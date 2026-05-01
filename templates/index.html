@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fitness Coach</title>
+    <link rel="stylesheet" href="static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+</head>
+<body>
+
+    <nav>
+    <div class="nav-logo">FC</div>
+    <div class="nav-links">
+        <a href="/" class="nav-link active">Ana Sayfa</a>
+        <a href="/nutrition" class="nav-link">Beslenme</a>
+        <a href="/training" class="nav-link">Antrenman</a>
+        <a href="/progress-page" class="nav-link">İlerleme</a>
+    </div>
+    <div class="nav-right">
+        <span class="nav-user">Hoş geldin, <span id="nav-username">{{ username }}</span></span>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Tema değiştir"></button>
+        <a href="/logout" class="logout-btn">Çıkış</a>
+    </div>
+</nav>
+
+    <div class="loading-overlay" id="loading">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Koçun hazırlanıyor...</div>
+    </div>
+
+    <div class="container">
+
+        <div class="page-header">
+            <h1>KİŞİSEL<br><span>ANTRENÖR</span></h1>
+            <p>Verilerini gir, yapay zeka destekli koçun seni bekliyor.</p>
+        </div>
+
+        <!-- FORM -->
+        <div class="message-input form-full" style="margin-bottom:12px">
+            <input type="text" id="message" placeholder="Koçuna bir şey sormak ister misin? (isteğe bağlı)">
+            <span class="message-hint">isteğe bağlı</span>
+        </div>
+
+        <div class="form-grid">
+            <div class="form-group">
+                <label>İsim</label>
+                <input type="text" id="name" value="{{ username }}" readonly>
+            </div>
+            <div class="form-group">
+                <label>Kilo (kg)</label>
+                <input type="number" id="weight" placeholder="78">
+            </div>
+            <div class="form-group">
+                <label>Boy (cm)</label>
+                <input type="number" id="height" placeholder="174">
+            </div>
+            <div class="form-group">
+                <label>Yaş</label>
+                <input type="number" id="age" placeholder="17">
+            </div>
+            <div class="form-group">
+                <label>Cinsiyet</label>
+                <select id="gender">
+                    <option value="male">Erkek</option>
+                    <option value="female">Kadın</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Hedef</label>
+                <select id="goal">
+                    <option value="kilo verme">Kilo Verme</option>
+                    <option value="kas kazanma">Kas Kazanma</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Fitness Seviyesi</label>
+                <select id="fitness_level">
+                    <option value="beginner">Başlangıç</option>
+                    <option value="intermediate">Orta</option>
+                    <option value="advanced">İleri</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Günlük Aktivite</label>
+                <select id="current_activity">
+                    <option value="sedentary">Hareketsiz (Masa başı)</option>
+                    <option value="active">Aktif (Haftada 3-5 gün)</option>
+                    <option value="very_active">Çok Aktif (Haftada 5-6 gün)</option>
+                </select>
+            </div>
+        </div>
+
+        <button class="submit-btn" onclick="sendMessage()" id="submit-btn">PLANIMI OLUŞTUR</button>
+
+        <!-- RESULTS -->
+        <div class="divider" id="divider">
+            <div class="divider-line"></div>
+            <div class="divider-label">Sonuçların</div>
+            <div class="divider-line"></div>
+        </div>
+
+        <div class="stats-grid" id="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">BMR</div>
+                <div class="stat-value" id="bmrResult">—</div>
+                <div class="stat-unit">bazal metabolizma hızı</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">TDEE</div>
+                <div class="stat-value" id="tdeeResult">—</div>
+                <div class="stat-unit">günlük enerji ihtiyacı</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Hedef Kalori</div>
+                <div class="stat-value" id="targetResult">—</div>
+                <div class="stat-unit">hedefe göre düzenlenmiş</div>
+            </div>
+        </div>
+
+        <div class="plan-grid" id="plan-grid">
+            <div class="plan-card">
+                <div class="plan-card-label">Antrenman Planı</div>
+                <div class="plan-card-text" id="trainingResult">—</div>
+            </div>
+            <div class="plan-card">
+                <div class="plan-card-label">Beslenme Planı</div>
+                <div class="plan-card-text" id="nutritionResult">—</div>
+            </div>
+        </div>
+
+        <div class="coach-card" id="coach-card">
+            <div class="coach-card-header">
+                <div class="coach-avatar">🏋️</div>
+                <div>
+                    <div class="coach-card-title">Koç Yorumu</div>
+                    <div class="coach-card-subtitle">Yapay zeka destekli kişisel değerlendirme</div>
+                </div>
+            </div>
+            <div id="coachResult">
+                <div style="color:var(--text3);font-size:14px;font-style:italic">Planını oluşturmak için formu doldurun.</div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // TEMA
+        function toggleTheme() {
+            const html = document.documentElement;
+            html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
+            localStorage.setItem('theme', html.dataset.theme);
+        }
+
+        // Kayıtlı temayı uygula
+        const savedTheme = localStorage.getItem('theme') || 'dark';
+        document.documentElement.dataset.theme = savedTheme;
+
+        // FORM GÖNDER
+        async function sendMessage() {
+            const btn = document.getElementById("submit-btn");
+            const loading = document.getElementById("loading");
+
+            // Validasyon
+            const weight = document.getElementById("weight").value;
+            const height = document.getElementById("height").value;
+            const age = document.getElementById("age").value;
+            if (!weight || !height || !age) {
+                alert("Lütfen kilo, boy ve yaş alanlarını doldurun.");
+                return;
+            }
+
+            btn.classList.add("loading");
+            btn.textContent = "HAZIRLANIYOR...";
+            loading.classList.add("active");
+
+            const payload = {
+                name: document.getElementById("name").value,
+                weight, height, age,
+                gender: document.getElementById("gender").value,
+                goal: document.getElementById("goal").value,
+                fitness_level: document.getElementById("fitness_level").value,
+                current_activity: document.getElementById("current_activity").value,
+                message: document.getElementById("message").value
+            };
+
+            try {
+            const response = await fetch("/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await response.json();
+
+            document.getElementById("bmrResult").textContent = data.bmr;
+            document.getElementById("tdeeResult").textContent = data.tdee;
+            document.getElementById("targetResult").textContent = data.target_calories;
+            document.getElementById("trainingResult").textContent = data.training_plan;
+            document.getElementById("nutritionResult").textContent = data.nutrition_plan;
+
+            renderCoachReply(data.coach_reply);
+
+            document.getElementById("divider").classList.add("visible");
+            document.getElementById("stats-grid").classList.add("visible");
+            document.getElementById("plan-grid").classList.add("visible");
+            document.getElementById("coach-card").classList.add("visible");
+
+            setTimeout(() => {
+                document.getElementById("divider").scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 200);
+
+            // ← BURAYA TAŞI — try bloğunun içinde, data erişilebilir
+            if (data.comparison) {
+                const diff = data.comparison.weight_diff;
+                const sign = diff < 0 ? "▼" : diff > 0 ? "▲" : "=";
+                const color = diff < 0 ? "#c8f060" : diff > 0 ? "#ff6b6b" : "#888";
+                const label = diff < 0
+                    ? `${Math.abs(diff)} kg verdin`
+                    : diff > 0
+                    ? `${Math.abs(diff)} kg aldın`
+                    : "Kilo değişmedi";
+
+                const compCard = document.createElement("div");
+                compCard.className = "stat-card";
+                compCard.innerHTML = `
+                    <div class="stat-label">${data.comparison.days_passed} günde</div>
+                    <div class="stat-value" style="color:${color}">${sign} ${Math.abs(diff)}</div>
+                    <div class="stat-unit">${label}</div>
+                `;
+                const grid = document.getElementById("stats-grid");
+                const old = document.getElementById("comp-card");
+                if (old) old.remove();
+                compCard.id = "comp-card";
+                grid.appendChild(compCard);
+                grid.style.gridTemplateColumns = "repeat(4, 1fr)";
+            }
+
+        } catch (err) {
+            alert("Bir hata oluştu: " + err.message);
+        } finally {
+            btn.classList.remove("loading");
+            btn.textContent = "PLANIMI OLUŞTUR";
+            loading.classList.remove("active");
+        }
+            // Stats gösterildikten sonra
+            if (data.comparison) {
+                const diff = data.comparison.weight_diff;
+                const sign = diff < 0 ? "▼" : diff > 0 ? "▲" : "=";
+                const color = diff < 0 ? "#c8f060" : diff > 0 ? "#ff6b6b" : "#888";
+                const label = diff < 0
+                    ? `${Math.abs(diff)} kg verdin`
+                    : diff > 0
+                    ? `${Math.abs(diff)} kg aldın`
+                    : "Kilo değişmedi";
+
+                // Stats grid'e 4. kart olarak ekle
+                const compCard = document.createElement("div");
+                compCard.className = "stat-card";
+                compCard.innerHTML = `
+                    <div class="stat-label">${data.comparison.days_passed} günde</div>
+                    <div class="stat-value" style="color:${color}">${sign} ${Math.abs(diff)}</div>
+                    <div class="stat-unit">${label}</div>
+                `;
+                const grid = document.getElementById("stats-grid");
+                // Varsa eski karşılaştırma kartını sil
+                const old = document.getElementById("comp-card");
+                if (old) old.remove();
+                compCard.id = "comp-card";
+                grid.appendChild(compCard);
+
+                // Stats grid'i 4 kolonlu yap
+                grid.style.gridTemplateColumns = "repeat(4, 1fr)";
+            }
+        }
+
+        function renderCoachReply(text) {
+            const container = document.getElementById("coachResult");
+
+            // Bölümleri parse et
+            const sections = {
+                "GENEL DEĞERLENDİRME": null,
+                "EN KRİTİK ADIM": null,
+                "BU HAFTA YAP": null,
+                "MOTİVASYON": null
+            };
+
+            let current = null;
+            const lines = text.split('\n');
+            const collected = {};
+
+            for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+
+                let matched = false;
+                for (const key of Object.keys(sections)) {
+                    if (trimmed.toUpperCase().includes(key)) {
+                        current = key;
+                        collected[current] = [];
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched && current) {
+                    collected[current].push(trimmed);
+                }
+            }
+
+            // Hiç parse edilemezse düz metin göster
+            if (Object.keys(collected).length === 0) {
+                container.innerHTML = `<div class="coach-section-text">${text.replace(/\n/g, '<br>')}</div>`;
+                return;
+            }
+
+            let html = '';
+
+            if (collected["GENEL DEĞERLENDİRME"]) {
+                html += `
+                    <div class="coach-section">
+                        <div class="coach-section-title">Genel Değerlendirme</div>
+                        <div class="coach-section-text">${collected["GENEL DEĞERLENDİRME"].join(' ')}</div>
+                    </div>`;
+            }
+
+            if (collected["EN KRİTİK ADIM"]) {
+                html += `
+                    <div class="coach-section">
+                        <div class="coach-section-title">En Kritik Adım</div>
+                        <div class="coach-section-text">${collected["EN KRİTİK ADIM"].join(' ')}</div>
+                    </div>`;
+            }
+
+            if (collected["BU HAFTA YAP"]) {
+                const tasks = collected["BU HAFTA YAP"].filter(l => l.match(/^\d+\./));
+                const taskHtml = tasks.length > 0
+                    ? `<ul class="task-list">${tasks.map((t, i) =>
+                        `<li><span class="task-num">${i+1}</span><span>${t.replace(/^\d+\.\s*/, '').replace(/\*\*/g, '')}</span></li>`
+                      ).join('')}</ul>`
+                    : `<div class="coach-section-text">${collected["BU HAFTA YAP"].join(' ')}</div>`;
+
+                html += `
+                    <div class="coach-section">
+                        <div class="coach-section-title">Bu Hafta Yap</div>
+                        ${taskHtml}
+                    </div>`;
+            }
+
+            if (collected["MOTİVASYON"]) {
+                html += `
+                    <div class="coach-section">
+                        <div class="coach-section-title">Motivasyon</div>
+                        <div class="coach-motivation">${collected["MOTİVASYON"].join(' ').replace(/["""]/g, '')}</div>
+                    </div>`;
+            }
+
+            container.innerHTML = html || `<div class="coach-section-text">${text.replace(/\n/g, '<br>')}</div>`;
+        }
+        // Sayfa açılınca son kaydı yükle
+async function loadLastSession() {
+    const res = await fetch("/last-session");
+    const data = await res.json();
+
+    if (data.exists) {
+        // Son kayıttan gelen değerleri placeholder olarak göster
+        document.getElementById("weight").placeholder = data.weight + " (son kayıt)";
+        document.getElementById("height").value = data.height;
+        document.getElementById("age").value = data.age;
+
+        // Select'leri eşleştir
+        document.getElementById("gender").value = data.gender;
+        document.getElementById("goal").value = data.goal;
+        document.getElementById("fitness_level").value = data.fitness_level;
+        document.getElementById("current_activity").value = data.current_activity;
+
+        // Son kayıt bilgisini göster
+        const header = document.querySelector(".page-header p");
+        header.innerHTML = `Son ölçümün: <strong style="color:var(--accent)">${data.tarih}</strong> — ${data.weight} kg. Güncel kilonu girerek ilerlemeyi gör.`;
+    }
+}
+
+loadLastSession();
+    </script>
+
+</body>
+</html>

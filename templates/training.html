@@ -1,0 +1,666 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Antrenman — Fitness Coach</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        :root[data-theme="dark"] {
+            --bg:#0a0a0a; --bg2:#111; --bg3:#1a1a1a;
+            --border:#2a2a2a; --text:#f0f0f0; --text2:#888; --text3:#555;
+            --accent:#c8f060; --accent2:#a8d040; --accent-glow:rgba(200,240,96,0.15);
+            --card:#141414; --input-bg:#1a1a1a;
+        }
+        :root[data-theme="light"] {
+            --bg:#f5f5f0; --bg2:#eeede8; --bg3:#e5e4df;
+            --border:#d5d4cf; --text:#1a1a1a; --text2:#666; --text3:#999;
+            --accent:#2d6a00; --accent2:#1a4500; --accent-glow:rgba(45,106,0,0.1);
+            --card:#fff; --input-bg:#fff;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background 0.3s,color 0.3s; }
+
+        /* NAV */
+        nav { display:flex; align-items:center; justify-content:space-between; padding:20px 40px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); z-index:100; backdrop-filter:blur(10px); }
+        .nav-logo { font-family:'Bebas Neue',sans-serif; font-size:28px; letter-spacing:3px; color:var(--accent); }
+        .nav-links { display:flex; align-items:center; gap:4px; }
+        .nav-link { font-size:13px; font-weight:500; color:var(--text2); text-decoration:none; padding:6px 14px; border-radius:6px; transition:all 0.2s; }
+        .nav-link:hover { color:var(--text); background:var(--bg3); }
+        .nav-link.active { color:var(--accent); background:var(--accent-glow); }
+        .nav-right { display:flex; align-items:center; gap:16px; }
+        .nav-user { font-size:14px; color:var(--text2); font-weight:300; }
+        .nav-user span { color:var(--text); font-weight:500; }
+        .theme-toggle { width:44px; height:24px; border-radius:12px; background:var(--bg3); border:1px solid var(--border); cursor:pointer; position:relative; transition:all 0.3s; }
+        .theme-toggle::after { content:''; position:absolute; width:18px; height:18px; border-radius:50%; background:var(--accent); top:2px; left:2px; transition:transform 0.3s; }
+        [data-theme="light"] .theme-toggle::after { transform:translateX(20px); }
+        .logout-btn { font-size:13px; font-weight:500; color:var(--text2); background:none; border:1px solid var(--border); padding:6px 16px; border-radius:6px; cursor:pointer; text-decoration:none; transition:all 0.2s; }
+        .logout-btn:hover { color:var(--text); border-color:var(--text3); }
+
+        /* LAYOUT */
+        .container { max-width:1100px; margin:0 auto; padding:40px 40px 80px; }
+        .page-header { margin-bottom:40px; }
+        .page-header h1 { font-family:'Bebas Neue',sans-serif; font-size:56px; letter-spacing:4px; line-height:1; color:var(--text); }
+        .page-header h1 span { color:var(--accent); }
+        .page-header p { margin-top:8px; color:var(--text2); font-size:15px; font-weight:300; }
+
+        /* INFO BANNER */
+        .info-banner { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 20px; margin-bottom:32px; display:flex; gap:24px; flex-wrap:wrap; }
+        .info-item { display:flex; flex-direction:column; gap:4px; }
+        .info-label { font-size:11px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:var(--text3); }
+        .info-val { font-family:'Bebas Neue',sans-serif; font-size:22px; letter-spacing:1px; color:var(--accent); }
+
+        /* ACTIVE PLAN BANNER */
+        .active-plan-banner { background:var(--accent-glow); border:1px solid var(--accent); border-radius:12px; padding:16px 20px; margin-bottom:24px; display:flex; align-items:center; justify-content:space-between; }
+        .active-plan-text { font-size:14px; color:var(--text); }
+        .active-plan-text strong { color:var(--accent); }
+        .active-plan-date { font-size:12px; color:var(--text2); margin-top:4px; }
+        .reset-btn { font-size:13px; color:var(--text3); background:none; border:1px solid var(--border); border-radius:6px; padding:6px 14px; cursor:pointer; transition:all 0.2s; }
+        .reset-btn:hover { color:var(--text); border-color:var(--text3); }
+
+        /* SECTION */
+        .section { margin-bottom:28px; }
+        .section-title { font-family:'Bebas Neue',sans-serif; font-size:22px; letter-spacing:3px; color:var(--text); margin-bottom:4px; }
+        .section-sub { font-size:13px; color:var(--text2); margin-bottom:14px; font-weight:300; }
+
+        /* OPTION GRID */
+        .option-grid { display:flex; flex-wrap:wrap; gap:8px; }
+        .option-chip { display:flex; align-items:center; gap:8px; background:var(--bg3); border:1.5px solid var(--border); border-radius:8px; padding:10px 18px; cursor:pointer; transition:all 0.2s; user-select:none; }
+        .option-chip:hover { border-color:var(--accent); }
+        .option-chip.selected { background:var(--accent-glow); border-color:var(--accent); }
+        .option-chip-dot { width:8px; height:8px; border-radius:50%; border:1.5px solid var(--text3); transition:all 0.2s; flex-shrink:0; }
+        .option-chip.selected .option-chip-dot { background:var(--accent); border-color:var(--accent); }
+        .option-chip-text { font-size:14px; font-weight:400; color:var(--text); }
+        .option-chip-sub { font-size:11px; color:var(--text3); }
+
+        /* SUBMIT */
+        .submit-btn { font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:3px; color:#0a0a0a; background:var(--accent); border:none; border-radius:8px; padding:14px 40px; cursor:pointer; transition:all 0.2s; margin-top:8px; }
+        .submit-btn:hover { background:var(--accent2); transform:translateY(-1px); }
+        .submit-btn.loading { opacity:0.7; cursor:not-allowed; }
+
+        /* LOADING */
+        .loading-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); z-index:200; align-items:center; justify-content:center; flex-direction:column; gap:16px; }
+        .loading-overlay.active { display:flex; }
+        .loading-spinner { width:48px; height:48px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin 0.8s linear infinite; }
+        .loading-text { font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:3px; color:var(--accent); }
+        @keyframes spin { to { transform:rotate(360deg); } }
+
+        /* DIVIDER */
+        .divider { display:flex; align-items:center; gap:16px; margin:40px 0 32px; }
+        .divider-line { flex:1; height:1px; background:var(--border); }
+        .divider-label { font-family:'Bebas Neue',sans-serif; font-size:14px; letter-spacing:3px; color:var(--text3); }
+
+        /* SCORE BANNER */
+        .score-banner { border-radius:12px; padding:20px 24px; margin-bottom:28px; display:flex; align-items:center; gap:20px; border:1px solid var(--border); background:var(--card); }
+        .score-val { font-family:'Bebas Neue',sans-serif; font-size:56px; letter-spacing:2px; line-height:1; }
+        .score-info { flex:1; }
+        .score-label-big { font-family:'Bebas Neue',sans-serif; font-size:22px; letter-spacing:2px; }
+        .score-desc { font-size:13px; color:var(--text2); margin-top:4px; font-weight:300; }
+        .score-bars { display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+        .score-bar-row { display:flex; align-items:center; gap:10px; font-size:12px; color:var(--text2); }
+        .score-bar-label { min-width:110px; }
+        .score-bar-track { flex:1; height:4px; background:var(--border); border-radius:2px; overflow:hidden; }
+        .score-bar-fill { height:100%; border-radius:2px; transition:width 0.8s ease; }
+        .score-bar-val { min-width:32px; text-align:right; }
+
+        /* WEEKLY GRID */
+        .weekly-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:8px; margin-bottom:16px; }
+        @media(max-width:900px) { .weekly-grid { grid-template-columns:repeat(4,1fr); } }
+        @media(max-width:560px) { .weekly-grid { grid-template-columns:repeat(2,1fr); } }
+
+        .day-card { background:var(--card); border:1px solid var(--border); border-radius:12px; overflow:hidden; cursor:pointer; transition:border-color 0.2s, transform 0.15s; }
+        .day-card.kardiyo { border-color: var(--blue); }
+        .day-card.kardiyo .day-odak { color: var(--blue); }
+        .day-card.kardiyo .day-name { color: var(--blue); }
+        .day-card:hover { border-color:var(--accent); transform:translateY(-2px); }
+        .day-card.rest { opacity:0.6; cursor:default; }
+        .day-card.rest:hover { transform:none; border-color:var(--border); }
+        .day-card-header { padding:12px 14px 10px; border-bottom:1px solid var(--border); }
+        .day-name { font-family:'Bebas Neue',sans-serif; font-size:16px; letter-spacing:2px; color:var(--text); }
+        .day-odak { font-size:11px; color:var(--accent); font-weight:500; margin-top:2px; }
+        .day-card.rest .day-odak { color:var(--text3); }
+        .day-card-body { padding:10px 14px 14px; }
+        .day-stat { font-size:12px; color:var(--text2); display:flex; justify-content:space-between; margin-bottom:4px; }
+        .day-stat span:last-child { color:var(--text); font-weight:500; }
+        .day-exercises { margin-top:8px; display:flex; flex-direction:column; gap:3px; }
+        .day-ex { font-size:11px; color:var(--text2); display:flex; align-items:center; gap:5px; }
+        .day-ex::before { content:'·'; color:var(--accent); }
+        .day-more { font-size:11px; color:var(--text3); font-style:italic; margin-top:4px; }
+
+        /* DETAIL PANEL */
+        .detail-panel { background:var(--card); border:1px solid var(--accent); border-radius:12px; padding:24px; margin-top:16px; display:none; position:relative; }
+        .detail-panel.visible { display:block; }
+        .detail-panel::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; background:linear-gradient(90deg,var(--accent),transparent); border-radius:12px 12px 0 0; }
+        .detail-close { position:absolute; top:16px; right:16px; font-size:20px; color:var(--text3); cursor:pointer; transition:color 0.2s; line-height:1; }
+        .detail-close:hover { color:var(--text); }
+        .detail-title { font-family:'Bebas Neue',sans-serif; font-size:24px; letter-spacing:3px; color:var(--accent); margin-bottom:4px; }
+        .detail-sub { font-size:13px; color:var(--text2); margin-bottom:20px; }
+        .exercise-table { width:100%; border-collapse:collapse; }
+        .exercise-table th { font-size:11px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:var(--text3); text-align:left; padding:8px 12px; border-bottom:1px solid var(--border); }
+        .exercise-table td { font-size:14px; color:var(--text); padding:10px 12px; border-bottom:1px solid var(--border); font-weight:300; }
+        .exercise-table tr:last-child td { border-bottom:none; }
+        .exercise-table td:first-child { font-weight:500; }
+        .ex-not { font-size:12px; color:var(--text3); margin-top:3px; }
+
+        /* HAFTALIK ÖZET */
+        .weekly-summary { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:24px; }
+        .summary-card { background:var(--bg3); border:1px solid var(--border); border-radius:10px; padding:16px; text-align:center; }
+        .summary-val { font-family:'Bebas Neue',sans-serif; font-size:28px; color:var(--accent); letter-spacing:1px; }
+        .summary-label { font-size:11px; color:var(--text3); text-transform:uppercase; letter-spacing:0.08em; margin-top:4px; }
+
+        /* SAVE BTN */
+        .save-plan-btn { font-family:'Bebas Neue',sans-serif; font-size:16px; letter-spacing:2px; color:#0a0a0a; background:var(--accent); border:none; border-radius:8px; padding:12px 32px; cursor:pointer; transition:all 0.2s; margin-top:24px; }
+        .save-plan-btn:hover { background:var(--accent2); }
+        .save-plan-btn.saved { background:var(--bg3); color:var(--accent); border:1px solid var(--accent); cursor:default; }
+
+        @media(max-width:640px) {
+            nav { padding:16px 20px; }
+            .container { padding:24px 20px 60px; }
+            .page-header h1 { font-size:40px; }
+            .nav-links { display:none; }
+            .weekly-summary { grid-template-columns:1fr 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<nav>
+    <div class="nav-logo">FC</div>
+    <div class="nav-links">
+        <a href="/" class="nav-link">Ana Sayfa</a>
+        <a href="/nutrition" class="nav-link">Beslenme</a>
+        <a href="/training" class="nav-link active">Antrenman</a>
+        <a href="/progress-page" class="nav-link">İlerleme</a>
+    </div>
+    <div class="nav-right">
+        <span class="nav-user">Hoş geldin, <span>{{ username }}</span></span>
+        <button class="theme-toggle" onclick="toggleTheme()"></button>
+        <a href="/logout" class="logout-btn">Çıkış</a>
+    </div>
+</nav>
+
+<div class="loading-overlay" id="loading">
+    <div class="loading-spinner"></div>
+    <div class="loading-text">Program hazırlanıyor...</div>
+</div>
+
+<div class="container">
+
+    <div class="page-header">
+        <h1>ANTRENMAN<br><span>PROGRAMI</span></h1>
+        <p>Tercihlerini belirle, haftalık antrenman programını oluştur.</p>
+    </div>
+
+    <!-- AKTİF PLAN -->
+    <div id="active-plan-banner" style="display:none"></div>
+
+    <!-- BİLGİ BANNER -->
+    <div class="info-banner" id="info-banner">
+        <div class="info-item">
+            <div class="info-label">Hedef</div>
+            <div class="info-val" id="info-goal">—</div>
+        </div>
+        <div class="info-item">
+            <div class="info-label">Seviye</div>
+            <div class="info-val" id="info-level">—</div>
+        </div>
+        <div class="info-item">
+            <div class="info-label">TDEE</div>
+            <div class="info-val" id="info-tdee">—</div>
+        </div>
+    </div>
+
+    <!-- GÜN SAYISI -->
+    <div class="section">
+        <div class="section-title">Haftada Kaç Gün?</div>
+        <div class="section-sub">Antrenman yapabileceğin gün sayısını seç.</div>
+        <div class="option-grid" id="gun-grid"></div>
+    </div>
+
+    <!-- EKİPMAN -->
+    <div class="section">
+        <div class="section-title">Ekipman</div>
+        <div class="section-sub">Hangi ortamda antrenman yapıyorsun?</div>
+        <div class="option-grid" id="ekipman-grid"></div>
+    </div>
+
+    <!-- ODAK -->
+    <div class="section">
+        <div class="section-title">Odak Bölge</div>
+        <div class="section-sub">Hangi bölgeye odaklanmak istiyorsun?</div>
+        <div class="option-grid" id="odak-grid"></div>
+    </div>
+
+    <!-- SÜRE -->
+    <div class="section">
+        <div class="section-title">Antrenman Süresi</div>
+        <div class="section-sub">Her antrenman için ne kadar süren var?</div>
+        <div class="option-grid" id="sure-grid"></div>
+    </div>
+    
+    <!-- KARDİYO -->
+    <div class="section">
+        <div class="section-title">Kardiyo</div>
+        <div class="section-sub">Kardiyo yapmak istiyor musun? Türünü ve detaylarını seç.</div>
+
+        <div class="cat-label">Kardiyo Türü</div>
+        <div class="option-grid" id="kardiyo-tip-grid"></div>
+
+        <div id="kardiyo-details" style="display:none; margin-top:16px;">
+            <div class="cat-label">Haftada Kaç Gün Kardiyo?</div>
+            <div class="option-grid" id="kardiyo-gun-grid"></div>
+
+            <div class="cat-label" style="margin-top:16px">Kardiyo Süresi</div>
+            <div class="option-grid" id="kardiyo-sure-grid"></div>
+
+            <div class="cat-label" style="margin-top:16px">Kardiyo Yoğunluğu</div>
+            <div class="option-grid" id="kardiyo-yogunluk-grid"></div>
+        </div>
+    </div>
+    
+
+
+    <button class="submit-btn" id="submit-btn" onclick="generatePlan()">PROGRAMIMI OLUŞTUR</button>
+
+    <!-- SONUÇLAR -->
+    <div id="results" style="display:none">
+        <div class="divider">
+            <div class="divider-line"></div>
+            <div class="divider-label">Haftalık Programın</div>
+            <div class="divider-line"></div>
+        </div>
+
+        <!-- SKOR -->
+        <div class="score-banner" id="score-banner"></div>
+
+        <!-- HAFTALIK GRID -->
+        <div class="weekly-grid" id="weekly-grid"></div>
+
+        <!-- DETAY PANELİ -->
+        <div class="detail-panel" id="detail-panel">
+            <span class="detail-close" onclick="closeDetail()">×</span>
+            <div class="detail-title" id="detail-title"></div>
+            <div class="detail-sub" id="detail-sub"></div>
+            <table class="exercise-table">
+                <thead>
+                    <tr>
+                        <th>Egzersiz</th>
+                        <th>Set</th>
+                        <th>Tekrar</th>
+                        <th>Dinlenme</th>
+                    </tr>
+                </thead>
+                <tbody id="detail-exercises"></tbody>
+            </table>
+        </div>
+
+        <!-- HAFTALIK ÖZET -->
+        <div class="weekly-summary" id="weekly-summary"></div>
+
+        <button class="save-plan-btn" id="save-btn" onclick="savePlan()">PROGRAMI KAYDET</button>
+    </div>
+
+</div>
+
+<script>
+    // TEMA
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    document.documentElement.dataset.theme = savedTheme;
+    function toggleTheme() {
+        const html = document.documentElement;
+        html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
+        localStorage.setItem('theme', html.dataset.theme);
+    }
+
+    // SEÇİM DURUMU
+    const selections = {
+        gun_sayisi: 3,
+        ekipman: "spor_salonu",
+        odak: "tum_vucut",
+        sure: 45
+    };
+
+    let currentPlan = null;
+    let currentScore = null;
+
+    // OPSİYON VERİLERİ
+    const OPTIONS = {
+        gun: [
+            { val: 3, label: "3 Gün", sub: "Başlangıç dostu" },
+            { val: 4, label: "4 Gün", sub: "Dengeli split" },
+            { val: 5, label: "5 Gün", sub: "Yoğun program" },
+            { val: 6, label: "6 Gün", sub: "İleri seviye" }
+        ],
+        ekipman: [
+            { val: "spor_salonu", label: "Spor Salonu", sub: "Tam ekipman" },
+            { val: "ev",          label: "Ev",          sub: "Vücut ağırlığı" },
+            { val: "minimal",     label: "Minimal",     sub: "Dambıl + bant" }
+        ],
+        odak: [
+            { val: "tum_vucut", label: "Tüm Vücut",   sub: "Dengeli gelişim" },
+            { val: "ust_vucut", label: "Üst Vücut",   sub: "Göğüs, sırt, omuz" },
+            { val: "alt_vucut", label: "Alt Vücut",   sub: "Bacak, kalça" },
+            { val: "core",      label: "Core",         sub: "Karın, bel" }
+        ],
+        sure: [
+            { val: 30, label: "30 Dakika", sub: "Kısa ve yoğun" },
+            { val: 45, label: "45 Dakika", sub: "Standart" },
+            { val: 60, label: "60 Dakika", sub: "Kapsamlı" },
+            { val: 90, label: "90 Dakika", sub: "İleri seviye" }
+        ]
+    };
+
+    const KARDIYO_OPTIONS = {
+        tip: [
+            { val:"yok",       label:"Kardiyo Yok",  sub:"Sadece ağırlık" },
+            { val:"kosu",      label:"Koşu",         sub:"Dış mekan / koşu bandı" },
+            { val:"bisiklet",  label:"Bisiklet",     sub:"Sabit veya dış mekan" },
+            { val:"yuzme",     label:"Yüzme",        sub:"Havuz" },
+            { val:"ip_atlama", label:"İp Atlama",    sub:"Ev / salon" },
+            { val:"yuruyus",   label:"Yürüyüş",     sub:"Tempolu yürüyüş" },
+            { val:"karisik",   label:"Karışık",      sub:"Farklı türler" }
+        ],
+        gun: [
+            { val:2, label:"2 Gün",  sub:"Hafif" },
+            { val:3, label:"3 Gün",  sub:"Orta" },
+            { val:4, label:"4 Gün",  sub:"Yoğun" },
+            { val:5, label:"5 Gün",  sub:"Çok yoğun" }
+        ],
+        sure: [
+            { val:15, label:"15 dk", sub:"Kısa HIIT" },
+            { val:20, label:"20 dk", sub:"Standart" },
+            { val:30, label:"30 dk", sub:"Orta" },
+            { val:45, label:"45 dk", sub:"Uzun" }
+        ],
+        yogunluk: [
+            { val:"dusuk",   label:"Düşük (LISS)", sub:"Yağ yakımı odaklı" },
+            { val:"orta",    label:"Orta",          sub:"Genel kondisyon" },
+            { val:"yuksek",  label:"Yüksek (HIIT)", sub:"Kısa ve yoğun" },
+            { val:"karisik", label:"Karışık",       sub:"Gün gün değişen" }
+        ]
+    };
+
+    // Kardiyo seçimleri
+    selections.kardiyo_tipi = "yok";
+    selections.kardiyo_gun = 0;
+    selections.kardiyo_sure = 20;
+    selections.kardiyo_yogunluk = "orta";
+
+    // Chip oluştur
+    function createOptionChip(item, category, selectionKey, defaultVal) {
+        const chip = document.createElement("div");
+        chip.className = "option-chip" + (item.val === defaultVal ? " selected" : "");
+        chip.innerHTML = `
+            <div class="option-chip-dot"></div>
+            <div>
+                <div class="option-chip-text">${item.label}</div>
+                <div class="option-chip-sub">${item.sub}</div>
+            </div>
+        `;
+        chip.addEventListener("click", () => {
+            document.querySelectorAll(`#${category} .option-chip`).forEach(c => c.classList.remove("selected"));
+            chip.classList.add("selected");
+            selections[selectionKey] = item.val;
+        });
+        return chip;
+    }
+
+    function populateOptions() {
+        OPTIONS.gun.forEach(o     => document.getElementById("gun-grid").appendChild(createOptionChip(o, "gun-grid", "gun_sayisi", 3)));
+        OPTIONS.ekipman.forEach(o => document.getElementById("ekipman-grid").appendChild(createOptionChip(o, "ekipman-grid", "ekipman", "spor_salonu")));
+        OPTIONS.odak.forEach(o    => document.getElementById("odak-grid").appendChild(createOptionChip(o, "odak-grid", "odak", "tum_vucut")));
+        OPTIONS.sure.forEach(o    => document.getElementById("sure-grid").appendChild(createOptionChip(o, "sure-grid", "sure", 45)));
+        // Kardiyo tip
+    KARDIYO_OPTIONS.tip.forEach(o => {
+        const chip = createOptionChip(o, "kardiyo-tip-grid", "kardiyo_tipi", "yok");
+        chip.addEventListener("click", () => {
+            const show = selections.kardiyo_tipi !== "yok";
+            document.getElementById("kardiyo-details").style.display = show ? "block" : "none";
+            if (!show) {
+                selections.kardiyo_gun = 0;
+            }
+        });
+        document.getElementById("kardiyo-tip-grid").appendChild(chip);
+    });
+
+    KARDIYO_OPTIONS.gun.forEach(o =>
+        document.getElementById("kardiyo-gun-grid").appendChild(
+            createOptionChip(o, "kardiyo-gun-grid", "kardiyo_gun", 2)
+        )
+    );
+    KARDIYO_OPTIONS.sure.forEach(o =>
+        document.getElementById("kardiyo-sure-grid").appendChild(
+            createOptionChip(o, "kardiyo-sure-grid", "kardiyo_sure", 20)
+        )
+    );
+    KARDIYO_OPTIONS.yogunluk.forEach(o =>
+        document.getElementById("kardiyo-yogunluk-grid").appendChild(
+            createOptionChip(o, "kardiyo-yogunluk-grid", "kardiyo_yogunluk", "orta")
+        )
+    );
+    }
+
+    // Bilgi banner yükle
+    async function loadInfo() {
+        const res  = await fetch("/last-session");
+        const data = await res.json();
+        if (data.exists) {
+            const goalLabels = { "kilo verme": "Kilo Ver", "kas kazanma": "Kas Kazan" };
+            const levelLabels = { "beginner": "Başlangıç", "intermediate": "Orta", "advanced": "İleri" };
+            document.getElementById("info-goal").textContent  = goalLabels[data.goal] || data.goal;
+            document.getElementById("info-level").textContent = levelLabels[data.fitness_level] || data.fitness_level;
+            document.getElementById("info-tdee").textContent  = Math.round(data.target_calories || 0) + " kcal";
+        }
+    }
+
+    // Aktif plan banner
+    async function loadActivePlan() {
+        const res  = await fetch("/training-plan/active");
+        const data = await res.json();
+        if (!data.exists) return;
+
+        const banner = document.getElementById("active-plan-banner");
+        banner.style.display = "flex";
+        banner.className = "active-plan-banner";
+        banner.innerHTML = `
+            <div>
+                <div class="active-plan-text">Aktif antrenman programın mevcut · Skor: <strong>${data.score}/10</strong></div>
+                <div class="active-plan-date">${data.created_at} tarihinde oluşturuldu</div>
+            </div>
+            <button class="reset-btn" onclick="this.closest('.active-plan-banner').style.display='none'">Yeni program oluştur</button>
+        `;
+    }
+
+    // Plan oluştur
+    async function generatePlan() {
+        const btn     = document.getElementById("submit-btn");
+        const loading = document.getElementById("loading");
+        btn.classList.add("loading");
+        btn.textContent = "HAZIRLANIYOR...";
+        loading.classList.add("active");
+
+        try {
+            const res  = await fetch("/training-plan", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(selections)
+            });
+
+            const data = await res.json();
+            if (data.error) { alert(data.error); return; }
+
+            currentPlan  = data.program;
+            currentScore = data.overall_score;
+
+            renderResults(data);
+
+        } catch (err) {
+            alert("Bir hata oluştu: " + err.message);
+        } finally {
+            btn.classList.remove("loading");
+            btn.textContent = "PROGRAMIMI OLUŞTUR";
+            loading.classList.remove("active");
+        }
+    }
+
+    function renderResults(data) {
+        document.getElementById("results").style.display = "block";
+        document.getElementById("save-btn").classList.remove("saved");
+        document.getElementById("save-btn").textContent = "PROGRAMI KAYDET";
+        
+
+        // Skor
+        const scoreColors = { "İyi": "#c8f060", "Orta": "#f0c040", "Kötü": "#ff6b6b" };
+        const color = scoreColors[data.score_label] || "#888";
+        const ozet  = data.haftalik_ozet || {};
+
+        document.getElementById("score-banner").innerHTML = `
+            <div class="score-val" style="color:${color}">${data.overall_score}</div>
+            <div class="score-info">
+                <div class="score-label-big" style="color:${color}">${data.score_label} Program</div>
+                <div class="score-desc">Yoğunluk, kas dengesi ve fitness seviyene uygunluk ortalaması</div>
+                <div class="score-bars">
+                    <div class="score-bar-row">
+                        <span class="score-bar-label">Yoğunluk</span>
+                        <div class="score-bar-track"><div class="score-bar-fill" style="width:${(ozet.yogunluk_skoru||7)*10}%;background:${color}"></div></div>
+                        <span class="score-bar-val">${ozet.yogunluk_skoru||7}/10</span>
+                    </div>
+                    <div class="score-bar-row">
+                        <span class="score-bar-label">Denge</span>
+                        <div class="score-bar-track"><div class="score-bar-fill" style="width:${(ozet.denge_skoru||7)*10}%;background:${color}"></div></div>
+                        <span class="score-bar-val">${ozet.denge_skoru||7}/10</span>
+                    </div>
+                    <div class="score-bar-row">
+                        <span class="score-bar-label">Uygunluk</span>
+                        <div class="score-bar-track"><div class="score-bar-fill" style="width:${(ozet.uygunluk_skoru||7)*10}%;background:${color}"></div></div>
+                        <span class="score-bar-val">${ozet.uygunluk_skoru||7}/10</span>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Haftalık grid
+        const grid = document.getElementById("weekly-grid");
+        grid.innerHTML = "";
+
+        data.program.forEach((gun, i) => {
+        const card = document.createElement("div");
+        const isRest   = gun.tip === "dinlenme";
+        const isCardio = gun.tip === "kardiyo";
+        card.className = "day-card" + (isRest ? " rest" : "") + (isCardio ? " kardiyo" : "");
+            
+
+            const exercises = gun.egzersizler || [];
+            const preview   = exercises.slice(0, 3).map(e => `<div class="day-ex">${e.isim}</div>`).join("");
+            const more      = exercises.length > 3 ? `<div class="day-more">+${exercises.length - 3} egzersiz daha</div>` : "";
+
+            card.innerHTML = `
+                <div class="day-card-header">
+                    <div class="day-name">${gun.gun}</div>
+                    <div class="day-odak">${gun.odak}</div>
+                </div>
+                <div class="day-card-body">
+                    ${!isRest ? `
+                        <div class="day-stat"><span>Süre</span><span>${gun.sure_dk} dk</span></div>
+                        <div class="day-stat"><span>Kalori</span><span>~${gun.tahmini_kalori} kcal</span></div>
+                        <div class="day-exercises">${preview}${more}</div>
+                    ` : `<div style="font-size:13px;color:var(--text3);margin-top:8px">Toparlanma günü</div>`}
+                </div>
+            `;
+
+            if (!isRest) {
+                card.addEventListener("click", () => showDetail(gun));
+            }
+
+            grid.appendChild(card);
+        });
+
+        // Haftalık özet
+        const toplam_kalori = data.program.reduce((a, g) => a + (g.tahmini_kalori || 0), 0);
+        document.getElementById("weekly-summary").innerHTML = `
+            <div class="summary-card">
+                <div class="summary-val">${ozet.toplam_antrenman_gun || selections.gun_sayisi}</div>
+                <div class="summary-label">Antrenman Günü</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-val">${toplam_kalori}</div>
+                <div class="summary-label">Haftalık Kalori</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-val">${data.program.filter(g => g.tip !== "dinlenme").length * selections.sure}</div>
+                <div class="summary-label">Toplam Dakika</div>
+            </div>
+        `;
+
+        setTimeout(() => {
+            document.getElementById("results").scrollIntoView({ behavior:"smooth", block:"start" });
+        }, 200);
+    }
+
+    // Detay paneli
+    function showDetail(gun) {
+        document.getElementById("detail-title").textContent = gun.gun + " — " + gun.odak;
+        document.getElementById("detail-sub").textContent   = `${gun.sure_dk} dakika · ~${gun.tahmini_kalori} kcal`;
+
+        const tbody = document.getElementById("detail-exercises");
+        tbody.innerHTML = (gun.egzersizler || []).map(e => `
+            <tr>
+                <td>
+                    ${e.isim}
+                    ${e.not ? `<div class="ex-not">${e.not}</div>` : ""}
+                </td>
+                <td>${e.set}</td>
+                <td>${e.tekrar}</td>
+                <td>${e.dinlenme}</td>
+            </tr>
+        `).join("");
+
+        const panel = document.getElementById("detail-panel");
+        panel.classList.add("visible");
+        panel.scrollIntoView({ behavior:"smooth", block:"nearest" });
+    }
+
+    function closeDetail() {
+        document.getElementById("detail-panel").classList.remove("visible");
+    }
+
+    // Plan kaydet
+    async function savePlan() {
+        const btn = document.getElementById("save-btn");
+        if (!currentPlan) return;
+
+        try {
+            const res  = await fetch("/training-plan/save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ plan: currentPlan, score: currentScore })
+            });
+            const data = await res.json();
+
+            btn.textContent = "✓ KAYDEDİLDİ";
+            btn.classList.add("saved");
+
+            const banner = document.getElementById("active-plan-banner");
+            banner.style.display = "flex";
+            banner.className = "active-plan-banner";
+            banner.innerHTML = `
+                <div>
+                    <div class="active-plan-text">Antrenman programın kaydedildi · Skor: <strong>${currentScore}/10</strong></div>
+                    <div class="active-plan-date">Az önce kaydedildi</div>
+                </div>
+                <button class="reset-btn" onclick="this.closest('.active-plan-banner').style.display='none'">Yeni program oluştur</button>
+            `;
+        } catch (err) {
+            alert("Kayıt hatası: " + err.message);
+        }
+    }
+
+    // Başlangıç
+    populateOptions();
+    loadInfo();
+    loadActivePlan();
+</script>
+
+</body>
+</html>

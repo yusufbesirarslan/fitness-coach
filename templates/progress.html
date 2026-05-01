@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>İlerleme — Fitness Coach</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root[data-theme="dark"] {
+            --bg:#0a0a0a; --bg2:#111; --bg3:#1a1a1a;
+            --border:#2a2a2a; --text:#f0f0f0; --text2:#888; --text3:#555;
+            --accent:#c8f060; --accent2:#a8d040; --accent-glow:rgba(200,240,96,0.15);
+            --card:#141414; --input-bg:#1a1a1a;
+            --red:#ff6b6b; --orange:#f0c040; --blue:#60a0f0;
+        }
+        :root[data-theme="light"] {
+            --bg:#f5f5f0; --bg2:#eeede8; --bg3:#e5e4df;
+            --border:#d5d4cf; --text:#1a1a1a; --text2:#666; --text3:#999;
+            --accent:#2d6a00; --accent2:#1a4500; --accent-glow:rgba(45,106,0,0.1);
+            --card:#fff; --input-bg:#fff;
+            --red:#d44; --orange:#c89800; --blue:#2a70c0;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background 0.3s,color 0.3s; }
+
+        nav { display:flex; align-items:center; justify-content:space-between; padding:20px 40px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); z-index:100; backdrop-filter:blur(10px); }
+        .nav-logo { font-family:'Bebas Neue',sans-serif; font-size:28px; letter-spacing:3px; color:var(--accent); }
+        .nav-links { display:flex; align-items:center; gap:4px; }
+        .nav-link { font-size:13px; font-weight:500; color:var(--text2); text-decoration:none; padding:6px 14px; border-radius:6px; transition:all 0.2s; }
+        .nav-link:hover { color:var(--text); background:var(--bg3); }
+        .nav-link.active { color:var(--accent); background:var(--accent-glow); }
+        .nav-right { display:flex; align-items:center; gap:16px; }
+        .nav-user { font-size:14px; color:var(--text2); font-weight:300; }
+        .nav-user span { color:var(--text); font-weight:500; }
+        .theme-toggle { width:44px; height:24px; border-radius:12px; background:var(--bg3); border:1px solid var(--border); cursor:pointer; position:relative; transition:all 0.3s; }
+        .theme-toggle::after { content:''; position:absolute; width:18px; height:18px; border-radius:50%; background:var(--accent); top:2px; left:2px; transition:transform 0.3s; }
+        [data-theme="light"] .theme-toggle::after { transform:translateX(20px); }
+        .logout-btn { font-size:13px; font-weight:500; color:var(--text2); background:none; border:1px solid var(--border); padding:6px 16px; border-radius:6px; cursor:pointer; text-decoration:none; transition:all 0.2s; }
+        .logout-btn:hover { color:var(--text); border-color:var(--text3); }
+
+        .container { max-width:1100px; margin:0 auto; padding:40px 40px 80px; }
+        .page-header { margin-bottom:40px; }
+        .page-header h1 { font-family:'Bebas Neue',sans-serif; font-size:56px; letter-spacing:4px; line-height:1; }
+        .page-header h1 span { color:var(--accent); }
+        .page-header p { margin-top:8px; color:var(--text2); font-size:15px; font-weight:300; }
+
+        /* TABS */
+        .tabs { display:flex; gap:4px; margin-bottom:32px; background:var(--bg3); border-radius:8px; padding:4px; }
+        .tab { flex:1; font-family:'Bebas Neue',sans-serif; font-size:15px; letter-spacing:2px; color:var(--text2); background:none; border:none; padding:10px; border-radius:6px; cursor:pointer; transition:all 0.2s; text-align:center; }
+        .tab.active { background:var(--card); color:var(--accent); border:1px solid var(--border); }
+        .tab:hover:not(.active) { color:var(--text); }
+        .tab-content { display:none; }
+        .tab-content.active { display:block; }
+
+        /* SECTION */
+        .section-title { font-family:'Bebas Neue',sans-serif; font-size:22px; letter-spacing:3px; color:var(--text); margin-bottom:4px; }
+        .section-sub { font-size:13px; color:var(--text2); margin-bottom:16px; font-weight:300; }
+
+        /* CHART */
+        .chart-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; margin-bottom:16px; }
+        .chart-title { font-family:'Bebas Neue',sans-serif; font-size:16px; letter-spacing:2px; color:var(--text); margin-bottom:16px; display:flex; align-items:center; gap:8px; }
+        .chart-title::before { content:''; width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+        .chart-container { position:relative; height:220px; }
+        .no-data { color:var(--text3); font-size:14px; font-style:italic; text-align:center; padding:40px 0; }
+
+        /* CHECK-IN FORM */
+        .checkin-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; margin-bottom:16px; }
+        .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:16px; }
+        .form-group { display:flex; flex-direction:column; gap:6px; }
+        .form-full { grid-column:1/-1; }
+        label { font-size:11px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:var(--text2); }
+        input,select,textarea { font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text); background:var(--input-bg); border:1px solid var(--border); border-radius:8px; padding:10px 14px; outline:none; transition:border-color 0.2s; }
+        input:focus,select:focus,textarea:focus { border-color:var(--accent); }
+        textarea { resize:vertical; min-height:60px; }
+
+        /* SLIDER */
+        .slider-group { display:flex; flex-direction:column; gap:6px; }
+        .slider-row { display:flex; align-items:center; gap:12px; }
+        .slider-labels { display:flex; justify-content:space-between; font-size:11px; color:var(--text3); }
+        input[type="range"] { flex:1; appearance:none; height:4px; background:var(--border); border-radius:2px; border:none; padding:0; cursor:pointer; }
+        input[type="range"]::-webkit-slider-thumb { appearance:none; width:18px; height:18px; border-radius:50%; background:var(--accent); cursor:pointer; }
+        .slider-val { font-family:'Bebas Neue',sans-serif; font-size:20px; color:var(--accent); min-width:28px; text-align:center; }
+
+        /* OVERLOAD OPTIONS */
+        .overload-grid { display:flex; gap:8px; }
+        .overload-chip { flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:var(--bg3); border:1.5px solid var(--border); border-radius:8px; padding:10px; cursor:pointer; transition:all 0.2s; font-size:13px; color:var(--text2); user-select:none; }
+        .overload-chip:hover { border-color:var(--accent); }
+        .overload-chip.selected { background:var(--accent-glow); border-color:var(--accent); color:var(--text); }
+
+        .submit-btn { font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:3px; color:#0a0a0a; background:var(--accent); border:none; border-radius:8px; padding:14px 40px; cursor:pointer; transition:all 0.2s; }
+        .submit-btn:hover { background:var(--accent2); transform:translateY(-1px); }
+        .submit-btn.loading { opacity:0.7; cursor:not-allowed; }
+
+        /* FEEDBACK */
+        .feedback-card { background:var(--accent-glow); border:1px solid var(--accent); border-radius:12px; padding:20px; margin-top:16px; display:none; }
+        .feedback-card.visible { display:block; }
+        .feedback-header { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
+        .feedback-avatar { width:32px; height:32px; border-radius:50%; background:var(--accent); display:flex; align-items:center; justify-content:center; font-size:14px; }
+        .feedback-title { font-family:'Bebas Neue',sans-serif; font-size:16px; letter-spacing:2px; color:var(--accent); }
+        .feedback-text { font-size:14px; color:var(--text); line-height:1.7; font-weight:300; }
+
+        /* HISTORY */
+        .history-card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:8px; }
+        .history-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+        .history-date { font-family:'Bebas Neue',sans-serif; font-size:15px; letter-spacing:1px; color:var(--accent); }
+        .history-weight { font-size:14px; color:var(--text); font-weight:500; }
+        .history-stats { display:flex; gap:16px; margin-bottom:8px; }
+        .history-stat { font-size:12px; color:var(--text2); }
+        .history-stat span { color:var(--text); font-weight:500; }
+        .history-feedback { font-size:13px; color:var(--text2); line-height:1.5; font-weight:300; border-top:1px solid var(--border); padding-top:8px; margin-top:8px; }
+
+        /* CHATBOT */
+        .chat-container { background:var(--card); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+        .chat-messages { height:400px; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:12px; }
+        .chat-msg { max-width:85%; padding:12px 16px; border-radius:12px; font-size:14px; line-height:1.6; font-weight:300; }
+        .chat-msg.user { align-self:flex-end; background:var(--accent); color:#0a0a0a; border-bottom-right-radius:4px; font-weight:400; }
+        .chat-msg.bot { align-self:flex-start; background:var(--bg3); color:var(--text); border-bottom-left-radius:4px; }
+        .chat-msg.bot.loading { opacity:0.6; font-style:italic; }
+        .chat-input-row { display:flex; border-top:1px solid var(--border); }
+        .chat-input { flex:1; font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text); background:transparent; border:none; padding:16px 20px; outline:none; }
+        .chat-input::placeholder { color:var(--text3); }
+        .chat-send { font-family:'Bebas Neue',sans-serif; font-size:14px; letter-spacing:2px; color:var(--accent); background:none; border:none; border-left:1px solid var(--border); padding:16px 24px; cursor:pointer; transition:background 0.2s; }
+        .chat-send:hover { background:var(--accent-glow); }
+        .chat-empty { color:var(--text3); font-size:14px; font-style:italic; text-align:center; padding:60px 0; }
+
+        @media(max-width:640px) {
+            nav { padding:16px 20px; }
+            .container { padding:24px 20px 60px; }
+            .page-header h1 { font-size:40px; }
+            .nav-links { display:none; }
+            .form-grid { grid-template-columns:1fr; }
+            .chart-container { height:180px; }
+        }
+    </style>
+</head>
+<body>
+
+<nav>
+    <div class="nav-logo">FC</div>
+    <div class="nav-links">
+        <a href="/" class="nav-link">Ana Sayfa</a>
+        <a href="/nutrition" class="nav-link">Beslenme</a>
+        <a href="/training" class="nav-link">Antrenman</a>
+        <a href="/progress-page" class="nav-link active">İlerleme</a>
+    </div>
+    <div class="nav-right">
+        <span class="nav-user">Hoş geldin, <span>{{ username }}</span></span>
+        <button class="theme-toggle" onclick="toggleTheme()"></button>
+        <a href="/logout" class="logout-btn">Çıkış</a>
+    </div>
+</nav>
+
+<div class="container">
+
+    <div class="page-header">
+        <h1>İLERLEME<br><span>TAKİBİ</span></h1>
+        <p>Haftalık check-in yap, grafiklerle ilerlemeni takip et, koçuna sor.</p>
+    </div>
+
+    <!-- TABS -->
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab('checkin')">Check-In</button>
+        <button class="tab" onclick="switchTab('charts')">Grafikler</button>
+        <button class="tab" onclick="switchTab('history')">Geçmiş</button>
+        <button class="tab" onclick="switchTab('chat')">Koçuna Sor</button>
+    </div>
+
+    <!-- TAB 1: CHECK-IN -->
+    <div class="tab-content active" id="tab-checkin">
+        <div class="checkin-card">
+            <div class="section-title">Haftalık Check-In</div>
+            <div class="section-sub">Bu haftanı değerlendir, koçun sana geri bildirim versin.</div>
+
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Güncel Kilo (kg)</label>
+                    <input type="number" id="ci-weight" placeholder="78.5" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>Not (isteğe bağlı)</label>
+                    <input type="text" id="ci-note" placeholder="Bu hafta nasıl geçti?">
+                </div>
+
+                <div class="slider-group form-full">
+                    <label>Antrenman Yoğunluğu</label>
+                    <div class="slider-row">
+                        <input type="range" id="ci-yogunluk" min="1" max="5" value="3" oninput="document.getElementById('yogunluk-val').textContent=this.value">
+                        <div class="slider-val" id="yogunluk-val">3</div>
+                    </div>
+                    <div class="slider-labels"><span>Çok düşük</span><span>Çok yüksek</span></div>
+                </div>
+
+                <div class="slider-group form-full">
+                    <label>Yorgunluk / Fatigue</label>
+                    <div class="slider-row">
+                        <input type="range" id="ci-fatigue" min="1" max="5" value="3" oninput="document.getElementById('fatigue-val').textContent=this.value">
+                        <div class="slider-val" id="fatigue-val">3</div>
+                    </div>
+                    <div class="slider-labels"><span>Hiç yorgun değil</span><span>Çok yorgun</span></div>
+                </div>
+
+                <div class="slider-group form-full">
+                    <label>Uyku Kalitesi</label>
+                    <div class="slider-row">
+                        <input type="range" id="ci-uyku" min="1" max="5" value="3" oninput="document.getElementById('uyku-val').textContent=this.value">
+                        <div class="slider-val" id="uyku-val">3</div>
+                    </div>
+                    <div class="slider-labels"><span>Çok kötü</span><span>Çok iyi</span></div>
+                </div>
+
+                <div class="slider-group form-full">
+                    <label>Beslenme Uyumu</label>
+                    <div class="slider-row">
+                        <input type="range" id="ci-beslenme" min="1" max="5" value="3" oninput="document.getElementById('beslenme-val').textContent=this.value">
+                        <div class="slider-val" id="beslenme-val">3</div>
+                    </div>
+                    <div class="slider-labels"><span>Hiç uyamadım</span><span>Tam uyum</span></div>
+                </div>
+
+                <div class="form-group form-full">
+                    <label>Progressive Overload</label>
+                    <div class="section-sub" style="margin-bottom:8px">Bu hafta ağırlık veya tekrar artırabildin mi?</div>
+                    <div class="overload-grid">
+                        <div class="overload-chip selected" onclick="selectOverload('evet',this)">Evet</div>
+                        <div class="overload-chip" onclick="selectOverload('kismen',this)">Kısmen</div>
+                        <div class="overload-chip" onclick="selectOverload('hayir',this)">Hayır</div>
+                    </div>
+                </div>
+            </div>
+
+            <button class="submit-btn" id="checkin-btn" onclick="submitCheckin()">CHECK-IN GÖNDER</button>
+        </div>
+
+        <div class="feedback-card" id="feedback-card">
+            <div class="feedback-header">
+                <div class="feedback-avatar">🏋️</div>
+                <div class="feedback-title">Koç Geri Bildirimi</div>
+            </div>
+            <div class="feedback-text" id="feedback-text"></div>
+        </div>
+    </div>
+
+    <!-- TAB 2: GRAFİKLER -->
+    <div class="tab-content" id="tab-charts">
+        <div class="chart-card">
+            <div class="chart-title" style="--dot-color:var(--accent)"><style>.chart-title::before{background:var(--accent)}</style>Kilo Değişimi</div>
+            <div class="chart-container"><canvas id="weightChart"></canvas></div>
+            <div class="no-data" id="weight-nodata">Henüz veri yok — ilk check-in'ini yap.</div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">Performans Metrikleri</div>
+            <div class="chart-container"><canvas id="metricsChart"></canvas></div>
+            <div class="no-data" id="metrics-nodata">Henüz veri yok.</div>
+        </div>
+        <div class="chart-card">
+            <div class="chart-title">Uyku & Beslenme Uyumu</div>
+            <div class="chart-container"><canvas id="wellnessChart"></canvas></div>
+            <div class="no-data" id="wellness-nodata">Henüz veri yok.</div>
+        </div>
+    </div>
+
+    <!-- TAB 3: GEÇMİŞ -->
+    <div class="tab-content" id="tab-history">
+        <div class="section-title">Check-In Geçmişi</div>
+        <div class="section-sub">Tüm haftalık check-in kayıtların ve koç geri bildirimleri.</div>
+        <div id="history-list">
+            <div class="no-data">Henüz check-in yok.</div>
+        </div>
+    </div>
+
+    <!-- TAB 4: CHATBOT -->
+    <div class="tab-content" id="tab-chat">
+        <div class="section-title">Koçuna Sor</div>
+        <div class="section-sub">Antrenman, beslenme veya sağlıkla ilgili aklındaki her şeyi sorabilirsin.</div>
+        <div class="chat-container">
+            <div class="chat-messages" id="chat-messages">
+                <div class="chat-empty">Koçuna bir şey sormak için aşağıya yaz.</div>
+            </div>
+            <div class="chat-input-row">
+                <input type="text" class="chat-input" id="chat-input" placeholder="Bir soru sor..." onkeydown="if(event.key==='Enter')sendChat()">
+                <button class="chat-send" onclick="sendChat()">GÖNDER</button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    document.documentElement.dataset.theme = savedTheme;
+    function toggleTheme() {
+        const html = document.documentElement;
+        html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
+        localStorage.setItem('theme', html.dataset.theme);
+        // Grafikleri yeniden çiz — tema değişince renkler güncellenmeli
+        loadCharts();
+    }
+
+    // TABS
+    function switchTab(name) {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        document.getElementById('tab-' + name).classList.add('active');
+        event.target.classList.add('active');
+        if (name === 'charts') loadCharts();
+        if (name === 'history') loadHistory();
+    }
+
+    // OVERLOAD
+    let selectedOverload = 'evet';
+    function selectOverload(val, el) {
+        selectedOverload = val;
+        document.querySelectorAll('.overload-chip').forEach(c => c.classList.remove('selected'));
+        el.classList.add('selected');
+    }
+
+    // CHECK-IN GÖNDER
+    async function submitCheckin() {
+        const weight = document.getElementById('ci-weight').value;
+        if (!weight) { alert('Kilo zorunludur.'); return; }
+
+        const btn = document.getElementById('checkin-btn');
+        btn.classList.add('loading');
+        btn.textContent = 'GÖNDERİLİYOR...';
+
+        try {
+            const res = await fetch('/checkin', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    weight: parseFloat(weight),
+                    yogunluk: parseInt(document.getElementById('ci-yogunluk').value),
+                    fatigue: parseInt(document.getElementById('ci-fatigue').value),
+                    uyku_kalitesi: parseInt(document.getElementById('ci-uyku').value),
+                    beslenme_uyumu: parseInt(document.getElementById('ci-beslenme').value),
+                    progressive_overload: selectedOverload,
+                    note: document.getElementById('ci-note').value
+                })
+            });
+
+            const data = await res.json();
+            if (data.error) { alert(data.error); return; }
+
+            const fb = document.getElementById('feedback-card');
+            document.getElementById('feedback-text').innerHTML = data.coach_feedback.replace(/\n/g, '<br>');
+            fb.classList.add('visible');
+            fb.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+        } catch (err) {
+            alert('Hata: ' + err.message);
+        } finally {
+            btn.classList.remove('loading');
+            btn.textContent = 'CHECK-IN GÖNDER';
+        }
+    }
+
+    // GRAFİKLER
+    let weightChart, metricsChart, wellnessChart;
+
+    async function loadCharts() {
+        const res = await fetch('/checkin-history');
+        const data = await res.json();
+
+        if (data.length === 0) {
+            document.getElementById('weight-nodata').style.display = 'block';
+            document.getElementById('metrics-nodata').style.display = 'block';
+            document.getElementById('wellness-nodata').style.display = 'block';
+            return;
+        }
+
+        document.getElementById('weight-nodata').style.display = 'none';
+        document.getElementById('metrics-nodata').style.display = 'none';
+        document.getElementById('wellness-nodata').style.display = 'none';
+
+        const labels = data.map(d => d.tarih);
+        const isDark = document.documentElement.dataset.theme === 'dark';
+        const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+        const textColor = isDark ? '#888' : '#666';
+
+        const baseOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { labels: { color: textColor, font: { family: 'DM Sans', size: 11 } } } },
+            scales: {
+                x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
+                y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } }
+            }
+        };
+
+        // Kilo grafiği
+        if (weightChart) weightChart.destroy();
+        weightChart = new Chart(document.getElementById('weightChart'), {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [{
+                    label: 'Kilo (kg)',
+                    data: data.map(d => d.kilo),
+                    borderColor: isDark ? '#c8f060' : '#2d6a00',
+                    backgroundColor: isDark ? 'rgba(200,240,96,0.1)' : 'rgba(45,106,0,0.1)',
+                    fill: true, tension: 0.3, pointRadius: 5, pointHoverRadius: 8,
+                    pointBackgroundColor: isDark ? '#c8f060' : '#2d6a00',
+                    borderWidth: 2
+                }]
+            },
+            options: { ...baseOptions, scales: { ...baseOptions.scales, y: { ...baseOptions.scales.y, beginAtZero: false } } }
+        });
+
+        // Performans grafiği
+        if (metricsChart) metricsChart.destroy();
+        metricsChart = new Chart(document.getElementById('metricsChart'), {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: 'Yoğunluk',
+                        data: data.map(d => d.yogunluk),
+                        borderColor: isDark ? '#c8f060' : '#2d6a00',
+                        borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false
+                    },
+                    {
+                        label: 'Yorgunluk',
+                        data: data.map(d => d.fatigue),
+                        borderColor: isDark ? '#ff6b6b' : '#d44',
+                        borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false
+                    }
+                ]
+            },
+            options: { ...baseOptions, scales: { ...baseOptions.scales, y: { ...baseOptions.scales.y, min: 0, max: 5 } } }
+        });
+
+        // Wellness grafiği
+        if (wellnessChart) wellnessChart.destroy();
+        wellnessChart = new Chart(document.getElementById('wellnessChart'), {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: 'Uyku',
+                        data: data.map(d => d.uyku),
+                        borderColor: isDark ? '#60a0f0' : '#2a70c0',
+                        borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false
+                    },
+                    {
+                        label: 'Beslenme',
+                        data: data.map(d => d.beslenme),
+                        borderColor: isDark ? '#f0c040' : '#c89800',
+                        borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false
+                    }
+                ]
+            },
+            options: { ...baseOptions, scales: { ...baseOptions.scales, y: { ...baseOptions.scales.y, min: 0, max: 5 } } }
+        });
+    }
+
+    // GEÇMİŞ
+    async function loadHistory() {
+        const res = await fetch('/checkin-history');
+        const data = await res.json();
+        const list = document.getElementById('history-list');
+
+        if (data.length === 0) {
+            list.innerHTML = '<div class="no-data">Henüz check-in yok.</div>';
+            return;
+        }
+
+        const overloadLabels = { 'evet': 'Evet', 'hayir': 'Hayır', 'kismen': 'Kısmen' };
+
+        list.innerHTML = data.reverse().map(c => `
+            <div class="history-card">
+                <div class="history-header">
+                    <div class="history-date">${c.tarih}</div>
+                    <div class="history-weight">${c.kilo} kg</div>
+                </div>
+                <div class="history-stats">
+                    <div class="history-stat">Yoğunluk: <span>${c.yogunluk}/5</span></div>
+                    <div class="history-stat">Yorgunluk: <span>${c.fatigue}/5</span></div>
+                    <div class="history-stat">Overload: <span>${overloadLabels[c.overload] || c.overload}</span></div>
+                    <div class="history-stat">Uyku: <span>${c.uyku}/5</span></div>
+                    <div class="history-stat">Beslenme: <span>${c.beslenme}/5</span></div>
+                </div>
+                ${c.feedback ? `<div class="history-feedback">${c.feedback.replace(/\n/g, '<br>')}</div>` : ''}
+            </div>
+        `).join('');
+    }
+
+    // CHATBOT
+    async function sendChat() {
+        const input = document.getElementById('chat-input');
+        const question = input.value.trim();
+        if (!question) return;
+
+        const messages = document.getElementById('chat-messages');
+        const empty = messages.querySelector('.chat-empty');
+        if (empty) empty.remove();
+
+        // Kullanıcı mesajı
+        const userMsg = document.createElement('div');
+        userMsg.className = 'chat-msg user';
+        userMsg.textContent = question;
+        messages.appendChild(userMsg);
+        input.value = '';
+
+        // Loading mesaj
+        const loadMsg = document.createElement('div');
+        loadMsg.className = 'chat-msg bot loading';
+        loadMsg.textContent = 'Düşünüyorum...';
+        messages.appendChild(loadMsg);
+        messages.scrollTop = messages.scrollHeight;
+
+        try {
+            const res = await fetch('/ask', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question })
+            });
+            const data = await res.json();
+
+            loadMsg.remove();
+            const botMsg = document.createElement('div');
+            botMsg.className = 'chat-msg bot';
+            botMsg.innerHTML = (data.answer || data.error || 'Yanıt alınamadı.').replace(/\n/g, '<br>');
+            messages.appendChild(botMsg);
+
+        } catch (err) {
+            loadMsg.remove();
+            const errMsg = document.createElement('div');
+            errMsg.className = 'chat-msg bot';
+            errMsg.textContent = 'Hata: ' + err.message;
+            messages.appendChild(errMsg);
+        }
+
+        messages.scrollTop = messages.scrollHeight;
+    }
+</script>
+
+</body>
+</html>
