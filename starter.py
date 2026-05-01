@@ -567,6 +567,8 @@ def generate_coach_reply(name, age, gender, weight, height,
     activity_text = activity_labels.get(current_activity, current_activity)
 
     # Önceki ilerleme metni
+    diff = 0
+    sure = "0 gün"
     progress_text = "İlk kayıt — geçmiş veri yok."
     if previous_weight and days_passed is not None:
         diff = round(weight - previous_weight, 1)
@@ -1142,7 +1144,7 @@ def not_found(e):
 
 @app.errorhandler(500)
 def server_error(e):
-    return render_template("500.html"), 500
+    return "Internal Server Error", 500
 
 with app.app_context():
     db.create_all()
