@@ -571,8 +571,8 @@ def generate_coach_reply(name, age, gender, weight, height,
     if previous_weight and days_passed is not None:
         diff = round(weight - previous_weight, 1)
         sure = f"{days_passed} gün"
-    if days_passed >= 7:
-        sure = f"{days_passed // 7} hafta {days_passed % 7} gün"
+        if days_passed >= 7:
+            sure = f"{days_passed // 7} hafta {days_passed % 7} gün"
 
     if goal.lower() == "kas kazanma":
         # Kas kazanmada kilo artışı OLUMLU
