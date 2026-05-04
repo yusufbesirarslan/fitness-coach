@@ -382,11 +382,28 @@ def log_meal():
 
     # AI'dan besin değerlerini hesaplat
     prompt = (
-        f"Şu yemeklerin yaklaşık besin değerlerini hesapla:\n"
-        f"{yemekler}\n\n"
+        f"Şu yemeklerin besin değerlerini hesapla. Miktarları dikkate al.\n"
+        f"Bilinen referans değerler (100g başına):\n"
+        f"- Tavuk göğsü: 165 kcal, 31g protein, 0g karb, 3.6g yağ\n"
+        f"- Yumurta (1 adet ~60g): 90 kcal, 7g protein, 0.6g karb, 6.3g yağ\n"
+        f"- Pirinç (pişmiş): 130 kcal, 2.7g protein, 28g karb, 0.3g yağ\n"
+        f"- Yulaf ezmesi: 389 kcal, 17g protein, 66g karb, 7g yağ\n"
+        f"- Beyaz peynir: 264 kcal, 17g protein, 0.5g karb, 21g yağ\n"
+        f"- Tam buğday ekmeği (1 dilim ~30g): 74 kcal, 4g protein, 12g karb, 1g yağ\n"
+        f"- Zeytinyağı (1 yemek kaşığı ~14ml): 119 kcal, 0g protein, 0g karb, 14g yağ\n"
+        f"- Domates (1 orta): 22 kcal, 1g protein, 5g karb, 0.2g yağ\n"
+        f"- Muz (1 orta): 105 kcal, 1.3g protein, 27g karb, 0.4g yağ\n"
+        f"- Badem (30g): 174 kcal, 6g protein, 6g karb, 15g yağ\n"
+        f"- Yoğurt (200g): 122 kcal, 20g protein, 7g karb, 0.8g yağ\n"
+        f"- Mercimek (pişmiş 100g): 116 kcal, 9g protein, 20g karb, 0.4g yağ\n"
+        f"- Kırmızı et (100g): 250 kcal, 26g protein, 0g karb, 17g yağ\n"
+        f"- Somon (100g): 208 kcal, 20g protein, 0g karb, 13g yağ\n\n"
+        f"Kullanıcının yediği: {yemekler}\n\n"
+        f"Miktarları doğru hesapla. 200g tavuk göğsü = 330 kcal, 62g protein.\n"
         f"SADECE şu JSON formatında yanıt ver, başka hiçbir şey yazma:\n"
         f'{{"kalori": 0, "protein": 0, "karb": 0, "yag": 0}}'
     )
+    
 
     try:
         response = client.chat.completions.create(

@@ -174,9 +174,12 @@ select {
     font-size: 15px;
     color: var(--text);
     line-height: 1.7;
-    font-weight: 400;  /* 300'den 400'e çıkar */
+    font-weight: 400;
 }
 
+.coach-motivation {
+    font-weight: 400;
+}
 /* ── OPTION CHIPS ────────────────────────────── */
 .option-grid { display:flex; flex-wrap:wrap; gap:8px; }
 .option-chip {
