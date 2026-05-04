@@ -218,6 +218,20 @@
         <div class="option-grid" id="gun-grid"></div>
     </div>
 
+    <!-- ANTRENMAN TARZI -->
+    <div class="section">
+        <div class="section-title">Antrenman Tarzı</div>
+        <div class="section-sub">Hangi tarzda antrenman yapmak istiyorsun?</div>
+        <div class="option-grid" id="tarzi-grid"></div>
+    </div>
+
+    <!-- ÖNCELIK HEDEFİ -->
+    <div class="section">
+        <div class="section-title">Öncelikli Hedef</div>
+        <div class="section-sub">Bu programda neye odaklanmak istiyorsun?</div>
+        <div class="option-grid" id="hedef-grid"></div>
+    </div>
+
     <!-- EKİPMAN -->
     <div class="section">
         <div class="section-title">Ekipman</div>
@@ -319,6 +333,7 @@
         ekipman: "spor_salonu",
         odak: "tum_vucut",
         sure: 45
+        
     };
 
     let currentPlan = null;
@@ -350,6 +365,23 @@
             { val: 90, label: "90 Dakika", sub: "İleri seviye" }
         ]
     };
+    const TARZI_OPTIONS = [
+        { val:"genel",        label:"Genel Fitness",  sub:"Karışık antrenman" },
+        { val:"crossfit",     label:"CrossFit",       sub:"WOD, fonksiyonel" },
+        { val:"calisthenics", label:"Kalistenik",     sub:"Vücut ağırlığı" },
+        { val:"powerlifting", label:"Powerlifting",   sub:"Güç odaklı" },
+        { val:"bodybuilding", label:"Bodybuilding",   sub:"Kas izolasyonu" },
+        { val:"fonksiyonel",  label:"Fonksiyonel",    sub:"Mobilite odaklı" }
+    ];
+
+    const HEDEF_OPTIONS = [
+        { val:"genel",       label:"Genel Sağlık",   sub:"Dengeli gelişim" },
+        { val:"guc",         label:"Güç",             sub:"Maksimum kuvvet" },
+        { val:"kondisyon",   label:"Kondisyon",       sub:"Dayanıklılık" },
+        { val:"kas_kutlesi", label:"Kas Kütlesi",    sub:"Hipertrofi" },
+        { val:"yag_yakimi",  label:"Yağ Yakımı",     sub:"Rekomposizyon" },
+        { val:"esneklik",    label:"Esneklik",        sub:"Mobilite" }
+    ];
 
     const KARDIYO_OPTIONS = {
         tip: [
@@ -386,6 +418,8 @@
     selections.kardiyo_gun = 0;
     selections.kardiyo_sure = 20;
     selections.kardiyo_yogunluk = "orta";
+    selections.antrenman_tarzi = "genel";
+    selections.odak_hedef = "genel";
 
     // Chip oluştur
     function createOptionChip(item, category, selectionKey, defaultVal) {
@@ -437,6 +471,16 @@
     KARDIYO_OPTIONS.yogunluk.forEach(o =>
         document.getElementById("kardiyo-yogunluk-grid").appendChild(
             createOptionChip(o, "kardiyo-yogunluk-grid", "kardiyo_yogunluk", "orta")
+        )
+    );
+    TARZI_OPTIONS.forEach(o =>
+        document.getElementById("tarzi-grid").appendChild(
+            createOptionChip(o, "tarzi-grid", "antrenman_tarzi", "genel")
+        )
+    );
+    HEDEF_OPTIONS.forEach(o =>
+        document.getElementById("hedef-grid").appendChild(
+            createOptionChip(o, "hedef-grid", "odak_hedef", "genel")
         )
     );
     }

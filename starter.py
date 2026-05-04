@@ -867,6 +867,8 @@ def training_plan_generate():
     kardiyo_gun      = data.get("kardiyo_gun", 0)
     kardiyo_sure     = data.get("kardiyo_sure", 20)
     kardiyo_yogunluk = data.get("kardiyo_yogunluk", "orta")
+    antrenman_tarzi  = data.get("antrenman_tarzi", "genel")
+    odak_hedef       = data.get("odak_hedef", "genel")
 
     ekipman_labels = {
         "ev"          : "ev ortamı (vücut ağırlığı egzersizleri)",
@@ -896,6 +898,23 @@ def training_plan_generate():
         "orta"   : "orta yoğunluk (konuşması biraz zor)",
         "yuksek" : "yüksek yoğunluk (HIIT — interval)",
         "karisik": "karışık (bazı günler LISS, bazı günler HIIT)"
+    }
+    tarzi_labels = {
+        "genel"        : "genel fitness (karışık antrenman)",
+        "crossfit"     : "CrossFit tarzı (fonksiyonel, yüksek yoğunluk, WOD yapısı)",
+        "calisthenics" : "kalistenik (vücut ağırlığı, beceri odaklı — muscle up, handstand)",
+        "powerlifting" : "powerlifting (squat, bench, deadlift odaklı, düşük tekrar yüksek ağırlık)",
+        "bodybuilding" : "vücut geliştirme (hipertrofi odaklı, split program, kas izolasyonu)",
+        "fonksiyonel"  : "fonksiyonel antrenman (günlük hareket kalıpları, mobilite)"
+    }
+
+    hedef_labels = {
+        "genel"      : "genel fitness ve sağlık",
+        "guc"        : "maksimum güç artışı",
+        "kondisyon"  : "kardiyovasküler kondisyon ve dayanıklılık",
+        "kas_kutlesi": "kas kütlesi ve hipertrofi",
+        "yag_yakimi" : "yağ yakımı ve vücut rekomposizyonu",
+        "esneklik"   : "esneklik ve mobilite"
     }
 
     # Kardiyo metni
@@ -929,6 +948,8 @@ def training_plan_generate():
         f"- Ekipman: {ekipman_labels.get(ekipman, ekipman)}\n"
         f"- Odak bölge: {odak_labels.get(odak, odak)}\n"
         f"- Antrenman süresi: {sure} dakika\n"
+        f"- Antrenman tarzı: {tarzi_labels.get(antrenman_tarzi, antrenman_tarzi)}\n"
+        f"- Öncelikli hedef: {hedef_labels.get(odak_hedef, odak_hedef)}\n"
         f"\n"
         f"{kardiyo_text}\n"
         f"\n"
