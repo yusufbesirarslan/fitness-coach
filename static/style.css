@@ -170,6 +170,12 @@ select {
 .section-sub {
     font-size:13px; color:var(--text2); margin-bottom:14px; font-weight:300;
 }
+.coach-section-text {
+    font-size: 15px;
+    color: var(--text);
+    line-height: 1.7;
+    font-weight: 400;  /* 300'den 400'e çıkar */
+}
 
 /* ── OPTION CHIPS ────────────────────────────── */
 .option-grid { display:flex; flex-wrap:wrap; gap:8px; }

@@ -413,7 +413,7 @@ def chat():
                           user_message,
                           previous_weight, days_passed
                       )
-
+    
     new_session = UserSession(
         name=name, age=age, gender=gender,
         weight=weight, height=height,
