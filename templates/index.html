@@ -7,6 +7,121 @@
     <link rel="stylesheet" href="/static/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
 </head>
+<style>
+    /* STATS GRID */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 12px;
+    opacity: 0;
+    transform: translateY(16px);
+    transition: all 0.5s 0.1s;
+}
+.stats-grid.visible { opacity: 1; transform: translateY(0); }
+
+/* PLAN GRID */
+.plan-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 12px;
+    opacity: 0;
+    transform: translateY(16px);
+    transition: all 0.5s 0.2s;
+}
+.plan-grid.visible { opacity: 1; transform: translateY(0); }
+
+.plan-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+}
+.plan-card-label {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--text3);
+    margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+}
+.plan-card-label::before {
+    content: ''; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); flex-shrink: 0;
+}
+.plan-card-text { font-size: 15px; color: var(--text); font-weight: 400; line-height: 1.5; }
+
+/* COACH CARD */
+.coach-card {
+    background: var(--card);
+    border: 1px solid var(--accent);
+    border-radius: 12px;
+    padding: 28px;
+    position: relative;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(16px);
+    transition: all 0.5s 0.3s;
+}
+.coach-card.visible { opacity: 1; transform: translateY(0); }
+.coach-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0;
+    height: 2px; background: linear-gradient(90deg, var(--accent), transparent);
+}
+.coach-card-header {
+    display: flex; align-items: center; gap: 12px; margin-bottom: 24px;
+}
+.coach-avatar {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: var(--accent-glow); border: 1px solid var(--accent);
+    display: flex; align-items: center; justify-content: center; font-size: 18px;
+}
+.coach-card-title {
+    font-family: 'Bebas Neue', sans-serif; font-size: 20px;
+    letter-spacing: 2px; color: var(--accent);
+}
+.coach-card-subtitle { font-size: 12px; color: var(--text2); font-weight: 300; }
+
+/* COACH SECTIONS */
+.coach-section {
+    margin-bottom: 20px; padding-bottom: 20px;
+    border-bottom: 1px solid var(--border);
+}
+.coach-section:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+.coach-section-title {
+    font-size: 11px; font-weight: 600; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--accent);
+    margin-bottom: 8px; display: flex; align-items: center; gap: 8px;
+}
+.coach-section-title::after {
+    content: ''; flex: 1; height: 1px; background: var(--accent-glow);
+}
+.coach-section-text {
+    font-size: 15px; color: var(--text); line-height: 1.7; font-weight: 400;
+}
+.coach-motivation {
+    background: var(--accent-glow); border-left: 3px solid var(--accent);
+    padding: 14px 18px; border-radius: 0 8px 8px 0;
+    font-size: 15px; color: var(--text); font-style: italic;
+    font-weight: 400; line-height: 1.6;
+}
+.task-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.task-list li {
+    display: flex; align-items: flex-start; gap: 10px;
+    font-size: 15px; color: var(--text); line-height: 1.5; font-weight: 400;
+}
+.task-num {
+    flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); color: #0a0a0a; font-size: 11px;
+    font-weight: 700; display: flex; align-items: center;
+    justify-content: center; margin-top: 1px;
+}
+
+/* DIVIDER */
+.divider { opacity: 0; transition: opacity 0.5s; }
+.divider.visible { opacity: 1; }
+
+/* MESSAGE INPUT (hidden olduğu için gerek yok ama eski referanslar için) */
+.message-input { position: relative; }
+</style>
 <body>
 
     <nav>
