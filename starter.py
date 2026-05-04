@@ -105,6 +105,21 @@ class TrainingPlan(db.Model):
 
     def __repr__(self):
         return f"<TrainingPlan {self.user_id} - {self.created_at}>"
+    
+class MealLog(db.Model):
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    ogun       = db.Column(db.String(20), nullable=False)  # kahvalti, ogle, aksam, ara
+    yemekler   = db.Column(db.Text, nullable=False)
+    kalori     = db.Column(db.Float)
+    protein    = db.Column(db.Float)
+    karb       = db.Column(db.Float)
+    yag        = db.Column(db.Float)
+    tarih      = db.Column(db.String(10))  # "01.05" formatında
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<MealLog {self.user_id} - {self.ogun} - {self.created_at}>"
 
 @app.route("/nutrition-plan/save", methods=["POST"])
 @login_required
@@ -354,6 +369,164 @@ def checkin_history():
         json.dumps(result, ensure_ascii=False),
         mimetype="application/json"
     )
+
+@app.route("/meal-log", methods=["POST"])
+@login_required
+def log_meal():
+    data = request.get_json()
+    ogun     = data.get("ogun", "")
+    yemekler = data.get("yemekler", "")
+
+    if not ogun or not yemekler:
+        return jsonify({"error": "Öğün ve yemekler zorunludur"}), 400
+
+    # AI'dan besin değerlerini hesaplat
+    prompt = (
+        f"Şu yemeklerin yaklaşık besin değerlerini hesapla:\n"
+        f"{yemekler}\n\n"
+        f"SADECE şu JSON formatında yanıt ver, başka hiçbir şey yazma:\n"
+        f'{{"kalori": 0, "protein": 0, "karb": 0, "yag": 0}}'
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": "Sen bir beslenme uzmanısın. SADECE JSON döndür."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=100,
+            temperature=0.1
+        )
+        raw = response.choices[0].message.content.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        nutrients = json.loads(raw)
+    except Exception:
+        nutrients = {"kalori": 0, "protein": 0, "karb": 0, "yag": 0}
+
+    today = datetime.utcnow().strftime("%d.%m")
+
+    entry = MealLog(
+        user_id  = current_user.id,
+        ogun     = ogun,
+        yemekler = yemekler,
+        kalori   = nutrients.get("kalori", 0),
+        protein  = nutrients.get("protein", 0),
+        karb     = nutrients.get("karb", 0),
+        yag      = nutrients.get("yag", 0),
+        tarih    = today
+    )
+    db.session.add(entry)
+    db.session.commit()
+
+    return jsonify({
+        "message": f"{ogun} kaydedildi.",
+        "nutrients": nutrients
+    })
+
+@app.route("/meal-log/today")
+@login_required
+def today_meals():
+    today = datetime.utcnow().strftime("%d.%m")
+    meals = MealLog.query.filter_by(user_id=current_user.id, tarih=today)\
+        .order_by(MealLog.created_at.asc()).all()
+
+    result = []
+    totals = {"kalori": 0, "protein": 0, "karb": 0, "yag": 0}
+    for m in meals:
+        result.append({
+            "ogun": m.ogun,
+            "yemekler": m.yemekler,
+            "kalori": m.kalori,
+            "protein": m.protein,
+            "karb": m.karb,
+            "yag": m.yag
+        })
+        totals["kalori"]  += m.kalori or 0
+        totals["protein"] += m.protein or 0
+        totals["karb"]    += m.karb or 0
+        totals["yag"]     += m.yag or 0
+
+    return jsonify({"meals": result, "totals": totals, "tarih": today})
+
+@app.route("/meal-log/history")
+@login_required
+def meal_history():
+    meals = MealLog.query.filter_by(user_id=current_user.id)\
+        .order_by(MealLog.created_at.desc()).limit(50).all()
+
+    days = {}
+    for m in meals:
+        if m.tarih not in days:
+            days[m.tarih] = {"meals": [], "totals": {"kalori": 0, "protein": 0, "karb": 0, "yag": 0}}
+        days[m.tarih]["meals"].append({
+            "ogun": m.ogun,
+            "yemekler": m.yemekler,
+            "kalori": m.kalori,
+            "protein": m.protein,
+            "karb": m.karb,
+            "yag": m.yag
+        })
+        days[m.tarih]["totals"]["kalori"]  += m.kalori or 0
+        days[m.tarih]["totals"]["protein"] += m.protein or 0
+        days[m.tarih]["totals"]["karb"]    += m.karb or 0
+        days[m.tarih]["totals"]["yag"]     += m.yag or 0
+
+    result = [{"tarih": k, **v} for k, v in days.items()]
+    return Response(json.dumps(result, ensure_ascii=False), mimetype="application/json")
+
+@app.route("/meal-log/review", methods=["POST"])
+@login_required
+def review_meals():
+    today = datetime.utcnow().strftime("%d.%m")
+    meals = MealLog.query.filter_by(user_id=current_user.id, tarih=today).all()
+
+    if not meals:
+        return jsonify({"error": "Bugün kayıtlı öğün yok."}), 400
+
+    last_session = UserSession.query.filter_by(user_id=current_user.id)\
+        .order_by(UserSession.created_at.desc()).first()
+
+    target = last_session.target_calories if last_session else 2000
+    goal   = last_session.goal if last_session else "genel sağlık"
+
+    meals_text = ""
+    total_cal = 0
+    for m in meals:
+        meals_text += f"- {m.ogun}: {m.yemekler} ({m.kalori} kcal, P:{m.protein}g K:{m.karb}g Y:{m.yag}g)\n"
+        total_cal += m.kalori or 0
+
+    prompt = (
+        f"Sen bir beslenme koçusun. Türkçe yaz, İngilizce kullanma.\n"
+        f"Kullanıcıya 'sen' diye hitap et.\n\n"
+        f"Kullanıcının hedefi: {goal}\n"
+        f"Günlük kalori hedefi: {round(target)} kcal\n"
+        f"Bugün toplam: {round(total_cal)} kcal\n\n"
+        f"Bugün yedikleri:\n{meals_text}\n"
+        f"Bu günü değerlendir:\n"
+        f"- Kalori hedefine ulaştı mı?\n"
+        f"- Makro dağılımı dengeli mi?\n"
+        f"- Biyoyararlanım açısından nasıl?\n"
+        f"- Gluten içeriği yüksek mi?\n"
+        f"- Değiştirilmesi gereken bir şey var mı?\n"
+        f"Kısa ve spesifik ol, 4-5 cümle yeterli."
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": "Sen bir beslenme koçusun. Kısa, spesifik, Türkçe konuş."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=400,
+            temperature=0.7
+        )
+        review = response.choices[0].message.content
+    except Exception as e:
+        review = f"Değerlendirme alınamadı: {str(e)}"
+
+    return jsonify({"review": review, "total_calories": round(total_cal), "target": round(target)})
 
 @app.route("/")
 @login_required

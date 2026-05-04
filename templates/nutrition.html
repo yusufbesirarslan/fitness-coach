@@ -7,153 +7,10 @@
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
     <style>
-        :root[data-theme="dark"] {
-            --bg: #0a0a0a; --bg2: #111; --bg3: #1a1a1a;
-            --border: #2a2a2a; --text: #f0f0f0; --text2: #888; --text3: #555;
-            --accent: #c8f060; --accent2: #a8d040; --accent-glow: rgba(200,240,96,0.15);
-            --card: #141414; --input-bg: #1a1a1a;
-        }
-        :root[data-theme="light"] {
-            --bg: #f5f5f0; --bg2: #eeede8; --bg3: #e5e4df;
-            --border: #d5d4cf; --text: #1a1a1a; --text2: #666; --text3: #999;
-            --accent: #2d6a00; --accent2: #1a4500; --accent-glow: rgba(45,106,0,0.1);
-            --card: #fff; --input-bg: #fff;
-        }
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background 0.3s,color 0.3s; }
-
-        /* NAV */
-        nav { display:flex; align-items:center; justify-content:space-between; padding:20px 40px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); z-index:100; backdrop-filter:blur(10px); }
-        .nav-logo { font-family:'Bebas Neue',sans-serif; font-size:28px; letter-spacing:3px; color:var(--accent); }
-        .nav-links { display:flex; align-items:center; gap:4px; }
-        .nav-link { font-size:13px; font-weight:500; color:var(--text2); text-decoration:none; padding:6px 14px; border-radius:6px; transition:all 0.2s; }
-        .nav-link:hover { color:var(--text); background:var(--bg3); }
-        .nav-link.active { color:var(--accent); background:var(--accent-glow); }
-        .nav-right { display:flex; align-items:center; gap:16px; }
-        .nav-user { font-size:14px; color:var(--text2); font-weight:300; }
-        .nav-user span { color:var(--text); font-weight:500; }
-        .theme-toggle { width:44px; height:24px; border-radius:12px; background:var(--bg3); border:1px solid var(--border); cursor:pointer; position:relative; transition:all 0.3s; }
-        .theme-toggle::after { content:''; position:absolute; width:18px; height:18px; border-radius:50%; background:var(--accent); top:2px; left:2px; transition:transform 0.3s; }
-        [data-theme="light"] .theme-toggle::after { transform:translateX(20px); }
-        .logout-btn { font-size:13px; font-weight:500; color:var(--text2); background:none; border:1px solid var(--border); padding:6px 16px; border-radius:6px; cursor:pointer; text-decoration:none; transition:all 0.2s; }
-        .logout-btn:hover { color:var(--text); border-color:var(--text3); }
-
-        /* LAYOUT */
-        .container { max-width:1100px; margin:0 auto; padding:40px 40px 80px; }
-        .page-header { margin-bottom:40px; }
-        .page-header h1 { font-family:'Bebas Neue',sans-serif; font-size:56px; letter-spacing:4px; line-height:1; color:var(--text); }
-        .page-header h1 span { color:var(--accent); }
-        .page-header p { margin-top:8px; color:var(--text2); font-size:15px; font-weight:300; }
-
-        /* KALORI BANNER */
-        .calori-banner { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 20px; margin-bottom:32px; display:flex; align-items:center; gap:16px; }
-        .calori-banner-val { font-family:'Bebas Neue',sans-serif; font-size:32px; color:var(--accent); letter-spacing:2px; }
-        .calori-banner-label { font-size:13px; color:var(--text2); font-weight:300; }
-        .calori-banner-warn { font-size:13px; color:var(--text3); font-style:italic; }
-
-        /* SECTION */
-        .section { margin-bottom:32px; }
-        .section-title { font-family:'Bebas Neue',sans-serif; font-size:22px; letter-spacing:3px; color:var(--text); margin-bottom:4px; }
-        .section-sub { font-size:13px; color:var(--text2); margin-bottom:16px; font-weight:300; }
-
-        /* CATEGORY LABEL */
-        .cat-label { font-size:11px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:var(--text3); margin-bottom:10px; margin-top:16px; display:flex; align-items:center; gap:8px; }
-        .cat-label::after { content:''; flex:1; height:1px; background:var(--border); }
-
-        /* FOOD GRID */
-        .food-grid { display:flex; flex-wrap:wrap; gap:8px; }
-        .food-chip { display:flex; align-items:center; gap:8px; background:var(--bg3); border:1px solid var(--border); border-radius:8px; padding:8px 14px; cursor:pointer; transition:all 0.2s; user-select:none; }
-        .food-chip:hover { border-color:var(--accent); }
-        .food-chip.selected { background:var(--accent-glow); border-color:var(--accent); }
-        .food-chip input[type="checkbox"] { display:none; }
-        .food-chip-dot { width:8px; height:8px; border-radius:50%; border:1.5px solid var(--text3); transition:all 0.2s; flex-shrink:0; }
-        .food-chip.selected .food-chip-dot { background:var(--accent); border-color:var(--accent); }
-        .food-chip-name { font-size:14px; font-weight:400; color:var(--text); }
-
-        /* CUSTOM FOOD */
-        .custom-food-row { display:flex; gap:8px; margin-top:12px; }
-        .custom-food-input { flex:1; font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text); background:var(--input-bg); border:1px solid var(--border); border-radius:8px; padding:10px 14px; outline:none; transition:border-color 0.2s; }
-        .custom-food-input:focus { border-color:var(--accent); }
-        .custom-food-input::placeholder { color:var(--text3); }
-        .custom-food-btn { font-family:'DM Sans',sans-serif; font-size:13px; font-weight:500; color:var(--accent); background:var(--accent-glow); border:1px solid var(--accent); border-radius:8px; padding:10px 18px; cursor:pointer; transition:all 0.2s; white-space:nowrap; }
-        .custom-food-btn:hover { background:var(--accent); color:#0a0a0a; }
-        .custom-tags { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
-        .custom-tag { display:flex; align-items:center; gap:6px; background:var(--bg3); border:1px solid var(--border); border-radius:6px; padding:4px 10px; font-size:13px; color:var(--text2); }
-        .custom-tag-remove { cursor:pointer; color:var(--text3); font-size:16px; line-height:1; transition:color 0.2s; }
-        .custom-tag-remove:hover { color:#ff6b6b; }
-
-        /* SUBMIT */
-        .submit-btn { font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:3px; color:#0a0a0a; background:var(--accent); border:none; border-radius:8px; padding:14px 40px; cursor:pointer; transition:all 0.2s; margin-top:8px; }
-        .submit-btn:hover { background:var(--accent2); transform:translateY(-1px); }
-        .submit-btn.loading { opacity:0.7; cursor:not-allowed; }
-
-        /* LOADING */
-        .loading-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); backdrop-filter:blur(4px); z-index:200; align-items:center; justify-content:center; flex-direction:column; gap:16px; }
-        .loading-overlay.active { display:flex; }
-        .loading-spinner { width:48px; height:48px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin 0.8s linear infinite; }
-        .loading-text { font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:3px; color:var(--accent); }
-        @keyframes spin { to { transform:rotate(360deg); } }
-
-        /* DIVIDER */
-        .divider { display:flex; align-items:center; gap:16px; margin:40px 0 32px; }
-        .divider-line { flex:1; height:1px; background:var(--border); }
-        .divider-label { font-family:'Bebas Neue',sans-serif; font-size:14px; letter-spacing:3px; color:var(--text3); }
-
-        /* SCORE BANNER */
-        .score-banner { border-radius:12px; padding:16px 20px; margin-bottom:24px; display:flex; align-items:center; gap:16px; border:1px solid var(--border); }
-        .score-val { font-family:'Bebas Neue',sans-serif; font-size:48px; letter-spacing:2px; line-height:1; }
-        .score-info { flex:1; }
-        .score-label-big { font-family:'Bebas Neue',sans-serif; font-size:20px; letter-spacing:2px; }
-        .score-desc { font-size:13px; color:var(--text2); margin-top:4px; font-weight:300; }
-        .score-bars { display:flex; flex-direction:column; gap:6px; margin-top:8px; }
-        .score-bar-row { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text2); }
-        .score-bar-track { flex:1; height:4px; background:var(--border); border-radius:2px; overflow:hidden; }
-        .score-bar-fill { height:100%; border-radius:2px; transition:width 0.6s; }
-
-        /* PLAN CARDS */
-        .plans-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
-        @media(max-width:900px) { .plans-grid { grid-template-columns:1fr; } }
-
-        .plan-card { background:var(--card); border:1px solid var(--border); border-radius:12px; overflow:hidden; transition:border-color 0.2s; }
-        .plan-card.selected-plan { border-color:var(--accent); }
-        .plan-card-header { padding:16px 18px 12px; border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; }
-        .plan-card-name { font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:2px; color:var(--accent); }
-        .plan-card-kcal { font-size:13px; color:var(--text2); font-weight:300; }
-        .plan-card-body { padding:16px 18px; }
-
-        .meal-section { margin-bottom:14px; }
-        .meal-title { font-size:11px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:var(--text3); margin-bottom:6px; }
-        .meal-items { list-style:none; display:flex; flex-direction:column; gap:3px; }
-        .meal-items li { font-size:13px; color:var(--text); font-weight:300; line-height:1.5; display:flex; align-items:flex-start; gap:6px; }
-        .meal-items li::before { content:'·'; color:var(--accent); flex-shrink:0; }
-
-        .plan-macros { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-top:14px; padding-top:14px; border-top:1px solid var(--border); }
-        .macro-item { text-align:center; }
-        .macro-val { font-family:'Bebas Neue',sans-serif; font-size:20px; color:var(--accent); letter-spacing:1px; }
-        .macro-label { font-size:10px; color:var(--text3); text-transform:uppercase; letter-spacing:0.08em; }
-
-        .select-plan-btn { width:100%; font-family:'Bebas Neue',sans-serif; font-size:15px; letter-spacing:2px; color:#0a0a0a; background:var(--accent); border:none; padding:12px; cursor:pointer; transition:all 0.2s; margin-top:14px; border-radius:6px; }
-        .select-plan-btn:hover { background:var(--accent2); }
-        .select-plan-btn.chosen { background:var(--bg3); color:var(--accent); border:1px solid var(--accent); cursor:default; }
-
-        /* ACTIVE PLAN BANNER */
-        .active-plan-banner { background:var(--accent-glow); border:1px solid var(--accent); border-radius:12px; padding:16px 20px; margin-bottom:24px; display:flex; align-items:center; justify-content:space-between; }
-        .active-plan-text { font-size:14px; color:var(--text); }
-        .active-plan-text strong { color:var(--accent); }
-        .active-plan-date { font-size:12px; color:var(--text2); margin-top:4px; }
-        .reset-btn { font-size:13px; color:var(--text3); background:none; border:1px solid var(--border); border-radius:6px; padding:6px 14px; cursor:pointer; transition:all 0.2s; }
-        .reset-btn:hover { color:var(--text); border-color:var(--text3); }
-
-        @media(max-width:640px) {
-            nav { padding:16px 20px; }
-            .container { padding:24px 20px 60px; }
-            .page-header h1 { font-size:40px; }
-            .nav-links { display:none; }
-        }
+        .tabs{display:flex;gap:4px;margin-bottom:32px;background:var(--bg3);border-radius:8px;padding:4px}.tab{flex:1;font-family:'Bebas Neue',sans-serif;font-size:15px;letter-spacing:2px;color:var(--text2);background:none;border:none;padding:10px;border-radius:6px;cursor:pointer;transition:all .2s;text-align:center}.tab.active{background:var(--card);color:var(--accent);border:1px solid var(--border)}.tab:hover:not(.active){color:var(--text)}.tab-content{display:none}.tab-content.active{display:block}.calori-banner{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:24px;display:flex;align-items:center;gap:16px;justify-content:space-between;flex-wrap:wrap}.calori-banner-val{font-family:'Bebas Neue',sans-serif;font-size:32px;color:var(--accent);letter-spacing:2px}.calori-banner-label{font-size:13px;color:var(--text2);font-weight:300}.calori-progress{flex:1;min-width:200px}.calori-bar{height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-top:6px}.calori-bar-fill{height:100%;border-radius:4px;transition:width .5s}.calori-eaten{font-size:12px;color:var(--text2);margin-top:4px}.meal-form{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:16px}.ogun-grid{display:flex;gap:8px;margin-bottom:16px}.ogun-chip{flex:1;text-align:center;padding:10px;border-radius:8px;background:var(--bg3);border:1.5px solid var(--border);cursor:pointer;transition:all .2s;font-size:13px;font-weight:500;color:var(--text2)}.ogun-chip:hover{border-color:var(--accent)}.ogun-chip.selected{background:var(--accent-glow);border-color:var(--accent);color:var(--text)}.ogun-icon{font-size:20px;display:block;margin-bottom:4px}.meal-textarea{width:100%;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text);background:var(--input-bg);border:1px solid var(--border);border-radius:8px;padding:14px;outline:none;min-height:80px;resize:vertical;transition:border-color .2s}.meal-textarea:focus{border-color:var(--accent)}.meal-textarea::placeholder{color:var(--text3)}.meal-submit{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:2px;color:#0a0a0a;background:var(--accent);border:none;border-radius:8px;padding:12px 32px;cursor:pointer;transition:all .2s;margin-top:12px}.meal-submit:hover{background:var(--accent2)}.today-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:10px}.today-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.today-ogun{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:2px;color:var(--accent)}.today-kcal{font-size:14px;color:var(--text2)}.today-foods{font-size:14px;color:var(--text);line-height:1.6;font-weight:300}.today-macros{display:flex;gap:16px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}.today-macro{font-size:12px;color:var(--text2)}.today-macro span{color:var(--text);font-weight:500}.today-empty{color:var(--text3);font-size:14px;font-style:italic;text-align:center;padding:30px 0}.totals-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}.total-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center}.total-val{font-family:'Bebas Neue',sans-serif;font-size:24px;color:var(--accent);letter-spacing:1px}.total-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-top:2px}.review-btn{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:2px;color:#0a0a0a;background:var(--accent);border:none;border-radius:8px;padding:12px 32px;cursor:pointer;transition:all .2s;width:100%}.review-btn:hover{background:var(--accent2)}.review-card{background:var(--accent-glow);border:1px solid var(--accent);border-radius:12px;padding:20px;margin-top:16px;display:none}.review-card.visible{display:block}.review-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}.review-avatar{width:32px;height:32px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:14px}.review-title{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:2px;color:var(--accent)}.review-text{font-size:14px;color:var(--text);line-height:1.7;font-weight:300}.history-day{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:12px}.history-day-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.history-date{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:2px;color:var(--accent)}.history-day-totals{display:flex;gap:12px}.history-day-total{font-size:12px;color:var(--text2)}.history-day-total span{color:var(--text);font-weight:500}.history-meal{padding:10px 0;border-bottom:1px solid var(--border)}.history-meal:last-child{border-bottom:none}.history-meal-ogun{font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}.history-meal-foods{font-size:14px;color:var(--text);font-weight:300;line-height:1.5}.plans-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}@media(max-width:900px){.plans-grid{grid-template-columns:1fr}}.plan-card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;transition:border-color .2s}.plan-card.selected-plan{border-color:var(--accent)}.plan-card-header{padding:16px 18px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}.plan-card-name{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:2px;color:var(--accent)}.plan-card-kcal{font-size:13px;color:var(--text2);font-weight:300}.plan-card-body{padding:16px 18px}.meal-section-plan{margin-bottom:14px}.meal-title-plan{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin-bottom:6px}.meal-items-plan{list-style:none;display:flex;flex-direction:column;gap:3px}.meal-items-plan li{font-size:13px;color:var(--text);font-weight:300;line-height:1.5;display:flex;align-items:flex-start;gap:6px}.meal-items-plan li::before{content:'·';color:var(--accent);flex-shrink:0}.plan-macros{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}.macro-item{text-align:center}.macro-val{font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--accent);letter-spacing:1px}.macro-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em}.select-plan-btn{width:100%;font-family:'Bebas Neue',sans-serif;font-size:15px;letter-spacing:2px;color:#0a0a0a;background:var(--accent);border:none;padding:12px;cursor:pointer;transition:all .2s;margin-top:14px;border-radius:6px}.select-plan-btn:hover{background:var(--accent2)}.select-plan-btn.chosen{background:var(--bg3);color:var(--accent);border:1px solid var(--accent);cursor:default}.custom-food-row{display:flex;gap:8px;margin-top:12px}.custom-food-input{flex:1;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text);background:var(--input-bg);border:1px solid var(--border);border-radius:8px;padding:10px 14px;outline:none}.custom-food-input:focus{border-color:var(--accent)}.custom-food-btn{font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;color:var(--accent);background:var(--accent-glow);border:1px solid var(--accent);border-radius:8px;padding:10px 18px;cursor:pointer;white-space:nowrap}.custom-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.custom-tag{display:flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:13px;color:var(--text2)}.custom-tag-remove{cursor:pointer;color:var(--text3);font-size:16px}@media(max-width:640px){.totals-grid{grid-template-columns:repeat(2,1fr)}.ogun-grid{flex-wrap:wrap}.ogun-chip{flex:none;width:calc(50% - 4px)}}
     </style>
 </head>
 <body>
-
 <nav>
     <div class="nav-logo">FC</div>
     <div class="nav-links">
@@ -168,368 +25,84 @@
         <a href="/logout" class="logout-btn">Çıkış</a>
     </div>
 </nav>
-
-<div class="loading-overlay" id="loading">
-    <div class="loading-spinner"></div>
-    <div class="loading-text">Planın hazırlanıyor...</div>
-</div>
-
+<div class="loading-overlay" id="loading"><div class="loading-spinner"></div><div class="loading-text">Hesaplanıyor...</div></div>
 <div class="container">
-
-    <div class="page-header">
-        <h1>BESLENME<br><span>PLANI</span></h1>
-        <p>Tercih ettiğin besin kaynaklarını seç, kişisel planını oluştur.</p>
+    <div class="page-header"><h1>BESLENME<br><span>TAKİBİ</span></h1><p>Öğünlerini kaydet, koçundan değerlendirme al veya plan oluştur.</p></div>
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab('log')">Öğün Kaydet</button>
+        <button class="tab" onclick="switchTab('today')">Bugün</button>
+        <button class="tab" onclick="switchTab('history')">Geçmiş</button>
+        <button class="tab" onclick="switchTab('plan')">Plan Oluştur</button>
     </div>
-
-    <!-- AKTİF PLAN BANNER -->
-    <div id="active-plan-banner" style="display:none"></div>
-
-    <!-- KALORİ BANNER -->
-    <div class="calori-banner" id="calori-banner">
-        <div>
-            <div class="calori-banner-label">Günlük hedef kalorini</div>
-            <div class="calori-banner-val" id="target-kcal">— kcal</div>
+    <div class="tab-content active" id="tab-log">
+        <div class="calori-banner" id="calori-banner">
+            <div><div class="calori-banner-label">Günlük hedef</div><div class="calori-banner-val" id="target-kcal">— kcal</div></div>
+            <div class="calori-progress"><div class="calori-bar"><div class="calori-bar-fill" id="calori-fill" style="width:0%;background:var(--accent)"></div></div><div class="calori-eaten" id="calori-eaten">Bugün: 0 kcal</div></div>
         </div>
-        <div class="calori-banner-warn" id="calori-warn">
-            Ana sayfadan planını oluşturduktan sonra burası otomatik dolacak.
+        <div class="meal-form">
+            <div class="section-title">Öğün Ekle</div><div class="section-sub">Ne yediğini yaz, koçun besin değerlerini hesaplasın.</div>
+            <div class="ogun-grid">
+                <div class="ogun-chip selected" onclick="selectOgun('Kahvaltı',this)"><span class="ogun-icon">🌅</span>Kahvaltı</div>
+                <div class="ogun-chip" onclick="selectOgun('Öğle',this)"><span class="ogun-icon">☀️</span>Öğle</div>
+                <div class="ogun-chip" onclick="selectOgun('Akşam',this)"><span class="ogun-icon">🌙</span>Akşam</div>
+                <div class="ogun-chip" onclick="selectOgun('Ara Öğün',this)"><span class="ogun-icon">🥤</span>Ara Öğün</div>
+            </div>
+            <textarea class="meal-textarea" id="meal-input" placeholder="Örn: 2 yumurta, 1 dilim tam buğday ekmeği, 50g beyaz peynir, 1 domates, zeytinyağı"></textarea>
+            <button class="meal-submit" onclick="logMeal()">KAYDET</button>
         </div>
+        <div id="today-preview"></div>
     </div>
-
-    <!-- PROTEİN -->
-    <div class="section">
-        <div class="section-title">Protein Kaynakları</div>
-        <div class="section-sub">En az bir hayvansal veya bitkisel protein kaynağı seç.</div>
-
-        <div class="cat-label">Hayvansal</div>
-        <div class="food-grid" id="protein-hayvansal"></div>
-
-        <div class="cat-label">Bitkisel</div>
-        <div class="food-grid" id="protein-bitkisel"></div>
-    </div>
-
-    <!-- KARBONHİDRAT -->
-    <div class="section">
-        <div class="section-title">Karbonhidrat Kaynakları</div>
-        <div class="section-sub">En az bir kaynak seç.</div>
-        <div class="food-grid" id="karb-list"></div>
-    </div>
-
-    <!-- YAĞ -->
-    <div class="section">
-        <div class="section-title">Yağ Kaynakları</div>
-        <div class="section-sub">En az bir kaynak seç.</div>
-        <div class="food-grid" id="yag-list"></div>
-    </div>
-
-    <!-- ÖZEL GİDA -->
-    <div class="section">
-        <div class="section-title">Özel Gıda Ekle</div>
-        <div class="section-sub">Listede olmayan bir gıdayı buraya yaz, plana dahil edilsin.</div>
-        <div class="custom-food-row">
-            <input type="text" id="custom-input" class="custom-food-input" placeholder="Örn: Keçi peyniri, Bulgur pilavı...">
-            <button class="custom-food-btn" onclick="addCustomFood()">+ Ekle</button>
+    <div class="tab-content" id="tab-today">
+        <div class="totals-grid" id="totals-grid">
+            <div class="total-card"><div class="total-val" id="t-kcal">0</div><div class="total-label">Kalori</div></div>
+            <div class="total-card"><div class="total-val" id="t-protein">0g</div><div class="total-label">Protein</div></div>
+            <div class="total-card"><div class="total-val" id="t-karb">0g</div><div class="total-label">Karbonhidrat</div></div>
+            <div class="total-card"><div class="total-val" id="t-yag">0g</div><div class="total-label">Yağ</div></div>
         </div>
-        <div class="custom-tags" id="custom-tags"></div>
+        <div id="today-meals-list"><div class="today-empty">Bugün kayıtlı öğün yok.</div></div>
+        <button class="review-btn" id="review-btn" onclick="getReview()">GÜN SONU DEĞERLENDİRMESİ</button>
+        <div class="review-card" id="review-card"><div class="review-header"><div class="review-avatar">🏋️</div><div class="review-title">Koç Değerlendirmesi</div></div><div class="review-text" id="review-text"></div></div>
     </div>
-
-    <button class="submit-btn" id="submit-btn" onclick="generatePlan()">PLANIMI OLUŞTUR</button>
-
-    <!-- SONUÇLAR -->
-    <div id="results" style="display:none">
-        <div class="divider">
-            <div class="divider-line"></div>
-            <div class="divider-label">Planların</div>
-            <div class="divider-line"></div>
-        </div>
-
-        <!-- SKOR -->
-        <div class="score-banner" id="score-banner"></div>
-
-        <!-- PLAN KARTLARI -->
-        <div class="plans-grid" id="plans-grid"></div>
+    <div class="tab-content" id="tab-history">
+        <div class="section-title">Beslenme Geçmişi</div><div class="section-sub">Günlük öğün kayıtların ve besin değerleri.</div>
+        <div id="history-list"><div class="today-empty">Henüz kayıt yok.</div></div>
     </div>
-
+    <div class="tab-content" id="tab-plan">
+        <div id="active-plan-banner" style="display:none"></div>
+        <div class="section"><div class="section-title">Protein Kaynakları</div><div class="section-sub">En az bir kaynak seç.</div><div class="cat-label">Hayvansal</div><div class="food-grid" id="protein-hayvansal"></div><div class="cat-label">Bitkisel</div><div class="food-grid" id="protein-bitkisel"></div></div>
+        <div class="section"><div class="section-title">Karbonhidrat Kaynakları</div><div class="section-sub">En az bir kaynak seç.</div><div class="food-grid" id="karb-list"></div></div>
+        <div class="section"><div class="section-title">Yağ Kaynakları</div><div class="section-sub">En az bir kaynak seç.</div><div class="food-grid" id="yag-list"></div></div>
+        <div class="section"><div class="section-title">Özel Gıda Ekle</div><div class="section-sub">Listede olmayan gıdayı yaz.</div><div class="custom-food-row"><input type="text" id="custom-input" class="custom-food-input" placeholder="Örn: Keçi peyniri..."><button class="custom-food-btn" onclick="addCustomFood()">+ Ekle</button></div><div class="custom-tags" id="custom-tags"></div></div>
+        <button class="submit-btn" id="plan-btn" onclick="generatePlan()">PLAN OLUŞTUR</button>
+        <div id="plan-results" style="display:none"><div class="divider"><div class="divider-line"></div><div class="divider-label">Planların</div><div class="divider-line"></div></div><div class="score-banner" id="score-banner"></div><div class="plans-grid" id="plans-grid"></div></div>
+    </div>
 </div>
-
 <script>
-    // TEMA
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    document.documentElement.dataset.theme = savedTheme;
-    function toggleTheme() {
-        const html = document.documentElement;
-        html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
-        localStorage.setItem('theme', html.dataset.theme);
-    }
-
-    // GıDA VERİTABANI — frontend kopyası
-    const FOODS = {
-        protein_hayvansal: ["Tavuk Göğsü","Yumurta","Ton Balığı","Kırmızı Et","Yoğurt","Somon"],
-        protein_bitkisel:  ["Mercimek","Nohut","Tofu","Kinoa","Edamame"],
-        karbonhidrat:      ["Yulaf Ezmesi","Pirinç","Bulgur","Tatlı Patates","Tam Buğday Ekmeği","Muz","Elma"],
-        yag:               ["Zeytinyağı","Avokado","Badem","Ceviz","Fındık"]
-    };
-
-    const selected = { proteins: new Set(), carbs: new Set(), fats: new Set() };
-    const customFoods = [];
-
-    // Chip oluştur
-    function createChip(name, category) {
-        const chip = document.createElement("label");
-        chip.className = "food-chip";
-        chip.innerHTML = `
-            <input type="checkbox" onchange="toggleFood('${name}','${category}',this)">
-            <div class="food-chip-dot"></div>
-            <span class="food-chip-name">${name}</span>
-        `;
-        return chip;
-    }
-
-    // Listeleri doldur
-    function populateFoods() {
-        FOODS.protein_hayvansal.forEach(f => document.getElementById("protein-hayvansal").appendChild(createChip(f, "proteins")));
-        FOODS.protein_bitkisel.forEach(f  => document.getElementById("protein-bitkisel").appendChild(createChip(f, "proteins")));
-        FOODS.karbonhidrat.forEach(f      => document.getElementById("karb-list").appendChild(createChip(f, "carbs")));
-        FOODS.yag.forEach(f               => document.getElementById("yag-list").appendChild(createChip(f, "fats")));
-    }
-
-    function toggleFood(name, category, checkbox) {
-        const chip = checkbox.closest(".food-chip");
-        if (checkbox.checked) {
-            selected[category].add(name);
-            chip.classList.add("selected");
-        } else {
-            selected[category].delete(name);
-            chip.classList.remove("selected");
-        }
-    }
-
-    // Özel gıda
-    function addCustomFood() {
-        const input = document.getElementById("custom-input");
-        const val = input.value.trim();
-        if (!val) return;
-        if (customFoods.includes(val)) { input.value = ""; return; }
-        customFoods.push(val);
-        input.value = "";
-
-        const tag = document.createElement("div");
-        tag.className = "custom-tag";
-        tag.id = `tag-${val}`;
-        tag.innerHTML = `<span>${val}</span><span class="custom-tag-remove" onclick="removeCustomFood('${val}')">×</span>`;
-        document.getElementById("custom-tags").appendChild(tag);
-    }
-
-    document.getElementById("custom-input").addEventListener("keydown", e => {
-        if (e.key === "Enter") addCustomFood();
-    });
-
-    function removeCustomFood(name) {
-        const idx = customFoods.indexOf(name);
-        if (idx > -1) customFoods.splice(idx, 1);
-        const tag = document.getElementById(`tag-${name}`);
-        if (tag) tag.remove();
-    }
-
-    // Kalori banner
-    async function loadCalori() {
-        const res  = await fetch("/last-session");
-        const data = await res.json();
-        if (data.exists) {
-            document.getElementById("target-kcal").textContent = Math.round(data.target_calories || 0) + " kcal";
-            document.getElementById("calori-warn").style.display = "none";
-        }
-    }
-
-    // Aktif plan banner
-    async function loadActivePlan() {
-        const res  = await fetch("/nutrition-plan/active");
-        const data = await res.json();
-        if (!data.exists) return;
-
-        const banner = document.getElementById("active-plan-banner");
-        banner.style.display = "flex";
-        banner.innerHTML = `
-            <div>
-                <div class="active-plan-text">
-                    Aktif planın: <strong>${data.plan.isim || "Seçili Plan"}</strong>
-                </div>
-                <div class="active-plan-date">${data.created_at} tarihinde oluşturuldu · Skor: ${data.score}/10</div>
-            </div>
-            <button class="reset-btn" onclick="document.getElementById('active-plan-banner').style.display='none'">Yeni plan oluştur</button>
-        `;
-    }
-
-    // Plan oluştur
-    async function generatePlan() {
-        if (selected.proteins.size === 0) { alert("En az bir protein kaynağı seç."); return; }
-        if (selected.carbs.size === 0)    { alert("En az bir karbonhidrat kaynağı seç."); return; }
-        if (selected.fats.size === 0)     { alert("En az bir yağ kaynağı seç."); return; }
-
-        const btn     = document.getElementById("submit-btn");
-        const loading = document.getElementById("loading");
-        btn.classList.add("loading");
-        btn.textContent = "HAZIRLANIYOR...";
-        loading.classList.add("active");
-
-        try {
-            const res  = await fetch("/nutrition-plan", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    proteins:     [...selected.proteins],
-                    carbs:        [...selected.carbs],
-                    fats:         [...selected.fats],
-                    custom_foods: customFoods
-                })
-            });
-
-            const data = await res.json();
-
-            if (data.error) { alert(data.error); return; }
-
-            renderResults(data);
-
-        } catch (err) {
-            alert("Bir hata oluştu: " + err.message);
-        } finally {
-            btn.classList.remove("loading");
-            btn.textContent = "PLANIMI OLUŞTUR";
-            loading.classList.remove("active");
-        }
-    }
-
-    // Sonuçları render et
-    function renderResults(data) {
-        document.getElementById("results").style.display = "block";
-
-        // Skor banner
-        const scoreColors = { "İyi": "#c8f060", "Orta": "#f0c040", "Kötü": "#ff6b6b" };
-        const color = scoreColors[data.score_label] || "#888";
-        document.getElementById("score-banner").innerHTML = `
-            <div class="score-val" style="color:${color}">${data.overall_score}</div>
-            <div class="score-info">
-                <div class="score-label-big" style="color:${color}">${data.score_label}</div>
-                <div class="score-desc">Seçtiğin gıdaların mikro değer, biyoyararlanım ve gluten skoru ortalaması</div>
-                <div class="score-bars">
-                    <div class="score-bar-row">
-                        <span style="min-width:100px">Mikro Değer</span>
-                        <div class="score-bar-track"><div class="score-bar-fill" style="width:${data.overall_score*10}%;background:${color}"></div></div>
-                        <span>${data.overall_score}/10</span>
-                    </div>
-                    <div class="score-bar-row">
-                        <span style="min-width:100px">Biyoyararlanım</span>
-                        <div class="score-bar-track"><div class="score-bar-fill" style="width:${data.overall_score*10}%;background:${color}"></div></div>
-                        <span>${data.overall_score}/10</span>
-                    </div>
-                </div>
-            </div>
-        `;
-
-        // Plan kartları
-        const grid = document.getElementById("plans-grid");
-        grid.innerHTML = "";
-
-        data.planlar.forEach((plan, i) => {
-            const card = document.createElement("div");
-            card.className = "plan-card";
-            card.id = `plan-card-${i}`;
-
-            const meals = [
-                { key: "kahvalti",  label: "Kahvaltı" },
-                { key: "ogle",      label: "Öğle"     },
-                { key: "aksam",     label: "Akşam"    },
-                { key: "ara_ogun",  label: "Ara Öğün" }
-            ];
-
-            const mealsHtml = meals.map(m => {
-                const meal = plan[m.key];
-                if (!meal) return "";
-                const items = (meal.yemekler || []).map(y => `<li>${y}</li>`).join("");
-                return `
-                    <div class="meal-section">
-                        <div class="meal-title">${m.label} · ${meal.kalori || "—"} kcal</div>
-                        <ul class="meal-items">${items}</ul>
-                    </div>`;
-            }).join("");
-
-            card.innerHTML = `
-                <div class="plan-card-header">
-                    <div class="plan-card-name">${plan.isim || "Plan " + (i+1)}</div>
-                    <div class="plan-card-kcal">${plan.toplam_kalori || "—"} kcal</div>
-                </div>
-                <div class="plan-card-body">
-                    ${mealsHtml}
-                    <div class="plan-macros">
-                        <div class="macro-item">
-                            <div class="macro-val">${plan.toplam_protein || "—"}g</div>
-                            <div class="macro-label">Protein</div>
-                        </div>
-                        <div class="macro-item">
-                            <div class="macro-val">${plan.toplam_karb || "—"}g</div>
-                            <div class="macro-label">Karb</div>
-                        </div>
-                        <div class="macro-item">
-                            <div class="macro-val">${plan.toplam_yag || "—"}g</div>
-                            <div class="macro-label">Yağ</div>
-                        </div>
-                    </div>
-                    <button class="select-plan-btn" id="select-btn-${i}" onclick="selectPlan(${i}, ${JSON.stringify(plan).replace(/"/g, '&quot;')}, ${data.overall_score})">
-                        BU PLANI SEÇ
-                    </button>
-                </div>
-            `;
-            grid.appendChild(card);
-        });
-
-        // Scroll
-        setTimeout(() => {
-            document.getElementById("results").scrollIntoView({ behavior:"smooth", block:"start" });
-        }, 200);
-    }
-
-    // Plan seç ve kaydet
-    async function selectPlan(index, plan, score) {
-        try {
-            const res  = await fetch("/nutrition-plan/save", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ plan, score })
-            });
-            const data = await res.json();
-
-            // UI güncelle
-            document.querySelectorAll(".plan-card").forEach(c => c.classList.remove("selected-plan"));
-            document.querySelectorAll(".select-plan-btn").forEach(b => {
-                b.textContent = "BU PLANI SEÇ";
-                b.classList.remove("chosen");
-            });
-
-            document.getElementById(`plan-card-${index}`).classList.add("selected-plan");
-            const btn = document.getElementById(`select-btn-${index}`);
-            btn.textContent = "✓ AKTİF PLAN";
-            btn.classList.add("chosen");
-
-            // Banner güncelle
-            const banner = document.getElementById("active-plan-banner");
-            banner.style.display = "flex";
-            banner.innerHTML = `
-                <div>
-                    <div class="active-plan-text">Aktif planın: <strong>${plan.isim || "Seçili Plan"}</strong></div>
-                    <div class="active-plan-date">Az önce seçildi · Skor: ${score}/10</div>
-                </div>
-                <button class="reset-btn" onclick="document.getElementById('active-plan-banner').style.display='none'">Yeni plan oluştur</button>
-            `;
-
-        } catch (err) {
-            alert("Plan kaydedilemedi: " + err.message);
-        }
-    }
-
-    // Sayfa yüklenince
-    populateFoods();
-    loadCalori();
-    loadActivePlan();
+const savedTheme=localStorage.getItem('theme')||'dark';document.documentElement.dataset.theme=savedTheme;
+function toggleTheme(){const h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark';localStorage.setItem('theme',h.dataset.theme)}
+function switchTab(name){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));document.getElementById('tab-'+name).classList.add('active');event.target.classList.add('active');if(name==='today')loadToday();if(name==='history')loadMealHistory()}
+let selectedOgun='Kahvaltı';
+function selectOgun(o,el){selectedOgun=o;document.querySelectorAll('.ogun-chip').forEach(c=>c.classList.remove('selected'));el.classList.add('selected')}
+async function logMeal(){const y=document.getElementById('meal-input').value.trim();if(!y){alert('Ne yediğini yaz.');return}const l=document.getElementById('loading');l.classList.add('active');try{const r=await fetch('/meal-log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ogun:selectedOgun,yemekler:y})});if(!r.ok){alert('Hata: '+r.status);return}const d=await r.json();if(d.error){alert(d.error);return}document.getElementById('meal-input').value='';loadTodayPreview();loadCaloriBanner()}catch(e){alert('Hata: '+e.message)}finally{l.classList.remove('active')}}
+let targetCalories=2000;
+async function loadCaloriBanner(){try{const sr=await fetch('/last-session');const sd=await sr.json();if(sd.exists&&sd.target_calories){targetCalories=Math.round(sd.target_calories);document.getElementById('target-kcal').textContent=targetCalories+' kcal'}const tr=await fetch('/meal-log/today');const td=await tr.json();const eaten=Math.round(td.totals.kalori);const pct=Math.min(Math.round(eaten/targetCalories*100),100);const color=pct>110?'var(--red)':pct>90?'var(--orange)':'var(--accent)';document.getElementById('calori-fill').style.width=pct+'%';document.getElementById('calori-fill').style.background=color;document.getElementById('calori-eaten').textContent=`Bugün: ${eaten} / ${targetCalories} kcal (${pct}%)`}catch(e){}}
+async function loadTodayPreview(){try{const r=await fetch('/meal-log/today');const d=await r.json();const c=document.getElementById('today-preview');if(d.meals.length===0){c.innerHTML='';return}c.innerHTML=d.meals.map(m=>`<div class="today-card"><div class="today-header"><div class="today-ogun">${m.ogun}</div><div class="today-kcal">${Math.round(m.kalori)} kcal</div></div><div class="today-foods">${m.yemekler}</div><div class="today-macros"><div class="today-macro">P: <span>${Math.round(m.protein)}g</span></div><div class="today-macro">K: <span>${Math.round(m.karb)}g</span></div><div class="today-macro">Y: <span>${Math.round(m.yag)}g</span></div></div></div>`).join('')}catch(e){}}
+async function loadToday(){try{const r=await fetch('/meal-log/today');const d=await r.json();document.getElementById('t-kcal').textContent=Math.round(d.totals.kalori);document.getElementById('t-protein').textContent=Math.round(d.totals.protein)+'g';document.getElementById('t-karb').textContent=Math.round(d.totals.karb)+'g';document.getElementById('t-yag').textContent=Math.round(d.totals.yag)+'g';const l=document.getElementById('today-meals-list');if(d.meals.length===0){l.innerHTML='<div class="today-empty">Bugün kayıtlı öğün yok.</div>';return}l.innerHTML=d.meals.map(m=>`<div class="today-card"><div class="today-header"><div class="today-ogun">${m.ogun}</div><div class="today-kcal">${Math.round(m.kalori)} kcal</div></div><div class="today-foods">${m.yemekler}</div><div class="today-macros"><div class="today-macro">Protein: <span>${Math.round(m.protein)}g</span></div><div class="today-macro">Karb: <span>${Math.round(m.karb)}g</span></div><div class="today-macro">Yağ: <span>${Math.round(m.yag)}g</span></div></div></div>`).join('')}catch(e){}}
+async function getReview(){const b=document.getElementById('review-btn');b.textContent='DEĞERLENDİRİLİYOR...';try{const r=await fetch('/meal-log/review',{method:'POST',headers:{'Content-Type':'application/json'}});const d=await r.json();if(d.error){alert(d.error);return}document.getElementById('review-text').innerHTML=d.review.replace(/\n/g,'<br>');document.getElementById('review-card').classList.add('visible')}catch(e){alert('Hata: '+e.message)}finally{b.textContent='GÜN SONU DEĞERLENDİRMESİ'}}
+async function loadMealHistory(){try{const r=await fetch('/meal-log/history');const d=await r.json();const l=document.getElementById('history-list');if(d.length===0){l.innerHTML='<div class="today-empty">Henüz kayıt yok.</div>';return}l.innerHTML=d.map(day=>`<div class="history-day"><div class="history-day-header"><div class="history-date">${day.tarih}</div><div class="history-day-totals"><div class="history-day-total">Kalori: <span>${Math.round(day.totals.kalori)}</span></div><div class="history-day-total">P: <span>${Math.round(day.totals.protein)}g</span></div><div class="history-day-total">K: <span>${Math.round(day.totals.karb)}g</span></div><div class="history-day-total">Y: <span>${Math.round(day.totals.yag)}g</span></div></div></div>${day.meals.map(m=>`<div class="history-meal"><div class="history-meal-ogun">${m.ogun} · ${Math.round(m.kalori)} kcal</div><div class="history-meal-foods">${m.yemekler}</div></div>`).join('')}</div>`).join('')}catch(e){}}
+const FOODS={protein_hayvansal:["Tavuk Göğsü","Yumurta","Ton Balığı","Kırmızı Et","Yoğurt","Somon"],protein_bitkisel:["Mercimek","Nohut","Tofu","Kinoa","Edamame"],karbonhidrat:["Yulaf Ezmesi","Pirinç","Bulgur","Tatlı Patates","Tam Buğday Ekmeği","Muz","Elma"],yag:["Zeytinyağı","Avokado","Badem","Ceviz","Fındık"]};
+const selected={proteins:new Set(),carbs:new Set(),fats:new Set()};const customFoods=[];
+function createChip(n,c){const ch=document.createElement("label");ch.className="food-chip";ch.innerHTML=`<input type="checkbox" onchange="toggleFood('${n}','${c}',this)"><div class="food-chip-dot"></div><span class="food-chip-name">${n}</span>`;return ch}
+function populateFoods(){FOODS.protein_hayvansal.forEach(f=>document.getElementById("protein-hayvansal").appendChild(createChip(f,"proteins")));FOODS.protein_bitkisel.forEach(f=>document.getElementById("protein-bitkisel").appendChild(createChip(f,"proteins")));FOODS.karbonhidrat.forEach(f=>document.getElementById("karb-list").appendChild(createChip(f,"carbs")));FOODS.yag.forEach(f=>document.getElementById("yag-list").appendChild(createChip(f,"fats")))}
+function toggleFood(n,c,cb){const ch=cb.closest(".food-chip");if(cb.checked){selected[c].add(n);ch.classList.add("selected")}else{selected[c].delete(n);ch.classList.remove("selected")}}
+function addCustomFood(){const i=document.getElementById("custom-input");const v=i.value.trim();if(!v||customFoods.includes(v)){i.value="";return}customFoods.push(v);i.value="";const t=document.createElement("div");t.className="custom-tag";t.innerHTML=`<span>${v}</span><span class="custom-tag-remove" onclick="removeCustomFood('${v}',this)">×</span>`;document.getElementById("custom-tags").appendChild(t)}
+document.getElementById("custom-input").addEventListener("keydown",e=>{if(e.key==="Enter")addCustomFood()});
+function removeCustomFood(n,el){const i=customFoods.indexOf(n);if(i>-1)customFoods.splice(i,1);el.closest('.custom-tag').remove()}
+async function generatePlan(){if(selected.proteins.size===0){alert("En az bir protein kaynağı seç.");return}if(selected.carbs.size===0){alert("En az bir karbonhidrat kaynağı seç.");return}if(selected.fats.size===0){alert("En az bir yağ kaynağı seç.");return}const b=document.getElementById("plan-btn");const l=document.getElementById("loading");b.classList.add("loading");b.textContent="HAZIRLANIYOR...";l.classList.add("active");try{const r=await fetch("/nutrition-plan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({proteins:[...selected.proteins],carbs:[...selected.carbs],fats:[...selected.fats],custom_foods:customFoods})});const d=await r.json();if(d.error){alert(d.error);return}renderPlans(d)}catch(e){alert("Hata: "+e.message)}finally{b.classList.remove("loading");b.textContent="PLAN OLUŞTUR";l.classList.remove("active")}}
+function renderPlans(data){document.getElementById("plan-results").style.display="block";const sc={"İyi":"#c8f060","Orta":"#f0c040","Kötü":"#ff6b6b"};const color=sc[data.score_label]||"#888";document.getElementById("score-banner").innerHTML=`<div class="score-val" style="color:${color}">${data.overall_score}</div><div class="score-info"><div class="score-label-big" style="color:${color}">${data.score_label}</div><div class="score-desc">Mikro değer, biyoyararlanım ve gluten skoru ortalaması</div></div>`;const g=document.getElementById("plans-grid");g.innerHTML="";data.planlar.forEach((plan,i)=>{const c=document.createElement("div");c.className="plan-card";c.id=`plan-card-${i}`;const meals=[{key:"kahvalti",label:"Kahvaltı"},{key:"ogle",label:"Öğle"},{key:"aksam",label:"Akşam"},{key:"ara_ogun",label:"Ara Öğün"}];const mh=meals.map(m=>{const ml=plan[m.key];if(!ml)return"";return`<div class="meal-section-plan"><div class="meal-title-plan">${m.label} · ${ml.kalori||"—"} kcal</div><ul class="meal-items-plan">${(ml.yemekler||[]).map(y=>`<li>${y}</li>`).join("")}</ul></div>`}).join("");c.innerHTML=`<div class="plan-card-header"><div class="plan-card-name">${plan.isim||"Plan "+(i+1)}</div><div class="plan-card-kcal">${plan.toplam_kalori||"—"} kcal</div></div><div class="plan-card-body">${mh}<div class="plan-macros"><div class="macro-item"><div class="macro-val">${plan.toplam_protein||"—"}g</div><div class="macro-label">Protein</div></div><div class="macro-item"><div class="macro-val">${plan.toplam_karb||"—"}g</div><div class="macro-label">Karb</div></div><div class="macro-item"><div class="macro-val">${plan.toplam_yag||"—"}g</div><div class="macro-label">Yağ</div></div></div><button class="select-plan-btn" id="sel-btn-${i}" onclick="selectPlan(${i},${JSON.stringify(plan).replace(/"/g,'&quot;')},${data.overall_score})">BU PLANI SEÇ</button></div>`;g.appendChild(c)});setTimeout(()=>document.getElementById("plan-results").scrollIntoView({behavior:"smooth",block:"start"}),200)}
+async function selectPlan(i,plan,score){try{await fetch("/nutrition-plan/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({plan,score})});document.querySelectorAll(".plan-card").forEach(c=>c.classList.remove("selected-plan"));document.querySelectorAll(".select-plan-btn").forEach(b=>{b.textContent="BU PLANI SEÇ";b.classList.remove("chosen")});document.getElementById(`plan-card-${i}`).classList.add("selected-plan");const b=document.getElementById(`sel-btn-${i}`);b.textContent="✓ AKTİF PLAN";b.classList.add("chosen")}catch(e){alert("Kayıt hatası: "+e.message)}}
+async function loadActivePlan(){try{const r=await fetch("/nutrition-plan/active");const d=await r.json();if(!d.exists)return;const b=document.getElementById("active-plan-banner");b.style.display="flex";b.className="active-plan-banner";b.innerHTML=`<div><div class="active-plan-text">Aktif planın: <strong>${d.plan.isim||"Seçili Plan"}</strong></div><div class="active-plan-date">${d.created_at} · Skor: ${d.score}/10</div></div><button class="reset-btn" onclick="this.closest('.active-plan-banner').style.display='none'">Yeni plan</button>`}catch(e){}}
+populateFoods();loadCaloriBanner();loadTodayPreview();loadActivePlan();
 </script>
-
 </body>
 </html>
