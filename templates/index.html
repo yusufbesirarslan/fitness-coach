@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fitness Coach</title>
-    <link rel="stylesheet" href="static/style.css">
+    <link rel="stylesheet" href="/static/style.css">
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
 </head>
 <body>
@@ -173,7 +173,7 @@
                 goal: document.getElementById("goal").value,
                 fitness_level: document.getElementById("fitness_level").value,
                 current_activity: document.getElementById("current_activity").value,
-                message: document.getElementById("message").value
+                message: ""
             };
 
             try {
@@ -242,36 +242,27 @@
             btn.textContent = "PLANIMI OLUŞTUR";
             loading.classList.remove("active");
         }
-            // Stats gösterildikten sonra
-            if (data.comparison) {
-                const diff = data.comparison.weight_diff;
-                const sign = diff < 0 ? "▼" : diff > 0 ? "▲" : "=";
-                const color = diff < 0 ? "#c8f060" : diff > 0 ? "#ff6b6b" : "#888";
-                const label = diff < 0
-                    ? `${Math.abs(diff)} kg verdin`
-                    : diff > 0
-                    ? `${Math.abs(diff)} kg aldın`
-                    : "Kilo değişmedi";
+        
 
                 // Stats grid'e 4. kart olarak ekle
-                const compCard = document.createElement("div");
-                compCard.className = "stat-card";
-                compCard.innerHTML = `
-                    <div class="stat-label">${data.comparison.days_passed} günde</div>
-                    <div class="stat-value" style="color:${color}">${sign} ${Math.abs(diff)}</div>
-                    <div class="stat-unit">${label}</div>
-                `;
-                const grid = document.getElementById("stats-grid");
+            const compCard = document.createElement("div");
+            compCard.className = "stat-card";
+            compCard.innerHTML = `
+                <div class="stat-label">${data.comparison.days_passed} günde</div>
+                <div class="stat-value" style="color:${color}">${sign} ${Math.abs(diff)}</div>
+                <div class="stat-unit">${label}</div>
+             `;
+            const grid = document.getElementById("stats-grid");
                 // Varsa eski karşılaştırma kartını sil
-                const old = document.getElementById("comp-card");
-                if (old) old.remove();
-                compCard.id = "comp-card";
-                grid.appendChild(compCard);
+            const old = document.getElementById("comp-card");
+        if (old) old.remove();
+            compCard.id = "comp-card";
+            grid.appendChild(compCard);
 
-                // Stats grid'i 4 kolonlu yap
-                grid.style.gridTemplateColumns = "repeat(4, 1fr)";
+            // Stats grid'i 4 kolonlu yap
+            grid.style.gridTemplateColumns = "repeat(4, 1fr)";
             }
-        }
+        
 
         function renderCoachReply(text) {
             const container = document.getElementById("coachResult");
