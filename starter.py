@@ -418,7 +418,9 @@ def log_meal():
         raw = response.choices[0].message.content.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         nutrients = json.loads(raw)
-    except Exception:
+    except Exception as e:
+        print(f"MEAL LOG AI ERROR: {e}")
+        print(f"RAW RESPONSE: {raw if 'raw' in dir() else 'no response'}")
         nutrients = {"kalori": 0, "protein": 0, "karb": 0, "yag": 0}
 
     today = datetime.utcnow().strftime("%d.%m")
