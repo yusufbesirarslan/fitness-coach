@@ -1450,6 +1450,7 @@ def server_error(e):
     return "Internal Server Error", 500
 
 with app.app_context():
+    db.drop_all()
     db.create_all()
 
 
