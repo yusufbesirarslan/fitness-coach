@@ -17,6 +17,10 @@ login_manager = LoginManager(app)
 login_manager.login_view = "login" # Giriş zaten yapılıysa yönlendirme
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
 class User(UserMixin, db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     username      = db.Column(db.String(80), unique=True, nullable=False)
@@ -1450,7 +1454,6 @@ def server_error(e):
     return "Internal Server Error", 500
 
 with app.app_context():
-    db.drop_all()
     db.create_all()
 
 
