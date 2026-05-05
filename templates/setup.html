@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profil Oluştur — Fitness Coach</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .setup-wrapper {
+            max-width: 640px;
+            margin: 0 auto;
+            padding: 40px 20px 80px;
+        }
+
+        .setup-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .setup-header h1 {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 48px;
+            letter-spacing: 4px;
+            line-height: 1;
+            color: var(--text);
+        }
+
+        .setup-header h1 span { color: var(--accent); }
+
+        .setup-header p {
+            margin-top: 10px;
+            color: var(--text2);
+            font-size: 15px;
+            font-weight: 300;
+        }
+
+        /* STEPS */
+        .step-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 32px;
+        }
+
+        .step-dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            background: var(--border); transition: all 0.3s;
+        }
+
+        .step-dot.active { background: var(--accent); width: 28px; border-radius: 5px; }
+        .step-dot.done { background: var(--accent); }
+
+        .step-line {
+            width: 24px; height: 1px; background: var(--border);
+        }
+
+        /* STEP CONTENT */
+        .step-content { display: none; }
+        .step-content.active { display: block; }
+
+        .step-card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 32px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .step-card::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0;
+            height: 2px; background: linear-gradient(90deg, var(--accent), transparent);
+        }
+
+        .step-title {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 24px;
+            letter-spacing: 3px;
+            color: var(--accent);
+            margin-bottom: 4px;
+        }
+
+        .step-sub {
+            font-size: 14px;
+            color: var(--text2);
+            font-weight: 300;
+            margin-bottom: 24px;
+        }
+
+        .step-card .form-grid {
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 0;
+        }
+
+        .step-card input, .step-card select {
+            font-size: 16px;
+            padding: 14px 16px;
+        }
+
+        /* OPTION CARDS (for goal, level, activity) */
+        .option-cards {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .option-card {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            background: var(--bg3);
+            border: 1.5px solid var(--border);
+            border-radius: 10px;
+            padding: 16px 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .option-card:hover { border-color: var(--accent); }
+        .option-card.selected { background: var(--accent-glow); border-color: var(--accent); }
+
+        .option-card-radio {
+            width: 18px; height: 18px; border-radius: 50%;
+            border: 2px solid var(--text3); flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .option-card.selected .option-card-radio {
+            border-color: var(--accent);
+        }
+
+        .option-card.selected .option-card-radio::after {
+            content: ''; width: 8px; height: 8px; border-radius: 50%;
+            background: var(--accent);
+        }
+
+        .option-card-icon { font-size: 24px; }
+
+        .option-card-text {
+            flex: 1;
+        }
+
+        .option-card-label {
+            font-size: 15px; font-weight: 500; color: var(--text);
+        }
+
+        .option-card-desc {
+            font-size: 12px; color: var(--text2); font-weight: 300; margin-top: 2px;
+        }
+
+        /* BUTTONS */
+        .step-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 24px;
+        }
+
+        .step-btn {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 16px;
+            letter-spacing: 2px;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 32px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .step-btn-next {
+            background: var(--accent);
+            color: #0a0a0a;
+            flex: 1;
+        }
+
+        .step-btn-next:hover { background: var(--accent2); transform: translateY(-1px); }
+
+        .step-btn-back {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text2);
+        }
+
+        .step-btn-back:hover { color: var(--text); border-color: var(--text3); }
+
+        /* RESULT */
+        .result-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+            margin: 24px 0;
+        }
+
+        .result-card {
+            background: var(--bg3);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .result-val {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 32px;
+            color: var(--accent);
+            letter-spacing: 2px;
+        }
+
+        .result-label {
+            font-size: 11px;
+            color: var(--text3);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin-top: 4px;
+        }
+
+        .result-message {
+            font-size: 14px;
+            color: var(--text);
+            line-height: 1.7;
+            font-weight: 300;
+            text-align: center;
+            margin-top: 16px;
+        }
+
+        .theme-corner { position: fixed; top: 20px; right: 20px; }
+
+        @media(max-width: 640px) {
+            .setup-header h1 { font-size: 36px; }
+            .step-card { padding: 24px; }
+            .step-card .form-grid { grid-template-columns: 1fr; }
+            .result-grid { grid-template-columns: 1fr 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="theme-corner">
+    <button class="theme-toggle" onclick="toggleTheme()"></button>
+</div>
+
+<div class="setup-wrapper">
+
+    <div class="setup-header">
+        <h1>HOŞ GELDİN<br><span>{{ username }}</span></h1>
+        <p>Seni tanıyalım — koçun sana özel bir plan oluştursun.</p>
+    </div>
+
+    <!-- STEP INDICATOR -->
+    <div class="step-indicator">
+        <div class="step-dot active" id="dot-0"></div>
+        <div class="step-line"></div>
+        <div class="step-dot" id="dot-1"></div>
+        <div class="step-line"></div>
+        <div class="step-dot" id="dot-2"></div>
+        <div class="step-line"></div>
+        <div class="step-dot" id="dot-3"></div>
+    </div>
+
+    <!-- STEP 0: Fiziksel bilgiler -->
+    <div class="step-content active" id="step-0">
+        <div class="step-card">
+            <div class="step-title">Fiziksel Bilgilerin</div>
+            <div class="step-sub">Koçun sana doğru plan verebilmesi için bunlar gerekli.</div>
+            <div class="form-grid">
+                <div class="form-group">
+                    <label>Kilo (kg)</label>
+                    <input type="number" id="s-weight" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>Boy (cm)</label>
+                    <input type="number" id="s-height">
+                </div>
+                <div class="form-group">
+                    <label>Yaş</label>
+                    <input type="number" id="s-age">
+                </div>
+                <div class="form-group">
+                    <label>Cinsiyet</label>
+                    <select id="s-gender">
+                        <option value="male">Erkek</option>
+                        <option value="female">Kadın</option>
+                    </select>
+                </div>
+            </div>
+            <div class="step-buttons">
+                <button class="step-btn step-btn-next" onclick="nextStep(0)">DEVAM ET</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- STEP 1: Hedef -->
+    <div class="step-content" id="step-1">
+        <div class="step-card">
+            <div class="step-title">Hedefin Ne?</div>
+            <div class="step-sub">Planın buna göre şekillenecek.</div>
+            <div class="option-cards" id="goal-cards">
+                <div class="option-card" onclick="selectOption('goal','kilo verme',this)">
+                    <div class="option-card-radio"></div>
+                    <div class="option-card-icon">🔥</div>
+                    <div class="option-card-text">
+                        <div class="option-card-label">Kilo Verme</div>
+                        <div class="option-card-desc">Yağ yakımı ve kalori açığı odaklı</div>
+                    </div>
+                </div>
+                <div class="option-card" onclick="selectOption('goal','kas kazanma',this)">
+                    <div class="option-card-radio"></div>
+                    <div class="option-card-icon">💪</div>
+                    <div class="option-card-text">
+                        <div class="option-card-label">Kas Kazanma</div>
+                        <div class="option-card-desc">Kas kütlesi artışı ve kalori fazlası</div>
+                    </div>
+                </div>
+            </div>
+            <div class="step-buttons">
+                <button class="step-btn step-btn-back" onclick="prevStep(1)">GERİ</button>
+                <button class="step-btn step-btn-next" onclick="nextStep(1)">DEVAM ET</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- STEP 2: Seviye -->
+    <div class="step-content" id="step-2">
+        <div class="step-card">
+            <div class="step-title">Fitness Seviyen</div>
+            <div class="step-sub">Şu anki durumunu en iyi hangisi tanımlıyor?</div>
+            <div class="option-cards" id="level-cards">
+                <div class="option-card" onclick="selectOption('level','beginner',this)">
+                    <div class="option-card-radio"></div>
+                    <div class="option-card-icon">🌱</div>
+                    <div class="option-card-text">
+                        <div class="option-card-label">Başlangıç</div>
+                        <div class="option-card-desc">Yeni başlıyorum veya uzun süredir ara verdim</div>
+                    </div>
+                </div>
+                <div class="option-card" onclick="selectOption('level','intermediate',this)">
+                    <div class="option-card-radio"></div>
+                    <div class="option-card-icon">⚡</div>
+                    <div class="option-card-text">
+                        <div class="option-card-label">Orta Seviye</div>
+                        <div class="option-card-desc">Düzenli antrenman yapıyorum, temeller sağlam</div>
+                    </div>
+                </div>
+                <div class="option-card" onclick="selectOption('level','advanced',this)">
+                    <div class="option-card-radio"></div>
+                    <div class="option-card-icon">🏆</div>
+                    <div class="option-card-text">
+                        <div class="option-card-label">İleri Seviye</div>
+                        <div class="option-card-desc">Yıllardır düzenli antrenman, tekniğim güçlü</div>
+                    </div>
+                </div>
+            </div>
+            <div class="step-buttons">
+                <button class="step-btn step-btn-back" onclick="prevStep(2)">GERİ</button>
+                <button class="step-btn step-btn-next" onclick="nextStep(2)">DEVAM ET</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- STEP 3: Aktivite + Sonuç -->
+    <div class="step-content" id="step-3">
+        <div class="step-card">
+            <div class="step-title">Günlük Aktiviten</div>
+            <div class="step-sub">İş ve günlük yaşamındaki hareketlilik.</div>
+            <div class="option-cards" id="activity-cards">
+                <div class="option-card" onclick="selectOption('activity','sedentary',this)">
+                    <div class="option-card-radio"></div>
+                    <div class="option-card-icon">🪑</div>
+                    <div class="option-card-text">
+                        <div class="option-card-label">Hareketsiz</div>
+                        <div class="option-card-desc">Masa başı iş, çoğunlukla oturuyorum</div>
+                    </div>
+                </div>
+                <div class="option-card" onclick="selectOption('activity','active',this)">
+                    <div class="option-card-radio"></div>
+                    <div class="option-card-icon">🚶</div>
+                    <div class="option-card-text">
+                        <div class="option-card-label">Aktif</div>
+                        <div class="option-card-desc">Haftada 3-5 gün hareket ediyorum</div>
+                    </div>
+                </div>
+                <div class="option-card" onclick="selectOption('activity','very_active',this)">
+                    <div class="option-card-radio"></div>
+                    <div class="option-card-icon">🏃</div>
+                    <div class="option-card-text">
+                        <div class="option-card-label">Çok Aktif</div>
+                        <div class="option-card-desc">Haftada 5-6 gün yoğun hareket</div>
+                    </div>
+                </div>
+            </div>
+            <div class="step-buttons">
+                <button class="step-btn step-btn-back" onclick="prevStep(3)">GERİ</button>
+                <button class="step-btn step-btn-next" id="finish-btn" onclick="finishSetup()">PROFİLİ OLUŞTUR</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- RESULT SCREEN -->
+    <div class="step-content" id="step-result">
+        <div class="step-card" style="text-align:center">
+            <div class="step-title">PROFİLİN HAZIR! 🎉</div>
+            <div class="step-sub">Koçun seni bekliyor.</div>
+            <div class="result-grid">
+                <div class="result-card">
+                    <div class="result-val" id="r-bmr">—</div>
+                    <div class="result-label">BMR</div>
+                </div>
+                <div class="result-card">
+                    <div class="result-val" id="r-tdee">—</div>
+                    <div class="result-label">TDEE</div>
+                </div>
+                <div class="result-card">
+                    <div class="result-val" id="r-target">—</div>
+                    <div class="result-label">Hedef Kalori</div>
+                </div>
+            </div>
+            <div class="result-message" id="r-message"></div>
+            <div class="step-buttons" style="justify-content:center">
+                <button class="step-btn step-btn-next" onclick="window.location.href='/'">BAŞLAYALIM</button>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    document.documentElement.dataset.theme = savedTheme;
+    function toggleTheme() {
+        const html = document.documentElement;
+        html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
+        localStorage.setItem('theme', html.dataset.theme);
+    }
+
+    let currentStep = 0;
+    const selections = { goal: '', level: '', activity: '' };
+
+    function selectOption(type, value, el) {
+        selections[type] = value;
+        const parent = el.closest('.option-cards');
+        parent.querySelectorAll('.option-card').forEach(c => c.classList.remove('selected'));
+        el.classList.add('selected');
+    }
+
+    function updateDots() {
+        for (let i = 0; i < 4; i++) {
+            const dot = document.getElementById('dot-' + i);
+            dot.classList.remove('active', 'done');
+            if (i === currentStep) dot.classList.add('active');
+            else if (i < currentStep) dot.classList.add('done');
+        }
+    }
+
+    function showStep(n) {
+        document.querySelectorAll('.step-content').forEach(s => s.classList.remove('active'));
+        document.getElementById('step-' + n).classList.add('active');
+        currentStep = n;
+        updateDots();
+    }
+
+    function nextStep(from) {
+        // Validasyon
+        if (from === 0) {
+            const w = document.getElementById('s-weight').value;
+            const h = document.getElementById('s-height').value;
+            const a = document.getElementById('s-age').value;
+            if (!w || !h || !a) { alert('Tüm alanları doldur.'); return; }
+        }
+        if (from === 1 && !selections.goal) { alert('Bir hedef seç.'); return; }
+        if (from === 2 && !selections.level) { alert('Fitness seviyeni seç.'); return; }
+
+        showStep(from + 1);
+    }
+
+    function prevStep(from) {
+        showStep(from - 1);
+    }
+
+    async function finishSetup() {
+        if (!selections.activity) { alert('Aktivite seviyeni seç.'); return; }
+
+        const btn = document.getElementById('finish-btn');
+        btn.textContent = 'KAYDEDİLİYOR...';
+        btn.style.opacity = '0.7';
+
+        try {
+            const res = await fetch('/setup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    weight: parseFloat(document.getElementById('s-weight').value),
+                    height: parseFloat(document.getElementById('s-height').value),
+                    age: parseInt(document.getElementById('s-age').value),
+                    gender: document.getElementById('s-gender').value,
+                    goal: selections.goal,
+                    fitness_level: selections.level,
+                    current_activity: selections.activity
+                })
+            });
+
+            const data = await res.json();
+
+            if (data.error) { alert(data.error); return; }
+
+            // Sonuç ekranını göster
+            document.getElementById('r-bmr').textContent = data.bmr;
+            document.getElementById('r-tdee').textContent = data.tdee;
+            document.getElementById('r-target').textContent = data.target_calories;
+
+            const goalText = selections.goal === 'kas kazanma'
+                ? `Günlük ${data.target_calories} kcal alarak kas kütleni artıracaksın.`
+                : `Günlük ${data.target_calories} kcal ile hedefine ulaşacaksın.`;
+            document.getElementById('r-message').textContent = goalText + ' Koçun seni bekliyor!';
+
+            document.querySelectorAll('.step-content').forEach(s => s.classList.remove('active'));
+            document.getElementById('step-result').classList.add('active');
+
+            // Tüm dot'ları done yap
+            for (let i = 0; i < 4; i++) {
+                document.getElementById('dot-' + i).classList.remove('active');
+                document.getElementById('dot-' + i).classList.add('done');
+            }
+
+        } catch (err) {
+            alert('Hata: ' + err.message);
+        } finally {
+            btn.textContent = 'PROFİLİ OLUŞTUR';
+            btn.style.opacity = '1';
+        }
+    }
+</script>
+
+</body>
+</html>

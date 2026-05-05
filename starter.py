@@ -18,24 +18,30 @@ login_manager.login_view = "login" # Giriş zaten yapılıysa yönlendirme
 client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 class User(UserMixin, db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(80), unique=True, nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    password_hash = db.Column(db.String(200),nullable=False)
-    created_at = db.Column(db.DateTime , default=datetime.utcnow)
+    id            = db.Column(db.Integer, primary_key=True)
+    username      = db.Column(db.String(80), unique=True, nullable=False)
+    email         = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(200), nullable=False)
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    # Profil bilgileri
+    weight           = db.Column(db.Float)
+    height           = db.Column(db.Float)
+    age              = db.Column(db.Integer)
+    gender           = db.Column(db.String(10))
+    goal             = db.Column(db.String(50))
+    fitness_level    = db.Column(db.String(20))
+    current_activity = db.Column(db.String(20))
+    profile_complete = db.Column(db.Boolean, default=False)
 
-    def set_password(self,password):
+    def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
-    def check_password(self , password):
+    def check_password(self, password):
         return check_password_hash(self.password_hash, password)
-    
+
     def __repr__(self):
         return f"<User {self.username}>"
-    
-@login_manager.user_loader
-def load_user(user_id):
-    return User.query.get(int(user_id))
 
 
 class UserSession(db.Model):
@@ -69,6 +75,59 @@ class WeeklyLog(db.Model):
 
     def __repr__(self):
         return f"<WeeklyLog {self.user_id} - {self.weight}kg - {self.created_at}>"
+    
+@app.route("/setup", methods=["GET", "POST"])
+@login_required
+def setup():
+    if request.method == "GET":
+        return render_template("setup.html", username=current_user.username)
+
+    data = request.get_json()
+
+    required = ["weight", "height", "age", "gender", "goal", "fitness_level", "current_activity"]
+    for field in required:
+        if not data.get(field):
+            return jsonify({"error": f"{field} alanı eksik"}), 400
+
+    try:
+        current_user.weight           = float(data["weight"])
+        current_user.height           = float(data["height"])
+        current_user.age              = int(data["age"])
+        current_user.gender           = data["gender"]
+        current_user.goal             = data["goal"]
+        current_user.fitness_level    = data["fitness_level"]
+        current_user.current_activity = data["current_activity"]
+        current_user.profile_complete = True
+        db.session.commit()
+    except ValueError:
+        return jsonify({"error": "Kilo, boy ve yaş sayısal olmalıdır"}), 400
+
+    # İlk oturumu oluştur
+    bmr             = calculate_bmr(current_user.weight, current_user.height, current_user.age, current_user.gender)
+    tdee            = calculate_tdee(bmr, current_user.current_activity)
+    target_calories = calculate_target(tdee, current_user.goal)
+    training_plan   = generate_training_plan(current_user.goal, current_user.fitness_level)
+    nutrition_plan  = generate_nutrition_plan(current_user.goal, target_calories)
+
+    session_entry = UserSession(
+        name=current_user.username,
+        age=current_user.age, gender=current_user.gender,
+        weight=current_user.weight, height=current_user.height,
+        goal=current_user.goal, fitness_level=current_user.fitness_level,
+        current_activity=current_user.current_activity,
+        bmr=bmr, tdee=tdee, target_calories=target_calories,
+        training_plan=training_plan, nutrition_plan=nutrition_plan,
+        coach_reply="", user_id=current_user.id
+    )
+    db.session.add(session_entry)
+    db.session.commit()
+
+    return jsonify({
+        "message": "Profil kaydedildi.",
+        "bmr": round(bmr),
+        "tdee": round(tdee),
+        "target_calories": round(target_calories)
+    })
 
 class WeeklyCheckIn(db.Model):
     id                = db.Column(db.Integer, primary_key=True)
@@ -552,7 +611,36 @@ def review_meals():
 @app.route("/")
 @login_required
 def home():
+    if not current_user.profile_complete:
+        return redirect(url_for("setup"))
     return render_template("index.html", username=current_user.username)
+
+@app.route("/update-weight", methods=["POST"])
+@login_required
+def update_weight():
+    data = request.get_json()
+    weight = data.get("weight")
+
+    if not weight:
+        return jsonify({"error": "Kilo zorunludur"}), 400
+
+    try:
+        weight = float(weight)
+    except ValueError:
+        return jsonify({"error": "Kilo sayısal olmalıdır"}), 400
+
+    current_user.weight = weight
+    db.session.commit()
+
+    bmr             = calculate_bmr(weight, current_user.height, current_user.age, current_user.gender)
+    tdee            = calculate_tdee(bmr, current_user.current_activity)
+    target_calories = calculate_target(tdee, current_user.goal)
+
+    return jsonify({
+        "bmr": round(bmr),
+        "tdee": round(tdee),
+        "target_calories": round(target_calories)
+    })
 
 @app.route("/chat", methods=["POST"])
 @login_required
