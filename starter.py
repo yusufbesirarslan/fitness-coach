@@ -9,7 +9,10 @@ import json
 from dotenv import load_dotenv
 load_dotenv()
 app = Flask(__name__)
-app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///chatbot.db"
+database_url = os.environ.get("DATABASE_URL", "sqlite:///chatbot.db")
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-123")
 db = SQLAlchemy(app)
