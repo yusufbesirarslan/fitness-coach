@@ -153,52 +153,13 @@
 
         <!-- FORM -->
         <input type="hidden" id="name" value="{{ username }}">
-        <div class="form-grid">
-            <div class="form-group">
-                <label>Kilo (kg)</label>
-                <input type="number" id="weight">
-            </div>
-            <div class="form-group">
-                <label>Boy (cm)</label>
-                <input type="number" id="height">
-            </div>
-            <div class="form-group">
-                <label>Yaş</label>
-                <input type="number" id="age">
-            </div>
-            <div class="form-group">
-                <label>Cinsiyet</label>
-                <select id="gender">
-                    <option value="male">Erkek</option>
-                    <option value="female">Kadın</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Hedef</label>
-                <select id="goal">
-                    <option value="kilo verme">Kilo Verme</option>
-                    <option value="kas kazanma">Kas Kazanma</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Fitness Seviyesi</label>
-                <select id="fitness_level">
-                    <option value="beginner">Başlangıç</option>
-                    <option value="intermediate">Orta</option>
-                    <option value="advanced">İleri</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label>Günlük Aktivite</label>
-                <select id="current_activity">
-                    <option value="sedentary">Hareketsiz (Masa başı)</option>
-                    <option value="active">Aktif (Haftada 3-5 gün)</option>
-                    <option value="very_active">Çok Aktif (Haftada 5-6 gün)</option>
-                </select>
-            </div>
+        <div class="form-grid" style="grid-template-columns: 1fr auto; align-items: flex-end; max-width: 400px;">
+        <div class="form-group">
+        <label>Güncel Kilo (kg)</label>
+        <input type="number" id="weight" placeholder="78">
         </div>
-
-        <button class="submit-btn" onclick="sendMessage()" id="submit-btn">PLANIMI OLUŞTUR</button>
+        <button class="submit-btn" onclick="updateWeight()" id="submit-btn" style="margin-bottom:0">GÜNCELLE</button>
+        </div>
 
         <!-- RESULTS -->
         <div class="divider" id="divider">
@@ -264,18 +225,29 @@
         document.documentElement.dataset.theme = savedTheme;
 
         // FORM GÖNDER
-        async function sendMessage() {
-            const btn = document.getElementById("submit-btn");
-            const loading = document.getElementById("loading");
+    async function updateWeight() {
+        const weight = document.getElementById("weight").value;
+        if (!weight) { alert("Kilo girin."); return; }
 
-            // Validasyon
-            const weight = document.getElementById("weight").value;
-            const height = document.getElementById("height").value;
-            const age = document.getElementById("age").value;
-            if (!weight || !height || !age) {
-                alert("Lütfen kilo, boy ve yaş alanlarını doldurun.");
-                return;
-            }
+        const btn = document.getElementById("submit-btn");
+        btn.textContent = "GÜNCELLENİYOR...";
+
+        const res = await fetch("/update-weight", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ weight })
+        });
+        const data = await res.json();
+
+        document.getElementById("bmrResult").textContent = data.bmr;
+        document.getElementById("tdeeResult").textContent = data.tdee;
+        document.getElementById("targetResult").textContent = data.target_calories;
+
+        document.getElementById("divider").classList.add("visible");
+        document.getElementById("stats-grid").classList.add("visible");
+
+        btn.textContent = "GÜNCELLE";
+    }
 
             btn.classList.add("loading");
             btn.textContent = "HAZIRLANIYOR...";
@@ -376,7 +348,7 @@
 
             // Stats grid'i 4 kolonlu yap
             grid.style.gridTemplateColumns = "repeat(4, 1fr)";
-            }
+            
         
 
         function renderCoachReply(text) {
@@ -467,18 +439,8 @@ async function loadLastSession() {
     const data = await res.json();
 
     if (data.exists) {
-        // Son kayıttan gelen değerleri placeholder olarak göster
-        document.getElementById("weight").placeholder = data.weight + " (son kayıt)";
-        document.getElementById("height").value = data.height;
-        document.getElementById("age").value = data.age;
+        document.getElementById("weight").placeholder = data.weight;
 
-        // Select'leri eşleştir
-        document.getElementById("gender").value = data.gender;
-        document.getElementById("goal").value = data.goal;
-        document.getElementById("fitness_level").value = data.fitness_level;
-        document.getElementById("current_activity").value = data.current_activity;
-
-        // Son kayıt bilgisini göster
         const header = document.querySelector(".page-header p");
         header.innerHTML = `Son ölçümün: <strong style="color:var(--accent)">${data.tarih}</strong> — ${data.weight} kg. Güncel kilonu girerek ilerlemeyi gör.`;
     }
