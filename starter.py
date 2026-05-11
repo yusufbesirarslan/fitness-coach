@@ -447,20 +447,32 @@ def log_meal():
         return jsonify({"error": "Öğün ve yemekler zorunludur"}), 400
 
     prompt = (
-        f"Şu yemeklerin besin değerlerini hesapla. Miktarları dikkate al.\n"
-        f"Referans değerler (100g başına):\n"
-        f"- Tavuk göğsü: 165 kcal, 31g protein, 0g karb, 3.6g yağ\n"
-        f"- Yumurta (1 adet ~60g): 90 kcal, 7g protein, 0.6g karb, 6.3g yağ\n"
-        f"- Pirinç (pişmiş): 130 kcal, 2.7g protein, 28g karb, 0.3g yağ\n"
-        f"- Yulaf ezmesi: 389 kcal, 17g protein, 66g karb, 7g yağ\n"
-        f"- Beyaz peynir: 264 kcal, 17g protein, 0.5g karb, 21g yağ\n"
-        f"- Tam buğday ekmeği (1 dilim ~30g): 74 kcal, 4g protein, 12g karb, 1g yağ\n"
-        f"- Zeytinyağı (1 yemek kaşığı ~14ml): 119 kcal, 0g protein, 0g karb, 14g yağ\n"
-        f"- Muz (1 orta): 105 kcal, 1.3g protein, 27g karb, 0.4g yağ\n"
-        f"- Fıstık ezmesi (15g): 94 kcal, 4g protein, 3g karb, 8g yağ\n\n"
+        f"Sen bir beslenme uzmanısın. Aşağıdaki yemeklerin GERÇEK toplam besin değerlerini hesapla.\n"
+        f"Miktar belirtilmişse kullan, belirtilmemişse standart porsiyon kabul et.\n\n"
+        f"Referans değerler:\n"
+        f"- Tavuk göğsü (100g): 165 kcal, 31g protein, 0g karb, 3.6g yağ\n"
+        f"- Yumurta (1 adet, 60g): 90 kcal, 7g protein, 0.6g karb, 6.3g yağ\n"
+        f"- Pirinç pişmiş (100g): 130 kcal, 2.7g protein, 28g karb, 0.3g yağ\n"
+        f"- Yulaf ezmesi (100g): 389 kcal, 17g protein, 66g karb, 7g yağ\n"
+        f"- Beyaz peynir (100g): 264 kcal, 17g protein, 0.5g karb, 21g yağ\n"
+        f"- Tam buğday ekmeği (1 dilim, 30g): 74 kcal, 4g protein, 12g karb, 1g yağ\n"
+        f"- Ekmek (1 dilim, 30g): 80 kcal, 2.5g protein, 15g karb, 1g yağ\n"
+        f"- Zeytinyağı (1 yemek kaşığı, 14ml): 119 kcal, 0g protein, 0g karb, 14g yağ\n"
+        f"- Muz (1 orta, 120g): 105 kcal, 1.3g protein, 27g karb, 0.4g yağ\n"
+        f"- Fıstık ezmesi (15g): 94 kcal, 4g protein, 3g karb, 8g yağ\n"
+        f"- Makarna pişmiş (100g): 158 kcal, 5.8g protein, 31g karb, 0.9g yağ\n"
+        f"- Patates pişmiş (100g): 87 kcal, 1.9g protein, 20g karb, 0.1g yağ\n"
+        f"- Kırmızı et (100g): 250 kcal, 26g protein, 0g karb, 17g yağ\n"
+        f"- Ton balığı (100g): 132 kcal, 28g protein, 0g karb, 1.3g yağ\n"
+        f"- Süt (1 bardak, 240ml): 150 kcal, 8g protein, 12g karb, 8g yağ\n"
+        f"- Yoğurt (100g): 61 kcal, 10g protein, 3.6g karb, 0.4g yağ\n"
+        f"- Peynir (kaşar, 100g): 350 kcal, 25g protein, 1.5g karb, 27g yağ\n"
+        f"- Salatalık (100g): 16 kcal, 0.7g protein, 3.6g karb, 0.1g yağ\n"
+        f"- Domates (100g): 18 kcal, 0.9g protein, 3.9g karb, 0.2g yağ\n\n"
         f"Kullanıcının yediği: {yemekler}\n\n"
-        f"Toplam değerleri hesapla ve SADECE bu JSON'u döndür:\n"
-        f'{{"kalori": 0, "protein": 0, "karb": 0, "yag": 0}}'
+        f"Her besini ayrı hesapla ve topla. Sonucu SADECE aşağıdaki JSON formatında döndür.\n"
+        f"Değerler gerçek sayı olmalı (0 değil), ondalık olabilir:\n"
+        f'{{"kalori": 520, "protein": 38, "karb": 45, "yag": 14}}'
     )
 
     nutrients = {"kalori": 0, "protein": 0, "karb": 0, "yag": 0}
@@ -468,12 +480,12 @@ def log_meal():
 
     try:
         response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": "SADECE JSON döndür. Açıklama yapma, markdown kullanma, sadece düz JSON."},
+                {"role": "system", "content": "SADECE JSON döndür. Açıklama yapma, markdown kullanma, sadece düz JSON objesi. Tüm değerler sayı olmalı."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=100,
+            max_tokens=150,
             temperature=0.1
         )
         raw = response.choices[0].message.content.strip()
@@ -486,6 +498,11 @@ def log_meal():
             raw = raw[start:end]
         
         nutrients = json.loads(raw)
+        for key in ("kalori", "protein", "karb", "yag"):
+            try:
+                nutrients[key] = round(float(nutrients.get(key, 0)), 1)
+            except (TypeError, ValueError):
+                nutrients[key] = 0
     except Exception as e:
         print(f"MEAL LOG ERROR: {e}")
         print(f"RAW: {raw}")
@@ -1074,24 +1091,48 @@ Kullanıcının tercih ettiği gıdalar:
 - Yağ kaynakları: {', '.join(selected_fats)}
 {custom_text}
 
-SADECE bu gıdaları kullanarak 3 FARKLI günlük beslenme planı oluştur.
-Her plan {round(target_calories)} kcal civarında olsun (±100 kcal tolerans).
+SADECE bu gıdaları kullanarak 3 FARKLI günlük beslenme planı oluştur (Plan A, Plan B, Plan C).
+Her plan tam olarak {round(target_calories)} kcal civarında olsun (±100 kcal tolerans).
 Her plan kahvaltı, öğle, akşam ve ara öğün içersin.
-Her öğünde miktar belirt (gram veya adet olarak).
+Her öğünde gram veya adet olarak miktar belirt.
+Tüm kalori ve makro değerlerini gerçek sayı olarak hesapla ve yaz.
 
-Yanıtını SADECE şu JSON formatında ver, başka hiçbir şey yazma:
+Yanıtını SADECE şu JSON formatında ver, başka hiçbir şey yazma.
+Örnek format (değerler örnek, gerçek değerleri hesapla):
 {{
   "planlar": [
     {{
       "isim": "Plan A",
-      "kahvalti": {{"yemekler": ["yemek - miktar"], "kalori": 0, "protein": 0, "karb": 0, "yag": 0}},
-      "ogle": {{"yemekler": ["yemek - miktar"], "kalori": 0, "protein": 0, "karb": 0, "yag": 0}},
-      "aksam": {{"yemekler": ["yemek - miktar"], "kalori": 0, "protein": 0, "karb": 0, "yag": 0}},
-      "ara_ogun": {{"yemekler": ["yemek - miktar"], "kalori": 0, "protein": 0, "karb": 0, "yag": 0}},
-      "toplam_kalori": 0,
-      "toplam_protein": 0,
-      "toplam_karb": 0,
-      "toplam_yag": 0
+      "kahvalti": {{"yemekler": ["Yumurta - 3 adet", "Tam buğday ekmeği - 2 dilim"], "kalori": 420, "protein": 28, "karb": 35, "yag": 18}},
+      "ogle": {{"yemekler": ["Tavuk göğsü - 150g", "Pirinç - 100g"], "kalori": 380, "protein": 48, "karb": 28, "yag": 5}},
+      "aksam": {{"yemekler": ["Kırmızı et - 120g", "Tatlı patates - 150g"], "kalori": 450, "protein": 38, "karb": 30, "yag": 20}},
+      "ara_ogun": {{"yemekler": ["Yoğurt - 200g", "Muz - 1 adet"], "kalori": 227, "protein": 22, "karb": 30, "yag": 1}},
+      "toplam_kalori": 1477,
+      "toplam_protein": 136,
+      "toplam_karb": 123,
+      "toplam_yag": 44
+    }},
+    {{
+      "isim": "Plan B",
+      "kahvalti": {{"yemekler": ["yemek - miktar"], "kalori": 400, "protein": 25, "karb": 40, "yag": 15}},
+      "ogle": {{"yemekler": ["yemek - miktar"], "kalori": 450, "protein": 40, "karb": 35, "yag": 10}},
+      "aksam": {{"yemekler": ["yemek - miktar"], "kalori": 500, "protein": 42, "karb": 38, "yag": 18}},
+      "ara_ogun": {{"yemekler": ["yemek - miktar"], "kalori": 200, "protein": 15, "karb": 20, "yag": 6}},
+      "toplam_kalori": 1550,
+      "toplam_protein": 122,
+      "toplam_karb": 133,
+      "toplam_yag": 49
+    }},
+    {{
+      "isim": "Plan C",
+      "kahvalti": {{"yemekler": ["yemek - miktar"], "kalori": 380, "protein": 22, "karb": 42, "yag": 12}},
+      "ogle": {{"yemekler": ["yemek - miktar"], "kalori": 430, "protein": 38, "karb": 40, "yag": 12}},
+      "aksam": {{"yemekler": ["yemek - miktar"], "kalori": 520, "protein": 44, "karb": 35, "yag": 22}},
+      "ara_ogun": {{"yemekler": ["yemek - miktar"], "kalori": 210, "protein": 18, "karb": 22, "yag": 5}},
+      "toplam_kalori": 1540,
+      "toplam_protein": 122,
+      "toplam_karb": 139,
+      "toplam_yag": 51
     }}
   ]
 }}"""
@@ -1108,9 +1149,11 @@ Yanıtını SADECE şu JSON formatında ver, başka hiçbir şey yazma:
         )
 
         raw = response.choices[0].message.content.strip()
-
-        # JSON parse
         raw = raw.replace("```json", "").replace("```", "").strip()
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start != -1 and end > start:
+            raw = raw[start:end]
         plans = json.loads(raw)
 
         return jsonify({

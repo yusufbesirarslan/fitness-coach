@@ -7,7 +7,8 @@
       "Bash(npm install *)",
       "Bash(railway redeploy *)",
       "Bash(railway logs *)",
-      "Bash(railway status *)"
+      "Bash(railway status *)",
+      "Bash(winget upgrade *)"
     ]
   }
 }
