@@ -107,7 +107,7 @@
         /* WEEKLY GRID */
         .weekly-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:8px; margin-bottom:16px; }
         @media(max-width:900px) { .weekly-grid { grid-template-columns:repeat(4,1fr); } }
-        @media(max-width:560px) { .weekly-grid { grid-template-columns:repeat(2,1fr); } }
+        @media(max-width:560px) { .weekly-grid { grid-template-columns:repeat(2,1fr); gap:6px; } }
 
         .day-card { background:var(--card); border:1px solid var(--border); border-radius:12px; overflow:hidden; cursor:pointer; transition:border-color 0.2s, transform 0.15s; }
         .day-card.kardiyo { border-color: var(--blue); }
@@ -155,11 +155,33 @@
         .save-plan-btn.saved { background:var(--bg3); color:var(--accent); border:1px solid var(--accent); cursor:default; }
 
         @media(max-width:640px) {
-            nav { padding:16px 20px; }
-            .container { padding:24px 20px 60px; }
-            .page-header h1 { font-size:40px; }
+            nav { padding:12px 16px; }
+            .container { padding:20px 16px 80px; }
+            .page-header h1 { font-size:36px; letter-spacing:2px; }
             .nav-links { display:none; }
+            .nav-user { display:none; }
             .weekly-summary { grid-template-columns:1fr 1fr; }
+            /* Exercise table — horizontal scroll */
+            .detail-panel { padding:16px 14px; overflow-x:hidden; }
+            .exercise-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+            .exercise-table { min-width:480px; }
+            .exercise-table th, .exercise-table td { padding:8px 10px; font-size:13px; }
+            /* Info banner */
+            .info-banner { gap:12px; padding:14px 16px; }
+            .info-val { font-size:18px; }
+            /* Option chips full row on mobile */
+            .option-chip { width:calc(50% - 4px); flex-basis:calc(50% - 4px); }
+            /* Kardiyo section stacking */
+            #kardiyo-details { margin-top:12px; }
+            /* Score banner */
+            .score-banner { padding:14px 16px; }
+            /* Save/submit buttons */
+            .save-plan-btn { width:100%; text-align:center; padding:12px; }
+            /* Weekly grid cards smaller text */
+            .day-name { font-size:13px; }
+            .day-odak { font-size:10px; }
+            .day-stat { font-size:11px; }
+            .day-ex { font-size:10px; }
         }
     </style>
 </head>
@@ -296,6 +318,7 @@
             <span class="detail-close" onclick="closeDetail()">×</span>
             <div class="detail-title" id="detail-title"></div>
             <div class="detail-sub" id="detail-sub"></div>
+            <div class="exercise-table-wrap">
             <table class="exercise-table">
                 <thead>
                     <tr>
@@ -307,6 +330,7 @@
                 </thead>
                 <tbody id="detail-exercises"></tbody>
             </table>
+            </div>
         </div>
 
         <!-- HAFTALIK ÖZET -->
@@ -707,5 +731,25 @@
     loadActivePlan();
 </script>
 
+<div class="mobile-bottom-nav">
+  <div class="mbn-inner">
+    <a href="/" class="mbn-item">
+      <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      Ana Sayfa
+    </a>
+    <a href="/nutrition" class="mbn-item">
+      <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+      Beslenme
+    </a>
+    <a href="/training" class="mbn-item active">
+      <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
+      Antrenman
+    </a>
+    <a href="/progress-page" class="mbn-item">
+      <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      İlerleme
+    </a>
+  </div>
+</div>
 </body>
 </html>
