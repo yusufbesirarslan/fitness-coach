@@ -1266,8 +1266,41 @@ def training_plan_generate():
     else:
         kardiyo_text = "Kardiyo istemiyor — sadece ağırlık antrenmanı planla."
 
+    # Kas grubu bazında geniş egzersiz referans listesi
+    egzersiz_referans = """
+SPOR SALONU EGZERSİZ REHBERİ (kas grubu başına çeşitli seçenekler):
+
+SIRT (her programda bu egzersizlerden EN AZ 4-5 farklısını kullan):
+  Yatay çekiş (compound): Barbell Bent Over Row, Dumbbell Row (tek kol), T-Bar Row, Cable Seated Row, Yatay Makine Çekiş
+  Dikey çekiş (compound): Lat Pulldown (geniş tutuş), Lat Pulldown (dar tutuş), Pull-Up (barfiks), Chin-Up, Assisted Pull-Up
+  İzolasyon/detail: Face Pull, Straight-Arm Pulldown, Cable Pullover, Rack Pull, Shrug (trapez), Rear Delt Fly
+  Deadlift ailesi: Conventional Deadlift, Romanian Deadlift, Sumo Deadlift
+  Sırt kalınlık: Meadows Row, Pendlay Row, Chest-Supported Row
+
+GÖĞÜS: Bench Press (düz/eğimli/negatif), Dumbbell Fly, Cable Crossover, Pec Deck, Dips (göğüs), Push-Up, Incline Dumbbell Press
+
+OMUZ: Overhead Press (barbell/dumbbell), Arnold Press, Lateral Raise, Front Raise, Rear Delt Fly, Face Pull, Upright Row, Shrug
+
+BİCEPS: Barbell Curl, Dumbbell Curl, Hammer Curl, Incline Dumbbell Curl, Concentration Curl, Cable Curl, Preacher Curl
+
+TRİCEPS: Triceps Pushdown (ip/düz), Skull Crusher, Close-Grip Bench Press, Overhead Triceps Extension, Dips (triceps), Kickback
+
+BACAK ÖN (quadriceps): Squat, Leg Press, Hack Squat, Leg Extension, Bulgarian Split Squat, Lunge, Step-Up
+
+BACAK ARKA (hamstring/glute): Romanian Deadlift, Leg Curl (yatay/oturarak), Hip Thrust, Sumo Squat, Good Morning, Cable Kickback
+
+BALDUR: Standing Calf Raise, Seated Calf Raise, Donkey Calf Raise, Leg Press Calf Raise
+
+KARIN (core): Crunch, Cable Crunch, Leg Raise, Plank, Russian Twist, Ab Rollout, Hanging Knee Raise, Oblique Crunch
+
+EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
+  Sırt: Pull-Up, Chin-Up, Band Bent Over Row, Dumbbell Row, Band Pulldown, Superman Hold
+  Göğüs: Push-Up (geniş/dar/eğimli), Dumbbell Press, Dumbbell Fly
+  Bacak: Squat, Lunge, Glute Bridge, Romanian Deadlift (dambıl), Step-Up
+"""
+
     prompt = (
-        f"Sen deneyimli bir kişisel antrenörsün. Türkçe yaz, İngilizce kelime kullanma.\n"
+        f"Sen 10+ yıllık deneyimli bir kişisel antrenörsün. Türkçe yaz, İngilizce egzersiz isimlerini kullanabilirsin.\n"
         f"\n"
         f"Kullanıcı bilgileri:\n"
         f"- Hedef: {goal}\n"
@@ -1285,36 +1318,52 @@ def training_plan_generate():
         f"\n"
         f"{kardiyo_text}\n"
         f"\n"
-        f"Haftanın 7 günü için antrenman programı oluştur.\n"
-        f"Antrenman günleri, kardiyo günleri ve dinlenme günlerini dengeli dağıt.\n"
-        f"Her egzersiz için set sayısı, tekrar sayısı ve dinlenme süresi belirt.\n"
-        f"Egzersizler seçilen ekipmana uygun olsun.\n"
-        f"Tahmini kalori yakımını her gün için belirt.\n"
+        f"{egzersiz_referans}\n"
         f"\n"
-        f"SADECE şu JSON formatında yanıt ver, başka hiçbir şey yazma:\n"
+        f"PROGRAM KURALLARI:\n"
+        f"1. Haftanın tam 7 günü için plan yap (Pazartesi'den Pazar'a).\n"
+        f"2. Antrenman günlerini, kardiyo günlerini ve dinlenme günlerini dengeli dağıt.\n"
+        f"3. Sırt günü varsa yukarıdaki listeden EN AZ 5 FARKLI sırt egzersizi kullan — sadece lat pulldown ve row yazma, çeşitlilik şart.\n"
+        f"4. Aynı kas grubunu ard arda iki güne koyma (toparlanma süresi ver).\n"
+        f"5. Her egzersiz için gerçekçi set, tekrar ve dinlenme süresi yaz.\n"
+        f"6. Her günün tahmini kalori yakımını gerçekçi hesapla (antrenman için 200-600 kcal arası).\n"
+        f"7. 'not' alanına egzersiz için kısa teknik ipucu yaz.\n"
+        f"8. Toplam antrenman günü tam olarak {gun_sayisi} olsun.\n"
+        f"\n"
+        f"SADECE geçerli JSON döndür, başka hiçbir şey yazma. Format:\n"
         f'{{"program": ['
-        f'{{"gun": "Pazartesi", "tip": "antrenman", "odak": "Göğüs ve Triceps", "sure_dk": {sure}, "tahmini_kalori": 0, '
-        f'"egzersizler": [{{"isim": "Bench Press", "set": 4, "tekrar": "8-10", "dinlenme": "90 sn", "not": "örnek"}}]}}, '
-        f'{{"gun": "Salı", "tip": "kardiyo", "odak": "Kardiyo", "sure_dk": {kardiyo_sure}, "tahmini_kalori": 0, '
-        f'"egzersizler": [{{"isim": "Koşu", "set": 1, "tekrar": "{kardiyo_sure} dk", "dinlenme": "-", "not": "örnek"}}]}}, '
-        f'{{"gun": "Çarşamba", "tip": "dinlenme", "odak": "Aktif Toparlanma", "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []}}], '
-        f'"haftalik_ozet": {{"toplam_antrenman_gun": {gun_sayisi}, "toplam_tahmini_kalori": 0, '
-        f'"yogunluk_skoru": 0, "denge_skoru": 0, "uygunluk_skoru": 0}}}}'
+        f'{{"gun": "Pazartesi", "tip": "antrenman", "odak": "Sırt ve Biceps", "sure_dk": {sure}, "tahmini_kalori": 380, '
+        f'"egzersizler": ['
+        f'{{"isim": "Bent Over Row", "set": 4, "tekrar": "8-10", "dinlenme": "90 sn", "not": "sırt düz tut, kürek kemiklerini sıkıştır"}}, '
+        f'{{"isim": "Lat Pulldown", "set": 4, "tekrar": "10-12", "dinlenme": "75 sn", "not": "tam uzanım, tam çekiş"}}, '
+        f'{{"isim": "Cable Seated Row", "set": 3, "tekrar": "10-12", "dinlenme": "75 sn", "not": "dirsekleri gövdeye yak"}}, '
+        f'{{"isim": "Face Pull", "set": 3, "tekrar": "15-20", "dinlenme": "60 sn", "not": "omuz sağlığı için kritik"}}, '
+        f'{{"isim": "Barbell Curl", "set": 3, "tekrar": "10-12", "dinlenme": "60 sn", "not": "sallanma yapma"}}]'
+        f'}}, '
+        f'{{"gun": "Salı", "tip": "dinlenme", "odak": "Aktif Toparlanma", "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []}}, '
+        f'{{"gun": "Çarşamba", "tip": "antrenman", "odak": "Göğüs ve Triceps", "sure_dk": {sure}, "tahmini_kalori": 350, '
+        f'"egzersizler": [{{"isim": "Bench Press", "set": 4, "tekrar": "8-10", "dinlenme": "90 sn", "not": "kürek kemiklerini bankaya bas"}}]}}], '
+        f'"haftalik_ozet": {{"toplam_antrenman_gun": {gun_sayisi}, "toplam_tahmini_kalori": 1800, '
+        f'"yogunluk_skoru": 8, "denge_skoru": 8, "uygunluk_skoru": 9}}}}'
     )
 
     try:
         response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": "Sen bir kişisel antrenörsün. SADECE geçerli JSON döndür, başka hiçbir şey yazma."},
+                {"role": "system", "content": "Sen deneyimli bir kişisel antrenörsün. SADECE geçerli JSON döndür, başka hiçbir şey yazma. Markdown, açıklama veya yorum ekleme."},
                 {"role": "user",   "content": prompt}
             ],
-            max_tokens=3000,
-            temperature=0.3
+            max_tokens=4000,
+            temperature=0.4
         )
 
         raw = response.choices[0].message.content.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start != -1 and end > start:
+            raw = raw[start:end]
         plan = json.loads(raw)
 
         ozet     = plan.get("haftalik_ozet", {})
