@@ -1210,9 +1210,10 @@ def training_plan_generate():
 
     odak_labels = {
         "tum_vucut" : "tüm vücut",
-        "ust_vucut" : "üst vücut",
-        "alt_vucut" : "alt vücut",
-        "core"      : "karın ve core bölgesi"
+        "ust_vucut" : "üst vücut (göğüs, sırt, omuz, kol)",
+        "alt_vucut" : "alt vücut (bacak, kalça, baldır)",
+        "core"      : "karın ve core bölgesi",
+        "sirt"      : "sırt odaklı (latissimus, trapez, rhomboid, arka zincir — sırta ekstra hacim ver)"
     }
 
     kardiyo_labels = {
@@ -1265,6 +1266,35 @@ def training_plan_generate():
         )
     else:
         kardiyo_text = "Kardiyo istemiyor — sadece ağırlık antrenmanı planla."
+
+    # Odak bölgeye ve gün sayısına göre split yapısı öner
+    odak_raw = odak  # "sirt", "tum_vucut" vb.
+
+    split_rehber_map = {
+        ("sirt", 3): "Push-Pull-Legs: Gün1=SIRT+Biceps (en az 6 egzersiz), Gün2=Göğüs+Triceps+Omuz, Gün3=Bacak+Core",
+        ("sirt", 4): "Gün1=SIRT+Biceps (en az 6 egzersiz), Gün2=Göğüs+Triceps, Gün3=Bacak, Gün4=Omuz+Core+Ek Sırt (Face Pull, Shrug)",
+        ("sirt", 5): "Gün1=SIRT (6-7 egzersiz, sadece sırt), Gün2=Göğüs+Triceps, Gün3=Bacak, Gün4=Omuz+Ek Sırt, Gün5=Biceps+Triceps+Core",
+        ("sirt", 6): "Gün1=SIRT+Biceps, Gün2=Göğüs+Triceps, Gün3=Bacak, Gün4=SIRT+Omuz (ikinci sırt günü), Gün5=Göğüs+Triceps, Gün6=Bacak+Core",
+        ("tum_vucut", 3): "Gün1=Full Body A (squat+bench+row), Gün2=Full Body B (deadlift+press+pulldown), Gün3=Full Body C (lunge+dips+curl)",
+        ("tum_vucut", 4): "Upper A (Göğüs+Sırt) / Lower A (Bacak ön) / Upper B (Omuz+Kol) / Lower B (Bacak arka+Core)",
+        ("tum_vucut", 5): "Push / Pull (Sırt+Biceps) / Bacak / Upper (Göğüs+Omuz) / Core+Ek",
+        ("tum_vucut", 6): "PPL tekrar: Push/Pull/Legs/Push/Pull/Legs",
+        ("ust_vucut", 3): "Gün1=Göğüs+Triceps, Gün2=SIRT+Biceps (en az 5 egzersiz), Gün3=Omuz+Core",
+        ("ust_vucut", 4): "Gün1=Göğüs+Triceps, Gün2=SIRT+Biceps, Gün3=Omuz+Core, Gün4=Göğüs+Sırt (compound odak)",
+        ("ust_vucut", 5): "Gün1=Göğüs, Gün2=SIRT (tek başına 6 egzersiz), Gün3=Omuz, Gün4=Biceps+Triceps, Gün5=Full Upper",
+        ("ust_vucut", 6): "Gün1=Göğüs+Triceps, Gün2=SIRT+Biceps, Gün3=Omuz, Gün4=Göğüs+Sırt, Gün5=Kol, Gün6=Full Upper",
+        ("alt_vucut", 3): "Gün1=Bacak ön (Quadriceps), Gün2=Bacak arka (Hamstring+Glute), Gün3=Bacak+Baldır+Core",
+        ("alt_vucut", 4): "Gün1=Squat odaklı, Gün2=Hip Hinge (deadlift), Gün3=Unilateral (lunge, split squat), Gün4=Glute+Core",
+        ("alt_vucut", 5): "Gün1=Quad, Gün2=Posterior chain, Gün3=Güç (squat+deadlift), Gün4=Tek bacak, Gün5=Hipertrofi+Baldır",
+        ("core", 3): "Gün1=Core compound (plank, rollout, hanging raise), Gün2=Core rotasyon+oblik, Gün3=Core stabilite+esneklik",
+        ("core", 4): "Her güne core bloku ekle, 4. gün full core+mobilite",
+        ("core", 5): "Her güne core ekle + 2 hafif kardiyo günü",
+    }
+
+    split_rehber = split_rehber_map.get(
+        (odak_raw, gun_sayisi),
+        f"Haftada {gun_sayisi} günlük dengeli split: her büyük kas grubu (sırt, göğüs, bacak, omuz) en az bir kez çalışılsın. Sırt mutlaka ayrı bir günde yer alsın."
+    )
 
     # Kas grubu bazında geniş egzersiz referans listesi
     egzersiz_referans = """
@@ -1320,13 +1350,20 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
         f"\n"
         f"{egzersiz_referans}\n"
         f"\n"
+        f"ÖNERİLEN SPLIT YAPISI ({gun_sayisi} gün için):\n"
+        f"{split_rehber}\n"
+        f"\n"
         f"PROGRAM KURALLARI:\n"
         f"1. Haftanın tam 7 günü için plan yap (Pazartesi'den Pazar'a).\n"
-        f"2. Antrenman günlerini, kardiyo günlerini ve dinlenme günlerini dengeli dağıt.\n"
-        f"3. Sırt günü varsa yukarıdaki listeden EN AZ 5 FARKLI sırt egzersizi kullan — sadece lat pulldown ve row yazma, çeşitlilik şart.\n"
-        f"4. Aynı kas grubunu ard arda iki güne koyma (toparlanma süresi ver).\n"
+        f"2. Yukarıdaki split yapısına uy — sırt günü MUTLAKA programda yer alsın.\n"
+        f"3. Sırt günü için EGZERSİZ REHBERİ'ndeki listeden EN AZ 5 FARKLI egzersiz seç:\n"
+        f"   - En az 1 yatay çekiş (Row ailesi)\n"
+        f"   - En az 1 dikey çekiş (Pulldown/Pull-up ailesi)\n"
+        f"   - En az 1 izolasyon (Face Pull, Pullover, Shrug vb.)\n"
+        f"   - Sırt günü 'odak' alanına 'Sırt ve Biceps' veya 'Sırt (Lat + Kalın Sırt)' yaz.\n"
+        f"4. Aynı kas grubunu ard arda iki güne koyma.\n"
         f"5. Her egzersiz için gerçekçi set, tekrar ve dinlenme süresi yaz.\n"
-        f"6. Her günün tahmini kalori yakımını gerçekçi hesapla (antrenman için 200-600 kcal arası).\n"
+        f"6. Her günün tahmini kalori yakımını gerçekçi hesapla (200-600 kcal arası).\n"
         f"7. 'not' alanına egzersiz için kısa teknik ipucu yaz.\n"
         f"8. Toplam antrenman günü tam olarak {gun_sayisi} olsun.\n"
         f"\n"
