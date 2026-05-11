@@ -1,245 +1,203 @@
 <!DOCTYPE html>
-<html lang="tr" data-theme="dark">
+<html lang="tr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>İlerleme — Fitness Coach</title>
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/theme.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        :root[data-theme="dark"] {
-            --bg:#0a0a0a; --bg2:#111; --bg3:#1a1a1a;
-            --border:#2a2a2a; --text:#f0f0f0; --text2:#888; --text3:#555;
-            --accent:#c8f060; --accent2:#a8d040; --accent-glow:rgba(200,240,96,0.15);
-            --card:#141414; --input-bg:#1a1a1a;
-            --red:#ff6b6b; --orange:#f0c040; --blue:#60a0f0;
-        }
-        :root[data-theme="light"] {
-            --bg:#f5f5f0; --bg2:#eeede8; --bg3:#e5e4df;
-            --border:#d5d4cf; --text:#1a1a1a; --text2:#666; --text3:#999;
-            --accent:#2d6a00; --accent2:#1a4500; --accent-glow:rgba(45,106,0,0.1);
-            --card:#fff; --input-bg:#fff;
-            --red:#d44; --orange:#c89800; --blue:#2a70c0;
-        }
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; transition:background 0.3s,color 0.3s; }
+        /* ── PAGE-SPECIFIC STYLES ── */
 
-        nav { display:flex; align-items:center; justify-content:space-between; padding:20px 40px; border-bottom:1px solid var(--border); position:sticky; top:0; background:var(--bg); z-index:100; backdrop-filter:blur(10px); }
-        .nav-logo { font-family:'Bebas Neue',sans-serif; font-size:28px; letter-spacing:3px; color:var(--accent); }
-        .nav-links { display:flex; align-items:center; gap:4px; }
-        .nav-link { font-size:13px; font-weight:500; color:var(--text2); text-decoration:none; padding:6px 14px; border-radius:6px; transition:all 0.2s; }
-        .nav-link:hover { color:var(--text); background:var(--bg3); }
-        .nav-link.active { color:var(--accent); background:var(--accent-glow); }
-        .nav-right { display:flex; align-items:center; gap:16px; }
-        .nav-user { font-size:14px; color:var(--text2); font-weight:300; }
-        .nav-user span { color:var(--text); font-weight:500; }
-        .theme-toggle { width:44px; height:24px; border-radius:12px; background:var(--bg3); border:1px solid var(--border); cursor:pointer; position:relative; transition:all 0.3s; }
-        .theme-toggle::after { content:''; position:absolute; width:18px; height:18px; border-radius:50%; background:var(--accent); top:2px; left:2px; transition:transform 0.3s; }
-        [data-theme="light"] .theme-toggle::after { transform:translateX(20px); }
-        .logout-btn { font-size:13px; font-weight:500; color:var(--text2); background:none; border:1px solid var(--border); padding:6px 16px; border-radius:6px; cursor:pointer; text-decoration:none; transition:all 0.2s; }
-        .logout-btn:hover { color:var(--text); border-color:var(--text3); }
-
-        .container { max-width:1100px; margin:0 auto; padding:40px 40px 80px; }
-        .page-header { margin-bottom:40px; }
-        .page-header h1 { font-family:'Bebas Neue',sans-serif; font-size:56px; letter-spacing:4px; line-height:1; }
-        .page-header h1 span { color:var(--accent); }
-        .page-header p { margin-top:8px; color:var(--text2); font-size:15px; font-weight:300; }
-
-        /* TABS */
-        .tabs { display:flex; gap:4px; margin-bottom:32px; background:var(--bg3); border-radius:8px; padding:4px; }
-        .tab { flex:1; font-family:'Bebas Neue',sans-serif; font-size:15px; letter-spacing:2px; color:var(--text2); background:none; border:none; padding:10px; border-radius:6px; cursor:pointer; transition:all 0.2s; text-align:center; }
-        .tab.active { background:var(--card); color:var(--accent); border:1px solid var(--border); }
-        .tab:hover:not(.active) { color:var(--text); }
-        .tab-content { display:none; }
-        .tab-content.active { display:block; }
-
-        /* SECTION */
-        .section-title { font-family:'Bebas Neue',sans-serif; font-size:22px; letter-spacing:3px; color:var(--text); margin-bottom:4px; }
-        .section-sub { font-size:13px; color:var(--text2); margin-bottom:16px; font-weight:300; }
-
-        /* CHART */
-        .chart-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; margin-bottom:16px; }
-        .chart-title { font-family:'Bebas Neue',sans-serif; font-size:16px; letter-spacing:2px; color:var(--text); margin-bottom:16px; display:flex; align-items:center; gap:8px; }
-        .chart-title::before { content:''; width:6px; height:6px; border-radius:50%; flex-shrink:0; }
-        .chart-container { position:relative; height:220px; }
-        .no-data { color:var(--text3); font-size:14px; font-style:italic; text-align:center; padding:40px 0; }
+        /* CHART CARD */
+        .chart-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 24px; margin-bottom: 16px; }
+        .chart-title { font-family: var(--font-display); font-size: 16px; letter-spacing: 2px; color: var(--text); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+        .chart-title::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--volt); flex-shrink: 0; }
+        .chart-container { position: relative; height: 220px; }
+        .no-data { color: var(--text-3); font-size: 14px; font-style: italic; text-align: center; padding: 40px 0; }
 
         /* CHECK-IN FORM */
-        .checkin-card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; margin-bottom:16px; }
-        .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:16px; }
-        .form-group { display:flex; flex-direction:column; gap:6px; }
-        .form-full { grid-column:1/-1; }
-        label { font-size:11px; font-weight:600; letter-spacing:0.1em; text-transform:uppercase; color:var(--text2); }
-        input,select,textarea { font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text); background:var(--input-bg); border:1px solid var(--border); border-radius:8px; padding:10px 14px; outline:none; transition:border-color 0.2s; }
-        input:focus,select:focus,textarea:focus { border-color:var(--accent); }
-        textarea { resize:vertical; min-height:60px; }
+        .checkin-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 24px; margin-bottom: 16px; }
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }
+        .form-group { display: flex; flex-direction: column; gap: 8px; }
+        .form-full  { grid-column: 1 / -1; }
+        .form-lbl { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3); }
+        input[type="text"],
+        input[type="number"],
+        select,
+        textarea {
+            font-family: var(--font-body); font-size: 14px; color: var(--text);
+            background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+            border-radius: var(--r-md); padding: 11px 14px; outline: none;
+            transition: border-color var(--t-fast), box-shadow var(--t-fast);
+            -webkit-appearance: none;
+        }
+        input:focus, select:focus, textarea:focus {
+            border-color: rgba(204,255,0,0.45); box-shadow: 0 0 0 3px rgba(204,255,0,0.07);
+        }
+        textarea { resize: vertical; min-height: 60px; }
 
         /* SLIDER */
-        .slider-group { display:flex; flex-direction:column; gap:6px; }
-        .slider-row { display:flex; align-items:center; gap:12px; }
-        .slider-labels { display:flex; justify-content:space-between; font-size:11px; color:var(--text3); }
+        .slider-group { display: flex; flex-direction: column; gap: 6px; }
+        .slider-row { display: flex; align-items: center; gap: 12px; }
+        .slider-val { font-family: var(--font-display); font-size: 18px; color: var(--volt); min-width: 24px; text-align: center; }
+        .slider-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-3); }
         input[type="range"] {
-        flex: 1;
-        -webkit-appearance: none;
-        appearance: none;
-        height: 6px;
-        background: var(--border);
-        border-radius: 3px;
-        border: none;
-        padding: 0;
-        cursor: pointer;
-        outline: none;
-        touch-action: pan-x;
+            flex: 1; -webkit-appearance: none; appearance: none;
+            height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px;
+            border: none; padding: 0; cursor: pointer; outline: none; touch-action: pan-x;
         }
         input[type="range"]::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 22px;
-            height: 22px;
-            border-radius: 50%;
-            background: var(--accent);
-            cursor: grab;
-            border: 2px solid var(--bg);
-            box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+            -webkit-appearance: none; appearance: none;
+            width: 22px; height: 22px; border-radius: 50%;
+            background: var(--volt); cursor: grab;
+            border: 2px solid #121212; box-shadow: 0 1px 4px rgba(0,0,0,0.4);
         }
-
-        input[type="range"]::-webkit-slider-thumb:active {
-            cursor: grabbing;
-            transform: scale(1.1);
-        }
-
+        input[type="range"]::-webkit-slider-thumb:active { cursor: grabbing; transform: scale(1.1); }
         input[type="range"]::-moz-range-thumb {
-            width: 22px;
-            height: 22px;
-            border-radius: 50%;
-            background: var(--accent);
-            cursor: grab;
-            border: 2px solid var(--bg);
-            box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+            width: 22px; height: 22px; border-radius: 50%;
+            background: var(--volt); cursor: grab;
+            border: 2px solid #121212; box-shadow: 0 1px 4px rgba(0,0,0,0.4);
         }
 
-        /* OVERLOAD OPTIONS */
-        .overload-grid { display:flex; gap:8px; }
-        .overload-chip { flex:1; display:flex; align-items:center; justify-content:center; gap:6px; background:var(--bg3); border:1.5px solid var(--border); border-radius:8px; padding:10px; cursor:pointer; transition:all 0.2s; font-size:13px; color:var(--text2); user-select:none; }
-        .overload-chip:hover { border-color:var(--accent); }
-        .overload-chip.selected { background:var(--accent-glow); border-color:var(--accent); color:var(--text); }
-
-        .submit-btn { font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:3px; color:#0a0a0a; background:var(--accent); border:none; border-radius:8px; padding:14px 40px; cursor:pointer; transition:all 0.2s; }
-        .submit-btn:hover { background:var(--accent2); transform:translateY(-1px); }
-        .submit-btn.loading { opacity:0.7; cursor:not-allowed; }
+        /* OVERLOAD */
+        .overload-grid { display: flex; gap: 8px; flex-wrap: wrap; }
+        .overload-chip {
+            flex: 1; min-width: 90px; display: flex; align-items: center; justify-content: center; gap: 6px;
+            background: rgba(255,255,255,0.03); border: 1.5px solid var(--border);
+            border-radius: var(--r-sm); padding: 10px 12px;
+            cursor: pointer; transition: all var(--t-fast); font-size: 13px; color: var(--text-2);
+            user-select: none;
+        }
+        .overload-chip:hover { border-color: rgba(204,255,0,0.35); }
+        .overload-chip.selected { background: var(--volt-dim); border-color: rgba(204,255,0,0.5); color: var(--volt); }
 
         /* FEEDBACK */
-        .feedback-card { background:var(--accent-glow); border:1px solid var(--accent); border-radius:12px; padding:20px; margin-top:16px; display:none; }
-        .feedback-card.visible { display:block; }
-        .feedback-header { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
-        .feedback-avatar { width:32px; height:32px; border-radius:50%; background:var(--accent); display:flex; align-items:center; justify-content:center; font-size:14px; }
-        .feedback-title { font-family:'Bebas Neue',sans-serif; font-size:16px; letter-spacing:2px; color:var(--accent); }
-        .feedback-text { font-size:14px; color:var(--text); line-height:1.7; font-weight:300; }
+        .feedback-card { background: var(--volt-dim); border: 1px solid rgba(204,255,0,0.2); border-radius: var(--r-lg); padding: 20px; margin-top: 16px; display: none; }
+        .feedback-card.visible { display: block; animation: slide-up 0.25s ease; }
+        .feedback-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+        .feedback-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--volt); display: flex; align-items: center; justify-content: center; font-size: 14px; }
+        .feedback-title { font-family: var(--font-display); font-size: 16px; letter-spacing: 2px; color: var(--volt); }
+        .feedback-text { font-size: 14px; color: var(--text); line-height: 1.72; font-weight: 300; }
 
         /* HISTORY */
-        .history-card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:8px; }
-        .history-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
-        .history-date { font-family:'Bebas Neue',sans-serif; font-size:15px; letter-spacing:1px; color:var(--accent); }
-        .history-weight { font-size:14px; color:var(--text); font-weight:500; }
-        .history-stats { display:flex; gap:16px; margin-bottom:8px; }
-        .history-stat { font-size:12px; color:var(--text2); }
-        .history-stat span { color:var(--text); font-weight:500; }
-        .history-feedback { font-size:13px; color:var(--text2); line-height:1.5; font-weight:300; border-top:1px solid var(--border); padding-top:8px; margin-top:8px; }
+        .history-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 16px; margin-bottom: 8px; }
+        .history-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 4px; }
+        .history-date-lbl { font-family: var(--font-display); font-size: 16px; letter-spacing: 1px; color: var(--volt); }
+        .history-weight-lbl { font-size: 14px; color: var(--text); font-weight: 500; }
+        .history-stats { display: flex; gap: 16px; margin-bottom: 8px; flex-wrap: wrap; }
+        .history-stat { font-size: 12px; color: var(--text-2); }
+        .history-stat span { color: var(--text); font-weight: 500; }
+        .history-feedback-txt { font-size: 13px; color: var(--text-2); line-height: 1.5; font-weight: 300; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px; }
 
-        /* CHATBOT */
-        .chat-container { background:var(--card); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
-        .chat-messages { height:400px; overflow-y:auto; padding:20px; display:flex; flex-direction:column; gap:12px; }
-        .chat-msg { max-width:85%; padding:12px 16px; border-radius:12px; font-size:14px; line-height:1.6; font-weight:300; }
-        .chat-msg.user { align-self:flex-end; background:var(--accent); color:#0a0a0a; border-bottom-right-radius:4px; font-weight:400; }
-        .chat-msg.bot { align-self:flex-start; background:var(--bg3); color:var(--text); border-bottom-left-radius:4px; }
-        .chat-msg.bot.loading { opacity:0.6; font-style:italic; }
-        .chat-input-row { display:flex; border-top:1px solid var(--border); }
-        .chat-input { flex:1; font-family:'DM Sans',sans-serif; font-size:14px; color:var(--text); background:transparent; border:none; padding:16px 20px; outline:none; }
-        .chat-input::placeholder { color:var(--text3); }
-        .chat-send { font-family:'Bebas Neue',sans-serif; font-size:14px; letter-spacing:2px; color:var(--accent); background:none; border:none; border-left:1px solid var(--border); padding:16px 24px; cursor:pointer; transition:background 0.2s; }
-        .chat-send:hover { background:var(--accent-glow); }
-        .chat-empty { color:var(--text3); font-size:14px; font-style:italic; text-align:center; padding:60px 0; }
+        /* CHAT */
+        .chat-container { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg); overflow: hidden; }
+        .chat-messages { height: 400px; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+        .chat-msg { max-width: 85%; padding: 12px 16px; border-radius: 12px; font-size: 14px; line-height: 1.6; font-weight: 300; }
+        .chat-msg.user { align-self: flex-end; background: var(--volt); color: #121212; border-bottom-right-radius: 4px; font-weight: 500; }
+        .chat-msg.bot { align-self: flex-start; background: var(--surface-3); color: var(--text); border-bottom-left-radius: 4px; }
+        .chat-msg.bot.loading { opacity: 0.6; font-style: italic; }
+        .chat-input-row { display: flex; border-top: 1px solid var(--border); }
+        .chat-input { flex: 1; font-family: var(--font-body); font-size: 14px; color: var(--text); background: transparent; border: none; padding: 16px 20px; outline: none; }
+        .chat-input::placeholder { color: var(--text-3); }
+        .chat-send { font-family: var(--font-display); font-size: 14px; letter-spacing: 2px; color: var(--volt); background: none; border: none; border-left: 1px solid var(--border); padding: 16px 24px; cursor: pointer; transition: background var(--t-fast); }
+        .chat-send:hover { background: var(--volt-dim); }
+        .chat-empty { color: var(--text-3); font-size: 14px; font-style: italic; text-align: center; padding: 60px 0; }
+
+        .section-title { font-family: var(--font-display); font-size: 20px; letter-spacing: 3px; color: var(--text); margin-bottom: 4px; }
+        .section-sub { font-size: 13px; color: var(--text-2); margin-bottom: 16px; font-weight: 300; }
 
         @media(max-width:640px) {
-            nav { padding:12px 16px; }
-            .container { padding:20px 16px 80px; }
-            .page-header h1 { font-size:36px; letter-spacing:2px; }
-            .nav-links { display:none; }
-            .nav-user { display:none; }
-            .form-grid { grid-template-columns:1fr; }
-            .chart-container { height:180px; }
-            /* Tabs scrollable */
-            .tabs { overflow-x:auto; -webkit-overflow-scrolling:touch; flex-wrap:nowrap; gap:2px; padding:3px; }
-            .tab { font-size:11px; letter-spacing:1px; padding:9px 8px; white-space:nowrap; flex-shrink:0; }
-            /* Overload chips wrap */
-            .overload-grid { flex-wrap:wrap; }
-            .overload-chip { flex:none; width:calc(50% - 4px); font-size:12px; padding:9px 8px; }
-            /* Submit full width */
-            .submit-btn { width:100%; }
-            /* Chat */
-            .chat-messages { height:280px; }
-            .chat-input { font-size:16px; } /* prevent iOS zoom */
-            .chat-send { padding:16px 16px; font-size:12px; letter-spacing:1px; }
-            /* History */
-            .history-header { flex-direction:column; align-items:flex-start; gap:4px; }
-            .history-stats { flex-wrap:wrap; gap:8px; }
-            /* Checkin card */
-            .checkin-card { padding:16px; }
-            .score-banner { padding:14px 16px; }
+            .form-grid { grid-template-columns: 1fr; }
+            .chart-container { height: 180px; }
+            .chat-messages { height: 280px; }
+            .chat-input { font-size: 16px; }
+            .chat-send { padding: 16px; font-size: 12px; letter-spacing: 1px; }
+            .history-stats { gap: 8px; }
+            .checkin-card { padding: 16px; }
         }
     </style>
 </head>
-<body>
+<body class="page-body">
 
-<nav>
-    <div class="nav-logo">FC</div>
-    <div class="nav-links">
-        <a href="/" class="nav-link">Ana Sayfa</a>
-        <a href="/nutrition" class="nav-link">Beslenme</a>
-        <a href="/training" class="nav-link">Antrenman</a>
-        <a href="/progress-page" class="nav-link active">İlerleme</a>
+<!-- ── SIDEBAR ── -->
+<aside class="sidebar">
+    <div class="sidebar-logo">FC</div>
+    <nav class="sidebar-nav">
+        <a href="/" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            Ana Sayfa
+        </a>
+        <a href="/nutrition" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+            Beslenme
+        </a>
+        <a href="/training" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
+            Antrenman
+        </a>
+        <a href="/progress-page" class="sidebar-link active">
+            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            İlerleme
+        </a>
+    </nav>
+    <div class="sidebar-sep"></div>
+    <div class="sidebar-user">
+        <div class="sidebar-avatar">{{ username[0]|upper if username else 'U' }}</div>
+        <div style="overflow:hidden">
+            <div class="sidebar-name">{{ username }}</div>
+            <a href="/logout" class="sidebar-logout">Çıkış yap</a>
+        </div>
     </div>
-    <div class="nav-right">
-        <span class="nav-user">Hoş geldin, <span>{{ username }}</span></span>
-        <button class="theme-toggle" onclick="toggleTheme()"></button>
-        <a href="/logout" class="logout-btn">Çıkış</a>
-    </div>
-</nav>
+</aside>
 
-<div class="container">
+<!-- ── MAIN CONTENT ── -->
+<main class="main-content">
 
-    <div class="page-header">
+    <div class="page-hdr">
         <h1>İLERLEME<br><span>TAKİBİ</span></h1>
         <p>Haftalık check-in yap, grafiklerle ilerlemeni takip et, koçuna sor.</p>
     </div>
 
     <!-- TABS -->
-    <div class="tabs">
-        <button class="tab active" onclick="switchTab('checkin')">Check-In</button>
-        <button class="tab" onclick="switchTab('charts')">Grafikler</button>
-        <button class="tab" onclick="switchTab('history')">Geçmiş</button>
-        <button class="tab" onclick="switchTab('chat')">Koçuna Sor</button>
+    <div class="tab-bar" role="tablist">
+        <button class="tab-btn active" onclick="switchTab('checkin', this)">
+            <svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+            Check-In
+        </button>
+        <button class="tab-btn" onclick="switchTab('charts', this)">
+            <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+            Grafikler
+        </button>
+        <button class="tab-btn" onclick="switchTab('history', this)">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Geçmiş
+        </button>
+        <button class="tab-btn" onclick="switchTab('chat', this)">
+            <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            Koçuna Sor
+        </button>
     </div>
 
     <!-- TAB 1: CHECK-IN -->
-    <div class="tab-content active" id="tab-checkin">
+    <div class="tab-panel active" id="tab-checkin">
         <div class="checkin-card">
             <div class="section-title">Haftalık Check-In</div>
             <div class="section-sub">Bu haftanı değerlendir, koçun sana geri bildirim versin.</div>
 
             <div class="form-grid">
                 <div class="form-group">
-                    <label>Güncel Kilo (kg)</label>
+                    <label class="form-lbl">Güncel Kilo (kg)</label>
                     <input type="number" id="ci-weight" placeholder="78.5" step="0.1">
                 </div>
                 <div class="form-group">
-                    <label>Not (isteğe bağlı)</label>
+                    <label class="form-lbl">Not (isteğe bağlı)</label>
                     <input type="text" id="ci-note" placeholder="Bu hafta nasıl geçti?">
                 </div>
 
                 <div class="slider-group form-full">
-                    <label>Antrenman Yoğunluğu</label>
+                    <label class="form-lbl">Antrenman Yoğunluğu</label>
                     <div class="slider-row">
                         <input type="range" id="ci-yogunluk" min="1" max="5" value="3" oninput="document.getElementById('yogunluk-val').textContent=this.value">
                         <div class="slider-val" id="yogunluk-val">3</div>
@@ -248,7 +206,7 @@
                 </div>
 
                 <div class="slider-group form-full">
-                    <label>Yorgunluk / Fatigue</label>
+                    <label class="form-lbl">Yorgunluk / Fatigue</label>
                     <div class="slider-row">
                         <input type="range" id="ci-fatigue" min="1" max="5" value="3" oninput="document.getElementById('fatigue-val').textContent=this.value">
                         <div class="slider-val" id="fatigue-val">3</div>
@@ -257,7 +215,7 @@
                 </div>
 
                 <div class="slider-group form-full">
-                    <label>Uyku Kalitesi</label>
+                    <label class="form-lbl">Uyku Kalitesi</label>
                     <div class="slider-row">
                         <input type="range" id="ci-uyku" min="1" max="5" value="3" oninput="document.getElementById('uyku-val').textContent=this.value">
                         <div class="slider-val" id="uyku-val">3</div>
@@ -266,7 +224,7 @@
                 </div>
 
                 <div class="slider-group form-full">
-                    <label>Beslenme Uyumu</label>
+                    <label class="form-lbl">Beslenme Uyumu</label>
                     <div class="slider-row">
                         <input type="range" id="ci-beslenme" min="1" max="5" value="3" oninput="document.getElementById('beslenme-val').textContent=this.value">
                         <div class="slider-val" id="beslenme-val">3</div>
@@ -275,17 +233,17 @@
                 </div>
 
                 <div class="form-group form-full">
-                    <label>Progressive Overload</label>
-                    <div class="section-sub" style="margin-bottom:8px">Bu hafta ağırlık veya tekrar artırabildin mi?</div>
+                    <label class="form-lbl">Progressive Overload</label>
+                    <div class="section-sub" style="margin-bottom:10px">Bu hafta ağırlık veya tekrar artırabildin mi?</div>
                     <div class="overload-grid">
-                        <div class="overload-chip selected" onclick="selectOverload('evet',this)">Evet</div>
-                        <div class="overload-chip" onclick="selectOverload('kismen',this)">Kısmen</div>
-                        <div class="overload-chip" onclick="selectOverload('hayir',this)">Hayır</div>
+                        <div class="overload-chip selected" onclick="selectOverload('evet',this)">Evet ✓</div>
+                        <div class="overload-chip" onclick="selectOverload('kismen',this)">Kısmen ~</div>
+                        <div class="overload-chip" onclick="selectOverload('hayir',this)">Hayır ✗</div>
                     </div>
                 </div>
             </div>
 
-            <button class="submit-btn" id="checkin-btn" onclick="submitCheckin()">CHECK-IN GÖNDER</button>
+            <button class="btn-volt w-full" id="checkin-btn" onclick="submitCheckin()">CHECK-IN GÖNDER</button>
         </div>
 
         <div class="feedback-card" id="feedback-card">
@@ -298,9 +256,9 @@
     </div>
 
     <!-- TAB 2: GRAFİKLER -->
-    <div class="tab-content" id="tab-charts">
+    <div class="tab-panel" id="tab-charts">
         <div class="chart-card">
-            <div class="chart-title" style="--dot-color:var(--accent)"><style>.chart-title::before{background:var(--accent)}</style>Kilo Değişimi</div>
+            <div class="chart-title">Kilo Değişimi</div>
             <div class="chart-container"><canvas id="weightChart"></canvas></div>
             <div class="no-data" id="weight-nodata">Henüz veri yok — ilk check-in'ini yap.</div>
         </div>
@@ -317,16 +275,14 @@
     </div>
 
     <!-- TAB 3: GEÇMİŞ -->
-    <div class="tab-content" id="tab-history">
+    <div class="tab-panel" id="tab-history">
         <div class="section-title">Check-In Geçmişi</div>
         <div class="section-sub">Tüm haftalık check-in kayıtların ve koç geri bildirimleri.</div>
-        <div id="history-list">
-            <div class="no-data">Henüz check-in yok.</div>
-        </div>
+        <div id="history-list"><div class="no-data">Henüz check-in yok.</div></div>
     </div>
 
     <!-- TAB 4: CHATBOT -->
-    <div class="tab-content" id="tab-chat">
+    <div class="tab-panel" id="tab-chat">
         <div class="section-title">Koçuna Sor</div>
         <div class="section-sub">Antrenman, beslenme veya sağlıkla ilgili aklındaki her şeyi sorabilirsin.</div>
         <div class="chat-container">
@@ -340,30 +296,56 @@
         </div>
     </div>
 
-</div>
+</main>
+
+<!-- ── BOTTOM NAV ── -->
+<nav class="bottom-nav">
+    <div class="bottom-nav-inner">
+        <a href="/" class="bn-item">
+            <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            Ana Sayfa
+        </a>
+        <a href="/nutrition" class="bn-item">
+            <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+            Beslenme
+        </a>
+        <a href="/training" class="bn-item">
+            <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
+            Antrenman
+        </a>
+        <a href="/progress-page" class="bn-item active">
+            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            İlerleme
+        </a>
+    </div>
+</nav>
+
+<!-- ── TOAST ── -->
+<div class="toast-wrap" id="toast-wrap"></div>
 
 <script>
-    const savedTheme = localStorage.getItem('theme') || 'dark';
-    document.documentElement.dataset.theme = savedTheme;
-    function toggleTheme() {
-        const html = document.documentElement;
-        html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
-        localStorage.setItem('theme', html.dataset.theme);
-        // Grafikleri yeniden çiz — tema değişince renkler güncellenmeli
-        loadCharts();
+    // ── TOAST ──
+    function showToast(msg, type='info') {
+        const icons = { success:'✓', error:'✗', info:'ℹ' };
+        const wrap = document.getElementById('toast-wrap');
+        const t = document.createElement('div');
+        t.className = `toast toast-${type}`;
+        t.innerHTML = `<span class="toast-icon">${icons[type]||'ℹ'}</span><span>${msg}</span>`;
+        wrap.appendChild(t);
+        setTimeout(() => { t.classList.add('hide'); setTimeout(()=>t.remove(),280); }, 3200);
     }
 
-    // TABS
-    function switchTab(name) {
-        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    // ── TABS ──
+    function switchTab(name, btn) {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+        if (btn) btn.classList.add('active');
         document.getElementById('tab-' + name).classList.add('active');
-        event.target.classList.add('active');
-        if (name === 'charts') loadCharts();
+        if (name === 'charts')  loadCharts();
         if (name === 'history') loadHistory();
     }
 
-    // OVERLOAD
+    // ── OVERLOAD ──
     let selectedOverload = 'evet';
     function selectOverload(val, el) {
         selectedOverload = val;
@@ -371,10 +353,10 @@
         el.classList.add('selected');
     }
 
-    // CHECK-IN GÖNDER
+    // ── CHECK-IN ──
     async function submitCheckin() {
         const weight = document.getElementById('ci-weight').value;
-        if (!weight) { alert('Kilo zorunludur.'); return; }
+        if (!weight) { showToast('Kilo zorunludur.', 'error'); return; }
 
         const btn = document.getElementById('checkin-btn');
         btn.classList.add('loading');
@@ -386,57 +368,49 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     weight: parseFloat(weight),
-                    yogunluk: parseInt(document.getElementById('ci-yogunluk').value),
-                    fatigue: parseInt(document.getElementById('ci-fatigue').value),
-                    uyku_kalitesi: parseInt(document.getElementById('ci-uyku').value),
+                    yogunluk:       parseInt(document.getElementById('ci-yogunluk').value),
+                    fatigue:        parseInt(document.getElementById('ci-fatigue').value),
+                    uyku_kalitesi:  parseInt(document.getElementById('ci-uyku').value),
                     beslenme_uyumu: parseInt(document.getElementById('ci-beslenme').value),
                     progressive_overload: selectedOverload,
                     note: document.getElementById('ci-note').value
                 })
             });
-
             const data = await res.json();
-            if (data.error) { alert(data.error); return; }
+            if (data.error) { showToast(data.error, 'error'); return; }
 
             const fb = document.getElementById('feedback-card');
             document.getElementById('feedback-text').innerHTML = data.coach_feedback.replace(/\n/g, '<br>');
             fb.classList.add('visible');
-            fb.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-
+            fb.scrollIntoView({ behavior:'smooth', block:'nearest' });
+            showToast('Check-in kaydedildi!', 'success');
         } catch (err) {
-            alert('Hata: ' + err.message);
+            showToast('Hata: ' + err.message, 'error');
         } finally {
             btn.classList.remove('loading');
             btn.textContent = 'CHECK-IN GÖNDER';
         }
     }
 
-    // GRAFİKLER
+    // ── CHARTS ──
     let weightChart, metricsChart, wellnessChart;
 
     async function loadCharts() {
-        const res = await fetch('/checkin-history');
+        const res  = await fetch('/checkin-history');
         const data = await res.json();
 
-        if (data.length === 0) {
-            document.getElementById('weight-nodata').style.display = 'block';
-            document.getElementById('metrics-nodata').style.display = 'block';
-            document.getElementById('wellness-nodata').style.display = 'block';
-            return;
-        }
+        const noData = data.length === 0;
+        ['weight','metrics','wellness'].forEach(k => {
+            document.getElementById(k + '-nodata').style.display = noData ? 'block' : 'none';
+        });
+        if (noData) return;
 
-        document.getElementById('weight-nodata').style.display = 'none';
-        document.getElementById('metrics-nodata').style.display = 'none';
-        document.getElementById('wellness-nodata').style.display = 'none';
+        const labels    = data.map(d => d.tarih);
+        const gridColor = 'rgba(255,255,255,0.05)';
+        const textColor = '#606060';
 
-        const labels = data.map(d => d.tarih);
-        const isDark = document.documentElement.dataset.theme === 'dark';
-        const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
-        const textColor = isDark ? '#888' : '#666';
-
-        const baseOptions = {
-            responsive: true,
-            maintainAspectRatio: false,
+        const baseOpts = {
+            responsive: true, maintainAspectRatio: false,
             plugins: { legend: { labels: { color: textColor, font: { family: 'DM Sans', size: 11 } } } },
             scales: {
                 x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
@@ -444,123 +418,80 @@
             }
         };
 
-        // Kilo grafiği
         if (weightChart) weightChart.destroy();
         weightChart = new Chart(document.getElementById('weightChart'), {
             type: 'line',
-            data: {
-                labels,
-                datasets: [{
-                    label: 'Kilo (kg)',
-                    data: data.map(d => d.kilo),
-                    borderColor: isDark ? '#c8f060' : '#2d6a00',
-                    backgroundColor: isDark ? 'rgba(200,240,96,0.1)' : 'rgba(45,106,0,0.1)',
-                    fill: true, tension: 0.3, pointRadius: 5, pointHoverRadius: 8,
-                    pointBackgroundColor: isDark ? '#c8f060' : '#2d6a00',
-                    borderWidth: 2
-                }]
-            },
-            options: { ...baseOptions, scales: { ...baseOptions.scales, y: { ...baseOptions.scales.y, beginAtZero: false } } }
+            data: { labels, datasets: [{
+                label: 'Kilo (kg)', data: data.map(d => d.kilo),
+                borderColor: '#CCFF00', backgroundColor: 'rgba(204,255,0,0.08)',
+                fill: true, tension: 0.35, pointRadius: 5, pointHoverRadius: 8,
+                pointBackgroundColor: '#CCFF00', borderWidth: 2
+            }]},
+            options: { ...baseOpts, scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, beginAtZero: false } } }
         });
 
-        // Performans grafiği
         if (metricsChart) metricsChart.destroy();
         metricsChart = new Chart(document.getElementById('metricsChart'), {
             type: 'line',
-            data: {
-                labels,
-                datasets: [
-                    {
-                        label: 'Yoğunluk',
-                        data: data.map(d => d.yogunluk),
-                        borderColor: isDark ? '#c8f060' : '#2d6a00',
-                        borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false
-                    },
-                    {
-                        label: 'Yorgunluk',
-                        data: data.map(d => d.fatigue),
-                        borderColor: isDark ? '#ff6b6b' : '#d44',
-                        borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false
-                    }
-                ]
-            },
-            options: { ...baseOptions, scales: { ...baseOptions.scales, y: { ...baseOptions.scales.y, min: 0, max: 5 } } }
+            data: { labels, datasets: [
+                { label: 'Yoğunluk', data: data.map(d => d.yogunluk), borderColor: '#CCFF00', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
+                { label: 'Yorgunluk', data: data.map(d => d.fatigue),  borderColor: '#FF4D4D', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false }
+            ]},
+            options: { ...baseOpts, scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, min: 0, max: 5 } } }
         });
 
-        // Wellness grafiği
         if (wellnessChart) wellnessChart.destroy();
         wellnessChart = new Chart(document.getElementById('wellnessChart'), {
             type: 'line',
-            data: {
-                labels,
-                datasets: [
-                    {
-                        label: 'Uyku',
-                        data: data.map(d => d.uyku),
-                        borderColor: isDark ? '#60a0f0' : '#2a70c0',
-                        borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false
-                    },
-                    {
-                        label: 'Beslenme',
-                        data: data.map(d => d.beslenme),
-                        borderColor: isDark ? '#f0c040' : '#c89800',
-                        borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false
-                    }
-                ]
-            },
-            options: { ...baseOptions, scales: { ...baseOptions.scales, y: { ...baseOptions.scales.y, min: 0, max: 5 } } }
+            data: { labels, datasets: [
+                { label: 'Uyku',     data: data.map(d => d.uyku),     borderColor: '#3D9EFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
+                { label: 'Beslenme', data: data.map(d => d.beslenme), borderColor: '#FFB020', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false }
+            ]},
+            options: { ...baseOpts, scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, min: 0, max: 5 } } }
         });
     }
 
-    // GEÇMİŞ
+    // ── HISTORY ──
     async function loadHistory() {
-        const res = await fetch('/checkin-history');
+        const res  = await fetch('/checkin-history');
         const data = await res.json();
         const list = document.getElementById('history-list');
-
-        if (data.length === 0) {
-            list.innerHTML = '<div class="no-data">Henüz check-in yok.</div>';
-            return;
-        }
-
-        const overloadLabels = { 'evet': 'Evet', 'hayir': 'Hayır', 'kismen': 'Kısmen' };
-
-        list.innerHTML = data.reverse().map(c => `
+        if (data.length === 0) { list.innerHTML = '<div class="no-data">Henüz check-in yok.</div>'; return; }
+        const overloadLabels = { 'evet':'Evet', 'hayir':'Hayır', 'kismen':'Kısmen' };
+        list.innerHTML = [...data].reverse().map(c => `
             <div class="history-card">
-                <div class="history-header">
-                    <div class="history-date">${c.tarih}</div>
-                    <div class="history-weight">${c.kilo} kg</div>
+                <div class="history-header-row">
+                    <div class="history-date-lbl">${c.tarih}</div>
+                    <div class="history-weight-lbl">${c.kilo} kg</div>
                 </div>
                 <div class="history-stats">
                     <div class="history-stat">Yoğunluk: <span>${c.yogunluk}/5</span></div>
                     <div class="history-stat">Yorgunluk: <span>${c.fatigue}/5</span></div>
-                    <div class="history-stat">Overload: <span>${overloadLabels[c.overload] || c.overload}</span></div>
+                    <div class="history-stat">Overload: <span>${overloadLabels[c.overload]||c.overload}</span></div>
                     <div class="history-stat">Uyku: <span>${c.uyku}/5</span></div>
                     <div class="history-stat">Beslenme: <span>${c.beslenme}/5</span></div>
                 </div>
-                ${c.feedback ? `<div class="history-feedback">${c.feedback.replace(/\n/g, '<br>')}</div>` : ''}
+                ${c.feedback ? `<div class="history-feedback-txt">${c.feedback.replace(/\n/g,'<br>')}</div>` : ''}
             </div>
         `).join('');
     }
 
-    // CHATBOT
+    // ── CHATBOT ──
     async function sendChat() {
-        const input = document.getElementById('chat-input');
+        const input    = document.getElementById('chat-input');
         const question = input.value.trim();
         if (!question) return;
 
         const messages = document.getElementById('chat-messages');
-        const empty = messages.querySelector('.chat-empty');
+        const empty    = messages.querySelector('.chat-empty');
         if (empty) empty.remove();
 
-        // Kullanıcı mesajı
         const userMsg = document.createElement('div');
         userMsg.className = 'chat-msg user';
         userMsg.textContent = question;
         messages.appendChild(userMsg);
         input.value = '';
 
-        // Loading mesaj
         const loadMsg = document.createElement('div');
         loadMsg.className = 'chat-msg bot loading';
         loadMsg.textContent = 'Düşünüyorum...';
@@ -568,19 +499,17 @@
         messages.scrollTop = messages.scrollHeight;
 
         try {
-            const res = await fetch('/ask', {
+            const res  = await fetch('/ask', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ question })
             });
             const data = await res.json();
-
             loadMsg.remove();
             const botMsg = document.createElement('div');
             botMsg.className = 'chat-msg bot';
             botMsg.innerHTML = (data.answer || data.error || 'Yanıt alınamadı.').replace(/\n/g, '<br>');
             messages.appendChild(botMsg);
-
         } catch (err) {
             loadMsg.remove();
             const errMsg = document.createElement('div');
@@ -588,30 +517,8 @@
             errMsg.textContent = 'Hata: ' + err.message;
             messages.appendChild(errMsg);
         }
-
         messages.scrollTop = messages.scrollHeight;
     }
 </script>
-
-<div class="mobile-bottom-nav">
-  <div class="mbn-inner">
-    <a href="/" class="mbn-item">
-      <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-      Ana Sayfa
-    </a>
-    <a href="/nutrition" class="mbn-item">
-      <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
-      Beslenme
-    </a>
-    <a href="/training" class="mbn-item">
-      <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
-      Antrenman
-    </a>
-    <a href="/progress-page" class="mbn-item active">
-      <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-      İlerleme
-    </a>
-  </div>
-</div>
 </body>
 </html>

@@ -1,146 +1,848 @@
 <!DOCTYPE html>
 <html lang="tr" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Beslenme — Fitness Coach</title>
-    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
-    <style>
-        .tabs{display:flex;gap:4px;margin-bottom:32px;background:var(--bg3);border-radius:8px;padding:4px}.tab{flex:1;font-family:'Bebas Neue',sans-serif;font-size:15px;letter-spacing:2px;color:var(--text2);background:none;border:none;padding:10px;border-radius:6px;cursor:pointer;transition:all .2s;text-align:center}.tab.active{background:var(--card);color:var(--accent);border:1px solid var(--border)}.tab:hover:not(.active){color:var(--text)}.tab-content{display:none}.tab-content.active{display:block}.calori-banner{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:16px 20px;margin-bottom:24px;display:flex;align-items:center;gap:16px;justify-content:space-between;flex-wrap:wrap}.calori-banner-val{font-family:'Bebas Neue',sans-serif;font-size:32px;color:var(--accent);letter-spacing:2px}.calori-banner-label{font-size:13px;color:var(--text2);font-weight:300}.calori-progress{flex:1;min-width:200px}.calori-bar{height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-top:6px}.calori-bar-fill{height:100%;border-radius:4px;transition:width .5s}.calori-eaten{font-size:12px;color:var(--text2);margin-top:4px}.meal-form{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:16px}.ogun-grid{display:flex;gap:8px;margin-bottom:16px}.ogun-chip{flex:1;text-align:center;padding:10px;border-radius:8px;background:var(--bg3);border:1.5px solid var(--border);cursor:pointer;transition:all .2s;font-size:13px;font-weight:500;color:var(--text2)}.ogun-chip:hover{border-color:var(--accent)}.ogun-chip.selected{background:var(--accent-glow);border-color:var(--accent);color:var(--text)}.ogun-icon{font-size:20px;display:block;margin-bottom:4px}.meal-textarea{width:100%;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text);background:var(--input-bg);border:1px solid var(--border);border-radius:8px;padding:14px;outline:none;min-height:80px;resize:vertical;transition:border-color .2s}.meal-textarea:focus{border-color:var(--accent)}.meal-textarea::placeholder{color:var(--text3)}.meal-submit{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:2px;color:#0a0a0a;background:var(--accent);border:none;border-radius:8px;padding:12px 32px;cursor:pointer;transition:all .2s;margin-top:12px}.meal-submit:hover{background:var(--accent2)}.today-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:10px}.today-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.today-ogun{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:2px;color:var(--accent)}.today-kcal{font-size:14px;color:var(--text2)}.today-foods{font-size:14px;color:var(--text);line-height:1.6;font-weight:300}.today-macros{display:flex;gap:16px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}.today-macro{font-size:12px;color:var(--text2)}.today-macro span{color:var(--text);font-weight:500}.today-empty{color:var(--text3);font-size:14px;font-style:italic;text-align:center;padding:30px 0}.totals-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}.total-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center}.total-val{font-family:'Bebas Neue',sans-serif;font-size:24px;color:var(--accent);letter-spacing:1px}.total-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-top:2px}.review-btn{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:2px;color:#0a0a0a;background:var(--accent);border:none;border-radius:8px;padding:12px 32px;cursor:pointer;transition:all .2s;width:100%}.review-btn:hover{background:var(--accent2)}.review-card{background:var(--accent-glow);border:1px solid var(--accent);border-radius:12px;padding:20px;margin-top:16px;display:none}.review-card.visible{display:block}.review-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}.review-avatar{width:32px;height:32px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:14px}.review-title{font-family:'Bebas Neue',sans-serif;font-size:16px;letter-spacing:2px;color:var(--accent)}.review-text{font-size:14px;color:var(--text);line-height:1.7;font-weight:300}.history-day{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px;margin-bottom:12px}.history-day-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}.history-date{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:2px;color:var(--accent)}.history-day-totals{display:flex;gap:12px}.history-day-total{font-size:12px;color:var(--text2)}.history-day-total span{color:var(--text);font-weight:500}.history-meal{padding:10px 0;border-bottom:1px solid var(--border)}.history-meal:last-child{border-bottom:none}.history-meal-ogun{font-size:12px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}.history-meal-foods{font-size:14px;color:var(--text);font-weight:300;line-height:1.5}.plans-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}@media(max-width:900px){.plans-grid{grid-template-columns:1fr}}.plan-card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden;transition:border-color .2s}.plan-card.selected-plan{border-color:var(--accent)}.plan-card-header{padding:16px 18px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}.plan-card-name{font-family:'Bebas Neue',sans-serif;font-size:18px;letter-spacing:2px;color:var(--accent)}.plan-card-kcal{font-size:13px;color:var(--text2);font-weight:300}.plan-card-body{padding:16px 18px}.meal-section-plan{margin-bottom:14px}.meal-title-plan{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text3);margin-bottom:6px}.meal-items-plan{list-style:none;display:flex;flex-direction:column;gap:3px}.meal-items-plan li{font-size:13px;color:var(--text);font-weight:300;line-height:1.5;display:flex;align-items:flex-start;gap:6px}.meal-items-plan li::before{content:'·';color:var(--accent);flex-shrink:0}.plan-macros{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}.macro-item{text-align:center}.macro-val{font-family:'Bebas Neue',sans-serif;font-size:20px;color:var(--accent);letter-spacing:1px}.macro-label{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em}.select-plan-btn{width:100%;font-family:'Bebas Neue',sans-serif;font-size:15px;letter-spacing:2px;color:#0a0a0a;background:var(--accent);border:none;padding:12px;cursor:pointer;transition:all .2s;margin-top:14px;border-radius:6px}.select-plan-btn:hover{background:var(--accent2)}.select-plan-btn.chosen{background:var(--bg3);color:var(--accent);border:1px solid var(--accent);cursor:default}.custom-food-row{display:flex;gap:8px;margin-top:12px}.custom-food-input{flex:1;font-family:'DM Sans',sans-serif;font-size:14px;color:var(--text);background:var(--input-bg);border:1px solid var(--border);border-radius:8px;padding:10px 14px;outline:none}.custom-food-input:focus{border-color:var(--accent)}.custom-food-btn{font-family:'DM Sans',sans-serif;font-size:13px;font-weight:500;color:var(--accent);background:var(--accent-glow);border:1px solid var(--accent);border-radius:8px;padding:10px 18px;cursor:pointer;white-space:nowrap}.custom-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.custom-tag{display:flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:4px 10px;font-size:13px;color:var(--text2)}.custom-tag-remove{cursor:pointer;color:var(--text3);font-size:16px}@media(max-width:640px){
-.tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;gap:2px;padding:3px}
-.tab{font-size:11px;letter-spacing:1px;padding:9px 6px;white-space:nowrap;flex-shrink:0}
-.totals-grid{grid-template-columns:repeat(2,1fr)}
-.ogun-grid{flex-wrap:wrap}
-.ogun-chip{flex:none;width:calc(50% - 4px)}
-.meal-form{padding:16px}
-.meal-submit{width:100%;padding:13px}
-.calori-banner{flex-direction:column;gap:10px;align-items:flex-start}
-.calori-progress{min-width:unset;width:100%}
-.history-day-totals{flex-wrap:wrap;gap:8px}
-.history-day-header{flex-direction:column;align-items:flex-start;gap:4px}
-.plan-card-body{padding:12px 14px}
-.section .section-title{font-size:18px}
-.cat-label{font-size:10px}
-.active-plan-banner{flex-direction:column;align-items:flex-start;gap:10px}
-.reset-btn{align-self:flex-end}
-}
-    </style>
-</head>
-<body>
-<nav>
-    <div class="nav-logo">FC</div>
-    <div class="nav-links">
-        <a href="/" class="nav-link">Ana Sayfa</a>
-        <a href="/nutrition" class="nav-link active">Beslenme</a>
-        <a href="/training" class="nav-link">Antrenman</a>
-        <a href="/progress-page" class="nav-link">İlerleme</a>
-    </div>
-    <div class="nav-right">
-        <span class="nav-user">Hoş geldin, <span>{{ username }}</span></span>
-        <button class="theme-toggle" onclick="toggleTheme()"></button>
-        <a href="/logout" class="logout-btn">Çıkış</a>
-    </div>
-</nav>
-<div class="loading-overlay" id="loading"><div class="loading-spinner"></div><div class="loading-text">Hesaplanıyor...</div></div>
-<div class="container">
-    <div class="page-header"><h1>BESLENME<br><span>TAKİBİ</span></h1><p>Öğünlerini kaydet, koçundan değerlendirme al veya plan oluştur.</p></div>
-    <div class="tabs">
-        <button class="tab active" onclick="switchTab('log')">Öğün Kaydet</button>
-        <button class="tab" onclick="switchTab('today')">Bugün</button>
-        <button class="tab" onclick="switchTab('history')">Geçmiş</button>
-        <button class="tab" onclick="switchTab('plan')">Plan Oluştur</button>
-    </div>
-    <div class="tab-content active" id="tab-log">
-        <div class="calori-banner" id="calori-banner">
-            <div><div class="calori-banner-label">Günlük hedef</div><div class="calori-banner-val" id="target-kcal">— kcal</div></div>
-            <div class="calori-progress"><div class="calori-bar"><div class="calori-bar-fill" id="calori-fill" style="width:0%;background:var(--accent)"></div></div><div class="calori-eaten" id="calori-eaten">Bugün: 0 kcal</div></div>
-        </div>
-        <div class="meal-form">
-            <div class="section-title">Öğün Ekle</div><div class="section-sub">Ne yediğini yaz, koçun besin değerlerini hesaplasın.</div>
-            <div class="ogun-grid">
-                <div class="ogun-chip selected" onclick="selectOgun('Kahvaltı',this)"><span class="ogun-icon">🌅</span>Kahvaltı</div>
-                <div class="ogun-chip" onclick="selectOgun('Öğle',this)"><span class="ogun-icon">☀️</span>Öğle</div>
-                <div class="ogun-chip" onclick="selectOgun('Akşam',this)"><span class="ogun-icon">🌙</span>Akşam</div>
-                <div class="ogun-chip" onclick="selectOgun('Ara Öğün',this)"><span class="ogun-icon">🥤</span>Ara Öğün</div>
-            </div>
-            <textarea class="meal-textarea" id="meal-input" placeholder="Örn: 2 yumurta, 1 dilim tam buğday ekmeği, 50g beyaz peynir, 1 domates, zeytinyağı"></textarea>
-            <button class="meal-submit" onclick="logMeal()">KAYDET</button>
-        </div>
-        <div id="today-preview"></div>
-    </div>
-    <div class="tab-content" id="tab-today">
-        <div class="totals-grid" id="totals-grid">
-            <div class="total-card"><div class="total-val" id="t-kcal">0</div><div class="total-label">Kalori</div></div>
-            <div class="total-card"><div class="total-val" id="t-protein">0g</div><div class="total-label">Protein</div></div>
-            <div class="total-card"><div class="total-val" id="t-karb">0g</div><div class="total-label">Karbonhidrat</div></div>
-            <div class="total-card"><div class="total-val" id="t-yag">0g</div><div class="total-label">Yağ</div></div>
-        </div>
-        <div id="today-meals-list"><div class="today-empty">Bugün kayıtlı öğün yok.</div></div>
-        <button class="review-btn" id="review-btn" onclick="getReview()">GÜN SONU DEĞERLENDİRMESİ</button>
-        <div class="review-card" id="review-card"><div class="review-header"><div class="review-avatar">🏋️</div><div class="review-title">Koç Değerlendirmesi</div></div><div class="review-text" id="review-text"></div></div>
-    </div>
-    <div class="tab-content" id="tab-history">
-        <div class="section-title">Beslenme Geçmişi</div><div class="section-sub">Günlük öğün kayıtların ve besin değerleri.</div>
-        <div id="history-list"><div class="today-empty">Henüz kayıt yok.</div></div>
-    </div>
-    <div class="tab-content" id="tab-plan">
-        <div id="active-plan-banner" style="display:none"></div>
-        <div class="section"><div class="section-title">Protein Kaynakları</div><div class="section-sub">En az bir kaynak seç.</div><div class="cat-label">Hayvansal</div><div class="food-grid" id="protein-hayvansal"></div><div class="cat-label">Bitkisel</div><div class="food-grid" id="protein-bitkisel"></div></div>
-        <div class="section"><div class="section-title">Karbonhidrat Kaynakları</div><div class="section-sub">En az bir kaynak seç.</div><div class="food-grid" id="karb-list"></div></div>
-        <div class="section"><div class="section-title">Yağ Kaynakları</div><div class="section-sub">En az bir kaynak seç.</div><div class="food-grid" id="yag-list"></div></div>
-        <div class="section"><div class="section-title">Özel Gıda Ekle</div><div class="section-sub">Listede olmayan gıdayı yaz.</div><div class="custom-food-row"><input type="text" id="custom-input" class="custom-food-input" placeholder="Örn: Keçi peyniri..."><button class="custom-food-btn" onclick="addCustomFood()">+ Ekle</button></div><div class="custom-tags" id="custom-tags"></div></div>
-        <button class="submit-btn" id="plan-btn" onclick="generatePlan()">PLAN OLUŞTUR</button>
-        <div id="plan-results" style="display:none"><div class="divider"><div class="divider-line"></div><div class="divider-label">Planların</div><div class="divider-line"></div></div><div class="score-banner" id="score-banner"></div><div class="plans-grid" id="plans-grid"></div></div>
-    </div>
-</div>
-<script>
-const savedTheme=localStorage.getItem('theme')||'dark';document.documentElement.dataset.theme=savedTheme;
-function toggleTheme(){const h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark';localStorage.setItem('theme',h.dataset.theme)}
-function switchTab(name){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));document.getElementById('tab-'+name).classList.add('active');event.target.classList.add('active');if(name==='today')loadToday();if(name==='history')loadMealHistory()}
-let selectedOgun='Kahvaltı';
-function selectOgun(o,el){selectedOgun=o;document.querySelectorAll('.ogun-chip').forEach(c=>c.classList.remove('selected'));el.classList.add('selected')}
-async function logMeal(){const y=document.getElementById('meal-input').value.trim();if(!y){alert('Ne yediğini yaz.');return}const l=document.getElementById('loading');l.classList.add('active');try{const r=await fetch('/meal-log',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ogun:selectedOgun,yemekler:y})});if(!r.ok){alert('Hata: '+r.status);return}const d=await r.json();if(d.error){alert(d.error);return}document.getElementById('meal-input').value='';loadTodayPreview();loadCaloriBanner()}catch(e){alert('Hata: '+e.message)}finally{l.classList.remove('active')}}
-let targetCalories=2000;
-async function loadCaloriBanner(){try{const sr=await fetch('/last-session');const sd=await sr.json();if(sd.exists&&sd.target_calories){targetCalories=Math.round(sd.target_calories);document.getElementById('target-kcal').textContent=targetCalories+' kcal'}const tr=await fetch('/meal-log/today');const td=await tr.json();const eaten=Math.round(td.totals.kalori);const pct=Math.min(Math.round(eaten/targetCalories*100),100);const color=pct>110?'var(--red)':pct>90?'var(--orange)':'var(--accent)';document.getElementById('calori-fill').style.width=pct+'%';document.getElementById('calori-fill').style.background=color;document.getElementById('calori-eaten').textContent=`Bugün: ${eaten} / ${targetCalories} kcal (${pct}%)`}catch(e){}}
-async function loadTodayPreview(){try{const r=await fetch('/meal-log/today');const d=await r.json();const c=document.getElementById('today-preview');if(d.meals.length===0){c.innerHTML='';return}c.innerHTML=d.meals.map(m=>`<div class="today-card"><div class="today-header"><div class="today-ogun">${m.ogun}</div><div class="today-kcal">${Math.round(m.kalori)} kcal</div></div><div class="today-foods">${m.yemekler}</div><div class="today-macros"><div class="today-macro">P: <span>${Math.round(m.protein)}g</span></div><div class="today-macro">K: <span>${Math.round(m.karb)}g</span></div><div class="today-macro">Y: <span>${Math.round(m.yag)}g</span></div></div></div>`).join('')}catch(e){}}
-async function loadToday(){try{const r=await fetch('/meal-log/today');const d=await r.json();document.getElementById('t-kcal').textContent=Math.round(d.totals.kalori);document.getElementById('t-protein').textContent=Math.round(d.totals.protein)+'g';document.getElementById('t-karb').textContent=Math.round(d.totals.karb)+'g';document.getElementById('t-yag').textContent=Math.round(d.totals.yag)+'g';const l=document.getElementById('today-meals-list');if(d.meals.length===0){l.innerHTML='<div class="today-empty">Bugün kayıtlı öğün yok.</div>';return}l.innerHTML=d.meals.map(m=>`<div class="today-card"><div class="today-header"><div class="today-ogun">${m.ogun}</div><div class="today-kcal">${Math.round(m.kalori)} kcal</div></div><div class="today-foods">${m.yemekler}</div><div class="today-macros"><div class="today-macro">Protein: <span>${Math.round(m.protein)}g</span></div><div class="today-macro">Karb: <span>${Math.round(m.karb)}g</span></div><div class="today-macro">Yağ: <span>${Math.round(m.yag)}g</span></div></div></div>`).join('')}catch(e){}}
-async function getReview(){const b=document.getElementById('review-btn');b.textContent='DEĞERLENDİRİLİYOR...';try{const r=await fetch('/meal-log/review',{method:'POST',headers:{'Content-Type':'application/json'}});const d=await r.json();if(d.error){alert(d.error);return}document.getElementById('review-text').innerHTML=d.review.replace(/\n/g,'<br>');document.getElementById('review-card').classList.add('visible')}catch(e){alert('Hata: '+e.message)}finally{b.textContent='GÜN SONU DEĞERLENDİRMESİ'}}
-async function loadMealHistory(){try{const r=await fetch('/meal-log/history');const d=await r.json();const l=document.getElementById('history-list');if(d.length===0){l.innerHTML='<div class="today-empty">Henüz kayıt yok.</div>';return}l.innerHTML=d.map(day=>`<div class="history-day"><div class="history-day-header"><div class="history-date">${day.tarih}</div><div class="history-day-totals"><div class="history-day-total">Kalori: <span>${Math.round(day.totals.kalori)}</span></div><div class="history-day-total">P: <span>${Math.round(day.totals.protein)}g</span></div><div class="history-day-total">K: <span>${Math.round(day.totals.karb)}g</span></div><div class="history-day-total">Y: <span>${Math.round(day.totals.yag)}g</span></div></div></div>${day.meals.map(m=>`<div class="history-meal"><div class="history-meal-ogun">${m.ogun} · ${Math.round(m.kalori)} kcal</div><div class="history-meal-foods">${m.yemekler}</div></div>`).join('')}</div>`).join('')}catch(e){}}
-const FOODS={protein_hayvansal:["Tavuk Göğsü","Yumurta","Ton Balığı","Kırmızı Et","Yoğurt","Somon"],protein_bitkisel:["Mercimek","Nohut","Tofu","Kinoa","Edamame"],karbonhidrat:["Yulaf Ezmesi","Pirinç","Bulgur","Tatlı Patates","Tam Buğday Ekmeği","Muz","Elma"],yag:["Zeytinyağı","Avokado","Badem","Ceviz","Fındık"]};
-const selected={proteins:new Set(),carbs:new Set(),fats:new Set()};const customFoods=[];
-function createChip(n,c){const ch=document.createElement("label");ch.className="food-chip";ch.innerHTML=`<input type="checkbox" onchange="toggleFood('${n}','${c}',this)"><div class="food-chip-dot"></div><span class="food-chip-name">${n}</span>`;return ch}
-function populateFoods(){FOODS.protein_hayvansal.forEach(f=>document.getElementById("protein-hayvansal").appendChild(createChip(f,"proteins")));FOODS.protein_bitkisel.forEach(f=>document.getElementById("protein-bitkisel").appendChild(createChip(f,"proteins")));FOODS.karbonhidrat.forEach(f=>document.getElementById("karb-list").appendChild(createChip(f,"carbs")));FOODS.yag.forEach(f=>document.getElementById("yag-list").appendChild(createChip(f,"fats")))}
-function toggleFood(n,c,cb){const ch=cb.closest(".food-chip");if(cb.checked){selected[c].add(n);ch.classList.add("selected")}else{selected[c].delete(n);ch.classList.remove("selected")}}
-function addCustomFood(){const i=document.getElementById("custom-input");const v=i.value.trim();if(!v||customFoods.includes(v)){i.value="";return}customFoods.push(v);i.value="";const t=document.createElement("div");t.className="custom-tag";t.innerHTML=`<span>${v}</span><span class="custom-tag-remove" onclick="removeCustomFood('${v}',this)">×</span>`;document.getElementById("custom-tags").appendChild(t)}
-document.getElementById("custom-input").addEventListener("keydown",e=>{if(e.key==="Enter")addCustomFood()});
-function removeCustomFood(n,el){const i=customFoods.indexOf(n);if(i>-1)customFoods.splice(i,1);el.closest('.custom-tag').remove()}
-async function generatePlan(){if(selected.proteins.size===0){alert("En az bir protein kaynağı seç.");return}if(selected.carbs.size===0){alert("En az bir karbonhidrat kaynağı seç.");return}if(selected.fats.size===0){alert("En az bir yağ kaynağı seç.");return}const b=document.getElementById("plan-btn");const l=document.getElementById("loading");b.classList.add("loading");b.textContent="HAZIRLANIYOR...";l.classList.add("active");try{const r=await fetch("/nutrition-plan",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({proteins:[...selected.proteins],carbs:[...selected.carbs],fats:[...selected.fats],custom_foods:customFoods})});const d=await r.json();if(d.error){alert(d.error);return}renderPlans(d)}catch(e){alert("Hata: "+e.message)}finally{b.classList.remove("loading");b.textContent="PLAN OLUŞTUR";l.classList.remove("active")}}
-function renderPlans(data){document.getElementById("plan-results").style.display="block";const sc={"İyi":"#c8f060","Orta":"#f0c040","Kötü":"#ff6b6b"};const color=sc[data.score_label]||"#888";document.getElementById("score-banner").innerHTML=`<div class="score-val" style="color:${color}">${data.overall_score}</div><div class="score-info"><div class="score-label-big" style="color:${color}">${data.score_label}</div><div class="score-desc">Mikro değer, biyoyararlanım ve gluten skoru ortalaması</div></div>`;const g=document.getElementById("plans-grid");g.innerHTML="";data.planlar.forEach((plan,i)=>{const c=document.createElement("div");c.className="plan-card";c.id=`plan-card-${i}`;const meals=[{key:"kahvalti",label:"Kahvaltı"},{key:"ogle",label:"Öğle"},{key:"aksam",label:"Akşam"},{key:"ara_ogun",label:"Ara Öğün"}];const mh=meals.map(m=>{const ml=plan[m.key];if(!ml)return"";return`<div class="meal-section-plan"><div class="meal-title-plan">${m.label} · ${ml.kalori??"—"} kcal</div><ul class="meal-items-plan">${(ml.yemekler||[]).map(y=>`<li>${y}</li>`).join("")}</ul></div>`}).join("");c.innerHTML=`<div class="plan-card-header"><div class="plan-card-name">${plan.isim??"Plan "+(i+1)}</div><div class="plan-card-kcal">${plan.toplam_kalori??"—"} kcal</div></div><div class="plan-card-body">${mh}<div class="plan-macros"><div class="macro-item"><div class="macro-val">${plan.toplam_protein??"—"}g</div><div class="macro-label">Protein</div></div><div class="macro-item"><div class="macro-val">${plan.toplam_karb??"—"}g</div><div class="macro-label">Karb</div></div><div class="macro-item"><div class="macro-val">${plan.toplam_yag??"—"}g</div><div class="macro-label">Yağ</div></div></div><button class="select-plan-btn" id="sel-btn-${i}" onclick="selectPlan(${i},${JSON.stringify(plan).replace(/"/g,'&quot;')},${data.overall_score})">BU PLANI SEÇ</button></div>`;g.appendChild(c)});setTimeout(()=>document.getElementById("plan-results").scrollIntoView({behavior:"smooth",block:"start"}),200)}
-async function selectPlan(i,plan,score){try{await fetch("/nutrition-plan/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({plan,score})});document.querySelectorAll(".plan-card").forEach(c=>c.classList.remove("selected-plan"));document.querySelectorAll(".select-plan-btn").forEach(b=>{b.textContent="BU PLANI SEÇ";b.classList.remove("chosen")});document.getElementById(`plan-card-${i}`).classList.add("selected-plan");const b=document.getElementById(`sel-btn-${i}`);b.textContent="✓ AKTİF PLAN";b.classList.add("chosen")}catch(e){alert("Kayıt hatası: "+e.message)}}
-async function loadActivePlan(){try{const r=await fetch("/nutrition-plan/active");const d=await r.json();if(!d.exists)return;const b=document.getElementById("active-plan-banner");b.style.display="flex";b.className="active-plan-banner";b.innerHTML=`<div><div class="active-plan-text">Aktif planın: <strong>${d.plan.isim||"Seçili Plan"}</strong></div><div class="active-plan-date">${d.created_at} · Skor: ${d.score}/10</div></div><button class="reset-btn" onclick="this.closest('.active-plan-banner').style.display='none'">Yeni plan</button>`}catch(e){}}
-populateFoods();loadCaloriBanner();loadTodayPreview();loadActivePlan();
-</script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Beslenme — Fitness Coach</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/theme.css">
+  <style>
+    /* ── PAGE-SPECIFIC OVERRIDES ── */
+    .calorie-stats-grid {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 32px;
+      align-items: center;
+    }
+    @media (max-width: 560px) {
+      .calorie-stats-grid { grid-template-columns: 1fr; justify-items: center; }
+    }
+    .macro-bars { display: flex; flex-direction: column; gap: 14px; width: 100%; }
+    .macro-row  { display: flex; flex-direction: column; gap: 5px; }
+    .macro-row-hdr { display: flex; justify-content: space-between; align-items: center; }
+    .macro-name { font-size: 12px; font-weight: 600; color: var(--text-2); }
+    .macro-val  { font-size: 12px; font-weight: 700; color: var(--text); }
 
-<div class="mobile-bottom-nav">
-  <div class="mbn-inner">
-    <a href="/" class="mbn-item">
+    .totals-row {
+      display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; margin-bottom: 24px;
+    }
+    @media (max-width: 500px) { .totals-row { grid-template-columns: repeat(2,1fr); } }
+    .total-stat { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; }
+    .total-val  { font-family: var(--font-display); font-size: 22px; color: var(--volt); letter-spacing: 1px; }
+    .total-lbl  { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 2px; }
+
+    /* Water modal */
+    .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.7); backdrop-filter:blur(6px); z-index:200; display:none; align-items:center; justify-content:center; padding:16px; }
+    .modal-overlay.open { display:flex; animation:fade-in 0.2s ease; }
+    .modal-box { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-xl); padding:32px; width:100%; max-width:360px; }
+    .modal-title { font-family:var(--font-display); font-size:22px; letter-spacing:3px; color:var(--volt); margin-bottom:20px; }
+
+    /* Score bar rows */
+    .score-bar-row { display:flex; align-items:center; gap:10px; font-size:12px; color:var(--text-2); margin-bottom:8px; }
+    .score-bar-lbl { min-width:80px; }
+    .score-bar-val { min-width:32px; text-align:right; }
+
+    /* Chip grid (food selection) */
+    .chip-grid { display:flex; flex-wrap:wrap; gap:8px; }
+
+    /* Skeleton placeholder */
+    .skel-card { padding:18px 20px; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-lg); display:flex; flex-direction:column; gap:10px; }
+  </style>
+</head>
+
+<body class="page-body">
+
+<!-- ── LOADING OVERLAY ── -->
+<div class="loading-overlay" id="loading">
+  <div class="loading-spinner"></div>
+  <div class="loading-text">Hesaplanıyor...</div>
+</div>
+
+<!-- ── WATER MODAL ── -->
+<div class="modal-overlay" id="water-modal" onclick="if(event.target===this)closeWater()">
+  <div class="modal-box">
+    <div class="modal-title">SU KAYDETT</div>
+    <p style="font-size:14px;color:var(--text-2);margin-bottom:20px;">Bugün ne kadar su içtin?</p>
+    <select class="fc-input" id="water-amount" style="margin-bottom:16px;">
+      <option value="250">1 bardak — 250 ml</option>
+      <option value="500">2 bardak — 500 ml</option>
+      <option value="750">3 bardak — 750 ml</option>
+      <option value="1000">1 litre — 1000 ml</option>
+      <option value="1500">1.5 litre</option>
+      <option value="2000">2 litre</option>
+    </select>
+    <button class="btn-volt w-full" onclick="logWater()">KAYDET</button>
+    <button class="btn-ghost w-full" style="margin-top:8px;width:100%;" onclick="closeWater()">İptal</button>
+  </div>
+</div>
+
+<!-- ── TOAST CONTAINER ── -->
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<!-- ── SIDEBAR (desktop) ── -->
+<aside class="sidebar">
+  <div class="sidebar-logo">FC</div>
+  <nav class="sidebar-nav">
+    <a href="/" class="sidebar-link">
       <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
       Ana Sayfa
     </a>
-    <a href="/nutrition" class="mbn-item active">
+    <a href="/nutrition" class="sidebar-link active">
       <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
       Beslenme
     </a>
-    <a href="/training" class="mbn-item">
+    <a href="/training" class="sidebar-link">
       <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
       Antrenman
     </a>
-    <a href="/progress-page" class="mbn-item">
+    <a href="/progress-page" class="sidebar-link">
+      <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      İlerleme
+    </a>
+  </nav>
+  <div class="sidebar-sep"></div>
+  <div class="sidebar-user">
+    <div class="sidebar-avatar" id="sb-avatar">U</div>
+    <div>
+      <div class="sidebar-name" id="sb-name">{{ username }}</div>
+      <a href="/logout" class="sidebar-logout">Çıkış yap →</a>
+    </div>
+  </div>
+</aside>
+
+<!-- ── MAIN CONTENT ── -->
+<main class="main-content">
+
+  <!-- Page Header -->
+  <div class="page-hdr">
+    <h1>BES<span>LENME</span></h1>
+    <p>Günlük öğünlerini takip et, beslenme planı oluştur.</p>
+  </div>
+
+  <!-- Tab Bar -->
+  <div class="tab-bar" role="tablist">
+    <button class="tab-btn active" onclick="switchTab('today',this)" role="tab">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+      Bugün
+    </button>
+    <button class="tab-btn" onclick="switchTab('plan',this)" role="tab">
+      <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      Plan Oluştur
+    </button>
+    <button class="tab-btn" onclick="switchTab('history',this)" role="tab">
+      <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Geçmiş
+    </button>
+  </div>
+
+  <!-- ════════════════════════════════
+       TAB 1 — BUGÜN
+  ════════════════════════════════ -->
+  <div class="tab-panel active" id="panel-today">
+
+    <!-- Calorie Ring + Macro Bars -->
+    <div class="card" style="padding:24px;margin-bottom:20px;">
+      <div class="calorie-stats-grid">
+
+        <!-- Ring -->
+        <div class="ring-wrap">
+          <svg class="ring-svg" width="150" height="150" viewBox="0 0 120 120">
+            <circle class="ring-track" cx="60" cy="60" r="48" stroke-width="8"/>
+            <circle class="ring-fill" id="calorie-ring"
+              cx="60" cy="60" r="48" stroke-width="8"
+              stroke="#CCFF00"
+              stroke-dasharray="301.6"
+              stroke-dashoffset="301.6"/>
+          </svg>
+          <div class="ring-label">
+            <div style="font-family:'Bebas Neue';font-size:30px;color:#CCFF00;letter-spacing:1px;line-height:1;" id="ring-eaten">0</div>
+            <div style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:2px;">kcal</div>
+            <div style="font-size:10px;color:var(--text-3);font-weight:500;" id="ring-pct">0%</div>
+          </div>
+        </div>
+
+        <!-- Macro bars -->
+        <div style="min-width:0;">
+          <div style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:16px;">
+            Hedef: <span id="ring-target" style="color:var(--text-2);">—</span> kcal
+          </div>
+          <div class="macro-bars">
+            <!-- Protein -->
+            <div class="macro-row">
+              <div class="macro-row-hdr">
+                <span class="macro-name">Protein</span>
+                <span class="macro-val"><span id="macro-protein">0</span>g</span>
+              </div>
+              <div class="pbar-track">
+                <div class="pbar-fill" id="bar-protein" style="width:0%;background:#3D9EFF;"></div>
+              </div>
+            </div>
+            <!-- Karbonhidrat -->
+            <div class="macro-row">
+              <div class="macro-row-hdr">
+                <span class="macro-name">Karbonhidrat</span>
+                <span class="macro-val"><span id="macro-karb">0</span>g</span>
+              </div>
+              <div class="pbar-track">
+                <div class="pbar-fill" id="bar-karb" style="width:0%;background:#FFB020;"></div>
+              </div>
+            </div>
+            <!-- Yağ -->
+            <div class="macro-row">
+              <div class="macro-row-hdr">
+                <span class="macro-name">Yağ</span>
+                <span class="macro-val"><span id="macro-yag">0</span>g</span>
+              </div>
+              <div class="pbar-track">
+                <div class="pbar-fill" id="bar-yag" style="width:0%;background:#00C48C;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Today's Meals -->
+    <div class="sec-label">Bugünkü Öğünler</div>
+    <div id="today-meals-list">
+      <!-- Skeleton -->
+      <div class="skel-card" id="today-skeleton">
+        <div class="skeleton" style="height:12px;width:40%;"></div>
+        <div class="skeleton" style="height:16px;width:80%;"></div>
+        <div class="skeleton" style="height:12px;width:60%;"></div>
+      </div>
+    </div>
+
+    <!-- AI Review -->
+    <button class="btn-ghost w-full" style="width:100%;margin-top:16px;" id="review-btn" onclick="getReview()">
+      <svg viewBox="0 0 24 24" style="width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      GÜN SONU AI DEĞERLENDİRMESİ
+    </button>
+    <div class="review-card" id="review-card">
+      <div class="review-hdr">
+        <div class="review-av">🤖</div>
+        <div class="review-lbl">AI KOÇ DEĞERLENDİRMESİ</div>
+      </div>
+      <div class="review-body" id="review-text"></div>
+    </div>
+
+    <!-- ── Log Meal Form ── -->
+    <div class="fc-divider">
+      <div class="fc-divider-line"></div>
+      <div class="fc-divider-lbl">Öğün Ekle</div>
+      <div class="fc-divider-line"></div>
+    </div>
+
+    <div class="card" style="padding:24px;">
+      <div class="meal-type-grid" id="meal-type-grid">
+        <div class="meal-type-opt selected" onclick="selectMealType('Kahvaltı',this)">
+          <span class="emoji">🍳</span>Kahvaltı
+        </div>
+        <div class="meal-type-opt" onclick="selectMealType('Öğle',this)">
+          <span class="emoji">🥗</span>Öğle
+        </div>
+        <div class="meal-type-opt" onclick="selectMealType('Akşam',this)">
+          <span class="emoji">🍽️</span>Akşam
+        </div>
+        <div class="meal-type-opt" onclick="selectMealType('Ara Öğün',this)">
+          <span class="emoji">🥜</span>Ara Öğün
+        </div>
+      </div>
+      <textarea class="fc-input" id="meal-input"
+        placeholder="Ne yedin? Örn: 3 yumurta, tam buğday ekmeği 2 dilim, zeytinyağı..."></textarea>
+      <button class="btn-volt w-full" style="margin-top:12px;" onclick="logMeal()">
+        ÖĞÜN KAYDET
+      </button>
+    </div>
+
+  </div><!-- /panel-today -->
+
+
+  <!-- ════════════════════════════════
+       TAB 2 — PLAN OLUŞTUR
+  ════════════════════════════════ -->
+  <div class="tab-panel" id="panel-plan">
+
+    <!-- Active plan banner -->
+    <div id="active-plan-banner" style="display:none;"></div>
+
+    <!-- Food Selection -->
+    <div class="card" style="padding:24px;margin-bottom:20px;">
+
+      <div class="cat-label">🥩 Protein — Hayvansal</div>
+      <div class="chip-grid" id="protein-hayvansal"></div>
+
+      <div class="cat-label">🌿 Protein — Bitkisel</div>
+      <div class="chip-grid" id="protein-bitkisel"></div>
+
+      <div class="cat-label">🍞 Karbonhidrat</div>
+      <div class="chip-grid" id="karb-list"></div>
+
+      <div class="cat-label">🥑 Sağlıklı Yağ</div>
+      <div class="chip-grid" id="yag-list"></div>
+
+      <!-- Custom food -->
+      <div class="cat-label">➕ Özel Gıda</div>
+      <div class="custom-food-row">
+        <input class="fc-input" id="custom-input" placeholder="Gıda ekle…" style="flex:1;">
+        <button class="btn-ghost" onclick="addCustomFood()">Ekle</button>
+      </div>
+      <div class="custom-tags" id="custom-tags"></div>
+    </div>
+
+    <button class="btn-volt w-full" id="plan-btn" onclick="generatePlan()">
+      <svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:#121212;fill:none;stroke-width:2.2;stroke-linecap:round;"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 1 0 4.93 19.07"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83"/></svg>
+      PLAN OLUŞTUR
+    </button>
+
+    <!-- Plan Results -->
+    <div id="plan-results" style="display:none;margin-top:32px;">
+      <div id="score-banner-wrap"></div>
+      <div class="plans-grid" id="plans-grid"></div>
+    </div>
+
+  </div><!-- /panel-plan -->
+
+
+  <!-- ════════════════════════════════
+       TAB 3 — GEÇMİŞ
+  ════════════════════════════════ -->
+  <div class="tab-panel" id="panel-history">
+
+    <!-- Weekly chart -->
+    <div class="card" style="padding:24px;margin-bottom:20px;">
+      <div style="font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--text-3);margin-bottom:16px;">Haftalık Kalori</div>
+      <div class="bar-chart-wrap" id="weekly-chart">
+        <!-- JS ile doldurulacak -->
+        <div style="flex:1;text-align:center;color:var(--text-3);font-size:13px;align-self:center;">Veri yükleniyor…</div>
+      </div>
+    </div>
+
+    <!-- History list -->
+    <div class="sec-label">Öğün Geçmişi</div>
+    <div id="history-list">
+      <div class="skel-card" style="margin-bottom:12px;">
+        <div class="skeleton" style="height:14px;width:30%;"></div>
+        <div class="skeleton" style="height:12px;width:70%;"></div>
+        <div class="skeleton" style="height:12px;width:55%;"></div>
+      </div>
+    </div>
+
+  </div><!-- /panel-history -->
+
+</main><!-- /main-content -->
+
+
+<!-- ── BOTTOM NAV (mobile) ── -->
+<nav class="bottom-nav">
+  <div class="bottom-nav-inner">
+    <a href="/" class="bn-item">
+      <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      Ana Sayfa
+    </a>
+    <a href="/nutrition" class="bn-item active">
+      <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+      Beslenme
+    </a>
+    <a href="/training" class="bn-item">
+      <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
+      Antrenman
+    </a>
+    <a href="/progress-page" class="bn-item">
       <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
       İlerleme
     </a>
   </div>
+</nav>
+
+
+<!-- ── FAB SPEED DIAL ── -->
+<div class="fab-wrap" id="fab-wrap">
+  <div class="fab-actions" id="fab-actions">
+
+    <div class="fab-row">
+      <span class="fab-lbl">Yapay Zeka'ya Sor</span>
+      <a href="/progress-page#chat" class="fab-sub">
+        <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      </a>
+    </div>
+
+    <div class="fab-row">
+      <span class="fab-lbl">Su Kaydet</span>
+      <button class="fab-sub" onclick="openWater();toggleFAB()">
+        <svg viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+      </button>
+    </div>
+
+    <div class="fab-row">
+      <span class="fab-lbl">Öğün Ekle</span>
+      <button class="fab-sub" onclick="scrollToForm();toggleFAB()">
+        <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+    </div>
+
+  </div>
+
+  <button class="fab-main" id="fab-main" onclick="toggleFAB()" aria-label="Hızlı işlemler">
+    <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  </button>
 </div>
+
+
+<!-- ══════════════════════════════════════════════════
+     JAVASCRIPT
+══════════════════════════════════════════════════ -->
+<script>
+/* ── CONSTANTS ── */
+const RING_CIRC = 301.6; // 2π × 48
+let targetCalories = 2000;
+let selectedMealType = 'Kahvaltı';
+let fabOpen = false;
+
+/* ── TOAST SYSTEM ── */
+function showToast(msg, type = 'info', duration = 3500) {
+  const wrap = document.getElementById('toast-wrap');
+  const icons = { success: '✓', error: '✕', info: 'ℹ' };
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.innerHTML = `<span class="toast-icon">${icons[type] || '•'}</span><span>${msg}</span>`;
+  wrap.appendChild(t);
+  setTimeout(() => {
+    t.classList.add('hide');
+    setTimeout(() => t.remove(), 300);
+  }, duration);
+}
+
+/* ── TAB SYSTEM ── */
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('panel-' + name).classList.add('active');
+  if (name === 'today')   { loadTodayData(); }
+  if (name === 'history') { loadMealHistory(); }
+}
+
+/* ── CALORIE RING ── */
+function updateRing(eaten, target) {
+  const pct = Math.min(eaten / Math.max(target, 1), 1);
+  const offset = RING_CIRC * (1 - pct);
+  const ring = document.getElementById('calorie-ring');
+  ring.style.strokeDashoffset = offset;
+  ring.style.stroke = eaten > target * 1.05 ? '#FF4D4D' : '#CCFF00';
+  document.getElementById('ring-eaten').textContent = Math.round(eaten);
+  document.getElementById('ring-pct').textContent   = Math.round(pct * 100) + '%';
+  document.getElementById('ring-target').textContent = Math.round(target);
+}
+
+/* ── MACRO BARS ── */
+function updateMacroBars(totals, targets) {
+  const cfg = [
+    { key:'protein', elVal:'macro-protein', elBar:'bar-protein', tgt: targets.protein || 140 },
+    { key:'karb',    elVal:'macro-karb',    elBar:'bar-karb',    tgt: targets.karb    || 200 },
+    { key:'yag',     elVal:'macro-yag',     elBar:'bar-yag',     tgt: targets.yag     || 60  },
+  ];
+  cfg.forEach(c => {
+    const val = totals[c.key] || 0;
+    const pct = Math.min(val / c.tgt, 1) * 100;
+    document.getElementById(c.elVal).textContent = Math.round(val);
+    document.getElementById(c.elBar).style.width = pct + '%';
+  });
+}
+
+/* ── MEAL TYPE SELECTOR ── */
+function selectMealType(type, el) {
+  selectedMealType = type;
+  document.querySelectorAll('.meal-type-opt').forEach(o => o.classList.remove('selected'));
+  el.classList.add('selected');
+}
+
+/* ── LOAD TODAY DATA ── */
+async function loadTodayData() {
+  try {
+    const [sessionRes, todayRes] = await Promise.all([
+      fetch('/last-session'),
+      fetch('/meal-log/today')
+    ]);
+    const session = await sessionRes.json();
+    const today   = await todayRes.json();
+
+    if (session.exists && session.target_calories) {
+      targetCalories = Math.round(session.target_calories);
+    }
+
+    // Update ring & bars
+    const eaten = today.totals || {};
+    updateRing(eaten.kalori || 0, targetCalories);
+
+    // Estimate macro targets from calories (rough: 30/40/30 split)
+    const macroTargets = {
+      protein: Math.round(targetCalories * 0.30 / 4),
+      karb:    Math.round(targetCalories * 0.40 / 4),
+      yag:     Math.round(targetCalories * 0.30 / 9),
+    };
+    updateMacroBars(eaten, macroTargets);
+
+    // Render meals list
+    renderTodayMeals(today.meals || []);
+
+  } catch (e) {
+    console.error('loadTodayData', e);
+  }
+}
+
+function renderTodayMeals(meals) {
+  const el = document.getElementById('today-meals-list');
+  if (!meals.length) {
+    el.innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon"><svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/></svg></div>
+        <div class="empty-title">Bugün henüz öğün girilmedi</div>
+        <div class="empty-sub">Aşağıdaki formdan öğünlerini ekle, AI besin değerlerini hesaplasın.</div>
+      </div>`;
+    return;
+  }
+  el.innerHTML = meals.map(m => `
+    <div class="meal-log-card" style="margin-bottom:10px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <span class="meal-badge">${m.ogun}</span>
+        <span style="font-family:'Bebas Neue';font-size:18px;color:var(--volt);letter-spacing:1px;">${Math.round(m.kalori)} kcal</span>
+      </div>
+      <div style="font-size:14px;color:var(--text);font-weight:300;line-height:1.6;margin-bottom:10px;">${m.yemekler}</div>
+      <div style="display:flex;gap:16px;padding-top:10px;border-top:1px solid var(--border);">
+        <span style="font-size:12px;color:var(--text-2);">P: <strong style="color:var(--text);">${Math.round(m.protein)}g</strong></span>
+        <span style="font-size:12px;color:var(--text-2);">K: <strong style="color:var(--text);">${Math.round(m.karb)}g</strong></span>
+        <span style="font-size:12px;color:var(--text-2);">Y: <strong style="color:var(--text);">${Math.round(m.yag)}g</strong></span>
+      </div>
+    </div>`).join('');
+}
+
+/* ── LOG MEAL ── */
+async function logMeal() {
+  const input = document.getElementById('meal-input');
+  const yemekler = input.value.trim();
+  if (!yemekler) { showToast('Ne yediğini yaz.', 'error'); return; }
+
+  const loading = document.getElementById('loading');
+  loading.classList.add('active');
+  try {
+    const res = await fetch('/meal-log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ogun: selectedMealType, yemekler })
+    });
+    const d = await res.json();
+    if (d.error) { showToast(d.error, 'error'); return; }
+    input.value = '';
+    showToast('Öğün kaydedildi! ✓', 'success');
+    loadTodayData();
+  } catch (e) {
+    showToast('Bağlantı hatası: ' + e.message, 'error');
+  } finally {
+    loading.classList.remove('active');
+  }
+}
+
+/* ── AI REVIEW ── */
+async function getReview() {
+  const btn = document.getElementById('review-btn');
+  btn.textContent = 'DEĞERLENDİRİLİYOR…';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/meal-log/review', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }
+    });
+    const d = await res.json();
+    if (d.error) { showToast(d.error, 'error'); return; }
+    document.getElementById('review-text').innerHTML = (d.review || d.message || '').replace(/\n/g, '<br>');
+    document.getElementById('review-card').classList.add('visible');
+  } catch (e) {
+    showToast('Değerlendirme alınamadı.', 'error');
+  } finally {
+    btn.textContent = 'GÜN SONU AI DEĞERLENDİRMESİ';
+    btn.disabled = false;
+  }
+}
+
+/* ── MEAL HISTORY ── */
+async function loadMealHistory() {
+  try {
+    const res = await fetch('/meal-log/history');
+    const data = await res.json();
+
+    // Weekly chart (last 7 days)
+    renderWeeklyChart(data.slice(0, 7).reverse());
+
+    // History list
+    const list = document.getElementById('history-list');
+    if (!data.length) {
+      list.innerHTML = `<div class="empty-state"><div class="empty-icon"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="empty-title">Henüz kayıt yok</div></div>`;
+      return;
+    }
+    list.innerHTML = data.map(day => `
+      <div class="history-day">
+        <div class="history-day-hdr">
+          <div class="history-date">${day.tarih}</div>
+          <div class="history-totals">
+            <span class="history-total">Kalori: <span>${Math.round(day.totals.kalori)}</span></span>
+            <span class="history-total">P: <span>${Math.round(day.totals.protein)}g</span></span>
+            <span class="history-total">K: <span>${Math.round(day.totals.karb)}g</span></span>
+            <span class="history-total">Y: <span>${Math.round(day.totals.yag)}g</span></span>
+          </div>
+        </div>
+        ${day.meals.map(m => `
+          <div class="history-meal">
+            <div class="history-meal-type">${m.ogun} · ${Math.round(m.kalori)} kcal</div>
+            <div class="history-meal-foods">${m.yemekler}</div>
+          </div>`).join('')}
+      </div>`).join('');
+  } catch (e) {
+    console.error('loadMealHistory', e);
+  }
+}
+
+function renderWeeklyChart(days) {
+  const chart = document.getElementById('weekly-chart');
+  if (!days.length) { chart.innerHTML = '<div style="flex:1;text-align:center;color:var(--text-3);font-size:13px;align-self:center;">Veri yok</div>'; return; }
+  const maxKal = Math.max(...days.map(d => d.totals.kalori || 0), 1);
+  chart.innerHTML = days.map(d => {
+    const pct = Math.round((d.totals.kalori || 0) / maxKal * 100);
+    return `
+      <div class="bar-col">
+        <div class="bar-track">
+          <div class="bar-fill" style="height:${pct}%;"></div>
+        </div>
+        <div class="bar-col-label">${d.tarih}</div>
+      </div>`;
+  }).join('');
+}
+
+/* ── FOOD CHIPS (Plan Tab) ── */
+const FOODS = {
+  protein_hayvansal: ['Tavuk Göğsü','Yumurta','Ton Balığı','Kırmızı Et','Yoğurt','Somon','Hindi'],
+  protein_bitkisel:  ['Mercimek','Nohut','Tofu','Kinoa','Edamame','Fasulye'],
+  karbonhidrat:      ['Yulaf Ezmesi','Pirinç','Bulgur','Tatlı Patates','Tam Buğday Ekmeği','Muz','Elma','Makarna'],
+  yag:               ['Zeytinyağı','Avokado','Badem','Ceviz','Fındık','Fıstık Ezmesi']
+};
+const selected    = { proteins: new Set(), carbs: new Set(), fats: new Set() };
+const customFoods = [];
+
+function createFoodChip(name, category) {
+  const el = document.createElement('div');
+  el.className = 'chip';
+  el.innerHTML = `<span class="chip-dot"></span>${name}`;
+  el.addEventListener('click', () => {
+    const isSelected = el.classList.toggle('selected');
+    if (isSelected) selected[category].add(name);
+    else            selected[category].delete(name);
+    el.querySelector('.chip-dot').style.background = isSelected ? '#CCFF00' : '';
+  });
+  return el;
+}
+
+function populateFoods() {
+  FOODS.protein_hayvansal.forEach(f => document.getElementById('protein-hayvansal').appendChild(createFoodChip(f, 'proteins')));
+  FOODS.protein_bitkisel.forEach(f  => document.getElementById('protein-bitkisel').appendChild(createFoodChip(f, 'proteins')));
+  FOODS.karbonhidrat.forEach(f      => document.getElementById('karb-list').appendChild(createFoodChip(f, 'carbs')));
+  FOODS.yag.forEach(f               => document.getElementById('yag-list').appendChild(createFoodChip(f, 'fats')));
+}
+
+function addCustomFood() {
+  const input = document.getElementById('custom-input');
+  const val   = input.value.trim();
+  if (!val || customFoods.includes(val)) { input.value = ''; return; }
+  customFoods.push(val);
+  input.value = '';
+  const tag = document.createElement('div');
+  tag.className = 'custom-tag';
+  tag.innerHTML = `<span>${val}</span><span class="custom-tag-remove" onclick="removeCustomFood('${val}',this)">×</span>`;
+  document.getElementById('custom-tags').appendChild(tag);
+}
+document.getElementById('custom-input').addEventListener('keydown', e => { if (e.key === 'Enter') addCustomFood(); });
+function removeCustomFood(name, el) {
+  const i = customFoods.indexOf(name);
+  if (i > -1) customFoods.splice(i, 1);
+  el.closest('.custom-tag').remove();
+}
+
+/* ── GENERATE PLAN ── */
+async function generatePlan() {
+  if (!selected.proteins.size) { showToast('En az bir protein kaynağı seç.', 'error'); return; }
+  if (!selected.carbs.size)    { showToast('En az bir karbonhidrat kaynağı seç.', 'error'); return; }
+  if (!selected.fats.size)     { showToast('En az bir yağ kaynağı seç.', 'error'); return; }
+
+  const btn = document.getElementById('plan-btn');
+  const loading = document.getElementById('loading');
+  btn.classList.add('loading');
+  btn.textContent = 'HAZIRLANIYOR...';
+  loading.classList.add('active');
+
+  try {
+    const res = await fetch('/nutrition-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        proteins:     [...selected.proteins],
+        carbs:        [...selected.carbs],
+        fats:         [...selected.fats],
+        custom_foods: customFoods
+      })
+    });
+    const data = await res.json();
+    if (data.error) { showToast(data.error, 'error'); return; }
+    renderPlans(data);
+  } catch (e) {
+    showToast('Plan oluşturulamadı: ' + e.message, 'error');
+  } finally {
+    btn.classList.remove('loading');
+    btn.textContent = 'PLAN OLUŞTUR';
+    loading.classList.remove('active');
+  }
+}
+
+function renderPlans(data) {
+  document.getElementById('plan-results').style.display = 'block';
+
+  // Score banner
+  const scoreColors = { 'İyi': '#CCFF00', 'Orta': '#FFB020', 'Kötü': '#FF4D4D' };
+  const color = scoreColors[data.score_label] || '#9A9A9A';
+  document.getElementById('score-banner-wrap').innerHTML = `
+    <div class="score-banner" style="margin-bottom:24px;">
+      <div class="score-big" style="color:${color};">${data.overall_score}</div>
+      <div>
+        <div class="score-label" style="color:${color};">${data.score_label} Plan</div>
+        <div class="score-desc">Mikro değer, biyoyararlanım ve gluten skoru ortalaması</div>
+      </div>
+    </div>`;
+
+  // Plan cards
+  const grid = document.getElementById('plans-grid');
+  grid.innerHTML = '';
+  data.planlar.forEach((plan, i) => {
+    const meals = [
+      { key:'kahvalti',  label:'Kahvaltı' },
+      { key:'ogle',      label:'Öğle'     },
+      { key:'aksam',     label:'Akşam'    },
+      { key:'ara_ogun',  label:'Ara Öğün' }
+    ];
+    const mealsHtml = meals.map(m => {
+      const ml = plan[m.key];
+      if (!ml) return '';
+      return `
+        <div class="plan-meal-sec">
+          <div class="plan-meal-title">${m.label} · ${ml.kalori ?? '—'} kcal</div>
+          <ul class="plan-meal-items">${(ml.yemekler || []).map(y => `<li>${y}</li>`).join('')}</ul>
+        </div>`;
+    }).join('');
+
+    const card = document.createElement('div');
+    card.className = 'plan-card';
+    card.id = `plan-card-${i}`;
+    card.innerHTML = `
+      <div class="plan-card-hdr">
+        <div class="plan-card-name">${plan.isim ?? 'Plan ' + (i+1)}</div>
+        <div class="plan-card-kcal">${plan.toplam_kalori ?? '—'} kcal</div>
+      </div>
+      <div class="plan-card-body">
+        ${mealsHtml}
+        <div class="plan-macro-grid">
+          <div class="plan-macro-item"><div class="plan-macro-val">${plan.toplam_protein ?? '—'}g</div><div class="plan-macro-lbl">Protein</div></div>
+          <div class="plan-macro-item"><div class="plan-macro-val">${plan.toplam_karb ?? '—'}g</div><div class="plan-macro-lbl">Karb</div></div>
+          <div class="plan-macro-item"><div class="plan-macro-val">${plan.toplam_yag ?? '—'}g</div><div class="plan-macro-lbl">Yağ</div></div>
+        </div>
+        <button class="btn-select-plan" id="sel-btn-${i}"
+          onclick="selectPlan(${i},${JSON.stringify(plan).replace(/"/g,'&quot;')},${data.overall_score})">
+          BU PLANI SEÇ
+        </button>
+      </div>`;
+    grid.appendChild(card);
+  });
+
+  setTimeout(() => document.getElementById('plan-results').scrollIntoView({ behavior:'smooth', block:'start' }), 200);
+}
+
+async function selectPlan(i, plan, score) {
+  try {
+    await fetch('/nutrition-plan/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ plan, score })
+    });
+    document.querySelectorAll('.plan-card').forEach(c => c.classList.remove('chosen'));
+    document.querySelectorAll('.btn-select-plan').forEach(b => { b.textContent = 'BU PLANI SEÇ'; b.classList.remove('chosen'); });
+    document.getElementById(`plan-card-${i}`).classList.add('chosen');
+    const btn = document.getElementById(`sel-btn-${i}`);
+    btn.textContent = '✓ AKTİF PLAN';
+    btn.classList.add('chosen');
+    showToast('Plan kaydedildi!', 'success');
+  } catch (e) {
+    showToast('Kayıt hatası: ' + e.message, 'error');
+  }
+}
+
+async function loadActivePlan() {
+  try {
+    const res = await fetch('/nutrition-plan/active');
+    const d   = await res.json();
+    if (!d.exists) return;
+    const banner = document.getElementById('active-plan-banner');
+    banner.style.display = 'flex';
+    banner.className = 'active-banner';
+    banner.innerHTML = `
+      <div>
+        <div class="active-banner-text">Aktif planın: <strong>${d.plan.isim || 'Seçili Plan'}</strong></div>
+        <div class="active-banner-sub">${d.created_at} · Skor: ${d.score}/10</div>
+      </div>
+      <button class="btn-ghost" onclick="this.closest('.active-banner').style.display='none'">Yeni plan</button>`;
+  } catch (e) {}
+}
+
+/* ── FAB ── */
+function toggleFAB() {
+  fabOpen = !fabOpen;
+  document.getElementById('fab-main').classList.toggle('open', fabOpen);
+  document.getElementById('fab-actions').classList.toggle('open', fabOpen);
+}
+document.addEventListener('click', e => {
+  if (fabOpen && !document.getElementById('fab-wrap').contains(e.target)) {
+    fabOpen = false;
+    document.getElementById('fab-main').classList.remove('open');
+    document.getElementById('fab-actions').classList.remove('open');
+  }
+});
+
+/* ── WATER MODAL ── */
+function openWater()  { document.getElementById('water-modal').classList.add('open'); }
+function closeWater() { document.getElementById('water-modal').classList.remove('open'); }
+function logWater() {
+  const ml = document.getElementById('water-amount').value;
+  closeWater();
+  showToast(`${ml} ml su kaydedildi 💧`, 'success');
+}
+
+/* ── SCROLL TO FORM ── */
+function scrollToForm() {
+  // Switch to today tab and scroll to log form
+  const todayTab = document.querySelector('.tab-btn');
+  switchTab('today', todayTab);
+  setTimeout(() => {
+    document.getElementById('meal-input').scrollIntoView({ behavior:'smooth', block:'center' });
+    document.getElementById('meal-input').focus();
+  }, 300);
+}
+
+/* ── SIDEBAR AVATAR INITIAL ── */
+(function() {
+  const name = document.getElementById('sb-name')?.textContent?.trim() || '';
+  const av   = document.getElementById('sb-avatar');
+  if (av && name) av.textContent = name[0].toUpperCase();
+})();
+
+/* ── INIT ── */
+populateFoods();
+loadTodayData();
+loadActivePlan();
+</script>
+
 </body>
 </html>
