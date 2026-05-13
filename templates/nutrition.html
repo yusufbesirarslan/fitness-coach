@@ -47,6 +47,25 @@
 
     /* Skeleton placeholder */
     .skel-card { padding:18px 20px; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-lg); display:flex; flex-direction:column; gap:10px; }
+
+    /* ── Active Plan Detail View ── */
+    .apd-header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:20px; }
+    .apd-title { font-family:var(--font-display); font-size:24px; letter-spacing:3px; color:var(--volt); margin-bottom:4px; }
+    .apd-sub { font-size:12px; color:var(--text-3); }
+    .apd-macro-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:20px; }
+    @media(max-width:500px){ .apd-macro-grid { grid-template-columns:repeat(2,1fr); } }
+    .apd-macro-item { background:rgba(204,255,0,0.05); border:1px solid rgba(204,255,0,0.14); border-radius:12px; padding:14px; text-align:center; }
+    .apd-macro-val { font-family:var(--font-display); font-size:22px; color:var(--volt); letter-spacing:1px; line-height:1.1; }
+    .apd-macro-lbl { font-size:10px; color:var(--text-3); text-transform:uppercase; letter-spacing:0.1em; margin-top:4px; }
+    .apd-meal { background:var(--surface-2); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:10px; }
+    .apd-meal-hdr { display:flex; align-items:center; gap:10px; margin-bottom:10px; padding-bottom:10px; border-bottom:1px solid var(--border); }
+    .apd-meal-icon { font-size:20px; flex-shrink:0; }
+    .apd-meal-name { font-family:var(--font-display); font-size:15px; letter-spacing:1.5px; color:var(--text); flex:1; }
+    .apd-meal-kcal { font-family:var(--font-display); font-size:16px; color:var(--volt); letter-spacing:1px; }
+    .apd-meal-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:7px; }
+    .apd-meal-list li { font-size:13.5px; color:var(--text-2); font-weight:300; padding-left:16px; position:relative; line-height:1.5; }
+    .apd-meal-list li::before { content:'›'; position:absolute; left:0; color:var(--volt); font-size:14px; top:0; }
+    .apd-reset-btn { margin-top:20px; }
   </style>
 </head>
 
@@ -263,8 +282,11 @@
   ════════════════════════════════ -->
   <div class="tab-panel" id="panel-plan">
 
-    <!-- Active plan banner -->
-    <div id="active-plan-banner" style="display:none;"></div>
+    <!-- Active plan detail (rendered by loadActivePlan when a saved plan exists) -->
+    <div id="active-plan-detail" style="display:none;"></div>
+
+    <!-- Plan creation form (hidden when an active plan is loaded) -->
+    <div id="plan-form">
 
     <!-- Food Selection -->
     <div class="card" style="padding:24px;margin-bottom:20px;">
@@ -300,6 +322,8 @@
       <div id="score-banner-wrap"></div>
       <div class="plans-grid" id="plans-grid"></div>
     </div>
+
+    </div><!-- /plan-form -->
 
   </div><!-- /panel-plan -->
 
@@ -785,16 +809,69 @@ async function loadActivePlan() {
     const res = await fetch('/nutrition-plan/active');
     const d   = await res.json();
     if (!d.exists) return;
-    const banner = document.getElementById('active-plan-banner');
-    banner.style.display = 'flex';
-    banner.className = 'active-banner';
-    banner.innerHTML = `
-      <div>
-        <div class="active-banner-text">Aktif planın: <strong>${d.plan.isim || 'Seçili Plan'}</strong></div>
-        <div class="active-banner-sub">${d.created_at} · Skor: ${d.score}/10</div>
-      </div>
-      <button class="btn-ghost" onclick="this.closest('.active-banner').style.display='none'">Yeni plan</button>`;
+    renderActivePlanDetail(d.plan, d.score, d.created_at);
+    document.getElementById('active-plan-detail').style.display = 'block';
+    document.getElementById('plan-form').style.display = 'none';
   } catch (e) {}
+}
+
+function renderActivePlanDetail(plan, score, createdAt) {
+  const meals = [
+    { key: 'kahvalti', label: 'Kahvaltı',  icon: '🍳' },
+    { key: 'ogle',     label: 'Öğle',      icon: '🥗' },
+    { key: 'aksam',    label: 'Akşam',     icon: '🍽️' },
+    { key: 'ara_ogun', label: 'Ara Öğün',  icon: '🥜' }
+  ];
+
+  const mealsHtml = meals.map(m => {
+    const ml = plan[m.key];
+    if (!ml) return '';
+    const items = (ml.yemekler || []).map(y => `<li>${y}</li>`).join('');
+    return `
+      <div class="apd-meal">
+        <div class="apd-meal-hdr">
+          <span class="apd-meal-icon">${m.icon}</span>
+          <span class="apd-meal-name">${m.label}</span>
+          <span class="apd-meal-kcal">${ml.kalori ?? '—'} kcal</span>
+        </div>
+        <ul class="apd-meal-list">${items}</ul>
+      </div>`;
+  }).join('');
+
+  document.getElementById('active-plan-detail').innerHTML = `
+    <div class="apd-header">
+      <div>
+        <div class="apd-title">${plan.isim || 'Aktif Plan'}</div>
+        <div class="apd-sub">${createdAt} · Skor: ${score}/10</div>
+      </div>
+      <button class="btn-ghost" onclick="resetPlan()">+ Yeni Plan Oluştur</button>
+    </div>
+
+    <div class="apd-macro-grid">
+      <div class="apd-macro-item">
+        <div class="apd-macro-val">${plan.toplam_kalori ?? '—'}</div>
+        <div class="apd-macro-lbl">kcal</div>
+      </div>
+      <div class="apd-macro-item">
+        <div class="apd-macro-val">${plan.toplam_protein ?? '—'}g</div>
+        <div class="apd-macro-lbl">Protein</div>
+      </div>
+      <div class="apd-macro-item">
+        <div class="apd-macro-val">${plan.toplam_karb ?? '—'}g</div>
+        <div class="apd-macro-lbl">Karb</div>
+      </div>
+      <div class="apd-macro-item">
+        <div class="apd-macro-val">${plan.toplam_yag ?? '—'}g</div>
+        <div class="apd-macro-lbl">Yağ</div>
+      </div>
+    </div>
+
+    <div class="apd-meals">${mealsHtml}</div>`;
+}
+
+function resetPlan() {
+  document.getElementById('active-plan-detail').style.display = 'none';
+  document.getElementById('plan-form').style.display = 'block';
 }
 
 /* ── FAB ── */
