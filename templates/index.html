@@ -213,8 +213,16 @@
     }
     .ins-btn:hover { color:#CCFF00; border-color:rgba(204,255,0,0.3); }
     .ins-dots { display:flex; gap:5px; }
-    .ins-dot  { width:5px; height:5px; border-radius:50%; background:#2A2A2A; transition:background 0.2s; }
-    .ins-dot.on { background:#CCFF00; }
+    .ins-dot  { width:5px; height:5px; border-radius:50%; background:#2A2A2A; transition:background 0.2s, transform 0.15s; cursor:pointer; }
+    .ins-dot:hover { background:rgba(204,255,0,0.4); transform:scale(1.5); }
+    .ins-dot.on { background:#CCFF00; transform:scale(1.3); }
+    /* ── Tip fade / slide ── */
+    #ins-body { transition: opacity 0.24s ease, transform 0.24s ease; min-height: 88px; }
+    #ins-body.ins-out { opacity:0; transform:translateX(-10px); pointer-events:none; }
+    /* ── 8-second countdown bar ── */
+    .ins-progress { height:2px; background:rgba(255,255,255,0.05); border-radius:1px; margin-top:12px; overflow:hidden; }
+    .ins-pbar { height:100%; background:linear-gradient(90deg,rgba(204,255,0,0.35),#CCFF00); border-radius:1px; transform-origin:left center; animation:ins-fill 8s linear forwards; }
+    @keyframes ins-fill { from{transform:scaleX(1)} to{transform:scaleX(0)} }
 
     /* ════════════════════════════════════════════════
        FAB
@@ -428,14 +436,17 @@
     <!-- ══ ⑥ AI INSIGHT FEED ══ -->
     <div class="bc b-1" style="display:flex;flex-direction:column;">
         <div class="bc-lbl"><span class="bc-dot" style="background:rgba(204,255,0,0.75)"></span>Günün İpucu</div>
-        <span class="ins-icon" id="ins-icon">⚡</span>
-        <div class="ins-text" id="ins-text">Yükleniyor…</div>
-        <div class="ins-source" id="ins-src">Spor Bilimi</div>
+        <div id="ins-body">
+            <span class="ins-icon" id="ins-icon">⚡</span>
+            <div class="ins-text" id="ins-text">Yükleniyor…</div>
+            <div class="ins-source" id="ins-src">Spor Bilimi</div>
+        </div>
         <div class="ins-nav">
             <button class="ins-btn" onclick="prevTip()">← Önceki</button>
             <div class="ins-dots" id="ins-dots"></div>
             <button class="ins-btn" onclick="nextTip()">Sonraki →</button>
         </div>
+        <div class="ins-progress"><div class="ins-pbar" id="ins-pbar"></div></div>
     </div>
 
 </div><!-- /bento -->
@@ -801,27 +812,62 @@ async function loadSparkline() {
 /* ═══════════════════════════════════════════════════════
    AI INSIGHT TIPS
    ═══════════════════════════════════════════════════════ */
-function renderTip(i) {
-    const t = TIPS[i];
-    document.getElementById('ins-icon').textContent = t.icon;
-    document.getElementById('ins-text').innerHTML   = t.text;
-    document.getElementById('ins-src').textContent  = t.src;
+let tipTimer = null;
 
-    // 5-dot paginator (sliding window)
-    const DOTS = 5;
+function renderTip(i, animated) {
+    const t       = TIPS[i];
+    const VISIBLE = Math.min(5, TIPS.length);
+    const half    = Math.floor(VISIBLE / 2);
+    const start   = Math.min(Math.max(i - half, 0), TIPS.length - VISIBLE);
+    const end     = Math.min(start + VISIBLE, TIPS.length);
+
+    // Rebuild dots — each clickable
     const dots = document.getElementById('ins-dots');
     dots.innerHTML = '';
-    const half   = Math.floor(DOTS / 2);
-    const start  = Math.min(Math.max(i - half, 0), TIPS.length - DOTS);
-    const end    = Math.min(start + DOTS, TIPS.length);
     for (let d = start; d < end; d++) {
         const dot = document.createElement('div');
         dot.className = 'ins-dot' + (d === i ? ' on' : '');
+        (function(idx) { dot.addEventListener('click', function() { goToTip(idx); }); })(d);
         dots.appendChild(dot);
     }
+
+    function applyContent() {
+        document.getElementById('ins-icon').textContent = t.icon;
+        document.getElementById('ins-text').innerHTML   = t.text;
+        document.getElementById('ins-src').textContent  = t.src;
+        restartProgressBar();
+    }
+
+    if (!animated) { applyContent(); return; }
+
+    const body = document.getElementById('ins-body');
+    body.classList.add('ins-out');
+    setTimeout(function() {
+        applyContent();
+        body.classList.remove('ins-out');
+    }, 260);
 }
-function nextTip() { tipIdx = (tipIdx + 1) % TIPS.length; renderTip(tipIdx); }
-function prevTip() { tipIdx = (tipIdx - 1 + TIPS.length) % TIPS.length; renderTip(tipIdx); }
+
+function restartProgressBar() {
+    const bar = document.getElementById('ins-pbar');
+    if (!bar) return;
+    bar.style.animation = 'none';
+    bar.offsetHeight;   // force reflow so animation restarts cleanly
+    bar.style.animation = 'ins-fill 8s linear forwards';
+}
+
+function goToTip(i) {
+    tipIdx = ((i % TIPS.length) + TIPS.length) % TIPS.length;
+    renderTip(tipIdx, true);
+    resetTipTimer();
+}
+function nextTip() { goToTip(tipIdx + 1); }
+function prevTip() { goToTip(tipIdx - 1); }
+
+function resetTipTimer() {
+    if (tipTimer) clearInterval(tipTimer);
+    tipTimer = setInterval(function() { goToTip(tipIdx + 1); }, 8000);
+}
 
 
 /* ═══════════════════════════════════════════════════════
@@ -851,9 +897,10 @@ async function init() {
     renderStreak(computeStreak());
     checkBtnGlow();
 
-    /* 2. Daily tip — rotates once per day based on UTC day index */
+    /* 2. Daily tip — starts at today's index, auto-cycles every 8 s */
     tipIdx = Math.floor(Date.now() / 86400000) % TIPS.length;
-    renderTip(tipIdx);
+    renderTip(tipIdx, false);
+    resetTipTimer();
 
     /* 3. Fetch last session + today's meals in parallel */
     try {
