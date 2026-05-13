@@ -259,26 +259,32 @@
       </div>
     </div>
 
-    <!-- AI Review -->
-    <button class="btn-ghost w-full" style="width:100%;margin-top:16px;" id="review-btn" onclick="getReview()">
-      <svg viewBox="0 0 24 24" style="width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-      GÜN SONU AI DEĞERLENDİRMESİ
-    </button>
-    <div class="review-card" id="review-card">
-      <div class="review-hdr">
-        <div class="review-av">🤖</div>
-        <div class="review-lbl">AI KOÇ DEĞERLENDİRMESİ</div>
-      </div>
-      <div class="review-body" id="review-text"></div>
-    </div>
-
-    <!-- ── Quick Add from Plan ── -->
+    <!-- ── Hızlı Ekle ── -->
     <div id="quick-add-section" style="margin-top:16px;">
       <div class="fc-divider">
         <div class="fc-divider-line"></div>
-        <div class="fc-divider-lbl">Plandan Hızlı Ekle</div>
+        <div class="fc-divider-lbl">Hızlı Ekle</div>
         <div class="fc-divider-line"></div>
       </div>
+
+      <!-- Su butonu -->
+      <button class="qab" id="qab-water" onclick="quickAddWater(this)" type="button" style="margin-bottom:4px;">
+        <span class="qab-icon">💧</span>
+        <div class="qab-info">
+          <div class="qab-title">Su — 1 Bardak</div>
+          <div class="qab-sub" id="qab-water-sub">Bugün 0 / 8 bardak</div>
+        </div>
+        <svg class="qab-check" viewBox="0 0 24 24" fill="none"
+             stroke="#CCFF00" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"/>
+        </svg>
+        <svg class="qab-plus" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+          <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+      </button>
+
+      <!-- Öğün butonları (plandan) -->
       <div id="quick-add-cards" style="display:flex;flex-direction:column;gap:8px;">
         <!-- Rendered by loadQuickAddSection() -->
       </div>
@@ -1006,6 +1012,34 @@ document.addEventListener('click', e => {
   }
 });
 
+/* ── WATER QUICK-ADD ── */
+function quickAddWater(btn) {
+  const GOAL = 8;
+  const today = new Date().toDateString();
+  const s = JSON.parse(localStorage.getItem('fc_water') || '{}');
+  const cur = s.date === today ? (s.count || 0) : 0;
+  if (cur >= GOAL) { showToast('Günlük su hedefine ulaştın! 🎉', 'success'); return; }
+  const next = cur + 1;
+  localStorage.setItem('fc_water', JSON.stringify({ date: today, count: next }));
+  document.getElementById('qab-water-sub').textContent = `Bugün ${next} / ${GOAL} bardak`;
+  btn.querySelector('.qab-plus').style.display = 'none';
+  btn.querySelector('.qab-check').style.display = '';
+  if (next >= GOAL) showToast('Günlük su hedefine ulaştın! 🎉', 'success');
+  else showToast(`${next}. bardak içildi 💧`, 'info');
+  setTimeout(() => {
+    btn.querySelector('.qab-plus').style.display = '';
+    btn.querySelector('.qab-check').style.display = 'none';
+  }, 1500);
+}
+function initWaterButton() {
+  const GOAL = 8;
+  const today = new Date().toDateString();
+  const s = JSON.parse(localStorage.getItem('fc_water') || '{}');
+  const cur = s.date === today ? (s.count || 0) : 0;
+  const sub = document.getElementById('qab-water-sub');
+  if (sub) sub.textContent = `Bugün ${cur} / ${GOAL} bardak`;
+}
+
 /* ── WATER MODAL ── */
 function openWater()  { document.getElementById('water-modal').classList.add('open'); }
 function closeWater() { document.getElementById('water-modal').classList.remove('open'); }
@@ -1038,6 +1072,7 @@ populateFoods();
 loadTodayData();
 loadQuickAddSection();
 loadActivePlan();
+initWaterButton();
 </script>
 
 <script src="/static/coach_widget.js"></script>
