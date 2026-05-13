@@ -382,7 +382,7 @@ textarea.fc-input { resize: vertical; min-height: 84px; line-height: 1.6; }
   position: fixed; right: 24px; bottom: 112px; z-index: 100;
   display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 12px;
 }
-@media (min-width: 1024px) { .fab-wrap { bottom: 96px; right: 90px; } }
+@media (min-width: 1024px) { .fab-wrap { bottom: 96px; } }
 
 .fab-main {
   width: 56px; height: 56px; border-radius: 50%;
