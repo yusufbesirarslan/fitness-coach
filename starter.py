@@ -227,6 +227,59 @@ def get_active_nutrition_plan():
         "created_at": plan.created_at.strftime("%d.%m.%Y")
     })
 
+@app.route("/api/quick-add-meal", methods=["POST"])
+@login_required
+def quick_add_meal():
+    data     = request.get_json()
+    meal_key = data.get("meal_key", "")
+
+    MEAL_LABELS = {
+        "kahvalti": "Kahvaltı",
+        "ogle":     "Öğle",
+        "aksam":    "Akşam",
+        "ara_ogun": "Ara Öğün"
+    }
+    if meal_key not in MEAL_LABELS:
+        return jsonify({"error": "Geçersiz öğün anahtarı."}), 400
+
+    plan_record = NutritionPlan.query.filter_by(user_id=current_user.id)\
+        .order_by(NutritionPlan.created_at.desc()).first()
+
+    if not plan_record:
+        return jsonify({"error": "Aktif beslenme planı bulunamadı."}), 404
+
+    plan = json.loads(plan_record.plan_data)
+    meal = plan.get(meal_key)
+
+    if not meal:
+        return jsonify({"error": "Bu öğün planda tanımlı değil."}), 404
+
+    yemekler = ", ".join(meal.get("yemekler", []))
+    today    = datetime.utcnow().strftime("%d.%m")
+
+    entry = MealLog(
+        user_id  = current_user.id,
+        ogun     = MEAL_LABELS[meal_key],
+        yemekler = yemekler,
+        kalori   = round(float(meal.get("kalori",  0)), 1),
+        protein  = round(float(meal.get("protein", 0)), 1),
+        karb     = round(float(meal.get("karb",    0)), 1),
+        yag      = round(float(meal.get("yag",     0)), 1),
+        tarih    = today
+    )
+    db.session.add(entry)
+    db.session.commit()
+
+    return jsonify({
+        "message": f"{MEAL_LABELS[meal_key]} planından eklendi.",
+        "nutrients": {
+            "kalori":  entry.kalori,
+            "protein": entry.protein,
+            "karb":    entry.karb,
+            "yag":     entry.yag
+        }
+    })
+
 @app.route("/log", methods=["POST"])
 @login_required
 def log_progress():

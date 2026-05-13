@@ -66,6 +66,33 @@
     .apd-meal-list li { font-size:13.5px; color:var(--text-2); font-weight:300; padding-left:16px; position:relative; line-height:1.5; }
     .apd-meal-list li::before { content:'›'; position:absolute; left:0; color:var(--volt); font-size:14px; top:0; }
     .apd-reset-btn { margin-top:20px; }
+
+    /* ── Quick Add from Plan ── */
+    .qab {
+      display:flex; align-items:center; gap:12px; width:100%;
+      background:rgba(204,255,0,0.04); border:1.5px solid rgba(204,255,0,0.16);
+      border-radius:12px; padding:13px 16px; cursor:pointer;
+      transition:background 0.18s, border-color 0.18s, transform 0.14s;
+      text-align:left;
+    }
+    .qab:hover:not(.qab-done) { background:rgba(204,255,0,0.09); border-color:rgba(204,255,0,0.38); transform:translateY(-1px); }
+    .qab:active:not(.qab-done) { transform:translateY(0); }
+    .qab.qab-done { background:rgba(204,255,0,0.10); border-color:#CCFF00; cursor:default; }
+    .qab-icon { font-size:20px; flex-shrink:0; }
+    .qab-info { flex:1; min-width:0; }
+    .qab-title { font-family:var(--font-display); font-size:14px; letter-spacing:1.2px; color:var(--text); line-height:1.2; }
+    .qab-sub { font-size:11.5px; color:var(--text-3); margin-top:3px; }
+    .qab-plus { width:18px; height:18px; flex-shrink:0; color:#CCFF00; stroke:#CCFF00; transition:transform 0.15s; }
+    .qab:hover:not(.qab-done) .qab-plus { transform:scale(1.25); }
+    .qab-check { width:18px; height:18px; flex-shrink:0; display:none; }
+    @keyframes qab-pop { 0%{transform:scale(0.6);opacity:0} 70%{transform:scale(1.2)} 100%{transform:scale(1);opacity:1} }
+    .qab-done .qab-check { display:block; animation:qab-pop 0.3s ease; }
+    .qab-no-plan {
+      padding:14px 16px; border:1.5px dashed rgba(255,255,255,0.1); border-radius:12px;
+      font-size:13px; color:var(--text-3); text-align:center; cursor:pointer;
+      transition:border-color 0.18s, color 0.18s;
+    }
+    .qab-no-plan:hover { border-color:rgba(204,255,0,0.3); color:var(--volt); }
   </style>
 </head>
 
@@ -245,10 +272,22 @@
       <div class="review-body" id="review-text"></div>
     </div>
 
+    <!-- ── Quick Add from Plan ── -->
+    <div id="quick-add-section" style="margin-top:16px;">
+      <div class="fc-divider">
+        <div class="fc-divider-line"></div>
+        <div class="fc-divider-lbl">Plandan Hızlı Ekle</div>
+        <div class="fc-divider-line"></div>
+      </div>
+      <div id="quick-add-cards" style="display:flex;flex-direction:column;gap:8px;">
+        <!-- Rendered by loadQuickAddSection() -->
+      </div>
+    </div>
+
     <!-- ── Log Meal Form ── -->
-    <div class="fc-divider">
+    <div class="fc-divider" style="margin-top:20px;">
       <div class="fc-divider-line"></div>
-      <div class="fc-divider-lbl">Öğün Ekle</div>
+      <div class="fc-divider-lbl">Manuel Ekle</div>
       <div class="fc-divider-line"></div>
     </div>
 
@@ -443,7 +482,7 @@ function switchTab(name, btn) {
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('panel-' + name).classList.add('active');
-  if (name === 'today')   { loadTodayData(); }
+  if (name === 'today')   { loadTodayData(); loadQuickAddSection(); }
   if (name === 'history') { loadMealHistory(); }
 }
 
@@ -874,6 +913,85 @@ function resetPlan() {
   document.getElementById('plan-form').style.display = 'block';
 }
 
+/* ── QUICK ADD FROM PLAN ── */
+async function loadQuickAddSection() {
+  const container = document.getElementById('quick-add-cards');
+  try {
+    const res = await fetch('/nutrition-plan/active');
+    const d   = await res.json();
+
+    if (!d.exists) {
+      container.innerHTML = `
+        <div class="qab-no-plan" onclick="switchTab('plan', document.querySelectorAll('.tab-btn')[1])">
+          📋 Henüz aktif planın yok — Plan Oluştur sekmesine git →
+        </div>`;
+      return;
+    }
+
+    const MEALS = [
+      { key: 'kahvalti', label: 'Kahvaltı',  icon: '🍳' },
+      { key: 'ogle',     label: 'Öğle',      icon: '🥗' },
+      { key: 'aksam',    label: 'Akşam',     icon: '🍽️' },
+      { key: 'ara_ogun', label: 'Ara Öğün',  icon: '🥜' }
+    ];
+
+    container.innerHTML = MEALS.map(m => {
+      const ml  = d.plan[m.key];
+      if (!ml) return '';
+      const sub = `${ml.kalori ?? '—'} kcal · ${ml.protein ?? '—'}g protein · ${ml.karb ?? '—'}g karb`;
+      return `
+        <button class="qab" id="qab-${m.key}"
+          onclick="quickAddMeal('${m.key}','${m.label}',this)" type="button">
+          <span class="qab-icon">${m.icon}</span>
+          <div class="qab-info">
+            <div class="qab-title">${m.label} — ${d.plan.isim || 'Aktif Plan'}</div>
+            <div class="qab-sub">${sub}</div>
+          </div>
+          <svg class="qab-check" viewBox="0 0 24 24" fill="none"
+               stroke="#CCFF00" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="20 6 9 17 4 12"/>
+          </svg>
+          <svg class="qab-plus" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+            <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+          </svg>
+        </button>`;
+    }).join('');
+
+  } catch (e) {
+    container.innerHTML = '';
+  }
+}
+
+async function quickAddMeal(mealKey, mealLabel, btn) {
+  if (btn.classList.contains('qab-done') || btn.disabled) return;
+  btn.disabled = true;
+  btn.style.opacity = '0.65';
+
+  try {
+    const res = await fetch('/api/quick-add-meal', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ meal_key: mealKey })
+    });
+    const d = await res.json();
+    if (d.error) { showToast(d.error, 'error'); btn.disabled = false; btn.style.opacity = '1'; return; }
+
+    // Success state — swap + icon for animated checkmark
+    btn.classList.add('qab-done');
+    btn.style.opacity = '1';
+    btn.querySelector('.qab-plus').style.display  = 'none';
+
+    showToast(`${mealLabel} eklendi ✓`, 'success');
+    loadTodayData(); // live-refresh calorie ring + macro bars
+
+  } catch (e) {
+    showToast('Eklenemedi: ' + e.message, 'error');
+    btn.disabled = false;
+    btn.style.opacity = '1';
+  }
+}
+
 /* ── FAB ── */
 function toggleFAB() {
   fabOpen = !fabOpen;
@@ -918,6 +1036,7 @@ function scrollToForm() {
 /* ── INIT ── */
 populateFoods();
 loadTodayData();
+loadQuickAddSection();
 loadActivePlan();
 </script>
 
