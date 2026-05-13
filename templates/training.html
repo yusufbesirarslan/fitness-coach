@@ -127,6 +127,39 @@
         .save-plan-btn:hover { background: var(--volt-dark); box-shadow: var(--shadow-volt); }
         .save-plan-btn.saved { background: rgba(255,255,255,0.04); color: var(--volt); border: 1px solid rgba(204,255,0,0.4); cursor: default; }
 
+        /* ── ACTIVE PLAN VIEW ── */
+        .apv-header {
+            display: flex; align-items: center; justify-content: space-between;
+            background: var(--surface-2); border: 1px solid rgba(204,255,0,0.25);
+            border-radius: var(--r-lg); padding: 20px 24px; margin-bottom: 24px;
+            flex-wrap: wrap; gap: 16px; position: relative; overflow: hidden;
+        }
+        .apv-header::after {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, var(--volt), transparent);
+        }
+        .apv-title {
+            font-family: var(--font-display); font-size: 22px;
+            letter-spacing: 3px; color: var(--volt);
+        }
+        .apv-meta { font-size: 13px; color: var(--text-2); margin-top: 4px; font-weight: 300; }
+        .apv-score-wrap { text-align: center; flex-shrink: 0; }
+        .apv-score { font-family: var(--font-display); font-size: 52px; letter-spacing: 2px; line-height: 1; }
+        .apv-score-lbl { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3); margin-top: 2px; }
+
+        .apv-section-title {
+            font-family: var(--font-display); font-size: 16px; letter-spacing: 2px;
+            color: var(--text-3); text-transform: uppercase; margin-bottom: 12px;
+        }
+
+        .reset-plan-btn {
+            background: none; border: 1px solid var(--border); color: var(--text-3);
+            border-radius: var(--r-md); padding: 12px 32px;
+            font-family: var(--font-body); font-size: 14px; cursor: pointer;
+            transition: all var(--t-fast); letter-spacing: 0.04em;
+        }
+        .reset-plan-btn:hover { border-color: var(--border-2); color: var(--text); }
+
         @media(max-width:640px) {
             .info-banner { gap: 12px; padding: 14px 16px; }
             .info-val { font-size: 18px; }
@@ -135,6 +168,7 @@
             .save-plan-btn { width: 100%; text-align: center; padding: 14px; }
             .weekly-summary { grid-template-columns: 1fr 1fr; }
             .detail-panel { padding: 16px 14px; }
+            .apv-header { flex-direction: column; align-items: flex-start; }
         }
     </style>
 </head>
@@ -185,109 +219,150 @@
         <p>Tercihlerini belirle, haftalık antrenman programını oluştur.</p>
     </div>
 
-    <!-- AKTİF PLAN -->
-    <div id="active-plan-banner" style="display:none"></div>
+    <!-- ══ AKTİF PLAN GÖRÜNÜMÜ (plan varsa göster) ══ -->
+    <div id="active-plan-view" style="display:none">
 
-    <!-- BİLGİ BANNER -->
-    <div class="info-banner" id="info-banner">
-        <div class="info-item"><div class="info-label">Hedef</div><div class="info-val" id="info-goal">—</div></div>
-        <div class="info-item"><div class="info-label">Seviye</div><div class="info-val" id="info-level">—</div></div>
-        <div class="info-item"><div class="info-label">TDEE</div><div class="info-val" id="info-tdee">—</div></div>
-    </div>
-
-    <!-- GÜN SAYISI -->
-    <div class="section">
-        <div class="section-title">Haftada Kaç Gün?</div>
-        <div class="section-sub">Antrenman yapabileceğin gün sayısını seç.</div>
-        <div class="option-grid" id="gun-grid"></div>
-    </div>
-
-    <!-- ANTRENMAN TARZI -->
-    <div class="section">
-        <div class="section-title">Antrenman Tarzı</div>
-        <div class="section-sub">Hangi tarzda antrenman yapmak istiyorsun?</div>
-        <div class="option-grid" id="tarzi-grid"></div>
-    </div>
-
-    <!-- ÖNCELİKLİ HEDEF -->
-    <div class="section">
-        <div class="section-title">Öncelikli Hedef</div>
-        <div class="section-sub">Bu programda neye odaklanmak istiyorsun?</div>
-        <div class="option-grid" id="hedef-grid"></div>
-    </div>
-
-    <!-- EKİPMAN -->
-    <div class="section">
-        <div class="section-title">Ekipman</div>
-        <div class="section-sub">Hangi ortamda antrenman yapıyorsun?</div>
-        <div class="option-grid" id="ekipman-grid"></div>
-    </div>
-
-    <!-- ODAK -->
-    <div class="section">
-        <div class="section-title">Odak Bölge</div>
-        <div class="section-sub">Hangi bölgeye odaklanmak istiyorsun?</div>
-        <div class="option-grid" id="odak-grid"></div>
-    </div>
-
-    <!-- SÜRE -->
-    <div class="section">
-        <div class="section-title">Antrenman Süresi</div>
-        <div class="section-sub">Her antrenman için ne kadar süren var?</div>
-        <div class="option-grid" id="sure-grid"></div>
-    </div>
-
-    <!-- KARDİYO -->
-    <div class="section">
-        <div class="section-title">Kardiyo</div>
-        <div class="section-sub">Kardiyo yapmak istiyor musun? Türünü ve detaylarını seç.</div>
-        <div class="cat-label" style="margin-top:0">Kardiyo Türü</div>
-        <div class="option-grid" id="kardiyo-tip-grid"></div>
-        <div id="kardiyo-details" style="display:none; margin-top:16px;">
-            <div class="cat-label">Haftada Kaç Gün Kardiyo?</div>
-            <div class="option-grid" id="kardiyo-gun-grid"></div>
-            <div class="cat-label" style="margin-top:16px">Kardiyo Süresi</div>
-            <div class="option-grid" id="kardiyo-sure-grid"></div>
-            <div class="cat-label" style="margin-top:16px">Kardiyo Yoğunluğu</div>
-            <div class="option-grid" id="kardiyo-yogunluk-grid"></div>
-        </div>
-    </div>
-
-    <button class="btn-volt" id="submit-btn" onclick="generatePlan()" style="margin-top:8px">PROGRAMIMI OLUŞTUR</button>
-
-    <!-- SONUÇLAR -->
-    <div id="results" style="display:none">
-        <div class="fc-divider" style="margin-top:40px">
-            <div class="fc-divider-line"></div>
-            <div class="fc-divider-lbl">Haftalık Programın</div>
-            <div class="fc-divider-line"></div>
+        <!-- Header: score + meta -->
+        <div class="apv-header">
+            <div>
+                <div class="apv-title">AKTİF PROGRAMIN</div>
+                <div class="apv-meta" id="apv-meta"></div>
+            </div>
+            <div class="apv-score-wrap">
+                <div class="apv-score" id="apv-score">—</div>
+                <div class="apv-score-lbl">/ 10 Puan</div>
+            </div>
         </div>
 
-        <div class="score-banner-card" id="score-banner"></div>
-        <div class="weekly-grid" id="weekly-grid"></div>
+        <!-- Weekly grid -->
+        <div class="apv-section-title">Haftalık Program</div>
+        <div class="weekly-grid" id="apv-weekly-grid"></div>
 
-        <div class="detail-panel" id="detail-panel">
-            <span class="detail-close" onclick="closeDetail()">×</span>
-            <div class="detail-title" id="detail-title"></div>
-            <div class="detail-sub" id="detail-sub"></div>
+        <!-- Day detail panel -->
+        <div class="detail-panel" id="apv-detail-panel">
+            <span class="detail-close" onclick="closeApvDetail()">×</span>
+            <div class="detail-title" id="apv-detail-title"></div>
+            <div class="detail-sub" id="apv-detail-sub"></div>
             <div class="exercise-table-wrap">
                 <table class="exercise-table">
-                    <thead>
-                        <tr>
-                            <th>Egzersiz</th>
-                            <th>Set</th>
-                            <th>Tekrar</th>
-                            <th>Dinlenme</th>
-                        </tr>
-                    </thead>
-                    <tbody id="detail-exercises"></tbody>
+                    <thead><tr>
+                        <th>Egzersiz</th><th>Set</th><th>Tekrar</th><th>Dinlenme</th>
+                    </tr></thead>
+                    <tbody id="apv-detail-exercises"></tbody>
                 </table>
             </div>
         </div>
 
-        <div class="weekly-summary" id="weekly-summary"></div>
-        <button class="save-plan-btn" id="save-btn" onclick="savePlan()">PROGRAMI KAYDET</button>
+        <!-- Weekly stats -->
+        <div class="weekly-summary" id="apv-summary" style="margin-top:24px"></div>
+
+        <!-- Reset -->
+        <div style="text-align:center;margin-top:36px;padding-bottom:48px">
+            <button class="reset-plan-btn" onclick="resetPlan()">↺ &nbsp;Programı Sıfırla / Yeni Plan Oluştur</button>
+        </div>
+
     </div>
+
+    <!-- ══ KURULUM FORMU (plan yoksa veya sıfırlandığında göster) ══ -->
+    <div id="setup-form">
+
+        <!-- BİLGİ BANNER -->
+        <div class="info-banner" id="info-banner">
+            <div class="info-item"><div class="info-label">Hedef</div><div class="info-val" id="info-goal">—</div></div>
+            <div class="info-item"><div class="info-label">Seviye</div><div class="info-val" id="info-level">—</div></div>
+            <div class="info-item"><div class="info-label">TDEE</div><div class="info-val" id="info-tdee">—</div></div>
+        </div>
+
+        <!-- GÜN SAYISI -->
+        <div class="section">
+            <div class="section-title">Haftada Kaç Gün?</div>
+            <div class="section-sub">Antrenman yapabileceğin gün sayısını seç.</div>
+            <div class="option-grid" id="gun-grid"></div>
+        </div>
+
+        <!-- ANTRENMAN TARZI -->
+        <div class="section">
+            <div class="section-title">Antrenman Tarzı</div>
+            <div class="section-sub">Hangi tarzda antrenman yapmak istiyorsun?</div>
+            <div class="option-grid" id="tarzi-grid"></div>
+        </div>
+
+        <!-- ÖNCELİKLİ HEDEF -->
+        <div class="section">
+            <div class="section-title">Öncelikli Hedef</div>
+            <div class="section-sub">Bu programda neye odaklanmak istiyorsun?</div>
+            <div class="option-grid" id="hedef-grid"></div>
+        </div>
+
+        <!-- EKİPMAN -->
+        <div class="section">
+            <div class="section-title">Ekipman</div>
+            <div class="section-sub">Hangi ortamda antrenman yapıyorsun?</div>
+            <div class="option-grid" id="ekipman-grid"></div>
+        </div>
+
+        <!-- ODAK -->
+        <div class="section">
+            <div class="section-title">Odak Bölge</div>
+            <div class="section-sub">Hangi bölgeye odaklanmak istiyorsun?</div>
+            <div class="option-grid" id="odak-grid"></div>
+        </div>
+
+        <!-- SÜRE -->
+        <div class="section">
+            <div class="section-title">Antrenman Süresi</div>
+            <div class="section-sub">Her antrenman için ne kadar süren var?</div>
+            <div class="option-grid" id="sure-grid"></div>
+        </div>
+
+        <!-- KARDİYO -->
+        <div class="section">
+            <div class="section-title">Kardiyo</div>
+            <div class="section-sub">Kardiyo yapmak istiyor musun? Türünü ve detaylarını seç.</div>
+            <div class="cat-label" style="margin-top:0">Kardiyo Türü</div>
+            <div class="option-grid" id="kardiyo-tip-grid"></div>
+            <div id="kardiyo-details" style="display:none; margin-top:16px;">
+                <div class="cat-label">Haftada Kaç Gün Kardiyo?</div>
+                <div class="option-grid" id="kardiyo-gun-grid"></div>
+                <div class="cat-label" style="margin-top:16px">Kardiyo Süresi</div>
+                <div class="option-grid" id="kardiyo-sure-grid"></div>
+                <div class="cat-label" style="margin-top:16px">Kardiyo Yoğunluğu</div>
+                <div class="option-grid" id="kardiyo-yogunluk-grid"></div>
+            </div>
+        </div>
+
+        <button class="btn-volt" id="submit-btn" onclick="generatePlan()" style="margin-top:8px">PROGRAMIMI OLUŞTUR</button>
+
+        <!-- SONUÇLAR (yeni oluşturulan plan önizlemesi) -->
+        <div id="results" style="display:none">
+            <div class="fc-divider" style="margin-top:40px">
+                <div class="fc-divider-line"></div>
+                <div class="fc-divider-lbl">Haftalık Programın</div>
+                <div class="fc-divider-line"></div>
+            </div>
+
+            <div class="score-banner-card" id="score-banner"></div>
+            <div class="weekly-grid" id="weekly-grid"></div>
+
+            <div class="detail-panel" id="detail-panel">
+                <span class="detail-close" onclick="closeDetail()">×</span>
+                <div class="detail-title" id="detail-title"></div>
+                <div class="detail-sub" id="detail-sub"></div>
+                <div class="exercise-table-wrap">
+                    <table class="exercise-table">
+                        <thead><tr>
+                            <th>Egzersiz</th><th>Set</th><th>Tekrar</th><th>Dinlenme</th>
+                        </tr></thead>
+                        <tbody id="detail-exercises"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="weekly-summary" id="weekly-summary"></div>
+            <button class="save-plan-btn" id="save-btn" onclick="savePlan()">PROGRAMI KAYDET</button>
+        </div>
+
+    </div><!-- /setup-form -->
 
 </main>
 
@@ -466,22 +541,109 @@
     }
 
     // ── ACTIVE PLAN ──
+    let activePlan = null;
+
     async function loadActivePlan() {
         try {
             const res  = await fetch("/training-plan/active");
             const data = await res.json();
             if (!data.exists) return;
-            const banner = document.getElementById("active-plan-banner");
-            banner.style.display = "flex";
-            banner.className = "active-plan-banner";
-            banner.innerHTML = `
-                <div>
-                    <div class="active-plan-text">Aktif antrenman programın mevcut · Skor: <strong>${data.score}/10</strong></div>
-                    <div class="active-plan-date">${data.created_at} tarihinde oluşturuldu</div>
+
+            activePlan = data.plan; // array of day objects
+
+            // Score color & label
+            const score = parseFloat(data.score) || 0;
+            const scoreColor = score >= 8 ? '#CCFF00' : score >= 6 ? '#FFB020' : '#FF4D4D';
+            const scoreLabel = score >= 8 ? 'Mükemmel Program' : score >= 6 ? 'İyi Program' : 'Orta Program';
+
+            document.getElementById('apv-score').textContent  = score;
+            document.getElementById('apv-score').style.color  = scoreColor;
+            document.getElementById('apv-meta').textContent   =
+                `${data.created_at} tarihinde oluşturuldu · ${scoreLabel}`;
+
+            // Weekly grid
+            renderApvGrid(activePlan);
+
+            // Summary stats (computed from saved plan data)
+            const antrenmanGun   = activePlan.filter(g => g.tip !== 'dinlenme').length;
+            const toplamKalori   = activePlan.reduce((a, g) => a + (g.tahmini_kalori || 0), 0);
+            const toplamDakika   = activePlan.reduce((a, g) => a + (g.sure_dk || 0), 0);
+            document.getElementById('apv-summary').innerHTML = `
+                <div class="summary-card">
+                    <div class="summary-val">${antrenmanGun}</div>
+                    <div class="summary-label">Antrenman Günü</div>
                 </div>
-                <button class="reset-btn" onclick="this.closest('.active-plan-banner').style.display='none'">Yeni program oluştur</button>
+                <div class="summary-card">
+                    <div class="summary-val">${toplamKalori}</div>
+                    <div class="summary-label">Haftalık Kalori</div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-val">${toplamDakika}</div>
+                    <div class="summary-label">Toplam Dakika</div>
+                </div>
             `;
+
+            // Switch views
+            document.getElementById('active-plan-view').style.display = 'block';
+            document.getElementById('setup-form').style.display        = 'none';
         } catch(e) {}
+    }
+
+    function renderApvGrid(program) {
+        const grid = document.getElementById('apv-weekly-grid');
+        grid.innerHTML = '';
+        program.forEach(gun => {
+            const card     = document.createElement('div');
+            const isRest   = gun.tip === 'dinlenme';
+            const isCardio = gun.tip === 'kardiyo';
+            card.className = 'day-card' +
+                (isRest   ? ' rest'    : '') +
+                (isCardio ? ' kardiyo' : '');
+            const exs     = gun.egzersizler || [];
+            const preview = exs.slice(0, 3).map(e => `<div class="day-ex">${e.isim}</div>`).join('');
+            const more    = exs.length > 3 ? `<div class="day-more">+${exs.length - 3} daha</div>` : '';
+            card.innerHTML = `
+                <div class="day-card-header">
+                    <div class="day-name">${gun.gun}</div>
+                    <div class="day-odak">${gun.odak}</div>
+                </div>
+                <div class="day-card-body">
+                    ${!isRest ? `
+                        <div class="day-stat"><span>Süre</span><span>${gun.sure_dk} dk</span></div>
+                        <div class="day-stat"><span>Kalori</span><span>~${gun.tahmini_kalori} kcal</span></div>
+                        <div class="day-exercises">${preview}${more}</div>
+                    ` : `<div style="font-size:13px;color:var(--text-3);margin-top:8px">Toparlanma günü</div>`}
+                </div>
+            `;
+            if (!isRest) card.addEventListener('click', () => showApvDetail(gun));
+            grid.appendChild(card);
+        });
+    }
+
+    function showApvDetail(gun) {
+        document.getElementById('apv-detail-title').textContent = `${gun.gun} — ${gun.odak}`;
+        document.getElementById('apv-detail-sub').textContent   = `${gun.sure_dk} dakika · ~${gun.tahmini_kalori} kcal`;
+        document.getElementById('apv-detail-exercises').innerHTML = (gun.egzersizler || []).map(e => `
+            <tr>
+                <td>${e.isim}${e.not ? `<div class="ex-not">${e.not}</div>` : ''}</td>
+                <td>${e.set}</td>
+                <td>${e.tekrar}</td>
+                <td>${e.dinlenme}</td>
+            </tr>
+        `).join('');
+        const panel = document.getElementById('apv-detail-panel');
+        panel.classList.add('visible');
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function closeApvDetail() {
+        document.getElementById('apv-detail-panel').classList.remove('visible');
+    }
+
+    function resetPlan() {
+        document.getElementById('active-plan-view').style.display = 'none';
+        document.getElementById('setup-form').style.display        = 'block';
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     // ── GENERATE PLAN ──
@@ -620,7 +782,7 @@
         const btn = document.getElementById("save-btn");
         if (!currentPlan) return;
         try {
-            const res  = await fetch("/training-plan/save", {
+            const res = await fetch("/training-plan/save", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ plan: currentPlan, score: currentScore })
@@ -629,16 +791,8 @@
             btn.textContent = "✓ KAYDEDİLDİ";
             btn.classList.add("saved");
             showToast("Program kaydedildi!", 'success');
-            const banner = document.getElementById("active-plan-banner");
-            banner.style.display = "flex";
-            banner.className = "active-plan-banner";
-            banner.innerHTML = `
-                <div>
-                    <div class="active-plan-text">Antrenman programın kaydedildi · Skor: <strong>${currentScore}/10</strong></div>
-                    <div class="active-plan-date">Az önce kaydedildi</div>
-                </div>
-                <button class="reset-btn" onclick="this.closest('.active-plan-banner').style.display='none'">Yeni program oluştur</button>
-            `;
+            // Reload and switch to active plan view
+            await loadActivePlan();
         } catch (err) {
             showToast("Kayıt hatası: " + err.message, 'error');
         }
