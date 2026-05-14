@@ -114,11 +114,13 @@
         .today-banner-icon { color: #CCFF00; font-size: 14px; flex-shrink: 0; }
         #today-banner-text {
             font-family: var(--font-display); font-size: 17px;
-            letter-spacing: 2px; color: #CCFF00;
+            letter-spacing: 2px; color: var(--text-2); font-weight: 700;
+            text-transform: uppercase;
         }
-        .today-banner.rest-day { border-left-color: var(--text-3); }
+        .today-focus { color: #CCFF00; font-weight: 700; }
+        .today-focus.off { color: var(--text-3); }
+        .today-banner.rest-day { border-left-color: var(--text-3); border-color: var(--border); }
         .today-banner.rest-day .today-banner-icon { color: var(--text-3); }
-        .today-banner.rest-day #today-banner-text { color: var(--text-2); }
 
         /* DETAIL PANEL */
         .detail-panel {
@@ -608,14 +610,16 @@
             // Today banner
             const todayName = getTodayTurkish();
             const todayWorkout = activePlan.find(g => g.gun === todayName);
-            if (todayWorkout) {
-                const banner = document.getElementById('today-banner');
-                const text   = document.getElementById('today-banner-text');
-                const isRest = todayWorkout.tip === 'dinlenme';
-                text.textContent = 'Bugün: ' + todayWorkout.odak;
-                banner.className = 'today-banner' + (isRest ? ' rest-day' : '');
-                banner.style.display = 'flex';
+            const banner = document.getElementById('today-banner');
+            const bannerText = document.getElementById('today-banner-text');
+            if (todayWorkout && todayWorkout.tip !== 'dinlenme') {
+                bannerText.innerHTML = 'BUGÜN: <span class="today-focus">' + todayWorkout.odak.toUpperCase() + '</span>';
+                banner.className = 'today-banner';
+            } else {
+                bannerText.innerHTML = 'BUGÜN: <span class="today-focus off">OFF DAY</span>';
+                banner.className = 'today-banner rest-day';
             }
+            banner.style.display = 'flex';
 
             // Summary stats (computed from saved plan data)
             const antrenmanGun   = activePlan.filter(g => g.tip !== 'dinlenme').length;
