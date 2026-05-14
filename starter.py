@@ -707,11 +707,20 @@ def update_weight():
         return jsonify({"error": "Kilo sayısal olmalıdır"}), 400
 
     current_user.weight = weight
-    db.session.commit()
 
     bmr             = calculate_bmr(weight, current_user.height, current_user.age, current_user.gender)
     tdee            = calculate_tdee(bmr, current_user.current_activity)
     target_calories = calculate_target(tdee, current_user.goal)
+
+    last_sess = UserSession.query.filter_by(user_id=current_user.id)\
+        .order_by(UserSession.created_at.desc()).first()
+    if last_sess:
+        last_sess.weight          = weight
+        last_sess.bmr             = bmr
+        last_sess.tdee            = tdee
+        last_sess.target_calories = target_calories
+
+    db.session.commit()
 
     return jsonify({
         "bmr": round(bmr),
@@ -1565,13 +1574,15 @@ def last_session():
 
     return jsonify({
         "exists"          : True,
-        "weight"          : s.weight,
+        "weight"          : current_user.weight or s.weight,
         "height"          : s.height,
         "age"             : s.age,
         "gender"          : s.gender,
         "goal"            : s.goal,
         "fitness_level"   : s.fitness_level,
         "current_activity": s.current_activity,
+        "bmr"             : s.bmr,
+        "tdee"            : s.tdee,
         "target_calories" : s.target_calories,
         "tarih"           : s.created_at.strftime("%d.%m.%Y")
     })
