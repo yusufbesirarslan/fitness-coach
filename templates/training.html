@@ -612,10 +612,14 @@
             const todayWorkout = activePlan.find(g => g.gun === todayName);
             const banner = document.getElementById('today-banner');
             const bannerText = document.getElementById('today-banner-text');
-            const isActive = todayWorkout && todayWorkout.tip && todayWorkout.tip !== 'dinlenme';
-            const focusText = isActive ? (todayWorkout.odak || todayWorkout.gun || 'ANTRENMAN').toUpperCase() : 'OFF DAY';
-            bannerText.innerHTML = 'BUGÜN: <span class="today-focus' + (isActive ? '' : ' off') + '">' + focusText + '</span>';
-            banner.className = 'today-banner' + (isActive ? '' : ' rest-day');
+            const isRest = !todayWorkout || todayWorkout.tip === 'dinlenme';
+            let focusText = 'OFF DAY';
+            if (!isRest) {
+                const exNames = (todayWorkout.egzersizler || []).map(e => e.isim).filter(Boolean);
+                focusText = (todayWorkout.odak || exNames[0] || todayWorkout.tip || 'ANTRENMAN').toUpperCase();
+            }
+            bannerText.innerHTML = 'BUGÜN: <span class="today-focus' + (isRest ? ' off' : '') + '">' + focusText + '</span>';
+            banner.className = 'today-banner' + (isRest ? ' rest-day' : '');
             banner.style.display = 'flex';
 
             // Summary stats (computed from saved plan data)
@@ -659,18 +663,19 @@
             const exs     = gun.egzersizler || [];
             const preview = exs.slice(0, 3).map(e => `<div class="day-ex">${e.isim}</div>`).join('');
             const more    = exs.length > 3 ? `<div class="day-more">+${exs.length - 3} daha</div>` : '';
+            const odakText = gun.odak || (exs[0] && exs[0].isim) || '';
             card.innerHTML = `
                 <div class="day-card-header">
                     ${isToday ? '<div class="today-badge">BUGÜN</div>' : ''}
                     <div class="day-name">${gun.gun}</div>
-                    <div class="day-odak">${gun.odak}</div>
+                    <div class="day-odak">${isRest ? 'Off Day' : odakText}</div>
                 </div>
                 <div class="day-card-body">
                     ${!isRest ? `
                         <div class="day-stat"><span>Süre</span><span>${gun.sure_dk} dk</span></div>
                         <div class="day-stat"><span>Kalori</span><span>~${gun.tahmini_kalori} kcal</span></div>
                         <div class="day-exercises">${preview}${more}</div>
-                    ` : `<div style="font-size:13px;color:var(--text-3);margin-top:8px">Toparlanma günü</div>`}
+                    ` : `<div style="font-size:13px;color:var(--text-3);margin-top:8px">Dinlenme günü</div>`}
                 </div>
             `;
             if (!isRest) card.addEventListener('click', () => showApvDetail(gun));
@@ -781,18 +786,19 @@
             const exercises = gun.egzersizler || [];
             const preview   = exercises.slice(0, 3).map(e => `<div class="day-ex">${e.isim}</div>`).join("");
             const more      = exercises.length > 3 ? `<div class="day-more">+${exercises.length - 3} daha</div>` : "";
+            const odakText = gun.odak || (exercises[0] && exercises[0].isim) || '';
             card.innerHTML = `
                 <div class="day-card-header">
                     ${isToday ? '<div class="today-badge">BUGÜN</div>' : ''}
                     <div class="day-name">${gun.gun}</div>
-                    <div class="day-odak">${gun.odak}</div>
+                    <div class="day-odak">${isRest ? 'Off Day' : odakText}</div>
                 </div>
                 <div class="day-card-body">
                     ${!isRest ? `
                         <div class="day-stat"><span>Süre</span><span>${gun.sure_dk} dk</span></div>
                         <div class="day-stat"><span>Kalori</span><span>~${gun.tahmini_kalori} kcal</span></div>
                         <div class="day-exercises">${preview}${more}</div>
-                    ` : `<div style="font-size:13px;color:var(--text-3);margin-top:8px">Toparlanma günü</div>`}
+                    ` : `<div style="font-size:13px;color:var(--text-3);margin-top:8px">Dinlenme günü</div>`}
                 </div>
             `;
             if (!isRest) card.addEventListener("click", () => showDetail(gun));
