@@ -164,8 +164,9 @@
     .w-display { display:flex; align-items:baseline; gap:6px; }
     .w-big     { font-family:'Bebas Neue',sans-serif; font-size:54px; letter-spacing:2px; color:#CCFF00; line-height:1; }
     .w-unit    { font-size:20px; color:#9A9A9A; font-weight:300; }
-    .w-delta   { font-size:13px; font-weight:600; margin-top:4px; min-height:18px; }
-    .w-delta.dn { color:#00C48C; } .w-delta.up { color:#FF4D4D; } .w-delta.eq { color:#606060; }
+    .w-delta   { font-size:13px; font-weight:600; margin-top:4px; min-height:18px; display:flex; align-items:center; gap:4px; }
+    .w-delta.goal-ok { color:#CCFF00; } .w-delta.goal-warn { color:#FF4D4D; } .w-delta.eq { color:#606060; }
+    .w-arrow { font-size:16px; font-weight:700; line-height:1; }
 
     .sparkline-wrap { height:64px; position:relative; margin:14px 0; }
 
@@ -405,7 +406,7 @@
 
     <!-- ══ ⑤ WEIGHT EVOLUTION — 2 cols ══ -->
     <div class="bc b-2" style="display:flex;flex-direction:column;">
-        <div class="bc-lbl"><span class="bc-dot" style="background:#CCFF00"></span>Ağırlık Takibi</div>
+        <div class="bc-lbl"><span class="bc-dot" style="background:#CCFF00"></span>Kilo Takibi</div>
 
         <div class="w-display">
             <div class="w-big" id="w-kg">—</div>
@@ -508,7 +509,7 @@
    CONSTANTS
    ═══════════════════════════════════════════════════════ */
 const WATER_GOAL = 8;
-let fabOpen = false, tipIdx = 0, sparkChart = null;
+let fabOpen = false, tipIdx = 0, sparkChart = null, userGoal = null;
 
 const TIPS = [
     { icon:'⚡', text:'<strong>Progressive Overload</strong> — Her hafta ağırlık veya tekrar sayını küçük artışlarla yükselt. Kas büyümesinin temel formülü budur.', src:'Spor Fizyolojisi' },
@@ -683,7 +684,8 @@ function updateCalRing(consumed, target) {
 /* ═══════════════════════════════════════════════════════
    SPARKLINE CHART  (Chart.js minimal)
    ═══════════════════════════════════════════════════════ */
-function renderSparkline(weights, labels) {
+function renderSparkline(weights, labels, lineColor) {
+    const color = lineColor || '#CCFF00';
     const canvas = document.getElementById('sparkline');
     document.getElementById('spark-empty').style.display = 'none';
     canvas.style.display = 'block';
@@ -695,16 +697,17 @@ function renderSparkline(weights, labels) {
             labels,
             datasets: [{
                 data: weights,
-                borderColor: '#CCFF00',
+                borderColor: color,
                 backgroundColor: (ctx) => {
                     const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, 64);
-                    g.addColorStop(0, 'rgba(204,255,0,0.18)');
-                    g.addColorStop(1, 'rgba(204,255,0,0)');
+                    const r = parseInt(color.slice(1,3),16), gr = parseInt(color.slice(3,5),16), b = parseInt(color.slice(5,7),16);
+                    g.addColorStop(0, `rgba(${r},${gr},${b},0.18)`);
+                    g.addColorStop(1, `rgba(${r},${gr},${b},0)`);
                     return g;
                 },
                 fill: true, tension: 0.4, borderWidth: 1.8,
                 pointRadius:          (ctx) => ctx.dataIndex === weights.length - 1 ? 4 : 0,
-                pointBackgroundColor: '#CCFF00',
+                pointBackgroundColor: color,
                 pointBorderColor:     '#121212',
                 pointBorderWidth:     2,
             }]
@@ -788,20 +791,34 @@ async function loadSparkline() {
             return;
         }
         const last7 = data.slice(-7);
-        renderSparkline(
-            last7.map(d => parseFloat(d.kilo)),
-            last7.map(d => d.tarih)
-        );
-        // Weight delta vs previous
+        const weights = last7.map(d => parseFloat(d.kilo));
+        const labels  = last7.map(d => d.tarih);
+
+        // Weight delta vs previous (goal-aware coloring)
+        let trendColor = '#CCFF00';
         if (last7.length >= 2) {
-            const cur  = parseFloat(last7[last7.length - 1].kilo);
-            const prev = parseFloat(last7[last7.length - 2].kilo);
+            const cur  = weights[weights.length - 1];
+            const prev = weights[weights.length - 2];
             const diff = (cur - prev).toFixed(1);
             const el   = document.getElementById('w-delta');
-            if      (diff < 0) { el.textContent = `▼ ${Math.abs(diff)} kg son girişe göre`; el.className = 'w-delta dn'; }
-            else if (diff > 0) { el.textContent = `▲ ${diff} kg son girişe göre`;             el.className = 'w-delta up'; }
-            else               { el.textContent = 'Son girişle aynı';                          el.className = 'w-delta eq'; }
+            const isLoss = userGoal === 'kilo verme';
+            if (diff < 0) {
+                const aligned = isLoss;
+                trendColor = aligned ? '#CCFF00' : '#FF4D4D';
+                el.innerHTML = `<span class="w-arrow">↓</span> ${Math.abs(diff)} kg son girişe göre`;
+                el.className = 'w-delta ' + (aligned ? 'goal-ok' : 'goal-warn');
+            } else if (diff > 0) {
+                const aligned = !isLoss;
+                trendColor = aligned ? '#CCFF00' : '#FF4D4D';
+                el.innerHTML = `<span class="w-arrow">↑</span> ${diff} kg son girişe göre`;
+                el.className = 'w-delta ' + (aligned ? 'goal-ok' : 'goal-warn');
+            } else {
+                el.innerHTML = '— Son girişle aynı';
+                el.className = 'w-delta eq';
+                trendColor = '#606060';
+            }
         }
+        renderSparkline(weights, labels, trendColor);
     } catch(e) {
         document.getElementById('sparkline').style.display = 'none';
         document.getElementById('spark-empty').style.display = 'block';
@@ -912,6 +929,7 @@ async function init() {
         const meals  = await mealRes.json();
 
         if (sess.exists) {
+            userGoal = sess.goal;
             setGreeting(sess.goal);
             document.getElementById('w-kg').textContent = sess.weight || '—';
 
