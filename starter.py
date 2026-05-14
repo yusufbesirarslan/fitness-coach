@@ -720,6 +720,16 @@ def update_weight():
         last_sess.tdee            = tdee
         last_sess.target_calories = target_calories
 
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_checkin = WeeklyCheckIn.query.filter(
+        WeeklyCheckIn.user_id == current_user.id,
+        WeeklyCheckIn.created_at >= today_start
+    ).first()
+    if today_checkin:
+        today_checkin.weight = weight
+    else:
+        db.session.add(WeeklyCheckIn(user_id=current_user.id, weight=weight))
+
     db.session.commit()
 
     return jsonify({
