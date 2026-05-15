@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Profil Düzenle — Fitness Coach</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/theme.css">
+    <style>
+    .profile-wrap { max-width: 600px; margin: 0 auto; }
+
+    /* ── avatar display ── */
+    .avatar-section { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 32px; }
+    .avatar-lg {
+        width: 96px; height: 96px; border-radius: 50%; flex-shrink: 0;
+        display: flex; align-items: center; justify-content: center;
+        font-family: 'Bebas Neue', sans-serif; font-size: 40px; letter-spacing: 2px;
+        color: #121212; background: linear-gradient(135deg, #CCFF00, #A8D400);
+        overflow: hidden; border: 3px solid rgba(204,255,0,0.3);
+    }
+    .avatar-lg img { width: 100%; height: 100%; object-fit: cover; }
+    .avatar-name {
+        font-family: 'Bebas Neue', sans-serif; font-size: 28px;
+        letter-spacing: 2px; color: var(--text); text-align: center;
+    }
+    .avatar-handle { font-size: 13px; color: var(--text-3); }
+
+    /* ── gamified stats ── */
+    .stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 32px; }
+    .stat-badge {
+        background: var(--surface-2); border: 1px solid var(--border);
+        border-radius: 14px; padding: 20px; text-align: center;
+        position: relative; overflow: hidden;
+    }
+    .stat-badge::before {
+        content: ''; position: absolute; top: 0; left: 0; right: 0;
+        height: 2px;
+    }
+    .stat-badge.streak::before { background: linear-gradient(90deg, #FFB020, transparent); }
+    .stat-badge.rank::before { background: linear-gradient(90deg, #3D9EFF, transparent); }
+    .stat-icon { font-size: 32px; line-height: 1; margin-bottom: 6px; }
+    .stat-val {
+        font-family: 'Bebas Neue', sans-serif; font-size: 36px;
+        letter-spacing: 2px; line-height: 1;
+    }
+    .stat-badge.streak .stat-val { color: #FFB020; }
+    .stat-badge.rank .stat-val { color: #3D9EFF; }
+    .stat-lbl {
+        font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
+        text-transform: uppercase; color: var(--text-3); margin-top: 4px;
+    }
+
+    /* ── form section ── */
+    .form-section {
+        background: var(--surface-2); border: 1px solid var(--border);
+        border-radius: 16px; padding: 28px; position: relative; overflow: hidden;
+    }
+    .form-section::before {
+        content: ''; position: absolute; top: 0; left: 0; right: 0;
+        height: 2px; background: linear-gradient(90deg, #CCFF00, transparent);
+    }
+    .form-section-title {
+        font-family: 'Bebas Neue', sans-serif; font-size: 20px;
+        letter-spacing: 3px; color: var(--text); margin-bottom: 20px;
+    }
+    .form-grid { display: flex; flex-direction: column; gap: 16px; }
+    .form-field label {
+        display: block; font-size: 11px; font-weight: 700;
+        letter-spacing: 0.12em; text-transform: uppercase;
+        color: var(--text-3); margin-bottom: 6px;
+    }
+    .form-field input {
+        width: 100%; padding: 12px 14px; border-radius: 8px;
+        background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+        color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px;
+        outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+        box-sizing: border-box;
+    }
+    .form-field input:focus {
+        border-color: rgba(204,255,0,0.45);
+        box-shadow: 0 0 0 3px rgba(204,255,0,0.06);
+    }
+    .form-field .field-hint { font-size: 12px; color: var(--text-3); margin-top: 4px; }
+
+    /* ── goal cards ── */
+    .goal-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .goal-card {
+        background: rgba(255,255,255,0.02); border: 1.5px solid var(--border);
+        border-radius: 12px; padding: 16px; cursor: pointer;
+        text-align: center; transition: all 0.2s;
+    }
+    .goal-card:hover { border-color: rgba(204,255,0,0.3); }
+    .goal-card.selected { border-color: #CCFF00; background: rgba(204,255,0,0.06); }
+    .goal-card-icon { font-size: 28px; margin-bottom: 6px; }
+    .goal-card-label {
+        font-size: 13px; font-weight: 600; color: var(--text);
+    }
+    .goal-card.selected .goal-card-label { color: #CCFF00; }
+
+    /* ── save button ── */
+    .save-btn {
+        width: 100%; margin-top: 24px; padding: 14px;
+        font-family: 'Bebas Neue', sans-serif; font-size: 18px;
+        letter-spacing: 3px; color: #121212; background: #CCFF00;
+        border: none; border-radius: 10px; cursor: pointer;
+        transition: background 0.2s, box-shadow 0.2s;
+    }
+    .save-btn:hover { background: #A8D400; box-shadow: 0 0 20px rgba(204,255,0,0.15); }
+    .save-btn:disabled { opacity: 0.5; cursor: default; }
+
+    @media (max-width: 600px) {
+        .stats-row { grid-template-columns: 1fr 1fr; gap: 8px; }
+        .goal-cards { grid-template-columns: 1fr 1fr; }
+        .form-section { padding: 20px; }
+    }
+    </style>
+</head>
+<body>
+
+<!-- ── TOAST CONTAINER ── -->
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<!-- ── SIDEBAR (desktop) ── -->
+<aside class="sidebar">
+    <div class="sidebar-logo">FC</div>
+    <nav class="sidebar-nav">
+        <a href="/" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            Ana Sayfa
+        </a>
+        <a href="/nutrition" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+            Beslenme
+        </a>
+        <a href="/training" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
+            Antrenman
+        </a>
+        <a href="/progress-page" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            İlerleme
+        </a>
+    </nav>
+    <div class="sidebar-sep"></div>
+    <div class="sidebar-user">
+        <a href="/edit-profile" style="display:flex;align-items:center;gap:10px;text-decoration:none;flex:1;min-width:0;">
+            {% if profile_picture %}
+                <img src="{{ profile_picture }}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;">
+            {% else %}
+                <div class="sidebar-avatar">{{ username[0]|upper if username else 'U' }}</div>
+            {% endif %}
+            <div style="overflow:hidden">
+                <div class="sidebar-name">{{ username }}</div>
+                <span style="font-size:11px;color:var(--text-3);">Profili düzenle</span>
+            </div>
+        </a>
+        <a href="/logout" class="sidebar-logout" title="Çıkış yap" style="margin-left:auto;">→</a>
+    </div>
+</aside>
+
+<!-- ── MAIN CONTENT ── -->
+<main class="main-content">
+
+    <div class="page-hdr">
+        <h1>PROFİL<br><span>AYARLARI</span></h1>
+        <p>Bilgilerini güncelle, istatistiklerini takip et.</p>
+    </div>
+
+    <div class="profile-wrap">
+
+        <!-- ── AVATAR DISPLAY ── -->
+        <div class="avatar-section">
+            <div class="avatar-lg" id="avatar-display">
+                {% if profile_picture %}
+                    <img src="{{ profile_picture }}" alt="Profil" id="avatar-img">
+                {% else %}
+                    <span id="avatar-letter">{{ username[0]|upper if username else 'U' }}</span>
+                {% endif %}
+            </div>
+            <div class="avatar-name">{{ full_name if full_name else username }}</div>
+            <div class="avatar-handle">@{{ username }}</div>
+        </div>
+
+        <!-- ── GAMIFIED STATS (read-only) ── -->
+        <div class="stats-row">
+            <div class="stat-badge streak">
+                <div class="stat-icon">🔥</div>
+                <div class="stat-val">{{ streak_count }}</div>
+                <div class="stat-lbl">Günlük Seri</div>
+            </div>
+            <div class="stat-badge rank">
+                <div class="stat-icon">⭐</div>
+                <div class="stat-val">{{ rank_points }}</div>
+                <div class="stat-lbl">Rank Puanı</div>
+            </div>
+        </div>
+
+        <!-- ── EDITABLE FORM ── -->
+        <div class="form-section">
+            <div class="form-section-title">BİLGİLERİNİ DÜZENLE</div>
+            <div class="form-grid">
+                <div class="form-field">
+                    <label for="full_name">Ad Soyad</label>
+                    <input type="text" id="full_name" placeholder="Adın ve soyadın" value="{{ full_name }}" maxlength="150">
+                </div>
+                <div class="form-field">
+                    <label for="username">Kullanıcı Adı</label>
+                    <input type="text" id="username" placeholder="Kullanıcı adın" value="{{ username }}" maxlength="80">
+                    <div class="field-hint">En az 3 karakter, benzersiz olmalı.</div>
+                </div>
+                <div class="form-field">
+                    <label for="profile_picture">Profil Fotoğrafı URL</label>
+                    <input type="url" id="profile_picture" placeholder="https://example.com/photo.jpg" value="{{ profile_picture }}">
+                    <div class="field-hint">Bir resim URL'si gir veya boş bırak.</div>
+                </div>
+                <div class="form-field">
+                    <label>Fitness Hedefi</label>
+                    <div class="goal-cards">
+                        <div class="goal-card{% if goal == 'kilo verme' %} selected{% endif %}" onclick="selectGoal('kilo verme', this)">
+                            <div class="goal-card-icon">🏃</div>
+                            <div class="goal-card-label">Kilo Verme</div>
+                        </div>
+                        <div class="goal-card{% if goal == 'kas kazanma' %} selected{% endif %}" onclick="selectGoal('kas kazanma', this)">
+                            <div class="goal-card-icon">💪</div>
+                            <div class="goal-card-label">Kas Kazanma</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <button class="save-btn" id="save-btn" onclick="saveProfile()">KAYDET</button>
+        </div>
+
+    </div>
+</main>
+
+<!-- ── BOTTOM NAV (mobile) ── -->
+<nav class="bottom-nav">
+    <div class="bottom-nav-inner">
+        <a href="/" class="bn-item">
+            <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            Ana Sayfa
+        </a>
+        <a href="/nutrition" class="bn-item">
+            <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+            Beslenme
+        </a>
+        <a href="/training" class="bn-item">
+            <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
+            Antrenman
+        </a>
+        <a href="/progress-page" class="bn-item">
+            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            İlerleme
+        </a>
+        <a href="/edit-profile" class="bn-item active">
+            <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            Profil
+        </a>
+    </div>
+</nav>
+
+<script>
+let selectedGoal = '{{ goal }}';
+
+function selectGoal(goal, el) {
+    document.querySelectorAll('.goal-card').forEach(c => c.classList.remove('selected'));
+    el.classList.add('selected');
+    selectedGoal = goal;
+}
+
+function toast(msg, type) {
+    type = type || 'info';
+    const wrap = document.getElementById('toast-wrap');
+    const t = document.createElement('div');
+    t.className = 'toast toast-' + type;
+    t.textContent = msg;
+    wrap.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3000);
+}
+
+function updateAvatarPreview() {
+    const url = document.getElementById('profile_picture').value.trim();
+    const display = document.getElementById('avatar-display');
+    if (url) {
+        display.innerHTML = '<img src="' + url.replace(/"/g, '&quot;') + '" alt="Profil" style="width:100%;height:100%;object-fit:cover;">';
+    } else {
+        const letter = (document.getElementById('username').value || 'U')[0].toUpperCase();
+        display.innerHTML = '<span>' + letter + '</span>';
+    }
+}
+
+document.getElementById('profile_picture').addEventListener('input', updateAvatarPreview);
+document.getElementById('username').addEventListener('input', updateAvatarPreview);
+
+async function saveProfile() {
+    const btn = document.getElementById('save-btn');
+    btn.disabled = true;
+    btn.textContent = 'KAYDEDİLİYOR...';
+
+    try {
+        const res = await fetch('/edit-profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                full_name: document.getElementById('full_name').value.trim(),
+                username: document.getElementById('username').value.trim(),
+                profile_picture: document.getElementById('profile_picture').value.trim(),
+                goal: selectedGoal
+            })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            toast(data.error || 'Bir hata oluştu.', 'error');
+        } else {
+            toast(data.message, 'success');
+            setTimeout(() => location.reload(), 800);
+        }
+    } catch (e) {
+        toast('Bağlantı hatası.', 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'KAYDET';
+    }
+}
+</script>
+</body>
+</html>
