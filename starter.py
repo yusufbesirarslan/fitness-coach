@@ -192,6 +192,31 @@ class MealLog(db.Model):
     def __repr__(self):
         return f"<MealLog {self.user_id} - {self.ogun} - {self.created_at}>"
 
+class Friendship(db.Model):
+    id          = db.Column(db.Integer, primary_key=True)
+    sender_id   = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    receiver_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    status      = db.Column(db.String(10), default="pending")
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("sender_id", "receiver_id", name="uq_friendship"),
+    )
+
+    sender   = db.relationship("User", foreign_keys=[sender_id], backref="sent_requests")
+    receiver = db.relationship("User", foreign_keys=[receiver_id], backref="received_requests")
+
+class Message(db.Model):
+    id          = db.Column(db.Integer, primary_key=True)
+    sender_id   = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    receiver_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    body        = db.Column(db.Text, nullable=False)
+    timestamp   = db.Column(db.DateTime, default=datetime.utcnow)
+    is_read     = db.Column(db.Boolean, default=False)
+
+    sender   = db.relationship("User", foreign_keys=[sender_id], backref="sent_messages")
+    receiver = db.relationship("User", foreign_keys=[receiver_id], backref="received_messages")
+
 @app.route("/nutrition-plan/save", methods=["POST"])
 @login_required
 def save_nutrition_plan():
@@ -745,6 +770,187 @@ def edit_profile():
 
     db.session.commit()
     return jsonify({"message": "Profil başarıyla güncellendi!"})
+
+# ── FRIENDSHIP ROUTES ──
+
+def are_friends(user_a_id, user_b_id):
+    return Friendship.query.filter(
+        Friendship.status == "accepted",
+        db.or_(
+            db.and_(Friendship.sender_id == user_a_id, Friendship.receiver_id == user_b_id),
+            db.and_(Friendship.sender_id == user_b_id, Friendship.receiver_id == user_a_id),
+        )
+    ).first() is not None
+
+@app.route("/friends")
+@login_required
+def friends_page():
+    return render_template("friends.html",
+        username=current_user.username,
+        profile_picture=current_user.profile_picture)
+
+@app.route("/friends/list")
+@login_required
+def friends_list():
+    accepted = Friendship.query.filter(
+        Friendship.status == "accepted",
+        db.or_(Friendship.sender_id == current_user.id, Friendship.receiver_id == current_user.id)
+    ).all()
+    friends = []
+    for f in accepted:
+        friend = f.receiver if f.sender_id == current_user.id else f.sender
+        friends.append({"id": friend.id, "username": friend.username,
+                        "full_name": friend.full_name or friend.username,
+                        "profile_picture": friend.profile_picture})
+
+    pending_in = Friendship.query.filter_by(receiver_id=current_user.id, status="pending").all()
+    incoming = [{"request_id": p.id, "username": p.sender.username,
+                 "full_name": p.sender.full_name or p.sender.username,
+                 "profile_picture": p.sender.profile_picture} for p in pending_in]
+
+    pending_out = Friendship.query.filter_by(sender_id=current_user.id, status="pending").all()
+    outgoing = [{"request_id": p.id, "username": p.receiver.username} for p in pending_out]
+
+    return jsonify({"friends": friends, "incoming": incoming, "outgoing": outgoing})
+
+@app.route("/friends/search")
+@login_required
+def friends_search():
+    q = request.args.get("q", "").strip()
+    if len(q) < 2:
+        return jsonify({"users": []})
+    users = User.query.filter(
+        User.username.ilike(f"%{q}%"),
+        User.id != current_user.id
+    ).limit(10).all()
+    results = []
+    for u in users:
+        existing = Friendship.query.filter(
+            db.or_(
+                db.and_(Friendship.sender_id == current_user.id, Friendship.receiver_id == u.id),
+                db.and_(Friendship.sender_id == u.id, Friendship.receiver_id == current_user.id),
+            )
+        ).first()
+        status = existing.status if existing else None
+        results.append({"username": u.username, "full_name": u.full_name or u.username,
+                        "profile_picture": u.profile_picture, "status": status})
+    return jsonify({"users": results})
+
+@app.route("/friend/request/<username>", methods=["POST"])
+@login_required
+def friend_request(username):
+    target = User.query.filter_by(username=username).first()
+    if not target:
+        return jsonify({"error": "Kullanıcı bulunamadı."}), 404
+    if target.id == current_user.id:
+        return jsonify({"error": "Kendinize istek gönderemezsiniz."}), 400
+
+    existing = Friendship.query.filter(
+        db.or_(
+            db.and_(Friendship.sender_id == current_user.id, Friendship.receiver_id == target.id),
+            db.and_(Friendship.sender_id == target.id, Friendship.receiver_id == current_user.id),
+        )
+    ).first()
+    if existing:
+        if existing.status == "accepted":
+            return jsonify({"error": "Zaten arkadaşsınız."}), 400
+        if existing.status == "pending":
+            return jsonify({"error": "Zaten bekleyen bir istek var."}), 400
+        if existing.status == "rejected":
+            existing.status = "pending"
+            existing.sender_id = current_user.id
+            existing.receiver_id = target.id
+            existing.created_at = datetime.utcnow()
+            db.session.commit()
+            return jsonify({"message": f"{username} kullanıcısına istek gönderildi."})
+
+    friendship = Friendship(sender_id=current_user.id, receiver_id=target.id)
+    db.session.add(friendship)
+    db.session.commit()
+    return jsonify({"message": f"{username} kullanıcısına istek gönderildi."})
+
+@app.route("/friend/accept/<int:request_id>", methods=["POST"])
+@login_required
+def friend_accept(request_id):
+    fr = Friendship.query.get_or_404(request_id)
+    if fr.receiver_id != current_user.id:
+        return jsonify({"error": "Bu isteği kabul etme yetkiniz yok."}), 403
+    if fr.status != "pending":
+        return jsonify({"error": "Bu istek zaten işlenmiş."}), 400
+    fr.status = "accepted"
+    db.session.commit()
+    return jsonify({"message": f"{fr.sender.username} ile artık arkadaşsınız!"})
+
+@app.route("/friend/reject/<int:request_id>", methods=["POST"])
+@login_required
+def friend_reject(request_id):
+    fr = Friendship.query.get_or_404(request_id)
+    if fr.receiver_id != current_user.id:
+        return jsonify({"error": "Bu isteği reddetme yetkiniz yok."}), 403
+    if fr.status != "pending":
+        return jsonify({"error": "Bu istek zaten işlenmiş."}), 400
+    fr.status = "rejected"
+    db.session.commit()
+    return jsonify({"message": "İstek reddedildi."})
+
+# ── CHAT ROUTES ──
+
+@app.route("/chat/<username>")
+@login_required
+def chat_page(username):
+    other = User.query.filter_by(username=username).first_or_404()
+    if not are_friends(current_user.id, other.id):
+        return redirect(url_for("friends_page"))
+    return render_template("chat.html",
+        username=current_user.username,
+        profile_picture=current_user.profile_picture,
+        other_username=other.username,
+        other_full_name=other.full_name or other.username,
+        other_profile_picture=other.profile_picture)
+
+@app.route("/chat/<username>/messages")
+@login_required
+def chat_messages(username):
+    other = User.query.filter_by(username=username).first_or_404()
+    if not are_friends(current_user.id, other.id):
+        return jsonify({"error": "Arkadaş değilsiniz."}), 403
+
+    Message.query.filter_by(sender_id=other.id, receiver_id=current_user.id, is_read=False)\
+        .update({"is_read": True})
+    db.session.commit()
+
+    messages = Message.query.filter(
+        db.or_(
+            db.and_(Message.sender_id == current_user.id, Message.receiver_id == other.id),
+            db.and_(Message.sender_id == other.id, Message.receiver_id == current_user.id),
+        )
+    ).order_by(Message.timestamp.asc()).all()
+
+    return jsonify({"messages": [
+        {"id": m.id, "sender": m.sender.username, "body": m.body,
+         "timestamp": m.timestamp.strftime("%H:%M"), "is_mine": m.sender_id == current_user.id}
+        for m in messages
+    ]})
+
+@app.route("/chat/<username>/send", methods=["POST"])
+@login_required
+def chat_send(username):
+    other = User.query.filter_by(username=username).first_or_404()
+    if not are_friends(current_user.id, other.id):
+        return jsonify({"error": "Arkadaş değilsiniz."}), 403
+
+    data = request.get_json()
+    body = (data.get("body") or "").strip()
+    if not body:
+        return jsonify({"error": "Mesaj boş olamaz."}), 400
+    if len(body) > 2000:
+        return jsonify({"error": "Mesaj çok uzun."}), 400
+
+    msg = Message(sender_id=current_user.id, receiver_id=other.id, body=body)
+    db.session.add(msg)
+    db.session.commit()
+    return jsonify({"message": "Gönderildi.", "id": msg.id,
+                    "timestamp": msg.timestamp.strftime("%H:%M")})
 
 @app.route("/update-weight", methods=["POST"])
 @login_required
