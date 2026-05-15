@@ -228,11 +228,18 @@
     </nav>
     <div class="sidebar-sep"></div>
     <div class="sidebar-user">
-        <div class="sidebar-avatar">{{ username[0]|upper if username else 'U' }}</div>
-        <div style="overflow:hidden">
-            <div class="sidebar-name">{{ username }}</div>
-            <a href="/logout" class="sidebar-logout">Çıkış yap</a>
-        </div>
+        <a href="/edit-profile" style="display:flex;align-items:center;gap:10px;text-decoration:none;flex:1;min-width:0;">
+            {% if profile_picture %}
+                <img src="{{ profile_picture }}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;">
+            {% else %}
+                <div class="sidebar-avatar">{{ username[0]|upper if username else 'U' }}</div>
+            {% endif %}
+            <div style="overflow:hidden">
+                <div class="sidebar-name">{{ username }}</div>
+                <span style="font-size:11px;color:var(--text-3);">Profili düzenle</span>
+            </div>
+        </a>
+        <a href="/logout" class="sidebar-logout" title="Çıkış yap" style="margin-left:auto;">→</a>
     </div>
 </aside>
 
@@ -421,6 +428,10 @@
         <a href="/progress-page" class="bn-item">
             <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
             İlerleme
+        </a>
+        <a href="/edit-profile" class="bn-item">
+            <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            Profil
         </a>
     </div>
 </nav>

@@ -41,6 +41,11 @@ class User(UserMixin, db.Model):
     current_activity = db.Column(db.String(20))
     profile_complete = db.Column(db.Boolean, default=False)
 
+    profile_picture  = db.Column(db.String(500), nullable=True)
+    full_name        = db.Column(db.String(150), nullable=True)
+    streak_count     = db.Column(db.Integer, default=0, server_default='0')
+    rank_points      = db.Column(db.Integer, default=0, server_default='0')
+
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
@@ -690,7 +695,56 @@ def review_meals():
 def home():
     if not current_user.profile_complete:
         return redirect(url_for("setup"))
-    return render_template("index.html", username=current_user.username)
+    return render_template("index.html", username=current_user.username, profile_picture=current_user.profile_picture)
+
+@app.route("/edit-profile", methods=["GET", "POST"])
+@login_required
+def edit_profile():
+    if request.method == "GET":
+        return render_template("edit_profile.html",
+            username=current_user.username,
+            full_name=current_user.full_name or "",
+            profile_picture=current_user.profile_picture or "",
+            goal=current_user.goal or "",
+            streak_count=current_user.streak_count or 0,
+            rank_points=current_user.rank_points or 0,
+        )
+
+    data = request.get_json()
+
+    new_username = (data.get("username") or "").strip()
+    new_full_name = (data.get("full_name") or "").strip()
+    new_profile_picture = (data.get("profile_picture") or "").strip()
+    new_goal = (data.get("goal") or "").strip()
+
+    if not new_username or len(new_username) < 3:
+        return jsonify({"error": "Kullanıcı adı en az 3 karakter olmalıdır."}), 400
+
+    if len(new_username) > 80:
+        return jsonify({"error": "Kullanıcı adı en fazla 80 karakter olabilir."}), 400
+
+    if new_username != current_user.username:
+        if User.query.filter_by(username=new_username).first():
+            return jsonify({"error": "Bu kullanıcı adı zaten alınmış."}), 400
+
+    if len(new_full_name) > 150:
+        return jsonify({"error": "Ad soyad en fazla 150 karakter olabilir."}), 400
+
+    if len(new_profile_picture) > 500:
+        return jsonify({"error": "Profil fotoğrafı URL'si çok uzun."}), 400
+
+    valid_goals = ["kilo verme", "kas kazanma", ""]
+    if new_goal not in valid_goals:
+        return jsonify({"error": "Geçersiz hedef seçimi."}), 400
+
+    current_user.username = new_username
+    current_user.full_name = new_full_name if new_full_name else None
+    current_user.profile_picture = new_profile_picture if new_profile_picture else None
+    if new_goal:
+        current_user.goal = new_goal
+
+    db.session.commit()
+    return jsonify({"message": "Profil başarıyla güncellendi!"})
 
 @app.route("/update-weight", methods=["POST"])
 @login_required
@@ -1054,7 +1108,7 @@ MOTİVASYON:
 @app.route("/nutrition")
 @login_required
 def nutrition():
-    return render_template("nutrition.html", username=current_user.username)
+    return render_template("nutrition.html", username=current_user.username, profile_picture=current_user.profile_picture)
     
 @app.route("/nutrition-plan", methods=["POST"])
 @login_required
@@ -1244,7 +1298,7 @@ Yanıtını SADECE şu JSON formatında ver, başka hiçbir şey yazma.
 @app.route("/training")
 @login_required
 def training():
-    return render_template("training.html", username=current_user.username)
+    return render_template("training.html", username=current_user.username, profile_picture=current_user.profile_picture)
 
 @app.route("/training-plan", methods=["POST"])
 @login_required
@@ -1551,7 +1605,7 @@ def get_active_training_plan():
 @app.route("/progress-page")
 @login_required  
 def progress_page():
-    return render_template("progress.html", username=current_user.username)
+    return render_template("progress.html", username=current_user.username, profile_picture=current_user.profile_picture)
     
 @app.route("/history")
 @login_required
