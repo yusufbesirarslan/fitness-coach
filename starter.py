@@ -264,6 +264,14 @@ def get_rank_title(points):
         return "Legend"
 
 
+@app.context_processor
+def inject_rank():
+    if current_user.is_authenticated:
+        pts = current_user.rank_points or 0
+        return {"rank_points": pts, "rank_title": get_rank_title(pts)}
+    return {"rank_points": 0, "rank_title": "Beginner"}
+
+
 def get_today_progress(user_id):
     today_key = date.today().isoformat()
     return UserQuestProgress.query.filter_by(
