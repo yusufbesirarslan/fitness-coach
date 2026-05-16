@@ -2077,6 +2077,14 @@ def server_error(e):
 
 with app.app_context():
     db.create_all()
+    if DailyQuest.query.count() == 0:
+        for q in [
+            DailyQuest(title="Daily Login", description="Bugün uygulamaya giriş yap", points_reward=10, quest_type="login"),
+            DailyQuest(title="Log a Workout", description="Bir antrenman planı oluştur veya kaydet", points_reward=50, quest_type="workout_logged"),
+            DailyQuest(title="Help a Friend", description="Bir arkadaşına mesaj gönder", points_reward=30, quest_type="suggestion_sent"),
+        ]:
+            db.session.add(q)
+        db.session.commit()
 
 
 if __name__ == "__main__":
