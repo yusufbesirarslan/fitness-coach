@@ -1,11 +1,12 @@
-from flask import Flask, request, jsonify, render_template , redirect , url_for , session , Response
+from flask import Flask, request, jsonify, render_template , redirect , url_for , session , Response, flash
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager , UserMixin , login_user , logout_user , login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime
+from datetime import datetime, date
 from groq import Groq
 import os
 import json
+import click
 from dotenv import load_dotenv
 load_dotenv()
 app = Flask(__name__)
@@ -216,6 +217,73 @@ class Message(db.Model):
 
     sender   = db.relationship("User", foreign_keys=[sender_id], backref="sent_messages")
     receiver = db.relationship("User", foreign_keys=[receiver_id], backref="received_messages")
+
+
+class DailyQuest(db.Model):
+    id            = db.Column(db.Integer, primary_key=True)
+    title         = db.Column(db.String(120), nullable=False)
+    description   = db.Column(db.Text)
+    points_reward = db.Column(db.Integer, nullable=False, default=10)
+    quest_type    = db.Column(db.String(50), nullable=False)
+    is_active     = db.Column(db.Boolean, default=True)
+
+
+class UserQuestProgress(db.Model):
+    id           = db.Column(db.Integer, primary_key=True)
+    user_id      = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    quest_id     = db.Column(db.Integer, db.ForeignKey("daily_quest.id"), nullable=False)
+    completed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    date_key     = db.Column(db.String(10), nullable=False, default=lambda: date.today().isoformat())
+    is_claimed   = db.Column(db.Boolean, default=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "quest_id", "date_key", name="uq_user_quest_day"),
+    )
+
+    user  = db.relationship("User", backref="quest_progress")
+    quest = db.relationship("DailyQuest", backref="progress_entries")
+
+
+def award_points(user_id, amount):
+    user = User.query.get(user_id)
+    if user:
+        user.rank_points = (user.rank_points or 0) + amount
+        db.session.commit()
+        return user.rank_points
+    return None
+
+
+def get_rank_title(points):
+    if points < 500:
+        return "Beginner"
+    elif points < 2000:
+        return "Gym Rat"
+    elif points < 5000:
+        return "Beast Mode"
+    else:
+        return "Legend"
+
+
+def get_today_progress(user_id):
+    today_key = date.today().isoformat()
+    return UserQuestProgress.query.filter_by(
+        user_id=user_id, date_key=today_key
+    ).all()
+
+
+def complete_quest_for_user(user_id, quest_type):
+    quest = DailyQuest.query.filter_by(quest_type=quest_type, is_active=True).first()
+    if not quest:
+        return
+    today_key = date.today().isoformat()
+    existing = UserQuestProgress.query.filter_by(
+        user_id=user_id, quest_id=quest.id, date_key=today_key
+    ).first()
+    if not existing:
+        progress = UserQuestProgress(user_id=user_id, quest_id=quest.id, date_key=today_key)
+        db.session.add(progress)
+        db.session.commit()
+
 
 @app.route("/nutrition-plan/save", methods=["POST"])
 @login_required
@@ -720,7 +788,12 @@ def review_meals():
 def home():
     if not current_user.profile_complete:
         return redirect(url_for("setup"))
-    return render_template("index.html", username=current_user.username, profile_picture=current_user.profile_picture)
+    return render_template("index.html",
+        username=current_user.username,
+        profile_picture=current_user.profile_picture,
+        rank_points=current_user.rank_points or 0,
+        rank_title=get_rank_title(current_user.rank_points or 0)
+    )
 
 @app.route("/edit-profile", methods=["GET", "POST"])
 @login_required
@@ -949,6 +1022,7 @@ def chat_send(username):
     msg = Message(sender_id=current_user.id, receiver_id=other.id, body=body)
     db.session.add(msg)
     db.session.commit()
+    complete_quest_for_user(current_user.id, "suggestion_sent")
     return jsonify({"message": "Gönderildi.", "id": msg.id,
                     "timestamp": msg.timestamp.strftime("%H:%M")})
 
@@ -1788,6 +1862,7 @@ def save_training_plan():
     )
     db.session.add(new_plan)
     db.session.commit()
+    complete_quest_for_user(current_user.id, "workout_logged")
 
     return jsonify({"message": "Antrenman planı kaydedildi."})
 
@@ -1903,6 +1978,7 @@ def login():
         return jsonify({"error": "Kullanıcı adı veya şifre hatalı"}) , 401
     
     login_user(user)
+    complete_quest_for_user(user.id, "login")
     return jsonify({"message" : f"Hoş geldin {user.username}!"})
 
 @app.route("/logout")
@@ -1910,6 +1986,78 @@ def login():
 def logout():
     logout_user()
     return redirect(url_for("login"))
+
+@app.route("/quests")
+@login_required
+def quests():
+    all_quests = DailyQuest.query.filter_by(is_active=True).all()
+    today_progress = get_today_progress(current_user.id)
+    progress_map = {p.quest_id: p for p in today_progress}
+
+    quest_data = []
+    for q in all_quests:
+        prog = progress_map.get(q.id)
+        if prog and prog.is_claimed:
+            status = "claimed"
+        elif prog:
+            status = "completed"
+        else:
+            status = "pending"
+        quest_data.append({"quest": q, "status": status})
+
+    rank_title = get_rank_title(current_user.rank_points or 0)
+    return render_template("quests.html",
+        username=current_user.username,
+        profile_picture=current_user.profile_picture,
+        rank_points=current_user.rank_points or 0,
+        rank_title=rank_title,
+        quest_data=quest_data
+    )
+
+
+@app.route("/quests/claim/<int:quest_id>", methods=["POST"])
+@login_required
+def claim_quest(quest_id):
+    quest = DailyQuest.query.get(quest_id)
+    if not quest:
+        return jsonify({"error": "Görev bulunamadı"}), 404
+
+    today_key = date.today().isoformat()
+    progress = UserQuestProgress.query.filter_by(
+        user_id=current_user.id, quest_id=quest_id, date_key=today_key
+    ).first()
+
+    if not progress:
+        return jsonify({"error": "Bu görevi henüz tamamlamadın"}), 403
+
+    if progress.is_claimed:
+        return jsonify({"error": "Bu ödülü zaten aldın"}), 400
+
+    progress.is_claimed = True
+    new_total = award_points(current_user.id, quest.points_reward)
+
+    return jsonify({
+        "message": f"+{quest.points_reward} Rank Points!",
+        "new_total": new_total,
+        "rank_title": get_rank_title(new_total)
+    })
+
+
+@app.cli.command("seed-quests")
+def seed_quests():
+    """Insert default daily quests into the database."""
+    defaults = [
+        {"title": "Daily Login", "description": "Bugün uygulamaya giriş yap", "points_reward": 10, "quest_type": "login"},
+        {"title": "Log a Workout", "description": "Bir antrenman planı oluştur veya kaydet", "points_reward": 50, "quest_type": "workout_logged"},
+        {"title": "Help a Friend", "description": "Bir arkadaşına mesaj gönder", "points_reward": 30, "quest_type": "suggestion_sent"},
+    ]
+    for q in defaults:
+        existing = DailyQuest.query.filter_by(quest_type=q["quest_type"]).first()
+        if not existing:
+            db.session.add(DailyQuest(**q))
+    db.session.commit()
+    click.echo("Default quests seeded successfully.")
+
 
 @app.errorhandler(404)
 def not_found(e):

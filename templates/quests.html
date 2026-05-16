@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Görevler — Fitness Coach</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/theme.css">
+  <style>
+    .rank-banner {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      position: relative;
+      overflow: hidden;
+    }
+    .rank-banner::before {
+      content: '';
+      position: absolute;
+      top: -60px; right: -60px;
+      width: 200px; height: 200px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(61,158,255,0.08), transparent 70%);
+      pointer-events: none;
+    }
+    .rank-icon {
+      width: 64px; height: 64px;
+      border-radius: 50%;
+      background: var(--blue-dim);
+      border: 2px solid rgba(61,158,255,0.3);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px;
+      flex-shrink: 0;
+    }
+    .rank-info { flex: 1; }
+    .rank-title-text {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 28px;
+      letter-spacing: 2px;
+      color: var(--blue-light);
+      line-height: 1;
+    }
+    .rank-points-text {
+      font-size: 13px;
+      color: var(--text-2);
+      margin-top: 4px;
+    }
+    .rank-points-text strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .quest-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 16px;
+    }
+    @media (max-width: 680px) {
+      .quest-grid { grid-template-columns: 1fr; }
+    }
+
+    .quest-card {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      transition: transform 0.24s ease, box-shadow 0.24s ease, border-color 0.24s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .quest-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 0 16px rgba(204,255,0,0.06), 0 8px 32px rgba(0,0,0,0.4);
+      border-color: var(--border-2);
+    }
+    .quest-card.claimed {
+      opacity: 0.6;
+      border-color: rgba(0,196,140,0.25);
+    }
+    .quest-card.claimed:hover { transform: none; box-shadow: none; }
+
+    .quest-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .quest-emoji {
+      width: 42px; height: 42px;
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+    .quest-emoji.login    { background: var(--volt-dim); }
+    .quest-emoji.workout  { background: var(--orange-dim); }
+    .quest-emoji.social   { background: var(--blue-dim); }
+
+    .quest-title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 20px;
+      letter-spacing: 1.5px;
+      color: var(--text);
+    }
+    .quest-desc {
+      font-size: 13px;
+      color: var(--text-2);
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+    .quest-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .quest-reward {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--volt);
+      background: var(--volt-dim);
+      border: 1px solid rgba(204,255,0,0.18);
+      border-radius: 20px;
+      padding: 5px 12px;
+    }
+
+    .btn-claim {
+      background: var(--volt);
+      color: #121212;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 18px;
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 15px;
+      letter-spacing: 2px;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .btn-claim:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 16px rgba(204,255,0,0.3);
+    }
+    .btn-claim:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 5px 12px;
+      border-radius: 20px;
+    }
+    .status-badge.pending {
+      color: var(--text-3);
+      background: rgba(255,255,255,0.04);
+      border: 1px solid var(--border);
+    }
+    .status-badge.done {
+      color: var(--green);
+      background: var(--green-dim);
+      border: 1px solid rgba(0,196,140,0.25);
+    }
+
+    .toast-wrap { position: fixed; bottom: 24px; left: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+    @media (max-width: 1024px) { .toast-wrap { bottom: 80px; left: 50%; transform: translateX(-50%); } }
+    .toast {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 20px; border-radius: 10px;
+      font-size: 13px; font-weight: 500;
+      animation: slideUp 0.3s ease;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    .toast-success { background: #1a3a2a; border: 1px solid rgba(0,196,140,0.3); color: var(--green); }
+    .toast-error   { background: #3a1a1a; border: 1px solid rgba(255,77,77,0.3); color: var(--red); }
+    @keyframes slideUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+  </style>
+</head>
+<body>
+
+<!-- ── SIDEBAR ── -->
+<aside class="sidebar">
+  <div class="sidebar-logo">FC</div>
+  <nav class="sidebar-nav">
+    <a href="/" class="sidebar-link">
+      <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      Ana Sayfa
+    </a>
+    <a href="/nutrition" class="sidebar-link">
+      <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+      Beslenme
+    </a>
+    <a href="/training" class="sidebar-link">
+      <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
+      Antrenman
+    </a>
+    <a href="/progress-page" class="sidebar-link">
+      <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      İlerleme
+    </a>
+    <a href="/friends" class="sidebar-link">
+      <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Arkadaşlar
+    </a>
+    <a href="/quests" class="sidebar-link active">
+      <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      Görevler
+    </a>
+  </nav>
+  <div class="sidebar-sep"></div>
+  <div class="sidebar-user">
+    <a href="/edit-profile" style="display:flex;align-items:center;gap:10px;text-decoration:none;flex:1;min-width:0;">
+      {% if profile_picture %}
+        <img src="{{ profile_picture }}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;">
+      {% else %}
+        <div class="sidebar-avatar">{{ username[0]|upper if username else 'U' }}</div>
+      {% endif %}
+      <div style="overflow:hidden">
+        <div class="sidebar-name">{{ username }}</div>
+        <span style="font-size:11px;color:var(--text-3);">{{ rank_points }} RP</span>
+      </div>
+    </a>
+    <a href="/logout" class="sidebar-logout" title="Çikis yap" style="margin-left:auto;">&#8594;</a>
+  </div>
+</aside>
+
+<!-- ── MAIN CONTENT ── -->
+<main class="main-content">
+
+  <!-- Page Header -->
+  <div class="page-hdr">
+    <h1>GÖREV<span>LER</span></h1>
+    <p>Günlük görevlerini tamamla, puan kazan ve sıralamalarda yüksel.</p>
+  </div>
+
+  <!-- Rank Banner -->
+  <div class="rank-banner">
+    <div class="rank-icon">
+      {% if rank_title == 'Beginner' %}&#127793;{% elif rank_title == 'Gym Rat' %}&#128170;{% elif rank_title == 'Beast Mode' %}&#128293;{% else %}&#127942;{% endif %}
+    </div>
+    <div class="rank-info">
+      <div class="rank-title-text">{{ rank_title }}</div>
+      <div class="rank-points-text"><strong>{{ rank_points }}</strong> Rank Points</div>
+    </div>
+  </div>
+
+  <!-- Quest Cards -->
+  <div class="quest-grid">
+    {% for item in quest_data %}
+    <div class="quest-card {% if item.status == 'claimed' %}claimed{% endif %}" id="quest-{{ item.quest.id }}">
+      <div class="quest-header">
+        <div class="quest-emoji {% if item.quest.quest_type == 'login' %}login{% elif item.quest.quest_type == 'workout_logged' %}workout{% else %}social{% endif %}">
+          {% if item.quest.quest_type == 'login' %}&#128272;{% elif item.quest.quest_type == 'workout_logged' %}&#127947;{% else %}&#129309;{% endif %}
+        </div>
+        <div class="quest-title">{{ item.quest.title }}</div>
+      </div>
+      <div class="quest-desc">{{ item.quest.description }}</div>
+      <div class="quest-footer">
+        <div class="quest-reward">+{{ item.quest.points_reward }} RP</div>
+        {% if item.status == 'pending' %}
+          <span class="status-badge pending">Bekliyor</span>
+        {% elif item.status == 'completed' %}
+          <button class="btn-claim" onclick="claimQuest({{ item.quest.id }})">PUAN AL</button>
+        {% else %}
+          <span class="status-badge done">&#10003; Alindi</span>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+</main>
+
+<!-- ── BOTTOM NAV (mobile) ── -->
+<nav class="bottom-nav">
+  <div class="bottom-nav-inner">
+    <a href="/" class="bn-item">
+      <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      Ana Sayfa
+    </a>
+    <a href="/nutrition" class="bn-item">
+      <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+      Beslenme
+    </a>
+    <a href="/training" class="bn-item">
+      <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
+      Antrenman
+    </a>
+    <a href="/progress-page" class="bn-item">
+      <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      Ilerleme
+    </a>
+    <a href="/quests" class="bn-item active">
+      <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+      Gorevler
+    </a>
+    <a href="/edit-profile" class="bn-item">
+      <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      Profil
+    </a>
+  </div>
+</nav>
+
+<!-- Toast container -->
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<script>
+function showToast(msg, type) {
+  const wrap = document.getElementById('toast-wrap');
+  const t = document.createElement('div');
+  t.className = 'toast toast-' + type;
+  t.innerHTML = '<span>' + (type === 'success' ? '&#10003;' : '&#10007;') + '</span><span>' + msg + '</span>';
+  wrap.appendChild(t);
+  setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3200);
+}
+
+async function claimQuest(questId) {
+  const btn = event.target;
+  btn.disabled = true;
+  btn.textContent = '...';
+
+  try {
+    const res = await fetch('/quests/claim/' + questId, { method: 'POST' });
+    const data = await res.json();
+
+    if (res.ok) {
+      showToast(data.message, 'success');
+      const card = document.getElementById('quest-' + questId);
+      card.classList.add('claimed');
+      btn.outerHTML = '<span class="status-badge done">&#10003; Alindi</span>';
+
+      const rankEl = document.querySelector('.rank-title-text');
+      const ptsEl = document.querySelector('.rank-points-text');
+      if (rankEl) rankEl.textContent = data.rank_title;
+      if (ptsEl) ptsEl.innerHTML = '<strong>' + data.new_total + '</strong> Rank Points';
+    } else {
+      showToast(data.error, 'error');
+      btn.disabled = false;
+      btn.textContent = 'PUAN AL';
+    }
+  } catch (e) {
+    showToast('Bir hata olustu', 'error');
+    btn.disabled = false;
+    btn.textContent = 'PUAN AL';
+  }
+}
+</script>
+
+</body>
+</html>
