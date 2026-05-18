@@ -220,6 +220,31 @@ class Message(db.Model):
     receiver = db.relationship("User", foreign_keys=[receiver_id], backref="received_messages")
 
 
+class Supplement(db.Model):
+    id                   = db.Column(db.Integer, primary_key=True)
+    user_id              = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    product_name         = db.Column(db.String(150), nullable=False)
+    brand                = db.Column(db.String(100), nullable=False)
+    category             = db.Column(db.String(30), nullable=False, default="Other")
+    status               = db.Column(db.String(15), nullable=False, default="Active")
+    rating_effectiveness = db.Column(db.Integer, nullable=True)
+    rating_taste         = db.Column(db.Integer, nullable=True)
+    rating_price         = db.Column(db.Integer, nullable=True)
+    review_text          = db.Column(db.Text, nullable=True)
+    price_paid           = db.Column(db.Float, nullable=True)
+    is_public            = db.Column(db.Boolean, default=True)
+    created_at           = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User", backref="supplements")
+
+SUPPLEMENT_CATEGORIES = ["Protein", "Amino Acid", "Pre-Workout", "Vitamin/Health", "Creatine", "Other"]
+SUPPLEMENT_STATUSES   = ["Active", "Low Stock", "Finished"]
+CATEGORY_ICONS = {
+    "Protein": "\U0001f964", "Amino Acid": "\U0001f4a7", "Pre-Workout": "⚡",
+    "Vitamin/Health": "\U0001f48a", "Creatine": "\U0001f4aa", "Other": "\U0001f4e6",
+}
+
+
 class DailyQuest(db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     title         = db.Column(db.String(120), nullable=False)
@@ -819,6 +844,9 @@ def home():
 @login_required
 def edit_profile():
     if request.method == "GET":
+        supps = Supplement.query.filter_by(user_id=current_user.id)\
+            .filter(Supplement.status.in_(["Active", "Low Stock"]))\
+            .order_by(Supplement.created_at.desc()).all()
         return render_template("edit_profile.html",
             username=current_user.username,
             full_name=current_user.full_name or "",
@@ -826,6 +854,8 @@ def edit_profile():
             goal=current_user.goal or "",
             streak_count=current_user.streak_count or 0,
             rank_points=current_user.rank_points or 0,
+            supplements=supps,
+            icons=CATEGORY_ICONS,
         )
 
     data = request.get_json()
@@ -1049,6 +1079,125 @@ def chat_send(username):
     complete_quest_for_user(current_user.id, "suggestion_sent")
     return jsonify({"message": "Gönderildi.", "id": msg.id,
                     "timestamp": msg.timestamp.strftime("%H:%M")})
+
+# ── SUPPLEMENT ROUTES ──
+
+@app.route("/supplements")
+@login_required
+def supplements_page():
+    supps = Supplement.query.filter_by(user_id=current_user.id)\
+        .order_by(Supplement.created_at.desc()).all()
+    return render_template("manage_stack.html",
+        username=current_user.username,
+        profile_picture=current_user.profile_picture,
+        supplements=supps,
+        categories=SUPPLEMENT_CATEGORIES,
+        statuses=SUPPLEMENT_STATUSES,
+        icons=CATEGORY_ICONS)
+
+@app.route("/supplement/add", methods=["POST"])
+@login_required
+def supplement_add():
+    data = request.get_json()
+    name = (data.get("product_name") or "").strip()
+    brand = (data.get("brand") or "").strip()
+    if not name or not brand:
+        return jsonify({"error": "Ürün adı ve marka zorunludur."}), 400
+
+    category = data.get("category", "Other")
+    if category not in SUPPLEMENT_CATEGORIES:
+        category = "Other"
+    status = data.get("status", "Active")
+    if status not in SUPPLEMENT_STATUSES:
+        status = "Active"
+
+    def parse_rating(val):
+        if val is None or val == "" or val == 0:
+            return None
+        try:
+            v = int(val)
+            return v if 1 <= v <= 5 else None
+        except (ValueError, TypeError):
+            return None
+
+    supp = Supplement(
+        user_id=current_user.id,
+        product_name=name, brand=brand,
+        category=category, status=status,
+        rating_effectiveness=parse_rating(data.get("rating_effectiveness")),
+        rating_taste=parse_rating(data.get("rating_taste")),
+        rating_price=parse_rating(data.get("rating_price")),
+        review_text=(data.get("review_text") or "").strip() or None,
+        price_paid=float(data["price_paid"]) if data.get("price_paid") else None,
+        is_public=data.get("is_public", True),
+    )
+    db.session.add(supp)
+
+    first_entry = Supplement.query.filter_by(user_id=current_user.id).count() == 0
+    db.session.commit()
+
+    if first_entry or Supplement.query.filter_by(user_id=current_user.id).count() == 1:
+        award_points(current_user.id, 25)
+        db.session.commit()
+
+    complete_quest_for_user(current_user.id, "supplement_added")
+
+    return jsonify({"message": "Supplement eklendi!", "id": supp.id})
+
+@app.route("/supplement/edit/<int:sid>", methods=["POST"])
+@login_required
+def supplement_edit(sid):
+    supp = Supplement.query.get_or_404(sid)
+    if supp.user_id != current_user.id:
+        return jsonify({"error": "Yetkiniz yok."}), 403
+
+    data = request.get_json()
+
+    if "product_name" in data:
+        name = (data["product_name"] or "").strip()
+        if name:
+            supp.product_name = name
+    if "brand" in data:
+        brand = (data["brand"] or "").strip()
+        if brand:
+            supp.brand = brand
+    if "category" in data and data["category"] in SUPPLEMENT_CATEGORIES:
+        supp.category = data["category"]
+    if "status" in data and data["status"] in SUPPLEMENT_STATUSES:
+        supp.status = data["status"]
+
+    def parse_rating(val):
+        if val is None or val == "" or val == 0:
+            return None
+        try:
+            v = int(val)
+            return v if 1 <= v <= 5 else None
+        except (ValueError, TypeError):
+            return None
+
+    for field in ["rating_effectiveness", "rating_taste", "rating_price"]:
+        if field in data:
+            setattr(supp, field, parse_rating(data[field]))
+    if "review_text" in data:
+        supp.review_text = (data["review_text"] or "").strip() or None
+    if "price_paid" in data:
+        supp.price_paid = float(data["price_paid"]) if data["price_paid"] else None
+    if "is_public" in data:
+        supp.is_public = bool(data["is_public"])
+
+    db.session.commit()
+    return jsonify({"message": "Supplement güncellendi!"})
+
+@app.route("/supplement/delete/<int:sid>", methods=["POST"])
+@login_required
+def supplement_delete(sid):
+    supp = Supplement.query.get_or_404(sid)
+    if supp.user_id != current_user.id:
+        return jsonify({"error": "Yetkiniz yok."}), 403
+    db.session.delete(supp)
+    db.session.commit()
+    return jsonify({"message": "Supplement silindi."})
+
 
 @app.route("/update-weight", methods=["POST"])
 @login_required
@@ -2133,6 +2282,13 @@ with app.app_context():
             DailyQuest(title="Help a Friend", description="Bir arkadaşına mesaj gönder", points_reward=30, quest_type="suggestion_sent"),
         ]:
             db.session.add(q)
+        db.session.commit()
+    if not DailyQuest.query.filter_by(quest_type="supplement_added").first():
+        db.session.add(DailyQuest(
+            title="Update Your Stack",
+            description="Supplement stack'ine yeni bir ürün ekle",
+            points_reward=25, quest_type="supplement_added"
+        ))
         db.session.commit()
 
 

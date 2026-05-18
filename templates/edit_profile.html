@@ -112,7 +112,42 @@
         .stats-row { grid-template-columns: 1fr 1fr; gap: 8px; }
         .goal-cards { grid-template-columns: 1fr 1fr; }
         .form-section { padding: 20px; }
+        .stack-grid { grid-template-columns: 1fr !important; }
     }
+
+    /* ── supplement stack on profile ── */
+    .stack-section { margin-top: 28px; }
+    .stack-section-title {
+        font-family: var(--font-display); font-size: 18px; letter-spacing: 2px;
+        color: var(--volt); margin-bottom: 14px;
+    }
+    .stack-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .stack-card {
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
+        padding: 14px 16px; display: flex; gap: 12px; align-items: flex-start; transition: border-color 0.2s;
+    }
+    .stack-card:hover { border-color: var(--border-2); }
+    .stack-icon { font-size: 26px; flex-shrink: 0; }
+    .stack-body { flex: 1; min-width: 0; }
+    .stack-name { font-weight: 600; font-size: 14px; color: var(--text); }
+    .stack-brand { font-size: 11px; color: var(--text-3); }
+    .stack-ratings { display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+    .stack-rating-item { font-size: 10px; color: var(--text-2); }
+    .stack-rating-item .mini-stars { color: var(--volt); letter-spacing: 1px; }
+    .stack-review { font-size: 11px; color: var(--text-3); font-style: italic; margin-top: 5px; border-left: 2px solid var(--volt); padding-left: 8px; }
+    .stack-status {
+        font-size: 9px; padding: 2px 8px; border-radius: 10px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;
+    }
+    .st-active  { background: rgba(0,196,140,0.15); color: #00C48C; }
+    .st-low     { background: rgba(255,176,32,0.15); color: #FFB020; }
+    .stack-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
+    .stack-empty { text-align: center; color: var(--text-3); font-size: 13px; padding: 24px; }
+    .stack-link {
+        display: inline-block; margin-top: 12px; font-size: 13px; color: var(--volt);
+        text-decoration: none; font-weight: 600; letter-spacing: 0.5px;
+    }
+    .stack-link:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -135,6 +170,10 @@
         <a href="/training" class="sidebar-link">
             <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
             Antrenman
+        </a>
+        <a href="/supplements" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+            Supplements
         </a>
         <a href="/progress-page" class="sidebar-link">
             <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
@@ -239,6 +278,47 @@
             <button class="save-btn" id="save-btn" onclick="saveProfile()">KAYDET</button>
         </div>
 
+        <!-- ── SUPPLEMENT STACK ── -->
+        <div class="stack-section">
+            <div class="stack-section-title">GÜNCEL SUPPLEMENT STACK</div>
+            {% if supplements %}
+            <div class="stack-grid">
+                {% for s in supplements %}
+                <div class="stack-card">
+                    <div class="stack-icon">{{ icons.get(s.category, '📦') }}</div>
+                    <div class="stack-body">
+                        <div class="stack-top">
+                            <div class="stack-name">{{ s.product_name }}</div>
+                            <span class="stack-status {% if s.status == 'Active' %}st-active{% else %}st-low{% endif %}">{{ s.status }}</span>
+                        </div>
+                        <div class="stack-brand">{{ s.brand }} · {{ s.category }}</div>
+                        <div class="stack-ratings">
+                            {% if s.rating_effectiveness %}
+                            <span class="stack-rating-item">Etkinlik: <span class="mini-stars">{{ '★' * s.rating_effectiveness }}{{ '☆' * (5 - s.rating_effectiveness) }}</span></span>
+                            {% endif %}
+                            {% if s.rating_taste %}
+                            <span class="stack-rating-item">Lezzet: <span class="mini-stars">{{ '★' * s.rating_taste }}{{ '☆' * (5 - s.rating_taste) }}</span></span>
+                            {% endif %}
+                            {% if s.rating_price %}
+                            <span class="stack-rating-item">Fiyat: <span class="mini-stars">{{ '★' * s.rating_price }}{{ '☆' * (5 - s.rating_price) }}</span></span>
+                            {% endif %}
+                        </div>
+                        {% if s.review_text %}
+                        <div class="stack-review">"{{ s.review_text }}"</div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            <a href="/supplements" class="stack-link">Stack'ini Düzenle →</a>
+            {% else %}
+            <div class="stack-empty">
+                Henüz supplement eklemedin.<br>
+                <a href="/supplements" class="stack-link">+ İlk Supplement'ini Ekle</a>
+            </div>
+            {% endif %}
+        </div>
+
     </div>
 </main>
 
@@ -256,6 +336,10 @@
         <a href="/training" class="bn-item">
             <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
             Antrenman
+        </a>
+        <a href="/supplements" class="bn-item">
+            <svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+            Supplements
         </a>
         <a href="/progress-page" class="bn-item">
             <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
