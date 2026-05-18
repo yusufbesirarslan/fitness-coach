@@ -11,11 +11,14 @@ Env vars:
 
 import os
 import json
+import time
+import threading
 from datetime import datetime, date, timedelta
 from contextlib import contextmanager
 
 import psycopg2
 import psycopg2.extras
+import requests
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
@@ -366,6 +369,132 @@ def get_user_nutrition_log(user_id: int, days: int = 3) -> str:
             result["plan_score"] = plan["score"]
 
         return json.dumps(result, ensure_ascii=False, default=str)
+
+
+# ── FatSecret API — OAuth2 Token Cache ─────────────────────────
+
+_fs_token_lock = threading.Lock()
+_fs_token_cache = {"token": None, "expires_at": 0}
+
+FATSECRET_TOKEN_URL = "https://oauth.fatsecret.com/connect/token"
+FATSECRET_API_URL = "https://platform.fatsecret.com/rest/server.api"
+
+
+def _get_fatsecret_token() -> str:
+    with _fs_token_lock:
+        if _fs_token_cache["token"] and time.time() < _fs_token_cache["expires_at"] - 60:
+            return _fs_token_cache["token"]
+
+    client_id = os.environ.get("FATSECRET_CLIENT_ID", "")
+    client_secret = os.environ.get("FATSECRET_CLIENT_SECRET", "")
+    if not client_id or not client_secret:
+        raise RuntimeError("FATSECRET_CLIENT_ID / FATSECRET_CLIENT_SECRET not set")
+
+    resp = requests.post(
+        FATSECRET_TOKEN_URL,
+        data={"grant_type": "client_credentials", "scope": "basic"},
+        auth=(client_id, client_secret),
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    with _fs_token_lock:
+        _fs_token_cache["token"] = data["access_token"]
+        _fs_token_cache["expires_at"] = time.time() + data.get("expires_in", 86400)
+
+    return data["access_token"]
+
+
+# ── TOOL 6: Nutrition Data Search (FatSecret) ─────────────────
+
+@mcp.tool()
+def search_nutrition_data(query: str) -> str:
+    """FatSecret API ile besin verisi arar. Kalori, protein, karb, yağ bilgisi döndürür. Örnek: '200g grilled chicken'."""
+    if not query.strip():
+        return json.dumps({"error": "Arama sorgusu boş olamaz."}, ensure_ascii=False)
+
+    try:
+        token = _get_fatsecret_token()
+    except Exception as e:
+        return json.dumps({"error": f"FatSecret auth hatası: {e}"}, ensure_ascii=False)
+
+    try:
+        resp = requests.get(
+            FATSECRET_API_URL,
+            params={
+                "method": "foods.search",
+                "search_expression": query,
+                "format": "json",
+                "max_results": 5,
+            },
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        return json.dumps({"error": f"FatSecret API hatası: {e}"}, ensure_ascii=False)
+
+    foods_wrapper = data.get("foods", {})
+    food_list = foods_wrapper.get("food", [])
+    if not food_list:
+        return json.dumps({
+            "query": query,
+            "results": [],
+            "message": "Sonuç bulunamadı.",
+        }, ensure_ascii=False)
+
+    if isinstance(food_list, dict):
+        food_list = [food_list]
+
+    results = []
+    for f in food_list:
+        desc = f.get("food_description", "")
+        entry = {
+            "name": f.get("food_name", ""),
+            "type": f.get("food_type", ""),
+            "brand": f.get("brand_name", ""),
+            "description": desc,
+        }
+        parsed = _parse_fatsecret_desc(desc)
+        if parsed:
+            entry["per_serving"] = parsed
+        results.append(entry)
+
+    return json.dumps({
+        "query": query,
+        "results": results,
+    }, ensure_ascii=False, default=str)
+
+
+def _parse_fatsecret_desc(desc: str) -> dict | None:
+    """Parse FatSecret's 'Per 100g - Calories: 165kcal | Fat: 3.57g | Carbs: 0.00g | Protein: 31.02g' format."""
+    if not desc:
+        return None
+    parts = {}
+    try:
+        segments = desc.split(" - ", 1)
+        if len(segments) == 2:
+            parts["serving"] = segments[0].strip()
+            macros = segments[1]
+        else:
+            macros = desc
+
+        for item in macros.split("|"):
+            item = item.strip()
+            if ":" not in item:
+                continue
+            key, val = item.split(":", 1)
+            key = key.strip().lower()
+            val = val.strip().replace("kcal", "").replace("g", "").strip()
+            try:
+                parts[key] = float(val)
+            except ValueError:
+                parts[key] = val
+    except Exception:
+        return None
+    return parts if len(parts) > 1 else None
 
 
 # ── Entry point ─────────────────────────────────────────────────
