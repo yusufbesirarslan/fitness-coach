@@ -23,7 +23,7 @@ def main():
 
     print("[FitX] Starting MCP server (HTTP) on :8100 ...")
     mcp_proc = subprocess.Popen(
-        [sys.executable, "-m", "mcp.server", "--http"],
+        [sys.executable, "-m", "fitx_mcp", "--http"],
         env=env,
     )
     procs.append(mcp_proc)

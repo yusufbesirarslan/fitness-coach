@@ -2,8 +2,8 @@
 FitX MCP Server — provides read-only database tools for the AI Coach.
 
 Usage:
-    python -m mcp.server          (stdio transport, for Claude Desktop / SDK)
-    python -m mcp.server --http   (streamable-http transport, for Flask integration)
+    python -m fitx_mcp          (stdio transport, for Claude Desktop / SDK)
+    python -m fitx_mcp --http   (streamable-http transport, for Flask integration)
 
 Env vars:
     DATABASE_URL  — PostgreSQL connection string (required)
