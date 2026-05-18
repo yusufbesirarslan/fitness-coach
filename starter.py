@@ -2119,7 +2119,7 @@ def server_error(e):
 with app.app_context():
     db.create_all()
     try:
-        db.session.execute(db.text("ALTER TABLE user ADD COLUMN last_login DATE"))
+        db.session.execute(db.text('ALTER TABLE "user" ADD COLUMN last_login DATE'))
         db.session.commit()
     except Exception:
         db.session.rollback()
