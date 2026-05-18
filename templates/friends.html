@@ -125,6 +125,7 @@
     .btn-chat:hover { background: rgba(61,158,255,0.2); }
 
     .loading-text { text-align: center; color: var(--text-3); padding: 20px; font-size: 13px; }
+    .rank-badge { font-size:10px; background:var(--volt,#CCFF00); color:#000; padding:2px 8px; border-radius:10px; margin-left:6px; font-weight:600; display:inline-block; vertical-align:middle; }
     </style>
 </head>
 <body>
@@ -325,7 +326,7 @@ async function loadFriends() {
     if (data.friends.length) {
         fList.innerHTML = data.friends.map(f =>
             '<div class="fr-row">' + avatarHTML(f.profile_picture, f.username) +
-            '<div class="fr-info"><div class="fr-name">'+f.full_name+'</div><div class="fr-handle">@'+f.username+'</div></div>' +
+            '<div class="fr-info"><div class="fr-name">'+f.full_name+'</div><div class="fr-handle">@'+f.username+' <span class="rank-badge">'+f.rank_title+'</span></div></div>' +
             '<a href="/chat/'+f.username+'" class="btn-chat">💬 Sohbet</a>' +
             '</div>'
         ).join('');
@@ -337,7 +338,11 @@ async function loadFriends() {
 async function acceptReq(id) {
     const res = await fetch('/friend/accept/' + id, { method: 'POST' });
     const data = await res.json();
-    if (res.ok) { toast(data.message, 'success'); loadFriends(); }
+    if (res.ok) {
+        toast(data.message, 'success');
+        if (data.points_awarded) toast('+' + data.points_awarded + ' Rank Points!', 'info');
+        loadFriends();
+    }
     else toast(data.error, 'error');
 }
 
