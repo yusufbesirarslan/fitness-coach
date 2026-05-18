@@ -1559,7 +1559,7 @@ def _is_nutrition_question(question: str) -> bool:
 
 
 def _fetch_coach_context(user_id, question=""):
-    from mcp.server import (
+    from fitx_mcp.server import (
         get_user_fitness_summary,
         get_user_workout_history,
         get_user_supplement_stack,

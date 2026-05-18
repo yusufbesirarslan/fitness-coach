@@ -1,5 +1,5 @@
-"""Allow running as: python -m mcp"""
-from mcp.server import mcp as app
+"""Allow running as: python -m fitx_mcp"""
+from fitx_mcp.server import mcp as app
 
 if __name__ == "__main__":
     import sys
