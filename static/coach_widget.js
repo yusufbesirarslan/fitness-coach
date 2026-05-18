@@ -172,10 +172,13 @@
       this._push('user', question);
       this._setLoading(true);
       var self = this;
+      var history = this.messages.slice(-8).map(function (m) {
+        return { role: m.role === 'user' ? 'user' : 'bot', text: m.text };
+      });
       fetch('/ask', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ question: question })
+        body:    JSON.stringify({ question: question, history: history })
       })
       .then(function (r) { return r.json(); })
       .then(function (d) {
@@ -217,6 +220,7 @@
         var cls = m.role === 'user' ? 'cw-user' : 'cw-bot';
         var esc = m.text
           .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
           .replace(/\n/g, '<br>');
         return '<div class="cw-row ' + cls + '">' +
                  '<div class="cw-bubble">' + esc + '</div>' +

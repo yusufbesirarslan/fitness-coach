@@ -295,6 +295,32 @@ class UserQuestProgress(db.Model):
     quest = db.relationship("DailyQuest", backref="progress_entries")
 
 
+class WorkoutLog(db.Model):
+    id            = db.Column(db.Integer, primary_key=True)
+    user_id       = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    exercise_name = db.Column(db.String(120), nullable=False)
+    sets          = db.Column(db.Integer, nullable=False)
+    reps          = db.Column(db.Integer, nullable=False)
+    weight_kg     = db.Column(db.Float, nullable=False, default=0)
+    volume        = db.Column(db.Float, nullable=False, default=0)
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    user = db.relationship("User", backref="workout_logs")
+
+
+class UserDailyNutrition(db.Model):
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    food_item  = db.Column(db.String(200), nullable=False)
+    calories   = db.Column(db.Float, nullable=False, default=0)
+    protein    = db.Column(db.Float, nullable=False, default=0)
+    carbs      = db.Column(db.Float, nullable=False, default=0)
+    fat        = db.Column(db.Float, nullable=False, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    user = db.relationship("User", backref="daily_nutrition")
+
+
 def award_xp(user_id, amount):
     user = User.query.get(user_id)
     if user:
@@ -1529,28 +1555,66 @@ def chat():
         "comparison"     : comparison
     })
 
-COACH_SYSTEM_PROMPT = """Sen FitX Akıllı Koçu ve Beslenme Uzmanısın. Kullanıcının gerçek zamanlı veritabanı verilerine ve FatSecret besin veritabanına erişimin var.
-Aşağıda kullanıcının güncel fitness özeti, antrenman geçmişi, supplement stack'i, beslenme logu ve arkadaş aktiviteleri yer alıyor.
-Eğer kullanıcı bir yiyecek veya besin hakkında soruyorsa, FatSecret'tan gelen gerçek besin değerlerini de görüyorsun.
+COACH_SYSTEM_PROMPT = """Sen FitX Proaktif Koçusun. Kullanıcının veritabanına HEM okuma HEM yazma erişimin var.
+
+TEMEL GÖREV:
+- Kullanıcı antrenman veya yemek bahsettiğinde HEMEN tespit et.
+- "yaptım", "yedim", "çalıştım", "içtim" gibi ifadeler = loglama niyeti.
+- Loglama niyeti tespit ettiğinde veriyi çıkar ve ONAY İSTE (asla direkt kaydetme).
+- Onay formatı: "📋 Tespit ettim: [detaylar]. Kayıt edeyim mi?"
+- Beslenme soruları için FatSecret verisini kullan, gerçek makro değerleri ver.
+- Trendleri, eksik logları ve başarıları proaktif olarak belirt.
+- Haftalık rapor günlerinde (Pazartesi/Pazar) otomatik rapor sun.
 
 KURALLAR:
 - Türkçe yaz, kullanıcıya "sen" diye hitap et.
-- Genel geçer şeyler söyleme — yanıtın tamamen bu kişinin verilerine ve gerçek besin verilerine dayansın.
-- Besin soruları için: FatSecret verisindeki kalori, protein, karb, yağ değerlerini VER, sonra kullanıcının hedefine göre yorum yap.
-- Kısa, net ve samimi konuş. Uzun paragraflar yazma.
-- Emin olmadığın tıbbi konularda doktora danışmasını öner.
-- Kas kazanma hedefinde kilo artışı OLUMLU, kilo verme hedefinde kilo azalışı OLUMLU.
-- Supplement önerisi yaparken mevcut stack'i dikkate al.
-- Streaktan bahsederken motive edici ol."""
+- Kısa, net, samimi ve veri odaklı konuş.
+- Genel geçer tavsiye VERME — her yanıt kullanıcının verisine dayansın.
+- Emin olmadığın tıbbi konularda doktora yönlendir.
+- Kas kazanma hedefinde kilo artışı OLUMLU, kilo vermede azalış OLUMLU.
+- Tonu: elit, destekleyici, veri odaklı."""
 
 NUTRITION_KEYWORDS = [
     "kalori", "kaç kalori", "protein", "karb", "karbonhidrat", "yağ", "makro",
     "besin", "beslenme", "yemek", "yiyecek", "içecek", "meyve", "sebze",
     "tavuk", "pirinç", "yumurta", "süt", "ekmek", "pilav", "makarna", "salata",
     "et", "balık", "peynir", "yoğurt", "çikolata", "muz", "elma",
-    "calories", "chicken", "rice", "egg", "protein", "carbs", "fat",
+    "calories", "chicken", "rice", "egg", "carbs", "fat",
     "gram", "100g", "200g", "porsiyon", "tabak",
 ]
+
+LOGGING_WORKOUT_KEYWORDS = [
+    "yaptım", "çalıştım", "kaldırdım", "press", "squat", "curl",
+    "deadlift", "bench", "set", "tekrar", "rep", "antrenman yaptım",
+    "egzersiz yaptım", "ağırlık", "dambıl", "barbell",
+]
+
+LOGGING_NUTRITION_KEYWORDS = [
+    "yedim", "içtim", "atıştırdım", "kahvaltı yaptım", "öğle yedim",
+    "akşam yedim", "ara öğün", "tükettim", "bir porsiyon",
+]
+
+CONFIRM_KEYWORDS = [
+    "evet", "yes", "onayla", "kaydet", "tamam", "olur", "yap",
+    "log", "do it", "confirm", "uygun", "kesinlikle", "tabii",
+]
+
+DENY_KEYWORDS = [
+    "hayır", "no", "iptal", "cancel", "vazgeç", "yapma", "değil",
+]
+
+
+def _detect_intent(question: str) -> str:
+    q = question.lower().strip()
+    if any(kw in q for kw in CONFIRM_KEYWORDS) and len(q.split()) <= 5:
+        return "confirm"
+    if any(kw in q for kw in DENY_KEYWORDS) and len(q.split()) <= 8:
+        return "deny"
+    if any(kw in q for kw in LOGGING_WORKOUT_KEYWORDS):
+        return "log_workout"
+    if any(kw in q for kw in LOGGING_NUTRITION_KEYWORDS):
+        return "log_nutrition"
+    return "general"
 
 
 def _is_nutrition_question(question: str) -> bool:
@@ -1566,6 +1630,7 @@ def _fetch_coach_context(user_id, question=""):
         get_friend_activities,
         get_user_nutrition_log,
         search_nutrition_data,
+        generate_weekly_report,
     )
     parts = []
     try:
@@ -1596,7 +1661,115 @@ def _fetch_coach_context(user_id, question=""):
         except Exception:
             parts.append("[FATSECRET BESİN VERİSİ] Veri alınamadı.")
 
+    from analytics_engine import get_nudges
+    try:
+        models = {
+            "WorkoutLog": WorkoutLog,
+            "UserDailyNutrition": UserDailyNutrition,
+            "UserSession": UserSession,
+        }
+        nudges = get_nudges(User.query.get(user_id), db, models)
+        if nudges:
+            parts.append("[PROAKTİF BİLDİRİMLER]\n" + "\n".join(nudges))
+    except Exception:
+        pass
+
     return "\n\n".join(parts)
+
+
+def _extract_with_llm(question, intent_type):
+    """Use a focused LLM call to extract structured data from natural language."""
+    if intent_type == "log_workout":
+        extraction_prompt = (
+            "Aşağıdaki mesajdan antrenman verisini JSON olarak çıkar. "
+            'Format: {"exercise": "...", "sets": N, "reps": N, "weight_kg": N}\n'
+            "Eğer bir değer belirtilmemişse makul bir varsayılan kullan (sets=3, reps=10, weight_kg=0).\n"
+            "SADECE JSON döndür, başka bir şey yazma.\n\n"
+            f"Mesaj: {question}"
+        )
+    else:
+        extraction_prompt = (
+            "Aşağıdaki mesajdan beslenme verisini JSON olarak çıkar. "
+            'Format: {"food_item": "...", "calories": N, "protein": N, "carbs": N, "fat": N}\n'
+            "Eğer makro değerleri belirtilmemişse 0 yaz — sistem FatSecret'tan alacak.\n"
+            "SADECE JSON döndür, başka bir şey yazma.\n\n"
+            f"Mesaj: {question}"
+        )
+    try:
+        resp = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": extraction_prompt}],
+            max_tokens=150,
+            temperature=0.1,
+        )
+        raw = resp.choices[0].message.content.strip()
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start >= 0 and end > start:
+            return json.loads(raw[start:end])
+    except Exception:
+        pass
+    return None
+
+
+def _execute_pending_action(user_id):
+    """Execute the pending coach action stored in session. Returns result dict or None."""
+    from fitx_mcp.server import log_workout_entry, log_nutrition_entry, search_nutrition_data
+
+    pending = session.get("pending_coach_action")
+    if not pending:
+        return None
+
+    session.pop("pending_coach_action", None)
+
+    action_type = pending.get("type")
+    data = pending.get("data", {})
+
+    if action_type == "log_workout":
+        result_str = log_workout_entry(
+            user_id,
+            data.get("exercise", ""),
+            data.get("sets", 3),
+            data.get("reps", 10),
+            data.get("weight_kg", 0),
+        )
+        result = json.loads(result_str)
+        if result.get("success"):
+            award_xp(user_id, 15)
+            log_activity(user_id, "workout_completed",
+                         f"{data.get('exercise')} — {data.get('sets')}x{data.get('reps')} @ {data.get('weight_kg')}kg")
+            db.session.commit()
+        return result
+
+    elif action_type == "log_nutrition":
+        cal = data.get("calories", 0)
+        pro = data.get("protein", 0)
+        carb = data.get("carbs", 0)
+        fat = data.get("fat", 0)
+
+        if cal == 0 and pro == 0:
+            try:
+                fs_result = json.loads(search_nutrition_data(data.get("food_item", "")))
+                results = fs_result.get("results", [])
+                if results and results[0].get("per_serving"):
+                    ps = results[0]["per_serving"]
+                    cal = ps.get("calories", 0)
+                    pro = ps.get("protein", 0)
+                    carb = ps.get("carbs", 0)
+                    fat = ps.get("fat", 0)
+            except Exception:
+                pass
+
+        result_str = log_nutrition_entry(user_id, data.get("food_item", ""), cal, pro, carb, fat)
+        result = json.loads(result_str)
+        if result.get("success"):
+            award_xp(user_id, 10)
+            log_activity(user_id, "nutrition_logged",
+                         f"{data.get('food_item')} — {round(cal)} kcal")
+            db.session.commit()
+        return result
+
+    return None
 
 
 @app.route("/ask", methods=["POST"])
@@ -1604,23 +1777,100 @@ def _fetch_coach_context(user_id, question=""):
 def ask_coach():
     data     = request.get_json()
     question = data.get("question", "")
+    history  = data.get("history", [])
 
     if not question.strip():
         return jsonify({"error": "Bir soru yaz."}), 400
 
+    intent = _detect_intent(question)
+
+    if intent == "confirm":
+        result = _execute_pending_action(current_user.id)
+        if result and result.get("success"):
+            if result.get("today_total_volume") is not None:
+                msg = (
+                    f"Kaydedildi! {result['exercise']} — "
+                    f"{result['sets']}x{result['reps']} @ {result['weight_kg']}kg "
+                    f"(Volüm: {result['volume']}kg)\n"
+                    f"Bugünkü toplam volüm: {result['today_total_volume']}kg "
+                    f"({result['today_entry_count']} kayıt) +15 XP!"
+                )
+            else:
+                t = result.get("today_totals", {})
+                msg = (
+                    f"Kaydedildi! {result['food_item']} — "
+                    f"{result['calories']} kcal | "
+                    f"P: {result['protein']}g | K: {result['carbs']}g | Y: {result['fat']}g\n"
+                    f"Bugünkü toplam: {t.get('calories', 0)} kcal | "
+                    f"P: {t.get('protein', 0)}g ({t.get('entry_count', 0)} kayıt) +10 XP!"
+                )
+            return jsonify({"answer": msg})
+        elif result and result.get("error"):
+            return jsonify({"answer": f"Hata: {result['error']}"})
+        else:
+            return jsonify({"answer": "Onaylanacak bir kayıt bulunamadı. Ne kaydetmemi istersin?"})
+
+    if intent == "deny":
+        session.pop("pending_coach_action", None)
+        return jsonify({"answer": "Tamam, iptal ettim. Düzeltme yapmak istersen söyle!"})
+
+    if intent in ("log_workout", "log_nutrition"):
+        extracted = _extract_with_llm(question, intent)
+        if extracted:
+            session["pending_coach_action"] = {"type": intent, "data": extracted}
+
+            if intent == "log_workout":
+                ex = extracted.get("exercise", "?")
+                s = extracted.get("sets", 3)
+                r = extracted.get("reps", 10)
+                w = extracted.get("weight_kg", 0)
+                vol = s * r * w
+                preview = (
+                    f"📋 Tespit ettim: **{ex}** — {s} set x {r} tekrar @ {w}kg "
+                    f"(Toplam volüm: {vol}kg)\n\nKayıt edeyim mi?"
+                )
+            else:
+                food = extracted.get("food_item", "?")
+                cal = extracted.get("calories", 0)
+                pro = extracted.get("protein", 0)
+
+                if cal == 0 and pro == 0:
+                    from fitx_mcp.server import search_nutrition_data
+                    try:
+                        fs = json.loads(search_nutrition_data(food))
+                        results = fs.get("results", [])
+                        if results and results[0].get("per_serving"):
+                            ps = results[0]["per_serving"]
+                            extracted["calories"] = ps.get("calories", 0)
+                            extracted["protein"] = ps.get("protein", 0)
+                            extracted["carbs"] = ps.get("carbs", 0)
+                            extracted["fat"] = ps.get("fat", 0)
+                            session["pending_coach_action"]["data"] = extracted
+                    except Exception:
+                        pass
+
+                cal = extracted.get("calories", 0)
+                pro = extracted.get("protein", 0)
+                carb = extracted.get("carbs", 0)
+                fat = extracted.get("fat", 0)
+                preview = (
+                    f"📋 Tespit ettim: **{food}** — {cal} kcal | "
+                    f"P: {pro}g | K: {carb}g | Y: {fat}g\n\nKayıt edeyim mi?"
+                )
+            return jsonify({"answer": preview})
+
     context = _fetch_coach_context(current_user.id, question)
 
-    prompt = f"""{context}
-
-Kullanıcının sorusu: {question}"""
+    messages = [{"role": "system", "content": COACH_SYSTEM_PROMPT}]
+    for h in history[-6:]:
+        role = "user" if h.get("role") == "user" else "assistant"
+        messages.append({"role": role, "content": h.get("text", "")[:500]})
+    messages.append({"role": "user", "content": f"{context}\n\nKullanıcının sorusu: {question}"})
 
     try:
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": COACH_SYSTEM_PROMPT},
-                {"role": "user",   "content": prompt}
-            ],
+            messages=messages,
             max_tokens=700,
             temperature=0.7
         )

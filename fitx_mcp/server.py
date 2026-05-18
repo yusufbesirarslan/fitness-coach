@@ -1,5 +1,5 @@
 """
-FitX MCP Server — provides read-only database tools for the AI Coach.
+FitX MCP Server — provides database tools (read + write) for the AI Coach.
 
 Usage:
     python -m fitx_mcp          (stdio transport, for Claude Desktop / SDK)
@@ -27,9 +27,9 @@ load_dotenv()
 mcp = FastMCP(
     "FitX Coach Tools",
     instructions=(
-        "Bu araçlar FitX fitness uygulamasının veritabanına salt-okunur erişim sağlar. "
-        "Kullanıcının fitness verileri, antrenman geçmişi, supplement stack'i ve "
-        "arkadaş aktiviteleri hakkında bilgi almak için kullan."
+        "Bu araçlar FitX fitness uygulamasının veritabanına erişim sağlar. "
+        "Okuma araçları ile kullanıcı verilerini sorgula, yazma araçları ile "
+        "antrenman ve beslenme kayıtlarını logla."
     ),
 )
 
@@ -50,6 +50,23 @@ def get_conn():
     conn.set_session(readonly=True, autocommit=True)
     try:
         yield conn
+    finally:
+        conn.close()
+
+
+@contextmanager
+def get_write_conn():
+    db_url = _get_db_url()
+    if not db_url:
+        raise RuntimeError("DATABASE_URL is not set")
+    dsn = db_url.replace("postgresql://", "postgres://", 1)
+    conn = psycopg2.connect(dsn, cursor_factory=psycopg2.extras.RealDictCursor)
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -495,6 +512,192 @@ def _parse_fatsecret_desc(desc: str) -> dict | None:
     except Exception:
         return None
     return parts if len(parts) > 1 else None
+
+
+# ── TOOL 7: Log Workout Entry (WRITE) ──────────────────────────
+
+@mcp.tool()
+def log_workout_entry(user_id: int, exercise_name: str, sets: int, reps: int, weight_kg: float) -> str:
+    """Kullanıcının antrenman kaydını veritabanına yazar. Onay alındıktan sonra çağrılmalı."""
+    if sets <= 0 or reps <= 0 or weight_kg < 0:
+        return json.dumps({"error": "Geçersiz değerler: set, tekrar > 0, ağırlık >= 0 olmalı."}, ensure_ascii=False)
+    if not exercise_name.strip():
+        return json.dumps({"error": "Egzersiz adı boş olamaz."}, ensure_ascii=False)
+
+    volume = sets * reps * weight_kg
+
+    with get_write_conn() as conn:
+        cur = conn.cursor()
+        cur.execute('SELECT id FROM "user" WHERE id = %s', (user_id,))
+        if not cur.fetchone():
+            return json.dumps({"error": "Kullanıcı bulunamadı"}, ensure_ascii=False)
+
+        cur.execute(
+            "INSERT INTO workout_log (user_id, exercise_name, sets, reps, weight_kg, volume, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (user_id, exercise_name.strip(), sets, reps, weight_kg, volume, datetime.utcnow()),
+        )
+        row = cur.fetchone()
+
+        cur.execute(
+            "SELECT COALESCE(SUM(volume), 0) as total_volume, COUNT(*) as entry_count "
+            "FROM workout_log WHERE user_id = %s AND created_at::date = CURRENT_DATE",
+            (user_id,),
+        )
+        today = cur.fetchone()
+
+    return json.dumps({
+        "success": True,
+        "id": row["id"],
+        "exercise": exercise_name.strip(),
+        "sets": sets,
+        "reps": reps,
+        "weight_kg": weight_kg,
+        "volume": volume,
+        "today_total_volume": round(today["total_volume"]),
+        "today_entry_count": today["entry_count"],
+    }, ensure_ascii=False)
+
+
+# ── TOOL 8: Log Nutrition Entry (WRITE) ────────────────────────
+
+@mcp.tool()
+def log_nutrition_entry(user_id: int, food_item: str, calories: float, protein: float, carbs: float, fat: float) -> str:
+    """Kullanıcının beslenme kaydını veritabanına yazar. Makro değerleri FatSecret'tan alınabilir."""
+    if not food_item.strip():
+        return json.dumps({"error": "Yiyecek adı boş olamaz."}, ensure_ascii=False)
+    if calories < 0 or protein < 0 or carbs < 0 or fat < 0:
+        return json.dumps({"error": "Makro değerleri negatif olamaz."}, ensure_ascii=False)
+
+    with get_write_conn() as conn:
+        cur = conn.cursor()
+        cur.execute('SELECT id FROM "user" WHERE id = %s', (user_id,))
+        if not cur.fetchone():
+            return json.dumps({"error": "Kullanıcı bulunamadı"}, ensure_ascii=False)
+
+        cur.execute(
+            "INSERT INTO user_daily_nutrition (user_id, food_item, calories, protein, carbs, fat, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (user_id, food_item.strip(), calories, protein, carbs, fat, datetime.utcnow()),
+        )
+        row = cur.fetchone()
+
+        cur.execute(
+            "SELECT COALESCE(SUM(calories), 0) as total_cal, "
+            "COALESCE(SUM(protein), 0) as total_protein, "
+            "COALESCE(SUM(carbs), 0) as total_carbs, "
+            "COALESCE(SUM(fat), 0) as total_fat, "
+            "COUNT(*) as entry_count "
+            "FROM user_daily_nutrition WHERE user_id = %s AND created_at::date = CURRENT_DATE",
+            (user_id,),
+        )
+        today = cur.fetchone()
+
+    return json.dumps({
+        "success": True,
+        "id": row["id"],
+        "food_item": food_item.strip(),
+        "calories": calories,
+        "protein": protein,
+        "carbs": carbs,
+        "fat": fat,
+        "today_totals": {
+            "calories": round(today["total_cal"]),
+            "protein": round(today["total_protein"], 1),
+            "carbs": round(today["total_carbs"], 1),
+            "fat": round(today["total_fat"], 1),
+            "entry_count": today["entry_count"],
+        },
+    }, ensure_ascii=False)
+
+
+# ── TOOL 9: Weekly Performance Report ──────────────────────────
+
+@mcp.tool()
+def generate_weekly_report(user_id: int) -> str:
+    """Kullanıcının haftalık performans raporunu oluşturur: bu hafta vs geçen hafta karşılaştırması."""
+    today = date.today()
+    this_week_start = today - timedelta(days=today.weekday())
+    last_week_start = this_week_start - timedelta(days=7)
+
+    with get_conn() as conn:
+        cur = conn.cursor()
+
+        cur.execute('SELECT id, goal FROM "user" WHERE id = %s', (user_id,))
+        user = cur.fetchone()
+        if not user:
+            return json.dumps({"error": "Kullanıcı bulunamadı"}, ensure_ascii=False)
+
+        cur.execute(
+            "SELECT exercise_name, SUM(volume) as total_vol, SUM(sets) as total_sets, "
+            "COUNT(*) as entries, MAX(weight_kg) as max_weight "
+            "FROM workout_log WHERE user_id = %s AND created_at::date >= %s "
+            "GROUP BY exercise_name ORDER BY total_vol DESC",
+            (user_id, this_week_start),
+        )
+        this_week_workouts = cur.fetchall()
+
+        cur.execute(
+            "SELECT COALESCE(SUM(volume), 0) as vol FROM workout_log "
+            "WHERE user_id = %s AND created_at::date >= %s AND created_at::date < %s",
+            (user_id, last_week_start, this_week_start),
+        )
+        last_week_vol = cur.fetchone()["vol"]
+
+        cur.execute(
+            "SELECT COALESCE(SUM(calories), 0) as cal, COALESCE(SUM(protein), 0) as pro, "
+            "COALESCE(SUM(carbs), 0) as carb, COALESCE(SUM(fat), 0) as fat, COUNT(*) as entries "
+            "FROM user_daily_nutrition WHERE user_id = %s AND created_at::date >= %s",
+            (user_id, this_week_start),
+        )
+        this_week_nutrition = cur.fetchone()
+
+        cur.execute(
+            "SELECT COALESCE(SUM(calories), 0) as cal, COALESCE(SUM(protein), 0) as pro "
+            "FROM user_daily_nutrition "
+            "WHERE user_id = %s AND created_at::date >= %s AND created_at::date < %s",
+            (user_id, last_week_start, this_week_start),
+        )
+        last_week_nutrition = cur.fetchone()
+
+    this_week_total_vol = sum(w["total_vol"] for w in this_week_workouts) if this_week_workouts else 0
+    vol_change = this_week_total_vol - (last_week_vol or 0)
+    cal_change = this_week_nutrition["cal"] - (last_week_nutrition["cal"] or 0)
+
+    mvp = None
+    if this_week_workouts:
+        mvp = {
+            "exercise": this_week_workouts[0]["exercise_name"],
+            "volume": round(this_week_workouts[0]["total_vol"]),
+            "max_weight": this_week_workouts[0]["max_weight"],
+            "sets": this_week_workouts[0]["total_sets"],
+        }
+
+    return json.dumps({
+        "period": f"{this_week_start.isoformat()} — {today.isoformat()}",
+        "goal": user["goal"],
+        "workouts": {
+            "total_volume": round(this_week_total_vol),
+            "last_week_volume": round(last_week_vol or 0),
+            "volume_change": round(vol_change),
+            "volume_change_pct": round(vol_change / last_week_vol * 100, 1) if last_week_vol else None,
+            "exercises": [
+                {"name": w["exercise_name"], "volume": round(w["total_vol"]),
+                 "max_weight": w["max_weight"], "entries": w["entries"]}
+                for w in this_week_workouts
+            ],
+            "mvp_exercise": mvp,
+        },
+        "nutrition": {
+            "total_calories": round(this_week_nutrition["cal"]),
+            "total_protein": round(this_week_nutrition["pro"], 1),
+            "total_carbs": round(this_week_nutrition["carb"], 1),
+            "total_fat": round(this_week_nutrition["fat"], 1),
+            "entries": this_week_nutrition["entries"],
+            "last_week_calories": round(last_week_nutrition["cal"] or 0),
+            "calorie_change": round(cal_change),
+        },
+    }, ensure_ascii=False, default=str)
 
 
 # ── Entry point ─────────────────────────────────────────────────
