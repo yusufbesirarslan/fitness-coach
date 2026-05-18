@@ -94,6 +94,79 @@
     .chat-send:disabled { opacity: 0.4; cursor: default; }
     .chat-send svg { width: 20px; height: 20px; color: #121212; }
     .rank-badge { font-size:10px; background:var(--volt,#CCFF00); color:#000; padding:2px 8px; border-radius:10px; margin-left:6px; font-weight:600; display:inline-block; vertical-align:middle; }
+    .level-badge { font-size:10px; background:rgba(204,255,0,0.15); color:#CCFF00; padding:2px 8px; border-radius:10px; margin-left:4px; font-weight:600; display:inline-block; vertical-align:middle; }
+
+    /* suggestion cards */
+    .msg-suggestion {
+        background: var(--surface-2); border: 1px solid rgba(204,255,0,0.2);
+        border-radius: 14px; padding: 14px 16px; max-width: 75%;
+    }
+    .msg-suggestion .sug-type {
+        font-size: 11px; font-weight: 700; letter-spacing: 0.08em;
+        text-transform: uppercase; margin-bottom: 6px;
+    }
+    .sug-type.meal { color: #FFB020; }
+    .sug-type.workout { color: #3D9EFF; }
+    .msg-suggestion .sug-body { font-size: 14px; color: var(--text); line-height: 1.5; margin-bottom: 10px; }
+    .sug-actions { display: flex; gap: 6px; }
+    .sug-btn {
+        padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
+        border: none; cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.2s;
+    }
+    .sug-btn.accept { background: #CCFF00; color: #121212; }
+    .sug-btn.accept:hover { background: #A8D400; }
+    .sug-btn.decline { background: rgba(255,77,77,0.1); color: #FF4D4D; border: 1px solid rgba(255,77,77,0.2); }
+    .sug-btn.decline:hover { background: rgba(255,77,77,0.2); }
+    .sug-btn:disabled { opacity: 0.4; cursor: default; }
+    .sug-status { font-size: 12px; font-weight: 600; padding: 4px 0; }
+    .sug-status.accepted { color: #CCFF00; }
+    .sug-status.declined { color: #FF4D4D; }
+
+    /* suggest button */
+    .suggest-toggle {
+        width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+        background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+        display: flex; align-items: center; justify-content: center;
+        color: var(--text-3); cursor: pointer; transition: all 0.2s; font-size: 16px;
+    }
+    .suggest-toggle:hover { background: rgba(204,255,0,0.08); border-color: rgba(204,255,0,0.3); color: #CCFF00; }
+
+    /* suggest modal */
+    .sug-modal-overlay {
+        position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+        z-index: 500; display: none; align-items: center; justify-content: center;
+    }
+    .sug-modal-overlay.show { display: flex; }
+    .sug-modal {
+        background: var(--surface-2); border: 1px solid var(--border);
+        border-radius: 16px; padding: 24px; width: 90%; max-width: 400px;
+    }
+    .sug-modal h3 {
+        font-family: 'Bebas Neue', sans-serif; font-size: 20px;
+        letter-spacing: 2px; color: var(--text); margin: 0 0 16px;
+    }
+    .sug-modal-tabs { display: flex; gap: 8px; margin-bottom: 14px; }
+    .sug-tab {
+        flex: 1; padding: 10px; border-radius: 10px; text-align: center;
+        font-size: 13px; font-weight: 600; cursor: pointer;
+        border: 1px solid var(--border); background: none; color: var(--text-3);
+        font-family: 'DM Sans', sans-serif; transition: all 0.2s;
+    }
+    .sug-tab.active { background: rgba(204,255,0,0.1); border-color: rgba(204,255,0,0.3); color: #CCFF00; }
+    .sug-textarea {
+        width: 100%; min-height: 80px; padding: 12px; border-radius: 10px;
+        background: rgba(255,255,255,0.03); border: 1px solid var(--border);
+        color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px;
+        outline: none; resize: vertical; box-sizing: border-box;
+    }
+    .sug-textarea:focus { border-color: rgba(204,255,0,0.45); }
+    .sug-send-btn {
+        width: 100%; margin-top: 12px; padding: 12px; border-radius: 10px;
+        background: #CCFF00; color: #121212; border: none; cursor: pointer;
+        font-family: 'Bebas Neue', sans-serif; font-size: 16px; letter-spacing: 2px;
+        transition: background 0.2s;
+    }
+    .sug-send-btn:hover { background: #A8D400; }
     </style>
 </head>
 <body>
@@ -129,6 +202,10 @@
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             Arkadaşlar
         </a>
+        <a href="/feed" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>
+            Akış
+        </a>
         <a href="/quests" class="sidebar-link">
             <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             Görevler
@@ -144,7 +221,7 @@
             {% endif %}
             <div style="overflow:hidden">
                 <div class="sidebar-name">{{ username }}</div>
-                <span style="font-size:11px;color:var(--text-3);">{{ rank_points }} RP · {{ rank_title }}</span>
+                <span style="font-size:11px;color:var(--text-3);">Lvl {{ user_level }} · {{ user_title }}</span>
             </div>
         </a>
         <a href="/logout" class="sidebar-logout" title="Çıkış yap" style="margin-left:auto;">→</a>
@@ -167,7 +244,10 @@
             {% endif %}
             <div>
                 <div class="chat-name">{{ other_full_name }}</div>
-                <div class="chat-handle">@{{ other_username }} <span class="rank-badge">{{ other_rank_title }}</span></div>
+                <div class="chat-handle">@{{ other_username }} <span class="rank-badge">{{ other_rank_title }}</span> <span class="level-badge">Lvl {{ other_level }}</span></div>
+            </div>
+            <div style="margin-left:auto;">
+                <button class="suggest-toggle" onclick="openSuggestModal()" title="Öneri gönder">💡</button>
             </div>
         </div>
 
@@ -213,11 +293,28 @@
     </div>
 </nav>
 
+<!-- SUGGESTION MODAL -->
+<div class="sug-modal-overlay" id="sug-modal">
+    <div class="sug-modal">
+        <h3>ARKADAŞINA ÖNER</h3>
+        <div class="sug-modal-tabs">
+            <button class="sug-tab active" data-type="suggestion_meal" onclick="setSugType(this)">🍎 Öğün Öner</button>
+            <button class="sug-tab" data-type="suggestion_workout" onclick="setSugType(this)">💪 Antrenman Öner</button>
+        </div>
+        <textarea class="sug-textarea" id="sug-text" placeholder="Önerini yaz..."></textarea>
+        <button class="sug-send-btn" onclick="sendSuggestion()">GÖNDER</button>
+        <div style="text-align:center;margin-top:8px;">
+            <button onclick="closeSuggestModal()" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:13px;">İptal</button>
+        </div>
+    </div>
+</div>
+
 <script>
 const OTHER = '{{ other_username }}';
 const msgContainer = document.getElementById('chat-messages');
 const msgInput = document.getElementById('msg-input');
 const emptyEl = document.getElementById('chat-empty');
+let sugType = 'suggestion_meal';
 
 function toast(msg, type) {
     type = type || 'info';
@@ -235,6 +332,39 @@ function escapeHTML(str) {
     return d.innerHTML;
 }
 
+function openSuggestModal() { document.getElementById('sug-modal').classList.add('show'); }
+function closeSuggestModal() { document.getElementById('sug-modal').classList.remove('show'); }
+function setSugType(btn) {
+    document.querySelectorAll('.sug-tab').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    sugType = btn.dataset.type;
+}
+
+function renderSuggestionCard(m) {
+    const isMeal = m.message_type.includes('meal');
+    const typeLabel = isMeal ? '🍎 ÖĞÜN ÖNERİSİ' : '💪 ANTRENMAN ÖNERİSİ';
+    const typeClass = isMeal ? 'meal' : 'workout';
+    const isAccepted = m.message_type.includes('_accepted');
+    const isDeclined = m.message_type.includes('_declined');
+    const isPending = !isAccepted && !isDeclined;
+
+    let actionsHTML = '';
+    if (isPending && !m.is_mine) {
+        actionsHTML = '<div class="sug-actions">' +
+            '<button class="sug-btn accept" onclick="respondSuggestion('+m.id+',\'accept\',this)">Kabul Et</button>' +
+            '<button class="sug-btn decline" onclick="respondSuggestion('+m.id+',\'decline\',this)">Reddet</button></div>';
+    } else if (isAccepted) {
+        actionsHTML = '<div class="sug-status accepted">✅ Kabul edildi</div>';
+    } else if (isDeclined) {
+        actionsHTML = '<div class="sug-status declined">Reddedildi</div>';
+    } else if (isPending && m.is_mine) {
+        actionsHTML = '<div class="sug-status" style="color:var(--text-3);">Yanıt bekleniyor...</div>';
+    }
+
+    return '<div class="msg-suggestion"><div class="sug-type '+typeClass+'">'+typeLabel+'</div>' +
+        '<div class="sug-body">'+escapeHTML(m.body)+'</div>'+actionsHTML+'</div>';
+}
+
 function renderMessages(messages) {
     if (!messages.length) {
         emptyEl.textContent = 'Henüz mesaj yok. İlk mesajı sen gönder!';
@@ -250,8 +380,15 @@ function renderMessages(messages) {
         const row = document.createElement('div');
         row.className = 'msg-row ' + (m.is_mine ? 'mine' : 'theirs');
         row.dataset.id = m.id;
-        row.innerHTML = '<div><div class="msg-bubble">' + escapeHTML(m.body) + '</div>' +
-            '<div class="msg-time">' + m.timestamp + '</div></div>';
+
+        const isSuggestion = m.message_type && m.message_type.startsWith('suggestion_');
+        if (isSuggestion) {
+            row.innerHTML = '<div>' + renderSuggestionCard(m) +
+                '<div class="msg-time">' + m.timestamp + '</div></div>';
+        } else {
+            row.innerHTML = '<div><div class="msg-bubble">' + escapeHTML(m.body) + '</div>' +
+                '<div class="msg-time">' + m.timestamp + '</div></div>';
+        }
         msgContainer.appendChild(row);
     });
     msgContainer.scrollTop = msgContainer.scrollHeight;
@@ -285,6 +422,39 @@ async function sendMessage() {
         '<div class="msg-time">' + data.timestamp + '</div></div>';
     msgContainer.appendChild(row);
     msgContainer.scrollTop = msgContainer.scrollHeight;
+}
+
+async function sendSuggestion() {
+    const body = document.getElementById('sug-text').value.trim();
+    if (!body) { toast('Öneri boş olamaz', 'error'); return; }
+
+    const res = await fetch('/suggest/' + OTHER, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: sugType, body: body })
+    });
+    const data = await res.json();
+    if (!res.ok) { toast(data.error, 'error'); return; }
+
+    toast('Öneri gönderildi!', 'success');
+    document.getElementById('sug-text').value = '';
+    closeSuggestModal();
+    loadMessages();
+}
+
+async function respondSuggestion(msgId, action, btn) {
+    btn.disabled = true;
+    const res = await fetch('/suggest/respond/' + msgId, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: action })
+    });
+    const data = await res.json();
+    if (!res.ok) { toast(data.error, 'error'); btn.disabled = false; return; }
+    toast(data.message, 'success');
+    msgContainer.querySelectorAll('.msg-row').forEach(r => r.remove());
+    emptyEl.style.display = '';
+    loadMessages();
 }
 
 msgInput.addEventListener('keydown', e => {
