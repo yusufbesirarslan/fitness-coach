@@ -227,8 +227,9 @@ class Supplement(db.Model):
     brand                = db.Column(db.String(100), nullable=False)
     category             = db.Column(db.String(30), nullable=False, default="Other")
     status               = db.Column(db.String(15), nullable=False, default="Active")
-    rating_effectiveness = db.Column(db.Integer, nullable=True)
+    rating_effect        = db.Column(db.Integer, nullable=True)
     rating_taste         = db.Column(db.Integer, nullable=True)
+    rating_digestion     = db.Column(db.Integer, nullable=True)
     rating_price         = db.Column(db.Integer, nullable=True)
     review_text          = db.Column(db.Text, nullable=True)
     price_paid           = db.Column(db.Float, nullable=True)
@@ -1124,8 +1125,9 @@ def supplement_add():
         user_id=current_user.id,
         product_name=name, brand=brand,
         category=category, status=status,
-        rating_effectiveness=parse_rating(data.get("rating_effectiveness")),
+        rating_effect=parse_rating(data.get("rating_effect")),
         rating_taste=parse_rating(data.get("rating_taste")),
+        rating_digestion=parse_rating(data.get("rating_digestion")),
         rating_price=parse_rating(data.get("rating_price")),
         review_text=(data.get("review_text") or "").strip() or None,
         price_paid=float(data["price_paid"]) if data.get("price_paid") else None,
@@ -1175,7 +1177,7 @@ def supplement_edit(sid):
         except (ValueError, TypeError):
             return None
 
-    for field in ["rating_effectiveness", "rating_taste", "rating_price"]:
+    for field in ["rating_effect", "rating_taste", "rating_digestion", "rating_price"]:
         if field in data:
             setattr(supp, field, parse_rating(data[field]))
     if "review_text" in data:

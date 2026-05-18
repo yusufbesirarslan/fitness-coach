@@ -188,14 +188,20 @@
             <div class="star-group">
                 <label style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:1px;">Puanlama (opsiyonel)</label>
                 <div class="star-row">
-                    <span class="star-row-label">Etkinlik</span>
-                    <div class="stars" data-field="rating_effectiveness">
+                    <span class="star-row-label">Etki</span>
+                    <div class="stars" data-field="rating_effect">
                         <span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span>
                     </div>
                 </div>
                 <div class="star-row">
                     <span class="star-row-label">Lezzet</span>
                     <div class="stars" data-field="rating_taste">
+                        <span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span>
+                    </div>
+                </div>
+                <div class="star-row">
+                    <span class="star-row-label">Sindirim</span>
+                    <div class="stars" data-field="rating_digestion">
                         <span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span>
                     </div>
                 </div>
@@ -239,11 +245,14 @@
                             <span class="status-badge {% if s.status == 'Active' %}status-active{% elif s.status == 'Low Stock' %}status-low{% else %}status-finished{% endif %}">{{ s.status }}</span>
                         </div>
                         <div class="supp-ratings">
-                            {% if s.rating_effectiveness %}
-                            <span class="supp-rating-item">Etkinlik: <span class="mini-stars">{{ '★' * s.rating_effectiveness }}{{ '☆' * (5 - s.rating_effectiveness) }}</span></span>
+                            {% if s.rating_effect %}
+                            <span class="supp-rating-item">Etki: <span class="mini-stars">{{ '★' * s.rating_effect }}{{ '☆' * (5 - s.rating_effect) }}</span></span>
                             {% endif %}
                             {% if s.rating_taste %}
                             <span class="supp-rating-item">Lezzet: <span class="mini-stars">{{ '★' * s.rating_taste }}{{ '☆' * (5 - s.rating_taste) }}</span></span>
+                            {% endif %}
+                            {% if s.rating_digestion %}
+                            <span class="supp-rating-item">Sindirim: <span class="mini-stars">{{ '★' * s.rating_digestion }}{{ '☆' * (5 - s.rating_digestion) }}</span></span>
                             {% endif %}
                             {% if s.rating_price %}
                             <span class="supp-rating-item">Fiyat: <span class="mini-stars">{{ '★' * s.rating_price }}{{ '☆' * (5 - s.rating_price) }}</span></span>
@@ -302,7 +311,7 @@
 <script>
 let selectedCat = 'Protein';
 let selectedStatus = 'Active';
-const ratings = { rating_effectiveness: 0, rating_taste: 0, rating_price: 0 };
+const ratings = { rating_effect: 0, rating_taste: 0, rating_digestion: 0, rating_price: 0 };
 
 function pickCat(el, cat) {
     document.querySelectorAll('.chip-row .cat-chip').forEach(c => {
@@ -354,8 +363,9 @@ async function addSupplement() {
             body: JSON.stringify({
                 product_name: name, brand: brand,
                 category: selectedCat, status: selectedStatus,
-                rating_effectiveness: ratings.rating_effectiveness || null,
+                rating_effect: ratings.rating_effect || null,
                 rating_taste: ratings.rating_taste || null,
+                rating_digestion: ratings.rating_digestion || null,
                 rating_price: ratings.rating_price || null,
                 review_text: document.getElementById('f-review').value.trim(),
                 price_paid: document.getElementById('f-price').value || null,
