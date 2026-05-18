@@ -1529,27 +1529,43 @@ def chat():
         "comparison"     : comparison
     })
 
-COACH_SYSTEM_PROMPT = """Sen FitX Akıllı Koçusun. Kullanıcının gerçek zamanlı veritabanı verilerine erişimin var.
+COACH_SYSTEM_PROMPT = """Sen FitX Akıllı Koçu ve Beslenme Uzmanısın. Kullanıcının gerçek zamanlı veritabanı verilerine ve FatSecret besin veritabanına erişimin var.
 Aşağıda kullanıcının güncel fitness özeti, antrenman geçmişi, supplement stack'i, beslenme logu ve arkadaş aktiviteleri yer alıyor.
-Bu verileri kullanarak kişiselleştirilmiş, spesifik ve motive edici tavsiyeler ver.
+Eğer kullanıcı bir yiyecek veya besin hakkında soruyorsa, FatSecret'tan gelen gerçek besin değerlerini de görüyorsun.
 
 KURALLAR:
 - Türkçe yaz, kullanıcıya "sen" diye hitap et.
-- Genel geçer şeyler söyleme — yanıtın tamamen bu kişinin verilerine dayansın.
+- Genel geçer şeyler söyleme — yanıtın tamamen bu kişinin verilerine ve gerçek besin verilerine dayansın.
+- Besin soruları için: FatSecret verisindeki kalori, protein, karb, yağ değerlerini VER, sonra kullanıcının hedefine göre yorum yap.
 - Kısa, net ve samimi konuş. Uzun paragraflar yazma.
 - Emin olmadığın tıbbi konularda doktora danışmasını öner.
 - Kas kazanma hedefinde kilo artışı OLUMLU, kilo verme hedefinde kilo azalışı OLUMLU.
 - Supplement önerisi yaparken mevcut stack'i dikkate al.
 - Streaktan bahsederken motive edici ol."""
 
+NUTRITION_KEYWORDS = [
+    "kalori", "kaç kalori", "protein", "karb", "karbonhidrat", "yağ", "makro",
+    "besin", "beslenme", "yemek", "yiyecek", "içecek", "meyve", "sebze",
+    "tavuk", "pirinç", "yumurta", "süt", "ekmek", "pilav", "makarna", "salata",
+    "et", "balık", "peynir", "yoğurt", "çikolata", "muz", "elma",
+    "calories", "chicken", "rice", "egg", "protein", "carbs", "fat",
+    "gram", "100g", "200g", "porsiyon", "tabak",
+]
 
-def _fetch_coach_context(user_id):
+
+def _is_nutrition_question(question: str) -> bool:
+    q = question.lower()
+    return any(kw in q for kw in NUTRITION_KEYWORDS)
+
+
+def _fetch_coach_context(user_id, question=""):
     from mcp.server import (
         get_user_fitness_summary,
         get_user_workout_history,
         get_user_supplement_stack,
         get_friend_activities,
         get_user_nutrition_log,
+        search_nutrition_data,
     )
     parts = []
     try:
@@ -1572,6 +1588,14 @@ def _fetch_coach_context(user_id):
         parts.append(f"[ARKADAŞ AKTİVİTELERİ]\n{get_friend_activities(user_id)}")
     except Exception:
         pass
+
+    if question and _is_nutrition_question(question):
+        try:
+            nutrition_result = search_nutrition_data(question)
+            parts.append(f"[FATSECRET BESİN VERİSİ]\n{nutrition_result}")
+        except Exception:
+            parts.append("[FATSECRET BESİN VERİSİ] Veri alınamadı.")
+
     return "\n\n".join(parts)
 
 
@@ -1584,7 +1608,7 @@ def ask_coach():
     if not question.strip():
         return jsonify({"error": "Bir soru yaz."}), 400
 
-    context = _fetch_coach_context(current_user.id)
+    context = _fetch_coach_context(current_user.id, question)
 
     prompt = f"""{context}
 
