@@ -1529,6 +1529,52 @@ def chat():
         "comparison"     : comparison
     })
 
+COACH_SYSTEM_PROMPT = """Sen FitX Akıllı Koçusun. Kullanıcının gerçek zamanlı veritabanı verilerine erişimin var.
+Aşağıda kullanıcının güncel fitness özeti, antrenman geçmişi, supplement stack'i, beslenme logu ve arkadaş aktiviteleri yer alıyor.
+Bu verileri kullanarak kişiselleştirilmiş, spesifik ve motive edici tavsiyeler ver.
+
+KURALLAR:
+- Türkçe yaz, kullanıcıya "sen" diye hitap et.
+- Genel geçer şeyler söyleme — yanıtın tamamen bu kişinin verilerine dayansın.
+- Kısa, net ve samimi konuş. Uzun paragraflar yazma.
+- Emin olmadığın tıbbi konularda doktora danışmasını öner.
+- Kas kazanma hedefinde kilo artışı OLUMLU, kilo verme hedefinde kilo azalışı OLUMLU.
+- Supplement önerisi yaparken mevcut stack'i dikkate al.
+- Streaktan bahsederken motive edici ol."""
+
+
+def _fetch_coach_context(user_id):
+    from mcp.server import (
+        get_user_fitness_summary,
+        get_user_workout_history,
+        get_user_supplement_stack,
+        get_friend_activities,
+        get_user_nutrition_log,
+    )
+    parts = []
+    try:
+        parts.append(f"[FITNESS ÖZETİ]\n{get_user_fitness_summary(user_id)}")
+    except Exception:
+        parts.append("[FITNESS ÖZETİ] Veri alınamadı.")
+    try:
+        parts.append(f"[ANTRENMAN GEÇMİŞİ (7 gün)]\n{get_user_workout_history(user_id, 7)}")
+    except Exception:
+        pass
+    try:
+        parts.append(f"[SUPPLEMENT STACK]\n{get_user_supplement_stack(user_id)}")
+    except Exception:
+        pass
+    try:
+        parts.append(f"[BESLENME LOGU (3 gün)]\n{get_user_nutrition_log(user_id, 3)}")
+    except Exception:
+        pass
+    try:
+        parts.append(f"[ARKADAŞ AKTİVİTELERİ]\n{get_friend_activities(user_id)}")
+    except Exception:
+        pass
+    return "\n\n".join(parts)
+
+
 @app.route("/ask", methods=["POST"])
 @login_required
 def ask_coach():
@@ -1538,50 +1584,20 @@ def ask_coach():
     if not question.strip():
         return jsonify({"error": "Bir soru yaz."}), 400
 
-    # Kullanıcı bağlamını topla
-    last_session = UserSession.query.filter_by(user_id=current_user.id)\
-        .order_by(UserSession.created_at.desc()).first()
+    context = _fetch_coach_context(current_user.id)
 
-    last_checkin = WeeklyCheckIn.query.filter_by(user_id=current_user.id)\
-        .order_by(WeeklyCheckIn.created_at.desc()).first()
+    prompt = f"""{context}
 
-    context = "Kullanıcı hakkında bilgi yok."
-    if last_session:
-        context = (
-            f"Kullanıcı: {current_user.username}, "
-            f"Kilo: {last_session.weight}kg, Boy: {last_session.height}cm, "
-            f"Yaş: {last_session.age}, Hedef: {last_session.goal}, "
-            f"Seviye: {last_session.fitness_level}, "
-            f"Kalori hedefi: {round(last_session.target_calories)} kcal"
-        )
-
-    checkin_context = ""
-    if last_checkin:
-        checkin_context = (
-            f"\nSon check-in: Kilo {last_checkin.weight}kg, "
-            f"Yorgunluk {last_checkin.fatigue}/5, "
-            f"Uyku {last_checkin.uyku_kalitesi}/5, "
-            f"Beslenme uyumu {last_checkin.beslenme_uyumu}/5"
-        )
-
-    prompt = f"""Sen bir kişisel fitness ve beslenme koçusun. Türkçe yaz.
-Kullanıcıya "sen" diye hitap et.
-
-{context}{checkin_context}
-
-Kullanıcının sorusu: {question}
-
-Kısa, net ve spesifik cevap ver. Kullanıcının verileriyle bağlantılı tavsiyeler sun.
-Emin olmadığın tıbbi konularda doktora danışmasını öner."""
+Kullanıcının sorusu: {question}"""
 
     try:
         response = client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
-                {"role": "system", "content": "Sen bir fitness koçusun. Türkçe, samimi, kısa ve net konuş."},
+                {"role": "system", "content": COACH_SYSTEM_PROMPT},
                 {"role": "user",   "content": prompt}
             ],
-            max_tokens=500,
+            max_tokens=700,
             temperature=0.7
         )
         return jsonify({"answer": response.choices[0].message.content})
