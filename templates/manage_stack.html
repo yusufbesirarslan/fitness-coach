@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Supplement Stack — Fitness Coach</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/theme.css">
+    <style>
+    .stack-wrap { max-width: 700px; margin: 0 auto; }
+
+    /* ── add form ── */
+    .add-card { background: var(--surface); border-radius: var(--r-lg); padding: 24px; margin-bottom: 32px; }
+    .add-card-title { font-family: var(--font-display); font-size: 20px; letter-spacing: 2px; color: var(--volt); margin-bottom: 16px; }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .form-row.full { grid-template-columns: 1fr; }
+    @media(max-width:500px) { .form-row { grid-template-columns: 1fr; } }
+    .form-row label { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; display: block; }
+    .form-row input, .form-row select, .form-row textarea {
+        width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm);
+        padding: 10px 14px; color: var(--text); font-size: 14px; font-family: var(--font-body);
+    }
+    .form-row input:focus, .form-row select:focus, .form-row textarea:focus { border-color: var(--volt); outline: none; }
+    .form-row textarea { resize: vertical; min-height: 60px; }
+
+    /* ── chips ── */
+    .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+    .chip-row label { font-size: 11px; color: var(--text-3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; display: block; width: 100%; }
+    .cat-chip {
+        padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border); background: transparent;
+        color: var(--text-2); font-size: 13px; cursor: pointer; transition: all 0.15s;
+    }
+    .cat-chip.active { background: var(--volt); color: #000; border-color: var(--volt); font-weight: 600; }
+
+    /* ── star rating ── */
+    .star-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+    .star-row { display: flex; align-items: center; gap: 10px; }
+    .star-row-label { font-size: 12px; color: var(--text-2); min-width: 90px; }
+    .stars { display: flex; gap: 4px; }
+    .stars .star {
+        width: 28px; height: 28px; cursor: pointer; font-size: 20px; line-height: 28px; text-align: center;
+        color: var(--border); transition: color 0.12s;
+    }
+    .stars .star.filled { color: var(--volt); }
+    .stars .star:hover { color: #e8ff57; }
+
+    /* ── submit ── */
+    .add-btn {
+        background: var(--volt); color: #000; font-family: var(--font-display); font-size: 16px;
+        letter-spacing: 2px; padding: 12px 32px; border: none; border-radius: var(--r-sm);
+        cursor: pointer; width: 100%; margin-top: 8px; transition: opacity 0.2s;
+    }
+    .add-btn:hover { opacity: 0.85; }
+    .add-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── toggle row ── */
+    .toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .toggle-row label { font-size: 13px; color: var(--text-2); }
+    .toggle { width: 40px; height: 22px; border-radius: 11px; background: var(--border); position: relative; cursor: pointer; transition: background 0.2s; }
+    .toggle.on { background: var(--volt); }
+    .toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 0.2s; }
+    .toggle.on::after { transform: translateX(18px); }
+
+    /* ── supplement list ── */
+    .list-title { font-family: var(--font-display); font-size: 18px; letter-spacing: 2px; color: var(--text); margin-bottom: 16px; }
+    .supp-grid { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 48px; }
+
+    .supp-card {
+        background: var(--surface); border-radius: var(--r-md); padding: 16px 20px;
+        display: flex; align-items: flex-start; gap: 14px; position: relative;
+        border: 1px solid var(--border); transition: border-color 0.2s;
+    }
+    .supp-card:hover { border-color: var(--border-2); }
+    .supp-icon { font-size: 28px; flex-shrink: 0; margin-top: 2px; }
+    .supp-body { flex: 1; min-width: 0; }
+    .supp-name { font-weight: 600; color: var(--text); font-size: 15px; }
+    .supp-brand { font-size: 12px; color: var(--text-3); }
+    .supp-ratings { display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap; }
+    .supp-rating-item { font-size: 11px; color: var(--text-2); }
+    .supp-rating-item .mini-stars { color: var(--volt); letter-spacing: 1px; }
+    .supp-review { font-size: 12px; color: var(--text-3); font-style: italic; margin-top: 6px; border-left: 2px solid var(--volt); padding-left: 10px; }
+
+    .status-badge {
+        font-size: 10px; padding: 3px 10px; border-radius: 10px; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;
+    }
+    .status-active   { background: rgba(0,196,140,0.15); color: #00C48C; }
+    .status-low      { background: rgba(255,176,32,0.15); color: #FFB020; }
+    .status-finished { background: rgba(100,100,100,0.2); color: #888; }
+
+    .supp-actions { display: flex; gap: 6px; margin-top: 8px; }
+    .supp-act-btn {
+        font-size: 11px; padding: 4px 12px; border-radius: var(--r-sm); border: 1px solid var(--border);
+        background: transparent; color: var(--text-2); cursor: pointer; transition: all 0.15s;
+    }
+    .supp-act-btn:hover { border-color: var(--volt); color: var(--volt); }
+    .supp-act-btn.del:hover { border-color: var(--red); color: var(--red); }
+    .supp-top-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+    .empty-state { text-align: center; color: var(--text-3); padding: 40px 20px; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<!-- ── SIDEBAR ── -->
+<aside class="sidebar">
+    <div class="sidebar-logo">FC</div>
+    <nav class="sidebar-nav">
+        <a href="/" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            Ana Sayfa
+        </a>
+        <a href="/nutrition" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+            Beslenme
+        </a>
+        <a href="/training" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
+            Antrenman
+        </a>
+        <a href="/supplements" class="sidebar-link active">
+            <svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+            Supplements
+        </a>
+        <a href="/progress-page" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            İlerleme
+        </a>
+        <a href="/friends" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            Arkadaşlar
+        </a>
+        <a href="/quests" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            Görevler
+        </a>
+    </nav>
+    <div class="sidebar-sep"></div>
+    <div class="sidebar-user">
+        <a href="/edit-profile" style="display:flex;align-items:center;gap:10px;text-decoration:none;flex:1;min-width:0;">
+            {% if profile_picture %}
+                <img src="{{ profile_picture }}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;">
+            {% else %}
+                <div class="sidebar-avatar">{{ username[0]|upper if username else 'U' }}</div>
+            {% endif %}
+            <div style="overflow:hidden">
+                <div class="sidebar-name">{{ username }}</div>
+                <span style="font-size:11px;color:var(--text-3);">{{ rank_points }} RP · {{ rank_title }}</span>
+            </div>
+        </a>
+        <a href="/logout" class="sidebar-logout" title="Çıkış yap" style="margin-left:auto;">→</a>
+    </div>
+</aside>
+
+<!-- ── MAIN ── -->
+<main class="main-content">
+    <div class="stack-wrap">
+
+        <div class="page-hdr">
+            <h1>SUPPLEMENT<br><span>STACK</span></h1>
+            <p>Kullandığın takviyeleri ekle, derecelendir ve profilinde sergile.</p>
+        </div>
+
+        <!-- ══ ADD FORM ══ -->
+        <div class="add-card" id="add-card">
+            <div class="add-card-title">+ YENİ SUPPLEMENT EKLE</div>
+
+            <div class="form-row">
+                <div><label>Ürün Adı *</label><input type="text" id="f-name" placeholder="Gold Standard Whey"></div>
+                <div><label>Marka *</label><input type="text" id="f-brand" placeholder="Optimum Nutrition"></div>
+            </div>
+
+            <div class="chip-row">
+                <label>Kategori</label>
+                {% for cat in categories %}
+                <button class="cat-chip{% if cat == 'Protein' %} active{% endif %}" onclick="pickCat(this,'{{ cat }}')">{{ icons[cat] }} {{ cat }}</button>
+                {% endfor %}
+            </div>
+
+            <div class="chip-row">
+                <label>Durum</label>
+                <button class="cat-chip active" onclick="pickStatus(this,'Active')">Active</button>
+                <button class="cat-chip" onclick="pickStatus(this,'Low Stock')">Low Stock</button>
+                <button class="cat-chip" onclick="pickStatus(this,'Finished')">Finished</button>
+            </div>
+
+            <div class="star-group">
+                <label style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:1px;">Puanlama (opsiyonel)</label>
+                <div class="star-row">
+                    <span class="star-row-label">Etkinlik</span>
+                    <div class="stars" data-field="rating_effectiveness">
+                        <span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span>
+                    </div>
+                </div>
+                <div class="star-row">
+                    <span class="star-row-label">Lezzet</span>
+                    <div class="stars" data-field="rating_taste">
+                        <span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span>
+                    </div>
+                </div>
+                <div class="star-row">
+                    <span class="star-row-label">Fiyat/Perf.</span>
+                    <div class="stars" data-field="rating_price">
+                        <span class="star" data-val="1">★</span><span class="star" data-val="2">★</span><span class="star" data-val="3">★</span><span class="star" data-val="4">★</span><span class="star" data-val="5">★</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div><label>Ödenen Fiyat (TL)</label><input type="number" id="f-price" placeholder="750" step="0.01"></div>
+                <div style="display:flex;align-items:end;padding-bottom:2px;">
+                    <div class="toggle-row">
+                        <div class="toggle on" id="f-public" onclick="this.classList.toggle('on')"></div>
+                        <label>Profilde Göster</label>
+                    </div>
+                </div>
+            </div>
+            <div class="form-row full">
+                <div><label>Yorum (opsiyonel)</label><textarea id="f-review" placeholder="Tadı güzel, çözünürlüğü yüksek..."></textarea></div>
+            </div>
+
+            <button class="add-btn" id="add-btn" onclick="addSupplement()">EKLE</button>
+        </div>
+
+        <!-- ══ EXISTING LIST ══ -->
+        <div class="list-title">MEVCUT STACK'İN</div>
+        <div class="supp-grid" id="supp-list">
+            {% if supplements %}
+                {% for s in supplements %}
+                <div class="supp-card" id="supp-{{ s.id }}">
+                    <div class="supp-icon">{{ icons.get(s.category, '📦') }}</div>
+                    <div class="supp-body">
+                        <div class="supp-top-row">
+                            <div>
+                                <div class="supp-name">{{ s.product_name }}</div>
+                                <div class="supp-brand">{{ s.brand }} · {{ s.category }}</div>
+                            </div>
+                            <span class="status-badge {% if s.status == 'Active' %}status-active{% elif s.status == 'Low Stock' %}status-low{% else %}status-finished{% endif %}">{{ s.status }}</span>
+                        </div>
+                        <div class="supp-ratings">
+                            {% if s.rating_effectiveness %}
+                            <span class="supp-rating-item">Etkinlik: <span class="mini-stars">{{ '★' * s.rating_effectiveness }}{{ '☆' * (5 - s.rating_effectiveness) }}</span></span>
+                            {% endif %}
+                            {% if s.rating_taste %}
+                            <span class="supp-rating-item">Lezzet: <span class="mini-stars">{{ '★' * s.rating_taste }}{{ '☆' * (5 - s.rating_taste) }}</span></span>
+                            {% endif %}
+                            {% if s.rating_price %}
+                            <span class="supp-rating-item">Fiyat: <span class="mini-stars">{{ '★' * s.rating_price }}{{ '☆' * (5 - s.rating_price) }}</span></span>
+                            {% endif %}
+                        </div>
+                        {% if s.review_text %}
+                        <div class="supp-review">"{{ s.review_text }}"</div>
+                        {% endif %}
+                        <div class="supp-actions">
+                            <button class="supp-act-btn" onclick="quickStatus({{ s.id }},'Active')">Active</button>
+                            <button class="supp-act-btn" onclick="quickStatus({{ s.id }},'Low Stock')">Low Stock</button>
+                            <button class="supp-act-btn" onclick="quickStatus({{ s.id }},'Finished')">Finished</button>
+                            <button class="supp-act-btn del" onclick="deleteSupplement({{ s.id }})">Sil</button>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">Henüz supplement eklemedin. Yukarıdan başla!</div>
+            {% endif %}
+        </div>
+
+    </div>
+</main>
+
+<!-- ── BOTTOM NAV ── -->
+<nav class="bottom-nav">
+    <div class="bottom-nav-inner">
+        <a href="/" class="bn-item">
+            <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            Ana Sayfa
+        </a>
+        <a href="/nutrition" class="bn-item">
+            <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+            Beslenme
+        </a>
+        <a href="/training" class="bn-item">
+            <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
+            Antrenman
+        </a>
+        <a href="/supplements" class="bn-item active">
+            <svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+            Supplements
+        </a>
+        <a href="/progress-page" class="bn-item">
+            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            İlerleme
+        </a>
+        <a href="/quests" class="bn-item">
+            <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            Görevler
+        </a>
+    </div>
+</nav>
+
+<script>
+let selectedCat = 'Protein';
+let selectedStatus = 'Active';
+const ratings = { rating_effectiveness: 0, rating_taste: 0, rating_price: 0 };
+
+function pickCat(el, cat) {
+    document.querySelectorAll('.chip-row .cat-chip').forEach(c => {
+        if (c.parentElement === el.parentElement) c.classList.remove('active');
+    });
+    el.classList.add('active');
+    selectedCat = cat;
+}
+
+function pickStatus(el, st) {
+    el.parentElement.querySelectorAll('.cat-chip').forEach(c => c.classList.remove('active'));
+    el.classList.add('active');
+    selectedStatus = st;
+}
+
+document.querySelectorAll('.stars').forEach(group => {
+    const field = group.dataset.field;
+    group.querySelectorAll('.star').forEach(star => {
+        star.addEventListener('click', () => {
+            const val = parseInt(star.dataset.val);
+            if (ratings[field] === val) { ratings[field] = 0; } else { ratings[field] = val; }
+            group.querySelectorAll('.star').forEach(s => {
+                s.classList.toggle('filled', parseInt(s.dataset.val) <= ratings[field]);
+            });
+        });
+    });
+});
+
+function toast(msg, type) {
+    type = type || 'info';
+    const wrap = document.getElementById('toast-wrap');
+    const t = document.createElement('div');
+    t.className = 'toast toast-' + type;
+    t.textContent = msg;
+    wrap.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3000);
+}
+
+async function addSupplement() {
+    const btn = document.getElementById('add-btn');
+    const name = document.getElementById('f-name').value.trim();
+    const brand = document.getElementById('f-brand').value.trim();
+    if (!name || !brand) { toast('Ürün adı ve marka zorunludur.', 'error'); return; }
+
+    btn.disabled = true; btn.textContent = 'EKLENİYOR...';
+    try {
+        const res = await fetch('/supplement/add', {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({
+                product_name: name, brand: brand,
+                category: selectedCat, status: selectedStatus,
+                rating_effectiveness: ratings.rating_effectiveness || null,
+                rating_taste: ratings.rating_taste || null,
+                rating_price: ratings.rating_price || null,
+                review_text: document.getElementById('f-review').value.trim(),
+                price_paid: document.getElementById('f-price').value || null,
+                is_public: document.getElementById('f-public').classList.contains('on'),
+            })
+        });
+        const data = await res.json();
+        if (res.ok) { toast(data.message, 'success'); setTimeout(() => location.reload(), 600); }
+        else toast(data.error, 'error');
+    } catch(e) { toast('Bağlantı hatası', 'error'); }
+    finally { btn.disabled = false; btn.textContent = 'EKLE'; }
+}
+
+async function quickStatus(id, status) {
+    try {
+        const res = await fetch('/supplement/edit/' + id, {
+            method: 'POST', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ status: status })
+        });
+        const data = await res.json();
+        if (res.ok) { toast(data.message, 'success'); setTimeout(() => location.reload(), 400); }
+        else toast(data.error, 'error');
+    } catch(e) { toast('Bağlantı hatası', 'error'); }
+}
+
+async function deleteSupplement(id) {
+    if (!confirm('Bu supplement silinsin mi?')) return;
+    try {
+        const res = await fetch('/supplement/delete/' + id, { method: 'POST' });
+        const data = await res.json();
+        if (res.ok) { toast(data.message, 'success'); document.getElementById('supp-' + id).remove(); }
+        else toast(data.error, 'error');
+    } catch(e) { toast('Bağlantı hatası', 'error'); }
+}
+</script>
+</body>
+</html>
