@@ -264,6 +264,18 @@ def get_rank_title(points):
         return "Legend"
 
 
+@app.before_request
+def update_streak():
+    if current_user.is_authenticated:
+        today = date.today()
+        if current_user.last_login != today:
+            if current_user.last_login == today - timedelta(days=1):
+                current_user.streak_count = (current_user.streak_count or 0) + 1
+            else:
+                current_user.streak_count = 1
+            current_user.last_login = today
+            db.session.commit()
+
 @app.context_processor
 def inject_rank():
     if current_user.is_authenticated:
@@ -2017,15 +2029,6 @@ def login():
         return jsonify({"error": "Kullanıcı adı veya şifre hatalı"}) , 401
     
     login_user(user)
-
-    today = date.today()
-    if user.last_login == today - timedelta(days=1):
-        user.streak_count = (user.streak_count or 0) + 1
-    elif user.last_login != today:
-        user.streak_count = 1
-    user.last_login = today
-    db.session.commit()
-
     complete_quest_for_user(user.id, "login")
     return jsonify({"message" : f"Hoş geldin {user.username}!"})
 
