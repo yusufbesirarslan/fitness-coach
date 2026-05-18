@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify, render_template , redirect , url_for 
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager , UserMixin , login_user , logout_user , login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from groq import Groq
 import os
 import json
@@ -46,6 +46,7 @@ class User(UserMixin, db.Model):
     full_name        = db.Column(db.String(150), nullable=True)
     streak_count     = db.Column(db.Integer, default=0, server_default='0')
     rank_points      = db.Column(db.Integer, default=0, server_default='0')
+    last_login       = db.Column(db.Date, nullable=True)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -248,7 +249,6 @@ def award_points(user_id, amount):
     user = User.query.get(user_id)
     if user:
         user.rank_points = (user.rank_points or 0) + amount
-        db.session.commit()
         return user.rank_points
     return None
 
@@ -882,7 +882,8 @@ def friends_list():
         friend = f.receiver if f.sender_id == current_user.id else f.sender
         friends.append({"id": friend.id, "username": friend.username,
                         "full_name": friend.full_name or friend.username,
-                        "profile_picture": friend.profile_picture})
+                        "profile_picture": friend.profile_picture,
+                        "rank_title": get_rank_title(friend.rank_points or 0)})
 
     pending_in = Friendship.query.filter_by(receiver_id=current_user.id, status="pending").all()
     incoming = [{"request_id": p.id, "username": p.sender.username,
@@ -959,8 +960,10 @@ def friend_accept(request_id):
     if fr.status != "pending":
         return jsonify({"error": "Bu istek zaten işlenmiş."}), 400
     fr.status = "accepted"
+    award_points(fr.sender_id, 50)
+    award_points(fr.receiver_id, 50)
     db.session.commit()
-    return jsonify({"message": f"{fr.sender.username} ile artık arkadaşsınız!"})
+    return jsonify({"message": f"{fr.sender.username} ile artık arkadaşsınız! +50 RP!", "points_awarded": 50})
 
 @app.route("/friend/reject/<int:request_id>", methods=["POST"])
 @login_required
@@ -987,7 +990,8 @@ def chat_page(username):
         profile_picture=current_user.profile_picture,
         other_username=other.username,
         other_full_name=other.full_name or other.username,
-        other_profile_picture=other.profile_picture)
+        other_profile_picture=other.profile_picture,
+        other_rank_title=get_rank_title(other.rank_points or 0))
 
 @app.route("/chat/<username>/messages")
 @login_required
@@ -1870,9 +1874,36 @@ def save_training_plan():
     )
     db.session.add(new_plan)
     db.session.commit()
-    complete_quest_for_user(current_user.id, "workout_logged")
 
     return jsonify({"message": "Antrenman planı kaydedildi."})
+
+@app.route("/workout/complete", methods=["POST"])
+@login_required
+def complete_workout():
+    plan = TrainingPlan.query.filter_by(user_id=current_user.id)\
+        .order_by(TrainingPlan.created_at.desc()).first()
+    if not plan:
+        return jsonify({"error": "Aktif antrenman planın yok."}), 400
+
+    today_key = date.today().isoformat()
+    quest = DailyQuest.query.filter_by(quest_type="workout_logged", is_active=True).first()
+    if quest:
+        existing = UserQuestProgress.query.filter_by(
+            user_id=current_user.id, quest_id=quest.id, date_key=today_key
+        ).first()
+        if existing:
+            return jsonify({"error": "Bugünkü antrenmanını zaten tamamladın!"}), 400
+
+    complete_quest_for_user(current_user.id, "workout_logged")
+    new_total = award_points(current_user.id, 10)
+    db.session.commit()
+
+    return jsonify({
+        "message": "Bugünkü antrenmanı tamamladın! +10 RP!",
+        "points_awarded": 10,
+        "new_total": new_total,
+        "rank_title": get_rank_title(new_total)
+    })
 
 @app.route("/training-plan/active")
 @login_required
@@ -1986,6 +2017,15 @@ def login():
         return jsonify({"error": "Kullanıcı adı veya şifre hatalı"}) , 401
     
     login_user(user)
+
+    today = date.today()
+    if user.last_login == today - timedelta(days=1):
+        user.streak_count = (user.streak_count or 0) + 1
+    elif user.last_login != today:
+        user.streak_count = 1
+    user.last_login = today
+    db.session.commit()
+
     complete_quest_for_user(user.id, "login")
     return jsonify({"message" : f"Hoş geldin {user.username}!"})
 
@@ -2043,6 +2083,7 @@ def claim_quest(quest_id):
 
     progress.is_claimed = True
     new_total = award_points(current_user.id, quest.points_reward)
+    db.session.commit()
 
     return jsonify({
         "message": f"+{quest.points_reward} Rank Points!",
@@ -2077,6 +2118,11 @@ def server_error(e):
 
 with app.app_context():
     db.create_all()
+    try:
+        db.session.execute(db.text("ALTER TABLE user ADD COLUMN last_login DATE"))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
     if DailyQuest.query.count() == 0:
         for q in [
             DailyQuest(title="Daily Login", description="Bugün uygulamaya giriş yap", points_reward=10, quest_type="login"),

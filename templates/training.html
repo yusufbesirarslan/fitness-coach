@@ -183,6 +183,15 @@
             color: var(--text-3); text-transform: uppercase; margin-bottom: 12px;
         }
 
+        .finish-workout-btn {
+            background: var(--volt, #CCFF00); color: #000;
+            font-family: var(--font-display); font-size: 16px; letter-spacing: 2px;
+            padding: 14px 32px; border: none; border-radius: var(--r-sm);
+            cursor: pointer; transition: opacity 0.2s;
+        }
+        .finish-workout-btn:hover { opacity: 0.85; }
+        .finish-workout-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
         .reset-plan-btn {
             background: none; border: 1px solid var(--border); color: var(--text-3);
             border-radius: var(--r-md); padding: 12px 32px;
@@ -307,6 +316,11 @@
 
         <!-- Weekly stats -->
         <div class="weekly-summary" id="apv-summary" style="margin-top:24px"></div>
+
+        <!-- Finish Today's Workout -->
+        <div id="finish-workout-wrap" style="text-align:center;margin-top:24px;display:none">
+            <button class="finish-workout-btn" id="finish-workout-btn" onclick="finishWorkout()">&#x2714; Bugünkü Antrenmanı Tamamla</button>
+        </div>
 
         <!-- Reset -->
         <div style="text-align:center;margin-top:36px;padding-bottom:48px">
@@ -667,6 +681,7 @@
             // Switch views
             document.getElementById('active-plan-view').style.display = 'block';
             document.getElementById('setup-form').style.display        = 'none';
+            document.getElementById('finish-workout-wrap').style.display = 'block';
         } catch(e) {}
     }
 
@@ -726,9 +741,32 @@
         document.getElementById('apv-detail-panel').classList.remove('visible');
     }
 
+    async function finishWorkout() {
+        const btn = document.getElementById('finish-workout-btn');
+        btn.disabled = true;
+        btn.textContent = 'İŞLENİYOR...';
+        try {
+            const res = await fetch('/workout/complete', { method: 'POST' });
+            const data = await res.json();
+            if (res.ok) {
+                showToast(data.message, 'success');
+                btn.textContent = '✓ TAMAMLANDI';
+            } else {
+                showToast(data.error || 'Hata oluştu', 'error');
+                btn.disabled = false;
+                btn.textContent = '✔ Bugünkü Antrenmanı Tamamla';
+            }
+        } catch (err) {
+            showToast('Bağlantı hatası', 'error');
+            btn.disabled = false;
+            btn.textContent = '✔ Bugünkü Antrenmanı Tamamla';
+        }
+    }
+
     function resetPlan() {
         document.getElementById('active-plan-view').style.display = 'none';
         document.getElementById('setup-form').style.display        = 'block';
+        document.getElementById('finish-workout-wrap').style.display = 'none';
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
