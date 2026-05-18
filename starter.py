@@ -2272,11 +2272,17 @@ def server_error(e):
 
 with app.app_context():
     db.create_all()
-    try:
-        db.session.execute(db.text('ALTER TABLE "user" ADD COLUMN last_login DATE'))
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
+    migrations = [
+        'ALTER TABLE "user" ADD COLUMN last_login DATE',
+        'ALTER TABLE supplement RENAME COLUMN rating_effectiveness TO rating_effect',
+        'ALTER TABLE supplement ADD COLUMN rating_digestion INTEGER',
+    ]
+    for sql in migrations:
+        try:
+            db.session.execute(db.text(sql))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
     if DailyQuest.query.count() == 0:
         for q in [
             DailyQuest(title="Daily Login", description="Bugün uygulamaya giriş yap", points_reward=10, quest_type="login"),
