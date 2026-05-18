@@ -222,6 +222,10 @@
       <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
       Arkadaşlar
     </a>
+    <a href="/feed" class="sidebar-link">
+      <svg viewBox="0 0 24 24"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>
+      Akış
+    </a>
     <a href="/quests" class="sidebar-link active">
       <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
       Görevler
@@ -237,7 +241,7 @@
       {% endif %}
       <div style="overflow:hidden">
         <div class="sidebar-name">{{ username }}</div>
-        <span style="font-size:11px;color:var(--text-3);">{{ rank_points }} RP</span>
+        <span style="font-size:11px;color:var(--text-3);">Lvl {{ user_level }} · {{ user_title }}</span>
       </div>
     </a>
     <a href="/logout" class="sidebar-logout" title="Çikis yap" style="margin-left:auto;">&#8594;</a>
@@ -256,11 +260,11 @@
   <!-- Rank Banner -->
   <div class="rank-banner">
     <div class="rank-icon">
-      {% if rank_title == 'Beginner' %}&#127793;{% elif rank_title == 'Gym Rat' %}&#128170;{% elif rank_title == 'Beast Mode' %}&#128293;{% else %}&#127942;{% endif %}
+      {% if user_level <= 5 %}&#127793;{% elif user_level <= 10 %}&#128170;{% elif user_level <= 20 %}&#128293;{% else %}&#127942;{% endif %}
     </div>
     <div class="rank-info">
-      <div class="rank-title-text">{{ rank_title }}</div>
-      <div class="rank-points-text"><strong>{{ rank_points }}</strong> Rank Points</div>
+      <div class="rank-title-text">{{ user_title }}</div>
+      <div class="rank-points-text"><strong>{{ user_xp }}</strong> XP · Seviye {{ user_level }}</div>
     </div>
   </div>
 
@@ -276,7 +280,7 @@
       </div>
       <div class="quest-desc">{{ item.quest.description }}</div>
       <div class="quest-footer">
-        <div class="quest-reward">+{{ item.quest.points_reward }} RP</div>
+        <div class="quest-reward">+{{ item.quest.points_reward }} XP</div>
         {% if item.status == 'pending' %}
           <span class="status-badge pending">Bekliyor</span>
         {% elif item.status == 'completed' %}

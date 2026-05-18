@@ -209,15 +209,39 @@ class Friendship(db.Model):
     receiver = db.relationship("User", foreign_keys=[receiver_id], backref="received_requests")
 
 class Message(db.Model):
-    id          = db.Column(db.Integer, primary_key=True)
-    sender_id   = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-    receiver_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-    body        = db.Column(db.Text, nullable=False)
-    timestamp   = db.Column(db.DateTime, default=datetime.utcnow)
-    is_read     = db.Column(db.Boolean, default=False)
+    id           = db.Column(db.Integer, primary_key=True)
+    sender_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    receiver_id  = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    body         = db.Column(db.Text, nullable=False)
+    timestamp    = db.Column(db.DateTime, default=datetime.utcnow)
+    is_read      = db.Column(db.Boolean, default=False)
+    message_type = db.Column(db.String(20), default="text")
 
     sender   = db.relationship("User", foreign_keys=[sender_id], backref="sent_messages")
     receiver = db.relationship("User", foreign_keys=[receiver_id], backref="received_messages")
+
+
+class Activity(db.Model):
+    id            = db.Column(db.Integer, primary_key=True)
+    user_id       = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    activity_type = db.Column(db.String(30), nullable=False)
+    content       = db.Column(db.String(300), nullable=False)
+    timestamp     = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    user = db.relationship("User", backref="activities")
+
+class ActivityClap(db.Model):
+    id          = db.Column(db.Integer, primary_key=True)
+    activity_id = db.Column(db.Integer, db.ForeignKey("activity.id"), nullable=False)
+    user_id     = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("activity_id", "user_id", name="uq_activity_clap"),
+    )
+
+    activity = db.relationship("Activity", backref="claps")
+    user     = db.relationship("User", backref="given_claps")
 
 
 class Supplement(db.Model):
@@ -271,23 +295,43 @@ class UserQuestProgress(db.Model):
     quest = db.relationship("DailyQuest", backref="progress_entries")
 
 
-def award_points(user_id, amount):
+def award_xp(user_id, amount):
     user = User.query.get(user_id)
     if user:
         user.rank_points = (user.rank_points or 0) + amount
         return user.rank_points
     return None
 
+def get_level(xp):
+    return 1 + (xp or 0) // 500
+
+def get_title(level):
+    if level <= 5:
+        return "Fitness Yolcusu"
+    elif level <= 10:
+        return "Demir Bükücü"
+    elif level <= 20:
+        return "Kas Mimarı"
+    elif level <= 50:
+        return "FitX Efsanesi"
+    else:
+        return "Antrenman Tanrısı"
+
+ACTIVITY_ICONS = {
+    "workout_completed": "⚡",
+    "new_supplement": "\U0001f48a",
+    "streak_milestone": "\U0001f525",
+    "new_friend": "\U0001f91d",
+    "level_up": "\U0001f31f",
+    "quest_completed": "\U0001f3af",
+}
+
+def log_activity(user_id, activity_type, content):
+    act = Activity(user_id=user_id, activity_type=activity_type, content=content)
+    db.session.add(act)
 
 def get_rank_title(points):
-    if points < 500:
-        return "Beginner"
-    elif points < 2000:
-        return "Gym Rat"
-    elif points < 5000:
-        return "Beast Mode"
-    else:
-        return "Legend"
+    return get_title(get_level(points))
 
 
 @app.before_request
@@ -300,14 +344,30 @@ def update_streak():
             else:
                 current_user.streak_count = 1
             current_user.last_login = today
+            streak = current_user.streak_count
+            if streak in (7, 14, 30, 60, 100):
+                log_activity(current_user.id, "streak_milestone",
+                             f"{streak} günlük seri yakalanadı!")
+                award_xp(current_user.id, streak * 2)
             db.session.commit()
 
 @app.context_processor
 def inject_rank():
     if current_user.is_authenticated:
-        pts = current_user.rank_points or 0
-        return {"rank_points": pts, "rank_title": get_rank_title(pts)}
-    return {"rank_points": 0, "rank_title": "Beginner"}
+        xp = current_user.rank_points or 0
+        level = get_level(xp)
+        title = get_title(level)
+        xp_in_level = xp % 500
+        return {
+            "rank_points": xp, "rank_title": title,
+            "user_xp": xp, "user_level": level, "user_title": title,
+            "xp_in_level": xp_in_level, "xp_for_next": 500,
+        }
+    return {
+        "rank_points": 0, "rank_title": "Fitness Yolcusu",
+        "user_xp": 0, "user_level": 1, "user_title": "Fitness Yolcusu",
+        "xp_in_level": 0, "xp_for_next": 500,
+    }
 
 
 def get_today_progress(user_id):
@@ -837,8 +897,7 @@ def home():
     return render_template("index.html",
         username=current_user.username,
         profile_picture=current_user.profile_picture,
-        rank_points=current_user.rank_points or 0,
-        rank_title=get_rank_title(current_user.rank_points or 0)
+        streak_count=current_user.streak_count or 0,
     )
 
 @app.route("/edit-profile", methods=["GET", "POST"])
@@ -854,7 +913,6 @@ def edit_profile():
             profile_picture=current_user.profile_picture or "",
             goal=current_user.goal or "",
             streak_count=current_user.streak_count or 0,
-            rank_points=current_user.rank_points or 0,
             supplements=supps,
             icons=CATEGORY_ICONS,
         )
@@ -923,10 +981,13 @@ def friends_list():
     friends = []
     for f in accepted:
         friend = f.receiver if f.sender_id == current_user.id else f.sender
+        xp = friend.rank_points or 0
+        lvl = get_level(xp)
         friends.append({"id": friend.id, "username": friend.username,
                         "full_name": friend.full_name or friend.username,
                         "profile_picture": friend.profile_picture,
-                        "rank_title": get_rank_title(friend.rank_points or 0)})
+                        "rank_title": get_title(lvl),
+                        "level": lvl})
 
     pending_in = Friendship.query.filter_by(receiver_id=current_user.id, status="pending").all()
     incoming = [{"request_id": p.id, "username": p.sender.username,
@@ -1003,10 +1064,12 @@ def friend_accept(request_id):
     if fr.status != "pending":
         return jsonify({"error": "Bu istek zaten işlenmiş."}), 400
     fr.status = "accepted"
-    award_points(fr.sender_id, 50)
-    award_points(fr.receiver_id, 50)
+    award_xp(fr.sender_id, 50)
+    award_xp(fr.receiver_id, 50)
+    log_activity(fr.sender_id, "new_friend", f"{fr.receiver.username} ile arkadaş oldu")
+    log_activity(fr.receiver_id, "new_friend", f"{fr.sender.username} ile arkadaş oldu")
     db.session.commit()
-    return jsonify({"message": f"{fr.sender.username} ile artık arkadaşsınız! +50 RP!", "points_awarded": 50})
+    return jsonify({"message": f"{fr.sender.username} ile artık arkadaşsınız! +50 XP!", "points_awarded": 50})
 
 @app.route("/friend/reject/<int:request_id>", methods=["POST"])
 @login_required
@@ -1028,13 +1091,16 @@ def chat_page(username):
     other = User.query.filter_by(username=username).first_or_404()
     if not are_friends(current_user.id, other.id):
         return redirect(url_for("friends_page"))
+    other_xp = other.rank_points or 0
+    other_lvl = get_level(other_xp)
     return render_template("chat.html",
         username=current_user.username,
         profile_picture=current_user.profile_picture,
         other_username=other.username,
         other_full_name=other.full_name or other.username,
         other_profile_picture=other.profile_picture,
-        other_rank_title=get_rank_title(other.rank_points or 0))
+        other_rank_title=get_title(other_lvl),
+        other_level=other_lvl)
 
 @app.route("/chat/<username>/messages")
 @login_required
@@ -1056,7 +1122,8 @@ def chat_messages(username):
 
     return jsonify({"messages": [
         {"id": m.id, "sender": m.sender.username, "body": m.body,
-         "timestamp": m.timestamp.strftime("%H:%M"), "is_mine": m.sender_id == current_user.id}
+         "timestamp": m.timestamp.strftime("%H:%M"), "is_mine": m.sender_id == current_user.id,
+         "message_type": m.message_type or "text"}
         for m in messages
     ]})
 
@@ -1074,12 +1141,137 @@ def chat_send(username):
     if len(body) > 2000:
         return jsonify({"error": "Mesaj çok uzun."}), 400
 
-    msg = Message(sender_id=current_user.id, receiver_id=other.id, body=body)
+    msg_type = data.get("message_type", "text")
+    if msg_type not in ("text", "suggestion_meal", "suggestion_workout"):
+        msg_type = "text"
+
+    msg = Message(sender_id=current_user.id, receiver_id=other.id,
+                  body=body, message_type=msg_type)
     db.session.add(msg)
     db.session.commit()
     complete_quest_for_user(current_user.id, "suggestion_sent")
     return jsonify({"message": "Gönderildi.", "id": msg.id,
-                    "timestamp": msg.timestamp.strftime("%H:%M")})
+                    "timestamp": msg.timestamp.strftime("%H:%M"),
+                    "message_type": msg_type})
+
+# ── SUGGESTION ROUTES ──
+
+@app.route("/suggest/<username>", methods=["POST"])
+@login_required
+def send_suggestion(username):
+    other = User.query.filter_by(username=username).first_or_404()
+    if not are_friends(current_user.id, other.id):
+        return jsonify({"error": "Arkadaş değilsiniz."}), 403
+
+    data = request.get_json()
+    stype = data.get("type")
+    body = (data.get("body") or "").strip()
+    if stype not in ("suggestion_meal", "suggestion_workout"):
+        return jsonify({"error": "Geçersiz öneri tipi."}), 400
+    if not body:
+        return jsonify({"error": "Öneri boş olamaz."}), 400
+
+    msg = Message(sender_id=current_user.id, receiver_id=other.id,
+                  body=body, message_type=stype)
+    db.session.add(msg)
+    db.session.commit()
+    complete_quest_for_user(current_user.id, "suggestion_sent")
+    return jsonify({"message": "Öneri gönderildi!", "id": msg.id})
+
+@app.route("/suggest/respond/<int:msg_id>", methods=["POST"])
+@login_required
+def respond_suggestion(msg_id):
+    msg = Message.query.get_or_404(msg_id)
+    if msg.receiver_id != current_user.id:
+        return jsonify({"error": "Bu öneri size ait değil."}), 403
+    if msg.message_type not in ("suggestion_meal", "suggestion_workout"):
+        return jsonify({"error": "Bu bir öneri mesajı değil."}), 400
+
+    data = request.get_json()
+    action = data.get("action")
+    if action not in ("accept", "decline"):
+        return jsonify({"error": "Geçersiz işlem."}), 400
+
+    if action == "accept":
+        msg.message_type = msg.message_type + "_accepted"
+        reply = Message(sender_id=current_user.id, receiver_id=msg.sender_id,
+                        body=f"✅ Önerini kabul ettim: {msg.body[:100]}",
+                        message_type="text")
+        db.session.add(reply)
+    else:
+        msg.message_type = msg.message_type + "_declined"
+
+    db.session.commit()
+    return jsonify({"message": "Kabul edildi!" if action == "accept" else "Reddedildi.",
+                    "new_type": msg.message_type})
+
+# ── FEED ROUTES ──
+
+@app.route("/feed")
+@login_required
+def feed_page():
+    return render_template("feed.html",
+        username=current_user.username,
+        profile_picture=current_user.profile_picture)
+
+@app.route("/feed/data")
+@login_required
+def feed_data():
+    accepted = Friendship.query.filter(
+        Friendship.status == "accepted",
+        db.or_(Friendship.sender_id == current_user.id,
+               Friendship.receiver_id == current_user.id)
+    ).all()
+    friend_ids = set()
+    for f in accepted:
+        friend_ids.add(f.receiver_id if f.sender_id == current_user.id else f.sender_id)
+
+    if not friend_ids:
+        return jsonify({"activities": [], "empty": True})
+
+    page = request.args.get("page", 1, type=int)
+    per_page = 20
+    activities = Activity.query.filter(Activity.user_id.in_(friend_ids))\
+        .order_by(Activity.timestamp.desc())\
+        .offset((page - 1) * per_page).limit(per_page).all()
+
+    result = []
+    for a in activities:
+        clap_count = ActivityClap.query.filter_by(activity_id=a.id).count()
+        has_clapped = ActivityClap.query.filter_by(
+            activity_id=a.id, user_id=current_user.id).first() is not None
+        result.append({
+            "id": a.id,
+            "username": a.user.username,
+            "full_name": a.user.full_name or a.user.username,
+            "profile_picture": a.user.profile_picture,
+            "activity_type": a.activity_type,
+            "content": a.content,
+            "icon": ACTIVITY_ICONS.get(a.activity_type, "📌"),
+            "timestamp": a.timestamp.strftime("%d.%m.%Y %H:%M"),
+            "clap_count": clap_count,
+            "has_clapped": has_clapped,
+        })
+
+    return jsonify({"activities": result, "empty": len(result) == 0})
+
+@app.route("/feed/clap/<int:activity_id>", methods=["POST"])
+@login_required
+def feed_clap(activity_id):
+    activity = Activity.query.get_or_404(activity_id)
+    existing = ActivityClap.query.filter_by(
+        activity_id=activity_id, user_id=current_user.id).first()
+    if existing:
+        db.session.delete(existing)
+        db.session.commit()
+        count = ActivityClap.query.filter_by(activity_id=activity_id).count()
+        return jsonify({"clapped": False, "count": count})
+
+    clap = ActivityClap(activity_id=activity_id, user_id=current_user.id)
+    db.session.add(clap)
+    db.session.commit()
+    count = ActivityClap.query.filter_by(activity_id=activity_id).count()
+    return jsonify({"clapped": True, "count": count})
 
 # ── SUPPLEMENT ROUTES ──
 
@@ -1139,9 +1331,10 @@ def supplement_add():
     db.session.commit()
 
     if first_entry or Supplement.query.filter_by(user_id=current_user.id).count() == 1:
-        award_points(current_user.id, 25)
+        award_xp(current_user.id, 25)
         db.session.commit()
 
+    log_activity(current_user.id, "new_supplement", f"{name} ({category}) stack'ine eklendi")
     complete_quest_for_user(current_user.id, "supplement_added")
 
     return jsonify({"message": "Supplement eklendi!", "id": supp.id})
@@ -2058,14 +2251,17 @@ def complete_workout():
             return jsonify({"error": "Bugünkü antrenmanını zaten tamamladın!"}), 400
 
     complete_quest_for_user(current_user.id, "workout_logged")
-    new_total = award_points(current_user.id, 10)
+    new_total = award_xp(current_user.id, 10)
+    log_activity(current_user.id, "workout_completed", "Bugünkü antrenmanını tamamladı")
     db.session.commit()
 
+    level = get_level(new_total)
     return jsonify({
-        "message": "Bugünkü antrenmanı tamamladın! +10 RP!",
+        "message": "Bugünkü antrenmanı tamamladın! +10 XP!",
         "points_awarded": 10,
         "new_total": new_total,
-        "rank_title": get_rank_title(new_total)
+        "level": level,
+        "title": get_title(level)
     })
 
 @app.route("/training-plan/active")
@@ -2207,12 +2403,9 @@ def quests():
             status = "pending"
         quest_data.append({"quest": q, "status": status})
 
-    rank_title = get_rank_title(current_user.rank_points or 0)
     return render_template("quests.html",
         username=current_user.username,
         profile_picture=current_user.profile_picture,
-        rank_points=current_user.rank_points or 0,
-        rank_title=rank_title,
         quest_data=quest_data
     )
 
@@ -2236,13 +2429,16 @@ def claim_quest(quest_id):
         return jsonify({"error": "Bu ödülü zaten aldın"}), 400
 
     progress.is_claimed = True
-    new_total = award_points(current_user.id, quest.points_reward)
+    new_total = award_xp(current_user.id, quest.points_reward)
+    log_activity(current_user.id, "quest_completed", f"'{quest.title}' görevini tamamladı")
     db.session.commit()
 
+    level = get_level(new_total)
     return jsonify({
-        "message": f"+{quest.points_reward} Rank Points!",
+        "message": f"+{quest.points_reward} XP!",
         "new_total": new_total,
-        "rank_title": get_rank_title(new_total)
+        "level": level,
+        "title": get_title(level)
     })
 
 
@@ -2276,6 +2472,7 @@ with app.app_context():
         'ALTER TABLE "user" ADD COLUMN last_login DATE',
         'ALTER TABLE supplement RENAME COLUMN rating_effectiveness TO rating_effect',
         'ALTER TABLE supplement ADD COLUMN rating_digestion INTEGER',
+        'ALTER TABLE message ADD COLUMN message_type VARCHAR(20) DEFAULT \'text\'',
     ]
     for sql in migrations:
         try:

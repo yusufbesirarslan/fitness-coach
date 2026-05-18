@@ -226,6 +226,42 @@
     @keyframes ins-fill { from{transform:scaleX(1)} to{transform:scaleX(0)} }
 
     /* ════════════════════════════════════════════════
+       ⑦ JOURNEY MAP
+       ════════════════════════════════════════════════ */
+    .jm-header { display:flex; align-items:center; gap:14px; margin-bottom:16px; }
+    .jm-level {
+        width:52px; height:52px; border-radius:50%; flex-shrink:0;
+        background: linear-gradient(135deg, #CCFF00, #A8D400);
+        display:flex; align-items:center; justify-content:center;
+        font-family:'Bebas Neue',sans-serif; font-size:24px; color:#121212;
+        box-shadow: 0 0 20px rgba(204,255,0,0.25);
+    }
+    .jm-info { flex:1; }
+    .jm-title-text {
+        font-family:'Bebas Neue',sans-serif; font-size:20px; color:#CCFF00;
+        letter-spacing:2px; line-height:1;
+    }
+    .jm-xp-text { font-size:12px; color:#9A9A9A; margin-top:3px; }
+    .jm-bar { height:8px; background:rgba(255,255,255,0.05); border-radius:4px; overflow:hidden; margin-bottom:18px; }
+    .jm-bar-inner {
+        height:100%; border-radius:4px;
+        background: linear-gradient(90deg, #A8D400, #CCFF00);
+        transition: width 0.8s cubic-bezier(0.4,0,0.2,1);
+        box-shadow: 0 0 8px rgba(204,255,0,0.3);
+    }
+    .jm-milestones { display:flex; gap:10px; flex-wrap:wrap; }
+    .jm-badge {
+        display:inline-flex; align-items:center; gap:6px;
+        padding:6px 12px; border-radius:20px; font-size:12px; font-weight:600;
+        border:1px solid var(--border); background:rgba(255,255,255,0.02);
+        color:#9A9A9A; transition: all 0.2s;
+    }
+    .jm-badge.earned {
+        background:rgba(204,255,0,0.08); border-color:rgba(204,255,0,0.25); color:#CCFF00;
+    }
+    .jm-badge-icon { font-size:16px; }
+
+    /* ════════════════════════════════════════════════
        FAB
        ════════════════════════════════════════════════ */
     .fab-wrap {
@@ -317,6 +353,10 @@
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             Arkadaşlar
         </a>
+        <a href="/feed" class="sidebar-link">
+            <svg viewBox="0 0 24 24"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>
+            Akış
+        </a>
         <a href="/quests" class="sidebar-link">
             <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             Görevler
@@ -332,7 +372,7 @@
             {% endif %}
             <div style="overflow:hidden">
                 <div class="sidebar-name">{{ username }}</div>
-                <span style="font-size:11px;color:var(--text-3);">{{ rank_points }} RP · {{ rank_title }}</span>
+                <span style="font-size:11px;color:var(--text-3);">Lvl {{ user_level }} · {{ user_title }}</span>
             </div>
         </a>
         <a href="/logout" class="sidebar-logout" title="Çıkış yap" style="margin-left:auto;">→</a>
@@ -453,6 +493,28 @@
         </div>
     </div>
 
+    <!-- ══ ⑦ JOURNEY MAP — full width ══ -->
+    <div class="bc b-3">
+        <div class="bc-lbl"><span class="bc-dot" style="background:#CCFF00"></span>Fitness Yolculuğun</div>
+        <div class="jm-header">
+            <div class="jm-level" id="jm-level">{{ user_level }}</div>
+            <div class="jm-info">
+                <div class="jm-title-text" id="jm-title">{{ user_title }}</div>
+                <div class="jm-xp-text" id="jm-xp">{{ user_xp }} XP · Sonraki seviye: {{ xp_for_next - xp_in_level }} XP kaldı</div>
+            </div>
+        </div>
+        <div class="jm-bar">
+            <div class="jm-bar-inner" id="jm-bar" style="width:{{ (xp_in_level / xp_for_next * 100)|int }}%"></div>
+        </div>
+        <div class="jm-milestones" id="jm-milestones">
+            <div class="jm-badge" data-req="streak-7"><span class="jm-badge-icon">🔥</span> 7 Gün Seri</div>
+            <div class="jm-badge" data-req="streak-30"><span class="jm-badge-icon">💎</span> 30 Gün Seri</div>
+            <div class="jm-badge" data-req="level-5"><span class="jm-badge-icon">⚡</span> Seviye 5</div>
+            <div class="jm-badge" data-req="level-10"><span class="jm-badge-icon">🌟</span> Seviye 10</div>
+            <div class="jm-badge" data-req="level-20"><span class="jm-badge-icon">👑</span> Seviye 20</div>
+        </div>
+    </div>
+
     <!-- ══ ⑥ AI INSIGHT FEED ══ -->
     <div class="bc b-1" style="display:flex;flex-direction:column;z-index:210;">
         <div class="bc-lbl"><span class="bc-dot" style="background:rgba(204,255,0,0.75)"></span>Günün İpucu</div>
@@ -489,13 +551,9 @@
             <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
             Antrenman
         </a>
-        <a href="/supplements" class="bn-item">
-            <svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-            Supplements
-        </a>
-        <a href="/progress-page" class="bn-item">
-            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-            İlerleme
+        <a href="/feed" class="bn-item">
+            <svg viewBox="0 0 24 24"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>
+            Akış
         </a>
         <a href="/friends" class="bn-item">
             <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -985,6 +1043,24 @@ async function init() {
 
     /* 4. Sparkline (can run while page is interactive) */
     await loadSparkline();
+
+    /* 5. Journey map milestones */
+    checkMilestones();
+}
+
+function checkMilestones() {
+    const level = {{ user_level }};
+    const streak = {{ streak_count|default(0) }};
+    document.querySelectorAll('.jm-badge').forEach(b => {
+        const req = b.dataset.req;
+        let earned = false;
+        if (req === 'streak-7') earned = streak >= 7;
+        else if (req === 'streak-30') earned = streak >= 30;
+        else if (req === 'level-5') earned = level >= 5;
+        else if (req === 'level-10') earned = level >= 10;
+        else if (req === 'level-20') earned = level >= 20;
+        if (earned) b.classList.add('earned');
+    });
 }
 
 init();
