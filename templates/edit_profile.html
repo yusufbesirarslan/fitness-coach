@@ -293,11 +293,14 @@
                         </div>
                         <div class="stack-brand">{{ s.brand }} · {{ s.category }}</div>
                         <div class="stack-ratings">
-                            {% if s.rating_effectiveness %}
-                            <span class="stack-rating-item">Etkinlik: <span class="mini-stars">{{ '★' * s.rating_effectiveness }}{{ '☆' * (5 - s.rating_effectiveness) }}</span></span>
+                            {% if s.rating_effect %}
+                            <span class="stack-rating-item">Etki: <span class="mini-stars">{{ '★' * s.rating_effect }}{{ '☆' * (5 - s.rating_effect) }}</span></span>
                             {% endif %}
                             {% if s.rating_taste %}
                             <span class="stack-rating-item">Lezzet: <span class="mini-stars">{{ '★' * s.rating_taste }}{{ '☆' * (5 - s.rating_taste) }}</span></span>
+                            {% endif %}
+                            {% if s.rating_digestion %}
+                            <span class="stack-rating-item">Sindirim: <span class="mini-stars">{{ '★' * s.rating_digestion }}{{ '☆' * (5 - s.rating_digestion) }}</span></span>
                             {% endif %}
                             {% if s.rating_price %}
                             <span class="stack-rating-item">Fiyat: <span class="mini-stars">{{ '★' * s.rating_price }}{{ '☆' * (5 - s.rating_price) }}</span></span>
