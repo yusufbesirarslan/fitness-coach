@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "fitx-coach": {
+      "command": "python",
+      "args": ["-m", "mcp.server"],
+      "cwd": "${PROJECT_ROOT}",
+      "env": {
+        "DATABASE_URL": "${DATABASE_URL}"
+      }
+    }
+  }
+}
