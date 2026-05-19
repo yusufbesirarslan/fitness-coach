@@ -90,15 +90,13 @@ body {
 .page-body { min-height: 100vh; background: var(--bg); }
 
 .main-content {
-  padding: var(--s5) var(--s5) var(--s6);
-  max-width: calc(var(--content-max) + var(--sidebar-w));
+  padding: var(--s3) var(--s2) var(--s4);
+  max-width: var(--content-max);
+  margin: 0 auto;
 }
 
-@media (min-width: 1024px) {
-  .main-content { margin-left: var(--sidebar-w); padding: var(--s5) var(--s5) var(--s6); max-width: none; }
-}
-@media (max-width: 1023px) {
-  .main-content { padding: var(--s3) var(--s2) calc(var(--bottom-nav-h) + var(--s4)); }
+@media (min-width: 768px) {
+  .main-content { padding: var(--s5) var(--s5) var(--s6); }
 }
 
 /* ── 5. SIDEBAR ───────────────────────────────────── */

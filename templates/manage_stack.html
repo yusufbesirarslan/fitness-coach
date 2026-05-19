@@ -6,6 +6,7 @@
     <title>Supplement Stack — Fitness Coach</title>
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/theme.css">
+    <link rel="stylesheet" href="/static/nav.css">
     <style>
     .stack-wrap { max-width: 700px; margin: 0 auto; }
 
@@ -103,58 +104,24 @@
 
 <div class="toast-wrap" id="toast-wrap"></div>
 
-<!-- ── SIDEBAR ── -->
-<aside class="sidebar">
-    <div class="sidebar-logo">FC</div>
-    <nav class="sidebar-nav">
-        <a href="/" class="sidebar-link">
-            <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-            Ana Sayfa
-        </a>
-        <a href="/nutrition" class="sidebar-link">
-            <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
-            Beslenme
-        </a>
-        <a href="/training" class="sidebar-link">
-            <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
-            Antrenman
-        </a>
-        <a href="/supplements" class="sidebar-link active">
-            <svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-            Supplements
-        </a>
-        <a href="/progress-page" class="sidebar-link">
-            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-            İlerleme
-        </a>
-        <a href="/friends" class="sidebar-link">
-            <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            Arkadaşlar
-        </a>
-        <a href="/feed" class="sidebar-link">
-            <svg viewBox="0 0 24 24"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/></svg>
-            Akış
-        </a>
-        <a href="/quests" class="sidebar-link">
-            <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-            Görevler
-        </a>
+<header class="global-header">
+    <button class="drawer-trigger" onclick="fxToggleDrawer()"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+    <span class="header-brand">FITX</span><div class="header-spacer"></div>
+    <a href="/edit-profile" class="header-avatar" title="Profil">{% if profile_picture %}<img src="{{ profile_picture }}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">{% else %}{{ username[0]|upper if username else 'U' }}{% endif %}</a>
+</header>
+<div id="fx-drawer-backdrop" class="drawer-backdrop"></div>
+<aside id="fx-drawer" class="drawer">
+    <div class="drawer-header"><div class="drawer-profile"><div class="drawer-profile-avatar">{% if profile_picture %}<img src="{{ profile_picture }}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">{% else %}{{ username[0]|upper if username else 'U' }}{% endif %}</div><div class="drawer-profile-info"><div class="drawer-profile-name">{{ username }}</div><div class="drawer-profile-title">{{ user_title }}</div></div></div>
+    <div class="drawer-xp"><div class="drawer-xp-label"><span class="drawer-xp-level">Level {{ user_level }}</span><span class="drawer-xp-val">{{ xp_in_level }} / {{ xp_for_next }} XP</span></div><div class="drawer-xp-track"><div class="drawer-xp-fill" style="width:{{ (xp_in_level / xp_for_next * 100)|int }}%"></div></div></div></div>
+    <nav class="drawer-nav"><div class="drawer-section-label">Keşfet</div>
+        <a href="/quests" class="drawer-link"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>Görevler</a>
+        <a href="/supplements" class="drawer-link active"><svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>Supplement Dolabı</a>
+        <a href="/progress-page" class="drawer-link"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>İlerleme</a>
+        <a href="/menu-assistant" class="drawer-link"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Menü Asistanı</a>
+        <div class="drawer-sep"></div>
+        <a href="/edit-profile" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Profilim</a>
     </nav>
-    <div class="sidebar-sep"></div>
-    <div class="sidebar-user">
-        <a href="/edit-profile" style="display:flex;align-items:center;gap:10px;text-decoration:none;flex:1;min-width:0;">
-            {% if profile_picture %}
-                <img src="{{ profile_picture }}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;">
-            {% else %}
-                <div class="sidebar-avatar">{{ username[0]|upper if username else 'U' }}</div>
-            {% endif %}
-            <div style="overflow:hidden">
-                <div class="sidebar-name">{{ username }}</div>
-                <span style="font-size:11px;color:var(--text-3);">Lvl {{ user_level }} · {{ user_title }}</span>
-            </div>
-        </a>
-        <a href="/logout" class="sidebar-logout" title="Çıkış yap" style="margin-left:auto;">→</a>
-    </div>
+    <div class="drawer-footer"><a href="/logout" class="drawer-logout"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Çıkış Yap</a></div>
 </aside>
 
 <!-- ── MAIN ── -->
@@ -282,35 +249,42 @@
     </div>
 </main>
 
-<!-- ── BOTTOM NAV ── -->
-<nav class="bottom-nav">
-    <div class="bottom-nav-inner">
-        <a href="/" class="bn-item">
-            <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-            Ana Sayfa
-        </a>
-        <a href="/nutrition" class="bn-item">
-            <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
-            Beslenme
-        </a>
-        <a href="/training" class="bn-item">
-            <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
-            Antrenman
-        </a>
-        <a href="/supplements" class="bn-item active">
-            <svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-            Supplements
-        </a>
-        <a href="/progress-page" class="bn-item">
-            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-            İlerleme
-        </a>
-        <a href="/quests" class="bn-item">
-            <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-            Görevler
-        </a>
+<nav class="action-bar">
+    <a href="/" class="ab-tab">
+        <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span>Ana Sayfa</span>
+    </a>
+    <a href="/training" class="ab-tab">
+        <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
+        <span>Antrenman</span>
+    </a>
+    <div class="ab-fab-wrapper">
+        <button class="qr-fab pulse" onclick="fxLaunchQR()" aria-label="QR Menü Tarayıcı">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3"/><path d="M20 14v3h-3"/><path d="M14 20h3"/><path d="M20 20h0"/></svg>
+        </button>
     </div>
+    <a href="/nutrition" class="ab-tab">
+        <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+        <span>Beslenme</span>
+    </a>
+    <a href="/feed" class="ab-tab">
+        <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Kulüp</span>
+    </a>
 </nav>
+
+<div id="fx-qr-overlay" class="qr-overlay">
+    <button class="qr-overlay-close" onclick="fxCloseQR()">
+        <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <div class="qr-overlay-title">MENÜ TARA</div>
+    <div id="fx-qr-reader" class="qr-overlay-reader"></div>
+    <div class="qr-overlay-hint">QR kodu kameraya gösterin veya menü URL'si girin</div>
+    <div class="qr-overlay-manual">
+        <input id="fx-qr-url-input" type="url" placeholder="https://menu.example.com" onkeydown="if(event.key==='Enter')fxSubmitQRUrl()">
+        <button onclick="fxSubmitQRUrl()">GİT</button>
+    </div>
+</div>
 
 <script>
 let selectedCat = 'Protein';
@@ -405,5 +379,6 @@ async function deleteSupplement(id) {
     } catch(e) { toast('Bağlantı hatası', 'error'); }
 }
 </script>
+<script src="/static/nav.js"></script>
 </body>
 </html>
