@@ -218,7 +218,27 @@
     .dish-add-btn:hover { background: rgba(204,255,0,0.12); border-color: rgba(204,255,0,0.3); }
     .dish-add-btn:disabled { opacity: 0.4; cursor: default; }
 
-    /* ── ALL RESULTS LIST ── */
+    /* ── CATEGORY SECTIONS ── */
+    .cat-section { margin-bottom: 8px; }
+    .cat-header {
+        position: sticky; top: 56px; z-index: 10;
+        font-family: 'Bebas Neue', sans-serif;
+        font-size: 15px; letter-spacing: 3px;
+        text-transform: uppercase; color: #CCFF00;
+        padding: 12px 0 8px;
+        background: linear-gradient(to bottom, #0A0A0C 60%, transparent);
+        display: flex; align-items: center; gap: 10px;
+    }
+    .cat-header::after {
+        content: ''; flex: 1; height: 1px;
+        background: linear-gradient(90deg, rgba(204,255,0,0.15), transparent);
+    }
+    .cat-count {
+        font-family: 'DM Sans', sans-serif; font-size: 11px;
+        font-weight: 600; letter-spacing: 0;
+        color: #505058; text-transform: none;
+    }
+
     .all-results-title {
         font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
         text-transform: uppercase; color: #505058;
@@ -440,23 +460,29 @@ async function processUrl(url) {
             return;
         }
 
-        setStatus('Yemekler analiz ediliyor...', 'loading');
+        const subCount = proxyData.sub_pages_crawled || 0;
+        setStatus(`Yemekler analiz ediliyor...${subCount ? ' (' + (subCount+1) + ' sayfa tarandı)' : ''}`, 'loading');
 
         const menuText = [proxyData.title, ...proxyData.headings, proxyData.body_text].join('\n');
+        const analyzeBody = {menu_text: menuText};
+        if (proxyData.framework_state) analyzeBody.framework_state = proxyData.framework_state;
 
         const analyzeRes = await fetch('/api/menu/analyze', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({menu_text: menuText})
+            body: JSON.stringify(analyzeBody)
         });
         const result = await analyzeRes.json();
 
-        if (result.error && (!result.items || result.items.length === 0)) {
+        const totalItems = Object.values(result.categories || {}).reduce((s, arr) => s + arr.length, 0);
+
+        if (result.error && totalItems === 0) {
             setStatus(result.error, 'error');
             return;
         }
 
-        setStatus(`${result.items.length} yemek analiz edildi`, 'success');
+        const catCount = Object.keys(result.categories || {}).length;
+        setStatus(`${totalItems} yemek · ${catCount} kategori analiz edildi`, 'success');
         renderResults(result);
 
     } catch (e) {
@@ -468,7 +494,6 @@ function renderResults(data) {
     const section = document.getElementById('results-section');
     section.classList.add('visible');
 
-    // Macro bar
     if (data.remaining) {
         const bar = document.getElementById('macro-bar');
         bar.style.display = 'grid';
@@ -478,19 +503,25 @@ function renderResults(data) {
         document.getElementById('rem-fat').textContent = Math.round(data.remaining.fat) + 'g';
     }
 
-    const items = data.items || [];
-    const top3 = items.slice(0, 3);
-    const rest = items.slice(3);
+    const picks = data.coach_picks || [];
+    document.getElementById('top-dishes').innerHTML = picks.map(d => dishCard(d, true)).join('');
 
-    document.getElementById('top-dishes').innerHTML = top3.map((d, i) => dishCard(d, true, i)).join('');
-    document.getElementById('all-dishes').innerHTML = rest.map((d, i) => dishCard(d, false, i + 3)).join('');
+    const cats = data.categories || {};
+    let catHTML = '';
+    for (const [catName, items] of Object.entries(cats)) {
+        catHTML += `<div class="cat-section">
+            <div class="cat-header">${catName} <span class="cat-count">${items.length}</span></div>
+            ${items.map(d => dishCard(d, false)).join('')}
+        </div>`;
+    }
+    document.getElementById('all-dishes').innerHTML = catHTML;
 
     section.scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
-function dishCard(d, isTop, idx) {
+function dishCard(d, isTop) {
     const scoreClass = d.score >= 50 ? 'high' : d.score >= 20 ? 'mid' : 'low';
-    const warnings = d.warnings.map(w => `<span class="dish-warn-tag">${w}</span>`).join('');
+    const warnings = (d.warnings || []).map(w => `<span class="dish-warn-tag">${w}</span>`).join('');
     const m = d.macros;
 
     return `

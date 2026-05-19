@@ -942,6 +942,100 @@ def menu_assistant():
     )
 
 
+def _validate_menu_url(url):
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return None, "Yalnızca HTTP/HTTPS desteklenir."
+    if not parsed.hostname:
+        return None, "Geçersiz URL."
+    blocked = ("127.0.0.1", "localhost", "0.0.0.0", "169.254.169.254", "[::1]")
+    if parsed.hostname.lower() in blocked or parsed.hostname.startswith("10.") or parsed.hostname.startswith("192.168."):
+        return None, "İç ağ adresleri engellendi."
+    return parsed, None
+
+
+def _fetch_page(url, timeout=8):
+    import requests as http_req
+    resp = http_req.get(url, timeout=timeout, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
+    }, allow_redirects=True)
+    resp.raise_for_status()
+    return resp
+
+
+def _extract_framework_state(html_text):
+    import re
+    patterns = [
+        (r'window\.__NEXT_DATA__\s*=\s*({.+?})\s*;?\s*</script>', "next"),
+        (r'window\.__NUXT__\s*=\s*({.+?})\s*;?\s*</script>', "nuxt"),
+        (r'window\.__DATA__\s*=\s*({.+?})\s*;?\s*</script>', "data"),
+        (r'window\.__INITIAL_STATE__\s*=\s*({.+?})\s*;?\s*</script>', "state"),
+    ]
+    for pattern, framework in patterns:
+        match = re.search(pattern, html_text, re.DOTALL)
+        if match:
+            try:
+                state = json.loads(match.group(1))
+                return state, framework
+            except (json.JSONDecodeError, ValueError):
+                continue
+    return None, None
+
+
+def _discover_menu_links(soup, base_parsed):
+    from urllib.parse import urljoin, urlparse
+    menu_keywords = (
+        "menu", "yemek", "yiyecek", "kahvalt", "icecek", "tatl", "salata",
+        "pizza", "burger", "makarna", "et", "tavuk", "balik", "corba",
+        "aperatif", "ara-sicak", "meze", "soguk", "sicak", "izgara",
+        "food", "dish", "breakfast", "lunch", "dinner", "drinks",
+    )
+    base_origin = f"{base_parsed.scheme}://{base_parsed.hostname}"
+    found = set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        if href.startswith("#") or href.startswith("javascript:") or href.startswith("mailto:"):
+            continue
+        full_url = urljoin(base_origin + base_parsed.path, href)
+        link_parsed = urlparse(full_url)
+        if link_parsed.hostname != base_parsed.hostname:
+            continue
+        path_lower = link_parsed.path.lower()
+        if any(kw in path_lower for kw in menu_keywords):
+            clean = f"{link_parsed.scheme}://{link_parsed.hostname}{link_parsed.path}"
+            if clean not in found and clean != f"{base_parsed.scheme}://{base_parsed.hostname}{base_parsed.path}":
+                found.add(clean)
+    return list(found)[:10]
+
+
+def _extract_page_sections(html_text, soup_clean):
+    from bs4 import BeautifulSoup
+    sections = []
+    current_heading = "Genel"
+    current_items = []
+
+    for el in soup_clean.find_all(["h1", "h2", "h3", "h4", "h5", "p", "li", "span", "div", "td"]):
+        text = el.get_text(strip=True)
+        if not text or len(text) < 2:
+            continue
+        if el.name in ("h1", "h2", "h3", "h4", "h5"):
+            if current_items:
+                sections.append({"category": current_heading, "text": "\n".join(current_items)})
+                current_items = []
+            current_heading = text
+        else:
+            if len(text) > 3 and len(text) < 200:
+                current_items.append(text)
+
+    if current_items:
+        sections.append({"category": current_heading, "text": "\n".join(current_items)})
+
+    return sections
+
+
 @app.route("/api/proxy/scan-menu", methods=["POST"])
 @login_required
 def proxy_scan_menu():
@@ -954,22 +1048,12 @@ def proxy_scan_menu():
     if not url:
         return jsonify({"error": "URL gerekli."}), 400
 
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        return jsonify({"error": "Yalnızca HTTP/HTTPS desteklenir."}), 400
-    if not parsed.hostname:
-        return jsonify({"error": "Geçersiz URL."}), 400
-
-    blocked = ("127.0.0.1", "localhost", "0.0.0.0", "169.254.169.254", "[::1]")
-    if parsed.hostname.lower() in blocked or parsed.hostname.startswith("10.") or parsed.hostname.startswith("192.168."):
-        return jsonify({"error": "İç ağ adresleri engellendi."}), 403
+    base_parsed, err = _validate_menu_url(url)
+    if err:
+        return jsonify({"error": err}), 400
 
     try:
-        resp = http_req.get(url, timeout=5, headers={
-            "User-Agent": "FitX-MenuScanner/1.0",
-            "Accept": "text/html,application/xhtml+xml",
-        }, allow_redirects=True)
-        resp.raise_for_status()
+        resp = _fetch_page(url)
     except http_req.exceptions.Timeout:
         return jsonify({"error": "Zaman aşımı — site yanıt vermedi."}), 504
     except http_req.exceptions.RequestException as e:
@@ -979,23 +1063,228 @@ def proxy_scan_menu():
     if "html" not in content_type and "text" not in content_type:
         return jsonify({"error": "Desteklenmeyen içerik tipi."}), 415
 
-    soup = BeautifulSoup(resp.text, "html.parser")
+    raw_html = resp.text
+    framework_state, fw_type = _extract_framework_state(raw_html)
+
+    soup = BeautifulSoup(raw_html, "html.parser")
+    sub_links = _discover_menu_links(soup, base_parsed)
+
     for tag in soup(["script", "style", "iframe", "object", "embed", "link", "meta"]):
         tag.decompose()
 
     title = soup.title.string.strip() if soup.title and soup.title.string else ""
-    headings = [h.get_text(strip=True) for h in soup.find_all(["h1", "h2", "h3", "h4"]) if h.get_text(strip=True)]
-    body_text = soup.get_text(separator="\n", strip=True)
-    body_text = "\n".join(line for line in body_text.split("\n") if len(line.strip()) > 2)
-    if len(body_text) > 8000:
-        body_text = body_text[:8000]
+    sections = _extract_page_sections(raw_html, soup)
 
-    return jsonify({
+    for sub_url in sub_links[:6]:
+        try:
+            sub_resp = _fetch_page(sub_url, timeout=6)
+            sub_soup = BeautifulSoup(sub_resp.text, "html.parser")
+            for tag in sub_soup(["script", "style", "iframe", "object", "embed", "link", "meta"]):
+                tag.decompose()
+            sub_sections = _extract_page_sections(sub_resp.text, sub_soup)
+            sections.extend(sub_sections)
+        except Exception:
+            continue
+
+    all_text_parts = []
+    for sec in sections:
+        all_text_parts.append(f"[{sec['category']}]\n{sec['text']}")
+    body_text = "\n\n".join(all_text_parts)
+    if len(body_text) > 12000:
+        body_text = body_text[:12000]
+
+    headings = [sec["category"] for sec in sections if sec["category"] != "Genel"]
+
+    result = {
         "title": title,
-        "headings": headings[:30],
+        "headings": list(dict.fromkeys(headings))[:40],
         "body_text": body_text,
         "source_url": url,
-    })
+        "sub_pages_crawled": len([s for s in sub_links[:6]]),
+    }
+
+    if framework_state:
+        fw_str = json.dumps(framework_state, ensure_ascii=False)
+        if len(fw_str) > 15000:
+            fw_str = fw_str[:15000]
+        result["framework_state"] = fw_str
+        result["framework_type"] = fw_type
+
+    return jsonify(result)
+
+
+def _extract_categorized_items(raw_text, fw_state=None):
+    menu_input = raw_text[:6000]
+    if fw_state:
+        menu_input = fw_state[:6000] + "\n\n" + raw_text[:3000]
+
+    prompt = f"""Aşağıdaki restoran menü metninden yemekleri KATEGORİLERİYLE çıkar.
+Pazarlama metinlerini, açıklamaları, fiyatları, içecekleri YOKSAY. Sadece yemek adlarını al.
+Her kategori altında en fazla 8 yemek olsun. Toplam en fazla 30 yemek.
+Kategorileri menüdeki başlıklardan al (örn: Kahvaltılar, Salatalar, Izgara & Etler, Makarnalar, Burgerler).
+Eğer kategori bulamazsan "Genel" kullan.
+
+Menü metni:
+{menu_input}
+
+SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma:
+{{"categories": {{"Kategori Adı": ["yemek1", "yemek2"], "Başka Kategori": ["yemek3"]}}}}"""
+
+    try:
+        resp = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "SADECE JSON döndür. Açıklama yapma, markdown kullanma. Yemek dışı öğeleri (içecek, tatlı süsleme metni, fiyat) dahil etme."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.1,
+            max_tokens=1500,
+        )
+        raw = resp.choices[0].message.content.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start >= 0 and end > start:
+            parsed = json.loads(raw[start:end])
+            cats = parsed.get("categories", parsed)
+            if isinstance(cats, dict):
+                return {k: v for k, v in cats.items() if isinstance(v, list)}
+    except Exception as e:
+        print(f"EXTRACT ERROR: {e}")
+    return {}
+
+
+def _lookup_macros_fatsecret(items, token):
+    import requests as http_req
+    from fitx_mcp.server import _parse_fatsecret_desc, FATSECRET_API_URL
+    results = {}
+    for name in items:
+        try:
+            fs_resp = http_req.get(FATSECRET_API_URL, params={
+                "method": "foods.search",
+                "search_expression": name,
+                "format": "json",
+                "max_results": 3,
+            }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
+            fs_data = fs_resp.json()
+            foods = fs_data.get("foods", {}).get("food", [])
+            if isinstance(foods, dict):
+                foods = [foods]
+            if foods:
+                parsed = _parse_fatsecret_desc(foods[0].get("food_description", ""))
+                if parsed and parsed.get("calories"):
+                    results[name] = {
+                        "calories": float(parsed.get("calories", 0)),
+                        "protein": float(parsed.get("protein", 0)),
+                        "carbs": float(parsed.get("carbs", 0)),
+                        "fat": float(parsed.get("fat", 0)),
+                    }
+        except Exception:
+            continue
+    return results
+
+
+def _estimate_macros_llm(items):
+    if not items:
+        return {}
+    items_str = "\n".join(f"- {name}" for name in items)
+    prompt = f"""Sen bir beslenme uzmanısın. Aşağıdaki restoran yemeklerinin TAHMİNİ besin değerlerini hesapla.
+Standart restoran porsiyonu kabul et (yaklaşık 250-350g arası bir tabak).
+Her yemek için gerçekçi değerler ver. Hiçbir yemeğe aynı değerleri verme, her biri farklı olmalı.
+
+Yemekler:
+{items_str}
+
+SADECE aşağıdaki JSON formatında yanıt ver:
+{{{", ".join(f'"{name}": {{"calories": X, "protein": Y, "carbs": Z, "fat": W}}' for name in items[:3])}{"..." if len(items) > 3 else ""}}}
+
+Tüm {len(items)} yemek için değer ver. Sadece JSON döndür, başka bir şey yazma."""
+
+    try:
+        resp = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "SADECE JSON döndür. Her yemek için farklı, gerçekçi makro değerleri hesapla. Hiçbir yemeğe aynı varsayılan değerleri kopyalama."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            max_tokens=2000,
+        )
+        raw = resp.choices[0].message.content.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start >= 0 and end > start:
+            parsed = json.loads(raw[start:end])
+            results = {}
+            for name in items:
+                if name in parsed and isinstance(parsed[name], dict):
+                    m = parsed[name]
+                    results[name] = {
+                        "calories": float(m.get("calories", 0)),
+                        "protein": float(m.get("protein", 0)),
+                        "carbs": float(m.get("carbs", 0)),
+                        "fat": float(m.get("fat", 0)),
+                    }
+            return results
+    except Exception as e:
+        print(f"LLM MACRO ESTIMATION ERROR: {e}")
+    return {}
+
+
+def _score_item(macros, remaining):
+    score = 0
+    rem_cal = max(remaining["calories"], 1)
+    rem_pro = max(remaining["protein"], 1)
+    rem_fat = max(remaining["fat"], 1)
+    rem_carb = max(remaining["carbs"], 1)
+
+    protein_fit = max(0, 1 - abs(macros["protein"] - rem_pro * 0.35) / rem_pro)
+    score += protein_fit * 40
+
+    cal_ratio = macros["calories"] / rem_cal
+    if cal_ratio <= 0.45:
+        score += 30
+    elif cal_ratio <= 0.65:
+        score += 20
+    elif cal_ratio <= 0.85:
+        score += 5
+    else:
+        score -= 15
+
+    fat_ratio = macros["fat"] / rem_fat
+    if fat_ratio <= 0.4:
+        score += 20
+    elif fat_ratio <= 0.7:
+        score += 10
+    else:
+        score -= 10
+
+    carb_ratio = macros["carbs"] / rem_carb
+    if carb_ratio <= 0.5:
+        score += 10
+    elif carb_ratio > 0.9:
+        score -= 5
+
+    warnings = []
+    if macros["fat"] > rem_fat * 0.8:
+        warnings.append("Günlük yağ limitinin %80'ini aşıyor")
+    if macros["calories"] > rem_cal * 0.8:
+        warnings.append("Günlük kalori limitinin %80'ini aşıyor")
+    if macros["carbs"] > rem_carb * 0.85:
+        warnings.append("Karbonhidrat limitine yakın")
+
+    reason_parts = []
+    if protein_fit > 0.5:
+        reason_parts.append(f"Kalan {remaining['protein']:.0f}g protein hedefinle uyumlu")
+    if cal_ratio <= 0.5:
+        reason_parts.append("Kalori bütçesine uygun")
+    if fat_ratio <= 0.4:
+        reason_parts.append("Düşük yağ")
+    if not reason_parts:
+        reason_parts.append(f"{macros['calories']:.0f} kcal · {macros['protein']:.0f}g protein")
+
+    return round(score, 1), warnings, " · ".join(reason_parts)
 
 
 @app.route("/api/menu/analyze", methods=["POST"])
@@ -1003,6 +1292,7 @@ def proxy_scan_menu():
 def analyze_menu():
     data = request.get_json()
     raw_text = (data or {}).get("menu_text", "").strip()
+    fw_state = (data or {}).get("framework_state")
     if not raw_text:
         return jsonify({"error": "Menü metni gerekli."}), 400
 
@@ -1033,116 +1323,63 @@ def analyze_menu():
         "fat": max(fat_target - consumed["fat"], 0),
     }
 
-    try:
-        extract_prompt = f"""Aşağıdaki restoran menü metninden SADECE yemek isimlerini çıkar.
-Pazarlama metinlerini, açıklamaları, fiyatları YOKSAY.
-Sadece yemek adlarını JSON array olarak döndür.
-Maksimum 15 yemek.
+    categorized = _extract_categorized_items(raw_text, fw_state)
+    if not categorized:
+        return jsonify({"error": "Menüden yemek çıkarılamadı.", "items": [], "categories": {}}), 200
 
-Menü metni:
-{raw_text[:4000]}
+    all_items = []
+    for cat, items in categorized.items():
+        for name in items:
+            if isinstance(name, str) and name.strip():
+                all_items.append((cat, name.strip()))
 
-Yanıt formatı (sadece JSON array):
-["yemek1", "yemek2", ...]"""
+    if not all_items:
+        return jsonify({"error": "Menüden yemek çıkarılamadı.", "items": [], "categories": {}}), 200
 
-        extract_resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": extract_prompt}],
-            temperature=0.1,
-            max_tokens=500,
-        )
-        items_raw = extract_resp.choices[0].message.content.strip()
-        start = items_raw.find("[")
-        end = items_raw.rfind("]") + 1
-        food_items = json.loads(items_raw[start:end]) if start >= 0 and end > start else []
-    except Exception:
-        food_items = []
+    item_names = list(dict.fromkeys(name for _, name in all_items))
 
-    if not food_items:
-        return jsonify({"error": "Menüden yemek çıkarılamadı.", "items": []}), 200
-
-    from fitx_mcp.server import _get_fatsecret_token, _parse_fatsecret_desc, FATSECRET_API_URL
-    import requests as http_req
-
-    ranked_items = []
+    from fitx_mcp.server import _get_fatsecret_token
+    macro_map = {}
     try:
         token = _get_fatsecret_token()
+        macro_map = _lookup_macros_fatsecret(item_names, token)
     except Exception:
-        token = None
+        pass
 
-    for item_name in food_items[:15]:
-        macros = {"calories": 300, "protein": 15, "carbs": 30, "fat": 12}
+    missing = [n for n in item_names if n not in macro_map]
+    if missing:
+        llm_macros = _estimate_macros_llm(missing)
+        macro_map.update(llm_macros)
 
-        if token:
-            try:
-                fs_resp = http_req.get(FATSECRET_API_URL, params={
-                    "method": "foods.search",
-                    "search_expression": item_name,
-                    "format": "json",
-                    "max_results": 1,
-                }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
-                fs_data = fs_resp.json()
-                foods = fs_data.get("foods", {}).get("food", [])
-                if isinstance(foods, dict):
-                    foods = [foods]
-                if foods:
-                    parsed = _parse_fatsecret_desc(foods[0].get("food_description", ""))
-                    if parsed:
-                        macros = {
-                            "calories": parsed.get("calories", 300),
-                            "protein": parsed.get("protein", 15),
-                            "carbs": parsed.get("carbs", 30),
-                            "fat": parsed.get("fat", 12),
-                        }
-            except Exception:
-                pass
+    categories_result = {}
+    all_scored = []
 
-        score = 0
-        protein_fit = max(0, 1 - abs(macros["protein"] - remaining["protein"] * 0.4) / max(remaining["protein"], 1))
-        score += protein_fit * 50
+    for cat, name in all_items:
+        macros = macro_map.get(name, {"calories": 0, "protein": 0, "carbs": 0, "fat": 0})
+        if macros["calories"] == 0:
+            continue
 
-        cal_ratio = macros["calories"] / max(remaining["calories"], 1)
-        if cal_ratio <= 0.5:
-            score += 30
-        elif cal_ratio <= 0.8:
-            score += 15
-        else:
-            score -= 10
+        score, warnings, reason = _score_item(macros, remaining)
 
-        fat_ratio = macros["fat"] / max(remaining["fat"], 1)
-        if fat_ratio <= 0.5:
-            score += 20
-        elif fat_ratio <= 0.8:
-            score += 5
-        else:
-            score -= 15
-
-        warnings = []
-        if macros["fat"] > remaining["fat"] * 0.8:
-            warnings.append("Günlük yağ limitinin %80'ini aşıyor")
-        if macros["calories"] > remaining["calories"] * 0.8:
-            warnings.append("Günlük kalori limitinin %80'ini aşıyor")
-
-        reason_parts = []
-        if protein_fit > 0.6:
-            reason_parts.append(f"Kalan {remaining['protein']:.0f}g protein hedefinle uyumlu")
-        if cal_ratio <= 0.5:
-            reason_parts.append("Kalori bütçesine uygun")
-        if not reason_parts:
-            reason_parts.append(f"{macros['calories']:.0f} kcal, {macros['protein']:.0f}g protein")
-
-        ranked_items.append({
-            "name": item_name,
+        item_obj = {
+            "name": name,
             "macros": {k: round(v, 1) for k, v in macros.items()},
-            "score": round(score, 1),
+            "score": score,
             "warnings": warnings,
-            "reason": " · ".join(reason_parts),
-        })
+            "reason": reason,
+        }
 
-    ranked_items.sort(key=lambda x: x["score"], reverse=True)
+        if cat not in categories_result:
+            categories_result[cat] = []
+        categories_result[cat].append(item_obj)
+        all_scored.append(item_obj)
+
+    all_scored.sort(key=lambda x: x["score"], reverse=True)
+    coach_picks = all_scored[:3]
 
     return jsonify({
-        "items": ranked_items,
+        "coach_picks": coach_picks,
+        "categories": categories_result,
         "remaining": {k: round(v, 1) for k, v in remaining.items()},
         "target": {
             "calories": round(target_cal),
