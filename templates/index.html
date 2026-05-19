@@ -1,7 +1,6 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="tr">
 <head>
-    <!-- Google Analytics -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-YXSGLN7C7Y"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
@@ -12,314 +11,11 @@
 
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fitness Coach — Dashboard</title>
+    <title>FitX — Dashboard</title>
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/theme.css">
+    <link rel="stylesheet" href="/static/dashboard.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-
-    <style>
-    /* ════════════════════════════════════════════════
-       BENTO GRID
-       ════════════════════════════════════════════════ */
-    .bento {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 16px;
-    }
-    .b-1 { grid-column: span 1; }
-    .b-2 { grid-column: span 2; }
-    .b-3 { grid-column: span 3; }
-
-    /* ════════════════════════════════════════════════
-       BASE BENTO CARD
-       ════════════════════════════════════════════════ */
-    .bc {
-        background: #1E1E1E;
-        border: 1px solid #2A2A2A;
-        border-radius: 12px;
-        padding: 22px;
-        position: relative;
-        overflow: hidden;
-        transition: transform 0.24s ease, box-shadow 0.24s ease, border-color 0.24s ease;
-    }
-    .bc:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 0 20px rgba(204,255,0,0.08), 0 12px 40px rgba(0,0,0,0.5);
-        border-color: #3A3A3A;
-    }
-
-    /* card micro-label */
-    .bc-lbl {
-        font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
-        text-transform: uppercase; color: #606060;
-        display: flex; align-items: center; gap: 8px;
-        margin-bottom: 18px;
-    }
-    .bc-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
-
-    /* ════════════════════════════════════════════════
-       ① GREETING CARD
-       ════════════════════════════════════════════════ */
-    .greeting-glow {
-        position: absolute; top: -80px; right: -80px;
-        width: 280px; height: 280px; border-radius: 50%;
-        background: radial-gradient(circle, rgba(204,255,0,0.055), transparent 70%);
-        pointer-events: none;
-    }
-    .g-eyebrow {
-        font-size: 10px; font-weight: 700; letter-spacing: 0.16em;
-        text-transform: uppercase; color: #606060; margin-bottom: 10px;
-    }
-    .g-title {
-        font-family: 'Bebas Neue', sans-serif;
-        font-size: 40px; letter-spacing: 3px; color: #F2F2F2; line-height: 1.05;
-    }
-    .g-title span { color: #CCFF00; }
-    .g-sub {
-        font-size: 14px; color: #9A9A9A; font-weight: 300;
-        line-height: 1.65; margin-top: 8px; max-width: 520px;
-    }
-    .g-badges { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-    .g-badge {
-        display: inline-flex; align-items: center; gap: 7px;
-        border-radius: 20px; padding: 5px 14px;
-        font-size: 12px; font-weight: 600;
-    }
-    .g-badge.volt   { background: rgba(204,255,0,0.09);  border: 1px solid rgba(204,255,0,0.22);  color: #CCFF00; }
-    .g-badge.blue   { background: rgba(61,158,255,0.09); border: 1px solid rgba(61,158,255,0.22); color: #3D9EFF; }
-    .g-badge.orange { background: rgba(255,176,32,0.09); border: 1px solid rgba(255,176,32,0.22); color: #FFB020; }
-    .g-badge-dot { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: blink 2s ease infinite; }
-    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
-
-    /* ════════════════════════════════════════════════
-       ② WATER WIDGET
-       ════════════════════════════════════════════════ */
-    .water-num  { font-family:'Bebas Neue',sans-serif; font-size:44px; letter-spacing:2px; color:#3D9EFF; line-height:1; }
-    .water-denom{ font-size:13px; color:#606060; font-weight:300; margin-top:1px; }
-    .water-glasses { display:flex; gap:5px; margin:14px 0 12px; flex-wrap:wrap; }
-    .wg {
-        width:26px; height:34px; border-radius:3px 3px 7px 7px;
-        border:1.5px solid #2A2A2A; cursor:pointer;
-        position:relative; overflow:hidden;
-        transition: border-color 0.18s;
-        background: rgba(255,255,255,0.01);
-    }
-    .wg:hover { border-color: rgba(61,158,255,0.5); }
-    .wg-fill {
-        position:absolute; bottom:0; left:0; right:0; height:0%;
-        background: linear-gradient(to top, #0060D0 0%, #3D9EFF 100%);
-        border-radius: 1px 1px 5px 5px;
-        transition: height 0.38s cubic-bezier(0.4,0,0.2,1);
-    }
-    .wg.filled { border-color: rgba(61,158,255,0.45); }
-    .wg.filled .wg-fill { height: 100%; }
-
-    .water-bar { height:3px; background:rgba(255,255,255,0.05); border-radius:2px; overflow:hidden; margin-bottom:14px; }
-    .water-bar-inner { height:100%; background:linear-gradient(to right,#0060D0,#3D9EFF); border-radius:2px; transition:width 0.5s ease; width:0%; }
-
-    .water-btn {
-        width:100%; padding:10px; border-radius:8px;
-        background:rgba(61,158,255,0.08); border:1px solid rgba(61,158,255,0.2);
-        color:#3D9EFF; font-size:13px; font-weight:600; cursor:pointer;
-        transition: all 0.2s;
-        display:flex; align-items:center; justify-content:center; gap:6px;
-    }
-    .water-btn:hover:not(:disabled) { background:rgba(61,158,255,0.18); border-color:rgba(61,158,255,0.45); }
-    .water-btn:disabled { opacity:0.5; cursor:default; }
-
-    /* ════════════════════════════════════════════════
-       ③ CALORIE RING
-       ════════════════════════════════════════════════ */
-    .cal-wrap { display:flex; align-items:center; gap:18px; }
-    .cal-ring-pos { position:relative; width:110px; height:110px; flex-shrink:0; }
-    .cal-center {
-        position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-        text-align:center; pointer-events:none;
-    }
-    .cal-center-num { font-family:'Bebas Neue',sans-serif; font-size:21px; letter-spacing:1px; color:#F2F2F2; line-height:1; }
-    .cal-center-lbl { font-size:9px; color:#606060; font-weight:700; letter-spacing:0.1em; text-transform:uppercase; }
-    .cal-legend { flex:1; display:flex; flex-direction:column; gap:10px; }
-    .cal-row { display:flex; align-items:center; gap:8px; }
-    .cal-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; }
-    .cal-row-lbl { font-size:12px; color:#9A9A9A; flex:1; }
-    .cal-row-val { font-size:13px; color:#F2F2F2; font-weight:600; font-variant-numeric:tabular-nums; }
-
-    /* ════════════════════════════════════════════════
-       ④ STREAK CARD
-       ════════════════════════════════════════════════ */
-    .streak-glow {
-        position:absolute; bottom:-50px; right:-50px; width:200px; height:200px;
-        border-radius:50%;
-        background: radial-gradient(circle, rgba(255,176,32,0.07), transparent 70%);
-        pointer-events:none;
-    }
-    .streak-flame { font-size:50px; line-height:1; display:block; margin-bottom:4px; }
-    .streak-num   { font-family:'Bebas Neue',sans-serif; font-size:58px; letter-spacing:3px; color:#FFB020; line-height:1; }
-    .streak-lbl   { font-size:10px; font-weight:700; letter-spacing:0.14em; text-transform:uppercase; color:#606060; margin-top:4px; }
-    .streak-sub   { font-size:13px; color:#9A9A9A; font-weight:300; margin-top:12px; line-height:1.55; }
-
-    /* ════════════════════════════════════════════════
-       ⑤ WEIGHT CARD
-       ════════════════════════════════════════════════ */
-    .w-display { display:flex; align-items:baseline; gap:6px; }
-    .w-big     { font-family:'Bebas Neue',sans-serif; font-size:54px; letter-spacing:2px; color:#CCFF00; line-height:1; }
-    .w-unit    { font-size:20px; color:#9A9A9A; font-weight:300; }
-    .w-delta   { font-size:13px; font-weight:600; margin-top:4px; min-height:18px; display:flex; align-items:center; gap:4px; }
-    .w-delta.goal-ok { color:#CCFF00; } .w-delta.goal-warn { color:#FF4D4D; } .w-delta.eq { color:#606060; }
-    .w-arrow { font-size:16px; font-weight:700; line-height:1; }
-
-    .sparkline-wrap { height:64px; position:relative; margin:14px 0; }
-
-    .w-form { display:flex; gap:8px; align-items:center; margin-bottom:16px; }
-    .w-input {
-        flex:1; background:rgba(255,255,255,0.03); border:1px solid #2A2A2A;
-        border-radius:8px; padding:10px 14px; color:#F2F2F2;
-        font-family:'DM Sans',sans-serif; font-size:14px; outline:none;
-        transition: border-color 0.2s, box-shadow 0.2s; -webkit-appearance:none;
-    }
-    .w-input:focus { border-color:rgba(204,255,0,0.45); box-shadow:0 0 0 3px rgba(204,255,0,0.06); }
-    .w-btn {
-        font-family:'Bebas Neue',sans-serif; font-size:14px; letter-spacing:2px;
-        color:#121212; background:#CCFF00; border:none; border-radius:8px;
-        padding:10px 20px; cursor:pointer;
-        transition: background 0.2s, box-shadow 0.2s; white-space:nowrap;
-    }
-    .w-btn:hover { background:#A8D400; }
-    .w-btn.pulse { animation: w-pulse 2.4s ease infinite; }
-    @keyframes w-pulse {
-        0%,100% { box-shadow:0 0 0 0   rgba(204,255,0,0.55); }
-        50%      { box-shadow:0 0 0 10px rgba(204,255,0,0); }
-    }
-
-    .w-meta { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.06); }
-    .wm-lbl { font-size:9px; font-weight:700; letter-spacing:0.12em; text-transform:uppercase; color:#606060; }
-    .wm-val { font-family:'Bebas Neue',sans-serif; font-size:20px; color:#CCFF00; letter-spacing:1px; margin-top:3px; }
-
-    /* ════════════════════════════════════════════════
-       ⑥ AI INSIGHT CARD
-       ════════════════════════════════════════════════ */
-    .ins-icon  { font-size:32px; line-height:1; display:block; margin-bottom:14px; }
-    .ins-text  { font-size:14px; color:#F2F2F2; line-height:1.75; font-weight:300; flex:1; }
-    .ins-text strong { color:#CCFF00; font-weight:600; }
-    .ins-source {
-        font-size:11px; color:#606060;
-        display:flex; align-items:center; gap:8px; margin-top:14px;
-    }
-    .ins-source::before { content:''; width:18px; height:1px; background:#2A2A2A; }
-    .ins-nav { display:flex; align-items:center; justify-content:space-between; padding-top:14px; margin-top:auto; }
-    .ins-btn {
-        background:none; border:1px solid #2A2A2A; border-radius:7px;
-        padding:6px 13px; font-size:11px; color:#9A9A9A; cursor:pointer;
-        transition: all 0.18s; font-family:'DM Sans',sans-serif;
-    }
-    .ins-btn:hover { color:#CCFF00; border-color:rgba(204,255,0,0.3); }
-    .ins-dots { display:flex; gap:5px; }
-    .ins-dot  { width:5px; height:5px; border-radius:50%; background:#2A2A2A; transition:background 0.2s, transform 0.15s; cursor:pointer; }
-    .ins-dot:hover { background:rgba(204,255,0,0.4); transform:scale(1.5); }
-    .ins-dot.on { background:#CCFF00; transform:scale(1.3); }
-    /* ── Tip fade / slide ── */
-    #ins-body { transition: opacity 0.24s ease, transform 0.24s ease; min-height: 88px; }
-    #ins-body.ins-out { opacity:0; transform:translateX(-10px); pointer-events:none; }
-    /* ── 8-second countdown bar ── */
-    .ins-progress { height:2px; background:rgba(255,255,255,0.05); border-radius:1px; margin-top:12px; overflow:hidden; }
-    .ins-pbar { height:100%; background:linear-gradient(90deg,rgba(204,255,0,0.35),#CCFF00); border-radius:1px; transform-origin:left center; animation:ins-fill 8s linear forwards; }
-    @keyframes ins-fill { from{transform:scaleX(1)} to{transform:scaleX(0)} }
-
-    /* ════════════════════════════════════════════════
-       ⑦ JOURNEY MAP
-       ════════════════════════════════════════════════ */
-    .jm-header { display:flex; align-items:center; gap:14px; margin-bottom:16px; }
-    .jm-level {
-        width:52px; height:52px; border-radius:50%; flex-shrink:0;
-        background: linear-gradient(135deg, #CCFF00, #A8D400);
-        display:flex; align-items:center; justify-content:center;
-        font-family:'Bebas Neue',sans-serif; font-size:24px; color:#121212;
-        box-shadow: 0 0 20px rgba(204,255,0,0.25);
-    }
-    .jm-info { flex:1; }
-    .jm-title-text {
-        font-family:'Bebas Neue',sans-serif; font-size:20px; color:#CCFF00;
-        letter-spacing:2px; line-height:1;
-    }
-    .jm-xp-text { font-size:12px; color:#9A9A9A; margin-top:3px; }
-    .jm-bar { height:8px; background:rgba(255,255,255,0.05); border-radius:4px; overflow:hidden; margin-bottom:18px; }
-    .jm-bar-inner {
-        height:100%; border-radius:4px;
-        background: linear-gradient(90deg, #A8D400, #CCFF00);
-        transition: width 0.8s cubic-bezier(0.4,0,0.2,1);
-        box-shadow: 0 0 8px rgba(204,255,0,0.3);
-    }
-    .jm-milestones { display:flex; gap:10px; flex-wrap:wrap; }
-    .jm-badge {
-        display:inline-flex; align-items:center; gap:6px;
-        padding:6px 12px; border-radius:20px; font-size:12px; font-weight:600;
-        border:1px solid var(--border); background:rgba(255,255,255,0.02);
-        color:#9A9A9A; transition: all 0.2s;
-    }
-    .jm-badge.earned {
-        background:rgba(204,255,0,0.08); border-color:rgba(204,255,0,0.25); color:#CCFF00;
-    }
-    .jm-badge-icon { font-size:16px; }
-
-    /* ════════════════════════════════════════════════
-       FAB
-       ════════════════════════════════════════════════ */
-    .fab-wrap {
-        position:fixed; bottom:88px; right:24px; z-index:200;
-        display:flex; flex-direction:column-reverse; align-items:flex-end; gap:12px;
-    }
-    @media(min-width:1024px) { .fab-wrap { bottom:36px; right:90px; } }
-
-    .fab-main {
-        width:56px; height:56px; border-radius:50%;
-        background:#CCFF00; border:none; cursor:pointer; flex-shrink:0;
-        display:flex; align-items:center; justify-content:center;
-        box-shadow: 0 4px 20px rgba(204,255,0,0.35);
-        transition: transform 0.30s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.2s;
-        font-size:24px; color:#121212; line-height:1; font-weight:300;
-    }
-    .fab-main:hover { box-shadow: 0 6px 32px rgba(204,255,0,0.55); }
-    .fab-main.open  { transform: rotate(45deg); }
-
-    .fab-actions {
-        display:flex; flex-direction:column; gap:10px; align-items:flex-end;
-        opacity:0; pointer-events:none;
-        transform: translateY(14px) scale(0.95);
-        transition: opacity 0.2s ease, transform 0.28s cubic-bezier(0.34,1.56,0.64,1);
-    }
-    .fab-actions.open { opacity:1; pointer-events:all; transform:translateY(0) scale(1); }
-    .fab-row { display:flex; align-items:center; gap:10px; }
-    .fab-lbl {
-        font-size:12px; font-weight:600; color:#F2F2F2;
-        background:rgba(14,14,14,0.96); border:1px solid #2A2A2A;
-        padding:7px 13px; border-radius:8px; white-space:nowrap;
-        backdrop-filter:blur(10px);
-    }
-    .fab-sub {
-        width:44px; height:44px; border-radius:50%; text-decoration:none;
-        background:rgba(14,14,14,0.96); border:1px solid #2A2A2A;
-        display:flex; align-items:center; justify-content:center;
-        font-size:16px; flex-shrink:0;
-        cursor:pointer; transition:all 0.15s; backdrop-filter:blur(10px);
-    }
-    .fab-sub:hover { border-color:#CCFF00; background:rgba(204,255,0,0.1); transform:scale(1.1); }
-
-    /* ════════════════════════════════════════════════
-       RESPONSIVE
-       ════════════════════════════════════════════════ */
-    @media(max-width:1023px) {
-        .bento { grid-template-columns:repeat(2,1fr); }
-        .b-3   { grid-column:span 2; }
-    }
-    @media(max-width:600px) {
-        .bento { grid-template-columns:1fr; gap:12px; }
-        .b-2, .b-3 { grid-column:span 1; }
-        .g-title { font-size:30px; }
-        .w-big   { font-size:42px; }
-        .cal-wrap { flex-direction:column; align-items:flex-start; }
-        .w-meta  { grid-template-columns:repeat(2,1fr); }
-    }
-    </style>
 </head>
 <body class="page-body">
 
@@ -327,7 +23,7 @@
      SIDEBAR
      ══════════════════════════════════════ -->
 <aside class="sidebar">
-    <div class="sidebar-logo">FC</div>
+    <div class="sidebar-logo">FX</div>
     <nav class="sidebar-nav">
         <a href="/" class="sidebar-link active">
             <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
@@ -380,45 +76,74 @@
 </aside>
 
 <!-- ══════════════════════════════════════
-     MAIN
+     MAIN CONTENT
      ══════════════════════════════════════ -->
 <main class="main-content">
-<div class="bento">
 
-    <!-- ══ ① GREETING — full width ══ -->
-    <div class="bc b-3">
-        <div class="greeting-glow"></div>
-        <div class="g-eyebrow" id="g-eyebrow">DASHBOARD</div>
-        <div class="g-title" id="g-title">Merhaba, <span>{{ username }}</span>!</div>
-        <div class="g-sub" id="g-sub">Veriler yükleniyor…</div>
-        <div class="g-badges">
-            <div class="g-badge volt"><span class="g-badge-dot"></span><span id="g-goal">—</span></div>
-            <div class="g-badge orange"><span class="g-badge-dot"></span><span id="g-streak-badge">— Günlük Seri</span></div>
-            <div class="g-badge blue" id="g-cal-badge" style="display:none"><span class="g-badge-dot"></span><span id="g-cal-badge-txt">—</span></div>
+<!-- ═══ A. EXECUTIVE PROGRESS HEADER ═══ -->
+<div class="exec-header">
+    <div class="exec-left">
+        <div class="exec-level-badge" id="exec-level">{{ user_level }}</div>
+        <div class="exec-rank-info">
+            <span class="exec-title" id="exec-title">{{ user_title }}</span>
+            <span class="exec-divider">|</span>
+            <span class="exec-label">Level {{ user_level }}</span>
         </div>
     </div>
+    <div class="exec-bar-wrap">
+        <div class="exec-bar">
+            <div class="exec-bar-fill" id="exec-bar" style="width:{{ (xp_in_level / xp_for_next * 100)|int }}%"></div>
+        </div>
+    </div>
+    <div class="exec-right">
+        <span class="exec-xp-remain" id="exec-xp">{{ xp_for_next - xp_in_level }} XP kaldı</span>
+    </div>
+</div>
 
-    <!-- ══ ② WATER INTAKE ══ -->
-    <div class="bc b-1">
-        <div class="bc-lbl"><span class="bc-dot" style="background:#3D9EFF"></span>Su Takibi</div>
-        <div class="water-num" id="water-num">0</div>
-        <div class="water-denom">/ 8 bardak · 2 litre</div>
-        <div class="water-glasses" id="water-glasses"></div>
-        <div class="water-bar"><div class="water-bar-inner" id="water-bar"></div></div>
-        <button class="water-btn" id="water-btn" onclick="addWater()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Bardak Ekle
-        </button>
+<!-- ═══ GREETING ROW ═══ -->
+<div class="greeting-row">
+    <div>
+        <div class="gr-eyebrow" id="g-eyebrow">DASHBOARD</div>
+        <h1 class="gr-title" id="g-title">Merhaba, <span>{{ username }}</span></h1>
+        <p class="gr-sub" id="g-sub">Veriler yükleniyor…</p>
+    </div>
+    <div class="gr-badges">
+        <div class="gr-badge volt"><span class="gr-badge-dot"></span><span id="g-goal">—</span></div>
+        <div class="gr-badge amber"><span class="gr-badge-dot"></span><span id="g-streak-badge">— Günlük Seri</span></div>
+        <div class="gr-badge blue" id="g-cal-badge" style="display:none"><span class="gr-badge-dot"></span><span id="g-cal-badge-txt">—</span></div>
+    </div>
+</div>
+
+<!-- ═══ BENTO GRID ═══ -->
+<div class="bento">
+
+    <!-- ═══ B. DISCIPLINE TRACKER (STREAK) ═══ -->
+    <div class="bc b-1 streak-card">
+        <div class="bc-lbl"><span class="bc-dot" style="background:#FFB020"></span>Disiplin Takibi</div>
+        <div class="streak-hero">
+            <div class="streak-number" id="streak-num">1</div>
+            <div class="streak-unit">GÜN</div>
+        </div>
+        <div class="streak-sub-label">Kesintisiz Seri</div>
+        <div class="streak-week" id="streak-week">
+            <div class="streak-day" data-day="Pzt">P</div>
+            <div class="streak-day" data-day="Sal">S</div>
+            <div class="streak-day" data-day="Çar">Ç</div>
+            <div class="streak-day" data-day="Per">P</div>
+            <div class="streak-day" data-day="Cum">C</div>
+            <div class="streak-day" data-day="Cmt">C</div>
+            <div class="streak-day" data-day="Paz">P</div>
+        </div>
+        <div class="streak-msg" id="streak-sub">Bugün giriş yaptın, serini koru!</div>
     </div>
 
-    <!-- ══ ③ CALORIE RING ══ -->
+    <!-- ═══ CALORIE RING ═══ -->
     <div class="bc b-1">
         <div class="bc-lbl"><span class="bc-dot" style="background:#CCFF00"></span>Günlük Kalori</div>
         <div class="cal-wrap">
-            <!-- SVG Ring: r=44, circ=2π×44≈276.46 -->
             <div class="cal-ring-pos">
                 <svg style="transform:rotate(-90deg);display:block;" viewBox="0 0 120 120" width="110" height="110">
-                    <circle cx="60" cy="60" r="44" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="10"/>
+                    <circle cx="60" cy="60" r="44" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="10"/>
                     <circle cx="60" cy="60" r="44" fill="none"
                         stroke="#CCFF00" stroke-width="10" stroke-linecap="round"
                         stroke-dasharray="276.46" stroke-dashoffset="276.46"
@@ -451,19 +176,44 @@
         </div>
     </div>
 
-    <!-- ══ ④ DAILY STREAK ══ -->
-    <div class="bc b-1" style="display:flex;flex-direction:column;">
-        <div class="streak-glow"></div>
-        <div class="bc-lbl"><span class="bc-dot" style="background:#FFB020"></span>Günlük Seri</div>
-        <div style="flex:1;display:flex;flex-direction:column;justify-content:center;">
-            <span class="streak-flame" id="streak-flame">🔥</span>
-            <div class="streak-num" id="streak-num">1</div>
-            <div class="streak-lbl">GÜN SERİSİ</div>
-        </div>
-        <div class="streak-sub" id="streak-sub">Bugün giriş yaptın, serini koru!</div>
+    <!-- ═══ WATER INTAKE ═══ -->
+    <div class="bc b-1">
+        <div class="bc-lbl"><span class="bc-dot" style="background:#3D9EFF"></span>Su Takibi</div>
+        <div class="water-num" id="water-num">0</div>
+        <div class="water-denom">/ 8 bardak · 2 litre</div>
+        <div class="water-glasses" id="water-glasses"></div>
+        <div class="water-bar"><div class="water-bar-inner" id="water-bar"></div></div>
+        <button class="water-btn" id="water-btn" onclick="addWater()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Bardak Ekle
+        </button>
     </div>
 
-    <!-- ══ ⑤ WEIGHT EVOLUTION — 2 cols ══ -->
+    <!-- ═══ C. AI COACH INSIGHT WIDGET ═══ -->
+    <div class="bc b-2 ai-coach-card">
+        <div class="ai-coach-glow"></div>
+        <div class="ai-coach-header">
+            <div class="ai-coach-avatar">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"/><path d="M16 14H8a6 6 0 0 0-6 6v1h20v-1a6 6 0 0 0-6-6z"/></svg>
+            </div>
+            <div>
+                <div class="ai-coach-name">AI Koç</div>
+                <div class="ai-coach-status"><span class="ai-coach-pulse"></span>Aktif</div>
+            </div>
+        </div>
+        <div class="ai-coach-body" id="ai-nudge-body">
+            <div class="ai-nudge-loading">
+                <div class="ai-nudge-skeleton"></div>
+                <div class="ai-nudge-skeleton short"></div>
+            </div>
+        </div>
+        <div class="ai-coach-footer">
+            <span class="ai-coach-source" id="ai-nudge-source">Kişisel Analiz</span>
+            <a href="#" class="ai-coach-action" onclick="event.preventDefault();document.querySelector('.coach-fab')?.click();">Koça Sor →</a>
+        </div>
+    </div>
+
+    <!-- ═══ WEIGHT EVOLUTION — 2 cols ═══ -->
     <div class="bc b-2" style="display:flex;flex-direction:column;">
         <div class="bc-lbl"><span class="bc-dot" style="background:#CCFF00"></span>Kilo Takibi</div>
 
@@ -473,19 +223,16 @@
         </div>
         <div class="w-delta" id="w-delta"></div>
 
-        <!-- Sparkline -->
         <div class="sparkline-wrap">
             <canvas id="sparkline"></canvas>
             <div id="spark-empty" style="display:none;font-size:12px;color:#606060;font-style:italic;padding-top:20px;">Henüz check-in verisi yok.</div>
         </div>
 
-        <!-- Update form -->
         <div class="w-form">
             <input type="number" class="w-input" id="w-input" placeholder="Güncel kilonuzu girin…" step="0.1" min="30" max="300">
             <button class="w-btn" id="w-btn" onclick="doUpdateWeight()">GÜNCELLE</button>
         </div>
 
-        <!-- BMR / TDEE / Target meta row -->
         <div class="w-meta" id="w-meta" style="display:none">
             <div><div class="wm-lbl">BMR</div><div class="wm-val" id="w-bmr">—</div></div>
             <div><div class="wm-lbl">TDEE</div><div class="wm-val" id="w-tdee">—</div></div>
@@ -493,29 +240,7 @@
         </div>
     </div>
 
-    <!-- ══ ⑦ JOURNEY MAP — full width ══ -->
-    <div class="bc b-3">
-        <div class="bc-lbl"><span class="bc-dot" style="background:#CCFF00"></span>Fitness Yolculuğun</div>
-        <div class="jm-header">
-            <div class="jm-level" id="jm-level">{{ user_level }}</div>
-            <div class="jm-info">
-                <div class="jm-title-text" id="jm-title">{{ user_title }}</div>
-                <div class="jm-xp-text" id="jm-xp">{{ user_xp }} XP · Sonraki seviye: {{ xp_for_next - xp_in_level }} XP kaldı</div>
-            </div>
-        </div>
-        <div class="jm-bar">
-            <div class="jm-bar-inner" id="jm-bar" style="width:{{ (xp_in_level / xp_for_next * 100)|int }}%"></div>
-        </div>
-        <div class="jm-milestones" id="jm-milestones">
-            <div class="jm-badge" data-req="streak-7"><span class="jm-badge-icon">🔥</span> 7 Gün Seri</div>
-            <div class="jm-badge" data-req="streak-30"><span class="jm-badge-icon">💎</span> 30 Gün Seri</div>
-            <div class="jm-badge" data-req="level-5"><span class="jm-badge-icon">⚡</span> Seviye 5</div>
-            <div class="jm-badge" data-req="level-10"><span class="jm-badge-icon">🌟</span> Seviye 10</div>
-            <div class="jm-badge" data-req="level-20"><span class="jm-badge-icon">👑</span> Seviye 20</div>
-        </div>
-    </div>
-
-    <!-- ══ ⑥ AI INSIGHT FEED ══ -->
+    <!-- ═══ AI INSIGHT FEED (Daily Tip) ═══ -->
     <div class="bc b-1" style="display:flex;flex-direction:column;z-index:210;">
         <div class="bc-lbl"><span class="bc-dot" style="background:rgba(204,255,0,0.75)"></span>Günün İpucu</div>
         <div id="ins-body">
@@ -529,6 +254,28 @@
             <button class="ins-btn" onclick="nextTip()">Sonraki →</button>
         </div>
         <div class="ins-progress"><div class="ins-pbar" id="ins-pbar"></div></div>
+    </div>
+
+    <!-- ═══ JOURNEY MAP — full width ═══ -->
+    <div class="bc b-3 journey-card">
+        <div class="bc-lbl"><span class="bc-dot" style="background:#CCFF00"></span>Fitness Yolculuğun</div>
+        <div class="jm-header">
+            <div class="jm-level" id="jm-level">{{ user_level }}</div>
+            <div class="jm-info">
+                <div class="jm-title-text" id="jm-title">{{ user_title }}</div>
+                <div class="jm-xp-text" id="jm-xp">{{ user_xp }} XP · Sonraki seviye: {{ xp_for_next - xp_in_level }} XP kaldı</div>
+            </div>
+        </div>
+        <div class="jm-bar">
+            <div class="jm-bar-inner" id="jm-bar" style="width:{{ (xp_in_level / xp_for_next * 100)|int }}%"></div>
+        </div>
+        <div class="jm-milestones" id="jm-milestones">
+            <div class="jm-badge" data-req="streak-7"><span class="jm-badge-icon">⚡</span> 7 Gün Seri</div>
+            <div class="jm-badge" data-req="streak-30"><span class="jm-badge-icon">◆</span> 30 Gün Seri</div>
+            <div class="jm-badge" data-req="level-5"><span class="jm-badge-icon">▲</span> Seviye 5</div>
+            <div class="jm-badge" data-req="level-10"><span class="jm-badge-icon">★</span> Seviye 10</div>
+            <div class="jm-badge" data-req="level-20"><span class="jm-badge-icon">✦</span> Seviye 20</div>
+        </div>
     </div>
 
 </div><!-- /bento -->
@@ -573,18 +320,26 @@
     <div class="fab-actions" id="fab-actions">
         <div class="fab-row">
             <div class="fab-lbl">Öğün Kaydet</div>
-            <a href="/nutrition" class="fab-sub">🍽️</a>
+            <a href="/nutrition" class="fab-sub">
+                <svg viewBox="0 0 24 24" width="17" height="17"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/></svg>
+            </a>
         </div>
         <div class="fab-row">
             <div class="fab-lbl">Antrenman Oluştur</div>
-            <a href="/training" class="fab-sub">🏋️</a>
+            <a href="/training" class="fab-sub">
+                <svg viewBox="0 0 24 24" width="17" height="17"><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/><path d="M6.5 6.5h11M6.5 17.5h11M3 8.5v7M21 8.5v7"/></svg>
+            </a>
         </div>
         <div class="fab-row">
             <div class="fab-lbl">Haftalık Check-In</div>
-            <a href="/progress-page" class="fab-sub">✅</a>
+            <a href="/progress-page" class="fab-sub">
+                <svg viewBox="0 0 24 24" width="17" height="17"><polyline points="20 6 9 17 4 12"/></svg>
+            </a>
         </div>
     </div>
-    <button class="fab-main" id="fab-btn" onclick="toggleFAB()">+</button>
+    <button class="fab-main" id="fab-btn" onclick="toggleFAB()">
+        <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
 </div>
 
 <!-- TOAST -->
@@ -594,9 +349,6 @@
      JAVASCRIPT
      ══════════════════════════════════════ -->
 <script>
-/* ═══════════════════════════════════════════════════════
-   CONSTANTS
-   ═══════════════════════════════════════════════════════ */
 const WATER_GOAL = 8;
 let fabOpen = false, tipIdx = 0, sparkChart = null, userGoal = null;
 
@@ -605,28 +357,26 @@ const TIPS = [
     { icon:'💧', text:'Antrenman sırasında kaybettiğin her 1 kg için en az 1 litre su iç. <strong>Dehidrasyon</strong>, performansı %20\'ye kadar düşürebilir.', src:'Egzersiz Fizyolojisi' },
     { icon:'🥩', text:'Kas gelişimi için günlük protein ihtiyacı vücut ağırlığının <strong>1.6–2.2 katı gram</strong> olmalıdır. Öğün başına max. 40 g sentezlenebilir.', src:'Spor Beslenmesi' },
     { icon:'😴', text:'Uyku sırasında salgılanan <strong>büyüme hormonu</strong> kaslardaki mikro yırtıkları onarır. 7–9 saat uyku antrenmanın ayrılmaz parçasıdır.', src:'Uyku Bilimi' },
-    { icon:'🔥', text:'HIIT antrenmanları bitiş sonrası <strong>24–48 saat</strong> devam eden "afterburn" etkisiyle ek kalori yakmanı sağlar.', src:'Metabolizma Araştırmaları' },
-    { icon:'🧲', text:'<strong>Magnezyum</strong> antrenman sonrası kas kramplarını azaltır ve toparlanmayı hızlandırır. Günlük 300–400 mg idealdir.', src:'Spor Beslenmesi' },
+    { icon:'⚡', text:'HIIT antrenmanları bitiş sonrası <strong>24–48 saat</strong> devam eden "afterburn" etkisiyle ek kalori yakmanı sağlar.', src:'Metabolizma Araştırmaları' },
+    { icon:'◆', text:'<strong>Magnezyum</strong> antrenman sonrası kas kramplarını azaltır ve toparlanmayı hızlandırır. Günlük 300–400 mg idealdir.', src:'Spor Beslenmesi' },
     { icon:'⏰', text:'Antrenman öncesi <strong>1–2 saat</strong> önce alınan karbonhidrat + protein kombinasyonu performansı belirgin biçimde optimize eder.', src:'Spor Beslenmesi' },
-    { icon:'🧠', text:'Egzersiz beyinde <strong>BDNF</strong> üretimini artırır; bu da konsantrasyon, öğrenme ve hafızayı güçlendirir.', src:'Nörobilim' },
-    { icon:'🌡️', text:'Antrenman öncesi <strong>10 dakikalık ısınma</strong> sakatlık riskini %50 oranında azaltır ve performansı görünür biçimde artırır.', src:'Spor Hekimliği' },
-    { icon:'🏋️', text:'<strong>Compound egzersizler</strong> (squat, deadlift, bench press) birden fazla kas grubunu çalıştırır ve anabolik hormon salgısını artırır.', src:'Egzersiz Bilimi' },
-    { icon:'🍳', text:'Antrenman sonrası ilk <strong>30–45 dakika</strong> "anabolik pencere"dir. Bu sürede protein alımı kas sentezini maksimize eder.', src:'Spor Beslenmesi' },
-    { icon:'❄️', text:'<strong>Soğuk duş</strong> antrenman sonrası kas iltihabını azaltır. 10–15°C\'de 10–15 dakika ideal toparlanma protokolüdür.', src:'Toparlanma Bilimi' },
-    { icon:'🎯', text:'<strong>Belirli ve ölçülebilir hedefler</strong> başarı oranını %42 artırır. "Daha fit olmak" yerine "8 haftada 4 kg vermek" daha etkilidir.', src:'Spor Psikolojisi' },
-    { icon:'⚖️', text:'<strong>Vücut yağ oranı</strong> kiloya kıyasla çok daha doğru bir ilerleme göstergesidir. Kas kitlesi artarken kilo sabit kalabilir.', src:'Vücut Kompozisyonu' },
-    { icon:'🌿', text:'<strong>Kreatin monohidrat</strong> en çok araştırılmış takviyedir. 3–5 g/gün alım güç ve kas kütlesini %10–15 oranında artırabilir.', src:'Sporcu Takviyeleri' },
-    { icon:'📊', text:'<strong>Antrenman günlüğü</strong> tutmak egzersiz kalitesini ortalama %28 artırır. Veri olmadan iyileştirme olmaz.', src:'Spor Psikolojisi' },
-    { icon:'🫀', text:'Düzenli egzersizle <strong>dinlenme kalp atış hızın</strong> düşer. Bu, kardiyovasküler sağlığının güçlendiğinin en somut göstergesidir.', src:'Kardiyoloji' },
-    { icon:'🫁', text:'<strong>Diyafram solunumu</strong> egzersiz sırasında oksijen verimliliğini artırır ve kortizol düzeyini düşürür.', src:'Solunum Fizyolojisi' },
-    { icon:'🍌', text:'Antrenman sonrası karbonhidrat + protein kombinasyonu glikojen depolarını <strong>2× daha hızlı</strong> yeniler. 3:1 oranı önerilir.', src:'Spor Beslenmesi' },
-    { icon:'🧘', text:'Haftada <strong>3 kez 10 dakika</strong> stretching eklem hareket açıklığını artırır ve yaralanma riskini önemli ölçüde azaltır.', src:'Fiziksel Tedavi' },
+    { icon:'▲', text:'Egzersiz beyinde <strong>BDNF</strong> üretimini artırır; bu da konsantrasyon, öğrenme ve hafızayı güçlendirir.', src:'Nörobilim' },
+    { icon:'◆', text:'Antrenman öncesi <strong>10 dakikalık ısınma</strong> sakatlık riskini %50 oranında azaltır ve performansı görünür biçimde artırır.', src:'Spor Hekimliği' },
+    { icon:'⚡', text:'<strong>Compound egzersizler</strong> (squat, deadlift, bench press) birden fazla kas grubunu çalıştırır ve anabolik hormon salgısını artırır.', src:'Egzersiz Bilimi' },
+    { icon:'▲', text:'Antrenman sonrası ilk <strong>30–45 dakika</strong> "anabolik pencere"dir. Bu sürede protein alımı kas sentezini maksimize eder.', src:'Spor Beslenmesi' },
+    { icon:'◆', text:'<strong>Soğuk duş</strong> antrenman sonrası kas iltihabını azaltır. 10–15°C\'de 10–15 dakika ideal toparlanma protokolüdür.', src:'Toparlanma Bilimi' },
+    { icon:'★', text:'<strong>Belirli ve ölçülebilir hedefler</strong> başarı oranını %42 artırır. "Daha fit olmak" yerine "8 haftada 4 kg vermek" daha etkilidir.', src:'Spor Psikolojisi' },
+    { icon:'◆', text:'<strong>Vücut yağ oranı</strong> kiloya kıyasla çok daha doğru bir ilerleme göstergesidir. Kas kitlesi artarken kilo sabit kalabilir.', src:'Vücut Kompozisyonu' },
+    { icon:'⚡', text:'<strong>Kreatin monohidrat</strong> en çok araştırılmış takviyedir. 3–5 g/gün alım güç ve kas kütlesini %10–15 oranında artırabilir.', src:'Sporcu Takviyeleri' },
+    { icon:'★', text:'<strong>Antrenman günlüğü</strong> tutmak egzersiz kalitesini ortalama %28 artırır. Veri olmadan iyileştirme olmaz.', src:'Spor Psikolojisi' },
+    { icon:'▲', text:'Düzenli egzersizle <strong>dinlenme kalp atış hızın</strong> düşer. Bu, kardiyovasküler sağlığının güçlendiğinin en somut göstergesidir.', src:'Kardiyoloji' },
+    { icon:'◆', text:'<strong>Diyafram solunumu</strong> egzersiz sırasında oksijen verimliliğini artırır ve kortizol düzeyini düşürür.', src:'Solunum Fizyolojisi' },
+    { icon:'★', text:'Antrenman sonrası karbonhidrat + protein kombinasyonu glikojen depolarını <strong>2× daha hızlı</strong> yeniler. 3:1 oranı önerilir.', src:'Spor Beslenmesi' },
+    { icon:'▲', text:'Haftada <strong>3 kez 10 dakika</strong> stretching eklem hareket açıklığını artırır ve yaralanma riskini önemli ölçüde azaltır.', src:'Fiziksel Tedavi' },
 ];
 
 
-/* ═══════════════════════════════════════════════════════
-   TOAST
-   ═══════════════════════════════════════════════════════ */
+/* ═══ TOAST ═══ */
 function toast(msg, type = 'info') {
     const icons = { success:'✓', error:'✗', info:'💧' };
     const wrap = document.getElementById('toast-wrap');
@@ -638,9 +388,7 @@ function toast(msg, type = 'info') {
 }
 
 
-/* ═══════════════════════════════════════════════════════
-   GREETING
-   ═══════════════════════════════════════════════════════ */
+/* ═══ GREETING ═══ */
 function setGreeting(goal) {
     const h = new Date().getHours();
     let gText, timeLabel;
@@ -651,21 +399,19 @@ function setGreeting(goal) {
 
     const uname = document.querySelector('#g-title span').textContent;
     document.getElementById('g-eyebrow').textContent = `${timeLabel} — COMMAND CENTER`;
-    document.getElementById('g-title').innerHTML = `${gText}, <span>${uname}</span>!`;
+    document.getElementById('g-title').innerHTML = `${gText}, <span>${uname}</span>`;
 
     const goalCfg = {
-        'kilo verme':  { sub: 'Bugün kalori açığını koru. Her küçük seçim hedefe bir adım daha yaklaştırıyor.', badge: '🎯 Kilo Verme Modu' },
-        'kas kazanma': { sub: 'Proteinini aldın mı? Kaslar antrenmanla kırılır, mutfakta yeniden yapılır.', badge: '💪 Kas Kazanma Modu' },
+        'kilo verme':  { sub: 'Bugün kalori açığını koru. Her küçük seçim hedefe bir adım daha yaklaştırıyor.', badge: 'Kilo Verme Modu' },
+        'kas kazanma': { sub: 'Proteinini aldın mı? Kaslar antrenmanla kırılır, mutfakta yeniden yapılır.', badge: 'Kas Kazanma Modu' },
     };
-    const cfg = goalCfg[goal] || { sub: 'Verilerini güncelle, yapay zeka koçun hazırda bekliyor.', badge: '🏃 Aktif Mod' };
+    const cfg = goalCfg[goal] || { sub: 'Verilerini güncelle, yapay zeka koçun hazırda bekliyor.', badge: 'Aktif Mod' };
     document.getElementById('g-sub').textContent  = cfg.sub;
     document.getElementById('g-goal').textContent = cfg.badge;
 }
 
 
-/* ═══════════════════════════════════════════════════════
-   WATER TRACKING  (localStorage, resets daily)
-   ═══════════════════════════════════════════════════════ */
+/* ═══ WATER TRACKING ═══ */
 function getWaterCount() {
     const today = new Date().toDateString();
     const s = JSON.parse(localStorage.getItem('fc_water') || '{}');
@@ -696,13 +442,12 @@ function buildWaterGlasses() {
         g.innerHTML = '<div class="wg-fill"></div>';
         g.addEventListener('click', () => {
             const cur = getWaterCount();
-            // Click filled → unfill to this point; click empty → fill to this point
             const next = i < cur ? i : i + 1;
             saveWaterCount(next);
             renderWater(next);
             if (next > cur) {
-                if (next === WATER_GOAL) toast('Günlük su hedefine ulaştın! 🎉', 'success');
-                else toast(`${next}. bardak içildi 💧`, 'info');
+                if (next === WATER_GOAL) toast('Günlük su hedefine ulaştın!', 'success');
+                else toast(`${next}. bardak içildi`, 'info');
             }
         });
         c.appendChild(g);
@@ -714,36 +459,46 @@ function addWater() {
     const next = cur + 1;
     saveWaterCount(next);
     renderWater(next);
-    if (next === WATER_GOAL) toast('Günlük su hedefine ulaştın! 🎉', 'success');
-    else toast(`${next}. bardak içildi 💧`, 'info');
+    if (next === WATER_GOAL) toast('Günlük su hedefine ulaştın!', 'success');
+    else toast(`${next}. bardak içildi`, 'info');
 }
 
 
-/* ═══════════════════════════════════════════════════════
-   STREAK  (localStorage, consecutive daily visits)
-   ═══════════════════════════════════════════════════════ */
+/* ═══ STREAK ═══ */
 function computeStreak() {
     const today = new Date().toDateString();
     const yday  = new Date(Date.now() - 86400000).toDateString();
     const s = JSON.parse(localStorage.getItem('fc_streak') || '{"count":0,"last":""}');
-    if (s.last === today) return s.count;                            // already counted today
-    const next = s.last === yday ? s.count + 1 : 1;                // consecutive or reset
+    if (s.last === today) return s.count;
+    const next = s.last === yday ? s.count + 1 : 1;
     localStorage.setItem('fc_streak', JSON.stringify({ count: next, last: today }));
     return next;
 }
 function renderStreak(n) {
     document.getElementById('streak-num').textContent = n;
-    document.getElementById('g-streak-badge').textContent = `🔥 ${n} Günlük Seri`;
-    const flames = n >= 30 ? '🏆' : n >= 14 ? '🔥🔥' : '🔥';
-    document.getElementById('streak-flame').textContent = flames;
+    document.getElementById('g-streak-badge').textContent = `${n} Günlük Seri`;
+
     const subs = ['Bugün giriş yaptın, serini koru!','Harika! 2 gün art arda.','Mükemmel — 3 gün seri!','Etkileyici, devam et!','Harika bir hafta geçiriyorsun!'];
-    document.getElementById('streak-sub').textContent = n <= subs.length ? subs[n-1] : `${n} gündür kesintisiz! Efsanesin 🏆`;
+    document.getElementById('streak-sub').textContent = n <= subs.length ? subs[n-1] : `${n} gündür kesintisiz — efsanesin.`;
+
+    renderStreakWeek(n);
+}
+function renderStreakWeek(streakCount) {
+    const today = new Date().getDay();
+    const days = document.querySelectorAll('.streak-day');
+    days.forEach((d, i) => {
+        const dayIndex = (i + 1) % 7;
+        const isToday = dayIndex === today;
+        const isPast = dayIndex < today || (today === 0 && dayIndex > 0);
+        const daysBack = isToday ? 0 : ((today - dayIndex + 7) % 7);
+        const active = isPast && daysBack < streakCount;
+        d.classList.toggle('active', active || isToday);
+        d.classList.toggle('today', isToday);
+    });
 }
 
 
-/* ═══════════════════════════════════════════════════════
-   CALORIE RING
-   ═══════════════════════════════════════════════════════ */
+/* ═══ CALORIE RING ═══ */
 function updateCalRing(consumed, target) {
     const circ  = 276.46;
     const ratio = target > 0 ? Math.min(consumed / target, 1) : 0;
@@ -756,23 +511,20 @@ function updateCalRing(consumed, target) {
     document.getElementById('cal-remain').textContent   = Math.max(target - consumed, 0) + ' kcal';
     document.getElementById('cal-target').textContent   = target + ' kcal';
 
-    // Greeting badge
     const badge = document.getElementById('g-cal-badge');
     const pct   = Math.round(ratio * 100);
     badge.style.display = 'inline-flex';
     if (ratio >= 1) {
-        badge.className = 'g-badge' + ' ' + 'orange'; // reuse class names
-        document.getElementById('g-cal-badge-txt').textContent = `⚠️ Hedef aşıldı (${pct}%)`;
+        badge.className = 'gr-badge amber';
+        document.getElementById('g-cal-badge-txt').textContent = `Hedef aşıldı (${pct}%)`;
     } else {
-        badge.className = 'g-badge blue';
-        document.getElementById('g-cal-badge-txt').textContent = `🍽️ ${pct}% tüketildi`;
+        badge.className = 'gr-badge blue';
+        document.getElementById('g-cal-badge-txt').textContent = `${pct}% tüketildi`;
     }
 }
 
 
-/* ═══════════════════════════════════════════════════════
-   SPARKLINE CHART  (Chart.js minimal)
-   ═══════════════════════════════════════════════════════ */
+/* ═══ SPARKLINE ═══ */
 function renderSparkline(weights, labels, lineColor) {
     const color = lineColor || '#CCFF00';
     const canvas = document.getElementById('sparkline');
@@ -795,10 +547,10 @@ function renderSparkline(weights, labels, lineColor) {
                     return g;
                 },
                 fill: true, tension: 0.4, borderWidth: 1.8,
-                pointRadius:          (ctx) => ctx.dataIndex === weights.length - 1 ? 4 : 0,
+                pointRadius: (ctx) => ctx.dataIndex === weights.length - 1 ? 4 : 0,
                 pointBackgroundColor: color,
-                pointBorderColor:     '#121212',
-                pointBorderWidth:     2,
+                pointBorderColor: '#121212',
+                pointBorderWidth: 2,
             }]
         },
         options: {
@@ -823,12 +575,10 @@ function renderSparkline(weights, labels, lineColor) {
 }
 
 
-/* ═══════════════════════════════════════════════════════
-   WEIGHT UPDATE
-   ═══════════════════════════════════════════════════════ */
+/* ═══ WEIGHT UPDATE ═══ */
 function checkBtnGlow() {
     const last = localStorage.getItem('fc_last_weight_update');
-    const stale = !last || (Date.now() - parseInt(last)) > 86400000; // >24h
+    const stale = !last || (Date.now() - parseInt(last)) > 86400000;
     document.getElementById('w-btn').classList.toggle('pulse', stale);
 }
 
@@ -857,8 +607,8 @@ async function doUpdateWeight() {
         localStorage.setItem('fc_last_weight_update', Date.now().toString());
         btn.classList.remove('pulse');
         input.value = '';
-        toast('Kilo güncellendi ✓', 'success');
-        await loadSparkline();         // refresh chart with new data
+        toast('Kilo güncellendi', 'success');
+        await loadSparkline();
     } catch (e) {
         toast('Güncelleme başarısız.', 'error');
     } finally {
@@ -867,9 +617,7 @@ async function doUpdateWeight() {
 }
 
 
-/* ═══════════════════════════════════════════════════════
-   SPARKLINE DATA LOAD
-   ═══════════════════════════════════════════════════════ */
+/* ═══ SPARKLINE DATA ═══ */
 async function loadSparkline() {
     try {
         const res  = await fetch('/checkin-history');
@@ -883,7 +631,6 @@ async function loadSparkline() {
         const weights = last7.map(d => parseFloat(d.kilo));
         const labels  = last7.map(d => d.tarih);
 
-        // Weight delta vs previous (goal-aware coloring)
         let trendColor = '#CCFF00';
         if (last7.length >= 2) {
             const cur  = weights[weights.length - 1];
@@ -915,9 +662,7 @@ async function loadSparkline() {
 }
 
 
-/* ═══════════════════════════════════════════════════════
-   AI INSIGHT TIPS
-   ═══════════════════════════════════════════════════════ */
+/* ═══ AI TIPS ═══ */
 let tipTimer = null;
 
 function renderTip(i, animated) {
@@ -927,7 +672,6 @@ function renderTip(i, animated) {
     const start   = Math.min(Math.max(i - half, 0), TIPS.length - VISIBLE);
     const end     = Math.min(start + VISIBLE, TIPS.length);
 
-    // Rebuild dots — each clickable
     const dots = document.getElementById('ins-dots');
     dots.innerHTML = '';
     for (let d = start; d < end; d++) {
@@ -958,7 +702,7 @@ function restartProgressBar() {
     const bar = document.getElementById('ins-pbar');
     if (!bar) return;
     bar.style.animation = 'none';
-    bar.offsetHeight;   // force reflow so animation restarts cleanly
+    bar.offsetHeight;
     bar.style.animation = 'ins-fill 8s linear forwards';
 }
 
@@ -976,9 +720,30 @@ function resetTipTimer() {
 }
 
 
-/* ═══════════════════════════════════════════════════════
-   FAB
-   ═══════════════════════════════════════════════════════ */
+/* ═══ AI COACH NUDGE WIDGET ═══ */
+async function loadNudges() {
+    const body = document.getElementById('ai-nudge-body');
+    try {
+        const res = await fetch('/dashboard-nudges');
+        const data = await res.json();
+        const nudges = data.nudges || [];
+
+        if (nudges.length > 0) {
+            body.innerHTML = nudges.map(n =>
+                `<p class="ai-nudge-item">${n}</p>`
+            ).join('');
+            document.getElementById('ai-nudge-source').textContent = 'Kişisel Analiz · Bugün';
+        } else {
+            body.innerHTML = '<p class="ai-nudge-item">Bugünkü antrenman ve beslenme verilerini girdikten sonra kişiselleştirilmiş öneriler burada görünecek.</p>';
+            document.getElementById('ai-nudge-source').textContent = 'AI Koç';
+        }
+    } catch(e) {
+        body.innerHTML = '<p class="ai-nudge-item">Koçunuz hazır — verilerinizi girin ve kişisel öneriler alın.</p>';
+    }
+}
+
+
+/* ═══ FAB ═══ */
 function toggleFAB() {
     fabOpen = !fabOpen;
     document.getElementById('fab-btn').classList.toggle('open', fabOpen);
@@ -993,22 +758,19 @@ document.addEventListener('click', (e) => {
 });
 
 
-/* ═══════════════════════════════════════════════════════
-   INIT  — orchestrate all async loads
-   ═══════════════════════════════════════════════════════ */
+/* ═══ INIT ═══ */
 async function init() {
-    /* 1. Synchronous / localStorage */
     buildWaterGlasses();
     renderWater(getWaterCount());
     renderStreak(computeStreak());
     checkBtnGlow();
 
-    /* 2. Daily tip — starts at today's index, auto-cycles every 8 s */
     tipIdx = Math.floor(Date.now() / 86400000) % TIPS.length;
     renderTip(tipIdx, false);
     resetTipTimer();
 
-    /* 3. Fetch last session + today's meals in parallel */
+    loadNudges();
+
     try {
         const [sessRes, mealRes] = await Promise.all([
             fetch('/last-session'),
@@ -1041,10 +803,7 @@ async function init() {
         updateCalRing(0, 2000);
     }
 
-    /* 4. Sparkline (can run while page is interactive) */
     await loadSparkline();
-
-    /* 5. Journey map milestones */
     checkMilestones();
 }
 

@@ -2620,6 +2620,33 @@ def last_session():
         "tarih"           : s.created_at.strftime("%d.%m.%Y")
     })
 
+@app.route("/dashboard-nudges")
+@login_required
+def dashboard_nudges():
+    from analytics_engine import get_nudges
+    nudge_translations = {
+        "NUDGE_MISSING_LOGS": "Son 48 saatte antrenman veya beslenme kaydın yok. Bugün hedeflerine bir adım daha yaklaş!",
+        "NUDGE_NO_WORKOUT": "Son 48 saatte antrenman kaydı görünmüyor. Kısa bir antrenman bile fark yaratır.",
+        "NUDGE_NO_NUTRITION": "Beslenme kaydını güncellemeyi unutma — veriler koçunun sana daha iyi yardım etmesini sağlar.",
+        "NUDGE_STREAK_RISK": "Serin risk altında! Bugün giriş yaparak kesintisiz serinizi koruyun.",
+        "NUDGE_PROTEIN_GOAL": "Haftalık protein hedefinin %90'ına ulaştın — harika gidiyorsun!",
+        "NUDGE_WEEKLY_REPORT": "Bugün haftalık rapor günü. Koçundan performans özetini iste!",
+    }
+    try:
+        models = {
+            "WorkoutLog": WorkoutLog,
+            "UserDailyNutrition": UserDailyNutrition,
+            "UserSession": UserSession,
+        }
+        raw_nudges = get_nudges(User.query.get(current_user.id), db, models)
+        cleaned = []
+        for n in (raw_nudges or []):
+            key = n.split(":")[0].strip() if ":" in n else ""
+            cleaned.append(nudge_translations.get(key, n))
+        return jsonify({"nudges": cleaned})
+    except Exception:
+        return jsonify({"nudges": []})
+
 @app.route("/register", methods=["GET","POST"])
 def register():
     if request.method == "GET":
