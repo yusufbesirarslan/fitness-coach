@@ -729,6 +729,24 @@ def log_meal():
     if not ogun or not yemekler:
         return jsonify({"error": "Öğün ve yemekler zorunludur"}), 400
 
+    override = data.get("override_macros")
+    if override:
+        nutrients = {
+            "kalori": round(float(override.get("kalori", 0)), 1),
+            "protein": round(float(override.get("protein", 0)), 1),
+            "karb": round(float(override.get("karb", 0)), 1),
+            "yag": round(float(override.get("yag", 0)), 1),
+        }
+        today = datetime.utcnow().strftime("%d.%m")
+        entry = MealLog(
+            user_id=current_user.id, ogun=ogun, yemekler=yemekler,
+            kalori=nutrients["kalori"], protein=nutrients["protein"],
+            karb=nutrients["karb"], yag=nutrients["yag"], tarih=today
+        )
+        db.session.add(entry)
+        db.session.commit()
+        return jsonify({"message": f"{ogun} kaydedildi.", "nutrients": nutrients})
+
     prompt = (
         f"Sen bir beslenme uzmanısın. Aşağıdaki yemeklerin GERÇEK toplam besin değerlerini hesapla.\n"
         f"Miktar belirtilmişse kullan, belirtilmemişse standart porsiyon kabul et.\n\n"
@@ -914,6 +932,227 @@ def review_meals():
         review = f"Değerlendirme alınamadı: {str(e)}"
 
     return jsonify({"review": review, "total_calories": round(total_cal), "target": round(target)})
+
+@app.route("/menu-assistant")
+@login_required
+def menu_assistant():
+    return render_template("menu_assistant.html",
+        username=current_user.username,
+        profile_picture=current_user.profile_picture,
+    )
+
+
+@app.route("/api/proxy/scan-menu", methods=["POST"])
+@login_required
+def proxy_scan_menu():
+    import requests as http_req
+    from bs4 import BeautifulSoup
+    from urllib.parse import urlparse
+
+    data = request.get_json()
+    url = (data or {}).get("url", "").strip()
+    if not url:
+        return jsonify({"error": "URL gerekli."}), 400
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return jsonify({"error": "Yalnızca HTTP/HTTPS desteklenir."}), 400
+    if not parsed.hostname:
+        return jsonify({"error": "Geçersiz URL."}), 400
+
+    blocked = ("127.0.0.1", "localhost", "0.0.0.0", "169.254.169.254", "[::1]")
+    if parsed.hostname.lower() in blocked or parsed.hostname.startswith("10.") or parsed.hostname.startswith("192.168."):
+        return jsonify({"error": "İç ağ adresleri engellendi."}), 403
+
+    try:
+        resp = http_req.get(url, timeout=5, headers={
+            "User-Agent": "FitX-MenuScanner/1.0",
+            "Accept": "text/html,application/xhtml+xml",
+        }, allow_redirects=True)
+        resp.raise_for_status()
+    except http_req.exceptions.Timeout:
+        return jsonify({"error": "Zaman aşımı — site yanıt vermedi."}), 504
+    except http_req.exceptions.RequestException as e:
+        return jsonify({"error": f"Bağlantı hatası: {type(e).__name__}"}), 502
+
+    content_type = resp.headers.get("Content-Type", "")
+    if "html" not in content_type and "text" not in content_type:
+        return jsonify({"error": "Desteklenmeyen içerik tipi."}), 415
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for tag in soup(["script", "style", "iframe", "object", "embed", "link", "meta"]):
+        tag.decompose()
+
+    title = soup.title.string.strip() if soup.title and soup.title.string else ""
+    headings = [h.get_text(strip=True) for h in soup.find_all(["h1", "h2", "h3", "h4"]) if h.get_text(strip=True)]
+    body_text = soup.get_text(separator="\n", strip=True)
+    body_text = "\n".join(line for line in body_text.split("\n") if len(line.strip()) > 2)
+    if len(body_text) > 8000:
+        body_text = body_text[:8000]
+
+    return jsonify({
+        "title": title,
+        "headings": headings[:30],
+        "body_text": body_text,
+        "source_url": url,
+    })
+
+
+@app.route("/api/menu/analyze", methods=["POST"])
+@login_required
+def analyze_menu():
+    data = request.get_json()
+    raw_text = (data or {}).get("menu_text", "").strip()
+    if not raw_text:
+        return jsonify({"error": "Menü metni gerekli."}), 400
+
+    sess = UserSession.query.filter_by(user_id=current_user.id)\
+        .order_by(UserSession.created_at.desc()).first()
+    if not sess or not sess.target_calories:
+        return jsonify({"error": "Profil verileri eksik."}), 400
+
+    today_str = datetime.utcnow().strftime("%d.%m")
+    meals = MealLog.query.filter_by(user_id=current_user.id, tarih=today_str).all()
+    consumed = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+    for m in meals:
+        consumed["calories"] += m.kalori or 0
+        consumed["protein"]  += m.protein or 0
+        consumed["carbs"]    += m.karb or 0
+        consumed["fat"]      += m.yag or 0
+
+    target_cal = sess.target_calories
+    goal = sess.goal or ""
+    protein_target = target_cal * (0.30 if goal == "kas kazanma" else 0.25) / 4
+    fat_target = target_cal * 0.25 / 9
+    carb_target = target_cal * (0.45 if goal == "kas kazanma" else 0.50) / 4
+
+    remaining = {
+        "calories": max(target_cal - consumed["calories"], 0),
+        "protein": max(protein_target - consumed["protein"], 0),
+        "carbs": max(carb_target - consumed["carbs"], 0),
+        "fat": max(fat_target - consumed["fat"], 0),
+    }
+
+    try:
+        extract_prompt = f"""Aşağıdaki restoran menü metninden SADECE yemek isimlerini çıkar.
+Pazarlama metinlerini, açıklamaları, fiyatları YOKSAY.
+Sadece yemek adlarını JSON array olarak döndür.
+Maksimum 15 yemek.
+
+Menü metni:
+{raw_text[:4000]}
+
+Yanıt formatı (sadece JSON array):
+["yemek1", "yemek2", ...]"""
+
+        extract_resp = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": extract_prompt}],
+            temperature=0.1,
+            max_tokens=500,
+        )
+        items_raw = extract_resp.choices[0].message.content.strip()
+        start = items_raw.find("[")
+        end = items_raw.rfind("]") + 1
+        food_items = json.loads(items_raw[start:end]) if start >= 0 and end > start else []
+    except Exception:
+        food_items = []
+
+    if not food_items:
+        return jsonify({"error": "Menüden yemek çıkarılamadı.", "items": []}), 200
+
+    from fitx_mcp.server import _get_fatsecret_token, _parse_fatsecret_desc, FATSECRET_API_URL
+    import requests as http_req
+
+    ranked_items = []
+    try:
+        token = _get_fatsecret_token()
+    except Exception:
+        token = None
+
+    for item_name in food_items[:15]:
+        macros = {"calories": 300, "protein": 15, "carbs": 30, "fat": 12}
+
+        if token:
+            try:
+                fs_resp = http_req.get(FATSECRET_API_URL, params={
+                    "method": "foods.search",
+                    "search_expression": item_name,
+                    "format": "json",
+                    "max_results": 1,
+                }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
+                fs_data = fs_resp.json()
+                foods = fs_data.get("foods", {}).get("food", [])
+                if isinstance(foods, dict):
+                    foods = [foods]
+                if foods:
+                    parsed = _parse_fatsecret_desc(foods[0].get("food_description", ""))
+                    if parsed:
+                        macros = {
+                            "calories": parsed.get("calories", 300),
+                            "protein": parsed.get("protein", 15),
+                            "carbs": parsed.get("carbs", 30),
+                            "fat": parsed.get("fat", 12),
+                        }
+            except Exception:
+                pass
+
+        score = 0
+        protein_fit = max(0, 1 - abs(macros["protein"] - remaining["protein"] * 0.4) / max(remaining["protein"], 1))
+        score += protein_fit * 50
+
+        cal_ratio = macros["calories"] / max(remaining["calories"], 1)
+        if cal_ratio <= 0.5:
+            score += 30
+        elif cal_ratio <= 0.8:
+            score += 15
+        else:
+            score -= 10
+
+        fat_ratio = macros["fat"] / max(remaining["fat"], 1)
+        if fat_ratio <= 0.5:
+            score += 20
+        elif fat_ratio <= 0.8:
+            score += 5
+        else:
+            score -= 15
+
+        warnings = []
+        if macros["fat"] > remaining["fat"] * 0.8:
+            warnings.append("Günlük yağ limitinin %80'ini aşıyor")
+        if macros["calories"] > remaining["calories"] * 0.8:
+            warnings.append("Günlük kalori limitinin %80'ini aşıyor")
+
+        reason_parts = []
+        if protein_fit > 0.6:
+            reason_parts.append(f"Kalan {remaining['protein']:.0f}g protein hedefinle uyumlu")
+        if cal_ratio <= 0.5:
+            reason_parts.append("Kalori bütçesine uygun")
+        if not reason_parts:
+            reason_parts.append(f"{macros['calories']:.0f} kcal, {macros['protein']:.0f}g protein")
+
+        ranked_items.append({
+            "name": item_name,
+            "macros": {k: round(v, 1) for k, v in macros.items()},
+            "score": round(score, 1),
+            "warnings": warnings,
+            "reason": " · ".join(reason_parts),
+        })
+
+    ranked_items.sort(key=lambda x: x["score"], reverse=True)
+
+    return jsonify({
+        "items": ranked_items,
+        "remaining": {k: round(v, 1) for k, v in remaining.items()},
+        "target": {
+            "calories": round(target_cal),
+            "protein": round(protein_target, 1),
+            "carbs": round(carb_target, 1),
+            "fat": round(fat_target, 1),
+        },
+        "consumed": {k: round(v, 1) for k, v in consumed.items()},
+    })
+
 
 @app.route("/")
 @login_required
@@ -1555,7 +1794,7 @@ def chat():
         "comparison"     : comparison
     })
 
-COACH_SYSTEM_PROMPT = """Sen FitX Proaktif Koçusun. Kullanıcının veritabanına HEM okuma HEM yazma erişimin var.
+COACH_SYSTEM_PROMPT = """Sen FitX Elit Koçu ve Yemek Kritikçisisin. Kullanıcının veritabanına HEM okuma HEM yazma erişimin var.
 
 TEMEL GÖREV:
 - Kullanıcı antrenman veya yemek bahsettiğinde HEMEN tespit et.
@@ -1565,6 +1804,13 @@ TEMEL GÖREV:
 - Beslenme soruları için FatSecret verisini kullan, gerçek makro değerleri ver.
 - Trendleri, eksik logları ve başarıları proaktif olarak belirt.
 - Haftalık rapor günlerinde (Pazartesi/Pazar) otomatik rapor sun.
+
+RESTORAN MENÜ ANALİZİ:
+- Restoran menülerini analiz ederken metabolik hassasiyet ve kullanıcının aktif hedeflerini her şeyin üstünde tut.
+- Objektif ol, restoran pazarlama abartılarını filtrele.
+- Sporcuyu masadaki en akıllı taktiksel yemeğe yönlendir.
+- Kalan günlük makro bütçesine göre somut önerilerde bulun.
+- Porsiyon boyutları ve gizli kaloriler konusunda uyar.
 
 KURALLAR:
 - Türkçe yaz, kullanıcıya "sen" diye hitap et.

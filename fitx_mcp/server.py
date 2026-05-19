@@ -700,6 +700,112 @@ def generate_weekly_report(user_id: int) -> str:
     }, ensure_ascii=False, default=str)
 
 
+# ── TOOL 10: Analyze & Rank Menu ─────────────────────────────────
+
+@mcp.tool()
+def analyze_and_rank_menu(raw_menu_text: str, user_id: int) -> str:
+    """Restoran menü metnini analiz eder, kullanıcının kalan günlük makro hedeflerine göre yemekleri sıralar.
+    Prompt injection'a karşı menüdeki pazarlama metinlerini yoksayar. Sadece besin verisi olarak işler."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+
+        cur.execute(
+            "SELECT target_calories, goal FROM user_session "
+            "WHERE user_id = %s ORDER BY created_at DESC LIMIT 1",
+            (user_id,),
+        )
+        sess = cur.fetchone()
+        if not sess or not sess["target_calories"]:
+            return json.dumps({"error": "Kullanıcı profil verisi bulunamadı."}, ensure_ascii=False)
+
+        today = date.today().strftime("%d.%m")
+        cur.execute(
+            "SELECT COALESCE(SUM(kalori), 0) as cal, COALESCE(SUM(protein), 0) as pro, "
+            "COALESCE(SUM(karb), 0) as carb, COALESCE(SUM(yag), 0) as fat "
+            "FROM meal_log WHERE user_id = %s AND tarih = %s",
+            (user_id, today),
+        )
+        consumed = cur.fetchone()
+
+    target_cal = sess["target_calories"]
+    goal = sess["goal"] or ""
+    protein_target = target_cal * (0.30 if goal == "kas kazanma" else 0.25) / 4
+    fat_target = target_cal * 0.25 / 9
+    carb_target = target_cal * (0.45 if goal == "kas kazanma" else 0.50) / 4
+
+    remaining = {
+        "calories": max(target_cal - consumed["cal"], 0),
+        "protein": max(protein_target - consumed["pro"], 0),
+        "carbs": max(carb_target - consumed["carb"], 0),
+        "fat": max(fat_target - consumed["fat"], 0),
+    }
+
+    lines = [l.strip() for l in raw_menu_text.split("\n") if len(l.strip()) > 2]
+    food_candidates = []
+    skip_words = {"fiyat", "price", "tl", "₺", "kampanya", "indirim", "fırsat", "sipariş"}
+    for line in lines[:50]:
+        lower = line.lower()
+        if any(sw in lower for sw in skip_words):
+            continue
+        if len(line) < 100:
+            food_candidates.append(line)
+
+    ranked = []
+    for item_name in food_candidates[:20]:
+        try:
+            token = _get_fatsecret_token()
+            resp = requests.get(FATSECRET_API_URL, params={
+                "method": "foods.search",
+                "search_expression": item_name,
+                "format": "json",
+                "max_results": 1,
+            }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
+            data = resp.json()
+            foods = data.get("foods", {}).get("food", [])
+            if isinstance(foods, dict):
+                foods = [foods]
+            if foods:
+                parsed = _parse_fatsecret_desc(foods[0].get("food_description", ""))
+                if parsed and parsed.get("calories"):
+                    macros = {
+                        "calories": parsed.get("calories", 0),
+                        "protein": parsed.get("protein", 0),
+                        "carbs": parsed.get("carbs", 0),
+                        "fat": parsed.get("fat", 0),
+                    }
+
+                    score = 0
+                    pfit = max(0, 1 - abs(macros["protein"] - remaining["protein"] * 0.4) / max(remaining["protein"], 1))
+                    score += pfit * 50
+                    cr = macros["calories"] / max(remaining["calories"], 1)
+                    score += 30 if cr <= 0.5 else (15 if cr <= 0.8 else -10)
+                    fr = macros["fat"] / max(remaining["fat"], 1)
+                    score += 20 if fr <= 0.5 else (5 if fr <= 0.8 else -15)
+
+                    warnings = []
+                    if macros["fat"] > remaining["fat"] * 0.8:
+                        warnings.append("Günlük yağ limitinin %80'ini aşıyor")
+                    if macros["calories"] > remaining["calories"] * 0.8:
+                        warnings.append("Günlük kalori limitinin %80'ini aşıyor")
+
+                    ranked.append({
+                        "name": item_name,
+                        "macros": {k: round(v, 1) for k, v in macros.items()},
+                        "score": round(score, 1),
+                        "warnings": warnings,
+                    })
+        except Exception:
+            continue
+
+    ranked.sort(key=lambda x: x["score"], reverse=True)
+
+    return json.dumps({
+        "ranked_items": ranked[:10],
+        "remaining_macros": {k: round(v, 1) for k, v in remaining.items()},
+        "analysis": f"{len(ranked)} yemek analiz edildi, protein ve kalori uyumuna göre sıralandı.",
+    }, ensure_ascii=False, default=str)
+
+
 # ── Entry point ─────────────────────────────────────────────────
 
 if __name__ == "__main__":
