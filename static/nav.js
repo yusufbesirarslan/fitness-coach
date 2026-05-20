@@ -139,6 +139,34 @@
     window.location.href = '/menu-assistant?url=' + encodeURIComponent(input.value.trim());
   };
 
+  /* ── localStorage avatar on all pages ──────────────── */
+  var savedAvatar = localStorage.getItem('fitx_user_avatar');
+  if (savedAvatar) {
+    document.querySelectorAll('.header-avatar, .sidebar-user a').forEach(function(el) {
+      var img = el.querySelector('img');
+      if (img) { img.src = savedAvatar; }
+      else {
+        var i = document.createElement('img');
+        i.src = savedAvatar;
+        i.style.cssText = 'width:100%;height:100%;border-radius:50%;object-fit:cover;';
+        el.textContent = '';
+        el.appendChild(i);
+      }
+    });
+    var drawerAvatar = document.querySelector('.drawer-profile-avatar');
+    if (drawerAvatar) {
+      var di = drawerAvatar.querySelector('img');
+      if (di) { di.src = savedAvatar; }
+      else {
+        var ni = document.createElement('img');
+        ni.src = savedAvatar;
+        ni.style.cssText = 'width:100%;height:100%;border-radius:50%;object-fit:cover;';
+        drawerAvatar.textContent = '';
+        drawerAvatar.appendChild(ni);
+      }
+    }
+  }
+
   /* ── Auto-start scanner from URL param ─────────────── */
   if (window.location.pathname === '/menu-assistant') {
     var params = new URLSearchParams(window.location.search);

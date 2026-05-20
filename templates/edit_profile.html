@@ -19,6 +19,14 @@
         overflow: hidden; border: 3px solid rgba(204,255,0,0.3);
     }
     .avatar-lg img { width: 100%; height: 100%; object-fit: cover; }
+    .avatar-lg { position: relative; cursor: pointer; }
+    .avatar-overlay {
+        position: absolute; inset: 0; border-radius: 50%;
+        background: rgba(0,0,0,0.5); display: flex; align-items: center;
+        justify-content: center; opacity: 0; transition: opacity 0.2s;
+    }
+    .avatar-lg:hover .avatar-overlay { opacity: 1; }
+    .avatar-overlay svg { width: 28px; height: 28px; stroke: #fff; fill: none; stroke-width: 1.5; }
     .avatar-name {
         font-family: 'Bebas Neue', sans-serif; font-size: 28px;
         letter-spacing: 2px; color: var(--text); text-align: center;
@@ -221,13 +229,17 @@
 
         <!-- ── AVATAR DISPLAY ── -->
         <div class="avatar-section">
-            <div class="avatar-lg" id="avatar-display">
+            <div class="avatar-lg" id="avatar-display" onclick="document.getElementById('avatar-file-input').click()">
                 {% if profile_picture %}
                     <img src="{{ profile_picture }}" alt="Profil" id="avatar-img">
                 {% else %}
                     <span id="avatar-letter">{{ username[0]|upper if username else 'U' }}</span>
                 {% endif %}
+                <div class="avatar-overlay">
+                    <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                </div>
             </div>
+            <input type="file" id="avatar-file-input" accept="image/*" hidden>
             <div class="avatar-name">{{ full_name if full_name else username }}</div>
             <div class="avatar-handle">@{{ username }}</div>
         </div>
@@ -258,11 +270,6 @@
                     <label for="username">Kullanıcı Adı</label>
                     <input type="text" id="username" placeholder="Kullanıcı adın" value="{{ username }}" maxlength="80">
                     <div class="field-hint">En az 3 karakter, benzersiz olmalı.</div>
-                </div>
-                <div class="form-field">
-                    <label for="profile_picture">Profil Fotoğrafı URL</label>
-                    <input type="url" id="profile_picture" placeholder="https://example.com/photo.jpg" value="{{ profile_picture }}">
-                    <div class="field-hint">Bir resim URL'si gir veya boş bırak.</div>
                 </div>
                 <div class="form-field">
                     <label>Fitness Hedefi</label>
@@ -382,19 +389,54 @@ function toast(msg, type) {
     setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3000);
 }
 
-function updateAvatarPreview() {
-    const url = document.getElementById('profile_picture').value.trim();
+function updateAvatarLetter() {
     const display = document.getElementById('avatar-display');
-    if (url) {
-        display.innerHTML = '<img src="' + url.replace(/"/g, '&quot;') + '" alt="Profil" style="width:100%;height:100%;object-fit:cover;">';
-    } else {
-        const letter = (document.getElementById('username').value || 'U')[0].toUpperCase();
-        display.innerHTML = '<span>' + letter + '</span>';
-    }
+    if (display.querySelector('img')) return;
+    const letter = (document.getElementById('username').value || 'U')[0].toUpperCase();
+    const span = display.querySelector('span');
+    if (span) span.textContent = letter;
 }
 
-document.getElementById('profile_picture').addEventListener('input', updateAvatarPreview);
-document.getElementById('username').addEventListener('input', updateAvatarPreview);
+document.getElementById('username').addEventListener('input', updateAvatarLetter);
+
+document.getElementById('avatar-file-input').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) { toast('Maksimum dosya boyutu 2MB.', 'error'); return; }
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+        const base64 = ev.target.result;
+        const display = document.getElementById('avatar-display');
+        const overlay = display.querySelector('.avatar-overlay');
+        const img = display.querySelector('img') || document.createElement('img');
+        img.src = base64;
+        img.alt = 'Profil';
+        img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+        const letter = display.querySelector('span');
+        if (letter) letter.remove();
+        if (!display.querySelector('img')) display.insertBefore(img, overlay);
+        try { localStorage.setItem('fitx_user_avatar', base64); } catch {}
+        toast('Profil fotoğrafı güncellendi.', 'success');
+    };
+    reader.readAsDataURL(file);
+});
+
+(function loadSavedAvatar() {
+    const saved = localStorage.getItem('fitx_user_avatar');
+    if (!saved) return;
+    const display = document.getElementById('avatar-display');
+    if (!display) return;
+    const overlay = display.querySelector('.avatar-overlay');
+    const existing = display.querySelector('img');
+    if (existing) { existing.src = saved; return; }
+    const img = document.createElement('img');
+    img.src = saved;
+    img.alt = 'Profil';
+    img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
+    const letter = display.querySelector('span');
+    if (letter) letter.remove();
+    display.insertBefore(img, overlay);
+})();
 
 async function saveProfile() {
     const btn = document.getElementById('save-btn');
@@ -408,7 +450,6 @@ async function saveProfile() {
             body: JSON.stringify({
                 full_name: document.getElementById('full_name').value.trim(),
                 username: document.getElementById('username').value.trim(),
-                profile_picture: document.getElementById('profile_picture').value.trim(),
                 goal: selectedGoal
             })
         });
