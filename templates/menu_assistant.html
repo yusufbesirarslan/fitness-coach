@@ -192,6 +192,10 @@
         line-height: 1.5; margin-bottom: 10px;
     }
 
+    .dish-serving-label {
+        font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+        color: #505058; text-transform: uppercase; margin-bottom: 6px;
+    }
     .dish-macros {
         display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 10px;
     }
@@ -531,6 +535,7 @@ function dishCard(d, isTop) {
             <div class="dish-score ${scoreClass}">${d.score > 0 ? '+' : ''}${d.score}</div>
         </div>
         <div class="dish-reason">${d.reason}</div>
+        <div class="dish-serving-label">1 Porsiyon</div>
         <div class="dish-macros">
             <div class="dish-macro"><span>${m.calories}</span> kcal</div>
             <div class="dish-macro"><span>${m.protein}g</span> protein</div>

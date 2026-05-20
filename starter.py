@@ -1154,42 +1154,125 @@ SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma:
     return {}
 
 
+def _is_per_serving(serving_text):
+    if not serving_text:
+        return False
+    s = serving_text.lower()
+    per_100_patterns = ("per 100g", "per 100 g", "100g başına", "100 gram")
+    if any(p in s for p in per_100_patterns):
+        return False
+    serving_patterns = ("per 1 serving", "per serving", "1 serving", "1 portion",
+                        "1 plate", "1 porsiyon", "1 tabak", "per 1 cup", "per 1 bowl")
+    return any(p in s for p in serving_patterns)
+
+
 def _lookup_macros_fatsecret(items, token):
     import requests as http_req
     from fitx_mcp.server import _parse_fatsecret_desc, FATSECRET_API_URL
-    results = {}
+    per_serving = {}
+    per_100g = {}
     for name in items:
         try:
             fs_resp = http_req.get(FATSECRET_API_URL, params={
                 "method": "foods.search",
                 "search_expression": name,
                 "format": "json",
-                "max_results": 3,
+                "max_results": 5,
             }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
             fs_data = fs_resp.json()
             foods = fs_data.get("foods", {}).get("food", [])
             if isinstance(foods, dict):
                 foods = [foods]
-            if foods:
-                parsed = _parse_fatsecret_desc(foods[0].get("food_description", ""))
-                if parsed and parsed.get("calories"):
-                    results[name] = {
-                        "calories": float(parsed.get("calories", 0)),
-                        "protein": float(parsed.get("protein", 0)),
-                        "carbs": float(parsed.get("carbs", 0)),
-                        "fat": float(parsed.get("fat", 0)),
-                    }
+            if not foods:
+                continue
+
+            found_serving = False
+            baseline_100g = None
+
+            for food in foods:
+                parsed = _parse_fatsecret_desc(food.get("food_description", ""))
+                if not parsed or not parsed.get("calories"):
+                    continue
+                macros = {
+                    "calories": float(parsed.get("calories", 0)),
+                    "protein": float(parsed.get("protein", 0)),
+                    "carbs": float(parsed.get("carbs", 0)),
+                    "fat": float(parsed.get("fat", 0)),
+                }
+                serving_text = parsed.get("serving", "")
+                if _is_per_serving(serving_text):
+                    per_serving[name] = macros
+                    found_serving = True
+                    break
+                if baseline_100g is None:
+                    baseline_100g = macros
+
+            if not found_serving and baseline_100g:
+                per_100g[name] = baseline_100g
+
         except Exception:
             continue
-    return results
+    return per_serving, per_100g
+
+
+def _estimate_serving_weights_llm(items):
+    if not items:
+        return {}
+    items_str = "\n".join(f"- {name}" for name in items)
+    prompt = f"""Sen bir restoran şefi ve beslenme uzmanısın. Aşağıdaki yemeklerin Türkiye'de standart bir restoranda servis edilen 1 PORSİYONUNUN ortalama ağırlığını GRAM cinsinden tahmin et.
+
+Kurallar:
+- Sadece tabakta servis edilen yemeğin ağırlığını ver (tabak hariç)
+- Garnitür, pilav, salata gibi yan ürünler dahil
+- Et yemekleri: sadece et 150-200g, garnitürle 300-400g
+- Salatalar: 250-350g
+- Çorbalar: 250-300ml (≈ gram)
+- Makarnalar: 300-400g
+- Hamburger: 250-350g
+- Izgara balık: 200-300g (garnitürle 350-450g)
+
+Yemekler:
+{items_str}
+
+SADECE aşağıdaki JSON formatında yanıt ver:
+{{{", ".join(f'"{name}": GRAM_SAYISI' for name in items[:3])}{"..." if len(items) > 3 else ""}}}"""
+
+    try:
+        resp = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "SADECE JSON döndür. Her yemek için farklı, gerçekçi gram değerleri ver. Sayıları integer olarak yaz."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            max_tokens=1000,
+        )
+        raw = resp.choices[0].message.content.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start >= 0 and end > start:
+            parsed = json.loads(raw[start:end])
+            results = {}
+            for name in items:
+                if name in parsed:
+                    grams = parsed[name]
+                    if isinstance(grams, (int, float)) and 50 <= grams <= 1500:
+                        results[name] = float(grams)
+            return results
+    except Exception as e:
+        print(f"LLM SERVING WEIGHT ERROR: {e}")
+    return {}
 
 
 def _estimate_macros_llm(items):
     if not items:
         return {}
     items_str = "\n".join(f"- {name}" for name in items)
-    prompt = f"""Sen bir beslenme uzmanısın. Aşağıdaki restoran yemeklerinin TAHMİNİ besin değerlerini hesapla.
-Standart restoran porsiyonu kabul et (yaklaşık 250-350g arası bir tabak).
+    prompt = f"""Sen bir beslenme uzmanısın. Aşağıdaki restoran yemeklerinin 1 PORSİYON (standart restoran servisi) için TAHMİNİ besin değerlerini hesapla.
+
+ÖNEMLİ: Değerler 100 gram için DEĞİL, 1 tam porsiyon (tabaktaki yemeğin tamamı) için olmalı.
+Referans porsiyon ağırlıkları: Et yemekleri garnitürle ~350g, salatalar ~300g, çorbalar ~280g, makarnalar ~350g.
 Her yemek için gerçekçi değerler ver. Hiçbir yemeğe aynı değerleri verme, her biri farklı olmalı.
 
 Yemekler:
@@ -1204,7 +1287,7 @@ Tüm {len(items)} yemek için değer ver. Sadece JSON döndür, başka bir şey 
         resp = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": "SADECE JSON döndür. Her yemek için farklı, gerçekçi makro değerleri hesapla. Hiçbir yemeğe aynı varsayılan değerleri kopyalama."},
+                {"role": "system", "content": "SADECE JSON döndür. Her yemek için 1 TAM PORSİYON (100g değil!) besin değerleri hesapla. Her yemeğe farklı, gerçekçi makro değerleri ver."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.2,
@@ -1340,11 +1423,25 @@ def analyze_menu():
 
     from fitx_mcp.server import _get_fatsecret_token
     macro_map = {}
+    per_100g_items = {}
     try:
         token = _get_fatsecret_token()
-        macro_map = _lookup_macros_fatsecret(item_names, token)
+        per_serving, per_100g_items = _lookup_macros_fatsecret(item_names, token)
+        macro_map.update(per_serving)
     except Exception:
         pass
+
+    if per_100g_items:
+        serving_weights = _estimate_serving_weights_llm(list(per_100g_items.keys()))
+        for name, base_macros in per_100g_items.items():
+            grams = serving_weights.get(name, 300)
+            scale = grams / 100.0
+            macro_map[name] = {
+                "calories": base_macros["calories"] * scale,
+                "protein": base_macros["protein"] * scale,
+                "carbs": base_macros["carbs"] * scale,
+                "fat": base_macros["fat"] * scale,
+            }
 
     missing = [n for n in item_names if n not in macro_map]
     if missing:
