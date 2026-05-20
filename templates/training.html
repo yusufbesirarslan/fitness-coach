@@ -188,10 +188,15 @@
             background: var(--volt, #CCFF00); color: #000;
             font-family: var(--font-display); font-size: 16px; letter-spacing: 2px;
             padding: 14px 32px; border: none; border-radius: var(--r-sm);
-            cursor: pointer; transition: opacity 0.2s;
+            cursor: pointer; transition: opacity 0.2s, background 0.3s;
         }
         .finish-workout-btn:hover { opacity: 0.85; }
         .finish-workout-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .finish-workout-btn.completed {
+            background: #3a3a3f; color: #8a8a90; opacity: 0.6;
+            pointer-events: none; cursor: default;
+            box-shadow: none;
+        }
 
         .reset-plan-btn {
             background: none; border: 1px solid var(--border); color: var(--text-3);
@@ -763,6 +768,23 @@
         document.getElementById('apv-detail-panel').classList.remove('visible');
     }
 
+    function getTodayKey() {
+        const d = new Date();
+        return 'fitx_workout_completed_' + d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    }
+
+    function markWorkoutCompleted() {
+        const btn = document.getElementById('finish-workout-btn');
+        if (!btn) return;
+        btn.disabled = true;
+        btn.textContent = '✓ Antrenman Tamamlandı';
+        btn.classList.add('completed');
+    }
+
+    function checkWorkoutCompleted() {
+        if (localStorage.getItem(getTodayKey()) === 'true') markWorkoutCompleted();
+    }
+
     async function finishWorkout() {
         const btn = document.getElementById('finish-workout-btn');
         btn.disabled = true;
@@ -772,16 +794,19 @@
             const data = await res.json();
             if (res.ok) {
                 showToast(data.message, 'success');
-                btn.textContent = '✓ TAMAMLANDI';
+                localStorage.setItem(getTodayKey(), 'true');
+                markWorkoutCompleted();
             } else {
                 showToast(data.error || 'Hata oluştu', 'error');
                 btn.disabled = false;
                 btn.textContent = '✔ Bugünkü Antrenmanı Tamamla';
+                btn.classList.remove('completed');
             }
         } catch (err) {
             showToast('Bağlantı hatası', 'error');
             btn.disabled = false;
             btn.textContent = '✔ Bugünkü Antrenmanı Tamamla';
+            btn.classList.remove('completed');
         }
     }
 
@@ -950,7 +975,7 @@
 
     populateOptions();
     loadInfo();
-    loadActivePlan();
+    loadActivePlan().then(() => checkWorkoutCompleted());
 </script>
 
 <script src="/static/coach_widget.js"></script>

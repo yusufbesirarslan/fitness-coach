@@ -137,26 +137,6 @@
 <!-- ═══ BENTO GRID ═══ -->
 <div class="bento">
 
-    <!-- ═══ B. DISCIPLINE TRACKER (STREAK) ═══ -->
-    <div class="bc b-1 streak-card">
-        <div class="bc-lbl"><span class="bc-dot" style="background:#FFB020"></span>Disiplin Takibi</div>
-        <div class="streak-hero">
-            <div class="streak-number" id="streak-num">1</div>
-            <div class="streak-unit">GÜN</div>
-        </div>
-        <div class="streak-sub-label">Kesintisiz Seri</div>
-        <div class="streak-week" id="streak-week">
-            <div class="streak-day" data-day="Pzt">P</div>
-            <div class="streak-day" data-day="Sal">S</div>
-            <div class="streak-day" data-day="Çar">Ç</div>
-            <div class="streak-day" data-day="Per">P</div>
-            <div class="streak-day" data-day="Cum">C</div>
-            <div class="streak-day" data-day="Cmt">C</div>
-            <div class="streak-day" data-day="Paz">P</div>
-        </div>
-        <div class="streak-msg" id="streak-sub">Bugün giriş yaptın, serini koru!</div>
-    </div>
-
     <!-- ═══ CALORIE RING ═══ -->
     <div class="bc b-1">
         <div class="bc-lbl"><span class="bc-dot" style="background:#CCFF00"></span>Günlük Kalori</div>
@@ -278,24 +258,23 @@
 
     <!-- ═══ JOURNEY MAP — full width ═══ -->
     <div class="bc b-3 journey-card">
-        <div class="bc-lbl"><span class="bc-dot" style="background:#CCFF00"></span>Fitness Yolculuğun</div>
         <div class="jm-header">
             <div class="jm-level" id="jm-level">{{ user_level }}</div>
             <div class="jm-info">
                 <div class="jm-title-text" id="jm-title">{{ user_title }}</div>
-                <div class="jm-xp-text" id="jm-xp">{{ user_xp }} XP · Sonraki seviye: {{ xp_for_next - xp_in_level }} XP kaldı</div>
+                <div class="jm-xp-row">
+                    <span class="jm-xp-text" id="jm-xp">{{ xp_in_level }} / {{ xp_for_next }} XP</span>
+                    <span class="jm-streak-flame" id="jm-streak">
+                        <svg class="flame-icon" viewBox="0 0 24 24"><defs><linearGradient id="flameGrad" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#FF6B00"/><stop offset="100%" stop-color="#FF2D7B"/></linearGradient></defs><path d="M12 2c.5 3.5-1 6-1 6s2-.5 3 1c1 1.5 0 4 0 4s1.5-1 2 .5.5 3.5-1 4.5-2 1-2 1 1-1.5 0-3-2-2-2-2-.5 2-2 3-1.5-1-1.5-1-.5 2.5-2 3-2-1-2-2 1.5-3 1.5-3-2 1.5-2.5 4c-.5 2.5 1 4 1 4s-3-1-3-5 3-8 5-10z" fill="url(#flameGrad)"/></svg>
+                        <span id="jm-streak-num">{{ streak_count|default(0) }} Gün</span>
+                    </span>
+                </div>
             </div>
         </div>
         <div class="jm-bar">
             <div class="jm-bar-inner" id="jm-bar" style="width:{{ (xp_in_level / xp_for_next * 100)|int }}%"></div>
         </div>
-        <div class="jm-milestones" id="jm-milestones">
-            <div class="jm-badge" data-req="streak-7"><span class="jm-badge-icon">⚡</span> 7 Gün Seri</div>
-            <div class="jm-badge" data-req="streak-30"><span class="jm-badge-icon">◆</span> 30 Gün Seri</div>
-            <div class="jm-badge" data-req="level-5"><span class="jm-badge-icon">▲</span> Seviye 5</div>
-            <div class="jm-badge" data-req="level-10"><span class="jm-badge-icon">★</span> Seviye 10</div>
-            <div class="jm-badge" data-req="level-20"><span class="jm-badge-icon">✦</span> Seviye 20</div>
-        </div>
+        <div class="jm-bonus" id="jm-bonus"></div>
     </div>
 
 </div><!-- /bento -->
@@ -502,26 +481,10 @@ function computeStreak() {
     return next;
 }
 function renderStreak(n) {
-    document.getElementById('streak-num').textContent = n;
-    document.getElementById('g-streak-badge').textContent = `${n} Günlük Seri`;
-
-    const subs = ['Bugün giriş yaptın, serini koru!','Harika! 2 gün art arda.','Mükemmel — 3 gün seri!','Etkileyici, devam et!','Harika bir hafta geçiriyorsun!'];
-    document.getElementById('streak-sub').textContent = n <= subs.length ? subs[n-1] : `${n} gündür kesintisiz — efsanesin.`;
-
-    renderStreakWeek(n);
-}
-function renderStreakWeek(streakCount) {
-    const today = new Date().getDay();
-    const days = document.querySelectorAll('.streak-day');
-    days.forEach((d, i) => {
-        const dayIndex = (i + 1) % 7;
-        const isToday = dayIndex === today;
-        const isPast = dayIndex < today || (today === 0 && dayIndex > 0);
-        const daysBack = isToday ? 0 : ((today - dayIndex + 7) % 7);
-        const active = isPast && daysBack < streakCount;
-        d.classList.toggle('active', active || isToday);
-        d.classList.toggle('today', isToday);
-    });
+    const badge = document.getElementById('g-streak-badge');
+    if (badge) badge.textContent = `${n} Günlük Seri`;
+    const flameNum = document.getElementById('jm-streak-num');
+    if (flameNum) flameNum.textContent = `${n} Gün`;
 }
 
 
@@ -831,22 +794,23 @@ async function init() {
     }
 
     await loadSparkline();
-    checkMilestones();
+    updateStreakBonus();
 }
 
-function checkMilestones() {
-    const level = {{ user_level }};
+function updateStreakBonus() {
     const streak = {{ streak_count|default(0) }};
-    document.querySelectorAll('.jm-badge').forEach(b => {
-        const req = b.dataset.req;
-        let earned = false;
-        if (req === 'streak-7') earned = streak >= 7;
-        else if (req === 'streak-30') earned = streak >= 30;
-        else if (req === 'level-5') earned = level >= 5;
-        else if (req === 'level-10') earned = level >= 10;
-        else if (req === 'level-20') earned = level >= 20;
-        if (earned) b.classList.add('earned');
-    });
+    const bonus = document.getElementById('jm-bonus');
+    if (!bonus) return;
+    let mult = 1.0;
+    if (streak >= 30) mult = 1.5;
+    else if (streak >= 14) mult = 1.3;
+    else if (streak >= 7) mult = 1.2;
+    else if (streak >= 3) mult = 1.1;
+    if (mult > 1.0) {
+        bonus.innerHTML = '<span class="bonus-active">×' + mult.toFixed(1) + ' Seri XP Bonusu Aktif</span>';
+    } else {
+        bonus.textContent = '3 gün seri yap → ×1.1 XP Bonus açılır';
+    }
 }
 
 init();

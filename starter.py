@@ -729,6 +729,35 @@ def log_meal():
     if not ogun or not yemekler:
         return jsonify({"error": "Öğün ve yemekler zorunludur"}), 400
 
+    _FITNESS_DICT = {
+        r'(?i)\b(\d+)\s*(?:ölçek|scoop)\s*(?:whey|protein\s*tozu|protein\s*powder)':
+            lambda m: (f"{m.group(1)} ölçek whey protein tozu ({int(m.group(1))*30}g)", None),
+        r'(?i)\b(\d+)\s*(?:ölçek|scoop)\s*kreatin':
+            lambda m: (f"{m.group(1)} ölçek kreatin ({int(m.group(1))*5}g)", None),
+        r'(?i)\b(\d+)\s*(?:ölçek|scoop)\s*(?:kazein|casein)':
+            lambda m: (f"{m.group(1)} ölçek kazein protein ({int(m.group(1))*33}g)", None),
+        r'(?i)\b(\d+)\s*(?:adet\s+)?pirinç\s*patlağı':
+            lambda m: (f"{m.group(1)} adet pirinç patlağı ({int(m.group(1))*8}g)", None),
+        r'(?i)\bprotein\s*bar[ıi]?\b':
+            lambda m: ("1 protein bar (60g)", None),
+        r'(?i)\b(\d+)\s*(?:kaşık|tbsp)\s*fıstık\s*ezmesi':
+            lambda m: (f"{m.group(1)} yemek kaşığı fıstık ezmesi ({int(m.group(1))*15}g)", None),
+        r'(?i)\b(\d+)\s*(?:kaşık|tbsp)\s*(?:bal|honey)':
+            lambda m: (f"{m.group(1)} yemek kaşığı bal ({int(m.group(1))*21}g)", None),
+        r'(?i)\bbcaa\b':
+            lambda m: ("1 ölçek BCAA (7g)", None),
+    }
+    import re as _re
+    normalized_yemekler = yemekler
+    for pattern, handler in _FITNESS_DICT.items():
+        match = _re.search(pattern, normalized_yemekler)
+        if match:
+            replacement, _ = handler(match)
+            normalized_yemekler = _re.sub(pattern, replacement, normalized_yemekler, count=1)
+    if normalized_yemekler != yemekler:
+        print(f"[MEAL] Normalized: '{yemekler}' → '{normalized_yemekler}'")
+    yemekler_for_prompt = normalized_yemekler
+
     override = data.get("override_macros")
     if override:
         nutrients = {
@@ -770,7 +799,16 @@ def log_meal():
         f"- Peynir (kaşar, 100g): 350 kcal, 25g protein, 1.5g karb, 27g yağ\n"
         f"- Salatalık (100g): 16 kcal, 0.7g protein, 3.6g karb, 0.1g yağ\n"
         f"- Domates (100g): 18 kcal, 0.9g protein, 3.9g karb, 0.2g yağ\n\n"
-        f"Kullanıcının yediği: {yemekler}\n\n"
+        f"Spor takviyeleri ve fitness besinleri:\n"
+        f"- Whey protein tozu (1 ölçek, 30g): 120 kcal, 24g protein, 3g karb, 1.5g yağ\n"
+        f"- Kazein protein (1 ölçek, 33g): 120 kcal, 24g protein, 3g karb, 1g yağ\n"
+        f"- Kreatin monohidrat (1 ölçek, 5g): 0 kcal, 0g protein, 0g karb, 0g yağ\n"
+        f"- BCAA (1 ölçek, 7g): 0 kcal, 0g protein, 0g karb, 0g yağ\n"
+        f"- Protein bar (1 adet, 60g): 220 kcal, 20g protein, 22g karb, 8g yağ\n"
+        f"- Pirinç patlağı (1 adet, 8g): 28 kcal, 0.7g protein, 6g karb, 0.2g yağ\n"
+        f"- Fıstık ezmesi (1 yemek kaşığı, 15g): 94 kcal, 4g protein, 3g karb, 8g yağ\n"
+        f"- Bal (1 yemek kaşığı, 21g): 64 kcal, 0g protein, 17g karb, 0g yağ\n\n"
+        f"Kullanıcının yediği: {yemekler_for_prompt}\n\n"
         f"Her besini ayrı hesapla ve topla. Sonucu SADECE aşağıdaki JSON formatında döndür.\n"
         f"Değerler gerçek sayı olmalı (0 değil), ondalık olabilir:\n"
         f'{{"kalori": 520, "protein": 38, "karb": 45, "yag": 14}}'
@@ -787,11 +825,11 @@ def log_meal():
                 {"role": "user", "content": prompt}
             ],
             max_tokens=150,
-            temperature=0.1
+            temperature=0.0
         )
         raw = response.choices[0].message.content.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
-        
+
         # Bazen AI fazladan metin ekliyor, sadece { } arasını al
         start = raw.find("{")
         end = raw.rfind("}") + 1

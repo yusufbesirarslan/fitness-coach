@@ -90,13 +90,13 @@ body {
 .page-body { min-height: 100vh; background: var(--bg); }
 
 .main-content {
-  padding: var(--s3) var(--s2) var(--s4);
+  padding: var(--s3) var(--s2) 108px;
   max-width: var(--content-max);
   margin: 0 auto;
 }
 
 @media (min-width: 768px) {
-  .main-content { padding: var(--s5) var(--s5) var(--s6); }
+  .main-content { padding: var(--s5) var(--s5) 116px; }
 }
 
 /* ── 5. SIDEBAR ───────────────────────────────────── */
