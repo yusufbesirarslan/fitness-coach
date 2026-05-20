@@ -362,9 +362,9 @@
   padding-bottom: calc(var(--action-bar-h) + env(safe-area-inset-bottom, 0));
 }
 
-/* Override old sidebar layout on desktop */
+/* Override old sidebar layout on desktop — preserve centering */
 @media (min-width: 1024px) {
-  .main-content { margin-left: 0 !important; }
+  .main-content { margin-left: auto !important; margin-right: auto !important; }
 }
 
 /* Hide legacy nav elements */

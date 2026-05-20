@@ -599,6 +599,12 @@
 /* ═══════════════════════════════════════════════════════
    RESPONSIVE
    ═══════════════════════════════════════════════════════ */
+/* ── DESKTOP: wider bento grid with more breathing room ── */
+@media(min-width:1024px) {
+    .bento { gap: 20px; }
+    .greeting-row { gap: 28px; }
+}
+
 @media(max-width:1023px) {
     .bento { grid-template-columns:repeat(2,1fr); }
     .b-3   { grid-column:span 2; }
