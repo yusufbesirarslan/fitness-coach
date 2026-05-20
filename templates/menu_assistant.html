@@ -457,10 +457,13 @@ async function processUrl(url) {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({url})
         });
-        const proxyData = await proxyRes.json();
+
+        let proxyData;
+        try { proxyData = await proxyRes.json(); }
+        catch { setStatus('Sunucudan geçersiz yanıt alındı.', 'error'); return; }
 
         if (!proxyRes.ok) {
-            setStatus(proxyData.error || 'Tarama başarısız.', 'error');
+            setStatus(proxyData.error || 'Menü içeriği şu anda korumalı veya okunamıyor. Lütfen linki kontrol edip tekrar deneyiniz.', 'error');
             return;
         }
 
@@ -468,6 +471,11 @@ async function processUrl(url) {
         setStatus(`Yemekler analiz ediliyor...${subCount ? ' (' + (subCount+1) + ' sayfa tarandı)' : ''}`, 'loading');
 
         const menuText = [proxyData.title, ...proxyData.headings, proxyData.body_text].join('\n');
+        if (!menuText || menuText.trim().length < 20) {
+            setStatus('Menü içeriği şu anda korumalı veya okunamıyor. Lütfen linki kontrol edip tekrar deneyiniz.', 'error');
+            return;
+        }
+
         const analyzeBody = {menu_text: menuText};
         if (proxyData.framework_state) analyzeBody.framework_state = proxyData.framework_state;
         if (proxyData.headings && proxyData.headings.length) analyzeBody.headings = proxyData.headings;
@@ -477,12 +485,20 @@ async function processUrl(url) {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify(analyzeBody)
         });
-        const result = await analyzeRes.json();
+
+        let result;
+        try { result = await analyzeRes.json(); }
+        catch { setStatus('Analiz yanıtı okunamadı. Lütfen tekrar deneyin.', 'error'); return; }
+
+        if (!analyzeRes.ok || result.success === false) {
+            setStatus(result.message || result.error || 'Menü metni işlenirken bir hata oluştu. Lütfen tekrar deneyin.', 'error');
+            return;
+        }
 
         const totalItems = Object.values(result.categories || {}).reduce((s, arr) => s + arr.length, 0);
 
         if (result.error && totalItems === 0) {
-            setStatus(result.error, 'error');
+            setStatus(result.message || result.error, 'error');
             return;
         }
 
@@ -491,7 +507,8 @@ async function processUrl(url) {
         renderResults(result);
 
     } catch (e) {
-        setStatus('Bağlantı hatası.', 'error');
+        console.error('[MENU] processUrl error:', e);
+        setStatus('Bağlantı hatası. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.', 'error');
     }
 }
 

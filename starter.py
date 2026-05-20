@@ -1127,6 +1127,20 @@ def proxy_scan_menu():
         all_text_parts.append(f"[{sec['category']}]\n{sec['text']}")
     body_text = "\n\n".join(all_text_parts)
 
+    if not body_text or len(body_text.strip()) < 20:
+        fallback_soup = BeautifulSoup(raw_html, "html.parser")
+        for tag in fallback_soup(["script", "style", "iframe", "object", "embed", "link", "meta", "noscript", "svg"]):
+            tag.decompose()
+        body_text = fallback_soup.get_text(separator=" ", strip=True)
+        print(f"[SCRAPER] Section extraction empty — used full-body fallback: {len(body_text)} chars")
+
+    if not body_text or len(body_text.strip()) < 20:
+        return jsonify({"error": "Menü içeriği şu anda korumalı veya okunamıyor. Lütfen linki kontrol edip tekrar deneyiniz."}), 422
+
+    import re as _re
+    body_text = _re.sub(r'\s{3,}', '  ', body_text)
+    body_text = _re.sub(r'(\n\s*){3,}', '\n\n', body_text)
+
     headings = [sec["category"] for sec in sections if sec["category"] != "Genel"]
     unique_headings = list(dict.fromkeys(headings))[:40]
 
@@ -1189,18 +1203,28 @@ SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma:
             max_tokens=2500,
         )
         raw = resp.choices[0].message.content.strip()
+        print(f"[EXTRACT] LLM raw response length: {len(raw)} chars")
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
         end = raw.rfind("}") + 1
-        if start >= 0 and end > start:
+        if start < 0 or end <= start:
+            print(f"[EXTRACT] ERROR: No valid JSON braces found in LLM response: {raw[:200]}")
+            return {}
+        try:
             parsed = json.loads(raw[start:end])
-            cats = parsed.get("categories", parsed)
-            if isinstance(cats, dict):
-                result = {k: v for k, v in cats.items() if isinstance(v, list)}
-                print(f"[EXTRACT] LLM returned {len(result)} categories: {list(result.keys())} — Total items: {sum(len(v) for v in result.values())}")
-                return result
+        except json.JSONDecodeError as je:
+            print(f"[EXTRACT] JSON parse failed: {je} — Raw snippet: {raw[start:start+300]}")
+            return {}
+        cats = parsed.get("categories", parsed)
+        if isinstance(cats, dict):
+            result = {k: v for k, v in cats.items() if isinstance(v, list)}
+            print(f"[EXTRACT] LLM returned {len(result)} categories: {list(result.keys())} — Total items: {sum(len(v) for v in result.values())}")
+            return result
+        print(f"[EXTRACT] ERROR: Unexpected parsed structure type: {type(cats).__name__}")
+    except json.JSONDecodeError as je:
+        print(f"[EXTRACT] JSON ERROR: {je}")
     except Exception as e:
-        print(f"[EXTRACT] ERROR: {e}")
+        print(f"[EXTRACT] ERROR: {type(e).__name__}: {e}")
     return {}
 
 
@@ -1464,9 +1488,15 @@ def analyze_menu():
     }
 
     headings_hint = (data or {}).get("headings")
-    categorized = _extract_categorized_items(raw_text, fw_state, headings=headings_hint)
+    try:
+        categorized = _extract_categorized_items(raw_text, fw_state, headings=headings_hint)
+    except Exception as e:
+        print(f"[ANALYZE] Extraction crashed: {type(e).__name__}: {e}")
+        categorized = {}
     if not categorized:
-        return jsonify({"error": "Menüden yemek çıkarılamadı.", "items": [], "categories": {}}), 200
+        return jsonify({"success": False, "error": "OUTPUT_PARSING_FAILED",
+                        "message": "Menü metni işlenirken bir hata oluştu. Lütfen tekrar deneyin.",
+                        "items": [], "categories": {}}), 200
 
     all_items = []
     for cat, items in categorized.items():
@@ -1475,7 +1505,9 @@ def analyze_menu():
                 all_items.append((cat, name.strip()))
 
     if not all_items:
-        return jsonify({"error": "Menüden yemek çıkarılamadı.", "items": [], "categories": {}}), 200
+        return jsonify({"success": False, "error": "OUTPUT_PARSING_FAILED",
+                        "message": "Menü metni işlenirken bir hata oluştu. Lütfen tekrar deneyin.",
+                        "items": [], "categories": {}}), 200
 
     item_names = list(dict.fromkeys(name for _, name in all_items))
 
