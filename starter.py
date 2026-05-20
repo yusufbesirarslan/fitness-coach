@@ -1296,13 +1296,15 @@ def _lookup_macros_fatsecret(items, token):
             if isinstance(foods, dict):
                 foods = [foods]
             if not foods:
+                print(f"[MACRO ENGINE] FatSecret returned 0 results for '{name}'")
                 continue
 
             found_serving = False
             baseline_100g = None
 
             for food in foods:
-                parsed = _parse_fatsecret_desc(food.get("food_description", ""))
+                desc_raw = food.get("food_description", "")
+                parsed = _parse_fatsecret_desc(desc_raw)
                 if not parsed or not parsed.get("calories"):
                     continue
                 macros = {
@@ -1315,21 +1317,26 @@ def _lookup_macros_fatsecret(items, token):
                 if _is_per_serving(serving_text):
                     per_serving[name] = macros
                     found_serving = True
+                    print(f"[MACRO ENGINE] FatSecret per-serving match: '{name}' → Cal={macros['calories']}, P={macros['protein']}, C={macros['carbs']}, F={macros['fat']}")
                     break
                 if baseline_100g is None:
                     baseline_100g = macros
 
             if not found_serving and baseline_100g:
                 per_100g[name] = baseline_100g
+                print(f"[MACRO ENGINE] FatSecret per-100g baseline: '{name}' → Cal={baseline_100g['calories']}/100g")
 
-        except Exception:
+        except Exception as e:
+            print(f"[MACRO ENGINE] FatSecret lookup failed for '{name}': {type(e).__name__}: {e}")
             continue
+    print(f"[MACRO ENGINE] FatSecret totals: {len(per_serving)} per-serving, {len(per_100g)} per-100g, {len(items) - len(per_serving) - len(per_100g)} missed")
     return per_serving, per_100g
 
 
 def _estimate_serving_weights_llm(items):
     if not items:
         return {}
+    print(f"[MACRO ENGINE] Estimating serving weights for {len(items)} per-100g items")
     items_str = "\n".join(f"- {name}" for name in items)
     prompt = f"""Sen bir restoran şefi ve beslenme uzmanısın. Aşağıdaki yemeklerin Türkiye'de standart bir restoranda servis edilen 1 PORSİYONUNUN ortalama ağırlığını GRAM cinsinden tahmin et.
 
@@ -1365,21 +1372,30 @@ SADECE aşağıdaki JSON formatında yanıt ver:
         end = raw.rfind("}") + 1
         if start >= 0 and end > start:
             parsed = json.loads(raw[start:end])
+            llm_lower = {k.strip().lower(): k for k in parsed.keys()}
             results = {}
             for name in items:
-                if name in parsed:
-                    grams = parsed[name]
-                    if isinstance(grams, (int, float)) and 50 <= grams <= 1500:
-                        results[name] = float(grams)
+                grams = parsed.get(name)
+                if grams is None:
+                    llm_key = llm_lower.get(name.strip().lower())
+                    if llm_key:
+                        grams = parsed[llm_key]
+                if isinstance(grams, (int, float)) and 50 <= grams <= 1500:
+                    results[name] = float(grams)
+                else:
+                    results[name] = 150.0
+                    print(f"[MACRO ENGINE] Serving weight fallback 150g for '{name}' (raw={grams})")
+            print(f"[MACRO ENGINE] Serving weights resolved: {results}")
             return results
     except Exception as e:
-        print(f"LLM SERVING WEIGHT ERROR: {e}")
-    return {}
+        print(f"[MACRO ENGINE] LLM SERVING WEIGHT ERROR: {type(e).__name__}: {e}")
+    return {n: 150.0 for n in items}
 
 
 def _estimate_macros_llm(items):
     if not items:
         return {}
+    print(f"[MACRO ENGINE] LLM fallback estimating macros for {len(items)} items: {items[:5]}{'...' if len(items)>5 else ''}")
     items_str = "\n".join(f"- {name}" for name in items)
     prompt = f"""Sen bir beslenme uzmanısın. Aşağıdaki restoran yemeklerinin 1 PORSİYON (standart restoran servisi) için TAHMİNİ besin değerlerini hesapla.
 
@@ -1387,7 +1403,7 @@ def _estimate_macros_llm(items):
 Referans porsiyon ağırlıkları: Et yemekleri garnitürle ~350g, salatalar ~300g, çorbalar ~280g, makarnalar ~350g.
 Her yemek için gerçekçi değerler ver. Hiçbir yemeğe aynı değerleri verme, her biri farklı olmalı.
 
-Yemekler:
+ÖNEMLİ: JSON anahtarları olarak yemek isimlerini AYNEN aşağıdaki listeden kopyala, hiçbir harfi değiştirme:
 {items_str}
 
 SADECE aşağıdaki JSON formatında yanıt ver:
@@ -1399,7 +1415,7 @@ Tüm {len(items)} yemek için değer ver. Sadece JSON döndür, başka bir şey 
         resp = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[
-                {"role": "system", "content": "SADECE JSON döndür. Her yemek için 1 TAM PORSİYON (100g değil!) besin değerleri hesapla. Her yemeğe farklı, gerçekçi makro değerleri ver."},
+                {"role": "system", "content": "SADECE JSON döndür. Her yemek için 1 TAM PORSİYON (100g değil!) besin değerleri hesapla. Her yemeğe farklı, gerçekçi makro değerleri ver. JSON anahtarlarını kullanıcının verdiği isimlerle BİREBİR AYNI yaz."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0.0,
@@ -1411,19 +1427,56 @@ Tüm {len(items)} yemek için değer ver. Sadece JSON döndür, başka bir şey 
         end = raw.rfind("}") + 1
         if start >= 0 and end > start:
             parsed = json.loads(raw[start:end])
+            print(f"[MACRO ENGINE] LLM returned {len(parsed)} keys: {list(parsed.keys())[:5]}...")
+
+            name_lower_map = {n.strip().lower(): n for n in items}
+            llm_key_map = {}
+            for k in parsed.keys():
+                llm_key_map[k.strip().lower()] = k
+
             results = {}
             for name in items:
+                m = None
                 if name in parsed and isinstance(parsed[name], dict):
                     m = parsed[name]
-                    results[name] = {
-                        "calories": float(m.get("calories", 0)),
-                        "protein": float(m.get("protein", 0)),
-                        "carbs": float(m.get("carbs", 0)),
-                        "fat": float(m.get("fat", 0)),
+                else:
+                    llm_key = llm_key_map.get(name.strip().lower())
+                    if llm_key and isinstance(parsed.get(llm_key), dict):
+                        m = parsed[llm_key]
+                        print(f"[MACRO ENGINE] Fuzzy match: '{name}' → LLM key '{llm_key}'")
+
+                if m:
+                    import re as _re
+                    _num_pat = _re.compile(r"(\d+(?:[.,]\d+)?)")
+                    def _safe_float(v):
+                        if isinstance(v, (int, float)):
+                            return float(v)
+                        if isinstance(v, str):
+                            match = _num_pat.search(v.replace(",", "."))
+                            if match:
+                                return float(match.group(1))
+                        return 0.0
+
+                    macros = {
+                        "calories": _safe_float(m.get("calories", 0)),
+                        "protein": _safe_float(m.get("protein", 0)),
+                        "carbs": _safe_float(m.get("carbs", 0)),
+                        "fat": _safe_float(m.get("fat", 0)),
                     }
+                    if macros["calories"] > 0:
+                        results[name] = macros
+                        print(f"[MACRO ENGINE] LLM macro: '{name}' → Cal={macros['calories']}, P={macros['protein']}, C={macros['carbs']}, F={macros['fat']}")
+                    else:
+                        print(f"[MACRO ENGINE] LLM returned 0 calories for '{name}', raw={m}")
+                else:
+                    print(f"[MACRO ENGINE] LLM key mismatch — no match for '{name}' in parsed keys")
+
+            print(f"[MACRO ENGINE] LLM resolved {len(results)}/{len(items)} items with non-zero macros")
             return results
+        else:
+            print(f"[MACRO ENGINE] LLM response has no valid JSON braces: {raw[:300]}")
     except Exception as e:
-        print(f"LLM MACRO ESTIMATION ERROR: {e}")
+        print(f"[MACRO ENGINE] LLM MACRO ESTIMATION ERROR: {type(e).__name__}: {e}")
     return {}
 
 
@@ -1548,33 +1601,41 @@ def analyze_menu():
                         "items": [], "categories": {}}), 200
 
     item_names = list(dict.fromkeys(name for _, name in all_items))
+    print(f"[MACRO ENGINE] Starting macro pipeline for {len(item_names)} unique items")
 
     from fitx_mcp.server import _get_fatsecret_token
     macro_map = {}
     per_100g_items = {}
     try:
         token = _get_fatsecret_token()
+        print(f"[MACRO ENGINE] FatSecret token acquired")
         per_serving, per_100g_items = _lookup_macros_fatsecret(item_names, token)
         macro_map.update(per_serving)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[MACRO ENGINE] FatSecret FAILED — all items will use LLM fallback: {type(e).__name__}: {e}")
 
     if per_100g_items:
         serving_weights = _estimate_serving_weights_llm(list(per_100g_items.keys()))
         for name, base_macros in per_100g_items.items():
-            grams = serving_weights.get(name, 300)
+            grams = serving_weights.get(name, 150.0)
             scale = grams / 100.0
-            macro_map[name] = {
-                "calories": base_macros["calories"] * scale,
-                "protein": base_macros["protein"] * scale,
-                "carbs": base_macros["carbs"] * scale,
-                "fat": base_macros["fat"] * scale,
+            scaled = {
+                "calories": round(base_macros["calories"] * scale, 1),
+                "protein": round(base_macros["protein"] * scale, 1),
+                "carbs": round(base_macros["carbs"] * scale, 1),
+                "fat": round(base_macros["fat"] * scale, 1),
             }
+            macro_map[name] = scaled
+            print(f"[MACRO ENGINE] Scaled per-100g→serving: '{name}' × {scale:.1f} → Cal={scaled['calories']}")
 
     missing = [n for n in item_names if n not in macro_map]
+    print(f"[MACRO ENGINE] After FatSecret: {len(macro_map)} resolved, {len(missing)} missing → LLM fallback")
     if missing:
         llm_macros = _estimate_macros_llm(missing)
         macro_map.update(llm_macros)
+
+    final_resolved = sum(1 for n in item_names if n in macro_map and macro_map[n].get("calories", 0) > 0)
+    print(f"[MACRO ENGINE] Final pipeline result: {final_resolved}/{len(item_names)} items have non-zero macros")
 
     categories_result = {}
     all_scored = []

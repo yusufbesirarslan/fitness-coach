@@ -487,6 +487,7 @@ def search_nutrition_data(query: str) -> str:
 
 def _parse_fatsecret_desc(desc: str) -> dict | None:
     """Parse FatSecret's 'Per 100g - Calories: 165kcal | Fat: 3.57g | Carbs: 0.00g | Protein: 31.02g' format."""
+    import re as _re
     if not desc:
         return None
     parts = {}
@@ -498,18 +499,25 @@ def _parse_fatsecret_desc(desc: str) -> dict | None:
         else:
             macros = desc
 
+        _num_pat = _re.compile(r"(\d+(?:[.,]\d+)?)")
         for item in macros.split("|"):
             item = item.strip()
             if ":" not in item:
                 continue
             key, val = item.split(":", 1)
             key = key.strip().lower()
-            val = val.strip().replace("kcal", "").replace("g", "").strip()
-            try:
-                parts[key] = float(val)
-            except ValueError:
-                parts[key] = val
-    except Exception:
+            num_match = _num_pat.search(val)
+            if num_match:
+                num_str = num_match.group(1).replace(",", ".")
+                try:
+                    parts[key] = float(num_str)
+                except ValueError:
+                    print(f"[FATSECRET PARSE] Failed to convert '{num_str}' from key='{key}', val='{val.strip()}'")
+                    parts[key] = 0.0
+            else:
+                print(f"[FATSECRET PARSE] No number found in key='{key}', val='{val.strip()}'")
+    except Exception as e:
+        print(f"[FATSECRET PARSE] Exception parsing desc: {e} — desc='{desc[:200]}'")
         return None
     return parts if len(parts) > 1 else None
 
