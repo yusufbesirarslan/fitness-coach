@@ -1325,6 +1325,199 @@ def _try_wordpress_api(base_parsed, raw_html):
     return None, []
 
 
+# ── Google Drive Interceptor ──────────────────────────────────
+
+def _is_google_drive_url(url):
+    return bool(url) and ("drive.google.com" in url or "docs.google.com" in url)
+
+
+def _extract_drive_file_id(url):
+    import re
+    patterns = [
+        r'/file/d/([a-zA-Z0-9_-]+)',
+        r'/document/d/([a-zA-Z0-9_-]+)',
+        r'/spreadsheets/d/([a-zA-Z0-9_-]+)',
+        r'/presentation/d/([a-zA-Z0-9_-]+)',
+        r'[?&]id=([a-zA-Z0-9_-]+)',
+        r'/open\?id=([a-zA-Z0-9_-]+)',
+    ]
+    for pat in patterns:
+        m = re.search(pat, url)
+        if m:
+            return m.group(1)
+    return None
+
+
+def _get_drive_direct_url(url, file_id):
+    if "docs.google.com/document" in url:
+        return f"https://docs.google.com/document/d/{file_id}/export?format=txt", "doc"
+    if "docs.google.com/spreadsheets" in url:
+        return f"https://docs.google.com/spreadsheets/d/{file_id}/export?format=csv", "sheet"
+    return f"https://drive.google.com/uc?export=download&id={file_id}", "file"
+
+
+def _extract_text_from_pdf(pdf_bytes):
+    import pdfplumber
+    import io
+    text_parts = []
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for page in pdf.pages[:20]:
+            page_text = page.extract_text()
+            if page_text:
+                text_parts.append(page_text)
+            tables = page.extract_tables()
+            for table in tables:
+                for row in table:
+                    cells = [str(c).strip() for c in row if c]
+                    if cells:
+                        text_parts.append(" | ".join(cells))
+    return "\n".join(text_parts)
+
+
+def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
+    import base64
+    b64 = base64.b64encode(image_bytes).decode("utf-8")
+    mime = content_type.split(";")[0].strip()
+    if mime not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
+        mime = "image/jpeg"
+
+    try:
+        resp = client.chat.completions.create(
+            model="llama-3.2-90b-vision-preview",
+            messages=[
+                {"role": "system", "content": "Sen bir menü okuma asistanısın. Görseldeki tüm yemek isimlerini ve varsa fiyatlarını oku. Sadece yemek/içecek adlarını listele, kategorileriyle birlikte. Türkçe yanıt ver."},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "Bu restoran menüsü görselindeki tüm yemek ve içecek isimlerini oku ve listele."},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+                ]}
+            ],
+            temperature=0.0,
+            seed=42,
+            max_tokens=3000,
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"[DRIVE] Vision OCR failed: {type(e).__name__}: {e}")
+        return ""
+
+
+def _process_google_drive_url(url):
+    import requests as http_req
+
+    file_id = _extract_drive_file_id(url)
+    if not file_id:
+        return None, "Google Drive bağlantısından dosya kimliği çıkarılamadı."
+
+    direct_url, url_type = _get_drive_direct_url(url, file_id)
+    print(f"[DRIVE] Detected type={url_type}, file_id={file_id}, direct_url={direct_url}")
+
+    try:
+        resp = http_req.get(direct_url, timeout=15, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+        }, allow_redirects=True, stream=True)
+    except http_req.exceptions.Timeout:
+        return None, "Google Drive dosyası indirilemedi — zaman aşımı."
+    except http_req.exceptions.RequestException as e:
+        return None, f"Google Drive bağlantı hatası: {type(e).__name__}"
+
+    if resp.status_code in (403, 401):
+        return None, json.dumps({
+            "success": False,
+            "error": "GOOGLE_DRIVE_LINK_RESTRICTED",
+            "message": "Bu menü dosyası gizli olarak ayarlanmış. Lütfen Drive üzerinden dosya iznini 'Bağlantıya sahip olan herkes görüntüleyebilir' olarak değiştirip tekrar deneyin."
+        })
+    if resp.status_code == 404:
+        return None, "Google Drive dosyası bulunamadı. Lütfen bağlantıyı kontrol edin."
+    if resp.status_code != 200:
+        return None, f"Google Drive hatası: HTTP {resp.status_code}"
+
+    content_type = resp.headers.get("Content-Type", "").lower()
+    file_bytes = resp.content
+
+    if len(file_bytes) > 20 * 1024 * 1024:
+        return None, "Dosya çok büyük (maks 20MB)."
+
+    print(f"[DRIVE] Downloaded {len(file_bytes)} bytes, Content-Type: {content_type}")
+
+    preview_lower = file_bytes[:5000].lower()
+    is_drive_confirm = ("text/html" in content_type and
+                        (b"virus scan" in preview_lower or b"download anyway" in preview_lower
+                         or b"uc-download-link" in preview_lower or b"confirm=" in preview_lower))
+    if is_drive_confirm:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(file_bytes, "html.parser")
+        confirm_link = soup.find("a", {"id": "uc-download-link"})
+        if confirm_link and confirm_link.get("href"):
+            confirm_url = "https://drive.google.com" + confirm_link["href"]
+            print(f"[DRIVE] Virus scan confirmation redirect: {confirm_url}")
+            try:
+                resp2 = http_req.get(confirm_url, timeout=15, headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                }, allow_redirects=True, cookies=resp.cookies)
+                if resp2.status_code == 200:
+                    file_bytes = resp2.content
+                    content_type = resp2.headers.get("Content-Type", "").lower()
+                    print(f"[DRIVE] Confirmed download: {len(file_bytes)} bytes, Content-Type: {content_type}")
+            except Exception as e:
+                print(f"[DRIVE] Confirm download failed: {e}")
+
+    import re as _re
+
+    if "application/pdf" in content_type or file_bytes[:5] == b"%PDF-":
+        print(f"[DRIVE] Dispatching to PDF extractor")
+        try:
+            text = _extract_text_from_pdf(file_bytes)
+            if text and len(text.strip()) > 20:
+                text = _re.sub(r'\s{3,}', '  ', text)
+                text = _re.sub(r'(\n\s*){3,}', '\n\n', text)
+                print(f"[DRIVE] PDF extracted: {len(text)} chars")
+                return {"title": "Google Drive PDF Menü", "body_text": text, "headings": [], "source_url": url}, None
+            return None, "PDF dosyasından menü metni çıkarılamadı."
+        except Exception as e:
+            print(f"[DRIVE] PDF extraction failed: {type(e).__name__}: {e}")
+            return None, f"PDF işlenirken hata: {type(e).__name__}"
+
+    if "text/plain" in content_type or "text/csv" in content_type or url_type in ("doc", "sheet"):
+        print(f"[DRIVE] Dispatching as plain text")
+        try:
+            text = file_bytes.decode("utf-8", errors="replace")
+        except Exception:
+            text = file_bytes.decode("latin-1", errors="replace")
+        if text and len(text.strip()) > 20:
+            text = _re.sub(r'\s{3,}', '  ', text)
+            text = _re.sub(r'(\n\s*){3,}', '\n\n', text)
+            print(f"[DRIVE] Text extracted: {len(text)} chars")
+            title = "Google Drive Doküman Menü" if url_type == "doc" else "Google Drive Menü"
+            return {"title": title, "body_text": text, "headings": [], "source_url": url}, None
+        return None, "Dosyadan menü metni çıkarılamadı."
+
+    if any(t in content_type for t in ("image/jpeg", "image/png", "image/webp", "image/gif")):
+        print(f"[DRIVE] Dispatching to Vision OCR")
+        if len(file_bytes) > 4 * 1024 * 1024:
+            return None, "Görsel dosya çok büyük (maks 4MB)."
+        text = _extract_text_from_image(file_bytes, content_type)
+        if text and len(text.strip()) > 20:
+            text = _re.sub(r'\s{3,}', '  ', text)
+            text = _re.sub(r'(\n\s*){3,}', '\n\n', text)
+            print(f"[DRIVE] Vision OCR extracted: {len(text)} chars")
+            return {"title": "Google Drive Görsel Menü", "body_text": text, "headings": [], "source_url": url}, None
+        return None, "Görselden menü metni okunamadı."
+
+    if "text/html" in content_type:
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(file_bytes, "html.parser")
+        for tag in soup(["script", "style", "link", "meta"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n", strip=True)
+        if text and len(text.strip()) > 20:
+            text = _re.sub(r'\s{3,}', '  ', text)
+            text = _re.sub(r'(\n\s*){3,}', '\n\n', text)
+            print(f"[DRIVE] HTML fallback extracted: {len(text)} chars")
+            return {"title": "Google Drive Menü", "body_text": text, "headings": [], "source_url": url}, None
+
+    return None, f"Desteklenmeyen dosya tipi: {content_type.split(';')[0]}"
+
+
 @app.route("/api/proxy/scan-menu", methods=["POST"])
 @login_required
 def proxy_scan_menu():
@@ -1341,6 +1534,17 @@ def proxy_scan_menu():
     if err:
         return jsonify({"error": err}), 400
     url = clean_url
+
+    if _is_google_drive_url(url):
+        print(f"[DRIVE] Intercepted Google Drive URL: {url}")
+        drive_result, drive_err = _process_google_drive_url(url)
+        if drive_err:
+            try:
+                err_payload = json.loads(drive_err)
+                return jsonify(err_payload), 403
+            except (json.JSONDecodeError, TypeError):
+                return jsonify({"error": drive_err}), 422
+        return jsonify(drive_result)
 
     try:
         resp = _fetch_page(url)
