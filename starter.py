@@ -1511,8 +1511,10 @@ def _process_google_drive_url(url):
     direct_url, url_type = _get_drive_direct_url(url, file_id)
     print(f"[DRIVE] Detected type={url_type}, file_id={file_id}, direct_url={direct_url}")
 
+    _DRIVE_MAX_BYTES = 50 * 1024 * 1024
+
     try:
-        resp = http_req.get(direct_url, timeout=15, headers={
+        resp = http_req.get(direct_url, timeout=30, headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
         }, allow_redirects=True, stream=True)
     except http_req.exceptions.Timeout:
@@ -1531,11 +1533,22 @@ def _process_google_drive_url(url):
     if resp.status_code != 200:
         return None, f"Google Drive hatası: HTTP {resp.status_code}"
 
-    content_type = resp.headers.get("Content-Type", "").lower()
-    file_bytes = resp.content
+    content_length = resp.headers.get("Content-Length")
+    if content_length and int(content_length) > _DRIVE_MAX_BYTES:
+        resp.close()
+        size_mb = int(content_length) // (1024 * 1024)
+        return None, f"Dosya çok büyük ({size_mb}MB). Maksimum 50MB desteklenir. Lütfen dosyayı küçültüp tekrar deneyin."
 
-    if len(file_bytes) > 20 * 1024 * 1024:
-        return None, "Dosya çok büyük (maks 20MB)."
+    content_type = resp.headers.get("Content-Type", "").lower()
+    chunks = []
+    downloaded = 0
+    for chunk in resp.iter_content(chunk_size=256 * 1024):
+        downloaded += len(chunk)
+        if downloaded > _DRIVE_MAX_BYTES:
+            resp.close()
+            return None, "Dosya çok büyük (maks 50MB). Lütfen dosyayı küçültüp tekrar deneyin."
+        chunks.append(chunk)
+    file_bytes = b"".join(chunks)
 
     print(f"[DRIVE] Downloaded {len(file_bytes)} bytes, Content-Type: {content_type}")
 
@@ -1596,8 +1609,8 @@ def _process_google_drive_url(url):
 
     if any(t in content_type for t in ("image/jpeg", "image/png", "image/webp", "image/gif")):
         print(f"[DRIVE] Dispatching to Vision OCR")
-        if len(file_bytes) > 4 * 1024 * 1024:
-            return None, "Görsel dosya çok büyük (maks 4MB)."
+        if len(file_bytes) > 10 * 1024 * 1024:
+            return None, "Görsel dosya çok büyük (maks 10MB)."
         text = _extract_text_from_image(file_bytes, content_type)
         if text and len(text.strip()) > 20:
             text = _sanitize_menu_text(text)
