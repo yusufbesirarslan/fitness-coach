@@ -981,16 +981,36 @@ def menu_assistant():
 
 
 def _validate_menu_url(url):
-    from urllib.parse import urlparse
+    from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
+    import re as _re
+
+    url = url.strip()
+    if not url:
+        return None, None, "URL gerekli."
+
+    if not _re.match(r'^https?://', url, _re.IGNORECASE):
+        if _re.match(r'^[a-zA-Z0-9]', url):
+            url = "https://" + url
+        else:
+            return None, None, "Geçersiz URL formatı."
+
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        return None, "Yalnızca HTTP/HTTPS desteklenir."
+        return None, None, "Yalnızca HTTP/HTTPS desteklenir."
     if not parsed.hostname:
-        return None, "Geçersiz URL."
+        return None, None, "Geçersiz URL."
     blocked = ("127.0.0.1", "localhost", "0.0.0.0", "169.254.169.254", "[::1]")
     if parsed.hostname.lower() in blocked or parsed.hostname.startswith("10.") or parsed.hostname.startswith("192.168."):
-        return None, "İç ağ adresleri engellendi."
-    return parsed, None
+        return None, None, "İç ağ adresleri engellendi."
+
+    tracking_params = {"utm_source", "utm_medium", "utm_campaign", "utm_term",
+                       "utm_content", "fbclid", "gclid", "ref", "source"}
+    qs = parse_qs(parsed.query, keep_blank_values=False)
+    cleaned_qs = {k: v for k, v in qs.items() if k.lower() not in tracking_params}
+    clean_query = urlencode(cleaned_qs, doseq=True) if cleaned_qs else ""
+    clean_url = urlunparse((parsed.scheme, parsed.netloc, parsed.path,
+                            parsed.params, clean_query, ""))
+    return urlparse(clean_url), clean_url, None
 
 
 _USER_AGENTS = [
@@ -1002,11 +1022,14 @@ _USER_AGENTS = [
 ]
 
 
-def _fetch_page(url, timeout=8):
+def _fetch_page(url, timeout=10):
     import requests as http_req
     import random
+    from urllib.parse import urlparse
+
     ua = random.choice(_USER_AGENTS)
-    resp = http_req.get(url, timeout=timeout, headers={
+    parsed = urlparse(url)
+    headers = {
         "User-Agent": ua,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -1014,27 +1037,68 @@ def _fetch_page(url, timeout=8):
         "DNT": "1",
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
-    }, allow_redirects=True)
+        "Referer": f"{parsed.scheme}://{parsed.hostname}/",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-User": "?1",
+    }
+
+    session = http_req.Session()
+    session.headers.update(headers)
+
+    resp = session.get(url, timeout=timeout, allow_redirects=True)
+
+    if resp.status_code == 403 or (resp.status_code == 200 and len(resp.text) < 500):
+        alt_ua = random.choice([u for u in _USER_AGENTS if u != ua] or _USER_AGENTS)
+        session.headers["User-Agent"] = alt_ua
+        import time
+        time.sleep(random.uniform(0.3, 0.8))
+        resp = session.get(url, timeout=timeout, allow_redirects=True)
+
     resp.raise_for_status()
     return resp
 
 
 def _extract_framework_state(html_text):
     import re
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html_text, "html.parser")
+    script_tag = soup.find("script", {"id": "__NEXT_DATA__"})
+    if script_tag and script_tag.string:
+        try:
+            state = json.loads(script_tag.string)
+            return state, "next"
+        except (json.JSONDecodeError, ValueError):
+            pass
+
     patterns = [
-        (r'window\.__NEXT_DATA__\s*=\s*({.+?})\s*;?\s*</script>', "next"),
-        (r'window\.__NUXT__\s*=\s*({.+?})\s*;?\s*</script>', "nuxt"),
-        (r'window\.__DATA__\s*=\s*({.+?})\s*;?\s*</script>', "data"),
-        (r'window\.__INITIAL_STATE__\s*=\s*({.+?})\s*;?\s*</script>', "state"),
+        (r'window\.__NEXT_DATA__\s*=\s*({.+})\s*;?\s*</script>', "next"),
+        (r'window\.__NUXT__\s*=\s*({.+})\s*;?\s*</script>', "nuxt"),
+        (r'window\.__DATA__\s*=\s*({.+})\s*;?\s*</script>', "data"),
+        (r'window\.__INITIAL_STATE__\s*=\s*({.+})\s*;?\s*</script>', "state"),
     ]
     for pattern, framework in patterns:
         match = re.search(pattern, html_text, re.DOTALL)
         if match:
-            try:
-                state = json.loads(match.group(1))
-                return state, framework
-            except (json.JSONDecodeError, ValueError):
-                continue
+            raw = match.group(1)
+            depth = 0
+            end_idx = 0
+            for i, ch in enumerate(raw):
+                if ch == '{':
+                    depth += 1
+                elif ch == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end_idx = i + 1
+                        break
+            if end_idx > 0:
+                try:
+                    state = json.loads(raw[:end_idx])
+                    return state, framework
+                except (json.JSONDecodeError, ValueError):
+                    continue
     return None, None
 
 
@@ -1066,7 +1130,34 @@ def _discover_menu_links(soup, base_parsed):
 
 def _extract_page_sections(html_text, soup_clean):
     from bs4 import BeautifulSoup
+    import re as _re
+
     sections = []
+
+    jsonld_scripts = soup_clean.find_all("script", {"type": "application/ld+json"})
+    for script in jsonld_scripts:
+        if script.string:
+            try:
+                ld = json.loads(script.string)
+                items = ld if isinstance(ld, list) else [ld]
+                for item in items:
+                    if item.get("@type") in ("Menu", "MenuSection", "Restaurant"):
+                        menu_sec = item.get("hasMenuSection", [])
+                        if not isinstance(menu_sec, list):
+                            menu_sec = [menu_sec]
+                        for sec in menu_sec:
+                            cat = sec.get("name", "Genel")
+                            menu_items = sec.get("hasMenuItem", [])
+                            if not isinstance(menu_items, list):
+                                menu_items = [menu_items]
+                            names = [mi.get("name", "") for mi in menu_items if mi.get("name")]
+                            if names:
+                                sections.append({"category": cat, "text": "\n".join(names)})
+            except (json.JSONDecodeError, TypeError):
+                pass
+    if sections:
+        return sections
+
     current_heading = "Genel"
     current_items = []
 
@@ -1080,11 +1171,25 @@ def _extract_page_sections(html_text, soup_clean):
                 current_items = []
             current_heading = text
         else:
-            if len(text) > 3 and len(text) < 200:
+            if len(text) > 3 and len(text) < 500:
                 current_items.append(text)
 
     if current_items:
         sections.append({"category": current_heading, "text": "\n".join(current_items)})
+
+    if not sections:
+        menu_containers = soup_clean.find_all(
+            ["div", "section", "ul"],
+            class_=_re.compile(r'menu|food|dish|product|item|category', _re.IGNORECASE)
+        )
+        for container in menu_containers:
+            items = []
+            for el in container.find_all(["h4", "h3", "h2", "p", "li", "span", "div"]):
+                text = el.get_text(strip=True)
+                if text and 3 < len(text) < 500:
+                    items.append(text)
+            if items:
+                sections.append({"category": "Genel", "text": "\n".join(items)})
 
     if not sections:
         container = soup_clean.find("main") or soup_clean.find("article") or soup_clean.find("body")
@@ -1092,12 +1197,110 @@ def _extract_page_sections(html_text, soup_clean):
             fallback_items = []
             for el in container.find_all(["h4", "h3", "h2", "p", "li", "span"]):
                 text = el.get_text(strip=True)
-                if text and 3 < len(text) < 200:
+                if text and 3 < len(text) < 500:
                     fallback_items.append(text)
             if fallback_items:
                 sections.append({"category": "Genel", "text": "\n".join(fallback_items)})
 
     return sections
+
+
+_FOOD_KEYWORDS = {
+    "kahvalt", "salata", "corba", "çorba", "pizza", "burger", "makarna", "tavuk",
+    "et ", "balık", "tost", "pilav", "izgara", "tatli", "tatlı", "içecek", "icecek",
+    "kahve", "çay", "smoothie", "meze", "kebab", "köfte", "lahmacun", "pide",
+    "breakfast", "salad", "soup", "pasta", "chicken", "steak", "grill", "dessert",
+    "drink", "sandwich", "appetizer", "main course", "starter",
+}
+
+
+def _content_has_food_items(text, threshold=3):
+    text_lower = text.lower()
+    return sum(1 for kw in _FOOD_KEYWORDS if kw in text_lower) >= threshold
+
+
+def _try_wordpress_api(base_parsed, raw_html):
+    import requests as http_req
+    from bs4 import BeautifulSoup
+
+    is_wp = "wp-content" in raw_html or "wp-json" in raw_html or "wordpress" in raw_html.lower()
+    if not is_wp:
+        return None, []
+
+    origin = f"{base_parsed.scheme}://{base_parsed.netloc}"
+    path_parts = [p for p in base_parsed.path.strip("/").split("/") if p]
+
+    slugs_to_try = []
+    if path_parts:
+        slugs_to_try.append(path_parts[-1])
+    slugs_to_try.extend(["menu", "yemek", "menü"])
+
+    print(f"[SCRAPER] WordPress detected — trying REST API for slugs: {slugs_to_try}")
+
+    for slug in slugs_to_try:
+        try:
+            api_url = f"{origin}/wp-json/wp/v2/pages?slug={slug}"
+            api_resp = http_req.get(api_url, timeout=8, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/json",
+            })
+            if api_resp.status_code != 200:
+                continue
+            pages = api_resp.json()
+            if not pages:
+                continue
+
+            content_html = pages[0].get("content", {}).get("rendered", "")
+            title = pages[0].get("title", {}).get("rendered", "")
+            if not content_html:
+                continue
+
+            soup = BeautifulSoup(content_html, "html.parser")
+            text = soup.get_text(separator="\n", strip=True)
+
+            if len(text) > 100 and _content_has_food_items(text):
+                print(f"[SCRAPER] WP API hit for slug '{slug}': {len(text)} chars with food content")
+                sections = _extract_page_sections(content_html, soup)
+                return title, sections
+
+            inner_links = []
+            for a in soup.find_all("a", href=True):
+                href = a["href"].strip()
+                if href.startswith("/") or href.startswith(origin):
+                    inner_links.append(href if href.startswith("http") else origin + href)
+
+            for link_url in inner_links[:4]:
+                link_parsed = http_req.utils.urlparse(link_url)
+                link_slug = [p for p in link_parsed.path.strip("/").split("/") if p]
+                if not link_slug:
+                    continue
+                sub_api = f"{origin}/wp-json/wp/v2/pages?slug={link_slug[-1]}"
+                try:
+                    sub_resp = http_req.get(sub_api, timeout=6, headers={
+                        "User-Agent": "Mozilla/5.0", "Accept": "application/json"})
+                    if sub_resp.status_code != 200:
+                        continue
+                    sub_pages = sub_resp.json()
+                    if not sub_pages:
+                        continue
+                    sub_html = sub_pages[0].get("content", {}).get("rendered", "")
+                    sub_soup = BeautifulSoup(sub_html, "html.parser")
+                    sub_text = sub_soup.get_text(separator="\n", strip=True)
+                    if len(sub_text) > 200 and _content_has_food_items(sub_text):
+                        print(f"[SCRAPER] WP API sub-page '{link_slug[-1]}': {len(sub_text)} chars with food content")
+                        sub_sections = _extract_page_sections(sub_html, sub_soup)
+                        sections.extend(sub_sections)
+                except Exception:
+                    continue
+
+            if sections:
+                return title, sections
+
+        except Exception as e:
+            print(f"[SCRAPER] WP API attempt for '{slug}' failed: {type(e).__name__}: {e}")
+            continue
+
+    return None, []
 
 
 @app.route("/api/proxy/scan-menu", methods=["POST"])
@@ -1112,9 +1315,10 @@ def proxy_scan_menu():
     if not url:
         return jsonify({"error": "URL gerekli."}), 400
 
-    base_parsed, err = _validate_menu_url(url)
+    base_parsed, clean_url, err = _validate_menu_url(url)
     if err:
         return jsonify({"error": err}), 400
+    url = clean_url
 
     try:
         resp = _fetch_page(url)
@@ -1164,6 +1368,19 @@ def proxy_scan_menu():
     for sec in sections:
         all_text_parts.append(f"[{sec['category']}]\n{sec['text']}")
     body_text = "\n\n".join(all_text_parts)
+
+    content_quality_ok = _content_has_food_items(body_text) if body_text else False
+
+    if not content_quality_ok:
+        print(f"[SCRAPER] Content quality low (no food keywords) — trying WordPress API fallback")
+        wp_title, wp_sections = _try_wordpress_api(base_parsed, raw_html)
+        if wp_sections:
+            sections = wp_sections
+            if wp_title:
+                title = wp_title
+            all_text_parts = [f"[{sec['category']}]\n{sec['text']}" for sec in sections]
+            body_text = "\n\n".join(all_text_parts)
+            print(f"[SCRAPER] WordPress API recovered {len(sections)} sections, {len(body_text)} chars")
 
     if not body_text or len(body_text.strip()) < 20:
         fallback_soup = BeautifulSoup(raw_html, "html.parser")
@@ -1305,13 +1522,16 @@ def _lookup_macros_fatsecret(items, token):
             for food in foods:
                 desc_raw = food.get("food_description", "")
                 parsed = _parse_fatsecret_desc(desc_raw)
-                if not parsed or not parsed.get("calories"):
+                if not parsed:
+                    continue
+                cal_val = parsed.get("calories") or parsed.get("cal") or parsed.get("energy") or 0
+                if not cal_val:
                     continue
                 macros = {
-                    "calories": float(parsed.get("calories", 0)),
+                    "calories": float(cal_val),
                     "protein": float(parsed.get("protein", 0)),
-                    "carbs": float(parsed.get("carbs", 0)),
-                    "fat": float(parsed.get("fat", 0)),
+                    "carbs": float(parsed.get("carbs", parsed.get("carbohydrate", parsed.get("carb", 0)))),
+                    "fat": float(parsed.get("fat", parsed.get("total fat", 0))),
                 }
                 serving_text = parsed.get("serving", "")
                 if _is_per_serving(serving_text):
@@ -1469,14 +1689,19 @@ Tüm {len(items)} yemek için değer ver. Sadece JSON döndür, başka bir şey 
                     else:
                         print(f"[MACRO ENGINE] LLM returned 0 calories for '{name}', raw={m}")
                 else:
-                    print(f"[MACRO ENGINE] LLM key mismatch — no match for '{name}' in parsed keys")
+                    print(f"[MACRO ENGINE] LLM key mismatch — no match for '{name}' in parsed keys: {list(parsed.keys())[:10]}")
 
             print(f"[MACRO ENGINE] LLM resolved {len(results)}/{len(items)} items with non-zero macros")
+            if len(results) == 0 and len(parsed) > 0:
+                print(f"[MACRO ENGINE] WARNING: LLM returned data but 0 matched — possible key mismatch. "
+                      f"Input names: {items[:3]} vs LLM keys: {list(parsed.keys())[:3]}")
             return results
         else:
             print(f"[MACRO ENGINE] LLM response has no valid JSON braces: {raw[:300]}")
     except Exception as e:
+        import traceback
         print(f"[MACRO ENGINE] LLM MACRO ESTIMATION ERROR: {type(e).__name__}: {e}")
+        traceback.print_exc()
     return {}
 
 
@@ -1634,8 +1859,18 @@ def analyze_menu():
         llm_macros = _estimate_macros_llm(missing)
         macro_map.update(llm_macros)
 
+    still_missing = [n for n in item_names if n not in macro_map or macro_map.get(n, {}).get("calories", 0) == 0]
+    if still_missing:
+        print(f"[MACRO ENGINE] Retry: {len(still_missing)} items still at 0 calories after first LLM pass, retrying...")
+        retry_macros = _estimate_macros_llm(still_missing)
+        for name, macros in retry_macros.items():
+            if macros.get("calories", 0) > 0:
+                macro_map[name] = macros
+
     final_resolved = sum(1 for n in item_names if n in macro_map and macro_map[n].get("calories", 0) > 0)
-    print(f"[MACRO ENGINE] Final pipeline result: {final_resolved}/{len(item_names)} items have non-zero macros")
+    final_zero = len(item_names) - final_resolved
+    print(f"[MACRO ENGINE] Final pipeline result: {final_resolved}/{len(item_names)} items have non-zero macros"
+          + (f" — WARNING: {final_zero} items still at 0" if final_zero else ""))
 
     categories_result = {}
     all_scored = []
@@ -1646,6 +1881,7 @@ def analyze_menu():
 
         if not has_macros:
             macros = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+            print(f"[MACRO ENGINE] ZERO-MACRO ITEM: '{name}' — no data from FatSecret or LLM")
 
         if has_macros:
             score, warnings, reason = _score_item(macros, remaining)

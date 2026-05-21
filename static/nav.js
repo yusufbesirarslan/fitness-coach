@@ -93,7 +93,11 @@
       function(decoded) {
         qrScanner.stop().then(function() { qrScanner = null; });
         fxCloseQR();
-        window.location.href = '/menu-assistant?url=' + encodeURIComponent(decoded);
+        var url = decoded.trim();
+        if (!/^https?:\/\//i.test(url) && /^[a-zA-Z0-9]/.test(url)) {
+          url = 'https://' + url;
+        }
+        window.location.href = '/menu-assistant?url=' + encodeURIComponent(url);
       }
     ).catch(function() {});
   }
