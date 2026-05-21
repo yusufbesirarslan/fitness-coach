@@ -487,6 +487,7 @@ async function processUrl(url) {
         }
 
         const analyzeBody = {menu_text: menuText};
+        if (proxyData.menu_source) analyzeBody.menu_source = proxyData.menu_source;
         if (proxyData.framework_state) analyzeBody.framework_state = proxyData.framework_state;
         if (proxyData.headings && proxyData.headings.length) analyzeBody.headings = proxyData.headings;
 

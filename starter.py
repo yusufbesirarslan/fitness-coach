@@ -1568,7 +1568,7 @@ def _process_google_drive_url(url):
             if text and len(text.strip()) > 20:
                 text = _sanitize_menu_text(text)
                 print(f"[DRIVE] PDF extracted: {len(text)} chars")
-                return {"title": "Google Drive PDF Menü", "body_text": text, "headings": [], "source_url": url}, None
+                return {"title": "Google Drive PDF Menü", "body_text": text, "headings": [], "source_url": url, "menu_source": "google_drive"}, None
             return None, "PDF dosyasından menü metni çıkarılamadı."
         except ValueError as ve:
             msg = str(ve)
@@ -1591,7 +1591,7 @@ def _process_google_drive_url(url):
             text = _sanitize_menu_text(text)
             print(f"[DRIVE] Text extracted: {len(text)} chars")
             title = "Google Drive Doküman Menü" if url_type == "doc" else "Google Drive Menü"
-            return {"title": title, "body_text": text, "headings": [], "source_url": url}, None
+            return {"title": title, "body_text": text, "headings": [], "source_url": url, "menu_source": "google_drive"}, None
         return None, "Dosyadan menü metni çıkarılamadı."
 
     if any(t in content_type for t in ("image/jpeg", "image/png", "image/webp", "image/gif")):
@@ -1602,7 +1602,7 @@ def _process_google_drive_url(url):
         if text and len(text.strip()) > 20:
             text = _sanitize_menu_text(text)
             print(f"[DRIVE] Vision OCR extracted: {len(text)} chars")
-            return {"title": "Google Drive Görsel Menü", "body_text": text, "headings": [], "source_url": url}, None
+            return {"title": "Google Drive Görsel Menü", "body_text": text, "headings": [], "source_url": url, "menu_source": "google_drive"}, None
         return None, "Görselden menü metni okunamadı."
 
     if "text/html" in content_type:
@@ -1614,7 +1614,7 @@ def _process_google_drive_url(url):
         if text and len(text.strip()) > 20:
             text = _sanitize_menu_text(text)
             print(f"[DRIVE] HTML fallback extracted: {len(text)} chars")
-            return {"title": "Google Drive Menü", "body_text": text, "headings": [], "source_url": url}, None
+            return {"title": "Google Drive Menü", "body_text": text, "headings": [], "source_url": url, "menu_source": "google_drive"}, None
 
     return None, f"Desteklenmeyen dosya tipi: {content_type.split(';')[0]}"
 
@@ -1738,6 +1738,7 @@ def proxy_scan_menu():
         "headings": unique_headings,
         "body_text": body_text,
         "source_url": url,
+        "menu_source": "web_scraper",
         "sub_pages_crawled": len(sub_links[:6]),
         "total_sections": len(sections),
         "crawl_errors": crawl_errors if crawl_errors else None,
@@ -1753,7 +1754,7 @@ def proxy_scan_menu():
     return jsonify(result)
 
 
-def _extract_categorized_items(raw_text, fw_state=None, headings=None):
+def _extract_categorized_items(raw_text, fw_state=None, headings=None, menu_source=None):
     menu_input = raw_text[:10000]
     if fw_state:
         menu_input = fw_state[:6000] + "\n\n" + raw_text[:6000]
@@ -1762,11 +1763,18 @@ def _extract_categorized_items(raw_text, fw_state=None, headings=None):
     if headings:
         heading_hint = f"\n\nTespit edilen kategori başlıkları: {', '.join(headings)}\nBu kategorilerin HEPSİ için yemek bul. Hiçbirini atlama."
 
+    doc_hint = ""
+    if menu_source == "google_drive":
+        doc_hint = ("\n\nDİKKAT: Bu metin bir PDF/görsel/doküman kaynağından çıkarılmıştır. "
+                    "Tablo formatları, OCR hataları veya düzensiz boşluklar olabilir. "
+                    "Satır satır dikkatlice oku, her yemek öğesini ayır. "
+                    "Fiyat sütunlarını ve tablo başlıklarını (adet, fiyat, TL, ₺) yoksay.")
+
     prompt = f"""Aşağıdaki restoran menü metninden yemekleri KATEGORİLERİYLE çıkar.
 Pazarlama metinlerini, açıklamaları, fiyatları YOKSAY. Sadece yemek/içecek adlarını al.
 Her kategori altında en fazla 10 yemek olsun. Toplam en fazla 50 yemek.
 Kategorileri menüdeki başlıklardan al (örn: Kahvaltılar, Salatalar, Izgara & Etler, Makarnalar, Burgerler, İçecekler, Tatlılar).
-Eğer kategori bulamazsan "Genel" kullan.{heading_hint}
+Eğer kategori bulamazsan "Genel" kullan.{heading_hint}{doc_hint}
 
 Menü metni:
 {menu_input}
@@ -2177,8 +2185,15 @@ def analyze_menu():
     data = request.get_json()
     raw_text = (data or {}).get("menu_text", "").strip()
     fw_state = (data or {}).get("framework_state")
-    if not raw_text:
-        return jsonify({"error": "Menü metni gerekli."}), 400
+    menu_source = (data or {}).get("menu_source", "web_scraper")
+
+    if not raw_text or len(raw_text.replace(" ", "").replace("\n", "")) < 15:
+        return jsonify({
+            "success": False,
+            "error": "EMPTY_MENU_TEXT",
+            "message": "Menü dökümanından anlamlı bir metin çıkarılamadı. Lütfen dosyanın taranabilir ve okunabilir bir menü içerdiğinden emin olun.",
+            "items": [], "categories": {},
+        }), 400
 
     sess = UserSession.query.filter_by(user_id=current_user.id)\
         .order_by(UserSession.created_at.desc()).first()
@@ -2209,7 +2224,7 @@ def analyze_menu():
 
     headings_hint = (data or {}).get("headings")
     try:
-        categorized = _extract_categorized_items(raw_text, fw_state, headings=headings_hint)
+        categorized = _extract_categorized_items(raw_text, fw_state, headings=headings_hint, menu_source=menu_source)
     except Exception as e:
         print(f"[ANALYZE] Extraction crashed: {type(e).__name__}: {e}")
         categorized = {}
@@ -2217,7 +2232,7 @@ def analyze_menu():
     if not categorized:
         print(f"[ANALYZE] First extraction returned empty — retrying without framework_state")
         try:
-            categorized = _extract_categorized_items(raw_text, None, headings=headings_hint)
+            categorized = _extract_categorized_items(raw_text, None, headings=headings_hint, menu_source=menu_source)
         except Exception as e:
             print(f"[ANALYZE] Retry extraction crashed: {type(e).__name__}: {e}")
             categorized = {}
@@ -2314,7 +2329,7 @@ def analyze_menu():
 
         item_obj = {
             "name": name,
-            "macros": {k: round(v, 1) for k, v in macros.items()},
+            "macros": {k: int(round(v)) for k, v in macros.items()},
             "score": score,
             "warnings": warnings,
             "reason": reason,
@@ -2336,17 +2351,22 @@ def analyze_menu():
     print(f"[DEBUG] Total items in payload: {sum(len(v) for v in categories_result.values())} — Scored items: {len(all_scored)}")
     print(f"[ALGORITHM DEBUG] Top 3 Raw Scores: {[(item['name'], item['score']) for item in coach_picks]}")
 
+    source_label = {"google_drive": "Google Drive", "web_scraper": "Web Scraper"}.get(menu_source, menu_source)
+
     return jsonify({
+        "success": True,
+        "menu_source": source_label,
         "coach_picks": coach_picks,
         "categories": categories_result,
-        "remaining": {k: round(v, 1) for k, v in remaining.items()},
+        "items": [item for items in categories_result.values() for item in items],
+        "remaining": {k: int(round(v)) for k, v in remaining.items()},
         "target": {
-            "calories": round(target_cal),
-            "protein": round(protein_target, 1),
-            "carbs": round(carb_target, 1),
-            "fat": round(fat_target, 1),
+            "calories": int(round(target_cal)),
+            "protein": int(round(protein_target)),
+            "carbs": int(round(carb_target)),
+            "fat": int(round(fat_target)),
         },
-        "consumed": {k: round(v, 1) for k, v in consumed.items()},
+        "consumed": {k: int(round(v)) for k, v in consumed.items()},
     })
 
 
