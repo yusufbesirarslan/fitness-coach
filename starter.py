@@ -1233,9 +1233,20 @@ def _try_wordpress_api(base_parsed, raw_html):
     slugs_to_try = []
     if path_parts:
         slugs_to_try.append(path_parts[-1])
-    slugs_to_try.extend(["menu", "yemek", "menü"])
+    slugs_to_try.extend(["menu", "yemek", "yiyecekler", "icecekler", "food", "foods"])
+
+    seen_slugs = set()
+    unique_slugs = []
+    for s in slugs_to_try:
+        if s not in seen_slugs:
+            seen_slugs.add(s)
+            unique_slugs.append(s)
+    slugs_to_try = unique_slugs
 
     print(f"[SCRAPER] WordPress detected — trying REST API for slugs: {slugs_to_try}")
+
+    all_sections = []
+    best_title = None
 
     for slug in slugs_to_try:
         try:
@@ -1261,20 +1272,29 @@ def _try_wordpress_api(base_parsed, raw_html):
             if len(text) > 100 and _content_has_food_items(text):
                 print(f"[SCRAPER] WP API hit for slug '{slug}': {len(text)} chars with food content")
                 sections = _extract_page_sections(content_html, soup)
-                return title, sections
+                all_sections.extend(sections)
+                if not best_title:
+                    best_title = title
+                continue
 
-            inner_links = []
+            discovered_slugs = set()
             for a in soup.find_all("a", href=True):
                 href = a["href"].strip()
-                if href.startswith("/") or href.startswith(origin):
-                    inner_links.append(href if href.startswith("http") else origin + href)
-
-            for link_url in inner_links[:4]:
-                link_parsed = http_req.utils.urlparse(link_url)
-                link_slug = [p for p in link_parsed.path.strip("/").split("/") if p]
-                if not link_slug:
+                if href.startswith("#") or href.startswith("javascript:") or href.startswith("mailto:"):
                     continue
-                sub_api = f"{origin}/wp-json/wp/v2/pages?slug={link_slug[-1]}"
+                if href.startswith("/") or href.startswith(origin):
+                    full = href if href.startswith("http") else origin + href
+                    link_parsed = http_req.utils.urlparse(full)
+                    parts = [p for p in link_parsed.path.strip("/").split("/") if p]
+                    if parts and parts[-1] not in seen_slugs:
+                        discovered_slugs.add(parts[-1])
+
+            if not best_title:
+                best_title = title
+
+            for link_slug in list(discovered_slugs)[:6]:
+                seen_slugs.add(link_slug)
+                sub_api = f"{origin}/wp-json/wp/v2/pages?slug={link_slug}"
                 try:
                     sub_resp = http_req.get(sub_api, timeout=6, headers={
                         "User-Agent": "Mozilla/5.0", "Accept": "application/json"})
@@ -1287,18 +1307,20 @@ def _try_wordpress_api(base_parsed, raw_html):
                     sub_soup = BeautifulSoup(sub_html, "html.parser")
                     sub_text = sub_soup.get_text(separator="\n", strip=True)
                     if len(sub_text) > 200 and _content_has_food_items(sub_text):
-                        print(f"[SCRAPER] WP API sub-page '{link_slug[-1]}': {len(sub_text)} chars with food content")
+                        print(f"[SCRAPER] WP API sub-page '{link_slug}': {len(sub_text)} chars with food content")
                         sub_sections = _extract_page_sections(sub_html, sub_soup)
-                        sections.extend(sub_sections)
-                except Exception:
+                        all_sections.extend(sub_sections)
+                except Exception as e:
+                    print(f"[SCRAPER] WP API sub-page '{link_slug}' failed: {type(e).__name__}: {e}")
                     continue
-
-            if sections:
-                return title, sections
 
         except Exception as e:
             print(f"[SCRAPER] WP API attempt for '{slug}' failed: {type(e).__name__}: {e}")
             continue
+
+    if all_sections:
+        print(f"[SCRAPER] WP API total: {len(all_sections)} sections recovered")
+        return best_title, all_sections
 
     return None, []
 
@@ -1809,7 +1831,19 @@ def analyze_menu():
     except Exception as e:
         print(f"[ANALYZE] Extraction crashed: {type(e).__name__}: {e}")
         categorized = {}
+
     if not categorized:
+        print(f"[ANALYZE] First extraction returned empty — retrying without framework_state")
+        try:
+            categorized = _extract_categorized_items(raw_text, None, headings=headings_hint)
+        except Exception as e:
+            print(f"[ANALYZE] Retry extraction crashed: {type(e).__name__}: {e}")
+            categorized = {}
+
+    if not categorized:
+        print(f"[ANALYZE] FAILED: No food items extracted. raw_text length={len(raw_text)}, "
+              f"has_food_keywords={_content_has_food_items(raw_text)}, "
+              f"first 300 chars: {raw_text[:300]}")
         return jsonify({"success": False, "error": "OUTPUT_PARSING_FAILED",
                         "message": "Menü metni işlenirken bir hata oluştu. Lütfen tekrar deneyin.",
                         "items": [], "categories": {}}), 200
