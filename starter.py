@@ -1463,8 +1463,41 @@ def _extract_pdf_pages_via_vision(pdf_bytes, page_indices):
     return "\n\n".join(results)
 
 
+def _compress_image_for_vision(image_bytes, max_bytes=1_500_000):
+    from PIL import Image
+    import io
+
+    try:
+        img = Image.open(io.BytesIO(image_bytes))
+    except Exception:
+        return image_bytes, "image/jpeg"
+
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+
+    max_dim = 1600
+    if max(img.size) > max_dim:
+        ratio = max_dim / max(img.size)
+        img = img.resize((int(img.width * ratio), int(img.height * ratio)), Image.LANCZOS)
+
+    buf = io.BytesIO()
+    quality = 85
+    img.save(buf, format="JPEG", quality=quality)
+    while buf.tell() > max_bytes and quality > 30:
+        quality -= 15
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=quality)
+
+    print(f"[VISION] Compressed image: {len(image_bytes)} -> {buf.tell()} bytes (q={quality}, {img.size[0]}x{img.size[1]})")
+    return buf.getvalue(), "image/jpeg"
+
+
 def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
     import base64
+
+    if len(image_bytes) > 1_500_000:
+        image_bytes, content_type = _compress_image_for_vision(image_bytes)
+
     b64 = base64.b64encode(image_bytes).decode("utf-8")
     mime = content_type.split(";")[0].strip()
     if mime not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
@@ -1472,7 +1505,7 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
 
     try:
         resp = client.chat.completions.create(
-            model="llama-3.2-90b-vision-preview",
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
             messages=[
                 {"role": "system", "content": (
                     "Sen bir restoran menüsü OCR asistanısın. Görseldeki TÜM yemek ve içecek isimlerini, "
