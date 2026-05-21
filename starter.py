@@ -1356,22 +1356,111 @@ def _get_drive_direct_url(url, file_id):
     return f"https://drive.google.com/uc?export=download&id={file_id}", "file"
 
 
+def _sanitize_menu_text(text):
+    import re as _re
+    if not text:
+        return ""
+    replacements = {
+        'Ä±': 'ı', 'Ä': 'ğ', 'Ã¼': 'ü',
+        'Ã¶': 'ö', 'Ã§': 'ç', 'Å': 'ş',
+        'Ä°': 'İ', 'Ä': 'Ğ', 'Ã': 'Ü',
+        'Ã': 'Ö', 'Ã': 'Ç', 'Å': 'Ş',
+    }
+    for bad, good in replacements.items():
+        text = text.replace(bad, good)
+    text = _re.sub(r'[^\S\n]+', ' ', text)
+    text = _re.sub(r' {2,}', ' ', text)
+    text = _re.sub(r'(\n\s*){3,}', '\n\n', text)
+    lines = []
+    for line in text.split('\n'):
+        stripped = line.strip()
+        if stripped:
+            lines.append(stripped)
+        elif lines and lines[-1] != '':
+            lines.append('')
+    return '\n'.join(lines).strip()
+
+
 def _extract_text_from_pdf(pdf_bytes):
     import pdfplumber
     import io
+
+    try:
+        pdf = pdfplumber.open(io.BytesIO(pdf_bytes))
+    except Exception as e:
+        err_str = str(e).lower()
+        if "password" in err_str or "encrypt" in err_str:
+            raise ValueError("PDF_ENCRYPTED")
+        raise ValueError(f"PDF_CORRUPT: {type(e).__name__}")
+
     text_parts = []
-    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        for page in pdf.pages[:20]:
-            page_text = page.extract_text()
-            if page_text:
-                text_parts.append(page_text)
-            tables = page.extract_tables()
+    scanned_pages = []
+
+    try:
+        for idx, page in enumerate(pdf.pages[:20]):
+            page_text = page.extract_text(x_tolerance=2, y_tolerance=3) or ""
+
+            tables = page.extract_tables() or []
+            table_text_parts = []
             for table in tables:
                 for row in table:
-                    cells = [str(c).strip() for c in row if c]
+                    cells = [str(c).strip() for c in row if c is not None and str(c).strip()]
                     if cells:
-                        text_parts.append(" | ".join(cells))
-    return "\n".join(text_parts)
+                        table_text_parts.append(" | ".join(cells))
+            table_text = "\n".join(table_text_parts)
+
+            combined = (page_text + "\n" + table_text).strip()
+
+            if len(combined.replace(" ", "").replace("\n", "")) < 10:
+                scanned_pages.append(idx)
+            else:
+                text_parts.append(combined)
+    finally:
+        pdf.close()
+
+    text_result = "\n\n".join(text_parts)
+
+    if scanned_pages and len(text_result.strip()) < 50:
+        print(f"[PDF] Scanned PDF detected: {len(scanned_pages)} pages with no text, forwarding to Vision OCR")
+        ocr_text = _extract_pdf_pages_via_vision(pdf_bytes, scanned_pages[:5])
+        if ocr_text:
+            text_result = (text_result + "\n\n" + ocr_text).strip() if text_result.strip() else ocr_text
+    elif scanned_pages:
+        print(f"[PDF] {len(scanned_pages)} scanned pages skipped (text pages had sufficient content)")
+
+    return _sanitize_menu_text(text_result)
+
+
+def _extract_pdf_pages_via_vision(pdf_bytes, page_indices):
+    import io
+    try:
+        import pdfplumber
+        pdf = pdfplumber.open(io.BytesIO(pdf_bytes))
+    except Exception:
+        return ""
+
+    results = []
+    try:
+        for idx in page_indices:
+            if idx >= len(pdf.pages):
+                continue
+            page = pdf.pages[idx]
+            try:
+                img = page.to_image(resolution=200)
+                img_buffer = io.BytesIO()
+                img.original.save(img_buffer, format="PNG")
+                img_bytes = img_buffer.getvalue()
+                print(f"[PDF→OCR] Page {idx + 1}: rendered {len(img_bytes)} bytes")
+                text = _extract_text_from_image(img_bytes, "image/png")
+                if text:
+                    results.append(f"[Sayfa {idx + 1}]\n{text}")
+            except Exception as e:
+                print(f"[PDF→OCR] Page {idx + 1} render failed: {type(e).__name__}: {e}")
+                continue
+    finally:
+        pdf.close()
+
+    return "\n\n".join(results)
 
 
 def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
@@ -1385,19 +1474,30 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
         resp = client.chat.completions.create(
             model="llama-3.2-90b-vision-preview",
             messages=[
-                {"role": "system", "content": "Sen bir menü okuma asistanısın. Görseldeki tüm yemek isimlerini ve varsa fiyatlarını oku. Sadece yemek/içecek adlarını listele, kategorileriyle birlikte. Türkçe yanıt ver."},
+                {"role": "system", "content": (
+                    "Sen bir restoran menüsü OCR asistanısın. Görseldeki TÜM yemek ve içecek isimlerini, "
+                    "açıklamalarını ve fiyatlarını eksiksiz oku. Hiçbir öğeyi atlama veya özetleme. "
+                    "Menüdeki kategori başlıklarını koru (örn: Kahvaltılar, Salatalar, Ana Yemekler). "
+                    "Her yemeği ayrı satırda yaz. Türkçe karakterleri doğru kullan (ı, ş, ğ, ç, ö, ü)."
+                )},
                 {"role": "user", "content": [
-                    {"type": "text", "text": "Bu restoran menüsü görselindeki tüm yemek ve içecek isimlerini oku ve listele."},
+                    {"type": "text", "text": (
+                        "Bu restoran menüsü görselindeki TÜM yemek ve içecek isimlerini satır satır oku. "
+                        "Kategori başlıklarını koru. Hiçbir öğeyi atlama, özetleme veya yorum ekleme. "
+                        "Sadece menüde yazanları aynen oku."
+                    )},
                     {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
                 ]}
             ],
             temperature=0.0,
             seed=42,
-            max_tokens=3000,
+            max_tokens=4000,
         )
-        return resp.choices[0].message.content.strip()
+        result = resp.choices[0].message.content.strip()
+        print(f"[VISION OCR] Extracted {len(result)} chars")
+        return result
     except Exception as e:
-        print(f"[DRIVE] Vision OCR failed: {type(e).__name__}: {e}")
+        print(f"[VISION OCR] Failed: {type(e).__name__}: {e}")
         return ""
 
 
@@ -1461,18 +1561,22 @@ def _process_google_drive_url(url):
             except Exception as e:
                 print(f"[DRIVE] Confirm download failed: {e}")
 
-    import re as _re
-
     if "application/pdf" in content_type or file_bytes[:5] == b"%PDF-":
         print(f"[DRIVE] Dispatching to PDF extractor")
         try:
             text = _extract_text_from_pdf(file_bytes)
             if text and len(text.strip()) > 20:
-                text = _re.sub(r'\s{3,}', '  ', text)
-                text = _re.sub(r'(\n\s*){3,}', '\n\n', text)
+                text = _sanitize_menu_text(text)
                 print(f"[DRIVE] PDF extracted: {len(text)} chars")
                 return {"title": "Google Drive PDF Menü", "body_text": text, "headings": [], "source_url": url}, None
             return None, "PDF dosyasından menü metni çıkarılamadı."
+        except ValueError as ve:
+            msg = str(ve)
+            if msg == "PDF_ENCRYPTED":
+                return None, "Bu PDF şifre korumalıdır. Lütfen şifresiz bir PDF yükleyin."
+            if msg == "PDF_CORRUPT":
+                return None, "PDF dosyası bozuk veya okunamıyor. Lütfen farklı bir dosya deneyin."
+            return None, f"PDF işlenirken hata: {msg}"
         except Exception as e:
             print(f"[DRIVE] PDF extraction failed: {type(e).__name__}: {e}")
             return None, f"PDF işlenirken hata: {type(e).__name__}"
@@ -1484,8 +1588,7 @@ def _process_google_drive_url(url):
         except Exception:
             text = file_bytes.decode("latin-1", errors="replace")
         if text and len(text.strip()) > 20:
-            text = _re.sub(r'\s{3,}', '  ', text)
-            text = _re.sub(r'(\n\s*){3,}', '\n\n', text)
+            text = _sanitize_menu_text(text)
             print(f"[DRIVE] Text extracted: {len(text)} chars")
             title = "Google Drive Doküman Menü" if url_type == "doc" else "Google Drive Menü"
             return {"title": title, "body_text": text, "headings": [], "source_url": url}, None
@@ -1497,8 +1600,7 @@ def _process_google_drive_url(url):
             return None, "Görsel dosya çok büyük (maks 4MB)."
         text = _extract_text_from_image(file_bytes, content_type)
         if text and len(text.strip()) > 20:
-            text = _re.sub(r'\s{3,}', '  ', text)
-            text = _re.sub(r'(\n\s*){3,}', '\n\n', text)
+            text = _sanitize_menu_text(text)
             print(f"[DRIVE] Vision OCR extracted: {len(text)} chars")
             return {"title": "Google Drive Görsel Menü", "body_text": text, "headings": [], "source_url": url}, None
         return None, "Görselden menü metni okunamadı."
@@ -1510,8 +1612,7 @@ def _process_google_drive_url(url):
             tag.decompose()
         text = soup.get_text(separator="\n", strip=True)
         if text and len(text.strip()) > 20:
-            text = _re.sub(r'\s{3,}', '  ', text)
-            text = _re.sub(r'(\n\s*){3,}', '\n\n', text)
+            text = _sanitize_menu_text(text)
             print(f"[DRIVE] HTML fallback extracted: {len(text)} chars")
             return {"title": "Google Drive Menü", "body_text": text, "headings": [], "source_url": url}, None
 
