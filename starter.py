@@ -1634,11 +1634,45 @@ SADECE aşağıdaki JSON formatında yanıt ver:
     return {n: 150.0 for n in items}
 
 
-def _estimate_macros_llm(items):
-    if not items:
+def _repair_truncated_json(raw_json):
+    import re as _re
+    depth = 0
+    last_valid = 0
+    in_string = False
+    escape_next = False
+    for i, ch in enumerate(raw_json):
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == '\\' and in_string:
+            escape_next = True
+            continue
+        if ch == '"' and not escape_next:
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                last_valid = i + 1
+                break
+    if depth == 0 and last_valid > 0:
+        return raw_json[:last_valid]
+    trimmed = raw_json.rstrip()
+    trimmed = _re.sub(r',\s*$', '', trimmed)
+    trimmed = _re.sub(r'"[^"]*$', '', trimmed)
+    trimmed = _re.sub(r',\s*$', '', trimmed)
+    trimmed += '}' * depth
+    return trimmed
+
+
+def _estimate_macros_llm_batch(batch_items):
+    if not batch_items:
         return {}
-    print(f"[MACRO ENGINE] LLM fallback estimating macros for {len(items)} items: {items[:5]}{'...' if len(items)>5 else ''}")
-    items_str = "\n".join(f"- {name}" for name in items)
+    items_str = "\n".join(f"- {name}" for name in batch_items)
     prompt = f"""Sen bir beslenme uzmanısın. Aşağıdaki restoran yemeklerinin 1 PORSİYON (standart restoran servisi) için TAHMİNİ besin değerlerini hesapla.
 
 ÖNEMLİ: Değerler 100 gram için DEĞİL, 1 tam porsiyon (tabaktaki yemeğin tamamı) için olmalı.
@@ -1649,10 +1683,11 @@ Her yemek için gerçekçi değerler ver. Hiçbir yemeğe aynı değerleri verme
 {items_str}
 
 SADECE aşağıdaki JSON formatında yanıt ver:
-{{{", ".join(f'"{name}": {{"calories": X, "protein": Y, "carbs": Z, "fat": W}}' for name in items[:3])}{"..." if len(items) > 3 else ""}}}
+{{{", ".join(f'"{name}": {{"calories": X, "protein": Y, "carbs": Z, "fat": W}}' for name in batch_items[:3])}{"..." if len(batch_items) > 3 else ""}}}
 
-Tüm {len(items)} yemek için değer ver. Sadece JSON döndür, başka bir şey yazma."""
+Tüm {len(batch_items)} yemek için değer ver. Sadece JSON döndür, başka bir şey yazma."""
 
+    max_tok = min(300 + len(batch_items) * 65, 4000)
     try:
         resp = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -1661,70 +1696,84 @@ Tüm {len(items)} yemek için değer ver. Sadece JSON döndür, başka bir şey 
                 {"role": "user", "content": prompt}
             ],
             temperature=0.0,
-            max_tokens=2000,
+            max_tokens=max_tok,
         )
         raw = resp.choices[0].message.content.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
-        end = raw.rfind("}") + 1
-        if start >= 0 and end > start:
-            parsed = json.loads(raw[start:end])
-            print(f"[MACRO ENGINE] LLM returned {len(parsed)} keys: {list(parsed.keys())[:5]}...")
+        if start < 0:
+            print(f"[MACRO ENGINE] LLM response has no JSON braces: {raw[:200]}")
+            return {}
 
-            name_lower_map = {n.strip().lower(): n for n in items}
-            llm_key_map = {}
-            for k in parsed.keys():
-                llm_key_map[k.strip().lower()] = k
+        json_str = raw[start:]
+        try:
+            parsed = json.loads(json_str)
+        except json.JSONDecodeError:
+            repaired = _repair_truncated_json(json_str)
+            try:
+                parsed = json.loads(repaired)
+                print(f"[MACRO ENGINE] Repaired truncated JSON: {len(json_str)} → {len(repaired)} chars")
+            except json.JSONDecodeError as je:
+                print(f"[MACRO ENGINE] JSON repair failed: {je} — raw[{start}:{start+200}]: {raw[start:start+200]}")
+                return {}
 
-            results = {}
-            for name in items:
-                m = None
-                if name in parsed and isinstance(parsed[name], dict):
-                    m = parsed[name]
-                else:
-                    llm_key = llm_key_map.get(name.strip().lower())
-                    if llm_key and isinstance(parsed.get(llm_key), dict):
-                        m = parsed[llm_key]
-                        print(f"[MACRO ENGINE] Fuzzy match: '{name}' → LLM key '{llm_key}'")
+        print(f"[MACRO ENGINE] LLM batch returned {len(parsed)} keys")
 
-                if m:
-                    import re as _re
-                    _num_pat = _re.compile(r"(\d+(?:[.,]\d+)?)")
-                    def _safe_float(v):
-                        if isinstance(v, (int, float)):
-                            return float(v)
-                        if isinstance(v, str):
-                            match = _num_pat.search(v.replace(",", "."))
-                            if match:
-                                return float(match.group(1))
-                        return 0.0
+        import re as _re
+        _num_pat = _re.compile(r"(\d+(?:[.,]\d+)?)")
+        def _safe_float(v):
+            if isinstance(v, (int, float)):
+                return float(v)
+            if isinstance(v, str):
+                match = _num_pat.search(v.replace(",", "."))
+                if match:
+                    return float(match.group(1))
+            return 0.0
 
-                    macros = {
-                        "calories": _safe_float(m.get("calories", 0)),
-                        "protein": _safe_float(m.get("protein", 0)),
-                        "carbs": _safe_float(m.get("carbs", 0)),
-                        "fat": _safe_float(m.get("fat", 0)),
-                    }
-                    if macros["calories"] > 0:
-                        results[name] = macros
-                        print(f"[MACRO ENGINE] LLM macro: '{name}' → Cal={macros['calories']}, P={macros['protein']}, C={macros['carbs']}, F={macros['fat']}")
-                    else:
-                        print(f"[MACRO ENGINE] LLM returned 0 calories for '{name}', raw={m}")
-                else:
-                    print(f"[MACRO ENGINE] LLM key mismatch — no match for '{name}' in parsed keys: {list(parsed.keys())[:10]}")
+        llm_key_map = {k.strip().lower(): k for k in parsed.keys()}
+        results = {}
+        for name in batch_items:
+            m = None
+            if name in parsed and isinstance(parsed[name], dict):
+                m = parsed[name]
+            else:
+                llm_key = llm_key_map.get(name.strip().lower())
+                if llm_key and isinstance(parsed.get(llm_key), dict):
+                    m = parsed[llm_key]
 
-            print(f"[MACRO ENGINE] LLM resolved {len(results)}/{len(items)} items with non-zero macros")
-            if len(results) == 0 and len(parsed) > 0:
-                print(f"[MACRO ENGINE] WARNING: LLM returned data but 0 matched — possible key mismatch. "
-                      f"Input names: {items[:3]} vs LLM keys: {list(parsed.keys())[:3]}")
-            return results
-        else:
-            print(f"[MACRO ENGINE] LLM response has no valid JSON braces: {raw[:300]}")
+            if m:
+                macros = {
+                    "calories": _safe_float(m.get("calories", 0)),
+                    "protein": _safe_float(m.get("protein", 0)),
+                    "carbs": _safe_float(m.get("carbs", 0)),
+                    "fat": _safe_float(m.get("fat", 0)),
+                }
+                if macros["calories"] > 0:
+                    results[name] = macros
+
+        return results
     except Exception as e:
         import traceback
-        print(f"[MACRO ENGINE] LLM MACRO ESTIMATION ERROR: {type(e).__name__}: {e}")
+        print(f"[MACRO ENGINE] LLM BATCH ERROR: {type(e).__name__}: {e}")
         traceback.print_exc()
     return {}
+
+
+_LLM_MACRO_BATCH_SIZE = 15
+
+
+def _estimate_macros_llm(items):
+    if not items:
+        return {}
+    print(f"[MACRO ENGINE] LLM fallback for {len(items)} items (batch size {_LLM_MACRO_BATCH_SIZE}): {items[:5]}{'...' if len(items)>5 else ''}")
+    all_results = {}
+    for i in range(0, len(items), _LLM_MACRO_BATCH_SIZE):
+        batch = items[i:i + _LLM_MACRO_BATCH_SIZE]
+        print(f"[MACRO ENGINE] Processing batch {i // _LLM_MACRO_BATCH_SIZE + 1}/{(len(items) - 1) // _LLM_MACRO_BATCH_SIZE + 1} ({len(batch)} items)")
+        batch_results = _estimate_macros_llm_batch(batch)
+        all_results.update(batch_results)
+    print(f"[MACRO ENGINE] LLM total resolved: {len(all_results)}/{len(items)} items with non-zero macros")
+    return all_results
 
 
 def _score_item(macros, remaining):
@@ -1859,7 +1908,13 @@ def analyze_menu():
                         "message": "Menü metni işlenirken bir hata oluştu. Lütfen tekrar deneyin.",
                         "items": [], "categories": {}}), 200
 
+    MAX_MENU_ITEMS = 50
     item_names = list(dict.fromkeys(name for _, name in all_items))
+    if len(item_names) > MAX_MENU_ITEMS:
+        print(f"[MACRO ENGINE] Capping items from {len(item_names)} to {MAX_MENU_ITEMS}")
+        item_names = item_names[:MAX_MENU_ITEMS]
+        kept = set(item_names)
+        all_items = [(cat, name) for cat, name in all_items if name in kept]
     print(f"[MACRO ENGINE] Starting macro pipeline for {len(item_names)} unique items")
 
     from fitx_mcp.server import _get_fatsecret_token
@@ -1892,14 +1947,6 @@ def analyze_menu():
     if missing:
         llm_macros = _estimate_macros_llm(missing)
         macro_map.update(llm_macros)
-
-    still_missing = [n for n in item_names if n not in macro_map or macro_map.get(n, {}).get("calories", 0) == 0]
-    if still_missing:
-        print(f"[MACRO ENGINE] Retry: {len(still_missing)} items still at 0 calories after first LLM pass, retrying...")
-        retry_macros = _estimate_macros_llm(still_missing)
-        for name, macros in retry_macros.items():
-            if macros.get("calories", 0) > 0:
-                macro_map[name] = macros
 
     final_resolved = sum(1 for n in item_names if n in macro_map and macro_map[n].get("calories", 0) > 0)
     final_zero = len(item_names) - final_resolved
