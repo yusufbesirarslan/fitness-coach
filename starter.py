@@ -1477,6 +1477,7 @@ SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma:
                 {"role": "user", "content": prompt}
             ],
             temperature=0.0,
+            seed=42,
             max_tokens=2500,
         )
         raw = resp.choices[0].message.content.strip()
@@ -1606,6 +1607,7 @@ SADECE aşağıdaki JSON formatında yanıt ver:
                 {"role": "user", "content": prompt}
             ],
             temperature=0.0,
+            seed=42,
             max_tokens=1000,
         )
         raw = resp.choices[0].message.content.strip()
@@ -1632,6 +1634,31 @@ SADECE aşağıdaki JSON formatında yanıt ver:
     except Exception as e:
         print(f"[MACRO ENGINE] LLM SERVING WEIGHT ERROR: {type(e).__name__}: {e}")
     return {n: 150.0 for n in items}
+
+
+_macro_cache = {}
+_MACRO_CACHE_MAX = 500
+
+
+def _get_cached_macros(item_names):
+    hits = {}
+    misses = []
+    for name in item_names:
+        cached = _macro_cache.get(name)
+        if cached is not None:
+            hits[name] = cached
+        else:
+            misses.append(name)
+    return hits, misses
+
+
+def _cache_macros(macro_map):
+    for name, macros in macro_map.items():
+        if macros.get("calories", 0) > 0:
+            if len(_macro_cache) >= _MACRO_CACHE_MAX:
+                oldest = next(iter(_macro_cache))
+                del _macro_cache[oldest]
+            _macro_cache[name] = macros
 
 
 def _repair_truncated_json(raw_json):
@@ -1696,6 +1723,7 @@ Tüm {len(batch_items)} yemek için değer ver. Sadece JSON döndür, başka bir
                 {"role": "user", "content": prompt}
             ],
             temperature=0.0,
+            seed=42,
             max_tokens=max_tok,
         )
         raw = resp.choices[0].message.content.strip()
@@ -1917,16 +1945,24 @@ def analyze_menu():
         all_items = [(cat, name) for cat, name in all_items if name in kept]
     print(f"[MACRO ENGINE] Starting macro pipeline for {len(item_names)} unique items")
 
+    cached_hits, uncached_names = _get_cached_macros(item_names)
+    if cached_hits:
+        print(f"[MACRO ENGINE] Cache hit: {len(cached_hits)}/{len(item_names)} items from cache")
+
     from fitx_mcp.server import _get_fatsecret_token
-    macro_map = {}
+    macro_map = dict(cached_hits)
     per_100g_items = {}
-    try:
-        token = _get_fatsecret_token()
-        print(f"[MACRO ENGINE] FatSecret token acquired")
-        per_serving, per_100g_items = _lookup_macros_fatsecret(item_names, token)
-        macro_map.update(per_serving)
-    except Exception as e:
-        print(f"[MACRO ENGINE] FatSecret FAILED — all items will use LLM fallback: {type(e).__name__}: {e}")
+    lookup_names = uncached_names
+    if not lookup_names:
+        print(f"[MACRO ENGINE] All {len(item_names)} items served from cache — skipping FatSecret + LLM")
+    else:
+        try:
+            token = _get_fatsecret_token()
+            print(f"[MACRO ENGINE] FatSecret token acquired")
+            per_serving, per_100g_items = _lookup_macros_fatsecret(lookup_names, token)
+            macro_map.update(per_serving)
+        except Exception as e:
+            print(f"[MACRO ENGINE] FatSecret FAILED — uncached items will use LLM fallback: {type(e).__name__}: {e}")
 
     if per_100g_items:
         serving_weights = _estimate_serving_weights_llm(list(per_100g_items.keys()))
@@ -1942,11 +1978,13 @@ def analyze_menu():
             macro_map[name] = scaled
             print(f"[MACRO ENGINE] Scaled per-100g→serving: '{name}' × {scale:.1f} → Cal={scaled['calories']}")
 
-    missing = [n for n in item_names if n not in macro_map]
+    missing = [n for n in lookup_names if n not in macro_map]
     print(f"[MACRO ENGINE] After FatSecret: {len(macro_map)} resolved, {len(missing)} missing → LLM fallback")
     if missing:
         llm_macros = _estimate_macros_llm(missing)
         macro_map.update(llm_macros)
+
+    _cache_macros(macro_map)
 
     final_resolved = sum(1 for n in item_names if n in macro_map and macro_map[n].get("calories", 0) > 0)
     final_zero = len(item_names) - final_resolved
