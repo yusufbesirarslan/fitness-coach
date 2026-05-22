@@ -305,6 +305,11 @@
                         </div>
                     </div>
                 </div>
+                <div class="form-field">
+                    <label for="target_weight">Hedef Kilo (kg)</label>
+                    <input type="number" id="target_weight" placeholder="Hedef kilonuz" value="{{ target_weight or '' }}" step="0.1" min="30" max="300">
+                    <div class="field-hint">Ulaşmak istediğiniz kilo (opsiyonel).</div>
+                </div>
             </div>
 
             <button class="save-btn" id="save-btn" onclick="saveProfile()">KAYDET</button>
@@ -438,7 +443,9 @@ async function saveProfile() {
             body: JSON.stringify({
                 full_name: document.getElementById('full_name').value.trim(),
                 username: document.getElementById('username').value.trim(),
-                goal: selectedGoal
+                goal: selectedGoal,
+                profile_picture: localStorage.getItem('fitx_user_avatar') || '',
+                target_weight: document.getElementById('target_weight') ? document.getElementById('target_weight').value.trim() : ''
             })
         });
         const data = await res.json();

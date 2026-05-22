@@ -42,8 +42,10 @@ class User(UserMixin, db.Model):
     current_activity = db.Column(db.String(20))
     profile_complete = db.Column(db.Boolean, default=False)
 
-    profile_picture  = db.Column(db.String(500), nullable=True)
+    profile_picture  = db.Column(db.Text, nullable=True)
     full_name        = db.Column(db.String(150), nullable=True)
+    target_weight    = db.Column(db.Float, nullable=True)
+    goal_type        = db.Column(db.String(10), nullable=True)
     streak_count     = db.Column(db.Integer, default=0, server_default='0')
     rank_points      = db.Column(db.Integer, default=0, server_default='0')
     last_login       = db.Column(db.Date, nullable=True)
@@ -112,6 +114,12 @@ def setup():
         current_user.fitness_level    = data["fitness_level"]
         current_user.current_activity = data["current_activity"]
         current_user.profile_complete = True
+        current_user.goal_type = "loss" if data["goal"] == "kilo verme" else "gain"
+        if data.get("target_weight"):
+            try:
+                current_user.target_weight = float(data["target_weight"])
+            except (ValueError, TypeError):
+                pass
         db.session.commit()
     except ValueError:
         return jsonify({"error": "Kilo, boy ve yaş sayısal olmalıdır"}), 400
@@ -319,6 +327,24 @@ class UserDailyNutrition(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     user = db.relationship("User", backref="daily_nutrition")
+
+
+class DailyActivity(db.Model):
+    id              = db.Column(db.Integer, primary_key=True)
+    user_id         = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    steps           = db.Column(db.Integer, nullable=False, default=0)
+    intensity       = db.Column(db.String(20), nullable=False, default="moderate")
+    calories_burned = db.Column(db.Float, nullable=False, default=0)
+    distance_km     = db.Column(db.Float, nullable=False, default=0)
+    duration_min    = db.Column(db.Float, nullable=False, default=0)
+    date_key        = db.Column(db.String(10), nullable=False)
+    created_at      = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    user = db.relationship("User", backref="daily_activities")
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "date_key", "intensity", name="uq_daily_activity"),
+    )
 
 
 def award_xp(user_id, amount):
@@ -2439,6 +2465,7 @@ def edit_profile():
             full_name=current_user.full_name or "",
             profile_picture=current_user.profile_picture or "",
             goal=current_user.goal or "",
+            target_weight=current_user.target_weight,
             streak_count=current_user.streak_count or 0,
             supplements=supps,
             icons=CATEGORY_ICONS,
@@ -2464,8 +2491,8 @@ def edit_profile():
     if len(new_full_name) > 150:
         return jsonify({"error": "Ad soyad en fazla 150 karakter olabilir."}), 400
 
-    if len(new_profile_picture) > 500:
-        return jsonify({"error": "Profil fotoğrafı URL'si çok uzun."}), 400
+    if len(new_profile_picture) > 500_000:
+        return jsonify({"error": "Profil fotoğrafı çok büyük (maks 2MB)."}), 400
 
     valid_goals = ["kilo verme", "kas kazanma", ""]
     if new_goal not in valid_goals:
@@ -2476,6 +2503,14 @@ def edit_profile():
     current_user.profile_picture = new_profile_picture if new_profile_picture else None
     if new_goal:
         current_user.goal = new_goal
+        current_user.goal_type = "loss" if new_goal == "kilo verme" else "gain"
+
+    new_target_weight = data.get("target_weight")
+    if new_target_weight is not None:
+        try:
+            current_user.target_weight = float(new_target_weight) if new_target_weight else None
+        except (ValueError, TypeError):
+            pass
 
     db.session.commit()
     return jsonify({"message": "Profil başarıyla güncellendi!"})
@@ -2967,6 +3002,75 @@ def update_weight():
         "target_calories": round(target_calories)
     })
 
+
+@app.route("/api/activity/log", methods=["POST"])
+@login_required
+def log_daily_activity():
+    data = request.get_json()
+    steps = int(data.get("steps", 0))
+    intensity = data.get("intensity", "moderate")
+
+    if intensity not in MET_CONFIG:
+        return jsonify({"error": "Geçersiz yoğunluk"}), 400
+    if steps <= 0:
+        return jsonify({"error": "Adım sayısı pozitif olmalı"}), 400
+
+    weight = current_user.weight or 70
+    height = current_user.height or 170
+    calories, distance, duration = calculate_activity_calories(steps, intensity, weight, height)
+
+    today_key = date.today().isoformat()
+    existing = DailyActivity.query.filter_by(
+        user_id=current_user.id, date_key=today_key, intensity=intensity
+    ).first()
+
+    if existing:
+        existing.steps = steps
+        existing.calories_burned = calories
+        existing.distance_km = distance
+        existing.duration_min = duration
+    else:
+        db.session.add(DailyActivity(
+            user_id=current_user.id, steps=steps, intensity=intensity,
+            calories_burned=calories, distance_km=distance,
+            duration_min=duration, date_key=today_key
+        ))
+
+    db.session.commit()
+    return jsonify({
+        "message": f"{steps} adım kaydedildi.",
+        "calories_burned": calories,
+        "distance_km": distance,
+        "duration_min": duration
+    })
+
+
+@app.route("/api/activity/today")
+@login_required
+def today_activity():
+    today_key = date.today().isoformat()
+    activities = DailyActivity.query.filter_by(
+        user_id=current_user.id, date_key=today_key
+    ).all()
+
+    total_calories = sum(a.calories_burned or 0 for a in activities)
+    total_steps = sum(a.steps or 0 for a in activities)
+    total_distance = sum(a.distance_km or 0 for a in activities)
+
+    entries = [{
+        "intensity": a.intensity, "steps": a.steps,
+        "calories_burned": a.calories_burned,
+        "distance_km": a.distance_km, "duration_min": a.duration_min,
+    } for a in activities]
+
+    return jsonify({
+        "total_calories": round(total_calories, 1),
+        "total_steps": total_steps,
+        "total_distance": round(total_distance, 2),
+        "entries": entries
+    })
+
+
 @app.route("/chat", methods=["POST"])
 @login_required
 def chat():
@@ -3408,6 +3512,21 @@ def calculate_target(tdee, goal):
     elif goal.lower() == "kas kazanma":
         return tdee + 300
     return tdee
+
+MET_CONFIG = {
+    "light":    {"met": 2.0, "speed_kmh": 3.0},
+    "moderate": {"met": 3.5, "speed_kmh": 4.5},
+    "brisk":    {"met": 4.3, "speed_kmh": 5.5},
+    "fast":     {"met": 5.0, "speed_kmh": 6.5},
+}
+
+def calculate_activity_calories(steps, intensity, weight_kg, height_cm):
+    config = MET_CONFIG.get(intensity, MET_CONFIG["moderate"])
+    stride_cm = height_cm * 0.414
+    distance_km = steps * stride_cm / 100_000
+    duration_hours = distance_km / config["speed_kmh"] if config["speed_kmh"] > 0 else 0
+    calories = config["met"] * weight_kg * duration_hours
+    return round(calories, 1), round(distance_km, 2), round(duration_hours * 60, 1)
 
 def generate_training_plan(goal, level):
     plans = {
@@ -4125,6 +4244,8 @@ def last_session():
         "bmr"             : s.bmr,
         "tdee"            : s.tdee,
         "target_calories" : s.target_calories,
+        "target_weight"   : current_user.target_weight,
+        "goal_type"       : current_user.goal_type,
         "tarih"           : s.created_at.strftime("%d.%m.%Y")
     })
 
@@ -4298,6 +4419,9 @@ with app.app_context():
         'ALTER TABLE supplement RENAME COLUMN rating_effectiveness TO rating_effect',
         'ALTER TABLE supplement ADD COLUMN rating_digestion INTEGER',
         'ALTER TABLE message ADD COLUMN message_type VARCHAR(20) DEFAULT \'text\'',
+        'ALTER TABLE "user" ADD COLUMN target_weight FLOAT',
+        'ALTER TABLE "user" ADD COLUMN goal_type VARCHAR(10)',
+        'ALTER TABLE "user" ALTER COLUMN profile_picture TYPE TEXT',
     ]
     for sql in migrations:
         try:
@@ -4305,6 +4429,43 @@ with app.app_context():
             db.session.commit()
         except Exception:
             db.session.rollback()
+
+    # PL/pgSQL trigger for PostgreSQL activity calorie auto-calculation
+    try:
+        db.session.execute(db.text("""
+            CREATE OR REPLACE FUNCTION calc_activity_calories()
+            RETURNS TRIGGER AS $$
+            DECLARE
+                w FLOAT; h FLOAT; stride FLOAT; dist FLOAT; dur FLOAT;
+                met_val FLOAT; spd FLOAT;
+            BEGIN
+                SELECT weight, height INTO w, h FROM "user" WHERE id = NEW.user_id;
+                w := COALESCE(w, 70); h := COALESCE(h, 170);
+                met_val := CASE NEW.intensity
+                    WHEN 'light' THEN 2.0 WHEN 'moderate' THEN 3.5
+                    WHEN 'brisk' THEN 4.3 WHEN 'fast' THEN 5.0 ELSE 3.5 END;
+                spd := CASE NEW.intensity
+                    WHEN 'light' THEN 3.0 WHEN 'moderate' THEN 4.5
+                    WHEN 'brisk' THEN 5.5 WHEN 'fast' THEN 6.5 ELSE 4.5 END;
+                stride := h * 0.414;
+                dist := NEW.steps * stride / 100000.0;
+                dur := dist / spd;
+                NEW.calories_burned := ROUND((met_val * w * dur)::numeric, 1);
+                NEW.distance_km := ROUND(dist::numeric, 2);
+                NEW.duration_min := ROUND((dur * 60)::numeric, 1);
+                RETURN NEW;
+            END;
+            $$ LANGUAGE plpgsql;
+        """))
+        db.session.execute(db.text("""
+            DROP TRIGGER IF EXISTS trg_calc_activity ON daily_activity;
+            CREATE TRIGGER trg_calc_activity
+            BEFORE INSERT OR UPDATE ON daily_activity
+            FOR EACH ROW EXECUTE FUNCTION calc_activity_calories();
+        """))
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
     if DailyQuest.query.count() == 0:
         for q in [
             DailyQuest(title="Daily Login", description="Bugün uygulamaya giriş yap", points_reward=10, quest_type="login"),

@@ -81,6 +81,10 @@
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
             Menü Asistanı
         </a>
+        <a href="#" class="drawer-link" onclick="event.preventDefault();fxCloseDrawer();fxLaunchQR();">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3"/><path d="M20 14v3h-3"/><path d="M14 20h3"/><path d="M20 20h0"/></svg>
+            Barkod Tara
+        </a>
         <div class="drawer-sep"></div>
         <a href="/edit-profile" class="drawer-link">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -168,6 +172,11 @@
                     <div class="cal-row-val" id="cal-remain">—</div>
                 </div>
                 <div class="cal-row">
+                    <div class="cal-dot" style="background:#00C48C"></div>
+                    <div class="cal-row-lbl">Aktivite</div>
+                    <div class="cal-row-val" id="cal-activity">0 kcal</div>
+                </div>
+                <div class="cal-row">
                     <div class="cal-dot" style="background:#404040"></div>
                     <div class="cal-row-lbl">Hedef</div>
                     <div class="cal-row-val" id="cal-target">—</div>
@@ -189,27 +198,23 @@
         </button>
     </div>
 
-    <!-- ═══ C. AI COACH INSIGHT WIDGET ═══ -->
-    <div class="bc b-2 ai-coach-card">
-        <div class="ai-coach-glow"></div>
-        <div class="ai-coach-header">
-            <div class="ai-coach-avatar">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"/><path d="M16 14H8a6 6 0 0 0-6 6v1h20v-1a6 6 0 0 0-6-6z"/></svg>
-            </div>
-            <div>
-                <div class="ai-coach-name">AI Koç</div>
-                <div class="ai-coach-status"><span class="ai-coach-pulse"></span>Aktif</div>
-            </div>
+    <!-- ═══ ACTIVITY TRACKER ═══ -->
+    <div class="bc b-1">
+        <div class="bc-lbl"><span class="bc-dot" style="background:#00C48C"></span>Aktivite Takibi</div>
+        <div class="act-intensity" id="act-intensity">
+            <button class="act-int-btn" data-int="light" onclick="selectIntensity('light')">Hafif</button>
+            <button class="act-int-btn active" data-int="moderate" onclick="selectIntensity('moderate')">Orta</button>
+            <button class="act-int-btn" data-int="brisk" onclick="selectIntensity('brisk')">Tempolu</button>
+            <button class="act-int-btn" data-int="fast" onclick="selectIntensity('fast')">Hızlı</button>
         </div>
-        <div class="ai-coach-body" id="ai-nudge-body">
-            <div class="ai-nudge-loading">
-                <div class="ai-nudge-skeleton"></div>
-                <div class="ai-nudge-skeleton short"></div>
-            </div>
+        <div class="act-form">
+            <input type="number" class="act-input" id="act-steps" placeholder="Adım sayısı" min="1" max="100000">
+            <button class="act-btn" id="act-btn" onclick="logActivity()">KAYDET</button>
         </div>
-        <div class="ai-coach-footer">
-            <span class="ai-coach-source" id="ai-nudge-source">Kişisel Analiz</span>
-            <a href="#" class="ai-coach-action" onclick="event.preventDefault();document.querySelector('.coach-fab')?.click();">Koça Sor →</a>
+        <div class="act-summary" id="act-summary" style="display:none">
+            <div class="act-stat"><span class="act-stat-val" id="act-total-steps">0</span><span class="act-stat-lbl">adım</span></div>
+            <div class="act-stat"><span class="act-stat-val" id="act-total-cal">0</span><span class="act-stat-lbl">kcal</span></div>
+            <div class="act-stat"><span class="act-stat-val" id="act-total-dist">0</span><span class="act-stat-lbl">km</span></div>
         </div>
     </div>
 
@@ -222,6 +227,10 @@
             <div class="w-unit">kg</div>
         </div>
         <div class="w-delta" id="w-delta"></div>
+        <div class="w-goal-progress" id="w-goal-progress" style="display:none">
+            <div class="w-goal-text" id="w-goal-text"></div>
+            <div class="w-goal-bar-wrap"><div class="w-goal-bar" id="w-goal-bar"></div></div>
+        </div>
 
         <div class="sparkline-wrap">
             <canvas id="sparkline"></canvas>
@@ -290,11 +299,6 @@
         <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
         <span>Antrenman</span>
     </a>
-    <div class="ab-fab-wrapper">
-        <button class="qr-fab pulse" onclick="fxLaunchQR()" aria-label="QR Menü Tarayıcı">
-            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3"/><path d="M20 14v3h-3"/><path d="M14 20h3"/><path d="M20 20h0"/></svg>
-        </button>
-    </div>
     <a href="/nutrition" class="ab-tab">
         <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
         <span>Beslenme</span>
@@ -320,30 +324,30 @@
 </div>
 
 <!-- ══════════════════════════════════════
-     FAB — Quick Log
+     QUICK ADD FAB — Bottom Left
      ══════════════════════════════════════ -->
-<div class="fab-wrap">
-    <div class="fab-actions" id="fab-actions">
+<div class="quick-add-wrap" id="quick-add-wrap">
+    <div class="quick-add-actions" id="quick-add-actions">
         <div class="fab-row">
-            <div class="fab-lbl">Öğün Kaydet</div>
             <a href="/nutrition" class="fab-sub">
-                <svg viewBox="0 0 24 24" width="17" height="17"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/></svg>
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/></svg>
             </a>
+            <div class="fab-lbl">Öğün Kaydet</div>
         </div>
         <div class="fab-row">
-            <div class="fab-lbl">Antrenman Oluştur</div>
-            <a href="/training" class="fab-sub">
-                <svg viewBox="0 0 24 24" width="17" height="17"><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/><path d="M6.5 6.5h11M6.5 17.5h11M3 8.5v7M21 8.5v7"/></svg>
-            </a>
+            <button class="fab-sub" onclick="addWater();toggleQuickAdd();">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+            </button>
+            <div class="fab-lbl">Su Ekle</div>
         </div>
         <div class="fab-row">
-            <div class="fab-lbl">Haftalık Check-In</div>
-            <a href="/progress-page" class="fab-sub">
-                <svg viewBox="0 0 24 24" width="17" height="17"><polyline points="20 6 9 17 4 12"/></svg>
-            </a>
+            <button class="fab-sub" onclick="toggleQuickAdd();fxLaunchQR();">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3"/><path d="M20 14v3h-3"/><path d="M14 20h3"/></svg>
+            </button>
+            <div class="fab-lbl">Barkod Tara</div>
         </div>
     </div>
-    <button class="fab-main" id="fab-btn" onclick="toggleFAB()">
+    <button class="quick-add-btn" id="quick-add-btn" onclick="toggleQuickAdd()">
         <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     </button>
 </div>
@@ -356,7 +360,8 @@
      ══════════════════════════════════════ -->
 <script>
 const WATER_GOAL = 8;
-let fabOpen = false, tipIdx = 0, sparkChart = null, userGoal = null;
+let quickAddOpen = false, tipIdx = 0, sparkChart = null, userGoal = null;
+let selectedIntensity = 'moderate', currentActivityCals = 0;
 
 const TIPS = [
     { icon:'⚡', text:'<strong>Progressive Overload</strong> — Her hafta ağırlık veya tekrar sayını küçük artışlarla yükselt. Kas büyümesinin temel formülü budur.', src:'Spor Fizyolojisi' },
@@ -489,17 +494,21 @@ function renderStreak(n) {
 
 
 /* ═══ CALORIE RING ═══ */
-function updateCalRing(consumed, target) {
+function updateCalRing(consumed, target, activityCals) {
+    activityCals = activityCals || 0;
+    const effectiveTarget = target + activityCals;
+    const remaining = Math.max(effectiveTarget - consumed, 0);
     const circ  = 276.46;
-    const ratio = target > 0 ? Math.min(consumed / target, 1) : 0;
+    const ratio = effectiveTarget > 0 ? Math.min(consumed / effectiveTarget, 1) : 0;
     const ring  = document.getElementById('cal-ring');
     ring.style.strokeDashoffset = circ * (1 - ratio);
     ring.style.stroke = ratio >= 1 ? '#FF4D4D' : ratio >= 0.85 ? '#FFB020' : '#CCFF00';
 
     document.getElementById('cal-num').textContent      = consumed;
     document.getElementById('cal-consumed').textContent = consumed + ' kcal';
-    document.getElementById('cal-remain').textContent   = Math.max(target - consumed, 0) + ' kcal';
+    document.getElementById('cal-remain').textContent   = remaining + ' kcal';
     document.getElementById('cal-target').textContent   = target + ' kcal';
+    document.getElementById('cal-activity').textContent = '+' + activityCals + ' kcal';
 
     const badge = document.getElementById('g-cal-badge');
     const pct   = Math.round(ratio * 100);
@@ -710,40 +719,63 @@ function resetTipTimer() {
 }
 
 
-/* ═══ AI COACH NUDGE WIDGET ═══ */
-async function loadNudges() {
-    const body = document.getElementById('ai-nudge-body');
-    try {
-        const res = await fetch('/dashboard-nudges');
-        const data = await res.json();
-        const nudges = data.nudges || [];
+/* ═══ ACTIVITY TRACKER ═══ */
+function selectIntensity(int) {
+    selectedIntensity = int;
+    document.querySelectorAll('.act-int-btn').forEach(b => b.classList.toggle('active', b.dataset.int === int));
+}
 
-        if (nudges.length > 0) {
-            body.innerHTML = nudges.map(n =>
-                `<p class="ai-nudge-item">${n}</p>`
-            ).join('');
-            document.getElementById('ai-nudge-source').textContent = 'Kişisel Analiz · Bugün';
-        } else {
-            body.innerHTML = '<p class="ai-nudge-item">Bugünkü antrenman ve beslenme verilerini girdikten sonra kişiselleştirilmiş öneriler burada görünecek.</p>';
-            document.getElementById('ai-nudge-source').textContent = 'AI Koç';
+async function logActivity() {
+    const stepsInput = document.getElementById('act-steps');
+    const steps = parseInt(stepsInput.value);
+    if (!steps || steps <= 0) { toast('Geçerli bir adım sayısı girin.', 'error'); return; }
+
+    const btn = document.getElementById('act-btn');
+    btn.textContent = '…'; btn.disabled = true;
+    try {
+        const res = await fetch('/api/activity/log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ steps, intensity: selectedIntensity })
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || 'Hata', 'error'); return; }
+        toast(data.message, 'success');
+        stepsInput.value = '';
+        await refreshActivitySummary();
+    } catch(e) { toast('Bağlantı hatası.', 'error'); }
+    finally { btn.textContent = 'KAYDET'; btn.disabled = false; }
+}
+
+async function refreshActivitySummary() {
+    try {
+        const res = await fetch('/api/activity/today');
+        const data = await res.json();
+        currentActivityCals = Math.round(data.total_calories || 0);
+        if (data.total_steps > 0) {
+            document.getElementById('act-summary').style.display = 'flex';
+            document.getElementById('act-total-steps').textContent = data.total_steps;
+            document.getElementById('act-total-cal').textContent = currentActivityCals;
+            document.getElementById('act-total-dist').textContent = data.total_distance;
         }
-    } catch(e) {
-        body.innerHTML = '<p class="ai-nudge-item">Koçunuz hazır — verilerinizi girin ve kişisel öneriler alın.</p>';
-    }
+        const consumed = parseInt(document.getElementById('cal-num').textContent) || 0;
+        const target = parseInt(document.getElementById('cal-target').textContent) || 2000;
+        updateCalRing(consumed, target, currentActivityCals);
+    } catch(e) {}
 }
 
 
-/* ═══ FAB ═══ */
-function toggleFAB() {
-    fabOpen = !fabOpen;
-    document.getElementById('fab-btn').classList.toggle('open', fabOpen);
-    document.getElementById('fab-actions').classList.toggle('open', fabOpen);
+/* ═══ QUICK ADD FAB ═══ */
+function toggleQuickAdd() {
+    quickAddOpen = !quickAddOpen;
+    document.getElementById('quick-add-btn').classList.toggle('open', quickAddOpen);
+    document.getElementById('quick-add-actions').classList.toggle('open', quickAddOpen);
 }
 document.addEventListener('click', (e) => {
-    if (fabOpen && !e.target.closest('.fab-wrap')) {
-        fabOpen = false;
-        document.getElementById('fab-btn').classList.remove('open');
-        document.getElementById('fab-actions').classList.remove('open');
+    if (quickAddOpen && !e.target.closest('.quick-add-wrap')) {
+        quickAddOpen = false;
+        document.getElementById('quick-add-btn').classList.remove('open');
+        document.getElementById('quick-add-actions').classList.remove('open');
     }
 });
 
@@ -759,20 +791,29 @@ async function init() {
     renderTip(tipIdx, false);
     resetTipTimer();
 
-    loadNudges();
-
     try {
-        const [sessRes, mealRes] = await Promise.all([
+        const [sessRes, mealRes, actRes] = await Promise.all([
             fetch('/last-session'),
-            fetch('/meal-log/today')
+            fetch('/meal-log/today'),
+            fetch('/api/activity/today')
         ]);
-        const sess   = await sessRes.json();
-        const meals  = await mealRes.json();
+        const sess     = await sessRes.json();
+        const meals    = await mealRes.json();
+        const activity = await actRes.json();
+
+        currentActivityCals = Math.round(activity.total_calories || 0);
+        if (activity.total_steps > 0) {
+            document.getElementById('act-summary').style.display = 'flex';
+            document.getElementById('act-total-steps').textContent = activity.total_steps;
+            document.getElementById('act-total-cal').textContent = currentActivityCals;
+            document.getElementById('act-total-dist').textContent = activity.total_distance;
+        }
 
         if (sess.exists) {
             userGoal = sess.goal;
             setGreeting(sess.goal);
-            document.getElementById('w-kg').textContent = sess.weight || '—';
+            const currentWeight = sess.weight || 0;
+            document.getElementById('w-kg').textContent = currentWeight || '—';
 
             if (sess.bmr) {
                 document.getElementById('w-bmr').textContent    = Math.round(sess.bmr);
@@ -781,16 +822,35 @@ async function init() {
                 document.getElementById('w-meta').style.display = 'grid';
             }
 
+            if (sess.target_weight && currentWeight) {
+                const tw = sess.target_weight;
+                const gt = sess.goal_type;
+                const remaining = gt === 'loss' ? Math.max(currentWeight - tw, 0) : Math.max(tw - currentWeight, 0);
+                const goalEl = document.getElementById('w-goal-progress');
+                const textEl = document.getElementById('w-goal-text');
+                const barEl  = document.getElementById('w-goal-bar');
+                goalEl.style.display = 'block';
+                if (remaining <= 0) {
+                    textEl.innerHTML = '<strong>' + currentWeight + ' kg</strong> — Hedefe ulaştınız!';
+                    barEl.style.width = '100%';
+                } else {
+                    const startDiff = remaining + 2;
+                    const pct = Math.min(((startDiff - remaining) / startDiff) * 100, 95);
+                    textEl.innerHTML = '<strong>' + currentWeight + ' kg</strong> / ' + remaining.toFixed(1) + ' kg kaldı';
+                    barEl.style.width = Math.max(pct, 5) + '%';
+                }
+            }
+
             const totals  = (meals && meals.totals) ? meals.totals : { kalori: 0 };
             const target  = sess.target_calories || 2000;
-            updateCalRing(Math.round(totals.kalori || 0), Math.round(target));
+            updateCalRing(Math.round(totals.kalori || 0), Math.round(target), currentActivityCals);
         } else {
             setGreeting(null);
-            updateCalRing(0, 2000);
+            updateCalRing(0, 2000, 0);
         }
     } catch(e) {
         setGreeting(null);
-        updateCalRing(0, 2000);
+        updateCalRing(0, 2000, 0);
     }
 
     await loadSparkline();

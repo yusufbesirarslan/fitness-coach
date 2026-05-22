@@ -305,137 +305,38 @@
 
 
 /* ═══════════════════════════════════════════════════════
-   C. AI COACH INSIGHT WIDGET
+   C. ACTIVITY TRACKER CARD
    ═══════════════════════════════════════════════════════ */
-.ai-coach-card {
-    background: linear-gradient(145deg, rgba(18,18,22,0.95) 0%, rgba(22,24,30,0.95) 100%);
-    border: 1px solid rgba(204,255,0,0.10);
-    border-radius: 14px;
-    display: flex;
-    flex-direction: column;
-    position: relative;
-    overflow: hidden;
+.act-intensity { display:flex; gap:6px; margin-bottom:14px; }
+.act-int-btn {
+    flex:1; padding:8px 4px; border-radius:8px; border:1px solid rgba(255,255,255,0.06);
+    background:rgba(255,255,255,0.03); color:#808088; font-size:11px; font-weight:600;
+    font-family:'DM Sans',sans-serif; cursor:pointer; transition:all 0.2s; text-align:center;
 }
+.act-int-btn.active { background:rgba(0,196,140,0.12); border-color:rgba(0,196,140,0.35); color:#00C48C; }
+.act-int-btn:hover:not(.active) { border-color:rgba(255,255,255,0.12); color:#C8C8D0; }
 
-.ai-coach-card::before {
-    content: '';
-    position: absolute;
-    inset: -1px;
-    border-radius: 15px;
-    padding: 1px;
-    background: linear-gradient(135deg,
-        rgba(204,255,0,0.15) 0%,
-        rgba(204,255,0,0.03) 40%,
-        rgba(61,158,255,0.08) 100%
-    );
-    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-    -webkit-mask-composite: xor;
-    mask-composite: exclude;
-    pointer-events: none;
+.act-form { display:flex; gap:8px; align-items:center; margin-bottom:12px; }
+.act-input {
+    flex:1; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.06);
+    border-radius:8px; padding:10px 14px; color:#F2F2F2;
+    font-family:'DM Sans',sans-serif; font-size:14px; outline:none;
+    transition:border-color 0.2s, box-shadow 0.2s; -webkit-appearance:none;
 }
+.act-input:focus { border-color:rgba(0,196,140,0.35); box-shadow:0 0 0 3px rgba(0,196,140,0.05); }
+.act-btn {
+    font-family:'Bebas Neue',sans-serif; font-size:14px; letter-spacing:2px;
+    color:#0A0A0C; background:#00C48C; border:none; border-radius:8px;
+    padding:10px 20px; cursor:pointer; transition:background 0.2s; white-space:nowrap;
+}
+.act-btn:hover { background:#00A876; }
 
-.ai-coach-glow {
-    position: absolute;
-    top: -60px; right: -60px;
-    width: 200px; height: 200px;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(204,255,0,0.04), transparent 70%);
-    pointer-events: none;
+.act-summary {
+    display:flex; gap:12px; padding-top:12px; border-top:1px solid rgba(255,255,255,0.04);
 }
-
-.ai-coach-header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 16px;
-}
-
-.ai-coach-avatar {
-    width: 36px; height: 36px;
-    border-radius: 10px;
-    background: linear-gradient(135deg, rgba(204,255,0,0.15), rgba(204,255,0,0.05));
-    border: 1px solid rgba(204,255,0,0.18);
-    display: flex; align-items: center; justify-content: center;
-    color: #CCFF00;
-    flex-shrink: 0;
-}
-
-.ai-coach-name {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 15px;
-    letter-spacing: 2px;
-    color: #CCFF00;
-}
-
-.ai-coach-status {
-    display: flex; align-items: center; gap: 6px;
-    font-size: 10px; color: #505058; font-weight: 500;
-}
-
-.ai-coach-pulse {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: #00C48C;
-    animation: coach-pulse 2s ease infinite;
-}
-@keyframes coach-pulse {
-    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(0,196,140,0.4); }
-    50% { opacity: 0.7; box-shadow: 0 0 0 4px rgba(0,196,140,0); }
-}
-
-.ai-coach-body {
-    flex: 1;
-    min-height: 60px;
-}
-
-.ai-nudge-item {
-    font-size: 14px;
-    color: #C8C8D0;
-    line-height: 1.72;
-    font-weight: 300;
-    margin-bottom: 8px;
-}
-.ai-nudge-item:last-child { margin-bottom: 0; }
-
-.ai-nudge-loading {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.ai-nudge-skeleton {
-    height: 14px;
-    background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
-    background-size: 400px 100%;
-    animation: skeleton-shimmer 1.5s ease infinite;
-    border-radius: 4px;
-    width: 100%;
-}
-.ai-nudge-skeleton.short { width: 65%; }
-
-.ai-coach-footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-top: 16px;
-    padding-top: 14px;
-    border-top: 1px solid rgba(255,255,255,0.04);
-}
-
-.ai-coach-source {
-    font-size: 11px;
-    color: #404048;
-    font-weight: 500;
-}
-
-.ai-coach-action {
-    font-size: 12px;
-    font-weight: 600;
-    color: #CCFF00;
-    text-decoration: none;
-    transition: opacity 0.2s;
-}
-.ai-coach-action:hover { opacity: 0.75; }
+.act-stat { display:flex; flex-direction:column; align-items:center; flex:1; }
+.act-stat-val { font-family:'Bebas Neue',sans-serif; font-size:22px; color:#00C48C; letter-spacing:1px; }
+.act-stat-lbl { font-size:10px; color:#505058; font-weight:600; text-transform:uppercase; letter-spacing:0.1em; }
 
 
 /* ═══════════════════════════════════════════════════════
@@ -447,6 +348,12 @@
 .w-delta   { font-size:13px; font-weight:600; margin-top:4px; min-height:18px; display:flex; align-items:center; gap:4px; }
 .w-delta.goal-ok { color:#CCFF00; } .w-delta.goal-warn { color:#FF4D4D; } .w-delta.eq { color:#505058; }
 .w-arrow { font-size:16px; font-weight:700; line-height:1; }
+
+.w-goal-progress { margin-top:10px; }
+.w-goal-text { font-size:13px; color:#808088; font-weight:500; margin-bottom:6px; }
+.w-goal-text strong { color:#CCFF00; font-weight:700; }
+.w-goal-bar-wrap { height:4px; background:rgba(255,255,255,0.04); border-radius:2px; overflow:hidden; }
+.w-goal-bar { height:100%; background:linear-gradient(90deg,#CCFF00,#A8D400); border-radius:2px; transition:width 0.8s cubic-bezier(0.4,0,0.2,1); width:0; }
 
 .sparkline-wrap { height:64px; position:relative; margin:14px 0; }
 
@@ -555,15 +462,16 @@
 
 
 /* ═══════════════════════════════════════════════════════
-   D. SEAMLESS ACTIVITY — FAB REFINEMENTS
+   D. QUICK ADD FAB (bottom-left)
    ═══════════════════════════════════════════════════════ */
-.fab-wrap {
-    position:fixed; bottom:88px; right:24px; z-index:200;
-    display:flex; flex-direction:column-reverse; align-items:flex-end; gap:12px;
+.quick-add-wrap {
+    position:fixed; bottom:88px; left:24px; z-index:200;
+    display:flex; flex-direction:column-reverse; align-items:flex-start; gap:12px;
 }
-@media(min-width:1024px) { .fab-wrap { bottom:36px; right:90px; } }
+@media(min-width:1024px) { .quick-add-wrap { display:none; } }
+@media(max-width:768px) { .quick-add-wrap { bottom:80px; left:16px; } }
 
-.fab-main {
+.quick-add-btn {
     width:52px; height:52px; border-radius:14px;
     background:#CCFF00; border:none; cursor:pointer; flex-shrink:0;
     display:flex; align-items:center; justify-content:center;
@@ -571,18 +479,18 @@
     transition: transform 0.30s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.2s, border-radius 0.3s;
     color:#0A0A0C;
 }
-.fab-main svg { width:20px; height:20px; stroke:currentColor; fill:none; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; transition: transform 0.3s ease; }
-.fab-main:hover { box-shadow: 0 6px 28px rgba(204,255,0,0.40); }
-.fab-main.open  { border-radius:50%; }
-.fab-main.open svg { transform: rotate(45deg); }
+.quick-add-btn svg { width:20px; height:20px; stroke:currentColor; fill:none; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; transition: transform 0.3s ease; }
+.quick-add-btn:hover { box-shadow: 0 6px 28px rgba(204,255,0,0.40); }
+.quick-add-btn.open  { border-radius:50%; }
+.quick-add-btn.open svg { transform: rotate(45deg); }
 
-.fab-actions {
-    display:flex; flex-direction:column; gap:10px; align-items:flex-end;
+.quick-add-actions {
+    display:flex; flex-direction:column; gap:10px; align-items:flex-start;
     opacity:0; pointer-events:none;
     transform: translateY(14px) scale(0.95);
     transition: opacity 0.2s ease, transform 0.28s cubic-bezier(0.34,1.56,0.64,1);
 }
-.fab-actions.open { opacity:1; pointer-events:all; transform:translateY(0) scale(1); }
+.quick-add-actions.open { opacity:1; pointer-events:all; transform:translateY(0) scale(1); }
 .fab-row { display:flex; align-items:center; gap:10px; }
 .fab-lbl {
     font-size:12px; font-weight:600; color:#F2F2F2;

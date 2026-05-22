@@ -359,13 +359,13 @@
 /* ── 5. LAYOUT ADJUSTMENTS ───────────────────────────── */
 .page-body {
   padding-top: var(--header-h);
-  padding-bottom: calc(var(--action-bar-h) + var(--fab-protrude) + 16px + env(safe-area-inset-bottom, 0));
+  padding-bottom: calc(var(--action-bar-h) + 24px + env(safe-area-inset-bottom, 0));
 }
 
 /* Override old sidebar layout on desktop — preserve centering */
 @media (min-width: 1024px) {
   .main-content { margin-left: auto !important; margin-right: auto !important; }
-  .fab-wrap, .cw-root-wrap { display: none !important; }
+  .fab-wrap, .quick-add-wrap, .cw-root-wrap { display: none !important; }
 }
 
 /* Hide floating FAB + chat widget on desktop */
