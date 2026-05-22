@@ -365,12 +365,6 @@
 /* Override old sidebar layout on desktop — preserve centering */
 @media (min-width: 1024px) {
   .main-content { margin-left: auto !important; margin-right: auto !important; }
-  .fab-wrap, .quick-add-wrap, .cw-root-wrap { display: none !important; }
-}
-
-/* Hide floating FAB + chat widget on desktop */
-@media (min-width: 1024px) {
-  #cw-root { display: none !important; }
 }
 
 /* Hide legacy nav elements */

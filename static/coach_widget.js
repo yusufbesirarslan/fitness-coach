@@ -6,7 +6,7 @@
   /* ── 1. Inject CSS ── */
   var style = document.createElement('style');
   style.textContent = [
-    '#cw-root{position:fixed;bottom:24px;left:24px;z-index:9998;display:flex;flex-direction:column;align-items:flex-start;gap:12px;pointer-events:none}',
+    '#cw-root{position:fixed;bottom:100px;left:36px;z-index:9998;display:flex;flex-direction:column;align-items:flex-start;gap:12px;pointer-events:none}',
     '@media(max-width:768px){#cw-root{bottom:148px;left:16px}}',
 
     '#cw-window{width:360px;height:500px;background:#1E1E1E;border:1px solid #333;border-radius:16px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 25px 60px rgba(0,0,0,.72),0 0 0 1px rgba(204,255,0,.04);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);pointer-events:none;opacity:0;transform:translateY(14px) scale(.96);transition:opacity .22s cubic-bezier(.4,0,.2,1),transform .22s cubic-bezier(.4,0,.2,1)}',

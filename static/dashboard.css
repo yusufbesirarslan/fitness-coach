@@ -468,7 +468,7 @@
     position:fixed; bottom:88px; left:24px; z-index:200;
     display:flex; flex-direction:column-reverse; align-items:flex-start; gap:12px;
 }
-@media(min-width:1024px) { .quick-add-wrap { display:none; } }
+@media(min-width:1024px) { .quick-add-wrap { bottom:36px; left:36px; } }
 @media(max-width:768px) { .quick-add-wrap { bottom:80px; left:16px; } }
 
 .quick-add-btn {
