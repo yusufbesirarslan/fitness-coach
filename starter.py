@@ -2475,7 +2475,6 @@ def edit_profile():
 
     new_username = (data.get("username") or "").strip()
     new_full_name = (data.get("full_name") or "").strip()
-    new_profile_picture = (data.get("profile_picture") or "").strip()
     new_goal = (data.get("goal") or "").strip()
 
     if not new_username or len(new_username) < 3:
@@ -2491,8 +2490,11 @@ def edit_profile():
     if len(new_full_name) > 150:
         return jsonify({"error": "Ad soyad en fazla 150 karakter olabilir."}), 400
 
-    if len(new_profile_picture) > 500_000:
-        return jsonify({"error": "Profil fotoğrafı çok büyük (maks 2MB)."}), 400
+    if "profile_picture" in data:
+        new_profile_picture = (data.get("profile_picture") or "").strip()
+        if len(new_profile_picture) > 500_000:
+            return jsonify({"error": "Profil fotoğrafı çok büyük (maks 2MB)."}), 400
+        current_user.profile_picture = new_profile_picture if new_profile_picture else None
 
     valid_goals = ["kilo verme", "kas kazanma", ""]
     if new_goal not in valid_goals:
@@ -2500,7 +2502,6 @@ def edit_profile():
 
     current_user.username = new_username
     current_user.full_name = new_full_name if new_full_name else None
-    current_user.profile_picture = new_profile_picture if new_profile_picture else None
     if new_goal:
         current_user.goal = new_goal
         current_user.goal_type = "loss" if new_goal == "kilo verme" else "gain"

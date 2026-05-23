@@ -39,96 +39,6 @@
 
 
 /* ═══════════════════════════════════════════════════════
-   A. EXECUTIVE PROGRESS HEADER
-   ═══════════════════════════════════════════════════════ */
-.exec-header {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    padding: 14px 20px;
-    margin-bottom: 24px;
-    background: rgba(22, 22, 26, 0.7);
-    border: 1px solid rgba(255,255,255,0.05);
-    border-radius: 12px;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-}
-
-.exec-left {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-shrink: 0;
-}
-
-.exec-level-badge {
-    width: 36px; height: 36px;
-    border-radius: 8px;
-    background: linear-gradient(135deg, #CCFF00 0%, #A8D400 100%);
-    display: flex; align-items: center; justify-content: center;
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 18px; color: #0A0A0C;
-    box-shadow: 0 0 16px rgba(204,255,0,0.20);
-}
-
-.exec-rank-info {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.exec-title {
-    font-family: 'Bebas Neue', sans-serif;
-    font-size: 16px;
-    letter-spacing: 2px;
-    color: #CCFF00;
-}
-
-.exec-divider {
-    color: rgba(255,255,255,0.12);
-    font-weight: 300;
-}
-
-.exec-label {
-    font-size: 12px;
-    color: #606068;
-    font-weight: 500;
-}
-
-.exec-bar-wrap {
-    flex: 1;
-    min-width: 80px;
-}
-
-.exec-bar {
-    height: 4px;
-    background: rgba(255,255,255,0.04);
-    border-radius: 2px;
-    overflow: hidden;
-}
-
-.exec-bar-fill {
-    height: 100%;
-    border-radius: 2px;
-    background: linear-gradient(90deg, rgba(204,255,0,0.6), #CCFF00);
-    transition: width 1s cubic-bezier(0.4,0,0.2,1);
-    box-shadow: 0 0 8px rgba(204,255,0,0.25);
-}
-
-.exec-right {
-    flex-shrink: 0;
-}
-
-.exec-xp-remain {
-    font-size: 11px;
-    color: #606068;
-    font-weight: 500;
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-}
-
-
-/* ═══════════════════════════════════════════════════════
    GREETING ROW
    ═══════════════════════════════════════════════════════ */
 .greeting-row {
@@ -523,8 +433,6 @@
     .bento { grid-template-columns:repeat(2,1fr); }
     .b-3   { grid-column:span 2; }
 
-    .exec-header { flex-wrap: wrap; gap: 10px; }
-    .exec-bar-wrap { order: 3; flex-basis: 100%; }
 }
 
 @media(max-width:600px) {
@@ -536,10 +444,6 @@
     .w-meta  { grid-template-columns:repeat(2,1fr); }
 
     .greeting-row { flex-direction: column; align-items: flex-start; }
-
-    .exec-header { padding: 10px 14px; }
-    .exec-rank-info { flex-wrap: wrap; gap: 4px; }
-    .exec-title { font-size: 14px; }
 
     .journey-card { padding: 18px; }
     .jm-xp-row { flex-direction: column; align-items: flex-start; gap: 6px; }

@@ -81,10 +81,6 @@
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
             Menü Asistanı
         </a>
-        <a href="#" class="drawer-link" onclick="event.preventDefault();fxCloseDrawer();fxLaunchQR();">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3"/><path d="M20 14v3h-3"/><path d="M14 20h3"/><path d="M20 20h0"/></svg>
-            Barkod Tara
-        </a>
         <div class="drawer-sep"></div>
         <a href="/edit-profile" class="drawer-link">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -103,26 +99,6 @@
      MAIN CONTENT
      ══════════════════════════════════════ -->
 <main class="main-content">
-
-<!-- ═══ A. EXECUTIVE PROGRESS HEADER ═══ -->
-<div class="exec-header">
-    <div class="exec-left">
-        <div class="exec-level-badge" id="exec-level">{{ user_level }}</div>
-        <div class="exec-rank-info">
-            <span class="exec-title" id="exec-title">{{ user_title }}</span>
-            <span class="exec-divider">|</span>
-            <span class="exec-label">Level {{ user_level }}</span>
-        </div>
-    </div>
-    <div class="exec-bar-wrap">
-        <div class="exec-bar">
-            <div class="exec-bar-fill" id="exec-bar" style="width:{{ (xp_in_level / xp_for_next * 100)|int }}%"></div>
-        </div>
-    </div>
-    <div class="exec-right">
-        <span class="exec-xp-remain" id="exec-xp">{{ xp_for_next - xp_in_level }} XP kaldı</span>
-    </div>
-</div>
 
 <!-- ═══ GREETING ROW ═══ -->
 <div class="greeting-row">
