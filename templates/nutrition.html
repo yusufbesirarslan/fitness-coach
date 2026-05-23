@@ -465,29 +465,25 @@
 </div>
 
 
-<!-- ── FAB SPEED DIAL ── -->
-<div class="fab-wrap" id="fab-wrap">
-  <div class="fab-actions" id="fab-actions">
-
-    <div class="fab-row">
-      <span class="fab-lbl">Su Kaydet</span>
-      <button class="fab-sub" onclick="openWater();toggleFAB()">
-        <svg viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
-      </button>
-    </div>
-
-    <div class="fab-row">
-      <span class="fab-lbl">Öğün Ekle</span>
-      <button class="fab-sub" onclick="scrollToForm();toggleFAB()">
+<!-- ── QUICK ADD FAB — Bottom Left ── -->
+<div class="quick-add-wrap" id="quick-add-wrap">
+    <button class="quick-add-btn" id="quick-add-btn" onclick="toggleQuickAdd()">
         <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      </button>
+    </button>
+    <div class="quick-add-actions" id="quick-add-actions">
+        <div class="fab-row">
+            <button class="fab-sub" onclick="openWater();toggleQuickAdd()">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+            </button>
+            <div class="fab-lbl">Su Kaydet</div>
+        </div>
+        <div class="fab-row">
+            <button class="fab-sub" onclick="scrollToForm();toggleQuickAdd()">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+            <div class="fab-lbl">Öğün Ekle</div>
+        </div>
     </div>
-
-  </div>
-
-  <button class="fab-main" id="fab-main" onclick="toggleFAB()" aria-label="Hızlı işlemler">
-    <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-  </button>
 </div>
 
 
@@ -499,7 +495,7 @@
 const RING_CIRC = 301.6; // 2π × 48
 let targetCalories = 2000;
 let selectedMealType = 'Kahvaltı';
-let fabOpen = false;
+let quickAddOpen = false;
 
 /* ── TOAST SYSTEM ── */
 function showToast(msg, type = 'info', duration = 3500) {
@@ -1031,17 +1027,17 @@ async function quickAddMeal(mealKey, mealLabel, btn) {
   }
 }
 
-/* ── FAB ── */
-function toggleFAB() {
-  fabOpen = !fabOpen;
-  document.getElementById('fab-main').classList.toggle('open', fabOpen);
-  document.getElementById('fab-actions').classList.toggle('open', fabOpen);
+/* ── QUICK ADD FAB ── */
+function toggleQuickAdd() {
+  quickAddOpen = !quickAddOpen;
+  document.getElementById('quick-add-btn').classList.toggle('open', quickAddOpen);
+  document.getElementById('quick-add-actions').classList.toggle('open', quickAddOpen);
 }
 document.addEventListener('click', e => {
-  if (fabOpen && !document.getElementById('fab-wrap').contains(e.target)) {
-    fabOpen = false;
-    document.getElementById('fab-main').classList.remove('open');
-    document.getElementById('fab-actions').classList.remove('open');
+  if (quickAddOpen && !e.target.closest('.quick-add-wrap')) {
+    quickAddOpen = false;
+    document.getElementById('quick-add-btn').classList.remove('open');
+    document.getElementById('quick-add-actions').classList.remove('open');
   }
 });
 

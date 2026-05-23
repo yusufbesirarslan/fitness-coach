@@ -489,10 +489,44 @@
     </div>
 </div>
 
+<!-- ── QUICK ADD FAB — Bottom Left ── -->
+<div class="quick-add-wrap" id="quick-add-wrap">
+    <button class="quick-add-btn" id="quick-add-btn" onclick="toggleQuickAdd()">
+        <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+    <div class="quick-add-actions" id="quick-add-actions">
+        <div class="fab-row">
+            <button class="fab-sub" onclick="toggleQuickAdd();document.getElementById('setup-form').style.display='block';document.getElementById('setup-form').scrollIntoView({behavior:'smooth'});">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+            <div class="fab-lbl">Program Oluştur</div>
+        </div>
+        <div class="fab-row">
+            <button class="fab-sub" onclick="toggleQuickAdd();if(document.getElementById('finish-workout-btn'))document.getElementById('finish-workout-btn').click();">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            </button>
+            <div class="fab-lbl">Antrenmanı Bitir</div>
+        </div>
+    </div>
+</div>
+
 <!-- ── TOAST ── -->
 <div class="toast-wrap" id="toast-wrap"></div>
 
 <script>
+let quickAddOpen = false;
+function toggleQuickAdd() {
+    quickAddOpen = !quickAddOpen;
+    document.getElementById('quick-add-btn').classList.toggle('open', quickAddOpen);
+    document.getElementById('quick-add-actions').classList.toggle('open', quickAddOpen);
+}
+document.addEventListener('click', e => {
+    if (quickAddOpen && !e.target.closest('.quick-add-wrap')) {
+        quickAddOpen = false;
+        document.getElementById('quick-add-btn').classList.remove('open');
+        document.getElementById('quick-add-actions').classList.remove('open');
+    }
+});
     // ── OPTIONS DATA ──
     const OPTIONS = {
         gun: [

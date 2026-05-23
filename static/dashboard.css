@@ -372,54 +372,6 @@
 
 
 /* ═══════════════════════════════════════════════════════
-   D. QUICK ADD FAB (bottom-left)
-   ═══════════════════════════════════════════════════════ */
-.quick-add-wrap {
-    position:fixed; bottom:88px; left:24px; z-index:200;
-}
-@media(min-width:1024px) { .quick-add-wrap { bottom:36px; left:36px; } }
-@media(max-width:768px) { .quick-add-wrap { bottom:80px; left:16px; } }
-
-.quick-add-btn {
-    width:52px; height:52px; border-radius:14px;
-    background:#CCFF00; border:none; cursor:pointer; flex-shrink:0;
-    display:flex; align-items:center; justify-content:center;
-    box-shadow: 0 4px 20px rgba(204,255,0,0.25);
-    transition: transform 0.30s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.2s, border-radius 0.3s;
-    color:#0A0A0C;
-}
-.quick-add-btn svg { width:20px; height:20px; stroke:currentColor; fill:none; stroke-width:2.2; stroke-linecap:round; stroke-linejoin:round; transition: transform 0.3s ease; }
-.quick-add-btn:hover { box-shadow: 0 6px 28px rgba(204,255,0,0.40); }
-.quick-add-btn.open  { border-radius:50%; }
-.quick-add-btn.open svg { transform: rotate(45deg); }
-
-.quick-add-actions {
-    position:absolute; left:66px; bottom:0;
-    display:flex; flex-direction:row; gap:10px; align-items:flex-end;
-    opacity:0; pointer-events:none;
-    transform: translateX(-14px) scale(0.92);
-    transition: opacity 0.2s ease, transform 0.28s cubic-bezier(0.34,1.56,0.64,1);
-}
-.quick-add-actions.open { opacity:1; pointer-events:all; transform:translateX(0) scale(1); }
-.fab-row { display:flex; flex-direction:column; align-items:center; gap:6px; }
-.fab-lbl {
-    font-size:10px; font-weight:600; color:#F2F2F2;
-    white-space:nowrap; text-align:center;
-}
-@media(max-width:768px) { .fab-lbl { display:none; } }
-.fab-sub {
-    width:42px; height:42px; border-radius:12px; text-decoration:none;
-    background:rgba(14,14,18,0.96); border:1px solid rgba(255,255,255,0.06);
-    display:flex; align-items:center; justify-content:center;
-    flex-shrink:0;
-    cursor:pointer; transition:all 0.2s; backdrop-filter:blur(10px);
-}
-.fab-sub svg { stroke:#808088; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; transition: stroke 0.2s; }
-.fab-sub:hover { border-color:rgba(204,255,0,0.25); background:rgba(204,255,0,0.06); }
-.fab-sub:hover svg { stroke:#CCFF00; }
-
-
-/* ═══════════════════════════════════════════════════════
    RESPONSIVE
    ═══════════════════════════════════════════════════════ */
 /* ── DESKTOP: wider bento grid with more breathing room ── */

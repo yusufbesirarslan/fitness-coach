@@ -375,48 +375,49 @@ textarea.fc-input { resize: vertical; min-height: 84px; line-height: 1.6; }
 .toast-info    { background: rgba(0,123,255,0.14);  border: 1px solid rgba(0,123,255,0.28);   color: #60A8FF; }
 .toast-icon { font-size: 15px; flex-shrink: 0; }
 
-/* ── 19. FAB SPEED DIAL ───────────────────────────── */
-.fab-wrap {
-  position: fixed; right: 24px; bottom: 112px; z-index: 100;
-  display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 12px;
+/* ── 19. QUICK ADD FAB (bottom-left, global) ─────── */
+.quick-add-wrap {
+  position: fixed; bottom: calc(var(--action-bar-h, 68px) + 15px); left: 20px; z-index: 200;
 }
-@media (min-width: 1024px) { .fab-wrap { bottom: 96px; } }
+@media(min-width:1024px) { .quick-add-wrap { bottom: 36px; left: 36px; } }
 
-.fab-main {
-  width: 56px; height: 56px; border-radius: 50%;
+.quick-add-btn {
+  width: 52px; height: 52px; border-radius: 14px;
   background: var(--volt); border: none; cursor: pointer; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 20px rgba(204,255,0,0.40);
-  transition: transform var(--t-spring), box-shadow var(--t-base);
+  box-shadow: 0 4px 20px rgba(204,255,0,0.25);
+  transition: transform 0.30s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.2s, border-radius 0.3s;
+  color: #0A0A0C;
 }
-.fab-main:hover { transform: scale(1.08); box-shadow: 0 6px 30px rgba(204,255,0,0.55); }
-.fab-main.open  { transform: rotate(45deg); }
-.fab-main svg   { width: 22px; height: 22px; stroke: #121212; fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.quick-add-btn svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.3s ease; }
+.quick-add-btn:hover { box-shadow: 0 6px 28px rgba(204,255,0,0.40); }
+.quick-add-btn.open  { border-radius: 50%; }
+.quick-add-btn.open svg { transform: rotate(45deg); }
 
-.fab-actions {
-  display: flex; flex-direction: column; gap: 10px; align-items: flex-end;
+.quick-add-actions {
+  position: absolute; left: 66px; bottom: 0;
+  display: flex; flex-direction: row; gap: 10px; align-items: flex-end;
   opacity: 0; pointer-events: none;
-  transform: translateY(12px) scale(0.96);
-  transition: opacity 0.2s ease, transform var(--t-spring);
+  transform: translateX(-14px) scale(0.92);
+  transition: opacity 0.2s ease, transform 0.28s cubic-bezier(0.34,1.56,0.64,1);
 }
-.fab-actions.open { opacity: 1; pointer-events: all; transform: translateY(0) scale(1); }
+.quick-add-actions.open { opacity: 1; pointer-events: all; transform: translateX(0) scale(1); }
 
-.fab-row { display: flex; align-items: center; gap: 10px; }
+.fab-row { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .fab-lbl {
-  font-size: 12px; font-weight: 600; color: var(--text);
-  background: rgba(22,22,22,0.96); border: 1px solid var(--border);
-  padding: 7px 13px; border-radius: var(--r-sm); white-space: nowrap;
-  backdrop-filter: blur(8px);
+  font-size: 10px; font-weight: 600; color: var(--text);
+  white-space: nowrap; text-align: center;
 }
+@media(max-width:768px) { .fab-lbl { display: none; } }
 .fab-sub {
-  width: 44px; height: 44px; border-radius: 50%;
-  background: rgba(22,22,22,0.96); border: 1px solid var(--border);
+  width: 42px; height: 42px; border-radius: 12px; text-decoration: none;
+  background: rgba(14,14,18,0.96); border: 1px solid rgba(255,255,255,0.06);
   display: flex; align-items: center; justify-content: center;
-  cursor: pointer; transition: all var(--t-fast); backdrop-filter: blur(8px);
   flex-shrink: 0;
+  cursor: pointer; transition: all 0.2s; backdrop-filter: blur(10px);
 }
-.fab-sub:hover { border-color: var(--volt); background: var(--volt-dim); }
-.fab-sub svg { width: 17px; height: 17px; stroke: var(--text-2); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: stroke var(--t-fast); }
+.fab-sub svg { stroke: var(--text-3, #808088); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; transition: stroke 0.2s; }
+.fab-sub:hover { border-color: rgba(204,255,0,0.25); background: rgba(204,255,0,0.06); }
 .fab-sub:hover svg { stroke: var(--volt); }
 
 /* ── 20. BANNERS ──────────────────────────────────── */
