@@ -190,7 +190,7 @@ class TrainingPlan(db.Model):
 class MealLog(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
     user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-    ogun       = db.Column(db.String(20), nullable=False)  # kahvalti, ogle, aksam, ara
+    ogun       = db.Column(db.String(100), nullable=False)
     yemekler   = db.Column(db.Text, nullable=False)
     kalori     = db.Column(db.Float)
     protein    = db.Column(db.Float)
@@ -4562,6 +4562,7 @@ with app.app_context():
         'ALTER TABLE "user" ADD COLUMN goal_type VARCHAR(10)',
         'ALTER TABLE "user" ALTER COLUMN profile_picture TYPE TEXT',
         'ALTER TABLE message ALTER COLUMN message_type TYPE VARCHAR(50)',
+        'ALTER TABLE meal_log ALTER COLUMN ogun TYPE VARCHAR(100)',
     ]
     for sql in migrations:
         try:
