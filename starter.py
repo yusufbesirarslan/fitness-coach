@@ -1903,6 +1903,51 @@ def _is_per_serving(serving_text):
     return any(p in s for p in serving_patterns)
 
 
+def _turkish_ablative_suffix(name):
+    name = (name or "").strip()
+    if not name:
+        return "'dan"
+    unvoiced = set("çÇfFhHkKpPsSşŞtT")
+    back_vowels = set("aAıIoOuU")
+    front_vowels = set("eEiİöÖüÜ")
+    last_vowel_is_back = True
+    for ch in reversed(name):
+        if ch in back_vowels:
+            last_vowel_is_back = True
+            break
+        elif ch in front_vowels:
+            last_vowel_is_back = False
+            break
+    last_char = name[-1]
+    if last_char in unvoiced:
+        return "'tan" if last_vowel_is_back else "'ten"
+    return "'dan" if last_vowel_is_back else "'den"
+
+
+def _parse_suggestion_items(body_text):
+    try:
+        resp = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content": "Kullanıcının yemek önerisinden yiyecek öğelerini çıkar. SADECE JSON array döndür, başka hiçbir şey yazma."},
+                {"role": "user", "content": f"Aşağıdaki öğün önerisinden her bir yiyecek öğesini (miktar dahil) çıkar ve JSON listesi olarak döndür:\n\n\"{body_text}\"\n\nÖrnek çıktı: [\"200g tavuk göğsü\", \"1 kase pilav\", \"yeşil salata\"]"}
+            ],
+            temperature=0.0,
+            max_tokens=500,
+        )
+        raw = resp.choices[0].message.content.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        start = raw.find("[")
+        end = raw.rfind("]") + 1
+        if start >= 0 and end > start:
+            items = json.loads(raw[start:end])
+            if isinstance(items, list) and items:
+                return [str(i).strip() for i in items if str(i).strip()]
+    except Exception as e:
+        print(f"[SUGGESTION] Failed to parse suggestion items: {type(e).__name__}: {e}")
+    return []
+
+
 def _lookup_macros_fatsecret(items, token):
     import requests as http_req
     from fitx_mcp.server import _parse_fatsecret_desc, FATSECRET_API_URL
@@ -2761,12 +2806,105 @@ def respond_suggestion(msg_id):
                         body=f"✅ Önerini kabul ettim: {msg.body[:100]}",
                         message_type="text")
         db.session.add(reply)
+
+        nutrients = None
+        if "meal" in msg.message_type:
+            nutrients = _process_meal_suggestion_accept(msg)
     else:
         msg.message_type = msg.message_type + "_declined"
 
     db.session.commit()
-    return jsonify({"message": "Kabul edildi!" if action == "accept" else "Reddedildi.",
-                    "new_type": msg.message_type})
+
+    resp = {"message": "Kabul edildi!" if action == "accept" else "Reddedildi.",
+            "new_type": msg.message_type}
+    if action == "accept" and nutrients:
+        resp["nutrients"] = nutrients
+        resp["message"] = f"Kabul edildi! {int(nutrients['kalori'])} kcal eklendi"
+    return jsonify(resp)
+
+
+def _process_meal_suggestion_accept(msg):
+    sender = User.query.get(msg.sender_id)
+    sender_name = sender.full_name or sender.username if sender else "Arkadaş"
+    suffix = _turkish_ablative_suffix(sender_name)
+    ogun_title = f"{sender_name}{suffix} alınan öneri"
+
+    items = _parse_suggestion_items(msg.body)
+    if not items:
+        print(f"[SUGGESTION] Could not parse items from: {msg.body[:100]}")
+        entry = MealLog(
+            user_id=current_user.id, ogun=ogun_title,
+            yemekler=msg.body[:200], kalori=0, protein=0, karb=0, yag=0,
+            tarih=datetime.utcnow().strftime("%d.%m")
+        )
+        db.session.add(entry)
+        return None
+
+    total = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+    try:
+        from fitx_mcp.server import _get_fatsecret_token
+        cached_hits, uncached = _get_cached_macros(items)
+        macro_map = dict(cached_hits)
+        per_100g_items = {}
+
+        if uncached:
+            try:
+                token = _get_fatsecret_token()
+                per_serving, per_100g_items = _lookup_macros_fatsecret(uncached, token)
+                macro_map.update(per_serving)
+            except Exception as e:
+                print(f"[SUGGESTION] FatSecret failed, using LLM fallback: {e}")
+
+            if per_100g_items:
+                weights = _estimate_serving_weights_llm(list(per_100g_items.keys()))
+                for name, base in per_100g_items.items():
+                    scale = weights.get(name, 150.0) / 100.0
+                    macro_map[name] = {
+                        "calories": round(base["calories"] * scale, 1),
+                        "protein": round(base["protein"] * scale, 1),
+                        "carbs": round(base["carbs"] * scale, 1),
+                        "fat": round(base["fat"] * scale, 1),
+                    }
+
+            missing = [n for n in uncached if n not in macro_map]
+            if missing:
+                llm_macros = _estimate_macros_llm(missing)
+                macro_map.update(llm_macros)
+
+            _cache_macros(macro_map)
+
+        for item in items:
+            m = macro_map.get(item, {})
+            total["calories"] += m.get("calories", 0)
+            total["protein"] += m.get("protein", 0)
+            total["carbs"] += m.get("carbs", 0)
+            total["fat"] += m.get("fat", 0)
+
+    except Exception as e:
+        print(f"[SUGGESTION] Macro lookup pipeline failed: {type(e).__name__}: {e}")
+        try:
+            llm_macros = _estimate_macros_llm(items)
+            for item in items:
+                m = llm_macros.get(item, {})
+                total["calories"] += m.get("calories", 0)
+                total["protein"] += m.get("protein", 0)
+                total["carbs"] += m.get("carbs", 0)
+                total["fat"] += m.get("fat", 0)
+        except Exception:
+            pass
+
+    entry = MealLog(
+        user_id=current_user.id, ogun=ogun_title,
+        yemekler=", ".join(items),
+        kalori=round(total["calories"], 1),
+        protein=round(total["protein"], 1),
+        karb=round(total["carbs"], 1),
+        yag=round(total["fat"], 1),
+        tarih=datetime.utcnow().strftime("%d.%m")
+    )
+    db.session.add(entry)
+    print(f"[SUGGESTION] Logged meal: {ogun_title} → {total['calories']:.0f} kcal")
+    return {"kalori": entry.kalori, "protein": entry.protein, "karb": entry.karb, "yag": entry.yag}
 
 # ── FEED ROUTES ──
 
