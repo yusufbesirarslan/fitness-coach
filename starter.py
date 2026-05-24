@@ -4423,6 +4423,7 @@ with app.app_context():
         'ALTER TABLE "user" ADD COLUMN target_weight FLOAT',
         'ALTER TABLE "user" ADD COLUMN goal_type VARCHAR(10)',
         'ALTER TABLE "user" ALTER COLUMN profile_picture TYPE TEXT',
+        'ALTER TABLE message ALTER COLUMN message_type TYPE VARCHAR(50)',
     ]
     for sql in migrations:
         try:
