@@ -45,10 +45,11 @@
     .msg-row { display: flex; }
     .msg-row.mine { justify-content: flex-end; }
     .msg-row.theirs { justify-content: flex-start; }
+    .msg-row > div { max-width: 75%; }
 
     .msg-bubble {
-        max-width: 75%; padding: 10px 14px; border-radius: 16px;
-        font-size: 14px; line-height: 1.5; word-break: break-word;
+        width: fit-content; padding: 10px 14px; border-radius: 16px;
+        font-size: 14px; line-height: 1.5; word-break: break-word; white-space: pre-wrap;
     }
     .msg-row.mine .msg-bubble {
         background: #CCFF00; color: #121212; border-bottom-right-radius: 4px;
@@ -443,18 +444,38 @@ async function sendSuggestion() {
 }
 
 async function respondSuggestion(msgId, action, btn) {
+    const originalText = btn.textContent;
     btn.disabled = true;
-    const res = await fetch('/suggest/respond/' + msgId, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: action })
-    });
-    const data = await res.json();
-    if (!res.ok) { toast(data.error, 'error'); btn.disabled = false; return; }
-    toast(data.message, 'success');
-    msgContainer.querySelectorAll('.msg-row').forEach(r => r.remove());
-    emptyEl.style.display = '';
-    loadMessages();
+    btn.textContent = '...';
+    const siblingBtns = btn.parentElement.querySelectorAll('.sug-btn');
+    siblingBtns.forEach(b => { b.disabled = true; });
+
+    try {
+        const res = await fetch('/suggest/respond/' + msgId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: action })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            toast(data.error || 'Bir hata oluştu', 'error');
+            siblingBtns.forEach(b => { b.disabled = false; });
+            btn.textContent = originalText;
+            return;
+        }
+        toast(data.message, 'success');
+        const actionsDiv = btn.closest('.sug-actions');
+        if (actionsDiv) {
+            const statusDiv = document.createElement('div');
+            statusDiv.className = 'sug-status ' + (action === 'accept' ? 'accepted' : 'declined');
+            statusDiv.textContent = action === 'accept' ? '✅ Kabul edildi' : 'Reddedildi';
+            actionsDiv.replaceWith(statusDiv);
+        }
+    } catch (e) {
+        toast('Bağlantı hatası, tekrar dene', 'error');
+        siblingBtns.forEach(b => { b.disabled = false; });
+        btn.textContent = originalText;
+    }
 }
 
 msgInput.addEventListener('keydown', e => {

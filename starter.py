@@ -223,7 +223,7 @@ class Message(db.Model):
     body         = db.Column(db.Text, nullable=False)
     timestamp    = db.Column(db.DateTime, default=datetime.utcnow)
     is_read      = db.Column(db.Boolean, default=False)
-    message_type = db.Column(db.String(20), default="text")
+    message_type = db.Column(db.String(50), default="text")
 
     sender   = db.relationship("User", foreign_keys=[sender_id], backref="sent_messages")
     receiver = db.relationship("User", foreign_keys=[receiver_id], backref="received_messages")
