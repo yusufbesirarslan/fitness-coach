@@ -251,10 +251,8 @@
         <div class="quest-reward">+{{ item.quest.points_reward }} XP</div>
         {% if item.status == 'pending' %}
           <span class="status-badge pending">Bekliyor</span>
-        {% elif item.status == 'completed' %}
-          <button class="btn-claim" onclick="claimQuest({{ item.quest.id }})">PUAN AL</button>
         {% else %}
-          <span class="status-badge done">&#10003; Alindi</span>
+          <span class="status-badge done">&#10003; Tamamlandı</span>
         {% endif %}
       </div>
     </div>
@@ -313,36 +311,6 @@ function showToast(msg, type) {
   setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3200);
 }
 
-async function claimQuest(questId) {
-  const btn = event.target;
-  btn.disabled = true;
-  btn.textContent = '...';
-
-  try {
-    const res = await fetch('/quests/claim/' + questId, { method: 'POST' });
-    const data = await res.json();
-
-    if (res.ok) {
-      showToast(data.message, 'success');
-      const card = document.getElementById('quest-' + questId);
-      card.classList.add('claimed');
-      btn.outerHTML = '<span class="status-badge done">&#10003; Alindi</span>';
-
-      const rankEl = document.querySelector('.rank-title-text');
-      const ptsEl = document.querySelector('.rank-points-text');
-      if (rankEl) rankEl.textContent = data.rank_title;
-      if (ptsEl) ptsEl.innerHTML = '<strong>' + data.new_total + '</strong> Rank Points';
-    } else {
-      showToast(data.error, 'error');
-      btn.disabled = false;
-      btn.textContent = 'PUAN AL';
-    }
-  } catch (e) {
-    showToast('Bir hata olustu', 'error');
-    btn.disabled = false;
-    btn.textContent = 'PUAN AL';
-  }
-}
 </script>
 <script src="/static/nav.js"></script>
 </body>

@@ -196,7 +196,8 @@ class MealLog(db.Model):
     protein    = db.Column(db.Float)
     karb       = db.Column(db.Float)
     yag        = db.Column(db.Float)
-    tarih      = db.Column(db.String(10))  # "01.05" formatında
+    tarih      = db.Column(db.String(10))
+    source     = db.Column(db.String(20), default="manual")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
@@ -347,6 +348,41 @@ class DailyActivity(db.Model):
     )
 
 
+class CustomMeal(db.Model):
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    meal_name  = db.Column(db.String(50), nullable=False)
+    date_key   = db.Column(db.String(10), nullable=False)
+    is_logged  = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user  = db.relationship("User", backref="custom_meals")
+    items = db.relationship("CustomMealItem", backref="meal",
+                            cascade="all, delete-orphan",
+                            order_by="CustomMealItem.id")
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "meal_name", "date_key",
+                            name="uq_custom_meal_day"),
+    )
+
+
+class CustomMealItem(db.Model):
+    id               = db.Column(db.Integer, primary_key=True)
+    custom_meal_id   = db.Column(db.Integer, db.ForeignKey("custom_meal.id"), nullable=False, index=True)
+    food_name        = db.Column(db.String(200), nullable=False)
+    grams            = db.Column(db.Float, nullable=False)
+    calories         = db.Column(db.Float, nullable=False, default=0)
+    protein          = db.Column(db.Float, nullable=False, default=0)
+    carbs            = db.Column(db.Float, nullable=False, default=0)
+    fat              = db.Column(db.Float, nullable=False, default=0)
+    fatsecret_food_id = db.Column(db.String(50), nullable=True)
+    per_100g_calories = db.Column(db.Float, nullable=True)
+    per_100g_protein  = db.Column(db.Float, nullable=True)
+    per_100g_carbs    = db.Column(db.Float, nullable=True)
+    per_100g_fat      = db.Column(db.Float, nullable=True)
+
+
 def award_xp(user_id, amount):
     user = User.query.get(user_id)
     if user:
@@ -432,15 +468,34 @@ def get_today_progress(user_id):
 def complete_quest_for_user(user_id, quest_type):
     quest = DailyQuest.query.filter_by(quest_type=quest_type, is_active=True).first()
     if not quest:
-        return
+        return None
     today_key = date.today().isoformat()
     existing = UserQuestProgress.query.filter_by(
         user_id=user_id, quest_id=quest.id, date_key=today_key
     ).first()
-    if not existing:
-        progress = UserQuestProgress(user_id=user_id, quest_id=quest.id, date_key=today_key)
+    if existing:
+        return None
+    try:
+        progress = UserQuestProgress(
+            user_id=user_id, quest_id=quest.id,
+            date_key=today_key, is_claimed=True
+        )
         db.session.add(progress)
+        new_total = award_xp(user_id, quest.points_reward)
+        log_activity(user_id, "quest_completed", f"'{quest.title}' görevini tamamladı")
         db.session.commit()
+        level = get_level(new_total)
+        return {
+            "awarded": True,
+            "xp": quest.points_reward,
+            "new_total": new_total,
+            "quest_title": quest.title,
+            "level": level,
+            "title": get_title(level)
+        }
+    except Exception:
+        db.session.rollback()
+        return None
 
 
 @app.route("/nutrition-plan/save", methods=["POST"])
@@ -523,10 +578,12 @@ def quick_add_meal():
         yag      = round(float(meal.get("yag",     0)), 1),
         tarih    = today
     )
+    entry.source = "ai_plan"
     db.session.add(entry)
     db.session.commit()
 
-    return jsonify({
+    quest_result = complete_quest_for_user(current_user.id, "meal_logged")
+    response = {
         "message": f"{MEAL_LABELS[meal_key]} planından eklendi.",
         "nutrients": {
             "kalori":  entry.kalori,
@@ -534,7 +591,309 @@ def quick_add_meal():
             "karb":    entry.karb,
             "yag":     entry.yag
         }
+    }
+    if quest_result:
+        response["quest_awarded"] = quest_result
+    return jsonify(response)
+
+
+@app.route("/api/food/search")
+@login_required
+def food_search():
+    import requests as http_req
+    q = request.args.get("q", "").strip()
+    if len(q) < 2:
+        return jsonify({"results": []})
+
+    cached = _macro_cache.get(q)
+    if cached:
+        return jsonify({"results": [{
+            "name": q, "brand": "", "food_id": "",
+            "serving": "", "is_per_serving": False,
+            "macros": cached, "per_100g": cached
+        }]})
+
+    try:
+        from fitx_mcp.server import _get_fatsecret_token, _parse_fatsecret_desc, FATSECRET_API_URL
+        token = _get_fatsecret_token()
+    except Exception:
+        return jsonify({"results": []})
+
+    try:
+        resp = http_req.get(FATSECRET_API_URL, params={
+            "method": "foods.search",
+            "search_expression": q,
+            "format": "json",
+            "max_results": 8,
+        }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
+        data = resp.json()
+    except Exception:
+        return jsonify({"results": []})
+
+    foods = data.get("foods", {}).get("food", [])
+    if isinstance(foods, dict):
+        foods = [foods]
+
+    results = []
+    for f in foods:
+        desc = f.get("food_description", "")
+        parsed = _parse_fatsecret_desc(desc)
+        if not parsed:
+            continue
+        cal_val = parsed.get("calories") or parsed.get("cal") or parsed.get("energy") or 0
+        if not cal_val:
+            continue
+        macros = {
+            "calories": float(cal_val),
+            "protein": float(parsed.get("protein", 0)),
+            "carbs": float(parsed.get("carbs", parsed.get("carbohydrate", parsed.get("carb", 0)))),
+            "fat": float(parsed.get("fat", parsed.get("total fat", 0))),
+        }
+        serving_text = parsed.get("serving", "")
+        is_serving = _is_per_serving(serving_text)
+
+        per_100g = macros
+        if is_serving:
+            est = _estimate_serving_weights_llm([f.get("food_name", q)])
+            weight_g = est.get(f.get("food_name", q), 150.0)
+            if weight_g and weight_g > 0:
+                scale = 100.0 / weight_g
+                per_100g = {
+                    "calories": round(macros["calories"] * scale, 1),
+                    "protein": round(macros["protein"] * scale, 1),
+                    "carbs": round(macros["carbs"] * scale, 1),
+                    "fat": round(macros["fat"] * scale, 1),
+                }
+
+        name = f.get("food_name", "")
+        _cache_macros({name: per_100g})
+
+        results.append({
+            "name": name,
+            "brand": f.get("brand_name", ""),
+            "food_id": f.get("food_id", ""),
+            "serving": serving_text,
+            "is_per_serving": is_serving,
+            "macros": macros,
+            "per_100g": per_100g
+        })
+
+    return jsonify({"results": results})
+
+
+# ── DIARY BUILDER API ──
+
+@app.route("/api/diary/meal", methods=["POST"])
+@login_required
+def diary_create_meal():
+    data = request.get_json()
+    meal_name = data.get("meal_name", "").strip()
+    date_key = data.get("date_key", date.today().isoformat())
+
+    valid_meals = ("Kahvaltı", "Öğle", "Akşam", "Ara Öğün")
+    if meal_name not in valid_meals:
+        return jsonify({"error": "Geçersiz öğün adı"}), 400
+
+    existing = CustomMeal.query.filter_by(
+        user_id=current_user.id, meal_name=meal_name, date_key=date_key
+    ).first()
+    if existing:
+        return jsonify({"meal_id": existing.id, "exists": True})
+
+    meal = CustomMeal(user_id=current_user.id, meal_name=meal_name, date_key=date_key)
+    db.session.add(meal)
+    db.session.commit()
+    return jsonify({"meal_id": meal.id, "exists": False})
+
+
+@app.route("/api/diary/meal/<int:meal_id>/item", methods=["POST"])
+@login_required
+def diary_add_item(meal_id):
+    meal = CustomMeal.query.get(meal_id)
+    if not meal or meal.user_id != current_user.id:
+        return jsonify({"error": "Öğün bulunamadı"}), 404
+    if meal.is_logged:
+        return jsonify({"error": "Bu öğün zaten kaydedilmiş"}), 400
+
+    data = request.get_json()
+    food_name = data.get("food_name", "").strip()
+    grams = float(data.get("grams", 100))
+    per_100g = data.get("per_100g", {})
+    food_id = data.get("fatsecret_food_id", "")
+
+    if not food_name:
+        return jsonify({"error": "Besin adı gerekli"}), 400
+
+    scale = grams / 100.0
+    p100_cal = float(per_100g.get("calories", 0))
+    p100_pro = float(per_100g.get("protein", 0))
+    p100_carb = float(per_100g.get("carbs", 0))
+    p100_fat = float(per_100g.get("fat", 0))
+
+    item = CustomMealItem(
+        custom_meal_id=meal_id,
+        food_name=food_name,
+        grams=grams,
+        calories=round(p100_cal * scale, 1),
+        protein=round(p100_pro * scale, 1),
+        carbs=round(p100_carb * scale, 1),
+        fat=round(p100_fat * scale, 1),
+        fatsecret_food_id=food_id or None,
+        per_100g_calories=p100_cal,
+        per_100g_protein=p100_pro,
+        per_100g_carbs=p100_carb,
+        per_100g_fat=p100_fat,
+    )
+    db.session.add(item)
+    db.session.commit()
+    return jsonify({
+        "item_id": item.id,
+        "calories": item.calories,
+        "protein": item.protein,
+        "carbs": item.carbs,
+        "fat": item.fat
     })
+
+
+@app.route("/api/diary/item/<int:item_id>", methods=["PATCH"])
+@login_required
+def diary_update_item(item_id):
+    item = CustomMealItem.query.get(item_id)
+    if not item or item.meal.user_id != current_user.id:
+        return jsonify({"error": "Besin bulunamadı"}), 404
+    if item.meal.is_logged:
+        return jsonify({"error": "Bu öğün zaten kaydedilmiş"}), 400
+
+    data = request.get_json()
+    grams = float(data.get("grams", item.grams))
+    scale = grams / 100.0
+
+    item.grams = grams
+    item.calories = round((item.per_100g_calories or 0) * scale, 1)
+    item.protein = round((item.per_100g_protein or 0) * scale, 1)
+    item.carbs = round((item.per_100g_carbs or 0) * scale, 1)
+    item.fat = round((item.per_100g_fat or 0) * scale, 1)
+    db.session.commit()
+    return jsonify({
+        "item_id": item.id,
+        "grams": item.grams,
+        "calories": item.calories,
+        "protein": item.protein,
+        "carbs": item.carbs,
+        "fat": item.fat
+    })
+
+
+@app.route("/api/diary/item/<int:item_id>", methods=["DELETE"])
+@login_required
+def diary_delete_item(item_id):
+    item = CustomMealItem.query.get(item_id)
+    if not item or item.meal.user_id != current_user.id:
+        return jsonify({"error": "Besin bulunamadı"}), 404
+    if item.meal.is_logged:
+        return jsonify({"error": "Bu öğün zaten kaydedilmiş"}), 400
+    db.session.delete(item)
+    db.session.commit()
+    return jsonify({"deleted": True})
+
+
+@app.route("/api/diary/meal/<int:meal_id>/log", methods=["POST"])
+@login_required
+def diary_log_meal(meal_id):
+    meal = CustomMeal.query.get(meal_id)
+    if not meal or meal.user_id != current_user.id:
+        return jsonify({"error": "Öğün bulunamadı"}), 404
+    if meal.is_logged:
+        return jsonify({"error": "Bu öğün zaten kaydedilmiş"}), 400
+    if not meal.items:
+        return jsonify({"error": "Öğüne en az bir besin ekle"}), 400
+
+    total_cal = sum(i.calories for i in meal.items)
+    total_pro = sum(i.protein for i in meal.items)
+    total_karb = sum(i.carbs for i in meal.items)
+    total_fat = sum(i.fat for i in meal.items)
+
+    yemekler = ", ".join(f"{i.food_name} ({int(i.grams)}g)" for i in meal.items)
+    today = datetime.utcnow().strftime("%d.%m")
+
+    entry = MealLog(
+        user_id=current_user.id,
+        ogun=meal.meal_name,
+        yemekler=yemekler,
+        kalori=round(total_cal, 1),
+        protein=round(total_pro, 1),
+        karb=round(total_karb, 1),
+        yag=round(total_fat, 1),
+        tarih=today,
+        source="diary"
+    )
+    db.session.add(entry)
+    meal.is_logged = True
+    db.session.commit()
+
+    quest_result = complete_quest_for_user(current_user.id, "meal_logged")
+    response = {
+        "message": f"{meal.meal_name} kaydedildi.",
+        "nutrients": {
+            "kalori": entry.kalori,
+            "protein": entry.protein,
+            "karb": entry.karb,
+            "yag": entry.yag
+        }
+    }
+    if quest_result:
+        response["quest_awarded"] = quest_result
+    return jsonify(response)
+
+
+@app.route("/api/diary/today")
+@login_required
+def diary_today():
+    today_key = date.today().isoformat()
+    meals = CustomMeal.query.filter_by(
+        user_id=current_user.id, date_key=today_key
+    ).order_by(CustomMeal.id).all()
+
+    result = []
+    grand_total = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+
+    for m in meals:
+        items = []
+        meal_total = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+        for i in m.items:
+            items.append({
+                "id": i.id,
+                "food_name": i.food_name,
+                "grams": i.grams,
+                "calories": i.calories,
+                "protein": i.protein,
+                "carbs": i.carbs,
+                "fat": i.fat,
+                "per_100g": {
+                    "calories": i.per_100g_calories,
+                    "protein": i.per_100g_protein,
+                    "carbs": i.per_100g_carbs,
+                    "fat": i.per_100g_fat
+                }
+            })
+            meal_total["calories"] += i.calories
+            meal_total["protein"] += i.protein
+            meal_total["carbs"] += i.carbs
+            meal_total["fat"] += i.fat
+
+        result.append({
+            "id": m.id,
+            "meal_name": m.meal_name,
+            "is_logged": m.is_logged,
+            "items": items,
+            "totals": meal_total
+        })
+
+        for k in grand_total:
+            grand_total[k] += meal_total[k]
+
+    return jsonify({"meals": result, "totals": grand_total})
+
 
 @app.route("/log", methods=["POST"])
 @login_required
@@ -887,11 +1246,15 @@ def log_meal():
     db.session.add(entry)
     db.session.commit()
 
-    return jsonify({
+    quest_result = complete_quest_for_user(current_user.id, "meal_logged")
+    response = {
         "message": f"{ogun} kaydedildi.",
         "nutrients": nutrients,
         "raw_debug": raw
-    })
+    }
+    if quest_result:
+        response["quest_awarded"] = quest_result
+    return jsonify(response)
 
 @app.route("/meal-log/today")
 @login_required
@@ -909,7 +1272,8 @@ def today_meals():
             "kalori": m.kalori,
             "protein": m.protein,
             "karb": m.karb,
-            "yag": m.yag
+            "yag": m.yag,
+            "source": getattr(m, "source", "manual") or "manual"
         })
         totals["kalori"]  += m.kalori or 0
         totals["protein"] += m.protein or 0
@@ -2757,10 +3121,13 @@ def chat_send(username):
                   body=body, message_type=msg_type)
     db.session.add(msg)
     db.session.commit()
-    complete_quest_for_user(current_user.id, "suggestion_sent")
-    return jsonify({"message": "Gönderildi.", "id": msg.id,
-                    "timestamp": msg.timestamp.strftime("%H:%M"),
-                    "message_type": msg_type})
+    quest_result = complete_quest_for_user(current_user.id, "suggestion_sent")
+    response = {"message": "Gönderildi.", "id": msg.id,
+                "timestamp": msg.timestamp.strftime("%H:%M"),
+                "message_type": msg_type}
+    if quest_result:
+        response["quest_awarded"] = quest_result
+    return jsonify(response)
 
 # ── SUGGESTION ROUTES ──
 
@@ -2783,8 +3150,11 @@ def send_suggestion(username):
                   body=body, message_type=stype)
     db.session.add(msg)
     db.session.commit()
-    complete_quest_for_user(current_user.id, "suggestion_sent")
-    return jsonify({"message": "Öneri gönderildi!", "id": msg.id})
+    quest_result = complete_quest_for_user(current_user.id, "suggestion_sent")
+    response = {"message": "Öneri gönderildi!", "id": msg.id}
+    if quest_result:
+        response["quest_awarded"] = quest_result
+    return jsonify(response)
 
 @app.route("/suggest/respond/<int:msg_id>", methods=["POST"])
 @login_required
@@ -3036,9 +3406,12 @@ def supplement_add():
         db.session.commit()
 
     log_activity(current_user.id, "new_supplement", f"{name} ({category}) stack'ine eklendi")
-    complete_quest_for_user(current_user.id, "supplement_added")
+    quest_result = complete_quest_for_user(current_user.id, "supplement_added")
 
-    return jsonify({"message": "Supplement eklendi!", "id": supp.id})
+    response = {"message": "Supplement eklendi!", "id": supp.id}
+    if quest_result:
+        response["quest_awarded"] = quest_result
+    return jsonify(response)
 
 @app.route("/supplement/edit/<int:sid>", methods=["POST"])
 @login_required
@@ -4306,19 +4679,23 @@ def complete_workout():
         if existing:
             return jsonify({"error": "Bugünkü antrenmanını zaten tamamladın!"}), 400
 
-    complete_quest_for_user(current_user.id, "workout_logged")
+    quest_result = complete_quest_for_user(current_user.id, "workout_logged")
     new_total = award_xp(current_user.id, 10)
     log_activity(current_user.id, "workout_completed", "Bugünkü antrenmanını tamamladı")
     db.session.commit()
 
+    total_xp = 10 + (quest_result["xp"] if quest_result else 0)
     level = get_level(new_total)
-    return jsonify({
-        "message": "Bugünkü antrenmanı tamamladın! +10 XP!",
-        "points_awarded": 10,
+    response = {
+        "message": f"Bugünkü antrenmanı tamamladın! +{total_xp} XP!",
+        "points_awarded": total_xp,
         "new_total": new_total,
         "level": level,
         "title": get_title(level)
-    })
+    }
+    if quest_result:
+        response["quest_awarded"] = quest_result
+    return jsonify(response)
 
 @app.route("/training-plan/active")
 @login_required
@@ -4461,8 +4838,11 @@ def login():
         return jsonify({"error": "Kullanıcı adı veya şifre hatalı"}) , 401
     
     login_user(user)
-    complete_quest_for_user(user.id, "login")
-    return jsonify({"message" : f"Hoş geldin {user.username}!"})
+    quest_result = complete_quest_for_user(user.id, "login")
+    response = {"message": f"Hoş geldin {user.username}!"}
+    if quest_result:
+        response["quest_awarded"] = quest_result
+    return jsonify(response)
 
 @app.route("/logout")
 @login_required
@@ -4480,12 +4860,7 @@ def quests():
     quest_data = []
     for q in all_quests:
         prog = progress_map.get(q.id)
-        if prog and prog.is_claimed:
-            status = "claimed"
-        elif prog:
-            status = "completed"
-        else:
-            status = "pending"
+        status = "claimed" if prog else "pending"
         quest_data.append({"quest": q, "status": status})
 
     return render_template("quests.html",
@@ -4498,30 +4873,11 @@ def quests():
 @app.route("/quests/claim/<int:quest_id>", methods=["POST"])
 @login_required
 def claim_quest(quest_id):
-    quest = DailyQuest.query.get(quest_id)
-    if not quest:
-        return jsonify({"error": "Görev bulunamadı"}), 404
-
-    today_key = date.today().isoformat()
-    progress = UserQuestProgress.query.filter_by(
-        user_id=current_user.id, quest_id=quest_id, date_key=today_key
-    ).first()
-
-    if not progress:
-        return jsonify({"error": "Bu görevi henüz tamamlamadın"}), 403
-
-    if progress.is_claimed:
-        return jsonify({"error": "Bu ödülü zaten aldın"}), 400
-
-    progress.is_claimed = True
-    new_total = award_xp(current_user.id, quest.points_reward)
-    log_activity(current_user.id, "quest_completed", f"'{quest.title}' görevini tamamladı")
-    db.session.commit()
-
-    level = get_level(new_total)
+    xp = current_user.rank_points or 0
+    level = get_level(xp)
     return jsonify({
-        "message": f"+{quest.points_reward} XP!",
-        "new_total": new_total,
+        "message": "Ödül zaten alındı ✓",
+        "new_total": xp,
         "level": level,
         "title": get_title(level)
     })
@@ -4534,6 +4890,7 @@ def seed_quests():
         {"title": "Daily Login", "description": "Bugün uygulamaya giriş yap", "points_reward": 10, "quest_type": "login"},
         {"title": "Log a Workout", "description": "Bir antrenman planı oluştur veya kaydet", "points_reward": 50, "quest_type": "workout_logged"},
         {"title": "Help a Friend", "description": "Bir arkadaşına mesaj gönder", "points_reward": 30, "quest_type": "suggestion_sent"},
+        {"title": "Log a Meal", "description": "Bugün bir öğün kaydet", "points_reward": 20, "quest_type": "meal_logged"},
     ]
     for q in defaults:
         existing = DailyQuest.query.filter_by(quest_type=q["quest_type"]).first()
@@ -4563,6 +4920,8 @@ with app.app_context():
         'ALTER TABLE "user" ALTER COLUMN profile_picture TYPE TEXT',
         'ALTER TABLE message ALTER COLUMN message_type TYPE VARCHAR(50)',
         'ALTER TABLE meal_log ALTER COLUMN ogun TYPE VARCHAR(100)',
+        'ALTER TABLE meal_log ADD COLUMN source VARCHAR(20) DEFAULT \'manual\'',
+        'UPDATE user_quest_progress SET is_claimed = true WHERE is_claimed = false',
     ]
     for sql in migrations:
         try:
