@@ -1357,13 +1357,15 @@ const _servingsCache = {};
 async function fetchServings(foodId) {
   if (_servingsCache[foodId]) return _servingsCache[foodId];
   try {
+    console.log('[servings] fetching for food_id:', foodId);
     const res = await fetch('/api/food/' + foodId + '/servings');
     const data = await res.json();
+    console.log('[servings] response:', data.servings?.length || 0, 'options');
     if (data.servings && data.servings.length) {
       _servingsCache[foodId] = data.servings;
       return data.servings;
     }
-  } catch (e) {}
+  } catch (e) { console.error('[servings] fetch error:', e); }
   return null;
 }
 

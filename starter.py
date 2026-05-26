@@ -81,21 +81,36 @@ def _food_get_servings(food_id):
         token = _get_fatsecret_token()
     except Exception:
         return None
-    try:
-        resp = http_requests_lib.get(FATSECRET_API_URL, params={
-            "method": "food.get.v4",
-            "food_id": food_id,
-            "format": "json",
-        }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
-        data = resp.json()
-    except Exception:
-        return None
 
-    try:
-        servings_raw = data["food"]["servings"]["serving"]
-        if isinstance(servings_raw, dict):
-            servings_raw = [servings_raw]
-    except (KeyError, TypeError):
+    servings_raw = None
+    for method in ("food.get.v4", "food.get.v2", "food.get"):
+        try:
+            resp = http_requests_lib.get(FATSECRET_API_URL, params={
+                "method": method,
+                "food_id": food_id,
+                "format": "json",
+            }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
+            data = resp.json()
+        except Exception as e:
+            app.logger.warning("_food_get_servings %s failed: %s", method, e)
+            continue
+
+        if "error" in data:
+            app.logger.warning("_food_get_servings %s error: %s", method, data["error"])
+            continue
+
+        try:
+            servings_raw = data["food"]["servings"]["serving"]
+            if isinstance(servings_raw, dict):
+                servings_raw = [servings_raw]
+            app.logger.info("_food_get_servings %s OK: %d servings", method, len(servings_raw))
+            break
+        except (KeyError, TypeError):
+            app.logger.warning("_food_get_servings %s: no servings in response keys=%s",
+                               method, list(data.get("food", {}).keys()) if "food" in data else list(data.keys()))
+            continue
+
+    if not servings_raw:
         return None
 
     results = []
@@ -978,6 +993,10 @@ def food_search():
 @login_required
 def food_servings(food_id):
     servings = _food_get_servings(food_id)
+    if servings:
+        app.logger.info("Servings OK for food_id=%s: %d options", food_id, len(servings))
+    else:
+        app.logger.warning("No servings for food_id=%s", food_id)
     return jsonify({"servings": servings or []})
 
 
