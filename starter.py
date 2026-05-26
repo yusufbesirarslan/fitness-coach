@@ -7,9 +7,73 @@ from groq import Groq
 import os
 import json
 import click
+import re
+import threading
+import time
+import requests as http_requests_lib
 from dotenv import load_dotenv
 load_dotenv()
 app = Flask(__name__)
+
+# ── FatSecret API (inlined to avoid psycopg2 dependency from fitx_mcp.server) ──
+
+FATSECRET_TOKEN_URL = "https://oauth.fatsecret.com/connect/token"
+FATSECRET_API_URL = "https://platform.fatsecret.com/rest/server.api"
+
+_fs_token_lock = threading.Lock()
+_fs_token_cache = {"token": None, "expires_at": 0}
+
+
+def _get_fatsecret_token() -> str:
+    with _fs_token_lock:
+        if _fs_token_cache["token"] and time.time() < _fs_token_cache["expires_at"] - 60:
+            return _fs_token_cache["token"]
+    client_id = os.environ.get("FATSECRET_CLIENT_ID", "")
+    client_secret = os.environ.get("FATSECRET_CLIENT_SECRET", "")
+    if not client_id or not client_secret:
+        raise RuntimeError("FATSECRET_CLIENT_ID / FATSECRET_CLIENT_SECRET not set")
+    resp = http_requests_lib.post(
+        FATSECRET_TOKEN_URL,
+        data={"grant_type": "client_credentials", "scope": "basic"},
+        auth=(client_id, client_secret),
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    with _fs_token_lock:
+        _fs_token_cache["token"] = data["access_token"]
+        _fs_token_cache["expires_at"] = time.time() + data.get("expires_in", 86400)
+    return data["access_token"]
+
+
+def _parse_fatsecret_desc(desc: str) -> dict | None:
+    if not desc:
+        return None
+    parts = {}
+    try:
+        segments = desc.split(" - ", 1)
+        if len(segments) == 2:
+            parts["serving"] = segments[0].strip()
+            macros = segments[1]
+        else:
+            macros = desc
+        _num_pat = re.compile(r"(\d+(?:[.,]\d+)?)")
+        for item in macros.split("|"):
+            item = item.strip()
+            if ":" not in item:
+                continue
+            key, val = item.split(":", 1)
+            key = key.strip().lower()
+            num_match = _num_pat.search(val)
+            if num_match:
+                num_str = num_match.group(1).replace(",", ".")
+                try:
+                    parts[key] = float(num_str)
+                except ValueError:
+                    parts[key] = 0.0
+    except Exception:
+        return None
+    return parts if len(parts) > 1 else None
 database_url = os.environ.get("DATABASE_URL", "sqlite:///chatbot.db")
 if database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
@@ -597,30 +661,15 @@ def quick_add_meal():
     return jsonify(response)
 
 
-@app.route("/api/food/search")
-@login_required
-def food_search():
-    import requests as http_req
-    q = request.args.get("q", "").strip()
-    if len(q) < 2:
-        return jsonify({"results": []})
-
-    cached = _macro_cache.get(q)
-    if cached:
-        return jsonify({"results": [{
-            "name": q, "brand": "", "food_id": "",
-            "serving": "", "is_per_serving": False,
-            "macros": cached, "per_100g": cached
-        }]})
-
+def _food_search_fatsecret(q):
+    """Try FatSecret API. Returns list of results or None on failure."""
     try:
-        from fitx_mcp.server import _get_fatsecret_token, _parse_fatsecret_desc, FATSECRET_API_URL
         token = _get_fatsecret_token()
     except Exception:
-        return jsonify({"results": []})
+        return None
 
     try:
-        resp = http_req.get(FATSECRET_API_URL, params={
+        resp = http_requests_lib.get(FATSECRET_API_URL, params={
             "method": "foods.search",
             "search_expression": q,
             "format": "json",
@@ -628,11 +677,16 @@ def food_search():
         }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
         data = resp.json()
     except Exception:
-        return jsonify({"results": []})
+        return None
+
+    if "error" in data:
+        return None
 
     foods = data.get("foods", {}).get("food", [])
     if isinstance(foods, dict):
         foods = [foods]
+    if not foods:
+        return None
 
     results = []
     for f in foods:
@@ -667,7 +721,6 @@ def food_search():
 
         name = f.get("food_name", "")
         _cache_macros({name: per_100g})
-
         results.append({
             "name": name,
             "brand": f.get("brand_name", ""),
@@ -677,6 +730,200 @@ def food_search():
             "macros": macros,
             "per_100g": per_100g
         })
+    return results if results else None
+
+
+_STATIC_FOODS = {
+    "tavuk": [
+        {"name": "Tavuk Göğsü (Haşlanmış)", "calories": 165, "protein": 31.0, "carbs": 0.0, "fat": 3.6},
+        {"name": "Tavuk But (Pişmiş)", "calories": 209, "protein": 26.0, "carbs": 0.0, "fat": 10.9},
+        {"name": "Tavuk Kanat (Izgara)", "calories": 203, "protein": 30.5, "carbs": 0.0, "fat": 8.1},
+        {"name": "Tavuk Köfte", "calories": 180, "protein": 18.0, "carbs": 8.0, "fat": 8.5},
+    ],
+    "yumurta": [
+        {"name": "Yumurta (Haşlanmış)", "calories": 155, "protein": 13.0, "carbs": 1.1, "fat": 11.0},
+        {"name": "Yumurta (Çırpılmış)", "calories": 149, "protein": 10.0, "carbs": 1.6, "fat": 11.2},
+        {"name": "Yumurta Beyazı", "calories": 52, "protein": 11.0, "carbs": 0.7, "fat": 0.2},
+    ],
+    "pirinç": [
+        {"name": "Pirinç Pilavı", "calories": 130, "protein": 2.7, "carbs": 28.0, "fat": 0.3},
+        {"name": "Bulgur Pilavı", "calories": 83, "protein": 3.1, "carbs": 18.6, "fat": 0.2},
+    ],
+    "pilav": [
+        {"name": "Pirinç Pilavı", "calories": 130, "protein": 2.7, "carbs": 28.0, "fat": 0.3},
+        {"name": "Bulgur Pilavı", "calories": 83, "protein": 3.1, "carbs": 18.6, "fat": 0.2},
+    ],
+    "ekmek": [
+        {"name": "Beyaz Ekmek", "calories": 265, "protein": 9.0, "carbs": 49.0, "fat": 3.2},
+        {"name": "Tam Buğday Ekmeği", "calories": 247, "protein": 13.0, "carbs": 41.0, "fat": 3.4},
+    ],
+    "süt": [
+        {"name": "Tam Yağlı Süt", "calories": 61, "protein": 3.2, "carbs": 4.8, "fat": 3.3},
+        {"name": "Yarım Yağlı Süt", "calories": 46, "protein": 3.4, "carbs": 4.7, "fat": 1.6},
+    ],
+    "peynir": [
+        {"name": "Beyaz Peynir", "calories": 264, "protein": 17.0, "carbs": 1.0, "fat": 21.0},
+        {"name": "Kaşar Peyniri", "calories": 340, "protein": 25.0, "carbs": 1.5, "fat": 26.0},
+        {"name": "Lor Peyniri", "calories": 98, "protein": 11.0, "carbs": 3.4, "fat": 4.3},
+    ],
+    "makarna": [
+        {"name": "Makarna (Haşlanmış)", "calories": 131, "protein": 5.0, "carbs": 25.0, "fat": 1.1},
+        {"name": "Tam Buğday Makarna", "calories": 124, "protein": 5.3, "carbs": 24.0, "fat": 0.5},
+    ],
+    "et": [
+        {"name": "Dana Kıyma (Pişmiş)", "calories": 250, "protein": 26.0, "carbs": 0.0, "fat": 15.0},
+        {"name": "Kuzu Eti (Pişmiş)", "calories": 294, "protein": 25.0, "carbs": 0.0, "fat": 21.0},
+        {"name": "Dana Biftek (Izgara)", "calories": 271, "protein": 26.0, "carbs": 0.0, "fat": 18.0},
+    ],
+    "balık": [
+        {"name": "Somon (Izgara)", "calories": 208, "protein": 20.0, "carbs": 0.0, "fat": 13.0},
+        {"name": "Levrek (Fırında)", "calories": 124, "protein": 24.0, "carbs": 0.0, "fat": 2.6},
+        {"name": "Hamsi (Tava)", "calories": 210, "protein": 20.0, "carbs": 3.0, "fat": 13.0},
+    ],
+    "yoğurt": [
+        {"name": "Tam Yağlı Yoğurt", "calories": 63, "protein": 3.5, "carbs": 4.7, "fat": 3.3},
+        {"name": "Süzme Yoğurt", "calories": 66, "protein": 10.0, "carbs": 3.6, "fat": 0.7},
+    ],
+    "muz": [
+        {"name": "Muz", "calories": 89, "protein": 1.1, "carbs": 23.0, "fat": 0.3},
+    ],
+    "elma": [
+        {"name": "Elma", "calories": 52, "protein": 0.3, "carbs": 14.0, "fat": 0.2},
+    ],
+    "salata": [
+        {"name": "Çoban Salatası", "calories": 25, "protein": 1.0, "carbs": 4.0, "fat": 0.5},
+        {"name": "Mevsim Salatası", "calories": 20, "protein": 1.2, "carbs": 3.5, "fat": 0.3},
+    ],
+    "çorba": [
+        {"name": "Mercimek Çorbası", "calories": 56, "protein": 3.5, "carbs": 9.0, "fat": 0.5},
+        {"name": "Tavuk Çorbası", "calories": 36, "protein": 2.5, "carbs": 4.0, "fat": 1.0},
+        {"name": "Domates Çorbası", "calories": 30, "protein": 1.0, "carbs": 5.5, "fat": 0.5},
+    ],
+    "mercimek": [
+        {"name": "Mercimek (Haşlanmış)", "calories": 116, "protein": 9.0, "carbs": 20.0, "fat": 0.4},
+        {"name": "Mercimek Çorbası", "calories": 56, "protein": 3.5, "carbs": 9.0, "fat": 0.5},
+    ],
+    "nohut": [
+        {"name": "Nohut (Haşlanmış)", "calories": 164, "protein": 8.9, "carbs": 27.0, "fat": 2.6},
+    ],
+    "patates": [
+        {"name": "Patates (Haşlanmış)", "calories": 87, "protein": 1.9, "carbs": 20.0, "fat": 0.1},
+        {"name": "Patates Kızartması", "calories": 312, "protein": 3.4, "carbs": 41.0, "fat": 15.0},
+    ],
+    "avokado": [
+        {"name": "Avokado", "calories": 160, "protein": 2.0, "carbs": 9.0, "fat": 15.0},
+    ],
+    "badem": [
+        {"name": "Badem", "calories": 579, "protein": 21.0, "carbs": 22.0, "fat": 50.0},
+    ],
+    "fıstık": [
+        {"name": "Yer Fıstığı", "calories": 567, "protein": 26.0, "carbs": 16.0, "fat": 49.0},
+        {"name": "Antep Fıstığı", "calories": 560, "protein": 20.0, "carbs": 28.0, "fat": 45.0},
+    ],
+    "ceviz": [
+        {"name": "Ceviz", "calories": 654, "protein": 15.0, "carbs": 14.0, "fat": 65.0},
+    ],
+    "zeytin": [
+        {"name": "Siyah Zeytin", "calories": 115, "protein": 0.8, "carbs": 6.0, "fat": 11.0},
+        {"name": "Yeşil Zeytin", "calories": 145, "protein": 1.0, "carbs": 3.8, "fat": 15.0},
+    ],
+    "bal": [
+        {"name": "Bal", "calories": 304, "protein": 0.3, "carbs": 82.0, "fat": 0.0},
+    ],
+    "protein": [
+        {"name": "Whey Protein Tozu", "calories": 375, "protein": 75.0, "carbs": 10.0, "fat": 3.0},
+        {"name": "Kazein Protein Tozu", "calories": 360, "protein": 70.0, "carbs": 12.0, "fat": 2.0},
+    ],
+}
+
+
+def _food_search_static(q):
+    """Last-resort fallback: match against built-in food database."""
+    q_lower = q.lower().strip()
+    matches = []
+    for key, foods in _STATIC_FOODS.items():
+        if q_lower in key or key in q_lower:
+            matches.extend(foods)
+    if not matches:
+        return []
+    results = []
+    for item in matches[:8]:
+        per_100g = {
+            "calories": item["calories"], "protein": item["protein"],
+            "carbs": item["carbs"], "fat": item["fat"],
+        }
+        _cache_macros({item["name"]: per_100g})
+        results.append({
+            "name": item["name"], "brand": "", "food_id": "",
+            "serving": "Per 100g", "is_per_serving": False,
+            "macros": per_100g, "per_100g": per_100g
+        })
+    return results
+
+
+def _food_search_llm(q):
+    """Fallback: use Groq LLM to estimate nutrition for common foods."""
+    prompt = (
+        f"Kullanıcı '{q}' araması yaptı. Bu aramayla eşleşen 5 yaygın besini listele.\n"
+        "Her biri için 100 gram başına makro değerlerini ver.\n"
+        "SADECE JSON döndür, başka metin yazma. Format:\n"
+        '[{{"name":"Besin adı","calories":123,"protein":10.5,"carbs":5.2,"fat":3.1}}]'
+    )
+    try:
+        resp = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3,
+            max_tokens=600,
+        )
+        text = resp.choices[0].message.content.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        items = json.loads(text)
+        results = []
+        for item in items:
+            per_100g = {
+                "calories": float(item.get("calories", 0)),
+                "protein": float(item.get("protein", 0)),
+                "carbs": float(item.get("carbs", 0)),
+                "fat": float(item.get("fat", 0)),
+            }
+            name = item.get("name", q)
+            _cache_macros({name: per_100g})
+            results.append({
+                "name": name,
+                "brand": "",
+                "food_id": "",
+                "serving": "Per 100g",
+                "is_per_serving": False,
+                "macros": per_100g,
+                "per_100g": per_100g
+            })
+        return results
+    except Exception:
+        return []
+
+
+@app.route("/api/food/search")
+@login_required
+def food_search():
+    q = request.args.get("q", "").strip()
+    if len(q) < 2:
+        return jsonify({"results": []})
+
+    cached = _macro_cache.get(q)
+    if cached:
+        return jsonify({"results": [{
+            "name": q, "brand": "", "food_id": "",
+            "serving": "", "is_per_serving": False,
+            "macros": cached, "per_100g": cached
+        }]})
+
+    results = _food_search_fatsecret(q)
+    if not results:
+        results = _food_search_llm(q)
+    if not results:
+        results = _food_search_static(q)
 
     return jsonify({"results": results})
 
@@ -2314,7 +2561,6 @@ def _parse_suggestion_items(body_text):
 
 def _lookup_macros_fatsecret(items, token):
     import requests as http_req
-    from fitx_mcp.server import _parse_fatsecret_desc, FATSECRET_API_URL
     per_serving = {}
     per_100g = {}
     for name in items:
@@ -2750,7 +2996,6 @@ def analyze_menu():
     if cached_hits:
         print(f"[MACRO ENGINE] Cache hit: {len(cached_hits)}/{len(item_names)} items from cache")
 
-    from fitx_mcp.server import _get_fatsecret_token
     macro_map = dict(cached_hits)
     per_100g_items = {}
     lookup_names = uncached_names
@@ -3212,7 +3457,6 @@ def _process_meal_suggestion_accept(msg):
 
     total = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
     try:
-        from fitx_mcp.server import _get_fatsecret_token
         cached_hits, uncached = _get_cached_macros(items)
         macro_map = dict(cached_hits)
         per_100g_items = {}
