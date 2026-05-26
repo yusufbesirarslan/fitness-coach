@@ -147,6 +147,34 @@
     }
     .diary-gram-input:focus { border-color:var(--volt); outline:none; }
     .diary-gram-input:disabled { opacity:0.5; }
+    .diary-serving-select {
+      max-width:130px; background:var(--surface); border:1px solid var(--border);
+      border-radius:8px; padding:6px 8px; color:var(--text);
+      font-size:12px; font-family:'DM Sans',sans-serif;
+      appearance:none; -webkit-appearance:none;
+      background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
+      background-repeat:no-repeat; background-position:right 8px center;
+      padding-right:22px; cursor:pointer;
+    }
+    .diary-serving-select:focus { border-color:var(--volt); outline:none; }
+    .diary-serving-select:disabled { opacity:0.5; cursor:default; }
+    .diary-qty-input {
+      width:48px; background:var(--surface); border:1px solid var(--border);
+      border-radius:8px; padding:6px 4px; color:var(--text);
+      font-size:13px; text-align:center; font-family:'DM Sans',sans-serif;
+    }
+    .diary-qty-input:focus { border-color:var(--volt); outline:none; }
+    .diary-qty-input:disabled { opacity:0.5; }
+    .diary-serving-label {
+      font-size:11px; color:var(--text-3); white-space:nowrap;
+      max-width:100px; overflow:hidden; text-overflow:ellipsis;
+    }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .diary-serving-loading {
+      width:16px; height:16px; border:2px solid var(--border);
+      border-top-color:var(--volt); border-radius:50%;
+      animation:spin 0.6s linear infinite; flex-shrink:0;
+    }
   </style>
 </head>
 
@@ -1324,6 +1352,21 @@ document.addEventListener('click', e => {
 });
 
 
+/* ── SERVINGS CACHE ── */
+const _servingsCache = {};
+async function fetchServings(foodId) {
+  if (_servingsCache[foodId]) return _servingsCache[foodId];
+  try {
+    const res = await fetch('/api/food/' + foodId + '/servings');
+    const data = await res.json();
+    if (data.servings && data.servings.length) {
+      _servingsCache[foodId] = data.servings;
+      return data.servings;
+    }
+  } catch (e) {}
+  return null;
+}
+
 /* ── DIARY BUILDER ── */
 const DIARY_MEALS = [
   { key: 'Kahvaltı', icon: '\u{1F373}' },
@@ -1352,17 +1395,39 @@ function renderDiary(data) {
     const isLogged = meal ? meal.is_logged : false;
     const totals = meal ? meal.totals : {calories:0, protein:0, carbs:0, fat:0};
 
-    const itemsHtml = items.map(item => `
-      <div class="diary-food-row">
+    const itemsHtml = items.map(item => {
+      let unitHtml;
+      const cached = item.fatsecret_food_id ? _servingsCache[item.fatsecret_food_id] : null;
+      if (item.serving_id && cached) {
+        const opts = cached.map(s =>
+          `<option value="${s.serving_id}" ${s.serving_id === item.serving_id ? 'selected' : ''}>${s.serving_description}</option>`
+        ).join('');
+        const qVal = item.serving_quantity || 1;
+        unitHtml = `<select class="diary-serving-select" onchange="updateDiaryServing(${item.id}, this.value, '${item.fatsecret_food_id}')" ${isLogged ? 'disabled' : ''}>${opts}</select>
+          <input type="number" class="diary-qty-input" value="${qVal}" min="0.5" step="0.5"
+            onchange="updateDiaryServingQty(${item.id}, this.value, '${item.fatsecret_food_id}')" ${isLogged ? 'disabled' : ''}>`;
+      } else if (item.serving_id) {
+        const qVal = item.serving_quantity || 1;
+        unitHtml = `<span class="diary-serving-label">${item.serving_description || ''}</span>
+          <input type="number" class="diary-qty-input" value="${qVal}" min="0.5" step="0.5"
+            onchange="updateDiaryServingQtyOnly(${item.id}, this.value)" ${isLogged ? 'disabled' : ''}>`;
+        if (item.fatsecret_food_id && !isLogged) {
+          fetchServings(item.fatsecret_food_id).then(s => { if (s) loadDiary(); });
+        }
+      } else {
+        unitHtml = `<input type="number" class="diary-gram-input" value="${item.grams}" min="1" step="10"
+            onchange="updateDiaryGrams(${item.id}, this.value)" ${isLogged ? 'disabled' : ''}>
+          <span style="font-size:11px;color:var(--text-3);">g</span>`;
+      }
+      return `<div class="diary-food-row" data-item-id="${item.id}">
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;color:var(--text);">${item.food_name}</div>
           <div style="font-size:11px;color:var(--text-3);">${Math.round(item.calories)} kcal · P:${Math.round(item.protein)}g K:${Math.round(item.carbs)}g Y:${Math.round(item.fat)}g</div>
         </div>
-        <input type="number" class="diary-gram-input" value="${item.grams}" min="1" step="10"
-          onchange="updateDiaryGrams(${item.id}, this.value)" ${isLogged ? 'disabled' : ''}>
-        <span style="font-size:11px;color:var(--text-3);">g</span>
+        ${unitHtml}
         ${!isLogged ? '<button class="sf-remove" onclick="deleteDiaryItem(' + item.id + ')">✕</button>' : ''}
-      </div>`).join('');
+      </div>`;
+    }).join('');
 
     return `
       <div class="card diary-meal-card" style="padding:20px;margin-bottom:12px;" data-meal-name="${dm.key}" data-meal-id="${mealId}">
@@ -1425,7 +1490,7 @@ function diaryFoodSearch(input, mealName) {
         const fj = JSON.stringify(f).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
         return `<div class="autocomplete-item" onclick='addDiaryFood("${mealName}", JSON.parse(this.dataset.f))' data-f="${fj}">
           <div class="ac-name">${f.name}</div>
-          <div class="ac-macros"><strong>${Math.round(f.per_100g.calories)}</strong> kcal/100g · P:${Math.round(f.per_100g.protein)}g · K:${Math.round(f.per_100g.carbs)}g · Y:${Math.round(f.per_100g.fat)}g</div>
+          <div class="ac-macros"><strong>${Math.round(f.per_100g.calories)}</strong> kcal/100g · P:${Math.round(f.per_100g.protein)}g · K:${Math.round(f.per_100g.carbs)}g · Y:${Math.round(f.per_100g.fat)}g${f.serving && f.is_per_serving ? ' · ' + f.serving : ''}</div>
         </div>`;
       }).join('');
       dropdown.style.display = 'block';
@@ -1447,13 +1512,42 @@ async function addDiaryFood(mealName, food) {
     mealId = d.meal_id;
     card.dataset.mealId = mealId;
   }
-  const res = await fetch('/api/diary/meal/' + mealId + '/item', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+
+  let body;
+  if (food.food_id) {
+    const searchInput = card.querySelector('.diary-food-search');
+    const listEl = card.querySelector('.diary-items-list');
+    if (listEl) listEl.insertAdjacentHTML('beforeend', '<div class="diary-food-row" style="justify-content:center;"><div class="diary-serving-loading"></div></div>');
+    if (searchInput) { searchInput.value = ''; searchInput.nextElementSibling.style.display = 'none'; }
+
+    const servings = await fetchServings(food.food_id);
+    if (servings && servings.length) {
+      const srv = servings.find(s => s.serving_description !== '100 g' && s.serving_description !== '100g') || servings[0];
+      body = {
+        food_name: food.name,
+        fatsecret_food_id: food.food_id,
+        serving_id: srv.serving_id,
+        serving_description: srv.serving_description,
+        serving_quantity: 1,
+        serving_calories: srv.calories,
+        serving_protein: srv.protein,
+        serving_carbs: srv.carbs,
+        serving_fat: srv.fat,
+        metric_serving_amount: srv.metric_serving_amount,
+      };
+    }
+  }
+  if (!body) {
+    body = {
       food_name: food.name, grams: 100,
       per_100g: food.per_100g,
       fatsecret_food_id: food.food_id || ''
-    })
+    };
+  }
+
+  const res = await fetch('/api/diary/meal/' + mealId + '/item', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
   });
   const d = await res.json();
   if (d.error) { showToast(d.error, 'error'); return; }
@@ -1466,6 +1560,70 @@ async function updateDiaryGrams(itemId, grams) {
     await fetch('/api/diary/item/' + itemId, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ grams: parseFloat(grams) })
+    });
+    loadDiary();
+  } catch (e) { showToast('Güncelleme hatası', 'error'); }
+}
+
+async function updateDiaryServing(itemId, servingId, foodId) {
+  const servings = _servingsCache[foodId];
+  if (!servings) return;
+  const srv = servings.find(s => s.serving_id === servingId);
+  if (!srv) return;
+  const qtyInput = document.querySelector(`[data-item-id="${itemId}"] .diary-qty-input`);
+  const qty = qtyInput ? parseFloat(qtyInput.value) || 1 : 1;
+  try {
+    await fetch('/api/diary/item/' + itemId, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        serving_id: srv.serving_id,
+        serving_description: srv.serving_description,
+        serving_quantity: qty,
+        serving_calories: srv.calories,
+        serving_protein: srv.protein,
+        serving_carbs: srv.carbs,
+        serving_fat: srv.fat,
+        metric_serving_amount: srv.metric_serving_amount,
+      })
+    });
+    loadDiary();
+  } catch (e) { showToast('Güncelleme hatası', 'error'); }
+}
+
+async function updateDiaryServingQty(itemId, qty, foodId) {
+  qty = parseFloat(qty);
+  if (!qty || qty < 0.5) return;
+  const servings = _servingsCache[foodId];
+  const row = document.querySelector(`[data-item-id="${itemId}"]`);
+  const select = row ? row.querySelector('.diary-serving-select') : null;
+  const servingId = select ? select.value : null;
+  const srv = servings && servingId ? servings.find(s => s.serving_id === servingId) : null;
+  try {
+    const body = srv ? {
+      serving_id: srv.serving_id,
+      serving_description: srv.serving_description,
+      serving_quantity: qty,
+      serving_calories: srv.calories,
+      serving_protein: srv.protein,
+      serving_carbs: srv.carbs,
+      serving_fat: srv.fat,
+      metric_serving_amount: srv.metric_serving_amount,
+    } : { serving_quantity: qty };
+    await fetch('/api/diary/item/' + itemId, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    loadDiary();
+  } catch (e) { showToast('Güncelleme hatası', 'error'); }
+}
+
+async function updateDiaryServingQtyOnly(itemId, qty) {
+  qty = parseFloat(qty);
+  if (!qty || qty < 0.5) return;
+  try {
+    await fetch('/api/diary/item/' + itemId, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serving_quantity: qty })
     });
     loadDiary();
   } catch (e) { showToast('Güncelleme hatası', 'error'); }

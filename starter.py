@@ -74,6 +74,49 @@ def _parse_fatsecret_desc(desc: str) -> dict | None:
     except Exception:
         return None
     return parts if len(parts) > 1 else None
+
+
+def _food_get_servings(food_id):
+    try:
+        token = _get_fatsecret_token()
+    except Exception:
+        return None
+    try:
+        resp = http_requests_lib.get(FATSECRET_API_URL, params={
+            "method": "food.get.v4",
+            "food_id": food_id,
+            "format": "json",
+        }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
+        data = resp.json()
+    except Exception:
+        return None
+
+    try:
+        servings_raw = data["food"]["servings"]["serving"]
+        if isinstance(servings_raw, dict):
+            servings_raw = [servings_raw]
+    except (KeyError, TypeError):
+        return None
+
+    results = []
+    for s in servings_raw:
+        try:
+            metric_amt = float(s.get("metric_serving_amount", 0))
+            results.append({
+                "serving_id": str(s.get("serving_id", "")),
+                "serving_description": s.get("serving_description", ""),
+                "metric_serving_amount": metric_amt,
+                "metric_serving_unit": s.get("metric_serving_unit", "g"),
+                "calories": float(s.get("calories", 0)),
+                "protein": float(s.get("protein", 0)),
+                "carbs": float(s.get("carbohydrate", 0)),
+                "fat": float(s.get("fat", 0)),
+            })
+        except (ValueError, TypeError):
+            continue
+    return results if results else None
+
+
 database_url = os.environ.get("DATABASE_URL", "sqlite:///chatbot.db")
 if database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
@@ -445,6 +488,9 @@ class CustomMealItem(db.Model):
     per_100g_protein  = db.Column(db.Float, nullable=True)
     per_100g_carbs    = db.Column(db.Float, nullable=True)
     per_100g_fat      = db.Column(db.Float, nullable=True)
+    serving_id          = db.Column(db.String(50), nullable=True)
+    serving_description = db.Column(db.String(200), nullable=True)
+    serving_quantity    = db.Column(db.Float, nullable=True)
 
 
 def award_xp(user_id, amount):
@@ -928,6 +974,13 @@ def food_search():
     return jsonify({"results": results})
 
 
+@app.route("/api/food/<food_id>/servings")
+@login_required
+def food_servings(food_id):
+    servings = _food_get_servings(food_id)
+    return jsonify({"servings": servings or []})
+
+
 # ── DIARY BUILDER API ──
 
 @app.route("/api/diary/meal", methods=["POST"])
@@ -964,33 +1017,64 @@ def diary_add_item(meal_id):
 
     data = request.get_json()
     food_name = data.get("food_name", "").strip()
-    grams = float(data.get("grams", 100))
-    per_100g = data.get("per_100g", {})
     food_id = data.get("fatsecret_food_id", "")
 
     if not food_name:
         return jsonify({"error": "Besin adı gerekli"}), 400
 
-    scale = grams / 100.0
-    p100_cal = float(per_100g.get("calories", 0))
-    p100_pro = float(per_100g.get("protein", 0))
-    p100_carb = float(per_100g.get("carbs", 0))
-    p100_fat = float(per_100g.get("fat", 0))
+    srv_id = data.get("serving_id")
+    if srv_id:
+        qty = float(data.get("serving_quantity", 1))
+        srv_cal = float(data.get("serving_calories", 0))
+        srv_pro = float(data.get("serving_protein", 0))
+        srv_carb = float(data.get("serving_carbs", 0))
+        srv_fat = float(data.get("serving_fat", 0))
+        metric_amt = float(data.get("metric_serving_amount", 0))
+        grams = round(metric_amt * qty, 1) if metric_amt else 0
+        p100_cal = round(srv_cal / metric_amt * 100, 2) if metric_amt else 0
+        p100_pro = round(srv_pro / metric_amt * 100, 2) if metric_amt else 0
+        p100_carb = round(srv_carb / metric_amt * 100, 2) if metric_amt else 0
+        p100_fat = round(srv_fat / metric_amt * 100, 2) if metric_amt else 0
+        item = CustomMealItem(
+            custom_meal_id=meal_id,
+            food_name=food_name,
+            grams=grams,
+            calories=round(srv_cal * qty, 1),
+            protein=round(srv_pro * qty, 1),
+            carbs=round(srv_carb * qty, 1),
+            fat=round(srv_fat * qty, 1),
+            fatsecret_food_id=food_id or None,
+            per_100g_calories=p100_cal,
+            per_100g_protein=p100_pro,
+            per_100g_carbs=p100_carb,
+            per_100g_fat=p100_fat,
+            serving_id=str(srv_id),
+            serving_description=data.get("serving_description", ""),
+            serving_quantity=qty,
+        )
+    else:
+        grams = float(data.get("grams", 100))
+        per_100g = data.get("per_100g", {})
+        scale = grams / 100.0
+        p100_cal = float(per_100g.get("calories", 0))
+        p100_pro = float(per_100g.get("protein", 0))
+        p100_carb = float(per_100g.get("carbs", 0))
+        p100_fat = float(per_100g.get("fat", 0))
+        item = CustomMealItem(
+            custom_meal_id=meal_id,
+            food_name=food_name,
+            grams=grams,
+            calories=round(p100_cal * scale, 1),
+            protein=round(p100_pro * scale, 1),
+            carbs=round(p100_carb * scale, 1),
+            fat=round(p100_fat * scale, 1),
+            fatsecret_food_id=food_id or None,
+            per_100g_calories=p100_cal,
+            per_100g_protein=p100_pro,
+            per_100g_carbs=p100_carb,
+            per_100g_fat=p100_fat,
+        )
 
-    item = CustomMealItem(
-        custom_meal_id=meal_id,
-        food_name=food_name,
-        grams=grams,
-        calories=round(p100_cal * scale, 1),
-        protein=round(p100_pro * scale, 1),
-        carbs=round(p100_carb * scale, 1),
-        fat=round(p100_fat * scale, 1),
-        fatsecret_food_id=food_id or None,
-        per_100g_calories=p100_cal,
-        per_100g_protein=p100_pro,
-        per_100g_carbs=p100_carb,
-        per_100g_fat=p100_fat,
-    )
     db.session.add(item)
     db.session.commit()
     return jsonify({
@@ -1012,14 +1096,47 @@ def diary_update_item(item_id):
         return jsonify({"error": "Bu öğün zaten kaydedilmiş"}), 400
 
     data = request.get_json()
-    grams = float(data.get("grams", item.grams))
-    scale = grams / 100.0
+    srv_id = data.get("serving_id")
 
-    item.grams = grams
-    item.calories = round((item.per_100g_calories or 0) * scale, 1)
-    item.protein = round((item.per_100g_protein or 0) * scale, 1)
-    item.carbs = round((item.per_100g_carbs or 0) * scale, 1)
-    item.fat = round((item.per_100g_fat or 0) * scale, 1)
+    if srv_id:
+        qty = float(data.get("serving_quantity", 1))
+        srv_cal = float(data.get("serving_calories", 0))
+        srv_pro = float(data.get("serving_protein", 0))
+        srv_carb = float(data.get("serving_carbs", 0))
+        srv_fat = float(data.get("serving_fat", 0))
+        metric_amt = float(data.get("metric_serving_amount", 0))
+        item.serving_id = str(srv_id)
+        item.serving_description = data.get("serving_description", "")
+        item.serving_quantity = qty
+        item.grams = round(metric_amt * qty, 1) if metric_amt else 0
+        item.calories = round(srv_cal * qty, 1)
+        item.protein = round(srv_pro * qty, 1)
+        item.carbs = round(srv_carb * qty, 1)
+        item.fat = round(srv_fat * qty, 1)
+        if metric_amt:
+            item.per_100g_calories = round(srv_cal / metric_amt * 100, 2)
+            item.per_100g_protein = round(srv_pro / metric_amt * 100, 2)
+            item.per_100g_carbs = round(srv_carb / metric_amt * 100, 2)
+            item.per_100g_fat = round(srv_fat / metric_amt * 100, 2)
+    elif "serving_quantity" in data and item.serving_id:
+        qty = float(data["serving_quantity"])
+        old_qty = item.serving_quantity or 1
+        factor = qty / old_qty
+        item.serving_quantity = qty
+        item.grams = round(item.grams * factor, 1)
+        item.calories = round(item.calories * factor, 1)
+        item.protein = round(item.protein * factor, 1)
+        item.carbs = round(item.carbs * factor, 1)
+        item.fat = round(item.fat * factor, 1)
+    else:
+        grams = float(data.get("grams", item.grams))
+        scale = grams / 100.0
+        item.grams = grams
+        item.calories = round((item.per_100g_calories or 0) * scale, 1)
+        item.protein = round((item.per_100g_protein or 0) * scale, 1)
+        item.carbs = round((item.per_100g_carbs or 0) * scale, 1)
+        item.fat = round((item.per_100g_fat or 0) * scale, 1)
+
     db.session.commit()
     return jsonify({
         "item_id": item.id,
@@ -1060,7 +1177,12 @@ def diary_log_meal(meal_id):
     total_karb = sum(i.carbs for i in meal.items)
     total_fat = sum(i.fat for i in meal.items)
 
-    yemekler = ", ".join(f"{i.food_name} ({int(i.grams)}g)" for i in meal.items)
+    def _item_label(i):
+        if i.serving_description and i.serving_quantity:
+            qty = int(i.serving_quantity) if i.serving_quantity == int(i.serving_quantity) else i.serving_quantity
+            return f"{i.food_name} ({qty}x {i.serving_description})"
+        return f"{i.food_name} ({int(i.grams)}g)"
+    yemekler = ", ".join(_item_label(i) for i in meal.items)
     today = datetime.utcnow().strftime("%d.%m")
 
     entry = MealLog(
@@ -1121,7 +1243,11 @@ def diary_today():
                     "protein": i.per_100g_protein,
                     "carbs": i.per_100g_carbs,
                     "fat": i.per_100g_fat
-                }
+                },
+                "serving_id": i.serving_id,
+                "serving_description": i.serving_description,
+                "serving_quantity": i.serving_quantity,
+                "fatsecret_food_id": i.fatsecret_food_id,
             })
             meal_total["calories"] += i.calories
             meal_total["protein"] += i.protein
@@ -5166,6 +5292,9 @@ with app.app_context():
         'ALTER TABLE meal_log ALTER COLUMN ogun TYPE VARCHAR(100)',
         'ALTER TABLE meal_log ADD COLUMN source VARCHAR(20) DEFAULT \'manual\'',
         'UPDATE user_quest_progress SET is_claimed = true WHERE is_claimed = false',
+        'ALTER TABLE custom_meal_item ADD COLUMN serving_id VARCHAR(50)',
+        'ALTER TABLE custom_meal_item ADD COLUMN serving_description VARCHAR(200)',
+        'ALTER TABLE custom_meal_item ADD COLUMN serving_quantity FLOAT',
     ]
     for sql in migrations:
         try:
