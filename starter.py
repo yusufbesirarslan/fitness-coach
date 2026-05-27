@@ -28,9 +28,6 @@ _proxy_host = None
 _proxy_port = None
 
 if _FS_PROXY_RAW:
-    import base64
-    from requests.adapters import HTTPAdapter
-
     # Parse proxy - handles all common formats:
     #   user:pass@host:port
     #   http://user:pass@host:port
@@ -67,24 +64,25 @@ if _FS_PROXY_RAW:
         _proxy_user = ""
         _proxy_pass = ""
 
-    _proxy_bare = f"http://{_proxy_host}:{_proxy_port}"
-    _proxy_creds = base64.b64encode(
+    # urllib3 2.x rejects auth-in-URL for proxies.
+    # Override proxy_headers() so auth goes into the CONNECT tunnel handshake.
+    import base64 as _b64
+    from requests.adapters import HTTPAdapter
+
+    _proxy_url = f"http://{_proxy_host}:{_proxy_port}"
+    _proxy_auth_hdr = "Basic " + _b64.b64encode(
         f"{_proxy_user}:{_proxy_pass}".encode()
     ).decode()
 
-    class _ProxyAuthAdapter(HTTPAdapter):
-        """Adapter that injects Proxy-Authorization header (urllib3 2.x compat)."""
-        def send(self, request, **kwargs):
-            request.headers["Proxy-Authorization"] = f"Basic {_proxy_creds}"
-            return super().send(request, **kwargs)
+    class _ProxyAdapter(HTTPAdapter):
+        def proxy_headers(self, proxy):
+            hdrs = super().proxy_headers(proxy)
+            hdrs["Proxy-Authorization"] = _proxy_auth_hdr
+            return hdrs
 
-        def proxy_manager_for(self, proxy, **proxy_kwargs):
-            proxy_kwargs["proxy_headers"] = {"Proxy-Authorization": f"Basic {_proxy_creds}"}
-            return super().proxy_manager_for(proxy, **proxy_kwargs)
-
-    _fs_session.proxies = {"http": _proxy_bare, "https": _proxy_bare}
-    _fs_session.mount("http://", _ProxyAuthAdapter())
-    _fs_session.mount("https://", _ProxyAuthAdapter())
+    _fs_session.mount("http://", _ProxyAdapter())
+    _fs_session.mount("https://", _ProxyAdapter())
+    _fs_session.proxies = {"http": _proxy_url, "https": _proxy_url}
     print(f"[FatSecret] Proxy: {_proxy_host}:{_proxy_port} user={_proxy_user}")
 
 _fs_token_lock = threading.Lock()
@@ -1087,10 +1085,7 @@ def debug_servings():
     steps = []
     steps.append({"step": "proxy_config", "proxy": bool(_FS_PROXY_RAW),
                   "proxy_host": f"{_proxy_host}:{_proxy_port}",
-                  "raw_len": len(_FS_PROXY_RAW),
-                  "raw_has_at": "@" in _FS_PROXY_RAW,
-                  "raw_colons": _FS_PROXY_RAW.count(":"),
-                  "raw_preview": _FS_PROXY_RAW[:8] + "..." + _FS_PROXY_RAW[-12:] if len(_FS_PROXY_RAW) > 20 else _FS_PROXY_RAW})
+                  "method": "proxy_headers_adapter" if _FS_PROXY_RAW else "direct"})
     try:
         token = _get_fatsecret_token()
         steps.append({"step": "token", "ok": True, "token_prefix": token[:20] + "..."})
