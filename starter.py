@@ -21,93 +21,16 @@ _BOOT_TS = int(time.time())  # cache-bust static assets on each deploy
 FATSECRET_TOKEN_URL = "https://oauth.fatsecret.com/connect/token"
 FATSECRET_API_URL = "https://platform.fatsecret.com/rest/server.api"
 
-# Proxy for stable outbound IP (Webshare IPs whitelisted in FatSecret)
-_FS_PROXY_RAW = os.environ.get("FATSECRET_PROXY_URL", "").strip()
-_proxy_host = None
-_proxy_port = None
-_fs_pool = None          # urllib3 pool (ProxyManager or PoolManager)
-
-if _FS_PROXY_RAW:
-    import urllib3
-    # Parse proxy - handles all common formats:
-    #   user:pass@host:port  |  http://user:pass@host:port  |  host:port:user:pass
-    _raw = _FS_PROXY_RAW
-    if "://" in _raw:
-        _raw = _raw.split("://", 1)[1]
-
-    def _extract_port(s):
-        return int(re.sub(r"[^\d]", "", s) or "8080")
-
-    if "@" in _raw:
-        _auth_part, _host_part = _raw.rsplit("@", 1)
-        _parts = _auth_part.split(":", 1)
-        _proxy_user = _parts[0].strip()
-        _proxy_pass = _parts[1].strip() if len(_parts) > 1 else ""
-        _hp = _host_part.strip().split(":")
-        _proxy_host = _hp[0].strip()
-        _proxy_port = _extract_port(_hp[1]) if len(_hp) > 1 else 8080
-    elif _raw.count(":") == 3:
-        _pieces = _raw.split(":")
-        _proxy_host = _pieces[0].strip()
-        _proxy_port = _extract_port(_pieces[1])
-        _proxy_user = _pieces[2]
-        _proxy_pass = _pieces[3]
-    else:
-        _proxy_host = _raw; _proxy_port = 8080; _proxy_user = ""; _proxy_pass = ""
-
-    # Use urllib3 ProxyManager directly — bypasses requests adapter issues
-    _proxy_hdrs = urllib3.make_headers(proxy_basic_auth=f"{_proxy_user}:{_proxy_pass}")
-    _fs_pool = urllib3.ProxyManager(
-        f"http://{_proxy_host}:{_proxy_port}",
-        proxy_headers=_proxy_hdrs,
-        num_pools=4,
-    )
-    print(f"[FatSecret] Proxy: {_proxy_host}:{_proxy_port} user={_proxy_user}")
-else:
-    import urllib3
-    _fs_pool = urllib3.PoolManager(num_pools=4)
-
-
-class _Urllib3Response:
-    """Thin wrapper so urllib3 responses have requests-like .json() / .status_code."""
-    def __init__(self, resp):
-        self._resp = resp
-        self.status_code = resp.status
-        self.text = resp.data.decode("utf-8", errors="replace")
-    def json(self):
-        return json.loads(self.text)
-    def raise_for_status(self):
-        if self.status_code >= 400:
-            raise Exception(f"HTTP {self.status_code}: {self.text[:200]}")
-
-
 def _fs_get(url, **kwargs):
-    """GET via proxy (if configured). Compatible with requests-style kwargs."""
-    headers = dict(kwargs.get("headers") or {})
-    timeout = kwargs.get("timeout", 10)
-    params = kwargs.get("params")
-    if params:
-        from urllib.parse import urlencode
-        url = url + ("&" if "?" in url else "?") + urlencode(params)
-    resp = _fs_pool.request("GET", url, headers=headers, timeout=float(timeout))
-    return _Urllib3Response(resp)
+    """GET request to FatSecret API."""
+    kwargs.setdefault("timeout", 10)
+    return http_requests_lib.get(url, **kwargs)
 
 
 def _fs_post(url, **kwargs):
-    """POST via proxy (if configured). Compatible with requests-style kwargs."""
-    headers = dict(kwargs.get("headers") or {})
-    timeout = kwargs.get("timeout", 10)
-    data = kwargs.get("data") or {}
-    auth = kwargs.get("auth")
-    if auth:
-        import base64
-        creds = base64.b64encode(f"{auth[0]}:{auth[1]}".encode()).decode()
-        headers["Authorization"] = f"Basic {creds}"
-    from urllib.parse import urlencode
-    body = urlencode(data)
-    headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
-    resp = _fs_pool.request("POST", url, headers=headers, body=body, timeout=float(timeout))
-    return _Urllib3Response(resp)
+    """POST request to FatSecret API."""
+    kwargs.setdefault("timeout", 10)
+    return http_requests_lib.post(url, **kwargs)
 
 
 _fs_token_lock = threading.Lock()
@@ -1090,175 +1013,16 @@ def food_search():
     return jsonify({"results": results})
 
 
-@app.route("/api/food/debug-servings")
+
+@app.route("/api/server-ip")
 @login_required
-def debug_servings():
-    """Temporary diagnostic endpoint — remove after debugging."""
-    import base64 as _dbg_b64
-    name = request.args.get("name", "egg")
-    steps = []
-
-    # Show parsed credentials (mask middle of password)
-    _pu = getattr(__import__("builtins"), "__builtins__", None)  # dummy
-    _parsed_user = globals().get("_proxy_user", "")
-    _parsed_pass = globals().get("_proxy_pass", "")
-    _pass_display = _parsed_pass[:3] + "***" + _parsed_pass[-3:] if len(_parsed_pass) > 6 else "***"
-    _cred_str = f"{_parsed_user}:{_parsed_pass}"
-    _b64_val = _dbg_b64.b64encode(_cred_str.encode()).decode()
-
-    steps.append({"step": "proxy_config", "proxy": bool(_FS_PROXY_RAW),
-                  "proxy_host": f"{_proxy_host}:{_proxy_port}",
-                  "parsed_user": _parsed_user,
-                  "parsed_pass": _pass_display,
-                  "b64_header": f"Basic {_b64_val[:20]}...",
-                  "method": "urllib3_proxy_manager" if _FS_PROXY_RAW else "direct"})
-
-    # Step 0: Show Railway's outbound IP (so user can whitelist it in Webshare)
-    _railway_ip = None
-    for _ip_url in ["https://api.ipify.org", "https://ifconfig.me/ip", "https://icanhazip.com"]:
-        try:
-            import urllib3 as _u3ip
-            _direct = _u3ip.PoolManager(num_pools=1)
-            _ip_resp = _direct.request("GET", _ip_url, timeout=8.0)
-            _railway_ip = _ip_resp.data.decode("utf-8").strip()
-            if _railway_ip:
-                break
-        except Exception:
-            continue
-    steps.append({"step": "railway_outbound_ip", "ip": _railway_ip or "unknown",
-                  "action": "Add this IP to Webshare Authorized IPs"})
-
-    # Test A: Plain HTTP through proxy (NO CONNECT tunnel — tests basic proxy auth)
+def server_ip():
+    """Show Railway's outbound IP for FatSecret whitelist management."""
     try:
-        import urllib3 as _u3a
-        _test_hdrs_a = _u3a.make_headers(proxy_basic_auth=_cred_str)
-        _pm_a = _u3a.ProxyManager(
-            f"http://{_proxy_host}:{_proxy_port}",
-            proxy_headers=_test_hdrs_a, num_pools=1,
-        )
-        _ra = _pm_a.request("GET", "http://httpbin.org/ip", timeout=8.0)
-        steps.append({"step": "http_plain_proxy", "ok": _ra.status == 200,
-                      "status": _ra.status,
-                      "body": _ra.data.decode("utf-8")[:200]})
+        r = http_requests_lib.get("https://api.ipify.org", timeout=5)
+        return jsonify({"ip": r.text.strip()})
     except Exception as e:
-        steps.append({"step": "http_plain_proxy", "ok": False, "error": str(e)})
-
-    # Test B: HTTPS CONNECT tunnel via raw http.client
-    try:
-        import http.client as _hc
-        _conn = _hc.HTTPConnection(_proxy_host, int(_proxy_port), timeout=10)
-        _conn.set_tunnel("httpbin.org", 443,
-                         headers={"Proxy-Authorization": f"Basic {_b64_val}"})
-        _conn.request("GET", "/ip")
-        _r = _conn.getresponse()
-        _body = _r.read().decode("utf-8", errors="replace")[:200]
-        steps.append({"step": "https_connect_tunnel", "ok": _r.status == 200,
-                      "status": _r.status, "body": _body})
-        _conn.close()
-    except Exception as e:
-        steps.append({"step": "https_connect_tunnel", "ok": False, "error": str(e)})
-
-    # Test C: Raw socket CONNECT (absolute lowest level)
-    try:
-        import socket
-        _s = socket.create_connection((_proxy_host, int(_proxy_port)), timeout=10)
-        _connect_req = (
-            f"CONNECT httpbin.org:443 HTTP/1.1\r\n"
-            f"Host: httpbin.org:443\r\n"
-            f"Proxy-Authorization: Basic {_b64_val}\r\n"
-            f"\r\n"
-        )
-        _s.sendall(_connect_req.encode())
-        _resp_bytes = _s.recv(4096)
-        _resp_line = _resp_bytes.decode("utf-8", errors="replace").split("\r\n")[0]
-        _s.close()
-        steps.append({"step": "raw_socket_connect", "ok": "200" in _resp_line,
-                      "response_line": _resp_line})
-    except Exception as e:
-        steps.append({"step": "raw_socket_connect", "ok": False, "error": str(e)})
-    except FileNotFoundError:
-        steps.append({"step": "curl_test", "ok": False, "error": "curl not installed"})
-    except Exception as e:
-        steps.append({"step": "curl_test", "ok": False, "error": str(e)})
-
-    # Test C: urllib3 ProxyManager
-    try:
-        import urllib3 as _u3
-        _test_hdrs = _u3.make_headers(proxy_basic_auth=_cred_str)
-        steps.append({"step": "urllib3_headers_check",
-                      "proxy_headers": {k: v[:30] + "..." for k, v in _test_hdrs.items()}})
-        _test_pm = _u3.ProxyManager(
-            f"http://{_proxy_host}:{_proxy_port}",
-            proxy_headers=_test_hdrs,
-            num_pools=1,
-        )
-        _test_resp = _test_pm.request("GET", "https://httpbin.org/ip", timeout=8.0)
-        steps.append({"step": "urllib3_proxy_manager_test", "ok": True,
-                      "status": _test_resp.status,
-                      "body": _test_resp.data.decode("utf-8")[:200]})
-    except Exception as e:
-        steps.append({"step": "urllib3_proxy_manager_test", "ok": False, "error": str(e)})
-
-    try:
-        token = _get_fatsecret_token()
-        steps.append({"step": "token", "ok": True, "token_prefix": token[:20] + "..."})
-    except Exception as e:
-        steps.append({"step": "token", "ok": False, "error": str(e)})
-        return jsonify({"steps": steps})
-
-    # Step 2: search
-    for search_term in [name, "egg"]:
-        try:
-            resp = _fs_get(FATSECRET_API_URL, params={
-                "method": "foods.search",
-                "search_expression": search_term,
-                "format": "json",
-                "max_results": 2,
-            }, headers={"Authorization": f"Bearer {token}"}, timeout=8)
-            data = resp.json()
-            if "error" in data:
-                steps.append({"step": f"search({search_term})", "ok": False, "error": data["error"]})
-                continue
-            foods = data.get("foods", {}).get("food", [])
-            if isinstance(foods, dict):
-                foods = [foods]
-            if not foods:
-                steps.append({"step": f"search({search_term})", "ok": False, "error": "no results"})
-                continue
-            fid = foods[0].get("food_id", "")
-            fname = foods[0].get("food_name", "")
-            steps.append({"step": f"search({search_term})", "ok": True, "food_id": fid, "food_name": fname})
-
-            # Step 3: food.get
-            if fid:
-                for method in ("food.get.v4", "food.get.v2", "food.get"):
-                    try:
-                        resp2 = _fs_get(FATSECRET_API_URL, params={
-                            "method": method, "food_id": fid, "format": "json",
-                        }, headers={"Authorization": f"Bearer {token}"}, timeout=8)
-                        d2 = resp2.json()
-                        if "error" in d2:
-                            steps.append({"step": f"food.get({method})", "ok": False, "error": d2["error"]})
-                            continue
-                        srvs = d2.get("food", {}).get("servings", {}).get("serving", [])
-                        if isinstance(srvs, dict):
-                            srvs = [srvs]
-                        steps.append({
-                            "step": f"food.get({method})",
-                            "ok": bool(srvs),
-                            "count": len(srvs),
-                            "first": srvs[0].get("serving_description", "") if srvs else None,
-                            "keys": list(d2.get("food", {}).keys())[:10],
-                        })
-                        if srvs:
-                            break
-                    except Exception as e:
-                        steps.append({"step": f"food.get({method})", "ok": False, "error": str(e)})
-                break  # found a food_id, stop searching
-        except Exception as e:
-            steps.append({"step": f"search({search_term})", "ok": False, "error": str(e)})
-
-    return jsonify({"steps": steps})
+        return jsonify({"ip": None, "error": str(e)})
 
 
 @app.route("/api/food/<food_id>/servings")
