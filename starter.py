@@ -23,26 +23,22 @@ FATSECRET_API_URL = "https://platform.fatsecret.com/rest/server.api"
 
 # Proxy for stable outbound IP (Webshare IPs whitelisted in FatSecret)
 _FS_PROXY_RAW = os.environ.get("FATSECRET_PROXY_URL", "").strip()
-_fs_session = http_requests_lib.Session()
 _proxy_host = None
 _proxy_port = None
+_fs_pool = None          # urllib3 pool (ProxyManager or PoolManager)
 
 if _FS_PROXY_RAW:
+    import urllib3
     # Parse proxy - handles all common formats:
-    #   user:pass@host:port
-    #   http://user:pass@host:port
-    #   host:port:user:pass  (Webshare format)
+    #   user:pass@host:port  |  http://user:pass@host:port  |  host:port:user:pass
     _raw = _FS_PROXY_RAW
-    # Strip scheme if present
     if "://" in _raw:
         _raw = _raw.split("://", 1)[1]
 
     def _extract_port(s):
-        """Extract numeric port from string, stripping any trailing junk."""
         return int(re.sub(r"[^\d]", "", s) or "8080")
 
     if "@" in _raw:
-        # Format: user:pass@host:port
         _auth_part, _host_part = _raw.rsplit("@", 1)
         _parts = _auth_part.split(":", 1)
         _proxy_user = _parts[0].strip()
@@ -51,54 +47,71 @@ if _FS_PROXY_RAW:
         _proxy_host = _hp[0].strip()
         _proxy_port = _extract_port(_hp[1]) if len(_hp) > 1 else 8080
     elif _raw.count(":") == 3:
-        # Format: host:port:user:pass (Webshare)
         _pieces = _raw.split(":")
         _proxy_host = _pieces[0].strip()
         _proxy_port = _extract_port(_pieces[1])
         _proxy_user = _pieces[2]
         _proxy_pass = _pieces[3]
     else:
-        # Unknown format, try as-is
-        _proxy_host = _raw
-        _proxy_port = 8080
-        _proxy_user = ""
-        _proxy_pass = ""
+        _proxy_host = _raw; _proxy_port = 8080; _proxy_user = ""; _proxy_pass = ""
 
-    # urllib3 2.x rejects auth-in-URL for proxies.
-    # Override proxy_headers() so auth goes into the CONNECT tunnel handshake.
-    import base64 as _b64
-    from requests.adapters import HTTPAdapter
-
-    _proxy_url = f"http://{_proxy_host}:{_proxy_port}"
-    _proxy_auth_hdr = "Basic " + _b64.b64encode(
-        f"{_proxy_user}:{_proxy_pass}".encode()
-    ).decode()
-
-    class _ProxyAdapter(HTTPAdapter):
-        def proxy_headers(self, proxy):
-            hdrs = super().proxy_headers(proxy)
-            hdrs["Proxy-Authorization"] = _proxy_auth_hdr
-            return hdrs
-
-    _fs_session.mount("http://", _ProxyAdapter())
-    _fs_session.mount("https://", _ProxyAdapter())
-    _fs_session.proxies = {"http": _proxy_url, "https": _proxy_url}
+    # Use urllib3 ProxyManager directly — bypasses requests adapter issues
+    _proxy_hdrs = urllib3.make_headers(proxy_basic_auth=f"{_proxy_user}:{_proxy_pass}")
+    _fs_pool = urllib3.ProxyManager(
+        f"http://{_proxy_host}:{_proxy_port}",
+        proxy_headers=_proxy_hdrs,
+        num_pools=4,
+    )
     print(f"[FatSecret] Proxy: {_proxy_host}:{_proxy_port} user={_proxy_user}")
+else:
+    import urllib3
+    _fs_pool = urllib3.PoolManager(num_pools=4)
 
-_fs_token_lock = threading.Lock()
-_fs_token_cache = {"token": None, "expires_at": 0}
+
+class _Urllib3Response:
+    """Thin wrapper so urllib3 responses have requests-like .json() / .status_code."""
+    def __init__(self, resp):
+        self._resp = resp
+        self.status_code = resp.status
+        self.text = resp.data.decode("utf-8", errors="replace")
+    def json(self):
+        return json.loads(self.text)
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise Exception(f"HTTP {self.status_code}: {self.text[:200]}")
 
 
 def _fs_get(url, **kwargs):
-    """GET request routed through proxy if configured."""
-    kwargs.setdefault("timeout", 10)
-    return _fs_session.get(url, **kwargs)
+    """GET via proxy (if configured). Compatible with requests-style kwargs."""
+    headers = dict(kwargs.get("headers") or {})
+    timeout = kwargs.get("timeout", 10)
+    params = kwargs.get("params")
+    if params:
+        from urllib.parse import urlencode
+        url = url + ("&" if "?" in url else "?") + urlencode(params)
+    resp = _fs_pool.request("GET", url, headers=headers, timeout=float(timeout))
+    return _Urllib3Response(resp)
 
 
 def _fs_post(url, **kwargs):
-    """POST request routed through proxy if configured."""
-    kwargs.setdefault("timeout", 10)
-    return _fs_session.post(url, **kwargs)
+    """POST via proxy (if configured). Compatible with requests-style kwargs."""
+    headers = dict(kwargs.get("headers") or {})
+    timeout = kwargs.get("timeout", 10)
+    data = kwargs.get("data") or {}
+    auth = kwargs.get("auth")
+    if auth:
+        import base64
+        creds = base64.b64encode(f"{auth[0]}:{auth[1]}".encode()).decode()
+        headers["Authorization"] = f"Basic {creds}"
+    from urllib.parse import urlencode
+    body = urlencode(data)
+    headers.setdefault("Content-Type", "application/x-www-form-urlencoded")
+    resp = _fs_pool.request("POST", url, headers=headers, body=body, timeout=float(timeout))
+    return _Urllib3Response(resp)
+
+
+_fs_token_lock = threading.Lock()
+_fs_token_cache = {"token": None, "expires_at": 0}
 
 
 def _get_fatsecret_token() -> str:
@@ -1085,7 +1098,7 @@ def debug_servings():
     steps = []
     steps.append({"step": "proxy_config", "proxy": bool(_FS_PROXY_RAW),
                   "proxy_host": f"{_proxy_host}:{_proxy_port}",
-                  "method": "proxy_headers_adapter" if _FS_PROXY_RAW else "direct"})
+                  "method": "urllib3_proxy_manager" if _FS_PROXY_RAW else "direct"})
     try:
         token = _get_fatsecret_token()
         steps.append({"step": "token", "ok": True, "token_prefix": token[:20] + "..."})
