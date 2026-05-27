@@ -158,6 +158,13 @@
     }
     .diary-serving-select:focus { border-color:var(--volt); outline:none; }
     .diary-serving-select:disabled { opacity:0.5; cursor:default; }
+    .diary-serving-select option, #sm-serving-select option {
+      background:#1a1a1a; color:#e0e0e0;
+    }
+    #sm-serving-select {
+      background:var(--surface, #1a1a1a); color:var(--text, #e0e0e0);
+      border-color:var(--border, #333);
+    }
     .diary-qty-input {
       width:48px; background:var(--surface); border:1px solid var(--border);
       border-radius:8px; padding:6px 4px; color:var(--text);
