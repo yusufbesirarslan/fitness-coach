@@ -134,6 +134,9 @@ def _food_get_servings(food_id):
     for s in servings_raw:
         try:
             metric_amt = float(s.get("metric_serving_amount", 0))
+            if metric_amt == 0:
+                app.logger.warning("_food_get_servings food_id=%s: serving '%s' has no metric_serving_amount",
+                                   food_id, s.get("serving_description", "?"))
             results.append({
                 "serving_id": str(s.get("serving_id", "")),
                 "serving_description": s.get("serving_description", ""),
@@ -146,7 +149,31 @@ def _food_get_servings(food_id):
             })
         except (ValueError, TypeError):
             continue
-    return results if results else None
+
+    if not results:
+        return None
+
+    # Inject a synthetic "100 g" serving if none exists
+    has_100g = any(abs(r["metric_serving_amount"] - 100) < 0.5 for r in results)
+    if not has_100g:
+        donor = max((r for r in results if r["metric_serving_amount"] > 0),
+                    key=lambda r: r["metric_serving_amount"], default=None)
+        if donor:
+            scale = 100.0 / donor["metric_serving_amount"]
+            results.append({
+                "serving_id": "100g_calc",
+                "serving_description": "100 g",
+                "metric_serving_amount": 100.0,
+                "metric_serving_unit": "g",
+                "calories": round(donor["calories"] * scale, 1),
+                "protein": round(donor["protein"] * scale, 1),
+                "carbs": round(donor["carbs"] * scale, 1),
+                "fat": round(donor["fat"] * scale, 1),
+            })
+        else:
+            app.logger.warning("_food_get_servings food_id=%s: cannot derive 100g — all servings lack metric_serving_amount", food_id)
+
+    return results
 
 
 database_url = os.environ.get("DATABASE_URL", "sqlite:///chatbot.db")

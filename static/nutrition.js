@@ -5,6 +5,15 @@ let targetCalories = 2000;
 let selectedMealType = 'Kahvaltı';
 let quickAddOpen = false;
 
+/* ── SERVING LABEL HELPER ── */
+function formatServingLabel(desc, metricAmt, calories) {
+  let label = desc;
+  if (metricAmt > 0 && !/^\d+\s*g$/i.test(desc))
+    label += ' (' + Math.round(metricAmt) + 'g)';
+  label += ' — ' + Math.round(calories) + ' kcal';
+  return label;
+}
+
 /* ── TOAST SYSTEM ── */
 function showToast(msg, type = 'info', duration = 3500) {
   const wrap = document.getElementById('toast-wrap');
@@ -784,7 +793,7 @@ function renderDiary(data) {
       const cached = item.fatsecret_food_id ? _servingsCache[item.fatsecret_food_id] : null;
       if (item.serving_id && cached) {
         const opts = cached.map(s =>
-          `<option value="${s.serving_id}" ${s.serving_id === item.serving_id ? 'selected' : ''}>${s.serving_description}</option>`
+          `<option value="${s.serving_id}" ${s.serving_id === item.serving_id ? 'selected' : ''}>${formatServingLabel(s.serving_description, s.metric_serving_amount, s.calories)}</option>`
         ).join('');
         const qVal = item.serving_quantity || 1;
         unitHtml = `<select class="diary-serving-select" onchange="updateDiaryServing(${item.id}, this.value, '${item.fatsecret_food_id}')" ${isLogged ? 'disabled' : ''}>${opts}</select>
@@ -918,8 +927,9 @@ function openServingModal(mealName, food) {
       _smServings = servings;
       const select = document.getElementById('sm-serving-select');
       select.innerHTML = servings.map(s =>
-        '<option value="' + s.serving_id + '">' + s.serving_description +
-        ' (' + Math.round(s.calories) + ' kcal)</option>'
+        '<option value="' + s.serving_id + '">' +
+        formatServingLabel(s.serving_description, s.metric_serving_amount, s.calories) +
+        '</option>'
       ).join('');
       const preferred = servings.findIndex(s => s.serving_description !== '100 g' && s.serving_description !== '100g');
       if (preferred >= 0) select.selectedIndex = preferred;
