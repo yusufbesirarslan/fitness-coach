@@ -723,24 +723,31 @@ document.addEventListener('click', e => {
 /* ── SERVINGS CACHE ── */
 const _servingsCache = {};
 async function fetchServings(foodIdOrName) {
-  if (_servingsCache[foodIdOrName]) return _servingsCache[foodIdOrName];
+  console.log('[servings] fetchServings called with:', foodIdOrName, typeof foodIdOrName);
+  if (_servingsCache[foodIdOrName]) { console.log('[servings] cache hit'); return _servingsCache[foodIdOrName]; }
   try {
     let url, data;
-    if (foodIdOrName && /^\d+$/.test(foodIdOrName)) {
+    if (foodIdOrName && /^\d+$/.test(String(foodIdOrName))) {
       url = '/api/food/' + foodIdOrName + '/servings';
+      console.log('[servings] fetching by id:', url);
       const res = await fetch(url);
       data = await res.json();
+      console.log('[servings] response by id:', JSON.stringify(data).substring(0, 500));
     } else {
       url = '/api/food/servings-by-name?name=' + encodeURIComponent(foodIdOrName);
+      console.log('[servings] fetching by name:', url);
       const res = await fetch(url);
       data = await res.json();
+      console.log('[servings] response by name:', JSON.stringify(data).substring(0, 500));
       if (data.food_id) _smFood && (_smFood.food_id = data.food_id);
     }
     if (data.servings && data.servings.length) {
+      console.log('[servings] OK:', data.servings.length, 'options');
       _servingsCache[foodIdOrName] = data.servings;
       return data.servings;
     }
-  } catch (e) {}
+    console.log('[servings] no servings in response');
+  } catch (e) { console.error('[servings] error:', e); }
   return null;
 }
 
@@ -883,6 +890,8 @@ let _smMealName = null;
 let _smServings = null;
 
 function openServingModal(mealName, food) {
+  console.log('[modal] openServingModal food:', JSON.stringify(food).substring(0, 300));
+  console.log('[modal] food_id:', food.food_id, 'type:', typeof food.food_id);
   _smFood = food;
   _smMealName = mealName;
   _smServings = null;

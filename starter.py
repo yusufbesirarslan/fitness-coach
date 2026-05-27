@@ -79,7 +79,9 @@ def _parse_fatsecret_desc(desc: str) -> dict | None:
 def _food_get_servings(food_id):
     try:
         token = _get_fatsecret_token()
-    except Exception:
+        app.logger.info("_food_get_servings: got token for food_id=%s", food_id)
+    except Exception as e:
+        app.logger.error("_food_get_servings: token failed: %s", e)
         return None
 
     servings_raw = None
@@ -91,6 +93,8 @@ def _food_get_servings(food_id):
                 "format": "json",
             }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
             data = resp.json()
+            app.logger.info("_food_get_servings %s status=%s keys=%s",
+                            method, resp.status_code, list(data.keys())[:5])
         except Exception as e:
             app.logger.warning("_food_get_servings %s failed: %s", method, e)
             continue
@@ -992,12 +996,15 @@ def food_search():
 @app.route("/api/food/<food_id>/servings")
 @login_required
 def food_servings(food_id):
+    app.logger.info("food_servings called with food_id=%s", food_id)
     servings = _food_get_servings(food_id)
     if servings:
-        app.logger.info("Servings OK for food_id=%s: %d options", food_id, len(servings))
+        app.logger.info("Servings OK for food_id=%s: %d options, first=%s",
+                        food_id, len(servings), servings[0].get("serving_description", "?"))
+        return jsonify({"servings": servings})
     else:
         app.logger.warning("No servings for food_id=%s", food_id)
-    return jsonify({"servings": servings or []})
+        return jsonify({"servings": [], "debug": "no_servings_returned"})
 
 
 @app.route("/api/food/servings-by-name")
