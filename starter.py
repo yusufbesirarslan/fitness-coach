@@ -1094,11 +1094,41 @@ def food_search():
 @login_required
 def debug_servings():
     """Temporary diagnostic endpoint — remove after debugging."""
+    import base64 as _dbg_b64
     name = request.args.get("name", "egg")
     steps = []
+
+    # Show parsed credentials (mask middle of password)
+    _pu = getattr(__import__("builtins"), "__builtins__", None)  # dummy
+    _parsed_user = globals().get("_proxy_user", "")
+    _parsed_pass = globals().get("_proxy_pass", "")
+    _pass_display = _parsed_pass[:3] + "***" + _parsed_pass[-3:] if len(_parsed_pass) > 6 else "***"
+    _cred_str = f"{_parsed_user}:{_parsed_pass}"
+    _b64_val = _dbg_b64.b64encode(_cred_str.encode()).decode()
+
     steps.append({"step": "proxy_config", "proxy": bool(_FS_PROXY_RAW),
                   "proxy_host": f"{_proxy_host}:{_proxy_port}",
+                  "parsed_user": _parsed_user,
+                  "parsed_pass": _pass_display,
+                  "b64_header": f"Basic {_b64_val[:20]}...",
                   "method": "urllib3_proxy_manager" if _FS_PROXY_RAW else "direct"})
+
+    # Step 0: Direct urllib3 test with hardcoded proxy to isolate the issue
+    try:
+        import urllib3 as _u3
+        _test_hdrs = _u3.make_headers(proxy_basic_auth=_cred_str)
+        _test_pm = _u3.ProxyManager(
+            f"http://{_proxy_host}:{_proxy_port}",
+            proxy_headers=_test_hdrs,
+            num_pools=1,
+        )
+        _test_resp = _test_pm.request("GET", "https://httpbin.org/ip", timeout=8.0)
+        steps.append({"step": "proxy_test_httpbin", "ok": True,
+                      "status": _test_resp.status,
+                      "body": _test_resp.data.decode("utf-8")[:200]})
+    except Exception as e:
+        steps.append({"step": "proxy_test_httpbin", "ok": False, "error": str(e)})
+
     try:
         token = _get_fatsecret_token()
         steps.append({"step": "token", "ok": True, "token_prefix": token[:20] + "..."})
