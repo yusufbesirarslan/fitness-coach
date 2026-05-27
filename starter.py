@@ -1113,7 +1113,22 @@ def debug_servings():
                   "b64_header": f"Basic {_b64_val[:20]}...",
                   "method": "urllib3_proxy_manager" if _FS_PROXY_RAW else "direct"})
 
-    # Test A: Raw http.client CONNECT tunnel (lowest-level Python test)
+    # Test A: Plain HTTP through proxy (NO CONNECT tunnel — tests basic proxy auth)
+    try:
+        import urllib3 as _u3a
+        _test_hdrs_a = _u3a.make_headers(proxy_basic_auth=_cred_str)
+        _pm_a = _u3a.ProxyManager(
+            f"http://{_proxy_host}:{_proxy_port}",
+            proxy_headers=_test_hdrs_a, num_pools=1,
+        )
+        _ra = _pm_a.request("GET", "http://httpbin.org/ip", timeout=8.0)
+        steps.append({"step": "http_plain_proxy", "ok": _ra.status == 200,
+                      "status": _ra.status,
+                      "body": _ra.data.decode("utf-8")[:200]})
+    except Exception as e:
+        steps.append({"step": "http_plain_proxy", "ok": False, "error": str(e)})
+
+    # Test B: HTTPS CONNECT tunnel via raw http.client
     try:
         import http.client as _hc
         _conn = _hc.HTTPConnection(_proxy_host, int(_proxy_port), timeout=10)
@@ -1122,27 +1137,30 @@ def debug_servings():
         _conn.request("GET", "/ip")
         _r = _conn.getresponse()
         _body = _r.read().decode("utf-8", errors="replace")[:200]
-        steps.append({"step": "raw_http_client", "ok": _r.status == 200,
+        steps.append({"step": "https_connect_tunnel", "ok": _r.status == 200,
                       "status": _r.status, "body": _body})
         _conn.close()
     except Exception as e:
-        steps.append({"step": "raw_http_client", "ok": False, "error": str(e)})
+        steps.append({"step": "https_connect_tunnel", "ok": False, "error": str(e)})
 
-    # Test B: curl subprocess (gold standard)
+    # Test C: Raw socket CONNECT (absolute lowest level)
     try:
-        import subprocess
-        _curl = subprocess.run(
-            ["curl", "-s", "--max-time", "10", "-w", "\n%{http_code}",
-             "-x", f"http://{_parsed_user}:{_parsed_pass}@{_proxy_host}:{_proxy_port}",
-             "https://httpbin.org/ip"],
-            capture_output=True, text=True, timeout=15,
+        import socket
+        _s = socket.create_connection((_proxy_host, int(_proxy_port)), timeout=10)
+        _connect_req = (
+            f"CONNECT httpbin.org:443 HTTP/1.1\r\n"
+            f"Host: httpbin.org:443\r\n"
+            f"Proxy-Authorization: Basic {_b64_val}\r\n"
+            f"\r\n"
         )
-        _lines = _curl.stdout.strip().rsplit("\n", 1)
-        _cbody = _lines[0] if _lines else ""
-        _ccode = _lines[1] if len(_lines) > 1 else "?"
-        steps.append({"step": "curl_test", "ok": _ccode == "200",
-                      "http_code": _ccode, "body": _cbody[:200],
-                      "stderr": _curl.stderr[:200] if _curl.stderr else ""})
+        _s.sendall(_connect_req.encode())
+        _resp_bytes = _s.recv(4096)
+        _resp_line = _resp_bytes.decode("utf-8", errors="replace").split("\r\n")[0]
+        _s.close()
+        steps.append({"step": "raw_socket_connect", "ok": "200" in _resp_line,
+                      "response_line": _resp_line})
+    except Exception as e:
+        steps.append({"step": "raw_socket_connect", "ok": False, "error": str(e)})
     except FileNotFoundError:
         steps.append({"step": "curl_test", "ok": False, "error": "curl not installed"})
     except Exception as e:
