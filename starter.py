@@ -21,8 +21,26 @@ _BOOT_TS = int(time.time())  # cache-bust static assets on each deploy
 FATSECRET_TOKEN_URL = "https://oauth.fatsecret.com/connect/token"
 FATSECRET_API_URL = "https://platform.fatsecret.com/rest/server.api"
 
+# Proxy for stable outbound IP (Webshare IPs whitelisted in FatSecret)
+_FS_PROXY_URL = os.environ.get("FATSECRET_PROXY_URL", "")
+_FS_PROXIES = {"http": _FS_PROXY_URL, "https": _FS_PROXY_URL} if _FS_PROXY_URL else None
+
 _fs_token_lock = threading.Lock()
 _fs_token_cache = {"token": None, "expires_at": 0}
+
+
+def _fs_get(url, **kwargs):
+    """GET request routed through proxy if configured."""
+    if _FS_PROXIES:
+        kwargs.setdefault("proxies", _FS_PROXIES)
+    return http_requests_lib.get(url, **kwargs)
+
+
+def _fs_post(url, **kwargs):
+    """POST request routed through proxy if configured."""
+    if _FS_PROXIES:
+        kwargs.setdefault("proxies", _FS_PROXIES)
+    return http_requests_lib.post(url, **kwargs)
 
 
 def _get_fatsecret_token() -> str:
@@ -33,7 +51,7 @@ def _get_fatsecret_token() -> str:
     client_secret = os.environ.get("FATSECRET_CLIENT_SECRET", "")
     if not client_id or not client_secret:
         raise RuntimeError("FATSECRET_CLIENT_ID / FATSECRET_CLIENT_SECRET not set")
-    resp = http_requests_lib.post(
+    resp = _fs_post(
         FATSECRET_TOKEN_URL,
         data={"grant_type": "client_credentials", "scope": "basic"},
         auth=(client_id, client_secret),
@@ -88,7 +106,7 @@ def _food_get_servings(food_id):
     servings_raw = None
     for method in ("food.get.v4", "food.get.v2", "food.get"):
         try:
-            resp = http_requests_lib.get(FATSECRET_API_URL, params={
+            resp = _fs_get(FATSECRET_API_URL, params={
                 "method": method,
                 "food_id": food_id,
                 "format": "json",
@@ -736,7 +754,7 @@ def _food_search_fatsecret(q):
         return None
 
     try:
-        resp = http_requests_lib.get(FATSECRET_API_URL, params={
+        resp = _fs_get(FATSECRET_API_URL, params={
             "method": "foods.search",
             "search_expression": q,
             "format": "json",
@@ -1017,7 +1035,7 @@ def debug_servings():
     # Step 2: search
     for search_term in [name, "egg"]:
         try:
-            resp = http_requests_lib.get(FATSECRET_API_URL, params={
+            resp = _fs_get(FATSECRET_API_URL, params={
                 "method": "foods.search",
                 "search_expression": search_term,
                 "format": "json",
@@ -1041,7 +1059,7 @@ def debug_servings():
             if fid:
                 for method in ("food.get.v4", "food.get.v2", "food.get"):
                     try:
-                        resp2 = http_requests_lib.get(FATSECRET_API_URL, params={
+                        resp2 = _fs_get(FATSECRET_API_URL, params={
                             "method": method, "food_id": fid, "format": "json",
                         }, headers={"Authorization": f"Bearer {token}"}, timeout=8)
                         d2 = resp2.json()
@@ -1123,7 +1141,7 @@ def food_servings_by_name():
     try:
         token = _get_fatsecret_token()
         for term in search_terms:
-            resp = http_requests_lib.get(FATSECRET_API_URL, params={
+            resp = _fs_get(FATSECRET_API_URL, params={
                 "method": "foods.search",
                 "search_expression": term,
                 "format": "json",
@@ -2857,12 +2875,11 @@ def _parse_suggestion_items(body_text):
 
 
 def _lookup_macros_fatsecret(items, token):
-    import requests as http_req
     per_serving = {}
     per_100g = {}
     for name in items:
         try:
-            fs_resp = http_req.get(FATSECRET_API_URL, params={
+            fs_resp = _fs_get(FATSECRET_API_URL, params={
                 "method": "foods.search",
                 "search_expression": name,
                 "format": "json",
