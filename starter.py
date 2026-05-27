@@ -1000,6 +1000,35 @@ def food_servings(food_id):
     return jsonify({"servings": servings or []})
 
 
+@app.route("/api/food/servings-by-name")
+@login_required
+def food_servings_by_name():
+    name = request.args.get("name", "").strip()
+    if len(name) < 2:
+        return jsonify({"servings": [], "food_id": ""})
+    try:
+        token = _get_fatsecret_token()
+        resp = http_requests_lib.get(FATSECRET_API_URL, params={
+            "method": "foods.search",
+            "search_expression": name,
+            "format": "json",
+            "max_results": 1,
+        }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
+        data = resp.json()
+        foods = data.get("foods", {}).get("food", [])
+        if isinstance(foods, dict):
+            foods = [foods]
+        if foods:
+            fid = foods[0].get("food_id", "")
+            if fid:
+                servings = _food_get_servings(fid)
+                if servings:
+                    return jsonify({"servings": servings, "food_id": fid})
+    except Exception as e:
+        app.logger.warning("servings-by-name failed for '%s': %s", name, e)
+    return jsonify({"servings": [], "food_id": ""})
+
+
 # ── DIARY BUILDER API ──
 
 @app.route("/api/diary/meal", methods=["POST"])
