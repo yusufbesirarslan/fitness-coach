@@ -29,6 +29,8 @@ if _FS_PROXY_URL:
     import base64
     from urllib.parse import urlparse
     from requests.adapters import HTTPAdapter
+    if "://" not in _FS_PROXY_URL:
+        _FS_PROXY_URL = "http://" + _FS_PROXY_URL
     _p = urlparse(_FS_PROXY_URL)
     _proxy_host = _p.hostname
     _proxy_port = _p.port
