@@ -14,6 +14,7 @@ import requests as http_requests_lib
 from dotenv import load_dotenv
 load_dotenv()
 app = Flask(__name__)
+_BOOT_TS = int(time.time())  # cache-bust static assets on each deploy
 
 # ── FatSecret API (inlined to avoid psycopg2 dependency from fitx_mcp.server) ──
 
@@ -570,17 +571,18 @@ def update_streak():
 
 @app.context_processor
 def inject_rank():
+    base = {"_v": _BOOT_TS}
     if current_user.is_authenticated:
         xp = current_user.rank_points or 0
         level = get_level(xp)
         title = get_title(level)
         xp_in_level = xp % 500
-        return {
+        return {**base,
             "rank_points": xp, "rank_title": title,
             "user_xp": xp, "user_level": level, "user_title": title,
             "xp_in_level": xp_in_level, "xp_for_next": 500,
         }
-    return {
+    return {**base,
         "rank_points": 0, "rank_title": "Fitness Yolcusu",
         "user_xp": 0, "user_level": 1, "user_title": "Fitness Yolcusu",
         "xp_in_level": 0, "xp_for_next": 500,
