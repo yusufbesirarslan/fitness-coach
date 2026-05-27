@@ -1001,6 +1001,74 @@ def food_search():
     return jsonify({"results": results})
 
 
+@app.route("/api/food/debug-servings")
+@login_required
+def debug_servings():
+    """Temporary diagnostic endpoint — remove after debugging."""
+    name = request.args.get("name", "egg")
+    steps = []
+    try:
+        token = _get_fatsecret_token()
+        steps.append({"step": "token", "ok": True, "token_prefix": token[:20] + "..."})
+    except Exception as e:
+        steps.append({"step": "token", "ok": False, "error": str(e)})
+        return jsonify({"steps": steps})
+
+    # Step 2: search
+    for search_term in [name, "egg"]:
+        try:
+            resp = http_requests_lib.get(FATSECRET_API_URL, params={
+                "method": "foods.search",
+                "search_expression": search_term,
+                "format": "json",
+                "max_results": 2,
+            }, headers={"Authorization": f"Bearer {token}"}, timeout=8)
+            data = resp.json()
+            if "error" in data:
+                steps.append({"step": f"search({search_term})", "ok": False, "error": data["error"]})
+                continue
+            foods = data.get("foods", {}).get("food", [])
+            if isinstance(foods, dict):
+                foods = [foods]
+            if not foods:
+                steps.append({"step": f"search({search_term})", "ok": False, "error": "no results"})
+                continue
+            fid = foods[0].get("food_id", "")
+            fname = foods[0].get("food_name", "")
+            steps.append({"step": f"search({search_term})", "ok": True, "food_id": fid, "food_name": fname})
+
+            # Step 3: food.get
+            if fid:
+                for method in ("food.get.v4", "food.get.v2", "food.get"):
+                    try:
+                        resp2 = http_requests_lib.get(FATSECRET_API_URL, params={
+                            "method": method, "food_id": fid, "format": "json",
+                        }, headers={"Authorization": f"Bearer {token}"}, timeout=8)
+                        d2 = resp2.json()
+                        if "error" in d2:
+                            steps.append({"step": f"food.get({method})", "ok": False, "error": d2["error"]})
+                            continue
+                        srvs = d2.get("food", {}).get("servings", {}).get("serving", [])
+                        if isinstance(srvs, dict):
+                            srvs = [srvs]
+                        steps.append({
+                            "step": f"food.get({method})",
+                            "ok": bool(srvs),
+                            "count": len(srvs),
+                            "first": srvs[0].get("serving_description", "") if srvs else None,
+                            "keys": list(d2.get("food", {}).keys())[:10],
+                        })
+                        if srvs:
+                            break
+                    except Exception as e:
+                        steps.append({"step": f"food.get({method})", "ok": False, "error": str(e)})
+                break  # found a food_id, stop searching
+        except Exception as e:
+            steps.append({"step": f"search({search_term})", "ok": False, "error": str(e)})
+
+    return jsonify({"steps": steps})
+
+
 @app.route("/api/food/<food_id>/servings")
 @login_required
 def food_servings(food_id):
