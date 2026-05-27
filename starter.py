@@ -22,8 +22,18 @@ FATSECRET_TOKEN_URL = "https://oauth.fatsecret.com/connect/token"
 FATSECRET_API_URL = "https://platform.fatsecret.com/rest/server.api"
 
 # Proxy for stable outbound IP (Webshare IPs whitelisted in FatSecret)
-_FS_PROXY_URL = os.environ.get("FATSECRET_PROXY_URL", "")
-_FS_PROXIES = {"http": _FS_PROXY_URL, "https": _FS_PROXY_URL} if _FS_PROXY_URL else None
+_FS_PROXY_URL = os.environ.get("FATSECRET_PROXY_URL", "").strip()
+_FS_PROXIES = None
+
+if _FS_PROXY_URL:
+    from urllib.parse import urlparse, quote
+    _p = urlparse(_FS_PROXY_URL)
+    # URL-encode user/pass to handle special chars, rebuild clean proxy URL
+    _user = quote(_p.username or "", safe="")
+    _pw = quote(_p.password or "", safe="")
+    _clean_proxy = f"{_p.scheme}://{_user}:{_pw}@{_p.hostname}:{_p.port}"
+    _FS_PROXIES = {"http": _clean_proxy, "https": _clean_proxy}
+    print(f"[FatSecret] Proxy configured: {_p.hostname}:{_p.port} (user={_p.username})")
 
 _fs_token_lock = threading.Lock()
 _fs_token_cache = {"token": None, "expires_at": 0}
@@ -31,6 +41,7 @@ _fs_token_cache = {"token": None, "expires_at": 0}
 
 def _fs_get(url, **kwargs):
     """GET request routed through proxy if configured."""
+    kwargs.setdefault("timeout", 10)
     if _FS_PROXIES:
         kwargs.setdefault("proxies", _FS_PROXIES)
     return http_requests_lib.get(url, **kwargs)
@@ -38,6 +49,7 @@ def _fs_get(url, **kwargs):
 
 def _fs_post(url, **kwargs):
     """POST request routed through proxy if configured."""
+    kwargs.setdefault("timeout", 10)
     if _FS_PROXIES:
         kwargs.setdefault("proxies", _FS_PROXIES)
     return http_requests_lib.post(url, **kwargs)
@@ -1025,6 +1037,8 @@ def debug_servings():
     """Temporary diagnostic endpoint — remove after debugging."""
     name = request.args.get("name", "egg")
     steps = []
+    steps.append({"step": "proxy_config", "proxy": bool(_FS_PROXIES),
+                  "url": _FS_PROXY_URL[:30] + "..." if _FS_PROXY_URL else "(none)"})
     try:
         token = _get_fatsecret_token()
         steps.append({"step": "token", "ok": True, "token_prefix": token[:20] + "..."})
