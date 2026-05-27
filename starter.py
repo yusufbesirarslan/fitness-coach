@@ -22,27 +22,55 @@ FATSECRET_TOKEN_URL = "https://oauth.fatsecret.com/connect/token"
 FATSECRET_API_URL = "https://platform.fatsecret.com/rest/server.api"
 
 # Proxy for stable outbound IP (Webshare IPs whitelisted in FatSecret)
-_FS_PROXY_URL = os.environ.get("FATSECRET_PROXY_URL", "").strip()
+_FS_PROXY_RAW = os.environ.get("FATSECRET_PROXY_URL", "").strip()
 _fs_session = http_requests_lib.Session()
+_proxy_host = None
+_proxy_port = None
 
-if _FS_PROXY_URL:
+if _FS_PROXY_RAW:
     import base64
-    from urllib.parse import urlparse
     from requests.adapters import HTTPAdapter
-    if "://" not in _FS_PROXY_URL:
-        _FS_PROXY_URL = "http://" + _FS_PROXY_URL
-    _p = urlparse(_FS_PROXY_URL)
-    _proxy_host = _p.hostname
-    _proxy_port = _p.port
+
+    # Parse proxy - handles all common formats:
+    #   user:pass@host:port
+    #   http://user:pass@host:port
+    #   host:port:user:pass  (Webshare format)
+    _raw = _FS_PROXY_RAW
+    # Strip scheme if present
+    if "://" in _raw:
+        _raw = _raw.split("://", 1)[1]
+
+    if "@" in _raw:
+        # Format: user:pass@host:port
+        _auth_part, _host_part = _raw.rsplit("@", 1)
+        _parts = _auth_part.split(":", 1)
+        _proxy_user = _parts[0]
+        _proxy_pass = _parts[1] if len(_parts) > 1 else ""
+        _hp = _host_part.split(":")
+        _proxy_host = _hp[0]
+        _proxy_port = int(_hp[1]) if len(_hp) > 1 else 8080
+    elif _raw.count(":") == 3:
+        # Format: host:port:user:pass (Webshare)
+        _pieces = _raw.split(":")
+        _proxy_host = _pieces[0]
+        _proxy_port = int(_pieces[1])
+        _proxy_user = _pieces[2]
+        _proxy_pass = _pieces[3]
+    else:
+        # Unknown format, try as-is
+        _proxy_host = _raw
+        _proxy_port = 8080
+        _proxy_user = ""
+        _proxy_pass = ""
+
     _proxy_bare = f"http://{_proxy_host}:{_proxy_port}"
     _proxy_creds = base64.b64encode(
-        f"{_p.username}:{_p.password}".encode()
+        f"{_proxy_user}:{_proxy_pass}".encode()
     ).decode()
 
     class _ProxyAuthAdapter(HTTPAdapter):
         """Adapter that injects Proxy-Authorization header (urllib3 2.x compat)."""
         def send(self, request, **kwargs):
-            # Set proxy auth header for CONNECT tunneling
             request.headers["Proxy-Authorization"] = f"Basic {_proxy_creds}"
             return super().send(request, **kwargs)
 
@@ -53,7 +81,7 @@ if _FS_PROXY_URL:
     _fs_session.proxies = {"http": _proxy_bare, "https": _proxy_bare}
     _fs_session.mount("http://", _ProxyAuthAdapter())
     _fs_session.mount("https://", _ProxyAuthAdapter())
-    print(f"[FatSecret] Proxy configured: {_proxy_host}:{_proxy_port} (user={_p.username})")
+    print(f"[FatSecret] Proxy: {_proxy_host}:{_proxy_port} user={_proxy_user}")
 
 _fs_token_lock = threading.Lock()
 _fs_token_cache = {"token": None, "expires_at": 0}
@@ -1053,8 +1081,12 @@ def debug_servings():
     """Temporary diagnostic endpoint — remove after debugging."""
     name = request.args.get("name", "egg")
     steps = []
-    steps.append({"step": "proxy_config", "proxy": bool(_FS_PROXY_URL),
-                  "proxy_host": f"{_proxy_host}:{_proxy_port}" if _FS_PROXY_URL else "(none)"})
+    steps.append({"step": "proxy_config", "proxy": bool(_FS_PROXY_RAW),
+                  "proxy_host": f"{_proxy_host}:{_proxy_port}",
+                  "raw_len": len(_FS_PROXY_RAW),
+                  "raw_has_at": "@" in _FS_PROXY_RAW,
+                  "raw_colons": _FS_PROXY_RAW.count(":"),
+                  "raw_preview": _FS_PROXY_RAW[:8] + "..." + _FS_PROXY_RAW[-12:] if len(_FS_PROXY_RAW) > 20 else _FS_PROXY_RAW})
     try:
         token = _get_fatsecret_token()
         steps.append({"step": "token", "ok": True, "token_prefix": token[:20] + "..."})
