@@ -1114,15 +1114,19 @@ def debug_servings():
                   "method": "urllib3_proxy_manager" if _FS_PROXY_RAW else "direct"})
 
     # Step 0: Show Railway's outbound IP (so user can whitelist it in Webshare)
-    try:
-        import urllib3 as _u3ip
-        _direct = _u3ip.PoolManager(num_pools=1)
-        _ip_resp = _direct.request("GET", "http://httpbin.org/ip", timeout=8.0)
-        _railway_ip = json.loads(_ip_resp.data.decode())["origin"]
-        steps.append({"step": "railway_outbound_ip", "ip": _railway_ip,
-                      "action": "Add this IP to Webshare Authorized IPs"})
-    except Exception as e:
-        steps.append({"step": "railway_outbound_ip", "error": str(e)})
+    _railway_ip = None
+    for _ip_url in ["https://api.ipify.org", "https://ifconfig.me/ip", "https://icanhazip.com"]:
+        try:
+            import urllib3 as _u3ip
+            _direct = _u3ip.PoolManager(num_pools=1)
+            _ip_resp = _direct.request("GET", _ip_url, timeout=8.0)
+            _railway_ip = _ip_resp.data.decode("utf-8").strip()
+            if _railway_ip:
+                break
+        except Exception:
+            continue
+    steps.append({"step": "railway_outbound_ip", "ip": _railway_ip or "unknown",
+                  "action": "Add this IP to Webshare Authorized IPs"})
 
     # Test A: Plain HTTP through proxy (NO CONNECT tunnel — tests basic proxy auth)
     try:
