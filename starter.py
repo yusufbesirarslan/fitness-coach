@@ -40,20 +40,24 @@ if _FS_PROXY_RAW:
     if "://" in _raw:
         _raw = _raw.split("://", 1)[1]
 
+    def _extract_port(s):
+        """Extract numeric port from string, stripping any trailing junk."""
+        return int(re.sub(r"[^\d]", "", s) or "8080")
+
     if "@" in _raw:
         # Format: user:pass@host:port
         _auth_part, _host_part = _raw.rsplit("@", 1)
         _parts = _auth_part.split(":", 1)
-        _proxy_user = _parts[0]
-        _proxy_pass = _parts[1] if len(_parts) > 1 else ""
-        _hp = _host_part.split(":")
-        _proxy_host = _hp[0]
-        _proxy_port = int(_hp[1]) if len(_hp) > 1 else 8080
+        _proxy_user = _parts[0].strip()
+        _proxy_pass = _parts[1].strip() if len(_parts) > 1 else ""
+        _hp = _host_part.strip().split(":")
+        _proxy_host = _hp[0].strip()
+        _proxy_port = _extract_port(_hp[1]) if len(_hp) > 1 else 8080
     elif _raw.count(":") == 3:
         # Format: host:port:user:pass (Webshare)
         _pieces = _raw.split(":")
-        _proxy_host = _pieces[0]
-        _proxy_port = int(_pieces[1])
+        _proxy_host = _pieces[0].strip()
+        _proxy_port = _extract_port(_pieces[1])
         _proxy_user = _pieces[2]
         _proxy_pass = _pieces[3]
     else:
