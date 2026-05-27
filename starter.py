@@ -787,11 +787,14 @@ def _food_search_fatsecret(q):
                 }
 
         name = f.get("food_name", "")
+        fid = f.get("food_id", "")
         _cache_macros({name: per_100g})
+        if fid:
+            _food_id_cache[name.lower()] = fid
         results.append({
             "name": name,
             "brand": f.get("brand_name", ""),
-            "food_id": f.get("food_id", ""),
+            "food_id": fid,
             "serving": serving_text,
             "is_per_serving": is_serving,
             "macros": macros,
@@ -980,8 +983,11 @@ def food_search():
 
     cached = _macro_cache.get(q)
     if cached:
+        cached_fid = _food_id_cache.get(q.lower(), "")
+        app.logger.info("food_search cache hit for '%s', food_id=%s", q, cached_fid or "(none)")
         return jsonify({"results": [{
-            "name": q, "brand": "", "food_id": "",
+            "name": q, "brand": "",
+            "food_id": cached_fid,
             "serving": "", "is_per_serving": False,
             "macros": cached, "per_100g": cached
         }]})
@@ -1015,24 +1021,64 @@ def food_servings_by_name():
     name = request.args.get("name", "").strip()
     if len(name) < 2:
         return jsonify({"servings": [], "food_id": ""})
+
+    # Check food_id cache first (populated by previous FatSecret searches)
+    cached_fid = _food_id_cache.get(name.lower())
+    if cached_fid:
+        app.logger.info("servings-by-name: cache hit food_id=%s for '%s'", cached_fid, name)
+        servings = _food_get_servings(cached_fid)
+        if servings:
+            return jsonify({"servings": servings, "food_id": cached_fid})
+
+    # Try FatSecret search with the original name and common translations
+    search_terms = [name]
+    # Add English translations for common Turkish food names
+    _TR_TO_EN = {
+        "yumurta": "egg", "tavuk": "chicken", "pirinc": "rice", "pilav": "rice pilaf",
+        "ekmek": "bread", "sut": "milk", "süt": "milk", "peynir": "cheese",
+        "yogurt": "yogurt", "yoğurt": "yogurt", "bal": "honey", "tereyagi": "butter",
+        "tereyağı": "butter", "makarna": "pasta", "salata": "salad",
+        "domates": "tomato", "patates": "potato", "havuc": "carrot", "havuç": "carrot",
+        "elma": "apple", "muz": "banana", "portakal": "orange", "balik": "fish",
+        "balık": "fish", "ton baligi": "tuna", "somon": "salmon",
+        "brokoli": "broccoli", "ispanak": "spinach", "fasulye": "beans",
+        "nohut": "chickpea", "mercimek": "lentil", "ceviz": "walnut",
+        "badem": "almond", "findik": "hazelnut", "fındık": "hazelnut",
+        "zeytin": "olive", "zeytinyagi": "olive oil", "zeytinyağı": "olive oil",
+        "avokado": "avocado", "kayisi": "apricot", "kayısı": "apricot",
+        "cilek": "strawberry", "çilek": "strawberry", "karpuz": "watermelon",
+    }
+    en = _TR_TO_EN.get(name.lower())
+    if en and en.lower() != name.lower():
+        search_terms.append(en)
+
     try:
         token = _get_fatsecret_token()
-        resp = http_requests_lib.get(FATSECRET_API_URL, params={
-            "method": "foods.search",
-            "search_expression": name,
-            "format": "json",
-            "max_results": 1,
-        }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
-        data = resp.json()
-        foods = data.get("foods", {}).get("food", [])
-        if isinstance(foods, dict):
-            foods = [foods]
-        if foods:
-            fid = foods[0].get("food_id", "")
-            if fid:
-                servings = _food_get_servings(fid)
-                if servings:
-                    return jsonify({"servings": servings, "food_id": fid})
+        for term in search_terms:
+            resp = http_requests_lib.get(FATSECRET_API_URL, params={
+                "method": "foods.search",
+                "search_expression": term,
+                "format": "json",
+                "max_results": 1,
+            }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
+            data = resp.json()
+            if "error" in data:
+                app.logger.warning("servings-by-name search '%s' error: %s", term, data["error"])
+                continue
+            foods = data.get("foods", {}).get("food", [])
+            if isinstance(foods, dict):
+                foods = [foods]
+            if foods:
+                fid = foods[0].get("food_id", "")
+                app.logger.info("servings-by-name: found food_id=%s for search '%s'", fid, term)
+                if fid:
+                    _food_id_cache[name.lower()] = fid
+                    servings = _food_get_servings(fid)
+                    if servings:
+                        return jsonify({"servings": servings, "food_id": fid})
+                    app.logger.warning("servings-by-name: food.get returned no servings for id=%s", fid)
+            else:
+                app.logger.info("servings-by-name: no results for search '%s'", term)
     except Exception as e:
         app.logger.warning("servings-by-name failed for '%s': %s", name, e)
     return jsonify({"servings": [], "food_id": ""})
@@ -2860,6 +2906,7 @@ SADECE aşağıdaki JSON formatında yanıt ver:
 
 
 _macro_cache = {}
+_food_id_cache = {}   # name → fatsecret food_id
 _MACRO_CACHE_MAX = 500
 
 
