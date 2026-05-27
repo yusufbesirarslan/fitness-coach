@@ -23,17 +23,35 @@ FATSECRET_API_URL = "https://platform.fatsecret.com/rest/server.api"
 
 # Proxy for stable outbound IP (Webshare IPs whitelisted in FatSecret)
 _FS_PROXY_URL = os.environ.get("FATSECRET_PROXY_URL", "").strip()
-_FS_PROXIES = None
+_fs_session = http_requests_lib.Session()
 
 if _FS_PROXY_URL:
-    from urllib.parse import urlparse, quote
+    import base64
+    from urllib.parse import urlparse
+    from requests.adapters import HTTPAdapter
     _p = urlparse(_FS_PROXY_URL)
-    # URL-encode user/pass to handle special chars, rebuild clean proxy URL
-    _user = quote(_p.username or "", safe="")
-    _pw = quote(_p.password or "", safe="")
-    _clean_proxy = f"{_p.scheme}://{_user}:{_pw}@{_p.hostname}:{_p.port}"
-    _FS_PROXIES = {"http": _clean_proxy, "https": _clean_proxy}
-    print(f"[FatSecret] Proxy configured: {_p.hostname}:{_p.port} (user={_p.username})")
+    _proxy_host = _p.hostname
+    _proxy_port = _p.port
+    _proxy_bare = f"http://{_proxy_host}:{_proxy_port}"
+    _proxy_creds = base64.b64encode(
+        f"{_p.username}:{_p.password}".encode()
+    ).decode()
+
+    class _ProxyAuthAdapter(HTTPAdapter):
+        """Adapter that injects Proxy-Authorization header (urllib3 2.x compat)."""
+        def send(self, request, **kwargs):
+            # Set proxy auth header for CONNECT tunneling
+            request.headers["Proxy-Authorization"] = f"Basic {_proxy_creds}"
+            return super().send(request, **kwargs)
+
+        def proxy_manager_for(self, proxy, **proxy_kwargs):
+            proxy_kwargs["proxy_headers"] = {"Proxy-Authorization": f"Basic {_proxy_creds}"}
+            return super().proxy_manager_for(proxy, **proxy_kwargs)
+
+    _fs_session.proxies = {"http": _proxy_bare, "https": _proxy_bare}
+    _fs_session.mount("http://", _ProxyAuthAdapter())
+    _fs_session.mount("https://", _ProxyAuthAdapter())
+    print(f"[FatSecret] Proxy configured: {_proxy_host}:{_proxy_port} (user={_p.username})")
 
 _fs_token_lock = threading.Lock()
 _fs_token_cache = {"token": None, "expires_at": 0}
@@ -42,17 +60,13 @@ _fs_token_cache = {"token": None, "expires_at": 0}
 def _fs_get(url, **kwargs):
     """GET request routed through proxy if configured."""
     kwargs.setdefault("timeout", 10)
-    if _FS_PROXIES:
-        kwargs.setdefault("proxies", _FS_PROXIES)
-    return http_requests_lib.get(url, **kwargs)
+    return _fs_session.get(url, **kwargs)
 
 
 def _fs_post(url, **kwargs):
     """POST request routed through proxy if configured."""
     kwargs.setdefault("timeout", 10)
-    if _FS_PROXIES:
-        kwargs.setdefault("proxies", _FS_PROXIES)
-    return http_requests_lib.post(url, **kwargs)
+    return _fs_session.post(url, **kwargs)
 
 
 def _get_fatsecret_token() -> str:
@@ -1037,8 +1051,8 @@ def debug_servings():
     """Temporary diagnostic endpoint — remove after debugging."""
     name = request.args.get("name", "egg")
     steps = []
-    steps.append({"step": "proxy_config", "proxy": bool(_FS_PROXIES),
-                  "url": _FS_PROXY_URL[:30] + "..." if _FS_PROXY_URL else "(none)"})
+    steps.append({"step": "proxy_config", "proxy": bool(_FS_PROXY_URL),
+                  "proxy_host": f"{_proxy_host}:{_proxy_port}" if _FS_PROXY_URL else "(none)"})
     try:
         token = _get_fatsecret_token()
         steps.append({"step": "token", "ok": True, "token_prefix": token[:20] + "..."})
