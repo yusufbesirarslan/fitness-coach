@@ -3,7 +3,8 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager , UserMixin , login_user , logout_user , login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
-from groq import Groq
+import boto3
+from botocore.exceptions import ClientError
 import os
 import json
 import click
@@ -185,7 +186,39 @@ app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-123")
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login" # Giriş zaten yapılıysa yönlendirme
-client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+bedrock_runtime = boto3.client(
+    'bedrock-runtime',
+    region_name=os.getenv('AWS_REGION'),
+    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+)
+BEDROCK_MODEL_ID = "us.anthropic.claude-sonnet-4-6-20250514-v1:0"
+
+
+def _bedrock_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
+    body = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": max_tokens,
+        "messages": messages,
+    }
+    if temperature is not None:
+        body["temperature"] = temperature
+    if system_prompt:
+        body["system"] = [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"}
+            }
+        ]
+    response = bedrock_runtime.invoke_model(
+        body=json.dumps(body),
+        modelId=BEDROCK_MODEL_ID,
+        contentType='application/json',
+        accept='application/json',
+    )
+    result = json.loads(response['body'].read())
+    return result['content'][0]['text']
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -971,7 +1004,7 @@ def _food_search_static(q):
 
 
 def _food_search_llm(q):
-    """Fallback: use Groq LLM to estimate nutrition for common foods."""
+    """Fallback: use LLM to estimate nutrition for common foods."""
     prompt = (
         f"Kullanıcı '{q}' araması yaptı. Bu aramayla eşleşen 5 yaygın besini listele.\n"
         "Her biri için 100 gram başına makro değerlerini ver.\n"
@@ -979,13 +1012,11 @@ def _food_search_llm(q):
         '[{{"name":"Besin adı","calories":123,"protein":10.5,"carbs":5.2,"fat":3.1}}]'
     )
     try:
-        resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        text = _bedrock_chat(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=600,
-        )
-        text = resp.choices[0].message.content.strip()
+        ).strip()
         if text.startswith("```"):
             text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         items = json.loads(text)
@@ -1552,17 +1583,13 @@ Fatigue yüksekse dinlenme öner, progressive overload yapamadıysa nasıl yapab
 Uyku kötüyse bunun etkisini açıkla."""
 
     try:
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": "Sen bir fitness koçusun. Kısa, spesifik, motive edici Türkçe konuş."},
-                {"role": "user",   "content": prompt}
-            ],
+        return _bedrock_chat(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt="Sen bir fitness koçusun. Kısa, spesifik, motive edici Türkçe konuş.",
             max_tokens=400,
-            temperature=0.7
+            temperature=0.7,
         )
-        return response.choices[0].message.content
-    except Exception as e:
+    except (ClientError, Exception) as e:
         return f"Geri bildirim alınamadı: {str(e)}"
     
 @app.route("/checkin", methods=["POST"])
@@ -1753,16 +1780,12 @@ def log_meal():
     raw = ""
 
     try:
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "SADECE JSON döndür. Açıklama yapma, markdown kullanma, sadece düz JSON objesi. Tüm değerler sayı olmalı."},
-                {"role": "user", "content": prompt}
-            ],
+        raw = _bedrock_chat(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt="SADECE JSON döndür. Açıklama yapma, markdown kullanma, sadece düz JSON objesi. Tüm değerler sayı olmalı.",
             max_tokens=150,
-            temperature=0.0
-        )
-        raw = response.choices[0].message.content.strip()
+            temperature=0.0,
+        ).strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
 
         # Bazen AI fazladan metin ekliyor, sadece { } arasını al
@@ -1896,16 +1919,12 @@ def review_meals():
     )
 
     try:
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": "Sen bir beslenme koçusun. Kısa, spesifik, Türkçe konuş."},
-                {"role": "user", "content": prompt}
-            ],
+        review = _bedrock_chat(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt="Sen bir beslenme koçusun. Kısa, spesifik, Türkçe konuş.",
             max_tokens=400,
-            temperature=0.7
+            temperature=0.7,
         )
-        review = response.choices[0].message.content
     except Exception as e:
         review = f"Değerlendirme alınamadı: {str(e)}"
 
@@ -2443,30 +2462,37 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
     if mime not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
         mime = "image/jpeg"
 
-    try:
-        resp = client.chat.completions.create(
-            model="meta-llama/llama-4-scout-17b-16e-instruct",
-            messages=[
-                {"role": "system", "content": (
-                    "Sen bir restoran menüsü OCR asistanısın. Görseldeki TÜM yemek ve içecek isimlerini, "
-                    "açıklamalarını ve fiyatlarını eksiksiz oku. Hiçbir öğeyi atlama veya özetleme. "
-                    "Menüdeki kategori başlıklarını koru (örn: Kahvaltılar, Salatalar, Ana Yemekler). "
-                    "Her yemeği ayrı satırda yaz. Türkçe karakterleri doğru kullan (ı, ş, ğ, ç, ö, ü)."
+    vision_system = (
+        "Sen bir restoran menüsü OCR asistanısın. Görseldeki TÜM yemek ve içecek isimlerini, "
+        "açıklamalarını ve fiyatlarını eksiksiz oku. Hiçbir öğeyi atlama veya özetleme. "
+        "Menüdeki kategori başlıklarını koru (örn: Kahvaltılar, Salatalar, Ana Yemekler). "
+        "Her yemeği ayrı satırda yaz. Türkçe karakterleri doğru kullan (ı, ş, ğ, ç, ö, ü)."
+    )
+    vision_body = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 4000,
+        "temperature": 0.0,
+        "system": [{"type": "text", "text": vision_system, "cache_control": {"type": "ephemeral"}}],
+        "messages": [
+            {"role": "user", "content": [
+                {"type": "text", "text": (
+                    "Bu restoran menüsü görselindeki TÜM yemek ve içecek isimlerini satır satır oku. "
+                    "Kategori başlıklarını koru. Hiçbir öğeyi atlama, özetleme veya yorum ekleme. "
+                    "Sadece menüde yazanları aynen oku."
                 )},
-                {"role": "user", "content": [
-                    {"type": "text", "text": (
-                        "Bu restoran menüsü görselindeki TÜM yemek ve içecek isimlerini satır satır oku. "
-                        "Kategori başlıklarını koru. Hiçbir öğeyi atlama, özetleme veya yorum ekleme. "
-                        "Sadece menüde yazanları aynen oku."
-                    )},
-                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
-                ]}
-            ],
-            temperature=0.0,
-            seed=42,
-            max_tokens=4000,
+                {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}},
+            ]}
+        ],
+    }
+    try:
+        resp = bedrock_runtime.invoke_model(
+            body=json.dumps(vision_body),
+            modelId=BEDROCK_MODEL_ID,
+            contentType='application/json',
+            accept='application/json',
         )
-        result = resp.choices[0].message.content.strip()
+        vision_result = json.loads(resp['body'].read())
+        result = vision_result['content'][0]['text'].strip()
         print(f"[VISION OCR] Extracted {len(result)} chars")
         return result
     except Exception as e:
@@ -2769,17 +2795,12 @@ SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma:
 {{"categories": {{"Kategori Adı": ["yemek1", "yemek2"], "Başka Kategori": ["yemek3"]}}}}"""
 
     try:
-        resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "SADECE JSON döndür. Açıklama yapma, markdown kullanma. Menüdeki TÜM kategorileri dahil et, hiçbirini atlama."},
-                {"role": "user", "content": prompt}
-            ],
+        raw = _bedrock_chat(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt="SADECE JSON döndür. Açıklama yapma, markdown kullanma. Menüdeki TÜM kategorileri dahil et, hiçbirini atlama.",
             temperature=0.0,
-            seed=42,
             max_tokens=2500,
-        )
-        raw = resp.choices[0].message.content.strip()
+        ).strip()
         print(f"[EXTRACT] LLM raw response length: {len(raw)} chars")
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
@@ -2840,16 +2861,12 @@ def _turkish_ablative_suffix(name):
 
 def _parse_suggestion_items(body_text):
     try:
-        resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "Kullanıcının yemek önerisinden yiyecek öğelerini çıkar. SADECE JSON array döndür, başka hiçbir şey yazma."},
-                {"role": "user", "content": f"Aşağıdaki öğün önerisinden her bir yiyecek öğesini (miktar dahil) çıkar ve JSON listesi olarak döndür:\n\n\"{body_text}\"\n\nÖrnek çıktı: [\"200g tavuk göğsü\", \"1 kase pilav\", \"yeşil salata\"]"}
-            ],
+        raw = _bedrock_chat(
+            messages=[{"role": "user", "content": f"Aşağıdaki öğün önerisinden her bir yiyecek öğesini (miktar dahil) çıkar ve JSON listesi olarak döndür:\n\n\"{body_text}\"\n\nÖrnek çıktı: [\"200g tavuk göğsü\", \"1 kase pilav\", \"yeşil salata\"]"}],
+            system_prompt="Kullanıcının yemek önerisinden yiyecek öğelerini çıkar. SADECE JSON array döndür, başka hiçbir şey yazma.",
             temperature=0.0,
             max_tokens=500,
-        )
-        raw = resp.choices[0].message.content.strip()
+        ).strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("[")
         end = raw.rfind("]") + 1
@@ -2942,17 +2959,12 @@ SADECE aşağıdaki JSON formatında yanıt ver:
 {{{", ".join(f'"{name}": GRAM_SAYISI' for name in items[:3])}{"..." if len(items) > 3 else ""}}}"""
 
     try:
-        resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "SADECE JSON döndür. Her yemek için farklı, gerçekçi gram değerleri ver. Sayıları integer olarak yaz."},
-                {"role": "user", "content": prompt}
-            ],
+        raw = _bedrock_chat(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt="SADECE JSON döndür. Her yemek için farklı, gerçekçi gram değerleri ver. Sayıları integer olarak yaz.",
             temperature=0.0,
-            seed=42,
             max_tokens=1000,
-        )
-        raw = resp.choices[0].message.content.strip()
+        ).strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
         end = raw.rfind("}") + 1
@@ -3059,17 +3071,12 @@ Tüm {len(batch_items)} yemek için değer ver. Sadece JSON döndür, başka bir
 
     max_tok = min(300 + len(batch_items) * 65, 4000)
     try:
-        resp = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "SADECE JSON döndür. Her yemek için 1 TAM PORSİYON (100g değil!) besin değerleri hesapla. Her yemeğe farklı, gerçekçi makro değerleri ver. JSON anahtarlarını kullanıcının verdiği isimlerle BİREBİR AYNI yaz."},
-                {"role": "user", "content": prompt}
-            ],
+        raw = _bedrock_chat(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt="SADECE JSON döndür. Her yemek için 1 TAM PORSİYON (100g değil!) besin değerleri hesapla. Her yemeğe farklı, gerçekçi makro değerleri ver. JSON anahtarlarını kullanıcının verdiği isimlerle BİREBİR AYNI yaz.",
             temperature=0.0,
-            seed=42,
             max_tokens=max_tok,
-        )
-        raw = resp.choices[0].message.content.strip()
+        ).strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
         if start < 0:
@@ -4219,7 +4226,12 @@ def chat():
         "comparison"     : comparison
     })
 
-COACH_SYSTEM_PROMPT = """Sen FitX Elit Koçu ve Yemek Kritikçisisin. Kullanıcının veritabanına HEM okuma HEM yazma erişimin var.
+COACH_SYSTEM_PROMPT = """Sen FitX uygulamasının profesyonel, son derece motive edici AI Fitness & Yaşam Koçusun. Kullanıcının veritabanına HEM okuma HEM yazma erişimin var.
+
+VERİ KAYNAKLARIN:
+- Beslenme verileri FatSecret API'den geliyor (besin öğeleri, porsiyon ölçekleri — orta/büyük yumurta gibi — ve metrikler).
+- Günlük aktivite verileri Apple Health (HealthKit) ve Android Health Connect'ten senkronize ediliyor (adım sayısı, kalori yakımı).
+- Bu verileri analiz ederek kişiye özel, veri odaklı önerilerde bulun.
 
 TEMEL GÖREV:
 - Kullanıcı antrenman veya yemek bahsettiğinde HEMEN tespit et.
@@ -4237,11 +4249,15 @@ RESTORAN MENÜ ANALİZİ:
 - Kalan günlük makro bütçesine göre somut önerilerde bulun.
 - Porsiyon boyutları ve gizli kaloriler konusunda uyar.
 
+YANIT FORMATI:
+- Yanıtlarını modern UI'a uygun yaz: taranabilir kısa bloklar, madde listeleri, net başlıklar.
+- Uzun paragraflar yerine aksiyon odaklı kısa maddeler kullan.
+
 KURALLAR:
 - Türkçe yaz, kullanıcıya "sen" diye hitap et.
 - Kısa, net, samimi ve veri odaklı konuş.
 - Genel geçer tavsiye VERME — her yanıt kullanıcının verisine dayansın.
-- Emin olmadığın tıbbi konularda doktora yönlendir.
+- Emin olmadığın tıbbi konularda doktora yönlendir. Tıbbi teşhis veya reçete VERME.
 - Kas kazanma hedefinde kilo artışı OLUMLU, kilo vermede azalış OLUMLU.
 - Tonu: elit, destekleyici, veri odaklı."""
 
@@ -4367,13 +4383,11 @@ def _extract_with_llm(question, intent_type):
             f"Mesaj: {question}"
         )
     try:
-        resp = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+        raw = _bedrock_chat(
             messages=[{"role": "user", "content": extraction_prompt}],
             max_tokens=150,
             temperature=0.1,
-        )
-        raw = resp.choices[0].message.content.strip()
+        ).strip()
         start = raw.find("{")
         end = raw.rfind("}") + 1
         if start >= 0 and end > start:
@@ -4532,21 +4546,21 @@ def ask_coach():
 
     context = _fetch_coach_context(current_user.id, question)
 
-    messages = [{"role": "system", "content": COACH_SYSTEM_PROMPT}]
+    messages = []
     for h in history[-6:]:
         role = "user" if h.get("role") == "user" else "assistant"
         messages.append({"role": role, "content": h.get("text", "")[:500]})
     messages.append({"role": "user", "content": f"{context}\n\nKullanıcının sorusu: {question}"})
 
     try:
-        response = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+        answer = _bedrock_chat(
             messages=messages,
+            system_prompt=COACH_SYSTEM_PROMPT,
             max_tokens=700,
-            temperature=0.7
+            temperature=0.7,
         )
-        return jsonify({"answer": response.choices[0].message.content})
-    except Exception as e:
+        return jsonify({"answer": answer})
+    except (ClientError, Exception) as e:
         return jsonify({"error": f"Yanıt alınamadı: {str(e)}"}), 500
 
 # ── HESAPLAMALAR ──────────────────────────────────────────
@@ -4716,17 +4730,13 @@ MOTİVASYON:
 (bu kişinin durumuna özel, güçlü bir cümle)"""
 
     try:
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "Sen bir fitness koçusun. Türkçe, samimi, spesifik ve motive edici konuş. Sayılar ve süreler kullan."},
-                {"role": "user",   "content": prompt}
-            ],
+        return _bedrock_chat(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt="Sen bir fitness koçusun. Türkçe, samimi, spesifik ve motive edici konuş. Sayılar ve süreler kullan.",
             max_tokens=700,
-            temperature=0.7
+            temperature=0.7,
         )
-        return response.choices[0].message.content
-    except Exception as e:
+    except (ClientError, Exception) as e:
         return f"Koç yorumu şu an alınamıyor. Hata: {str(e)}"
     
 @app.route("/nutrition")
@@ -4888,17 +4898,12 @@ Yanıtını SADECE şu JSON formatında ver, başka hiçbir şey yazma.
 }}"""
 
     try:
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "Sen bir beslenme uzmanısın. SADECE geçerli JSON döndür, başka hiçbir şey yazma."},
-                {"role": "user", "content": prompt}
-            ],
+        raw = _bedrock_chat(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt="Sen bir beslenme uzmanısın. SADECE geçerli JSON döndür, başka hiçbir şey yazma.",
             max_tokens=2000,
-            temperature=0.3  # düşük — tutarlı JSON için
-        )
-
-        raw = response.choices[0].message.content.strip()
+            temperature=0.3,
+        ).strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
         end = raw.rfind("}") + 1
@@ -5135,17 +5140,12 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
     )
 
     try:
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": "Sen deneyimli bir kişisel antrenörsün. SADECE geçerli JSON döndür, başka hiçbir şey yazma. Markdown, açıklama veya yorum ekleme."},
-                {"role": "user",   "content": prompt}
-            ],
+        raw = _bedrock_chat(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt="Sen deneyimli bir kişisel antrenörsün. SADECE geçerli JSON döndür, başka hiçbir şey yazma. Markdown, açıklama veya yorum ekleme.",
             max_tokens=4000,
-            temperature=0.4
-        )
-
-        raw = response.choices[0].message.content.strip()
+            temperature=0.4,
+        ).strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
         end = raw.rfind("}") + 1
