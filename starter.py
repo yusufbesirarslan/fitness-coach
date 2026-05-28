@@ -192,7 +192,7 @@ bedrock_runtime = boto3.client(
     aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
     aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
 )
-BEDROCK_MODEL_ID = "us.anthropic.claude-sonnet-4-6-20250514-v1:0"
+BEDROCK_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
 
 
 def _bedrock_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
