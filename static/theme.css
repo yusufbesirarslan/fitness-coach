@@ -592,10 +592,11 @@ button:focus-visible,
   .skeleton, [class*="shimmer"] {
     animation: none !important;
   }
-  /* Tip card: crossfade only, no horizontal slide */
-  #ins-body.ins-out-left, #ins-body.ins-out-right,
-  #ins-body.ins-in-left,  #ins-body.ins-in-right {
+  /* Tip card: no horizontal slide under reduced motion */
+  .ins-slide.ins-out-left, .ins-slide.ins-out-right,
+  .ins-slide.ins-in-left,  .ins-slide.ins-in-right {
     transform: none !important;
   }
+  .ins-slide { transition: none !important; }
   html { scroll-behavior: auto !important; }
 }

@@ -233,9 +233,11 @@
     <div class="bc b-1" style="display:flex;flex-direction:column;z-index:210;">
         <div class="bc-lbl"><span class="bc-dot" style="background:rgba(204,255,0,0.75)"></span>Günün İpucu</div>
         <div id="ins-body">
-            <span class="ins-icon" id="ins-icon">⚡</span>
-            <div class="ins-text" id="ins-text">Yükleniyor…</div>
-            <div class="ins-source" id="ins-src">Spor Bilimi</div>
+            <div class="ins-slide" id="ins-slide">
+                <span class="ins-icon" id="ins-icon">⚡</span>
+                <div class="ins-text" id="ins-text">Yükleniyor…</div>
+                <div class="ins-source" id="ins-src">Spor Bilimi</div>
+            </div>
         </div>
         <div class="ins-nav">
             <button class="ins-btn" onclick="prevTip()">← Önceki</button>
@@ -670,28 +672,24 @@ function renderTip(i, animated, dir) {
 
     if (!animated) { applyContent(); return; }
 
-    const body     = document.getElementById('ins-body');
-    const outClass = dir > 0 ? 'ins-out-left'  : 'ins-out-right';
-    const inClass  = dir > 0 ? 'ins-in-right'  : 'ins-in-left';
+    const slide    = document.getElementById('ins-slide');
+    // L→R sweep: new content enters from the left, old exits to the right.
+    const outClass = dir > 0 ? 'ins-out-right' : 'ins-out-left';
+    const inClass  = dir > 0 ? 'ins-in-left'   : 'ins-in-right';
 
-    // Exit toward travel direction, then enter from the opposite side.
-    body.classList.add(outClass);
+    slide.classList.add(outClass);
     setTimeout(function() {
         applyContent();
-        body.classList.remove(outClass);
-        // Jump to the incoming offset with no transition.
-        body.classList.add('ins-instant', inClass);
-        body.offsetHeight;                       // force reflow at offset
-        body.classList.remove('ins-instant');    // re-enable transition
-        // Wait one frame so the painted offset is committed, THEN release
-        // the inClass — this is what makes the slide-in actually animate
-        // instead of snapping straight to the home position.
+        slide.classList.remove(outClass);
+        slide.classList.add('ins-instant', inClass);
+        slide.offsetHeight;
+        slide.classList.remove('ins-instant');
         requestAnimationFrame(function() {
             requestAnimationFrame(function() {
-                body.classList.remove(inClass);
+                slide.classList.remove(inClass);
             });
         });
-    }, 170);
+    }, 320);
 }
 
 function restartProgressBar() {
