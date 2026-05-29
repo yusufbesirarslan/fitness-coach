@@ -672,24 +672,36 @@ function renderTip(i, animated, dir) {
 
     if (!animated) { applyContent(); return; }
 
-    const slide    = document.getElementById('ins-slide');
-    // L→R sweep: new content enters from the left, old exits to the right.
-    const outClass = dir > 0 ? 'ins-out-right' : 'ins-out-left';
-    const inClass  = dir > 0 ? 'ins-in-left'   : 'ins-in-right';
+    const slide   = document.getElementById('ins-slide');
+    // L→R sweep: old exits right, new enters from left (for next).
+    const outDx   = dir > 0 ? '105%'  : '-105%';
+    const inFrom  = dir > 0 ? '-105%' : '105%';
+    const easing  = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
 
-    slide.classList.add(outClass);
-    setTimeout(function() {
+    // Cancel any in-flight animation so back-to-back navigation stays clean.
+    if (slide._tipAnim) { try { slide._tipAnim.cancel(); } catch (e) {} }
+
+    // Use Web Animations API — bypasses CSS transition pitfalls (batched
+    // class changes, reduced-motion overrides on .ins-slide) and guarantees
+    // the slide plays on every tip change.
+    const outAnim = slide.animate(
+        [ { transform: 'translateX(0)' }, { transform: 'translateX(' + outDx + ')' } ],
+        { duration: 180, easing: easing, fill: 'forwards' }
+    );
+    slide._tipAnim = outAnim;
+    outAnim.onfinish = function() {
         applyContent();
-        slide.classList.remove(outClass);
-        slide.classList.add('ins-instant', inClass);
-        slide.offsetHeight;
-        slide.classList.remove('ins-instant');
-        requestAnimationFrame(function() {
-            requestAnimationFrame(function() {
-                slide.classList.remove(inClass);
-            });
-        });
-    }, 320);
+        const inAnim = slide.animate(
+            [ { transform: 'translateX(' + inFrom + ')' }, { transform: 'translateX(0)' } ],
+            { duration: 260, easing: easing, fill: 'forwards' }
+        );
+        slide._tipAnim = inAnim;
+        inAnim.onfinish = function() {
+            slide.style.transform = '';   // hand control back to CSS
+            try { outAnim.cancel(); inAnim.cancel(); } catch (e) {}
+            slide._tipAnim = null;
+        };
+    };
 }
 
 function restartProgressBar() {
