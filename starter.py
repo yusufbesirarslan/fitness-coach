@@ -1939,6 +1939,43 @@ def menu_assistant():
     )
 
 
+def _is_safe_public_ip(ip_str):
+    import ipaddress as _ipa
+    try:
+        ip = _ipa.ip_address(ip_str)
+    except ValueError:
+        return False
+    # Unwrap IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) so the IPv4 checks apply.
+    if isinstance(ip, _ipa.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return not (ip.is_private or ip.is_loopback or ip.is_link_local
+                or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+
+
+def _resolve_host_safely(hostname):
+    """Resolve hostname; raise ValueError if any address is non-public.
+
+    Catches alternate IPv4 encodings (decimal/hex/short), IPv6 ULA/link-local,
+    and hostnames that resolve to RFC1918/loopback. Returns list of resolved IPs.
+    """
+    import socket as _sock
+    if not hostname:
+        raise ValueError("Geçersiz URL.")
+    try:
+        infos = _sock.getaddrinfo(hostname, None)
+    except _sock.gaierror:
+        raise ValueError("Host adı çözümlenemedi.")
+    ips = []
+    for info in infos:
+        ip = info[4][0]
+        if not _is_safe_public_ip(ip):
+            raise ValueError("İç ağ adresleri engellendi.")
+        ips.append(ip)
+    if not ips:
+        raise ValueError("Host adı çözümlenemedi.")
+    return ips
+
+
 def _validate_menu_url(url):
     from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
     import re as _re
@@ -1958,9 +1995,11 @@ def _validate_menu_url(url):
         return None, None, "Yalnızca HTTP/HTTPS desteklenir."
     if not parsed.hostname:
         return None, None, "Geçersiz URL."
-    blocked = ("127.0.0.1", "localhost", "0.0.0.0", "169.254.169.254", "[::1]")
-    if parsed.hostname.lower() in blocked or parsed.hostname.startswith("10.") or parsed.hostname.startswith("192.168."):
-        return None, None, "İç ağ adresleri engellendi."
+
+    try:
+        _resolve_host_safely(parsed.hostname)
+    except ValueError as e:
+        return None, None, str(e)
 
     tracking_params = {"utm_source", "utm_medium", "utm_campaign", "utm_term",
                        "utm_content", "fbclid", "gclid", "ref", "source"}
@@ -1984,7 +2023,7 @@ _USER_AGENTS = [
 def _fetch_page(url, timeout=10):
     import requests as http_req
     import random
-    from urllib.parse import urlparse
+    from urllib.parse import urlparse, urljoin
 
     ua = random.choice(_USER_AGENTS)
     parsed = urlparse(url)
@@ -2006,14 +2045,36 @@ def _fetch_page(url, timeout=10):
     session = http_req.Session()
     session.headers.update(headers)
 
-    resp = session.get(url, timeout=timeout, allow_redirects=True)
+    def _safe_get(target_url):
+        # Re-validate every hop to defeat DNS rebinding and bypass via
+        # untrusted Location headers from cooperative origins.
+        p = urlparse(target_url)
+        if p.scheme not in ("http", "https") or not p.hostname:
+            raise http_req.exceptions.InvalidURL("Geçersiz URL.")
+        _resolve_host_safely(p.hostname)
+        return session.get(target_url, timeout=timeout, allow_redirects=False)
+
+    def _follow(start_url):
+        current = start_url
+        for _ in range(5):
+            r = _safe_get(current)
+            if r.status_code in (301, 302, 303, 307, 308):
+                loc = r.headers.get("Location")
+                if not loc:
+                    return r
+                current = urljoin(current, loc)
+                continue
+            return r
+        raise http_req.exceptions.TooManyRedirects("Çok fazla yönlendirme.")
+
+    resp = _follow(url)
 
     if resp.status_code == 403 or (resp.status_code == 200 and len(resp.text) < 500):
         alt_ua = random.choice([u for u in _USER_AGENTS if u != ua] or _USER_AGENTS)
         session.headers["User-Agent"] = alt_ua
         import time
         time.sleep(random.uniform(0.3, 0.8))
-        resp = session.get(url, timeout=timeout, allow_redirects=True)
+        resp = _follow(url)
 
     resp.raise_for_status()
     return resp
