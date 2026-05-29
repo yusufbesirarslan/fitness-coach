@@ -2736,6 +2736,9 @@ def proxy_scan_menu():
 
     try:
         resp = _fetch_page(url)
+    except ValueError as e:
+        # _resolve_host_safely raises ValueError on a blocked redirect target.
+        return jsonify({"error": str(e)}), 400
     except http_req.exceptions.Timeout:
         return jsonify({"error": "Zaman aşımı — site yanıt vermedi."}), 504
     except http_req.exceptions.RequestException as e:
