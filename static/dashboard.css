@@ -29,6 +29,22 @@
     border-color: rgba(255,255,255,0.10);
 }
 
+/* Staggered entrance — cards rise into place from below (spatial continuity). */
+.bento .bc {
+    animation: bc-enter 0.34s cubic-bezier(0.16,1,0.3,1) backwards;
+}
+.bento .bc:nth-child(1) { animation-delay: 0.00s; }
+.bento .bc:nth-child(2) { animation-delay: 0.04s; }
+.bento .bc:nth-child(3) { animation-delay: 0.08s; }
+.bento .bc:nth-child(4) { animation-delay: 0.12s; }
+.bento .bc:nth-child(5) { animation-delay: 0.16s; }
+.bento .bc:nth-child(6) { animation-delay: 0.20s; }
+.bento .bc:nth-child(n+7) { animation-delay: 0.24s; }
+@keyframes bc-enter {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
 .bc-lbl {
     font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
     text-transform: uppercase; color: #505058;
@@ -278,9 +294,11 @@
     font-family:'Bebas Neue',sans-serif; font-size:14px; letter-spacing:2px;
     color:#0A0A0C; background:#CCFF00; border:none; border-radius:8px;
     padding:10px 20px; cursor:pointer;
-    transition: background 0.2s, box-shadow 0.2s; white-space:nowrap;
+    transition: background 0.2s, box-shadow 0.2s, transform 0.14s cubic-bezier(0.4,0,0.2,1);
+    white-space:nowrap;
 }
-.w-btn:hover { background:#A8D400; }
+.w-btn:hover  { background:#A8D400; transform:translateY(-1px); }
+.w-btn:active { transform:scale(0.96); }
 .w-btn.pulse { animation: w-pulse 2.4s ease infinite; }
 @keyframes w-pulse {
     0%,100% { box-shadow:0 0 0 0  rgba(204,255,0,0.30); }
@@ -309,14 +327,26 @@
     padding:6px 13px; font-size:11px; color:#606068; cursor:pointer;
     transition: all 0.18s; font-family:'DM Sans',sans-serif;
 }
-.ins-btn:hover { color:#CCFF00; border-color:rgba(204,255,0,0.25); }
+.ins-btn:hover  { color:#CCFF00; border-color:rgba(204,255,0,0.25); }
+.ins-btn:active { transform:scale(0.95); }
 .ins-dots { display:flex; gap:5px; }
 .ins-dot  { width:5px; height:5px; border-radius:50%; background:rgba(255,255,255,0.06); transition:background 0.2s, transform 0.15s; cursor:pointer; }
 .ins-dot:hover { background:rgba(204,255,0,0.3); transform:scale(1.5); }
 .ins-dot.on { background:#CCFF00; transform:scale(1.3); }
 
-#ins-body { transition: opacity 0.24s ease, transform 0.24s ease; min-height: 88px; }
-#ins-body.ins-out { opacity:0; transform:translateX(-10px); pointer-events:none; }
+#ins-body {
+    transition: opacity 0.26s cubic-bezier(0.16,1,0.3,1),
+                transform 0.26s cubic-bezier(0.16,1,0.3,1);
+    min-height: 88px;
+}
+/* Exit (faster) toward travel direction; enter from the opposite side. */
+#ins-body.ins-instant   { transition: none; }
+#ins-body.ins-out-left,
+#ins-body.ins-out-right { opacity:0; pointer-events:none; transition-duration:0.18s; }
+#ins-body.ins-out-left  { transform: translateX(-16px); }
+#ins-body.ins-out-right { transform: translateX(16px); }
+#ins-body.ins-in-left   { opacity:0; transform: translateX(-16px); }
+#ins-body.ins-in-right  { opacity:0; transform: translateX(16px); }
 
 .ins-progress { height:2px; background:rgba(255,255,255,0.03); border-radius:1px; margin-top:12px; overflow:hidden; }
 .ins-pbar { height:100%; background:linear-gradient(90deg,rgba(204,255,0,0.25),#CCFF00); border-radius:1px; transform-origin:left center; animation:ins-fill 8s linear forwards; }

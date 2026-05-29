@@ -630,7 +630,8 @@ async function loadSparkline() {
 /* ═══ AI TIPS ═══ */
 let tipTimer = null;
 
-function renderTip(i, animated) {
+function renderTip(i, animated, dir) {
+    dir = dir || 1;                 // 1 = forward (next), -1 = backward (prev)
     const t       = TIPS[i];
     const VISIBLE = Math.min(5, TIPS.length);
     const half    = Math.floor(VISIBLE / 2);
@@ -655,12 +656,21 @@ function renderTip(i, animated) {
 
     if (!animated) { applyContent(); return; }
 
-    const body = document.getElementById('ins-body');
-    body.classList.add('ins-out');
+    const body     = document.getElementById('ins-body');
+    const outClass = dir > 0 ? 'ins-out-left'  : 'ins-out-right';
+    const inClass  = dir > 0 ? 'ins-in-right'  : 'ins-in-left';
+
+    // Exit toward travel direction (faster), then enter from the opposite side.
+    body.classList.add(outClass);
     setTimeout(function() {
         applyContent();
-        body.classList.remove('ins-out');
-    }, 260);
+        body.classList.remove(outClass);
+        // Jump to the incoming offset with no transition, then release to slide in.
+        body.classList.add('ins-instant', inClass);
+        body.offsetHeight;                       // force reflow
+        body.classList.remove('ins-instant');
+        body.classList.remove(inClass);
+    }, 180);
 }
 
 function restartProgressBar() {
@@ -671,17 +681,23 @@ function restartProgressBar() {
     bar.style.animation = 'ins-fill 8s linear forwards';
 }
 
-function goToTip(i) {
+function goToTip(i, dir) {
+    const prev = tipIdx;
     tipIdx = ((i % TIPS.length) + TIPS.length) % TIPS.length;
-    renderTip(tipIdx, true);
+    if (dir === undefined) {
+        // Pick the shorter way around the ring for dot clicks.
+        const fwd = (tipIdx - prev + TIPS.length) % TIPS.length;
+        dir = (fwd === 0 || fwd <= TIPS.length / 2) ? 1 : -1;
+    }
+    renderTip(tipIdx, true, dir);
     resetTipTimer();
 }
-function nextTip() { goToTip(tipIdx + 1); }
-function prevTip() { goToTip(tipIdx - 1); }
+function nextTip() { goToTip(tipIdx + 1,  1); }
+function prevTip() { goToTip(tipIdx - 1, -1); }
 
 function resetTipTimer() {
     if (tipTimer) clearInterval(tipTimer);
-    tipTimer = setInterval(function() { goToTip(tipIdx + 1); }, 8000);
+    tipTimer = setInterval(function() { goToTip(tipIdx + 1, 1); }, 8000);
 }
 
 

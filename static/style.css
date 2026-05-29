@@ -130,7 +130,7 @@ select {
     cursor:pointer; transition:all 0.2s; margin-top:4px;
 }
 .submit-btn:hover { background:var(--accent2); transform:translateY(-1px); }
-.submit-btn:active { transform:translateY(0); }
+.submit-btn:active { transform:scale(0.97); }
 .submit-btn.loading { opacity:0.7; cursor:not-allowed; }
 
 /* ── CARDS ───────────────────────────────────── */
@@ -189,6 +189,7 @@ select {
     transition:all 0.2s; user-select:none;
 }
 .option-chip:hover { border-color:var(--accent); }
+.option-chip:active { transform:scale(0.97); }
 .option-chip.selected { background:var(--accent-glow); border-color:var(--accent); }
 .option-chip-dot {
     width:8px; height:8px; border-radius:50%;
@@ -207,6 +208,7 @@ select {
     transition:all 0.2s; user-select:none;
 }
 .food-chip:hover { border-color:var(--accent); }
+.food-chip:active { transform:scale(0.97); }
 .food-chip.selected { background:var(--accent-glow); border-color:var(--accent); }
 .food-chip input[type="checkbox"] { display:none; }
 .food-chip-dot {

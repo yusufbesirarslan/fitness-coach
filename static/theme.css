@@ -126,6 +126,7 @@ body {
   transition: all var(--t-base);
 }
 .sidebar-link:hover  { color: var(--text);   background: rgba(255,255,255,0.04); }
+.sidebar-link:active { transform: scale(0.98); }
 .sidebar-link.active { color: var(--volt);   background: var(--volt-dim); }
 .sidebar-link svg    { width: 17px; height: 17px; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
@@ -164,10 +165,11 @@ body {
   align-items: center; justify-content: center; gap: 3px;
   text-decoration: none; color: var(--text-3);
   font-size: 9px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
-  transition: color var(--t-base);
+  transition: color var(--t-base), transform var(--t-fast);
 }
 .bn-item.active  { color: var(--volt); }
 .bn-item:hover   { color: var(--text-2); }
+.bn-item:active  { transform: scale(0.92); }
 .bn-item svg     { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 @media (max-width: 1023px) { .bottom-nav { display: block; } }
@@ -215,6 +217,7 @@ body {
   display: flex; align-items: center; justify-content: center; gap: 7px;
 }
 .tab-btn:hover:not(.active) { color: var(--text-2); background: rgba(255,255,255,0.04); }
+.tab-btn:active { transform: scale(0.96); }
 .tab-btn.active { background: var(--volt-dim); color: var(--volt); border: 1px solid rgba(204,255,0,0.22); }
 .tab-btn svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 1.8; flex-shrink: 0; }
 
@@ -232,6 +235,7 @@ body {
   transition: all var(--t-fast); user-select: none;
 }
 .chip:hover    { border-color: rgba(204,255,0,0.35); color: var(--text); }
+.chip:active   { transform: scale(0.96); }
 .chip.selected { background: var(--volt-dim); border-color: rgba(204,255,0,0.55); color: var(--volt); }
 .chip-dot { width: 6px; height: 6px; border-radius: 50%; border: 1.5px solid var(--text-3); transition: all var(--t-fast); flex-shrink: 0; }
 .chip.selected .chip-dot { background: var(--volt); border-color: var(--volt); }
@@ -246,7 +250,7 @@ body {
   transition: all var(--t-base);
 }
 .btn-volt:hover   { background: var(--volt-dark); box-shadow: var(--shadow-volt); transform: translateY(-1px); }
-.btn-volt:active  { transform: translateY(0); box-shadow: none; }
+.btn-volt:active  { transform: scale(0.97); box-shadow: none; }
 .btn-volt.loading { opacity: 0.65; cursor: not-allowed; pointer-events: none; }
 .btn-volt.w-full  { width: 100%; }
 
@@ -257,7 +261,8 @@ body {
   border: 1px solid var(--border); border-radius: var(--r-sm);
   cursor: pointer; transition: all var(--t-fast);
 }
-.btn-ghost:hover { color: var(--text); border-color: var(--border-2); background: rgba(255,255,255,0.04); }
+.btn-ghost:hover  { color: var(--text); border-color: var(--border-2); background: rgba(255,255,255,0.04); }
+.btn-ghost:active { transform: scale(0.97); }
 
 /* ── 12. INPUTS ───────────────────────────────────── */
 .fc-input {
@@ -309,6 +314,7 @@ textarea.fc-input { resize: vertical; min-height: 84px; line-height: 1.6; }
   color: var(--text-3); font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
 }
 .meal-type-opt:hover    { border-color: rgba(204,255,0,0.3); }
+.meal-type-opt:active   { transform: scale(0.96); }
 .meal-type-opt.selected { background: var(--volt-dim); border-color: rgba(204,255,0,0.5); color: var(--volt); }
 .meal-type-opt .emoji   { font-size: 22px; line-height: 1; }
 
@@ -343,6 +349,7 @@ textarea.fc-input { resize: vertical; min-height: 84px; line-height: 1.6; }
   margin-top: 14px; border-radius: var(--r-sm);
 }
 .btn-select-plan:hover { background: var(--volt-dark); }
+.btn-select-plan:active:not(.chosen) { transform: scale(0.98); }
 .btn-select-plan.chosen { background: rgba(255,255,255,0.04); color: var(--volt); border: 1px solid rgba(204,255,0,0.4); cursor: default; }
 
 /* ── 17. SKELETON SCREENS ─────────────────────────── */
