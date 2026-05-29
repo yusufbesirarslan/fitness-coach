@@ -341,18 +341,19 @@
 .ins-dot.on { background:#CCFF00; transform:scale(1.3); }
 
 #ins-body {
-    transition: opacity 0.26s cubic-bezier(0.16,1,0.3,1),
-                transform 0.26s cubic-bezier(0.16,1,0.3,1);
+    transition: opacity 0.24s cubic-bezier(0.16,1,0.3,1),
+                transform 0.24s cubic-bezier(0.16,1,0.3,1);
     min-height: 88px;
+    will-change: transform, opacity;
 }
 /* Exit (faster) toward travel direction; enter from the opposite side. */
-#ins-body.ins-instant   { transition: none; }
+#ins-body.ins-instant   { transition: none !important; }
 #ins-body.ins-out-left,
-#ins-body.ins-out-right { opacity:0; pointer-events:none; transition-duration:0.18s; }
-#ins-body.ins-out-left  { transform: translateX(-28px); }
-#ins-body.ins-out-right { transform: translateX(28px); }
-#ins-body.ins-in-left   { opacity:0; transform: translateX(-28px); }
-#ins-body.ins-in-right  { opacity:0; transform: translateX(28px); }
+#ins-body.ins-out-right { opacity:0; pointer-events:none; transition-duration:0.17s; }
+#ins-body.ins-out-left  { transform: translateX(-32px); }
+#ins-body.ins-out-right { transform: translateX(32px); }
+#ins-body.ins-in-left   { opacity:0; transform: translateX(-32px); }
+#ins-body.ins-in-right  { opacity:0; transform: translateX(32px); }
 
 .ins-progress { height:2px; background:rgba(255,255,255,0.03); border-radius:1px; margin-top:12px; overflow:hidden; }
 .ins-pbar { height:100%; background:linear-gradient(90deg,rgba(204,255,0,0.25),#CCFF00); border-radius:1px; transform-origin:left center; animation:ins-fill 8s linear forwards; }

@@ -674,17 +674,24 @@ function renderTip(i, animated, dir) {
     const outClass = dir > 0 ? 'ins-out-left'  : 'ins-out-right';
     const inClass  = dir > 0 ? 'ins-in-right'  : 'ins-in-left';
 
-    // Exit toward travel direction (faster), then enter from the opposite side.
+    // Exit toward travel direction, then enter from the opposite side.
     body.classList.add(outClass);
     setTimeout(function() {
         applyContent();
         body.classList.remove(outClass);
-        // Jump to the incoming offset with no transition, then release to slide in.
+        // Jump to the incoming offset with no transition.
         body.classList.add('ins-instant', inClass);
-        body.offsetHeight;                       // force reflow
-        body.classList.remove('ins-instant');
-        body.classList.remove(inClass);
-    }, 180);
+        body.offsetHeight;                       // force reflow at offset
+        body.classList.remove('ins-instant');    // re-enable transition
+        // Wait one frame so the painted offset is committed, THEN release
+        // the inClass — this is what makes the slide-in actually animate
+        // instead of snapping straight to the home position.
+        requestAnimationFrame(function() {
+            requestAnimationFrame(function() {
+                body.classList.remove(inClass);
+            });
+        });
+    }, 170);
 }
 
 function restartProgressBar() {
