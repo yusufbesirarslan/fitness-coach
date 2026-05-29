@@ -182,7 +182,21 @@ if database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-123")
+_secret_key = os.environ.get("SECRET_KEY")
+if not _secret_key:
+    # Allow boot without SECRET_KEY only in explicit debug mode, and generate
+    # a per-process random key so dev sessions still cannot be forged from
+    # a known constant. Sessions invalidate on restart, which is fine in dev.
+    if os.environ.get("FLASK_DEBUG") == "1" or os.environ.get("FLASK_ENV") == "development":
+        import secrets as _secrets
+        _secret_key = _secrets.token_urlsafe(32)
+        app.logger.warning("SECRET_KEY not set; using ephemeral dev key (sessions invalidate on restart).")
+    else:
+        raise RuntimeError(
+            "SECRET_KEY environment variable must be set. "
+            "Set FLASK_DEBUG=1 to allow an ephemeral key for local development."
+        )
+app.config["SECRET_KEY"] = _secret_key
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login" # Giriş zaten yapılıysa yönlendirme
