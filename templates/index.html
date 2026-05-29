@@ -397,10 +397,24 @@ function getWaterCount() {
 function saveWaterCount(n) {
     localStorage.setItem('fc_water', JSON.stringify({ date: new Date().toDateString(), count: n }));
 }
-function renderWater(count) {
-    document.getElementById('water-num').textContent = count;
+function renderWater(count, animate) {
+    const numEl = document.getElementById('water-num');
+    const prev  = parseInt(numEl.textContent, 10) || 0;
+    numEl.textContent = count;
+    if (animate !== false && count > prev) {
+        numEl.classList.remove('bump'); void numEl.offsetWidth; numEl.classList.add('bump');
+        setTimeout(function() { numEl.classList.remove('bump'); }, 220);
+    }
     document.getElementById('water-bar').style.width = Math.min(count / WATER_GOAL * 100, 100) + '%';
-    document.querySelectorAll('.wg').forEach((g, i) => g.classList.toggle('filled', i < count));
+    document.querySelectorAll('.wg').forEach((g, i) => {
+        const wasFilled = g.classList.contains('filled');
+        const nowFilled = i < count;
+        g.classList.toggle('filled', nowFilled);
+        if (animate !== false && nowFilled && !wasFilled) {
+            g.classList.remove('just-filled'); void g.offsetWidth; g.classList.add('just-filled');
+            setTimeout(function() { g.classList.remove('just-filled'); }, 340);
+        }
+    });
     const btn = document.getElementById('water-btn');
     if (count >= WATER_GOAL) {
         btn.disabled = true;
@@ -765,7 +779,7 @@ document.addEventListener('click', (e) => {
 /* ═══ INIT ═══ */
 async function init() {
     buildWaterGlasses();
-    renderWater(getWaterCount());
+    renderWater(getWaterCount(), false);
     renderStreak(computeStreak());
     checkBtnGlow();
 

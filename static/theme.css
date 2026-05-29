@@ -579,13 +579,23 @@ button:focus-visible,
 .fc-input:focus-visible { outline: none; }
 
 /* ── 35. REDUCED MOTION ───────────────────────────── */
-/* Respect the OS "reduce motion" preference: keep transitions snappy
-   and disable looping/decorative animation. */
+/* Respect the OS "reduce motion" preference, but do it surgically:
+   kill looping/decorative + entrance keyframe animations and strip
+   translate-based movement, while keeping short functional feedback
+   (opacity/colour/scale state transitions) so the UI still responds.
+   We deliberately DON'T freeze every transition globally — that made
+   the whole dashboard feel dead. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    scroll-behavior: auto !important;
+  /* Looping / decorative / entrance animations → off */
+  .bento .bc, .ins-pbar,
+  .w-btn.pulse, .qr-fab.pulse, .gr-badge-dot,
+  .skeleton, [class*="shimmer"] {
+    animation: none !important;
   }
+  /* Tip card: crossfade only, no horizontal slide */
+  #ins-body.ins-out-left, #ins-body.ins-out-right,
+  #ins-body.ins-in-left,  #ins-body.ins-in-right {
+    transform: none !important;
+  }
+  html { scroll-behavior: auto !important; }
 }
