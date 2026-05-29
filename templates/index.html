@@ -648,15 +648,13 @@ let tipTimer = null;
 
 function renderTip(i, animated, dir) {
     dir = dir || 1;                 // 1 = forward (next), -1 = backward (prev)
-    const t       = TIPS[i];
-    const VISIBLE = Math.min(5, TIPS.length);
-    const half    = Math.floor(VISIBLE / 2);
-    const start   = Math.min(Math.max(i - half, 0), TIPS.length - VISIBLE);
-    const end     = Math.min(start + VISIBLE, TIPS.length);
+    const t = TIPS[i];
 
     const dots = document.getElementById('ins-dots');
     dots.innerHTML = '';
-    for (let d = start; d < end; d++) {
+    // Show every tip as its own dot so the active dot visibly advances
+    // by one step on each change instead of staying centered in a window.
+    for (let d = 0; d < TIPS.length; d++) {
         const dot = document.createElement('div');
         dot.className = 'ins-dot' + (d === i ? ' on' : '');
         (function(idx) { dot.addEventListener('click', function() { goToTip(idx); }); })(d);
