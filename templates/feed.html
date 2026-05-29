@@ -141,10 +141,16 @@ function toast(msg, type) {
     setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3000);
 }
 
+function escapeHTML(str) {
+    const d = document.createElement('div');
+    d.textContent = str == null ? '' : String(str);
+    return d.innerHTML;
+}
+
 function avatarHTML(pp, name) {
-    if (pp) return '<div class="feed-avatar"><img src="'+pp.replace(/"/g,'&quot;')+'"></div>';
+    if (pp) return '<div class="feed-avatar"><img src="'+escapeHTML(pp).replace(/"/g,'&quot;')+'"></div>';
     const letter = (name || 'U')[0].toUpperCase();
-    return '<div class="feed-avatar">'+letter+'</div>';
+    return '<div class="feed-avatar">'+escapeHTML(letter)+'</div>';
 }
 
 async function loadFeed() {
@@ -166,12 +172,12 @@ async function loadFeed() {
                 <div class="feed-header">
                     ${avatarHTML(a.profile_picture, a.full_name)}
                     <div class="feed-user">
-                        <div class="feed-name">${a.full_name}</div>
-                        <div class="feed-time">${a.timestamp}</div>
+                        <div class="feed-name">${escapeHTML(a.full_name)}</div>
+                        <div class="feed-time">${escapeHTML(a.timestamp)}</div>
                     </div>
                 </div>
                 <div class="feed-content">
-                    <span class="feed-icon">${a.icon}</span> ${a.content}
+                    <span class="feed-icon">${escapeHTML(a.icon)}</span> ${escapeHTML(a.content)}
                 </div>
                 <div class="feed-footer">
                     <button class="clap-btn ${a.has_clapped ? 'clapped' : ''}"

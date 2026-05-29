@@ -237,11 +237,17 @@ function toast(msg, type) {
     setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3000);
 }
 
+function escapeHTML(str) {
+    const d = document.createElement('div');
+    d.textContent = str == null ? '' : String(str);
+    return d.innerHTML;
+}
+
 function avatarHTML(pp, name, cls) {
     cls = cls || 'fr-avatar';
-    if (pp) return '<div class="'+cls+'"><img src="'+pp.replace(/"/g,'&quot;')+'"></div>';
+    if (pp) return '<div class="'+cls+'"><img src="'+escapeHTML(pp).replace(/"/g,'&quot;')+'"></div>';
     const letter = (name || 'U')[0].toUpperCase();
-    return '<div class="'+cls+'">'+letter+'</div>';
+    return '<div class="'+cls+'">'+escapeHTML(letter)+'</div>';
 }
 
 // ── Search ──
@@ -263,9 +269,9 @@ searchInput.addEventListener('input', function() {
                 let btnHTML = '';
                 if (u.status === 'accepted') btnHTML = '<span class="sr-btn accepted">Arkadaş</span>';
                 else if (u.status === 'pending') btnHTML = '<span class="sr-btn pending">Bekliyor</span>';
-                else btnHTML = '<button class="sr-btn add" onclick="sendRequest(\''+u.username+'\')">Ekle</button>';
+                else btnHTML = '<button class="sr-btn add" data-username="'+escapeHTML(u.username).replace(/"/g,'&quot;')+'">Ekle</button>';
                 return '<div class="sr-item">' + avatarHTML(u.profile_picture, u.username, 'sr-avatar') +
-                    '<div class="sr-info"><div class="sr-name">'+u.full_name+'</div><div class="sr-handle">@'+u.username+'</div></div>' +
+                    '<div class="sr-info"><div class="sr-name">'+escapeHTML(u.full_name)+'</div><div class="sr-handle">@'+escapeHTML(u.username)+'</div></div>' +
                     btnHTML + '</div>';
             }).join('');
         }
@@ -277,8 +283,13 @@ document.addEventListener('click', e => {
     if (!e.target.closest('.search-box')) searchResults.classList.remove('show');
 });
 
+searchResults.addEventListener('click', e => {
+    const btn = e.target.closest('.sr-btn.add');
+    if (btn && btn.dataset.username) sendRequest(btn.dataset.username);
+});
+
 async function sendRequest(username) {
-    const res = await fetch('/friend/request/' + username, { method: 'POST' });
+    const res = await fetch('/friend/request/' + encodeURIComponent(username), { method: 'POST' });
     const data = await res.json();
     if (res.ok) { toast(data.message, 'success'); searchInput.value = ''; searchResults.classList.remove('show'); loadFriends(); }
     else toast(data.error, 'error');
@@ -297,7 +308,7 @@ async function loadFriends() {
         inSection.style.display = '';
         inList.innerHTML = data.incoming.map(r =>
             '<div class="fr-row">' + avatarHTML(r.profile_picture, r.username) +
-            '<div class="fr-info"><div class="fr-name">'+r.full_name+'</div><div class="fr-handle">@'+r.username+'</div></div>' +
+            '<div class="fr-info"><div class="fr-name">'+escapeHTML(r.full_name)+'</div><div class="fr-handle">@'+escapeHTML(r.username)+'</div></div>' +
             '<div class="fr-actions">' +
             '<button class="btn-accept" onclick="acceptReq('+r.request_id+')">Kabul</button>' +
             '<button class="btn-reject" onclick="rejectReq('+r.request_id+')">Reddet</button>' +
@@ -313,8 +324,8 @@ async function loadFriends() {
     if (data.friends.length) {
         fList.innerHTML = data.friends.map(f =>
             '<div class="fr-row">' + avatarHTML(f.profile_picture, f.username) +
-            '<div class="fr-info"><div class="fr-name">'+f.full_name+'</div><div class="fr-handle">@'+f.username+' <span class="rank-badge">'+f.rank_title+'</span></div></div>' +
-            '<a href="/chat/'+f.username+'" class="btn-chat">💬 Sohbet</a>' +
+            '<div class="fr-info"><div class="fr-name">'+escapeHTML(f.full_name)+'</div><div class="fr-handle">@'+escapeHTML(f.username)+' <span class="rank-badge">'+escapeHTML(f.rank_title)+'</span></div></div>' +
+            '<a href="/chat/'+encodeURIComponent(f.username)+'" class="btn-chat">💬 Sohbet</a>' +
             '</div>'
         ).join('');
     } else {

@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, render_template , redirect , url_for , session , Response, flash
+from flask import Flask, request, jsonify, render_template , redirect , url_for , session , Response, flash, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager , UserMixin , login_user , logout_user , login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -197,6 +197,47 @@ if not _secret_key:
             "Set FLASK_DEBUG=1 to allow an ephemeral key for local development."
         )
 app.config["SECRET_KEY"] = _secret_key
+
+# Dev mode = explicit FLASK_DEBUG/FLASK_ENV. Used to relax the Secure-cookie
+# requirement so local http:// sessions still work.
+_IS_DEV = os.environ.get("FLASK_DEBUG") == "1" or os.environ.get("FLASK_ENV") == "development"
+
+# ── Session cookie hardening ──
+# HttpOnly: JS can't read the session cookie (limits XSS impact).
+# SameSite=Lax: browser won't send the cookie on cross-site POST/PATCH/DELETE,
+#   which is the primary CSRF defense (combined with the Origin check below).
+# Secure: only sent over HTTPS in production (relaxed for local http dev).
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = not _IS_DEV
+app.config["REMEMBER_COOKIE_HTTPONLY"] = True
+app.config["REMEMBER_COOKIE_SAMESITE"] = "Lax"
+app.config["REMEMBER_COOKIE_SECURE"] = not _IS_DEV
+
+
+@app.before_request
+def _csrf_protect():
+    """Reject state-changing requests that don't originate from our own site.
+
+    Cookie-authenticated POST/PUT/PATCH/DELETE requests are the CSRF attack
+    surface. We verify the Origin (or Referer) header matches our host; a
+    cross-site forgery cannot forge these headers. Same-origin fetch() calls
+    send them automatically, so the frontend needs no changes.
+    """
+    if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+        return
+    from urllib.parse import urlparse
+    expected_host = request.host.split(":")[0]
+    for header in ("Origin", "Referer"):
+        value = request.headers.get(header)
+        if value:
+            if urlparse(value).hostname == expected_host:
+                return
+            abort(403, description="CSRF doğrulaması başarısız.")
+    # No Origin and no Referer on a state-changing request → treat as forged.
+    abort(403, description="CSRF doğrulaması başarısız.")
+
+
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login" # Giriş zaten yapılıysa yönlendirme
@@ -3519,11 +3560,9 @@ def edit_profile():
     new_full_name = (data.get("full_name") or "").strip()
     new_goal = (data.get("goal") or "").strip()
 
-    if not new_username or len(new_username) < 3:
-        return jsonify({"error": "Kullanıcı adı en az 3 karakter olmalıdır."}), 400
-
-    if len(new_username) > 80:
-        return jsonify({"error": "Kullanıcı adı en fazla 80 karakter olabilir."}), 400
+    username_error = validate_username(new_username)
+    if username_error:
+        return jsonify({"error": username_error}), 400
 
     if new_username != current_user.username:
         if User.query.filter_by(username=new_username).first():
@@ -5417,6 +5456,24 @@ def dashboard_nudges():
     except Exception:
         return jsonify({"nudges": []})
 
+USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+def validate_username(name):
+    """Return an error message if username is invalid, else None.
+
+    Restricting to [A-Za-z0-9_.-] keeps usernames safe to interpolate into
+    HTML/JS/URL contexts on the client (defense against stored XSS).
+    """
+    if not name or len(name) < 3:
+        return "Kullanıcı adı en az 3 karakter olmalıdır."
+    if len(name) > 80:
+        return "Kullanıcı adı en fazla 80 karakter olabilir."
+    if not USERNAME_RE.match(name):
+        return "Kullanıcı adı yalnızca harf, rakam, nokta, alt çizgi ve tire içerebilir."
+    return None
+
+
 @app.route("/register", methods=["GET","POST"])
 def register():
     if request.method == "GET":
@@ -5431,10 +5488,11 @@ def register():
     
     if len(password) < 6:
         return jsonify({"error" : "Şifre en az 6 karakter olmalıdır."}) , 400
-    
-    if len(username) < 3:
-        return jsonify({"error" : "Kullanıcı adı en az 3 karakter olmalıdır."}) , 400
-    
+
+    username_error = validate_username(username)
+    if username_error:
+        return jsonify({"error": username_error}), 400
+
     # Kullanıcı check
     if User.query.filter_by(username=username).first():
         return jsonify({"error" : "Bu kullanıcı adı alınmış."}), 400
