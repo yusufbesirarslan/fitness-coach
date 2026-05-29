@@ -41,10 +41,10 @@ body {
   --orange:      #FFB020;
   --orange-dim:  rgba(255,176,32,0.12);
 
-  --text:        #F2F2F2;
-  --text-2:      #9A9A9A;
-  --text-3:      #606060;
-  --text-4:      #3A3A3A;
+  --text:        #F4F4F4;
+  --text-2:      #A6A6A6;
+  --text-3:      #808080;
+  --text-4:      #4D4D4D;
 
   /* Spacing (8px grid) */
   --s1: 8px;   --s2: 16px;  --s3: 24px;  --s4: 32px;
@@ -57,17 +57,17 @@ body {
   --font-display: 'Bebas Neue', sans-serif;
   --font-body:    'DM Sans', sans-serif;
 
-  /* Shadows */
-  --shadow-sm:   0 2px 8px  rgba(0,0,0,0.40);
-  --shadow-md:   0 4px 20px rgba(0,0,0,0.50);
-  --shadow-lg:   0 8px 40px rgba(0,0,0,0.60);
-  --shadow-volt: 0 4px 24px rgba(204,255,0,0.28);
-  --shadow-blue: 0 4px 24px rgba(0,123,255,0.22);
+  /* Shadows — consistent elevation scale, no neon glow */
+  --shadow-sm:   0 1px 2px  rgba(0,0,0,0.40);
+  --shadow-md:   0 4px 16px rgba(0,0,0,0.45);
+  --shadow-lg:   0 12px 32px rgba(0,0,0,0.55);
+  --shadow-volt: 0 2px 10px rgba(204,255,0,0.14);
+  --shadow-blue: 0 2px 10px rgba(0,123,255,0.12);
 
-  /* Transitions */
-  --t-fast: 0.15s ease;
-  --t-base: 0.25s ease;
-  --t-spring: 0.30s cubic-bezier(0.34,1.56,0.64,1);
+  /* Transitions — clean decelerating ease, no overshoot */
+  --t-fast: 0.14s cubic-bezier(0.4,0,0.2,1);
+  --t-base: 0.2s  cubic-bezier(0.4,0,0.2,1);
+  --t-spring: 0.28s cubic-bezier(0.16,1,0.3,1);
 
   /* Layout */
   --sidebar-w:    256px;
@@ -80,7 +80,7 @@ body {
 @keyframes fade-in     { from { opacity:0; } to { opacity:1; } }
 @keyframes slide-up    { from { transform:translateY(14px); opacity:0; } to { transform:translateY(0); opacity:1; } }
 @keyframes toast-in    { from { transform:translateY(20px); opacity:0; } to { transform:translateY(0); opacity:1; } }
-@keyframes pulse-glow  { 0%,100% { box-shadow:0 0 16px var(--volt-glow); } 50% { box-shadow:0 0 36px rgba(204,255,0,.5); } }
+@keyframes pulse-glow  { 0%,100% { box-shadow:0 0 0 0 rgba(204,255,0,0.18); } 50% { box-shadow:0 0 0 4px rgba(204,255,0,0); } }
 @keyframes skeleton-shimmer {
   0%   { background-position: -600px 0; }
   100% { background-position:  600px 0; }
@@ -318,7 +318,7 @@ textarea.fc-input { resize: vertical; min-height: 84px; line-height: 1.6; }
   border-radius: var(--r-lg); overflow: hidden;
   transition: border-color var(--t-base), transform var(--t-base), box-shadow var(--t-base);
 }
-.plan-card:hover  { border-color: var(--border-2); transform: translateY(-3px); box-shadow: var(--shadow-lg); }
+.plan-card:hover  { border-color: var(--border-2); transform: translateY(-2px); box-shadow: var(--shadow-md); }
 .plan-card.chosen { border-color: var(--volt); }
 
 .plan-card-hdr   { padding: 18px 20px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
@@ -385,12 +385,12 @@ textarea.fc-input { resize: vertical; min-height: 84px; line-height: 1.6; }
   width: 52px; height: 52px; border-radius: 14px;
   background: var(--volt); border: none; cursor: pointer; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 20px rgba(204,255,0,0.25);
-  transition: transform 0.30s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.2s, border-radius 0.3s;
+  box-shadow: var(--shadow-md);
+  transition: transform var(--t-spring), box-shadow var(--t-base), border-radius 0.3s;
   color: #0A0A0C;
 }
 .quick-add-btn svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.3s ease; }
-.quick-add-btn:hover { box-shadow: 0 6px 28px rgba(204,255,0,0.40); }
+.quick-add-btn:hover { box-shadow: var(--shadow-lg); transform: translateY(-1px); }
 .quick-add-btn.open  { border-radius: 50%; }
 .quick-add-btn.open svg { transform: rotate(45deg); }
 
@@ -540,4 +540,45 @@ textarea.fc-input { resize: vertical; min-height: 84px; line-height: 1.6; }
   .active-banner { flex-direction: column; align-items: flex-start; }
   .fc-divider   { margin: 24px 0 18px; }
   .btn-ghost    { padding: 8px 14px; font-size: 12px; }
+}
+
+/* ── 33. TABULAR FIGURES (data alignment) ─────────── */
+/* Numeric/metric displays use tabular figures so digits stay aligned
+   and don't cause layout shift as values update — data-focused feel. */
+.score-big, .score-label,
+.plan-macro-val, .plan-card-kcal,
+.history-total span, .bar-col-label,
+.meal-badge, .pbar-track + *,
+.stat-value, .stat-unit {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* ── 34. ACCESSIBLE FOCUS (keyboard) ──────────────── */
+/* Visible focus ring on all interactive elements for keyboard users,
+   without affecting mouse/touch interaction. */
+a:focus-visible,
+button:focus-visible,
+.tab-btn:focus-visible,
+.chip:focus-visible,
+.meal-type-opt:focus-visible,
+.sidebar-link:focus-visible,
+.bn-item:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--volt);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+.fc-input:focus-visible { outline: none; }
+
+/* ── 35. REDUCED MOTION ───────────────────────────── */
+/* Respect the OS "reduce motion" preference: keep transitions snappy
+   and disable looping/decorative animation. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

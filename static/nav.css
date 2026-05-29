@@ -254,9 +254,7 @@
   border: 2px solid rgba(204,255,0,0.25);
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  box-shadow:
-    0 0 20px rgba(204,255,0,0.15),
-    0 4px 16px rgba(0,0,0,0.5);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
   transition: all var(--t-spring);
   z-index: 10;
   -webkit-tap-highlight-color: transparent;
@@ -267,19 +265,17 @@
   stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round;
 }
 .qr-fab:hover {
-  box-shadow:
-    0 0 30px rgba(204,255,0,0.30),
-    0 6px 24px rgba(0,0,0,0.6);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.6);
   border-color: rgba(204,255,0,0.5);
-  transform: translateX(-50%) scale(1.06);
+  transform: translateX(-50%) scale(1.04);
 }
 .qr-fab:active {
   transform: translateX(-50%) scale(0.95);
 }
 
 @keyframes fab-pulse {
-  0%, 100% { box-shadow: 0 0 20px rgba(204,255,0,0.15), 0 4px 16px rgba(0,0,0,0.5); }
-  50% { box-shadow: 0 0 32px rgba(204,255,0,0.35), 0 4px 16px rgba(0,0,0,0.5); }
+  0%, 100% { box-shadow: 0 4px 16px rgba(0,0,0,0.5), 0 0 0 0 rgba(204,255,0,0.20); }
+  50% { box-shadow: 0 4px 16px rgba(0,0,0,0.5), 0 0 0 5px rgba(204,255,0,0); }
 }
 .qr-fab.pulse { animation: fab-pulse 2.5s ease-in-out infinite; }
 

@@ -24,8 +24,8 @@
     transition: transform 0.28s ease, box-shadow 0.28s ease, border-color 0.28s ease;
 }
 .bc:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 12px 40px rgba(0,0,0,0.45);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
     border-color: rgba(255,255,255,0.10);
 }
 
@@ -147,7 +147,6 @@
     background: rgba(255,176,32,0.18);
     border-color: rgba(255,176,32,0.5);
     color: #FFB020;
-    box-shadow: 0 0 10px rgba(255,176,32,0.15);
 }
 
 .streak-msg {
@@ -284,8 +283,8 @@
 .w-btn:hover { background:#A8D400; }
 .w-btn.pulse { animation: w-pulse 2.4s ease infinite; }
 @keyframes w-pulse {
-    0%,100% { box-shadow:0 0 0 0   rgba(204,255,0,0.55); }
-    50%      { box-shadow:0 0 0 10px rgba(204,255,0,0); }
+    0%,100% { box-shadow:0 0 0 0  rgba(204,255,0,0.30); }
+    50%      { box-shadow:0 0 0 6px rgba(204,255,0,0); }
 }
 
 .w-meta { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; padding-top:14px; border-top:1px solid rgba(255,255,255,0.04); }
@@ -338,7 +337,6 @@
     background: linear-gradient(135deg, #CCFF00, #A8D400);
     display:flex; align-items:center; justify-content:center;
     font-family:'Bebas Neue',sans-serif; font-size:22px; color:#0A0A0C;
-    box-shadow: 0 0 16px rgba(204,255,0,0.18);
 }
 .jm-info { flex:1; min-width:0; }
 .jm-title-text {
@@ -362,7 +360,6 @@
     height:100%; border-radius:4px;
     background: linear-gradient(90deg, #4F46E5, #06B6D4);
     transition: width 0.8s cubic-bezier(0.4,0,0.2,1);
-    box-shadow: 0 0 15px rgba(79,70,229,0.35), 0 0 6px rgba(6,182,212,0.25);
 }
 .jm-bonus {
     font-size:11px; color:#606068; font-weight:500; letter-spacing:0.3px;
@@ -399,6 +396,19 @@
 
     .journey-card { padding: 18px; }
     .jm-xp-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   TABULAR FIGURES (data alignment)
+   ═══════════════════════════════════════════════════════ */
+.streak-number, .streak-unit,
+.water-num, .water-denom,
+.w-big, .wm-val, .w-delta,
+.act-stat-val, .jm-xp-text,
+.cal-center-num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
 }
 
 
