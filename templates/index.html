@@ -662,10 +662,9 @@ function renderTip(i, animated, dir) {
         (function(idx) { dot.addEventListener('click', function() { goToTip(idx); }); })(d);
         dots.appendChild(dot);
     }
-    // Slide the dot strip rightward so the indicator change is visible
-    // even when the window keeps the active dot near center.
+    // Next: dot strip enters from the right and settles left into place.
     if (animated) {
-        const dotDx = (dir || 1) > 0 ? -8 : 8;
+        const dotDx = (dir || 1) > 0 ? 8 : -8;
         dots.animate(
             [ { transform: 'translateX(' + dotDx + 'px)' }, { transform: 'translateX(0)' } ],
             { duration: 220, easing: 'cubic-bezier(0.22, 0.61, 0.36, 1)' }
@@ -682,9 +681,9 @@ function renderTip(i, animated, dir) {
     if (!animated) { applyContent(); return; }
 
     const slide   = document.getElementById('ins-slide');
-    // L→R sweep: old exits right, new enters from left (for next).
-    const outDx   = dir > 0 ? '105%'  : '-105%';
-    const inFrom  = dir > 0 ? '-105%' : '105%';
+    // Carousel "next" sweep: old exits left, new enters from right.
+    const outDx   = dir > 0 ? '-105%' : '105%';
+    const inFrom  = dir > 0 ? '105%'  : '-105%';
     const easing  = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
 
     // Cancel any in-flight animation so back-to-back navigation stays clean.
