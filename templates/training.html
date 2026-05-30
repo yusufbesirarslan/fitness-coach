@@ -799,7 +799,9 @@ document.addEventListener('click', e => {
     }
 
     function checkWorkoutCompleted() {
-        if (localStorage.getItem(getTodayKey()) === 'true') markWorkoutCompleted();
+        try {
+            if (localStorage.getItem(getTodayKey()) === 'true') markWorkoutCompleted();
+        } catch (e) {}
     }
 
     async function finishWorkout() {
@@ -811,8 +813,10 @@ document.addEventListener('click', e => {
             const data = await res.json();
             if (res.ok) {
                 showToast(data.message, 'success');
-                localStorage.setItem(getTodayKey(), 'true');
                 markWorkoutCompleted();
+                // localStorage bazı mobil tarayıcılarda (iOS Safari gizli mod vb.)
+                // hata fırlatabilir; butonu bozmaması için ayrı koru.
+                try { localStorage.setItem(getTodayKey(), 'true'); } catch (e) {}
             } else {
                 showToast(data.error || 'Hata oluştu', 'error');
                 btn.disabled = false;
