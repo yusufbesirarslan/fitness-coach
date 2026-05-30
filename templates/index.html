@@ -572,9 +572,14 @@ function renderSparkline(weights, labels, lineColor) {
 
 
 /* ═══ WEIGHT UPDATE ═══ */
+/* Son güncelleme zamanı sunucudan gelir (cihazlar arası tutarlı). */
+let lastWeightUpdateMs = (function () {
+    const iso = "{{ last_weight_update|default('') }}";
+    const t = iso ? Date.parse(iso) : NaN;
+    return isNaN(t) ? 0 : t;
+})();
 function checkBtnGlow() {
-    const last = localStorage.getItem('fc_last_weight_update');
-    const stale = !last || (Date.now() - parseInt(last)) > 86400000;
+    const stale = !lastWeightUpdateMs || (Date.now() - lastWeightUpdateMs) > 86400000;
     document.getElementById('w-btn').classList.toggle('pulse', stale);
 }
 
@@ -600,7 +605,7 @@ async function doUpdateWeight() {
         document.getElementById('w-target').textContent = Math.round(data.target_calories || 0);
         document.getElementById('w-meta').style.display = 'grid';
 
-        localStorage.setItem('fc_last_weight_update', Date.now().toString());
+        lastWeightUpdateMs = Date.now();
         btn.classList.remove('pulse');
         input.value = '';
         toast('Kilo güncellendi', 'success');

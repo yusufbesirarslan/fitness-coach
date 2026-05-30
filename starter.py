@@ -3543,10 +3543,16 @@ def analyze_menu():
 def home():
     if not current_user.profile_complete:
         return redirect(url_for("setup"))
+    # Son kilo güncellemesi zamanı (kilo butonu "hatırlatma" parıltısı için —
+    # cihazlar arası tutarlı olsun diye sunucudan, localStorage yerine).
+    last_checkin = WeeklyCheckIn.query.filter_by(user_id=current_user.id)\
+        .order_by(WeeklyCheckIn.created_at.desc()).first()
+    last_weight_update = (last_checkin.created_at.isoformat() + "Z") if last_checkin else ""
     return render_template("index.html",
         username=current_user.username,
         profile_picture=current_user.profile_picture,
         streak_count=current_user.streak_count or 0,
+        last_weight_update=last_weight_update,
     )
 
 @app.route("/edit-profile", methods=["GET", "POST"])
