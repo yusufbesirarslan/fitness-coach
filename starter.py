@@ -12,9 +12,18 @@ import re
 import threading
 import time
 import requests as http_requests_lib
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 load_dotenv()
 app = Flask(__name__)
+# Railway/gunicorn run behind a reverse proxy, so request.remote_addr is the
+# proxy's IP unless we trust X-Forwarded-For. ProxyFix(x_for=1) reads the single
+# entry the platform proxy appends (the real client), which the rate limiter
+# keys on. Without this, every request shares one IP and the limiter would
+# throttle all users together / be trivially bypassable.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 _BOOT_TS = int(time.time())  # cache-bust static assets on each deploy
 
 # ── FatSecret API (inlined to avoid psycopg2 dependency from fitx_mcp.server) ──
@@ -241,6 +250,23 @@ def _csrf_protect():
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login" # Giriş zaten yapılıysa yönlendirme
+
+# ── Rate limiting (brute-force / credential-stuffing defense) ──
+# Limits are applied per-route (see @limiter.limit on /login and /register);
+# no global default so the rest of the API is unaffected.
+# NOTE: storage is in-process memory — correct for a single gunicorn worker
+# (the current Procfile). If you scale to multiple workers/instances, point
+# storage_uri at a shared backend (e.g. Redis) so limits are enforced globally.
+limiter = Limiter(
+    key_func=get_remote_address,
+    app=app,
+    storage_uri="memory://",
+)
+
+
+@app.errorhandler(429)
+def ratelimit_exceeded(e):
+    return jsonify({"error": "Çok fazla deneme yaptınız. Lütfen biraz sonra tekrar deneyin."}), 429
 bedrock_runtime = boto3.client(
     'bedrock-runtime',
     region_name=os.getenv('AWS_REGION', 'us-east-1'),
@@ -5537,6 +5563,7 @@ def validate_username(name):
 
 
 @app.route("/register", methods=["GET","POST"])
+@limiter.limit("5 per hour", methods=["POST"])
 def register():
     if request.method == "GET":
         return render_template("register.html")
@@ -5570,6 +5597,7 @@ def register():
     return jsonify({"message" : f"Hoş geldin {username}, hesabın oluşturuldu!"})
 
 @app.route("/login", methods=["GET","POST"])
+@limiter.limit("10 per minute; 50 per hour", methods=["POST"])
 def login():
     if request.method == "GET":
         return render_template("login.html")
