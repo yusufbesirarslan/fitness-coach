@@ -394,7 +394,8 @@ _fs_token_lock = threading.Lock()
 _fs_token_cache = {"token": None, "expires_at": 0}
 
 FATSECRET_TOKEN_URL = "https://oauth.fatsecret.com/connect/token"
-FATSECRET_API_URL = "https://platform.fatsecret.com/rest/server.api"
+FATSECRET_BASE_URL = os.environ.get("FATSECRET_BASE_URL", "http://18.153.156.28:3000")
+FATSECRET_API_URL = f"{FATSECRET_BASE_URL}/rest/server.api"
 
 
 def _get_fatsecret_token() -> str:

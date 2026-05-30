@@ -29,7 +29,8 @@ _BOOT_TS = int(time.time())  # cache-bust static assets on each deploy
 # ── FatSecret API (inlined to avoid psycopg2 dependency from fitx_mcp.server) ──
 
 FATSECRET_TOKEN_URL = "https://oauth.fatsecret.com/connect/token"
-FATSECRET_API_URL = "https://platform.fatsecret.com/rest/server.api"
+FATSECRET_BASE_URL = os.environ.get("FATSECRET_BASE_URL", "http://18.153.156.28:3000")
+FATSECRET_API_URL = f"{FATSECRET_BASE_URL}/rest/server.api"
 
 def _fs_get(url, **kwargs):
     """GET request to FatSecret API."""
