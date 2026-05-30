@@ -1166,40 +1166,6 @@ def food_search():
 
 
 
-@app.route("/api/server-ip")
-@login_required
-def server_ip():
-    """Show Railway's outbound IP and test FatSecret connectivity."""
-    result = {}
-    try:
-        r = http_requests_lib.get("https://api.ipify.org", timeout=5)
-        result["ip"] = r.text.strip()
-    except Exception as e:
-        result["ip"] = None
-        result["ip_error"] = str(e)
-    try:
-        token = _get_fatsecret_token()
-        result["fatsecret_token"] = True
-        resp = _fs_get(FATSECRET_API_URL, params={
-            "method": "foods.search", "search_expression": "egg",
-            "format": "json", "max_results": 1,
-        }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
-        data = resp.json()
-        if "error" in data:
-            result["fatsecret_search"] = False
-            result["fatsecret_error"] = data["error"]
-        else:
-            foods = data.get("foods", {}).get("food", [])
-            if isinstance(foods, dict):
-                foods = [foods]
-            result["fatsecret_search"] = True
-            result["food_id"] = foods[0].get("food_id") if foods else None
-    except Exception as e:
-        result["fatsecret_token"] = False
-        result["fatsecret_error"] = str(e)
-    return jsonify(result)
-
-
 @app.route("/api/food/<food_id>/servings")
 @login_required
 def food_servings(food_id):
