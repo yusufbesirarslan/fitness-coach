@@ -602,32 +602,53 @@ document.addEventListener('click', e => {
   }
 });
 
-/* ── WATER QUICK-ADD ── */
-function quickAddWater(btn) {
-  const GOAL = 8;
-  const today = new Date().toDateString();
-  const s = JSON.parse(localStorage.getItem('fc_water') || '{}');
-  const cur = s.date === today ? (s.count || 0) : 0;
-  if (cur >= GOAL) { showToast('Günlük su hedefine ulaştın! 🎉', 'success'); return; }
+/* ── WATER QUICK-ADD (sunucuda saklanır — cihazlar arası senkron) ──
+   localStorage yalnızca anlık boyama / offline yedek olarak kullanılır;
+   ana sayfadaki su widget'ı ile aynı /water uç noktasını paylaşır. */
+const WATER_GOAL_N = 8;
+function readWaterCache() {
+  try {
+    const today = new Date().toDateString();
+    const s = JSON.parse(localStorage.getItem('fc_water') || '{}');
+    return s.date === today ? (s.count || 0) : 0;
+  } catch (e) { return 0; }
+}
+function writeWaterCache(n) {
+  try { localStorage.setItem('fc_water', JSON.stringify({ date: new Date().toDateString(), count: n })); } catch (e) {}
+}
+function setWaterSub(n) {
+  const sub = document.getElementById('qab-water-sub');
+  if (sub) sub.textContent = `Bugün ${n} / ${WATER_GOAL_N} bardak`;
+}
+async function quickAddWater(btn) {
+  const cur = readWaterCache();
+  if (cur >= WATER_GOAL_N) { showToast('Günlük su hedefine ulaştın! 🎉', 'success'); return; }
   const next = cur + 1;
-  localStorage.setItem('fc_water', JSON.stringify({ date: today, count: next }));
-  document.getElementById('qab-water-sub').textContent = `Bugün ${next} / ${GOAL} bardak`;
+  writeWaterCache(next);
+  setWaterSub(next);
   btn.querySelector('.qab-plus').style.display = 'none';
   btn.querySelector('.qab-check').style.display = '';
-  if (next >= GOAL) showToast('Günlük su hedefine ulaştın! 🎉', 'success');
+  if (next >= WATER_GOAL_N) showToast('Günlük su hedefine ulaştın! 🎉', 'success');
   else showToast(`${next}. bardak içildi 💧`, 'info');
   setTimeout(() => {
     btn.querySelector('.qab-plus').style.display = '';
     btn.querySelector('.qab-check').style.display = 'none';
   }, 1500);
+  try {
+    const res = await fetch('/water', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ count: next })
+    });
+    if (res.ok) { const d = await res.json(); writeWaterCache(d.count); setWaterSub(d.count); }
+  } catch (e) {}
 }
-function initWaterButton() {
-  const GOAL = 8;
-  const today = new Date().toDateString();
-  const s = JSON.parse(localStorage.getItem('fc_water') || '{}');
-  const cur = s.date === today ? (s.count || 0) : 0;
-  const sub = document.getElementById('qab-water-sub');
-  if (sub) sub.textContent = `Bugün ${cur} / ${GOAL} bardak`;
+async function initWaterButton() {
+  setWaterSub(readWaterCache());   // önbellekten anlık
+  try {
+    const res = await fetch('/water');
+    if (res.ok) { const d = await res.json(); writeWaterCache(d.count); setWaterSub(d.count); }
+  } catch (e) {}
 }
 
 /* ── WATER MODAL ── */

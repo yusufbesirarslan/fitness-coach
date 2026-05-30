@@ -480,15 +480,8 @@ function addWater() {
 
 
 /* ═══ STREAK ═══ */
-function computeStreak() {
-    const today = new Date().toDateString();
-    const yday  = new Date(Date.now() - 86400000).toDateString();
-    const s = JSON.parse(localStorage.getItem('fc_streak') || '{"count":0,"last":""}');
-    if (s.last === today) return s.count;
-    const next = s.last === yday ? s.count + 1 : 1;
-    localStorage.setItem('fc_streak', JSON.stringify({ count: next, last: today }));
-    return next;
-}
+/* Streak sunucuda (update_streak / streak_count) tutulur; cihazlar arası
+   tutarlı olması için her zaman sunucu değeri gösterilir. */
 function renderStreak(n) {
     const badge = document.getElementById('g-streak-badge');
     if (badge) badge.textContent = `${n} Günlük Seri`;
@@ -829,7 +822,7 @@ async function init() {
     waterCount = readWaterCache();
     renderWater(waterCount, false);   // önbellekten anlık boyama
     loadWater();                       // sunucudan senkronla
-    renderStreak(computeStreak());
+    renderStreak({{ streak_count|default(0) }});
     checkBtnGlow();
 
     tipIdx = Math.floor(Date.now() / 86400000) % TIPS.length;
