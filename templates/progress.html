@@ -337,7 +337,14 @@
             if (data.error) { showToast(data.error, 'error'); return; }
 
             const fb = document.getElementById('feedback-card');
-            document.getElementById('feedback-text').innerHTML = data.coach_feedback.replace(/\n/g, '<br>');
+            // AI çıktısı güvenilmez: HTML entity'lerini escape et, sonra satır
+            // sonlarını <br>'e çevir (XSS koruması).
+            const safeFeedback = (data.coach_feedback || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/\n/g, '<br>');
+            document.getElementById('feedback-text').innerHTML = safeFeedback;
             fb.classList.add('visible');
             fb.scrollIntoView({ behavior:'smooth', block:'nearest' });
             showToast('Check-in kaydedildi!', 'success');

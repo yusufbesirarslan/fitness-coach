@@ -553,18 +553,31 @@ function renderResults(data) {
     section.scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
+// Yemek verisi LLM'in taradığı (saldırgan kontrolünde olabilen) menü
+// sayfasından geliyor. HTML'e basmadan önce mutlaka escape et (XSS koruması).
+function escMenu(s) {
+    return String(s == null ? '' : s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
 function dishCard(d, isTop) {
     const scoreClass = d.score >= 50 ? 'high' : d.score >= 20 ? 'mid' : 'low';
-    const warnings = (d.warnings || []).map(w => `<span class="dish-warn-tag">${w}</span>`).join('');
+    const warnings = (d.warnings || []).map(w => `<span class="dish-warn-tag">${escMenu(w)}</span>`).join('');
     const m = d.macros;
+    // onclick attribute: JSON'u HTML-entity ile kaçır ki tarayıcı attribute'u
+    // okurken geri çözsün ama tırnak/açı parantez ile attribute'tan çıkılamasın.
+    const onclickData = escMenu(JSON.stringify(JSON.stringify(d)));
 
     return `
     <div class="dish-card ${isTop ? 'top' : ''}">
         <div class="dish-header">
-            <div class="dish-name">${d.name}</div>
+            <div class="dish-name">${escMenu(d.name)}</div>
             <div class="dish-score ${scoreClass}">${d.score > 0 ? '+' : ''}${d.score}</div>
         </div>
-        <div class="dish-reason">${d.reason}</div>
+        <div class="dish-reason">${escMenu(d.reason)}</div>
         <div class="dish-serving-label">1 Porsiyon</div>
         <div class="dish-macros">
             <div class="dish-macro"><span>${m.calories}</span> kcal</div>
@@ -573,7 +586,7 @@ function dishCard(d, isTop) {
             <div class="dish-macro"><span>${m.fat}g</span> yağ</div>
         </div>
         ${warnings ? '<div class="dish-warnings">' + warnings + '</div>' : ''}
-        <button class="dish-add-btn" onclick="addToLog(this, ${JSON.stringify(JSON.stringify(d))})">Günlük Kayda Ekle</button>
+        <button class="dish-add-btn" onclick="addToLog(this, ${onclickData})">Günlük Kayda Ekle</button>
     </div>`;
 }
 
