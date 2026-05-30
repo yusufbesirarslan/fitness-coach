@@ -5556,6 +5556,24 @@ def validate_username(name):
     return None
 
 
+def validate_password(password):
+    """Return an error message if the password is too weak, else None.
+
+    Min 8 chars with at least one letter and one digit raises the bar against
+    brute-force/guessing. The 128-char cap bounds the work the hashing function
+    does per request (avoids a DoS via a megabyte-long password).
+    """
+    if not password or len(password) < 8:
+        return "Şifre en az 8 karakter olmalıdır."
+    if len(password) > 128:
+        return "Şifre en fazla 128 karakter olabilir."
+    if not any(c.isalpha() for c in password):
+        return "Şifre en az bir harf içermelidir."
+    if not any(c.isdigit() for c in password):
+        return "Şifre en az bir rakam içermelidir."
+    return None
+
+
 @app.route("/register", methods=["GET","POST"])
 @limiter.limit("5 per hour", methods=["POST"])
 def register():
@@ -5569,8 +5587,9 @@ def register():
     if not username or not email or not password:
         return jsonify({"error" : "Tüm alanlar zorunludur"}), 400
     
-    if len(password) < 6:
-        return jsonify({"error" : "Şifre en az 6 karakter olmalıdır."}) , 400
+    password_error = validate_password(password)
+    if password_error:
+        return jsonify({"error": password_error}), 400
 
     username_error = validate_username(username)
     if username_error:
