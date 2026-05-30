@@ -3581,6 +3581,33 @@ def home():
         last_weight_update=last_weight_update,
     )
 
+_PROFILE_PIC_RE = re.compile(
+    r'^data:image/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/]+={0,2})$'
+)
+
+
+def validate_profile_picture(value):
+    """Return (cleaned_value, error). Only accept a base64-encoded image data
+    URL. Rejecting arbitrary strings stops external/tracking URLs, javascript:
+    and data:text/html payloads from being stored and later rendered in the
+    <img src> of anyone who views the profile (defense against XSS/SSRF/abuse).
+    """
+    if not value:
+        return None, None  # boş = fotoğrafı kaldır
+    if len(value) > 500_000:
+        return None, "Profil fotoğrafı çok büyük (maks 2MB)."
+    m = _PROFILE_PIC_RE.match(value)
+    if not m:
+        return None, "Geçersiz profil fotoğrafı formatı."
+    # base64 gövdesi gerçekten çözülebiliyor mu?
+    import base64 as _b64
+    try:
+        _b64.b64decode(m.group(2), validate=True)
+    except Exception:
+        return None, "Profil fotoğrafı çözümlenemedi."
+    return value, None
+
+
 @app.route("/edit-profile", methods=["GET", "POST"])
 @login_required
 def edit_profile():
@@ -3618,9 +3645,10 @@ def edit_profile():
 
     if "profile_picture" in data:
         new_profile_picture = (data.get("profile_picture") or "").strip()
-        if len(new_profile_picture) > 500_000:
-            return jsonify({"error": "Profil fotoğrafı çok büyük (maks 2MB)."}), 400
-        current_user.profile_picture = new_profile_picture if new_profile_picture else None
+        cleaned_pic, pic_error = validate_profile_picture(new_profile_picture)
+        if pic_error:
+            return jsonify({"error": pic_error}), 400
+        current_user.profile_picture = cleaned_pic
 
     valid_goals = ["kilo verme", "kas kazanma", ""]
     if new_goal not in valid_goals:
