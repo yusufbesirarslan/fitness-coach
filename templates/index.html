@@ -391,13 +391,35 @@ function setGreeting(goal) {
 
 
 /* ═══ WATER TRACKING ═══ */
-function getWaterCount() {
-    const today = new Date().toDateString();
-    const s = JSON.parse(localStorage.getItem('fc_water') || '{}');
-    return s.date === today ? (s.count || 0) : 0;
+/* Sunucuda saklanır (cihazlar arası senkron). localStorage yalnızca
+   anlık boyama / offline yedek olarak kullanılır. */
+let waterCount = 0;
+function getWaterCount() { return waterCount; }
+function readWaterCache() {
+    try {
+        const today = new Date().toDateString();
+        const s = JSON.parse(localStorage.getItem('fc_water') || '{}');
+        return s.date === today ? (s.count || 0) : 0;
+    } catch (e) { return 0; }
 }
 function saveWaterCount(n) {
-    localStorage.setItem('fc_water', JSON.stringify({ date: new Date().toDateString(), count: n }));
+    waterCount = n;
+    try { localStorage.setItem('fc_water', JSON.stringify({ date: new Date().toDateString(), count: n })); } catch (e) {}
+    fetch('/water', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: n })
+    }).catch(() => {});
+}
+async function loadWater() {
+    try {
+        const res = await fetch('/water');
+        if (!res.ok) return;
+        const data = await res.json();
+        waterCount = data.count || 0;
+        try { localStorage.setItem('fc_water', JSON.stringify({ date: new Date().toDateString(), count: waterCount })); } catch (e) {}
+        renderWater(waterCount, false);
+    } catch (e) {}
 }
 function renderWater(count, animate) {
     const numEl = document.getElementById('water-num');
@@ -804,7 +826,9 @@ document.addEventListener('click', (e) => {
 /* ═══ INIT ═══ */
 async function init() {
     buildWaterGlasses();
-    renderWater(getWaterCount(), false);
+    waterCount = readWaterCache();
+    renderWater(waterCount, false);   // önbellekten anlık boyama
+    loadWater();                       // sunucudan senkronla
     renderStreak(computeStreak());
     checkBtnGlow();
 

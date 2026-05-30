@@ -558,6 +558,19 @@ class UserQuestProgress(db.Model):
     quest = db.relationship("DailyQuest", backref="progress_entries")
 
 
+class WaterLog(db.Model):
+    # Günlük su (bardak) sayısı — kullanıcı + gün başına tek satır.
+    # Cihazlar arası senkron için sunucuda tutulur.
+    id       = db.Column(db.Integer, primary_key=True)
+    user_id  = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    date_key = db.Column(db.String(10), nullable=False, default=lambda: date.today().isoformat())
+    count    = db.Column(db.Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "date_key", name="uq_user_water_day"),
+    )
+
+
 class WorkoutLog(db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     user_id       = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
@@ -5360,6 +5373,36 @@ def complete_workout():
     if quest_result:
         response["quest_awarded"] = quest_result
     return jsonify(response)
+
+
+WATER_GOAL = 8  # bardak
+
+@app.route("/water", methods=["GET"])
+@login_required
+def get_water():
+    today_key = date.today().isoformat()
+    row = WaterLog.query.filter_by(user_id=current_user.id, date_key=today_key).first()
+    return jsonify({"count": row.count if row else 0, "goal": WATER_GOAL})
+
+@app.route("/water", methods=["POST"])
+@login_required
+def set_water():
+    data = request.get_json(silent=True) or {}
+    try:
+        count = int(data.get("count", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Geçersiz değer."}), 400
+    count = max(0, min(count, WATER_GOAL))  # 0..8 arası kıs
+
+    today_key = date.today().isoformat()
+    row = WaterLog.query.filter_by(user_id=current_user.id, date_key=today_key).first()
+    if row:
+        row.count = count
+    else:
+        row = WaterLog(user_id=current_user.id, date_key=today_key, count=count)
+        db.session.add(row)
+    db.session.commit()
+    return jsonify({"count": row.count, "goal": WATER_GOAL})
 
 @app.route("/training-plan/active")
 @login_required
