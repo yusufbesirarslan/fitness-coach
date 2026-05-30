@@ -798,9 +798,20 @@ document.addEventListener('click', e => {
         btn.classList.add('completed');
     }
 
-    function checkWorkoutCompleted() {
+    async function checkWorkoutCompleted() {
+        // hızlı yol: yerel önbellek (anlık boyama)
         try {
             if (localStorage.getItem(getTodayKey()) === 'true') markWorkoutCompleted();
+        } catch (e) {}
+        // doğru yol: sunucudan (cihazlar arası senkron)
+        try {
+            const res = await fetch('/workout/status');
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.completed) {
+                markWorkoutCompleted();
+                try { localStorage.setItem(getTodayKey(), 'true'); } catch (e) {}
+            }
         } catch (e) {}
     }
 
@@ -809,10 +820,16 @@ document.addEventListener('click', e => {
         btn.disabled = true;
         btn.textContent = 'İŞLENİYOR...';
         try {
-            const res = await fetch('/workout/complete', { method: 'POST' });
-            const data = await res.json();
-            if (res.ok) {
-                showToast(data.message, 'success');
+            const res = await fetch('/workout/complete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            const data = await res.json().catch(() => ({}));
+            // Sunucu "zaten tamamladın" derse (ör. başka cihazda yapıldı) bunu
+            // hata değil, tamamlanmış kabul et ve butonu güncelle.
+            const already = !res.ok && (data.error || '').includes('zaten');
+            if (res.ok || already) {
+                if (res.ok) showToast(data.message, 'success');
                 markWorkoutCompleted();
                 // localStorage bazı mobil tarayıcılarda (iOS Safari gizli mod vb.)
                 // hata fırlatabilir; butonu bozmaması için ayrı koru.

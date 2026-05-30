@@ -5374,6 +5374,19 @@ def complete_workout():
         response["quest_awarded"] = quest_result
     return jsonify(response)
 
+@app.route("/workout/status")
+@login_required
+def workout_status():
+    # Bugünkü antrenman tamamlanmış mı? (cihazlar arası senkron için sunucudan)
+    today_key = date.today().isoformat()
+    quest = DailyQuest.query.filter_by(quest_type="workout_logged", is_active=True).first()
+    completed = False
+    if quest:
+        completed = UserQuestProgress.query.filter_by(
+            user_id=current_user.id, quest_id=quest.id, date_key=today_key
+        ).first() is not None
+    return jsonify({"completed": completed})
+
 
 WATER_GOAL = 8  # bardak
 
