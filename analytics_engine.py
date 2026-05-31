@@ -23,7 +23,6 @@ def get_nudges(user, db, models):
     today = date.today()
 
     _check_missing_logs(user, db, models, now, nudges)
-    _check_streak_at_risk(user, today, nudges)
     _check_protein_goal(user, db, models, today, nudges)
     _check_weekly_report_day(today, nudges)
 
@@ -59,17 +58,6 @@ def _check_missing_logs(user, db, models, now, nudges):
         nudges.append(
             "NUDGE_NO_NUTRITION: Son 48 saatte beslenme kaydı yok. "
             "Ne yediğini loglamasını öner."
-        )
-
-
-def _check_streak_at_risk(user, today, nudges):
-    streak = user.streak_count or 0
-    last_login = user.last_login
-
-    if streak >= 5 and last_login and last_login < today:
-        nudges.append(
-            f"NUDGE_STREAK_RISK: Kullanıcının {streak} günlük serisi var ve bugün henüz aktif değil. "
-            f"'Seriyi kırma!' tarzı motive edici bir mesaj ver."
         )
 
 
