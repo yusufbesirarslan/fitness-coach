@@ -111,11 +111,6 @@
         <h1 class="gr-title" id="g-title">Merhaba, <span>{{ username }}</span></h1>
         <p class="gr-sub" id="g-sub">Veriler yükleniyor…</p>
     </div>
-    <div class="gr-badges">
-        <div class="gr-badge volt"><span class="gr-badge-dot"></span><span id="g-goal">—</span></div>
-        <div class="gr-badge amber"><span class="gr-badge-dot"></span><span id="g-streak-badge">— Günlük Seri</span></div>
-        <div class="gr-badge blue" id="g-cal-badge" style="display:none"><span class="gr-badge-dot"></span><span id="g-cal-badge-txt">—</span></div>
-    </div>
 </div>
 
 <!-- ═══ BENTO GRID ═══ -->
@@ -361,12 +356,11 @@ function setGreeting(goal) {
     document.getElementById('g-title').innerHTML = `${gText}, <span>${uname}</span>`;
 
     const goalCfg = {
-        'kilo verme':  { sub: 'Bugün kalori açığını koru. Her küçük seçim hedefe bir adım daha yaklaştırıyor.', badge: 'Kilo Verme Modu' },
-        'kas kazanma': { sub: 'Proteinini aldın mı? Kaslar antrenmanla kırılır, mutfakta yeniden yapılır.', badge: 'Kas Kazanma Modu' },
+        'kilo verme':  { sub: 'Bugün kalori açığını koru. Her küçük seçim hedefe bir adım daha yaklaştırıyor.' },
+        'kas kazanma': { sub: 'Proteinini aldın mı? Kaslar antrenmanla kırılır, mutfakta yeniden yapılır.' },
     };
-    const cfg = goalCfg[goal] || { sub: 'Verilerini güncelle, yapay zeka koçun hazırda bekliyor.', badge: 'Aktif Mod' };
+    const cfg = goalCfg[goal] || { sub: 'Verilerini güncelle, yapay zeka koçun hazırda bekliyor.' };
     document.getElementById('g-sub').textContent  = cfg.sub;
-    document.getElementById('g-goal').textContent = cfg.badge;
 }
 
 
@@ -374,8 +368,6 @@ function setGreeting(goal) {
 /* Streak sunucuda (update_streak / streak_count) tutulur; cihazlar arası
    tutarlı olması için her zaman sunucu değeri gösterilir. */
 function renderStreak(n) {
-    const badge = document.getElementById('g-streak-badge');
-    if (badge) badge.textContent = `${n} Günlük Seri`;
     const flameNum = document.getElementById('jm-streak-num');
     if (flameNum) flameNum.textContent = `${n} Gün`;
 }
@@ -397,17 +389,6 @@ function updateCalRing(consumed, target, activityCals) {
     document.getElementById('cal-remain').textContent   = remaining + ' kcal';
     document.getElementById('cal-target').textContent   = target + ' kcal';
     document.getElementById('cal-activity').textContent = '+' + activityCals + ' kcal';
-
-    const badge = document.getElementById('g-cal-badge');
-    const pct   = Math.round(ratio * 100);
-    badge.style.display = 'inline-flex';
-    if (ratio >= 1) {
-        badge.className = 'gr-badge amber';
-        document.getElementById('g-cal-badge-txt').textContent = `Hedef aşıldı (${pct}%)`;
-    } else {
-        badge.className = 'gr-badge blue';
-        document.getElementById('g-cal-badge-txt').textContent = `${pct}% tüketildi`;
-    }
 }
 
 
