@@ -520,19 +520,6 @@ class Activity(db.Model):
 
     user = db.relationship("User", backref="activities")
 
-class ActivityClap(db.Model):
-    id          = db.Column(db.Integer, primary_key=True)
-    activity_id = db.Column(db.Integer, db.ForeignKey("activity.id"), nullable=False)
-    user_id     = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
-    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
-
-    __table_args__ = (
-        db.UniqueConstraint("activity_id", "user_id", name="uq_activity_clap"),
-    )
-
-    activity = db.relationship("Activity", backref="claps")
-    user     = db.relationship("User", backref="given_claps")
-
 
 class Supplement(db.Model):
     id                   = db.Column(db.Integer, primary_key=True)
@@ -3987,73 +3974,78 @@ def _process_meal_suggestion_accept(msg):
     print(f"[SUGGESTION] Logged meal: {ogun_title} → {total['calories']:.0f} kcal")
     return {"kalori": entry.kalori, "protein": entry.protein, "karb": entry.karb, "yag": entry.yag}
 
-# ── FEED ROUTES ──
+# ── LEADERBOARD ROUTES ──
 
-@app.route("/feed")
+LEADERBOARD_TOP_N = 100  # size of the visible top list
+
+def _accepted_friend_ids():
+    rows = Friendship.query.filter(
+        Friendship.status == "accepted",
+        db.or_(Friendship.sender_id == current_user.id,
+               Friendship.receiver_id == current_user.id)).all()
+    return {r.receiver_id if r.sender_id == current_user.id else r.sender_id
+            for r in rows}
+
+def _lb_serialize(u, rank):
+    xp = u.rank_points or 0
+    return {
+        "rank": rank,
+        "id": u.id,
+        "username": u.username,
+        "full_name": u.full_name or u.username,
+        "profile_picture": u.profile_picture,
+        "level": get_level(xp),
+        "xp": xp,
+        "streak": u.streak_count or 0,
+        "is_me": u.id == current_user.id,
+    }
+
+@app.route("/leaderboard")
 @login_required
-def feed_page():
-    return render_template("feed.html",
+def leaderboard_page():
+    return render_template("leaderboard.html",
         username=current_user.username,
         profile_picture=current_user.profile_picture)
 
-@app.route("/feed/data")
+@app.route("/leaderboard/data")
 @login_required
-def feed_data():
-    accepted = Friendship.query.filter(
-        Friendship.status == "accepted",
-        db.or_(Friendship.sender_id == current_user.id,
-               Friendship.receiver_id == current_user.id)
-    ).all()
-    friend_ids = set()
-    for f in accepted:
-        friend_ids.add(f.receiver_id if f.sender_id == current_user.id else f.sender_id)
+def leaderboard_data():
+    scope = "friends" if request.args.get("scope") == "friends" else "global"
 
-    if not friend_ids:
-        return jsonify({"activities": [], "empty": True})
+    # Sort: Total XP (rank_points) desc → Streak desc → id asc (stable tiebreak).
+    # Level is derived from XP (get_level = 1 + xp//500), so it never breaks a tie
+    # that XP did not already break — XP ordering already implies level ordering.
+    rp = db.func.coalesce(User.rank_points, 0)
+    sc = db.func.coalesce(User.streak_count, 0)
+    order = (rp.desc(), sc.desc(), User.id.asc())
 
-    page = request.args.get("page", 1, type=int)
-    per_page = 20
-    activities = Activity.query.filter(Activity.user_id.in_(friend_ids))\
-        .order_by(Activity.timestamp.desc())\
-        .offset((page - 1) * per_page).limit(per_page).all()
+    if scope == "friends":
+        fids = _accepted_friend_ids()
+        if not fids:
+            return jsonify({"scope": scope, "entries": [], "me": None,
+                            "in_list": False, "no_friends": True})
+        ids = fids | {current_user.id}  # include self in the friends board
+        base = User.query.filter(User.id.in_(ids))
+    else:
+        base = User.query
 
-    result = []
-    for a in activities:
-        clap_count = ActivityClap.query.filter_by(activity_id=a.id).count()
-        has_clapped = ActivityClap.query.filter_by(
-            activity_id=a.id, user_id=current_user.id).first() is not None
-        result.append({
-            "id": a.id,
-            "username": a.user.username,
-            "full_name": a.user.full_name or a.user.username,
-            "profile_picture": a.user.profile_picture,
-            "activity_type": a.activity_type,
-            "content": a.content,
-            "icon": ACTIVITY_ICONS.get(a.activity_type, "📌"),
-            "timestamp": a.timestamp.strftime("%d.%m.%Y %H:%M"),
-            "clap_count": clap_count,
-            "has_clapped": has_clapped,
-        })
+    top = base.order_by(*order).limit(LEADERBOARD_TOP_N).all()
+    entries = [_lb_serialize(u, i + 1) for i, u in enumerate(top)]
 
-    return jsonify({"activities": result, "empty": len(result) == 0})
+    in_list = any(e["is_me"] for e in entries)
+    me = next((e for e in entries if e["is_me"]), None)
+    if not in_list:
+        my_xp = current_user.rank_points or 0
+        my_sc = current_user.streak_count or 0
+        ahead = db.or_(
+            rp > my_xp,
+            db.and_(rp == my_xp, sc > my_sc),
+            db.and_(rp == my_xp, sc == my_sc, User.id < current_user.id))
+        my_rank = base.filter(ahead).count() + 1
+        me = _lb_serialize(current_user, my_rank)
 
-@app.route("/feed/clap/<int:activity_id>", methods=["POST"])
-@login_required
-def feed_clap(activity_id):
-    activity = Activity.query.get_or_404(activity_id)
-    existing = ActivityClap.query.filter_by(
-        activity_id=activity_id, user_id=current_user.id).first()
-    if existing:
-        db.session.delete(existing)
-        db.session.commit()
-        count = ActivityClap.query.filter_by(activity_id=activity_id).count()
-        return jsonify({"clapped": False, "count": count})
-
-    clap = ActivityClap(activity_id=activity_id, user_id=current_user.id)
-    db.session.add(clap)
-    db.session.commit()
-    count = ActivityClap.query.filter_by(activity_id=activity_id).count()
-    return jsonify({"clapped": True, "count": count})
+    return jsonify({"scope": scope, "entries": entries,
+                    "me": me, "in_list": in_list, "no_friends": False})
 
 # ── SUPPLEMENT ROUTES ──
 
