@@ -182,6 +182,50 @@
       border-top-color:var(--volt); border-radius:50%;
       animation:spin 0.6s linear infinite; flex-shrink:0;
     }
+
+    /* ── SU TAKİBİ (Water tracking) ── */
+    .water-card { max-width:420px; margin:0 auto; }
+    .water-hdr {
+      display:flex; align-items:center; gap:8px; font-size:11px; color:var(--text-3);
+      font-weight:700; letter-spacing:0.14em; text-transform:uppercase; margin-bottom:18px;
+    }
+    .water-dot { width:7px; height:7px; border-radius:50%; background:#3D9EFF; flex-shrink:0; }
+    .water-num  { font-family:'Bebas Neue',sans-serif; font-size:44px; letter-spacing:2px; color:#3D9EFF; line-height:1; display:inline-block; transition:transform 0.2s cubic-bezier(0.16,1,0.3,1); }
+    .water-num.bump { transform:scale(1.18); }
+    .water-denom{ font-size:13px; color:var(--text-3); font-weight:300; margin-top:1px; }
+    .water-glasses { display:flex; gap:5px; margin:14px 0 12px; flex-wrap:wrap; }
+    .wg {
+      width:26px; height:34px; border-radius:3px 3px 7px 7px;
+      border:1.5px solid rgba(255,255,255,0.06); cursor:pointer;
+      position:relative; overflow:hidden;
+      transition:border-color 0.18s, transform 0.16s cubic-bezier(0.16,1,0.3,1);
+      background:rgba(255,255,255,0.01);
+    }
+    .wg:hover  { border-color:rgba(61,158,255,0.4); transform:translateY(-2px); }
+    .wg:active { transform:scale(0.9); }
+    .wg.just-filled { animation:wg-pop 0.32s cubic-bezier(0.16,1,0.3,1); }
+    @keyframes wg-pop { 0%{transform:scale(0.9);} 55%{transform:scale(1.12);} 100%{transform:scale(1);} }
+    .wg-fill {
+      position:absolute; bottom:0; left:0; right:0; height:0%;
+      background:linear-gradient(to top,#0060D0 0%,#3D9EFF 100%);
+      border-radius:1px 1px 5px 5px;
+      transition:height 0.38s cubic-bezier(0.4,0,0.2,1);
+    }
+    .wg.filled { border-color:rgba(61,158,255,0.35); }
+    .wg.filled .wg-fill { height:100%; }
+    .water-bar { height:3px; background:rgba(255,255,255,0.04); border-radius:2px; overflow:hidden; margin-bottom:14px; }
+    .water-bar-inner { height:100%; background:linear-gradient(to right,#0060D0,#3D9EFF); border-radius:2px; transition:width 0.5s ease; width:0%; }
+    .water-btn {
+      width:100%; padding:10px; border-radius:8px;
+      background:rgba(61,158,255,0.06); border:1px solid rgba(61,158,255,0.15);
+      color:#3D9EFF; font-size:13px; font-weight:600; cursor:pointer;
+      transition:background 0.2s, border-color 0.2s, transform 0.14s cubic-bezier(0.4,0,0.2,1);
+      display:flex; align-items:center; justify-content:center; gap:6px;
+      font-family:'DM Sans',sans-serif;
+    }
+    .water-btn:hover:not(:disabled)  { background:rgba(61,158,255,0.14); border-color:rgba(61,158,255,0.35); }
+    .water-btn:active:not(:disabled) { transform:scale(0.97); }
+    .water-btn:disabled { opacity:0.5; cursor:default; }
   </style>
 </head>
 
@@ -331,6 +375,10 @@
     <button class="tab-btn" onclick="switchTab('history',this)" role="tab">
       <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       Geçmiş
+    </button>
+    <button class="tab-btn" onclick="switchTab('water',this)" role="tab">
+      <svg viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+      Su Takibi
     </button>
   </div>
 
@@ -605,6 +653,28 @@
     </div>
 
   </div><!-- /panel-history -->
+
+
+  <!-- ════════════════════════════════
+       TAB 5 — SU TAKİBİ
+  ════════════════════════════════ -->
+  <div class="tab-panel" id="panel-water">
+
+    <div class="card water-card" style="padding:28px 24px;">
+      <div class="water-hdr">
+        <span class="water-dot"></span>Su Takibi
+      </div>
+      <div class="water-num" id="water-num">0</div>
+      <div class="water-denom">/ 8 bardak · 2 litre</div>
+      <div class="water-glasses" id="water-glasses"></div>
+      <div class="water-bar"><div class="water-bar-inner" id="water-bar"></div></div>
+      <button class="water-btn" id="water-btn" onclick="addWater()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Bardak Ekle
+      </button>
+    </div>
+
+  </div><!-- /panel-water -->
 
 </main><!-- /main-content -->
 

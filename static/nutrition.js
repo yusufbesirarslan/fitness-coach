@@ -602,10 +602,12 @@ document.addEventListener('click', e => {
   }
 });
 
-/* ── WATER QUICK-ADD (sunucuda saklanır — cihazlar arası senkron) ──
-   localStorage yalnızca anlık boyama / offline yedek olarak kullanılır;
-   ana sayfadaki su widget'ı ile aynı /water uç noktasını paylaşır. */
+/* ── SU TAKİBİ (Water tracking) — sunucuda saklanır (/water), cihazlar arası senkron ──
+   "Su Takibi" sekmesindeki bardak widget'ı ile "Bugün" sekmesindeki Hızlı Ekle
+   butonu aynı sayacı paylaşır. localStorage anlık boyama / offline yedek. */
 const WATER_GOAL_N = 8;
+let waterCount = 0;
+
 function readWaterCache() {
   try {
     const today = new Date().toDateString();
@@ -620,12 +622,96 @@ function setWaterSub(n) {
   const sub = document.getElementById('qab-water-sub');
   if (sub) sub.textContent = `Bugün ${n} / ${WATER_GOAL_N} bardak`;
 }
+
+/* Sayacı kaydet: bellek + cache + sunucu (fire-and-forget) */
+function saveWaterCount(n) {
+  waterCount = n;
+  writeWaterCache(n);
+  fetch('/water', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ count: n })
+  }).catch(() => {});
+}
+
+/* Bardak widget'ını ("Su Takibi" sekmesi) + Hızlı Ekle altyazısını çiz */
+function renderWater(count, animate) {
+  waterCount = count;
+  setWaterSub(count);
+
+  const numEl = document.getElementById('water-num');
+  if (numEl) {
+    const prev = parseInt(numEl.textContent, 10) || 0;
+    numEl.textContent = count;
+    if (animate !== false && count > prev) {
+      numEl.classList.remove('bump'); void numEl.offsetWidth; numEl.classList.add('bump');
+      setTimeout(() => numEl.classList.remove('bump'), 220);
+    }
+  }
+  const bar = document.getElementById('water-bar');
+  if (bar) bar.style.width = Math.min(count / WATER_GOAL_N * 100, 100) + '%';
+
+  document.querySelectorAll('.wg').forEach((g, i) => {
+    const wasFilled = g.classList.contains('filled');
+    const nowFilled = i < count;
+    g.classList.toggle('filled', nowFilled);
+    if (animate !== false && nowFilled && !wasFilled) {
+      g.classList.remove('just-filled'); void g.offsetWidth; g.classList.add('just-filled');
+      setTimeout(() => g.classList.remove('just-filled'), 340);
+    }
+  });
+
+  const btn = document.getElementById('water-btn');
+  if (btn) {
+    if (count >= WATER_GOAL_N) {
+      btn.disabled = true;
+      btn.innerHTML = '✓ &nbsp;Günlük hedefe ulaştın!';
+    } else {
+      btn.disabled = false;
+      btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Bardak Ekle';
+    }
+  }
+}
+
+/* Bardakları oluştur ("Su Takibi" sekmesi) */
+function buildWaterGlasses() {
+  const c = document.getElementById('water-glasses');
+  if (!c) return;
+  c.innerHTML = '';
+  for (let i = 0; i < WATER_GOAL_N; i++) {
+    const g = document.createElement('div');
+    g.className = 'wg';
+    g.innerHTML = '<div class="wg-fill"></div>';
+    g.addEventListener('click', () => {
+      const cur = waterCount;
+      const next = i < cur ? i : i + 1;
+      saveWaterCount(next);
+      renderWater(next);
+      if (next > cur) {
+        if (next === WATER_GOAL_N) showToast('Günlük su hedefine ulaştın!', 'success');
+        else showToast(`${next}. bardak içildi`, 'info');
+      }
+    });
+    c.appendChild(g);
+  }
+}
+
+/* "Bardak Ekle" butonu ("Su Takibi" sekmesi) */
+function addWater() {
+  if (waterCount >= WATER_GOAL_N) return;
+  const next = waterCount + 1;
+  saveWaterCount(next);
+  renderWater(next);
+  if (next === WATER_GOAL_N) showToast('Günlük su hedefine ulaştın!', 'success');
+  else showToast(`${next}. bardak içildi`, 'info');
+}
+
+/* "Hızlı Ekle" su butonu ("Bugün" sekmesi) */
 async function quickAddWater(btn) {
-  const cur = readWaterCache();
-  if (cur >= WATER_GOAL_N) { showToast('Günlük su hedefine ulaştın! 🎉', 'success'); return; }
-  const next = cur + 1;
-  writeWaterCache(next);
-  setWaterSub(next);
+  if (waterCount >= WATER_GOAL_N) { showToast('Günlük su hedefine ulaştın! 🎉', 'success'); return; }
+  const next = waterCount + 1;
+  saveWaterCount(next);
+  renderWater(next);
   btn.querySelector('.qab-plus').style.display = 'none';
   btn.querySelector('.qab-check').style.display = '';
   if (next >= WATER_GOAL_N) showToast('Günlük su hedefine ulaştın! 🎉', 'success');
@@ -634,20 +720,18 @@ async function quickAddWater(btn) {
     btn.querySelector('.qab-plus').style.display = '';
     btn.querySelector('.qab-check').style.display = 'none';
   }, 1500);
-  try {
-    const res = await fetch('/water', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ count: next })
-    });
-    if (res.ok) { const d = await res.json(); writeWaterCache(d.count); setWaterSub(d.count); }
-  } catch (e) {}
 }
+
 async function initWaterButton() {
-  setWaterSub(readWaterCache());   // önbellekten anlık
+  buildWaterGlasses();
+  renderWater(readWaterCache(), false);   // önbellekten anlık
   try {
     const res = await fetch('/water');
-    if (res.ok) { const d = await res.json(); writeWaterCache(d.count); setWaterSub(d.count); }
+    if (res.ok) {
+      const d = await res.json();
+      writeWaterCache(d.count || 0);
+      renderWater(d.count || 0, false);
+    }
   } catch (e) {}
 }
 
