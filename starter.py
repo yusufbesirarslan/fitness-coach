@@ -327,6 +327,9 @@ class User(UserMixin, db.Model):
     full_name        = db.Column(db.String(150), nullable=True)
     target_weight    = db.Column(db.Float, nullable=True)
     goal_type        = db.Column(db.String(10), nullable=True)
+    streak_count     = db.Column(db.Integer, default=0, server_default='0')
+    rank_points      = db.Column(db.Integer, default=0, server_default='0')
+    last_login       = db.Column(db.Date, nullable=True)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -481,6 +484,56 @@ class MealLog(db.Model):
     def __repr__(self):
         return f"<MealLog {self.user_id} - {self.ogun} - {self.created_at}>"
 
+class Friendship(db.Model):
+    id          = db.Column(db.Integer, primary_key=True)
+    sender_id   = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    receiver_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    status      = db.Column(db.String(10), default="pending")
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("sender_id", "receiver_id", name="uq_friendship"),
+    )
+
+    sender   = db.relationship("User", foreign_keys=[sender_id], backref="sent_requests")
+    receiver = db.relationship("User", foreign_keys=[receiver_id], backref="received_requests")
+
+class Message(db.Model):
+    id           = db.Column(db.Integer, primary_key=True)
+    sender_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    receiver_id  = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    body         = db.Column(db.Text, nullable=False)
+    timestamp    = db.Column(db.DateTime, default=datetime.utcnow)
+    is_read      = db.Column(db.Boolean, default=False)
+    message_type = db.Column(db.String(50), default="text")
+
+    sender   = db.relationship("User", foreign_keys=[sender_id], backref="sent_messages")
+    receiver = db.relationship("User", foreign_keys=[receiver_id], backref="received_messages")
+
+
+class Activity(db.Model):
+    id            = db.Column(db.Integer, primary_key=True)
+    user_id       = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    activity_type = db.Column(db.String(30), nullable=False)
+    content       = db.Column(db.String(300), nullable=False)
+    timestamp     = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    user = db.relationship("User", backref="activities")
+
+class ActivityClap(db.Model):
+    id          = db.Column(db.Integer, primary_key=True)
+    activity_id = db.Column(db.Integer, db.ForeignKey("activity.id"), nullable=False)
+    user_id     = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("activity_id", "user_id", name="uq_activity_clap"),
+    )
+
+    activity = db.relationship("Activity", backref="claps")
+    user     = db.relationship("User", backref="given_claps")
+
+
 class Supplement(db.Model):
     id                   = db.Column(db.Integer, primary_key=True)
     user_id              = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
@@ -505,6 +558,44 @@ CATEGORY_ICONS = {
     "Protein": "\U0001f964", "Amino Acid": "\U0001f4a7", "Pre-Workout": "⚡",
     "Vitamin/Health": "\U0001f48a", "Creatine": "\U0001f4aa", "Other": "\U0001f4e6",
 }
+
+
+class DailyQuest(db.Model):
+    id            = db.Column(db.Integer, primary_key=True)
+    title         = db.Column(db.String(120), nullable=False)
+    description   = db.Column(db.Text)
+    points_reward = db.Column(db.Integer, nullable=False, default=10)
+    quest_type    = db.Column(db.String(50), nullable=False)
+    is_active     = db.Column(db.Boolean, default=True)
+
+
+class UserQuestProgress(db.Model):
+    id           = db.Column(db.Integer, primary_key=True)
+    user_id      = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    quest_id     = db.Column(db.Integer, db.ForeignKey("daily_quest.id"), nullable=False)
+    completed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    date_key     = db.Column(db.String(10), nullable=False, default=lambda: date.today().isoformat())
+    is_claimed   = db.Column(db.Boolean, default=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "quest_id", "date_key", name="uq_user_quest_day"),
+    )
+
+    user  = db.relationship("User", backref="quest_progress")
+    quest = db.relationship("DailyQuest", backref="progress_entries")
+
+
+class WaterLog(db.Model):
+    # Günlük su (bardak) sayısı — kullanıcı + gün başına tek satır.
+    # Cihazlar arası senkron için sunucuda tutulur.
+    id       = db.Column(db.Integer, primary_key=True)
+    user_id  = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    date_key = db.Column(db.String(10), nullable=False, default=lambda: date.today().isoformat())
+    count    = db.Column(db.Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "date_key", name="uq_user_water_day"),
+    )
 
 
 class WorkoutLog(db.Model):
@@ -589,9 +680,120 @@ class CustomMealItem(db.Model):
     serving_quantity    = db.Column(db.Float, nullable=True)
 
 
+def award_xp(user_id, amount):
+    user = User.query.get(user_id)
+    if user:
+        user.rank_points = (user.rank_points or 0) + amount
+        return user.rank_points
+    return None
+
+def get_level(xp):
+    return 1 + (xp or 0) // 500
+
+def get_title(level):
+    if level <= 5:
+        return "Fitness Yolcusu"
+    elif level <= 10:
+        return "Demir Bükücü"
+    elif level <= 20:
+        return "Kas Mimarı"
+    elif level <= 50:
+        return "FitX Efsanesi"
+    else:
+        return "Antrenman Tanrısı"
+
+ACTIVITY_ICONS = {
+    "workout_completed": "⚡",
+    "new_supplement": "\U0001f48a",
+    "streak_milestone": "\U0001f525",
+    "new_friend": "\U0001f91d",
+    "level_up": "\U0001f31f",
+    "quest_completed": "\U0001f3af",
+}
+
+def log_activity(user_id, activity_type, content):
+    act = Activity(user_id=user_id, activity_type=activity_type, content=content)
+    db.session.add(act)
+
+def get_rank_title(points):
+    return get_title(get_level(points))
+
+
+@app.before_request
+def update_streak():
+    if current_user.is_authenticated:
+        today = date.today()
+        if current_user.last_login != today:
+            if current_user.last_login == today - timedelta(days=1):
+                current_user.streak_count = (current_user.streak_count or 0) + 1
+            else:
+                current_user.streak_count = 1
+            current_user.last_login = today
+            streak = current_user.streak_count
+            if streak in (7, 14, 30, 60, 100):
+                log_activity(current_user.id, "streak_milestone",
+                             f"{streak} günlük seri yakalanadı!")
+                award_xp(current_user.id, streak * 2)
+            db.session.commit()
+
 @app.context_processor
-def inject_version():
-    return {"_v": _BOOT_TS}
+def inject_rank():
+    base = {"_v": _BOOT_TS}
+    if current_user.is_authenticated:
+        xp = current_user.rank_points or 0
+        level = get_level(xp)
+        title = get_title(level)
+        xp_in_level = xp % 500
+        return {**base,
+            "rank_points": xp, "rank_title": title,
+            "user_xp": xp, "user_level": level, "user_title": title,
+            "xp_in_level": xp_in_level, "xp_for_next": 500,
+        }
+    return {**base,
+        "rank_points": 0, "rank_title": "Fitness Yolcusu",
+        "user_xp": 0, "user_level": 1, "user_title": "Fitness Yolcusu",
+        "xp_in_level": 0, "xp_for_next": 500,
+    }
+
+
+def get_today_progress(user_id):
+    today_key = date.today().isoformat()
+    return UserQuestProgress.query.filter_by(
+        user_id=user_id, date_key=today_key
+    ).all()
+
+
+def complete_quest_for_user(user_id, quest_type):
+    quest = DailyQuest.query.filter_by(quest_type=quest_type, is_active=True).first()
+    if not quest:
+        return None
+    today_key = date.today().isoformat()
+    existing = UserQuestProgress.query.filter_by(
+        user_id=user_id, quest_id=quest.id, date_key=today_key
+    ).first()
+    if existing:
+        return None
+    try:
+        progress = UserQuestProgress(
+            user_id=user_id, quest_id=quest.id,
+            date_key=today_key, is_claimed=True
+        )
+        db.session.add(progress)
+        new_total = award_xp(user_id, quest.points_reward)
+        log_activity(user_id, "quest_completed", f"'{quest.title}' görevini tamamladı")
+        db.session.commit()
+        level = get_level(new_total)
+        return {
+            "awarded": True,
+            "xp": quest.points_reward,
+            "new_total": new_total,
+            "quest_title": quest.title,
+            "level": level,
+            "title": get_title(level)
+        }
+    except Exception:
+        db.session.rollback()
+        return None
 
 
 @app.route("/nutrition-plan/save", methods=["POST"])
@@ -678,6 +880,7 @@ def quick_add_meal():
     db.session.add(entry)
     db.session.commit()
 
+    quest_result = complete_quest_for_user(current_user.id, "meal_logged")
     response = {
         "message": f"{MEAL_LABELS[meal_key]} planından eklendi.",
         "nutrients": {
@@ -687,6 +890,8 @@ def quick_add_meal():
             "yag":     entry.yag
         }
     }
+    if quest_result:
+        response["quest_awarded"] = quest_result
     return jsonify(response)
 
 
@@ -1264,6 +1469,7 @@ def diary_log_meal(meal_id):
     meal.is_logged = True
     db.session.commit()
 
+    quest_result = complete_quest_for_user(current_user.id, "meal_logged")
     response = {
         "message": f"{meal.meal_name} kaydedildi.",
         "nutrients": {
@@ -1273,6 +1479,8 @@ def diary_log_meal(meal_id):
             "yag": entry.yag
         }
     }
+    if quest_result:
+        response["quest_awarded"] = quest_result
     return jsonify(response)
 
 
@@ -1672,11 +1880,14 @@ def log_meal():
     db.session.add(entry)
     db.session.commit()
 
+    quest_result = complete_quest_for_user(current_user.id, "meal_logged")
     response = {
         "message": f"{ogun} kaydedildi.",
         "nutrients": nutrients,
         "raw_debug": raw
     }
+    if quest_result:
+        response["quest_awarded"] = quest_result
     return jsonify(response)
 
 @app.route("/meal-log/today")
@@ -2752,6 +2963,47 @@ def _is_per_serving(serving_text):
     return any(p in s for p in serving_patterns)
 
 
+def _turkish_ablative_suffix(name):
+    name = (name or "").strip()
+    if not name:
+        return "'dan"
+    unvoiced = set("çÇfFhHkKpPsSşŞtT")
+    back_vowels = set("aAıIoOuU")
+    front_vowels = set("eEiİöÖüÜ")
+    last_vowel_is_back = True
+    for ch in reversed(name):
+        if ch in back_vowels:
+            last_vowel_is_back = True
+            break
+        elif ch in front_vowels:
+            last_vowel_is_back = False
+            break
+    last_char = name[-1]
+    if last_char in unvoiced:
+        return "'tan" if last_vowel_is_back else "'ten"
+    return "'dan" if last_vowel_is_back else "'den"
+
+
+def _parse_suggestion_items(body_text):
+    try:
+        raw = _bedrock_chat(
+            messages=[{"role": "user", "content": f"Aşağıdaki öğün önerisinden her bir yiyecek öğesini (miktar dahil) çıkar ve JSON listesi olarak döndür:\n\n\"{body_text}\"\n\nÖrnek çıktı: [\"200g tavuk göğsü\", \"1 kase pilav\", \"yeşil salata\"]"}],
+            system_prompt="Kullanıcının yemek önerisinden yiyecek öğelerini çıkar. SADECE JSON array döndür, başka hiçbir şey yazma.",
+            temperature=0.0,
+            max_tokens=500,
+        ).strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        start = raw.find("[")
+        end = raw.rfind("]") + 1
+        if start >= 0 and end > start:
+            items = json.loads(raw[start:end])
+            if isinstance(items, list) and items:
+                return [str(i).strip() for i in items if str(i).strip()]
+    except Exception as e:
+        print(f"[SUGGESTION] Failed to parse suggestion items: {type(e).__name__}: {e}")
+    return []
+
+
 def _lookup_macros_fatsecret(items, token):
     per_serving = {}
     per_100g = {}
@@ -3292,6 +3544,7 @@ def home():
     return render_template("index.html",
         username=current_user.username,
         profile_picture=current_user.profile_picture,
+        streak_count=current_user.streak_count or 0,
         last_weight_update=last_weight_update,
     )
 
@@ -3335,6 +3588,7 @@ def edit_profile():
             profile_picture=current_user.profile_picture or "",
             goal=current_user.goal or "",
             target_weight=current_user.target_weight,
+            streak_count=current_user.streak_count or 0,
             supplements=supps,
             icons=CATEGORY_ICONS,
         )
@@ -3382,6 +3636,424 @@ def edit_profile():
 
     db.session.commit()
     return jsonify({"message": "Profil başarıyla güncellendi!"})
+
+# ── FRIENDSHIP ROUTES ──
+
+def are_friends(user_a_id, user_b_id):
+    return Friendship.query.filter(
+        Friendship.status == "accepted",
+        db.or_(
+            db.and_(Friendship.sender_id == user_a_id, Friendship.receiver_id == user_b_id),
+            db.and_(Friendship.sender_id == user_b_id, Friendship.receiver_id == user_a_id),
+        )
+    ).first() is not None
+
+@app.route("/friends")
+@login_required
+def friends_page():
+    return render_template("friends.html",
+        username=current_user.username,
+        profile_picture=current_user.profile_picture)
+
+@app.route("/friends/list")
+@login_required
+def friends_list():
+    accepted = Friendship.query.filter(
+        Friendship.status == "accepted",
+        db.or_(Friendship.sender_id == current_user.id, Friendship.receiver_id == current_user.id)
+    ).all()
+    friends = []
+    for f in accepted:
+        friend = f.receiver if f.sender_id == current_user.id else f.sender
+        xp = friend.rank_points or 0
+        lvl = get_level(xp)
+        friends.append({"id": friend.id, "username": friend.username,
+                        "full_name": friend.full_name or friend.username,
+                        "profile_picture": friend.profile_picture,
+                        "rank_title": get_title(lvl),
+                        "level": lvl})
+
+    pending_in = Friendship.query.filter_by(receiver_id=current_user.id, status="pending").all()
+    incoming = [{"request_id": p.id, "username": p.sender.username,
+                 "full_name": p.sender.full_name or p.sender.username,
+                 "profile_picture": p.sender.profile_picture} for p in pending_in]
+
+    pending_out = Friendship.query.filter_by(sender_id=current_user.id, status="pending").all()
+    outgoing = [{"request_id": p.id, "username": p.receiver.username} for p in pending_out]
+
+    return jsonify({"friends": friends, "incoming": incoming, "outgoing": outgoing})
+
+@app.route("/friends/search")
+@login_required
+def friends_search():
+    q = request.args.get("q", "").strip()
+    if len(q) < 2:
+        return jsonify({"users": []})
+    users = User.query.filter(
+        User.username.ilike(f"%{q}%"),
+        User.id != current_user.id
+    ).limit(10).all()
+    results = []
+    for u in users:
+        existing = Friendship.query.filter(
+            db.or_(
+                db.and_(Friendship.sender_id == current_user.id, Friendship.receiver_id == u.id),
+                db.and_(Friendship.sender_id == u.id, Friendship.receiver_id == current_user.id),
+            )
+        ).first()
+        status = existing.status if existing else None
+        results.append({"username": u.username, "full_name": u.full_name or u.username,
+                        "profile_picture": u.profile_picture, "status": status})
+    return jsonify({"users": results})
+
+@app.route("/friend/request/<username>", methods=["POST"])
+@login_required
+def friend_request(username):
+    target = User.query.filter_by(username=username).first()
+    if not target:
+        return jsonify({"error": "Kullanıcı bulunamadı."}), 404
+    if target.id == current_user.id:
+        return jsonify({"error": "Kendinize istek gönderemezsiniz."}), 400
+
+    existing = Friendship.query.filter(
+        db.or_(
+            db.and_(Friendship.sender_id == current_user.id, Friendship.receiver_id == target.id),
+            db.and_(Friendship.sender_id == target.id, Friendship.receiver_id == current_user.id),
+        )
+    ).first()
+    if existing:
+        if existing.status == "accepted":
+            return jsonify({"error": "Zaten arkadaşsınız."}), 400
+        if existing.status == "pending":
+            return jsonify({"error": "Zaten bekleyen bir istek var."}), 400
+        if existing.status == "rejected":
+            existing.status = "pending"
+            existing.sender_id = current_user.id
+            existing.receiver_id = target.id
+            existing.created_at = datetime.utcnow()
+            db.session.commit()
+            return jsonify({"message": f"{username} kullanıcısına istek gönderildi."})
+
+    friendship = Friendship(sender_id=current_user.id, receiver_id=target.id)
+    db.session.add(friendship)
+    db.session.commit()
+    return jsonify({"message": f"{username} kullanıcısına istek gönderildi."})
+
+@app.route("/friend/accept/<int:request_id>", methods=["POST"])
+@login_required
+def friend_accept(request_id):
+    fr = Friendship.query.get_or_404(request_id)
+    if fr.receiver_id != current_user.id:
+        return jsonify({"error": "Bu isteği kabul etme yetkiniz yok."}), 403
+    if fr.status != "pending":
+        return jsonify({"error": "Bu istek zaten işlenmiş."}), 400
+    fr.status = "accepted"
+    award_xp(fr.sender_id, 50)
+    award_xp(fr.receiver_id, 50)
+    log_activity(fr.sender_id, "new_friend", f"{fr.receiver.username} ile arkadaş oldu")
+    log_activity(fr.receiver_id, "new_friend", f"{fr.sender.username} ile arkadaş oldu")
+    db.session.commit()
+    return jsonify({"message": f"{fr.sender.username} ile artık arkadaşsınız! +50 XP!", "points_awarded": 50})
+
+@app.route("/friend/reject/<int:request_id>", methods=["POST"])
+@login_required
+def friend_reject(request_id):
+    fr = Friendship.query.get_or_404(request_id)
+    if fr.receiver_id != current_user.id:
+        return jsonify({"error": "Bu isteği reddetme yetkiniz yok."}), 403
+    if fr.status != "pending":
+        return jsonify({"error": "Bu istek zaten işlenmiş."}), 400
+    fr.status = "rejected"
+    db.session.commit()
+    return jsonify({"message": "İstek reddedildi."})
+
+# ── CHAT ROUTES ──
+
+@app.route("/chat/<username>")
+@login_required
+def chat_page(username):
+    other = User.query.filter_by(username=username).first_or_404()
+    if not are_friends(current_user.id, other.id):
+        return redirect(url_for("friends_page"))
+    other_xp = other.rank_points or 0
+    other_lvl = get_level(other_xp)
+    return render_template("chat.html",
+        username=current_user.username,
+        profile_picture=current_user.profile_picture,
+        other_username=other.username,
+        other_full_name=other.full_name or other.username,
+        other_profile_picture=other.profile_picture,
+        other_rank_title=get_title(other_lvl),
+        other_level=other_lvl)
+
+@app.route("/chat/<username>/messages")
+@login_required
+def chat_messages(username):
+    other = User.query.filter_by(username=username).first_or_404()
+    if not are_friends(current_user.id, other.id):
+        return jsonify({"error": "Arkadaş değilsiniz."}), 403
+
+    Message.query.filter_by(sender_id=other.id, receiver_id=current_user.id, is_read=False)\
+        .update({"is_read": True})
+    db.session.commit()
+
+    messages = Message.query.filter(
+        db.or_(
+            db.and_(Message.sender_id == current_user.id, Message.receiver_id == other.id),
+            db.and_(Message.sender_id == other.id, Message.receiver_id == current_user.id),
+        )
+    ).order_by(Message.timestamp.asc()).all()
+
+    return jsonify({"messages": [
+        {"id": m.id, "sender": m.sender.username, "body": m.body,
+         "timestamp": m.timestamp.strftime("%H:%M"), "is_mine": m.sender_id == current_user.id,
+         "message_type": m.message_type or "text"}
+        for m in messages
+    ]})
+
+@app.route("/chat/<username>/send", methods=["POST"])
+@login_required
+def chat_send(username):
+    other = User.query.filter_by(username=username).first_or_404()
+    if not are_friends(current_user.id, other.id):
+        return jsonify({"error": "Arkadaş değilsiniz."}), 403
+
+    data = request.get_json()
+    body = (data.get("body") or "").strip()
+    if not body:
+        return jsonify({"error": "Mesaj boş olamaz."}), 400
+    if len(body) > 2000:
+        return jsonify({"error": "Mesaj çok uzun."}), 400
+
+    msg_type = data.get("message_type", "text")
+    if msg_type not in ("text", "suggestion_meal", "suggestion_workout"):
+        msg_type = "text"
+
+    msg = Message(sender_id=current_user.id, receiver_id=other.id,
+                  body=body, message_type=msg_type)
+    db.session.add(msg)
+    db.session.commit()
+    quest_result = complete_quest_for_user(current_user.id, "suggestion_sent")
+    response = {"message": "Gönderildi.", "id": msg.id,
+                "timestamp": msg.timestamp.strftime("%H:%M"),
+                "message_type": msg_type}
+    if quest_result:
+        response["quest_awarded"] = quest_result
+    return jsonify(response)
+
+# ── SUGGESTION ROUTES ──
+
+@app.route("/suggest/<username>", methods=["POST"])
+@login_required
+def send_suggestion(username):
+    other = User.query.filter_by(username=username).first_or_404()
+    if not are_friends(current_user.id, other.id):
+        return jsonify({"error": "Arkadaş değilsiniz."}), 403
+
+    data = request.get_json()
+    stype = data.get("type")
+    body = (data.get("body") or "").strip()
+    if stype not in ("suggestion_meal", "suggestion_workout"):
+        return jsonify({"error": "Geçersiz öneri tipi."}), 400
+    if not body:
+        return jsonify({"error": "Öneri boş olamaz."}), 400
+
+    msg = Message(sender_id=current_user.id, receiver_id=other.id,
+                  body=body, message_type=stype)
+    db.session.add(msg)
+    db.session.commit()
+    quest_result = complete_quest_for_user(current_user.id, "suggestion_sent")
+    response = {"message": "Öneri gönderildi!", "id": msg.id}
+    if quest_result:
+        response["quest_awarded"] = quest_result
+    return jsonify(response)
+
+@app.route("/suggest/respond/<int:msg_id>", methods=["POST"])
+@login_required
+def respond_suggestion(msg_id):
+    msg = Message.query.get_or_404(msg_id)
+    if msg.receiver_id != current_user.id:
+        return jsonify({"error": "Bu öneri size ait değil."}), 403
+    if msg.message_type not in ("suggestion_meal", "suggestion_workout"):
+        return jsonify({"error": "Bu bir öneri mesajı değil."}), 400
+
+    data = request.get_json()
+    action = data.get("action")
+    if action not in ("accept", "decline"):
+        return jsonify({"error": "Geçersiz işlem."}), 400
+
+    if action == "accept":
+        msg.message_type = msg.message_type + "_accepted"
+        reply = Message(sender_id=current_user.id, receiver_id=msg.sender_id,
+                        body=f"✅ Önerini kabul ettim: {msg.body[:100]}",
+                        message_type="text")
+        db.session.add(reply)
+
+        nutrients = None
+        if "meal" in msg.message_type:
+            nutrients = _process_meal_suggestion_accept(msg)
+    else:
+        msg.message_type = msg.message_type + "_declined"
+
+    db.session.commit()
+
+    resp = {"message": "Kabul edildi!" if action == "accept" else "Reddedildi.",
+            "new_type": msg.message_type}
+    if action == "accept" and nutrients:
+        resp["nutrients"] = nutrients
+        resp["message"] = f"Kabul edildi! {int(nutrients['kalori'])} kcal eklendi"
+    return jsonify(resp)
+
+
+def _process_meal_suggestion_accept(msg):
+    sender = User.query.get(msg.sender_id)
+    sender_name = sender.full_name or sender.username if sender else "Arkadaş"
+    suffix = _turkish_ablative_suffix(sender_name)
+    ogun_title = f"{sender_name}{suffix} alınan öneri"
+
+    items = _parse_suggestion_items(msg.body)
+    if not items:
+        print(f"[SUGGESTION] Could not parse items from: {msg.body[:100]}")
+        entry = MealLog(
+            user_id=current_user.id, ogun=ogun_title,
+            yemekler=msg.body[:200], kalori=0, protein=0, karb=0, yag=0,
+            tarih=datetime.utcnow().strftime("%d.%m")
+        )
+        db.session.add(entry)
+        return None
+
+    total = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
+    try:
+        cached_hits, uncached = _get_cached_macros(items)
+        macro_map = dict(cached_hits)
+        per_100g_items = {}
+
+        if uncached:
+            try:
+                token = _get_fatsecret_token()
+                per_serving, per_100g_items = _lookup_macros_fatsecret(uncached, token)
+                macro_map.update(per_serving)
+            except Exception as e:
+                print(f"[SUGGESTION] FatSecret failed, using LLM fallback: {e}")
+
+            if per_100g_items:
+                weights = _estimate_serving_weights_llm(list(per_100g_items.keys()))
+                for name, base in per_100g_items.items():
+                    scale = weights.get(name, 150.0) / 100.0
+                    macro_map[name] = {
+                        "calories": round(base["calories"] * scale, 1),
+                        "protein": round(base["protein"] * scale, 1),
+                        "carbs": round(base["carbs"] * scale, 1),
+                        "fat": round(base["fat"] * scale, 1),
+                    }
+
+            missing = [n for n in uncached if n not in macro_map]
+            if missing:
+                llm_macros = _estimate_macros_llm(missing)
+                macro_map.update(llm_macros)
+
+            _cache_macros(macro_map)
+
+        for item in items:
+            m = macro_map.get(item, {})
+            total["calories"] += m.get("calories", 0)
+            total["protein"] += m.get("protein", 0)
+            total["carbs"] += m.get("carbs", 0)
+            total["fat"] += m.get("fat", 0)
+
+    except Exception as e:
+        print(f"[SUGGESTION] Macro lookup pipeline failed: {type(e).__name__}: {e}")
+        try:
+            llm_macros = _estimate_macros_llm(items)
+            for item in items:
+                m = llm_macros.get(item, {})
+                total["calories"] += m.get("calories", 0)
+                total["protein"] += m.get("protein", 0)
+                total["carbs"] += m.get("carbs", 0)
+                total["fat"] += m.get("fat", 0)
+        except Exception:
+            pass
+
+    entry = MealLog(
+        user_id=current_user.id, ogun=ogun_title,
+        yemekler=", ".join(items),
+        kalori=round(total["calories"], 1),
+        protein=round(total["protein"], 1),
+        karb=round(total["carbs"], 1),
+        yag=round(total["fat"], 1),
+        tarih=datetime.utcnow().strftime("%d.%m")
+    )
+    db.session.add(entry)
+    print(f"[SUGGESTION] Logged meal: {ogun_title} → {total['calories']:.0f} kcal")
+    return {"kalori": entry.kalori, "protein": entry.protein, "karb": entry.karb, "yag": entry.yag}
+
+# ── FEED ROUTES ──
+
+@app.route("/feed")
+@login_required
+def feed_page():
+    return render_template("feed.html",
+        username=current_user.username,
+        profile_picture=current_user.profile_picture)
+
+@app.route("/feed/data")
+@login_required
+def feed_data():
+    accepted = Friendship.query.filter(
+        Friendship.status == "accepted",
+        db.or_(Friendship.sender_id == current_user.id,
+               Friendship.receiver_id == current_user.id)
+    ).all()
+    friend_ids = set()
+    for f in accepted:
+        friend_ids.add(f.receiver_id if f.sender_id == current_user.id else f.sender_id)
+
+    if not friend_ids:
+        return jsonify({"activities": [], "empty": True})
+
+    page = request.args.get("page", 1, type=int)
+    per_page = 20
+    activities = Activity.query.filter(Activity.user_id.in_(friend_ids))\
+        .order_by(Activity.timestamp.desc())\
+        .offset((page - 1) * per_page).limit(per_page).all()
+
+    result = []
+    for a in activities:
+        clap_count = ActivityClap.query.filter_by(activity_id=a.id).count()
+        has_clapped = ActivityClap.query.filter_by(
+            activity_id=a.id, user_id=current_user.id).first() is not None
+        result.append({
+            "id": a.id,
+            "username": a.user.username,
+            "full_name": a.user.full_name or a.user.username,
+            "profile_picture": a.user.profile_picture,
+            "activity_type": a.activity_type,
+            "content": a.content,
+            "icon": ACTIVITY_ICONS.get(a.activity_type, "📌"),
+            "timestamp": a.timestamp.strftime("%d.%m.%Y %H:%M"),
+            "clap_count": clap_count,
+            "has_clapped": has_clapped,
+        })
+
+    return jsonify({"activities": result, "empty": len(result) == 0})
+
+@app.route("/feed/clap/<int:activity_id>", methods=["POST"])
+@login_required
+def feed_clap(activity_id):
+    activity = Activity.query.get_or_404(activity_id)
+    existing = ActivityClap.query.filter_by(
+        activity_id=activity_id, user_id=current_user.id).first()
+    if existing:
+        db.session.delete(existing)
+        db.session.commit()
+        count = ActivityClap.query.filter_by(activity_id=activity_id).count()
+        return jsonify({"clapped": False, "count": count})
+
+    clap = ActivityClap(activity_id=activity_id, user_id=current_user.id)
+    db.session.add(clap)
+    db.session.commit()
+    count = ActivityClap.query.filter_by(activity_id=activity_id).count()
+    return jsonify({"clapped": True, "count": count})
 
 # ── SUPPLEMENT ROUTES ──
 
@@ -3437,9 +4109,20 @@ def supplement_add():
     )
     db.session.add(supp)
 
+    first_entry = Supplement.query.filter_by(user_id=current_user.id).count() == 0
     db.session.commit()
 
-    return jsonify({"message": "Supplement eklendi!", "id": supp.id})
+    if first_entry or Supplement.query.filter_by(user_id=current_user.id).count() == 1:
+        award_xp(current_user.id, 25)
+        db.session.commit()
+
+    log_activity(current_user.id, "new_supplement", f"{name} ({category}) stack'ine eklendi")
+    quest_result = complete_quest_for_user(current_user.id, "supplement_added")
+
+    response = {"message": "Supplement eklendi!", "id": supp.id}
+    if quest_result:
+        response["quest_awarded"] = quest_result
+    return jsonify(response)
 
 @app.route("/supplement/edit/<int:sid>", methods=["POST"])
 @login_required
@@ -3788,6 +4471,7 @@ def _fetch_coach_context(user_id, question=""):
         get_user_fitness_summary,
         get_user_workout_history,
         get_user_supplement_stack,
+        get_friend_activities,
         get_user_nutrition_log,
         search_nutrition_data,
         generate_weekly_report,
@@ -3807,6 +4491,10 @@ def _fetch_coach_context(user_id, question=""):
         pass
     try:
         parts.append(f"[BESLENME LOGU (3 gün)]\n{get_user_nutrition_log(user_id, 3)}")
+    except Exception:
+        pass
+    try:
+        parts.append(f"[ARKADAŞ AKTİVİTELERİ]\n{get_friend_activities(user_id)}")
     except Exception:
         pass
 
@@ -3888,6 +4576,11 @@ def _execute_pending_action(user_id):
             data.get("weight_kg", 0),
         )
         result = json.loads(result_str)
+        if result.get("success"):
+            award_xp(user_id, 15)
+            log_activity(user_id, "workout_completed",
+                         f"{data.get('exercise')} — {data.get('sets')}x{data.get('reps')} @ {data.get('weight_kg')}kg")
+            db.session.commit()
         return result
 
     elif action_type == "log_nutrition":
@@ -3911,6 +4604,11 @@ def _execute_pending_action(user_id):
 
         result_str = log_nutrition_entry(user_id, data.get("food_item", ""), cal, pro, carb, fat)
         result = json.loads(result_str)
+        if result.get("success"):
+            award_xp(user_id, 10)
+            log_activity(user_id, "nutrition_logged",
+                         f"{data.get('food_item')} — {round(cal)} kcal")
+            db.session.commit()
         return result
 
     return None
@@ -4676,14 +5374,75 @@ def complete_workout():
     if not plan:
         return jsonify({"error": "Aktif antrenman planın yok."}), 400
 
-    return jsonify({"message": "Bugünkü antrenmanı tamamladın!"})
+    today_key = date.today().isoformat()
+    quest = DailyQuest.query.filter_by(quest_type="workout_logged", is_active=True).first()
+    if quest:
+        existing = UserQuestProgress.query.filter_by(
+            user_id=current_user.id, quest_id=quest.id, date_key=today_key
+        ).first()
+        if existing:
+            return jsonify({"error": "Bugünkü antrenmanını zaten tamamladın!"}), 400
+
+    quest_result = complete_quest_for_user(current_user.id, "workout_logged")
+    new_total = award_xp(current_user.id, 10)
+    log_activity(current_user.id, "workout_completed", "Bugünkü antrenmanını tamamladı")
+    db.session.commit()
+
+    total_xp = 10 + (quest_result["xp"] if quest_result else 0)
+    level = get_level(new_total)
+    response = {
+        "message": f"Bugünkü antrenmanı tamamladın! +{total_xp} XP!",
+        "points_awarded": total_xp,
+        "new_total": new_total,
+        "level": level,
+        "title": get_title(level)
+    }
+    if quest_result:
+        response["quest_awarded"] = quest_result
+    return jsonify(response)
 
 @app.route("/workout/status")
 @login_required
 def workout_status():
-    # Tamamlanma durumu artık yalnızca istemci tarafında (localStorage) tutulur.
-    return jsonify({"completed": False})
+    # Bugünkü antrenman tamamlanmış mı? (cihazlar arası senkron için sunucudan)
+    today_key = date.today().isoformat()
+    quest = DailyQuest.query.filter_by(quest_type="workout_logged", is_active=True).first()
+    completed = False
+    if quest:
+        completed = UserQuestProgress.query.filter_by(
+            user_id=current_user.id, quest_id=quest.id, date_key=today_key
+        ).first() is not None
+    return jsonify({"completed": completed})
 
+
+WATER_GOAL = 8  # bardak
+
+@app.route("/water", methods=["GET"])
+@login_required
+def get_water():
+    today_key = date.today().isoformat()
+    row = WaterLog.query.filter_by(user_id=current_user.id, date_key=today_key).first()
+    return jsonify({"count": row.count if row else 0, "goal": WATER_GOAL})
+
+@app.route("/water", methods=["POST"])
+@login_required
+def set_water():
+    data = request.get_json(silent=True) or {}
+    try:
+        count = int(data.get("count", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Geçersiz değer."}), 400
+    count = max(0, min(count, WATER_GOAL))  # 0..8 arası kıs
+
+    today_key = date.today().isoformat()
+    row = WaterLog.query.filter_by(user_id=current_user.id, date_key=today_key).first()
+    if row:
+        row.count = count
+    else:
+        row = WaterLog(user_id=current_user.id, date_key=today_key, count=count)
+        db.session.add(row)
+    db.session.commit()
+    return jsonify({"count": row.count, "goal": WATER_GOAL})
 
 @app.route("/training-plan/active")
 @login_required
@@ -4761,6 +5520,7 @@ def dashboard_nudges():
         "NUDGE_MISSING_LOGS": "Son 48 saatte antrenman veya beslenme kaydın yok. Bugün hedeflerine bir adım daha yaklaş!",
         "NUDGE_NO_WORKOUT": "Son 48 saatte antrenman kaydı görünmüyor. Kısa bir antrenman bile fark yaratır.",
         "NUDGE_NO_NUTRITION": "Beslenme kaydını güncellemeyi unutma — veriler koçunun sana daha iyi yardım etmesini sağlar.",
+        "NUDGE_STREAK_RISK": "Serin risk altında! Bugün giriş yaparak kesintisiz serinizi koruyun.",
         "NUDGE_PROTEIN_GOAL": "Haftalık protein hedefinin %90'ına ulaştın — harika gidiyorsun!",
         "NUDGE_WEEKLY_REPORT": "Bugün haftalık rapor günü. Koçundan performans özetini iste!",
     }
@@ -4865,13 +5625,67 @@ def login():
         return jsonify({"error": "Kullanıcı adı veya şifre hatalı"}) , 401
     
     login_user(user)
-    return jsonify({"message": f"Hoş geldin {user.username}!"})
+    quest_result = complete_quest_for_user(user.id, "login")
+    response = {"message": f"Hoş geldin {user.username}!"}
+    if quest_result:
+        response["quest_awarded"] = quest_result
+    return jsonify(response)
 
 @app.route("/logout")
 @login_required
 def logout():
     logout_user()
     return redirect(url_for("login"))
+
+@app.route("/quests")
+@login_required
+def quests():
+    all_quests = DailyQuest.query.filter_by(is_active=True).all()
+    today_progress = get_today_progress(current_user.id)
+    progress_map = {p.quest_id: p for p in today_progress}
+
+    quest_data = []
+    for q in all_quests:
+        prog = progress_map.get(q.id)
+        status = "claimed" if prog else "pending"
+        quest_data.append({"quest": q, "status": status})
+
+    return render_template("quests.html",
+        username=current_user.username,
+        profile_picture=current_user.profile_picture,
+        quest_data=quest_data
+    )
+
+
+@app.route("/quests/claim/<int:quest_id>", methods=["POST"])
+@login_required
+def claim_quest(quest_id):
+    xp = current_user.rank_points or 0
+    level = get_level(xp)
+    return jsonify({
+        "message": "Ödül zaten alındı ✓",
+        "new_total": xp,
+        "level": level,
+        "title": get_title(level)
+    })
+
+
+@app.cli.command("seed-quests")
+def seed_quests():
+    """Insert default daily quests into the database."""
+    defaults = [
+        {"title": "Daily Login", "description": "Bugün uygulamaya giriş yap", "points_reward": 10, "quest_type": "login"},
+        {"title": "Log a Workout", "description": "Bir antrenman planı oluştur veya kaydet", "points_reward": 50, "quest_type": "workout_logged"},
+        {"title": "Help a Friend", "description": "Bir arkadaşına mesaj gönder", "points_reward": 30, "quest_type": "suggestion_sent"},
+        {"title": "Log a Meal", "description": "Bugün bir öğün kaydet", "points_reward": 20, "quest_type": "meal_logged"},
+    ]
+    for q in defaults:
+        existing = DailyQuest.query.filter_by(quest_type=q["quest_type"]).first()
+        if not existing:
+            db.session.add(DailyQuest(**q))
+    db.session.commit()
+    click.echo("Default quests seeded successfully.")
+
 
 @app.errorhandler(404)
 def not_found(e):
@@ -4887,11 +5701,14 @@ with app.app_context():
         'ALTER TABLE "user" ADD COLUMN last_login DATE',
         'ALTER TABLE supplement RENAME COLUMN rating_effectiveness TO rating_effect',
         'ALTER TABLE supplement ADD COLUMN rating_digestion INTEGER',
+        'ALTER TABLE message ADD COLUMN message_type VARCHAR(20) DEFAULT \'text\'',
         'ALTER TABLE "user" ADD COLUMN target_weight FLOAT',
         'ALTER TABLE "user" ADD COLUMN goal_type VARCHAR(10)',
         'ALTER TABLE "user" ALTER COLUMN profile_picture TYPE TEXT',
+        'ALTER TABLE message ALTER COLUMN message_type TYPE VARCHAR(50)',
         'ALTER TABLE meal_log ALTER COLUMN ogun TYPE VARCHAR(100)',
         'ALTER TABLE meal_log ADD COLUMN source VARCHAR(20) DEFAULT \'manual\'',
+        'UPDATE user_quest_progress SET is_claimed = true WHERE is_claimed = false',
         'ALTER TABLE custom_meal_item ADD COLUMN serving_id VARCHAR(50)',
         'ALTER TABLE custom_meal_item ADD COLUMN serving_description VARCHAR(200)',
         'ALTER TABLE custom_meal_item ADD COLUMN serving_quantity FLOAT',
@@ -4939,6 +5756,21 @@ with app.app_context():
         db.session.commit()
     except Exception:
         db.session.rollback()
+    if DailyQuest.query.count() == 0:
+        for q in [
+            DailyQuest(title="Daily Login", description="Bugün uygulamaya giriş yap", points_reward=10, quest_type="login"),
+            DailyQuest(title="Log a Workout", description="Bir antrenman planı oluştur veya kaydet", points_reward=50, quest_type="workout_logged"),
+            DailyQuest(title="Help a Friend", description="Bir arkadaşına mesaj gönder", points_reward=30, quest_type="suggestion_sent"),
+        ]:
+            db.session.add(q)
+        db.session.commit()
+    if not DailyQuest.query.filter_by(quest_type="supplement_added").first():
+        db.session.add(DailyQuest(
+            title="Update Your Stack",
+            description="Supplement stack'ine yeni bir ürün ekle",
+            points_reward=25, quest_type="supplement_added"
+        ))
+        db.session.commit()
 
 
 if __name__ == "__main__":
