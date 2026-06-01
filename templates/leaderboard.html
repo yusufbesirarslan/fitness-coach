@@ -3,61 +3,98 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Akış — Fitness Coach</title>
+    <title>Liderlik — Fitness Coach</title>
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <style>
-    .feed-wrap { max-width: 600px; margin: 0 auto; }
+    .lb-wrap { max-width: 600px; margin: 0 auto; }
 
-    .feed-card {
+    /* ── Tabs ── */
+    .lb-tabs {
+        display: flex; gap: 8px; margin-bottom: 18px;
         background: var(--surface-2); border: 1px solid var(--border);
-        border-radius: 16px; padding: 18px 20px; margin-bottom: 12px;
+        border-radius: var(--r-md); padding: 5px;
+    }
+    .lb-tab {
+        flex: 1; height: 40px; border: none; cursor: pointer;
+        background: transparent; color: var(--text-3);
+        font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600;
+        letter-spacing: 0.04em; border-radius: var(--r-sm);
+        transition: all 0.2s; -webkit-tap-highlight-color: transparent;
+    }
+    .lb-tab:hover:not(.active) { color: var(--text-2); background: rgba(255,255,255,0.04); }
+    .lb-tab.active {
+        background: var(--volt-dim); color: var(--volt);
+        border: 1px solid rgba(204,255,0,0.22);
+    }
+
+    /* ── Rows ── */
+    .lb-list { padding-bottom: 8px; }
+    .lb-list.has-sticky { padding-bottom: 84px; }
+
+    .lb-row {
+        display: grid;
+        grid-template-columns: 30px 40px 1fr auto;
+        align-items: center; gap: 12px;
+        background: var(--surface-2); border: 1px solid var(--border);
+        border-radius: var(--r-md); padding: 11px 14px; margin-bottom: 8px;
         transition: border-color 0.2s;
     }
-    .feed-card:hover { border-color: rgba(204,255,0,0.2); }
-
-    .feed-header {
-        display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+    .lb-row.me {
+        background: rgba(204,255,0,0.06);
+        border-color: rgba(204,255,0,0.30);
+        border-left: 3px solid var(--volt);
+        padding-left: 11px;
     }
-    .feed-avatar {
-        width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
+
+    .lb-rank {
+        font-family: 'Bebas Neue', sans-serif; font-size: 20px;
+        color: var(--text-3); text-align: center; line-height: 1;
+    }
+    .lb-rank.top { color: var(--volt); }
+
+    .lb-avatar {
+        width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
         display: flex; align-items: center; justify-content: center;
-        font-family: 'Bebas Neue', sans-serif; font-size: 16px;
+        font-family: 'Bebas Neue', sans-serif; font-size: 17px;
         color: #121212; background: linear-gradient(135deg, #CCFF00, #A8D400);
         overflow: hidden;
     }
-    .feed-avatar img { width: 100%; height: 100%; object-fit: cover; }
-    .feed-user { flex: 1; min-width: 0; }
-    .feed-name { font-size: 14px; font-weight: 600; color: var(--text); }
-    .feed-time { font-size: 11px; color: var(--text-3); }
+    .lb-avatar img { width: 100%; height: 100%; object-fit: cover; }
 
-    .feed-icon {
-        font-size: 22px; margin-right: 6px; vertical-align: middle;
+    .lb-id { min-width: 0; }
+    .lb-name {
+        font-size: 14px; font-weight: 600; color: var(--text);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .feed-content {
-        font-size: 14px; color: var(--text-2); line-height: 1.5;
-        padding: 0 0 0 48px;
-    }
-
-    .feed-footer {
-        display: flex; align-items: center; gap: 12px;
-        padding: 8px 0 0 48px; margin-top: 8px;
-        border-top: 1px solid rgba(255,255,255,0.04);
-    }
-    .clap-btn {
-        display: flex; align-items: center; gap: 5px;
-        background: none; border: 1px solid var(--border);
-        border-radius: 20px; padding: 5px 14px; cursor: pointer;
-        color: var(--text-3); font-size: 13px; font-family: 'DM Sans', sans-serif;
-        transition: all 0.2s;
-    }
-    .clap-btn:hover { border-color: rgba(204,255,0,0.3); color: var(--text); }
-    .clap-btn.clapped {
-        background: rgba(204,255,0,0.1); border-color: rgba(204,255,0,0.3);
-        color: #CCFF00;
+    .lb-sub {
+        font-size: 11px; color: var(--text-3); margin-top: 2px;
+        text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600;
     }
 
+    .lb-stats { text-align: right; }
+    .lb-xp {
+        font-size: 14px; font-weight: 700; color: var(--text);
+        font-variant-numeric: tabular-nums;
+    }
+    .lb-streak { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+
+    /* ── Sticky current-user rank ── */
+    .lb-sticky {
+        display: none;
+        position: fixed; left: 0; right: 0;
+        bottom: calc(var(--action-bar-h) + env(safe-area-inset-bottom, 0));
+        z-index: 90;
+        padding: 8px var(--s2);
+        background: rgba(20,24,8,0.92);
+        border-top: 1px solid rgba(204,255,0,0.30);
+        backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    }
+    .lb-sticky .lb-wrap { margin: 0 auto; }
+    .lb-sticky .lb-row { margin-bottom: 0; }
+
+    /* ── Empty / status ── */
     .empty-state {
         text-align: center; padding: 60px 20px;
         background: var(--surface-2); border: 1px solid var(--border);
@@ -69,6 +106,14 @@
         letter-spacing: 2px; color: var(--text); margin-bottom: 8px;
     }
     .empty-desc { font-size: 13px; color: var(--text-3); max-width: 300px; margin: 0 auto; }
+    .lb-cta {
+        display: inline-block; margin-top: 18px;
+        background: var(--volt); color: #121212;
+        font-size: 13px; font-weight: 700; text-decoration: none;
+        padding: 10px 22px; border-radius: var(--r-full);
+        transition: opacity 0.2s;
+    }
+    .lb-cta:hover { opacity: 0.85; }
 
     .loading-text { text-align: center; color: var(--text-3); padding: 40px; font-size: 13px; }
     </style>
@@ -100,16 +145,22 @@
 
 <main class="main-content">
     <div class="page-hdr">
-        <h1>ARKADAŞ<br><span>AKIŞI</span></h1>
-        <p>Arkadaşlarının aktivitelerini takip et ve onları motive et.</p>
+        <h1>KULÜP<br><span>LİDERLİK</span></h1>
+        <p>XP, seviye ve serine göre sıralamandaki yerini gör.</p>
     </div>
 
-    <div class="feed-wrap">
-        <div id="feed-container">
+    <div class="lb-wrap">
+        <div class="lb-tabs">
+            <button class="lb-tab active" data-scope="friends" onclick="loadBoard('friends')">Arkadaşlar</button>
+            <button class="lb-tab" data-scope="global" onclick="loadBoard('global')">Genel</button>
+        </div>
+        <div id="lb-list" class="lb-list">
             <div class="loading-text">Yükleniyor...</div>
         </div>
     </div>
 </main>
+
+<div id="lb-sticky" class="lb-sticky"><div class="lb-wrap"></div></div>
 
 <nav class="action-bar">
     <a href="/" class="ab-tab">
@@ -124,7 +175,7 @@
         <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
         <span>Beslenme</span>
     </a>
-    <a href="/feed" class="ab-tab active">
+    <a href="/leaderboard" class="ab-tab active">
         <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         <span>Kulüp</span>
     </a>
@@ -148,62 +199,76 @@ function escapeHTML(str) {
 }
 
 function avatarHTML(pp, name) {
-    if (pp) return '<div class="feed-avatar"><img src="'+escapeHTML(pp).replace(/"/g,'&quot;')+'"></div>';
+    if (pp) return '<div class="lb-avatar"><img src="' + escapeHTML(pp).replace(/"/g, '&quot;') + '"></div>';
     const letter = (name || 'U')[0].toUpperCase();
-    return '<div class="feed-avatar">'+escapeHTML(letter)+'</div>';
+    return '<div class="lb-avatar">' + escapeHTML(letter) + '</div>';
 }
 
-async function loadFeed() {
-    const container = document.getElementById('feed-container');
+function rowHTML(e, isSticky) {
+    const meClass = e.is_me ? ' me' : '';
+    const topClass = e.rank <= 3 ? ' top' : '';
+    const sub = isSticky ? ('Lv ' + e.level + ' · Sen') : ('Lv ' + e.level);
+    return `
+        <div class="lb-row${meClass}">
+            <div class="lb-rank${topClass}">${e.rank}</div>
+            ${avatarHTML(e.profile_picture, e.full_name)}
+            <div class="lb-id">
+                <div class="lb-name">${escapeHTML(e.username)}</div>
+                <div class="lb-sub">${escapeHTML(sub)}</div>
+            </div>
+            <div class="lb-stats">
+                <div class="lb-xp">${Number(e.xp).toLocaleString('tr-TR')} XP</div>
+                <div class="lb-streak">🔥 ${e.streak}</div>
+            </div>
+        </div>`;
+}
+
+function emptyStateHTML() {
+    return `
+        <div class="empty-state">
+            <div class="empty-icon">🤝</div>
+            <div class="empty-title">HENÜZ ARKADAŞIN YOK</div>
+            <div class="empty-desc">Arkadaş ekleyerek onlarla yarış ve sıralamada yüksel.</div>
+            <a href="/friends" class="lb-cta">Arkadaş Ekle</a>
+        </div>`;
+}
+
+async function loadBoard(scope) {
+    document.querySelectorAll('.lb-tab').forEach(t =>
+        t.classList.toggle('active', t.dataset.scope === scope));
+
+    const list = document.getElementById('lb-list');
+    const sticky = document.getElementById('lb-sticky');
+    sticky.style.display = 'none';
+    list.classList.remove('has-sticky');
+    list.innerHTML = '<div class="loading-text">Yükleniyor...</div>';
+
     try {
-        const res = await fetch('/feed/data');
+        const res = await fetch('/leaderboard/data?scope=' + encodeURIComponent(scope));
         const data = await res.json();
-        if (data.empty) {
-            container.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-icon">🌱</div>
-                    <div class="empty-title">HENÜZ AKTİVİTE YOK</div>
-                    <div class="empty-desc">Arkadaşların aktif olduğunda burada göreceksin. Hadi bir arkadaş ekle!</div>
-                </div>`;
+
+        if (data.no_friends) {
+            list.innerHTML = emptyStateHTML();
             return;
         }
-        container.innerHTML = data.activities.map(a => `
-            <div class="feed-card" data-id="${a.id}">
-                <div class="feed-header">
-                    ${avatarHTML(a.profile_picture, a.full_name)}
-                    <div class="feed-user">
-                        <div class="feed-name">${escapeHTML(a.full_name)}</div>
-                        <div class="feed-time">${escapeHTML(a.timestamp)}</div>
-                    </div>
-                </div>
-                <div class="feed-content">
-                    <span class="feed-icon">${escapeHTML(a.icon)}</span> ${escapeHTML(a.content)}
-                </div>
-                <div class="feed-footer">
-                    <button class="clap-btn ${a.has_clapped ? 'clapped' : ''}"
-                            onclick="toggleClap(${a.id}, this)">
-                        👏 <span class="clap-count">${a.clap_count || ''}</span>
-                    </button>
-                </div>
-            </div>
-        `).join('');
+        if (!data.entries || !data.entries.length) {
+            list.innerHTML = '<div class="loading-text">Henüz sıralama yok.</div>';
+            return;
+        }
+
+        list.innerHTML = data.entries.map(e => rowHTML(e, false)).join('');
+
+        if (!data.in_list && data.me) {
+            sticky.querySelector('.lb-wrap').innerHTML = rowHTML(data.me, true);
+            sticky.style.display = 'block';
+            list.classList.add('has-sticky');
+        }
     } catch (e) {
-        container.innerHTML = '<div class="loading-text">Akış yüklenirken hata oluştu.</div>';
+        list.innerHTML = '<div class="loading-text">Sıralama yüklenirken hata oluştu.</div>';
     }
 }
 
-async function toggleClap(activityId, btn) {
-    try {
-        const res = await fetch('/feed/clap/' + activityId, { method: 'POST' });
-        const data = await res.json();
-        btn.classList.toggle('clapped', data.clapped);
-        btn.querySelector('.clap-count').textContent = data.count || '';
-    } catch (e) {
-        toast('Hata oluştu', 'error');
-    }
-}
-
-loadFeed();
+loadBoard('friends');
 </script>
 <script src="/static/nav.js"></script>
 </body>
