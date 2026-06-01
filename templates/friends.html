@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="tr" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arkadaşlar — Fitness Coach</title>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/theme.css">
+    <link rel="stylesheet" href="/static/nav.css">
+    <style>
+    .friends-wrap { max-width: 600px; margin: 0 auto; }
+
+    /* ── search ── */
+    .search-box {
+        position: relative; margin-bottom: 24px;
+    }
+    .search-input {
+        width: 100%; padding: 14px 14px 14px 42px; border-radius: 12px;
+        background: var(--surface-2); border: 1px solid var(--border);
+        color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px;
+        outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+        box-sizing: border-box;
+    }
+    .search-input:focus {
+        border-color: rgba(204,255,0,0.45);
+        box-shadow: 0 0 0 3px rgba(204,255,0,0.06);
+    }
+    .search-icon {
+        position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+        width: 18px; height: 18px; color: var(--text-3);
+    }
+    .search-results {
+        position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
+        background: var(--surface-2); border: 1px solid var(--border);
+        border-radius: 12px; margin-top: 4px; max-height: 300px; overflow-y: auto;
+        display: none;
+    }
+    .search-results.show { display: block; }
+    .sr-item {
+        display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+        border-bottom: 1px solid rgba(255,255,255,0.04); cursor: default;
+    }
+    .sr-item:last-child { border-bottom: none; }
+    .sr-avatar {
+        width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+        display: flex; align-items: center; justify-content: center;
+        font-family: 'Bebas Neue', sans-serif; font-size: 16px;
+        color: #121212; background: linear-gradient(135deg, #CCFF00, #A8D400);
+        overflow: hidden;
+    }
+    .sr-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .sr-info { flex: 1; min-width: 0; }
+    .sr-name { font-size: 14px; font-weight: 600; color: var(--text); }
+    .sr-handle { font-size: 12px; color: var(--text-3); }
+    .sr-btn {
+        padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
+        letter-spacing: 0.05em; border: none; cursor: pointer; transition: all 0.2s;
+        font-family: 'DM Sans', sans-serif;
+    }
+    .sr-btn.add { background: #CCFF00; color: #121212; }
+    .sr-btn.add:hover { background: #A8D400; }
+    .sr-btn.pending { background: rgba(255,255,255,0.06); color: var(--text-3); cursor: default; }
+    .sr-btn.accepted { background: rgba(204,255,0,0.1); color: #CCFF00; cursor: default; }
+
+    /* ── section ── */
+    .section-card {
+        background: var(--surface-2); border: 1px solid var(--border);
+        border-radius: 16px; padding: 24px; margin-bottom: 16px;
+        position: relative; overflow: hidden;
+    }
+    .section-card::before {
+        content: ''; position: absolute; top: 0; left: 0; right: 0;
+        height: 2px;
+    }
+    .section-card.incoming::before { background: linear-gradient(90deg, #FFB020, transparent); }
+    .section-card.friends-list::before { background: linear-gradient(90deg, #CCFF00, transparent); }
+    .section-title {
+        font-family: 'Bebas Neue', sans-serif; font-size: 18px;
+        letter-spacing: 3px; color: var(--text); margin-bottom: 16px;
+        display: flex; align-items: center; gap: 8px;
+    }
+    .section-count {
+        background: rgba(204,255,0,0.12); color: #CCFF00;
+        font-size: 11px; font-weight: 700; padding: 2px 8px;
+        border-radius: 10px; letter-spacing: 0;
+        font-family: 'DM Sans', sans-serif;
+    }
+    .section-empty { font-size: 13px; color: var(--text-3); }
+
+    /* ── friend/request row ── */
+    .fr-row {
+        display: flex; align-items: center; gap: 10px; padding: 10px 0;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .fr-row:last-child { border-bottom: none; }
+    .fr-avatar {
+        width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
+        display: flex; align-items: center; justify-content: center;
+        font-family: 'Bebas Neue', sans-serif; font-size: 18px;
+        color: #121212; background: linear-gradient(135deg, #CCFF00, #A8D400);
+        overflow: hidden;
+    }
+    .fr-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .fr-info { flex: 1; min-width: 0; }
+    .fr-name { font-size: 14px; font-weight: 600; color: var(--text); }
+    .fr-handle { font-size: 12px; color: var(--text-3); }
+    .fr-actions { display: flex; gap: 6px; }
+    .btn-accept {
+        padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
+        background: #CCFF00; color: #121212; border: none; cursor: pointer;
+        font-family: 'DM Sans', sans-serif; transition: background 0.2s;
+    }
+    .btn-accept:hover { background: #A8D400; }
+    .btn-reject {
+        padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
+        background: rgba(255,77,77,0.1); color: #FF4D4D; border: 1px solid rgba(255,77,77,0.2);
+        cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.2s;
+    }
+    .btn-reject:hover { background: rgba(255,77,77,0.2); }
+    .btn-chat {
+        padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
+        background: rgba(61,158,255,0.1); color: #3D9EFF; border: 1px solid rgba(61,158,255,0.2);
+        cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.2s;
+        text-decoration: none; display: inline-flex; align-items: center; gap: 4px;
+    }
+    .btn-chat:hover { background: rgba(61,158,255,0.2); }
+
+    .loading-text { text-align: center; color: var(--text-3); padding: 20px; font-size: 13px; }
+    .rank-badge { font-size:10px; background:var(--volt,#CCFF00); color:#000; padding:2px 8px; border-radius:10px; margin-left:6px; font-weight:600; display:inline-block; vertical-align:middle; }
+    </style>
+</head>
+<body>
+
+<!-- ── TOAST CONTAINER ── -->
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<header class="global-header">
+    <button class="drawer-trigger" onclick="fxToggleDrawer()"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+    <span class="header-brand">FITX</span><div class="header-spacer"></div>
+    <a href="/edit-profile" class="header-avatar" title="Profil">{% if profile_picture %}<img src="{{ profile_picture }}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">{% else %}{{ username[0]|upper if username else 'U' }}{% endif %}</a>
+</header>
+<div id="fx-drawer-backdrop" class="drawer-backdrop"></div>
+<aside id="fx-drawer" class="drawer">
+    <div class="drawer-header"><div class="drawer-profile"><div class="drawer-profile-avatar">{% if profile_picture %}<img src="{{ profile_picture }}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">{% else %}{{ username[0]|upper if username else 'U' }}{% endif %}</div><div class="drawer-profile-info"><div class="drawer-profile-name">{{ username }}</div><div class="drawer-profile-title">{{ user_title }}</div></div></div>
+    <div class="drawer-xp"><div class="drawer-xp-label"><span class="drawer-xp-level">Level {{ user_level }}</span><span class="drawer-xp-val">{{ xp_in_level }} / {{ xp_for_next }} XP</span></div><div class="drawer-xp-track"><div class="drawer-xp-fill" style="width:{{ (xp_in_level / xp_for_next * 100)|int }}%"></div></div></div></div>
+    <nav class="drawer-nav"><div class="drawer-section-label">Keşfet</div>
+        <a href="/quests" class="drawer-link"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>Görevler</a>
+        <a href="/supplements" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>Supplement Dolabı</a>
+        <a href="/progress-page" class="drawer-link"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>İlerleme</a>
+        <a href="/menu-assistant" class="drawer-link"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Menü Asistanı</a>
+        <a href="/friends" class="drawer-link active"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Arkadaşlarım</a>
+        <div class="drawer-sep"></div>
+        <a href="/edit-profile" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Profilim</a>
+    </nav>
+    <div class="drawer-footer"><a href="/logout" class="drawer-logout"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Çıkış Yap</a></div>
+</aside>
+
+<!-- ── MAIN CONTENT ── -->
+<main class="main-content">
+
+    <div class="page-hdr">
+        <h1>ARKADAŞ<br><span>LARIN</span></h1>
+        <p>Arkadaş ekle, istekleri yönet, sohbet başlat.</p>
+    </div>
+
+    <div class="friends-wrap">
+
+        <!-- ── SEARCH ── -->
+        <div class="search-box">
+            <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" class="search-input" id="search-input" placeholder="Kullanıcı adı ara..." autocomplete="off">
+            <div class="search-results" id="search-results"></div>
+        </div>
+
+        <!-- ── PENDING REQUESTS ── -->
+        <div class="section-card incoming" id="incoming-section" style="display:none;">
+            <div class="section-title">GELEN İSTEKLER <span class="section-count" id="incoming-count">0</span></div>
+            <div id="incoming-list"></div>
+        </div>
+
+        <!-- ── FRIENDS LIST ── -->
+        <div class="section-card friends-list">
+            <div class="section-title">ARKADAŞLARIM <span class="section-count" id="friends-count">0</span></div>
+            <div id="friends-list">
+                <div class="loading-text">Yükleniyor...</div>
+            </div>
+        </div>
+
+    </div>
+</main>
+
+<nav class="action-bar">
+    <a href="/" class="ab-tab">
+        <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        <span>Ana Sayfa</span>
+    </a>
+    <a href="/training" class="ab-tab">
+        <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
+        <span>Antrenman</span>
+    </a>
+    <div class="ab-fab-wrapper">
+        <button class="qr-fab pulse" onclick="fxLaunchQR()" aria-label="QR Menü Tarayıcı">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3"/><path d="M20 14v3h-3"/><path d="M14 20h3"/><path d="M20 20h0"/></svg>
+        </button>
+    </div>
+    <a href="/nutrition" class="ab-tab">
+        <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
+        <span>Beslenme</span>
+    </a>
+    <a href="/feed" class="ab-tab active">
+        <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Kulüp</span>
+    </a>
+</nav>
+
+<div id="fx-qr-overlay" class="qr-overlay">
+    <button class="qr-overlay-close" onclick="fxCloseQR()">
+        <svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+    <div class="qr-overlay-title">MENÜ TARA</div>
+    <div id="fx-qr-reader" class="qr-overlay-reader"></div>
+    <div class="qr-overlay-hint">QR kodu kameraya gösterin veya menü URL'si girin</div>
+    <div class="qr-overlay-manual">
+        <input id="fx-qr-url-input" type="url" placeholder="https://menu.example.com" onkeydown="if(event.key==='Enter')fxSubmitQRUrl()">
+        <button onclick="fxSubmitQRUrl()">GİT</button>
+    </div>
+</div>
+
+<script>
+function toast(msg, type) {
+    type = type || 'info';
+    const wrap = document.getElementById('toast-wrap');
+    const t = document.createElement('div');
+    t.className = 'toast toast-' + type;
+    t.textContent = msg;
+    wrap.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3000);
+}
+
+function escapeHTML(str) {
+    const d = document.createElement('div');
+    d.textContent = str == null ? '' : String(str);
+    return d.innerHTML;
+}
+
+function avatarHTML(pp, name, cls) {
+    cls = cls || 'fr-avatar';
+    if (pp) return '<div class="'+cls+'"><img src="'+escapeHTML(pp).replace(/"/g,'&quot;')+'"></div>';
+    const letter = (name || 'U')[0].toUpperCase();
+    return '<div class="'+cls+'">'+escapeHTML(letter)+'</div>';
+}
+
+// ── Search ──
+let searchTimeout;
+const searchInput = document.getElementById('search-input');
+const searchResults = document.getElementById('search-results');
+
+searchInput.addEventListener('input', function() {
+    clearTimeout(searchTimeout);
+    const q = this.value.trim();
+    if (q.length < 2) { searchResults.classList.remove('show'); return; }
+    searchTimeout = setTimeout(async () => {
+        const res = await fetch('/friends/search?q=' + encodeURIComponent(q));
+        const data = await res.json();
+        if (!data.users.length) {
+            searchResults.innerHTML = '<div class="sr-item"><span class="sr-name" style="color:var(--text-3)">Sonuç bulunamadı</span></div>';
+        } else {
+            searchResults.innerHTML = data.users.map(u => {
+                let btnHTML = '';
+                if (u.status === 'accepted') btnHTML = '<span class="sr-btn accepted">Arkadaş</span>';
+                else if (u.status === 'pending') btnHTML = '<span class="sr-btn pending">Bekliyor</span>';
+                else btnHTML = '<button class="sr-btn add" data-username="'+escapeHTML(u.username).replace(/"/g,'&quot;')+'">Ekle</button>';
+                return '<div class="sr-item">' + avatarHTML(u.profile_picture, u.username, 'sr-avatar') +
+                    '<div class="sr-info"><div class="sr-name">'+escapeHTML(u.full_name)+'</div><div class="sr-handle">@'+escapeHTML(u.username)+'</div></div>' +
+                    btnHTML + '</div>';
+            }).join('');
+        }
+        searchResults.classList.add('show');
+    }, 300);
+});
+
+document.addEventListener('click', e => {
+    if (!e.target.closest('.search-box')) searchResults.classList.remove('show');
+});
+
+searchResults.addEventListener('click', e => {
+    const btn = e.target.closest('.sr-btn.add');
+    if (btn && btn.dataset.username) sendRequest(btn.dataset.username);
+});
+
+async function sendRequest(username) {
+    const res = await fetch('/friend/request/' + encodeURIComponent(username), { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) { toast(data.message, 'success'); searchInput.value = ''; searchResults.classList.remove('show'); loadFriends(); }
+    else toast(data.error, 'error');
+}
+
+// ── Load friends ──
+async function loadFriends() {
+    const res = await fetch('/friends/list');
+    const data = await res.json();
+
+    // Incoming requests
+    const inSection = document.getElementById('incoming-section');
+    const inList = document.getElementById('incoming-list');
+    document.getElementById('incoming-count').textContent = data.incoming.length;
+    if (data.incoming.length) {
+        inSection.style.display = '';
+        inList.innerHTML = data.incoming.map(r =>
+            '<div class="fr-row">' + avatarHTML(r.profile_picture, r.username) +
+            '<div class="fr-info"><div class="fr-name">'+escapeHTML(r.full_name)+'</div><div class="fr-handle">@'+escapeHTML(r.username)+'</div></div>' +
+            '<div class="fr-actions">' +
+            '<button class="btn-accept" onclick="acceptReq('+r.request_id+')">Kabul</button>' +
+            '<button class="btn-reject" onclick="rejectReq('+r.request_id+')">Reddet</button>' +
+            '</div></div>'
+        ).join('');
+    } else {
+        inSection.style.display = 'none';
+    }
+
+    // Friends
+    const fList = document.getElementById('friends-list');
+    document.getElementById('friends-count').textContent = data.friends.length;
+    if (data.friends.length) {
+        fList.innerHTML = data.friends.map(f =>
+            '<div class="fr-row">' + avatarHTML(f.profile_picture, f.username) +
+            '<div class="fr-info"><div class="fr-name">'+escapeHTML(f.full_name)+'</div><div class="fr-handle">@'+escapeHTML(f.username)+' <span class="rank-badge">'+escapeHTML(f.rank_title)+'</span></div></div>' +
+            '<a href="/chat/'+encodeURIComponent(f.username)+'" class="btn-chat">💬 Sohbet</a>' +
+            '</div>'
+        ).join('');
+    } else {
+        fList.innerHTML = '<div class="section-empty">Henüz arkadaşın yok. Yukarıdan kullanıcı ara ve istek gönder!</div>';
+    }
+}
+
+async function acceptReq(id) {
+    const res = await fetch('/friend/accept/' + id, { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) {
+        toast(data.message, 'success');
+        if (data.points_awarded) toast('+' + data.points_awarded + ' Rank Points!', 'info');
+        loadFriends();
+    }
+    else toast(data.error, 'error');
+}
+
+async function rejectReq(id) {
+    const res = await fetch('/friend/reject/' + id, { method: 'POST' });
+    const data = await res.json();
+    if (res.ok) { toast(data.message, 'success'); loadFriends(); }
+    else toast(data.error, 'error');
+}
+
+loadFriends();
+</script>
+<script src="/static/nav.js"></script>
+</body>
+</html>

@@ -30,7 +30,6 @@ function showToast(msg, type = 'info', duration = 3500) {
 
 /* ── TAB SYSTEM ── */
 function switchTab(name, btn) {
-  if (name !== 'qr') stopNutritionQR();   // başka sekmeye geçerken kamerayı kapat
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
@@ -38,61 +37,6 @@ function switchTab(name, btn) {
   if (name === 'today')   { loadTodayData(); loadQuickAddSection(); }
   if (name === 'diary')   { loadDiary(); }
   if (name === 'history') { loadMealHistory(); }
-}
-
-/* ── QR OKUT (menü tarama) ──
-   Kamera ile QR okur veya URL alır; ardından mevcut /menu-assistant
-   analiz akışına yönlendirir (orada ?url= otomatik işlenir). */
-let nutqScanner = null;
-function _gotoMenuAssistant(url) {
-  url = (url || '').trim();
-  if (!url) return;
-  if (!/^https?:\/\//i.test(url) && /^[a-zA-Z0-9]/.test(url)) url = 'https://' + url;
-  window.location.href = '/menu-assistant?url=' + encodeURIComponent(url);
-}
-function submitNutritionQRUrl() {
-  const inp = document.getElementById('nutq-url');
-  if (!inp || !inp.value.trim()) return;
-  _gotoMenuAssistant(inp.value);
-}
-function _resetNutqButtons() {
-  const a = document.getElementById('nutq-start');
-  const b = document.getElementById('nutq-stop');
-  if (a) a.style.display = '';
-  if (b) b.style.display = 'none';
-}
-function startNutritionQR() {
-  const reader = document.getElementById('nutq-reader');
-  if (!reader || nutqScanner) return;
-  const begin = () => {
-    if (typeof Html5Qrcode === 'undefined') { showToast('Kamera kütüphanesi yüklenemedi', 'error'); return; }
-    nutqScanner = new Html5Qrcode('nutq-reader');
-    const a = document.getElementById('nutq-start');
-    const b = document.getElementById('nutq-stop');
-    if (a) a.style.display = 'none';
-    if (b) b.style.display = '';
-    nutqScanner.start(
-      { facingMode: 'environment' },
-      { fps: 10, qrbox: { width: 220, height: 220 } },
-      (decoded) => { stopNutritionQR(); _gotoMenuAssistant(decoded); }
-    ).catch(() => { showToast('Kamera başlatılamadı', 'error'); nutqScanner = null; _resetNutqButtons(); });
-  };
-  if (typeof Html5Qrcode === 'undefined') {
-    const s = document.createElement('script');
-    s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
-    s.onload = begin;
-    s.onerror = () => showToast('Kamera kütüphanesi yüklenemedi', 'error');
-    document.head.appendChild(s);
-  } else {
-    begin();
-  }
-}
-function stopNutritionQR() {
-  if (nutqScanner) {
-    nutqScanner.stop().catch(() => {});
-    nutqScanner = null;
-  }
-  _resetNutqButtons();
 }
 
 /* ── CALORIE RING ── */
@@ -225,6 +169,7 @@ async function logMeal() {
       renderSelectedFoods();
       input.value = '';
       showToast('Öğün kaydedildi! ✓', 'success');
+      if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
       loadTodayData();
     } catch (e) {
       showToast('Bağlantı hatası: ' + e.message, 'error');
@@ -248,6 +193,7 @@ async function logMeal() {
     if (d.error) { showToast(d.error, 'error'); return; }
     input.value = '';
     showToast('Öğün kaydedildi! ✓', 'success');
+    if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
     loadTodayData();
   } catch (e) {
     showToast('Bağlantı hatası: ' + e.message, 'error');
@@ -655,6 +601,64 @@ document.addEventListener('click', e => {
     document.getElementById('quick-add-actions').classList.remove('open');
   }
 });
+
+/* ── WATER QUICK-ADD (sunucuda saklanır — cihazlar arası senkron) ──
+   localStorage yalnızca anlık boyama / offline yedek olarak kullanılır;
+   ana sayfadaki su widget'ı ile aynı /water uç noktasını paylaşır. */
+const WATER_GOAL_N = 8;
+function readWaterCache() {
+  try {
+    const today = new Date().toDateString();
+    const s = JSON.parse(localStorage.getItem('fc_water') || '{}');
+    return s.date === today ? (s.count || 0) : 0;
+  } catch (e) { return 0; }
+}
+function writeWaterCache(n) {
+  try { localStorage.setItem('fc_water', JSON.stringify({ date: new Date().toDateString(), count: n })); } catch (e) {}
+}
+function setWaterSub(n) {
+  const sub = document.getElementById('qab-water-sub');
+  if (sub) sub.textContent = `Bugün ${n} / ${WATER_GOAL_N} bardak`;
+}
+async function quickAddWater(btn) {
+  const cur = readWaterCache();
+  if (cur >= WATER_GOAL_N) { showToast('Günlük su hedefine ulaştın! 🎉', 'success'); return; }
+  const next = cur + 1;
+  writeWaterCache(next);
+  setWaterSub(next);
+  btn.querySelector('.qab-plus').style.display = 'none';
+  btn.querySelector('.qab-check').style.display = '';
+  if (next >= WATER_GOAL_N) showToast('Günlük su hedefine ulaştın! 🎉', 'success');
+  else showToast(`${next}. bardak içildi 💧`, 'info');
+  setTimeout(() => {
+    btn.querySelector('.qab-plus').style.display = '';
+    btn.querySelector('.qab-check').style.display = 'none';
+  }, 1500);
+  try {
+    const res = await fetch('/water', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ count: next })
+    });
+    if (res.ok) { const d = await res.json(); writeWaterCache(d.count); setWaterSub(d.count); }
+  } catch (e) {}
+}
+async function initWaterButton() {
+  setWaterSub(readWaterCache());   // önbellekten anlık
+  try {
+    const res = await fetch('/water');
+    if (res.ok) { const d = await res.json(); writeWaterCache(d.count); setWaterSub(d.count); }
+  } catch (e) {}
+}
+
+/* ── WATER MODAL ── */
+function openWater()  { document.getElementById('water-modal').classList.add('open'); }
+function closeWater() { document.getElementById('water-modal').classList.remove('open'); }
+function logWater() {
+  const ml = document.getElementById('water-amount').value;
+  closeWater();
+  showToast(`${ml} ml su kaydedildi 💧`, 'success');
+}
 
 /* ── SCROLL TO FORM ── */
 function scrollToForm() {
@@ -1140,6 +1144,7 @@ async function logDiaryMeal(mealName) {
     const d = await res.json();
     if (d.error) { showToast(d.error, 'error'); return; }
     showToast(mealName + ' kaydedildi! ✓', 'success');
+    if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
     loadDiary();
   } catch (e) { showToast('Kayıt hatası', 'error'); }
 }
@@ -1162,3 +1167,4 @@ populateFoods();
 loadTodayData();
 loadQuickAddSection();
 loadActivePlan();
+initWaterButton();

@@ -50,12 +50,25 @@
             </div>
             <div class="drawer-profile-info">
                 <div class="drawer-profile-name">{{ username }}</div>
-</div>
+                <div class="drawer-profile-title">{{ user_title }}</div>
+            </div>
         </div>
-        
+        <div class="drawer-xp">
+            <div class="drawer-xp-label">
+                <span class="drawer-xp-level">Level {{ user_level }}</span>
+                <span class="drawer-xp-val">{{ xp_in_level }} / {{ xp_for_next }} XP</span>
+            </div>
+            <div class="drawer-xp-track">
+                <div class="drawer-xp-fill" style="width:{{ (xp_in_level / xp_for_next * 100)|int }}%"></div>
+            </div>
+        </div>
     </div>
     <nav class="drawer-nav">
         <div class="drawer-section-label">Keşfet</div>
+        <a href="/quests" class="drawer-link">
+            <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            Görevler
+        </a>
         <a href="/supplements" class="drawer-link">
             <svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
             Supplement Dolabı
@@ -67,6 +80,10 @@
         <a href="/menu-assistant" class="drawer-link">
             <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
             Menü Asistanı
+        </a>
+        <a href="/friends" class="drawer-link">
+            <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            Arkadaşlarım
         </a>
         <div class="drawer-sep"></div>
         <a href="/edit-profile" class="drawer-link">
@@ -92,8 +109,11 @@
     <div>
         <div class="gr-eyebrow" id="g-eyebrow">DASHBOARD</div>
         <h1 class="gr-title" id="g-title">Merhaba, <span>{{ username }}</span></h1>
+        <p class="gr-sub" id="g-sub">Veriler yükleniyor…</p>
     </div>
     <div class="gr-badges">
+        <div class="gr-badge volt"><span class="gr-badge-dot"></span><span id="g-goal">—</span></div>
+        <div class="gr-badge amber"><span class="gr-badge-dot"></span><span id="g-streak-badge">— Günlük Seri</span></div>
         <div class="gr-badge blue" id="g-cal-badge" style="display:none"><span class="gr-badge-dot"></span><span id="g-cal-badge-txt">—</span></div>
     </div>
 </div>
@@ -143,6 +163,19 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- ═══ WATER INTAKE ═══ -->
+    <div class="bc b-1">
+        <div class="bc-lbl"><span class="bc-dot" style="background:#3D9EFF"></span>Su Takibi</div>
+        <div class="water-num" id="water-num">0</div>
+        <div class="water-denom">/ 8 bardak · 2 litre</div>
+        <div class="water-glasses" id="water-glasses"></div>
+        <div class="water-bar"><div class="water-bar-inner" id="water-bar"></div></div>
+        <button class="water-btn" id="water-btn" onclick="addWater()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Bardak Ekle
+        </button>
     </div>
 
     <!-- ═══ ACTIVITY TRACKER ═══ -->
@@ -214,6 +247,27 @@
         <div class="ins-progress"><div class="ins-pbar" id="ins-pbar"></div></div>
     </div>
 
+    <!-- ═══ JOURNEY MAP — full width ═══ -->
+    <div class="bc b-3 journey-card">
+        <div class="jm-header">
+            <div class="jm-level" id="jm-level">{{ user_level }}</div>
+            <div class="jm-info">
+                <div class="jm-title-text" id="jm-title">{{ user_title }}</div>
+                <div class="jm-xp-row">
+                    <span class="jm-xp-text" id="jm-xp">{{ xp_in_level }} / {{ xp_for_next }} XP</span>
+                    <span class="jm-streak-flame" id="jm-streak">
+                        <svg class="flame-icon" viewBox="0 0 24 24"><defs><linearGradient id="flameGrad" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#FF6B00"/><stop offset="100%" stop-color="#FF2D7B"/></linearGradient></defs><path d="M12 2c.5 3.5-1 6-1 6s2-.5 3 1c1 1.5 0 4 0 4s1.5-1 2 .5.5 3.5-1 4.5-2 1-2 1 1-1.5 0-3-2-2-2-2-.5 2-2 3-1.5-1-1.5-1-.5 2.5-2 3-2-1-2-2 1.5-3 1.5-3-2 1.5-2.5 4c-.5 2.5 1 4 1 4s-3-1-3-5 3-8 5-10z" fill="url(#flameGrad)"/></svg>
+                        <span id="jm-streak-num">{{ streak_count|default(0) }} Gün</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+        <div class="jm-bar">
+            <div class="jm-bar-inner" id="jm-bar" style="width:{{ (xp_in_level / xp_for_next * 100)|int }}%"></div>
+        </div>
+        <div class="jm-bonus" id="jm-bonus"></div>
+    </div>
+
 </div><!-- /bento -->
 </main>
 
@@ -230,6 +284,10 @@
     <a href="/nutrition" class="ab-tab">
         <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
         <span>Beslenme</span>
+    </a>
+    <a href="/feed" class="ab-tab">
+        <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span>Kulüp</span>
     </a>
 </nav>
 
@@ -248,6 +306,12 @@
             <div class="fab-lbl">Öğün Kaydet</div>
         </div>
         <div class="fab-row">
+            <button class="fab-sub" onclick="addWater();toggleQuickAdd();">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
+            </button>
+            <div class="fab-lbl">Su Ekle</div>
+        </div>
+        <div class="fab-row">
             <button class="fab-sub" onclick="toggleQuickAdd();fxLaunchQR();">
                 <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3"/><path d="M20 14v3h-3"/><path d="M14 20h3"/></svg>
             </button>
@@ -263,6 +327,7 @@
      JAVASCRIPT
      ══════════════════════════════════════ -->
 <script>
+const WATER_GOAL = 8;
 let quickAddOpen = false, tipIdx = 0, sparkChart = null, userGoal = null;
 let selectedIntensity = 'moderate', currentActivityCals = 0;
 
@@ -289,6 +354,7 @@ const TIPS = [
     { icon:'🧘', text:'Haftada <strong>3 kez 10 dakika</strong> stretching eklem hareket açıklığını artırır ve yaralanma riskini önemli ölçüde azaltır.', src:'Fiziksel Tedavi' },
 ];
 
+
 /* ═══ TOAST ═══ */
 function toast(msg, type = 'info') {
     const icons = { success:'✓', error:'✗', info:'💧' };
@@ -299,6 +365,7 @@ function toast(msg, type = 'info') {
     wrap.appendChild(el);
     setTimeout(() => { el.classList.add('hide'); setTimeout(()=>el.remove(),280); }, 3200);
 }
+
 
 /* ═══ GREETING ═══ */
 function setGreeting(goal) {
@@ -312,7 +379,116 @@ function setGreeting(goal) {
     const uname = document.querySelector('#g-title span').textContent;
     document.getElementById('g-eyebrow').textContent = `${timeLabel} — COMMAND CENTER`;
     document.getElementById('g-title').innerHTML = `${gText}, <span>${uname}</span>`;
+
+    const goalCfg = {
+        'kilo verme':  { sub: 'Bugün kalori açığını koru. Her küçük seçim hedefe bir adım daha yaklaştırıyor.', badge: 'Kilo Verme Modu' },
+        'kas kazanma': { sub: 'Proteinini aldın mı? Kaslar antrenmanla kırılır, mutfakta yeniden yapılır.', badge: 'Kas Kazanma Modu' },
+    };
+    const cfg = goalCfg[goal] || { sub: 'Verilerini güncelle, yapay zeka koçun hazırda bekliyor.', badge: 'Aktif Mod' };
+    document.getElementById('g-sub').textContent  = cfg.sub;
+    document.getElementById('g-goal').textContent = cfg.badge;
 }
+
+
+/* ═══ WATER TRACKING ═══ */
+/* Sunucuda saklanır (cihazlar arası senkron). localStorage yalnızca
+   anlık boyama / offline yedek olarak kullanılır. */
+let waterCount = 0;
+function getWaterCount() { return waterCount; }
+function readWaterCache() {
+    try {
+        const today = new Date().toDateString();
+        const s = JSON.parse(localStorage.getItem('fc_water') || '{}');
+        return s.date === today ? (s.count || 0) : 0;
+    } catch (e) { return 0; }
+}
+function saveWaterCount(n) {
+    waterCount = n;
+    try { localStorage.setItem('fc_water', JSON.stringify({ date: new Date().toDateString(), count: n })); } catch (e) {}
+    fetch('/water', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ count: n })
+    }).catch(() => {});
+}
+async function loadWater() {
+    try {
+        const res = await fetch('/water');
+        if (!res.ok) return;
+        const data = await res.json();
+        waterCount = data.count || 0;
+        try { localStorage.setItem('fc_water', JSON.stringify({ date: new Date().toDateString(), count: waterCount })); } catch (e) {}
+        renderWater(waterCount, false);
+    } catch (e) {}
+}
+function renderWater(count, animate) {
+    const numEl = document.getElementById('water-num');
+    const prev  = parseInt(numEl.textContent, 10) || 0;
+    numEl.textContent = count;
+    if (animate !== false && count > prev) {
+        numEl.classList.remove('bump'); void numEl.offsetWidth; numEl.classList.add('bump');
+        setTimeout(function() { numEl.classList.remove('bump'); }, 220);
+    }
+    document.getElementById('water-bar').style.width = Math.min(count / WATER_GOAL * 100, 100) + '%';
+    document.querySelectorAll('.wg').forEach((g, i) => {
+        const wasFilled = g.classList.contains('filled');
+        const nowFilled = i < count;
+        g.classList.toggle('filled', nowFilled);
+        if (animate !== false && nowFilled && !wasFilled) {
+            g.classList.remove('just-filled'); void g.offsetWidth; g.classList.add('just-filled');
+            setTimeout(function() { g.classList.remove('just-filled'); }, 340);
+        }
+    });
+    const btn = document.getElementById('water-btn');
+    if (count >= WATER_GOAL) {
+        btn.disabled = true;
+        btn.innerHTML = '✓ &nbsp;Günlük hedefe ulaştın!';
+    } else {
+        btn.disabled = false;
+        btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Bardak Ekle';
+    }
+}
+function buildWaterGlasses() {
+    const c = document.getElementById('water-glasses');
+    c.innerHTML = '';
+    for (let i = 0; i < WATER_GOAL; i++) {
+        const g = document.createElement('div');
+        g.className = 'wg';
+        g.innerHTML = '<div class="wg-fill"></div>';
+        g.addEventListener('click', () => {
+            const cur = getWaterCount();
+            const next = i < cur ? i : i + 1;
+            saveWaterCount(next);
+            renderWater(next);
+            if (next > cur) {
+                if (next === WATER_GOAL) toast('Günlük su hedefine ulaştın!', 'success');
+                else toast(`${next}. bardak içildi`, 'info');
+            }
+        });
+        c.appendChild(g);
+    }
+}
+function addWater() {
+    const cur  = getWaterCount();
+    if (cur >= WATER_GOAL) return;
+    const next = cur + 1;
+    saveWaterCount(next);
+    renderWater(next);
+    if (next === WATER_GOAL) toast('Günlük su hedefine ulaştın!', 'success');
+    else toast(`${next}. bardak içildi`, 'info');
+}
+
+
+/* ═══ STREAK ═══ */
+/* Streak sunucuda (update_streak / streak_count) tutulur; cihazlar arası
+   tutarlı olması için her zaman sunucu değeri gösterilir. */
+function renderStreak(n) {
+    const badge = document.getElementById('g-streak-badge');
+    if (badge) badge.textContent = `${n} Günlük Seri`;
+    const flameNum = document.getElementById('jm-streak-num');
+    if (flameNum) flameNum.textContent = `${n} Gün`;
+}
+
 
 /* ═══ CALORIE RING ═══ */
 function updateCalRing(consumed, target, activityCals) {
@@ -342,6 +518,7 @@ function updateCalRing(consumed, target, activityCals) {
         document.getElementById('g-cal-badge-txt').textContent = `${pct}% tüketildi`;
     }
 }
+
 
 /* ═══ SPARKLINE ═══ */
 function renderSparkline(weights, labels, lineColor) {
@@ -393,6 +570,7 @@ function renderSparkline(weights, labels, lineColor) {
     });
 }
 
+
 /* ═══ WEIGHT UPDATE ═══ */
 /* Son güncelleme zamanı sunucudan gelir (cihazlar arası tutarlı). */
 let lastWeightUpdateMs = (function () {
@@ -439,6 +617,7 @@ async function doUpdateWeight() {
     }
 }
 
+
 /* ═══ SPARKLINE DATA ═══ */
 async function loadSparkline() {
     try {
@@ -482,6 +661,7 @@ async function loadSparkline() {
         document.getElementById('spark-empty').style.display = 'block';
     }
 }
+
 
 /* ═══ AI TIPS ═══ */
 let tipTimer = null;
@@ -579,6 +759,7 @@ function resetTipTimer() {
     tipTimer = setInterval(function() { goToTip(tipIdx + 1, 1); }, 8000);
 }
 
+
 /* ═══ ACTIVITY TRACKER ═══ */
 function selectIntensity(int) {
     selectedIntensity = int;
@@ -624,6 +805,7 @@ async function refreshActivitySummary() {
     } catch(e) {}
 }
 
+
 /* ═══ QUICK ADD FAB ═══ */
 function toggleQuickAdd() {
     quickAddOpen = !quickAddOpen;
@@ -638,8 +820,14 @@ document.addEventListener('click', (e) => {
     }
 });
 
+
 /* ═══ INIT ═══ */
 async function init() {
+    buildWaterGlasses();
+    waterCount = readWaterCache();
+    renderWater(waterCount, false);   // önbellekten anlık boyama
+    loadWater();                       // sunucudan senkronla
+    renderStreak({{ streak_count|default(0) }});
     checkBtnGlow();
 
     tipIdx = Math.floor(Date.now() / 86400000) % TIPS.length;
@@ -709,6 +897,23 @@ async function init() {
     }
 
     await loadSparkline();
+    updateStreakBonus();
+}
+
+function updateStreakBonus() {
+    const streak = {{ streak_count|default(0) }};
+    const bonus = document.getElementById('jm-bonus');
+    if (!bonus) return;
+    let mult = 1.0;
+    if (streak >= 30) mult = 1.5;
+    else if (streak >= 14) mult = 1.3;
+    else if (streak >= 7) mult = 1.2;
+    else if (streak >= 3) mult = 1.1;
+    if (mult > 1.0) {
+        bonus.innerHTML = '<span class="bonus-active">×' + mult.toFixed(1) + ' Seri XP Bonusu Aktif</span>';
+    } else {
+        bonus.textContent = '3 gün seri yap → ×1.1 XP Bonus açılır';
+    }
 }
 
 init();

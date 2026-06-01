@@ -271,7 +271,60 @@ def get_user_supplement_stack(user_id: int) -> str:
         return json.dumps(result, ensure_ascii=False, default=str)
 
 
-# ── TOOL 4: Nutrition Log ───────────────────────────────────────
+# ── TOOL 4: Friend Activities ───────────────────────────────────
+
+@mcp.tool()
+def get_friend_activities(user_id: int) -> str:
+    """Kullanıcının arkadaşlarının son aktivitelerini döndürür (sosyal bağlam için)."""
+    with get_conn() as conn:
+        cur = conn.cursor()
+
+        cur.execute('SELECT id FROM "user" WHERE id = %s', (user_id,))
+        if not cur.fetchone():
+            return json.dumps({"error": "Kullanıcı bulunamadı"}, ensure_ascii=False)
+
+        cur.execute(
+            "SELECT CASE WHEN sender_id = %s THEN receiver_id ELSE sender_id END AS friend_id "
+            "FROM friendship WHERE status = 'accepted' "
+            "AND (sender_id = %s OR receiver_id = %s)",
+            (user_id, user_id, user_id),
+        )
+        friend_ids = [r["friend_id"] for r in cur.fetchall()]
+
+        if not friend_ids:
+            return json.dumps({
+                "friends_count": 0,
+                "activities": [],
+                "message": "Henüz arkadaş yok.",
+            }, ensure_ascii=False)
+
+        cur.execute(
+            'SELECT a.activity_type, a.content, a.timestamp, u.username, u.full_name '
+            'FROM activity a JOIN "user" u ON u.id = a.user_id '
+            "WHERE a.user_id = ANY(%s) "
+            "ORDER BY a.timestamp DESC LIMIT 20",
+            (friend_ids,),
+        )
+        activities = cur.fetchall()
+
+        result = {
+            "friends_count": len(friend_ids),
+            "activities": [
+                {
+                    "username": a["username"],
+                    "name": a["full_name"] or a["username"],
+                    "type": a["activity_type"],
+                    "content": a["content"],
+                    "time": str(a["timestamp"]),
+                }
+                for a in activities
+            ],
+        }
+
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+
+# ── TOOL 5: Nutrition Log ───────────────────────────────────────
 
 @mcp.tool()
 def get_user_nutrition_log(user_id: int, days: int = 3) -> str:
