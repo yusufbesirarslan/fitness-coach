@@ -165,19 +165,6 @@
         </div>
     </div>
 
-    <!-- ═══ WATER INTAKE ═══ -->
-    <div class="bc b-1">
-        <div class="bc-lbl"><span class="bc-dot" style="background:#3D9EFF"></span>Su Takibi</div>
-        <div class="water-num" id="water-num">0</div>
-        <div class="water-denom">/ 8 bardak · 2 litre</div>
-        <div class="water-glasses" id="water-glasses"></div>
-        <div class="water-bar"><div class="water-bar-inner" id="water-bar"></div></div>
-        <button class="water-btn" id="water-btn" onclick="addWater()">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Bardak Ekle
-        </button>
-    </div>
-
     <!-- ═══ ACTIVITY TRACKER ═══ -->
     <div class="bc b-1">
         <div class="bc-lbl"><span class="bc-dot" style="background:#00C48C"></span>Aktivite Takibi</div>
@@ -306,12 +293,6 @@
             <div class="fab-lbl">Öğün Kaydet</div>
         </div>
         <div class="fab-row">
-            <button class="fab-sub" onclick="addWater();toggleQuickAdd();">
-                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
-            </button>
-            <div class="fab-lbl">Su Ekle</div>
-        </div>
-        <div class="fab-row">
             <button class="fab-sub" onclick="toggleQuickAdd();fxLaunchQR();">
                 <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3"/><path d="M20 14v3h-3"/><path d="M14 20h3"/></svg>
             </button>
@@ -327,7 +308,6 @@
      JAVASCRIPT
      ══════════════════════════════════════ -->
 <script>
-const WATER_GOAL = 8;
 let quickAddOpen = false, tipIdx = 0, sparkChart = null, userGoal = null;
 let selectedIntensity = 'moderate', currentActivityCals = 0;
 
@@ -387,95 +367,6 @@ function setGreeting(goal) {
     const cfg = goalCfg[goal] || { sub: 'Verilerini güncelle, yapay zeka koçun hazırda bekliyor.', badge: 'Aktif Mod' };
     document.getElementById('g-sub').textContent  = cfg.sub;
     document.getElementById('g-goal').textContent = cfg.badge;
-}
-
-
-/* ═══ WATER TRACKING ═══ */
-/* Sunucuda saklanır (cihazlar arası senkron). localStorage yalnızca
-   anlık boyama / offline yedek olarak kullanılır. */
-let waterCount = 0;
-function getWaterCount() { return waterCount; }
-function readWaterCache() {
-    try {
-        const today = new Date().toDateString();
-        const s = JSON.parse(localStorage.getItem('fc_water') || '{}');
-        return s.date === today ? (s.count || 0) : 0;
-    } catch (e) { return 0; }
-}
-function saveWaterCount(n) {
-    waterCount = n;
-    try { localStorage.setItem('fc_water', JSON.stringify({ date: new Date().toDateString(), count: n })); } catch (e) {}
-    fetch('/water', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count: n })
-    }).catch(() => {});
-}
-async function loadWater() {
-    try {
-        const res = await fetch('/water');
-        if (!res.ok) return;
-        const data = await res.json();
-        waterCount = data.count || 0;
-        try { localStorage.setItem('fc_water', JSON.stringify({ date: new Date().toDateString(), count: waterCount })); } catch (e) {}
-        renderWater(waterCount, false);
-    } catch (e) {}
-}
-function renderWater(count, animate) {
-    const numEl = document.getElementById('water-num');
-    const prev  = parseInt(numEl.textContent, 10) || 0;
-    numEl.textContent = count;
-    if (animate !== false && count > prev) {
-        numEl.classList.remove('bump'); void numEl.offsetWidth; numEl.classList.add('bump');
-        setTimeout(function() { numEl.classList.remove('bump'); }, 220);
-    }
-    document.getElementById('water-bar').style.width = Math.min(count / WATER_GOAL * 100, 100) + '%';
-    document.querySelectorAll('.wg').forEach((g, i) => {
-        const wasFilled = g.classList.contains('filled');
-        const nowFilled = i < count;
-        g.classList.toggle('filled', nowFilled);
-        if (animate !== false && nowFilled && !wasFilled) {
-            g.classList.remove('just-filled'); void g.offsetWidth; g.classList.add('just-filled');
-            setTimeout(function() { g.classList.remove('just-filled'); }, 340);
-        }
-    });
-    const btn = document.getElementById('water-btn');
-    if (count >= WATER_GOAL) {
-        btn.disabled = true;
-        btn.innerHTML = '✓ &nbsp;Günlük hedefe ulaştın!';
-    } else {
-        btn.disabled = false;
-        btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Bardak Ekle';
-    }
-}
-function buildWaterGlasses() {
-    const c = document.getElementById('water-glasses');
-    c.innerHTML = '';
-    for (let i = 0; i < WATER_GOAL; i++) {
-        const g = document.createElement('div');
-        g.className = 'wg';
-        g.innerHTML = '<div class="wg-fill"></div>';
-        g.addEventListener('click', () => {
-            const cur = getWaterCount();
-            const next = i < cur ? i : i + 1;
-            saveWaterCount(next);
-            renderWater(next);
-            if (next > cur) {
-                if (next === WATER_GOAL) toast('Günlük su hedefine ulaştın!', 'success');
-                else toast(`${next}. bardak içildi`, 'info');
-            }
-        });
-        c.appendChild(g);
-    }
-}
-function addWater() {
-    const cur  = getWaterCount();
-    if (cur >= WATER_GOAL) return;
-    const next = cur + 1;
-    saveWaterCount(next);
-    renderWater(next);
-    if (next === WATER_GOAL) toast('Günlük su hedefine ulaştın!', 'success');
-    else toast(`${next}. bardak içildi`, 'info');
 }
 
 
@@ -823,10 +714,6 @@ document.addEventListener('click', (e) => {
 
 /* ═══ INIT ═══ */
 async function init() {
-    buildWaterGlasses();
-    waterCount = readWaterCache();
-    renderWater(waterCount, false);   // önbellekten anlık boyama
-    loadWater();                       // sunucudan senkronla
     renderStreak({{ streak_count|default(0) }});
     checkBtnGlow();
 
