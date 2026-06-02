@@ -376,22 +376,49 @@
 
       var begin = function () {
         if (typeof Html5Qrcode === 'undefined') { self._scanStatus('Tarayıcı yüklenemedi.'); return; }
+        if (!window.isSecureContext) {
+          self._scanStatus('Kamera yalnızca güvenli (HTTPS) bağlantıda açılır. "URL Gir" seçeneğini kullanın.');
+          return;
+        }
         var reader = document.getElementById('cw-scan-reader');
         if (reader) reader.innerHTML = '';
+        var qrCfg = { fps: 10, qrbox: { width: 220, height: 220 } };
+        var onDecode = function (decoded) {
+          var url = self._normUrl(decoded);
+          self.stopScan();
+          if (!url) { self._toast('QR kod geçerli bir URL içermiyor.', 'error'); return; }
+          self.processMenuUrl(url);
+        };
+        var fail = function (err) {
+          var info = ((err && (err.name || err.type)) || '') + ' ' + ((err && err.message) || err || '');
+          if (/NotAllowed|Permission|denied/i.test(info)) {
+            self._scanStatus('Kamera izni reddedildi. Tarayıcı ayarlarından kamera iznini açıp tekrar deneyin.');
+          } else if (/NotReadable|TrackStart|in use/i.test(info)) {
+            self._scanStatus('Kamera başka bir uygulama tarafından kullanılıyor.');
+          } else if (/NotFound|Overconstrained|no camera|devices/i.test(info)) {
+            self._scanStatus('Uygun kamera bulunamadı. "URL Gir" seçeneğini kullanabilirsiniz.');
+          } else {
+            self._scanStatus('Kamera açılamadı. "URL Gir" seçeneğini kullanabilirsiniz.');
+          }
+        };
+        // Arka kamerayı dene; başarısız olursa (örn. masaüstü) mevcut kameraya düş.
+        var fallbackToAnyCamera = function () {
+          Html5Qrcode.getCameras().then(function (cams) {
+            if (!cams || !cams.length) { fail({ name: 'NotFoundError' }); return; }
+            var back = cams.filter(function (c) { return /back|rear|arka|environment/i.test(c.label || ''); })[0];
+            var cam  = back || cams[cams.length - 1];
+            self._scanner.start(cam.id, qrCfg, onDecode, function () {})
+              .then(function () { self._scanStatus(''); })
+              .catch(fail);
+          }).catch(fail);
+        };
         try {
           self._scanner = new Html5Qrcode('cw-scan-reader');
-          self._scanner.start(
-            { facingMode: 'environment' },
-            { fps: 10, qrbox: { width: 220, height: 220 } },
-            function (decoded) {
-              var url = self._normUrl(decoded);
-              self.stopScan();
-              if (!url) { self._toast('QR kod geçerli bir URL içermiyor.', 'error'); return; }
-              self.processMenuUrl(url);
-            },
-            function () {}
-          ).catch(function () { self._scanStatus('Kamera erişimi reddedildi veya mevcut değil.'); });
-        } catch (e) { self._scanStatus('Kamera başlatılamadı.'); }
+          self._scanStatus('Kamera başlatılıyor...');
+          self._scanner.start({ facingMode: 'environment' }, qrCfg, onDecode, function () {})
+            .then(function () { self._scanStatus(''); })
+            .catch(fallbackToAnyCamera);
+        } catch (e) { fail(e); }
       };
 
       if (typeof Html5Qrcode !== 'undefined') {
