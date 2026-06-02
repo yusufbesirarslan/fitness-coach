@@ -1,12 +1,11 @@
 /* ═══════════════════════════════════════════════════════
    FITX — HYBRID NAVIGATION v3.0
-   Drawer · QR FAB · Swipe gestures
+   Drawer · Swipe gestures
    ═══════════════════════════════════════════════════════ */
 
 (function() {
   const drawer = document.getElementById('fx-drawer');
   const backdrop = document.getElementById('fx-drawer-backdrop');
-  const overlay = document.getElementById('fx-qr-overlay');
 
   /* ── Drawer ────────────────────────────────────────── */
   window.fxOpenDrawer = function() {
@@ -70,97 +69,10 @@
     }, { passive: true });
   }
 
-  /* ── Escape key closes drawer and overlay ──────────── */
+  /* ── Escape key closes drawer ──────────────────────── */
   document.addEventListener('keydown', function(e) {
     if (e.key === 'Escape') {
       fxCloseDrawer();
-      fxCloseQR();
     }
   });
-
-  /* ── QR Overlay ────────────────────────────────────── */
-  var qrScanner = null;
-  var qrLibLoaded = typeof Html5Qrcode !== 'undefined';
-
-  function _startQRScanner() {
-    if (qrScanner) return;
-    var reader = document.getElementById('fx-qr-reader');
-    if (!reader || typeof Html5Qrcode === 'undefined') return;
-    qrScanner = new Html5Qrcode('fx-qr-reader');
-    qrScanner.start(
-      { facingMode: 'environment' },
-      { fps: 10, qrbox: { width: 220, height: 220 } },
-      function(decoded) {
-        qrScanner.stop().then(function() { qrScanner = null; });
-        fxCloseQR();
-        var url = decoded.trim();
-        if (!/^https?:\/\//i.test(url) && /^[a-zA-Z0-9]/.test(url)) {
-          url = 'https://' + url;
-        }
-        window.location.href = '/menu-assistant?url=' + encodeURIComponent(url);
-      }
-    ).catch(function() {});
-  }
-
-  window.fxLaunchQR = function() {
-    if (window.location.pathname === '/menu-assistant') {
-      var startBtn = document.getElementById('btn-start');
-      if (startBtn) { startBtn.click(); return; }
-    }
-
-    if (!overlay) {
-      window.location.href = '/menu-assistant?scan=auto';
-      return;
-    }
-
-    overlay.classList.add('open');
-    document.body.style.overflow = 'hidden';
-
-    if (qrLibLoaded) {
-      _startQRScanner();
-    } else {
-      var s = document.createElement('script');
-      s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
-      s.onload = function() { qrLibLoaded = true; _startQRScanner(); };
-      document.head.appendChild(s);
-    }
-  };
-
-  window.fxCloseQR = function() {
-    if (!overlay) return;
-    overlay.classList.remove('open');
-    document.body.style.overflow = '';
-    if (qrScanner) {
-      qrScanner.stop().catch(function() {});
-      qrScanner = null;
-    }
-  };
-
-  window.fxSubmitQRUrl = function() {
-    var input = document.getElementById('fx-qr-url-input');
-    if (!input || !input.value.trim()) return;
-    fxCloseQR();
-    window.location.href = '/menu-assistant?url=' + encodeURIComponent(input.value.trim());
-  };
-
-  /* ── Auto-start scanner from URL param ─────────────── */
-  if (window.location.pathname === '/menu-assistant') {
-    var params = new URLSearchParams(window.location.search);
-    if (params.get('scan') === 'auto') {
-      window.addEventListener('load', function() {
-        var startBtn = document.getElementById('btn-start');
-        if (startBtn) startBtn.click();
-      });
-    }
-    var preUrl = params.get('url');
-    if (preUrl) {
-      window.addEventListener('load', function() {
-        var urlInput = document.getElementById('url-input');
-        if (urlInput) urlInput.value = preUrl;
-        if (typeof processUrl === 'function') {
-          processUrl(preUrl);
-        }
-      });
-    }
-  }
 })();

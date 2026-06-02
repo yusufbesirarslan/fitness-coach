@@ -1978,14 +1978,6 @@ def review_meals():
 
     return jsonify({"review": review, "total_calories": round(total_cal), "target": round(target)})
 
-@app.route("/menu-assistant")
-@login_required
-def menu_assistant():
-    return render_template("menu_assistant.html",
-        username=current_user.username,
-        profile_picture=current_user.profile_picture,
-    )
-
 
 def _is_safe_public_ip(ip_str):
     import ipaddress as _ipa

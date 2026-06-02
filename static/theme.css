@@ -588,7 +588,7 @@ button:focus-visible,
 @media (prefers-reduced-motion: reduce) {
   /* Looping / decorative / entrance animations → off */
   .bento .bc, .ins-pbar,
-  .w-btn.pulse, .qr-fab.pulse, .gr-badge-dot,
+  .w-btn.pulse, .gr-badge-dot,
   .skeleton, [class*="shimmer"] {
     animation: none !important;
   }
