@@ -2601,6 +2601,63 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
         return ""
 
 
+def validate_pump_check(image_bytes, location_type, user_description):
+    """'Pump Check' doğrulaması: yüklenen ortam fotoğrafının, kullanıcının beyan
+    ettiği antrenman ortamıyla (location_type + user_description) uyuşup uyuşmadığını
+    kontrol eder.
+
+    Return: {"valid": bool, "reason": str, "fallback": bool}
+
+    NOT: Şu an MOCK. Gerçek görsel sağlayıcı (Bedrock Claude / OpenAI) henüz
+    kesinleşmedi; aşağıdaki PLUG POINT bölümüne, _extract_text_from_image()'deki
+    bedrock_runtime görsel desenini birebir izleyerek takılır. Çağıranlar sağlayıcıyı
+    bilmek zorunda kalmasın diye yapılandırılmış (structured) bir sözlük döner.
+    """
+    location_type = (location_type or "").strip() or "belirtilmedi"
+    user_description = (user_description or "").strip() or "belirtilmedi"
+
+    prompt = (
+        f"Analyze if the provided image matches the user's claimed workout "
+        f"location type '{location_type}' and description '{user_description}'. "
+        f"Check if the environment looks like a gym, home workout area, or relevant "
+        f"fitness space based on their input. Return a boolean response."
+    )
+    print(f"[PUMP CHECK] prompt: {prompt}")
+
+    try:
+        # ── PLUG POINT: gerçek görsel doğrulama çağrısını buraya tak ──────────
+        # import base64
+        # img, mime = _compress_image_for_vision(image_bytes)
+        # b64 = base64.b64encode(img).decode("utf-8")
+        # body = {
+        #     "anthropic_version": "bedrock-2023-05-31",
+        #     "max_tokens": 10, "temperature": 0.0,
+        #     "messages": [{"role": "user", "content": [
+        #         {"type": "text", "text": prompt + " Answer strictly 'true' or 'false'."},
+        #         {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}},
+        #     ]}],
+        # }
+        # resp = bedrock_runtime.invoke_model(
+        #     body=json.dumps(body), modelId=BEDROCK_MODEL_ID,
+        #     contentType='application/json', accept='application/json')
+        # answer = json.loads(resp['body'].read())['content'][0]['text'].strip().lower()
+        # is_valid = answer.startswith("true")
+        # return {
+        #     "valid": is_valid, "fallback": False,
+        #     "reason": "Pump Check doğrulandı." if is_valid else
+        #               "Fotoğraf belirttiğin ortamla eşleşmedi. Antrenman alanını "
+        #               "net gösteren bir kare deneyebilir misin?",
+        # }
+        # ─────────────────────────────────────────────────────────────────────
+
+        # MOCK davranışı: biçimi geçerli her gönderimi kabul et.
+        return {"valid": True, "reason": "Pump Check doğrulandı.", "fallback": False}
+    except Exception as e:
+        # Görsel servis hatası (timeout / API down) → kullanıcıyı engelleme (fail-open).
+        print(f"[PUMP CHECK] AI failed, failing open: {type(e).__name__}: {e}")
+        return {"valid": True, "reason": "Doğrulama atlandı (servis hatası).", "fallback": True}
+
+
 def _process_google_drive_url(url):
     import requests as http_req
 
@@ -3552,6 +3609,25 @@ def validate_profile_picture(value):
     except Exception:
         return None, "Profil fotoğrafı çözümlenemedi."
     return value, None
+
+
+def validate_pump_check_image(value):
+    """Pump Check fotoğrafı için base64 data-URL'i doğrular ve ham bayta çevirir.
+    Fotoğraf saklanmadığı (yalnızca anlık doğrulama) için profil fotoğrafından
+    biraz daha yüksek bir boyut sınırı kullanılır. Return: (image_bytes, error)."""
+    import base64 as _b64
+    if not value:
+        return None, "Pump Check fotoğrafı gerekli."
+    if len(value) > 8_000_000:  # ~6 MB görsel + base64 şişmesi payı
+        return None, "Fotoğraf çok büyük (maks ~6MB)."
+    m = _PROFILE_PIC_RE.match(value)
+    if not m:
+        return None, "Geçersiz fotoğraf formatı."
+    try:
+        image_bytes = _b64.b64decode(m.group(2), validate=True)
+    except Exception:
+        return None, "Fotoğraf çözümlenemedi."
+    return image_bytes, None
 
 
 @app.route("/edit-profile", methods=["GET", "POST"])
@@ -5367,16 +5443,34 @@ def complete_workout():
         if existing:
             return jsonify({"error": "Bugünkü antrenmanını zaten tamamladın!"}), 400
 
+    # ── PUMP CHECK GATE ──────────────────────────────────────────────────────
+    # Antrenman tamamlanmadan önce ortam fotoğrafı + konum AI ile doğrulanmalı.
+    # Fotoğraf yalnızca anlık doğrulama için kullanılır; hiçbir yere kaydedilmez.
+    data = request.get_json(silent=True) or {}
+    image_bytes, img_err = validate_pump_check_image(data.get("image"))
+    if img_err:
+        return jsonify({"error": img_err}), 400
+
+    check = validate_pump_check(image_bytes, data.get("location_type"), data.get("description"))
+    if not check["valid"]:
+        # Doğrulama başarısız (fail-open değil) → XP yok, kullanıcı yeniden denesin.
+        return jsonify({"error": check["reason"]}), 422
+    # ─────────────────────────────────────────────────────────────────────────
+
+    base_xp = 10
+    pump_bonus = 25
     quest_result = complete_quest_for_user(current_user.id, "workout_logged")
-    new_total = award_xp(current_user.id, 10)
-    log_activity(current_user.id, "workout_completed", "Bugünkü antrenmanını tamamladı")
+    new_total = award_xp(current_user.id, base_xp + pump_bonus)
+    log_activity(current_user.id, "workout_completed",
+                 "Bugünkü antrenmanını tamamladı (Pump Check ✓)")
     db.session.commit()
 
-    total_xp = 10 + (quest_result["xp"] if quest_result else 0)
+    total_xp = base_xp + pump_bonus + (quest_result["xp"] if quest_result else 0)
     level = get_level(new_total)
     response = {
-        "message": f"Bugünkü antrenmanı tamamladın! +{total_xp} XP!",
+        "message": f"Bugünkü antrenmanı tamamladın! +{total_xp} XP! (Pump Check +{pump_bonus})",
         "points_awarded": total_xp,
+        "pump_bonus": pump_bonus,
         "new_total": new_total,
         "level": level,
         "title": get_title(level)

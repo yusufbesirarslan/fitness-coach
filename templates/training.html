@@ -206,6 +206,88 @@
         }
         .reset-plan-btn:hover { border-color: var(--border-2); color: var(--text); }
 
+        /* ── PUMP CHECK MODAL ── */
+        .pump-modal {
+            position: fixed; inset: 0; z-index: 1000;
+            display: none; align-items: center; justify-content: center; padding: 20px;
+            background: rgba(0,0,0,0.62);
+            backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+        }
+        .pump-modal.active { display: flex; animation: fade-in 0.18s ease; }
+        .pump-card {
+            background: var(--surface-2); border: 1px solid var(--border);
+            border-radius: var(--r-lg); box-shadow: var(--shadow-lg);
+            width: 100%; max-width: 420px; max-height: 92vh; overflow-y: auto;
+            padding: 24px; display: flex; flex-direction: column; gap: 16px;
+            animation: slide-up 0.24s cubic-bezier(0.16,1,0.3,1);
+        }
+        .pump-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+        .pump-title { font-family: var(--font-display); font-size: 26px; letter-spacing: 3px; color: var(--volt); line-height: 1; }
+        .pump-sub { font-size: 13px; color: var(--text-2); margin-top: 6px; font-weight: 300; line-height: 1.5; }
+        .pump-close {
+            background: none; border: none; color: var(--text-3); cursor: pointer;
+            font-size: 22px; line-height: 1; flex-shrink: 0;
+            width: 32px; height: 32px; border-radius: var(--r-sm);
+            transition: color var(--t-fast), background var(--t-fast);
+        }
+        .pump-close:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+
+        .pump-dropzone {
+            position: relative; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 8px; text-align: center;
+            min-height: 160px; padding: 20px;
+            border: 1.5px dashed var(--border-2); border-radius: var(--r-md);
+            background: rgba(255,255,255,0.02); cursor: pointer;
+            transition: border-color var(--t-fast), background var(--t-fast);
+        }
+        .pump-dropzone:hover { border-color: rgba(204,255,0,0.45); background: var(--volt-dim); }
+        .pump-dz-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+        .pump-dz-empty svg { width: 30px; height: 30px; stroke: var(--text-3); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+        .pump-dropzone-text { font-size: 13px; color: var(--text-2); font-weight: 500; }
+        .pump-dropzone-hint { font-size: 11px; color: var(--text-4); }
+        .pump-dropzone.has-image { padding: 0; border-style: solid; border-color: var(--border); overflow: hidden; }
+        .pump-dropzone.has-image .pump-dz-empty { display: none; }
+        .pump-preview { display: none; width: 100%; }
+        .pump-dropzone.has-image .pump-preview { display: block; }
+        .pump-preview img { display: block; width: 100%; max-height: 240px; object-fit: cover; }
+        .pump-preview-badge {
+            position: absolute; bottom: 8px; right: 8px;
+            font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+            color: #121212; background: var(--volt); padding: 4px 8px; border-radius: var(--r-sm);
+        }
+
+        .pump-field { display: flex; flex-direction: column; gap: 6px; }
+        .pump-label { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3); }
+        select.fc-input {
+            appearance: none; -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23808080' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat; background-position: right 16px center;
+            padding-right: 38px; cursor: pointer;
+        }
+        select.fc-input option { background: var(--surface-2); color: var(--text); }
+
+        .pump-error {
+            display: none; font-size: 13px; color: #FF7070;
+            background: var(--red-dim); border: 1px solid rgba(255,77,77,0.28);
+            border-radius: var(--r-sm); padding: 10px 12px; line-height: 1.45;
+        }
+        .pump-error.visible { display: block; }
+
+        .pump-actions { display: flex; gap: 10px; margin-top: 4px; }
+        .pump-actions .btn-volt { flex: 1; }
+        .pump-busy { display: inline-flex; align-items: center; gap: 8px; }
+        .pump-spinner {
+            width: 16px; height: 16px;
+            border: 2px solid rgba(18,18,18,0.35); border-top-color: #121212;
+            border-radius: 50%; animation: spin 0.7s linear infinite;
+        }
+
+        @media (max-width: 480px) {
+            .pump-card { padding: 20px; border-radius: var(--r-md); }
+            .pump-actions { flex-direction: column-reverse; }
+            .pump-actions .btn-ghost, .pump-actions .btn-volt { width: 100%; }
+        }
+
         @media(min-width:1024px) {
             .weekly-grid { gap: 12px; }
             .weekly-summary { gap: 16px; }
@@ -284,6 +366,53 @@
 <div class="loading-overlay" id="loading">
     <div class="loading-spinner"></div>
     <div class="loading-text">Program hazırlanıyor...</div>
+</div>
+
+<!-- ── PUMP CHECK MODAL ── -->
+<div class="pump-modal" id="pump-check-modal" role="dialog" aria-modal="true" aria-labelledby="pump-title">
+    <div class="pump-card">
+        <div class="pump-head">
+            <div>
+                <div class="pump-title" id="pump-title">PUMP CHECK</div>
+                <div class="pump-sub">Antrenmanını tamamlamak için ortamının bir fotoğrafını yükle — yapay zekâ doğrulasın.</div>
+            </div>
+            <button type="button" class="pump-close" id="pump-close" aria-label="Kapat">&times;</button>
+        </div>
+
+        <div class="pump-dropzone" id="pump-dropzone" role="button" tabindex="0" aria-label="Pump Check fotoğrafı yükle">
+            <div class="pump-dz-empty">
+                <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+                <div class="pump-dropzone-text">Fotoğraf çek veya yükle</div>
+                <div class="pump-dropzone-hint">Spor salonu, ev ya da antrenman alanın</div>
+            </div>
+            <div class="pump-preview">
+                <img id="pump-preview-img" alt="Pump Check fotoğrafı önizleme">
+                <span class="pump-preview-badge">Değiştir</span>
+            </div>
+        </div>
+        <input type="file" id="pump-file-input" accept="image/*" hidden>
+
+        <div class="pump-field">
+            <label class="pump-label" for="pump-location">Nerede antrenman yaptın?</label>
+            <select id="pump-location" class="fc-input">
+                <option value="Ev">Ev</option>
+                <option value="Spor Salonu" selected>Spor Salonu</option>
+                <option value="Diğer:">Diğer:</option>
+            </select>
+        </div>
+
+        <div class="pump-field">
+            <label class="pump-label" for="pump-desc">Kısa açıklama</label>
+            <input type="text" id="pump-desc" class="fc-input" maxlength="140" placeholder="Bugün antrenmanını nerde yaptın?">
+        </div>
+
+        <div class="pump-error" id="pump-error" role="alert" aria-live="polite"></div>
+
+        <div class="pump-actions">
+            <button type="button" class="btn-ghost" id="pump-cancel">Vazgeç</button>
+            <button type="button" class="btn-volt" id="pump-submit" onclick="submitPumpCheck()">Antrenmanı Tamamla</button>
+        </div>
+    </div>
 </div>
 
 <!-- ── MAIN CONTENT ── -->
@@ -814,36 +943,105 @@ document.addEventListener('click', e => {
         } catch (e) {}
     }
 
-    async function finishWorkout() {
+    // "Antrenmanı Tamamla" artık doğrudan tamamlamaz; önce Pump Check modalını açar.
+    function finishWorkout() {
+        openPumpCheck();
+    }
+
+    // ── PUMP CHECK MODAL ──
+    let pumpImageData = null;  // seçilen fotoğrafın base64 data-URL'i
+
+    function openPumpCheck() {
+        const modal = document.getElementById('pump-check-modal');
+        if (!modal) return;
+        // durumu sıfırla
+        pumpImageData = null;
+        document.getElementById('pump-dropzone').classList.remove('has-image');
+        document.getElementById('pump-file-input').value = '';
+        clearPumpError();
+        const submit = document.getElementById('pump-submit');
+        submit.disabled = false;
+        submit.classList.remove('loading');
+        submit.textContent = 'Antrenmanı Tamamla';
+        modal.classList.add('active');
+        document.body.style.overflow = 'hidden';
+        setTimeout(() => document.getElementById('pump-dropzone').focus(), 50);
+    }
+
+    function closePumpCheck() {
+        const modal = document.getElementById('pump-check-modal');
+        if (!modal) return;
+        modal.classList.remove('active');
+        document.body.style.overflow = '';
         const btn = document.getElementById('finish-workout-btn');
-        btn.disabled = true;
-        btn.textContent = 'İŞLENİYOR...';
+        if (btn && !btn.classList.contains('completed')) btn.focus();
+    }
+
+    function showPumpError(msg) {
+        const el = document.getElementById('pump-error');
+        el.textContent = msg;
+        el.classList.add('visible');
+    }
+    function clearPumpError() {
+        const el = document.getElementById('pump-error');
+        el.textContent = '';
+        el.classList.remove('visible');
+    }
+
+    function handlePumpFile(file) {
+        if (!file) return;
+        if (!file.type || !file.type.startsWith('image/')) { showPumpError('Lütfen bir görsel dosyası seç.'); return; }
+        if (file.size > 5 * 1024 * 1024) { showPumpError('Fotoğraf çok büyük (maks 5MB).'); return; }
+        const reader = new FileReader();
+        reader.onload = function(ev) {
+            pumpImageData = ev.target.result;
+            document.getElementById('pump-preview-img').src = pumpImageData;
+            document.getElementById('pump-dropzone').classList.add('has-image');
+            clearPumpError();
+        };
+        reader.readAsDataURL(file);
+    }
+
+    async function submitPumpCheck() {
+        if (!pumpImageData) { showPumpError('Önce bir Pump Check fotoğrafı yükle.'); return; }
+        clearPumpError();
+        const submit = document.getElementById('pump-submit');
+        submit.disabled = true;
+        submit.classList.add('loading');
+        submit.innerHTML = '<span class="pump-busy"><span class="pump-spinner"></span>DOĞRULANIYOR...</span>';
+        const payload = {
+            image: pumpImageData,
+            location_type: document.getElementById('pump-location').value,
+            description: document.getElementById('pump-desc').value.trim()
+        };
         try {
             const res = await fetch('/workout/complete', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
             });
             const data = await res.json().catch(() => ({}));
             // Sunucu "zaten tamamladın" derse (ör. başka cihazda yapıldı) bunu
-            // hata değil, tamamlanmış kabul et ve butonu güncelle.
+            // hata değil, tamamlanmış kabul et.
             const already = !res.ok && (data.error || '').includes('zaten');
             if (res.ok || already) {
                 if (res.ok) showToast(data.message, 'success');
                 markWorkoutCompleted();
-                // localStorage bazı mobil tarayıcılarda (iOS Safari gizli mod vb.)
-                // hata fırlatabilir; butonu bozmaması için ayrı koru.
+                // localStorage bazı mobil tarayıcılarda hata fırlatabilir; ayrı koru.
                 try { localStorage.setItem(getTodayKey(), 'true'); } catch (e) {}
+                closePumpCheck();
             } else {
-                showToast(data.error || 'Hata oluştu', 'error');
-                btn.disabled = false;
-                btn.textContent = '✔ Bugünkü Antrenmanı Tamamla';
-                btn.classList.remove('completed');
+                // 422 = doğrulama eşleşmedi, 400 = eksik/biçim hatası → modalda göster, yeniden dene.
+                showPumpError(data.error || 'Doğrulama başarısız oldu. Tekrar dene.');
+                submit.disabled = false;
+                submit.classList.remove('loading');
+                submit.textContent = 'Antrenmanı Tamamla';
             }
         } catch (err) {
-            showToast('Bağlantı hatası', 'error');
-            btn.disabled = false;
-            btn.textContent = '✔ Bugünkü Antrenmanı Tamamla';
-            btn.classList.remove('completed');
+            showPumpError('Bağlantı hatası. Tekrar dene.');
+            submit.disabled = false;
+            submit.classList.remove('loading');
+            submit.textContent = 'Antrenmanı Tamamla';
         }
     }
 
@@ -1009,6 +1207,25 @@ document.addEventListener('click', e => {
             showToast("Kayıt hatası: " + err.message, 'error');
         }
     }
+
+    // ── Pump Check modal olay bağlantıları ──
+    (function initPumpCheck() {
+        const modal = document.getElementById('pump-check-modal');
+        if (!modal) return;
+        const dz = document.getElementById('pump-dropzone');
+        const fileInput = document.getElementById('pump-file-input');
+        dz.addEventListener('click', () => fileInput.click());
+        dz.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+        });
+        fileInput.addEventListener('change', (e) => handlePumpFile(e.target.files[0]));
+        document.getElementById('pump-close').addEventListener('click', closePumpCheck);
+        document.getElementById('pump-cancel').addEventListener('click', closePumpCheck);
+        modal.addEventListener('click', (e) => { if (e.target === modal) closePumpCheck(); });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && modal.classList.contains('active')) closePumpCheck();
+        });
+    })();
 
     populateOptions();
     loadInfo();
