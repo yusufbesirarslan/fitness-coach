@@ -10,6 +10,15 @@
     <style>
     .lb-wrap { max-width: 600px; margin: 0 auto; }
 
+    /* ── Weekly countdown (visible only on the Haftalık timeframe) ── */
+    .lb-countdown-wrap { display: none; justify-content: flex-end; margin-bottom: 10px; }
+    .lb-countdown {
+        font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 600;
+        letter-spacing: 0.03em; color: var(--text-3);
+        font-variant-numeric: tabular-nums; transition: color 0.3s;
+    }
+    .lb-countdown.urgent { color: var(--volt); }
+
     /* ── Controls (Zaman dropdown + Friends/Global tabs) ── */
     .lb-controls { display: flex; gap: 8px; margin-bottom: 18px; align-items: stretch; }
 
@@ -177,6 +186,9 @@
     </div>
 
     <div class="lb-wrap">
+        <div id="lb-countdown-wrap" class="lb-countdown-wrap">
+            <span id="lb-countdown" class="lb-countdown" aria-live="polite"></span>
+        </div>
         <div class="lb-controls">
             <select id="lb-zaman" class="lb-zaman" aria-label="Zaman aralığı" onchange="setTimeframe(this.value)">
                 <option value="all_time">Tüm Zamanlar</option>
@@ -269,8 +281,49 @@ function emptyStateHTML() {
 let currentScope = 'friends';
 let currentTimeframe = 'all_time';
 
+// ── Weekly countdown ──────────────────────────────────────────────
+// Targets the weekly reset boundary in UTC. Change LB_RESET to adjust
+// the reset day/time in one place if it ever moves.
+const LB_RESET = { day: 0, hour: 23, minute: 59 };  // 0 = Sunday (UTC)
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+function nextResetUTC(now) {
+    now = now || new Date();
+    const t = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+        LB_RESET.hour, LB_RESET.minute, 0, 0));
+    t.setUTCDate(t.getUTCDate() + ((LB_RESET.day - now.getUTCDay() + 7) % 7));
+    if (t.getTime() <= now.getTime()) t.setUTCDate(t.getUTCDate() + 7);  // already passed today → next week
+    return t;
+}
+
+function formatRemaining(ms) {
+    if (ms < 0) ms = 0;
+    const totalMin = Math.floor(ms / 60000);
+    const days = Math.floor(totalMin / (60 * 24));
+    const hours = Math.floor((totalMin % (60 * 24)) / 60);
+    const mins = totalMin % 60;
+    return `Bitişine: ${days}g ${hours}s ${mins}dk`;
+}
+
+function updateCountdown() {
+    const el = document.getElementById('lb-countdown');
+    if (!el) return;
+    const ms = nextResetUTC() - new Date();
+    el.textContent = formatRemaining(ms);
+    el.classList.toggle('urgent', ms < DAY_MS);  // accent color under 24h
+}
+
+function applyCountdownVisibility() {
+    const wrap = document.getElementById('lb-countdown-wrap');
+    if (!wrap) return;
+    const show = currentTimeframe === 'weekly';
+    wrap.style.display = show ? 'flex' : 'none';
+    if (show) updateCountdown();
+}
+
 function setTimeframe(tf) {
     currentTimeframe = tf;
+    applyCountdownVisibility();
     loadBoard(currentScope);
 }
 
@@ -310,6 +363,9 @@ async function loadBoard(scope) {
         list.innerHTML = '<div class="loading-text">Sıralama yüklenirken hata oluştu.</div>';
     }
 }
+
+applyCountdownVisibility();
+setInterval(() => { if (currentTimeframe === 'weekly') updateCountdown(); }, 60000);
 
 loadBoard('friends');
 </script>
