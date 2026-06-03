@@ -10,9 +10,27 @@
     <style>
     .lb-wrap { max-width: 600px; margin: 0 auto; }
 
+    /* ── Controls (Zaman dropdown + Friends/Global tabs) ── */
+    .lb-controls { display: flex; gap: 8px; margin-bottom: 18px; align-items: stretch; }
+
+    .lb-zaman {
+        flex-shrink: 0; height: 50px; min-width: 132px;
+        background: var(--surface-2); border: 1px solid var(--border);
+        border-radius: var(--r-md); color: var(--text-2);
+        font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600;
+        letter-spacing: 0.02em; cursor: pointer;
+        padding: 0 34px 0 14px; -webkit-appearance: none; appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23A6A6A6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+        background-repeat: no-repeat; background-position: right 12px center;
+        transition: border-color 0.2s, color 0.2s;
+    }
+    .lb-zaman:hover { color: var(--text); border-color: var(--border-2); }
+    .lb-zaman:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; }
+    .lb-zaman option { background: var(--surface-3); color: var(--text); }
+
     /* ── Tabs ── */
     .lb-tabs {
-        display: flex; gap: 8px; margin-bottom: 18px;
+        flex: 1; display: flex; gap: 8px;
         background: var(--surface-2); border: 1px solid var(--border);
         border-radius: var(--r-md); padding: 5px;
     }
@@ -48,11 +66,21 @@
         padding-left: 11px;
     }
 
+    /* ── Top-3 medal framing (minimalist) ── */
+    .lb-row.rank-1 {
+        border-color: rgba(255,215,0,0.55);
+        box-shadow: 0 0 0 1px rgba(255,215,0,0.22), 0 0 18px rgba(255,215,0,0.10);
+    }
+    .lb-row.rank-2 { border-color: rgba(208,214,222,0.50); }
+    .lb-row.rank-3 { border-color: rgba(205,127,50,0.50); }
+    .lb-rank.rank-1 { color: #FFD700; }
+    .lb-rank.rank-2 { color: #D0D6DE; }
+    .lb-rank.rank-3 { color: #CD7F32; }
+
     .lb-rank {
         font-family: 'Bebas Neue', sans-serif; font-size: 20px;
         color: var(--text-3); text-align: center; line-height: 1;
     }
-    .lb-rank.top { color: var(--volt); }
 
     .lb-avatar {
         width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
@@ -149,9 +177,15 @@
     </div>
 
     <div class="lb-wrap">
-        <div class="lb-tabs">
-            <button class="lb-tab active" data-scope="friends" onclick="loadBoard('friends')">Arkadaşlar</button>
-            <button class="lb-tab" data-scope="global" onclick="loadBoard('global')">Genel</button>
+        <div class="lb-controls">
+            <select id="lb-zaman" class="lb-zaman" aria-label="Zaman aralığı" onchange="setTimeframe(this.value)">
+                <option value="all_time">Tüm Zamanlar</option>
+                <option value="weekly">Haftalık</option>
+            </select>
+            <div class="lb-tabs">
+                <button class="lb-tab active" data-scope="friends" onclick="loadBoard('friends')">Arkadaşlar</button>
+                <button class="lb-tab" data-scope="global" onclick="loadBoard('global')">Genel</button>
+            </div>
         </div>
         <div id="lb-list" class="lb-list">
             <div class="loading-text">Yükleniyor...</div>
@@ -205,11 +239,11 @@ function avatarHTML(pp, name) {
 
 function rowHTML(e, isSticky) {
     const meClass = e.is_me ? ' me' : '';
-    const topClass = e.rank <= 3 ? ' top' : '';
+    const rankClass = e.rank <= 3 ? (' rank-' + e.rank) : '';
     const sub = isSticky ? ('Lv ' + e.level + ' · Sen') : ('Lv ' + e.level);
     return `
-        <div class="lb-row${meClass}">
-            <div class="lb-rank${topClass}">${e.rank}</div>
+        <div class="lb-row${meClass}${rankClass}">
+            <div class="lb-rank${rankClass}">${e.rank}</div>
             ${avatarHTML(e.profile_picture, e.full_name)}
             <div class="lb-id">
                 <div class="lb-name">${escapeHTML(e.username)}</div>
@@ -232,7 +266,16 @@ function emptyStateHTML() {
         </div>`;
 }
 
+let currentScope = 'friends';
+let currentTimeframe = 'all_time';
+
+function setTimeframe(tf) {
+    currentTimeframe = tf;
+    loadBoard(currentScope);
+}
+
 async function loadBoard(scope) {
+    currentScope = scope;
     document.querySelectorAll('.lb-tab').forEach(t =>
         t.classList.toggle('active', t.dataset.scope === scope));
 
@@ -243,7 +286,8 @@ async function loadBoard(scope) {
     list.innerHTML = '<div class="loading-text">Yükleniyor...</div>';
 
     try {
-        const res = await fetch('/leaderboard/data?scope=' + encodeURIComponent(scope));
+        const res = await fetch('/leaderboard/data?scope=' + encodeURIComponent(scope) +
+            '&timeframe=' + encodeURIComponent(currentTimeframe));
         const data = await res.json();
 
         if (data.no_friends) {

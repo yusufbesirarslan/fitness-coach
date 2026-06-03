@@ -289,6 +289,58 @@
 <!-- TOAST -->
 <div class="toast-wrap" id="toast-wrap"></div>
 
+<!-- WEEKLY REWARD CELEBRATION MODAL -->
+<style>
+.reward-overlay {
+    position: fixed; inset: 0; z-index: 1000;
+    display: none; align-items: center; justify-content: center;
+    padding: 24px; background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.reward-overlay.open { display: flex; }
+.reward-card {
+    width: 100%; max-width: 360px; text-align: center;
+    background: var(--surface-2); border: 1px solid var(--border-2);
+    border-radius: var(--r-lg); padding: 32px 28px 26px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.55);
+    animation: rewardIn 0.2s cubic-bezier(0.16,1,0.3,1);
+}
+@keyframes rewardIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
+.reward-trophy {
+    width: 56px; height: 56px; margin: 0 auto 18px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 50%; background: rgba(255,215,0,0.10);
+    border: 1px solid rgba(255,215,0,0.35);
+    box-shadow: 0 0 22px rgba(255,215,0,0.12);
+}
+.reward-trophy svg { width: 30px; height: 30px; stroke: #FFD700; fill: none; stroke-width: 1.8; }
+.reward-title {
+    font-family: 'Bebas Neue', sans-serif; font-size: 26px; letter-spacing: 1.5px;
+    color: var(--text); margin: 0 0 10px;
+}
+.reward-body { font-size: 14px; line-height: 1.55; color: var(--text-2); margin: 0 0 24px; }
+.reward-body b { color: var(--text); font-weight: 700; }
+.reward-xp { color: var(--volt); font-weight: 700; }
+.reward-btn {
+    width: 100%; height: 48px; border: none; cursor: pointer;
+    background: var(--volt); color: #121212;
+    font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 700;
+    border-radius: var(--r-md); transition: opacity 0.2s;
+}
+.reward-btn:hover { opacity: 0.88; }
+@media (prefers-reduced-motion: reduce) { .reward-card { animation: none; } }
+</style>
+<div class="reward-overlay" id="reward-overlay" role="dialog" aria-modal="true" aria-labelledby="reward-title">
+    <div class="reward-card">
+        <div class="reward-trophy">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0V4zM7 5H4v2a3 3 0 0 0 3 3M17 5h3v2a3 3 0 0 1-3 3"/></svg>
+        </div>
+        <h2 class="reward-title" id="reward-title">TEBRİKLER!</h2>
+        <p class="reward-body" id="reward-body"></p>
+        <button class="reward-btn" id="reward-btn" onclick="dismissReward()">Devam Et</button>
+    </div>
+</div>
+
 <!-- ══════════════════════════════════════
      JAVASCRIPT
      ══════════════════════════════════════ -->
@@ -779,5 +831,33 @@ init();
 
 <script src="/static/coach_widget.js"></script>
 <script src="/static/nav.js"></script>
+
+<!-- WEEKLY REWARD CELEBRATION -->
+<script>
+function dismissReward() {
+    document.getElementById('reward-overlay').classList.remove('open');
+    fetch('/leaderboard/reward-dismiss', { method: 'POST' }).catch(() => {});
+}
+(function checkWeeklyReward() {
+    fetch('/leaderboard/reward-check')
+        .then(r => r.json())
+        .then(d => {
+            if (!d || !d.show) return;
+            const place = d.rank + '.';
+            const xp = Number(d.xp).toLocaleString('tr-TR');
+            document.getElementById('reward-body').innerHTML =
+                'Geçen haftayı liderlik tablosunda <b>' + place + '</b> sırada tamamladın ve ' +
+                '<span class="reward-xp">' + xp + ' XP</span> kazandın.';
+            const overlay = document.getElementById('reward-overlay');
+            overlay.classList.add('open');
+            document.getElementById('reward-btn').focus();
+            overlay.addEventListener('click', e => { if (e.target === overlay) dismissReward(); });
+            document.addEventListener('keydown', function esc(e) {
+                if (e.key === 'Escape') { dismissReward(); document.removeEventListener('keydown', esc); }
+            });
+        })
+        .catch(() => {});
+})();
+</script>
 </body>
 </html>

@@ -330,6 +330,8 @@ class User(UserMixin, db.Model):
     goal_type        = db.Column(db.String(10), nullable=True)
     streak_count     = db.Column(db.Integer, default=0, server_default='0')
     rank_points      = db.Column(db.Integer, default=0, server_default='0')
+    weekly_xp        = db.Column(db.Integer, default=0, server_default='0')
+    last_reward_week = db.Column(db.String(10), nullable=True)  # ISO week of last seen reward popup, e.g. "2026-W22"
     last_login       = db.Column(db.Date, nullable=True)
 
     def set_password(self, password):
@@ -573,6 +575,27 @@ class UserQuestProgress(db.Model):
     quest = db.relationship("DailyQuest", backref="progress_entries")
 
 
+class WeeklyWinner(db.Model):
+    # Haftalık liderlik kazananları — kutlama pop-up'ını da besler.
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    week_key   = db.Column(db.String(10), nullable=False)   # biten ISO hafta, ör. "2026-W22"
+    rank       = db.Column(db.Integer, nullable=False)       # 1, 2, 3
+    xp_awarded = db.Column(db.Integer, nullable=False)       # 500 / 300 / 150
+    notified   = db.Column(db.Boolean, default=False, server_default='false')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User", backref="weekly_wins")
+
+
+class WeeklyResetLog(db.Model):
+    # Haftalık rollover idempotency koruması — her hafta yalnızca bir kez işlenir.
+    id           = db.Column(db.Integer, primary_key=True)
+    week_key     = db.Column(db.String(10), unique=True, nullable=False)
+    processed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    winner_count = db.Column(db.Integer, default=0)
+
+
 class WaterLog(db.Model):
     # Günlük su (bardak) sayısı — kullanıcı + gün başına tek satır.
     # Cihazlar arası senkron için sunucuda tutulur.
@@ -672,6 +695,7 @@ def award_xp(user_id, amount):
     user = User.query.get(user_id)
     if user:
         user.rank_points = (user.rank_points or 0) + amount
+        user.weekly_xp = (user.weekly_xp or 0) + amount
         return user.rank_points
     return None
 
@@ -705,6 +729,79 @@ def log_activity(user_id, activity_type, content):
 
 def get_rank_title(points):
     return get_title(get_level(points))
+
+
+# ── WEEKLY XP REWARD CYCLE ──
+# Weekly board snapshots + resets every Sunday 23:59 UTC. Top 3 by weekly_xp earn
+# bonus all-time XP. Run via the `weekly-reset` CLI (Railway Cron) and an idempotent
+# in-app self-heal so a missed boundary still rolls over (and local dev is testable).
+
+WEEKLY_REWARDS = {1: 500, 2: 300, 3: 150}
+
+
+def _last_completed_week_key(now=None):
+    """ISO 'YYYY-Www' of the most recently completed week (boundary = Sunday 23:59 UTC)."""
+    now = now or datetime.utcnow()
+    monday = (now - timedelta(days=now.isoweekday() - 1)).replace(
+        hour=0, minute=0, second=0, microsecond=0)
+    sunday_2359 = monday + timedelta(days=6, hours=23, minutes=59)
+    ref = now if now >= sunday_2359 else (monday - timedelta(days=1))  # this week if closed, else last
+    y, w, _ = ref.isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+def run_weekly_rollover(now=None, force_week=None):
+    """Snapshot the weekly board, award top-3 XP, reset weekly counters. Idempotent."""
+    week_key = force_week or _last_completed_week_key(now)
+
+    # Idempotency guard — skip if this week was already processed.
+    if WeeklyResetLog.query.filter_by(week_key=week_key).first():
+        return {"status": "already_processed", "week_key": week_key}
+
+    wx = db.func.coalesce(User.weekly_xp, 0)
+    sc = db.func.coalesce(User.streak_count, 0)
+    top = (User.query.filter(wx > 0)
+                     .order_by(wx.desc(), sc.desc(), User.id.asc())
+                     .limit(3).all())
+
+    winners = []
+    for i, u in enumerate(top):
+        rank = i + 1
+        xp = WEEKLY_REWARDS[rank]
+        u.rank_points = (u.rank_points or 0) + xp  # reward feeds all-time only, not weekly
+        db.session.add(WeeklyWinner(user_id=u.id, week_key=week_key,
+                                    rank=rank, xp_awarded=xp, notified=False))
+        winners.append({"user_id": u.id, "rank": rank, "xp": xp})
+
+    # Reset everyone's weekly counter for the new cycle.
+    db.session.query(User).update({User.weekly_xp: 0})
+    db.session.add(WeeklyResetLog(week_key=week_key, winner_count=len(winners)))
+
+    try:
+        db.session.commit()
+    except Exception:
+        # Concurrent run won the race (week_key UNIQUE) — safe to ignore.
+        db.session.rollback()
+        return {"status": "already_processed", "week_key": week_key}
+
+    return {"status": "done", "week_key": week_key, "winners": winners}
+
+
+# Throttle the in-app self-heal so it queries at most once per ~5 min per worker.
+_last_rollover_check = [None]
+
+
+@app.before_request
+def maybe_weekly_rollover():
+    now = datetime.utcnow()
+    last = _last_rollover_check[0]
+    if last is not None and (now - last).total_seconds() < 300:
+        return
+    _last_rollover_check[0] = now
+    try:
+        run_weekly_rollover(now)
+    except Exception:
+        db.session.rollback()
 
 
 @app.before_request
@@ -4116,15 +4213,16 @@ def _accepted_friend_ids():
     return {r.receiver_id if r.sender_id == current_user.id else r.sender_id
             for r in rows}
 
-def _lb_serialize(u, rank):
-    xp = u.rank_points or 0
+def _lb_serialize(u, rank, timeframe="all_time"):
+    # XP shown reflects the selected timeframe; level always derives from lifetime XP.
+    xp = (u.weekly_xp if timeframe == "weekly" else u.rank_points) or 0
     return {
         "rank": rank,
         "id": u.id,
         "username": u.username,
         "full_name": u.full_name or u.username,
         "profile_picture": u.profile_picture,
-        "level": get_level(xp),
+        "level": get_level(u.rank_points or 0),
         "xp": xp,
         "streak": u.streak_count or 0,
         "is_me": u.id == current_user.id,
@@ -4141,41 +4239,68 @@ def leaderboard_page():
 @login_required
 def leaderboard_data():
     scope = "friends" if request.args.get("scope") == "friends" else "global"
+    timeframe = "weekly" if request.args.get("timeframe") == "weekly" else "all_time"
 
-    # Sort: Total XP (rank_points) desc → Streak desc → id asc (stable tiebreak).
-    # Level is derived from XP (get_level = 1 + xp//500), so it never breaks a tie
-    # that XP did not already break — XP ordering already implies level ordering.
-    rp = db.func.coalesce(User.rank_points, 0)
+    # Sort: XP (for the selected timeframe) desc → Streak desc → id asc (stable tiebreak).
+    # Level is derived from lifetime XP and never breaks a tie that XP did not already break.
+    xpc = db.func.coalesce(User.weekly_xp if timeframe == "weekly" else User.rank_points, 0)
     sc = db.func.coalesce(User.streak_count, 0)
-    order = (rp.desc(), sc.desc(), User.id.asc())
+    order = (xpc.desc(), sc.desc(), User.id.asc())
 
     if scope == "friends":
         fids = _accepted_friend_ids()
         if not fids:
-            return jsonify({"scope": scope, "entries": [], "me": None,
-                            "in_list": False, "no_friends": True})
+            return jsonify({"scope": scope, "timeframe": timeframe, "entries": [],
+                            "me": None, "in_list": False, "no_friends": True})
         ids = fids | {current_user.id}  # include self in the friends board
         base = User.query.filter(User.id.in_(ids))
     else:
         base = User.query
 
     top = base.order_by(*order).limit(LEADERBOARD_TOP_N).all()
-    entries = [_lb_serialize(u, i + 1) for i, u in enumerate(top)]
+    entries = [_lb_serialize(u, i + 1, timeframe) for i, u in enumerate(top)]
 
     in_list = any(e["is_me"] for e in entries)
     me = next((e for e in entries if e["is_me"]), None)
     if not in_list:
-        my_xp = current_user.rank_points or 0
+        my_xp = (current_user.weekly_xp if timeframe == "weekly" else current_user.rank_points) or 0
         my_sc = current_user.streak_count or 0
         ahead = db.or_(
-            rp > my_xp,
-            db.and_(rp == my_xp, sc > my_sc),
-            db.and_(rp == my_xp, sc == my_sc, User.id < current_user.id))
+            xpc > my_xp,
+            db.and_(xpc == my_xp, sc > my_sc),
+            db.and_(xpc == my_xp, sc == my_sc, User.id < current_user.id))
         my_rank = base.filter(ahead).count() + 1
-        me = _lb_serialize(current_user, my_rank)
+        me = _lb_serialize(current_user, my_rank, timeframe)
 
-    return jsonify({"scope": scope, "entries": entries,
+    return jsonify({"scope": scope, "timeframe": timeframe, "entries": entries,
                     "me": me, "in_list": in_list, "no_friends": False})
+
+
+@app.route("/leaderboard/reward-check")
+@login_required
+def reward_check():
+    """Return the newest unseen weekly-reward win for the celebration pop-up."""
+    win = (WeeklyWinner.query
+           .filter_by(user_id=current_user.id, notified=False)
+           .order_by(WeeklyWinner.created_at.desc(), WeeklyWinner.id.desc())
+           .first())
+    if not win:
+        return jsonify({"show": False})
+    return jsonify({"show": True, "rank": win.rank,
+                    "xp": win.xp_awarded, "week": win.week_key})
+
+
+@app.route("/leaderboard/reward-dismiss", methods=["POST"])
+@login_required
+def reward_dismiss():
+    """Mark the user's pending reward pop-ups as seen so they don't repeat."""
+    rows = WeeklyWinner.query.filter_by(user_id=current_user.id, notified=False).all()
+    for r in rows:
+        r.notified = True
+    if rows:
+        current_user.last_reward_week = rows[0].week_key
+    db.session.commit()
+    return jsonify({"ok": True})
 
 # ── SUPPLEMENT ROUTES ──
 
@@ -5844,6 +5969,16 @@ def seed_quests():
     click.echo("Default quests seeded successfully.")
 
 
+@app.cli.command("weekly-reset")
+def weekly_reset_cmd():
+    """Snapshot the weekly board, award top-3 XP, reset weekly_xp. Idempotent.
+
+    Wire to Railway Cron `59 23 * * 0` (Sunday 23:59 UTC):
+        flask --app starter weekly-reset
+    """
+    click.echo(run_weekly_rollover())
+
+
 @app.errorhandler(404)
 def not_found(e):
     return render_template("404.html"), 404
@@ -5869,6 +6004,8 @@ with app.app_context():
         'ALTER TABLE custom_meal_item ADD COLUMN serving_id VARCHAR(50)',
         'ALTER TABLE custom_meal_item ADD COLUMN serving_description VARCHAR(200)',
         'ALTER TABLE custom_meal_item ADD COLUMN serving_quantity FLOAT',
+        'ALTER TABLE "user" ADD COLUMN weekly_xp INTEGER DEFAULT 0',
+        'ALTER TABLE "user" ADD COLUMN last_reward_week VARCHAR(10)',
     ]
     for sql in migrations:
         try:
