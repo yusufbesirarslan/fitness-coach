@@ -857,6 +857,14 @@ document.addEventListener('click', e => {
         } catch(e) {}
     }
 
+    // Plan text (exercise names, notes, day focus) originates from the AI model;
+    // escape it before interpolating into innerHTML so it can't inject markup.
+    function esc(s) {
+        const d = document.createElement('div');
+        d.textContent = s == null ? '' : String(s);
+        return d.innerHTML;
+    }
+
     function renderApvGrid(program) {
         const grid = document.getElementById('apv-weekly-grid');
         grid.innerHTML = '';
@@ -871,14 +879,14 @@ document.addEventListener('click', e => {
                 (isCardio ? ' kardiyo' : '') +
                 (isToday  ? ' today'   : ' not-today');
             const exs     = gun.egzersizler || [];
-            const preview = exs.slice(0, 3).map(e => `<div class="day-ex">${e.isim}</div>`).join('');
+            const preview = exs.slice(0, 3).map(e => `<div class="day-ex">${esc(e.isim)}</div>`).join('');
             const more    = exs.length > 3 ? `<div class="day-more">+${exs.length - 3} daha</div>` : '';
             const odakText = gun.odak || (exs[0] && exs[0].isim) || '';
             card.innerHTML = `
                 <div class="day-card-header">
                     ${isToday ? '<div class="today-badge">BUGÜN</div>' : ''}
-                    <div class="day-name">${gun.gun}</div>
-                    <div class="day-odak">${isRest ? 'Off Day' : odakText}</div>
+                    <div class="day-name">${esc(gun.gun)}</div>
+                    <div class="day-odak">${isRest ? 'Off Day' : esc(odakText)}</div>
                 </div>
                 <div class="day-card-body">
                     ${!isRest ? `
@@ -898,7 +906,7 @@ document.addEventListener('click', e => {
         document.getElementById('apv-detail-sub').textContent   = `${gun.sure_dk} dakika · ~${gun.tahmini_kalori} kcal`;
         document.getElementById('apv-detail-exercises').innerHTML = (gun.egzersizler || []).map(e => `
             <tr>
-                <td>${e.isim}${e.not ? `<div class="ex-not">${e.not}</div>` : ''}</td>
+                <td>${esc(e.isim)}${e.not ? `<div class="ex-not">${esc(e.not)}</div>` : ''}</td>
                 <td>${e.set}</td>
                 <td>${e.tekrar}</td>
                 <td>${e.dinlenme}</td>
@@ -1127,14 +1135,14 @@ document.addEventListener('click', e => {
             const isToday  = gun.gun === todaySetup;
             card.className = "day-card" + (isRest ? " rest" : "") + (isCardio ? " kardiyo" : "") + (isToday ? " today" : " not-today");
             const exercises = gun.egzersizler || [];
-            const preview   = exercises.slice(0, 3).map(e => `<div class="day-ex">${e.isim}</div>`).join("");
+            const preview   = exercises.slice(0, 3).map(e => `<div class="day-ex">${esc(e.isim)}</div>`).join("");
             const more      = exercises.length > 3 ? `<div class="day-more">+${exercises.length - 3} daha</div>` : "";
             const odakText = gun.odak || (exercises[0] && exercises[0].isim) || '';
             card.innerHTML = `
                 <div class="day-card-header">
                     ${isToday ? '<div class="today-badge">BUGÜN</div>' : ''}
-                    <div class="day-name">${gun.gun}</div>
-                    <div class="day-odak">${isRest ? 'Off Day' : odakText}</div>
+                    <div class="day-name">${esc(gun.gun)}</div>
+                    <div class="day-odak">${isRest ? 'Off Day' : esc(odakText)}</div>
                 </div>
                 <div class="day-card-body">
                     ${!isRest ? `
@@ -1173,7 +1181,7 @@ document.addEventListener('click', e => {
         document.getElementById("detail-sub").textContent   = `${gun.sure_dk} dakika · ~${gun.tahmini_kalori} kcal`;
         document.getElementById("detail-exercises").innerHTML = (gun.egzersizler || []).map(e => `
             <tr>
-                <td>${e.isim}${e.not ? `<div class="ex-not">${e.not}</div>` : ""}</td>
+                <td>${esc(e.isim)}${e.not ? `<div class="ex-not">${esc(e.not)}</div>` : ""}</td>
                 <td>${e.set}</td>
                 <td>${e.tekrar}</td>
                 <td>${e.dinlenme}</td>

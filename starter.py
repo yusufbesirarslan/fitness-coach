@@ -11,6 +11,7 @@ import click
 import re
 import threading
 import time
+import contextlib
 import requests as http_requests_lib
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -2016,6 +2017,42 @@ def _resolve_host_safely(hostname):
     return ips
 
 
+# Cap on how much of a fetched page we read into memory (bounds a DoS where a
+# cooperative origin streams an unbounded body).
+_MAX_FETCH_BYTES = 3_000_000  # ~3 MB
+_dns_pin_lock = threading.Lock()
+
+
+@contextlib.contextmanager
+def _pin_getaddrinfo(hostname, ip):
+    """Force socket.getaddrinfo to return `ip` for `hostname` while active.
+
+    Closes the DNS-rebinding window in the SSRF guard: the socket connects to
+    the exact IP that _resolve_host_safely already vetted, not a fresh (and
+    attacker-flippable) lookup at connect time. The hostname is still used for
+    TLS SNI and certificate validation, so HTTPS integrity is preserved.
+
+    The patch is process-global, so it is serialized by a lock. Menu scraping
+    is an infrequent, heavy operation, so serializing it is not a bottleneck;
+    the lock is only held for connection setup, not for the body download.
+    """
+    import socket as _s
+    family = _s.AF_INET6 if ":" in ip else _s.AF_INET
+    with _dns_pin_lock:
+        original = _s.getaddrinfo
+
+        def _patched(host, port, *args, **kwargs):
+            if host == hostname:
+                return [(family, _s.SOCK_STREAM, 6, "", (ip, port))]
+            return original(host, port, *args, **kwargs)
+
+        _s.getaddrinfo = _patched
+        try:
+            yield
+        finally:
+            _s.getaddrinfo = original
+
+
 def _validate_menu_url(url):
     from urllib.parse import urlparse, urlunparse, parse_qs, urlencode
     import re as _re
@@ -2085,14 +2122,38 @@ def _fetch_page(url, timeout=10):
     session = http_req.Session()
     session.headers.update(headers)
 
+    def _read_capped(resp):
+        # Stream the body with a hard size cap so a malicious/oversized origin
+        # can't exhaust memory. Materialise into resp._content so later reads
+        # of resp.text behave normally.
+        total = 0
+        chunks = []
+        for chunk in resp.iter_content(8192):
+            if not chunk:
+                continue
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > _MAX_FETCH_BYTES:
+                resp.close()
+                raise ValueError("Sayfa çok büyük (boyut limiti aşıldı).")
+        resp._content = b"".join(chunks)
+        resp._content_consumed = True
+        return resp
+
     def _safe_get(target_url):
-        # Re-validate every hop to defeat DNS rebinding and bypass via
-        # untrusted Location headers from cooperative origins.
+        # Re-validate every hop to defeat bypass via untrusted Location headers
+        # from cooperative origins, then PIN the vetted IP for the actual socket
+        # connection so the host can't be rebound to an internal address between
+        # validation and connect (DNS-rebinding TOCTOU).
         p = urlparse(target_url)
         if p.scheme not in ("http", "https") or not p.hostname:
             raise http_req.exceptions.InvalidURL("Geçersiz URL.")
-        _resolve_host_safely(p.hostname)
-        return session.get(target_url, timeout=timeout, allow_redirects=False)
+        safe_ips = _resolve_host_safely(p.hostname)
+        # stream=True so the TCP connect (which resolves DNS) happens inside the
+        # pinned window; the body is downloaded later via _read_capped.
+        with _pin_getaddrinfo(p.hostname, safe_ips[0]):
+            return session.get(target_url, timeout=timeout,
+                               allow_redirects=False, stream=True)
 
     def _follow(start_url):
         current = start_url
@@ -2100,11 +2161,12 @@ def _fetch_page(url, timeout=10):
             r = _safe_get(current)
             if r.status_code in (301, 302, 303, 307, 308):
                 loc = r.headers.get("Location")
+                r.close()  # release the unread streamed body before next hop
                 if not loc:
                     return r
                 current = urljoin(current, loc)
                 continue
-            return r
+            return _read_capped(r)
         raise http_req.exceptions.TooManyRedirects("Çok fazla yönlendirme.")
 
     resp = _follow(url)
@@ -5653,6 +5715,19 @@ def validate_password(password):
     return None
 
 
+# Pragmatic email shape check: one @, no spaces, a dotted domain. Not RFC-5322
+# exhaustive — just enough to reject garbage before it reaches the DB / any
+# future email-sending or link-building code path.
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def validate_email(email):
+    """Return an error message if the email is malformed, else None."""
+    if not email or len(email) > 120 or not EMAIL_RE.match(email):
+        return "Geçerli bir e-posta adresi girin."
+    return None
+
+
 @app.route("/register", methods=["GET","POST"])
 @limiter.limit("5 per hour", methods=["POST"])
 def register():
@@ -5660,12 +5735,12 @@ def register():
         return render_template("register.html")
     data = request.get_json()
     username = data.get("username")
-    email = data.get("email")
+    email = (data.get("email") or "").strip()
     password = data.get("password")
 
     if not username or not email or not password:
         return jsonify({"error" : "Tüm alanlar zorunludur"}), 400
-    
+
     password_error = validate_password(password)
     if password_error:
         return jsonify({"error": password_error}), 400
@@ -5673,6 +5748,10 @@ def register():
     username_error = validate_username(username)
     if username_error:
         return jsonify({"error": username_error}), 400
+
+    email_error = validate_email(email)
+    if email_error:
+        return jsonify({"error": email_error}), 400
 
     # Kullanıcı check
     if User.query.filter_by(username=username).first():
