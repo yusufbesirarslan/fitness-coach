@@ -213,6 +213,36 @@ app.config["SECRET_KEY"] = _secret_key
 # requirement so local http:// sessions still work.
 _IS_DEV = os.environ.get("FLASK_DEBUG") == "1" or os.environ.get("FLASK_ENV") == "development"
 
+# ── FatSecret proxy must use TLS in production ──
+# Calls to FATSECRET_API_URL carry the OAuth token in an `Authorization: Bearer`
+# header. Over plaintext http:// that token is exposed to anyone on the network
+# path. Require https:// in production; allow http only for a loopback dev proxy
+# or when explicitly running in debug mode.
+def _enforce_fatsecret_tls():
+    from urllib.parse import urlparse as _urlparse
+    p = _urlparse(FATSECRET_BASE_URL)
+    host = (p.hostname or "").lower()
+    is_local = host in ("localhost", "127.0.0.1", "::1")
+    if p.scheme == "https" or is_local:
+        return
+    if _IS_DEV:
+        app.logger.warning(
+            "FATSECRET_BASE_URL uses plaintext http (%s) — the FatSecret bearer "
+            "token is exposed on the wire. Use https:// outside local dev.",
+            FATSECRET_BASE_URL,
+        )
+        return
+    raise RuntimeError(
+        "FATSECRET_BASE_URL must use https:// in production — the FatSecret "
+        "OAuth token is sent in the Authorization header and would otherwise be "
+        "transmitted in cleartext. Point FATSECRET_BASE_URL at an https:// "
+        "endpoint (terminate TLS in front of the proxy), or set FLASK_DEBUG=1 "
+        "for local http testing."
+    )
+
+
+_enforce_fatsecret_tls()
+
 # ── Session cookie hardening ──
 # HttpOnly: JS can't read the session cookie (limits XSS impact).
 # SameSite=Lax: browser won't send the cookie on cross-site POST/PATCH/DELETE,
@@ -5878,12 +5908,15 @@ def register():
     if email_error:
         return jsonify({"error": email_error}), 400
 
-    # Kullanıcı check
-    if User.query.filter_by(username=username).first():
-        return jsonify({"error" : "Bu kullanıcı adı alınmış."}), 400
-    
-    if User.query.filter_by(email = email).first():
-        return jsonify({"error" : "Bu email zaten kayıtlı."}) , 400
+    # Username/email collision. Return one generic message for both checks so the
+    # response can't be used to confirm whether a specific username OR e-mail is
+    # already registered (account-enumeration hardening). Combined with the per-IP
+    # rate limit on this route, this raises the cost of enumeration. Note that
+    # usernames are inherently discoverable via the friend search and there is no
+    # e-mail login / reset flow, so the residual exposure is low.
+    if (User.query.filter_by(username=username).first()
+            or User.query.filter_by(email=email).first()):
+        return jsonify({"error": "Bu kullanıcı adı veya e-posta zaten kullanımda."}), 400
     
     user = User(username = username , email = email)
     user.set_password(password)
@@ -5916,6 +5949,22 @@ def login():
 @app.route("/logout")
 @login_required
 def logout():
+    # Logout CSRF guard. The logout links across the app are same-site <a>
+    # navigations (GET), so this can't be POST-only without reworking every
+    # template. Instead, reject cross-site triggers — e.g. an attacker page
+    # embedding <img src="/logout"> to silently sign the user out. A genuine
+    # same-site navigation reports Sec-Fetch-Site: same-origin/same-site/none;
+    # for older browsers without that header we fall back to a Referer check.
+    sec_site = request.headers.get("Sec-Fetch-Site")
+    if sec_site:
+        if sec_site not in ("same-origin", "same-site", "none"):
+            abort(403, description="CSRF doğrulaması başarısız.")
+    else:
+        referer = request.headers.get("Referer")
+        if referer:
+            from urllib.parse import urlparse
+            if urlparse(referer).hostname != request.host.split(":")[0]:
+                abort(403, description="CSRF doğrulaması başarısız.")
     logout_user()
     return redirect(url_for("login"))
 
