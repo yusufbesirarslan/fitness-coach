@@ -1,0 +1,47 @@
+# FitX — tek EC2 üzerinde Docker Compose ile çalıştırma.
+# Host üzerindeki nginx (bkz. nginx.conf) gelen istekleri 127.0.0.1:5000'e
+# (web servisi) yönlendirir. db sadece compose ağı içinden erişilebilir.
+#
+# ${VAR:-default} değerleri proje kökündeki .env dosyasından okunur
+# (compose otomatik olarak .env'i değişken ikamesi için yükler).
+
+services:
+  web:
+    build: .
+    restart: unless-stopped
+    # Yalnızca loopback'e bağla — Flask doğrudan internete açık değil,
+    # sadece host nginx reverse-proxy üzerinden erişilir.
+    ports:
+      - "127.0.0.1:5000:5000"
+    env_file:
+      - .env
+    environment:
+      # Compose içindeki Postgres'e bağlan; host'u "db" servis adı çözer.
+      # .env'deki DATABASE_URL'i bilinçli olarak override ediyoruz ki
+      # uygulama her zaman compose db'sine baksın.
+      DATABASE_URL: postgresql://${POSTGRES_USER:-fitx}:${POSTGRES_PASSWORD:-fitx}@db:5432/${POSTGRES_DB:-fitx}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fitx}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fitx}
+      POSTGRES_DB: ${POSTGRES_DB:-fitx}
+    volumes:
+      # Konteyner silinse bile veri kaybolmaz.
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      # web, db "healthy" olana kadar başlamaz; starter.py import sırasında
+      # db.create_all() çağırdığı için Postgres hazır olmadan boot başarısız olur.
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fitx} -d ${POSTGRES_DB:-fitx}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+volumes:
+  pgdata:
