@@ -299,12 +299,18 @@ limiter = Limiter(
 @app.errorhandler(429)
 def ratelimit_exceeded(e):
     return jsonify({"error": "Çok fazla deneme yaptınız. Lütfen biraz sonra tekrar deneyin."}), 429
-bedrock_runtime = boto3.client(
-    'bedrock-runtime',
-    region_name=os.getenv('AWS_REGION', 'us-east-1'),
-    aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
-    aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
-)
+# AWS kimlik doğrulama: EC2'de IAM Instance Profile atalı olduğundan statik
+# anahtar GEÇMİYORUZ — boto3'ün varsayılan credential zinciri (instance role)
+# otomatik devreye girer. Açık anahtarları yalnızca İKİSİ de set ise (örn. yerel
+# geliştirme) iletiriz; boş string ("") geçmek instance-profile aramasını geçersiz
+# bir credential ile ezeceği için bilinçli olarak atlıyoruz.
+_bedrock_kwargs = {"region_name": os.getenv("AWS_REGION", "us-east-1")}
+_aws_key = os.getenv("AWS_ACCESS_KEY_ID")
+_aws_secret = os.getenv("AWS_SECRET_ACCESS_KEY")
+if _aws_key and _aws_secret:
+    _bedrock_kwargs["aws_access_key_id"] = _aws_key
+    _bedrock_kwargs["aws_secret_access_key"] = _aws_secret
+bedrock_runtime = boto3.client("bedrock-runtime", **_bedrock_kwargs)
 BEDROCK_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
 
 

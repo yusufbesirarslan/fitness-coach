@@ -1,0 +1,24 @@
+# Sırlar ve yerel durum imaja sızmasın
+.env
+.git
+.gitignore
+
+# Python derleme artıkları
+__pycache__/
+*.pyc
+*.pyo
+
+# SQLite / yerel veritabanı (artık Postgres kullanıyoruz)
+instance/
+*.db
+
+# Geliştirme / editör
+.claude/
+.vscode/
+*.log
+_test_script.js
+
+# Docker ile ilgili dosyalar imaj içine gerekmez
+Dockerfile
+docker-compose.yml
+nginx.conf
