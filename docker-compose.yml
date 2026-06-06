@@ -25,12 +25,16 @@ services:
         condition: service_healthy
 
   db:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-fitx}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fitx}
       POSTGRES_DB: ${POSTGRES_DB:-fitx}
+      # postgres:18+ varsayilan veri dizinini degistirdi: mount /var/lib/postgresql/data'da
+      # olunca "unused mount/volume" hatasiyla boot patliyor. PGDATA'yi eski yola sabitleyip
+      # mevcut mount'u koruyoruz (alternatif: mount'u /var/lib/postgresql'e tasimak).
+      PGDATA: /var/lib/postgresql/data
     volumes:
       # Konteyner silinse bile veri kaybolmaz.
       - pgdata:/var/lib/postgresql/data
