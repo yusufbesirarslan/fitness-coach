@@ -1,6 +1,6 @@
 # Fitness Coach
 
-Flask + SQLAlchemy + AWS Bedrock (Claude, boto3) + FatSecret API proxy.
+Flask + SQLAlchemy + OpenAI (gpt-4o-mini) + FatSecret API proxy.
 Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 
 ## Yapı
@@ -9,8 +9,8 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 - static/style.css — ortak CSS
 - Dockerfile / docker-compose.yml — web (gunicorn) + db (postgres:15-alpine)
 - nginx.conf — host reverse proxy: / → Flask:5000, /fatsecret/ → statik IP proxy
-- .env — SECRET_KEY, DATABASE_URL, POSTGRES_*, FATSECRET_*, AWS_REGION (commit etme)
-  - Örnek için .env.example'a bak. AWS access key YOK; EC2 IAM Instance Profile sağlar.
+- .env — SECRET_KEY, DATABASE_URL, POSTGRES_*, FATSECRET_*, OPENAI_API_KEY, OPENAI_MODEL (commit etme)
+  - Örnek için .env.example'a bak. OpenAI anahtarı .env'den okunur, asla hardcode edilmez.
 
 ## Veritabanı
 Lokal: SQLite (chatbot.db). Prod/Docker: PostgreSQL (DATABASE_URL ile).

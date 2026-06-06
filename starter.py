@@ -3,8 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager , UserMixin , login_user , logout_user , login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, date, timedelta
-import boto3
-from botocore.exceptions import ClientError
+from openai import OpenAI, APIError, RateLimitError, APITimeoutError, APIConnectionError
 import os
 import json
 import click
@@ -299,45 +298,38 @@ limiter = Limiter(
 @app.errorhandler(429)
 def ratelimit_exceeded(e):
     return jsonify({"error": "Çok fazla deneme yaptınız. Lütfen biraz sonra tekrar deneyin."}), 429
-# AWS kimlik doğrulama: EC2'de IAM Instance Profile atalı olduğundan statik
-# anahtar GEÇMİYORUZ — boto3'ün varsayılan credential zinciri (instance role)
-# otomatik devreye girer. Açık anahtarları yalnızca İKİSİ de set ise (örn. yerel
-# geliştirme) iletiriz; boş string ("") geçmek instance-profile aramasını geçersiz
-# bir credential ile ezeceği için bilinçli olarak atlıyoruz.
-_bedrock_kwargs = {"region_name": os.getenv("AWS_REGION", "us-east-1")}
-_aws_key = os.getenv("AWS_ACCESS_KEY_ID")
-_aws_secret = os.getenv("AWS_SECRET_ACCESS_KEY")
-if _aws_key and _aws_secret:
-    _bedrock_kwargs["aws_access_key_id"] = _aws_key
-    _bedrock_kwargs["aws_secret_access_key"] = _aws_secret
-bedrock_runtime = boto3.client("bedrock-runtime", **_bedrock_kwargs)
-BEDROCK_MODEL_ID = "us.anthropic.claude-sonnet-4-6"
+# OpenAI istemcisi: API anahtarı .env'den (OPENAI_API_KEY) gelir — asla hardcode
+# edilmez. Model varsayılanı gpt-4o-mini; OPENAI_MODEL ile override edilebilir.
+# Anahtar yoksa OpenAI() çağrısı boot'u kırmasın diye api_key'i açıkça veriyoruz.
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=30.0, max_retries=2)
 
 
-def _bedrock_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
-    body = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": max_tokens,
-        "messages": messages,
-    }
-    if temperature is not None:
-        body["temperature"] = temperature
+def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
+    """Merkezi LLM sohbet çağrısı (OpenAI Chat Completions).
+
+    `messages` Anthropic ile uyumlu [{"role","content"}] listesidir; system_prompt
+    varsa başa bir system mesajı olarak eklenir. Hata durumunda kullanıcı-dostu bir
+    RuntimeError fırlatır; çağıranlar bunu kendi try/except fallback'leriyle yakalar.
+    """
+    full_messages = []
     if system_prompt:
-        body["system"] = [
-            {
-                "type": "text",
-                "text": system_prompt,
-                "cache_control": {"type": "ephemeral"}
-            }
-        ]
-    response = bedrock_runtime.invoke_model(
-        body=json.dumps(body),
-        modelId=BEDROCK_MODEL_ID,
-        contentType='application/json',
-        accept='application/json',
-    )
-    result = json.loads(response['body'].read())
-    return result['content'][0]['text']
+        full_messages.append({"role": "system", "content": system_prompt})
+    full_messages.extend(messages)
+    try:
+        resp = openai_client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=full_messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        return resp.choices[0].message.content
+    except RateLimitError:
+        raise RuntimeError("AI servisi şu an yoğun (rate limit). Lütfen biraz sonra tekrar deneyin.")
+    except (APITimeoutError, APIConnectionError):
+        raise RuntimeError("AI servisine ulaşılamadı (zaman aşımı). Lütfen tekrar deneyin.")
+    except APIError as e:
+        raise RuntimeError(f"AI servisi hatası: {e}")
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -1228,7 +1220,7 @@ def _food_search_llm(q):
         '[{{"name":"Besin adı","calories":123,"protein":10.5,"carbs":5.2,"fat":3.1}}]'
     )
     try:
-        text = _bedrock_chat(
+        text = _openai_chat(
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=600,
@@ -1765,13 +1757,13 @@ Fatigue yüksekse dinlenme öner, progressive overload yapamadıysa nasıl yapab
 Uyku kötüyse bunun etkisini açıkla."""
 
     try:
-        return _bedrock_chat(
+        return _openai_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="Sen bir fitness koçusun. Kısa, spesifik, motive edici Türkçe konuş.",
             max_tokens=400,
             temperature=0.7,
         )
-    except (ClientError, Exception) as e:
+    except Exception as e:
         return f"Geri bildirim alınamadı: {str(e)}"
     
 @app.route("/checkin", methods=["POST"])
@@ -1962,7 +1954,7 @@ def log_meal():
     raw = ""
 
     try:
-        raw = _bedrock_chat(
+        raw = _openai_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="SADECE JSON döndür. Açıklama yapma, markdown kullanma, sadece düz JSON objesi. Tüm değerler sayı olmalı.",
             max_tokens=150,
@@ -2101,7 +2093,7 @@ def review_meals():
     )
 
     try:
-        review = _bedrock_chat(
+        review = _openai_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="Sen bir beslenme koçusun. Kısa, spesifik, Türkçe konuş.",
             max_tokens=400,
@@ -2764,31 +2756,24 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
         "Menüdeki kategori başlıklarını koru (örn: Kahvaltılar, Salatalar, Ana Yemekler). "
         "Her yemeği ayrı satırda yaz. Türkçe karakterleri doğru kullan (ı, ş, ğ, ç, ö, ü)."
     )
-    vision_body = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": 4000,
-        "temperature": 0.0,
-        "system": [{"type": "text", "text": vision_system, "cache_control": {"type": "ephemeral"}}],
-        "messages": [
-            {"role": "user", "content": [
-                {"type": "text", "text": (
-                    "Bu restoran menüsü görselindeki TÜM yemek ve içecek isimlerini satır satır oku. "
-                    "Kategori başlıklarını koru. Hiçbir öğeyi atlama, özetleme veya yorum ekleme. "
-                    "Sadece menüde yazanları aynen oku."
-                )},
-                {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}},
-            ]}
-        ],
-    }
     try:
-        resp = bedrock_runtime.invoke_model(
-            body=json.dumps(vision_body),
-            modelId=BEDROCK_MODEL_ID,
-            contentType='application/json',
-            accept='application/json',
+        resp = openai_client.chat.completions.create(
+            model=OPENAI_MODEL,
+            max_tokens=4000,
+            temperature=0.0,
+            messages=[
+                {"role": "system", "content": vision_system},
+                {"role": "user", "content": [
+                    {"type": "text", "text": (
+                        "Bu restoran menüsü görselindeki TÜM yemek ve içecek isimlerini satır satır oku. "
+                        "Kategori başlıklarını koru. Hiçbir öğeyi atlama, özetleme veya yorum ekleme. "
+                        "Sadece menüde yazanları aynen oku."
+                    )},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+                ]},
+            ],
         )
-        vision_result = json.loads(resp['body'].read())
-        result = vision_result['content'][0]['text'].strip()
+        result = (resp.choices[0].message.content or "").strip()
         print(f"[VISION OCR] Extracted {len(result)} chars")
         return result
     except Exception as e:
@@ -2803,10 +2788,9 @@ def validate_pump_check(image_bytes, location_type, user_description):
 
     Return: {"valid": bool, "reason": str, "fallback": bool}
 
-    NOT: Şu an MOCK. Gerçek görsel sağlayıcı (Bedrock Claude / OpenAI) henüz
-    kesinleşmedi; aşağıdaki PLUG POINT bölümüne, _extract_text_from_image()'deki
-    bedrock_runtime görsel desenini birebir izleyerek takılır. Çağıranlar sağlayıcıyı
-    bilmek zorunda kalmasın diye yapılandırılmış (structured) bir sözlük döner.
+    NOT: Şu an MOCK. Gerçek görsel doğrulama, _extract_text_from_image()'deki OpenAI
+    vision desenini (gpt-4o-mini) birebir izleyerek aşağıdaki PLUG POINT bölümüne takılır.
+    Çağıranlar sağlayıcıyı bilmek zorunda kalmasın diye yapılandırılmış bir sözlük döner.
     """
     location_type = (location_type or "").strip() or "belirtilmedi"
     user_description = (user_description or "").strip() or "belirtilmedi"
@@ -2824,18 +2808,13 @@ def validate_pump_check(image_bytes, location_type, user_description):
         # import base64
         # img, mime = _compress_image_for_vision(image_bytes)
         # b64 = base64.b64encode(img).decode("utf-8")
-        # body = {
-        #     "anthropic_version": "bedrock-2023-05-31",
-        #     "max_tokens": 10, "temperature": 0.0,
-        #     "messages": [{"role": "user", "content": [
+        # resp = openai_client.chat.completions.create(
+        #     model=OPENAI_MODEL, max_tokens=10, temperature=0.0,
+        #     messages=[{"role": "user", "content": [
         #         {"type": "text", "text": prompt + " Answer strictly 'true' or 'false'."},
-        #         {"type": "image", "source": {"type": "base64", "media_type": mime, "data": b64}},
-        #     ]}],
-        # }
-        # resp = bedrock_runtime.invoke_model(
-        #     body=json.dumps(body), modelId=BEDROCK_MODEL_ID,
-        #     contentType='application/json', accept='application/json')
-        # answer = json.loads(resp['body'].read())['content'][0]['text'].strip().lower()
+        #         {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+        #     ]}])
+        # answer = (resp.choices[0].message.content or "").strip().lower()
         # is_valid = answer.startswith("true")
         # return {
         #     "valid": is_valid, "fallback": False,
@@ -3151,7 +3130,7 @@ SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma:
 {{"categories": {{"Kategori Adı": ["yemek1", "yemek2"], "Başka Kategori": ["yemek3"]}}}}"""
 
     try:
-        raw = _bedrock_chat(
+        raw = _openai_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="SADECE JSON döndür. Açıklama yapma, markdown kullanma. Menüdeki TÜM kategorileri dahil et, hiçbirini atlama.",
             temperature=0.0,
@@ -3217,7 +3196,7 @@ def _turkish_ablative_suffix(name):
 
 def _parse_suggestion_items(body_text):
     try:
-        raw = _bedrock_chat(
+        raw = _openai_chat(
             messages=[{"role": "user", "content": f"Aşağıdaki öğün önerisinden her bir yiyecek öğesini (miktar dahil) çıkar ve JSON listesi olarak döndür:\n\n\"{body_text}\"\n\nÖrnek çıktı: [\"200g tavuk göğsü\", \"1 kase pilav\", \"yeşil salata\"]"}],
             system_prompt="Kullanıcının yemek önerisinden yiyecek öğelerini çıkar. SADECE JSON array döndür, başka hiçbir şey yazma.",
             temperature=0.0,
@@ -3315,7 +3294,7 @@ SADECE aşağıdaki JSON formatında yanıt ver:
 {{{", ".join(f'"{name}": GRAM_SAYISI' for name in items[:3])}{"..." if len(items) > 3 else ""}}}"""
 
     try:
-        raw = _bedrock_chat(
+        raw = _openai_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="SADECE JSON döndür. Her yemek için farklı, gerçekçi gram değerleri ver. Sayıları integer olarak yaz.",
             temperature=0.0,
@@ -3427,7 +3406,7 @@ Tüm {len(batch_items)} yemek için değer ver. Sadece JSON döndür, başka bir
 
     max_tok = min(300 + len(batch_items) * 65, 4000)
     try:
-        raw = _bedrock_chat(
+        raw = _openai_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="SADECE JSON döndür. Her yemek için 1 TAM PORSİYON (100g değil!) besin değerleri hesapla. Her yemeğe farklı, gerçekçi makro değerleri ver. JSON anahtarlarını kullanıcının verdiği isimlerle BİREBİR AYNI yaz.",
             temperature=0.0,
@@ -4823,7 +4802,7 @@ def _extract_with_llm(question, intent_type):
             f"Mesaj: {question}"
         )
     try:
-        raw = _bedrock_chat(
+        raw = _openai_chat(
             messages=[{"role": "user", "content": extraction_prompt}],
             max_tokens=150,
             temperature=0.1,
@@ -4993,14 +4972,14 @@ def ask_coach():
     messages.append({"role": "user", "content": f"{context}\n\nKullanıcının sorusu: {question}"})
 
     try:
-        answer = _bedrock_chat(
+        answer = _openai_chat(
             messages=messages,
             system_prompt=COACH_SYSTEM_PROMPT,
             max_tokens=700,
             temperature=0.7,
         )
         return jsonify({"answer": answer})
-    except (ClientError, Exception) as e:
+    except Exception as e:
         return jsonify({"error": f"Yanıt alınamadı: {str(e)}"}), 500
 
 # ── HESAPLAMALAR ──────────────────────────────────────────
@@ -5170,13 +5149,13 @@ MOTİVASYON:
 (bu kişinin durumuna özel, güçlü bir cümle)"""
 
     try:
-        return _bedrock_chat(
+        return _openai_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="Sen bir fitness koçusun. Türkçe, samimi, spesifik ve motive edici konuş. Sayılar ve süreler kullan.",
             max_tokens=700,
             temperature=0.7,
         )
-    except (ClientError, Exception) as e:
+    except Exception as e:
         return f"Koç yorumu şu an alınamıyor. Hata: {str(e)}"
     
 @app.route("/nutrition")
@@ -5338,7 +5317,7 @@ Yanıtını SADECE şu JSON formatında ver, başka hiçbir şey yazma.
 }}"""
 
     try:
-        raw = _bedrock_chat(
+        raw = _openai_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="Sen bir beslenme uzmanısın. SADECE geçerli JSON döndür, başka hiçbir şey yazma.",
             max_tokens=2000,
@@ -5580,7 +5559,7 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
     )
 
     try:
-        raw = _bedrock_chat(
+        raw = _openai_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="Sen deneyimli bir kişisel antrenörsün. SADECE geçerli JSON döndür, başka hiçbir şey yazma. Markdown, açıklama veya yorum ekleme.",
             max_tokens=4000,
