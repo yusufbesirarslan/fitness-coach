@@ -23,6 +23,20 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started
+
+  redis:
+    image: redis:alpine
+    container_name: fitx-redis
+    restart: always
+    # Sadece loopback'e bağla — uygulama compose ağından "redis:6379" ile erişir;
+    # host eşlemesi yalnızca EC2 üzerinden redis-cli ile bakmak içindir, dışarı kapalı.
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      # Konteyner silinse bile sorted-set verisi kalır (Postgres yine de kaynaktır).
+      - redis_data:/data
 
   db:
     image: postgres:18-alpine
@@ -49,3 +63,4 @@ services:
 
 volumes:
   pgdata:
+  redis_data:

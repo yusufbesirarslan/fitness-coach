@@ -14,3 +14,4 @@ beautifulsoup4>=4.12.0
 pdfplumber>=0.10.0
 Pillow>=10.0.0
 boto3>=1.34.0
+redis==5.2.1

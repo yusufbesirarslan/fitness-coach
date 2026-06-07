@@ -11,6 +11,7 @@ import re
 import threading
 import time
 import contextlib
+import redis
 import requests as http_requests_lib
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -233,6 +234,16 @@ if database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+# ── Redis (liderlik tablosu / Club hızlı sıralama katmanı) ──
+# Postgres kaynak (source of truth) kalır; Redis yalnızca sorted-set önbelleğidir.
+# from_url tembeldir: bağlantı ilk komutta kurulur, böylece Redis web'den sonra
+# ayağa kalksa bile çalışır. Tüm okuma/yazmalar try/except ile sarılı olduğundan
+# Redis erişilemezse uygulama Postgres'e düşer (bkz. leaderboard_data).
+_REDIS_URL = os.environ.get("REDIS_URL")
+redis_client = redis.from_url(_REDIS_URL, decode_responses=True) if _REDIS_URL else None
+LB_ALLTIME_KEY = "lb:global:alltime"
+LB_WEEKLY_KEY  = "lb:global:weekly"
 _secret_key = os.environ.get("SECRET_KEY")
 if not _secret_key:
     # Allow boot without SECRET_KEY only in explicit debug mode, and generate
@@ -810,11 +821,53 @@ class CustomMealItem(db.Model):
     serving_quantity    = db.Column(db.Float, nullable=True)
 
 
+# ── LEADERBOARD REDIS SYNC ──
+# İki sorted set: all-time (rank_points) ve weekly (weekly_xp). Üye = user id.
+# Skor, XP'yi birincil ve streak'i ikincil tiebreak yapacak şekilde tek bir float'a
+# kodlanır (Postgres'teki "xp desc, streak desc" sırasını taklit eder). Tam-tamına
+# eşit xp+streak'te son "id asc" tiebreak'i Redis member sırasına bırakılır — kozmetik.
+
+def _lb_score(xp, streak):
+    """XP'yi 1e5 ile çarpıp streak'i ekleyerek kompozit sıralama skoru üret."""
+    return (xp or 0) * 100000 + min(streak or 0, 99999)
+
+
+def lb_sync_user(user):
+    """Tek kullanıcının skorunu iki sete yaz. Redis yoksa/çökerse sessizce geç."""
+    if not redis_client or not user:
+        return
+    try:
+        s = user.streak_count or 0
+        uid = str(user.id)
+        redis_client.zadd(LB_ALLTIME_KEY, {uid: _lb_score(user.rank_points, s)})
+        redis_client.zadd(LB_WEEKLY_KEY,  {uid: _lb_score(user.weekly_xp, s)})
+    except Exception:
+        pass  # Postgres kaynak; boot/rollover'daki lb_rebuild sürüklenmeyi düzeltir
+
+
+def lb_rebuild():
+    """Her iki sorted set'i Postgres'ten sıfırdan kur (boot + haftalık rollover sonrası)."""
+    if not redis_client:
+        return
+    try:
+        pipe = redis_client.pipeline()
+        pipe.delete(LB_ALLTIME_KEY, LB_WEEKLY_KEY)
+        for u in User.query.all():
+            s = u.streak_count or 0
+            uid = str(u.id)
+            pipe.zadd(LB_ALLTIME_KEY, {uid: _lb_score(u.rank_points, s)})
+            pipe.zadd(LB_WEEKLY_KEY,  {uid: _lb_score(u.weekly_xp, s)})
+        pipe.execute()
+    except Exception:
+        pass
+
+
 def award_xp(user_id, amount):
     user = User.query.get(user_id)
     if user:
         user.rank_points = (user.rank_points or 0) + amount
         user.weekly_xp = (user.weekly_xp or 0) + amount
+        lb_sync_user(user)  # Redis'i anında güncelle (kalıcılık route commit'inde)
         return user.rank_points
     return None
 
@@ -903,6 +956,7 @@ def run_weekly_rollover(now=None, force_week=None):
         db.session.rollback()
         return {"status": "already_processed", "week_key": week_key}
 
+    lb_rebuild()  # weekly_xp sıfırlandı + kazananlara XP eklendi → setleri yeniden kur
     return {"status": "done", "week_key": week_key, "winners": winners}
 
 
@@ -939,6 +993,7 @@ def update_streak():
                              f"{streak} günlük seri yakalanadı!")
                 award_xp(current_user.id, streak * 2)
             db.session.commit()
+            lb_sync_user(current_user)  # streak tiebreak'i değişti → Redis'i güncelle
 
 @app.context_processor
 def inject_rank():
@@ -4474,6 +4529,66 @@ def leaderboard_data():
     scope = "friends" if request.args.get("scope") == "friends" else "global"
     timeframe = "weekly" if request.args.get("timeframe") == "weekly" else "all_time"
 
+    # Hızlı yol: Redis sorted set'ten anında sırala. Redis yoksa veya herhangi bir
+    # hata olursa Postgres ORDER BY yoluna düş (Postgres her zaman kaynaktır).
+    if redis_client:
+        key = LB_WEEKLY_KEY if timeframe == "weekly" else LB_ALLTIME_KEY
+        try:
+            return _leaderboard_via_redis(scope, timeframe, key)
+        except Exception:
+            app.logger.warning("Leaderboard Redis yolu başarısız; Postgres'e düşülüyor",
+                               exc_info=True)
+    return _leaderboard_via_postgres(scope, timeframe)
+
+
+def _redis_users_in_order(ids):
+    """Verilen id sırasını koruyarak User satırlarını çek (PK IN — tam-tablo sıralaması yok)."""
+    if not ids:
+        return []
+    int_ids = [int(i) for i in ids]
+    users = {u.id: u for u in User.query.filter(User.id.in_(int_ids)).all()}
+    return [users[i] for i in int_ids if i in users]
+
+
+def _leaderboard_via_redis(scope, timeframe, key):
+    """Sıralamayı Redis sorted set'ten üret; kullanıcı detayları Postgres'ten gelir."""
+    if scope == "friends":
+        fids = _accepted_friend_ids()
+        if not fids:
+            return jsonify({"scope": scope, "timeframe": timeframe, "entries": [],
+                            "me": None, "in_list": False, "no_friends": True})
+        member_ids = [str(i) for i in (fids | {current_user.id})]  # kendini de dahil et
+        scores = redis_client.zmscore(key, member_ids)
+        # Skora göre azalan, eşitlikte id artan (Postgres tiebreak'iyle aynı). Eksik = 0.
+        ranked = sorted(
+            ((int(mid), sc if sc is not None else 0.0)
+             for mid, sc in zip(member_ids, scores)),
+            key=lambda t: (-t[1], t[0]))
+        top_ids = [uid for uid, _ in ranked[:LEADERBOARD_TOP_N]]
+    else:
+        top_ids = redis_client.zrevrange(key, 0, LEADERBOARD_TOP_N - 1)
+        ranked = None  # global'de "me" rütbesi ZREVRANK ile hesaplanır
+
+    users = _redis_users_in_order(top_ids)
+    entries = [_lb_serialize(u, i + 1, timeframe) for i, u in enumerate(users)]
+
+    in_list = any(e["is_me"] for e in entries)
+    me = next((e for e in entries if e["is_me"]), None)
+    if not in_list:
+        if scope == "friends":
+            my_rank = next((i + 1 for i, (uid, _) in enumerate(ranked)
+                            if uid == current_user.id), len(ranked) + 1)
+        else:
+            rank = redis_client.zrevrank(key, str(current_user.id))
+            my_rank = (rank + 1) if rank is not None else (redis_client.zcard(key) + 1)
+        me = _lb_serialize(current_user, my_rank, timeframe)
+
+    return jsonify({"scope": scope, "timeframe": timeframe, "entries": entries,
+                    "me": me, "in_list": in_list, "no_friends": False})
+
+
+def _leaderboard_via_postgres(scope, timeframe):
+    """Redis erişilemezse kullanılan kaynak-doğru yol (eski ORDER BY mantığı)."""
     # Sort: XP (for the selected timeframe) desc → Streak desc → id asc (stable tiebreak).
     # Level is derived from lifetime XP and never breaks a tie that XP did not already break.
     xpc = db.func.coalesce(User.weekly_xp if timeframe == "weekly" else User.rank_points, 0)
@@ -6527,6 +6642,10 @@ with app.app_context():
             points_reward=25, quest_type="supplement_added"
         ))
         db.session.commit()
+
+    # Liderlik sorted set'lerini Postgres'ten doldur (Redis varsa). Redis sonradan
+    # ayağa kalkarsa ilk leaderboard isteği zaten Postgres'e düşer; sonraki restart hidratlar.
+    lb_rebuild()
 
 
 if __name__ == "__main__":
