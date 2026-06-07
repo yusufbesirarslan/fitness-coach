@@ -100,6 +100,65 @@ def _parse_fatsecret_desc(desc: str) -> dict | None:
     return parts if len(parts) > 1 else None
 
 
+# Tek bir porsiyon (qty=1) için bu gramın üstü "tüm tarif/tencere" sayılır:
+# listede tutulur ama UI'da asla varsayılan seçilmez.
+_BULK_SERVING_GRAMS = 500.0
+
+
+def _is_100g_serving(r):
+    """unit ne olursa olsun ~100'lük (gerçek veya türetilmiş) baz porsiyon mu?"""
+    return abs(r.get("metric_serving_amount", 0) - 100) < 0.5
+
+
+def _normalize_servings(results):
+    """FatSecret servings listesini güvenilir 100g bazına oturt ve devasa
+    'tüm tarif/tencere' porsiyonlarını işaretle.
+
+    - Gerçek bir 100g (amount≈100) satırı varsa onu baz alır; yoksa makul
+      (≤500g) bir 'donor' porsiyondan 1g başına oranlayıp 100g türetir
+      (ölçekleme lineer olduğundan değerler tutarlı kalır).
+    - Her serving'e is_bulk bayrağı ekler (metric_serving_amount > 500g).
+    - Sıralar: önce makul tek porsiyonlar, sonra 100 g bazı, en sonda is_bulk
+      satırlar — böylece UI'daki ilk/varsayılan seçim asla devasa tarif olmaz.
+    """
+    if not results:
+        return results
+
+    # Devasa "tüm tarif" porsiyonlarını işaretle.
+    for r in results:
+        r["is_bulk"] = r.get("metric_serving_amount", 0) > _BULK_SERVING_GRAMS
+
+    # 100g bazı yoksa sentetik bir tane türet — donor olarak makul (bulk
+    # olmayan) en büyük porsiyonu seç; hiç makul porsiyon yoksa son çare en büyüğü.
+    if not any(_is_100g_serving(r) for r in results):
+        sane = [r for r in results if r["metric_serving_amount"] > 0 and not r["is_bulk"]]
+        pool = sane or [r for r in results if r["metric_serving_amount"] > 0]
+        donor = max(pool, key=lambda r: r["metric_serving_amount"], default=None)
+        if donor:
+            scale = 100.0 / donor["metric_serving_amount"]
+            results.append({
+                "serving_id": "100g_calc",
+                "serving_description": "100 g",
+                "metric_serving_amount": 100.0,
+                "metric_serving_unit": "g",
+                "calories": round(donor["calories"] * scale, 1),
+                "protein": round(donor["protein"] * scale, 1),
+                "carbs": round(donor["carbs"] * scale, 1),
+                "fat": round(donor["fat"] * scale, 1),
+                "is_bulk": False,
+            })
+        else:
+            app.logger.warning("_normalize_servings: cannot derive 100g — all servings lack metric_serving_amount")
+
+    # Sırala: makul tek porsiyonlar (0,0) → 100 g bazı (0,1) → bulk (1,*) en sonda.
+    def _sort_key(r):
+        return (1 if r.get("is_bulk") else 0,
+                1 if _is_100g_serving(r) else 0,
+                r.get("metric_serving_amount", 0))
+    results.sort(key=_sort_key)
+    return results
+
+
 def _food_get_servings(food_id):
     try:
         token = _get_fatsecret_token()
@@ -164,27 +223,8 @@ def _food_get_servings(food_id):
     if not results:
         return None
 
-    # Inject a synthetic "100 g" serving if none exists
-    has_100g = any(abs(r["metric_serving_amount"] - 100) < 0.5 for r in results)
-    if not has_100g:
-        donor = max((r for r in results if r["metric_serving_amount"] > 0),
-                    key=lambda r: r["metric_serving_amount"], default=None)
-        if donor:
-            scale = 100.0 / donor["metric_serving_amount"]
-            results.append({
-                "serving_id": "100g_calc",
-                "serving_description": "100 g",
-                "metric_serving_amount": 100.0,
-                "metric_serving_unit": "g",
-                "calories": round(donor["calories"] * scale, 1),
-                "protein": round(donor["protein"] * scale, 1),
-                "carbs": round(donor["carbs"] * scale, 1),
-                "fat": round(donor["fat"] * scale, 1),
-            })
-        else:
-            app.logger.warning("_food_get_servings food_id=%s: cannot derive 100g — all servings lack metric_serving_amount", food_id)
-
-    return results
+    # 100g bazına normalize et + devasa "tüm tarif" porsiyonlarını işaretle/en sona it.
+    return _normalize_servings(results)
 
 
 database_url = os.environ.get("DATABASE_URL", "sqlite:///chatbot.db")
@@ -303,6 +343,15 @@ def ratelimit_exceeded(e):
 # Anahtar yoksa OpenAI() çağrısı boot'u kırmasın diye api_key'i açıkça veriyoruz.
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=30.0, max_retries=2)
+
+# Porsiyon mantığı guardrail'i — kalori/porsiyon üreten tüm system prompt'lara
+# iliştirilir. AI'ın "tüm tarif/tencere" toplamını tek porsiyon sanmasını engeller.
+PORTION_SANITY_RULE = (
+    " Kalori/makro değerlerini ASLA tüm bir tarifin, tencerenin veya devasa "
+    "porsiyonun toplamı olarak verme. Her zaman makul TEK porsiyon (≈200-350g) "
+    "veya net 100g bazında hesapla; bir insanın tek oturuşta yiyebileceği makul "
+    "sınırların dışına çıkma."
+)
 
 
 def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
@@ -1956,7 +2005,7 @@ def log_meal():
     try:
         raw = _openai_chat(
             messages=[{"role": "user", "content": prompt}],
-            system_prompt="SADECE JSON döndür. Açıklama yapma, markdown kullanma, sadece düz JSON objesi. Tüm değerler sayı olmalı.",
+            system_prompt="SADECE JSON döndür. Açıklama yapma, markdown kullanma, sadece düz JSON objesi. Tüm değerler sayı olmalı." + PORTION_SANITY_RULE,
             max_tokens=150,
             temperature=0.0,
         ).strip()
@@ -3132,7 +3181,7 @@ SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma:
     try:
         raw = _openai_chat(
             messages=[{"role": "user", "content": prompt}],
-            system_prompt="SADECE JSON döndür. Açıklama yapma, markdown kullanma. Menüdeki TÜM kategorileri dahil et, hiçbirini atlama.",
+            system_prompt="SADECE JSON döndür. Açıklama yapma, markdown kullanma. Menüdeki TÜM kategorileri dahil et, hiçbirini atlama." + PORTION_SANITY_RULE,
             temperature=0.0,
             max_tokens=2500,
         ).strip()
@@ -3296,7 +3345,7 @@ SADECE aşağıdaki JSON formatında yanıt ver:
     try:
         raw = _openai_chat(
             messages=[{"role": "user", "content": prompt}],
-            system_prompt="SADECE JSON döndür. Her yemek için farklı, gerçekçi gram değerleri ver. Sayıları integer olarak yaz.",
+            system_prompt="SADECE JSON döndür. Her yemek için farklı, gerçekçi gram değerleri ver. Sayıları integer olarak yaz." + PORTION_SANITY_RULE,
             temperature=0.0,
             max_tokens=1000,
         ).strip()
@@ -3313,7 +3362,7 @@ SADECE aşağıdaki JSON formatında yanıt ver:
                     llm_key = llm_lower.get(name.strip().lower())
                     if llm_key:
                         grams = parsed[llm_key]
-                if isinstance(grams, (int, float)) and 50 <= grams <= 1500:
+                if isinstance(grams, (int, float)) and 50 <= grams <= 600:
                     results[name] = float(grams)
                 else:
                     results[name] = 150.0
@@ -3408,7 +3457,7 @@ Tüm {len(batch_items)} yemek için değer ver. Sadece JSON döndür, başka bir
     try:
         raw = _openai_chat(
             messages=[{"role": "user", "content": prompt}],
-            system_prompt="SADECE JSON döndür. Her yemek için 1 TAM PORSİYON (100g değil!) besin değerleri hesapla. Her yemeğe farklı, gerçekçi makro değerleri ver. JSON anahtarlarını kullanıcının verdiği isimlerle BİREBİR AYNI yaz.",
+            system_prompt="SADECE JSON döndür. Her yemek için 1 TAM PORSİYON (100g değil!) besin değerleri hesapla. Her yemeğe farklı, gerçekçi makro değerleri ver. JSON anahtarlarını kullanıcının verdiği isimlerle BİREBİR AYNI yaz." + PORTION_SANITY_RULE,
             temperature=0.0,
             max_tokens=max_tok,
         ).strip()

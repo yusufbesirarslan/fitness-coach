@@ -6,11 +6,12 @@ let selectedMealType = 'Kahvaltı';
 let quickAddOpen = false;
 
 /* ── SERVING LABEL HELPER ── */
-function formatServingLabel(desc, metricAmt, calories) {
+function formatServingLabel(desc, metricAmt, calories, isBulk) {
   let label = desc;
   if (metricAmt > 0 && !/^\d+\s*g$/i.test(desc))
     label += ' (' + Math.round(metricAmt) + 'g)';
   label += ' — ' + Math.round(calories) + ' kcal';
+  if (isBulk) label += ' ⚠ tüm tarif';
   return label;
 }
 
@@ -891,7 +892,7 @@ function renderDiary(data) {
       const cached = item.fatsecret_food_id ? _servingsCache[item.fatsecret_food_id] : null;
       if (item.serving_id && cached) {
         const opts = cached.map(s =>
-          `<option value="${s.serving_id}" ${s.serving_id === item.serving_id ? 'selected' : ''}>${formatServingLabel(s.serving_description, s.metric_serving_amount, s.calories)}</option>`
+          `<option value="${s.serving_id}" ${s.serving_id === item.serving_id ? 'selected' : ''}>${formatServingLabel(s.serving_description, s.metric_serving_amount, s.calories, s.is_bulk)}</option>`
         ).join('');
         const qVal = item.serving_quantity || 1;
         unitHtml = `<select class="diary-serving-select" onchange="updateDiaryServing(${item.id}, this.value, '${item.fatsecret_food_id}')" ${isLogged ? 'disabled' : ''}>${opts}</select>
@@ -1030,10 +1031,14 @@ function openServingModal(mealName, food) {
       const select = document.getElementById('sm-serving-select');
       select.innerHTML = servings.map(s =>
         '<option value="' + s.serving_id + '">' +
-        formatServingLabel(s.serving_description, s.metric_serving_amount, s.calories) +
+        formatServingLabel(s.serving_description, s.metric_serving_amount, s.calories, s.is_bulk) +
         '</option>'
       ).join('');
-      const preferred = servings.findIndex(s => s.serving_description !== '100 g' && s.serving_description !== '100g');
+      // Varsayılan: devasa "tüm tarif" porsiyonu (is_bulk) ASLA seçilmez.
+      // Önce makul tek porsiyon, yoksa 100 g bazına düş.
+      const is100 = s => s.serving_description === '100 g' || s.serving_description === '100g';
+      let preferred = servings.findIndex(s => !s.is_bulk && !is100(s));
+      if (preferred < 0) preferred = servings.findIndex(is100);
       if (preferred >= 0) select.selectedIndex = preferred;
       document.getElementById('sm-serving-row').style.display = 'block';
       document.getElementById('sm-qty-row').style.display = 'block';
