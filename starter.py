@@ -920,10 +920,22 @@ def review_meals():
 def home():
     if not current_user.profile_complete:
         return redirect(url_for("setup"))
+    nudges = []
+    try:
+        from analytics_engine import get_nudges
+        models = {
+            "WorkoutLog": WorkoutLog,
+            "UserDailyNutrition": UserDailyNutrition,
+            "UserSession": UserSession,
+        }
+        nudges = get_nudges(current_user, db, models)
+    except Exception:
+        pass
     return render_template("index.html",
         username=current_user.username,
         profile_picture=current_user.profile_picture,
         streak_count=current_user.streak_count or 0,
+        nudges=nudges,
     )
 
 @app.route("/edit-profile", methods=["GET", "POST"])
