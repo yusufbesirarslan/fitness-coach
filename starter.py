@@ -1812,8 +1812,9 @@ Uyku kötüyse bunun etkisini açıkla."""
             max_tokens=400,
             temperature=0.7,
         )
-    except Exception as e:
-        return f"Geri bildirim alınamadı: {str(e)}"
+    except Exception:
+        app.logger.exception("Check-in geri bildirimi üretilemedi")
+        return "Geri bildirim şu an alınamadı, lütfen tekrar dene."
     
 @app.route("/checkin", methods=["POST"])
 @login_required
@@ -1832,6 +1833,8 @@ def checkin():
     yogunluk    = int(data.get("yogunluk", 3))
     fatigue     = int(data.get("fatigue", 3))
     overload    = data.get("progressive_overload", "kismen")
+    if overload not in ("evet", "hayir", "kismen"):
+        overload = "kismen"
     uyku        = int(data.get("uyku_kalitesi", 3))
     beslenme    = int(data.get("beslenme_uyumu", 3))
     note        = data.get("note", "")
@@ -2046,7 +2049,6 @@ def log_meal():
     response = {
         "message": f"{ogun} kaydedildi.",
         "nutrients": nutrients,
-        "raw_debug": raw
     }
     if quest_result:
         response["quest_awarded"] = quest_result
@@ -2148,8 +2150,9 @@ def review_meals():
             max_tokens=400,
             temperature=0.7,
         )
-    except Exception as e:
-        review = f"Değerlendirme alınamadı: {str(e)}"
+    except Exception:
+        app.logger.exception("Öğün değerlendirmesi üretilemedi")
+        review = "Değerlendirme şu an alınamadı, lütfen tekrar dene."
 
     return jsonify({"review": review, "total_calories": round(total_cal), "target": round(target)})
 
@@ -2225,6 +2228,60 @@ def _pin_getaddrinfo(hostname, ip):
             yield
         finally:
             _s.getaddrinfo = original
+
+
+def _safe_requests_get(url, *, timeout, headers=None, cookies=None,
+                       max_redirects=5, max_bytes=None):
+    """SSRF-safe GET for the WordPress REST fallback and the Google Drive
+    downloader.
+
+    These two paths previously used a bare requests.get with allow_redirects=True
+    and no host validation, which bypassed the protections in _fetch_page. This
+    helper mirrors those protections: it re-validates the host of EVERY hop with
+    _resolve_host_safely (rejecting RFC1918/loopback/link-local/etc.), PINS the
+    vetted IP for the socket connect to close the DNS-rebinding TOCTOU window,
+    and follows redirects MANUALLY (allow_redirects=False) so an attacker who
+    controls a Location header can't smuggle the request to an internal target.
+    When max_bytes is given the body is materialised behind a hard size cap so
+    later .content/.json()/.text reads are bounded.
+
+    Returns the final streamed Response. Raises ValueError on a blocked host or
+    an oversized body, and requests.exceptions.TooManyRedirects past the limit.
+    """
+    import requests as http_req
+    from urllib.parse import urlparse, urljoin
+
+    current = url
+    for _ in range(max_redirects + 1):
+        p = urlparse(current)
+        if p.scheme not in ("http", "https") or not p.hostname:
+            raise http_req.exceptions.InvalidURL("Geçersiz URL.")
+        safe_ips = _resolve_host_safely(p.hostname)  # ValueError if non-public
+        with _pin_getaddrinfo(p.hostname, safe_ips[0]):
+            r = http_req.get(current, timeout=timeout, stream=True,
+                             allow_redirects=False, headers=headers, cookies=cookies)
+        if r.status_code in (301, 302, 303, 307, 308):
+            loc = r.headers.get("Location")
+            r.close()  # release the unread streamed body before the next hop
+            if not loc:
+                return r
+            current = urljoin(current, loc)
+            continue
+        if max_bytes is not None:
+            total = 0
+            chunks = []
+            for chunk in r.iter_content(8192):
+                if not chunk:
+                    continue
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > max_bytes:
+                    r.close()
+                    raise ValueError("İçerik çok büyük (boyut limiti aşıldı).")
+            r._content = b"".join(chunks)
+            r._content_consumed = True
+        return r
+    raise http_req.exceptions.TooManyRedirects("Çok fazla yönlendirme.")
 
 
 def _validate_menu_url(url):
@@ -2547,7 +2604,7 @@ def _try_wordpress_api(base_parsed, raw_html):
     for slug in slugs_to_try:
         try:
             api_url = f"{origin}/wp-json/wp/v2/pages?slug={slug}"
-            api_resp = http_req.get(api_url, timeout=8, headers={
+            api_resp = _safe_requests_get(api_url, timeout=8, max_bytes=8_000_000, headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Accept": "application/json",
             })
@@ -2592,7 +2649,7 @@ def _try_wordpress_api(base_parsed, raw_html):
                 seen_slugs.add(link_slug)
                 sub_api = f"{origin}/wp-json/wp/v2/pages?slug={link_slug}"
                 try:
-                    sub_resp = http_req.get(sub_api, timeout=6, headers={
+                    sub_resp = _safe_requests_get(sub_api, timeout=6, max_bytes=8_000_000, headers={
                         "User-Agent": "Mozilla/5.0", "Accept": "application/json"})
                     if sub_resp.status_code != 200:
                         continue
@@ -2894,9 +2951,13 @@ def _process_google_drive_url(url):
     _DRIVE_MAX_BYTES = 50 * 1024 * 1024
 
     try:
-        resp = http_req.get(direct_url, timeout=30, headers={
+        # SSRF-safe: validates + pins every redirect hop (Google's export
+        # endpoints redirect to googleusercontent.com, which resolves public).
+        resp = _safe_requests_get(direct_url, timeout=30, headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        }, allow_redirects=True, stream=True)
+        })
+    except ValueError:
+        return None, "Google Drive bağlantısı çözümlenemedi."
     except http_req.exceptions.Timeout:
         return None, "Google Drive dosyası indirilemedi — zaman aşımı."
     except http_req.exceptions.RequestException as e:
@@ -2944,9 +3005,9 @@ def _process_google_drive_url(url):
             confirm_url = "https://drive.google.com" + confirm_link["href"]
             print(f"[DRIVE] Virus scan confirmation redirect: {confirm_url}")
             try:
-                resp2 = http_req.get(confirm_url, timeout=15, headers={
+                resp2 = _safe_requests_get(confirm_url, timeout=15, headers={
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                }, allow_redirects=True, cookies=resp.cookies)
+                }, cookies=resp.cookies, max_bytes=_DRIVE_MAX_BYTES)
                 if resp2.status_code == 200:
                     file_bytes = resp2.content
                     content_type = resp2.headers.get("Content-Type", "").lower()
@@ -5028,8 +5089,9 @@ def ask_coach():
             temperature=0.7,
         )
         return jsonify({"answer": answer})
-    except Exception as e:
-        return jsonify({"error": f"Yanıt alınamadı: {str(e)}"}), 500
+    except Exception:
+        app.logger.exception("Koç yanıtı üretilemedi")
+        return jsonify({"error": "Yanıt şu an alınamadı, lütfen tekrar dene."}), 500
 
 # ── HESAPLAMALAR ──────────────────────────────────────────
 
@@ -5204,8 +5266,9 @@ MOTİVASYON:
             max_tokens=700,
             temperature=0.7,
         )
-    except Exception as e:
-        return f"Koç yorumu şu an alınamıyor. Hata: {str(e)}"
+    except Exception:
+        app.logger.exception("Koç yorumu üretilemedi")
+        return "Koç yorumu şu an alınamıyor, lütfen tekrar dene."
     
 @app.route("/nutrition")
 @login_required
@@ -5389,8 +5452,9 @@ Yanıtını SADECE şu JSON formatında ver, başka hiçbir şey yazma.
 
     except json.JSONDecodeError:
         return jsonify({"error": "Plan oluşturulamadı, tekrar dene."}), 500
-    except Exception as e:
-        return jsonify({"error": f"Hata: {str(e)}"}), 500
+    except Exception:
+        app.logger.exception("Plan oluşturma hatası")
+        return jsonify({"error": "Plan oluşturulamadı, lütfen tekrar dene."}), 500
 
 @app.route("/training")
 @login_required
@@ -5652,8 +5716,9 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
 
     except json.JSONDecodeError:
         return jsonify({"error": "Plan oluşturulamadı, tekrar dene."}), 500
-    except Exception as e:
-        return jsonify({"error": f"Hata: {str(e)}"}), 500
+    except Exception:
+        app.logger.exception("Plan oluşturma hatası")
+        return jsonify({"error": "Plan oluşturulamadı, lütfen tekrar dene."}), 500
     
 @app.route("/training-plan/save", methods=["POST"])
 @login_required
@@ -5917,6 +5982,12 @@ def validate_email(email):
     return None
 
 
+# Precomputed hash compared against when a username lookup misses, so a
+# nonexistent user can't be told apart from a wrong password by response
+# timing (user-enumeration hardening — see login()).
+_DUMMY_PW_HASH = generate_password_hash("timing-equalization-placeholder")
+
+
 @app.route("/register", methods=["GET","POST"])
 @limiter.limit("5 per hour", methods=["POST"])
 def register():
@@ -5970,7 +6041,15 @@ def login():
 
     user = User.query.filter_by(username = username).first()
 
-    if not user or not user.check_password(password):
+    # Always run one password hash comparison, whether or not the username
+    # exists, so the response time can't reveal which usernames are registered.
+    if user:
+        password_ok = user.check_password(password or "")
+    else:
+        check_password_hash(_DUMMY_PW_HASH, password or "")
+        password_ok = False
+
+    if not password_ok:
         return jsonify({"error": "Kullanıcı adı veya şifre hatalı"}) , 401
     
     login_user(user)

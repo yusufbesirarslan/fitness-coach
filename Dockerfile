@@ -17,6 +17,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Uygulama kodu
 COPY . .
 
+# Root'tan düş: uygulamayı yetkisiz bir kullanıcı olarak çalıştır (savunma
+# derinliği — bir kod-çalıştırma hatası konteyner içinde root olmasın).
+# gunicorn 5000 portuna (>1024) bağlandığı için ayrıcalık gerekmez.
+RUN useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 5000
 
 # Tek worker: starter.py içindeki in-process self-heal / haftalik reset mantığı

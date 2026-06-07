@@ -19,7 +19,7 @@ services:
       # Compose içindeki Postgres'e bağlan; host'u "db" servis adı çözer.
       # .env'deki DATABASE_URL'i bilinçli olarak override ediyoruz ki
       # uygulama her zaman compose db'sine baksın.
-      DATABASE_URL: postgresql://${POSTGRES_USER:-fitx}:${POSTGRES_PASSWORD:-fitx}@db:5432/${POSTGRES_DB:-fitx}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-fitx}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/${POSTGRES_DB:-fitx}
     depends_on:
       db:
         condition: service_healthy
@@ -29,7 +29,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-fitx}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fitx}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
       POSTGRES_DB: ${POSTGRES_DB:-fitx}
       # postgres:18+ varsayilan veri dizinini degistirdi: mount /var/lib/postgresql/data'da
       # olunca "unused mount/volume" hatasiyla boot patliyor. PGDATA'yi eski yola sabitleyip
