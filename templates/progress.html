@@ -284,6 +284,13 @@
         setTimeout(() => { t.classList.add('hide'); setTimeout(()=>t.remove(),280); }, 3200);
     }
 
+    // Escape untrusted strings before they touch innerHTML (XSS koruması).
+    function escapeHTML(str) {
+        const d = document.createElement('div');
+        d.textContent = str == null ? '' : String(str);
+        return d.innerHTML;
+    }
+
     // ── TABS ──
     function switchTab(name, btn) {
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -424,11 +431,11 @@
                 <div class="history-stats">
                     <div class="history-stat">Yoğunluk: <span>${c.yogunluk}/5</span></div>
                     <div class="history-stat">Yorgunluk: <span>${c.fatigue}/5</span></div>
-                    <div class="history-stat">Overload: <span>${overloadLabels[c.overload]||c.overload}</span></div>
+                    <div class="history-stat">Overload: <span>${overloadLabels[c.overload]||escapeHTML(c.overload)}</span></div>
                     <div class="history-stat">Uyku: <span>${c.uyku}/5</span></div>
                     <div class="history-stat">Beslenme: <span>${c.beslenme}/5</span></div>
                 </div>
-                ${c.feedback ? `<div class="history-feedback-txt">${c.feedback.replace(/\n/g,'<br>')}</div>` : ''}
+                ${c.feedback ? `<div class="history-feedback-txt">${escapeHTML(c.feedback).replace(/\n/g,'<br>')}</div>` : ''}
             </div>
         `).join('');
     }
