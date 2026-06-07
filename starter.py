@@ -17,6 +17,7 @@ from flask_limiter.util import get_remote_address
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 load_dotenv()
+import s3_helper
 app = Flask(__name__)
 # Railway/gunicorn run behind a reverse proxy, so request.remote_addr is the
 # proxy's IP unless we trust X-Forwarded-For. ProxyFix(x_for=1) reads the single
@@ -559,10 +560,51 @@ class MealLog(db.Model):
     yag        = db.Column(db.Float)
     tarih      = db.Column(db.String(10))
     source     = db.Column(db.String(20), default="manual")
+    photo_key  = db.Column(db.String(300), nullable=True)  # S3 nesne anahtarı (opsiyonel)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def __repr__(self):
         return f"<MealLog {self.user_id} - {self.ogun} - {self.created_at}>"
+
+
+class PendingAction(db.Model):
+    """Onay bekleyen ('staged') koç aksiyonu.
+
+    Kullanıcı bir yemeğin makrolarını sorduğunda veya yediğini söylediğinde,
+    veri DOĞRUDAN kalıcı log'a yazılmaz; önce buraya geçici olarak konur. Böylece
+    sadece meraktan sorulan ("kaç kalori?") şeyler yanlışlıkla loglanmaz.
+    Kullanıcı onayladığında payload kalıcı kayda (UserDailyNutrition / WorkoutLog)
+    taşınır ve buradaki satır silinir → durum geçişi: staged → committed.
+
+    payload (JSON): log_meal için {food_name, calories, protein, carbs, fat,
+    serving_size}; log_workout için {exercise_name, sets, reps, weight_kg, volume}.
+    """
+    id          = db.Column(db.Integer, primary_key=True)
+    user_id     = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    action_type = db.Column(db.String(20), nullable=False)  # 'log_meal' | 'log_workout'
+    payload     = db.Column(db.JSON, nullable=False)
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    user = db.relationship("User", backref="pending_actions")
+
+    def __repr__(self):
+        return f"<PendingAction {self.user_id} - {self.action_type} - {self.created_at}>"
+
+
+class PumpCheck(db.Model):
+    """Antrenman tamamlama doğrulaması ('Pump Check'). Yüklenen ortam fotoğrafı
+    S3'e konur; burada yalnızca nesne anahtarı ve doğrulama sonucu saklanır."""
+    id            = db.Column(db.Integer, primary_key=True)
+    user_id       = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    image_key     = db.Column(db.String(300), nullable=True)  # S3 nesne anahtarı
+    location_type = db.Column(db.String(50))
+    description   = db.Column(db.String(200))
+    valid         = db.Column(db.Boolean, default=True)
+    fallback      = db.Column(db.Boolean, default=False)  # AI atlandıysa (fail-open)
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<PumpCheck {self.user_id} - {self.created_at}>"
 
 class Friendship(db.Model):
     id          = db.Column(db.Integer, primary_key=True)
@@ -1917,6 +1959,22 @@ def log_meal():
     if not ogun or not yemekler:
         return jsonify({"error": "Öğün ve yemekler zorunludur"}), 400
 
+    # Opsiyonel öğün fotoğrafı: doğrula ve (varsa) S3'e yükle. S3 hatası öğün
+    # kaydını bloklamaz (fail-open) — yalnızca foto atlanır.
+    photo_bytes, photo_mime, photo_err = validate_meal_photo(data.get("image"))
+    if photo_err:
+        return jsonify({"error": photo_err}), 400
+    meal_photo_key = None
+    if photo_bytes:
+        try:
+            if s3_helper.is_enabled():
+                meal_photo_key = s3_helper.upload_image(
+                    photo_bytes, content_type=photo_mime,
+                    prefix="meals", user_id=current_user.id,
+                )
+        except Exception as e:
+            print(f"[S3] Öğün fotoğrafı yüklemesi başarısız: {type(e).__name__}: {e}")
+
     _FITNESS_DICT = {
         r'(?i)\b(\d+)\s*(?:ölçek|scoop)\s*(?:whey|protein\s*tozu|protein\s*powder)':
             lambda m: (f"{m.group(1)} ölçek whey protein tozu ({int(m.group(1))*30}g)", None),
@@ -1958,11 +2016,15 @@ def log_meal():
         entry = MealLog(
             user_id=current_user.id, ogun=ogun, yemekler=yemekler,
             kalori=nutrients["kalori"], protein=nutrients["protein"],
-            karb=nutrients["karb"], yag=nutrients["yag"], tarih=today
+            karb=nutrients["karb"], yag=nutrients["yag"], tarih=today,
+            photo_key=meal_photo_key
         )
         db.session.add(entry)
         db.session.commit()
-        return jsonify({"message": f"{ogun} kaydedildi.", "nutrients": nutrients})
+        resp = {"message": f"{ogun} kaydedildi.", "nutrients": nutrients}
+        if meal_photo_key:
+            resp["photo_url"] = _meal_photo_url(entry)
+        return jsonify(resp)
 
     prompt = (
         f"Sen bir beslenme uzmanısın. Aşağıdaki yemeklerin GERÇEK toplam besin değerlerini hesapla.\n"
@@ -2040,7 +2102,8 @@ def log_meal():
         protein  = nutrients.get("protein", 0),
         karb     = nutrients.get("karb", 0),
         yag      = nutrients.get("yag", 0),
-        tarih    = today
+        tarih    = today,
+        photo_key = meal_photo_key
     )
     db.session.add(entry)
     db.session.commit()
@@ -2050,6 +2113,8 @@ def log_meal():
         "message": f"{ogun} kaydedildi.",
         "nutrients": nutrients,
     }
+    if meal_photo_key:
+        response["photo_url"] = _meal_photo_url(entry)
     if quest_result:
         response["quest_awarded"] = quest_result
     return jsonify(response)
@@ -2071,7 +2136,8 @@ def today_meals():
             "protein": m.protein,
             "karb": m.karb,
             "yag": m.yag,
-            "source": getattr(m, "source", "manual") or "manual"
+            "source": getattr(m, "source", "manual") or "manual",
+            "photo_url": _meal_photo_url(m)
         })
         totals["kalori"]  += m.kalori or 0
         totals["protein"] += m.protein or 0
@@ -2096,7 +2162,8 @@ def meal_history():
             "kalori": m.kalori,
             "protein": m.protein,
             "karb": m.karb,
-            "yag": m.yag
+            "yag": m.yag,
+            "photo_url": _meal_photo_url(m)
         })
         days[m.tarih]["totals"]["kalori"]  += m.kalori or 0
         days[m.tarih]["totals"]["protein"] += m.protein or 0
@@ -3895,23 +3962,64 @@ def validate_profile_picture(value):
     return value, None
 
 
-def validate_pump_check_image(value):
-    """Pump Check fotoğrafı için base64 data-URL'i doğrular ve ham bayta çevirir.
-    Fotoğraf saklanmadığı (yalnızca anlık doğrulama) için profil fotoğrafından
-    biraz daha yüksek bir boyut sınırı kullanılır. Return: (image_bytes, error)."""
+def _decode_data_url_image(value, max_len):
+    """Bir base64 image data-URL'ini doğrular ve (image_bytes, content_type, hata)
+    olarak çözer. hata kodları: missing / too_big / bad_format / decode_failed.
+    Çağıranlar bu kodları kullanıcıya gösterilecek mesaja çevirir."""
     import base64 as _b64
     if not value:
-        return None, "Pump Check fotoğrafı gerekli."
-    if len(value) > 8_000_000:  # ~6 MB görsel + base64 şişmesi payı
-        return None, "Fotoğraf çok büyük (maks ~6MB)."
+        return None, None, "missing"
+    if len(value) > max_len:
+        return None, None, "too_big"
     m = _PROFILE_PIC_RE.match(value)
     if not m:
-        return None, "Geçersiz fotoğraf formatı."
+        return None, None, "bad_format"
     try:
         image_bytes = _b64.b64decode(m.group(2), validate=True)
     except Exception:
-        return None, "Fotoğraf çözümlenemedi."
-    return image_bytes, None
+        return None, None, "decode_failed"
+    ext = m.group(1).lower()
+    content_type = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+    return image_bytes, content_type, None
+
+
+def validate_pump_check_image(value):
+    """Pump Check fotoğrafı için base64 data-URL'i doğrular ve ham bayta çevirir.
+    Return: (image_bytes, content_type, error)."""
+    image_bytes, content_type, code = _decode_data_url_image(value, 8_000_000)
+    if code:
+        msg = {
+            "missing": "Pump Check fotoğrafı gerekli.",
+            "too_big": "Fotoğraf çok büyük (maks ~6MB).",
+            "bad_format": "Geçersiz fotoğraf formatı.",
+            "decode_failed": "Fotoğraf çözümlenemedi.",
+        }[code]
+        return None, None, msg
+    return image_bytes, content_type, None
+
+
+def validate_meal_photo(value):
+    """Öğün fotoğrafı (opsiyonel) için base64 data-URL'i doğrular. Boş değer
+    geçerli kabul edilir (foto isteğe bağlı). Return: (image_bytes, content_type, error)."""
+    if not value:
+        return None, None, None  # fotoğraf opsiyonel
+    image_bytes, content_type, code = _decode_data_url_image(value, 8_000_000)
+    if code and code != "missing":
+        msg = {
+            "too_big": "Öğün fotoğrafı çok büyük (maks ~6MB).",
+            "bad_format": "Geçersiz fotoğraf formatı.",
+            "decode_failed": "Fotoğraf çözümlenemedi.",
+        }[code]
+        return None, None, msg
+    return image_bytes, content_type, None
+
+
+def _meal_photo_url(meal):
+    """MealLog kaydı için S3 pre-signed görsel URL'i (yoksa None)."""
+    key = getattr(meal, "photo_key", None)
+    if not key or not s3_helper.is_enabled():
+        return None
+    return s3_helper.generate_presigned_url(key, expires_in=3600)
 
 
 @app.route("/edit-profile", methods=["GET", "POST"])
@@ -4755,19 +4863,31 @@ def chat():
         "comparison"     : comparison
     })
 
-COACH_SYSTEM_PROMPT = """Sen FitX uygulamasının profesyonel, son derece motive edici AI Fitness & Yaşam Koçusun. Kullanıcının veritabanına HEM okuma HEM yazma erişimin var.
+COACH_SYSTEM_PROMPT = """Sen FitX uygulamasının elit, destekleyici ama gerçekçi AI Beslenme & Fitness Koçusun. Kullanıcının veritabanına HEM okuma HEM yazma erişimin var ve bunu ARAÇLAR (function calling) üzerinden yaparsın.
 
 VERİ KAYNAKLARIN:
-- Beslenme verileri FatSecret API'den geliyor (besin öğeleri, porsiyon ölçekleri — orta/büyük yumurta gibi — ve metrikler).
+- Beslenme verileri FatSecret API'den geliyor — makroları ASLA tahmin etme, daima aracı çağır.
 - Günlük aktivite verileri Apple Health (HealthKit) ve Android Health Connect'ten senkronize ediliyor (adım sayısı, kalori yakımı).
 - Bu verileri analiz ederek kişiye özel, veri odaklı önerilerde bulun.
 
+═══ BESLENME LOGLAMA İŞ AKIŞI (ÇOK ÖNEMLİ) ═══
+Kullanıcı bir yiyecek/içecek YEDİĞİNİ söylediğinde VEYA makrolarını/kalorisini sorduğunda:
+1. DAİMA önce `fetch_nutrition_and_stage_log` aracını çağır — gerçek makroları FatSecret'tan çeker ve onaya hazır şekilde geçici olarak hazırlar. Bu araç KAYDETMEZ, sadece veriyi getirir.
+2. Dönen makroları kullanıcıya KISA ve NET sun (kalori | P | K | Y + porsiyon), sonra AÇIKÇA onay iste: "Günlüğüne kaydedeyim mi?"
+3. Kullanıcı onaylarsa ("evet", "kaydet", "olur" vb.) `confirm_and_commit_meal_log` aracını çağır. Onay GELMEDEN asla bu aracı çağırma — merak amaçlı sorular yanlışlıkla loglanmamalı.
+4. Kullanıcı reddederse/iptal ederse ("hayır", "iptal", "vazgeç") `cancel_pending_log` aracını çağır.
+Antrenman için aynı mantık: `stage_workout_log` → onay → `confirm_and_commit_workout_log`.
+
+═══ ÇEŞİTLİLİK DİREKTİFİ (ZORUNLU) ═══
+ASLA monoton, tekrarlayan "tavuk + pirinç" gibi sıkıcı seçeneklere yönlendirme. Bunun yerine aktif olarak:
+- Mikro besin yoğunluğunu öne çıkar (renkli sebzeler, yapraklılar, vitamin/mineral kaynakları).
+- Lif alımını teşvik et (bakliyat, tam tahıl, sebze-meyve).
+- Sağlıklı yağları öner (zeytinyağı, avokado, kuruyemiş, yağlı balık — omega-3).
+- Çeşit sun: aynı makroyu farklı, lezzetli ve yöresel/global alternatiflerle ver.
+- Popüler zincir/kafe ürünlerini (Starbucks, yerel kafeler, fast-food) değerlendirirken dürüst ol; daha besleyici, dengeli alternatifler öner.
+
 TEMEL GÖREV:
-- Kullanıcı antrenman veya yemek bahsettiğinde HEMEN tespit et.
-- "yaptım", "yedim", "çalıştım", "içtim" gibi ifadeler = loglama niyeti.
-- Loglama niyeti tespit ettiğinde veriyi çıkar ve ONAY İSTE (asla direkt kaydetme).
-- Onay formatı: "📋 Tespit ettim: [detaylar]. Kayıt edeyim mi?"
-- Beslenme soruları için FatSecret verisini kullan, gerçek makro değerleri ver.
+- Beslenme sorularında gerçek FatSecret makrolarını kullan, tahmin etme.
 - Trendleri, eksik logları ve başarıları proaktif olarak belirt.
 - Haftalık rapor günlerinde (Pazartesi/Pazar) otomatik rapor sun.
 
@@ -4790,62 +4910,16 @@ KURALLAR:
 - Kas kazanma hedefinde kilo artışı OLUMLU, kilo vermede azalış OLUMLU.
 - Tonu: elit, destekleyici, veri odaklı."""
 
-NUTRITION_KEYWORDS = [
-    "kalori", "kaç kalori", "protein", "karb", "karbonhidrat", "yağ", "makro",
-    "besin", "beslenme", "yemek", "yiyecek", "içecek", "meyve", "sebze",
-    "tavuk", "pirinç", "yumurta", "süt", "ekmek", "pilav", "makarna", "salata",
-    "et", "balık", "peynir", "yoğurt", "çikolata", "muz", "elma",
-    "calories", "chicken", "rice", "egg", "carbs", "fat",
-    "gram", "100g", "200g", "porsiyon", "tabak",
-]
-
-LOGGING_WORKOUT_KEYWORDS = [
-    "yaptım", "çalıştım", "kaldırdım", "press", "squat", "curl",
-    "deadlift", "bench", "set", "tekrar", "rep", "antrenman yaptım",
-    "egzersiz yaptım", "ağırlık", "dambıl", "barbell",
-]
-
-LOGGING_NUTRITION_KEYWORDS = [
-    "yedim", "içtim", "atıştırdım", "kahvaltı yaptım", "öğle yedim",
-    "akşam yedim", "ara öğün", "tükettim", "bir porsiyon",
-]
-
-CONFIRM_KEYWORDS = [
-    "evet", "yes", "onayla", "kaydet", "tamam", "olur", "yap",
-    "log", "do it", "confirm", "uygun", "kesinlikle", "tabii",
-]
-
-DENY_KEYWORDS = [
-    "hayır", "no", "iptal", "cancel", "vazgeç", "yapma", "değil",
-]
-
-
-def _detect_intent(question: str) -> str:
-    q = question.lower().strip()
-    if any(kw in q for kw in CONFIRM_KEYWORDS) and len(q.split()) <= 5:
-        return "confirm"
-    if any(kw in q for kw in DENY_KEYWORDS) and len(q.split()) <= 8:
-        return "deny"
-    if any(kw in q for kw in LOGGING_WORKOUT_KEYWORDS):
-        return "log_workout"
-    if any(kw in q for kw in LOGGING_NUTRITION_KEYWORDS):
-        return "log_nutrition"
-    return "general"
-
-
-def _is_nutrition_question(question: str) -> bool:
-    q = question.lower()
-    return any(kw in q for kw in NUTRITION_KEYWORDS)
-
-
 def _fetch_coach_context(user_id, question=""):
+    # Not: Beslenme makroları artık koç araçları (fetch_nutrition_and_stage_log)
+    # üzerinden tek yoldan gelir; burada FatSecret verisi enjekte ETMİYORUZ ki
+    # model rakip bir veri kaynağı görüp staging adımını atlamasın.
     from fitx_mcp.server import (
         get_user_fitness_summary,
         get_user_workout_history,
         get_user_supplement_stack,
         get_friend_activities,
         get_user_nutrition_log,
-        search_nutrition_data,
         generate_weekly_report,
     )
     parts = []
@@ -4870,13 +4944,6 @@ def _fetch_coach_context(user_id, question=""):
     except Exception:
         pass
 
-    if question and _is_nutrition_question(question):
-        try:
-            nutrition_result = search_nutrition_data(question)
-            parts.append(f"[FATSECRET BESİN VERİSİ]\n{nutrition_result}")
-        except Exception:
-            parts.append("[FATSECRET BESİN VERİSİ] Veri alınamadı.")
-
     from analytics_engine import get_nudges
     try:
         models = {
@@ -4893,201 +4960,410 @@ def _fetch_coach_context(user_id, question=""):
     return "\n\n".join(parts)
 
 
-def _extract_with_llm(question, intent_type):
-    """Use a focused LLM call to extract structured data from natural language."""
-    if intent_type == "log_workout":
-        extraction_prompt = (
-            "Aşağıdaki mesajdan antrenman verisini JSON olarak çıkar. "
-            'Format: {"exercise": "...", "sets": N, "reps": N, "weight_kg": N}\n'
-            "Eğer bir değer belirtilmemişse makul bir varsayılan kullan (sets=3, reps=10, weight_kg=0).\n"
-            "SADECE JSON döndür, başka bir şey yazma.\n\n"
-            f"Mesaj: {question}"
-        )
-    else:
-        extraction_prompt = (
-            "Aşağıdaki mesajdan beslenme verisini JSON olarak çıkar. "
-            'Format: {"food_item": "...", "calories": N, "protein": N, "carbs": N, "fat": N}\n'
-            "Eğer makro değerleri belirtilmemişse 0 yaz — sistem FatSecret'tan alacak.\n"
-            "SADECE JSON döndür, başka bir şey yazma.\n\n"
-            f"Mesaj: {question}"
-        )
-    try:
-        raw = _openai_chat(
-            messages=[{"role": "user", "content": extraction_prompt}],
-            max_tokens=150,
-            temperature=0.1,
-        ).strip()
-        start = raw.find("{")
-        end = raw.rfind("}") + 1
-        if start >= 0 and end > start:
-            return json.loads(raw[start:end])
-    except Exception:
-        pass
+# ── KOÇ ARAÇLARI (OpenAI Function Calling) ─────────────────────
+# Durum makinesi: kullanıcı bir yiyeceği sorduğunda/yediğini söylediğinde veri
+# DOĞRUDAN loglanmaz; önce PendingAction'a (DB) 'staged' edilir. Kullanıcı
+# onaylayınca kalıcı kayda (UserDailyNutrition / WorkoutLog) taşınır. Böylece
+# merak amaçlı sorular yanlışlıkla loglanmaz.
+
+_GRAMS_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:g|gr|gram)\b", re.IGNORECASE)
+
+
+def _extract_grams(text):
+    """Sorgudan gram miktarını yakala (ör. '300g tavuk' → 300.0). Yoksa None."""
+    m = _GRAMS_RE.search(text or "")
+    if m:
+        try:
+            val = float(m.group(1).replace(",", "."))
+            if 0 < val <= 5000:
+                return val
+        except ValueError:
+            pass
     return None
 
 
-def _execute_pending_action(user_id):
-    """Execute the pending coach action stored in session. Returns result dict or None."""
-    from fitx_mcp.server import log_workout_entry, log_nutrition_entry, search_nutrition_data
+def _coach_search_food(query):
+    """Birleşik besin araması: FatSecret birincil, erişilemezse statik/LLM
+    fallback. Hepsi 100g bazlı 'per_100g' makroları içerir."""
+    return (_food_search_fatsecret(query)
+            or _food_search_static(query)
+            or _food_search_llm(query)
+            or [])
 
-    pending = session.get("pending_coach_action")
+
+def _today_nutrition_totals(user_id):
+    """Bugünün beslenme toplamları (SQLAlchemy ile, DB-agnostik)."""
+    start = datetime.combine(datetime.utcnow().date(), datetime.min.time())
+    row = db.session.query(
+        db.func.coalesce(db.func.sum(UserDailyNutrition.calories), 0),
+        db.func.coalesce(db.func.sum(UserDailyNutrition.protein), 0),
+        db.func.coalesce(db.func.sum(UserDailyNutrition.carbs), 0),
+        db.func.coalesce(db.func.sum(UserDailyNutrition.fat), 0),
+        db.func.count(UserDailyNutrition.id),
+    ).filter(
+        UserDailyNutrition.user_id == user_id,
+        UserDailyNutrition.created_at >= start,
+    ).first()
+    return {
+        "calories": round(row[0]),
+        "protein": round(row[1], 1),
+        "carbs": round(row[2], 1),
+        "fat": round(row[3], 1),
+        "entry_count": row[4],
+    }
+
+
+def _today_workout_totals(user_id):
+    """Bugünün antrenman toplam volümü."""
+    start = datetime.combine(datetime.utcnow().date(), datetime.min.time())
+    row = db.session.query(
+        db.func.coalesce(db.func.sum(WorkoutLog.volume), 0),
+        db.func.count(WorkoutLog.id),
+    ).filter(
+        WorkoutLog.user_id == user_id,
+        WorkoutLog.created_at >= start,
+    ).first()
+    return {"total_volume": round(row[0], 1), "entry_count": row[1]}
+
+
+def _tool_fetch_nutrition_and_stage_log(user_id, food_query):
+    """TOOL (staging): FatSecret'tan makro çek → PendingAction'a yaz → LLM'e döndür.
+    KALICI KAYIT YAPMAZ. Durum geçişi: (yok) → staged."""
+    food_query = (food_query or "").strip()
+    if not food_query:
+        return json.dumps({"status": "error", "message": "Yiyecek sorgusu boş."}, ensure_ascii=False)
+
+    results = _coach_search_food(food_query)
+    if not results:
+        # FatSecret/fallback boş → LLM kullanıcıdan netleştirme istesin (hata yönetimi).
+        return json.dumps({
+            "status": "not_found",
+            "message": f"'{food_query}' için besin verisi bulunamadı. Kullanıcıdan daha açık bir tanım iste (pişirme şekli, marka, miktar).",
+        }, ensure_ascii=False)
+
+    top = results[0]
+    per_100g = top.get("per_100g") or top.get("macros") or {}
+    grams = _extract_grams(food_query) or 100.0
+    scale = grams / 100.0
+    payload = {
+        "food_name": (top.get("name") or food_query)[:200],
+        "calories": round(float(per_100g.get("calories", 0)) * scale, 1),
+        "protein": round(float(per_100g.get("protein", 0)) * scale, 1),
+        "carbs": round(float(per_100g.get("carbs", 0)) * scale, 1),
+        "fat": round(float(per_100g.get("fat", 0)) * scale, 1),
+        "serving_size": f"{grams:g} g",
+    }
+
+    # Tek aktif 'staged' meal: önceki bekleyenleri temizle, yenisini yaz, commit et.
+    PendingAction.query.filter_by(user_id=user_id, action_type="log_meal").delete()
+    db.session.add(PendingAction(user_id=user_id, action_type="log_meal", payload=payload))
+    db.session.commit()
+
+    return json.dumps({
+        "status": "staged",
+        "staged_food": payload,
+        "instruction": "Makroları kullanıcıya kısa ve net sun, sonra 'Günlüğüne kaydedeyim mi?' diye onay iste. Onay gelmeden confirm_and_commit_meal_log çağırma.",
+    }, ensure_ascii=False)
+
+
+def _tool_confirm_and_commit_meal_log(user_id):
+    """TOOL (commit): En son staged meal'i kalıcı UserDailyNutrition kaydına taşı,
+    PendingAction satırını sil. Durum geçişi: staged → committed."""
+    pending = (PendingAction.query
+               .filter_by(user_id=user_id, action_type="log_meal")
+               .order_by(PendingAction.created_at.desc())
+               .first())
     if not pending:
-        return None
+        # 'evet' dendi ama ortada bekleyen yemek yok → güvenli hata yönetimi.
+        return json.dumps({
+            "status": "no_pending",
+            "message": "Onaylanacak bekleyen bir yemek kaydı yok. Önce kullanıcının ne yediğini öğrenip fetch_nutrition_and_stage_log çağır.",
+        }, ensure_ascii=False)
 
-    session.pop("pending_coach_action", None)
+    data = pending.payload or {}
+    cal = float(data.get("calories", 0) or 0)
+    pro = float(data.get("protein", 0) or 0)
+    carb = float(data.get("carbs", 0) or 0)
+    fat = float(data.get("fat", 0) or 0)
+    name = (data.get("food_name") or "Yemek")[:200]
 
-    action_type = pending.get("type")
-    data = pending.get("data", {})
+    db.session.add(UserDailyNutrition(
+        user_id=user_id, food_item=name,
+        calories=cal, protein=pro, carbs=carb, fat=fat,
+    ))
+    db.session.delete(pending)  # staged satırı temizle (state geçişi tamamlandı)
+    award_xp(user_id, 10)
+    log_activity(user_id, "nutrition_logged", f"{name} — {round(cal)} kcal")
+    db.session.commit()
 
-    if action_type == "log_workout":
-        result_str = log_workout_entry(
-            user_id,
-            data.get("exercise", ""),
-            data.get("sets", 3),
-            data.get("reps", 10),
-            data.get("weight_kg", 0),
+    return json.dumps({
+        "status": "committed",
+        "logged": {
+            "food_name": name, "calories": cal, "protein": pro,
+            "carbs": carb, "fat": fat, "serving_size": data.get("serving_size", ""),
+        },
+        "xp_awarded": 10,
+        "today_totals": _today_nutrition_totals(user_id),
+    }, ensure_ascii=False)
+
+
+def _tool_stage_workout_log(user_id, exercise_name, sets, reps, weight_kg):
+    """TOOL (staging): Antrenmanı onaya hazırla. Kalıcı kayıt yapmaz."""
+    exercise_name = (exercise_name or "").strip()
+    if not exercise_name:
+        return json.dumps({"status": "error", "message": "Egzersiz adı boş."}, ensure_ascii=False)
+    try:
+        sets = int(sets or 0)
+        reps = int(reps or 0)
+        weight = float(weight_kg or 0)
+    except (TypeError, ValueError):
+        sets, reps, weight = 3, 10, 0.0
+    if sets <= 0:
+        sets = 3
+    if reps <= 0:
+        reps = 10
+    if weight < 0:
+        weight = 0.0
+
+    payload = {
+        "exercise_name": exercise_name[:120],
+        "sets": sets, "reps": reps, "weight_kg": weight,
+        "volume": round(sets * reps * weight, 1),
+    }
+    PendingAction.query.filter_by(user_id=user_id, action_type="log_workout").delete()
+    db.session.add(PendingAction(user_id=user_id, action_type="log_workout", payload=payload))
+    db.session.commit()
+
+    return json.dumps({
+        "status": "staged",
+        "staged_workout": payload,
+        "instruction": "Antrenmanı özetle ve onay iste; onay gelince confirm_and_commit_workout_log çağır.",
+    }, ensure_ascii=False)
+
+
+def _tool_confirm_and_commit_workout_log(user_id):
+    """TOOL (commit): En son staged antrenmanı kalıcı WorkoutLog'a taşı."""
+    pending = (PendingAction.query
+               .filter_by(user_id=user_id, action_type="log_workout")
+               .order_by(PendingAction.created_at.desc())
+               .first())
+    if not pending:
+        return json.dumps({
+            "status": "no_pending",
+            "message": "Onaylanacak bekleyen bir antrenman kaydı yok.",
+        }, ensure_ascii=False)
+
+    d = pending.payload or {}
+    db.session.add(WorkoutLog(
+        user_id=user_id,
+        exercise_name=(d.get("exercise_name") or "Egzersiz")[:120],
+        sets=int(d.get("sets", 3)), reps=int(d.get("reps", 10)),
+        weight_kg=float(d.get("weight_kg", 0)), volume=float(d.get("volume", 0)),
+    ))
+    db.session.delete(pending)
+    award_xp(user_id, 15)
+    log_activity(user_id, "workout_completed",
+                 f"{d.get('exercise_name')} — {d.get('sets')}x{d.get('reps')} @ {d.get('weight_kg')}kg")
+    db.session.commit()
+
+    return json.dumps({
+        "status": "committed",
+        "logged": d,
+        "xp_awarded": 15,
+        "today_totals": _today_workout_totals(user_id),
+    }, ensure_ascii=False)
+
+
+def _tool_cancel_pending_log(user_id):
+    """TOOL: Kullanıcı reddederse tüm bekleyen staged kayıtları sil."""
+    removed = PendingAction.query.filter_by(user_id=user_id).delete()
+    db.session.commit()
+    return json.dumps({"status": "cancelled", "removed": removed}, ensure_ascii=False)
+
+
+# OpenAI'a sunulan araç şemaları. user_id ASLA şemada yok — sunucu enjekte eder.
+COACH_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_nutrition_and_stage_log",
+            "description": (
+                "Kullanıcı bir yiyecek/içecek YEDİĞİNİ söylediğinde VEYA bir yiyeceğin "
+                "kalori/makro değerlerini sorduğunda çağır. FatSecret'tan gerçek makroları "
+                "çeker ve onaya hazır şekilde geçici olarak hazırlar (stage). KALICI KAYIT "
+                "YAPMAZ; sadece veriyi getirir."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "food_query": {
+                        "type": "string",
+                        "description": "Yiyecek ve varsa miktar. Ör: '300g ızgara tavuk göğsü', 'grande caffe latte', '2 haşlanmış yumurta'.",
+                    }
+                },
+                "required": ["food_query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "confirm_and_commit_meal_log",
+            "description": (
+                "Kullanıcı stage edilmiş yemeği günlüğüne kaydetmeyi ONAYLADIĞINDA çağır "
+                "('evet', 'kaydet', 'olur', 'tabii' vb.). Bekleyen yemek kaydını kalıcı "
+                "günlüğe yazar. Onay açıkça gelmediyse ÇAĞIRMA."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stage_workout_log",
+            "description": (
+                "Kullanıcı bir antrenman/egzersiz YAPTIĞINI söylediğinde çağır "
+                "(ör. '5x5 100kg squat yaptım'). Veriyi onaya hazırlar; kalıcı kayıt yapmaz."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "exercise_name": {"type": "string", "description": "Egzersiz adı, ör. 'Squat', 'Bench Press'."},
+                    "sets": {"type": "integer", "description": "Set sayısı. Belirtilmemişse 3."},
+                    "reps": {"type": "integer", "description": "Tekrar sayısı. Belirtilmemişse 10."},
+                    "weight_kg": {"type": "number", "description": "Ağırlık (kg). Vücut ağırlığı egzersizinde 0."},
+                },
+                "required": ["exercise_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "confirm_and_commit_workout_log",
+            "description": "Kullanıcı stage edilmiş antrenmanı kaydetmeyi onayladığında çağır.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_pending_log",
+            "description": "Kullanıcı stage edilmiş kaydı reddederse/iptal ederse çağır ('hayır', 'iptal', 'vazgeç', 'yanlış').",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+]
+
+
+def _dispatch_coach_tool(user_id, name, arguments_json):
+    """LLM'in istediği aracı sunucu tarafında çalıştır. user_id ASLA LLM'den
+    gelmez — güvenlik için current_user'dan enjekte edilir. JSON string döndürür."""
+    try:
+        args = json.loads(arguments_json) if arguments_json else {}
+    except (json.JSONDecodeError, TypeError):
+        args = {}
+
+    if name == "fetch_nutrition_and_stage_log":
+        return _tool_fetch_nutrition_and_stage_log(user_id, args.get("food_query", ""))
+    if name == "confirm_and_commit_meal_log":
+        return _tool_confirm_and_commit_meal_log(user_id)
+    if name == "stage_workout_log":
+        return _tool_stage_workout_log(
+            user_id, args.get("exercise_name", ""),
+            args.get("sets"), args.get("reps"), args.get("weight_kg"),
         )
-        result = json.loads(result_str)
-        if result.get("success"):
-            award_xp(user_id, 15)
-            log_activity(user_id, "workout_completed",
-                         f"{data.get('exercise')} — {data.get('sets')}x{data.get('reps')} @ {data.get('weight_kg')}kg")
-            db.session.commit()
-        return result
+    if name == "confirm_and_commit_workout_log":
+        return _tool_confirm_and_commit_workout_log(user_id)
+    if name == "cancel_pending_log":
+        return _tool_cancel_pending_log(user_id)
+    return json.dumps({"status": "error", "message": f"Bilinmeyen araç: {name}"}, ensure_ascii=False)
 
-    elif action_type == "log_nutrition":
-        cal = data.get("calories", 0)
-        pro = data.get("protein", 0)
-        carb = data.get("carbs", 0)
-        fat = data.get("fat", 0)
 
-        if cal == 0 and pro == 0:
-            try:
-                fs_result = json.loads(search_nutrition_data(data.get("food_item", "")))
-                results = fs_result.get("results", [])
-                if results and results[0].get("per_serving"):
-                    ps = results[0]["per_serving"]
-                    cal = ps.get("calories", 0)
-                    pro = ps.get("protein", 0)
-                    carb = ps.get("carbs", 0)
-                    fat = ps.get("fat", 0)
-            except Exception:
-                pass
+# Session bir imzalı cookie (~4KB sınır). Düz-metin tutuyoruz; asıl durum DB'de.
+COACH_HISTORY_LIMIT = 6          # son 3 alışveriş (user+assistant) yeterli bağlam
+COACH_HISTORY_CHAR_CAP = 400     # her turu kırp ki cookie sınırı aşılmasın
 
-        result_str = log_nutrition_entry(user_id, data.get("food_item", ""), cal, pro, carb, fat)
-        result = json.loads(result_str)
-        if result.get("success"):
-            award_xp(user_id, 10)
-            log_activity(user_id, "nutrition_logged",
-                         f"{data.get('food_item')} — {round(cal)} kcal")
-            db.session.commit()
-        return result
 
-    return None
+def _run_coach_conversation(user_id, question, context):
+    """OpenAI function-calling döngüsü: system → (gerekirse araç çağrıları) → final metin.
+
+    Çok turlu onay akışı için konuşma geçmişi sunucu tarafında session'da tutulur
+    (chat widget'ı history göndermiyor). Asıl 'staged' veri DB'deki PendingAction'da
+    yaşar; session yalnızca modelin onay niyetini anlaması için düz-metin tutar.
+    """
+    history = session.get("coach_history", [])
+
+    messages = [{"role": "system", "content": COACH_SYSTEM_PROMPT}]
+    if context:
+        messages.append({"role": "system", "content": f"[KULLANICI VERİSİ]\n{context}"})
+    messages.extend(history[-COACH_HISTORY_LIMIT:])
+    messages.append({"role": "user", "content": question})
+
+    final_text = ""
+    for _ in range(5):  # araç çağrısı yinelemesine güvenli üst sınır
+        resp = openai_client.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=messages,
+            tools=COACH_TOOLS,
+            tool_choice="auto",
+            max_tokens=700,
+            temperature=0.6,
+        )
+        msg = resp.choices[0].message
+        tool_calls = msg.tool_calls or []
+
+        if not tool_calls:
+            final_text = msg.content or ""
+            break
+
+        # Araç isteyen assistant mesajını (tool_calls ile) sıraya ekle.
+        messages.append({
+            "role": "assistant",
+            "content": msg.content or "",
+            "tool_calls": [
+                {"id": tc.id, "type": "function",
+                 "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                for tc in tool_calls
+            ],
+        })
+        # Her tool_call_id için tam olarak bir 'tool' yanıtı ekle (API zorunluluğu).
+        for tc in tool_calls:
+            result = _dispatch_coach_tool(user_id, tc.function.name, tc.function.arguments)
+            messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+        # Döngü başa döner: model araç sonuçlarıyla final metni üretir ya da zincirler.
+    else:
+        final_text = "İşlemi tamamlayamadım, tekrar dener misin?"
+
+    if not final_text:
+        final_text = "Bir şeyler ters gitti, tekrar dener misin?"
+
+    # Düz-metin geçmişini güncelle (tool mesajları session'a yazılmaz; durum DB'de).
+    history.append({"role": "user", "content": question[:COACH_HISTORY_CHAR_CAP]})
+    history.append({"role": "assistant", "content": final_text[:COACH_HISTORY_CHAR_CAP]})
+    session["coach_history"] = history[-COACH_HISTORY_LIMIT:]
+    return final_text
 
 
 @app.route("/ask", methods=["POST"])
 @login_required
 def ask_coach():
-    data     = request.get_json()
-    question = data.get("question", "")
-    history  = data.get("history", [])
+    data     = request.get_json(silent=True) or {}
+    question = (data.get("question") or "").strip()
 
-    if not question.strip():
+    if not question:
         return jsonify({"error": "Bir soru yaz."}), 400
 
-    intent = _detect_intent(question)
-
-    if intent == "confirm":
-        result = _execute_pending_action(current_user.id)
-        if result and result.get("success"):
-            if result.get("today_total_volume") is not None:
-                msg = (
-                    f"Kaydedildi! {result['exercise']} — "
-                    f"{result['sets']}x{result['reps']} @ {result['weight_kg']}kg "
-                    f"(Volüm: {result['volume']}kg)\n"
-                    f"Bugünkü toplam volüm: {result['today_total_volume']}kg "
-                    f"({result['today_entry_count']} kayıt) +15 XP!"
-                )
-            else:
-                t = result.get("today_totals", {})
-                msg = (
-                    f"Kaydedildi! {result['food_item']} — "
-                    f"{result['calories']} kcal | "
-                    f"P: {result['protein']}g | K: {result['carbs']}g | Y: {result['fat']}g\n"
-                    f"Bugünkü toplam: {t.get('calories', 0)} kcal | "
-                    f"P: {t.get('protein', 0)}g ({t.get('entry_count', 0)} kayıt) +10 XP!"
-                )
-            return jsonify({"answer": msg})
-        elif result and result.get("error"):
-            return jsonify({"answer": f"Hata: {result['error']}"})
-        else:
-            return jsonify({"answer": "Onaylanacak bir kayıt bulunamadı. Ne kaydetmemi istersin?"})
-
-    if intent == "deny":
-        session.pop("pending_coach_action", None)
-        return jsonify({"answer": "Tamam, iptal ettim. Düzeltme yapmak istersen söyle!"})
-
-    if intent in ("log_workout", "log_nutrition"):
-        extracted = _extract_with_llm(question, intent)
-        if extracted:
-            session["pending_coach_action"] = {"type": intent, "data": extracted}
-
-            if intent == "log_workout":
-                ex = extracted.get("exercise", "?")
-                s = extracted.get("sets", 3)
-                r = extracted.get("reps", 10)
-                w = extracted.get("weight_kg", 0)
-                vol = s * r * w
-                preview = (
-                    f"📋 Tespit ettim: **{ex}** — {s} set x {r} tekrar @ {w}kg "
-                    f"(Toplam volüm: {vol}kg)\n\nKayıt edeyim mi?"
-                )
-            else:
-                food = extracted.get("food_item", "?")
-                cal = extracted.get("calories", 0)
-                pro = extracted.get("protein", 0)
-
-                if cal == 0 and pro == 0:
-                    from fitx_mcp.server import search_nutrition_data
-                    try:
-                        fs = json.loads(search_nutrition_data(food))
-                        results = fs.get("results", [])
-                        if results and results[0].get("per_serving"):
-                            ps = results[0]["per_serving"]
-                            extracted["calories"] = ps.get("calories", 0)
-                            extracted["protein"] = ps.get("protein", 0)
-                            extracted["carbs"] = ps.get("carbs", 0)
-                            extracted["fat"] = ps.get("fat", 0)
-                            session["pending_coach_action"]["data"] = extracted
-                    except Exception:
-                        pass
-
-                cal = extracted.get("calories", 0)
-                pro = extracted.get("protein", 0)
-                carb = extracted.get("carbs", 0)
-                fat = extracted.get("fat", 0)
-                preview = (
-                    f"📋 Tespit ettim: **{food}** — {cal} kcal | "
-                    f"P: {pro}g | K: {carb}g | Y: {fat}g\n\nKayıt edeyim mi?"
-                )
-            return jsonify({"answer": preview})
-
-    context = _fetch_coach_context(current_user.id, question)
-
-    messages = []
-    for h in history[-6:]:
-        role = "user" if h.get("role") == "user" else "assistant"
-        messages.append({"role": role, "content": h.get("text", "")[:500]})
-    messages.append({"role": "user", "content": f"{context}\n\nKullanıcının sorusu: {question}"})
+    # Bağlam toplama psycopg2-bağımlı fitx_mcp.server'a dokunur; local'de veya
+    # geçici çökmede graceful degrade etsin diye sarmalanır — function-calling
+    # akışı (FatSecret + SQLAlchemy) buna bağlı değil, yine de çalışır.
+    try:
+        context = _fetch_coach_context(current_user.id, question)
+    except Exception:
+        context = ""
 
     try:
-        answer = _openai_chat(
-            messages=messages,
-            system_prompt=COACH_SYSTEM_PROMPT,
-            max_tokens=700,
-            temperature=0.7,
-        )
+        answer = _run_coach_conversation(current_user.id, question, context)
         return jsonify({"answer": answer})
     except Exception:
         app.logger.exception("Koç yanıtı üretilemedi")
@@ -5761,16 +6037,37 @@ def complete_workout():
 
     # ── PUMP CHECK GATE ──────────────────────────────────────────────────────
     # Antrenman tamamlanmadan önce ortam fotoğrafı + konum AI ile doğrulanmalı.
-    # Fotoğraf yalnızca anlık doğrulama için kullanılır; hiçbir yere kaydedilmez.
+    # Doğrulama geçerse fotoğraf S3'e (özel bucket) yüklenir ve kaydı tutulur.
     data = request.get_json(silent=True) or {}
-    image_bytes, img_err = validate_pump_check_image(data.get("image"))
+    image_bytes, img_mime, img_err = validate_pump_check_image(data.get("image"))
     if img_err:
         return jsonify({"error": img_err}), 400
 
-    check = validate_pump_check(image_bytes, data.get("location_type"), data.get("description"))
+    location_type = (data.get("location_type") or "")[:50]
+    description = (data.get("description") or "")[:200]
+
+    check = validate_pump_check(image_bytes, location_type, description)
     if not check["valid"]:
         # Doğrulama başarısız (fail-open değil) → XP yok, kullanıcı yeniden denesin.
         return jsonify({"error": check["reason"]}), 422
+
+    # Doğrulanan fotoğrafı S3'e yükle. S3 hatası antrenman tamamlamayı bloklamaz
+    # (fail-open) — yalnızca görsel kaydı atlanır.
+    pump_image_key = None
+    try:
+        if s3_helper.is_enabled():
+            pump_image_key = s3_helper.upload_image(
+                image_bytes, content_type=img_mime,
+                prefix="pump-checks", user_id=current_user.id,
+            )
+    except Exception as e:
+        print(f"[S3] Pump Check yüklemesi başarısız: {type(e).__name__}: {e}")
+
+    db.session.add(PumpCheck(
+        user_id=current_user.id, image_key=pump_image_key,
+        location_type=location_type, description=description,
+        valid=True, fallback=check.get("fallback", False),
+    ))
     # ─────────────────────────────────────────────────────────────────────────
 
     base_xp = 10
@@ -5793,6 +6090,8 @@ def complete_workout():
     }
     if quest_result:
         response["quest_awarded"] = quest_result
+    if pump_image_key:
+        response["pump_image_url"] = s3_helper.generate_presigned_url(pump_image_key, expires_in=3600)
     return jsonify(response)
 
 @app.route("/workout/status")
@@ -6162,6 +6461,7 @@ with app.app_context():
         'ALTER TABLE message ALTER COLUMN message_type TYPE VARCHAR(50)',
         'ALTER TABLE meal_log ALTER COLUMN ogun TYPE VARCHAR(100)',
         'ALTER TABLE meal_log ADD COLUMN source VARCHAR(20) DEFAULT \'manual\'',
+        'ALTER TABLE meal_log ADD COLUMN photo_key VARCHAR(300)',
         'UPDATE user_quest_progress SET is_claimed = true WHERE is_claimed = false',
         'ALTER TABLE custom_meal_item ADD COLUMN serving_id VARCHAR(50)',
         'ALTER TABLE custom_meal_item ADD COLUMN serving_description VARCHAR(200)',
