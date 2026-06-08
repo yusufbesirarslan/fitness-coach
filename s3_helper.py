@@ -16,7 +16,10 @@ taraflar görsel yüklemeyi sessizce atlar (temel akış bloklanmaz).
 """
 import os
 import uuid
+import logging
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 try:
     import boto3
@@ -26,7 +29,7 @@ except Exception as _imp_err:  # boto3 kurulu değil (örn. lokal geliştirme)
     boto3 = None
     BotoCoreError = ClientError = Exception
     _BOTO3_AVAILABLE = False
-    print(f"[S3] boto3 import edilemedi, S3 devre dışı: {type(_imp_err).__name__}: {_imp_err}")
+    logger.warning("[S3] boto3 import edilemedi, S3 devre dışı: %s: %s", type(_imp_err).__name__, _imp_err)
 
 # EC2 örneğinin bulunduğu bölge (bkz. .env). Yoksa boto3 metadata'dan çözer.
 AWS_REGION = os.environ.get("AWS_REGION", "eu-central-1")
@@ -92,10 +95,10 @@ def upload_image(image_bytes, content_type="image/jpeg", prefix="uploads", user_
             ContentType=content_type or "application/octet-stream",
             ServerSideEncryption="AES256",
         )
-        print(f"[S3] Yüklendi: s3://{S3_BUCKET_NAME}/{key} ({len(image_bytes)} bayt)")
+        logger.info("[S3] Yüklendi: s3://%s/%s (%d bayt)", S3_BUCKET_NAME, key, len(image_bytes))
         return key
     except (BotoCoreError, ClientError) as e:
-        print(f"[S3] Yükleme başarısız ({key}): {type(e).__name__}: {e}")
+        logger.warning("[S3] Yükleme başarısız (%s): %s: %s", key, type(e).__name__, e)
         raise S3Error(str(e)) from e
 
 
@@ -112,5 +115,5 @@ def generate_presigned_url(key, expires_in=3600):
             ExpiresIn=expires_in,
         )
     except (BotoCoreError, ClientError, S3Error) as e:
-        print(f"[S3] Pre-signed URL üretilemedi ({key}): {type(e).__name__}: {e}")
+        logger.warning("[S3] Pre-signed URL üretilemedi (%s): %s: %s", key, type(e).__name__, e)
         return None

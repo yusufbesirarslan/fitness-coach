@@ -11,6 +11,7 @@ import re
 import threading
 import time
 import contextlib
+import logging
 import redis
 import requests as http_requests_lib
 from flask_limiter import Limiter
@@ -27,6 +28,20 @@ app = Flask(__name__)
 # throttle all users together / be trivially bypassable.
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
 _BOOT_TS = int(time.time())  # cache-bust static assets on each deploy
+
+# ── Logging ──
+# Route all diagnostic output through app.logger instead of bare print() so it
+# carries timestamps + levels and honours a configurable threshold. Under
+# gunicorn we adopt its handlers so log lines land in the captured error stream
+# (Docker stdout); standalone (`python starter.py`) falls back to basicConfig.
+_LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+_gunicorn_logger = logging.getLogger("gunicorn.error")
+if _gunicorn_logger.handlers:
+    app.logger.handlers = _gunicorn_logger.handlers
+    app.logger.setLevel(_gunicorn_logger.level or getattr(logging, _LOG_LEVEL, logging.INFO))
+else:
+    logging.basicConfig(level=getattr(logging, _LOG_LEVEL, logging.INFO))
+    app.logger.setLevel(getattr(logging, _LOG_LEVEL, logging.INFO))
 
 # ── FatSecret API (inlined to avoid psycopg2 dependency from fitx_mcp.server) ──
 
@@ -334,22 +349,50 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login" # Giriş zaten yapılıysa yönlendirme
 
-# ── Rate limiting (brute-force / credential-stuffing defense) ──
-# Limits are applied per-route (see @limiter.limit on /login and /register);
-# no global default so the rest of the API is unaffected.
-# NOTE: storage is in-process memory — correct for a single gunicorn worker
-# (the current Procfile). If you scale to multiple workers/instances, point
-# storage_uri at a shared backend (e.g. Redis) so limits are enforced globally.
+# ── Rate limiting (brute-force / credential-stuffing + AI cost-abuse defense) ──
+# Limits are applied per-route (see @limiter.limit on /login, /register and the
+# AI/scraping routes); no global default so the rest of the API is unaffected.
+# Storage: Redis when REDIS_URL is set, so limits are enforced GLOBALLY across
+# gunicorn workers and instances (in-process memory only counts within one
+# worker and is trivially bypassed once you scale out). If Redis is unreachable
+# we fall back to in-memory counting rather than failing requests open —
+# mirroring the leaderboard's "Redis is a cache, degrade gracefully" stance.
+_LIMITER_STORAGE = _REDIS_URL or "memory://"
 limiter = Limiter(
     key_func=get_remote_address,
     app=app,
-    storage_uri="memory://",
+    storage_uri=_LIMITER_STORAGE,
+    storage_options={"socket_connect_timeout": 2} if _REDIS_URL else {},
+    in_memory_fallback_enabled=True,
 )
 
 
 @app.errorhandler(429)
 def ratelimit_exceeded(e):
     return jsonify({"error": "Çok fazla deneme yaptınız. Lütfen biraz sonra tekrar deneyin."}), 429
+
+
+# ── AI / scraping endpoint rate limits ──
+# The OpenAI-backed and outbound-fetching routes are the cost-amplification and
+# abuse surface: without a limit a single authenticated user could run up the
+# OpenAI bill or use the menu scraper as an outbound request generator. These
+# limits are keyed PER-USER (not per-IP) so accounts behind a shared NAT get
+# independent budgets and the limit tracks the account actually spending.
+AI_RATELIMIT = "30 per hour"           # OpenAI text/vision generation
+SCRAPE_RATELIMIT = "20 per hour"       # menu scraper (outbound fetch + AI; also SSRF surface)
+FOOD_SEARCH_RATELIMIT = "60 per hour"  # food search (LLM only fires on a FatSecret miss)
+
+
+def _user_or_ip_key():
+    """Rate-limit key: the user id when logged in, else the client IP. The AI
+    routes are all @login_required, so in practice each account gets its own
+    budget regardless of source IP."""
+    try:
+        if current_user.is_authenticated:
+            return f"user:{current_user.id}"
+    except Exception:
+        pass
+    return get_remote_address()
 # OpenAI istemcisi: API anahtarı .env'den (OPENAI_API_KEY) gelir — asla hardcode
 # edilmez. Model varsayılanı gpt-4o-mini; OPENAI_MODEL ile override edilebilir.
 # Anahtar yoksa OpenAI() çağrısı boot'u kırmasın diye api_key'i açıkça veriyoruz.
@@ -1400,6 +1443,7 @@ def _food_search_llm(q):
 
 @app.route("/api/food/search")
 @login_required
+@limiter.limit(FOOD_SEARCH_RATELIMIT, key_func=_user_or_ip_key)
 def food_search():
     q = request.args.get("q", "").strip()
     if len(q) < 2:
@@ -1915,6 +1959,7 @@ Uyku kötüyse bunun etkisini açıkla."""
     
 @app.route("/checkin", methods=["POST"])
 @login_required
+@limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def checkin():
     data = request.get_json()
 
@@ -2006,6 +2051,7 @@ def checkin_history():
 
 @app.route("/meal-log", methods=["POST"])
 @login_required
+@limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def log_meal():
     data = request.get_json()
     ogun     = data.get("ogun", "")
@@ -2028,7 +2074,7 @@ def log_meal():
                     prefix="meals", user_id=current_user.id,
                 )
         except Exception as e:
-            print(f"[S3] Öğün fotoğrafı yüklemesi başarısız: {type(e).__name__}: {e}")
+            app.logger.info(f"[S3] Öğün fotoğrafı yüklemesi başarısız: {type(e).__name__}: {e}")
 
     _FITNESS_DICT = {
         r'(?i)\b(\d+)\s*(?:ölçek|scoop)\s*(?:whey|protein\s*tozu|protein\s*powder)':
@@ -2056,7 +2102,7 @@ def log_meal():
             replacement, _ = handler(match)
             normalized_yemekler = _re.sub(pattern, replacement, normalized_yemekler, count=1)
     if normalized_yemekler != yemekler:
-        print(f"[MEAL] Normalized: '{yemekler}' → '{normalized_yemekler}'")
+        app.logger.info(f"[MEAL] Normalized: '{yemekler}' → '{normalized_yemekler}'")
     yemekler_for_prompt = normalized_yemekler
 
     override = data.get("override_macros")
@@ -2144,8 +2190,8 @@ def log_meal():
             except (TypeError, ValueError):
                 nutrients[key] = 0
     except Exception as e:
-        print(f"MEAL LOG ERROR: {e}")
-        print(f"RAW: {raw}")
+        app.logger.info(f"MEAL LOG ERROR: {e}")
+        app.logger.info(f"RAW: {raw}")
 
     today = datetime.utcnow().strftime("%d.%m")
 
@@ -2230,6 +2276,7 @@ def meal_history():
 
 @app.route("/meal-log/review", methods=["POST"])
 @login_required
+@limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def review_meals():
     today = datetime.utcnow().strftime("%d.%m")
     meals = MealLog.query.filter_by(user_id=current_user.id, tarih=today).all()
@@ -2718,7 +2765,7 @@ def _try_wordpress_api(base_parsed, raw_html):
             unique_slugs.append(s)
     slugs_to_try = unique_slugs
 
-    print(f"[SCRAPER] WordPress detected — trying REST API for slugs: {slugs_to_try}")
+    app.logger.info(f"[SCRAPER] WordPress detected — trying REST API for slugs: {slugs_to_try}")
 
     all_sections = []
     best_title = None
@@ -2745,7 +2792,7 @@ def _try_wordpress_api(base_parsed, raw_html):
             text = soup.get_text(separator="\n", strip=True)
 
             if len(text) > 100 and _content_has_food_items(text):
-                print(f"[SCRAPER] WP API hit for slug '{slug}': {len(text)} chars with food content")
+                app.logger.info(f"[SCRAPER] WP API hit for slug '{slug}': {len(text)} chars with food content")
                 sections = _extract_page_sections(content_html, soup)
                 all_sections.extend(sections)
                 if not best_title:
@@ -2782,19 +2829,19 @@ def _try_wordpress_api(base_parsed, raw_html):
                     sub_soup = BeautifulSoup(sub_html, "html.parser")
                     sub_text = sub_soup.get_text(separator="\n", strip=True)
                     if len(sub_text) > 200 and _content_has_food_items(sub_text):
-                        print(f"[SCRAPER] WP API sub-page '{link_slug}': {len(sub_text)} chars with food content")
+                        app.logger.info(f"[SCRAPER] WP API sub-page '{link_slug}': {len(sub_text)} chars with food content")
                         sub_sections = _extract_page_sections(sub_html, sub_soup)
                         all_sections.extend(sub_sections)
                 except Exception as e:
-                    print(f"[SCRAPER] WP API sub-page '{link_slug}' failed: {type(e).__name__}: {e}")
+                    app.logger.warning(f"[SCRAPER] WP API sub-page '{link_slug}' failed: {type(e).__name__}: {e}")
                     continue
 
         except Exception as e:
-            print(f"[SCRAPER] WP API attempt for '{slug}' failed: {type(e).__name__}: {e}")
+            app.logger.warning(f"[SCRAPER] WP API attempt for '{slug}' failed: {type(e).__name__}: {e}")
             continue
 
     if all_sections:
-        print(f"[SCRAPER] WP API total: {len(all_sections)} sections recovered")
+        app.logger.info(f"[SCRAPER] WP API total: {len(all_sections)} sections recovered")
         return best_title, all_sections
 
     return None, []
@@ -2896,12 +2943,12 @@ def _extract_text_from_pdf(pdf_bytes):
     text_result = "\n\n".join(text_parts)
 
     if scanned_pages and len(text_result.strip()) < 50:
-        print(f"[PDF] Scanned PDF detected: {len(scanned_pages)} pages with no text, forwarding to Vision OCR")
+        app.logger.info(f"[PDF] Scanned PDF detected: {len(scanned_pages)} pages with no text, forwarding to Vision OCR")
         ocr_text = _extract_pdf_pages_via_vision(pdf_bytes, scanned_pages[:5])
         if ocr_text:
             text_result = (text_result + "\n\n" + ocr_text).strip() if text_result.strip() else ocr_text
     elif scanned_pages:
-        print(f"[PDF] {len(scanned_pages)} scanned pages skipped (text pages had sufficient content)")
+        app.logger.info(f"[PDF] {len(scanned_pages)} scanned pages skipped (text pages had sufficient content)")
 
     return _sanitize_menu_text(text_result)
 
@@ -2925,12 +2972,12 @@ def _extract_pdf_pages_via_vision(pdf_bytes, page_indices):
                 img_buffer = io.BytesIO()
                 img.original.save(img_buffer, format="PNG")
                 img_bytes = img_buffer.getvalue()
-                print(f"[PDF→OCR] Page {idx + 1}: rendered {len(img_bytes)} bytes")
+                app.logger.info(f"[PDF→OCR] Page {idx + 1}: rendered {len(img_bytes)} bytes")
                 text = _extract_text_from_image(img_bytes, "image/png")
                 if text:
                     results.append(f"[Sayfa {idx + 1}]\n{text}")
             except Exception as e:
-                print(f"[PDF→OCR] Page {idx + 1} render failed: {type(e).__name__}: {e}")
+                app.logger.warning(f"[PDF→OCR] Page {idx + 1} render failed: {type(e).__name__}: {e}")
                 continue
     finally:
         pdf.close()
@@ -2963,7 +3010,7 @@ def _compress_image_for_vision(image_bytes, max_bytes=1_500_000):
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=quality)
 
-    print(f"[VISION] Compressed image: {len(image_bytes)} -> {buf.tell()} bytes (q={quality}, {img.size[0]}x{img.size[1]})")
+    app.logger.info(f"[VISION] Compressed image: {len(image_bytes)} -> {buf.tell()} bytes (q={quality}, {img.size[0]}x{img.size[1]})")
     return buf.getvalue(), "image/jpeg"
 
 
@@ -3002,10 +3049,10 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
             ],
         )
         result = (resp.choices[0].message.content or "").strip()
-        print(f"[VISION OCR] Extracted {len(result)} chars")
+        app.logger.info(f"[VISION OCR] Extracted {len(result)} chars")
         return result
     except Exception as e:
-        print(f"[VISION OCR] Failed: {type(e).__name__}: {e}")
+        app.logger.warning(f"[VISION OCR] Failed: {type(e).__name__}: {e}")
         return ""
 
 
@@ -3029,7 +3076,7 @@ def validate_pump_check(image_bytes, location_type, user_description):
         f"Check if the environment looks like a gym, home workout area, or relevant "
         f"fitness space based on their input. Return a boolean response."
     )
-    print(f"[PUMP CHECK] prompt: {prompt}")
+    app.logger.info(f"[PUMP CHECK] prompt: {prompt}")
 
     try:
         # ── PLUG POINT: gerçek görsel doğrulama çağrısını buraya tak ──────────
@@ -3056,7 +3103,7 @@ def validate_pump_check(image_bytes, location_type, user_description):
         return {"valid": True, "reason": "Pump Check doğrulandı.", "fallback": False}
     except Exception as e:
         # Görsel servis hatası (timeout / API down) → kullanıcıyı engelleme (fail-open).
-        print(f"[PUMP CHECK] AI failed, failing open: {type(e).__name__}: {e}")
+        app.logger.warning(f"[PUMP CHECK] AI failed, failing open: {type(e).__name__}: {e}")
         return {"valid": True, "reason": "Doğrulama atlandı (servis hatası).", "fallback": True}
 
 
@@ -3068,7 +3115,7 @@ def _process_google_drive_url(url):
         return None, "Google Drive bağlantısından dosya kimliği çıkarılamadı."
 
     direct_url, url_type = _get_drive_direct_url(url, file_id)
-    print(f"[DRIVE] Detected type={url_type}, file_id={file_id}, direct_url={direct_url}")
+    app.logger.info(f"[DRIVE] Detected type={url_type}, file_id={file_id}, direct_url={direct_url}")
 
     _DRIVE_MAX_BYTES = 50 * 1024 * 1024
 
@@ -3113,7 +3160,7 @@ def _process_google_drive_url(url):
         chunks.append(chunk)
     file_bytes = b"".join(chunks)
 
-    print(f"[DRIVE] Downloaded {len(file_bytes)} bytes, Content-Type: {content_type}")
+    app.logger.info(f"[DRIVE] Downloaded {len(file_bytes)} bytes, Content-Type: {content_type}")
 
     preview_lower = file_bytes[:5000].lower()
     is_drive_confirm = ("text/html" in content_type and
@@ -3125,7 +3172,7 @@ def _process_google_drive_url(url):
         confirm_link = soup.find("a", {"id": "uc-download-link"})
         if confirm_link and confirm_link.get("href"):
             confirm_url = "https://drive.google.com" + confirm_link["href"]
-            print(f"[DRIVE] Virus scan confirmation redirect: {confirm_url}")
+            app.logger.info(f"[DRIVE] Virus scan confirmation redirect: {confirm_url}")
             try:
                 resp2 = _safe_requests_get(confirm_url, timeout=15, headers={
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -3133,17 +3180,17 @@ def _process_google_drive_url(url):
                 if resp2.status_code == 200:
                     file_bytes = resp2.content
                     content_type = resp2.headers.get("Content-Type", "").lower()
-                    print(f"[DRIVE] Confirmed download: {len(file_bytes)} bytes, Content-Type: {content_type}")
+                    app.logger.info(f"[DRIVE] Confirmed download: {len(file_bytes)} bytes, Content-Type: {content_type}")
             except Exception as e:
-                print(f"[DRIVE] Confirm download failed: {e}")
+                app.logger.warning(f"[DRIVE] Confirm download failed: {e}")
 
     if "application/pdf" in content_type or file_bytes[:5] == b"%PDF-":
-        print(f"[DRIVE] Dispatching to PDF extractor")
+        app.logger.info(f"[DRIVE] Dispatching to PDF extractor")
         try:
             text = _extract_text_from_pdf(file_bytes)
             if text and len(text.strip()) > 20:
                 text = _sanitize_menu_text(text)
-                print(f"[DRIVE] PDF extracted: {len(text)} chars")
+                app.logger.info(f"[DRIVE] PDF extracted: {len(text)} chars")
                 return {"title": "Google Drive PDF Menü", "body_text": text, "headings": [], "source_url": url, "menu_source": "google_drive"}, None
             return None, "PDF dosyasından menü metni çıkarılamadı."
         except ValueError as ve:
@@ -3154,30 +3201,30 @@ def _process_google_drive_url(url):
                 return None, "PDF dosyası bozuk veya okunamıyor. Lütfen farklı bir dosya deneyin."
             return None, f"PDF işlenirken hata: {msg}"
         except Exception as e:
-            print(f"[DRIVE] PDF extraction failed: {type(e).__name__}: {e}")
+            app.logger.warning(f"[DRIVE] PDF extraction failed: {type(e).__name__}: {e}")
             return None, f"PDF işlenirken hata: {type(e).__name__}"
 
     if "text/plain" in content_type or "text/csv" in content_type or url_type in ("doc", "sheet"):
-        print(f"[DRIVE] Dispatching as plain text")
+        app.logger.info(f"[DRIVE] Dispatching as plain text")
         try:
             text = file_bytes.decode("utf-8", errors="replace")
         except Exception:
             text = file_bytes.decode("latin-1", errors="replace")
         if text and len(text.strip()) > 20:
             text = _sanitize_menu_text(text)
-            print(f"[DRIVE] Text extracted: {len(text)} chars")
+            app.logger.info(f"[DRIVE] Text extracted: {len(text)} chars")
             title = "Google Drive Doküman Menü" if url_type == "doc" else "Google Drive Menü"
             return {"title": title, "body_text": text, "headings": [], "source_url": url, "menu_source": "google_drive"}, None
         return None, "Dosyadan menü metni çıkarılamadı."
 
     if any(t in content_type for t in ("image/jpeg", "image/png", "image/webp", "image/gif")):
-        print(f"[DRIVE] Dispatching to Vision OCR")
+        app.logger.info(f"[DRIVE] Dispatching to Vision OCR")
         if len(file_bytes) > 10 * 1024 * 1024:
             return None, "Görsel dosya çok büyük (maks 10MB)."
         text = _extract_text_from_image(file_bytes, content_type)
         if text and len(text.strip()) > 20:
             text = _sanitize_menu_text(text)
-            print(f"[DRIVE] Vision OCR extracted: {len(text)} chars")
+            app.logger.info(f"[DRIVE] Vision OCR extracted: {len(text)} chars")
             return {"title": "Google Drive Görsel Menü", "body_text": text, "headings": [], "source_url": url, "menu_source": "google_drive"}, None
         return None, "Görselden menü metni okunamadı."
 
@@ -3189,7 +3236,7 @@ def _process_google_drive_url(url):
         text = soup.get_text(separator="\n", strip=True)
         if text and len(text.strip()) > 20:
             text = _sanitize_menu_text(text)
-            print(f"[DRIVE] HTML fallback extracted: {len(text)} chars")
+            app.logger.info(f"[DRIVE] HTML fallback extracted: {len(text)} chars")
             return {"title": "Google Drive Menü", "body_text": text, "headings": [], "source_url": url, "menu_source": "google_drive"}, None
 
     return None, f"Desteklenmeyen dosya tipi: {content_type.split(';')[0]}"
@@ -3197,6 +3244,7 @@ def _process_google_drive_url(url):
 
 @app.route("/api/proxy/scan-menu", methods=["POST"])
 @login_required
+@limiter.limit(SCRAPE_RATELIMIT, key_func=_user_or_ip_key)
 def proxy_scan_menu():
     import requests as http_req
     from bs4 import BeautifulSoup
@@ -3213,7 +3261,7 @@ def proxy_scan_menu():
     url = clean_url
 
     if _is_google_drive_url(url):
-        print(f"[DRIVE] Intercepted Google Drive URL: {url}")
+        app.logger.info(f"[DRIVE] Intercepted Google Drive URL: {url}")
         drive_result, drive_err = _process_google_drive_url(url)
         if drive_err:
             try:
@@ -3238,12 +3286,12 @@ def proxy_scan_menu():
         return jsonify({"error": "Desteklenmeyen içerik tipi."}), 415
 
     raw_html = resp.text
-    print(f"[SCRAPER] Page 1 (main) — {url} — HTTP {resp.status_code} — {len(raw_html)} bytes")
+    app.logger.info(f"[SCRAPER] Page 1 (main) — {url} — HTTP {resp.status_code} — {len(raw_html)} bytes")
     framework_state, fw_type = _extract_framework_state(raw_html)
 
     soup = BeautifulSoup(raw_html, "html.parser")
     sub_links = _discover_menu_links(soup, base_parsed)
-    print(f"[SCRAPER] Discovered {len(sub_links)} sub-links, crawling {min(len(sub_links), 6)}: {sub_links[:6]}")
+    app.logger.info(f"[SCRAPER] Discovered {len(sub_links)} sub-links, crawling {min(len(sub_links), 6)}: {sub_links[:6]}")
 
     for tag in soup(["script", "style", "iframe", "object", "embed", "link", "meta"]):
         tag.decompose()
@@ -3258,16 +3306,16 @@ def proxy_scan_menu():
             time.sleep(random.uniform(0.5, 1.5))
         try:
             sub_resp = _fetch_page(sub_url, timeout=6)
-            print(f"[SCRAPER] Page {idx+2}/{len(sub_links[:6])+1} — {sub_url} — HTTP {sub_resp.status_code}")
+            app.logger.info(f"[SCRAPER] Page {idx+2}/{len(sub_links[:6])+1} — {sub_url} — HTTP {sub_resp.status_code}")
             sub_soup = BeautifulSoup(sub_resp.text, "html.parser")
             for tag in sub_soup(["script", "style", "iframe", "object", "embed", "link", "meta"]):
                 tag.decompose()
             sub_sections = _extract_page_sections(sub_resp.text, sub_soup)
-            print(f"[SCRAPER]   → Extracted {len(sub_sections)} section(s): {[s['category'] for s in sub_sections]}")
+            app.logger.info(f"[SCRAPER]   → Extracted {len(sub_sections)} section(s): {[s['category'] for s in sub_sections]}")
             sections.extend(sub_sections)
         except Exception as e:
             status = getattr(getattr(e, 'response', None), 'status_code', 'N/A')
-            print(f"[SCRAPER] Page {idx+2} FAILED — {sub_url} — Status: {status} — {type(e).__name__}: {e}")
+            app.logger.warning(f"[SCRAPER] Page {idx+2} FAILED — {sub_url} — Status: {status} — {type(e).__name__}: {e}")
             crawl_errors.append({"url": sub_url, "error": f"{type(e).__name__}: {status}"})
 
     all_text_parts = []
@@ -3278,7 +3326,7 @@ def proxy_scan_menu():
     content_quality_ok = _content_has_food_items(body_text) if body_text else False
 
     if not content_quality_ok:
-        print(f"[SCRAPER] Content quality low (no food keywords) — trying WordPress API fallback")
+        app.logger.info(f"[SCRAPER] Content quality low (no food keywords) — trying WordPress API fallback")
         wp_title, wp_sections = _try_wordpress_api(base_parsed, raw_html)
         if wp_sections:
             sections = wp_sections
@@ -3286,14 +3334,14 @@ def proxy_scan_menu():
                 title = wp_title
             all_text_parts = [f"[{sec['category']}]\n{sec['text']}" for sec in sections]
             body_text = "\n\n".join(all_text_parts)
-            print(f"[SCRAPER] WordPress API recovered {len(sections)} sections, {len(body_text)} chars")
+            app.logger.info(f"[SCRAPER] WordPress API recovered {len(sections)} sections, {len(body_text)} chars")
 
     if not body_text or len(body_text.strip()) < 20:
         fallback_soup = BeautifulSoup(raw_html, "html.parser")
         for tag in fallback_soup(["script", "style", "iframe", "object", "embed", "link", "meta", "noscript", "svg"]):
             tag.decompose()
         body_text = fallback_soup.get_text(separator=" ", strip=True)
-        print(f"[SCRAPER] Section extraction empty — used full-body fallback: {len(body_text)} chars")
+        app.logger.info(f"[SCRAPER] Section extraction empty — used full-body fallback: {len(body_text)} chars")
 
     if not body_text or len(body_text.strip()) < 20:
         return jsonify({"error": "Menü içeriği şu anda korumalı veya okunamıyor. Lütfen linki kontrol edip tekrar deneyiniz."}), 422
@@ -3305,12 +3353,12 @@ def proxy_scan_menu():
     headings = [sec["category"] for sec in sections if sec["category"] != "Genel"]
     unique_headings = list(dict.fromkeys(headings))[:40]
 
-    print(f"[SCRAPER] Total sections: {len(sections)} — Unique categories: {len(unique_headings)} — Categories: {unique_headings}")
-    print(f"[SCRAPER] Raw body_text length: {len(body_text)} chars")
+    app.logger.info(f"[SCRAPER] Total sections: {len(sections)} — Unique categories: {len(unique_headings)} — Categories: {unique_headings}")
+    app.logger.info(f"[SCRAPER] Raw body_text length: {len(body_text)} chars")
 
     if len(body_text) > 18000:
         body_text = body_text[:18000]
-        print(f"[SCRAPER] Truncated body_text to 18000 chars")
+        app.logger.info(f"[SCRAPER] Truncated body_text to 18000 chars")
 
     result = {
         "title": title,
@@ -3368,28 +3416,28 @@ SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma:
             temperature=0.0,
             max_tokens=2500,
         ).strip()
-        print(f"[EXTRACT] LLM raw response length: {len(raw)} chars")
+        app.logger.info(f"[EXTRACT] LLM raw response length: {len(raw)} chars")
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
         end = raw.rfind("}") + 1
         if start < 0 or end <= start:
-            print(f"[EXTRACT] ERROR: No valid JSON braces found in LLM response: {raw[:200]}")
+            app.logger.info(f"[EXTRACT] ERROR: No valid JSON braces found in LLM response: {raw[:200]}")
             return {}
         try:
             parsed = json.loads(raw[start:end])
         except json.JSONDecodeError as je:
-            print(f"[EXTRACT] JSON parse failed: {je} — Raw snippet: {raw[start:start+300]}")
+            app.logger.warning(f"[EXTRACT] JSON parse failed: {je} — Raw snippet: {raw[start:start+300]}")
             return {}
         cats = parsed.get("categories", parsed)
         if isinstance(cats, dict):
             result = {k: v for k, v in cats.items() if isinstance(v, list)}
-            print(f"[EXTRACT] LLM returned {len(result)} categories: {list(result.keys())} — Total items: {sum(len(v) for v in result.values())}")
+            app.logger.info(f"[EXTRACT] LLM returned {len(result)} categories: {list(result.keys())} — Total items: {sum(len(v) for v in result.values())}")
             return result
-        print(f"[EXTRACT] ERROR: Unexpected parsed structure type: {type(cats).__name__}")
+        app.logger.info(f"[EXTRACT] ERROR: Unexpected parsed structure type: {type(cats).__name__}")
     except json.JSONDecodeError as je:
-        print(f"[EXTRACT] JSON ERROR: {je}")
+        app.logger.info(f"[EXTRACT] JSON ERROR: {je}")
     except Exception as e:
-        print(f"[EXTRACT] ERROR: {type(e).__name__}: {e}")
+        app.logger.info(f"[EXTRACT] ERROR: {type(e).__name__}: {e}")
     return {}
 
 
@@ -3442,7 +3490,7 @@ def _parse_suggestion_items(body_text):
             if isinstance(items, list) and items:
                 return [str(i).strip() for i in items if str(i).strip()]
     except Exception as e:
-        print(f"[SUGGESTION] Failed to parse suggestion items: {type(e).__name__}: {e}")
+        app.logger.warning(f"[SUGGESTION] Failed to parse suggestion items: {type(e).__name__}: {e}")
     return []
 
 
@@ -3462,7 +3510,7 @@ def _lookup_macros_fatsecret(items, token):
             if isinstance(foods, dict):
                 foods = [foods]
             if not foods:
-                print(f"[MACRO ENGINE] FatSecret returned 0 results for '{name}'")
+                app.logger.info(f"[MACRO ENGINE] FatSecret returned 0 results for '{name}'")
                 continue
 
             found_serving = False
@@ -3486,26 +3534,26 @@ def _lookup_macros_fatsecret(items, token):
                 if _is_per_serving(serving_text):
                     per_serving[name] = macros
                     found_serving = True
-                    print(f"[MACRO ENGINE] FatSecret per-serving match: '{name}' → Cal={macros['calories']}, P={macros['protein']}, C={macros['carbs']}, F={macros['fat']}")
+                    app.logger.info(f"[MACRO ENGINE] FatSecret per-serving match: '{name}' → Cal={macros['calories']}, P={macros['protein']}, C={macros['carbs']}, F={macros['fat']}")
                     break
                 if baseline_100g is None:
                     baseline_100g = macros
 
             if not found_serving and baseline_100g:
                 per_100g[name] = baseline_100g
-                print(f"[MACRO ENGINE] FatSecret per-100g baseline: '{name}' → Cal={baseline_100g['calories']}/100g")
+                app.logger.info(f"[MACRO ENGINE] FatSecret per-100g baseline: '{name}' → Cal={baseline_100g['calories']}/100g")
 
         except Exception as e:
-            print(f"[MACRO ENGINE] FatSecret lookup failed for '{name}': {type(e).__name__}: {e}")
+            app.logger.warning(f"[MACRO ENGINE] FatSecret lookup failed for '{name}': {type(e).__name__}: {e}")
             continue
-    print(f"[MACRO ENGINE] FatSecret totals: {len(per_serving)} per-serving, {len(per_100g)} per-100g, {len(items) - len(per_serving) - len(per_100g)} missed")
+    app.logger.info(f"[MACRO ENGINE] FatSecret totals: {len(per_serving)} per-serving, {len(per_100g)} per-100g, {len(items) - len(per_serving) - len(per_100g)} missed")
     return per_serving, per_100g
 
 
 def _estimate_serving_weights_llm(items):
     if not items:
         return {}
-    print(f"[MACRO ENGINE] Estimating serving weights for {len(items)} per-100g items")
+    app.logger.info(f"[MACRO ENGINE] Estimating serving weights for {len(items)} per-100g items")
     items_str = "\n".join(f"- {name}" for name in items)
     prompt = f"""Sen bir restoran şefi ve beslenme uzmanısın. Aşağıdaki yemeklerin Türkiye'de standart bir restoranda servis edilen 1 PORSİYONUNUN ortalama ağırlığını GRAM cinsinden tahmin et.
 
@@ -3549,11 +3597,11 @@ SADECE aşağıdaki JSON formatında yanıt ver:
                     results[name] = float(grams)
                 else:
                     results[name] = 150.0
-                    print(f"[MACRO ENGINE] Serving weight fallback 150g for '{name}' (raw={grams})")
-            print(f"[MACRO ENGINE] Serving weights resolved: {results}")
+                    app.logger.info(f"[MACRO ENGINE] Serving weight fallback 150g for '{name}' (raw={grams})")
+            app.logger.info(f"[MACRO ENGINE] Serving weights resolved: {results}")
             return results
     except Exception as e:
-        print(f"[MACRO ENGINE] LLM SERVING WEIGHT ERROR: {type(e).__name__}: {e}")
+        app.logger.info(f"[MACRO ENGINE] LLM SERVING WEIGHT ERROR: {type(e).__name__}: {e}")
     return {n: 150.0 for n in items}
 
 
@@ -3647,7 +3695,7 @@ Tüm {len(batch_items)} yemek için değer ver. Sadece JSON döndür, başka bir
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
         if start < 0:
-            print(f"[MACRO ENGINE] LLM response has no JSON braces: {raw[:200]}")
+            app.logger.info(f"[MACRO ENGINE] LLM response has no JSON braces: {raw[:200]}")
             return {}
 
         json_str = raw[start:]
@@ -3657,12 +3705,12 @@ Tüm {len(batch_items)} yemek için değer ver. Sadece JSON döndür, başka bir
             repaired = _repair_truncated_json(json_str)
             try:
                 parsed = json.loads(repaired)
-                print(f"[MACRO ENGINE] Repaired truncated JSON: {len(json_str)} → {len(repaired)} chars")
+                app.logger.info(f"[MACRO ENGINE] Repaired truncated JSON: {len(json_str)} → {len(repaired)} chars")
             except json.JSONDecodeError as je:
-                print(f"[MACRO ENGINE] JSON repair failed: {je} — raw[{start}:{start+200}]: {raw[start:start+200]}")
+                app.logger.warning(f"[MACRO ENGINE] JSON repair failed: {je} — raw[{start}:{start+200}]: {raw[start:start+200]}")
                 return {}
 
-        print(f"[MACRO ENGINE] LLM batch returned {len(parsed)} keys")
+        app.logger.info(f"[MACRO ENGINE] LLM batch returned {len(parsed)} keys")
 
         import re as _re
         _num_pat = _re.compile(r"(\d+(?:[.,]\d+)?)")
@@ -3699,7 +3747,7 @@ Tüm {len(batch_items)} yemek için değer ver. Sadece JSON döndür, başka bir
         return results
     except Exception as e:
         import traceback
-        print(f"[MACRO ENGINE] LLM BATCH ERROR: {type(e).__name__}: {e}")
+        app.logger.info(f"[MACRO ENGINE] LLM BATCH ERROR: {type(e).__name__}: {e}")
         traceback.print_exc()
     return {}
 
@@ -3710,14 +3758,14 @@ _LLM_MACRO_BATCH_SIZE = 15
 def _estimate_macros_llm(items):
     if not items:
         return {}
-    print(f"[MACRO ENGINE] LLM fallback for {len(items)} items (batch size {_LLM_MACRO_BATCH_SIZE}): {items[:5]}{'...' if len(items)>5 else ''}")
+    app.logger.info(f"[MACRO ENGINE] LLM fallback for {len(items)} items (batch size {_LLM_MACRO_BATCH_SIZE}): {items[:5]}{'...' if len(items)>5 else ''}")
     all_results = {}
     for i in range(0, len(items), _LLM_MACRO_BATCH_SIZE):
         batch = items[i:i + _LLM_MACRO_BATCH_SIZE]
-        print(f"[MACRO ENGINE] Processing batch {i // _LLM_MACRO_BATCH_SIZE + 1}/{(len(items) - 1) // _LLM_MACRO_BATCH_SIZE + 1} ({len(batch)} items)")
+        app.logger.info(f"[MACRO ENGINE] Processing batch {i // _LLM_MACRO_BATCH_SIZE + 1}/{(len(items) - 1) // _LLM_MACRO_BATCH_SIZE + 1} ({len(batch)} items)")
         batch_results = _estimate_macros_llm_batch(batch)
         all_results.update(batch_results)
-    print(f"[MACRO ENGINE] LLM total resolved: {len(all_results)}/{len(items)} items with non-zero macros")
+    app.logger.info(f"[MACRO ENGINE] LLM total resolved: {len(all_results)}/{len(items)} items with non-zero macros")
     return all_results
 
 
@@ -3785,6 +3833,7 @@ def _score_item(macros, remaining):
 
 @app.route("/api/menu/analyze", methods=["POST"])
 @login_required
+@limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def analyze_menu():
     data = request.get_json()
     raw_text = (data or {}).get("menu_text", "").strip()
@@ -3830,19 +3879,19 @@ def analyze_menu():
     try:
         categorized = _extract_categorized_items(raw_text, fw_state, headings=headings_hint, menu_source=menu_source)
     except Exception as e:
-        print(f"[ANALYZE] Extraction crashed: {type(e).__name__}: {e}")
+        app.logger.warning(f"[ANALYZE] Extraction crashed: {type(e).__name__}: {e}")
         categorized = {}
 
     if not categorized:
-        print(f"[ANALYZE] First extraction returned empty — retrying without framework_state")
+        app.logger.info(f"[ANALYZE] First extraction returned empty — retrying without framework_state")
         try:
             categorized = _extract_categorized_items(raw_text, None, headings=headings_hint, menu_source=menu_source)
         except Exception as e:
-            print(f"[ANALYZE] Retry extraction crashed: {type(e).__name__}: {e}")
+            app.logger.warning(f"[ANALYZE] Retry extraction crashed: {type(e).__name__}: {e}")
             categorized = {}
 
     if not categorized:
-        print(f"[ANALYZE] FAILED: No food items extracted. raw_text length={len(raw_text)}, "
+        app.logger.warning(f"[ANALYZE] FAILED: No food items extracted. raw_text length={len(raw_text)}, "
               f"has_food_keywords={_content_has_food_items(raw_text)}, "
               f"first 300 chars: {raw_text[:300]}")
         return jsonify({"success": False, "error": "OUTPUT_PARSING_FAILED",
@@ -3863,29 +3912,29 @@ def analyze_menu():
     MAX_MENU_ITEMS = 50
     item_names = list(dict.fromkeys(name for _, name in all_items))
     if len(item_names) > MAX_MENU_ITEMS:
-        print(f"[MACRO ENGINE] Capping items from {len(item_names)} to {MAX_MENU_ITEMS}")
+        app.logger.info(f"[MACRO ENGINE] Capping items from {len(item_names)} to {MAX_MENU_ITEMS}")
         item_names = item_names[:MAX_MENU_ITEMS]
         kept = set(item_names)
         all_items = [(cat, name) for cat, name in all_items if name in kept]
-    print(f"[MACRO ENGINE] Starting macro pipeline for {len(item_names)} unique items")
+    app.logger.info(f"[MACRO ENGINE] Starting macro pipeline for {len(item_names)} unique items")
 
     cached_hits, uncached_names = _get_cached_macros(item_names)
     if cached_hits:
-        print(f"[MACRO ENGINE] Cache hit: {len(cached_hits)}/{len(item_names)} items from cache")
+        app.logger.info(f"[MACRO ENGINE] Cache hit: {len(cached_hits)}/{len(item_names)} items from cache")
 
     macro_map = dict(cached_hits)
     per_100g_items = {}
     lookup_names = uncached_names
     if not lookup_names:
-        print(f"[MACRO ENGINE] All {len(item_names)} items served from cache — skipping FatSecret + LLM")
+        app.logger.info(f"[MACRO ENGINE] All {len(item_names)} items served from cache — skipping FatSecret + LLM")
     else:
         try:
             token = _get_fatsecret_token()
-            print(f"[MACRO ENGINE] FatSecret token acquired")
+            app.logger.info(f"[MACRO ENGINE] FatSecret token acquired")
             per_serving, per_100g_items = _lookup_macros_fatsecret(lookup_names, token)
             macro_map.update(per_serving)
         except Exception as e:
-            print(f"[MACRO ENGINE] FatSecret FAILED — uncached items will use LLM fallback: {type(e).__name__}: {e}")
+            app.logger.warning(f"[MACRO ENGINE] FatSecret FAILED — uncached items will use LLM fallback: {type(e).__name__}: {e}")
 
     if per_100g_items:
         serving_weights = _estimate_serving_weights_llm(list(per_100g_items.keys()))
@@ -3899,10 +3948,10 @@ def analyze_menu():
                 "fat": round(base_macros["fat"] * scale, 1),
             }
             macro_map[name] = scaled
-            print(f"[MACRO ENGINE] Scaled per-100g→serving: '{name}' × {scale:.1f} → Cal={scaled['calories']}")
+            app.logger.info(f"[MACRO ENGINE] Scaled per-100g→serving: '{name}' × {scale:.1f} → Cal={scaled['calories']}")
 
     missing = [n for n in lookup_names if n not in macro_map]
-    print(f"[MACRO ENGINE] After FatSecret: {len(macro_map)} resolved, {len(missing)} missing → LLM fallback")
+    app.logger.info(f"[MACRO ENGINE] After FatSecret: {len(macro_map)} resolved, {len(missing)} missing → LLM fallback")
     if missing:
         llm_macros = _estimate_macros_llm(missing)
         macro_map.update(llm_macros)
@@ -3911,7 +3960,7 @@ def analyze_menu():
 
     final_resolved = sum(1 for n in item_names if n in macro_map and macro_map[n].get("calories", 0) > 0)
     final_zero = len(item_names) - final_resolved
-    print(f"[MACRO ENGINE] Final pipeline result: {final_resolved}/{len(item_names)} items have non-zero macros"
+    app.logger.info(f"[MACRO ENGINE] Final pipeline result: {final_resolved}/{len(item_names)} items have non-zero macros"
           + (f" — WARNING: {final_zero} items still at 0" if final_zero else ""))
 
     categories_result = {}
@@ -3923,7 +3972,7 @@ def analyze_menu():
 
         if not has_macros:
             macros = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
-            print(f"[MACRO ENGINE] ZERO-MACRO ITEM: '{name}' — no data from FatSecret or LLM")
+            app.logger.info(f"[MACRO ENGINE] ZERO-MACRO ITEM: '{name}' — no data from FatSecret or LLM")
 
         if has_macros:
             score, warnings, reason = _score_item(macros, remaining)
@@ -3950,9 +3999,9 @@ def analyze_menu():
     all_scored.sort(key=lambda x: (-x["score"], x["name"]))
     coach_picks = all_scored[:3]
 
-    print(f"[DEBUG] Total unique categories found: {len(categories_result.keys())} — Categories: {list(categories_result.keys())}")
-    print(f"[DEBUG] Total items in payload: {sum(len(v) for v in categories_result.values())} — Scored items: {len(all_scored)}")
-    print(f"[ALGORITHM DEBUG] Top 3 Raw Scores: {[(item['name'], item['score']) for item in coach_picks]}")
+    app.logger.info(f"[DEBUG] Total unique categories found: {len(categories_result.keys())} — Categories: {list(categories_result.keys())}")
+    app.logger.info(f"[DEBUG] Total items in payload: {sum(len(v) for v in categories_result.values())} — Scored items: {len(all_scored)}")
+    app.logger.info(f"[ALGORITHM DEBUG] Top 3 Raw Scores: {[(item['name'], item['score']) for item in coach_picks]}")
 
     source_label = {"google_drive": "Google Drive", "web_scraper": "Web Scraper"}.get(menu_source, menu_source)
 
@@ -3994,6 +4043,43 @@ _PROFILE_PIC_RE = re.compile(
     r'^data:image/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/]+={0,2})$'
 )
 
+# Pillow refuses to fully decode images larger than this (decompression-bomb
+# guard): a tiny upload that declares enormous dimensions is rejected before it
+# can blow up memory in Pillow, S3, or the OpenAI vision call downstream.
+_MAX_IMAGE_PIXELS = 40_000_000  # ~40 megapixels
+_ALLOWED_IMAGE_FORMATS = {"JPEG", "PNG", "GIF", "WEBP"}
+
+
+def _verify_image_bytes(image_bytes):
+    """Confirm the decoded bytes are a real, sane raster image — not arbitrary
+    data wearing an image/* MIME, and not a decompression bomb. The regex only
+    proves the data-URL is shaped like an image; this proves the payload is one.
+
+    Returns None on success or a user-facing error message. Fails OPEN (returns
+    None) only when Pillow is unavailable — that happens in local dev where the
+    dependency may be missing; production ships Pillow (see requirements.txt)."""
+    try:
+        from PIL import Image
+    except Exception:
+        app.logger.warning("Pillow unavailable; skipping image content verification.")
+        return None
+    import io as _io
+    Image.MAX_IMAGE_PIXELS = _MAX_IMAGE_PIXELS
+    try:
+        im = Image.open(_io.BytesIO(image_bytes))
+        fmt = (im.format or "").upper()
+        width, height = im.size
+        # verify() must run right after open() and leaves the image unusable, so
+        # read format/size first, then check structural integrity.
+        im.verify()
+    except Exception:
+        return "Geçerli bir görsel dosyası değil."
+    if width * height > _MAX_IMAGE_PIXELS:
+        return "Görsel çözünürlüğü çok yüksek."
+    if fmt not in _ALLOWED_IMAGE_FORMATS:
+        return "Desteklenmeyen görsel formatı."
+    return None
+
 
 def validate_profile_picture(value):
     """Return (cleaned_value, error). Only accept a base64-encoded image data
@@ -4011,16 +4097,20 @@ def validate_profile_picture(value):
     # base64 gövdesi gerçekten çözülebiliyor mu?
     import base64 as _b64
     try:
-        _b64.b64decode(m.group(2), validate=True)
+        image_bytes = _b64.b64decode(m.group(2), validate=True)
     except Exception:
         return None, "Profil fotoğrafı çözümlenemedi."
+    # Baytlar gerçekten geçerli bir görsel mi (sahte image/* MIME / bomba değil)?
+    img_error = _verify_image_bytes(image_bytes)
+    if img_error:
+        return None, img_error
     return value, None
 
 
 def _decode_data_url_image(value, max_len):
     """Bir base64 image data-URL'ini doğrular ve (image_bytes, content_type, hata)
-    olarak çözer. hata kodları: missing / too_big / bad_format / decode_failed.
-    Çağıranlar bu kodları kullanıcıya gösterilecek mesaja çevirir."""
+    olarak çözer. hata kodları: missing / too_big / bad_format / decode_failed /
+    bad_image. Çağıranlar bu kodları kullanıcıya gösterilecek mesaja çevirir."""
     import base64 as _b64
     if not value:
         return None, None, "missing"
@@ -4033,6 +4123,10 @@ def _decode_data_url_image(value, max_len):
         image_bytes = _b64.b64decode(m.group(2), validate=True)
     except Exception:
         return None, None, "decode_failed"
+    # Baytlar gerçekten geçerli bir görsel mi? (sahte image/* MIME / bomba değil).
+    # Bu görseller S3'e ve OpenAI vision'a gittiği için içeriği burada doğrula.
+    if _verify_image_bytes(image_bytes):
+        return None, None, "bad_image"
     ext = m.group(1).lower()
     content_type = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
     return image_bytes, content_type, None
@@ -4048,6 +4142,7 @@ def validate_pump_check_image(value):
             "too_big": "Fotoğraf çok büyük (maks ~6MB).",
             "bad_format": "Geçersiz fotoğraf formatı.",
             "decode_failed": "Fotoğraf çözümlenemedi.",
+            "bad_image": "Geçerli bir görsel dosyası değil.",
         }[code]
         return None, None, msg
     return image_bytes, content_type, None
@@ -4064,6 +4159,7 @@ def validate_meal_photo(value):
             "too_big": "Öğün fotoğrafı çok büyük (maks ~6MB).",
             "bad_format": "Geçersiz fotoğraf formatı.",
             "decode_failed": "Fotoğraf çözümlenemedi.",
+            "bad_image": "Geçerli bir görsel dosyası değil.",
         }[code]
         return None, None, msg
     return image_bytes, content_type, None
@@ -4415,7 +4511,7 @@ def _process_meal_suggestion_accept(msg):
 
     items = _parse_suggestion_items(msg.body)
     if not items:
-        print(f"[SUGGESTION] Could not parse items from: {msg.body[:100]}")
+        app.logger.warning(f"[SUGGESTION] Could not parse items from: {msg.body[:100]}")
         entry = MealLog(
             user_id=current_user.id, ogun=ogun_title,
             yemekler=msg.body[:200], kalori=0, protein=0, karb=0, yag=0,
@@ -4436,7 +4532,7 @@ def _process_meal_suggestion_accept(msg):
                 per_serving, per_100g_items = _lookup_macros_fatsecret(uncached, token)
                 macro_map.update(per_serving)
             except Exception as e:
-                print(f"[SUGGESTION] FatSecret failed, using LLM fallback: {e}")
+                app.logger.warning(f"[SUGGESTION] FatSecret failed, using LLM fallback: {e}")
 
             if per_100g_items:
                 weights = _estimate_serving_weights_llm(list(per_100g_items.keys()))
@@ -4464,7 +4560,7 @@ def _process_meal_suggestion_accept(msg):
             total["fat"] += m.get("fat", 0)
 
     except Exception as e:
-        print(f"[SUGGESTION] Macro lookup pipeline failed: {type(e).__name__}: {e}")
+        app.logger.warning(f"[SUGGESTION] Macro lookup pipeline failed: {type(e).__name__}: {e}")
         try:
             llm_macros = _estimate_macros_llm(items)
             for item in items:
@@ -4486,7 +4582,7 @@ def _process_meal_suggestion_accept(msg):
         tarih=datetime.utcnow().strftime("%d.%m")
     )
     db.session.add(entry)
-    print(f"[SUGGESTION] Logged meal: {ogun_title} → {total['calories']:.0f} kcal")
+    app.logger.info(f"[SUGGESTION] Logged meal: {ogun_title} → {total['calories']:.0f} kcal")
     return {"kalori": entry.kalori, "protein": entry.protein, "karb": entry.karb, "yag": entry.yag}
 
 # ── LEADERBOARD ROUTES ──
@@ -4891,6 +4987,7 @@ def today_activity():
 
 @app.route("/chat", methods=["POST"])
 @login_required
+@limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def chat():
     data = request.get_json()
 
@@ -5462,6 +5559,7 @@ def _run_coach_conversation(user_id, question, context):
 
 @app.route("/ask", methods=["POST"])
 @login_required
+@limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def ask_coach():
     data     = request.get_json(silent=True) or {}
     question = (data.get("question") or "").strip()
@@ -5668,6 +5766,7 @@ def nutrition():
     
 @app.route("/nutrition-plan", methods=["POST"])
 @login_required
+@limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def nutrition_plan_generate():
     data = request.get_json()
     FOOD_DATABASE = {
@@ -5854,6 +5953,7 @@ def training():
 
 @app.route("/training-plan", methods=["POST"])
 @login_required
+@limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def training_plan_generate():
     data = request.get_json()
 
@@ -6135,6 +6235,7 @@ def save_training_plan():
 
 @app.route("/workout/complete", methods=["POST"])
 @login_required
+@limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def complete_workout():
     plan = TrainingPlan.query.filter_by(user_id=current_user.id)\
         .order_by(TrainingPlan.created_at.desc()).first()
@@ -6176,7 +6277,7 @@ def complete_workout():
                 prefix="pump-checks", user_id=current_user.id,
             )
     except Exception as e:
-        print(f"[S3] Pump Check yüklemesi başarısız: {type(e).__name__}: {e}")
+        app.logger.info(f"[S3] Pump Check yüklemesi başarısız: {type(e).__name__}: {e}")
 
     db.session.add(PumpCheck(
         user_id=current_user.id, image_key=pump_image_key,
