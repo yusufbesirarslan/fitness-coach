@@ -1,0 +1,317 @@
+"""Deterministic nutrition ingestion, sanitization & macro-scoring pipeline.
+
+Bu modul, FatSecret API'sinden gelen ham besin verisini *deterministik* (LLM'siz)
+kurallarla temizler, 100g bazina normalize edilmis makrolari kullanicinin gunluk
+KALAN makro hedefleriyle karsilastirip 0-100 arasi bir uyum skoru uretir ve sunum
+katmaninin (LLM) ASLA degistiremeyecegi temiz bir JSON sozlesmesi dondurur.
+
+Tasarim ilkeleri (todos.txt):
+1. Tum matematik/filtreleme burada, saf fonksiyonlarda yapilir. LLM kullanilmaz.
+2. LLM yalnizca bu modulun urettigi sabit sayilari *sunar*.
+
+Saf modul: Flask / SQLAlchemy / OpenAI importu YOKTUR. Bu sayede DB veya ag
+baglantisi olmadan birim testleriyle dogrulanabilir. Makro sozlugu sozlesmesi
+projenin geri kalaniyla ayni: ``{"calories", "protein", "carbs", "fat"}``
+(kaloriler kcal, makrolar gram).
+"""
+
+from __future__ import annotations
+
+# ---------------------------------------------------------------------------
+# MODULE 1 — Sabitler & saglik/biyoloji kisitlari
+# ---------------------------------------------------------------------------
+
+# Termodinamik tavan: 100g saf yag ~900 kcal. Hicbir gercek besin 100g basina
+# 900 kcal'i asamaz (orn. "bir bardak cay = 3000 kcal" troll girdisi elenir).
+MAX_KCAL_PER_100G = 900.0
+
+# Protein+Karb+Yag gram toplami porsiyon agirligini bu kadar gram asabilir
+# (kayan nokta yuvarlama paylari icin kucuk tolerans).
+MACRO_WEIGHT_TOLERANCE_G = 1.0
+
+# Beyan edilen kalori ile Atwater'dan hesaplanan kalori (4P + 4C + 9F) arasindaki
+# goreli sapma bu esigi asarsa girdi "tutarsiz" olarak ISARETLENIR (silinmez).
+ATWATER_TOLERANCE = 0.30
+
+# Skorlamada sifira bolmeyi onleyen taban; ayni zamanda kalan butce ~0 iken
+# herhangi bir pozitif makronun butceyi asmasini saglar.
+_EPS = 1e-9
+
+# Asiri butce cezasinin devreye girdigi esik: bir makro kalanin %80'ini asinca.
+_PENALTY_THRESHOLD = 0.80
+
+# Makro basina ilerlemeli ceza agirliklari (esik ustu her oran puani icin).
+_PENALTY_WEIGHT_CAL = 150.0
+_PENALTY_WEIGHT_FAT = 150.0
+_PENALTY_WEIGHT_CARB = 100.0
+
+# Protein bonusu tavani ve olcegi.
+_PROTEIN_BONUS_MAX = 15.0
+_PROTEIN_BONUS_SCALE = 30.0
+
+# Deterministik porsiyon -> gram/ml ortalama agirlik matrisi. SADECE FatSecret
+# metric_serving_amount eksik/0 oldugunda yedek olarak kullanilir; LLM tahmini
+# yerine gecer. Degerler ortalama yaklasimlardir. Daha spesifik (cok kelimeli)
+# anahtarlar genel olanlardan ONCE gelmeli (alt-dize eslesmesi sirayla yapilir).
+_PORTION_WEIGHTS = [
+    ("su bardağı", 200.0),
+    ("çay bardağı", 100.0),
+    ("yemek kaşığı", 15.0),
+    ("tatlı kaşığı", 7.0),
+    ("çay kaşığı", 5.0),
+    ("tablespoon", 15.0),
+    ("teaspoon", 5.0),
+    ("simit", 100.0),
+    ("dilim", 30.0),
+    ("slice", 30.0),
+    ("bardak", 200.0),
+    ("glass", 200.0),
+    ("kâse", 250.0),
+    ("kase", 250.0),
+    ("bowl", 250.0),
+    ("cup", 200.0),
+    ("çay", 200.0),
+    ("tea", 200.0),
+    ("medium", 120.0),
+    ("orta", 120.0),
+    ("adet", 100.0),
+    ("piece", 100.0),
+]
+
+
+def _num(value, default=0.0):
+    """Guvenli float donusumu: None / hatali deger -> default."""
+    try:
+        if value is None:
+            return float(default)
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def estimate_serving_grams(description):
+    """Porsiyon aciklamasini deterministik agirlik matrisinden gram/ml'ye cevir.
+
+    SADECE FatSecret metric_serving_amount eksik/0 oldugunda yedek olarak
+    kullanilmali. Bilinmeyen aciklama icin ``None`` doner (cagiran taraf karar verir).
+    LLM KULLANMAZ.
+    """
+    if not description:
+        return None
+    d = str(description).lower()
+    for key, grams in _PORTION_WEIGHTS:
+        if key in d:
+            return float(grams)
+    return None
+
+
+def check_serving(serving):
+    """Tek bir porsiyon sozlugunu fizik/biyoloji kisitlarina gore denetle.
+
+    Beklenen anahtarlar: ``metric_serving_amount`` (gram/ml), ``calories``,
+    ``protein``, ``carbs``, ``fat``.
+
+    Donus: ``(is_valid, flags, reasons)``
+      - ``is_valid``: kati saglik kontrollerinden gecti mi (False -> at).
+      - ``flags``: bilgilendirici isaretler (orn. ``"macros_inconsistent"``).
+      - ``reasons``: gecersizlik nedenleri (orn. ``"caloric_density_exceeds_900"``).
+
+    Kati kontroller (ihlal -> gecersiz):
+      * Makro-agirlik: protein + karb + yag (g) <= porsiyon agirligi (+ tolerans).
+      * Kalorik yogunluk: 100g basina kalori <= 900 kcal (termodinamik tavan).
+    Yumusak kontrol (ihlal -> sadece isaret):
+      * Atwater tutarliligi: beyan kalori ile 4P+4C+9F arasindaki sapma.
+
+    Not: "yesil sebzede >20g protein" gibi kategoriye ozgu aykiri-deger kurallari
+    bir besin taksonomisi gerektirir (uygulamada yok); bunun yerine kategoriden
+    bagimsiz Atwater tutarlilik kontrolu genel bir aykiri-deger tespiti saglar.
+    """
+    flags = []
+    reasons = []
+    is_valid = True
+
+    amount = _num(serving.get("metric_serving_amount"))
+    cal = _num(serving.get("calories"))
+    protein = _num(serving.get("protein"))
+    carbs = _num(serving.get("carbs"))
+    fat = _num(serving.get("fat"))
+
+    if amount > 0:
+        # Makro-agirlik kontrolu: makro gram toplami porsiyon agirligini asamaz.
+        if (protein + carbs + fat) > amount + MACRO_WEIGHT_TOLERANCE_G:
+            is_valid = False
+            reasons.append("macro_weight_exceeds_serving")
+
+        # Kalorik yogunluk kontrolu: 100g basina kalori 900'u asamaz.
+        density_per_100g = cal / amount * 100.0
+        if density_per_100g > MAX_KCAL_PER_100G + _EPS:
+            is_valid = False
+            reasons.append("caloric_density_exceeds_900")
+
+    # Atwater tutarliligi (yumusak aykiri-deger isareti).
+    expected_cal = 4.0 * protein + 4.0 * carbs + 9.0 * fat
+    if cal > 0 and expected_cal > 0:
+        gap = abs(cal - expected_cal) / cal
+        if gap > ATWATER_TOLERANCE:
+            flags.append("macros_inconsistent")
+
+    return is_valid, flags, reasons
+
+
+def sanitize_servings(servings, food_type=None):
+    """Bir porsiyon listesini denetle: gecersizleri at, isaretleri ekle, dogrulanmis
+    (Generic) girdileri one al (kararli siralama).
+
+    ``food_type`` listedeki tum girdiler icin ortak bir tur ipucu olarak gecilebilir;
+    her porsiyon sozlugunde ayrica ``food_type`` anahtari varsa o onceliklenir.
+    Veritabanina/skora gecmeden ONCE cagrilmak uzere tasarlanmistir.
+    """
+    sanitized = []
+    for serving in servings or []:
+        is_valid, flags, _reasons = check_serving(serving)
+        if not is_valid:
+            continue
+        item = dict(serving)
+        if flags:
+            item["flags"] = list(item.get("flags", [])) + flags
+        sanitized.append(item)
+
+    # Dogrulanmis/Generic girdileri one al (kararli siralama digerlerini korur).
+    def _priority(item):
+        ft = item.get("food_type", food_type)
+        return 0 if (ft is None or str(ft).strip().lower() == "generic") else 1
+
+    sanitized.sort(key=_priority)
+    return sanitized
+
+
+# ---------------------------------------------------------------------------
+# MODULE 2 — Deterministik uyum skoru (0-100)
+# ---------------------------------------------------------------------------
+
+def _safe_ratio(food_value, remaining_value):
+    """food/remaining orani; kalan <= 0 iken pozitif makro -> sonsuz (butce asimi)."""
+    if remaining_value <= 0:
+        return float("inf") if food_value > 0 else 0.0
+    return food_value / remaining_value
+
+
+def score_compatibility(food_macros, remaining):
+    """Bir besinin kullanicinin KALAN gunluk makrolariyla uyumunu 0-100 puanla.
+
+    Girdi:
+      - ``food_macros``: ``{"calories", "protein", "carbs", "fat"}`` (porsiyona olceklenmis).
+      - ``remaining``: ayni anahtarlarla kullanicinin gun icin KALAN butcesi.
+
+    Mantik (todos.txt Module 2 ceza matrisi):
+      * Taban skor 100.
+      * Kalori/Yag/Karb asiri-butce cezasi: bir makro kalanin %80'ini astikca
+        ilerlemeli ceza uygulanir.
+      * Kati kural: besin kalanin %100'unu (kalori VEYA yag) asarsa skor ANINDA 0
+        olur ve ``"Exceeds daily budget limit"`` uyarisi tetiklenir.
+      * Protein bonusu: kalan protein hedefi varsa ve besin kalori butcesine
+        sigiyorsa proteinli besinler odullendirilir.
+      * ``Score = max(0, min(100, round(100 - (P_cal+P_fat+P_carb) + Bonus_Protein)))``.
+
+    Donus: ``{"score": int(0..100), "flags": [...], "warnings": [...]}``.
+    """
+    cal = _num(food_macros.get("calories"))
+    protein = _num(food_macros.get("protein"))
+    carbs = _num(food_macros.get("carbs"))
+    fat = _num(food_macros.get("fat"))
+
+    # Negatif kalanlari 0'a kenetle (asilmis butce = butce yok).
+    rem_cal = max(_num(remaining.get("calories")), 0.0)
+    rem_pro = max(_num(remaining.get("protein")), 0.0)
+    rem_carb = max(_num(remaining.get("carbs")), 0.0)
+    rem_fat = max(_num(remaining.get("fat")), 0.0)
+
+    cal_ratio = _safe_ratio(cal, rem_cal)
+    fat_ratio = _safe_ratio(fat, rem_fat)
+    carb_ratio = _safe_ratio(carbs, rem_carb)
+    pro_ratio = _safe_ratio(protein, rem_pro)
+
+    flags = []
+    warnings = []
+
+    # Kati kural: kalori veya yag butcesi %100'u astiysa skor 0.
+    if cal_ratio > 1.0 or fat_ratio > 1.0:
+        return {
+            "score": 0,
+            "flags": [],
+            "warnings": ["Exceeds daily budget limit"],
+        }
+
+    # Ilerlemeli asiri-butce cezalari (yalnizca esik ustunde).
+    penalty_cal = max(0.0, cal_ratio - _PENALTY_THRESHOLD) * _PENALTY_WEIGHT_CAL
+    penalty_fat = max(0.0, fat_ratio - _PENALTY_THRESHOLD) * _PENALTY_WEIGHT_FAT
+    penalty_carb = max(0.0, carb_ratio - _PENALTY_THRESHOLD) * _PENALTY_WEIGHT_CARB
+
+    # Protein bonusu: kalan protein hedefi varken proteinli besinleri odullendir.
+    bonus_protein = 0.0
+    if rem_pro > 0 and protein > 0:
+        bonus_protein = min(_PROTEIN_BONUS_MAX, pro_ratio * _PROTEIN_BONUS_SCALE)
+
+    raw = 100.0 - (penalty_cal + penalty_fat + penalty_carb) + bonus_protein
+    score = int(round(max(0.0, min(100.0, raw))))
+
+    # Deterministik isaretler.
+    if rem_fat > 0 and fat_ratio < 0.30:
+        flags.append("low_fat")
+    if cal > 0 and (4.0 * protein / cal) >= 0.20:
+        flags.append("high_protein")
+    if cal_ratio <= _PENALTY_THRESHOLD:
+        flags.append("fits_calorie_budget")
+
+    # Deterministik uyarilar (kati 0 disindaki esik asimlari).
+    if _PENALTY_THRESHOLD < cal_ratio <= 1.0:
+        warnings.append("Approaching calorie budget")
+    if _PENALTY_THRESHOLD < fat_ratio <= 1.0:
+        warnings.append("Approaching fat budget")
+    if carb_ratio > 1.0:
+        warnings.append("High carbohydrate load")
+
+    return {"score": score, "flags": flags, "warnings": warnings}
+
+
+# ---------------------------------------------------------------------------
+# MODULE 3 — Cikis mimarisi (LLM'in degistiremeyecegi JSON sozlesmesi)
+# ---------------------------------------------------------------------------
+
+def build_evaluation(food_id, name, standardized_serving, macros, remaining,
+                     extra_flags=None):
+    """Sunum katmani (LLM) icin temiz, yapilandirilmis degerlendirme JSON'u uret.
+
+    Ciktidaki tum sayilar kesindir; LLM bunlari ASLA degistirmemelidir.
+
+    Ornek sozlesme::
+
+        {
+          "food_id": "12345",
+          "name": "Simit",
+          "standardized_serving": "1 Piece (100g)",
+          "macros": {"kcal": 420, "protein": 16, "carbs": 66, "fat": 9},
+          "compatibility_score": 100,
+          "flags": ["low_fat", "fits_calorie_budget"],
+          "warnings": []
+        }
+    """
+    scored = score_compatibility(macros, remaining)
+
+    # Sanitize isaretleri + skor isaretleri (sira korunur, tekrar elenir).
+    merged_flags = list(dict.fromkeys(list(extra_flags or []) + scored["flags"]))
+
+    return {
+        "food_id": "" if food_id is None else str(food_id),
+        "name": name,
+        "standardized_serving": standardized_serving,
+        "macros": {
+            "kcal": int(round(_num(macros.get("calories")))),
+            "protein": int(round(_num(macros.get("protein")))),
+            "carbs": int(round(_num(macros.get("carbs")))),
+            "fat": int(round(_num(macros.get("fat")))),
+        },
+        "compatibility_score": scored["score"],
+        "flags": merged_flags,
+        "warnings": scored["warnings"],
+    }
