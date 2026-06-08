@@ -19,6 +19,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 load_dotenv()
 import s3_helper
+import nutrition_pipeline
 app = Flask(__name__)
 # Railway/gunicorn run behind a reverse proxy, so request.remote_addr is the
 # proxy's IP unless we trust X-Forwarded-For. ProxyFix(x_for=1) reads the single
@@ -207,8 +208,15 @@ def _food_get_servings(food_id):
         try:
             metric_amt = float(s.get("metric_serving_amount", 0))
             if metric_amt == 0:
-                app.logger.warning("_food_get_servings food_id=%s: serving '%s' has no metric_serving_amount",
-                                   food_id, s.get("serving_description", "?"))
+                # Metrik agirlik yoksa deterministik porsiyon matrisinden tahmin et (LLM'siz).
+                est = nutrition_pipeline.estimate_serving_grams(s.get("serving_description", ""))
+                if est:
+                    metric_amt = est
+                    app.logger.info("_food_get_servings food_id=%s: '%s' metrik agirligi yok -> matris tahmini %.0fg",
+                                    food_id, s.get("serving_description", "?"), est)
+                else:
+                    app.logger.warning("_food_get_servings food_id=%s: serving '%s' has no metric_serving_amount",
+                                       food_id, s.get("serving_description", "?"))
             results.append({
                 "serving_id": str(s.get("serving_id", "")),
                 "serving_description": s.get("serving_description", ""),
@@ -223,6 +231,13 @@ def _food_get_servings(food_id):
             continue
 
     if not results:
+        return None
+
+    # Deterministik saglik/biyoloji kontrolleri: imkansiz girdileri (P+C+F > agirlik,
+    # 100g basina >900 kcal) DB'ye/skora gecmeden once ele.
+    results = nutrition_pipeline.sanitize_servings(results)
+    if not results:
+        app.logger.warning("_food_get_servings food_id=%s: tum porsiyonlar saglik kontrolunden geri dondu", food_id)
         return None
 
     # 100g bazına normalize et + devasa "tüm tarif" porsiyonlarını işaretle/en sona it.
@@ -1212,6 +1227,18 @@ def _food_search_fatsecret(q):
                     "fat": round(macros["fat"] * scale, 1),
                 }
 
+        # Deterministik saglik kontrolu: imkansiz girdiyi (100g basina >900 kcal,
+        # makro-agirlik ihlali) arama sonuclarindan ele. LLM kullanilmaz.
+        valid_100g, _flags, _reasons = nutrition_pipeline.check_serving({
+            "metric_serving_amount": 100.0,
+            "calories": per_100g["calories"],
+            "protein": per_100g["protein"],
+            "carbs": per_100g["carbs"],
+            "fat": per_100g["fat"],
+        })
+        if not valid_100g:
+            continue
+
         name = f.get("food_name", "")
         fid = f.get("food_id", "")
         _cache_macros({name: per_100g})
@@ -1224,8 +1251,13 @@ def _food_search_fatsecret(q):
             "serving": serving_text,
             "is_per_serving": is_serving,
             "macros": macros,
-            "per_100g": per_100g
+            "per_100g": per_100g,
+            "food_type": f.get("food_type", ""),
         })
+
+    # Dogrulama filtresi: 'Generic' girdileri one al (kararli siralama FatSecret
+    # alaka sirasini grup icinde korur).
+    results.sort(key=lambda r: 0 if str(r.get("food_type", "")).strip().lower() == "generic" else 1)
     return results if results else None
 
 
@@ -3783,6 +3815,34 @@ def _score_item(macros, remaining):
     return round(score, 4), warnings, " · ".join(reason_parts)
 
 
+# Menu uyarilarini (deterministik, Ingilizce sozlesme) Turkce UI'ya cevir.
+_MENU_WARN_TR = {
+    "Exceeds daily budget limit": "Günlük bütçe limitini aşıyor",
+    "Approaching calorie budget": "Kalori limitine yaklaşıyor",
+    "Approaching fat budget": "Yağ limitine yaklaşıyor",
+    "High carbohydrate load": "Yüksek karbonhidrat",
+}
+
+
+def _menu_score(macros, remaining):
+    """Menu analizi icin deterministik skor (nutrition_pipeline.score_compatibility)
+    -> mevcut (score:int, warnings:[tr], reason:str) sozlesmesi. LLM matematik yapmaz."""
+    res = nutrition_pipeline.score_compatibility(macros, remaining)
+    flags = res["flags"]
+    reason_parts = []
+    if "high_protein" in flags:
+        reason_parts.append("Yüksek protein")
+    if "low_fat" in flags:
+        reason_parts.append("Düşük yağ")
+    if "fits_calorie_budget" in flags:
+        reason_parts.append("Kalori bütçesine uygun")
+    if not reason_parts:
+        reason_parts.append(f"{int(round(macros.get('calories', 0)))} kcal · "
+                            f"{int(round(macros.get('protein', 0)))}g protein")
+    warnings_tr = [_MENU_WARN_TR.get(w, w) for w in res["warnings"]]
+    return res["score"], warnings_tr, " · ".join(reason_parts)
+
+
 @app.route("/api/menu/analyze", methods=["POST"])
 @login_required
 def analyze_menu():
@@ -3926,7 +3986,7 @@ def analyze_menu():
             print(f"[MACRO ENGINE] ZERO-MACRO ITEM: '{name}' — no data from FatSecret or LLM")
 
         if has_macros:
-            score, warnings, reason = _score_item(macros, remaining)
+            score, warnings, reason = _menu_score(macros, remaining)
         else:
             score, warnings, reason = 0, [], "Besin değerleri hesaplanamadı"
 
@@ -4988,7 +5048,7 @@ VERİ KAYNAKLARIN:
 ═══ BESLENME LOGLAMA İŞ AKIŞI (ÇOK ÖNEMLİ) ═══
 Kullanıcı bir yiyecek/içecek YEDİĞİNİ söylediğinde VEYA makrolarını/kalorisini sorduğunda:
 1. DAİMA önce `fetch_nutrition_and_stage_log` aracını çağır — gerçek makroları FatSecret'tan çeker ve onaya hazır şekilde geçici olarak hazırlar. Bu araç KAYDETMEZ, sadece veriyi getirir.
-2. Dönen makroları kullanıcıya KISA ve NET sun (kalori | P | K | Y + porsiyon), sonra AÇIKÇA onay iste: "Günlüğüne kaydedeyim mi?"
+2. Dönen makroları kullanıcıya KISA ve NET sun (kalori | P | K | Y + porsiyon), sonra AÇIKÇA onay iste: "Günlüğüne kaydedeyim mi?". Araç bir `evaluation.compatibility_score` (0-100) döndürürse onu da AYNEN aktar.
 3. Kullanıcı onaylarsa ("evet", "kaydet", "olur" vb.) `confirm_and_commit_meal_log` aracını çağır. Onay GELMEDEN asla bu aracı çağırma — merak amaçlı sorular yanlışlıkla loglanmamalı.
 4. Kullanıcı reddederse/iptal ederse ("hayır", "iptal", "vazgeç") `cancel_pending_log` aracını çağır.
 Antrenman için aynı mantık: `stage_workout_log` → onay → `confirm_and_commit_workout_log`.
@@ -5003,6 +5063,7 @@ ASLA monoton, tekrarlayan "tavuk + pirinç" gibi sıkıcı seçeneklere yönlend
 
 TEMEL GÖREV:
 - Beslenme sorularında gerçek FatSecret makrolarını kullan, tahmin etme.
+- Araçların döndürdüğü makrolar ve `compatibility_score` DETERMİNİSTİK olarak sunucuda hesaplanır; bu sayıları ASLA değiştirme, yeniden hesaplama veya yuvarlama — yalnızca AYNEN sun ve yorumla.
 - Trendleri, eksik logları ve başarıları proaktif olarak belirt.
 - Haftalık rapor günlerinde (Pazartesi/Pazar) otomatik rapor sun.
 
@@ -5128,6 +5189,31 @@ def _today_nutrition_totals(user_id):
     }
 
 
+def _remaining_macros_for_user(user_id):
+    """Kullanicinin bugun KALAN gunluk makro butcesi.
+
+    UserSession hedef kalorisinden hedef-makro dagilimi (analyze_menu ile ayni
+    formul) cikarilir, bugun UserDailyNutrition'a islenen tuketim dusulur.
+    Deterministik; LLM yok. Profil/hedef yoksa None doner.
+    """
+    sess = (UserSession.query.filter_by(user_id=user_id)
+            .order_by(UserSession.created_at.desc()).first())
+    if not sess or not sess.target_calories:
+        return None
+    target_cal = sess.target_calories
+    goal = sess.goal or ""
+    protein_target = target_cal * (0.30 if goal == "kas kazanma" else 0.25) / 4
+    fat_target = target_cal * 0.25 / 9
+    carb_target = target_cal * (0.45 if goal == "kas kazanma" else 0.50) / 4
+    consumed = _today_nutrition_totals(user_id)
+    return {
+        "calories": max(target_cal - consumed["calories"], 0),
+        "protein": max(protein_target - consumed["protein"], 0),
+        "carbs": max(carb_target - consumed["carbs"], 0),
+        "fat": max(fat_target - consumed["fat"], 0),
+    }
+
+
 def _today_workout_totals(user_id):
     """Bugünün antrenman toplam volümü."""
     start = datetime.combine(datetime.utcnow().date(), datetime.min.time())
@@ -5169,6 +5255,24 @@ def _tool_fetch_nutrition_and_stage_log(user_id, food_query):
         "serving_size": f"{grams:g} g",
     }
 
+    # Deterministik uyum degerlendirmesi (compatibility_score 0-100). Tum matematik
+    # nutrition_pipeline'da yapilir; LLM yalnizca bu sabit sayilari sunar.
+    remaining = _remaining_macros_for_user(user_id)
+    evaluation = None
+    if remaining is not None:
+        evaluation = nutrition_pipeline.build_evaluation(
+            food_id=top.get("food_id", ""),
+            name=payload["food_name"],
+            standardized_serving=payload["serving_size"],
+            macros={
+                "calories": payload["calories"],
+                "protein": payload["protein"],
+                "carbs": payload["carbs"],
+                "fat": payload["fat"],
+            },
+            remaining=remaining,
+        )
+
     # Tek aktif 'staged' meal: önceki bekleyenleri temizle, yenisini yaz, commit et.
     PendingAction.query.filter_by(user_id=user_id, action_type="log_meal").delete()
     db.session.add(PendingAction(user_id=user_id, action_type="log_meal", payload=payload))
@@ -5177,7 +5281,11 @@ def _tool_fetch_nutrition_and_stage_log(user_id, food_query):
     return json.dumps({
         "status": "staged",
         "staged_food": payload,
-        "instruction": "Makroları kullanıcıya kısa ve net sun, sonra 'Günlüğüne kaydedeyim mi?' diye onay iste. Onay gelmeden confirm_and_commit_meal_log çağırma.",
+        "evaluation": evaluation,
+        "instruction": ("Makroları ve (varsa) compatibility_score'u kullanıcıya AYNEN, "
+                        "değiştirmeden ve yeniden hesaplamadan sun — sayılar kesindir. "
+                        "Sonra 'Günlüğüne kaydedeyim mi?' diye onay iste; onay gelmeden "
+                        "confirm_and_commit_meal_log çağırma."),
     }, ensure_ascii=False)
 
 
