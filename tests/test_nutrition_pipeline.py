@@ -15,6 +15,7 @@ from nutrition_pipeline import (  # noqa: E402
     build_evaluation,
     check_serving,
     estimate_serving_grams,
+    parse_fatsecret_serving,
     sanitize_servings,
     score_compatibility,
 )
@@ -31,6 +32,55 @@ def _serving(amount, cal, protein, carbs, fat, **extra):
     }
     s.update(extra)
     return s
+
+
+# ---------------------------------------------------------------------------
+# MOCK FIXTURE — ham FatSecret API yanitlarini taklit eder (todos.txt §3)
+# Gercek API'de degerler STRING gelir ve karbonhidrat anahtari 'carbohydrate'tir.
+# ---------------------------------------------------------------------------
+RAW_FATSECRET_SERVINGS = [
+    {   # Dogrulanmis yuksek-protein, yagsiz et (Bonfile / dana bonfile)
+        "serving_id": "1", "serving_description": "100 g",
+        "metric_serving_amount": "100.0", "metric_serving_unit": "g",
+        "calories": "143", "protein": "26.0", "carbohydrate": "0.0", "fat": "4.0",
+    },
+    {   # Yuksek-karb (pirinc pilavi)
+        "serving_id": "2", "serving_description": "100 g",
+        "metric_serving_amount": "100.0", "metric_serving_unit": "g",
+        "calories": "130", "protein": "2.7", "carbohydrate": "28.0", "fat": "0.3",
+    },
+    {   # Bozuk/aykiri-deger (Pesto Soslu Makarna): 350 g'da 4696 kcal / 440 g yag
+        "serving_id": "3", "serving_description": "1 serving",
+        "metric_serving_amount": "350.0", "metric_serving_unit": "g",
+        "calories": "4696", "protein": "100.0", "carbohydrate": "84.0", "fat": "440.0",
+    },
+]
+
+
+class TestFatSecretMapping:
+    """todos.txt §3.1 & §3.2: ham FatSecret yaniti -> dogru anahtar eslemesi +
+    bozuk/aykiri girdinin son yanit dizisinden tamamen filtrelenmesi."""
+
+    def test_keys_map_to_exact_fields(self):
+        beef = parse_fatsecret_serving(RAW_FATSECRET_SERVINGS[0])
+        # Yagsiz et KARB degeri ALMAMALI (protein<->carb kaymasi yok).
+        assert beef["protein"] == 26.0
+        assert beef["carbs"] == 0.0
+        assert beef["fat"] == 4.0
+        assert beef["calories"] == 143.0
+
+        rice = parse_fatsecret_serving(RAW_FATSECRET_SERVINGS[1])
+        assert rice["carbs"] == 28.0
+        assert rice["protein"] == 2.7
+        assert rice["fat"] == 0.3
+
+    def test_outlier_excluded_from_payload(self):
+        parsed = [parse_fatsecret_serving(r) for r in RAW_FATSECRET_SERVINGS]
+        clean = sanitize_servings(parsed)
+        ids = {s["serving_id"] for s in clean}
+        assert "3" not in ids        # Pesto aykiri-degeri elendi
+        assert ids == {"1", "2"}     # sadece gecerli iki girdi kaldi
+        assert len(clean) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +137,39 @@ class TestAtwaterConsistency:
         valid, flags, _reasons = check_serving(_serving(100, 100, 30, 40, 5))
         assert "macros_inconsistent" in flags
         assert valid is True  # yumusak kontrol: silmez
+
+
+class TestServingPlausibility:
+    """Bug 2 (macro mapping & filter leakage): imkansiz makro profilleri yanit
+    dizisinden TAMAMEN silinmeli — sadece skor 0 verilip tutulmamali."""
+
+    def test_meat_with_zero_protein_rejected(self):
+        # "Bonfile" senaryosu: kayda deger kalori ama makrolar bunu aciklayamiyor
+        # (kalori yoktan var olamaz) -> enerji korunumu ihlali, ELE.
+        valid, _flags, reasons = check_serving(_serving(0, 200, 0, 6, 1))
+        assert valid is False
+        assert "calories_exceed_macro_energy" in reasons
+
+    def test_absurd_serving_discarded_by_absolute_caps(self):
+        # "Pesto Soslu Makarna": 4696 kcal / 440 g yag -> tek porsiyon icin imkansiz.
+        valid, _flags, reasons = check_serving(_serving(0, 4696, 100, 84, 440))
+        assert valid is False
+        assert "calories_exceed_serving_max" in reasons
+        assert "macro_exceeds_serving_max" in reasons
+
+    def test_normal_large_meal_passes(self):
+        # Mesru buyuk karisik tabak (~1500 kcal) elenmemeli (false positive yok).
+        valid, _flags, reasons = check_serving(_serving(0, 1500, 90, 120, 60))
+        assert valid is True
+        assert reasons == []
+
+    def test_sanitize_drops_impossible_servings(self):
+        good = _serving(200, 520, 30, 60, 18)     # makul tek porsiyon
+        bonfile = _serving(0, 200, 0, 6, 1)       # kalori-makro enerji ihlali
+        pesto = _serving(0, 4696, 100, 84, 440)   # absurd porsiyon
+        out = sanitize_servings([good, bonfile, pesto])
+        assert len(out) == 1
+        assert out[0]["calories"] == 520
 
 
 class TestSanitizeServings:
@@ -203,6 +286,69 @@ class TestScoringOutputShape:
         result = score_compatibility(food, remaining)
         assert "High carbohydrate load" in result["warnings"]
         assert result["score"] > 0  # karbda kati 0 kurali yok
+
+
+class TestGranularScoring:
+    """Bug 1 (binary collapse): butceye sigan ama makro-dengesiz besinler 100
+    yerine granuler (orta) puan almali; skor protein kalitesiyle olceklenmeli."""
+
+    def test_pure_carb_when_protein_needed_scores_mid(self):
+        # Saf karb, butceye rahat siger ama kullanici hala proteine ihtiyac duyuyor.
+        food = {"calories": 300, "protein": 0, "carbs": 70, "fat": 1}
+        remaining = {"calories": 1500, "protein": 120, "carbs": 150, "fat": 50}
+        result = score_compatibility(food, remaining)
+        assert 60 <= result["score"] <= 80      # artik flat 100 degil
+        assert "low_protein_food" in result["flags"]
+
+    def test_score_scales_with_protein_quality(self):
+        # Protein kalitesi arttikca skor MONOTON artmali (granulerlik kaniti).
+        remaining = {"calories": 1500, "protein": 120, "carbs": 150, "fat": 50}
+        pure_carb = score_compatibility(
+            {"calories": 300, "protein": 0, "carbs": 73, "fat": 1}, remaining)["score"]
+        mixed = score_compatibility(
+            {"calories": 300, "protein": 15, "carbs": 45, "fat": 5}, remaining)["score"]
+        lean_protein = score_compatibility(
+            {"calories": 300, "protein": 60, "carbs": 8, "fat": 4}, remaining)["score"]
+        assert pure_carb < mixed < lean_protein
+
+    def test_no_balance_penalty_when_protein_goal_met(self):
+        # Kalan protein 0 -> denge cezasi yok; ayni karb besin yine yuksek alir.
+        food = {"calories": 300, "protein": 0, "carbs": 70, "fat": 1}
+        remaining = {"calories": 1500, "protein": 0, "carbs": 150, "fat": 50}
+        result = score_compatibility(food, remaining)
+        assert result["score"] >= 90
+        assert "low_protein_food" not in result["flags"]
+
+
+class TestScoreDistribution:
+    """todos.txt §3.3: skorlama ikili (100/0) degil; cesitli/granuler puanlar
+    uretmeli ve kullanicinin KALAN profiline gore degismeli."""
+
+    def test_low_mid_high_band_spread(self):
+        # Ayni 'protein gerekli' kalan profili; besinin protein kalitesi arttikca
+        # skor kademeli yukselir -> ~55 / ~75 / ~90 bantlari.
+        remaining = {"calories": 1500, "protein": 130, "carbs": 90, "fat": 50}
+        low = score_compatibility(
+            {"calories": 450, "protein": 5, "carbs": 82, "fat": 5}, remaining)["score"]
+        mid = score_compatibility(
+            {"calories": 450, "protein": 12, "carbs": 75, "fat": 8}, remaining)["score"]
+        high = score_compatibility(
+            {"calories": 450, "protein": 25, "carbs": 55, "fat": 11}, remaining)["score"]
+        assert 50 <= low <= 62                          # ~55
+        assert 66 <= mid <= 80                          # ~75
+        assert 84 <= high <= 96                         # ~90
+        assert low < mid < high                         # monoton granulerlik
+        assert all(0 < s < 100 for s in (low, mid, high))  # ikili degil
+
+    def test_same_food_varies_by_remaining_profile(self):
+        # Ayni karb-agirlikli besin: protein gerekirken dusuk, protein hedefi
+        # dolmusken yuksek puan almali (dinamik, kalan-ihtiyac temelli sapma).
+        food = {"calories": 400, "protein": 10, "carbs": 70, "fat": 6}
+        needs_protein = score_compatibility(
+            food, {"calories": 1500, "protein": 140, "carbs": 80, "fat": 45})["score"]
+        protein_met = score_compatibility(
+            food, {"calories": 1500, "protein": 0, "carbs": 250, "fat": 60})["score"]
+        assert needs_protein < protein_met
 
 
 # ---------------------------------------------------------------------------

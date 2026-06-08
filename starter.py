@@ -220,30 +220,17 @@ def _food_get_servings(food_id):
 
     results = []
     for s in servings_raw:
-        try:
-            metric_amt = float(s.get("metric_serving_amount", 0))
-            if metric_amt == 0:
-                # Metrik agirlik yoksa deterministik porsiyon matrisinden tahmin et (LLM'siz).
-                est = nutrition_pipeline.estimate_serving_grams(s.get("serving_description", ""))
-                if est:
-                    metric_amt = est
-                    app.logger.info("_food_get_servings food_id=%s: '%s' metrik agirligi yok -> matris tahmini %.0fg",
-                                    food_id, s.get("serving_description", "?"), est)
-                else:
-                    app.logger.warning("_food_get_servings food_id=%s: serving '%s' has no metric_serving_amount",
-                                       food_id, s.get("serving_description", "?"))
-            results.append({
-                "serving_id": str(s.get("serving_id", "")),
-                "serving_description": s.get("serving_description", ""),
-                "metric_serving_amount": metric_amt,
-                "metric_serving_unit": s.get("metric_serving_unit", "g"),
-                "calories": float(s.get("calories", 0)),
-                "protein": float(s.get("protein", 0)),
-                "carbs": float(s.get("carbohydrate", 0)),
-                "fat": float(s.get("fat", 0)),
-            })
-        except (ValueError, TypeError):
-            continue
+        # Anahtar eslemesi (protein/carbohydrate/fat) ve metrik-agirlik tahmini tek
+        # noktada, test edilebilir saf fonksiyonda yapilir (nutrition_pipeline).
+        item = nutrition_pipeline.parse_fatsecret_serving(s)
+        if float(s.get("metric_serving_amount") or 0) == 0:
+            if item["metric_serving_amount"] > 0:
+                app.logger.info("_food_get_servings food_id=%s: '%s' metrik agirligi yok -> matris tahmini %.0fg",
+                                food_id, item["serving_description"] or "?", item["metric_serving_amount"])
+            else:
+                app.logger.warning("_food_get_servings food_id=%s: serving '%s' has no metric_serving_amount",
+                                   food_id, item["serving_description"] or "?")
+        results.append(item)
 
     if not results:
         return None
@@ -3563,7 +3550,23 @@ def _lookup_macros_fatsecret(items, token):
                     "fat": float(parsed.get("fat", parsed.get("total fat", 0))),
                 }
                 serving_text = parsed.get("serving", "")
-                if _is_per_serving(serving_text):
+                is_serv = _is_per_serving(serving_text)
+
+                # Deterministik saglik kontrolu: imkansiz girdiyi (kalori-makro enerji
+                # ihlali, mutlak porsiyon tavanlari, 100g basina >900 kcal) kaynakta
+                # ele. 100g bazinda yogunluk kontrolu icin amount=100 ver. LLM'siz.
+                valid_fs, _f, _r = nutrition_pipeline.check_serving({
+                    "metric_serving_amount": 0 if is_serv else 100.0,
+                    "calories": macros["calories"],
+                    "protein": macros["protein"],
+                    "carbs": macros["carbs"],
+                    "fat": macros["fat"],
+                })
+                if not valid_fs:
+                    app.logger.info(f"[MACRO ENGINE] FatSecret implausible entry skipped for '{name}': {macros} reasons={_r}")
+                    continue
+
+                if is_serv:
                     per_serving[name] = macros
                     found_serving = True
                     app.logger.info(f"[MACRO ENGINE] FatSecret per-serving match: '{name}' → Cal={macros['calories']}, P={macros['protein']}, C={macros['carbs']}, F={macros['fat']}")
@@ -3884,6 +3887,8 @@ def _menu_score(macros, remaining):
         reason_parts.append("Düşük yağ")
     if "fits_calorie_budget" in flags:
         reason_parts.append("Kalori bütçesine uygun")
+    if "low_protein_food" in flags:
+        reason_parts.append("Protein oranı düşük")
     if not reason_parts:
         reason_parts.append(f"{int(round(macros.get('calories', 0)))} kcal · "
                             f"{int(round(macros.get('protein', 0)))}g protein")
@@ -4029,6 +4034,22 @@ def analyze_menu():
     for cat, name in all_items:
         macros = macro_map.get(name)
         has_macros = macros is not None and macros.get("calories", 0) > 0
+
+        # Deterministik saglik/biyoloji kontrolu: termodinamik olarak imkansiz
+        # girdileri (tek porsiyona >3000 kcal / >300 g makro, kalori-makro enerji
+        # ihlali) skor verilip yazdirilmadan ONCE yanit dizisinden TAMAMEN ELE.
+        if has_macros:
+            valid, _flags, reasons = nutrition_pipeline.check_serving({
+                "metric_serving_amount": 0,
+                "calories": macros.get("calories", 0),
+                "protein": macros.get("protein", 0),
+                "carbs": macros.get("carbs", 0),
+                "fat": macros.get("fat", 0),
+            })
+            if not valid:
+                app.logger.info(f"[MACRO ENGINE] DISCARDED implausible item '{name}': "
+                                f"{macros} reasons={reasons}")
+                continue
 
         if not has_macros:
             macros = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}

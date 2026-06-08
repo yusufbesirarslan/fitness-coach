@@ -25,6 +25,13 @@ from __future__ import annotations
 # 900 kcal'i asamaz (orn. "bir bardak cay = 3000 kcal" troll girdisi elenir).
 MAX_KCAL_PER_100G = 900.0
 
+# Tek bir insan porsiyonu (bir tabak/kase) bu mutlak sinirlari asamaz. Porsiyon
+# agirligi bilinmese bile gecerli: LLM/parse hatalarini (orn. tek porsiyona 4696
+# kcal veya 440 g yag) agirliktan BAGIMSIZ olarak eler. Genis tutuldu ki mesru
+# buyuk karisik tabaklar (~1500-2000 kcal) gecsin, sadece imkansizlar elensin.
+MAX_SERVING_KCAL = 3000.0
+MAX_SERVING_MACRO_G = 300.0
+
 # Protein+Karb+Yag gram toplami porsiyon agirligini bu kadar gram asabilir
 # (kayan nokta yuvarlama paylari icin kucuk tolerans).
 MACRO_WEIGHT_TOLERANCE_G = 1.0
@@ -32,6 +39,14 @@ MACRO_WEIGHT_TOLERANCE_G = 1.0
 # Beyan edilen kalori ile Atwater'dan hesaplanan kalori (4P + 4C + 9F) arasindaki
 # goreli sapma bu esigi asarsa girdi "tutarsiz" olarak ISARETLENIR (silinmez).
 ATWATER_TOLERANCE = 0.30
+
+# Enerji korunumu (kati): makrolarin uretebilecegi enerji, beyan edilen kalorinin
+# bu kesrinin ALTINA duserse girdi fiziksel olarak imkansizdir (kalori yoktan var
+# olamaz) -> ELE. Asimetriktir: yalnizca "kalori var ama makro yok" yonunu siler;
+# ters yon (etiket kaloriyi az gosterir) yumusak ISARET olarak kalir (bkz.
+# ATWATER_TOLERANCE). Not: bu kontrol makro-disi enerji iceren alkollu icecekleri
+# (etanol 7 kcal/g, makrolara sayilmaz) de eler; fitness gunlugu icin kabul edilir.
+ATWATER_HARD_TOLERANCE = 0.50
 
 # Skorlamada sifira bolmeyi onleyen taban; ayni zamanda kalan butce ~0 iken
 # herhangi bir pozitif makronun butceyi asmasini saglar.
@@ -48,6 +63,20 @@ _PENALTY_WEIGHT_CARB = 100.0
 # Protein bonusu tavani ve olcegi.
 _PROTEIN_BONUS_MAX = 15.0
 _PROTEIN_BONUS_SCALE = 30.0
+
+# Makro denge cezasi: hedef protein kalori payi SABIT degil, kullanicinin O ANKI
+# KALAN ihtiyacindan turetilir (kalan proteinin kalan makro-kalorisine orani).
+# Boylece ceza "besinin makro orani ile kullanicinin kalan ihtiyaci arasindaki
+# orantili sapmadir" (todos.txt §1). Besin bu dinamik hedefin altinda kaldikca
+# PURUZSUZ (ikili degil) ceza alir; butceye sigan ama protein-fakiri besinler 100
+# yerine kademeli ~55-80 puana oturur (binary collapse fix). Tavan, neredeyse tum
+# butcesi protein olan kullanicilarda asiri cezayi sinirlar (skor tabani ~60).
+_PROTEIN_QUALITY_CAP = 0.40
+_BALANCE_PENALTY_WEIGHT = 100.0
+
+# Bir besinin "protein orani dusuk" olarak isaretlenecegi esik (kalori payi).
+# high_protein esiginin (0.20) altinda tutulur ki iki isaret cakismasin.
+_LOW_PROTEIN_FLAG_SHARE = 0.15
 
 # Deterministik porsiyon -> gram/ml ortalama agirlik matrisi. SADECE FatSecret
 # metric_serving_amount eksik/0 oldugunda yedek olarak kullanilir; LLM tahmini
@@ -105,6 +134,37 @@ def estimate_serving_grams(description):
     return None
 
 
+def parse_fatsecret_serving(raw):
+    """Ham FatSecret ``serving`` JSON nesnesini standart makro sozlesmemize esle.
+
+    FatSecret alanlari -> ic sema:
+      ``calories`` -> calories, ``protein`` -> protein, ``carbohydrate`` -> carbs,
+      ``fat`` -> fat (DIKKAT: FatSecret 'carbohydrate' kullanir; 'carbs' degil).
+      Ayrica serving_id / serving_description / metric_serving_amount(+unit) tasinir.
+
+    ``metric_serving_amount`` eksik/0 ise ``estimate_serving_grams`` ile porsiyon
+    matrisinden deterministik (LLM'siz) tahmin edilir. Tum sayisal alanlar ``_num``
+    ile guvenle cevrilir (FatSecret degerleri string gelebilir). Anahtar eslemesini
+    TEK noktada toplar ki protein/karb/yag kaymasi tekrar olusamasin (todos.txt §2).
+    """
+    raw = raw or {}
+    amount = _num(raw.get("metric_serving_amount"))
+    if amount == 0:
+        est = estimate_serving_grams(raw.get("serving_description", ""))
+        if est:
+            amount = est
+    return {
+        "serving_id": str(raw.get("serving_id", "")),
+        "serving_description": raw.get("serving_description", ""),
+        "metric_serving_amount": amount,
+        "metric_serving_unit": raw.get("metric_serving_unit", "g"),
+        "calories": _num(raw.get("calories")),
+        "protein": _num(raw.get("protein")),
+        "carbs": _num(raw.get("carbohydrate")),
+        "fat": _num(raw.get("fat")),
+    }
+
+
 def check_serving(serving):
     """Tek bir porsiyon sozlugunu fizik/biyoloji kisitlarina gore denetle.
 
@@ -119,8 +179,12 @@ def check_serving(serving):
     Kati kontroller (ihlal -> gecersiz):
       * Makro-agirlik: protein + karb + yag (g) <= porsiyon agirligi (+ tolerans).
       * Kalorik yogunluk: 100g basina kalori <= 900 kcal (termodinamik tavan).
+      * Mutlak porsiyon tavanlari: kalori <= MAX_SERVING_KCAL ve her makro <=
+        MAX_SERVING_MACRO_G (agirlik bilinmese de imkansiz porsiyonlari eler).
+      * Enerji korunumu: makrolarin Atwater enerjisi beyan kalorinin cok altinda
+        olamaz (ATWATER_HARD_TOLERANCE) -> "kalori var ama makro yok" parse hatasi.
     Yumusak kontrol (ihlal -> sadece isaret):
-      * Atwater tutarliligi: beyan kalori ile 4P+4C+9F arasindaki sapma.
+      * Atwater tutarliligi: beyan kalori ile 4P+4C+9F arasindaki (ters yon) sapma.
 
     Not: "yesil sebzede >20g protein" gibi kategoriye ozgu aykiri-deger kurallari
     bir besin taksonomisi gerektirir (uygulamada yok); bunun yerine kategoriden
@@ -148,11 +212,28 @@ def check_serving(serving):
             is_valid = False
             reasons.append("caloric_density_exceeds_900")
 
-    # Atwater tutarliligi (yumusak aykiri-deger isareti).
+    # Tek porsiyon mutlak tavanlari (agirliktan bagimsiz): bir tabak yemek bu
+    # sinirlari asamaz. Porsiyon agirligi bilinmese bile imkansiz LLM/parse
+    # ciktilarini eler (orn. "Pesto Soslu Makarna" 4696 kcal / 440 g yag).
+    if cal > MAX_SERVING_KCAL:
+        is_valid = False
+        reasons.append("calories_exceed_serving_max")
+    if max(protein, carbs, fat) > MAX_SERVING_MACRO_G:
+        is_valid = False
+        reasons.append("macro_exceeds_serving_max")
+
+    # Atwater / enerji korunumu.
     expected_cal = 4.0 * protein + 4.0 * carbs + 9.0 * fat
-    if cal > 0 and expected_cal > 0:
-        gap = abs(cal - expected_cal) / cal
-        if gap > ATWATER_TOLERANCE:
+    if cal > 0:
+        if expected_cal < cal * (1.0 - ATWATER_HARD_TOLERANCE):
+            # Kati: beyan edilen kaloriler makrolarin uretebileceginin cok ustunde
+            # -> makrolar eksik/yanlis (orn. et ama 0 g protein). Parse/eslesme
+            # hatasi kabul edilir ve girdi ELENIR.
+            is_valid = False
+            reasons.append("calories_exceed_macro_energy")
+        elif expected_cal > 0 and abs(cal - expected_cal) / cal > ATWATER_TOLERANCE:
+            # Yumusak: beyan ile Atwater farkli ama ret bandinin altinda
+            # (orn. etiket kaloriyi az gosteriyor) -> sadece ISARETLE, silme.
             flags.append("macros_inconsistent")
 
     return is_valid, flags, reasons
@@ -207,11 +288,15 @@ def score_compatibility(food_macros, remaining):
       * Taban skor 100.
       * Kalori/Yag/Karb asiri-butce cezasi: bir makro kalanin %80'ini astikca
         ilerlemeli ceza uygulanir.
+      * Makro denge cezasi: besin butceye SIGSA bile, besinin protein kalori payi
+        kullanicinin KALAN ihtiyacindaki protein payinin (dinamik hedef) altinda
+        kaldikca orantili-puruzsuz ceza alir (orn. saf karb, protein gerekirken)
+        -> ~55-80 puan (binary collapse fix); ceza kalan profile gore degisir.
       * Kati kural: besin kalanin %100'unu (kalori VEYA yag) asarsa skor ANINDA 0
         olur ve ``"Exceeds daily budget limit"`` uyarisi tetiklenir.
       * Protein bonusu: kalan protein hedefi varsa ve besin kalori butcesine
         sigiyorsa proteinli besinler odullendirilir.
-      * ``Score = max(0, min(100, round(100 - (P_cal+P_fat+P_carb) + Bonus_Protein)))``.
+      * ``Score = max(0, min(100, round(100 - (P_cal+P_fat+P_carb+P_balance) + Bonus_Protein)))``.
 
     Donus: ``{"score": int(0..100), "flags": [...], "warnings": [...]}``.
     """
@@ -247,19 +332,35 @@ def score_compatibility(food_macros, remaining):
     penalty_fat = max(0.0, fat_ratio - _PENALTY_THRESHOLD) * _PENALTY_WEIGHT_FAT
     penalty_carb = max(0.0, carb_ratio - _PENALTY_THRESHOLD) * _PENALTY_WEIGHT_CARB
 
+    # Makro denge cezasi (granulerlik): besinin kalorisinin ne kadari proteinden
+    # geliyor (protein_cal_share) vs kullanicinin KALAN ihtiyacinda protein kalori
+    # payi ne kadar (target_share)? Besin bu DINAMIK hedefin altina dustukce
+    # orantili ve PURUZSUZ ceza uygula -> "makro orani ile kalan ihtiyac arasindaki
+    # sapma" (todos.txt §1). Boylece ayni besin, kullanicinin kalan profiline gore
+    # farkli (granuler) puan alir; saf karb/yag besinler 100 yerine kademeli iner.
+    protein_cal_share = (4.0 * protein / cal) if cal > 0 else 0.0
+    rem_macro_cal = 4.0 * rem_pro + 4.0 * rem_carb + 9.0 * rem_fat
+    penalty_balance = 0.0
+    if rem_pro > 0 and rem_macro_cal > 0:
+        target_share = min(_PROTEIN_QUALITY_CAP, (4.0 * rem_pro) / rem_macro_cal)
+        deficit = max(0.0, target_share - protein_cal_share)
+        penalty_balance = deficit * _BALANCE_PENALTY_WEIGHT
+
     # Protein bonusu: kalan protein hedefi varken proteinli besinleri odullendir.
     bonus_protein = 0.0
     if rem_pro > 0 and protein > 0:
         bonus_protein = min(_PROTEIN_BONUS_MAX, pro_ratio * _PROTEIN_BONUS_SCALE)
 
-    raw = 100.0 - (penalty_cal + penalty_fat + penalty_carb) + bonus_protein
+    raw = 100.0 - (penalty_cal + penalty_fat + penalty_carb + penalty_balance) + bonus_protein
     score = int(round(max(0.0, min(100.0, raw))))
 
     # Deterministik isaretler.
     if rem_fat > 0 and fat_ratio < 0.30:
         flags.append("low_fat")
-    if cal > 0 and (4.0 * protein / cal) >= 0.20:
+    if protein_cal_share >= 0.20:
         flags.append("high_protein")
+    elif rem_pro > 0 and protein_cal_share < _LOW_PROTEIN_FLAG_SHARE:
+        flags.append("low_protein_food")
     if cal_ratio <= _PENALTY_THRESHOLD:
         flags.append("fits_calorie_budget")
 
