@@ -1244,7 +1244,10 @@ def _food_search_fatsecret(q):
         serving_text = parsed.get("serving", "")
         is_serving = _is_per_serving(serving_text)
 
-        per_100g = macros
+        # per_100g, macros'tan AYRI bir kopya olmali: ayni nesne hem sonuca hem
+        # _macro_cache'e konursa, ileride biri yerinde (in-place) degistirdiginde
+        # onbellek ve diger besinler bozulur (todos.txt §1 — referans paylasimi).
+        per_100g = dict(macros)
         if is_serving:
             est = _estimate_serving_weights_llm([f.get("food_name", q)])
             weight_g = est.get(f.get("food_name", q), 150.0)
@@ -1420,16 +1423,27 @@ def _food_search_static(q):
 
 
 def _food_search_llm(q):
-    """Fallback: use LLM to estimate nutrition for common foods."""
+    """Fallback: use LLM to estimate nutrition for common foods.
+
+    FatSecret erisilemezken besin verisinin TEK kaynagi budur. Bu yuzden ornek
+    olarak SABIT sayilar verilmez (model bunlari her besine kopyalayip ayni
+    makrolari klonlayabilir — todos.txt §4); bunun yerine X/Y/Z/W yer tutuculari
+    kullanilir ve her besinin KENDI farkli, gercek degerlerini uretmesi istenir.
+    """
     prompt = (
         f"Kullanıcı '{q}' araması yaptı. Bu aramayla eşleşen 5 yaygın besini listele.\n"
-        "Her biri için 100 gram başına makro değerlerini ver.\n"
-        "SADECE JSON döndür, başka metin yazma. Format:\n"
-        '[{{"name":"Besin adı","calories":123,"protein":10.5,"carbs":5.2,"fat":3.1}}]'
+        "Her biri için 100 gram başına GERÇEK makro değerlerini ver. Her besinin "
+        "kendi gerçek değerleri olmalı — hiçbir besine aynı değerleri verme.\n"
+        "SADECE JSON döndür, başka metin yazma. Aşağıdaki X/Y/Z/W yer tutucularını "
+        "her besin için gerçek sayılarla doldur (örnek sayıları KOPYALAMA):\n"
+        '[{{"name":"Besin adı","calories":X,"protein":Y,"carbs":Z,"fat":W}}]'
     )
     try:
         text = _openai_chat(
             messages=[{"role": "user", "content": prompt}],
+            system_prompt="SADECE JSON döndür. Her besin için 100g başına gerçek, "
+                          "birbirinden farklı makro değerleri hesapla; örnek/şablon "
+                          "sayılarını tekrar etme." + PORTION_SANITY_RULE,
             temperature=0.3,
             max_tokens=600,
         ).strip()
