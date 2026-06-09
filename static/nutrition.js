@@ -5,6 +5,13 @@ let targetCalories = 2000;
 let selectedMealType = 'Kahvaltı';
 let quickAddOpen = false;
 
+/* ── HTML ESCAPE (XSS guard — innerHTML'e giren kullanıcı/AI/FatSecret metni) ── */
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
 /* ── SERVING LABEL HELPER ── */
 function formatServingLabel(desc, metricAmt, calories, isBulk) {
   let label = desc;
@@ -129,7 +136,7 @@ function renderTodayMeals(meals) {
         <span class="meal-badge">${m.ogun}${badge}</span>
         <span style="font-family:'Bebas Neue';font-size:18px;color:var(--volt);letter-spacing:1px;">${Math.round(m.kalori)} kcal</span>
       </div>
-      <div style="font-size:14px;color:var(--text);font-weight:300;line-height:1.6;margin-bottom:10px;">${m.yemekler}</div>
+      <div style="font-size:14px;color:var(--text);font-weight:300;line-height:1.6;margin-bottom:10px;">${esc(m.yemekler)}</div>
       <div style="display:flex;gap:16px;padding-top:10px;border-top:1px solid var(--border);">
         <span style="font-size:12px;color:var(--text-2);">P: <strong style="color:var(--text);">${Math.round(m.protein)}g</strong></span>
         <span style="font-size:12px;color:var(--text-2);">K: <strong style="color:var(--text);">${Math.round(m.karb)}g</strong></span>
@@ -214,7 +221,7 @@ async function getReview() {
     });
     const d = await res.json();
     if (d.error) { showToast(d.error, 'error'); return; }
-    document.getElementById('review-text').innerHTML = (d.review || d.message || '').replace(/\n/g, '<br>');
+    document.getElementById('review-text').innerHTML = esc(d.review || d.message || '').replace(/\n/g, '<br>');
     document.getElementById('review-card').classList.add('visible');
   } catch (e) {
     showToast('Değerlendirme alınamadı.', 'error');
@@ -253,7 +260,7 @@ async function loadMealHistory() {
         ${day.meals.map(m => `
           <div class="history-meal">
             <div class="history-meal-type">${m.ogun} · ${Math.round(m.kalori)} kcal</div>
-            <div class="history-meal-foods">${m.yemekler}</div>
+            <div class="history-meal-foods">${esc(m.yemekler)}</div>
           </div>`).join('')}
       </div>`).join('');
   } catch (e) {
@@ -315,7 +322,7 @@ function addCustomFood() {
   input.value = '';
   const tag = document.createElement('div');
   tag.className = 'custom-tag';
-  tag.innerHTML = `<span>${val}</span><span class="custom-tag-remove" onclick="removeCustomFood('${val}',this)">×</span>`;
+  tag.innerHTML = `<span>${esc(val)}</span><span class="custom-tag-remove" onclick="removeCustomFood('${val}',this)">×</span>`;
   document.getElementById('custom-tags').appendChild(tag);
 }
 document.getElementById('custom-input').addEventListener('keydown', e => { if (e.key === 'Enter') addCustomFood(); });
@@ -391,7 +398,7 @@ function renderPlans(data) {
       return `
         <div class="plan-meal-sec">
           <div class="plan-meal-title">${m.label} · ${ml.kalori ?? '—'} kcal</div>
-          <ul class="plan-meal-items">${(ml.yemekler || []).map(y => `<li>${y}</li>`).join('')}</ul>
+          <ul class="plan-meal-items">${(ml.yemekler || []).map(y => `<li>${esc(y)}</li>`).join('')}</ul>
         </div>`;
     }).join('');
 
@@ -400,7 +407,7 @@ function renderPlans(data) {
     card.id = `plan-card-${i}`;
     card.innerHTML = `
       <div class="plan-card-hdr">
-        <div class="plan-card-name">${plan.isim ?? 'Plan ' + (i+1)}</div>
+        <div class="plan-card-name">${esc(plan.isim ?? 'Plan ' + (i+1))}</div>
         <div class="plan-card-kcal">${plan.toplam_kalori ?? '—'} kcal</div>
       </div>
       <div class="plan-card-body">
@@ -477,7 +484,7 @@ function renderActivePlanDetail(plan, score, createdAt) {
   document.getElementById('active-plan-detail').innerHTML = `
     <div class="apd-header">
       <div>
-        <div class="apd-title">${plan.isim || 'Aktif Plan'}</div>
+        <div class="apd-title">${esc(plan.isim || 'Aktif Plan')}</div>
         <div class="apd-sub">${createdAt} · Skor: ${score}/10</div>
       </div>
       <button class="btn-ghost" onclick="resetPlan()">+ Yeni Plan Oluştur</button>
@@ -541,7 +548,7 @@ async function loadQuickAddSection() {
           onclick="quickAddMeal('${m.key}','${m.label}',this)" type="button">
           <span class="qab-icon">${m.icon}</span>
           <div class="qab-info">
-            <div class="qab-title">${m.label} — ${d.plan.isim || 'Aktif Plan'}</div>
+            <div class="qab-title">${m.label} — ${esc(d.plan.isim || 'Aktif Plan')}</div>
             <div class="qab-sub">${sub}</div>
           </div>
           <svg class="qab-check" viewBox="0 0 24 24" fill="none"
@@ -786,8 +793,8 @@ async function searchFood(query) {
     dropdown.innerHTML = data.results.map(f => {
       const fj = JSON.stringify(f).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
       return `<div class="autocomplete-item" onclick='selectFood(JSON.parse(this.dataset.f))' data-f="${fj}">
-        <div class="ac-name">${f.name}${f.brand ? ' <span class="ac-brand">(' + f.brand + ')</span>' : ''}</div>
-        <div class="ac-macros"><strong>${Math.round(f.macros.calories)}</strong> kcal · P: ${Math.round(f.macros.protein)}g · K: ${Math.round(f.macros.carbs)}g · Y: ${Math.round(f.macros.fat)}g${f.serving ? ' · ' + f.serving : ''}</div>
+        <div class="ac-name">${esc(f.name)}${f.brand ? ' <span class="ac-brand">(' + esc(f.brand) + ')</span>' : ''}</div>
+        <div class="ac-macros"><strong>${Math.round(f.macros.calories)}</strong> kcal · P: ${Math.round(f.macros.protein)}g · K: ${Math.round(f.macros.carbs)}g · Y: ${Math.round(f.macros.fat)}g${f.serving ? ' · ' + esc(f.serving) : ''}</div>
       </div>`;
     }).join('');
     dropdown.style.display = 'block';
@@ -818,7 +825,7 @@ function renderSelectedFoods() {
     <div class="selected-food-item">
       <button class="sf-remove" onclick="removeSelectedFood(${i})">✕</button>
       <div style="flex:1;min-width:0;">
-        <div style="font-size:13px;color:var(--text);">${f.name}</div>
+        <div style="font-size:13px;color:var(--text);">${esc(f.name)}</div>
         <div style="font-size:11px;color:var(--text-3);">${Math.round(f.per_100g.calories)} kcal · P:${Math.round(f.per_100g.protein)}g K:${Math.round(f.per_100g.carbs)}g Y:${Math.round(f.per_100g.fat)}g</div>
       </div>
     </div>`).join('');
@@ -892,7 +899,7 @@ function renderDiary(data) {
       const cached = item.fatsecret_food_id ? _servingsCache[item.fatsecret_food_id] : null;
       if (item.serving_id && cached) {
         const opts = cached.map(s =>
-          `<option value="${s.serving_id}" ${s.serving_id === item.serving_id ? 'selected' : ''}>${formatServingLabel(s.serving_description, s.metric_serving_amount, s.calories, s.is_bulk)}</option>`
+          `<option value="${s.serving_id}" ${s.serving_id === item.serving_id ? 'selected' : ''}>${esc(formatServingLabel(s.serving_description, s.metric_serving_amount, s.calories, s.is_bulk))}</option>`
         ).join('');
         const qVal = item.serving_quantity || 1;
         unitHtml = `<select class="diary-serving-select" onchange="updateDiaryServing(${item.id}, this.value, '${item.fatsecret_food_id}')" ${isLogged ? 'disabled' : ''}>${opts}</select>
@@ -900,7 +907,7 @@ function renderDiary(data) {
             onchange="updateDiaryServingQty(${item.id}, this.value, '${item.fatsecret_food_id}')" ${isLogged ? 'disabled' : ''}>`;
       } else if (item.serving_id) {
         const qVal = item.serving_quantity || 1;
-        unitHtml = `<span class="diary-serving-label">${item.serving_description || ''}</span>
+        unitHtml = `<span class="diary-serving-label">${esc(item.serving_description || '')}</span>
           <input type="number" class="diary-qty-input" value="${qVal}" min="0.5" step="0.5"
             onchange="updateDiaryServingQtyOnly(${item.id}, this.value)" ${isLogged ? 'disabled' : ''}>`;
         if (item.fatsecret_food_id && !isLogged) {
@@ -913,7 +920,7 @@ function renderDiary(data) {
       }
       return `<div class="diary-food-row" data-item-id="${item.id}">
         <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;color:var(--text);">${item.food_name}</div>
+          <div style="font-size:13px;color:var(--text);">${esc(item.food_name)}</div>
           <div style="font-size:11px;color:var(--text-3);">${Math.round(item.calories)} kcal · P:${Math.round(item.protein)}g K:${Math.round(item.carbs)}g Y:${Math.round(item.fat)}g</div>
         </div>
         ${unitHtml}
@@ -981,8 +988,8 @@ function diaryFoodSearch(input, mealName) {
       dropdown.innerHTML = data.results.map(f => {
         const fj = JSON.stringify(f).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
         return `<div class="autocomplete-item" onclick='addDiaryFood("${mealName}", JSON.parse(this.dataset.f))' data-f="${fj}">
-          <div class="ac-name">${f.name}</div>
-          <div class="ac-macros"><strong>${Math.round(f.per_100g.calories)}</strong> kcal/100g · P:${Math.round(f.per_100g.protein)}g · K:${Math.round(f.per_100g.carbs)}g · Y:${Math.round(f.per_100g.fat)}g${f.serving && f.is_per_serving ? ' · ' + f.serving : ''}</div>
+          <div class="ac-name">${esc(f.name)}</div>
+          <div class="ac-macros"><strong>${Math.round(f.per_100g.calories)}</strong> kcal/100g · P:${Math.round(f.per_100g.protein)}g · K:${Math.round(f.per_100g.carbs)}g · Y:${Math.round(f.per_100g.fat)}g${f.serving && f.is_per_serving ? ' · ' + esc(f.serving) : ''}</div>
         </div>`;
       }).join('');
       dropdown.style.display = 'block';
@@ -1031,7 +1038,7 @@ function openServingModal(mealName, food) {
       const select = document.getElementById('sm-serving-select');
       select.innerHTML = servings.map(s =>
         '<option value="' + s.serving_id + '">' +
-        formatServingLabel(s.serving_description, s.metric_serving_amount, s.calories, s.is_bulk) +
+        esc(formatServingLabel(s.serving_description, s.metric_serving_amount, s.calories, s.is_bulk)) +
         '</option>'
       ).join('');
       // Varsayılan: devasa "tüm tarif" porsiyonu (is_bulk) ASLA seçilmez.

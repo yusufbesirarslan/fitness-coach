@@ -30,6 +30,11 @@ EXPOSE 5000
 # çalıştırır. AI/ağ çağrıları I/O-bound olduğu için eşzamanlılığı thread ile
 # veriyoruz. timeout 300 = uzun süren AI Coach isteklerini kesmesin (nginx
 # proxy_read_timeout 300 ile uyumlu).
+
+# Sağlık kontrolü: /health 200 dönmezse konteyner "unhealthy" işaretlenir.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5000/health', timeout=4).status==200 else 1)"
+
 CMD ["gunicorn", "--bind", "0.0.0.0:5000", \
      "--workers", "1", "--threads", "8", \
      "--timeout", "300", "--graceful-timeout", "30", \

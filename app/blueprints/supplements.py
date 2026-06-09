@@ -5,6 +5,7 @@ from flask_login import current_user, login_required
 from app.extensions import db
 from app.models import Supplement
 from app.services.gamification import award_xp, complete_quest_for_user, log_activity
+from app.services.validators import _to_float
 
 
 bp = Blueprint("supplements", __name__)
@@ -58,7 +59,7 @@ def supplement_add():
         rating_digestion=parse_rating(data.get("rating_digestion")),
         rating_price=parse_rating(data.get("rating_price")),
         review_text=(data.get("review_text") or "").strip() or None,
-        price_paid=float(data["price_paid"]) if data.get("price_paid") else None,
+        price_paid=_to_float(data["price_paid"], None) if data.get("price_paid") else None,
         is_public=data.get("is_public", True),
     )
     db.session.add(supp)
@@ -116,7 +117,7 @@ def supplement_edit(sid):
     if "review_text" in data:
         supp.review_text = (data["review_text"] or "").strip() or None
     if "price_paid" in data:
-        supp.price_paid = float(data["price_paid"]) if data["price_paid"] else None
+        supp.price_paid = _to_float(data["price_paid"], None) if data["price_paid"] else None
     if "is_public" in data:
         supp.is_public = bool(data["is_public"])
 
