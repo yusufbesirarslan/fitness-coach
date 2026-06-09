@@ -10,7 +10,7 @@ from app.extensions import _user_or_ip_key, db, limiter
 from app.models import CustomMeal, CustomMealItem, MealLog, NutritionPlan, UserSession
 from app.services.ai import PORTION_SANITY_RULE, _openai_chat
 from app.services.gamification import complete_quest_for_user
-from app.services.validators import _meal_photo_url, validate_meal_photo
+from app.services.validators import _meal_photo_url, _to_float, validate_meal_photo
 
 
 bp = Blueprint("nutrition", __name__)
@@ -158,12 +158,12 @@ def diary_add_item(meal_id):
 
     srv_id = data.get("serving_id")
     if srv_id:
-        qty = float(data.get("serving_quantity", 1))
-        srv_cal = float(data.get("serving_calories", 0))
-        srv_pro = float(data.get("serving_protein", 0))
-        srv_carb = float(data.get("serving_carbs", 0))
-        srv_fat = float(data.get("serving_fat", 0))
-        metric_amt = float(data.get("metric_serving_amount", 0))
+        qty = _to_float(data.get("serving_quantity", 1), 1)
+        srv_cal = _to_float(data.get("serving_calories", 0))
+        srv_pro = _to_float(data.get("serving_protein", 0))
+        srv_carb = _to_float(data.get("serving_carbs", 0))
+        srv_fat = _to_float(data.get("serving_fat", 0))
+        metric_amt = _to_float(data.get("metric_serving_amount", 0))
         grams = round(metric_amt * qty, 1) if metric_amt else 0
         p100_cal = round(srv_cal / metric_amt * 100, 2) if metric_amt else 0
         p100_pro = round(srv_pro / metric_amt * 100, 2) if metric_amt else 0
@@ -187,13 +187,15 @@ def diary_add_item(meal_id):
             serving_quantity=qty,
         )
     else:
-        grams = float(data.get("grams", 100))
-        per_100g = data.get("per_100g", {})
+        grams = _to_float(data.get("grams", 100), 100)
+        per_100g = data.get("per_100g")
+        if not isinstance(per_100g, dict):
+            per_100g = {}
         scale = grams / 100.0
-        p100_cal = float(per_100g.get("calories", 0))
-        p100_pro = float(per_100g.get("protein", 0))
-        p100_carb = float(per_100g.get("carbs", 0))
-        p100_fat = float(per_100g.get("fat", 0))
+        p100_cal = _to_float(per_100g.get("calories", 0))
+        p100_pro = _to_float(per_100g.get("protein", 0))
+        p100_carb = _to_float(per_100g.get("carbs", 0))
+        p100_fat = _to_float(per_100g.get("fat", 0))
         item = CustomMealItem(
             custom_meal_id=meal_id,
             food_name=food_name,
@@ -233,12 +235,12 @@ def diary_update_item(item_id):
     srv_id = data.get("serving_id")
 
     if srv_id:
-        qty = float(data.get("serving_quantity", 1))
-        srv_cal = float(data.get("serving_calories", 0))
-        srv_pro = float(data.get("serving_protein", 0))
-        srv_carb = float(data.get("serving_carbs", 0))
-        srv_fat = float(data.get("serving_fat", 0))
-        metric_amt = float(data.get("metric_serving_amount", 0))
+        qty = _to_float(data.get("serving_quantity", 1), 1)
+        srv_cal = _to_float(data.get("serving_calories", 0))
+        srv_pro = _to_float(data.get("serving_protein", 0))
+        srv_carb = _to_float(data.get("serving_carbs", 0))
+        srv_fat = _to_float(data.get("serving_fat", 0))
+        metric_amt = _to_float(data.get("metric_serving_amount", 0))
         item.serving_id = str(srv_id)
         item.serving_description = data.get("serving_description", "")
         item.serving_quantity = qty
@@ -253,7 +255,7 @@ def diary_update_item(item_id):
             item.per_100g_carbs = round(srv_carb / metric_amt * 100, 2)
             item.per_100g_fat = round(srv_fat / metric_amt * 100, 2)
     elif "serving_quantity" in data and item.serving_id:
-        qty = float(data["serving_quantity"])
+        qty = _to_float(data["serving_quantity"], item.serving_quantity or 1)
         old_qty = item.serving_quantity or 1
         factor = qty / old_qty
         item.serving_quantity = qty
@@ -263,7 +265,7 @@ def diary_update_item(item_id):
         item.carbs = round(item.carbs * factor, 1)
         item.fat = round(item.fat * factor, 1)
     else:
-        grams = float(data.get("grams", item.grams))
+        grams = _to_float(data.get("grams", item.grams), item.grams)
         scale = grams / 100.0
         item.grams = grams
         item.calories = round((item.per_100g_calories or 0) * scale, 1)
@@ -459,12 +461,12 @@ def log_meal():
     yemekler_for_prompt = normalized_yemekler
 
     override = data.get("override_macros")
-    if override:
+    if override and isinstance(override, dict):
         nutrients = {
-            "kalori": round(float(override.get("kalori", 0)), 1),
-            "protein": round(float(override.get("protein", 0)), 1),
-            "karb": round(float(override.get("karb", 0)), 1),
-            "yag": round(float(override.get("yag", 0)), 1),
+            "kalori": round(_to_float(override.get("kalori", 0)), 1),
+            "protein": round(_to_float(override.get("protein", 0)), 1),
+            "karb": round(_to_float(override.get("karb", 0)), 1),
+            "yag": round(_to_float(override.get("yag", 0)), 1),
         }
         today = datetime.utcnow().strftime("%d.%m")
         entry = MealLog(

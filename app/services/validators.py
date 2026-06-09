@@ -5,6 +5,16 @@ from flask import current_app
 from werkzeug.security import generate_password_hash
 
 
+def _to_float(value, default=0.0):
+    """Kullanıcı JSON'undan gelen sayıyı güvenle float'a çevir; geçersiz/eksikse
+    default döner (500 yerine). Diary/öğün/supplement makro & fiyat girişlerinde
+    ValueError/TypeError'a karşı."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 
 _PROFILE_PIC_RE = re.compile(
     r'^data:image/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/]+={0,2})$'

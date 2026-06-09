@@ -26,6 +26,11 @@ def create_app():
 
     register_blueprints(app)
 
+    @app.route("/health")
+    def health():
+        # Konteyner sağlık kontrolü (Docker HEALTHCHECK). Auth gerektirmez, body okumaz.
+        return {"status": "ok"}, 200
+
     # before_request order must match the original monolith:
     #   _csrf_protect -> (limiter) _check_request_limit -> maybe_weekly_rollover -> update_streak
     from app.hooks import _csrf_protect, maybe_weekly_rollover, update_streak, inject_rank, \
