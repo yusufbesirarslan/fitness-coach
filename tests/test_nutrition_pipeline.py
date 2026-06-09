@@ -15,6 +15,7 @@ from nutrition_pipeline import (  # noqa: E402
     build_evaluation,
     check_serving,
     estimate_serving_grams,
+    find_cloned_keys,
     parse_fatsecret_serving,
     sanitize_servings,
     score_compatibility,
@@ -386,6 +387,44 @@ class TestBuildEvaluation:
                                {"calories": 10, "protein": 1, "carbs": 1, "fat": 0},
                                {"calories": 100, "protein": 10, "carbs": 10, "fat": 5})
         assert out["food_id"] == ""
+
+
+class TestCloneDetection:
+    """todos.txt 'keyword-group ingestion bug': FatSecret farkli urunlere AYNI genel
+    kaydi (ozdes makro) dondurunce klonlar tespit edilip LLM'e yonlendirilmeli."""
+
+    def test_specialty_burgers_flagged_as_clones(self):
+        # 'Acili/Mantar/Soslu Burger' hepsi 705/82/0/40 -> uctu de klon.
+        burger_sig = (705.0, 82.0, 0.0, 40.0)
+        sigs = {
+            "Acılı Burger": burger_sig,
+            "Mantar Burger": burger_sig,
+            "Soslu Burger": burger_sig,
+        }
+        assert find_cloned_keys(sigs) == {"Acılı Burger", "Mantar Burger", "Soslu Burger"}
+
+    def test_only_the_collided_subset_is_flagged(self):
+        # Iki pasta klon, ucuncu (farkli imza) korunur.
+        pasta_sig = (800.0, 40.0, 92.0, 48.0)
+        sigs = {
+            "Domatesli Makarna": pasta_sig,
+            "Kremalı Makarna": pasta_sig,
+            "Izgara Tavuk": (220.0, 33.0, 0.0, 9.0),
+        }
+        assert find_cloned_keys(sigs) == {"Domatesli Makarna", "Kremalı Makarna"}
+
+    def test_distinct_signatures_no_clones(self):
+        sigs = {
+            "Mercimek Çorbası": (180.0, 9.0, 24.0, 5.0),
+            "Çoban Salata": (90.0, 3.0, 10.0, 5.0),
+        }
+        assert find_cloned_keys(sigs) == set()
+
+    def test_single_item_never_flagged(self):
+        assert find_cloned_keys({"Tek Yemek": (500.0, 30.0, 40.0, 20.0)}) == set()
+
+    def test_empty_input(self):
+        assert find_cloned_keys({}) == set()
 
 
 def test_constants_sane():

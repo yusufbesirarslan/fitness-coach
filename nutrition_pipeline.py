@@ -266,6 +266,25 @@ def sanitize_servings(servings, food_type=None):
     return sanitized
 
 
+def find_cloned_keys(name_to_signature):
+    """Birbirinden FARKLI isimlere AYNI imzayi (makro/food_id) atanmis girdileri
+    bul (todos.txt 'keyword-group ingestion bug').
+
+    FatSecret 'Acili Burger', 'Mantar Burger' vb. nitelendiriciyi yok sayip her
+    sorgu icin AYNI genel kaydi dondurunce, farkli urunler ozdes makrolarla
+    'klonlanir'. ``name_to_signature`` her urun adini hashlenebilir bir imzaya
+    (orn. ``(cal, protein, carbs, fat)`` demeti) esler; >=2 farkli isim ayni imzayi
+    paylasiyorsa o isimlerin tamami klon kabul edilir ve geri dondurulur (cagiran
+    bunlari FatSecret sonucundan atip kisiye-ozel LLM tahminine yonlendirir).
+
+    Saf fonksiyon: tek girdi (eslesmesiz) -> bos kume (yanlis pozitif yok).
+    """
+    counts = {}
+    for sig in name_to_signature.values():
+        counts[sig] = counts.get(sig, 0) + 1
+    return {name for name, sig in name_to_signature.items() if counts[sig] >= 2}
+
+
 # ---------------------------------------------------------------------------
 # MODULE 2 — Deterministik uyum skoru (0-100)
 # ---------------------------------------------------------------------------

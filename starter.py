@@ -3530,6 +3530,11 @@ def _parse_suggestion_items(body_text):
 def _lookup_macros_fatsecret(items, token):
     per_serving = {}
     per_100g = {}
+    # Klon tespiti (todos.txt): her eslesen ismin makro imzasini ve food_id'sini
+    # tut. FatSecret farkli "X Burger" sorgulari icin AYNI genel kaydi dondurunce
+    # imzalar cakisir; donguden sonra bunlari atip kisiye-ozel LLM'e yonlendiririz.
+    signatures = {}
+    name_to_fid = {}
     for name in items:
         try:
             fs_resp = _fs_get(FATSECRET_API_URL, params={
@@ -3548,6 +3553,7 @@ def _lookup_macros_fatsecret(items, token):
 
             found_serving = False
             baseline_100g = None
+            baseline_fid = ""
 
             for food in foods:
                 desc_raw = food.get("food_description", "")
@@ -3583,18 +3589,35 @@ def _lookup_macros_fatsecret(items, token):
                 if is_serv:
                     per_serving[name] = macros
                     found_serving = True
+                    signatures[name] = (round(macros["calories"], 1), round(macros["protein"], 1),
+                                        round(macros["carbs"], 1), round(macros["fat"], 1))
+                    name_to_fid[name] = food.get("food_id", "")
                     app.logger.info(f"[MACRO ENGINE] FatSecret per-serving match: '{name}' → Cal={macros['calories']}, P={macros['protein']}, C={macros['carbs']}, F={macros['fat']}")
                     break
                 if baseline_100g is None:
                     baseline_100g = macros
+                    baseline_fid = food.get("food_id", "")
 
             if not found_serving and baseline_100g:
                 per_100g[name] = baseline_100g
+                signatures[name] = (round(baseline_100g["calories"], 1), round(baseline_100g["protein"], 1),
+                                    round(baseline_100g["carbs"], 1), round(baseline_100g["fat"], 1))
+                name_to_fid[name] = baseline_fid
                 app.logger.info(f"[MACRO ENGINE] FatSecret per-100g baseline: '{name}' → Cal={baseline_100g['calories']}/100g")
 
         except Exception as e:
             app.logger.warning(f"[MACRO ENGINE] FatSecret lookup failed for '{name}': {type(e).__name__}: {e}")
             continue
+
+    # Klon ayikla (todos.txt): farkli urunlere ozdes makrolar atanmissa FatSecret
+    # genel/yanlis bir kaydi cogaltmistir. Bunlari sonuctan dusur; cagiran (analyze
+    # _menu / _process_meal_suggestion_accept) cozulmeyen isimleri zaten _estimate
+    # _macros_llm'e yonlendirip her varyant icin AYRI gercekci makro uretir.
+    for name in nutrition_pipeline.find_cloned_keys(signatures):
+        per_serving.pop(name, None)
+        per_100g.pop(name, None)
+        app.logger.info(f"[MACRO ENGINE] Clone dropped → LLM: '{name}' (fid={name_to_fid.get(name, '')})")
+
     app.logger.info(f"[MACRO ENGINE] FatSecret totals: {len(per_serving)} per-serving, {len(per_100g)} per-100g, {len(items) - len(per_serving) - len(per_100g)} missed")
     return per_serving, per_100g
 
