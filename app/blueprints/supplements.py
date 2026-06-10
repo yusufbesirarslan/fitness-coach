@@ -28,7 +28,7 @@ def supplements_page():
 @bp.route("/supplement/add", methods=["POST"])
 @login_required
 def supplement_add():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     name = (data.get("product_name") or "").strip()
     brand = (data.get("brand") or "").strip()
     if not name or not brand:
@@ -87,7 +87,7 @@ def supplement_edit(sid):
     if supp.user_id != current_user.id:
         return jsonify({"error": "Yetkiniz yok."}), 403
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
 
     if "product_name" in data:
         name = (data["product_name"] or "").strip()

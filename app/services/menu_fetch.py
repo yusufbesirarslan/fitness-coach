@@ -300,7 +300,7 @@ def _process_google_drive_url(url):
         return None, "Google Drive bağlantısından dosya kimliği çıkarılamadı."
 
     direct_url, url_type = _get_drive_direct_url(url, file_id)
-    current_app.logger.info(f"[DRIVE] Detected type={url_type}, file_id={file_id}, direct_url={direct_url}")
+    current_app.logger.debug(f"[DRIVE] Detected type={url_type}, file_id={file_id}, direct_url={direct_url}")
 
     _DRIVE_MAX_BYTES = 50 * 1024 * 1024
 
@@ -357,7 +357,7 @@ def _process_google_drive_url(url):
         confirm_link = soup.find("a", {"id": "uc-download-link"})
         if confirm_link and confirm_link.get("href"):
             confirm_url = "https://drive.google.com" + confirm_link["href"]
-            current_app.logger.info(f"[DRIVE] Virus scan confirmation redirect: {confirm_url}")
+            current_app.logger.debug(f"[DRIVE] Virus scan confirmation redirect: {confirm_url}")
             try:
                 resp2 = _safe_requests_get(confirm_url, timeout=15, headers={
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",

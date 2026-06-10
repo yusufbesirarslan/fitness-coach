@@ -11,6 +11,9 @@ _food_id_cache = {}   # name → fatsecret food_id
 _MACRO_CACHE_MAX = 500
 
 
+_FOOD_ID_CACHE_MAX = 1000
+
+
 def _get_cached_macros(item_names):
     hits = {}
     misses = []
@@ -30,3 +33,18 @@ def _cache_macros(macro_map):
                 oldest = next(iter(_macro_cache))
                 del _macro_cache[oldest]
             _macro_cache[name] = macros
+
+
+def _cache_food_id(name, fid):
+    """name → FatSecret food_id eşlemesini sınırlı (bounded) bir sözlükte tut.
+
+    _macro_cache gibi FIFO tavanı uygula: kimliği doğrulanmış kullanıcılar
+    serbest metin sorgularıyla bu önbelleği büyütebildiği için tavansız bırakmak
+    yavaş bir bellek-büyümesi (DoS) vektörü olurdu."""
+    if not name or not fid:
+        return
+    key = name.lower()
+    if key not in _food_id_cache and len(_food_id_cache) >= _FOOD_ID_CACHE_MAX:
+        oldest = next(iter(_food_id_cache))
+        del _food_id_cache[oldest]
+    _food_id_cache[key] = fid

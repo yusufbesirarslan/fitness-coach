@@ -19,7 +19,7 @@ bp = Blueprint("nutrition", __name__)
 @bp.route("/nutrition-plan/save", methods=["POST"])
 @login_required
 def save_nutrition_plan():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     plan = data.get("plan")
     score = data.get("score")
 
@@ -61,7 +61,7 @@ def get_active_nutrition_plan():
 @bp.route("/api/quick-add-meal", methods=["POST"])
 @login_required
 def quick_add_meal():
-    data     = request.get_json()
+    data     = request.get_json(silent=True) or {}
     meal_key = data.get("meal_key", "")
 
     MEAL_LABELS = {
@@ -120,7 +120,7 @@ def quick_add_meal():
 @bp.route("/api/diary/meal", methods=["POST"])
 @login_required
 def diary_create_meal():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     meal_name = data.get("meal_name", "").strip()
     date_key = data.get("date_key", date.today().isoformat())
 
@@ -149,7 +149,7 @@ def diary_add_item(meal_id):
     if meal.is_logged:
         return jsonify({"error": "Bu öğün zaten kaydedilmiş"}), 400
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     food_name = data.get("food_name", "").strip()
     food_id = data.get("fatsecret_food_id", "")
 
@@ -231,7 +231,7 @@ def diary_update_item(item_id):
     if item.meal.is_logged:
         return jsonify({"error": "Bu öğün zaten kaydedilmiş"}), 400
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     srv_id = data.get("serving_id")
 
     if srv_id:
@@ -408,7 +408,7 @@ def diary_today():
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def log_meal():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     ogun     = data.get("ogun", "")
     yemekler = data.get("yemekler", "")
 
@@ -694,7 +694,7 @@ def nutrition():
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def nutrition_plan_generate():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     FOOD_DATABASE = {
     "protein": {
         "hayvansal": [
