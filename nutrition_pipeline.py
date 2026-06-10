@@ -32,6 +32,14 @@ MAX_KCAL_PER_100G = 900.0
 MAX_SERVING_KCAL = 3000.0
 MAX_SERVING_MACRO_G = 300.0
 
+# Tek bir insan porsiyonundaki YAĞ icin daha siki, ayri bir tavan. Mesru cok yagli
+# tabaklar (buyuk antipasti/karisik izgara ~100-120 g yag) gecsin ama olcekleme
+# patlamalari elensin: ornegin 'olive' aramasi saf zeytinyagina eslesip porsiyon
+# agirligiyla carpilinca uretilen 202 g yag / 1848 kcal'lik "salata" -> imkansiz.
+# Atwater tutarli oldugu (yag-kalorisi ~ beyan kalori) icin enerji kontrolune
+# takilmiyordu; bu mutlak yag tavani agirliktan bagimsiz olarak yakalar.
+MAX_SERVING_FAT_G = 150.0
+
 # Protein+Karb+Yag gram toplami porsiyon agirligini bu kadar gram asabilir
 # (kayan nokta yuvarlama paylari icin kucuk tolerans).
 MACRO_WEIGHT_TOLERANCE_G = 1.0
@@ -77,6 +85,18 @@ _BALANCE_PENALTY_WEIGHT = 100.0
 # Bir besinin "protein orani dusuk" olarak isaretlenecegi esik (kalori payi).
 # high_protein esiginin (0.20) altinda tutulur ki iki isaret cakismasin.
 _LOW_PROTEIN_FLAG_SHARE = 0.15
+
+# "high_protein" etiketi icin kalori payinin (>=0.20) YANI SIRA gereken MUTLAK
+# protein (gram). Yalniz oran bakmak, 45 kcal'lik 3 g proteinli bir salatayi
+# (3 g -> 12 kcal -> kalorinin %27'si) "yuksek protein" gosteriyordu; mutlak esik
+# bunu eler — gercekten proteinli bir ogun en az bu kadar gram protein icermeli.
+_HIGH_PROTEIN_MIN_G = 15.0
+
+# "low_fat" etiketi artik besinin KENDI yag-enerji payina bakar (yag_kcal/toplam),
+# kullanicinin kalan yag butcesine DEGIL. Bu esigin altindaki yag payi "dusuk yag"
+# sayilir. Boylece kalori-yogun yagli bir tabak (orn. 20 g yag / 255 kcal = %67),
+# kullanicinin kalan butcesi bol olsa bile yanlislikla "dusuk yag" etiketi almaz.
+_LOW_FAT_CAL_SHARE = 0.30
 
 # Deterministik porsiyon -> gram/ml ortalama agirlik matrisi. SADECE FatSecret
 # metric_serving_amount eksik/0 oldugunda yedek olarak kullanilir; LLM tahmini
@@ -221,6 +241,11 @@ def check_serving(serving):
     if max(protein, carbs, fat) > MAX_SERVING_MACRO_G:
         is_valid = False
         reasons.append("macro_exceeds_serving_max")
+    # Yag, genel makro tavanindan daha siki bir esige tabi (olcekleme patlamalarini
+    # erken yakalar; tek tabakta >150 g yag fiziksel olarak imkansiz).
+    if fat > MAX_SERVING_FAT_G:
+        is_valid = False
+        reasons.append("fat_exceeds_serving_max")
 
     # Atwater / enerji korunumu.
     expected_cal = 4.0 * protein + 4.0 * carbs + 9.0 * fat
@@ -390,9 +415,14 @@ def score_compatibility(food_macros, remaining):
     score = int(round(max(0.0, min(100.0, raw))))
 
     # Deterministik isaretler.
-    if rem_fat > 0 and fat_ratio < 0.30:
+    # low_fat: besinin KENDI yag-enerji payina gore (kalan butceye gore degil) —
+    # yagli yemekler buyuk butce kaldiginda yanlis "dusuk yag" damgasi almasin.
+    fat_cal_share = (9.0 * fat / cal) if cal > 0 else 0.0
+    if cal > 0 and fat_cal_share < _LOW_FAT_CAL_SHARE:
         flags.append("low_fat")
-    if protein_cal_share >= 0.20:
+    # high_protein: hem kalori payi (>=0.20) HEM DE mutlak gram (>=_HIGH_PROTEIN_MIN_G)
+    # esigini gecmeli — kucuk porsiyonlu az-protein (orn. 3 g'lik salata) elensin.
+    if protein_cal_share >= 0.20 and protein >= _HIGH_PROTEIN_MIN_G:
         flags.append("high_protein")
     elif rem_pro > 0 and protein_cal_share < _LOW_PROTEIN_FLAG_SHARE:
         flags.append("low_protein_food")
