@@ -9,7 +9,7 @@ from app.config import OPENAI_MODEL
 from app.extensions import db, openai_client
 from app.models import PendingAction, User, UserDailyNutrition, UserSession, WorkoutLog
 from app.services.ai import _openai_chat
-from app.services.ai_nutrition import _food_search_llm
+from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
 from app.services.fatsecret import _food_search_fatsecret, _food_search_static
 from app.services.gamification import award_xp, log_activity
 
@@ -130,12 +130,31 @@ def _extract_grams(text):
 
 
 def _coach_search_food(query):
-    """Birleşik besin araması: FatSecret birincil, erişilemezse statik/LLM
-    fallback. Hepsi 100g bazlı 'per_100g' makroları içerir."""
-    return (_food_search_fatsecret(query)
-            or _food_search_static(query)
-            or _food_search_llm(query)
-            or [])
+    """Birleşik besin araması — alaka-kapısı + TR→EN normalizasyonlu.
+
+    1) Ham sorguyla FatSecret dene (İngilizce sorgular ve marka adları doğrudan
+       eşleşir). Sonuçları ALAKA filtresinden geçir: FatSecret eşleyemediği
+       Türkçe sorgulara ilgisiz jenerik besin döndürdüğü için ('patates
+       kızartması' → 'Soy Nuts') ad-token örtüşmesi olmayanları ele.
+    2) Alakalı sonuç yoksa sorguyu İngilizce'ye çevirip tekrar dene — FatSecret
+       verisi ağırlıklı İngilizce, Türkçe serbest metin nadiren eşleşir.
+    3) Son çare: statik Türkçe tablo, sonra LLM tahmini.
+    Hepsi 100g bazlı 'per_100g' makroları içerir."""
+    raw = (query or "").strip()
+
+    relevant = [r for r in (_food_search_fatsecret(raw) or [])
+                if _is_relevant_food(raw, r.get("name", ""))]
+    if relevant:
+        return relevant
+
+    english = _normalize_food_query_en(raw)
+    if english and english.lower() != raw.lower():
+        relevant = [r for r in (_food_search_fatsecret(english) or [])
+                    if _is_relevant_food(english, r.get("name", ""))]
+        if relevant:
+            return relevant
+
+    return _food_search_static(raw) or _food_search_llm(english or raw) or []
 
 
 def _today_nutrition_totals(user_id):
@@ -476,17 +495,52 @@ def _dispatch_coach_tool(user_id, name, arguments_json):
 COACH_HISTORY_LIMIT = 6          # son 3 alışveriş (user+assistant) yeterli bağlam
 
 
-COACH_HISTORY_CHAR_CAP = 400     # her turu kırp ki cookie sınırı aşılmasın
+COACH_HISTORY_CHAR_CAP = 400     # her turu kırp ki istem şişmesin
 
 
-def _run_coach_conversation(user_id, question, context):
+def _sanitize_client_history(raw):
+    """Widget'ın gönderdiği konuşma geçmişini güvenli OpenAI mesajlarına çevir.
+
+    Widget formatı: [{"role": "user"|"bot", "text": "..."}]. 'bot' → 'assistant'
+    eşlenir, metin kırpılır, yalnızca düz-metin user/assistant turları geçer
+    (tool/sistem rolleri client'tan KABUL EDİLMEZ). Bozuk girdi sessizce atlanır."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for item in raw[-COACH_HISTORY_LIMIT:]:
+        if not isinstance(item, dict):
+            continue
+        role = item.get("role")
+        role = "assistant" if role in ("bot", "assistant") else "user" if role == "user" else None
+        if role is None:
+            continue
+        text = item.get("text") or item.get("content") or ""
+        if not isinstance(text, str):
+            continue
+        text = text.strip()
+        if text:
+            out.append({"role": role, "content": text[:COACH_HISTORY_CHAR_CAP]})
+    return out
+
+
+def _run_coach_conversation(user_id, question, context, client_history=None):
     """OpenAI function-calling döngüsü: system → (gerekirse araç çağrıları) → final metin.
 
-    Çok turlu onay akışı için konuşma geçmişi sunucu tarafında session'da tutulur
-    (chat widget'ı history göndermiyor). Asıl 'staged' veri DB'deki PendingAction'da
-    yaşar; session yalnızca modelin onay niyetini anlaması için düz-metin tutar.
+    Konuşma geçmişi kullanıcının GÖRDÜĞÜ sohbettir: widget her istekte `history`
+    gönderir, biz onu kaynak-doğru kabul ederiz (UI ↔ model her zaman senkron;
+    "sohbeti temizle" doğal çalışır). Asıl 'staged' veri DB'deki PendingAction'da
+    yaşar — onay/iptal akışı geçmiş metnine değil, ona bağlıdır. Geriye dönük
+    uyumluluk için client geçmiş göndermezse eski session-cookie'sine düşülür.
     """
-    history = session.get("coach_history", [])
+    use_client = client_history is not None
+    if use_client:
+        history = _sanitize_client_history(client_history)
+        # Widget mevcut soruyu da history'nin sonuna iter; soruyu aşağıda biz
+        # ayrıca eklediğimiz için sondaki user turlarını atıp çift eklemeyi önle.
+        while history and history[-1]["role"] == "user":
+            history.pop()
+    else:
+        history = session.get("coach_history", [])
 
     messages = [{"role": "system", "content": COACH_SYSTEM_PROMPT}]
     if context:
@@ -532,10 +586,13 @@ def _run_coach_conversation(user_id, question, context):
     if not final_text:
         final_text = "Bir şeyler ters gitti, tekrar dener misin?"
 
-    # Düz-metin geçmişini güncelle (tool mesajları session'a yazılmaz; durum DB'de).
-    history.append({"role": "user", "content": question[:COACH_HISTORY_CHAR_CAP]})
-    history.append({"role": "assistant", "content": final_text[:COACH_HISTORY_CHAR_CAP]})
-    session["coach_history"] = history[-COACH_HISTORY_LIMIT:]
+    # Geçmiş artık client'ta (widget sessionStorage) tutuluyor; client modunda
+    # session'a YAZMA (UI kaynak-doğru). Yalnızca client history göndermezse eski
+    # cookie geçmişini güncelle — geriye dönük uyumluluk.
+    if not use_client:
+        history.append({"role": "user", "content": question[:COACH_HISTORY_CHAR_CAP]})
+        history.append({"role": "assistant", "content": final_text[:COACH_HISTORY_CHAR_CAP]})
+        session["coach_history"] = history[-COACH_HISTORY_LIMIT:]
     return final_text
 
 

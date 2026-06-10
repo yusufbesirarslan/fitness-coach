@@ -110,6 +110,11 @@ def chat():
 def ask_coach():
     data     = request.get_json(silent=True) or {}
     question = (data.get("question") or "").strip()
+    # Widget her istekte kullanıcının gördüğü sohbeti gönderir → kaynak-doğru.
+    # Liste değilse None bırak ki _run_coach_conversation eski session'a düşsün.
+    client_history = data.get("history")
+    if not isinstance(client_history, list):
+        client_history = None
 
     if not question:
         return jsonify({"error": "Bir soru yaz."}), 400
@@ -123,7 +128,7 @@ def ask_coach():
         context = ""
 
     try:
-        answer = _run_coach_conversation(current_user.id, question, context)
+        answer = _run_coach_conversation(current_user.id, question, context, client_history)
         return jsonify({"answer": answer})
     except Exception:
         current_app.logger.exception("Koç yanıtı üretilemedi")
