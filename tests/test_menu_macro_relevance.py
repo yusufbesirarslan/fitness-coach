@@ -20,7 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.services.ai_nutrition import _is_relevant_food  # noqa: E402
+from app.services.ai_nutrition import _is_relevant_food, _is_specific_match, _token_match_count  # noqa: E402
 from app.services.menu_extract import _is_price_noise, _extract_page_sections  # noqa: E402
 
 
@@ -51,6 +51,44 @@ def test_specific_turkish_names_still_match_turkish_entries():
     # Accent-folding: a raw Turkish query must still match a Turkish DB entry.
     assert _is_relevant_food("Köfte", "Köfte") is True
     assert _is_relevant_food("Omlet", "Omlet") is True
+
+
+# ---------------------------------------------------------------------------
+# Strict specificity gate — FatSecret "family collapse" (the 2nd-pass bug).
+#
+# Multi-word dishes share only a generic category token with FatSecret's generic
+# entry, so the relevance gate (1 shared token) let the SAME generic land on every
+# variant → 7 burgers all identical at 705/82/0/40 with 0 g carb; 3 salads all at
+# 40 kcal. The strict gate requires >=2 token matches for multi-token queries, so
+# generic-only matches are rejected and the item falls through to the LLM.
+# ---------------------------------------------------------------------------
+
+def test_generic_family_collapse_rejected_by_strict_gate():
+    # All of these passed the loose gate via the single 'burger'/'salad' token —
+    # the strict gate must reject them so they don't collapse onto a generic.
+    assert _is_specific_match("Tavuk Burger", "Burger") is False        # chicken→generic
+    assert _is_specific_match("Vejetaryen Burger", "Beef Burger") is False  # veggie→beef!
+    assert _is_specific_match("Mantar Burger", "Burger") is False
+    assert _is_specific_match("caesar salad", "Salad") is False
+    assert _is_specific_match("chicken burger", "Beef Burger") is False
+
+
+def test_strict_gate_keeps_specific_matches():
+    assert _is_specific_match("chicken burger", "Chicken Burger") is True
+    assert _is_specific_match("caesar salad", "Caesar Salad") is True
+    assert _is_specific_match("bacon burger", "Bacon Burger") is True
+    assert _is_specific_match("chicken soup", "Chicken Soup") is True
+    # Single-token (atomic) items keep the 1-match behaviour — no family-collapse.
+    assert _is_specific_match("Cheeseburger", "Cheeseburger") is True
+    assert _is_specific_match("tea", "Black Tea") is True
+    assert _is_specific_match("cola", "Coca-Cola") is True
+
+
+def test_token_match_count_orders_by_specificity():
+    # The candidate sort key: the most-specific (most query tokens covered) wins.
+    assert _token_match_count("chicken burger", "Chicken Burger") == 2
+    assert _token_match_count("chicken burger", "Beef Burger") == 1
+    assert _token_match_count("chicken burger", "Soy Nuts") == 0
 
 
 # ---------------------------------------------------------------------------
