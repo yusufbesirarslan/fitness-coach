@@ -178,6 +178,31 @@ _USER_AGENTS = [
 ]
 
 
+def _acceptable_encodings():
+    """Accept-Encoding değerini, GERÇEKTEN açabildiğimiz içerik-kodlamalarından kur.
+
+    urllib3 gzip/deflate'i şeffaf açar; brotli ("br") ise yalnızca `brotli` veya
+    `brotlicffi` paketi kuruluysa açılabilir. Decoder olmadan "br" reklamı yapmak,
+    brotli'yi tercih eden (Cloudflare arkasındaki çoğu TR restoran sitesi gibi)
+    origin'lerin sıkıştırılmış gövdeyi geri vermesine yol açar — urllib3 onu
+    açamaz, "HTML" ikili çöpe döner ve hiçbir menü öğesi çıkarılamaz. Bu yüzden
+    "br"yi yalnızca decoder mevcutsa ilan ederiz; aksi halde gzip'e düşeriz."""
+    encodings = ["gzip", "deflate"]
+    try:
+        import brotli  # noqa: F401
+        encodings.append("br")
+    except ImportError:
+        try:
+            import brotlicffi  # noqa: F401
+            encodings.append("br")
+        except ImportError:
+            pass
+    return ", ".join(encodings)
+
+
+_ACCEPT_ENCODING = _acceptable_encodings()
+
+
 def _fetch_page(url, timeout=10):
     import requests as http_req
     import random
@@ -189,7 +214,7 @@ def _fetch_page(url, timeout=10):
         "User-Agent": ua,
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Encoding": _ACCEPT_ENCODING,
         "DNT": "1",
         "Connection": "keep-alive",
         "Upgrade-Insecure-Requests": "1",
