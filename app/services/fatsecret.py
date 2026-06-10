@@ -9,7 +9,7 @@ from flask import current_app
 
 from app.config import FATSECRET_API_URL, FATSECRET_TOKEN_URL
 from app.services.ai_nutrition import _estimate_serving_weights_llm
-from app.services.foodcache import _cache_macros, _food_id_cache
+from app.services.foodcache import _cache_food_id, _cache_macros
 
 
 def _fs_get(url, **kwargs):
@@ -285,7 +285,7 @@ def _food_search_fatsecret(q):
         fid = f.get("food_id", "")
         _cache_macros({name: per_100g})
         if fid:
-            _food_id_cache[name.lower()] = fid
+            _cache_food_id(name, fid)
         results.append({
             "name": name,
             "brand": f.get("brand_name", ""),

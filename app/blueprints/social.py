@@ -200,7 +200,7 @@ def chat_send(username):
     if not are_friends(current_user.id, other.id):
         return jsonify({"error": "Arkadaş değilsiniz."}), 403
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     body = (data.get("body") or "").strip()
     if not body:
         return jsonify({"error": "Mesaj boş olamaz."}), 400
@@ -231,7 +231,7 @@ def send_suggestion(username):
     if not are_friends(current_user.id, other.id):
         return jsonify({"error": "Arkadaş değilsiniz."}), 403
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     stype = data.get("type")
     body = (data.get("body") or "").strip()
     if stype not in ("suggestion_meal", "suggestion_workout"):
@@ -259,7 +259,7 @@ def respond_suggestion(msg_id):
     if msg.message_type not in ("suggestion_meal", "suggestion_workout"):
         return jsonify({"error": "Bu bir öneri mesajı değil."}), 400
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     action = data.get("action")
     if action not in ("accept", "decline"):
         return jsonify({"error": "Geçersiz işlem."}), 400

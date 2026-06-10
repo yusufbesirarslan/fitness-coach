@@ -35,7 +35,7 @@ def home():
 @bp.route("/log", methods=["POST"])
 @login_required
 def log_progress():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     weight = data.get("weight")
     note = data.get("note", "")
 
@@ -96,7 +96,7 @@ def progress():
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def checkin():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
 
     weight = data.get("weight")
     if not weight:
@@ -189,7 +189,7 @@ def checkin_history():
 @bp.route("/update-weight", methods=["POST"])
 @login_required
 def update_weight():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     weight = data.get("weight")
 
     if not weight:
@@ -236,7 +236,7 @@ def update_weight():
 @bp.route("/api/activity/log", methods=["POST"])
 @login_required
 def log_daily_activity():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     steps = int(data.get("steps", 0))
     intensity = data.get("intensity", "moderate")
 

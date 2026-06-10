@@ -27,7 +27,7 @@ def proxy_scan_menu():
     from bs4 import BeautifulSoup
     from urllib.parse import urlparse
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     url = (data or {}).get("url", "").strip()
     if not url:
         return jsonify({"error": "URL gerekli."}), 400
@@ -38,7 +38,7 @@ def proxy_scan_menu():
     url = clean_url
 
     if _is_google_drive_url(url):
-        current_app.logger.info(f"[DRIVE] Intercepted Google Drive URL: {url}")
+        current_app.logger.debug(f"[DRIVE] Intercepted Google Drive URL: {url}")
         drive_result, drive_err = _process_google_drive_url(url)
         if drive_err:
             try:
@@ -162,7 +162,7 @@ def proxy_scan_menu():
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def analyze_menu():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     raw_text = (data or {}).get("menu_text", "").strip()
     fw_state = (data or {}).get("framework_state")
     menu_source = (data or {}).get("menu_source", "web_scraper")

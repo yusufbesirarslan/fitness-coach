@@ -18,7 +18,7 @@ def setup():
     if request.method == "GET":
         return render_template("setup.html", username=current_user.username)
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
 
     required = ["weight", "height", "age", "gender", "goal", "fitness_level", "current_activity"]
     for field in required:
@@ -90,7 +90,7 @@ def edit_profile():
             icons=CATEGORY_ICONS,
         )
 
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
 
     new_username = (data.get("username") or "").strip()
     new_full_name = (data.get("full_name") or "").strip()

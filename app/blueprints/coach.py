@@ -17,7 +17,7 @@ bp = Blueprint("coach", __name__)
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def chat():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
 
     required_fields = ["weight", "height", "age",
                        "gender", "goal", "fitness_level", "current_activity"]

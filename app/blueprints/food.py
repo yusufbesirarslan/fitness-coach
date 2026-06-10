@@ -6,7 +6,7 @@ from app.config import FATSECRET_API_URL, FOOD_SEARCH_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter
 from app.services.ai_coach import _coach_search_food
 from app.services.fatsecret import _food_get_servings, _fs_get, _get_fatsecret_token
-from app.services.foodcache import _food_id_cache, _macro_cache
+from app.services.foodcache import _cache_food_id, _food_id_cache, _macro_cache
 
 
 bp = Blueprint("food", __name__)
@@ -23,7 +23,7 @@ def food_search():
     cached = _macro_cache.get(q)
     if cached:
         cached_fid = _food_id_cache.get(q.lower(), "")
-        current_app.logger.info("food_search cache hit for '%s', food_id=%s", q, cached_fid or "(none)")
+        current_app.logger.debug("food_search cache hit for '%s', food_id=%s", q, cached_fid or "(none)")
         return jsonify({"results": [{
             "name": q, "brand": "",
             "food_id": cached_fid,
@@ -41,6 +41,7 @@ def food_search():
 
 @bp.route("/api/food/<food_id>/servings")
 @login_required
+@limiter.limit(FOOD_SEARCH_RATELIMIT, key_func=_user_or_ip_key)
 def food_servings(food_id):
     current_app.logger.info("food_servings called with food_id=%s", food_id)
     servings = _food_get_servings(food_id)
@@ -55,6 +56,7 @@ def food_servings(food_id):
 
 @bp.route("/api/food/servings-by-name")
 @login_required
+@limiter.limit(FOOD_SEARCH_RATELIMIT, key_func=_user_or_ip_key)
 def food_servings_by_name():
     name = request.args.get("name", "").strip()
     if len(name) < 2:
@@ -110,7 +112,7 @@ def food_servings_by_name():
                 fid = foods[0].get("food_id", "")
                 current_app.logger.info("servings-by-name: found food_id=%s for search '%s'", fid, term)
                 if fid:
-                    _food_id_cache[name.lower()] = fid
+                    _cache_food_id(name, fid)
                     servings = _food_get_servings(fid)
                     if servings:
                         return jsonify({"servings": servings, "food_id": fid})

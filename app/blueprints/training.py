@@ -27,7 +27,7 @@ def training():
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def training_plan_generate():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
 
     last = UserSession.query.filter_by(user_id=current_user.id)\
         .order_by(UserSession.created_at.desc())\
@@ -287,7 +287,7 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
 @bp.route("/training-plan/save", methods=["POST"])
 @login_required
 def save_training_plan():
-    data  = request.get_json()
+    data  = request.get_json(silent=True) or {}
     plan  = data.get("plan")
     score = data.get("score")
 
