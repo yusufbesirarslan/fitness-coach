@@ -96,6 +96,59 @@ def _normalize_food_query_en(q):
         return ""
 
 
+def _normalize_food_queries_en(names):
+    """Bir besin adı LİSTESİNİ TEK LLM çağrısında kısa İngilizce arama terimlerine
+    çevir. Menü taraması düzinelerce Türkçe öğe içerir; her birini ayrı ayrı
+    çevirmek (öğe başına 1 çağrı) çok yavaş olur — bu toplu sürüm hepsini bir kerede
+    çevirir.
+
+    `name -> english` sözlüğü döner. Yalnızca güvenli, anlamlı çeviriler eklenir;
+    çevrilemeyen/şüpheli (boş, çok uzun, ham ile aynı) girdiler atlanır ki çağıran
+    ham ada düşebilsin. Herhangi bir hata → {} (çağıran ham sorgularla devam eder).
+    Tasarımı tekil `_normalize_food_query_en` ile aynı; sadece toplu çalışır."""
+    names = [n for n in (names or []) if n and n.strip()]
+    if not names:
+        return {}
+    listing = "\n".join(f"- {n}" for n in names)
+    prompt = (
+        "Aşağıdaki yemek/içecek adlarının HER BİRİNİ, bir beslenme veritabanında "
+        "aratmak için kısa bir İngilizce terime çevir. Marka adlarını olduğu gibi "
+        "bırak. SADECE JSON nesnesi döndür: anahtar = verilen ad (AYNEN), değer = "
+        "İngilizce terim. Başka hiçbir şey yazma.\n\n" + listing
+    )
+    try:
+        raw = _openai_chat(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt="You translate food/drink names to concise English search "
+                          "terms for a nutrition database. Reply with ONLY a JSON "
+                          "object mapping each given name to its English term.",
+            temperature=0.0,
+            max_tokens=min(200 + len(names) * 20, 2000),
+        ).strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        if start < 0 or end <= start:
+            return {}
+        parsed = json.loads(raw[start:end])
+        if not isinstance(parsed, dict):
+            return {}
+        # LLM anahtarı küçük-büyük harf/boşluk farkıyla dönebilir → toleranslı eşle.
+        llm_lower = {str(k).strip().lower(): v for k, v in parsed.items()}
+        result = {}
+        for name in names:
+            en = parsed.get(name)
+            if en is None:
+                en = llm_lower.get(name.strip().lower())
+            if isinstance(en, str):
+                en = en.strip().strip('"').strip(".").strip()
+                if en and len(en) <= 80 and "\n" not in en and en.lower() != name.lower():
+                    result[name] = en
+        return result
+    except Exception:
+        return {}
+
+
 def _food_search_llm(q):
     """Fallback: use LLM to estimate nutrition for common foods.
 
