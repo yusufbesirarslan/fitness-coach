@@ -4,8 +4,8 @@ from flask_login import login_required
 
 from app.config import FATSECRET_API_URL, FOOD_SEARCH_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter
-from app.services.ai_nutrition import _food_search_llm
-from app.services.fatsecret import _food_get_servings, _food_search_fatsecret, _food_search_static, _fs_get, _get_fatsecret_token
+from app.services.ai_coach import _coach_search_food
+from app.services.fatsecret import _food_get_servings, _fs_get, _get_fatsecret_token
 from app.services.foodcache import _food_id_cache, _macro_cache
 
 
@@ -31,11 +31,10 @@ def food_search():
             "macros": cached, "per_100g": cached
         }]})
 
-    results = _food_search_fatsecret(q)
-    if not results:
-        results = _food_search_llm(q)
-    if not results:
-        results = _food_search_static(q)
+    # Alaka-kapısı + TR→EN normalizasyonlu birleşik arama (koç ile aynı yol):
+    # FatSecret Türkçe sorgulara ilgisiz jenerik besin döndürdüğü için ham
+    # results[0]'a güvenmek yanlış makro veriyordu ('patates' → 'Soy Nuts').
+    results = _coach_search_food(q)
 
     return jsonify({"results": results})
 
