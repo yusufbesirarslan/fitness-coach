@@ -8,7 +8,7 @@ import nutrition_pipeline
 from flask import current_app
 
 from app.config import FATSECRET_API_URL, FATSECRET_TOKEN_URL
-from app.services.ai_nutrition import _estimate_serving_weights_llm
+from app.services.ai_nutrition import _estimate_serving_weights_llm, _is_relevant_food, _normalize_food_queries_en
 from app.services.foodcache import _cache_food_id, _cache_macros
 
 
@@ -443,23 +443,67 @@ def _is_per_serving(serving_text):
     return any(p in s for p in serving_patterns)
 
 
+def _fs_search_foods(query, token):
+    """Tek bir FatSecret foods.search çağrısı → ham 'food' dict listesi (veya []).
+    Ağ/format hatasında sessizce [] döner (çağıran karar verir)."""
+    try:
+        resp = _fs_get(FATSECRET_API_URL, params={
+            "method": "foods.search",
+            "search_expression": query,
+            "format": "json",
+            "max_results": 5,
+        }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
+        data = resp.json()
+        if "error" in data:
+            return []
+        foods = data.get("foods", {}).get("food", [])
+        if isinstance(foods, dict):
+            foods = [foods]
+        return foods or []
+    except Exception as e:
+        current_app.logger.warning(f"[MACRO ENGINE] FatSecret search failed for '{query}': {type(e).__name__}: {e}")
+        return []
+
+
+def _fs_relevant_candidates(name, english, token):
+    """FatSecret aday besinlerini ALAKA-KAPISINDAN geçir — `_coach_search_food` ile
+    AYNI strateji, ama menü makro hattı için ham 'food' dict'leri döndürür.
+
+    FatSecret veritabanı ağırlıklı İngilizce/ABD; eşleyemediği (çoğunlukla Türkçe)
+    sorgulara ilgisiz jenerik besinler döndürür ('Çay' → yüksek-proteinli bir ürün,
+    'Bonfile' → alakasız bir kayıt). Önceki kod körlemesine ilk sonucu kabul ettiği
+    için her öğeye yanlış makro gidiyordu. Bu kapı, ad-token örtüşmesi olmayanları
+    eler:
+
+    1) Ham (Türkçe) sorguyla ara → alaka filtresi.
+    2) Boşsa, önceden hesaplanmış İngilizce terimle ara → alaka filtresi.
+
+    Hiç alakalı aday yoksa [] döner → çağıran bu öğeyi LLM tahminine bırakır
+    (jenerik FatSecret çöpü yerine gerçekçi porsiyon tahmini)."""
+    foods = _fs_search_foods(name, token)
+    relevant = [f for f in foods if _is_relevant_food(name, f.get("food_name", ""))]
+    if relevant:
+        return relevant
+    if english and english.lower() != name.lower():
+        foods_en = _fs_search_foods(english, token)
+        relevant = [f for f in foods_en if _is_relevant_food(english, f.get("food_name", ""))]
+        if relevant:
+            return relevant
+    return []
+
+
 def _lookup_macros_fatsecret(items, token):
     per_serving = {}
     per_100g = {}
+    # Tüm öğe adlarını TEK çağrıda İngilizce'ye çevir (ham Türkçe sorgular FatSecret'ta
+    # nadiren eşleştiği için alaka-kapısı sonrası yedek arama terimi). Hata → {} →
+    # yalnızca ham sorgu + kapı (yine de eski körlemesine davranıştan kesinlikle iyi).
+    english_map = _normalize_food_queries_en(items)
     for name in items:
         try:
-            fs_resp = _fs_get(FATSECRET_API_URL, params={
-                "method": "foods.search",
-                "search_expression": name,
-                "format": "json",
-                "max_results": 5,
-            }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
-            fs_data = fs_resp.json()
-            foods = fs_data.get("foods", {}).get("food", [])
-            if isinstance(foods, dict):
-                foods = [foods]
+            foods = _fs_relevant_candidates(name, english_map.get(name, ""), token)
             if not foods:
-                current_app.logger.info(f"[MACRO ENGINE] FatSecret returned 0 results for '{name}'")
+                current_app.logger.info(f"[MACRO ENGINE] FatSecret: '{name}' için alakalı eşleşme yok → LLM yedeği")
                 continue
 
             found_serving = False
