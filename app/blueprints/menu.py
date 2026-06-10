@@ -18,6 +18,12 @@ from app.services.menu_fetch import _fetch_page, _is_google_drive_url, _process_
 
 bp = Blueprint("menu", __name__)
 
+# Menü tarama hattına özgü alt taban: bir YEMEK için bu kcal'in altındaki makro
+# (örn. 'Sıcak Kahvaltı' → 5 kcal) neredeyse her zaman başarısız/boş bir FatSecret
+# eşleşmesidir; gerçek bir tabak değil → listeden ele. (Koç hattında çay/su gibi
+# düşük kalorili öğeleri loglamak serbest olduğu için bu taban yalnızca menüde.)
+_MENU_MIN_DISH_KCAL = 20
+
 
 @bp.route("/api/proxy/scan-menu", methods=["POST"])
 @login_required
@@ -133,9 +139,14 @@ def proxy_scan_menu():
     current_app.logger.info(f"[SCRAPER] Total sections: {len(sections)} — Unique categories: {len(unique_headings)} — Categories: {unique_headings}")
     current_app.logger.info(f"[SCRAPER] Raw body_text length: {len(body_text)} chars")
 
-    if len(body_text) > 18000:
-        body_text = body_text[:18000]
-        current_app.logger.info(f"[SCRAPER] Truncated body_text to 18000 chars")
+    # Büyük menüler (örn. ~32k karakterlik BigChefs) tek sayfada tüm kategorileri
+    # (kahvaltıdan ana yemek/tatlıya) barındırır; 18000'de kesmek sonraki yarıyı
+    # (makarna, schnitzel, et, balık) atıyordu. gpt-4o-mini 128k bağlamla bunu
+    # rahat işler. Bu sınır, çıkarıcıdaki _MENU_EXTRACT_MAX_CHARS ile hizalı olmalı.
+    _BODY_TEXT_MAX = 40000
+    if len(body_text) > _BODY_TEXT_MAX:
+        body_text = body_text[:_BODY_TEXT_MAX]
+        current_app.logger.info(f"[SCRAPER] Truncated body_text to {_BODY_TEXT_MAX} chars")
 
     result = {
         "title": title,
@@ -236,7 +247,7 @@ def analyze_menu():
                         "message": "Menü metni işlenirken bir hata oluştu. Lütfen tekrar deneyin.",
                         "items": [], "categories": {}}), 200
 
-    MAX_MENU_ITEMS = 50
+    MAX_MENU_ITEMS = 80  # _extract_categorized_items istemiyle (toplam ≤80) hizalı; büyük menülerde kategori kapsamını korur
     item_names = list(dict.fromkeys(name for _, name in all_items))
     if len(item_names) > MAX_MENU_ITEMS:
         current_app.logger.info(f"[MACRO ENGINE] Capping items from {len(item_names)} to {MAX_MENU_ITEMS}")
@@ -308,6 +319,11 @@ def analyze_menu():
                 "carbs": macros.get("carbs", 0),
                 "fat": macros.get("fat", 0),
             })
+            # Menü-özel: absürt düşük kalorili "yemek" (≈başarısız eşleşme) → ele.
+            if valid and macros.get("calories", 0) < _MENU_MIN_DISH_KCAL:
+                current_app.logger.info(f"[MACRO ENGINE] DISCARDED implausibly-low dish '{name}': {macros}")
+                valid = False
+                reasons = ["menu_calories_implausibly_low"]
             if not valid:
                 current_app.logger.info(f"[MACRO ENGINE] DISCARDED implausible item '{name}': "
                                 f"{macros} reasons={reasons}")

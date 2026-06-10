@@ -246,10 +246,19 @@ def _food_search_llm(q):
         return []
 
 
+# Tarayıcı (proxy_scan_menu) body_text'i bu sınırda kapıyor; çıkarıcı da tamamını
+# LLM'e versin (ikisi hizalı olmalı). Önceki 10000 kısıtı uzun menülerde (örn. 32k
+# karakterlik BigChefs menüsü) sonradan gelen kategorileri (Burgerler, Pizzalar,
+# ana yemekler, tatlılar) LLM girişine hiç ulaştırmadan atıyordu — kategoriler
+# "eksik" görünüyordu. gpt-4o-mini 128k bağlamla bu boyutu rahat işler.
+_MENU_EXTRACT_MAX_CHARS = 40000
+
+
 def _extract_categorized_items(raw_text, fw_state=None, headings=None, menu_source=None):
-    menu_input = raw_text[:10000]
+    menu_input = raw_text[:_MENU_EXTRACT_MAX_CHARS]
     if fw_state:
-        menu_input = fw_state[:6000] + "\n\n" + raw_text[:6000]
+        # framework_state + ham metni birlikte ver ama toplam giriş bütçesini koru.
+        menu_input = fw_state[:6000] + "\n\n" + raw_text[:_MENU_EXTRACT_MAX_CHARS - 6000]
 
     heading_hint = ""
     if headings:
@@ -264,7 +273,8 @@ def _extract_categorized_items(raw_text, fw_state=None, headings=None, menu_sour
 
     prompt = f"""Aşağıdaki restoran menü metninden yemekleri KATEGORİLERİYLE çıkar.
 Pazarlama metinlerini, açıklamaları, fiyatları YOKSAY. Sadece yemek/içecek adlarını al.
-Her kategori altında en fazla 10 yemek olsun. Toplam en fazla 50 yemek.
+ÖNEMLİ: Önce HER kategoriden en az 2 yemek seç (hiçbir kategoriyi atlama — özellikle Burgerler, Pizzalar, ana yemekler gibi sonradan gelen başlıkları), sonra kalan kotayı doldur.
+Kategori başına en fazla 8 yemek, toplam en fazla 80 yemek.
 Kategorileri menüdeki başlıklardan al (örn: Kahvaltılar, Salatalar, Izgara & Etler, Makarnalar, Burgerler, İçecekler, Tatlılar).
 Eğer kategori bulamazsan "Genel" kullan.{heading_hint}{doc_hint}
 
