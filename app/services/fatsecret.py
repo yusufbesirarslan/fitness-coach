@@ -8,7 +8,7 @@ import nutrition_pipeline
 from flask import current_app
 
 from app.config import FATSECRET_API_URL, FATSECRET_TOKEN_URL
-from app.services.ai_nutrition import _estimate_serving_weights_llm, _is_relevant_food, _normalize_food_queries_en
+from app.services.ai_nutrition import _estimate_serving_weights_llm, _is_specific_match, _normalize_food_queries_en, _token_match_count
 from app.services.foodcache import _cache_food_id, _cache_macros
 
 
@@ -466,27 +466,35 @@ def _fs_search_foods(query, token):
 
 
 def _fs_relevant_candidates(name, english, token):
-    """FatSecret aday besinlerini ALAKA-KAPISINDAN geçir — `_coach_search_food` ile
-    AYNI strateji, ama menü makro hattı için ham 'food' dict'leri döndürür.
+    """FatSecret aday besinlerini KATI alaka kapısından geçir + en spesifik eşleşmeyi
+    öne al — menü makro hattı için ham 'food' dict'leri döndürür.
 
-    FatSecret veritabanı ağırlıklı İngilizce/ABD; eşleyemediği (çoğunlukla Türkçe)
-    sorgulara ilgisiz jenerik besinler döndürür ('Çay' → yüksek-proteinli bir ürün,
-    'Bonfile' → alakasız bir kayıt). Önceki kod körlemesine ilk sonucu kabul ettiği
-    için her öğeye yanlış makro gidiyordu. Bu kapı, ad-token örtüşmesi olmayanları
-    eler:
+    FatSecret veritabanı ağırlıklı İngilizce/ABD ve eşleyemediği Türkçe sorgulara iki
+    tür hata yapar:
+      (a) Tamamen ilgisiz jenerik ('Çay' → yüksek-proteinli ürün) — token örtüşmesi
+          olmadığı için kapı eler.
+      (b) AİLE-ÇÖKMESİ: bilmediği niteleyiciyi yok sayıp tüm aileye aynı jenerik
+          kaydı verir ('Tavuk/Mantar/Vejetaryen Burger' → hepsi 'Burger' → özdeş,
+          yanlış makro; 0 g karblı köfte). `_is_specific_match` çok-kelimeli sorguda
+          ≥2 token örtüşmesi istediği için bu jenerikleri de eler.
 
-    1) Ham (Türkçe) sorguyla ara → alaka filtresi.
-    2) Boşsa, önceden hesaplanmış İngilizce terimle ara → alaka filtresi.
+    Strateji `_coach_search_food` ile aynı: 1) ham (Türkçe) sorgu → kapı; 2) boşsa
+    önceden hesaplanmış İngilizce terim → kapı. Geçen adaylar, sorgunun EN ÇOK
+    token'ını karşılayana göre azalan sıralanır (kararlı) → çağıran ilk/varsayılan
+    porsiyonu seçtiğinde en spesifik kayıt kazanır. Hiç spesifik aday yoksa [] döner
+    → öğe LLM tahminine bırakılır (niteleyiciye göre ayırt eden gerçekçi porsiyon)."""
+    def _filter_sorted(query, foods):
+        relevant = [f for f in foods if _is_specific_match(query, f.get("food_name", ""))]
+        # Kararlı sıralama: en çok token örtüşeni (en spesifik) öne al; FatSecret'in
+        # grup-içi alaka sırasını eşit-skorlular arasında korur.
+        relevant.sort(key=lambda f: _token_match_count(query, f.get("food_name", "")), reverse=True)
+        return relevant
 
-    Hiç alakalı aday yoksa [] döner → çağıran bu öğeyi LLM tahminine bırakır
-    (jenerik FatSecret çöpü yerine gerçekçi porsiyon tahmini)."""
-    foods = _fs_search_foods(name, token)
-    relevant = [f for f in foods if _is_relevant_food(name, f.get("food_name", ""))]
+    relevant = _filter_sorted(name, _fs_search_foods(name, token))
     if relevant:
         return relevant
     if english and english.lower() != name.lower():
-        foods_en = _fs_search_foods(english, token)
-        relevant = [f for f in foods_en if _is_relevant_food(english, f.get("food_name", ""))]
+        relevant = _filter_sorted(english, _fs_search_foods(english, token))
         if relevant:
             return relevant
     return []
@@ -525,6 +533,15 @@ def _lookup_macros_fatsecret(items, token):
                 }
                 serving_text = parsed.get("serving", "")
                 is_serv = _is_per_serving(serving_text)
+
+                # Saf yag/sivi-yag BILESENINI ele: FatSecret 'zeytin/olive' aramasina
+                # 'Olive Oil' (saf yag) donduruyor; 'Zeytin Tabagi'na eslesince
+                # porsiyon agirligiyla olceklenip 1300+ kcal / 150g yag uretiyordu.
+                # Bu bir yemek degil bilesen → atla; gercek 'Olives' adayi veya LLM
+                # tahmini kazansin. (Yalnizca menu hatti; kocta yag loglamak serbest.)
+                if nutrition_pipeline.is_pure_fat_ingredient(macros):
+                    current_app.logger.info(f"[MACRO ENGINE] FatSecret saf-yag bileseni atlandi '{name}': {food.get('food_name','?')} {macros}")
+                    continue
 
                 # Deterministik saglik kontrolu: imkansiz girdiyi (kalori-makro enerji
                 # ihlali, mutlak porsiyon tavanlari, 100g basina >900 kcal) kaynakta

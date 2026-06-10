@@ -68,6 +68,51 @@ def _is_relevant_food(query, name):
     return False
 
 
+def _token_match_count(query, name):
+    """Sonuç adının (`name`) sorgudaki (`query`) KAÇ FARKLI anlamlı token'ı
+    karşıladığını say. `_is_relevant_food` ile aynı eşleştirme kuralı (tam eşitlik
+    veya ≥4 harf önek toleransı), ama boolean yerine örtüşme SAYISI döner —
+    adayları 'en spesifik' olana göre sıralamak için kullanılır."""
+    q_tokens = _food_tokens(query)
+    if not q_tokens:
+        return 0
+    n_tokens = _food_tokens(name)
+    if not n_tokens:
+        return 0
+    matched = 0
+    for qt in q_tokens:
+        for nt in n_tokens:
+            if qt == nt:
+                matched += 1
+                break
+            shorter, longer = (qt, nt) if len(qt) <= len(nt) else (nt, qt)
+            if len(shorter) >= 4 and longer.startswith(shorter):
+                matched += 1
+                break
+    return matched
+
+
+def _is_specific_match(query, name):
+    """`_is_relevant_food`'tan DAHA KATI alaka kapısı — menü makro hattı içindir.
+
+    Çok-kelimeli (kompozit) yemek adlarında ('Tavuk Burger', 'Sezar Salata') tek
+    bir GENEL kategori kelimesini ('burger', 'salata') paylaşmak YETMEZ. FatSecret
+    bilmediği Türkçe niteleyiciyi yok sayıp tüm AİLEYE aynı jenerik kaydı döndürür:
+    'Tavuk/Mantar/Vejetaryen Burger' → hepsi aynı 'Burger' → ÖZDEŞ ve yanlış makro
+    (tavuk/sebze burgerine 82 g et proteini, 0 g karb — kepeksiz köfte kaydı).
+
+    Bu kapı, sorgu ≥2 anlamlı token içeriyorsa sonucun bunlardan EN AZ 2'siyle
+    örtüşmesini ister; böylece yalnızca jenerik kategori kelimesini paylaşan kayıt
+    reddedilir ve öğe FatSecret jeneriği yerine LLM tahminine düşer (LLM niteleyiciye
+    göre ayırt eder, kepek karbını da verir). Tek-token basit öğeler ('Çay', 'Kola',
+    'Bal') eskisi gibi 1 örtüşmeyle eşleşir — onlarda jenerik-çökme sorunu yoktur."""
+    q_tokens = _food_tokens(query)
+    if not q_tokens:
+        return True  # Anlamlı token yok → aşırı filtreleme yapma (bkz _is_relevant_food).
+    need = 2 if len(q_tokens) >= 2 else 1
+    return _token_match_count(query, name) >= need
+
+
 def _normalize_food_query_en(q):
     """Serbest metin (çoğunlukla Türkçe) besin sorgusunu kısa bir İngilizce
     arama terimine çevir. FatSecret veritabanı ağırlıklı İngilizce/ABD; ham

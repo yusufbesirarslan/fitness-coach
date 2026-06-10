@@ -15,10 +15,33 @@ from nutrition_pipeline import (  # noqa: E402
     build_evaluation,
     check_serving,
     estimate_serving_grams,
+    is_pure_fat_ingredient,
     parse_fatsecret_serving,
     sanitize_servings,
     score_compatibility,
 )
+
+
+def _macros(cal, protein, carbs, fat):
+    return {"calories": cal, "protein": protein, "carbs": carbs, "fat": fat}
+
+
+def test_pure_fat_ingredient_detects_oils():
+    # 'Zeytin Tabağı' field bug: 'olive' matched 'Olive Oil' (pure fat) → scaled to
+    # 1326 kcal / 150 g fat. Pure oils/fats are ingredients, not menu dishes.
+    assert is_pure_fat_ingredient(_macros(900, 0, 0, 100)) is True      # olive oil /100g
+    assert is_pure_fat_ingredient(_macros(1326, 0, 0, 150)) is True     # the exact field value
+    assert is_pure_fat_ingredient(_macros(884, 0, 0, 100)) is True      # generic oil
+    assert is_pure_fat_ingredient(_macros(119, 0, 0, 13.5)) is True     # 1 tbsp oil serving
+
+
+def test_real_foods_are_not_pure_fat():
+    # Whole olives have carbs+protein → kept (not flagged as the oil ingredient).
+    assert is_pure_fat_ingredient(_macros(115, 0.8, 6.0, 11.0)) is False
+    assert is_pure_fat_ingredient(_macros(160, 2.0, 9.0, 15.0)) is False   # avocado
+    assert is_pure_fat_ingredient(_macros(717, 0.85, 0.06, 81.0)) is False  # butter (trace protein)
+    assert is_pure_fat_ingredient(_macros(705, 82, 0, 40)) is False        # a burger
+    assert is_pure_fat_ingredient(_macros(0, 0, 0, 0)) is False            # empty
 
 
 def _serving(amount, cal, protein, carbs, fat, **extra):
