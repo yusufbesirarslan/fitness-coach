@@ -239,6 +239,41 @@ def check_serving(serving):
     return is_valid, flags, reasons
 
 
+# Saf yag/sivi-yag bilesenini ayirt etmek icin: kalorinin bu kesrinden fazlasi
+# yagdan geliyorsa ve protein+karb yok denecek kadar azsa, girdi bir YEMEK degil
+# bir BILESEN (zeytinyagi, tereyagi, ayciçek yagi...) profilindedir.
+_PURE_FAT_CAL_SHARE = 0.95
+# protein/karb "yok denecek kadar az" esigi (gram). Saf yaglarda 0; zeytin TANESI
+# gibi gercek yiyeceklerde protein VEYA karb bunun ustundedir (~0.8g / ~6g).
+_TRACE_MACRO_G = 0.5
+
+
+def is_pure_fat_ingredient(macros):
+    """Makro profili saf yag/sivi-yag BILESENI mi? (zeytinyagi, tereyagi, vb.)
+
+    Bunlar menude TEK BASINA siparis edilen bir yemek DEGIL, bir bilesendir.
+    FatSecret 'zeytin/olive' aramasina cogu zaman 'Olive Oil' (100g = 900 kcal,
+    saf yag) dondurur; 'Zeytin Tabagi' (bir tabak zeytin) buna eslesince porsiyon
+    agirligiyla olceklenip 1300+ kcal / 150 g yag gibi imkansiz bir 'tabak' uretir.
+
+    Profil: protein ~0 VE karb ~0 VE kalorinin >= %95'i yagdan. Gercek yemeklerde
+    -zeytin TANESI dahil (~115 kcal, 6 g karb, 0.8 g protein)- protein VEYA karb
+    iz miktarin uzerindedir; bu yuzden kural yalnizca saf yaglari yakalar, gercek
+    yemekleri (hatta zeytinin kendisini) elemez.
+
+    NOT: Bu yalnizca MENU TARAMA hattinda kullanilmali. Kullanici kocta acikca
+    'zeytinyagi' loglamak isteyebilir; orada bu eleme uygulanmaz."""
+    cal = _num(macros.get("calories"))
+    fat = _num(macros.get("fat"))
+    protein = _num(macros.get("protein"))
+    carbs = _num(macros.get("carbs"))
+    if cal <= 0 or fat <= 0:
+        return False
+    if protein >= _TRACE_MACRO_G or carbs >= _TRACE_MACRO_G:
+        return False
+    return (9.0 * fat) >= _PURE_FAT_CAL_SHARE * cal
+
+
 def sanitize_servings(servings, food_type=None):
     """Bir porsiyon listesini denetle: gecersizleri at, isaretleri ekle, dogrulanmis
     (Generic) girdileri one al (kararli siralama).

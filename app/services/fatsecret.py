@@ -534,6 +534,15 @@ def _lookup_macros_fatsecret(items, token):
                 serving_text = parsed.get("serving", "")
                 is_serv = _is_per_serving(serving_text)
 
+                # Saf yag/sivi-yag BILESENINI ele: FatSecret 'zeytin/olive' aramasina
+                # 'Olive Oil' (saf yag) donduruyor; 'Zeytin Tabagi'na eslesince
+                # porsiyon agirligiyla olceklenip 1300+ kcal / 150g yag uretiyordu.
+                # Bu bir yemek degil bilesen → atla; gercek 'Olives' adayi veya LLM
+                # tahmini kazansin. (Yalnizca menu hatti; kocta yag loglamak serbest.)
+                if nutrition_pipeline.is_pure_fat_ingredient(macros):
+                    current_app.logger.info(f"[MACRO ENGINE] FatSecret saf-yag bileseni atlandi '{name}': {food.get('food_name','?')} {macros}")
+                    continue
+
                 # Deterministik saglik kontrolu: imkansiz girdiyi (kalori-makro enerji
                 # ihlali, mutlak porsiyon tavanlari, 100g basina >900 kcal) kaynakta
                 # ele. 100g bazinda yogunluk kontrolu icin amount=100 ver. LLM'siz.
