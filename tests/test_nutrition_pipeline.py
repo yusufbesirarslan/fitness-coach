@@ -15,6 +15,7 @@ from nutrition_pipeline import (  # noqa: E402
     build_evaluation,
     check_serving,
     estimate_serving_grams,
+    is_implausibly_low_menu_kcal,
     is_pure_fat_ingredient,
     parse_fatsecret_serving,
     sanitize_servings,
@@ -42,6 +43,29 @@ def test_real_foods_are_not_pure_fat():
     assert is_pure_fat_ingredient(_macros(717, 0.85, 0.06, 81.0)) is False  # butter (trace protein)
     assert is_pure_fat_ingredient(_macros(705, 82, 0, 40)) is False        # a burger
     assert is_pure_fat_ingredient(_macros(0, 0, 0, 0)) is False            # empty
+
+
+class TestImplausiblyLowMenuKcal:
+    """Menu-only floor (MENU_MIN_DISH_KCAL): an item resolving under ~20 kcal is
+    almost always a failed/empty FatSecret match, not a real dish. calories<=0 is a
+    separate 'no data' case the caller handles, so it must NOT report True here."""
+
+    def test_below_floor_is_implausible(self):
+        assert is_implausibly_low_menu_kcal(_macros(5, 0, 0.5, 0)) is True   # 'Sıcak Kahvaltı' → 5
+        assert is_implausibly_low_menu_kcal(_macros(19.9, 0, 1, 0)) is True
+
+    def test_at_or_above_floor_is_plausible(self):
+        assert is_implausibly_low_menu_kcal(_macros(20, 0, 1, 0)) is False   # == floor
+        assert is_implausibly_low_menu_kcal(_macros(250, 12, 8, 14)) is False
+
+    def test_zero_or_missing_calories_is_not_implausible(self):
+        # 0 / missing kcal is "no data" (handled separately), not a low-match.
+        assert is_implausibly_low_menu_kcal(_macros(0, 0, 0, 0)) is False
+        assert is_implausibly_low_menu_kcal({}) is False
+
+    def test_custom_threshold(self):
+        assert is_implausibly_low_menu_kcal(_macros(30, 1, 4, 0), min_kcal=50) is True
+        assert is_implausibly_low_menu_kcal(_macros(60, 1, 4, 0), min_kcal=50) is False
 
 
 def _serving(amount, cal, protein, carbs, fat, **extra):
@@ -195,6 +219,33 @@ class TestServingPlausibility:
         assert out[0]["calories"] == 520
 
 
+class TestFatServingCap:
+    """MAX_SERVING_FAT_G: yag, genel makro tavanindan (300 g) daha siki ayri bir
+    esige (150 g) tabi. Olcekleme patlamalari (orn. 'olive'->zeytinyagi porsiyon
+    agirligiyla carpilinca) genel tavanin altinda kalsa bile burada yakalanir."""
+
+    def test_fat_just_over_cap_discarded(self):
+        # 151 g yag: kalori (1500<3000) ve diger tavanlar altinda ama yag-tavanini
+        # asar -> SADECE fat_exceeds_serving_max ile elenir (izole yeni kural).
+        valid, _flags, reasons = check_serving(_serving(0, 1500, 10, 10, 151))
+        assert valid is False
+        assert reasons == ["fat_exceeds_serving_max"]
+
+    def test_fat_exactly_at_cap_passes(self):
+        # 150 g == tavan; gecmeli (Atwater de tutarli: beyan 1400 ~ 9*150+macros).
+        valid, _flags, reasons = check_serving(_serving(0, 1400, 10, 10, 150))
+        assert valid is True
+        assert "fat_exceeds_serving_max" not in reasons
+
+    def test_fat_cap_catches_what_general_macro_cap_misses(self):
+        # 200 g yag, genel MAX_SERVING_MACRO_G (300) altinda -> eski kontrol kacardi;
+        # 'olive'->zeytinyagi 202 g yag / 1848 kcal "salata" senaryosunu yine eler.
+        valid, _flags, reasons = check_serving(_serving(0, 1848, 10, 12, 200))
+        assert valid is False
+        assert "fat_exceeds_serving_max" in reasons
+        assert "macro_exceeds_serving_max" not in reasons  # 200 < 300
+
+
 class TestSanitizeServings:
     def test_drops_invalid_keeps_valid(self):
         good = _serving(100, 165, 31, 0, 3.6)          # tavuk gogsu
@@ -309,6 +360,60 @@ class TestScoringOutputShape:
         result = score_compatibility(food, remaining)
         assert "High carbohydrate load" in result["warnings"]
         assert result["score"] > 0  # karbda kati 0 kurali yok
+
+
+class TestLowFatFlag:
+    """low_fat artik besinin KENDI yag-enerji payina (9*fat/cal) bakar, kullanicinin
+    kalan yag butcesine DEGIL. Esik: fat_cal_share < _LOW_FAT_CAL_SHARE (0.30)."""
+
+    _BIG = {"calories": 2000, "protein": 150, "carbs": 200, "fat": 100}
+
+    def test_high_fat_food_not_flagged_even_with_big_budget(self):
+        # 20 g yag / 255 kcal = %71 yag-payi. Eski kural (fat_ratio<0.30 buyuk
+        # butcede) bunu yanlislikla "dusuk yag" damgalardi; yeni kural damgalamaz.
+        res = score_compatibility({"calories": 255, "protein": 5, "carbs": 5, "fat": 20}, self._BIG)
+        assert "low_fat" not in res["flags"]
+
+    def test_lean_food_flagged_low_fat(self):
+        # Yagsiz/az-yagli besin (yag-payi <%30) -> low_fat.
+        res = score_compatibility({"calories": 300, "protein": 0, "carbs": 73, "fat": 0}, self._BIG)
+        assert "low_fat" in res["flags"]
+
+    def test_boundary_at_30_percent_share(self):
+        # yag-payi tam %30 -> esik DAHIL degil (kati <0.30) -> low_fat YOK.
+        # cal=600, fat=20 -> 9*20/600 = 0.30.
+        at = score_compatibility({"calories": 600, "protein": 50, "carbs": 80, "fat": 20}, self._BIG)
+        assert "low_fat" not in at["flags"]
+        # cal=601 -> pay <0.30 -> low_fat VAR.
+        under = score_compatibility({"calories": 601, "protein": 50, "carbs": 80, "fat": 20}, self._BIG)
+        assert "low_fat" in under["flags"]
+
+
+class TestHighProteinFlag:
+    """high_protein artik HEM kalori payi (>=0.20) HEM DE mutlak gram
+    (>=_HIGH_PROTEIN_MIN_G = 15) gerektirir; kucuk porsiyonlu az-protein elensin."""
+
+    _BIG = {"calories": 2000, "protein": 150, "carbs": 200, "fat": 100}
+
+    def test_small_high_share_low_gram_not_flagged(self):
+        # 45 kcal / 3 g protein salata: pay=12/45=%27 (>=0.20) ama 3 g < 15 g ->
+        # high_protein YOK, ve low_protein_food da YOK (pay 0.15'in altinda degil).
+        res = score_compatibility({"calories": 45, "protein": 3, "carbs": 2, "fat": 1}, self._BIG)
+        assert "high_protein" not in res["flags"]
+        assert "low_protein_food" not in res["flags"]
+
+    def test_gram_threshold_boundary(self):
+        # protein tam 15 g + pay>=0.20 (300 kcal -> 60/300=0.20) -> high_protein VAR.
+        at = score_compatibility({"calories": 300, "protein": 15, "carbs": 10, "fat": 5}, self._BIG)
+        assert "high_protein" in at["flags"]
+        # 14 g (esik alti) -> high_protein YOK.
+        under = score_compatibility({"calories": 280, "protein": 14, "carbs": 10, "fat": 5}, self._BIG)
+        assert "high_protein" not in under["flags"]
+
+    def test_genuinely_high_protein_still_flagged(self):
+        # Hem pay hem gram esigini gecen gercek proteinli besin (tavuk gogsu).
+        res = score_compatibility({"calories": 165, "protein": 31, "carbs": 0, "fat": 3.6}, self._BIG)
+        assert "high_protein" in res["flags"]
 
 
 class TestGranularScoring:

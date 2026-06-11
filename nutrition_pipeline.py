@@ -299,6 +299,23 @@ def is_pure_fat_ingredient(macros):
     return (9.0 * fat) >= _PURE_FAT_CAL_SHARE * cal
 
 
+# Menu-tarama hattina ozgu alt taban: bir YEMEK icin bu kcal'in altindaki makro
+# (orn. 'Sicak Kahvalti' -> 5 kcal) neredeyse her zaman basarisiz/bos bir FatSecret
+# eslesmesidir; gercek bir tabak degil. SADECE menu hattinda uygulanir -- koc
+# hattinda cay/su gibi dusuk kalorili ogeleri loglamak serbest.
+MENU_MIN_DISH_KCAL = 20.0
+
+
+def is_implausibly_low_menu_kcal(macros, min_kcal=MENU_MIN_DISH_KCAL):
+    """Menu-tarama: makro absurd-dusuk kalorili mi (~basarisiz FatSecret eslesmesi)?
+
+    ``0 < calories < min_kcal`` -> True. ``calories <= 0`` ayri bir durumdur
+    ("veri yok") ve cagiran tarafindan ele alinir; bu yuzden burada True donmez.
+    is_pure_fat_ingredient ile ayni menu-sanitize damarinda yer alir."""
+    cal = _num(macros.get("calories"))
+    return 0.0 < cal < min_kcal
+
+
 def sanitize_servings(servings, food_type=None):
     """Bir porsiyon listesini denetle: gecersizleri at, isaretleri ekle, dogrulanmis
     (Generic) girdileri one al (kararli siralama).
