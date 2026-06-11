@@ -1,6 +1,10 @@
 # Risk: Menü çıkarımında `max_tokens` ile öğe kapasitesi hizasız
 
-**Durum:** Açık (henüz düzeltilmedi)
+**Durum:** Düzeltildi — önerilen 4 madde de uygulandı:
+`max_tokens` artık `MAX_MENU_ITEMS`'tan türetiliyor (`_MENU_EXTRACT_MAX_TOKENS = 200 + 80×60 = 5000`),
+kesik JSON `_salvage_truncated_categories` ile son tamamlanmış öğe sınırına kadar kurtarılıyor,
+`finish_reason == "length"` `_openai_chat` içinde loglanıyor ve kapasite/çıkış ilişkisi
+`tests/test_menu_extract_truncation.py` ile pinlendi.
 **Etki alanı:** `app/services/ai_nutrition.py` → `_extract_categorized_items`, çağıran `app/blueprints/menu.py` → `analyze_menu`
 **Önem:** Yüksek — büyük menüler **tamamen** boş dönebilir.
 
