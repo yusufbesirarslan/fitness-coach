@@ -20,7 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.services.ai_nutrition import _dish_types, _is_relevant_food, _is_specific_match, _token_match_count  # noqa: E402
+from app.services.ai_nutrition import _dish_types, _is_relevant_food, _is_specific_match, _primary_dish_type, _token_match_count  # noqa: E402
 from app.services.menu_extract import _is_price_noise, _extract_page_sections  # noqa: E402
 
 
@@ -184,6 +184,34 @@ def test_section_extraction_dedups_nested_repeats_and_drops_prices():
     assert "Klasik Burger" in lines
     assert "10" not in lines                   # count dropped
     assert "120 TL" not in lines               # price dropped
+
+
+# ---------------------------------------------------------------------------
+# Porsiyon-makullük kapısının tür çözümü (docs/menu-porsiyon-eslesme-hatasi.md):
+# bant/gram kuralları yalnız KESİN türde uygulanır — ad önce, sonra kategori.
+# ---------------------------------------------------------------------------
+
+def test_primary_dish_type_from_name():
+    assert _primary_dish_type("Vegan Burger") == "burger"
+    assert _primary_dish_type("Sezar Salata") == "salad"
+    assert _primary_dish_type("Mercimek Çorbası") == "soup"
+
+
+def test_primary_dish_type_category_fallback():
+    # Ad tür içermiyor → kategori çözer (saha vakaları: Penne, Margarita).
+    assert _primary_dish_type("Penne Arrabbiata", "Makarnalar") == "pasta"
+    assert _primary_dish_type("Margarita", "Pizzalar") == "pizza"
+
+
+def test_primary_dish_type_name_wins_over_category():
+    # Ad zaten kesin tür veriyorsa kategoriye bakılmaz.
+    assert _primary_dish_type("Tavuk Burger", "Ana Yemekler") == "burger"
+
+
+def test_primary_dish_type_unknown_or_ambiguous_is_none():
+    assert _primary_dish_type("Tavuk Mangal", "Ana Yemekler") is None  # taksonomi dışı
+    assert _primary_dish_type("Pizza Burger") is None                  # belirsiz ad
+    assert _primary_dish_type("", None) is None
 
 
 def test_legitimate_cross_category_repeat_is_preserved():
