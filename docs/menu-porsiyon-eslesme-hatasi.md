@@ -1,6 +1,8 @@
 # Menü Makrolarında Porsiyon Eşleşme Hatası
 
-> Durum: **bilinen sorun / analiz** — henüz düzeltilmedi.
+> Durum: **düzeltildi** — porsiyon bandı (`nutrition_pipeline.check_portion_band`)
+> + per-serving güven kapısı / 100g-eşdeğeri dönüşüm (`gate_per_serving`)
+> + tür-bazlı gram yedeği (`DISH_SERVING_DEFAULT_G`).
 > İlgili düzeltmeler: alaka-kapısı + TR→EN normalizasyon (`c1efbfd`), FatSecret
 > aile-çökmesi (`57683a6`), saf-yağ bileşeni (`d53f093`), yemek-türü ana-ad +
 > kategori kapısı (bu PR). Bu belge, o kapıların **kapsamadığı** ayrı bir hata
@@ -71,19 +73,28 @@ ile **100 g'a normalize eder**; menü hattı (`_lookup_macros_fatsecret`) ise
 per-serving'i **doğrudan kullanır**. İki hattın porsiyon ele alışı farklı — düzeltme
 bunları yakınlaştırmalı.
 
-## Önerilen düzeltme yönü (henüz uygulanmadı)
+## Önerilen düzeltme yönü (uygulandı)
 
 1. **Yemek-türüne göre porsiyon bandı (alt/üst sınır).** Makro çözüldükten sonra
    toplam kaloriyi türe göre makul bir aralıkla karşılaştır (örn. burger ~350–800,
    makarna tabağı ~350–700, salata ~150–600, çorba ~150–400 kcal). Değer alt sınırın
    altındaysa: per-serving'i güvenme; per-100g/türetilmiş değeri yemek-türü servis
    ağırlığına ölçekle ya da LLM porsiyon tahminine düş.
+   → `nutrition_pipeline.PORTION_KCAL_BANDS` + `check_portion_band`; per-serving
+   kabul noktasında `gate_per_serving` (`_lookup_macros_fatsecret` içinde), band
+   üstü kayıt atlanır, band altı 100g-eşdeğerine çevrilip per-100g yoluna verilir.
+   Çözüm-sonrası ek log: `menu.py` `PORTION BAND LOW/HIGH`.
 2. **Küçük FatSecret servinglerini per-100g muamelesi yap.** Per-serving kaydının
    metrik ağırlığı türün asgari gramından küçükse, onu 100 g eşdeğeri kabul edip
    yeniden ölçekle (mevcut `_estimate_serving_weights_llm` mantığını kullan).
+   → `DISH_SERVING_MIN_G` + `gate_per_serving(serving_grams=...)`; ağırlık
+   `estimate_serving_grams` ile deterministik tahmin edilir, oran dönüşümü
+   900 kcal/100g tavanını aşarsa as-is 100g-eşdeğerine düşülür.
 3. **150 g sabit yedeği sıkılaştır.** Bilinen büyük porsiyonlu türler için
    (makarna/burger/ana yemek) düz 150 g yedeğinden kaçın; tür-bazlı bir varsayılan
    kullan.
+   → `DISH_SERVING_DEFAULT_G` + `_estimate_serving_weights_llm(fallback_weights=...)`;
+   tür çözümü `_primary_dish_type(ad, kategori)` (koç hattı 150 g varsayılanını korur).
 
 Bu yön, mevcut mimariyi korur: kapılar saf fonksiyon kalır, porsiyon bandı kontrolü
 `nutrition_pipeline`'a deterministik bir kural olarak eklenebilir; LLM yalnızca

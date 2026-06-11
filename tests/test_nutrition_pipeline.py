@@ -11,10 +11,15 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import nutrition_pipeline as np  # noqa: E402
 from nutrition_pipeline import (  # noqa: E402
+    DISH_SERVING_DEFAULT_G,
+    DISH_SERVING_MIN_G,
     MAX_KCAL_PER_100G,
+    PORTION_KCAL_BANDS,
     build_evaluation,
+    check_portion_band,
     check_serving,
     estimate_serving_grams,
+    gate_per_serving,
     is_implausibly_low_menu_kcal,
     is_pure_fat_ingredient,
     parse_fatsecret_serving,
@@ -519,3 +524,98 @@ class TestBuildEvaluation:
 def test_constants_sane():
     assert MAX_KCAL_PER_100G == 900.0
     assert np.ATWATER_TOLERANCE > 0
+
+
+# ---------------------------------------------------------------------------
+# Porsiyon makullugu (docs/menu-porsiyon-eslesme-hatasi.md): dogru KIMLIKLI ama
+# yanlis MIKTARLI eslesmeler — FatSecret per-serving kucuk ABD referans miktari
+# (tek kofte, 1/2 cup) tam tabak sanilinca 2-3x eksik kalori.
+# ---------------------------------------------------------------------------
+
+class TestCheckPortionBand:
+    def test_field_cases_are_low(self):
+        # Saha ciktisi (ai-chatbot-menu.txt): tam tabak sanilan referans miktarlar.
+        assert check_portion_band(170, "burger") == "low"   # Vegan Burger
+        assert check_portion_band(180, "pasta") == "low"    # Penne Arrabbiata
+
+    def test_in_band_ok(self):
+        assert check_portion_band(500, "burger") == "ok"
+        assert check_portion_band(450, "pasta") == "ok"
+        assert check_portion_band(300, "salad") == "ok"
+        assert check_portion_band(250, "soup") == "ok"
+
+    def test_oversized_is_high(self):
+        assert check_portion_band(900, "burger") == "high"
+        assert check_portion_band(1200, "pasta") == "high"
+
+    def test_no_decision_without_band(self):
+        # None = "karar yok": tur bilinmiyor, bandi yok veya kalori <= 0.
+        assert check_portion_band(170, None) is None
+        assert check_portion_band(170, "kebab") is None     # taksonomide yok
+        assert check_portion_band(0, "burger") is None
+        assert check_portion_band(-5, "burger") is None
+
+
+class TestGatePerServing:
+    def test_vegan_burger_field_case_converted(self):
+        # 'Veggie Burger – per 1 patty = 170 kcal' (ekmeksiz kofte) tam tabak
+        # sanilmamali → 100g-esdegeri olarak per-100g yoluna verilir.
+        status, conv = gate_per_serving("burger", _macros(170, 5, 20, 8))
+        assert status == "convert"
+        assert conv == _macros(170, 5, 20, 8)  # agirlik bilinmiyor → as-is ≈100g
+        # 300 g tur varsayilaniyla olceklenince banda oturur: 170 * 3 = 510 kcal.
+        assert PORTION_KCAL_BANDS["burger"][0] <= conv["calories"] * 3.0 <= PORTION_KCAL_BANDS["burger"][1]
+
+    def test_penne_arrabbiata_field_case_converted(self):
+        status, conv = gate_per_serving("pasta", _macros(180, 5, 29, 4))
+        assert status == "convert"
+        assert conv["calories"] == 180.0
+
+    def test_in_band_serving_accepted(self):
+        status, conv = gate_per_serving("burger", _macros(500, 30, 40, 22))
+        assert status == "accept"
+        assert conv is None
+
+    def test_unknown_dish_type_accepted_unchanged(self):
+        # Taksonomi kapsamiyorsa karar yok → mevcut davranis korunur.
+        assert gate_per_serving(None, _macros(170, 5, 20, 8)) == ("accept", None)
+        assert gate_per_serving("kebab", _macros(170, 5, 20, 8)) == ("accept", None)
+
+    def test_oversized_serving_skipped(self):
+        # Band ustu (aile/toplu kayit): 100g varsaymak degeri patlatir → atla.
+        status, conv = gate_per_serving("pasta", _macros(1200, 40, 150, 45))
+        assert status == "skip"
+        assert conv is None
+
+    def test_known_grams_ratio_conversion(self):
+        # '1 cup' corba (200 g matris degeri) 120 kcal → 60 kcal/100g yogunluk.
+        status, conv = gate_per_serving("soup", _macros(120, 6, 14, 4), serving_grams=200.0)
+        assert status == "convert"
+        assert conv["calories"] == 60.0
+        assert conv["protein"] == 3.0
+
+    def test_invalid_density_falls_back_to_as_is(self):
+        # Kaba matris agirligi ('dilim'→30g) oran donusumunde 900 kcal/100g
+        # tavanini asarsa as-is 100g-esdegerine dusulur.
+        status, conv = gate_per_serving("pizza", _macros(285, 12, 36, 10), serving_grams=30.0)
+        assert status == "convert"
+        assert conv["calories"] == 285.0  # 950/100g gecersiz → as-is
+
+    def test_small_grams_triggers_convert_even_in_band(self):
+        # Band-ici kalori ama metrik agirlik turun asgarisinden kucuk → tam tabak
+        # degil (belge #2): yine donustur.
+        status, conv = gate_per_serving("burger", _macros(400, 25, 30, 18), serving_grams=120.0)
+        assert status == "convert"
+        # Oran donusumu gecerli yogunluk verir: 400 * 100/120 ≈ 333 kcal/100g.
+        assert conv["calories"] == round(400 * 100.0 / 120.0, 1)
+
+
+def test_portion_tables_self_consistent():
+    # Tablolar ayni tur kumesini kapsamali; degerler kendi iclerinde tutarli olmali.
+    assert set(PORTION_KCAL_BANDS) == set(DISH_SERVING_DEFAULT_G) == set(DISH_SERVING_MIN_G)
+    for dish, (low, high) in PORTION_KCAL_BANDS.items():
+        assert 0 < low < high
+        assert high <= np.MAX_SERVING_KCAL
+        # LLM kelepcesi 50-600 g (ai_nutrition._estimate_serving_weights_llm).
+        assert 50 <= DISH_SERVING_DEFAULT_G[dish] <= 600
+        assert 0 < DISH_SERVING_MIN_G[dish] <= DISH_SERVING_DEFAULT_G[dish]

@@ -8,7 +8,7 @@ import nutrition_pipeline
 from flask import current_app
 
 from app.config import FATSECRET_API_URL, FATSECRET_TOKEN_URL
-from app.services.ai_nutrition import _dish_types, _estimate_serving_weights_llm, _is_specific_match, _normalize_food_queries_en, _token_match_count
+from app.services.ai_nutrition import _dish_types, _estimate_serving_weights_llm, _is_specific_match, _normalize_food_queries_en, _primary_dish_type, _token_match_count
 from app.services.foodcache import _cache_food_id, _cache_macros
 
 
@@ -534,6 +534,7 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
 
             found_serving = False
             baseline_100g = None
+            converted_baseline = None
 
             for food in foods:
                 desc_raw = food.get("food_description", "")
@@ -576,16 +577,37 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
                     continue
 
                 if is_serv:
-                    per_serving[name] = macros
-                    found_serving = True
-                    current_app.logger.info(f"[MACRO ENGINE] FatSecret per-serving match: '{name}' → Cal={macros['calories']}, P={macros['protein']}, C={macros['carbs']}, F={macros['fat']}")
-                    break
+                    # Porsiyon-makulluk kapisi (docs/menu-porsiyon-eslesme-hatasi.md):
+                    # FatSecret 'serving' cogu zaman kucuk ABD referans miktaridir
+                    # (tek kofte, 1/2 cup) → tam tabak sanilirsa 2-3x eksik kalori.
+                    # Tur-bazli kalori bandi + asgari-gram kontrolu KIMLIGI degil
+                    # MIKTARI denetler; karar saf fonksiyonda (gate_per_serving).
+                    dish_type = _primary_dish_type(name, category_map.get(name))
+                    est_g = nutrition_pipeline.estimate_serving_grams(serving_text)
+                    status, conv = nutrition_pipeline.gate_per_serving(dish_type, macros, est_g)
+                    if status == "accept":
+                        per_serving[name] = macros
+                        found_serving = True
+                        current_app.logger.info(f"[MACRO ENGINE] FatSecret per-serving match: '{name}' → Cal={macros['calories']}, P={macros['protein']}, C={macros['carbs']}, F={macros['fat']}")
+                        break
+                    if status == "skip":
+                        current_app.logger.info(f"[MACRO ENGINE] FatSecret per-serving band-USTU atlandi '{name}' ({dish_type}): {macros}")
+                        continue
+                    # "convert": tam tabak degil → 100g-esdegeri olarak sakla; dongu
+                    # surer ki band-ICI daha sonraki bir per-serving aday kazanabilsin.
+                    if converted_baseline is None:
+                        converted_baseline = conv
+                        current_app.logger.info(f"[MACRO ENGINE] FatSecret per-serving 100g-esdegerine cevrildi '{name}' ({dish_type}, est_g={est_g}): {macros} → {conv}")
+                    continue
                 if baseline_100g is None:
                     baseline_100g = macros
 
-            if not found_serving and baseline_100g:
-                per_100g[name] = baseline_100g
-                current_app.logger.info(f"[MACRO ENGINE] FatSecret per-100g baseline: '{name}' → Cal={baseline_100g['calories']}/100g")
+            if not found_serving:
+                # Gercek 100g yogunlugu, per-serving'den cevrilmis esdegere tercih edilir.
+                chosen = baseline_100g or converted_baseline
+                if chosen:
+                    per_100g[name] = chosen
+                    current_app.logger.info(f"[MACRO ENGINE] FatSecret per-100g baseline: '{name}' → Cal={chosen['calories']}/100g")
 
         except Exception as e:
             current_app.logger.warning(f"[MACRO ENGINE] FatSecret lookup failed for '{name}': {type(e).__name__}: {e}")

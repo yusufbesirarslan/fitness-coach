@@ -131,6 +131,25 @@ def _dish_types(text):
     return types
 
 
+def _primary_dish_type(name, category=None):
+    """Tek ve KESİN yemek-türü çözümü: önce ad, ad tür içermiyorsa kategori.
+
+    Porsiyon-makullük kuralları (nutrition_pipeline.check_portion_band /
+    gate_per_serving) yalnızca tür KESİN olduğunda uygulanır: aynı metin birden
+    çok tür içeriyorsa ('Pizza Burger') belirsizdir → None (kural uygulanmaz,
+    mevcut davranış sürer). Ad tür vermezse kategori çözer ('Penne Arrabbiata'
+    @ 'Makarnalar' → pasta)."""
+    for text in (name, category):
+        if not text:
+            continue
+        types = _dish_types(text)
+        if len(types) == 1:
+            return next(iter(types))
+        if len(types) > 1:
+            return None
+    return None
+
+
 def _is_specific_match(query, name):
     """`_is_relevant_food`'tan DAHA KATI alaka kapısı — menü makro hattı içindir.
 
@@ -491,9 +510,13 @@ def _parse_suggestion_items(body_text):
     return []
 
 
-def _estimate_serving_weights_llm(items):
+def _estimate_serving_weights_llm(items, fallback_weights=None):
+    # fallback_weights: ad → gram; LLM tahmini yok/aralık-dışıyken düz 150 g
+    # yerine kullanılır (menü hattı tür-bazlı varsayılan geçer; koç hattı eski
+    # 150 g davranışını korur — parametre verilmezse değişiklik yok).
     if not items:
         return {}
+    fallback_weights = fallback_weights or {}
     current_app.logger.info(f"[MACRO ENGINE] Estimating serving weights for {len(items)} per-100g items")
     items_str = "\n".join(f"- {name}" for name in items)
     prompt = f"""Sen bir restoran şefi ve beslenme uzmanısın. Aşağıdaki yemeklerin Türkiye'de standart bir restoranda servis edilen 1 PORSİYONUNUN ortalama ağırlığını GRAM cinsinden tahmin et.
@@ -537,13 +560,13 @@ SADECE aşağıdaki JSON formatında yanıt ver:
                 if isinstance(grams, (int, float)) and 50 <= grams <= 600:
                     results[name] = float(grams)
                 else:
-                    results[name] = 150.0
-                    current_app.logger.info(f"[MACRO ENGINE] Serving weight fallback 150g for '{name}' (raw={grams})")
+                    results[name] = fallback_weights.get(name, 150.0)
+                    current_app.logger.info(f"[MACRO ENGINE] Serving weight fallback {results[name]:.0f}g for '{name}' (raw={grams})")
             current_app.logger.info(f"[MACRO ENGINE] Serving weights resolved: {results}")
             return results
     except Exception as e:
         current_app.logger.info(f"[MACRO ENGINE] LLM SERVING WEIGHT ERROR: {type(e).__name__}: {e}")
-    return {n: 150.0 for n in items}
+    return {n: fallback_weights.get(n, 150.0) for n in items}
 
 
 def _repair_truncated_json(raw_json):

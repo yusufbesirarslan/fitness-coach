@@ -9,7 +9,7 @@ from flask_login import current_user, login_required
 from app.config import AI_RATELIMIT, SCRAPE_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter
 from app.models import MealLog, UserSession
-from app.services.ai_nutrition import MAX_MENU_ITEMS, _estimate_macros_llm, _estimate_serving_weights_llm, _extract_categorized_items
+from app.services.ai_nutrition import MAX_MENU_ITEMS, _estimate_macros_llm, _estimate_serving_weights_llm, _extract_categorized_items, _primary_dish_type
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
 from app.services.foodcache import _cache_macros, _get_cached_macros
 from app.services.menu_extract import _content_has_food_items, _discover_menu_links, _extract_framework_state, _extract_page_sections, _menu_score, _try_wordpress_api
@@ -276,9 +276,17 @@ def analyze_menu():
             current_app.logger.warning(f"[MACRO ENGINE] FatSecret FAILED — uncached items will use LLM fallback: {type(e).__name__}: {e}")
 
     if per_100g_items:
-        serving_weights = _estimate_serving_weights_llm(list(per_100g_items.keys()))
+        # Tur-bazli gram yedegi: LLM tahmini yok/aralik-disiyken duz 150 g yerine
+        # yemek-turu varsayilani (makarna/burger 300-400 g) kullanilir — duz 150 g
+        # buyuk porsiyonlu turleri yariya indiriyordu (porsiyon-eslesme hatasi #3).
+        fallback_g = {
+            n: nutrition_pipeline.DISH_SERVING_DEFAULT_G.get(
+                _primary_dish_type(n, category_map.get(n)), 150.0)
+            for n in per_100g_items
+        }
+        serving_weights = _estimate_serving_weights_llm(list(per_100g_items.keys()), fallback_weights=fallback_g)
         for name, base_macros in per_100g_items.items():
-            grams = serving_weights.get(name, 150.0)
+            grams = serving_weights.get(name, fallback_g.get(name, 150.0))
             scale = grams / 100.0
             scaled = {
                 "calories": round(base_macros["calories"] * scale, 1),
@@ -329,6 +337,15 @@ def analyze_menu():
                 current_app.logger.info(f"[MACRO ENGINE] DISCARDED implausible item '{name}': "
                                 f"{macros} reasons={reasons}")
                 continue
+
+            # Porsiyon bandi — yalniz LOG: band ihlali "imkansiz" degil (300 kcal
+            # cocuk burgeri mesru olabilir); sistematik nedenler kaynakta cozuldu
+            # (per-serving kapisi + tur-bazli gram yedegi). Bu log eski cache /
+            # LLM kacaklarini sahada gorunur kilar, degeri ATMAZ.
+            band = nutrition_pipeline.check_portion_band(
+                macros.get("calories", 0), _primary_dish_type(name, cat))
+            if band in ("low", "high"):
+                current_app.logger.info(f"[MACRO ENGINE] PORTION BAND {band.upper()} '{name}': {macros}")
 
         if not has_macros:
             macros = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}

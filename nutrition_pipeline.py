@@ -316,6 +316,113 @@ def is_implausibly_low_menu_kcal(macros, min_kcal=MENU_MIN_DISH_KCAL):
     return 0.0 < cal < min_kcal
 
 
+# ---------------------------------------------------------------------------
+# Porsiyon makullugu (yemek-turune gore alt/ust kalori bandi) — bkz.
+# docs/menu-porsiyon-eslesme-hatasi.md. Kimlik kapilari DOGRU yemegi secse de
+# FatSecret per-serving kaydi kucuk bir ABD referans miktari olabilir (tek
+# kofte, 1/2 cup) → butun tabak 2-3x eksik sayilir. Bu kurallar MIKTARI denetler.
+# dish_type anahtarlari ai_nutrition._DISH_TYPE_KEYWORDS siniflaridir; cagiran
+# taraf turu cozer (bu modul saf kalir, taksonomi importu yapmaz).
+
+# Yemek-turune gore makul tek-porsiyon kalori bandi (kcal). Pizza belgede
+# ornek listede yok ama taksonomide var; butun restoran pizzasi ~800-1200 kcal.
+PORTION_KCAL_BANDS = {
+    "burger": (350.0, 800.0),
+    "pasta": (350.0, 700.0),
+    "salad": (150.0, 600.0),
+    "soup": (150.0, 400.0),
+    "pizza": (400.0, 1300.0),
+}
+
+# Tur-bazli varsayilan servis agirligi (g) — duz 150 g yedegin yerine. Degerler
+# _estimate_serving_weights_llm prompt kurallariyla hizali (makarna 300-400,
+# burger 250-350, salata 250-350, corba 250-300) ve LLM kelepcesi (50-600) icinde.
+DISH_SERVING_DEFAULT_G = {
+    "burger": 300.0,
+    "pasta": 350.0,
+    "salad": 300.0,
+    "soup": 275.0,
+    "pizza": 400.0,
+}
+
+# Per-serving kaydinin metrik agirligi turun asgarisinden kucukse bu "tam tabak"
+# degil bir referans miktaridir (tek kofte, 1 cup) → 100g-esdegeri muamelesi
+# yapilir. Soup=150: "cup"→200g matris degeriyle sinir cakismasini onler
+# (1 cup corba mesru bir porsiyon olabilir; gercekten kucukler bandi zaten asar).
+DISH_SERVING_MIN_G = {
+    "burger": 200.0,
+    "pasta": 200.0,
+    "salad": 150.0,
+    "soup": 150.0,
+    "pizza": 200.0,
+}
+
+
+def check_portion_band(calories, dish_type):
+    """Toplam kaloriyi yemek-turunun makul porsiyon bandiyla karsilastir.
+
+    Donus: ``"low"`` / ``"high"`` / ``"ok"`` — ya da band uygulanamiyorsa
+    ``None`` (tur bilinmiyor, bandi yok veya kalori <= 0). ``None`` "gecti"
+    DEGIL "karar yok" demektir; cagiran mevcut davranisini surdurmelidir."""
+    band = PORTION_KCAL_BANDS.get(dish_type) if dish_type else None
+    cal = _num(calories)
+    if not band or cal <= 0:
+        return None
+    low, high = band
+    if cal < low:
+        return "low"
+    if cal > high:
+        return "high"
+    return "ok"
+
+
+def gate_per_serving(dish_type, macros, serving_grams=None):
+    """FatSecret per-serving kaydina TAM PORSIYON olarak guvenilir mi karari.
+
+    Donus: ``(status, baseline_100g)``
+      * ``"accept"`` → kayit bant icinde (veya tur bilinmiyor) → mevcut davranis:
+        degeri oldugu gibi tam tabak say. ``baseline_100g`` None.
+      * ``"skip"``   → bant USTU (aile/toplu kayit). 100g varsaymak degeri daha da
+        patlatacagindan aday tamamen atlanir; sonraki aday veya LLM kazanir.
+      * ``"convert"``→ bant ALTI ya da metrik agirlik turun asgarisinden kucuk →
+        kayit tam tabak DEGIL. ``baseline_100g`` per-100g esdegeri olarak doner;
+        cagiran bunu per-100g yoluna (servis agirligiyla olcekleme) verir.
+
+    Donusum: ``serving_grams`` biliniyorsa makrolar 100/serving_grams ile oranlanir
+    ve sonuc ``check_serving(amount=100)`` ile dogrulanir (kaba agirlik matrisi
+    "dilim"→30g gibi degerlerle 900 kcal/100g tavanini asabilir); gecersizse veya
+    agirlik bilinmiyorsa kucuk referans porsiyonu ~100g esdegeri kabul edilir
+    (FatSecret referans miktarlari 100-150g civarinda kumelenir → hafif yukari
+    yanlilik, bant icine oturur). LLM KULLANMAZ."""
+    band = check_portion_band(macros.get("calories"), dish_type)
+    if band is None:
+        return "accept", None
+    if band == "high":
+        return "skip", None
+    grams = _num(serving_grams)
+    too_small = grams > 0 and grams < DISH_SERVING_MIN_G.get(dish_type, 0.0)
+    if band == "low" or too_small:
+        if grams > 0:
+            scale = 100.0 / grams
+            candidate = {
+                "calories": round(_num(macros.get("calories")) * scale, 1),
+                "protein": round(_num(macros.get("protein")) * scale, 1),
+                "carbs": round(_num(macros.get("carbs")) * scale, 1),
+                "fat": round(_num(macros.get("fat")) * scale, 1),
+            }
+            valid, _flags, _reasons = check_serving(
+                {"metric_serving_amount": 100.0, **candidate})
+            if valid:
+                return "convert", candidate
+        return "convert", {
+            "calories": _num(macros.get("calories")),
+            "protein": _num(macros.get("protein")),
+            "carbs": _num(macros.get("carbs")),
+            "fat": _num(macros.get("fat")),
+        }
+    return "accept", None
+
+
 def sanitize_servings(servings, food_type=None):
     """Bir porsiyon listesini denetle: gecersizleri at, isaretleri ekle, dogrulanmis
     (Generic) girdileri one al (kararli siralama).
