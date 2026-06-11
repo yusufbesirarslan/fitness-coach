@@ -8,7 +8,7 @@ import nutrition_pipeline
 from flask import current_app
 
 from app.config import FATSECRET_API_URL, FATSECRET_TOKEN_URL
-from app.services.ai_nutrition import _estimate_serving_weights_llm, _is_specific_match, _normalize_food_queries_en, _token_match_count
+from app.services.ai_nutrition import _dish_types, _estimate_serving_weights_llm, _is_specific_match, _normalize_food_queries_en, _token_match_count
 from app.services.foodcache import _cache_food_id, _cache_macros
 
 
@@ -465,7 +465,7 @@ def _fs_search_foods(query, token):
         return []
 
 
-def _fs_relevant_candidates(name, english, token):
+def _fs_relevant_candidates(name, english, token, category=None):
     """FatSecret aday besinlerini KATI alaka kapısından geçir + en spesifik eşleşmeyi
     öne al — menü makro hattı için ham 'food' dict'leri döndürür.
 
@@ -478,13 +478,29 @@ def _fs_relevant_candidates(name, english, token):
           yanlış makro; 0 g karblı köfte). `_is_specific_match` çok-kelimeli sorguda
           ≥2 token örtüşmesi istediği için bu jenerikleri de eler.
 
+    `category` verilirse VE başlık bir yemek-türü dayatıyorsa (Pizzalar→pizza,
+    Salatalar→salad) aday adının da o türden olması istenir: 'Pizzalar' kategorisindeki
+    'Margarita' ham aramada KOKTEYL 'Margarita'ya birebir eşleşir (tür kapısı sorguda
+    yok çünkü 'margarita' bir tür adı değil) — kategori kapısı pizza token'ı olmayan
+    bu kaydı eler; gerçek 'Margherita Pizza' (ham veya İngilizce pass'te) kazanır.
+
     Strateji `_coach_search_food` ile aynı: 1) ham (Türkçe) sorgu → kapı; 2) boşsa
     önceden hesaplanmış İngilizce terim → kapı. Geçen adaylar, sorgunun EN ÇOK
     token'ını karşılayana göre azalan sıralanır (kararlı) → çağıran ilk/varsayılan
     porsiyonu seçtiğinde en spesifik kayıt kazanır. Hiç spesifik aday yoksa [] döner
     → öğe LLM tahminine bırakılır (niteleyiciye göre ayırt eden gerçekçi porsiyon)."""
+    cat_types = _dish_types(category) if category else set()
+
     def _filter_sorted(query, foods):
-        relevant = [f for f in foods if _is_specific_match(query, f.get("food_name", ""))]
+        relevant = []
+        for f in foods:
+            fname = f.get("food_name", "")
+            if not _is_specific_match(query, fname):
+                continue
+            # Kategori bir yemek-türü dayatıyorsa aday da o türden olmalı.
+            if cat_types and not (cat_types & _dish_types(fname)):
+                continue
+            relevant.append(f)
         # Kararlı sıralama: en çok token örtüşeni (en spesifik) öne al; FatSecret'in
         # grup-içi alaka sırasını eşit-skorlular arasında korur.
         relevant.sort(key=lambda f: _token_match_count(query, f.get("food_name", "")), reverse=True)
@@ -500,16 +516,18 @@ def _fs_relevant_candidates(name, english, token):
     return []
 
 
-def _lookup_macros_fatsecret(items, token):
+def _lookup_macros_fatsecret(items, token, category_map=None):
     per_serving = {}
     per_100g = {}
+    category_map = category_map or {}
     # Tüm öğe adlarını TEK çağrıda İngilizce'ye çevir (ham Türkçe sorgular FatSecret'ta
-    # nadiren eşleştiği için alaka-kapısı sonrası yedek arama terimi). Hata → {} →
-    # yalnızca ham sorgu + kapı (yine de eski körlemesine davranıştan kesinlikle iyi).
-    english_map = _normalize_food_queries_en(items)
+    # nadiren eşleştiği için alaka-kapısı sonrası yedek arama terimi). Menü kategorisi
+    # ayırt edici bağlam olarak iletilir ('Margarita'@Pizzalar → 'margherita pizza').
+    # Hata → {} → yalnızca ham sorgu + kapı (yine de eski körlemesine davranıştan iyi).
+    english_map = _normalize_food_queries_en(items, category_map)
     for name in items:
         try:
-            foods = _fs_relevant_candidates(name, english_map.get(name, ""), token)
+            foods = _fs_relevant_candidates(name, english_map.get(name, ""), token, category_map.get(name))
             if not foods:
                 current_app.logger.info(f"[MACRO ENGINE] FatSecret: '{name}' için alakalı eşleşme yok → LLM yedeği")
                 continue

@@ -20,7 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.services.ai_nutrition import _is_relevant_food, _is_specific_match, _token_match_count  # noqa: E402
+from app.services.ai_nutrition import _dish_types, _is_relevant_food, _is_specific_match, _token_match_count  # noqa: E402
 from app.services.menu_extract import _is_price_noise, _extract_page_sections  # noqa: E402
 
 
@@ -89,6 +89,58 @@ def test_token_match_count_orders_by_specificity():
     assert _token_match_count("chicken burger", "Chicken Burger") == 2
     assert _token_match_count("chicken burger", "Beef Burger") == 1
     assert _token_match_count("chicken burger", "Soy Nuts") == 0
+
+
+# ---------------------------------------------------------------------------
+# Dish-type head-noun gate — a composed dish must not collapse onto a COMPONENT.
+#
+# Field bug (ai-chatbot-menu.txt): 'Kızarmış Keçi Peyniri Salatası' (a SALAD)
+# resolved to plain 'Goat Cheese' — goat+cheese share 2 tokens so the strict gate
+# let it pass, but the match is a cheese block, not a salad → scaled to a salad
+# serving weight it produced 1264 kcal / 101 g fat. The gate now also requires the
+# matched name to share the query's dish-TYPE (salad/soup/burger/pizza/pasta).
+# ---------------------------------------------------------------------------
+
+def test_dish_type_gate_rejects_component_collapse():
+    # SALAD → cheese component: 2 tokens match but the 'salad' head-noun is absent.
+    assert _is_specific_match("Fried Goat Cheese Salad", "Goat Cheese") is False
+    assert _is_specific_match("Keçi Peyniri Salatası", "Keçi Peyniri") is False
+    # A salad must not collapse onto its dressing/base either.
+    assert _is_specific_match("caesar chicken salad", "Caesar Chicken") is False
+
+
+def test_dish_type_gate_keeps_same_type_matches():
+    assert _is_specific_match("Fried Goat Cheese Salad", "Goat Cheese Salad") is True
+    assert _is_specific_match("chicken soup", "Chicken Soup") is True
+    assert _is_specific_match("Mantar Çorbası", "Mantar Çorbası") is True
+    # Items with NO dish-type token keep the plain token-count behaviour.
+    assert _is_specific_match("Cheeseburger", "Cheeseburger") is True
+    assert _is_specific_match("tea", "Black Tea") is True
+
+
+# ---------------------------------------------------------------------------
+# Category → dish-type resolution. The menu pipeline threads the item's category
+# heading into the FatSecret candidate gate so an ambiguous name is forced to the
+# right food family: 'Margarita' under 'Pizzalar' must resolve to a pizza, not the
+# cocktail. A drink-category Margarita (no identity dish-type) stays the cocktail.
+# ---------------------------------------------------------------------------
+
+def test_category_headings_map_to_identity_dish_types():
+    assert _dish_types("Pizzalar") == {"pizza"}
+    assert _dish_types("Salatalar") == {"salad"}
+    assert _dish_types("Çorbalar") == {"soup"}
+    assert _dish_types("Makarnalar") == {"pasta"}
+    assert _dish_types("Margherita Pizza") == {"pizza"}
+
+
+def test_non_identity_categories_impose_no_dish_type():
+    # Serving-vessel / generic headings must NOT force a type (Beef Stroganoff under
+    # 'Sıcak Kaseler' should still resolve normally — bowl is not an identity type).
+    assert _dish_types("Sıcak Kaseler") == set()
+    assert _dish_types("Tavuklar") == set()
+    assert _dish_types("İçecekler") == set()
+    # A bare cocktail name carries no dish-type, so the Pizzalar gate rejects it.
+    assert _dish_types("Margarita") == set()
 
 
 # ---------------------------------------------------------------------------
