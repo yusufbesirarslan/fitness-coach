@@ -5,7 +5,7 @@ from flask_login import current_user, login_required
 from app.config import LB_ALLTIME_KEY, LB_WEEKLY_KEY
 from app.extensions import db, redis_client
 from app.models import DailyQuest, WeeklyWinner
-from app.services.gamification import _leaderboard_via_postgres, _leaderboard_via_redis, get_level, get_title, get_today_progress
+from app.services.gamification import _leaderboard_via_postgres, _leaderboard_via_redis, get_today_progress
 
 
 bp = Blueprint("gamification", __name__)
@@ -84,14 +84,3 @@ def quests():
     )
 
 
-@bp.route("/quests/claim/<int:quest_id>", methods=["POST"])
-@login_required
-def claim_quest(quest_id):
-    xp = current_user.rank_points or 0
-    level = get_level(xp)
-    return jsonify({
-        "message": "Ödül zaten alındı ✓",
-        "new_total": xp,
-        "level": level,
-        "title": get_title(level)
-    })

@@ -272,7 +272,7 @@
 <!-- ── TOAST ── -->
 <div class="toast-wrap" id="toast-wrap"></div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
     // ── TOAST ──
     function showToast(msg, type='info') {
         const icons = { success:'✓', error:'✗', info:'ℹ' };
