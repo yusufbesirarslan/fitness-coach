@@ -9,7 +9,7 @@ from flask_login import current_user, login_required
 from app.config import AI_RATELIMIT, SCRAPE_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter
 from app.models import MealLog, UserSession
-from app.services.ai_nutrition import _estimate_macros_llm, _estimate_serving_weights_llm, _extract_categorized_items
+from app.services.ai_nutrition import MAX_MENU_ITEMS, _estimate_macros_llm, _estimate_serving_weights_llm, _extract_categorized_items
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
 from app.services.foodcache import _cache_macros, _get_cached_macros
 from app.services.menu_extract import _content_has_food_items, _discover_menu_links, _extract_framework_state, _extract_page_sections, _menu_score, _try_wordpress_api
@@ -241,7 +241,8 @@ def analyze_menu():
                         "message": "Menü metni işlenirken bir hata oluştu. Lütfen tekrar deneyin.",
                         "items": [], "categories": {}}), 200
 
-    MAX_MENU_ITEMS = 80  # _extract_categorized_items istemiyle (toplam ≤80) hizalı; büyük menülerde kategori kapsamını korur
+    # MAX_MENU_ITEMS ai_nutrition'dan gelir: istem ("toplam en fazla N yemek"),
+    # bu kırpma ve LLM çıkış bütçesi (_MENU_EXTRACT_MAX_TOKENS) tek kaynaktan hizalı.
     item_names = list(dict.fromkeys(name for _, name in all_items))
     if len(item_names) > MAX_MENU_ITEMS:
         current_app.logger.info(f"[MACRO ENGINE] Capping items from {len(item_names)} to {MAX_MENU_ITEMS}")
