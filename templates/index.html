@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-YXSGLN7C7Y"></script>
-    <script>
+    <script nonce="{{ csp_nonce }}">
       window.dataLayer = window.dataLayer || [];
       function gtag(){dataLayer.push(arguments);}
       gtag('js', new Date());
@@ -344,7 +344,7 @@
 <!-- ══════════════════════════════════════
      JAVASCRIPT
      ══════════════════════════════════════ -->
-<script>
+<script nonce="{{ csp_nonce }}">
 let quickAddOpen = false, tipIdx = 0, sparkChart = null, userGoal = null;
 let selectedIntensity = 'moderate', currentActivityCals = 0;
 
@@ -833,7 +833,7 @@ init();
 <script src="/static/nav.js"></script>
 
 <!-- WEEKLY REWARD CELEBRATION -->
-<script>
+<script nonce="{{ csp_nonce }}">
 function dismissReward() {
     document.getElementById('reward-overlay').classList.remove('open');
     fetch('/leaderboard/reward-dismiss', { method: 'POST' }).catch(() => {});

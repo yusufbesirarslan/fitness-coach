@@ -26,6 +26,7 @@ jobs:
             --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
             --document-name "AWS-RunShellScript" \
             --parameters '{"commands":[
+              "NGINX_SITE=/etc/nginx/sites-available/fitx; if [ -f \"$NGINX_SITE\" ] && grep -q \"add_header Content-Security-Policy\" \"$NGINX_SITE\"; then sed -i \"/add_header Content-Security-Policy/d\" \"$NGINX_SITE\" && nginx -t && systemctl reload nginx && echo \"nginx: eski CSP add_header satiri kaldirildi, reload edildi (CSP artik Flask tarafindan uretiliyor)\"; else echo \"nginx: CSP temizligi gerekmiyor\"; fi",
               "sudo -u ${{ secrets.DEPLOY_USER }} -i bash -c \"cd ${{ secrets.DEPLOY_DIR }} && git fetch --all --prune && git reset --hard origin/main && docker compose up -d --build && docker image prune -f && docker compose ps\""
             ], "executionTimeout":["900"]}' \
             --query "Command.CommandId" \
