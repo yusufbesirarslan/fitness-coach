@@ -18,12 +18,6 @@ from app.services.menu_fetch import _fetch_page, _is_google_drive_url, _process_
 
 bp = Blueprint("menu", __name__)
 
-# Menü tarama hattına özgü alt taban: bir YEMEK için bu kcal'in altındaki makro
-# (örn. 'Sıcak Kahvaltı' → 5 kcal) neredeyse her zaman başarısız/boş bir FatSecret
-# eşleşmesidir; gerçek bir tabak değil → listeden ele. (Koç hattında çay/su gibi
-# düşük kalorili öğeleri loglamak serbest olduğu için bu taban yalnızca menüde.)
-_MENU_MIN_DISH_KCAL = 20
-
 
 @bp.route("/api/proxy/scan-menu", methods=["POST"])
 @login_required
@@ -320,7 +314,7 @@ def analyze_menu():
                 "fat": macros.get("fat", 0),
             })
             # Menü-özel: absürt düşük kalorili "yemek" (≈başarısız eşleşme) → ele.
-            if valid and macros.get("calories", 0) < _MENU_MIN_DISH_KCAL:
+            if valid and nutrition_pipeline.is_implausibly_low_menu_kcal(macros):
                 current_app.logger.info(f"[MACRO ENGINE] DISCARDED implausibly-low dish '{name}': {macros}")
                 valid = False
                 reasons = ["menu_calories_implausibly_low"]
