@@ -92,6 +92,45 @@ def _token_match_count(query, name):
     return matched
 
 
+# Yemek "tür/ana-ad" sınıfları (TR↔EN). Bir öğe açıkça bir SALATA/ÇORBA/BURGER/
+# PİZZA/MAKARNA ise, eşleşen FatSecret kaydı da AYNI türden olmalı; yoksa öğe bir
+# BİLEŞENE çöker ('Keçi Peyniri Salatası' → 'Goat Cheese' = saf peynir → 1264 kcal).
+# Aynı sınıf seti kategori başlığını da çözer ('Pizzalar' → pizza), böylece kategori
+# bir türü dayattığında ('Margarita' Pizzalar'da) ilgisiz kayıt (kokteyl) elenir.
+# Token eşleşmesi _food_tokens ile aynı kural: tam eşitlik veya ≥4 harf önek
+# (çoğul/çekim toleransı: 'salatasi'⊃'salata', 'corbasi'⊃'corba', 'makarnalar'⊃'makarna').
+_DISH_TYPE_KEYWORDS = {
+    "salad": ("salad", "salata"),
+    "soup": ("soup", "corba"),
+    "burger": ("burger", "hamburger"),
+    "pizza": ("pizza",),
+    "pasta": ("pasta", "makarna"),
+}
+
+
+def _dish_type_of_token(tok):
+    """Token bir yemek-türü anahtarıyla eşleşiyorsa sınıfını döndür, yoksa None."""
+    for cls, keywords in _DISH_TYPE_KEYWORDS.items():
+        for kw in keywords:
+            if tok == kw:
+                return cls
+            shorter, longer = (tok, kw) if len(tok) <= len(kw) else (kw, tok)
+            if len(shorter) >= 4 and longer.startswith(shorter):
+                return cls
+    return None
+
+
+def _dish_types(text):
+    """`text` içindeki yemek-türü sınıfları kümesi (salad/soup/burger/pizza/pasta).
+    Hem yemek adı ('... Salatası') hem kategori başlığı ('Pizzalar') için kullanılır."""
+    types = set()
+    for tok in _food_tokens(text):
+        cls = _dish_type_of_token(tok)
+        if cls:
+            types.add(cls)
+    return types
+
+
 def _is_specific_match(query, name):
     """`_is_relevant_food`'tan DAHA KATI alaka kapısı — menü makro hattı içindir.
 
@@ -105,12 +144,23 @@ def _is_specific_match(query, name):
     örtüşmesini ister; böylece yalnızca jenerik kategori kelimesini paylaşan kayıt
     reddedilir ve öğe FatSecret jeneriği yerine LLM tahminine düşer (LLM niteleyiciye
     göre ayırt eder, kepek karbını da verir). Tek-token basit öğeler ('Çay', 'Kola',
-    'Bal') eskisi gibi 1 örtüşmeyle eşleşir — onlarda jenerik-çökme sorunu yoktur."""
+    'Bal') eskisi gibi 1 örtüşmeyle eşleşir — onlarda jenerik-çökme sorunu yoktur.
+
+    Ek kapı — yemek-TÜRÜ tutarlılığı: sorgu açık bir tür içeriyorsa (salata/çorba/
+    burger/pizza/makarna), eşleşen adın da AYNI türden olması gerekir. Token sayısı
+    yeterli olsa bile tür uyuşmazsa reddeder: 'Keçi Peyniri Salatası' (salata) →
+    'Goat Cheese' (goat+cheese = 2 token geçer AMA 'salad' ana-adı yok) bir BİLEŞENe
+    çökmesin diye elenir; öğe gerçekçi bir salata porsiyonu için LLM'e bırakılır."""
     q_tokens = _food_tokens(query)
     if not q_tokens:
         return True  # Anlamlı token yok → aşırı filtreleme yapma (bkz _is_relevant_food).
     need = 2 if len(q_tokens) >= 2 else 1
-    return _token_match_count(query, name) >= need
+    if _token_match_count(query, name) < need:
+        return False
+    q_types = _dish_types(query)
+    if q_types and not (q_types & _dish_types(name)):
+        return False
+    return True
 
 
 def _normalize_food_query_en(q):
@@ -141,7 +191,7 @@ def _normalize_food_query_en(q):
         return ""
 
 
-def _normalize_food_queries_en(names):
+def _normalize_food_queries_en(names, category_map=None):
     """Bir besin adı LİSTESİNİ TEK LLM çağrısında kısa İngilizce arama terimlerine
     çevir. Menü taraması düzinelerce Türkçe öğe içerir; her birini ayrı ayrı
     çevirmek (öğe başına 1 çağrı) çok yavaş olur — bu toplu sürüm hepsini bir kerede
@@ -154,12 +204,23 @@ def _normalize_food_queries_en(names):
     names = [n for n in (names or []) if n and n.strip()]
     if not names:
         return {}
-    listing = "\n".join(f"- {n}" for n in names)
+    category_map = category_map or {}
+    # Menü kategorisi varsa parantez içinde bağlam olarak ekle — ÇEVİRİYE değil,
+    # yalnızca DOĞRU yemeği seçmeye yarar: 'Pizzalar' kategorisindeki 'Margarita'
+    # kokteyl değil 'margherita pizza' olarak çevrilsin.
+    listing_lines = []
+    for n in names:
+        cat = (category_map.get(n) or "").strip()
+        listing_lines.append(f"- {n} (menü kategorisi: {cat})" if cat else f"- {n}")
+    listing = "\n".join(listing_lines)
     prompt = (
         "Aşağıdaki yemek/içecek adlarının HER BİRİNİ, bir beslenme veritabanında "
-        "aratmak için kısa bir İngilizce terime çevir. Marka adlarını olduğu gibi "
-        "bırak. SADECE JSON nesnesi döndür: anahtar = verilen ad (AYNEN), değer = "
-        "İngilizce terim. Başka hiçbir şey yazma.\n\n" + listing
+        "aratmak için kısa bir İngilizce terime çevir. Parantez içindeki menü "
+        "kategorisi yalnızca anlamı netleştirmek içindir (örn. 'Pizzalar' "
+        "kategorisindeki 'Margarita' → 'margherita pizza', kokteyl DEĞİL); kategori "
+        "etiketini terime EKLEME, sadece doğru yemeği seçmek için kullan. Marka "
+        "adlarını olduğu gibi bırak. SADECE JSON nesnesi döndür: anahtar = verilen ad "
+        "(parantezsiz, AYNEN), değer = İngilizce terim. Başka hiçbir şey yazma.\n\n" + listing
     )
     try:
         raw = _openai_chat(

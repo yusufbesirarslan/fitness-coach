@@ -251,6 +251,12 @@ def analyze_menu():
         all_items = [(cat, name) for cat, name in all_items if name in kept]
     current_app.logger.info(f"[MACRO ENGINE] Starting macro pipeline for {len(item_names)} unique items")
 
+    # Ad → kategori haritası (ilk kategori kazanır) — FatSecret çözümlemesinde
+    # belirsiz adları ayırt etmek için ('Margarita' Pizzalar'da → pizza, kokteyl değil).
+    category_map = {}
+    for cat, name in all_items:
+        category_map.setdefault(name, cat)
+
     cached_hits, uncached_names = _get_cached_macros(item_names)
     if cached_hits:
         current_app.logger.info(f"[MACRO ENGINE] Cache hit: {len(cached_hits)}/{len(item_names)} items from cache")
@@ -264,7 +270,7 @@ def analyze_menu():
         try:
             token = _get_fatsecret_token()
             current_app.logger.info(f"[MACRO ENGINE] FatSecret token acquired")
-            per_serving, per_100g_items = _lookup_macros_fatsecret(lookup_names, token)
+            per_serving, per_100g_items = _lookup_macros_fatsecret(lookup_names, token, category_map)
             macro_map.update(per_serving)
         except Exception as e:
             current_app.logger.warning(f"[MACRO ENGINE] FatSecret FAILED — uncached items will use LLM fallback: {type(e).__name__}: {e}")
