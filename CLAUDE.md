@@ -30,8 +30,10 @@ Tablolar boot'ta db.create_all() ile oluşur (app/db_init.py); ayrıca Alembic b
 Şema değişikliği akışı (yeni değişiklikler için tercih edilen yol):
 1. Modeli app/models.py'de değiştir
 2. `FITX_SKIP_DB_INIT=1 flask --app starter db migrate -m "açıklama"`
-3. Üretilen dosyayı gözden geçir, sonra `flask --app starter db upgrade`
-Mevcut (migration öncesi kurulmuş) bir DB'yi zincire almak için: `flask --app starter db stamp head`.
+3. Üretilen dosyayı gözden geçir ve commit'le — uygulama boot'ta bekleyen
+   migration'ları OTOMATİK uygular (app/db_init.py); alembic_version tablosu
+   olmayan eski DB'ler de boot'ta otomatik `stamp` ile zincire alınır.
+   Manuel `flask db upgrade` / `stamp head` yalnızca lokal işler için gerekir.
 Modeller: User, UserSession, WeeklyLog, WeeklyCheckIn, NutritionPlan, TrainingPlan, MealLog,
 PendingAction, PumpCheck, Friendship, Message, Activity, Supplement, DailyQuest,
 UserQuestProgress, WeeklyWinner, WeeklyResetLog, WaterLog, WorkoutLog, UserDailyNutrition,
@@ -43,5 +45,7 @@ DailyActivity, CustomMeal, CustomMealItem
 - Test: `pytest` + `flask run` ile local test et
 - CSP: başlık Flask'ta üretilir (app/hooks.py). Şablona yeni satır-içi <script> eklerken
   MUTLAKA `<script nonce="{{ csp_nonce }}">` yaz, yoksa tarayıcı bloklar. Dış script
-  yalnızca cdn.jsdelivr.net'ten yüklenebilir.
+  yalnızca cdn.jsdelivr.net ve *.googletagmanager.com'dan (GA) yüklenebilir.
+- Deploy: push to main → .github/workflows/deploy.yml (AWS SSM) EC2'de compose'u
+  yeniden kurar ve host nginx'teki eski CSP add_header satırını otomatik temizler.
 - Sorgular daima current_user.id'ye scope'lanır; ID ile yüklenen kayıtlarda sahiplik kontrolü zorunlu

@@ -13,7 +13,25 @@ def init_database(app):
     # komutlarını çalıştırırken FITX_SKIP_DB_INIT=1 ayarla (bkz. CLAUDE.md).
     if os.environ.get("FITX_SKIP_DB_INIT") == "1":
         return
+    _migrations_dir = os.path.join(app.root_path, "..", "migrations")
     with app.app_context():
+        # ── Alembic zinciri (konsolsuz, kendi kendine yeten) ──
+        # Bekleyen migration'lar create_all'dan ÖNCE uygulanmalı: yeni bir
+        # migration tablo oluşturuyorsa create_all onu önce yaratır ve
+        # op.create_table çakışırdı. Compose tek instance/tek worker çalıştırdığı
+        # için boot'ta otomatik upgrade'de eşzamanlı migration yarışı yok.
+        _has_alembic = False
+        try:
+            from sqlalchemy import inspect as sa_inspect
+            _has_alembic = sa_inspect(db.engine).has_table("alembic_version")
+            if _has_alembic and os.path.isdir(_migrations_dir):
+                from flask_migrate import upgrade
+                upgrade()
+        except Exception:
+            # Migration hatası boot'u öldürmesin; logla ki deploy çıktısında görünsün.
+            db.session.rollback()
+            app.logger.exception("[DB] Alembic upgrade başarısız — şema migration zinciri gerisinde kalmış olabilir.")
+
         db.create_all()
         migrations = [
             'ALTER TABLE "user" ADD COLUMN last_login DATE',
@@ -92,6 +110,20 @@ def init_database(app):
                 points_reward=25, quest_type="supplement_added"
             ))
             db.session.commit()
+
+        # Şema az önce create_all + legacy ALTER'larla güncel hâle geldi; DB henüz
+        # Alembic zincirinde değilse baseline'ı çalıştırmadan "head" olarak damgala.
+        # Mevcut prod DB'ler ve taze kurulumlar böylece konsola gerek kalmadan
+        # zincire girer; manuel `flask db stamp head` gerekmez.
+        if not _has_alembic:
+            try:
+                from flask_migrate import stamp
+                if os.path.isdir(_migrations_dir):
+                    stamp()
+                    app.logger.info("[DB] Mevcut şema Alembic baseline olarak damgalandı.")
+            except Exception:
+                db.session.rollback()
+                app.logger.exception("[DB] Alembic stamp başarısız — şema migration zinciri dışında kaldı.")
 
         # Liderlik sorted set'lerini Postgres'ten doldur (Redis varsa). Redis sonradan
         # ayağa kalkarsa ilk leaderboard isteği zaten Postgres'e düşer; sonraki restart hidratlar.

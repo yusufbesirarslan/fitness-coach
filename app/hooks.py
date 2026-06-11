@@ -25,16 +25,21 @@ def set_csp_header(response):
     nitelik-handler'ları için gerekli (nonce nitelikler için çalışmaz);
     asıl enjeksiyon vektörü olan <script> blokları yine de nonce'a tabidir.
     img-src: 'https:' (tüm hostlar) yerine yalnızca S3 (pre-signed URL'ler,
-    *.amazonaws.com) + data: (base64 profil/önizleme görselleri)."""
+    *.amazonaws.com) + data: (base64 profil/önizleme görselleri).
+    Google Analytics (gtag.js, index.html): script/img/connect kaynakları
+    Google'ın resmî CSP rehberindeki host setiyle açıldı."""
     nonce = getattr(g, "csp_nonce", "")
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net; "
+        f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net "
+        "https://*.googletagmanager.com; "
         "script-src-attr 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
-        "img-src 'self' data: https://*.amazonaws.com; "
-        "connect-src 'self'; "
+        "img-src 'self' data: https://*.amazonaws.com "
+        "https://*.google-analytics.com https://*.googletagmanager.com; "
+        "connect-src 'self' https://*.google-analytics.com "
+        "https://*.analytics.google.com https://*.googletagmanager.com; "
         "frame-ancestors 'none'; "
         "base-uri 'self'; "
         "form-action 'self'; "
