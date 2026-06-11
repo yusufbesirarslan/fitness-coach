@@ -239,7 +239,9 @@
   /* ── 4. CW object ── */
   var STORAGE_KEY  = 'fc_coach_messages';
   var MAX_MESSAGES = 60;
-  var QR_LIB_SRC   = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+  // jsdelivr: CSP script-src yalnızca 'self' + cdn.jsdelivr.net'e izin verir
+  // (unpkg.com politika dışıydı ve tarayıcı yüklemeyi engelliyordu).
+  var QR_LIB_SRC   = 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js';
 
   var CW = window.CW = {
     open:     false,

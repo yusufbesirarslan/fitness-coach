@@ -326,10 +326,80 @@ def _food_search_llm(q):
         return []
 
 
+# Tarayıcı (proxy_scan_menu) body_text'i bu sınırda kapıyor; çıkarıcı da tamamını
+# LLM'e versin (ikisi hizalı olmalı). Önceki 10000 kısıtı uzun menülerde (örn. 32k
+# karakterlik BigChefs menüsü) sonradan gelen kategorileri (Burgerler, Pizzalar,
+# ana yemekler, tatlılar) LLM girişine hiç ulaştırmadan atıyordu — kategoriler
+# "eksik" görünüyordu. gpt-4o-mini 128k bağlamla bu boyutu rahat işler.
+_MENU_EXTRACT_MAX_CHARS = 40000
+
+# Çıkarım kapasitesi tek kaynaktan: istemdeki "toplam en fazla N yemek" sınırı,
+# menu.py'deki kırpma ve LLM çıkış bütçesi hep bu sabitten türetilir.
+MAX_MENU_ITEMS = 80
+_MENU_ITEMS_PER_CATEGORY = 8
+# Çıkış bütçesi kapasiteyle birlikte hareket etmeli: Türkçe yemek adları
+# İngilizceye göre daha çok token'a bölünür; öğe başına ~60 token + JSON
+# yapısı/kategori adları payı. Sabit 2500 tavanı, 80 öğelik yanıtı dizi
+# ortasında kesip TÜM çıkarımı boş döndürebiliyordu
+# (docs/menu-extraction-truncation-risk.md).
+_MENU_EXTRACT_MAX_TOKENS = 200 + MAX_MENU_ITEMS * 60
+
+
+def _salvage_truncated_categories(raw):
+    """Kesik (max_tokens'a takılmış) JSON çıktısından son tamamlanmış
+    öğe/kategori sınırına kadar olan kısmı kurtarır; başaramazsa None döner.
+
+    Beklenen şema {"categories": {"Kategori": ["yemek", ...]}} olduğundan,
+    güvenli kesim noktaları yalnızca dizi içinde kapanan string'ler (öğe
+    adları) ve kapanan köşeli/küme parantezleridir — dict içinde kapanan bir
+    string anahtardır, ardından ":" beklediği için orada kesilemez.
+    """
+    start = raw.find("{")
+    if start < 0:
+        return None
+    stack = []
+    in_str = esc = False
+    cut = -1
+    cut_stack = []
+    for i in range(start, len(raw)):
+        ch = raw[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+                if stack and stack[-1] == "[":
+                    cut, cut_stack = i, list(stack)
+        elif ch == '"':
+            in_str = True
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch in "}]":
+            if not stack:
+                return None
+            stack.pop()
+            cut, cut_stack = i, list(stack)
+    if cut < 0:
+        return None
+    repaired = raw[start:cut + 1] + "".join(
+        "}" if b == "{" else "]" for b in reversed(cut_stack))
+    try:
+        parsed = json.loads(repaired)
+    except json.JSONDecodeError:
+        return None
+    cats = parsed.get("categories", parsed)
+    if not isinstance(cats, dict):
+        return None
+    return {k: v for k, v in cats.items() if isinstance(v, list) and v} or None
+
+
 def _extract_categorized_items(raw_text, fw_state=None, headings=None, menu_source=None):
-    menu_input = raw_text[:10000]
+    menu_input = raw_text[:_MENU_EXTRACT_MAX_CHARS]
     if fw_state:
-        menu_input = fw_state[:6000] + "\n\n" + raw_text[:6000]
+        # framework_state + ham metni birlikte ver ama toplam giriş bütçesini koru.
+        menu_input = fw_state[:6000] + "\n\n" + raw_text[:_MENU_EXTRACT_MAX_CHARS - 6000]
 
     heading_hint = ""
     if headings:
@@ -344,7 +414,8 @@ def _extract_categorized_items(raw_text, fw_state=None, headings=None, menu_sour
 
     prompt = f"""Aşağıdaki restoran menü metninden yemekleri KATEGORİLERİYLE çıkar.
 Pazarlama metinlerini, açıklamaları, fiyatları YOKSAY. Sadece yemek/içecek adlarını al.
-Her kategori altında en fazla 10 yemek olsun. Toplam en fazla 50 yemek.
+ÖNEMLİ: Önce HER kategoriden en az 2 yemek seç (hiçbir kategoriyi atlama — özellikle Burgerler, Pizzalar, ana yemekler gibi sonradan gelen başlıkları), sonra kalan kotayı doldur.
+Kategori başına en fazla {_MENU_ITEMS_PER_CATEGORY} yemek, toplam en fazla {MAX_MENU_ITEMS} yemek.
 Kategorileri menüdeki başlıklardan al (örn: Kahvaltılar, Salatalar, Izgara & Etler, Makarnalar, Burgerler, İçecekler, Tatlılar).
 Eğer kategori bulamazsan "Genel" kullan.{heading_hint}{doc_hint}
 
@@ -359,19 +430,31 @@ SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma:
             messages=[{"role": "user", "content": prompt}],
             system_prompt="SADECE JSON döndür. Açıklama yapma, markdown kullanma. Menüdeki TÜM kategorileri dahil et, hiçbirini atlama." + PORTION_SANITY_RULE,
             temperature=0.0,
-            max_tokens=2500,
+            max_tokens=_MENU_EXTRACT_MAX_TOKENS,
         ).strip()
         current_app.logger.info(f"[EXTRACT] LLM raw response length: {len(raw)} chars")
         raw = raw.replace("```json", "").replace("```", "").strip()
         start = raw.find("{")
-        end = raw.rfind("}") + 1
-        if start < 0 or end <= start:
+        if start < 0:
             current_app.logger.info(f"[EXTRACT] ERROR: No valid JSON braces found in LLM response: {raw[:200]}")
             return {}
-        try:
-            parsed = json.loads(raw[start:end])
-        except json.JSONDecodeError as je:
-            current_app.logger.warning(f"[EXTRACT] JSON parse failed: {je} — Raw snippet: {raw[start:start+300]}")
+        end = raw.rfind("}") + 1
+        parsed = None
+        if end > start:
+            try:
+                parsed = json.loads(raw[start:end])
+            except json.JSONDecodeError:
+                parsed = None
+        if parsed is None:
+            # Kesik çıktı (örn. max_tokens'a takıldı): tümünü çöpe atmak yerine
+            # son tamamlanmış öğe/kategori sınırına kadar olanı kurtar.
+            salvaged = _salvage_truncated_categories(raw)
+            if salvaged:
+                current_app.logger.warning(
+                    f"[EXTRACT] Truncated JSON salvaged: {len(salvaged)} categories, "
+                    f"{sum(len(v) for v in salvaged.values())} items recovered")
+                return salvaged
+            current_app.logger.warning(f"[EXTRACT] JSON parse failed and salvage found nothing — Raw snippet: {raw[start:start+300]}")
             return {}
         cats = parsed.get("categories", parsed)
         if isinstance(cats, dict):

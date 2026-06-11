@@ -207,7 +207,7 @@
     </a>
 </nav>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 function toast(msg, type) {
     type = type || 'info';
     const wrap = document.getElementById('toast-wrap');

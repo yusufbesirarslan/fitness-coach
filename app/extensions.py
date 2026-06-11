@@ -2,6 +2,7 @@
 import os
 import redis
 from flask_limiter import Limiter
+from flask_migrate import Migrate
 from flask_sqlalchemy import SQLAlchemy
 from flask_limiter.util import get_remote_address
 from flask_login import LoginManager, current_user
@@ -11,6 +12,7 @@ from app.config import _REDIS_URL
 
 
 db = SQLAlchemy()
+migrate = Migrate()
 login_manager = LoginManager()
 login_manager.login_view = "auth.login"
 redis_client = redis.from_url(_REDIS_URL, decode_responses=True) if _REDIS_URL else None

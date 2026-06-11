@@ -4,7 +4,7 @@ import os
 from flask import Flask
 
 from app.config import configure_app
-from app.extensions import db, login_manager, limiter
+from app.extensions import db, login_manager, limiter, migrate
 from app.cli import register_cli
 from app.db_init import init_database
 
@@ -22,6 +22,7 @@ def create_app():
     configure_app(app)
 
     db.init_app(app)
+    migrate.init_app(app, db)
     login_manager.init_app(app)
 
     register_blueprints(app)
@@ -33,13 +34,17 @@ def create_app():
 
     # before_request order must match the original monolith:
     #   _csrf_protect -> (limiter) _check_request_limit -> maybe_weekly_rollover -> update_streak
-    from app.hooks import _csrf_protect, maybe_weekly_rollover, update_streak, inject_rank, \
+    from app.hooks import _csrf_protect, generate_csp_nonce, inject_csp_nonce, \
+        maybe_weekly_rollover, set_csp_header, update_streak, inject_rank, \
         ratelimit_exceeded, not_found, server_error
+    app.before_request(generate_csp_nonce)
     app.before_request(_csrf_protect)
     limiter.init_app(app)
     app.before_request(maybe_weekly_rollover)
     app.before_request(update_streak)
+    app.context_processor(inject_csp_nonce)
     app.context_processor(inject_rank)
+    app.after_request(set_csp_header)
     app.errorhandler(429)(ratelimit_exceeded)
     app.errorhandler(404)(not_found)
     app.errorhandler(500)(server_error)

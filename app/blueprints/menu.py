@@ -9,7 +9,7 @@ from flask_login import current_user, login_required
 from app.config import AI_RATELIMIT, SCRAPE_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter
 from app.models import MealLog, UserSession
-from app.services.ai_nutrition import _estimate_macros_llm, _estimate_serving_weights_llm, _extract_categorized_items, _primary_dish_type
+from app.services.ai_nutrition import MAX_MENU_ITEMS, _estimate_macros_llm, _estimate_serving_weights_llm, _extract_categorized_items, _primary_dish_type
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
 from app.services.foodcache import _cache_macros, _get_cached_macros
 from app.services.menu_extract import _content_has_food_items, _discover_menu_links, _extract_framework_state, _extract_page_sections, _menu_score, _try_wordpress_api
@@ -133,9 +133,14 @@ def proxy_scan_menu():
     current_app.logger.info(f"[SCRAPER] Total sections: {len(sections)} — Unique categories: {len(unique_headings)} — Categories: {unique_headings}")
     current_app.logger.info(f"[SCRAPER] Raw body_text length: {len(body_text)} chars")
 
-    if len(body_text) > 18000:
-        body_text = body_text[:18000]
-        current_app.logger.info(f"[SCRAPER] Truncated body_text to 18000 chars")
+    # Büyük menüler (örn. ~32k karakterlik BigChefs) tek sayfada tüm kategorileri
+    # (kahvaltıdan ana yemek/tatlıya) barındırır; 18000'de kesmek sonraki yarıyı
+    # (makarna, schnitzel, et, balık) atıyordu. gpt-4o-mini 128k bağlamla bunu
+    # rahat işler. Bu sınır, çıkarıcıdaki _MENU_EXTRACT_MAX_CHARS ile hizalı olmalı.
+    _BODY_TEXT_MAX = 40000
+    if len(body_text) > _BODY_TEXT_MAX:
+        body_text = body_text[:_BODY_TEXT_MAX]
+        current_app.logger.info(f"[SCRAPER] Truncated body_text to {_BODY_TEXT_MAX} chars")
 
     result = {
         "title": title,
@@ -236,7 +241,8 @@ def analyze_menu():
                         "message": "Menü metni işlenirken bir hata oluştu. Lütfen tekrar deneyin.",
                         "items": [], "categories": {}}), 200
 
-    MAX_MENU_ITEMS = 50
+    # MAX_MENU_ITEMS ai_nutrition'dan gelir: istem ("toplam en fazla N yemek"),
+    # bu kırpma ve LLM çıkış bütçesi (_MENU_EXTRACT_MAX_TOKENS) tek kaynaktan hizalı.
     item_names = list(dict.fromkeys(name for _, name in all_items))
     if len(item_names) > MAX_MENU_ITEMS:
         current_app.logger.info(f"[MACRO ENGINE] Capping items from {len(item_names)} to {MAX_MENU_ITEMS}")
@@ -322,6 +328,11 @@ def analyze_menu():
                 "carbs": macros.get("carbs", 0),
                 "fat": macros.get("fat", 0),
             })
+            # Menü-özel: absürt düşük kalorili "yemek" (≈başarısız eşleşme) → ele.
+            if valid and nutrition_pipeline.is_implausibly_low_menu_kcal(macros):
+                current_app.logger.info(f"[MACRO ENGINE] DISCARDED implausibly-low dish '{name}': {macros}")
+                valid = False
+                reasons = ["menu_calories_implausibly_low"]
             if not valid:
                 current_app.logger.info(f"[MACRO ENGINE] DISCARDED implausible item '{name}': "
                                 f"{macros} reasons={reasons}")
