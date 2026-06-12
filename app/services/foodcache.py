@@ -22,7 +22,9 @@ _FOOD_ID_CACHE_MAX = 1000
 
 
 def _get_cached_macros(item_names, basis="per_serving"):
-    cache = _macro_cache[basis]
+    # setdefault: dis sozluk temizlense bile (test fixture'lari .clear() yapar)
+    # namespace kendini onarir.
+    cache = _macro_cache.setdefault(basis, {})
     hits = {}
     misses = []
     for name in item_names:
@@ -35,7 +37,7 @@ def _get_cached_macros(item_names, basis="per_serving"):
 
 
 def _cache_macros(macro_map, basis="per_serving"):
-    cache = _macro_cache[basis]
+    cache = _macro_cache.setdefault(basis, {})
     for name, macros in macro_map.items():
         if macros.get("calories", 0) > 0:
             if len(cache) >= _MACRO_CACHE_MAX:

@@ -184,7 +184,7 @@ def test_macros_batch_no_json_returns_empty(app, monkeypatch):
 def test_macros_llm_batches_large_lists(app, monkeypatch):
     batches = []
     monkeypatch.setattr(ai_nutrition, "_estimate_macros_llm_batch",
-                        lambda items: batches.append(list(items)) or
+                        lambda items, category_map=None: batches.append(list(items)) or
                         {n: {"calories": 100.0} for n in items})
     items = [f"yemek{i}" for i in range(20)]
     result = _estimate_macros_llm(items)

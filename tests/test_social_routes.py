@@ -222,7 +222,7 @@ def test_accept_meal_suggestion_llm_fallback_for_missing(client, auth_user, frie
     def no_token():
         raise RuntimeError("fatsecret down")
     monkeypatch.setattr(social_bp, "_get_fatsecret_token", no_token)
-    monkeypatch.setattr(social_bp, "_estimate_macros_llm", lambda items: {
+    monkeypatch.setattr(social_bp, "_estimate_macros_llm", lambda items, category_map=None: {
         "gizemli yemek": {"calories": 400.0, "protein": 20.0, "carbs": 30.0, "fat": 20.0}})
 
     msg = _send_suggestion(client, friend, auth_user, "suggestion_meal", "gizemli yemek")

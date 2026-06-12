@@ -143,7 +143,8 @@ def _mock_pipeline(monkeypatch, categorized, per_serving=None, llm=None):
     monkeypatch.setattr(menu_bp, "_get_fatsecret_token", lambda: "tok")
     monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret",
                         lambda items, token, cmap=None: (per_serving or {}, {}))
-    monkeypatch.setattr(menu_bp, "_estimate_macros_llm", lambda items: llm or {})
+    monkeypatch.setattr(menu_bp, "_estimate_macros_llm",
+                        lambda items, category_map=None: llm or {})
 
 
 def test_analyze_requires_text_and_profile(client, auth_user):
@@ -213,7 +214,8 @@ def test_analyze_extraction_failure_returns_parsing_error(client, profile_sessio
 
 
 def test_analyze_serves_cached_items_without_fatsecret(client, profile_session, monkeypatch):
-    foodcache._macro_cache["Izgara Tavuk"] = CHICKEN
+    # Menü hattı PORSİYON-bazlı namespace'ten okur (per-100g koç önbelleğiyle karışmaz).
+    foodcache._macro_cache.setdefault("per_serving", {})["Izgara Tavuk"] = CHICKEN
     monkeypatch.setattr(menu_bp, "_extract_categorized_items",
                         lambda *a, **kw: {"Ana Yemekler": ["Izgara Tavuk"]})
 
