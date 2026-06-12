@@ -103,3 +103,33 @@ def login(client):
         return client.post("/login", json={"username": username, "password": password})
 
     return _login
+
+
+@pytest.fixture
+def auth_user(make_user, login):
+    """Oturum açmış varsayılan kullanıcı; `client` aynı oturumu taşır."""
+    user = make_user("testuser")
+    login("testuser")
+    return user
+
+
+@pytest.fixture
+def make_users_bulk(app):
+    """Şifre hash'i olmadan hızlı toplu kullanıcı üretimi (giriş yapamazlar);
+    leaderboard gibi çok-kullanıcılı senaryolar için."""
+    from app.extensions import db
+    from app.models import User
+
+    def _make(n, prefix="bulk", **fields):
+        users = []
+        for i in range(n):
+            user = User(username=f"{prefix}{i}", email=f"{prefix}{i}@example.com",
+                        password_hash="not-a-real-hash")
+            for key, value in fields.items():
+                setattr(user, key, value)
+            users.append(user)
+            db.session.add(user)
+        db.session.commit()
+        return users
+
+    return _make
