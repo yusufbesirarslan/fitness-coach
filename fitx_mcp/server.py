@@ -820,6 +820,16 @@ def analyze_and_rank_menu(raw_menu_text: str, user_id: int) -> str:
 if __name__ == "__main__":
     import sys
     if "--http" in sys.argv:
+        # Aynı kapı fitx_mcp/__main__.py'de de var; bu blok doğrudan
+        # `python fitx_mcp/server.py --http` çalıştırılırsa onu atlamasın.
+        # Araçlar user_id'yi parametre alır ve kendi yetkilendirmesi yoktur —
+        # HTTP taşıması yalnızca açık opt-in + loopback ile açılır.
+        if os.environ.get("FITX_MCP_ALLOW_HTTP") != "1":
+            sys.exit(
+                "MCP HTTP taşıması başlatılmıyor: kimliksiz, çapraz-kullanıcı "
+                "veritabanı erişimi açığa çıkarır. Riski anlıyorsan (yalnızca "
+                "loopback) FITX_MCP_ALLOW_HTTP=1 ayarla."
+            )
         mcp.run(transport="streamable-http", host="127.0.0.1", port=8100)
     else:
         mcp.run(transport="stdio")

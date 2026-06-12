@@ -12,13 +12,19 @@ import re
 import subprocess
 import sys
 
+import pytest
+
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def test_http_transport_refused_without_optin():
+@pytest.mark.parametrize("entrypoint", [
+    ["-m", "fitx_mcp"],            # belgelenen yol
+    ["fitx_mcp/server.py"],        # doğrudan script çalıştırma da kapıyı atlamamalı
+])
+def test_http_transport_refused_without_optin(entrypoint):
     env = {k: v for k, v in os.environ.items() if k != "FITX_MCP_ALLOW_HTTP"}
     result = subprocess.run(
-        [sys.executable, "-m", "fitx_mcp", "--http"],
+        [sys.executable, *entrypoint, "--http"],
         cwd=_REPO_ROOT, env=env, capture_output=True, text=True, timeout=60,
     )
     assert result.returncode != 0
