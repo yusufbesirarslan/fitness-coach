@@ -11,7 +11,10 @@ config = context.config
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.
-fileConfig(config.config_file_name)
+# disable_existing_loggers=False: migration'lar boot SIRASINDA da çalışır
+# (app/db_init.py upgrade/stamp); varsayılan True uygulamanın mevcut
+# logger'larını kalıcı olarak susturuyordu.
+fileConfig(config.config_file_name, disable_existing_loggers=False)
 logger = logging.getLogger('alembic.env')
 
 
