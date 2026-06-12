@@ -23,7 +23,23 @@ limiter = Limiter(
     storage_options={"socket_connect_timeout": 2} if _REDIS_URL else {},
     in_memory_fallback_enabled=True,
 )
-openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"), timeout=30.0, max_retries=2)
+class _LazyOpenAI:
+    """OpenAI istemcisini ilk kullanımda kurar. İstemci import sırasında
+    kurulursa OPENAI_API_KEY olmayan her ortam (test, migration, CLI) daha
+    import'ta patlar; lazy kurulumda anahtar yalnızca gerçek bir AI çağrısı
+    yapılırken gerekir. `openai_client.chat...` erişimleri __getattr__ ile
+    gerçek istemciye delege edilir."""
+
+    _client = None
+
+    def __getattr__(self, name):
+        if self._client is None:
+            self._client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"),
+                                  timeout=30.0, max_retries=2)
+        return getattr(self._client, name)
+
+
+openai_client = _LazyOpenAI()
 
 def _user_or_ip_key():
     """Rate-limit key: the user id when logged in, else the client IP. The AI
