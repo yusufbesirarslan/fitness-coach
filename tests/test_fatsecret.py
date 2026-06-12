@@ -244,17 +244,20 @@ def test_food_search_token_failure_returns_none(monkeypatch):
 # ---------------------------------------------------------------------------
 
 def test_macro_cache_skips_zero_calories_and_caps_size():
-    foodcache._macro_cache.clear()
-    foodcache._cache_macros({"sifir": {"calories": 0}})
-    assert "sifir" not in foodcache._macro_cache
+    # Önbellek artık baz (per_100g / per_serving) bazında ayrı namespace tutar;
+    # FIFO tavanı her namespace için ayrı işler.
+    cache = foodcache._macro_cache.setdefault("per_serving", {})
+    cache.clear()
+    foodcache._cache_macros({"sifir": {"calories": 0}}, basis="per_serving")
+    assert "sifir" not in cache
 
     for i in range(foodcache._MACRO_CACHE_MAX):
-        foodcache._cache_macros({f"yemek{i}": {"calories": 100}})
-    foodcache._cache_macros({"taze": {"calories": 100}})
-    assert len(foodcache._macro_cache) == foodcache._MACRO_CACHE_MAX
-    assert "yemek0" not in foodcache._macro_cache  # en eski düştü
-    assert "taze" in foodcache._macro_cache
-    foodcache._macro_cache.clear()
+        foodcache._cache_macros({f"yemek{i}": {"calories": 100}}, basis="per_serving")
+    foodcache._cache_macros({"taze": {"calories": 100}}, basis="per_serving")
+    assert len(cache) == foodcache._MACRO_CACHE_MAX
+    assert "yemek0" not in cache  # en eski düştü
+    assert "taze" in cache
+    cache.clear()
 
 
 def test_food_id_cache_normalizes_and_caps():

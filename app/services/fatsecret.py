@@ -283,7 +283,7 @@ def _food_search_fatsecret(q):
 
         name = f.get("food_name", "")
         fid = f.get("food_id", "")
-        _cache_macros({name: per_100g})
+        _cache_macros({name: per_100g}, basis="per_100g")
         if fid:
             _cache_food_id(name, fid)
         results.append({
@@ -422,7 +422,7 @@ def _food_search_static(q):
             "calories": item["calories"], "protein": item["protein"],
             "carbs": item["carbs"], "fat": item["fat"],
         }
-        _cache_macros({item["name"]: per_100g})
+        _cache_macros({item["name"]: per_100g}, basis="per_100g")
         results.append({
             "name": item["name"], "brand": "", "food_id": "",
             "serving": "Per 100g", "is_per_serving": False,

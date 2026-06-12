@@ -9,7 +9,7 @@ from flask_login import current_user, login_required
 from app.config import AI_RATELIMIT, SCRAPE_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter
 from app.models import MealLog, UserSession
-from app.services.ai_nutrition import MAX_MENU_ITEMS, _estimate_macros_llm, _estimate_serving_weights_llm, _extract_categorized_items, _primary_dish_type
+from app.services.ai_nutrition import MAX_MENU_ITEMS, _cap_items_round_robin, _estimate_macros_llm, _estimate_serving_weights_llm, _extract_categorized_items, _primary_dish_type
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
 from app.services.foodcache import _cache_macros, _get_cached_macros
 from app.services.menu_extract import _content_has_food_items, _discover_menu_links, _extract_framework_state, _extract_page_sections, _menu_score, _try_wordpress_api
@@ -243,12 +243,13 @@ def analyze_menu():
 
     # MAX_MENU_ITEMS ai_nutrition'dan gelir: istem ("toplam en fazla N yemek"),
     # bu kırpma ve LLM çıkış bütçesi (_MENU_EXTRACT_MAX_TOKENS) tek kaynaktan hizalı.
+    # Kırpma kategoriler arası ROUND-ROBIN yapılır: düz [:N] kesimi çıkarım
+    # sırasındaki son kategorileri (tatlılar, veganlar...) toptan düşürüyordu.
     item_names = list(dict.fromkeys(name for _, name in all_items))
     if len(item_names) > MAX_MENU_ITEMS:
-        current_app.logger.info(f"[MACRO ENGINE] Capping items from {len(item_names)} to {MAX_MENU_ITEMS}")
-        item_names = item_names[:MAX_MENU_ITEMS]
-        kept = set(item_names)
-        all_items = [(cat, name) for cat, name in all_items if name in kept]
+        current_app.logger.info(f"[MACRO ENGINE] Capping items from {len(item_names)} to {MAX_MENU_ITEMS} (round-robin)")
+        all_items = _cap_items_round_robin(all_items, MAX_MENU_ITEMS)
+        item_names = list(dict.fromkeys(name for _, name in all_items))
     current_app.logger.info(f"[MACRO ENGINE] Starting macro pipeline for {len(item_names)} unique items")
 
     # Ad → kategori haritası (ilk kategori kazanır) — FatSecret çözümlemesinde
@@ -257,7 +258,7 @@ def analyze_menu():
     for cat, name in all_items:
         category_map.setdefault(name, cat)
 
-    cached_hits, uncached_names = _get_cached_macros(item_names)
+    cached_hits, uncached_names = _get_cached_macros(item_names, basis="per_serving")
     if cached_hits:
         current_app.logger.info(f"[MACRO ENGINE] Cache hit: {len(cached_hits)}/{len(item_names)} items from cache")
 
@@ -300,10 +301,12 @@ def analyze_menu():
     missing = [n for n in lookup_names if n not in macro_map]
     current_app.logger.info(f"[MACRO ENGINE] After FatSecret: {len(macro_map)} resolved, {len(missing)} missing → LLM fallback")
     if missing:
-        llm_macros = _estimate_macros_llm(missing)
+        # Kategori bağlamı LLM'e de geçer: 'Margarita'@Pizzalar kokteyl değil
+        # tek kişilik pizza olarak tahmin edilsin (tür referanslı prompt).
+        llm_macros = _estimate_macros_llm(missing, category_map)
         macro_map.update(llm_macros)
 
-    _cache_macros(macro_map)
+    _cache_macros(macro_map, basis="per_serving")
 
     final_resolved = sum(1 for n in item_names if n in macro_map and macro_map[n].get("calories", 0) > 0)
     final_zero = len(item_names) - final_resolved
@@ -338,14 +341,19 @@ def analyze_menu():
                                 f"{macros} reasons={reasons}")
                 continue
 
-            # Porsiyon bandi — yalniz LOG: band ihlali "imkansiz" degil (300 kcal
-            # cocuk burgeri mesru olabilir); sistematik nedenler kaynakta cozuldu
-            # (per-serving kapisi + tur-bazli gram yedegi). Bu log eski cache /
-            # LLM kacaklarini sahada gorunur kilar, degeri ATMAZ.
-            band = nutrition_pipeline.check_portion_band(
-                macros.get("calories", 0), _primary_dish_type(name, cat))
-            if band in ("low", "high"):
-                current_app.logger.info(f"[MACRO ENGINE] PORTION BAND {band.upper()} '{name}': {macros}")
+            # Porsiyon bandi — ZORLAYICI (yalniz ust yonde): tur kesinse ve deger
+            # bant USTUYSE tum makrolar oransal olarak bant ustune kirpilir
+            # (saha vakasi: Margarita pizza 1320 kcal — cache/FatSecret/LLM hangi
+            # kaynaktan sizarsa sizsin tek bogum noktasi burasi). Bant ALTI yalniz
+            # loglanir: 300 kcal cocuk burgeri mesru olabilir, kaynak-tarafi
+            # kapilar (gate_per_serving) sistematik dusukleri zaten ceviriyor.
+            dish_type = _primary_dish_type(name, cat)
+            clamped, changed = nutrition_pipeline.clamp_to_band(macros, dish_type)
+            if changed:
+                current_app.logger.info(f"[MACRO ENGINE] PORTION BAND CLAMP '{name}' ({dish_type}): {macros} → {clamped}")
+                macros = clamped
+            elif nutrition_pipeline.check_portion_band(macros.get("calories", 0), dish_type) == "low":
+                current_app.logger.info(f"[MACRO ENGINE] PORTION BAND LOW '{name}': {macros}")
 
         if not has_macros:
             macros = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}

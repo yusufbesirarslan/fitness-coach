@@ -324,14 +324,17 @@ def is_implausibly_low_menu_kcal(macros, min_kcal=MENU_MIN_DISH_KCAL):
 # dish_type anahtarlari ai_nutrition._DISH_TYPE_KEYWORDS siniflaridir; cagiran
 # taraf turu cozer (bu modul saf kalir, taksonomi importu yapmaz).
 
-# Yemek-turune gore makul tek-porsiyon kalori bandi (kcal). Pizza belgede
-# ornek listede yok ama taksonomide var; butun restoran pizzasi ~800-1200 kcal.
+# Yemek-turune gore makul tek-porsiyon kalori bandi (kcal). Pizza bandi TEK
+# KISILIK tam pizza (~30 cm) icindir: margarita ~850, dort peynirli ~1050;
+# 1100 ustu (saha vakasi: 1320 kcal Margarita) sisirilmis tahmindir. Tatli
+# bandi tek dilim/kase porsiyonu denetler (800 kcal'lik sufle elenir/kirpilir).
 PORTION_KCAL_BANDS = {
     "burger": (350.0, 800.0),
     "pasta": (350.0, 700.0),
     "salad": (150.0, 600.0),
     "soup": (150.0, 400.0),
-    "pizza": (400.0, 1300.0),
+    "pizza": (400.0, 1100.0),
+    "dessert": (150.0, 700.0),
 }
 
 # Tur-bazli varsayilan servis agirligi (g) — duz 150 g yedegin yerine. Degerler
@@ -343,6 +346,7 @@ DISH_SERVING_DEFAULT_G = {
     "salad": 300.0,
     "soup": 275.0,
     "pizza": 400.0,
+    "dessert": 150.0,
 }
 
 # Per-serving kaydinin metrik agirligi turun asgarisinden kucukse bu "tam tabak"
@@ -355,6 +359,7 @@ DISH_SERVING_MIN_G = {
     "salad": 150.0,
     "soup": 150.0,
     "pizza": 200.0,
+    "dessert": 80.0,
 }
 
 
@@ -374,6 +379,34 @@ def check_portion_band(calories, dish_type):
     if cal > high:
         return "high"
     return "ok"
+
+
+def clamp_to_band(macros, dish_type):
+    """Bant-USTU makrolari turun ust sinirina oransal olarak kirp.
+
+    Donus: ``(macros, changed)``. Yalnizca ``check_portion_band == "high"``
+    durumunda tum makrolar ayni katsayiyla olceklenir (kalori = bant ustu;
+    oransal olcekleme Atwater tutarliligini korur). "low"/"ok"/None oldugu
+    gibi birakilir — dusuk taraf mesru olabilir (cocuk porsiyonu, kucuk kase)
+    ve kaynak-tarafi kapilar (gate_per_serving) zaten duzeltiyor.
+
+    Tek bogum noktasi olarak menu hattinda skor oncesi cagrilir: cache,
+    FatSecret accept, per-100g olcekleme ve LLM yedegi dahil HER kaynaktan
+    sizan sisirilmis degeri (saha vakasi: Margarita pizza 1320 kcal) yakalar.
+    LLM KULLANMAZ."""
+    band = check_portion_band(macros.get("calories"), dish_type)
+    if band != "high":
+        return macros, False
+    cal = _num(macros.get("calories"))
+    _low, high = PORTION_KCAL_BANDS[dish_type]
+    scale = high / cal
+    clamped = {
+        "calories": round(cal * scale, 1),
+        "protein": round(_num(macros.get("protein")) * scale, 1),
+        "carbs": round(_num(macros.get("carbs")) * scale, 1),
+        "fat": round(_num(macros.get("fat")) * scale, 1),
+    }
+    return clamped, True
 
 
 def gate_per_serving(dish_type, macros, serving_grams=None):
