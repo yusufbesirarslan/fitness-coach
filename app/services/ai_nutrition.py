@@ -104,7 +104,14 @@ _DISH_TYPE_KEYWORDS = {
     "soup": ("soup", "corba"),
     "burger": ("burger", "hamburger"),
     "pizza": ("pizza",),
-    "pasta": ("pasta", "makarna"),
+    "pasta": ("pasta", "makarna", "lazanya", "lasagna"),
+    # 'tatli' oneki 'Tatlılar' kategori basligini da cozer (≥4 harf onek kurali).
+    # DIKKAT: 'cheesecake' BILEREK yok — onek kurali 'cheese' token'ini da
+    # tatliya cevirir ve salata→peynir bilesen-cokmesi korumasini bozar
+    # (test_dish_type_gate_rejects_component_collapse); cheesecake'i kategori
+    # fallback'i ('Tatlılar') cozer.
+    "dessert": ("dessert", "tatli", "sufle", "souffle",
+                "tiramisu", "baklava", "brownie", "sutlac"),
 }
 
 
@@ -311,7 +318,7 @@ def _food_search_llm(q):
                 "fat": float(item.get("fat", 0)),
             }
             name = item.get("name", q)
-            _cache_macros({name: per_100g})
+            _cache_macros({name: per_100g}, basis="per_100g")
             results.append({
                 "name": name,
                 "brand": "",
@@ -343,6 +350,36 @@ _MENU_ITEMS_PER_CATEGORY = 8
 # ortasında kesip TÜM çıkarımı boş döndürebiliyordu
 # (docs/menu-extraction-truncation-risk.md).
 _MENU_EXTRACT_MAX_TOKENS = 200 + MAX_MENU_ITEMS * 60
+
+
+def _cap_items_round_robin(all_items, max_total=MAX_MENU_ITEMS):
+    """(kategori, ad) listesini kategoriler arasi ADIL bicimde max_total'a indir.
+
+    Eski davranis duz `[:max_total]` idi: cikarim sirasindaki SON kategoriler
+    (tatlilar, veganlar...) toptan dusuyordu. Round-robin her turda her
+    kategoriden 1 oge alir; kategori sirasi ve kategori-ici oge sirasi korunur.
+    Toplam zaten sinirin altindaysa girdi oldugu gibi doner. Ayni ad birden cok
+    kategoride mesru olarak yer alabilir (cagiran ad-bazli tekillestirmeyi
+    kendisi yapar — mevcut sozlesme degismez)."""
+    if len(all_items) <= max_total:
+        return list(all_items)
+    by_cat = {}
+    for cat, name in all_items:
+        by_cat.setdefault(cat, []).append(name)
+    capped = []
+    round_idx = 0
+    while len(capped) < max_total:
+        took_any = False
+        for cat, names in by_cat.items():
+            if round_idx < len(names):
+                capped.append((cat, names[round_idx]))
+                took_any = True
+                if len(capped) >= max_total:
+                    break
+        if not took_any:
+            break
+        round_idx += 1
+    return capped
 
 
 def _salvage_truncated_categories(raw):
@@ -403,7 +440,17 @@ def _extract_categorized_items(raw_text, fw_state=None, headings=None, menu_sour
 
     heading_hint = ""
     if headings:
-        heading_hint = f"\n\nTespit edilen kategori başlıkları: {', '.join(headings)}\nBu kategorilerin HEPSİ için yemek bul. Hiçbirini atlama."
+        # DİKKAT: bazı siteler (örn. BigChefs) HER YEMEĞİ ayrı bir başlık
+        # etiketiyle işaretler — bu liste kategori değil yemek adlarıyla dolu
+        # olabilir. İpucunu bağlayıcı yapmak ("bu kategorilerin hepsi için yemek
+        # bul") LLM'i yemek-adı-başına-kategori üretmeye itiyordu; öneri olarak
+        # ver ve gerçek kategorileri metinden çıkarmasını iste.
+        heading_hint = (
+            f"\n\nSayfadan tespit edilen başlıklar (DİKKAT: bir kısmı kategori değil TEK YEMEK adı olabilir): {', '.join(headings)}"
+            "\nGerçek menü kategorilerini metnin bölüm yapısından SEN belirle (örn. Kahvaltılar, Çorbalar, Salatalar, Burgerler, Pizzalar, Tatlılar). "
+            "Tek bir yemeğin adını kategori olarak KULLANMA; her yemeği uygun kategoriye yerleştir. "
+            "Menünün TAMAMINI tara — metnin sonundaki kategorileri de dahil et."
+        )
 
     doc_hint = ""
     if menu_source == "google_drive":
@@ -414,8 +461,8 @@ def _extract_categorized_items(raw_text, fw_state=None, headings=None, menu_sour
 
     prompt = f"""Aşağıdaki restoran menü metninden yemekleri KATEGORİLERİYLE çıkar.
 Pazarlama metinlerini, açıklamaları, fiyatları YOKSAY. Sadece yemek/içecek adlarını al.
-ÖNEMLİ: Önce HER kategoriden en az 2 yemek seç (hiçbir kategoriyi atlama — özellikle Burgerler, Pizzalar, ana yemekler gibi sonradan gelen başlıkları), sonra kalan kotayı doldur.
-Kategori başına en fazla {_MENU_ITEMS_PER_CATEGORY} yemek, toplam en fazla {MAX_MENU_ITEMS} yemek.
+ÖNEMLİ: Her kategorideki TÜM yemekleri listele — 2-3 örnekle yetinme, kategorideki her yemeği yaz (kategori başına en fazla {_MENU_ITEMS_PER_CATEGORY} yemek, toplam en fazla {MAX_MENU_ITEMS} yemek).
+Hiçbir kategoriyi atlama — özellikle Burgerler, Pizzalar, ana yemekler gibi sonradan gelen başlıkları.
 Kategorileri menüdeki başlıklardan al (örn: Kahvaltılar, Salatalar, Izgara & Etler, Makarnalar, Burgerler, İçecekler, Tatlılar).
 Eğer kategori bulamazsan "Genel" kullan.{heading_hint}{doc_hint}
 
@@ -529,6 +576,8 @@ Kurallar:
 - Çorbalar: 250-300ml (≈ gram)
 - Makarnalar: 300-400g
 - Hamburger: 250-350g
+- Pizza (tek kişilik tam, ~30cm): 350-450g
+- Tatlılar (tek dilim/kase): 100-200g
 - Izgara balık: 200-300g (garnitürle 350-450g)
 
 Yemekler:
@@ -604,17 +653,31 @@ def _repair_truncated_json(raw_json):
     return trimmed
 
 
-def _estimate_macros_llm_batch(batch_items):
+def _estimate_macros_llm_batch(batch_items, category_map=None):
     if not batch_items:
         return {}
-    items_str = "\n".join(f"- {name}" for name in batch_items)
+    category_map = category_map or {}
+    # Menü kategorisi parantez içinde yalnızca BAĞLAM olarak verilir — belirsiz
+    # adlarda doğru yemeği seçtirir ('Margarita'@Pizzalar → pizza, kokteyl değil).
+    listing_lines = []
+    for name in batch_items:
+        cat = (category_map.get(name) or "").strip()
+        listing_lines.append(f"- {name} (menü kategorisi: {cat})" if cat else f"- {name}")
+    items_str = "\n".join(listing_lines)
     prompt = f"""Sen bir beslenme uzmanısın. Aşağıdaki restoran yemeklerinin 1 PORSİYON (standart restoran servisi) için TAHMİNİ besin değerlerini hesapla.
 
 ÖNEMLİ: Değerler 100 gram için DEĞİL, 1 tam porsiyon (tabaktaki yemeğin tamamı) için olmalı.
-Referans porsiyon ağırlıkları: Et yemekleri garnitürle ~350g, salatalar ~300g, çorbalar ~280g, makarnalar ~350g.
+Referans porsiyonlar (Türkiye restoranı, tek kişi):
+- Et yemekleri garnitürle ~350g
+- Salatalar ~300g, çorbalar ~280g, makarnalar ~350g
+- Pizza (tek kişilik tam, ~30cm): 700-1100 kcal
+- Burger (tabak, patates hariç): 400-800 kcal
+- Tatlılar (tek dilim/kase): 250-650 kcal
+- Kahvaltı tabağı: 400-800 kcal (ekmek/reçel karbonhidratı DAHİL — karbonhidrat 0 olamaz)
 Her yemek için gerçekçi değerler ver. Hiçbir yemeğe aynı değerleri verme, her biri farklı olmalı.
+Parantez içindeki menü kategorisi yalnızca anlamı netleştirmek içindir; JSON anahtarına EKLEME.
 
-ÖNEMLİ: JSON anahtarları olarak yemek isimlerini AYNEN aşağıdaki listeden kopyala, hiçbir harfi değiştirme:
+ÖNEMLİ: JSON anahtarları olarak yemek isimlerini (parantezsiz) AYNEN aşağıdaki listeden kopyala, hiçbir harfi değiştirme:
 {items_str}
 
 SADECE aşağıdaki JSON formatında yanıt ver:
@@ -693,7 +756,7 @@ Tüm {len(batch_items)} yemek için değer ver. Sadece JSON döndür, başka bir
 _LLM_MACRO_BATCH_SIZE = 15
 
 
-def _estimate_macros_llm(items):
+def _estimate_macros_llm(items, category_map=None):
     if not items:
         return {}
     current_app.logger.info(f"[MACRO ENGINE] LLM fallback for {len(items)} items (batch size {_LLM_MACRO_BATCH_SIZE}): {items[:5]}{'...' if len(items)>5 else ''}")
@@ -701,7 +764,7 @@ def _estimate_macros_llm(items):
     for i in range(0, len(items), _LLM_MACRO_BATCH_SIZE):
         batch = items[i:i + _LLM_MACRO_BATCH_SIZE]
         current_app.logger.info(f"[MACRO ENGINE] Processing batch {i // _LLM_MACRO_BATCH_SIZE + 1}/{(len(items) - 1) // _LLM_MACRO_BATCH_SIZE + 1} ({len(batch)} items)")
-        batch_results = _estimate_macros_llm_batch(batch)
+        batch_results = _estimate_macros_llm_batch(batch, category_map)
         all_results.update(batch_results)
     current_app.logger.info(f"[MACRO ENGINE] LLM total resolved: {len(all_results)}/{len(items)} items with non-zero macros")
     return all_results

@@ -306,7 +306,7 @@ def _process_meal_suggestion_accept(msg):
 
     total = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
     try:
-        cached_hits, uncached = _get_cached_macros(items)
+        cached_hits, uncached = _get_cached_macros(items, basis="per_serving")
         macro_map = dict(cached_hits)
         per_100g_items = {}
 
@@ -334,7 +334,7 @@ def _process_meal_suggestion_accept(msg):
                 llm_macros = _estimate_macros_llm(missing)
                 macro_map.update(llm_macros)
 
-            _cache_macros(macro_map)
+            _cache_macros(macro_map, basis="per_serving")
 
         for item in items:
             m = macro_map.get(item, {})

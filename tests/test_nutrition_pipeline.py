@@ -18,6 +18,7 @@ from nutrition_pipeline import (  # noqa: E402
     build_evaluation,
     check_portion_band,
     check_serving,
+    clamp_to_band,
     estimate_serving_grams,
     gate_per_serving,
     is_implausibly_low_menu_kcal,
@@ -608,6 +609,55 @@ class TestGatePerServing:
         assert status == "convert"
         # Oran donusumu gecerli yogunluk verir: 400 * 100/120 ≈ 333 kcal/100g.
         assert conv["calories"] == round(400 * 100.0 / 120.0, 1)
+
+
+class TestClampToBand:
+    """Bant-ustu zorlamasi (saha vakasi ai-chatbot-menu.txt, 2026-06-12):
+    Margarita 1320 kcal / Dort Peynirli 1240 kcal tek kisilik pizza icin
+    sisirilmis; Cikolatali Sufle 800 kcal tek kase tatli icin sisirilmis."""
+
+    def test_margarita_field_case_clamped(self):
+        # Pizza ust siniri artik 1100 (tek kisilik tam pizza karari).
+        clamped, changed = clamp_to_band(_macros(1320, 60, 176, 44), "pizza")
+        assert changed is True
+        assert clamped["calories"] == 1100.0
+        # Oransal olcekleme: Atwater tutarliligi korunur (4P+4C+9F ~ kalori).
+        scale = 1100.0 / 1320.0
+        assert clamped["protein"] == round(60 * scale, 1)
+        assert clamped["carbs"] == round(176 * scale, 1)
+        assert clamped["fat"] == round(44 * scale, 1)
+
+    def test_dort_peynirli_field_case_clamped(self):
+        clamped, changed = clamp_to_band(_macros(1240, 56, 148, 52), "pizza")
+        assert changed is True
+        assert clamped["calories"] == 1100.0
+
+    def test_oversized_dessert_clamped(self):
+        clamped, changed = clamp_to_band(_macros(800, 12, 84, 50), "dessert")
+        assert changed is True
+        assert clamped["calories"] == 700.0
+
+    def test_in_band_untouched(self):
+        m = _macros(850, 38, 110, 28)
+        assert clamp_to_band(m, "pizza") == (m, False)
+
+    def test_low_band_untouched(self):
+        # Dusuk taraf mesru olabilir (cocuk porsiyonu) → kirpilmaz.
+        m = _macros(300, 18, 25, 12)
+        assert clamp_to_band(m, "burger") == (m, False)
+
+    def test_unknown_type_untouched(self):
+        m = _macros(1320, 60, 176, 44)
+        assert clamp_to_band(m, None) == (m, False)
+        assert clamp_to_band(m, "kebab") == (m, False)
+
+
+def test_dessert_band_field_cases():
+    # Tatli taksonomiye eklendi: sufle 800 'high', San Sebastian 500 'ok'.
+    assert check_portion_band(800, "dessert") == "high"
+    assert check_portion_band(500, "dessert") == "ok"
+    assert check_portion_band(1320, "pizza") == "high"   # Margarita saha degeri
+    assert check_portion_band(1240, "pizza") == "high"   # Dort Peynirli saha degeri
 
 
 def test_portion_tables_self_consistent():

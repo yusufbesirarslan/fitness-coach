@@ -2,7 +2,14 @@
 
 
 
-_macro_cache = {}
+# Makro onbellegi BAZ (basis) bazinda ayri tutulur: koc aramasi 100g-bazli,
+# menu/social hatti PORSIYON-bazli deger yazar. Eski tek-sozluk tasarimda ayni
+# ad altinda iki baz karisiyordu ('Pizza' 100g=267 kcal ← koc; menu bunu 1 tam
+# porsiyon sanip 4-5 kat eksik gosteriyordu — ya da tersi, sisirme).
+_macro_cache = {
+    "per_100g": {},
+    "per_serving": {},
+}
 
 
 _food_id_cache = {}   # name → fatsecret food_id
@@ -14,11 +21,12 @@ _MACRO_CACHE_MAX = 500
 _FOOD_ID_CACHE_MAX = 1000
 
 
-def _get_cached_macros(item_names):
+def _get_cached_macros(item_names, basis="per_serving"):
+    cache = _macro_cache[basis]
     hits = {}
     misses = []
     for name in item_names:
-        cached = _macro_cache.get(name)
+        cached = cache.get(name)
         if cached is not None:
             hits[name] = cached
         else:
@@ -26,13 +34,14 @@ def _get_cached_macros(item_names):
     return hits, misses
 
 
-def _cache_macros(macro_map):
+def _cache_macros(macro_map, basis="per_serving"):
+    cache = _macro_cache[basis]
     for name, macros in macro_map.items():
         if macros.get("calories", 0) > 0:
-            if len(_macro_cache) >= _MACRO_CACHE_MAX:
-                oldest = next(iter(_macro_cache))
-                del _macro_cache[oldest]
-            _macro_cache[name] = macros
+            if len(cache) >= _MACRO_CACHE_MAX:
+                oldest = next(iter(cache))
+                del cache[oldest]
+            cache[name] = macros
 
 
 def _cache_food_id(name, fid):

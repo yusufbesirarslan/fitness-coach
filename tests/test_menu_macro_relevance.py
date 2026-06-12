@@ -195,6 +195,9 @@ def test_primary_dish_type_from_name():
     assert _primary_dish_type("Vegan Burger") == "burger"
     assert _primary_dish_type("Sezar Salata") == "salad"
     assert _primary_dish_type("Mercimek Çorbası") == "soup"
+    # Saha vakası (BigChefs e2e): 'Vegan Lazanya' 1155 kcal bandsız sızıyordu.
+    assert _primary_dish_type("Vegan Lazanya") == "pasta"
+    assert _primary_dish_type("Lasagna Bolognese") == "pasta"
 
 
 def test_primary_dish_type_category_fallback():
@@ -212,6 +215,19 @@ def test_primary_dish_type_unknown_or_ambiguous_is_none():
     assert _primary_dish_type("Tavuk Mangal", "Ana Yemekler") is None  # taksonomi dışı
     assert _primary_dish_type("Pizza Burger") is None                  # belirsiz ad
     assert _primary_dish_type("", None) is None
+
+
+def test_primary_dish_type_dessert_cases():
+    # Saha vakaları (ai-chatbot-menu.txt): 800 kcal'lik sufle bandsızdı —
+    # tatlı taksonomiye eklendi; ad veya 'Tatlılar' kategori başlığı çözer.
+    assert _primary_dish_type("Çikolatalı Sufle") == "dessert"
+    # 'cheesecake' anahtar kelimesi bilerek yok ('cheese' çakışması) →
+    # kategori fallback'i çözer.
+    assert _primary_dish_type("San Sebastian Cheesecake", "Tatlılar") == "dessert"
+    assert _primary_dish_type("Fırın Sütlaç", "Tatlılar") == "dessert"
+    assert _dish_types("Tatlılar") == {"dessert"}
+    # Peynirli SALATA tatlıya dönmemeli (bileşen-çökmesi korumasıyla uyum).
+    assert _primary_dish_type("Goat Cheese Salad") == "salad"
 
 
 def test_legitimate_cross_category_repeat_is_preserved():
