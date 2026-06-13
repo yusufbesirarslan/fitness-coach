@@ -6,7 +6,7 @@ from datetime import datetime
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 
-from app.config import AI_RATELIMIT, SCRAPE_RATELIMIT
+from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT, SCRAPE_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter
 from app.models import MealLog, UserSession
 from app.services.ai_nutrition import MAX_MENU_ITEMS, _cap_items_round_robin, _estimate_macros_llm, _estimate_serving_weights_llm, _extract_categorized_items, _primary_dish_type
@@ -166,6 +166,7 @@ def proxy_scan_menu():
 @bp.route("/api/menu/analyze", methods=["POST"])
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
+@limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # Sonnet (çoklu çağrı): daha sıkı tavan
 def analyze_menu():
     data = request.get_json(silent=True) or {}
     raw_text = (data or {}).get("menu_text", "").strip()

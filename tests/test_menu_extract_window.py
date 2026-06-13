@@ -48,6 +48,7 @@ def _capture_prompt(monkeypatch):
         return '{"categories": {"Genel": ["x"]}}'
 
     monkeypatch.setattr(ai_nutrition, "_openai_chat", _fake)
+    monkeypatch.setattr(ai_nutrition, "_heavy_chat", _fake)  # menü çıkarımı artık ağır yol
     return captured
 
 

@@ -5,10 +5,10 @@ from datetime import date, datetime
 from flask import Blueprint, Response, current_app, jsonify, render_template, request
 from flask_login import current_user, login_required
 
-from app.config import AI_RATELIMIT
+from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
 from app.models import CustomMeal, CustomMealItem, MealLog, NutritionPlan, UserSession
-from app.services.ai import PORTION_SANITY_RULE, _openai_chat
+from app.services.ai import PORTION_SANITY_RULE, _heavy_chat, _openai_chat
 from app.services.gamification import complete_quest_for_user
 from app.services.validators import _meal_photo_url, _to_float, validate_meal_photo
 
@@ -693,6 +693,7 @@ def nutrition():
 @bp.route("/nutrition-plan", methods=["POST"])
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
+@limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # Sonnet üretimi: daha sıkı tavan
 def nutrition_plan_generate():
     data = request.get_json(silent=True) or {}
     FOOD_DATABASE = {
@@ -845,7 +846,7 @@ Yanıtını SADECE şu JSON formatında ver, başka hiçbir şey yazma.
 }}"""
 
     try:
-        raw = _openai_chat(
+        raw = _heavy_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="Sen bir beslenme uzmanısın. SADECE geçerli JSON döndür, başka hiçbir şey yazma.",
             max_tokens=2000,

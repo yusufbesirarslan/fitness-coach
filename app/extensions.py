@@ -8,7 +8,7 @@ from flask_limiter.util import get_remote_address
 from flask_login import LoginManager, current_user
 from openai import OpenAI
 
-from app.config import _REDIS_URL
+from app.config import _REDIS_URL, BEDROCK_REGION
 
 
 db = SQLAlchemy()
@@ -40,6 +40,28 @@ class _LazyOpenAI:
 
 
 openai_client = _LazyOpenAI()
+
+
+class _LazyAnthropicBedrock:
+    """AnthropicBedrock istemcisini ilk kullanımda kurar (lazy). Kimlik bilgisi
+    AWS varsayılan zincirinden (EC2 IAM Instance Profile / lokal AWS profili) gelir;
+    kodda HİÇBİR anahtar tutulmaz. `api_key` geçilmediği için token bir Python
+    argümanı/repr/log'unda asla görünmez. `anthropic` paketi kurulu değilse import
+    bu modülü değil yalnızca ilk Bedrock çağrısını etkiler (s3_helper boto3 guard
+    deseniyle aynı)."""
+
+    _client = None
+
+    def __getattr__(self, name):
+        if self._client is None:
+            from anthropic import AnthropicBedrock
+            self._client = AnthropicBedrock(aws_region=BEDROCK_REGION,
+                                            timeout=60.0, max_retries=2)
+        return getattr(self._client, name)
+
+
+bedrock_client = _LazyAnthropicBedrock()
+
 
 def _user_or_ip_key():
     """Rate-limit key: the user id when logged in, else the client IP. The AI

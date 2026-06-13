@@ -3,7 +3,7 @@ import json
 import re
 from flask import current_app
 
-from app.services.ai import PORTION_SANITY_RULE, _openai_chat
+from app.services.ai import PORTION_SANITY_RULE, _heavy_chat, _openai_chat
 from app.services.foodcache import _cache_macros
 
 
@@ -298,7 +298,7 @@ def _food_search_llm(q):
         '[{{"name":"Besin adı","calories":X,"protein":Y,"carbs":Z,"fat":W}}]'
     )
     try:
-        text = _openai_chat(
+        text = _heavy_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="SADECE JSON döndür. Her besin için 100g başına gerçek, "
                           "birbirinden farklı makro değerleri hesapla; örnek/şablon "
@@ -473,7 +473,7 @@ SADECE aşağıdaki JSON formatında yanıt ver, başka hiçbir şey yazma:
 {{"categories": {{"Kategori Adı": ["yemek1", "yemek2"], "Başka Kategori": ["yemek3"]}}}}"""
 
     try:
-        raw = _openai_chat(
+        raw = _heavy_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="SADECE JSON döndür. Açıklama yapma, markdown kullanma. Menüdeki TÜM kategorileri dahil et, hiçbirini atlama." + PORTION_SANITY_RULE,
             temperature=0.0,
@@ -587,7 +587,7 @@ SADECE aşağıdaki JSON formatında yanıt ver:
 {{{", ".join(f'"{name}": GRAM_SAYISI' for name in items[:3])}{"..." if len(items) > 3 else ""}}}"""
 
     try:
-        raw = _openai_chat(
+        raw = _heavy_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="SADECE JSON döndür. Her yemek için farklı, gerçekçi gram değerleri ver. Sayıları integer olarak yaz." + PORTION_SANITY_RULE,
             temperature=0.0,
@@ -687,7 +687,7 @@ Tüm {len(batch_items)} yemek için değer ver. Sadece JSON döndür, başka bir
 
     max_tok = min(300 + len(batch_items) * 65, 4000)
     try:
-        raw = _openai_chat(
+        raw = _heavy_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="SADECE JSON döndür. Her yemek için 1 TAM PORSİYON (100g değil!) besin değerleri hesapla. Her yemeğe farklı, gerçekçi makro değerleri ver. JSON anahtarlarını kullanıcının verdiği isimlerle BİREBİR AYNI yaz." + PORTION_SANITY_RULE,
             temperature=0.0,

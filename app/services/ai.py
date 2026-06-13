@@ -3,8 +3,13 @@ import logging
 
 from openai import APIConnectionError, APIError, APITimeoutError, RateLimitError
 
-from app.config import OPENAI_MODEL
-from app.extensions import openai_client
+try:
+    import anthropic  # Bedrock/Claude (ağır görevler)
+except Exception:  # paket yoksa Bedrock zaten BEDROCK_ENABLED ile kapalı kalır
+    anthropic = None
+
+from app.config import BEDROCK_ENABLED, BEDROCK_MAX_TOKENS, BEDROCK_MODEL, OPENAI_MODEL
+from app.extensions import bedrock_client, openai_client
 
 logger = logging.getLogger(__name__)
 
@@ -48,3 +53,58 @@ def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
         raise RuntimeError("AI servisine ulaşılamadı (zaman aşımı). Lütfen tekrar deneyin.")
     except APIError as e:
         raise RuntimeError(f"AI servisi hatası: {e}")
+
+
+def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
+    """Ağır görev LLM çağrısı (Claude Sonnet 4.5 — Amazon Bedrock, Messages API).
+
+    `_openai_chat` ile AYNI imzayı taşır; OpenAI-stili argümanları Anthropic'e çevirir:
+      • system_prompt ve messages içindeki her {"role":"system"} üst düzey `system=`
+        paramına taşınır (Anthropic system rolünü messages içinde kabul etmez).
+      • max_tokens, Anthropic'in zorunlu kıldığı sınır için BEDROCK_MAX_TOKENS'a clamp'lenir.
+      • Yanıt, ilk text content bloğunun metnidir.
+    Hata durumunda `_openai_chat` ile birebir aynı Türkçe RuntimeError'ları fırlatır;
+    çağıran (_heavy_chat) bunları yakalayıp OpenAI'ya düşer.
+    """
+    sys_parts = [system_prompt] if system_prompt else []
+    convo = []
+    for m in messages:
+        if m.get("role") == "system":
+            sys_parts.append(m.get("content", ""))
+        else:
+            convo.append(m)
+    system = "\n\n".join(p for p in sys_parts if p)
+    capped = min(max_tokens, BEDROCK_MAX_TOKENS)
+    try:
+        kwargs = dict(model=BEDROCK_MODEL, max_tokens=capped,
+                      messages=convo, temperature=temperature)
+        if system:
+            kwargs["system"] = system
+        resp = bedrock_client.messages.create(**kwargs)
+        if getattr(resp, "stop_reason", None) == "max_tokens":
+            logger.warning("Claude yanıtı max_tokens=%s sınırında kesildi (stop_reason=max_tokens)", capped)
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                return block.text
+        return ""
+    except anthropic.RateLimitError:
+        raise RuntimeError("AI servisi şu an yoğun (rate limit). Lütfen biraz sonra tekrar deneyin.")
+    except (anthropic.APITimeoutError, anthropic.APIConnectionError):
+        raise RuntimeError("AI servisine ulaşılamadı (zaman aşımı). Lütfen tekrar deneyin.")
+    except anthropic.APIError as e:  # APIStatusError bunun alt sınıfıdır — tek except yeter
+        raise RuntimeError(f"AI servisi hatası: {e}")
+
+
+def _heavy_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
+    """Ağır görev yönlendiricisi: Bedrock açıksa Claude Sonnet'e gider, aksi halde veya
+    herhangi bir hatada OpenAI'ya şeffafça düşer. İmza `_openai_chat` ile aynıdır, böylece
+    çağrı noktaları yalnızca `_openai_chat(` → `_heavy_chat(` rename'iyle taşınır."""
+    if BEDROCK_ENABLED and anthropic is not None:
+        try:
+            return _claude_chat(messages, system_prompt=system_prompt,
+                                 max_tokens=max_tokens, temperature=temperature)
+        except Exception as e:  # RuntimeError dahil her şey → OpenAI'ya düş (istek bozulmasın)
+            logger.warning("Bedrock/Claude çağrısı başarısız, OpenAI'ya düşülüyor: %s: %s",
+                           type(e).__name__, e)
+    return _openai_chat(messages, system_prompt=system_prompt,
+                        max_tokens=max_tokens, temperature=temperature)

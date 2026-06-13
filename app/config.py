@@ -20,7 +20,16 @@ _IS_DEV = os.environ.get("FLASK_DEBUG") == "1" or os.environ.get("FLASK_ENV") ==
 AI_RATELIMIT = "30 per hour"           # OpenAI text/vision generation
 SCRAPE_RATELIMIT = "20 per hour"       # menu scraper (outbound fetch + AI; also SSRF surface)
 FOOD_SEARCH_RATELIMIT = "60 per hour"  # food search (LLM only fires on a FatSecret miss)
+# Sonnet (Bedrock) pahalı olduğundan, ağır ÜRETKEN Sonnet route'larına AI_RATELIMIT
+# üstüne binen, daha sıkı kullanıcı-başı ikinci tavan. Env ile ayarlanabilir.
+BEDROCK_RATELIMIT = os.getenv("BEDROCK_RATELIMIT", "10 per hour")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+# ── Bedrock (Claude Sonnet 4.5 — ağır görevler) ──
+# Kimlik bilgisi EC2 IAM Instance Profile'dan gelir (S3 ile aynı); kodda/.env'de anahtar yok.
+BEDROCK_REGION = os.getenv("BEDROCK_REGION") or os.getenv("AWS_REGION", "eu-central-1")
+BEDROCK_MODEL = os.getenv("BEDROCK_MODEL", "global.anthropic.claude-sonnet-4-5-20250929-v1:0")
+BEDROCK_MAX_TOKENS = int(os.getenv("BEDROCK_MAX_TOKENS", "8000"))
+BEDROCK_ENABLED = os.getenv("BEDROCK_ENABLED", "0") == "1"  # açık opt-in; prod .env'de =1
 
 
 def _enforce_fatsecret_tls(app):

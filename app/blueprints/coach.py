@@ -3,7 +3,7 @@ from datetime import datetime
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import current_user, login_required
 
-from app.config import AI_RATELIMIT
+from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
 from app.models import UserSession
 from app.services.ai_coach import _fetch_coach_context, _run_coach_conversation, generate_coach_reply
@@ -16,6 +16,7 @@ bp = Blueprint("coach", __name__)
 @bp.route("/chat", methods=["POST"])
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
+@limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # generate_coach_reply Sonnet'te: daha sıkı tavan
 def chat():
     data = request.get_json(silent=True) or {}
 

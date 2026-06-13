@@ -5,10 +5,10 @@ from datetime import date
 from flask import Blueprint, current_app, jsonify, render_template, request
 from flask_login import current_user, login_required
 
-from app.config import AI_RATELIMIT
+from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
 from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog
-from app.services.ai import _openai_chat
+from app.services.ai import _heavy_chat
 from app.services.gamification import award_xp, complete_quest_for_user, get_level, get_title, log_activity
 from app.services.menu_extract import validate_pump_check
 from app.services.validators import validate_pump_check_image
@@ -26,6 +26,7 @@ def training():
 @bp.route("/training-plan", methods=["POST"])
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
+@limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # Sonnet üretimi: daha sıkı tavan
 def training_plan_generate():
     data = request.get_json(silent=True) or {}
 
@@ -235,7 +236,7 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
     )
 
     try:
-        raw = _openai_chat(
+        raw = _heavy_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="Sen deneyimli bir kişisel antrenörsün. SADECE geçerli JSON döndür, başka hiçbir şey yazma. Markdown, açıklama veya yorum ekleme.",
             max_tokens=4000,

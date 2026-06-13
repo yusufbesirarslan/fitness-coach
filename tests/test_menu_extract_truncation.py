@@ -42,6 +42,7 @@ def _fake_llm(monkeypatch, response):
         return response
 
     monkeypatch.setattr(ai_nutrition, "_openai_chat", _fake)
+    monkeypatch.setattr(ai_nutrition, "_heavy_chat", _fake)  # menü çıkarımı artık ağır yol
     return captured
 
 
