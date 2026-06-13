@@ -135,7 +135,7 @@
 <div class="toast-wrap" id="toast-wrap"></div>
 
 <header class="global-header">
-    <button class="drawer-trigger" onclick="fxToggleDrawer()"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+    <button class="drawer-trigger" data-action="fxToggleDrawer"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
     <span class="header-brand">FITX</span><div class="header-spacer"></div>
     <a href="/edit-profile" class="header-avatar" title="Profil">{% if profile_picture %}<img src="{{ profile_picture }}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">{% else %}{{ username[0]|upper if username else 'U' }}{% endif %}</a>
 </header>
@@ -291,8 +291,8 @@ async function loadFriends() {
             '<div class="fr-row">' + avatarHTML(r.profile_picture, r.username) +
             '<div class="fr-info"><div class="fr-name">'+escapeHTML(r.full_name)+'</div><div class="fr-handle">@'+escapeHTML(r.username)+'</div></div>' +
             '<div class="fr-actions">' +
-            '<button class="btn-accept" onclick="acceptReq('+r.request_id+')">Kabul</button>' +
-            '<button class="btn-reject" onclick="rejectReq('+r.request_id+')">Reddet</button>' +
+            '<button class="btn-accept" data-action="acceptReq" data-args="['+r.request_id+']">Kabul</button>' +
+            '<button class="btn-reject" data-action="rejectReq" data-args="['+r.request_id+']">Reddet</button>' +
             '</div></div>'
         ).join('');
     } else {
@@ -335,5 +335,6 @@ async function rejectReq(id) {
 loadFriends();
 </script>
 <script src="/static/nav.js"></script>
+<script src="/static/actions.js"></script>
 </body>
 </html>

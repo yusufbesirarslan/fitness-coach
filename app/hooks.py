@@ -21,9 +21,10 @@ def set_csp_header(response):
     nonce per-request üretildiği için statik nginx config'de yazılamaz).
 
     script-src: 'unsafe-inline' KALDIRILDI — satır-içi script blokları artık
-    nonce ister. script-src-attr 'unsafe-inline': şablonlardaki onclick=...
-    nitelik-handler'ları için gerekli (nonce nitelikler için çalışmaz);
-    asıl enjeksiyon vektörü olan <script> blokları yine de nonce'a tabidir.
+    nonce ister. script-src-attr 'none': tüm satır-içi nitelik-handler'ları
+    (onclick=...) yasak. Şablonlardaki/JS'teki on* işleyicileri data-action
+    delegasyonuyla (static/actions.js) değiştirildi, böylece bu vektör tamamen
+    kapatıldı; asıl enjeksiyon vektörü <script> blokları zaten nonce'a tabidir.
     img-src: 'https:' (tüm hostlar) yerine yalnızca S3 (pre-signed URL'ler,
     *.amazonaws.com) + data: (base64 profil/önizleme görselleri).
     Google Analytics (gtag.js, index.html): script/img/connect kaynakları
@@ -33,7 +34,7 @@ def set_csp_header(response):
         "default-src 'self'; "
         f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net "
         "https://*.googletagmanager.com; "
-        "script-src-attr 'unsafe-inline'; "
+        "script-src-attr 'none'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         "img-src 'self' data: https://*.amazonaws.com "

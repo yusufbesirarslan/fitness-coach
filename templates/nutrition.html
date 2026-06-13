@@ -238,7 +238,7 @@
 </div>
 
 <!-- ── WATER MODAL ── -->
-<div class="modal-overlay" id="water-modal" onclick="if(event.target===this)closeWater()">
+<div class="modal-overlay" id="water-modal" data-action-self="closeWater">
   <div class="modal-box">
     <div class="modal-title">SU KAYDET</div>
     <p style="font-size:14px;color:var(--text-2);margin-bottom:20px;">Bugün ne kadar su içtin?</p>
@@ -250,13 +250,13 @@
       <option value="1500">1.5 litre</option>
       <option value="2000">2 litre</option>
     </select>
-    <button class="btn-volt w-full" onclick="logWater()">KAYDET</button>
-    <button class="btn-ghost w-full" style="margin-top:8px;width:100%;" onclick="closeWater()">İptal</button>
+    <button class="btn-volt w-full" data-action="logWater">KAYDET</button>
+    <button class="btn-ghost w-full" style="margin-top:8px;width:100%;" data-action="closeWater">İptal</button>
   </div>
 </div>
 
 <!-- ── SERVING SELECTOR MODAL ── -->
-<div class="modal-overlay" id="serving-modal" onclick="if(event.target===this)closeServingModal()">
+<div class="modal-overlay" id="serving-modal" data-action-self="closeServingModal">
   <div class="modal-box">
     <div class="modal-title" id="sm-title">BESİN EKLE</div>
     <div id="sm-food-name" style="font-size:15px;color:var(--text);font-weight:600;margin-bottom:4px;"></div>
@@ -268,15 +268,15 @@
       </div>
       <div id="sm-serving-row" style="display:none;margin-bottom:12px;">
         <label style="font-size:11px;color:var(--text-3);letter-spacing:1px;font-weight:600;display:block;margin-bottom:6px;">PORSİYON</label>
-        <select class="fc-input" id="sm-serving-select" onchange="updateSmPreview()" style="width:100%;"></select>
+        <select class="fc-input" id="sm-serving-select" data-action-change="updateSmPreview" style="width:100%;"></select>
       </div>
       <div id="sm-gram-row" style="display:none;margin-bottom:12px;">
         <label style="font-size:11px;color:var(--text-3);letter-spacing:1px;font-weight:600;display:block;margin-bottom:6px;">MİKTAR (GRAM)</label>
-        <input type="number" class="fc-input" id="sm-gram-input" value="100" min="1" step="10" oninput="updateSmPreview()" style="width:100%;">
+        <input type="number" class="fc-input" id="sm-gram-input" value="100" min="1" step="10" data-action-input="updateSmPreview" style="width:100%;">
       </div>
       <div id="sm-qty-row" style="display:none;margin-bottom:16px;">
         <label style="font-size:11px;color:var(--text-3);letter-spacing:1px;font-weight:600;display:block;margin-bottom:6px;">ADET</label>
-        <input type="number" class="fc-input" id="sm-qty-input" value="1" min="0.5" step="0.5" oninput="updateSmPreview()" style="width:100%;">
+        <input type="number" class="fc-input" id="sm-qty-input" value="1" min="0.5" step="0.5" data-action-input="updateSmPreview" style="width:100%;">
       </div>
     </div>
     <div id="sm-macros" style="display:flex;justify-content:space-between;background:var(--surface);border-radius:12px;padding:12px 16px;margin-bottom:20px;">
@@ -285,8 +285,8 @@
       <div style="text-align:center;"><div style="font-size:18px;font-weight:700;color:#FB923C;" id="sm-carb">0</div><div style="font-size:10px;color:var(--text-3);">KARB</div></div>
       <div style="text-align:center;"><div style="font-size:18px;font-weight:700;color:#4ADE80;" id="sm-fat">0</div><div style="font-size:10px;color:var(--text-3);">YAĞ</div></div>
     </div>
-    <button class="btn-volt w-full" id="sm-confirm-btn" onclick="confirmServingModal()">EKLE</button>
-    <button class="btn-ghost w-full" style="margin-top:8px;width:100%;" onclick="closeServingModal()">İptal</button>
+    <button class="btn-volt w-full" id="sm-confirm-btn" data-action="confirmServingModal">EKLE</button>
+    <button class="btn-ghost w-full" style="margin-top:8px;width:100%;" data-action="closeServingModal">İptal</button>
   </div>
 </div>
 
@@ -295,7 +295,7 @@
 
 <!-- GLOBAL HEADER -->
 <header class="global-header">
-    <button class="drawer-trigger" onclick="fxToggleDrawer()">
+    <button class="drawer-trigger" data-action="fxToggleDrawer">
         <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
     <span class="header-brand">FITX</span>
@@ -359,23 +359,23 @@
 
   <!-- Tab Bar -->
   <div class="tab-bar" role="tablist">
-    <button class="tab-btn active" onclick="switchTab('today',this)" role="tab">
+    <button class="tab-btn active" data-action="switchTab" data-args='["today"]' role="tab">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
       Bugün
     </button>
-    <button class="tab-btn" onclick="switchTab('diary',this)" role="tab">
+    <button class="tab-btn" data-action="switchTab" data-args='["diary"]' role="tab">
       <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
       Günlük
     </button>
-    <button class="tab-btn" onclick="switchTab('plan',this)" role="tab">
+    <button class="tab-btn" data-action="switchTab" data-args='["plan"]' role="tab">
       <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
       AI Plan
     </button>
-    <button class="tab-btn" onclick="switchTab('history',this)" role="tab">
+    <button class="tab-btn" data-action="switchTab" data-args='["history"]' role="tab">
       <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       Geçmiş
     </button>
-    <button class="tab-btn" onclick="switchTab('water',this)" role="tab">
+    <button class="tab-btn" data-action="switchTab" data-args='["water"]' role="tab">
       <svg viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
       Su Takibi
     </button>
@@ -468,7 +468,7 @@
       </div>
 
       <!-- Su butonu -->
-      <button class="qab" id="qab-water" onclick="quickAddWater(this)" type="button" style="margin-bottom:4px;">
+      <button class="qab" id="qab-water" data-action="quickAddWater" type="button" style="margin-bottom:4px;">
         <span class="qab-icon">💧</span>
         <div class="qab-info">
           <div class="qab-title">Su — 1 Bardak</div>
@@ -499,16 +499,16 @@
 
     <div class="card" style="padding:24px;">
       <div class="meal-type-grid" id="meal-type-grid">
-        <div class="meal-type-opt selected" onclick="selectMealType('Kahvaltı',this)">
+        <div class="meal-type-opt selected" data-action="selectMealType" data-args='["Kahvaltı"]'>
           <span class="emoji">🍳</span>Kahvaltı
         </div>
-        <div class="meal-type-opt" onclick="selectMealType('Öğle',this)">
+        <div class="meal-type-opt" data-action="selectMealType" data-args='["Öğle"]'>
           <span class="emoji">🥗</span>Öğle
         </div>
-        <div class="meal-type-opt" onclick="selectMealType('Akşam',this)">
+        <div class="meal-type-opt" data-action="selectMealType" data-args='["Akşam"]'>
           <span class="emoji">🍽️</span>Akşam
         </div>
-        <div class="meal-type-opt" onclick="selectMealType('Ara Öğün',this)">
+        <div class="meal-type-opt" data-action="selectMealType" data-args='["Ara Öğün"]'>
           <span class="emoji">🥜</span>Ara Öğün
         </div>
       </div>
@@ -529,7 +529,7 @@
 
       <textarea class="fc-input" id="meal-input"
         placeholder="veya serbest metin gir: 3 yumurta, tam buğday ekmeği 2 dilim..."></textarea>
-      <button class="btn-volt w-full" style="margin-top:12px;" onclick="logMeal()">
+      <button class="btn-volt w-full" style="margin-top:12px;" data-action="logMeal">
         ÖĞÜN KAYDET
       </button>
     </div>
@@ -606,12 +606,12 @@
       <div class="cat-label">➕ Özel Gıda</div>
       <div class="custom-food-row">
         <input class="fc-input" id="custom-input" placeholder="Gıda ekle…" style="flex:1;">
-        <button class="btn-ghost" onclick="addCustomFood()">Ekle</button>
+        <button class="btn-ghost" data-action="addCustomFood">Ekle</button>
       </div>
       <div class="custom-tags" id="custom-tags"></div>
     </div>
 
-    <button class="btn-volt w-full" id="plan-btn" onclick="generatePlan()">
+    <button class="btn-volt w-full" id="plan-btn" data-action="generatePlan">
       <svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:#121212;fill:none;stroke-width:2.2;stroke-linecap:round;"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 1 0 4.93 19.07"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83"/></svg>
       PLAN OLUŞTUR
     </button>
@@ -667,7 +667,7 @@
       <div class="water-denom">/ 8 bardak · 2 litre</div>
       <div class="water-glasses" id="water-glasses"></div>
       <div class="water-bar"><div class="water-bar-inner" id="water-bar"></div></div>
-      <button class="water-btn" id="water-btn" onclick="addWater()">
+      <button class="water-btn" id="water-btn" data-action="addWater">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         Bardak Ekle
       </button>
@@ -700,18 +700,18 @@
 
 <!-- ── QUICK ADD FAB — Bottom Left ── -->
 <div class="quick-add-wrap" id="quick-add-wrap">
-    <button class="quick-add-btn" id="quick-add-btn" onclick="toggleQuickAdd()">
+    <button class="quick-add-btn" id="quick-add-btn" data-action="toggleQuickAdd">
         <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     </button>
     <div class="quick-add-actions" id="quick-add-actions">
         <div class="fab-row">
-            <button class="fab-sub" onclick="openWater();toggleQuickAdd()">
+            <button class="fab-sub" data-action="fxQuickWater">
                 <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
             </button>
             <div class="fab-lbl">Su Kaydet</div>
         </div>
         <div class="fab-row">
-            <button class="fab-sub" onclick="scrollToForm();toggleQuickAdd()">
+            <button class="fab-sub" data-action="fxQuickScroll">
                 <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
             <div class="fab-lbl">Öğün Ekle</div>
@@ -727,5 +727,6 @@
 
 <script src="/static/coach_widget.js?v={{ _v }}"></script>
 <script src="/static/nav.js?v={{ _v }}"></script>
+<script src="/static/actions.js?v={{ _v }}"></script>
 </body>
 </html>

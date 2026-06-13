@@ -67,7 +67,7 @@
 <body>
 
     <div class="theme-corner">
-        <button class="theme-toggle" onclick="toggleTheme()"></button>
+        <button class="theme-toggle" data-action="toggleTheme"></button>
     </div>
 
     <div class="auth-wrapper">
@@ -91,7 +91,7 @@
                 <input type="password" id="password" placeholder="en az 8 karakter, harf + rakam">
             </div>
 
-            <button class="auth-btn" onclick="register()">KAYIT OL</button>
+            <button class="auth-btn" data-action="register">KAYIT OL</button>
 
             <div class="auth-footer">
                 Zaten hesabın var mı? <a href="/login">Giriş yap</a>
@@ -139,6 +139,7 @@
             if (e.key === "Enter") register();
         });
     </script>
+    <script src="/static/actions.js"></script>
 
 </body>
 </html>

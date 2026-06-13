@@ -265,7 +265,7 @@
           </div>
         </div>
       </div>
-      <button id="cw-close" onclick="CW.toggle()" aria-label="Sohbeti kapat">
+      <button id="cw-close" data-action="CW.toggle" aria-label="Sohbeti kapat">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
           <line x1="18" y1="6" x2="6" y2="18"/>
           <line x1="6" y1="6" x2="18" y2="18"/>
@@ -282,9 +282,9 @@
         type="text" id="cw-input"
         placeholder="Bir şey sor..."
         autocomplete="off" autocorrect="off"
-        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();CW.send();}"
+        data-action-keydown="CW.enterSend"
       >
-      <button id="cw-send" onclick="CW.send()" aria-label="Gönder">
+      <button id="cw-send" data-action="CW.send" aria-label="Gönder">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
              stroke-linecap="round" stroke-linejoin="round">
           <line x1="22" y1="2" x2="11" y2="13"/>
@@ -296,7 +296,7 @@
   </div>
 
   <!-- ② FAB (collapsed state) -->
-  <button id="cw-fab" onclick="CW.toggle()" aria-label="Koçunla sohbet et">
+  <button id="cw-fab" data-action="CW.toggle" aria-label="Koçunla sohbet et">
     <span id="cw-badge" aria-hidden="true"></span>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
          stroke-linecap="round" stroke-linejoin="round">
@@ -327,6 +327,11 @@
     busy:    false,
     unread:  false,
     messages: [],
+
+    /* Enter (Shift'siz) ile gönder — eski satır-içi onkeydown'ın data-action karşılığı */
+    enterSend: function (el, e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); this.send(); }
+    },
 
     /* Called on DOMContentLoaded */
     init: function () {

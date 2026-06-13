@@ -105,7 +105,7 @@
 <div class="toast-wrap" id="toast-wrap"></div>
 
 <header class="global-header">
-    <button class="drawer-trigger" onclick="fxToggleDrawer()"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+    <button class="drawer-trigger" data-action="fxToggleDrawer"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
     <span class="header-brand">FITX</span><div class="header-spacer"></div>
     <a href="/edit-profile" class="header-avatar" title="Profil">{% if profile_picture %}<img src="{{ profile_picture }}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">{% else %}{{ username[0]|upper if username else 'U' }}{% endif %}</a>
 </header>
@@ -145,15 +145,15 @@
             <div class="chip-row">
                 <label>Kategori</label>
                 {% for cat in categories %}
-                <button class="cat-chip{% if cat == 'Protein' %} active{% endif %}" onclick="pickCat(this,'{{ cat }}')">{{ icons[cat] }} {{ cat }}</button>
+                <button class="cat-chip{% if cat == 'Protein' %} active{% endif %}" data-action="fxPickCat" data-cat="{{ cat }}">{{ icons[cat] }} {{ cat }}</button>
                 {% endfor %}
             </div>
 
             <div class="chip-row">
                 <label>Durum</label>
-                <button class="cat-chip active" onclick="pickStatus(this,'Active')">Active</button>
-                <button class="cat-chip" onclick="pickStatus(this,'Low Stock')">Low Stock</button>
-                <button class="cat-chip" onclick="pickStatus(this,'Finished')">Finished</button>
+                <button class="cat-chip active" data-action="fxPickStatus" data-status="Active">Active</button>
+                <button class="cat-chip" data-action="fxPickStatus" data-status="Low Stock">Low Stock</button>
+                <button class="cat-chip" data-action="fxPickStatus" data-status="Finished">Finished</button>
             </div>
 
             <div class="star-group">
@@ -188,7 +188,7 @@
                 <div><label>Ödenen Fiyat (TL)</label><input type="number" id="f-price" placeholder="750" step="0.01"></div>
                 <div style="display:flex;align-items:end;padding-bottom:2px;">
                     <div class="toggle-row">
-                        <div class="toggle on" id="f-public" onclick="this.classList.toggle('on')"></div>
+                        <div class="toggle on" id="f-public" data-action="fxToggleClass" data-class="on"></div>
                         <label>Profilde Göster</label>
                     </div>
                 </div>
@@ -197,7 +197,7 @@
                 <div><label>Yorum (opsiyonel)</label><textarea id="f-review" placeholder="Tadı güzel, çözünürlüğü yüksek..."></textarea></div>
             </div>
 
-            <button class="add-btn" id="add-btn" onclick="addSupplement()">EKLE</button>
+            <button class="add-btn" id="add-btn" data-action="addSupplement">EKLE</button>
         </div>
 
         <!-- ══ EXISTING LIST ══ -->
@@ -233,10 +233,10 @@
                         <div class="supp-review">"{{ s.review_text }}"</div>
                         {% endif %}
                         <div class="supp-actions">
-                            <button class="supp-act-btn" onclick="quickStatus({{ s.id }},'Active')">Active</button>
-                            <button class="supp-act-btn" onclick="quickStatus({{ s.id }},'Low Stock')">Low Stock</button>
-                            <button class="supp-act-btn" onclick="quickStatus({{ s.id }},'Finished')">Finished</button>
-                            <button class="supp-act-btn del" onclick="deleteSupplement({{ s.id }})">Sil</button>
+                            <button class="supp-act-btn" data-action="quickStatus" data-args='[{{ s.id }},"Active"]'>Active</button>
+                            <button class="supp-act-btn" data-action="quickStatus" data-args='[{{ s.id }},"Low Stock"]'>Low Stock</button>
+                            <button class="supp-act-btn" data-action="quickStatus" data-args='[{{ s.id }},"Finished"]'>Finished</button>
+                            <button class="supp-act-btn del" data-action="deleteSupplement" data-args='[{{ s.id }}]'>Sil</button>
                         </div>
                     </div>
                 </div>
@@ -286,6 +286,11 @@ function pickStatus(el, st) {
     el.classList.add('active');
     selectedStatus = st;
 }
+
+// data-action sarmalayıcıları: tıklanan öğe (this) ilk argümandı; delegasyonda
+// öğe son argümana düştüğü için sıralamayı koruyacak ince köprüler.
+function fxPickCat(el) { pickCat(el, el.dataset.cat); }
+function fxPickStatus(el) { pickStatus(el, el.dataset.status); }
 
 document.querySelectorAll('.stars').forEach(group => {
     const field = group.dataset.field;
@@ -362,5 +367,6 @@ async function deleteSupplement(id) {
 }
 </script>
 <script src="/static/nav.js"></script>
+<script src="/static/actions.js"></script>
 </body>
 </html>
