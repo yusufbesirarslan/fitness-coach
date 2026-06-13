@@ -250,7 +250,7 @@
 
         <!-- ── AVATAR DISPLAY ── -->
         <div class="avatar-section">
-            <div class="avatar-lg" id="avatar-display" onclick="document.getElementById('avatar-file-input').click()">
+            <div class="avatar-lg" id="avatar-display" data-action="fxClickTarget" data-target="avatar-file-input">
                 {% if profile_picture %}
                     <img src="{{ profile_picture }}" alt="Profil" id="avatar-img">
                 {% else %}
@@ -295,11 +295,11 @@
                 <div class="form-field">
                     <label>Fitness Hedefi</label>
                     <div class="goal-cards">
-                        <div class="goal-card{% if goal == 'kilo verme' %} selected{% endif %}" onclick="selectGoal('kilo verme', this)">
+                        <div class="goal-card{% if goal == 'kilo verme' %} selected{% endif %}" data-action="selectGoal" data-args='["kilo verme"]'>
                             <div class="goal-card-icon">🏃</div>
                             <div class="goal-card-label">Kilo Verme</div>
                         </div>
-                        <div class="goal-card{% if goal == 'kas kazanma' %} selected{% endif %}" onclick="selectGoal('kas kazanma', this)">
+                        <div class="goal-card{% if goal == 'kas kazanma' %} selected{% endif %}" data-action="selectGoal" data-args='["kas kazanma"]'>
                             <div class="goal-card-icon">💪</div>
                             <div class="goal-card-label">Kas Kazanma</div>
                         </div>
@@ -312,7 +312,7 @@
                 </div>
             </div>
 
-            <button class="save-btn" id="save-btn" onclick="saveProfile()">KAYDET</button>
+            <button class="save-btn" id="save-btn" data-action="saveProfile">KAYDET</button>
         </div>
 
         <!-- ── SUPPLEMENT STACK ── -->
@@ -452,5 +452,6 @@ async function saveProfile() {
     }
 }
 </script>
+<script src="/static/actions.js"></script>
 </body>
 </html>

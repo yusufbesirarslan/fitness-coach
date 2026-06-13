@@ -248,7 +248,7 @@
                 <div class="chat-handle">@{{ other_username }} <span class="rank-badge">{{ other_rank_title }}</span> <span class="level-badge">Lvl {{ other_level }}</span></div>
             </div>
             <div style="margin-left:auto;">
-                <button class="suggest-toggle" onclick="openSuggestModal()" title="Öneri gönder">💡</button>
+                <button class="suggest-toggle" data-action="openSuggestModal" title="Öneri gönder">💡</button>
             </div>
         </div>
 
@@ -260,7 +260,7 @@
         <!-- ── INPUT ── -->
         <div class="chat-input-bar">
             <input type="text" class="chat-input" id="msg-input" placeholder="Mesajını yaz..." maxlength="2000" autocomplete="off">
-            <button class="chat-send" id="send-btn" onclick="sendMessage()">
+            <button class="chat-send" id="send-btn" data-action="sendMessage">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
             </button>
         </div>
@@ -299,13 +299,13 @@
     <div class="sug-modal">
         <h3>ARKADAŞINA ÖNER</h3>
         <div class="sug-modal-tabs">
-            <button class="sug-tab active" data-type="suggestion_meal" onclick="setSugType(this)">🍎 Öğün Öner</button>
-            <button class="sug-tab" data-type="suggestion_workout" onclick="setSugType(this)">💪 Antrenman Öner</button>
+            <button class="sug-tab active" data-type="suggestion_meal" data-action="setSugType">🍎 Öğün Öner</button>
+            <button class="sug-tab" data-type="suggestion_workout" data-action="setSugType">💪 Antrenman Öner</button>
         </div>
         <textarea class="sug-textarea" id="sug-text" placeholder="Önerini yaz..."></textarea>
-        <button class="sug-send-btn" onclick="sendSuggestion()">GÖNDER</button>
+        <button class="sug-send-btn" data-action="sendSuggestion">GÖNDER</button>
         <div style="text-align:center;margin-top:8px;">
-            <button onclick="closeSuggestModal()" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:13px;">İptal</button>
+            <button data-action="closeSuggestModal" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:13px;">İptal</button>
         </div>
     </div>
 </div>
@@ -352,8 +352,8 @@ function renderSuggestionCard(m) {
     let actionsHTML = '';
     if (isPending && !m.is_mine) {
         actionsHTML = '<div class="sug-actions">' +
-            '<button class="sug-btn accept" onclick="respondSuggestion('+m.id+',\'accept\',this)">Kabul Et</button>' +
-            '<button class="sug-btn decline" onclick="respondSuggestion('+m.id+',\'decline\',this)">Reddet</button></div>';
+            '<button class="sug-btn accept" data-action="respondSuggestion" data-args=\'['+m.id+',"accept"]\'>Kabul Et</button>' +
+            '<button class="sug-btn decline" data-action="respondSuggestion" data-args=\'['+m.id+',"decline"]\'>Reddet</button></div>';
     } else if (isAccepted) {
         actionsHTML = '<div class="sug-status accepted">✅ Kabul edildi</div>';
     } else if (isDeclined) {
@@ -485,5 +485,6 @@ msgInput.addEventListener('keydown', e => {
 loadMessages();
 setInterval(loadMessages, 5000);
 </script>
+<script src="/static/actions.js"></script>
 </body>
 </html>

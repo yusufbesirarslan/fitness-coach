@@ -22,7 +22,7 @@
 
 <!-- GLOBAL HEADER -->
 <header class="global-header">
-    <button class="drawer-trigger" onclick="fxToggleDrawer()">
+    <button class="drawer-trigger" data-action="fxToggleDrawer">
         <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
     <span class="header-brand">FITX</span>
@@ -160,14 +160,14 @@
     <div class="bc b-1">
         <div class="bc-lbl"><span class="bc-dot" style="background:#00C48C"></span>Aktivite Takibi</div>
         <div class="act-intensity" id="act-intensity">
-            <button class="act-int-btn" data-int="light" onclick="selectIntensity('light')">Hafif</button>
-            <button class="act-int-btn active" data-int="moderate" onclick="selectIntensity('moderate')">Orta</button>
-            <button class="act-int-btn" data-int="brisk" onclick="selectIntensity('brisk')">Tempolu</button>
-            <button class="act-int-btn" data-int="fast" onclick="selectIntensity('fast')">Hızlı</button>
+            <button class="act-int-btn" data-int="light" data-action="selectIntensity" data-args='["light"]'>Hafif</button>
+            <button class="act-int-btn active" data-int="moderate" data-action="selectIntensity" data-args='["moderate"]'>Orta</button>
+            <button class="act-int-btn" data-int="brisk" data-action="selectIntensity" data-args='["brisk"]'>Tempolu</button>
+            <button class="act-int-btn" data-int="fast" data-action="selectIntensity" data-args='["fast"]'>Hızlı</button>
         </div>
         <div class="act-form">
             <input type="number" class="act-input" id="act-steps" placeholder="Adım sayısı" min="1" max="100000">
-            <button class="act-btn" id="act-btn" onclick="logActivity()">KAYDET</button>
+            <button class="act-btn" id="act-btn" data-action="logActivity">KAYDET</button>
         </div>
         <div class="act-summary" id="act-summary" style="display:none">
             <div class="act-stat"><span class="act-stat-val" id="act-total-steps">0</span><span class="act-stat-lbl">adım</span></div>
@@ -197,7 +197,7 @@
 
         <div class="w-form">
             <input type="number" class="w-input" id="w-input" placeholder="Güncel kilonuzu girin…" step="0.1" min="30" max="300">
-            <button class="w-btn" id="w-btn" onclick="doUpdateWeight()">GÜNCELLE</button>
+            <button class="w-btn" id="w-btn" data-action="doUpdateWeight">GÜNCELLE</button>
         </div>
 
         <div class="w-meta" id="w-meta" style="display:none">
@@ -218,9 +218,9 @@
             </div>
         </div>
         <div class="ins-nav">
-            <button class="ins-btn" onclick="prevTip()">← Önceki</button>
+            <button class="ins-btn" data-action="prevTip">← Önceki</button>
             <div class="ins-dots" id="ins-dots"></div>
-            <button class="ins-btn" onclick="nextTip()">Sonraki →</button>
+            <button class="ins-btn" data-action="nextTip">Sonraki →</button>
         </div>
         <div class="ins-progress"><div class="ins-pbar" id="ins-pbar"></div></div>
     </div>
@@ -273,7 +273,7 @@
      QUICK ADD FAB — Bottom Left
      ══════════════════════════════════════ -->
 <div class="quick-add-wrap" id="quick-add-wrap">
-    <button class="quick-add-btn" id="quick-add-btn" onclick="toggleQuickAdd()">
+    <button class="quick-add-btn" id="quick-add-btn" data-action="toggleQuickAdd">
         <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     </button>
     <div class="quick-add-actions" id="quick-add-actions">
@@ -337,7 +337,7 @@
         </div>
         <h2 class="reward-title" id="reward-title">TEBRİKLER!</h2>
         <p class="reward-body" id="reward-body"></p>
-        <button class="reward-btn" id="reward-btn" onclick="dismissReward()">Devam Et</button>
+        <button class="reward-btn" id="reward-btn" data-action="dismissReward">Devam Et</button>
     </div>
 </div>
 
@@ -831,6 +831,7 @@ init();
 
 <script src="/static/coach_widget.js"></script>
 <script src="/static/nav.js"></script>
+<script src="/static/actions.js"></script>
 
 <!-- WEEKLY REWARD CELEBRATION -->
 <script nonce="{{ csp_nonce }}">

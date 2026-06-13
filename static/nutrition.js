@@ -47,6 +47,21 @@ function switchTab(name, btn) {
   if (name === 'history') { loadMealHistory(); }
 }
 
+/* ── data-action köprüleri (CSP: satır-içi on* yerine) ──
+   Tıklanan öğe (eski `this`) bazı eski çağrılarda ortada/başta argümandı ya da
+   this.value iletiliyordu; delegasyon öğeyi sona koyduğu için bu ince
+   sarmalayıcılar argüman sırasını ve değer okumayı korur. */
+function fxQuickWater()  { openWater(); toggleQuickAdd(); }
+function fxQuickScroll() { scrollToForm(); toggleQuickAdd(); }
+function fxGoToPlanTab() { switchTab('plan', document.querySelectorAll('.tab-btn')[1]); }
+function fxSelectFood(el) { selectFood(JSON.parse(el.dataset.f)); }
+function fxAddDiaryFood(el) { addDiaryFood(el.dataset.meal, JSON.parse(el.dataset.f)); }
+function fxDiaryFoodSearch(el) { diaryFoodSearch(el, el.dataset.meal); }
+function fxUpdateDiaryServing(el) { updateDiaryServing(el.dataset.itemId, el.value, el.dataset.foodId); }
+function fxUpdateDiaryServingQty(el) { updateDiaryServingQty(el.dataset.itemId, el.value, el.dataset.foodId); }
+function fxUpdateDiaryServingQtyOnly(el) { updateDiaryServingQtyOnly(el.dataset.itemId, el.value); }
+function fxUpdateDiaryGrams(el) { updateDiaryGrams(el.dataset.itemId, el.value); }
+
 /* ── CALORIE RING ── */
 function updateRing(eaten, target) {
   const pct = Math.min(eaten / Math.max(target, 1), 1);
@@ -322,14 +337,17 @@ function addCustomFood() {
   input.value = '';
   const tag = document.createElement('div');
   tag.className = 'custom-tag';
-  tag.innerHTML = `<span>${esc(val)}</span><span class="custom-tag-remove" onclick="removeCustomFood('${val}',this)">×</span>`;
+  tag.innerHTML = `<span>${esc(val)}</span><span class="custom-tag-remove" data-action="removeCustomFood">×</span>`;
   document.getElementById('custom-tags').appendChild(tag);
 }
 document.getElementById('custom-input').addEventListener('keydown', e => { if (e.key === 'Enter') addCustomFood(); });
-function removeCustomFood(name, el) {
+function removeCustomFood(el) {
+  const tag = el.closest('.custom-tag');
+  if (!tag) return;
+  const name = tag.querySelector('span').textContent;
   const i = customFoods.indexOf(name);
   if (i > -1) customFoods.splice(i, 1);
-  el.closest('.custom-tag').remove();
+  tag.remove();
 }
 
 /* ── GENERATE PLAN ── */
@@ -418,7 +436,7 @@ function renderPlans(data) {
           <div class="plan-macro-item"><div class="plan-macro-val">${plan.toplam_yag ?? '—'}g</div><div class="plan-macro-lbl">Yağ</div></div>
         </div>
         <button class="btn-select-plan" id="sel-btn-${i}"
-          onclick="selectPlan(${i},${JSON.stringify(plan).replace(/"/g,'&quot;')},${data.overall_score})">
+          data-action="selectPlan" data-args="${JSON.stringify([i, plan, data.overall_score]).replace(/"/g,'&quot;')}">
           BU PLANI SEÇ
         </button>
       </div>`;
@@ -487,7 +505,7 @@ function renderActivePlanDetail(plan, score, createdAt) {
         <div class="apd-title">${esc(plan.isim || 'Aktif Plan')}</div>
         <div class="apd-sub">${createdAt} · Skor: ${score}/10</div>
       </div>
-      <button class="btn-ghost" onclick="resetPlan()">+ Yeni Plan Oluştur</button>
+      <button class="btn-ghost" data-action="resetPlan">+ Yeni Plan Oluştur</button>
     </div>
 
     <div class="apd-macro-grid">
@@ -526,7 +544,7 @@ async function loadQuickAddSection() {
 
     if (!d.exists) {
       container.innerHTML = `
-        <div class="qab-no-plan" onclick="switchTab('plan', document.querySelectorAll('.tab-btn')[1])">
+        <div class="qab-no-plan" data-action="fxGoToPlanTab">
           📋 Henüz aktif planın yok — Plan Oluştur sekmesine git →
         </div>`;
       return;
@@ -545,7 +563,7 @@ async function loadQuickAddSection() {
       const sub = `${ml.kalori ?? '—'} kcal · ${ml.protein ?? '—'}g protein · ${ml.karb ?? '—'}g karb`;
       return `
         <button class="qab" id="qab-${m.key}"
-          onclick="quickAddMeal('${m.key}','${m.label}',this)" type="button">
+          data-action="quickAddMeal" data-args='["${m.key}","${m.label}"]' type="button">
           <span class="qab-icon">${m.icon}</span>
           <div class="qab-info">
             <div class="qab-title">${m.label} — ${esc(d.plan.isim || 'Aktif Plan')}</div>
@@ -792,7 +810,7 @@ async function searchFood(query) {
     }
     dropdown.innerHTML = data.results.map(f => {
       const fj = JSON.stringify(f).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
-      return `<div class="autocomplete-item" onclick='selectFood(JSON.parse(this.dataset.f))' data-f="${fj}">
+      return `<div class="autocomplete-item" data-action="fxSelectFood" data-f="${fj}">
         <div class="ac-name">${esc(f.name)}${f.brand ? ' <span class="ac-brand">(' + esc(f.brand) + ')</span>' : ''}</div>
         <div class="ac-macros"><strong>${Math.round(f.macros.calories)}</strong> kcal · P: ${Math.round(f.macros.protein)}g · K: ${Math.round(f.macros.carbs)}g · Y: ${Math.round(f.macros.fat)}g${f.serving ? ' · ' + esc(f.serving) : ''}</div>
       </div>`;
@@ -823,7 +841,7 @@ function renderSelectedFoods() {
   container.style.display = 'block';
   items.innerHTML = selectedFoods.map((f, i) => `
     <div class="selected-food-item">
-      <button class="sf-remove" onclick="removeSelectedFood(${i})">✕</button>
+      <button class="sf-remove" data-action="removeSelectedFood" data-args="[${i}]">✕</button>
       <div style="flex:1;min-width:0;">
         <div style="font-size:13px;color:var(--text);">${esc(f.name)}</div>
         <div style="font-size:11px;color:var(--text-3);">${Math.round(f.per_100g.calories)} kcal · P:${Math.round(f.per_100g.protein)}g K:${Math.round(f.per_100g.carbs)}g Y:${Math.round(f.per_100g.fat)}g</div>
@@ -902,20 +920,20 @@ function renderDiary(data) {
           `<option value="${s.serving_id}" ${s.serving_id === item.serving_id ? 'selected' : ''}>${esc(formatServingLabel(s.serving_description, s.metric_serving_amount, s.calories, s.is_bulk))}</option>`
         ).join('');
         const qVal = item.serving_quantity || 1;
-        unitHtml = `<select class="diary-serving-select" onchange="updateDiaryServing(${item.id}, this.value, '${item.fatsecret_food_id}')" ${isLogged ? 'disabled' : ''}>${opts}</select>
+        unitHtml = `<select class="diary-serving-select" data-action-change="fxUpdateDiaryServing" data-item-id="${item.id}" data-food-id="${item.fatsecret_food_id}" ${isLogged ? 'disabled' : ''}>${opts}</select>
           <input type="number" class="diary-qty-input" value="${qVal}" min="0.5" step="0.5"
-            onchange="updateDiaryServingQty(${item.id}, this.value, '${item.fatsecret_food_id}')" ${isLogged ? 'disabled' : ''}>`;
+            data-action-change="fxUpdateDiaryServingQty" data-item-id="${item.id}" data-food-id="${item.fatsecret_food_id}" ${isLogged ? 'disabled' : ''}>`;
       } else if (item.serving_id) {
         const qVal = item.serving_quantity || 1;
         unitHtml = `<span class="diary-serving-label">${esc(item.serving_description || '')}</span>
           <input type="number" class="diary-qty-input" value="${qVal}" min="0.5" step="0.5"
-            onchange="updateDiaryServingQtyOnly(${item.id}, this.value)" ${isLogged ? 'disabled' : ''}>`;
+            data-action-change="fxUpdateDiaryServingQtyOnly" data-item-id="${item.id}" ${isLogged ? 'disabled' : ''}>`;
         if (item.fatsecret_food_id && !isLogged) {
           fetchServings(item.fatsecret_food_id).then(s => { if (s) loadDiary(); });
         }
       } else {
         unitHtml = `<input type="number" class="diary-gram-input" value="${item.grams}" min="1" step="10"
-            onchange="updateDiaryGrams(${item.id}, this.value)" ${isLogged ? 'disabled' : ''}>
+            data-action-change="fxUpdateDiaryGrams" data-item-id="${item.id}" ${isLogged ? 'disabled' : ''}>
           <span style="font-size:11px;color:var(--text-3);">g</span>`;
       }
       return `<div class="diary-food-row" data-item-id="${item.id}">
@@ -924,7 +942,7 @@ function renderDiary(data) {
           <div style="font-size:11px;color:var(--text-3);">${Math.round(item.calories)} kcal · P:${Math.round(item.protein)}g K:${Math.round(item.carbs)}g Y:${Math.round(item.fat)}g</div>
         </div>
         ${unitHtml}
-        ${!isLogged ? '<button class="sf-remove" onclick="deleteDiaryItem(' + item.id + ')">✕</button>' : ''}
+        ${!isLogged ? '<button class="sf-remove" data-action="deleteDiaryItem" data-args="[' + item.id + ']">✕</button>' : ''}
       </div>`;
     }).join('');
 
@@ -941,10 +959,10 @@ function renderDiary(data) {
         ${!isLogged ? `
         <div style="position:relative;margin-top:10px;">
           <input class="fc-input diary-food-search" placeholder="Besin ara..."
-            oninput="diaryFoodSearch(this, '${dm.key}')" autocomplete="off">
+            data-action-input="fxDiaryFoodSearch" data-meal="${dm.key}" autocomplete="off">
           <div class="autocomplete-dropdown diary-ac" style="display:none;"></div>
         </div>
-        <button class="btn-volt w-full" style="margin-top:10px;" onclick="logDiaryMeal('${dm.key}')">ÖĞÜNÜ KAYDET</button>
+        <button class="btn-volt w-full" style="margin-top:10px;" data-action="logDiaryMeal" data-args='["${dm.key}"]'>ÖĞÜNÜ KAYDET</button>
         ` : `
         <div style="text-align:center;padding:8px;color:#00C48C;font-size:12px;font-weight:600;letter-spacing:0.1em;">✓ KAYDEDİLDİ</div>
         `}
@@ -987,7 +1005,7 @@ function diaryFoodSearch(input, mealName) {
       }
       dropdown.innerHTML = data.results.map(f => {
         const fj = JSON.stringify(f).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
-        return `<div class="autocomplete-item" onclick='addDiaryFood("${mealName}", JSON.parse(this.dataset.f))' data-f="${fj}">
+        return `<div class="autocomplete-item" data-action="fxAddDiaryFood" data-meal="${mealName}" data-f="${fj}">
           <div class="ac-name">${esc(f.name)}</div>
           <div class="ac-macros"><strong>${Math.round(f.per_100g.calories)}</strong> kcal/100g · P:${Math.round(f.per_100g.protein)}g · K:${Math.round(f.per_100g.carbs)}g · Y:${Math.round(f.per_100g.fat)}g${f.serving && f.is_per_serving ? ' · ' + esc(f.serving) : ''}</div>
         </div>`;

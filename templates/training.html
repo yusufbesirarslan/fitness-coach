@@ -309,7 +309,7 @@
 
 <!-- GLOBAL HEADER -->
 <header class="global-header">
-    <button class="drawer-trigger" onclick="fxToggleDrawer()">
+    <button class="drawer-trigger" data-action="fxToggleDrawer">
         <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
     <span class="header-brand">FITX</span>
@@ -410,7 +410,7 @@
 
         <div class="pump-actions">
             <button type="button" class="btn-ghost" id="pump-cancel">Vazgeç</button>
-            <button type="button" class="btn-volt" id="pump-submit" onclick="submitPumpCheck()">Antrenmanı Tamamla</button>
+            <button type="button" class="btn-volt" id="pump-submit" data-action="submitPumpCheck">Antrenmanı Tamamla</button>
         </div>
     </div>
 </div>
@@ -450,7 +450,7 @@
 
         <!-- Day detail panel -->
         <div class="detail-panel" id="apv-detail-panel">
-            <span class="detail-close" onclick="closeApvDetail()">×</span>
+            <span class="detail-close" data-action="closeApvDetail">×</span>
             <div class="detail-title" id="apv-detail-title"></div>
             <div class="detail-sub" id="apv-detail-sub"></div>
             <div class="exercise-table-wrap">
@@ -468,12 +468,12 @@
 
         <!-- Finish Today's Workout -->
         <div id="finish-workout-wrap" style="text-align:center;margin-top:24px;display:none">
-            <button class="finish-workout-btn" id="finish-workout-btn" onclick="finishWorkout()">&#x2714; Bugünkü Antrenmanı Tamamla</button>
+            <button class="finish-workout-btn" id="finish-workout-btn" data-action="finishWorkout">&#x2714; Bugünkü Antrenmanı Tamamla</button>
         </div>
 
         <!-- Reset -->
         <div style="text-align:center;margin-top:36px;padding-bottom:48px">
-            <button class="reset-plan-btn" onclick="resetPlan()">↺ &nbsp;Programı Sıfırla / Yeni Plan Oluştur</button>
+            <button class="reset-plan-btn" data-action="resetPlan">↺ &nbsp;Programı Sıfırla / Yeni Plan Oluştur</button>
         </div>
 
     </div>
@@ -546,7 +546,7 @@
             </div>
         </div>
 
-        <button class="btn-volt" id="submit-btn" onclick="generatePlan()" style="margin-top:8px">PROGRAMIMI OLUŞTUR</button>
+        <button class="btn-volt" id="submit-btn" data-action="generatePlan" style="margin-top:8px">PROGRAMIMI OLUŞTUR</button>
 
         <!-- SONUÇLAR (yeni oluşturulan plan önizlemesi) -->
         <div id="results" style="display:none">
@@ -560,7 +560,7 @@
             <div class="weekly-grid" id="weekly-grid"></div>
 
             <div class="detail-panel" id="detail-panel">
-                <span class="detail-close" onclick="closeDetail()">×</span>
+                <span class="detail-close" data-action="closeDetail">×</span>
                 <div class="detail-title" id="detail-title"></div>
                 <div class="detail-sub" id="detail-sub"></div>
                 <div class="exercise-table-wrap">
@@ -574,7 +574,7 @@
             </div>
 
             <div class="weekly-summary" id="weekly-summary"></div>
-            <button class="save-plan-btn" id="save-btn" onclick="savePlan()">PROGRAMI KAYDET</button>
+            <button class="save-plan-btn" id="save-btn" data-action="savePlan">PROGRAMI KAYDET</button>
         </div>
 
     </div><!-- /setup-form -->
@@ -602,18 +602,18 @@
 
 <!-- ── QUICK ADD FAB — Bottom Left ── -->
 <div class="quick-add-wrap" id="quick-add-wrap">
-    <button class="quick-add-btn" id="quick-add-btn" onclick="toggleQuickAdd()">
+    <button class="quick-add-btn" id="quick-add-btn" data-action="toggleQuickAdd">
         <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     </button>
     <div class="quick-add-actions" id="quick-add-actions">
         <div class="fab-row">
-            <button class="fab-sub" onclick="toggleQuickAdd();document.getElementById('setup-form').style.display='block';document.getElementById('setup-form').scrollIntoView({behavior:'smooth'});">
+            <button class="fab-sub" data-action="fxOpenSetupForm">
                 <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
             <div class="fab-lbl">Program Oluştur</div>
         </div>
         <div class="fab-row">
-            <button class="fab-sub" onclick="toggleQuickAdd();if(document.getElementById('finish-workout-btn'))document.getElementById('finish-workout-btn').click();">
+            <button class="fab-sub" data-action="fxTriggerFinish">
                 <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
             </button>
             <div class="fab-lbl">Antrenmanı Bitir</div>
@@ -630,6 +630,17 @@ function toggleQuickAdd() {
     quickAddOpen = !quickAddOpen;
     document.getElementById('quick-add-btn').classList.toggle('open', quickAddOpen);
     document.getElementById('quick-add-actions').classList.toggle('open', quickAddOpen);
+}
+// Eski bileşik satır-içi onclick'lerin (toggleQuickAdd();...) data-action karşılığı.
+function fxOpenSetupForm() {
+    toggleQuickAdd();
+    const f = document.getElementById('setup-form');
+    if (f) { f.style.display = 'block'; f.scrollIntoView({ behavior: 'smooth' }); }
+}
+function fxTriggerFinish() {
+    toggleQuickAdd();
+    const b = document.getElementById('finish-workout-btn');
+    if (b) b.click();
 }
 document.addEventListener('click', e => {
     if (quickAddOpen && !e.target.closest('.quick-add-wrap')) {
@@ -1242,5 +1253,6 @@ document.addEventListener('click', e => {
 
 <script src="/static/coach_widget.js"></script>
 <script src="/static/nav.js"></script>
+<script src="/static/actions.js"></script>
 </body>
 </html>

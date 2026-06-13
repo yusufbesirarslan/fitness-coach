@@ -65,6 +65,9 @@ def test_csp_header_present_and_locked_down(client):
     assert directives["default-src"] == "default-src 'self'"
     assert "'nonce-" in directives["script-src"]
     assert "'unsafe-inline'" not in directives["script-src"]
+    # Satır-içi nitelik-handler'ları (onclick=...) tamamen yasak — tüm on*
+    # işleyicileri data-action delegasyonuna (static/actions.js) taşındı.
+    assert directives["script-src-attr"] == "script-src-attr 'none'"
     assert directives["frame-ancestors"] == "frame-ancestors 'none'"
     assert directives["object-src"] == "object-src 'none'"
 
