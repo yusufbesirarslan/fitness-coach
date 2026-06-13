@@ -305,7 +305,7 @@ def test_nutrition_plan_scores_selection_and_returns_plans(client, auth_user, mo
     db.session.add(UserSession(user_id=auth_user.id, target_calories=2300,
                                goal="kas kazanma"))
     db.session.commit()
-    monkeypatch.setattr(nutrition_bp, "_openai_chat",
+    monkeypatch.setattr(nutrition_bp, "_heavy_chat",
                         lambda **kw: json.dumps(PLAN_RESPONSE, ensure_ascii=False))
 
     body = client.post("/nutrition-plan",
@@ -320,7 +320,7 @@ def test_nutrition_plan_scores_selection_and_returns_plans(client, auth_user, mo
 def test_nutrition_plan_bad_llm_json_returns_500(client, auth_user, monkeypatch):
     db.session.add(UserSession(user_id=auth_user.id, target_calories=2000, goal="x"))
     db.session.commit()
-    monkeypatch.setattr(nutrition_bp, "_openai_chat", lambda **kw: "plan yapamadım")
+    monkeypatch.setattr(nutrition_bp, "_heavy_chat", lambda **kw: "plan yapamadım")
     assert client.post("/nutrition-plan", json=PLAN_REQUEST).status_code == 500
 
 

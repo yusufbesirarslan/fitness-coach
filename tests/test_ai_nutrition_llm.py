@@ -32,7 +32,9 @@ def _fake_chat(monkeypatch, reply, capture=None):
         if isinstance(reply, Exception):
             raise reply
         return reply
+    # Hafif siteler _openai_chat, ağır siteler _heavy_chat çağırır; ikisini de yakala.
     monkeypatch.setattr(ai_nutrition, "_openai_chat", fake)
+    monkeypatch.setattr(ai_nutrition, "_heavy_chat", fake)
 
 
 # ---------------------------------------------------------------------------

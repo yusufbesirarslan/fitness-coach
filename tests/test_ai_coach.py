@@ -298,7 +298,7 @@ def test_conversation_session_fallback_persists_history(app, auth_user, monkeypa
 
 def test_coach_reply_frames_gain_as_success_for_bulking(app, monkeypatch):
     captured = []
-    monkeypatch.setattr(ai_coach, "_openai_chat",
+    monkeypatch.setattr(ai_coach, "_heavy_chat",
                         lambda **kw: captured.append(kw["messages"][0]["content"]) or "yorum")
     reply = generate_coach_reply("yusuf", 30, "male", 82, 180, "kas kazanma",
                                  "beginner", "active", 1780, 2759, 3059,
@@ -310,7 +310,7 @@ def test_coach_reply_frames_gain_as_success_for_bulking(app, monkeypatch):
 
 def test_coach_reply_frames_gain_as_setback_for_cutting(app, monkeypatch):
     captured = []
-    monkeypatch.setattr(ai_coach, "_openai_chat",
+    monkeypatch.setattr(ai_coach, "_heavy_chat",
                         lambda **kw: captured.append(kw["messages"][0]["content"]) or "yorum")
     generate_coach_reply("yusuf", 30, "male", 82, 180, "kilo verme",
                          "beginner", "active", 1780, 2759, 2359,
@@ -321,7 +321,7 @@ def test_coach_reply_frames_gain_as_setback_for_cutting(app, monkeypatch):
 def test_coach_reply_fallback_on_llm_failure(app, monkeypatch):
     def boom(**kw):
         raise RuntimeError("down")
-    monkeypatch.setattr(ai_coach, "_openai_chat", boom)
+    monkeypatch.setattr(ai_coach, "_heavy_chat", boom)
     reply = generate_coach_reply("y", 30, "male", 80, 180, "kilo verme",
                                  "beginner", "active", 1780, 2759, 2359, "p", "p", "")
     assert "tekrar dene" in reply
@@ -329,7 +329,7 @@ def test_coach_reply_fallback_on_llm_failure(app, monkeypatch):
 
 def test_checkin_feedback_progress_framing(app, monkeypatch):
     captured = []
-    monkeypatch.setattr(ai_coach, "_openai_chat",
+    monkeypatch.setattr(ai_coach, "_heavy_chat",
                         lambda **kw: captured.append(kw["messages"][0]["content"]) or "geri bildirim")
     out = generate_checkin_feedback("y", 78, 80, 7, "kilo verme", 4, 2,
                                     "evet", 4, 4, "")
@@ -340,7 +340,7 @@ def test_checkin_feedback_progress_framing(app, monkeypatch):
 def test_checkin_feedback_fallback(app, monkeypatch):
     def boom(**kw):
         raise RuntimeError("down")
-    monkeypatch.setattr(ai_coach, "_openai_chat", boom)
+    monkeypatch.setattr(ai_coach, "_heavy_chat", boom)
     out = generate_checkin_feedback("y", 78, None, None, "x", 3, 3, "kismen", 3, 3, "")
     assert "tekrar dene" in out
 

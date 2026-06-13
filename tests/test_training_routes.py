@@ -44,7 +44,7 @@ def test_plan_requires_existing_session(client, auth_user):
 
 def test_plan_parses_fenced_json_and_scores(client, with_session, monkeypatch):
     raw = "```json\n" + json.dumps(PLAN_JSON, ensure_ascii=False) + "\n```"
-    monkeypatch.setattr(training_bp, "_openai_chat", lambda **kwargs: raw)
+    monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: raw)
 
     body = client.post("/training-plan", json={"gun_sayisi": 3}).get_json()
     assert body["program"] == PLAN_JSON["program"]
@@ -55,7 +55,7 @@ def test_plan_parses_fenced_json_and_scores(client, with_session, monkeypatch):
 def test_plan_zero_scores_default_to_seven(client, with_session, monkeypatch):
     plan = dict(PLAN_JSON, haftalik_ozet={"yogunluk_skoru": 0, "denge_skoru": 0,
                                           "uygunluk_skoru": 0})
-    monkeypatch.setattr(training_bp, "_openai_chat",
+    monkeypatch.setattr(training_bp, "_heavy_chat",
                         lambda **kwargs: json.dumps(plan, ensure_ascii=False))
     body = client.post("/training-plan", json={}).get_json()
     assert body["overall_score"] == 7.0
@@ -63,7 +63,7 @@ def test_plan_zero_scores_default_to_seven(client, with_session, monkeypatch):
 
 
 def test_plan_invalid_llm_output_returns_500(client, with_session, monkeypatch):
-    monkeypatch.setattr(training_bp, "_openai_chat", lambda **kwargs: "tabii, işte planın:")
+    monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: "tabii, işte planın:")
     assert client.post("/training-plan", json={}).status_code == 500
 
 
@@ -73,7 +73,7 @@ def test_plan_prompt_includes_cardio_preferences(client, with_session, monkeypat
     def fake_chat(**kwargs):
         captured["prompt"] = kwargs["messages"][0]["content"]
         return json.dumps(PLAN_JSON, ensure_ascii=False)
-    monkeypatch.setattr(training_bp, "_openai_chat", fake_chat)
+    monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
 
     client.post("/training-plan", json={"kardiyo_tipi": "kosu", "kardiyo_gun": 2})
     assert "koşu" in captured["prompt"]

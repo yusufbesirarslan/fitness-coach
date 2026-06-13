@@ -4,3 +4,14 @@ instance/
 *.db
 *.pyc
 .pytest_cache/
+
+# Bedrock / AWS uzun ömürlü anahtarlar & kimlik dosyaları — ASLA commit etme
+.env.*
+!.env.example
+*.csv
+*-api-key*.csv
+*accessKeys*.csv
+*credentials*.csv
+*.pem
+*.key
+*.pfx

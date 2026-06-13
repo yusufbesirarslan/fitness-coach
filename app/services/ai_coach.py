@@ -8,7 +8,7 @@ from flask import current_app, session
 from app.config import OPENAI_MODEL
 from app.extensions import db, openai_client
 from app.models import PendingAction, User, UserDailyNutrition, UserSession, WorkoutLog
-from app.services.ai import _openai_chat
+from app.services.ai import _heavy_chat
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
 from app.services.fatsecret import _food_search_fatsecret, _food_search_static
 from app.services.gamification import award_xp, log_activity
@@ -704,7 +704,7 @@ MOTİVASYON:
 (bu kişinin durumuna özel, güçlü bir cümle)"""
 
     try:
-        return _openai_chat(
+        return _heavy_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="Sen bir fitness koçusun. Türkçe, samimi, spesifik ve motive edici konuş. Sayılar ve süreler kullan.",
             max_tokens=700,
@@ -764,7 +764,7 @@ Fatigue yüksekse dinlenme öner, progressive overload yapamadıysa nasıl yapab
 Uyku kötüyse bunun etkisini açıkla."""
 
     try:
-        return _openai_chat(
+        return _heavy_chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt="Sen bir fitness koçusun. Kısa, spesifik, motive edici Türkçe konuş.",
             max_tokens=400,

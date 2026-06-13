@@ -1,0 +1,185 @@
+"""Sağlayıcı yönlendirme testleri (app/services/ai.py).
+
+_heavy_chat: BEDROCK_ENABLED'a göre Claude Sonnet (Bedrock) ya da OpenAI'ya gider;
+herhangi bir Bedrock hatasında şeffafça OpenAI'ya düşer.
+_claude_chat: OpenAI-stili argümanların Anthropic Messages API'ye çevirisi
+(system hoisting, max_tokens clamp) + hata eşleme.
+Ağ yok — bedrock_client/openai_client/anthropic monkeypatch'li.
+
+    python -m pytest tests/test_ai_routing.py -v
+"""
+from types import SimpleNamespace
+
+import pytest
+
+from app.services import ai
+from app.extensions import bedrock_client as _real_bedrock_client
+
+
+# ---------------------------------------------------------------------------
+# _heavy_chat yönlendirme
+# ---------------------------------------------------------------------------
+
+def test_heavy_chat_disabled_uses_openai(monkeypatch):
+    monkeypatch.setattr(ai, "BEDROCK_ENABLED", False)
+    monkeypatch.setattr(ai, "_claude_chat",
+                        lambda *a, **k: pytest.fail("Bedrock kapalıyken Claude çağrılmamalı"))
+    monkeypatch.setattr(ai, "_openai_chat", lambda *a, **k: "OPENAI")
+    assert ai._heavy_chat([{"role": "user", "content": "x"}]) == "OPENAI"
+
+
+def test_heavy_chat_enabled_uses_claude(monkeypatch):
+    monkeypatch.setattr(ai, "BEDROCK_ENABLED", True)
+    monkeypatch.setattr(ai, "anthropic", object())  # paket var (non-None)
+    monkeypatch.setattr(ai, "_claude_chat", lambda *a, **k: "CLAUDE")
+    monkeypatch.setattr(ai, "_openai_chat",
+                        lambda *a, **k: pytest.fail("Claude başarılıyken OpenAI çağrılmamalı"))
+    assert ai._heavy_chat([{"role": "user", "content": "x"}]) == "CLAUDE"
+
+
+def test_heavy_chat_disabled_when_anthropic_missing(monkeypatch):
+    monkeypatch.setattr(ai, "BEDROCK_ENABLED", True)
+    monkeypatch.setattr(ai, "anthropic", None)  # paket kurulu değil
+    monkeypatch.setattr(ai, "_claude_chat",
+                        lambda *a, **k: pytest.fail("anthropic yokken Claude çağrılmamalı"))
+    monkeypatch.setattr(ai, "_openai_chat", lambda *a, **k: "OPENAI")
+    assert ai._heavy_chat([{"role": "user", "content": "x"}]) == "OPENAI"
+
+
+def test_heavy_chat_falls_back_on_claude_error(monkeypatch, caplog):
+    monkeypatch.setattr(ai, "BEDROCK_ENABLED", True)
+    monkeypatch.setattr(ai, "anthropic", object())
+
+    def boom(*a, **k):
+        raise RuntimeError("bedrock down")
+    monkeypatch.setattr(ai, "_claude_chat", boom)
+    monkeypatch.setattr(ai, "_openai_chat", lambda *a, **k: "FALLBACK")
+
+    with caplog.at_level("WARNING"):
+        assert ai._heavy_chat([{"role": "user", "content": "x"}]) == "FALLBACK"
+    assert any("OpenAI'ya düşülüyor" in r.getMessage() for r in caplog.records)
+
+
+def test_heavy_chat_passes_kwargs_through(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(ai, "BEDROCK_ENABLED", True)
+    monkeypatch.setattr(ai, "anthropic", object())
+
+    def fake_claude(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
+        captured.update(messages=messages, system_prompt=system_prompt,
+                        max_tokens=max_tokens, temperature=temperature)
+        return "ok"
+    monkeypatch.setattr(ai, "_claude_chat", fake_claude)
+
+    ai._heavy_chat([{"role": "user", "content": "x"}],
+                   system_prompt="S", max_tokens=4000, temperature=0.4)
+    assert captured == {"messages": [{"role": "user", "content": "x"}],
+                        "system_prompt": "S", "max_tokens": 4000, "temperature": 0.4}
+
+
+# ---------------------------------------------------------------------------
+# _claude_chat çeviri + hata eşleme
+# ---------------------------------------------------------------------------
+
+class _FakeRateLimit(Exception):
+    pass
+
+
+class _FakeTimeout(Exception):
+    pass
+
+
+class _FakeConn(Exception):
+    pass
+
+
+class _FakeAPIError(Exception):
+    pass
+
+
+_FAKE_ANTHROPIC = SimpleNamespace(
+    RateLimitError=_FakeRateLimit,
+    APITimeoutError=_FakeTimeout,
+    APIConnectionError=_FakeConn,
+    APIError=_FakeAPIError,
+)
+
+
+def _fake_bedrock(monkeypatch, *, reply=None, raises=None, capture=None):
+    """ai.bedrock_client.messages.create'i ve ai.anthropic'i sahte ile değiştir."""
+    def create(**kwargs):
+        if capture is not None:
+            capture.update(kwargs)
+        if raises is not None:
+            raise raises
+        return reply
+    monkeypatch.setattr(ai, "anthropic", _FAKE_ANTHROPIC)
+    monkeypatch.setattr(ai, "bedrock_client",
+                        SimpleNamespace(messages=SimpleNamespace(create=create)))
+
+
+def test_claude_chat_hoists_system_and_clamps_tokens(monkeypatch):
+    cap = {}
+    resp = SimpleNamespace(content=[SimpleNamespace(type="text", text="merhaba")],
+                           stop_reason="end_turn")
+    _fake_bedrock(monkeypatch, reply=resp, capture=cap)
+    monkeypatch.setattr(ai, "BEDROCK_MODEL", "global.anthropic.claude-sonnet-4-5-20250929-v1:0")
+    monkeypatch.setattr(ai, "BEDROCK_MAX_TOKENS", 8000)
+
+    out = ai._claude_chat(
+        messages=[{"role": "system", "content": "EK SİSTEM"},
+                  {"role": "user", "content": "selam"}],
+        system_prompt="ANA SİSTEM",
+        max_tokens=999999,   # clamp testi
+        temperature=0.3,
+    )
+    assert out == "merhaba"
+    # system_prompt + messages içindeki stray system birleşip üst düzey system= oldu:
+    assert cap["system"] == "ANA SİSTEM\n\nEK SİSTEM"
+    # messages içinde artık system rolü YOK:
+    assert cap["messages"] == [{"role": "user", "content": "selam"}]
+    assert cap["max_tokens"] == 8000  # BEDROCK_MAX_TOKENS'a clamp'lendi
+    assert cap["model"] == "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
+    assert cap["temperature"] == 0.3
+
+
+def test_claude_chat_omits_system_when_none(monkeypatch):
+    cap = {}
+    resp = SimpleNamespace(content=[SimpleNamespace(type="text", text="ok")],
+                           stop_reason="end_turn")
+    _fake_bedrock(monkeypatch, reply=resp, capture=cap)
+    ai._claude_chat([{"role": "user", "content": "x"}])
+    assert "system" not in cap  # boş system gönderilmez
+
+
+def test_claude_chat_no_text_block_returns_empty(monkeypatch):
+    resp = SimpleNamespace(content=[SimpleNamespace(type="tool_use")], stop_reason="end_turn")
+    _fake_bedrock(monkeypatch, reply=resp)
+    assert ai._claude_chat([{"role": "user", "content": "x"}]) == ""
+
+
+def test_claude_chat_maps_rate_limit(monkeypatch):
+    _fake_bedrock(monkeypatch, raises=_FakeRateLimit("429"))
+    with pytest.raises(RuntimeError, match="yoğun"):
+        ai._claude_chat([{"role": "user", "content": "x"}])
+
+
+def test_claude_chat_maps_timeout(monkeypatch):
+    _fake_bedrock(monkeypatch, raises=_FakeTimeout("t/o"))
+    with pytest.raises(RuntimeError, match="zaman aşımı"):
+        ai._claude_chat([{"role": "user", "content": "x"}])
+
+
+def test_claude_chat_maps_api_error(monkeypatch):
+    _fake_bedrock(monkeypatch, raises=_FakeAPIError("boom"))
+    with pytest.raises(RuntimeError, match="AI servisi hatası"):
+        ai._claude_chat([{"role": "user", "content": "x"}])
+
+
+# ---------------------------------------------------------------------------
+# Lazy istemci: import sırasında AWS/anthropic'e dokunmaz
+# ---------------------------------------------------------------------------
+
+def test_bedrock_client_is_lazy_not_constructed():
+    # __getattr__ tetiklenmeden _client None kalır (anahtar/paket gerekmez).
+    assert _real_bedrock_client._client is None
