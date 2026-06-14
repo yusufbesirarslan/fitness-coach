@@ -17,6 +17,8 @@ projenin geri kalaniyla ayni: ``{"calories", "protein", "carbs", "fat"}``
 
 from __future__ import annotations
 
+import re
+
 # ---------------------------------------------------------------------------
 # MODULE 1 — Sabitler & saglik/biyoloji kisitlari
 # ---------------------------------------------------------------------------
@@ -152,6 +154,60 @@ def estimate_serving_grams(description):
         if key in d:
             return float(grams)
     return None
+
+
+# Yemek adinda ACIKCA belirtilen porsiyon gramaji: '(220 GR)', '(200 Gr)',
+# '(110gr)', '(80 g)'. Restoran menulerinde neredeyse her zaman protein ana
+# yemegin porsiyonunu belirtir. '(400 GR. 2 Kisilik)' gibi cok-kisilik notunda
+# gramaj kisi sayisina bolunur (tek porsiyon).
+_STATED_GRAMS_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(?:gr|gram|g)\b", re.IGNORECASE)
+_STATED_PERSONS_RE = re.compile(r"(\d+)\s*ki[sş]i", re.IGNORECASE)
+
+
+def parse_stated_grams(name):
+    """Yemek adindaki ACIK porsiyon gramajini (gram) cikar; yoksa ``None``.
+
+    Saf fonksiyon (LLM/ag yok). '(220 GR)' -> 220.0. Cok-kisilik notu varsa
+    ('400 GR. 2 Kisilik') gramaj kisi sayisina bolunur (tek porsiyon). Birden
+    cok gramaj gecerse ILKI alinir (porsiyon ad'in basinda belirtilir)."""
+    if not name:
+        return None
+    m = _STATED_GRAMS_RE.search(str(name))
+    if not m:
+        return None
+    try:
+        grams = float(m.group(1).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    if grams <= 0:
+        return None
+    persons = _STATED_PERSONS_RE.search(str(name))
+    if persons:
+        n = _num(persons.group(1))
+        if n > 1:
+            grams = grams / n
+    return grams
+
+
+# Beyan edilen gramajli bir tabak icin imkansiz-DUSUK kalori yogunlugu esigi
+# (kcal/g). Pismis tuzlu restoran ana yemekleri tipik olarak >1.5 kcal/g; bunun
+# altindaki degerler (220g tavuklu fajita ~0.57, 300g levrek ~0.61, 200g soslu
+# schnitzel ~1.3) neredeyse her zaman eksik/hatali bir tahmindir. Gramaji
+# belirtilen ogeler protein ana yemekleridir → bu esik onlar icin guvenlidir.
+MIN_KCAL_PER_G_STATED = 1.5
+
+
+def is_low_for_stated_grams(macros, grams, min_kcal_per_g=MIN_KCAL_PER_G_STATED):
+    """Beyan gramajli ogenin kalori yogunlugu imkansiz-dusuk mu? (yeniden-tahmin sinyali)
+
+    ``calories / grams < esik`` -> ``True``. Yalnizca POZITIF kalorili, gramaji
+    bilinen ogeler icin anlamlidir; aksi halde ``False`` (karar yok). MIKTARI
+    denetler, kimligi degil; saf fonksiyon — LLM KULLANMAZ."""
+    cal = _num(macros.get("calories")) if macros else 0.0
+    g = _num(grams)
+    if g <= 0 or cal <= 0:
+        return False
+    return (cal / g) < min_kcal_per_g
 
 
 def parse_fatsecret_serving(raw):

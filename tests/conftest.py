@@ -20,7 +20,11 @@ os.environ["SECRET_KEY"] = "test-secret-key"
 os.environ["DATABASE_URL"] = "sqlite://"  # in-memory, per-app engine
 os.environ["FATSECRET_BASE_URL"] = "https://fatsecret.invalid"  # TLS guard passes, host unroutable
 os.environ["FITX_SKIP_DB_INIT"] = "1"  # tables come from db.create_all() in the app fixture
-os.environ.pop("REDIS_URL", None)  # redis_client=None → leaderboard sync no-op
+# REDIS_URL: pop YETMEZ — app/config.py'deki load_dotenv() .env'deki
+# 'redis://redis:6379' (docker hostname) değerini geri yükler ve limiter/redis
+# çözümlenemeyen host'a bağlanmaya çalışır. Boş string ata: load_dotenv mevcut
+# değeri override ETMEZ → redis_client=None, limiter memory:// (hermetik).
+os.environ["REDIS_URL"] = ""
 os.environ.pop("FLASK_DEBUG", None)
 os.environ.pop("FLASK_ENV", None)
 

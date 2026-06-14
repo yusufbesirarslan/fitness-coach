@@ -73,21 +73,7 @@
   #cw-header-title {
     font-family: 'DM Sans', sans-serif;
     font-size: 14px; font-weight: 600; color: #FFFFFF;
-    line-height: 1; margin-bottom: 4px;
-  }
-  #cw-header-status {
-    display: flex; align-items: center; gap: 5px;
-    font-family: 'DM Sans', sans-serif;
-    font-size: 11px; color: #888;
-  }
-  .cw-pulse-dot {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: #CCFF00; flex-shrink: 0;
-    animation: cw-dot-pulse 2.2s ease-in-out infinite;
-  }
-  @keyframes cw-dot-pulse {
-    0%, 100% { opacity: 1; transform: scale(1); }
-    50%       { opacity: 0.35; transform: scale(0.85); }
+    line-height: 1;
   }
   #cw-close {
     width: 30px; height: 30px; border-radius: 8px;
@@ -259,10 +245,6 @@
         <div id="cw-avatar">🏋️</div>
         <div>
           <div id="cw-header-title">AI Fitness Coach</div>
-          <div id="cw-header-status">
-            <span class="cw-pulse-dot"></span>
-            Online
-          </div>
         </div>
       </div>
       <button id="cw-close" data-action="CW.toggle" aria-label="Sohbeti kapat">
