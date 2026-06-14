@@ -22,7 +22,9 @@ from nutrition_pipeline import (  # noqa: E402
     estimate_serving_grams,
     gate_per_serving,
     is_implausibly_low_menu_kcal,
+    is_low_for_stated_grams,
     is_pure_fat_ingredient,
+    parse_stated_grams,
     parse_fatsecret_serving,
     sanitize_servings,
     score_compatibility,
@@ -669,3 +671,48 @@ def test_portion_tables_self_consistent():
         # LLM kelepcesi 50-600 g (ai_nutrition._estimate_serving_weights_llm).
         assert 50 <= DISH_SERVING_DEFAULT_G[dish] <= 600
         assert 0 < DISH_SERVING_MIN_G[dish] <= DISH_SERVING_DEFAULT_G[dish]
+
+
+# ---------------------------------------------------------------------------
+# Beyan edilen porsiyon gramaji (menunun KENDI yazdigi '(220 GR)')
+# ---------------------------------------------------------------------------
+
+class TestParseStatedGrams:
+    def test_basic_gram_forms(self):
+        assert parse_stated_grams("BBQ & Cheddar Burger (160 GR)") == 160.0
+        assert parse_stated_grams("Mantar Soslu Schnitzel (200 Gr)") == 200.0
+        assert parse_stated_grams("Kıtır Somon Salatası (110gr)") == 110.0
+        assert parse_stated_grams("Casarecce Pesto Rosso (80 g)") == 80.0
+
+    def test_multi_person_divides_by_count(self):
+        # '400 GR. 2 Kişilik' → tek porsiyon 200 g.
+        assert parse_stated_grams("Cızırdayan Bonfile (400 GR. 2 Kişilik)") == 200.0
+
+    def test_none_when_no_grams(self):
+        assert parse_stated_grams("Avokado Poşe Yumurta") is None
+        assert parse_stated_grams("Big Big Burger") is None
+        assert parse_stated_grams("") is None
+        assert parse_stated_grams(None) is None
+
+    def test_does_not_match_cm_or_ml(self):
+        # Pizza '~30cm' / '250ml' gramaj DEĞİL.
+        assert parse_stated_grams("Pizza (~30cm)") is None
+        assert parse_stated_grams("Ayran (250ml)") is None
+
+
+class TestIsLowForStatedGrams:
+    def test_flags_implausibly_low_density(self):
+        # Saha vakalari: gramaja gore imkansiz-dusuk kalori.
+        assert is_low_for_stated_grams(_macros(125, 18, 9, 2), 220) is True   # Tavuklu Fajita
+        assert is_low_for_stated_grams(_macros(182, 35, 0, 4), 300) is True   # Izgara Levrek
+        assert is_low_for_stated_grams(_macros(260, 13, 30, 12), 200) is True  # Mantar Schnitzel
+
+    def test_accepts_dense_realistic_portions(self):
+        assert is_low_for_stated_grams(_macros(736, 42, 34, 28), 160) is False  # Burger (patty g)
+        assert is_low_for_stated_grams(_macros(820, 61, 52, 40), 200) is False  # Tavuk Schnitzel
+        assert is_low_for_stated_grams(_macros(600, 15, 80, 25), 80) is False   # kuru makarna gramı
+
+    def test_no_decision_without_grams_or_calories(self):
+        assert is_low_for_stated_grams(_macros(125, 18, 9, 2), 0) is False
+        assert is_low_for_stated_grams(_macros(0, 0, 0, 0), 220) is False
+        assert is_low_for_stated_grams(None, 220) is False

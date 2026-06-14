@@ -16,10 +16,7 @@
     '#cw-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #2A2A2A;flex-shrink:0;background:#1E1E1E}',
     '#cw-hleft{display:flex;align-items:center;gap:10px}',
     '#cw-avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#CCFF00,#99cc00);display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;box-shadow:0 0 12px rgba(204,255,0,.3)}',
-    '#cw-htitle{font-family:"DM Sans",sans-serif;font-size:14px;font-weight:600;color:#fff;line-height:1;margin-bottom:4px}',
-    '#cw-hstatus{display:flex;align-items:center;gap:5px;font-family:"DM Sans",sans-serif;font-size:11px;color:#888}',
-    '.cw-pdot{width:6px;height:6px;border-radius:50%;background:#CCFF00;flex-shrink:0;animation:cw-dp 2.2s ease-in-out infinite}',
-    '@keyframes cw-dp{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.85)}}',
+    '#cw-htitle{font-family:"DM Sans",sans-serif;font-size:14px;font-weight:600;color:#fff;line-height:1}',
     '#cw-close{width:30px;height:30px;border-radius:8px;background:rgba(255,255,255,.05);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s;color:#888;flex-shrink:0}',
     '#cw-close:hover{background:rgba(255,255,255,.1);color:#ddd}',
     '#cw-close svg{width:15px;height:15px}',
@@ -137,7 +134,6 @@
           '<div id="cw-avatar">🏋️</div>' +
           '<div>' +
             '<div id="cw-htitle">AI Fitness Coach</div>' +
-            '<div id="cw-hstatus"><span class="cw-pdot"></span>Online</div>' +
           '</div>' +
         '</div>' +
         '<button id="cw-close" aria-label="Kapat">' +

@@ -35,7 +35,9 @@ def test_streamable_http_always_binds_loopback_only():
     # Kaynak-seviyesi koruma: herhangi bir streamable-http run() çağrısına
     # public bind (0.0.0.0 vb.) eklenirse bu test patlar.
     for rel_path in ("fitx_mcp/__main__.py", "fitx_mcp/server.py"):
-        with open(os.path.join(_REPO_ROOT, rel_path)) as f:
+        # encoding="utf-8": kaynaklar UTF-8; aksi halde Windows yerel kod sayfası
+        # (cp1254) Türkçe/em-dash baytlarında UnicodeDecodeError verir.
+        with open(os.path.join(_REPO_ROOT, rel_path), encoding="utf-8") as f:
             source = f.read()
         http_runs = re.findall(r'\.run\(transport="streamable-http"[^)]*\)', source)
         assert http_runs, f"{rel_path}: streamable-http çağrısı bulunamadı (yol değiştiyse testi güncelle)"

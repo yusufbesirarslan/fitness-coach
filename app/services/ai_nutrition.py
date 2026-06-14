@@ -653,17 +653,29 @@ def _repair_truncated_json(raw_json):
     return trimmed
 
 
-def _estimate_macros_llm_batch(batch_items, category_map=None):
+def _estimate_macros_llm_batch(batch_items, category_map=None, grams_hint=None):
     if not batch_items:
         return {}
     category_map = category_map or {}
+    grams_hint = grams_hint or {}
     # Menü kategorisi parantez içinde yalnızca BAĞLAM olarak verilir — belirsiz
     # adlarda doğru yemeği seçtirir ('Margarita'@Pizzalar → pizza, kokteyl değil).
+    # Adında gramaj geçen öğelerde (menünün KENDİ beyanı) porsiyon da ipucu olarak
+    # eklenir → makrolar bu gramaja uygun (per-100g değil) hesaplanır.
     listing_lines = []
     for name in batch_items:
+        notes = []
         cat = (category_map.get(name) or "").strip()
-        listing_lines.append(f"- {name} (menü kategorisi: {cat})" if cat else f"- {name}")
+        if cat:
+            notes.append(f"menü kategorisi: {cat}")
+        g = grams_hint.get(name)
+        if g:
+            notes.append(f"porsiyon ≈{int(round(g))} g")
+        listing_lines.append(f"- {name} ({'; '.join(notes)})" if notes else f"- {name}")
     items_str = "\n".join(listing_lines)
+    grams_rule = ("\nParantezde 'porsiyon ≈NNN g' verilen yemeklerde makrolar bu gramaja "
+                  "uygun, gerçekçi olmalı (örn. 220 g tavuklu fajita ≈350-500 kcal; asla "
+                  "100 g için ya da absürt düşük bir değer verme)." if grams_hint else "")
     prompt = f"""Sen bir beslenme uzmanısın. Aşağıdaki restoran yemeklerinin 1 PORSİYON (standart restoran servisi) için TAHMİNİ besin değerlerini hesapla.
 
 ÖNEMLİ: Değerler 100 gram için DEĞİL, 1 tam porsiyon (tabaktaki yemeğin tamamı) için olmalı.
@@ -675,7 +687,7 @@ Referans porsiyonlar (Türkiye restoranı, tek kişi):
 - Tatlılar (tek dilim/kase): 250-650 kcal
 - Kahvaltı tabağı: 400-800 kcal (ekmek/reçel karbonhidratı DAHİL — karbonhidrat 0 olamaz)
 Her yemek için gerçekçi değerler ver. Hiçbir yemeğe aynı değerleri verme, her biri farklı olmalı.
-Parantez içindeki menü kategorisi yalnızca anlamı netleştirmek içindir; JSON anahtarına EKLEME.
+Parantez içindeki menü kategorisi yalnızca anlamı netleştirmek içindir; JSON anahtarına EKLEME.{grams_rule}
 
 ÖNEMLİ: JSON anahtarları olarak yemek isimlerini (parantezsiz) AYNEN aşağıdaki listeden kopyala, hiçbir harfi değiştirme:
 {items_str}
@@ -756,7 +768,7 @@ Tüm {len(batch_items)} yemek için değer ver. Sadece JSON döndür, başka bir
 _LLM_MACRO_BATCH_SIZE = 15
 
 
-def _estimate_macros_llm(items, category_map=None):
+def _estimate_macros_llm(items, category_map=None, grams_hint=None):
     if not items:
         return {}
     current_app.logger.info(f"[MACRO ENGINE] LLM fallback for {len(items)} items (batch size {_LLM_MACRO_BATCH_SIZE}): {items[:5]}{'...' if len(items)>5 else ''}")
@@ -764,7 +776,12 @@ def _estimate_macros_llm(items, category_map=None):
     for i in range(0, len(items), _LLM_MACRO_BATCH_SIZE):
         batch = items[i:i + _LLM_MACRO_BATCH_SIZE]
         current_app.logger.info(f"[MACRO ENGINE] Processing batch {i // _LLM_MACRO_BATCH_SIZE + 1}/{(len(items) - 1) // _LLM_MACRO_BATCH_SIZE + 1} ({len(batch)} items)")
-        batch_results = _estimate_macros_llm_batch(batch, category_map)
+        # grams_hint yoksa eski 2-argümanlı imza korunur (mevcut çağrı/mock'lar bozulmaz).
+        if grams_hint:
+            batch_grams = {n: grams_hint[n] for n in batch if n in grams_hint}
+            batch_results = _estimate_macros_llm_batch(batch, category_map, grams_hint=batch_grams)
+        else:
+            batch_results = _estimate_macros_llm_batch(batch, category_map)
         all_results.update(batch_results)
     current_app.logger.info(f"[MACRO ENGINE] LLM total resolved: {len(all_results)}/{len(items)} items with non-zero macros")
     return all_results
