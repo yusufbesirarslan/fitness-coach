@@ -98,13 +98,17 @@ def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
 def _heavy_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
     """Ağır görev yönlendiricisi: Bedrock açıksa Claude Sonnet'e gider, aksi halde veya
     herhangi bir hatada OpenAI'ya şeffafça düşer. İmza `_openai_chat` ile aynıdır, böylece
-    çağrı noktaları yalnızca `_openai_chat(` → `_heavy_chat(` rename'iyle taşınır."""
+    çağrı noktaları yalnızca `_openai_chat(` → `_heavy_chat(` rename'iyle taşınır.
+    Hangi sağlayıcının cevap verdiğini `[AI]` etiketli INFO satırıyla loglar (gözlemlenebilirlik)."""
     if BEDROCK_ENABLED and anthropic is not None:
         try:
-            return _claude_chat(messages, system_prompt=system_prompt,
+            reply = _claude_chat(messages, system_prompt=system_prompt,
                                  max_tokens=max_tokens, temperature=temperature)
+            logger.info("[AI] sağlayıcı: Bedrock (Claude Sonnet)")
+            return reply
         except Exception as e:  # RuntimeError dahil her şey → OpenAI'ya düş (istek bozulmasın)
             logger.warning("Bedrock/Claude çağrısı başarısız, OpenAI'ya düşülüyor: %s: %s",
                            type(e).__name__, e)
+    logger.info("[AI] sağlayıcı: OpenAI (%s)", OPENAI_MODEL)
     return _openai_chat(messages, system_prompt=system_prompt,
                         max_tokens=max_tokens, temperature=temperature)
