@@ -10,7 +10,9 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 - app/hooks.py — CSRF koruması, CSP başlığı + per-request nonce, streak/rollover hook'ları
 - app/extensions.py — db, migrate, login_manager, limiter, redis_client, openai_client
 - app/models.py — tüm SQLAlchemy modelleri
-- app/db_init.py — boot'ta create_all + idempotent legacy ALTER'lar (FITX_SKIP_DB_INIT=1 ile atlanır)
+- app/db_init.py — boot'ta create_all + bekleyen Alembic migration'ları otomatik uygular + idempotent legacy ALTER'lar (FITX_SKIP_DB_INIT=1 ile atlanır)
+- app/cli.py — flask CLI komutları (seed-quests, weekly-reset)
+- app/timeutil.py — TEK gün/saat kaynağı: sabit Europe/Istanbul (app_today/day_key/utc_day_bounds). Tüm gün anahtarları buradan; doğrudan date.today()/utcnow().strftime("%d.%m") KULLANMA
 - app/blueprints/ — auth, profile, nutrition, food, menu, training, tracking, social, gamification, supplements, coach
 - app/services/ — ai, ai_coach, ai_nutrition, calculations, fatsecret, foodcache, gamification, menu_extract/fetch/ocr, validators
 - fitx_mcp/ — MCP sunucusu (AI Coach DB araçları). DİKKAT: araçlar user_id'yi parametre alır, kendi yetkilendirmesi YOKTUR — yalnızca stdio/in-process kullan; HTTP taşıması FITX_MCP_ALLOW_HTTP=1 + loopback arkasındadır, asla public proxy'e koyma
@@ -25,7 +27,10 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
   - Örnek için .env.example'a bak. OpenAI anahtarı .env'den okunur, asla hardcode edilmez.
 
 ## Veritabanı
-Lokal: SQLite (chatbot.db). Prod/Docker: PostgreSQL (DATABASE_URL ile).
+Lokal: SQLite (instance/chatbot.db). Prod/Docker: PostgreSQL (DATABASE_URL ile).
+Beslenme TEK kanonik defterde tutulur: MealLog (UI + AI koç + menü; UserDailyNutrition
+artık YAZILMIYOR, eski veriler MealLog'a taşındı). MealLog.tarih ISO 'YYYY-MM-DD'
+(Istanbul); gün anahtarları için app/timeutil kullan.
 Tablolar boot'ta db.create_all() ile oluşur (app/db_init.py); ayrıca Alembic baseline migration mevcut.
 Şema değişikliği akışı (yeni değişiklikler için tercih edilen yol):
 1. Modeli app/models.py'de değiştir

@@ -112,8 +112,8 @@ def test_streak_risk_uses_prev_last_login_when_provided():
 
 def test_protein_goal_nudge_at_90_percent(make_user):
     user = make_user("frank", last_login=date.today())
-    db.session.add(UserSession(user_id=user.id, target_calories=2000))
-    # Haftalık hedef 1050 g; %90 = 945 g.
+    # kas kazanma → %30 protein: haftalık hedef 1050 g; %90 = 945 g (F8).
+    db.session.add(UserSession(user_id=user.id, target_calories=2000, goal="kas kazanma"))
     db.session.add(MealLog(user_id=user.id, ogun="öğün", yemekler="tavuk",
                            kalori=4000, protein=950))
     db.session.commit()

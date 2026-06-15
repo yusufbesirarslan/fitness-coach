@@ -25,7 +25,7 @@ def seed_quests():
 def weekly_reset_cmd():
     """Snapshot the weekly board, award top-3 XP, reset weekly_xp. Idempotent.
 
-    Wire to Railway Cron `59 23 * * 0` (Sunday 23:59 UTC):
+    EC2 host cron `59 23 * * 0` (Sunday 23:59 UTC) ile çalışır (Railway kaldırıldı):
         flask --app starter weekly-reset
     """
     click.echo(run_weekly_rollover())

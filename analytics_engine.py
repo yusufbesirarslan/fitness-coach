@@ -87,7 +87,10 @@ def _check_protein_goal(user, db, models, today, nudges):
     if not sess or not sess.target_calories:
         return
 
-    weekly_protein_goal = sess.target_calories * 0.3 / 4 * 7
+    # Protein hedefi yüzdesi koç/menü ile tutarlı: kas kazanmada %30, aksi halde %25
+    # (eski sabit %30, diğer hesaplarla çelişiyordu — F8).
+    protein_pct = 0.30 if (sess.goal or "") == "kas kazanma" else 0.25
+    weekly_protein_goal = sess.target_calories * protein_pct / 4 * 7
 
     week_start = today - timedelta(days=today.weekday())
     week_start_utc, _ = utc_day_bounds(week_start)

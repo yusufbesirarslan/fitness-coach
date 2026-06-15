@@ -176,7 +176,11 @@ def test_menu_score_overbudget_warns_in_turkish():
 
 def test_pump_check_contract(app):
     result = validate_pump_check(b"img", "salon", "ağırlık bölgesi")
-    assert result == {"valid": True, "reason": "Pump Check doğrulandı.", "fallback": False}
+    # F7: mock doğrulama "doğrulandı" İDDİA ETMEZ; dürüst "kaydedildi" mesajı.
+    assert result["valid"] is True
+    assert result["fallback"] is False
+    assert "doğruland" not in result["reason"].lower()
+    assert "kaydedildi" in result["reason"].lower()
     # Boş girdiler de biçim hatasız işlenmeli.
     result = validate_pump_check(b"img", None, "")
     assert result["valid"] is True

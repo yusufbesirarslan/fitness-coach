@@ -17,6 +17,22 @@ from app.timeutil import app_today, day_key, display_ddmm
 bp = Blueprint("nutrition", __name__)
 
 
+def _sanitize_meal_macros(kalori, protein, karb, yag):
+    """LLM plan makrolarını nutrition_pipeline kapısıyla (menü hattıyla aynı)
+    denetle; fiziksel olarak imkânsız değerleri makul tavanlara kıs — aksi halde
+    bir LLM saçmalığı (örn. 9999 kcal) doğrudan MealLog'a sızıyordu (F9)."""
+    import nutrition_pipeline as _np
+    serving = {"calories": kalori, "protein": protein, "carbs": karb, "fat": yag}
+    is_valid, _flags, reasons = _np.check_serving(serving)
+    if not is_valid:
+        current_app.logger.warning("[NUTRITION] Plan makroları makul değil %s — kısılıyor", reasons)
+        kalori = min(kalori, _np.MAX_SERVING_KCAL)
+        protein = min(protein, _np.MAX_SERVING_MACRO_G)
+        karb = min(karb, _np.MAX_SERVING_MACRO_G)
+        yag = min(yag, _np.MAX_SERVING_FAT_G)
+    return kalori, protein, karb, yag
+
+
 @bp.route("/nutrition-plan/save", methods=["POST"])
 @login_required
 def save_nutrition_plan():
@@ -89,14 +105,20 @@ def quick_add_meal():
     yemekler = ", ".join(meal.get("yemekler", []))
     today    = day_key()
 
+    kalori, protein, karb, yag = _sanitize_meal_macros(
+        round(float(meal.get("kalori",  0)), 1),
+        round(float(meal.get("protein", 0)), 1),
+        round(float(meal.get("karb",    0)), 1),
+        round(float(meal.get("yag",     0)), 1),
+    )
     entry = MealLog(
         user_id  = current_user.id,
         ogun     = MEAL_LABELS[meal_key],
         yemekler = yemekler,
-        kalori   = round(float(meal.get("kalori",  0)), 1),
-        protein  = round(float(meal.get("protein", 0)), 1),
-        karb     = round(float(meal.get("karb",    0)), 1),
-        yag      = round(float(meal.get("yag",     0)), 1),
+        kalori   = kalori,
+        protein  = protein,
+        karb     = karb,
+        yag      = yag,
         tarih    = today
     )
     entry.source = "ai_plan"

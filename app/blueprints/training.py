@@ -370,20 +370,22 @@ def complete_workout():
     ))
     # ─────────────────────────────────────────────────────────────────────────
 
+    # F7: "Pump Check ✓/doğrulandı" iddiası kaldırıldı — otomatik görsel doğrulama
+    # henüz mock. Bonus, doğrulama değil "foto ekledin" ödülü olarak dürüstçe sunulur.
     base_xp = 10
-    pump_bonus = 25
+    photo_bonus = 25
     quest_result = complete_quest_for_user(current_user.id, "workout_logged")
-    new_total = award_xp(current_user.id, base_xp + pump_bonus)
+    new_total = award_xp(current_user.id, base_xp + photo_bonus)
     log_activity(current_user.id, "workout_completed",
-                 "Bugünkü antrenmanını tamamladı (Pump Check ✓)")
+                 "Bugünkü antrenmanını tamamladı (foto eklendi)")
     db.session.commit()
 
-    total_xp = base_xp + pump_bonus + (quest_result["xp"] if quest_result else 0)
+    total_xp = base_xp + photo_bonus + (quest_result["xp"] if quest_result else 0)
     level = get_level(new_total)
     response = {
-        "message": f"Bugünkü antrenmanı tamamladın! +{total_xp} XP! (Pump Check +{pump_bonus})",
+        "message": f"Bugünkü antrenmanı tamamladın! +{total_xp} XP! (foto +{photo_bonus})",
         "points_awarded": total_xp,
-        "pump_bonus": pump_bonus,
+        "pump_bonus": photo_bonus,
         "new_total": new_total,
         "level": level,
         "title": get_title(level)

@@ -31,25 +31,28 @@ _fs_token_cache = {"token": None, "expires_at": 0}
 
 
 def _get_fatsecret_token() -> str:
+    # Kilit, getirme dahil tüm kritik bölümü kapsar: soğuk önbellekte eşzamanlı
+    # çağrılar her biri ayrı token alıp thundering-herd yapmasın; ilk çağrı
+    # önbelleği doldurur, bekleyenler tekrar kontrolde önbelleği bulur (F13).
+    # Token getirme seyrek olduğundan kilidi ağ çağrısı boyunca tutmak sorun değil.
     with _fs_token_lock:
         if _fs_token_cache["token"] and time.time() < _fs_token_cache["expires_at"] - 60:
             return _fs_token_cache["token"]
-    client_id = os.environ.get("FATSECRET_CLIENT_ID", "")
-    client_secret = os.environ.get("FATSECRET_CLIENT_SECRET", "")
-    if not client_id or not client_secret:
-        raise RuntimeError("FATSECRET_CLIENT_ID / FATSECRET_CLIENT_SECRET not set")
-    resp = _fs_post(
-        FATSECRET_TOKEN_URL,
-        data={"grant_type": "client_credentials", "scope": "basic"},
-        auth=(client_id, client_secret),
-        timeout=10,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    with _fs_token_lock:
+        client_id = os.environ.get("FATSECRET_CLIENT_ID", "")
+        client_secret = os.environ.get("FATSECRET_CLIENT_SECRET", "")
+        if not client_id or not client_secret:
+            raise RuntimeError("FATSECRET_CLIENT_ID / FATSECRET_CLIENT_SECRET not set")
+        resp = _fs_post(
+            FATSECRET_TOKEN_URL,
+            data={"grant_type": "client_credentials", "scope": "basic"},
+            auth=(client_id, client_secret),
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
         _fs_token_cache["token"] = data["access_token"]
         _fs_token_cache["expires_at"] = time.time() + data.get("expires_in", 86400)
-    return data["access_token"]
+        return data["access_token"]
 
 
 def _parse_fatsecret_desc(desc: str) -> dict | None:
