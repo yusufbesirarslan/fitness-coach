@@ -38,6 +38,18 @@ class User(UserMixin, db.Model):
     last_reward_week = db.Column(db.String(10), nullable=True)  # ISO week of last seen reward popup, e.g. "2026-W22"
     last_login       = db.Column(db.Date, nullable=True)
 
+    # Davet/referral döngüsü: her kullanıcının paylaşılabilir tek davet kodu olur;
+    # referred_by_id, bu kullanıcıyı getiren davetçiyi işaret eder (çift taraflı ödül).
+    referral_code    = db.Column(db.String(12), unique=True, nullable=True)
+    referred_by_id   = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+
+    # Para kazanma: freemium hattı. is_premium şu an yalnızca instrümantasyon için
+    # tutulur (billing yok); GET /premium upgrade-intent GA olayı ile takip edilir.
+    is_premium       = db.Column(db.Boolean, default=False, server_default='false')
+    premium_since    = db.Column(db.DateTime, nullable=True)
+
+    referrer = db.relationship("User", remote_side=[id], backref="referrals")
+
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 

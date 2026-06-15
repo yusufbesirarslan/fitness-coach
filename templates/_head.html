@@ -1,0 +1,21 @@
+{# Tüm sayfalarda ortak <head> parçası: charset/viewport, favicon, fontlar
+   (preconnect + birleşik ağırlık seti), Google Analytics ve funnel olay yardımcı
+   script'i. Her sayfa kendi <title> ve sayfaya özel CSS'ini bu include'dan SONRA
+   ekler. Yeni satır-içi <script> için CSP nonce'u gerekir (app/hooks.py). #}
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+
+<!-- Google Analytics (site geneli — funnel olayları static/analytics.js'te) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-YXSGLN7C7Y"></script>
+<script nonce="{{ csp_nonce }}">
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-YXSGLN7C7Y');
+</script>
+<script src="/static/analytics.js?v={{ _v }}" defer></script>

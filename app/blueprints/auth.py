@@ -7,6 +7,7 @@ from werkzeug.security import check_password_hash
 from app.extensions import db, limiter
 from app.models import User
 from app.services.gamification import complete_quest_for_user
+from app.services.referral import consume_referral, ensure_referral_code
 from app.services.validators import _DUMMY_PW_HASH, validate_email, validate_password, validate_username
 
 
@@ -66,10 +67,20 @@ def register():
     
     user = User(username = username , email = email)
     user.set_password(password)
+    ensure_referral_code(user)
     db.session.add(user)
     db.session.commit()
 
-    return jsonify({"message" : f"Hoş geldin {username}, hesabın oluşturuldu!"})
+    # Davet döngüsü: kayıt davet bağlantısından geldiyse (cookie veya body)
+    # davetçi ile bağla ve iki tarafa da XP ver.
+    ref_code = (data.get("ref") or request.cookies.get("fitx_ref") or "").strip()
+    referred = bool(consume_referral(user, ref_code))
+
+    resp = jsonify({"message": f"Hoş geldin {username}, hesabın oluşturuldu!",
+                    "referred": referred})
+    if request.cookies.get("fitx_ref"):
+        resp.delete_cookie("fitx_ref")
+    return resp
 
 
 @bp.route("/login", methods=["GET","POST"])

@@ -1,10 +1,8 @@
 <!DOCTYPE html>
 <html lang="tr" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {% include "_head.html" %}
     <title>Arkadaşlar — FitX</title>
-    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <style>
@@ -171,6 +169,21 @@
             <div class="search-results" id="search-results"></div>
         </div>
 
+        <!-- ── INVITE / REFERRAL ── -->
+        <div class="section-card" style="margin-bottom:24px;">
+            <div class="section-title">ARKADAŞINI DAVET ET</div>
+            <p style="font-size:13px;color:var(--text-2);margin:6px 0 14px;font-weight:300;">
+                Davet bağlantını paylaş — arkadaşın katılınca ikiniz de <strong style="color:var(--volt);">+75 XP</strong> kazanın.
+            </p>
+            <div style="display:flex;gap:8px;">
+                <input type="text" id="invite-link" readonly value="Yükleniyor…"
+                       style="flex:1;min-width:0;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,0.04);border:1px solid var(--border);color:var(--text-2);font-size:13px;">
+                <button id="invite-copy-btn" data-action="copyInvite" data-ga-event="invite_copy"
+                        style="flex-shrink:0;padding:12px 18px;border-radius:10px;background:var(--volt);color:#121212;border:none;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">Kopyala</button>
+            </div>
+            <div id="invite-meta" style="font-size:12px;color:var(--text-3);margin-top:10px;"></div>
+        </div>
+
         <!-- ── PENDING REQUESTS ── -->
         <div class="section-card incoming" id="incoming-section" style="display:none;">
             <div class="section-title">GELEN İSTEKLER <span class="section-count" id="incoming-count">0</span></div>
@@ -332,7 +345,37 @@ async function rejectReq(id) {
     else toast(data.error, 'error');
 }
 
+// ── Invite / referral ──
+let inviteUrl = '';
+async function loadReferral() {
+    try {
+        const res = await fetch('/referral');
+        if (!res.ok) return;
+        const data = await res.json();
+        inviteUrl = data.invite_url || '';
+        const inp = document.getElementById('invite-link');
+        if (inp) inp.value = inviteUrl;
+        const meta = document.getElementById('invite-meta');
+        if (meta) meta.textContent = data.referred_count
+            ? (data.referred_count + ' kişi davetinle katıldı 🎉')
+            : 'Henüz kimseyi davet etmedin.';
+    } catch (e) { /* yoksay */ }
+}
+
+async function copyInvite() {
+    if (!inviteUrl) return;
+    try {
+        await navigator.clipboard.writeText(inviteUrl);
+        toast('Davet bağlantısı kopyalandı!', 'success');
+    } catch (e) {
+        const inp = document.getElementById('invite-link');
+        if (inp) { inp.focus(); inp.select(); }
+        toast('Bağlantıyı seçip kopyalayabilirsin.', 'info');
+    }
+}
+
 loadFriends();
+loadReferral();
 </script>
 <script src="/static/nav.js"></script>
 <script src="/static/actions.js"></script>

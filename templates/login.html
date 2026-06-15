@@ -1,19 +1,9 @@
 <!DOCTYPE html>
 <html lang="tr" data-theme="dark">
 <head>
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-YXSGLN7C7Y"></script>
-    <script nonce="{{ csp_nonce }}">
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-      gtag('config', 'G-YXSGLN7C7Y');
-    </script>
-
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {% include "_head.html" %}
     <title>Giriş Yap — FitX</title>
     <meta name="description" content="FitX — yapay zekâ koçunla kişiye özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.">
-    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <meta property="og:title" content="FitX — Yapay Zekâ Fitness Koçun">
     <meta property="og:description" content="Sana özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.">
     <meta property="og:type" content="website">
@@ -21,7 +11,6 @@
     <meta name="twitter:card" content="summary">
     <meta name="twitter:title" content="FitX — Yapay Zekâ Fitness Koçun">
     <meta name="twitter:description" content="Sana özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.">
-    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
     <style>
         .auth-wrapper {
