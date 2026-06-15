@@ -242,7 +242,7 @@ function escapeHTML(str) {
 }
 
 function avatarHTML(pp, name) {
-    if (pp) return '<div class="lb-avatar"><img src="' + escapeHTML(pp).replace(/"/g, '&quot;') + '"></div>';
+    if (pp) return '<div class="lb-avatar"><img src="' + escapeHTML(pp).replace(/"/g, '&quot;') + '" loading="lazy" decoding="async" alt=""></div>';
     const letter = (name || 'U')[0].toUpperCase();
     return '<div class="lb-avatar">' + escapeHTML(letter) + '</div>';
 }

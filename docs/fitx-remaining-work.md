@@ -36,13 +36,22 @@ cleanup, functionally identical; the two converted pages (chat, edit_profile) + 
 `.bn-item*` and `.glass*` rules removed from `static/theme.css`; the force-hide overrides removed
 from `static/nav.css`; focus-visible selectors repointed to `.drawer-link`/`.ab-tab`.
 
-## 🔴 ⚠️ Clean test/seed accounts out of production
-**What:** leaderboard shows a user literally named `test`; friends list is sparse.
-**Why deferred:** this is **production data**, not code — I can't (and shouldn't) mutate the
-prod DB from here.
-**Plan (owner action):** remove/anonymize the `test` account in prod; optionally gate the
-global leaderboard behind a minimum cohort size or switch to relative framing
-("ilk %20'desin") until density grows.
+## 🔴 ✅/⚠️ Clean test/seed accounts out of production
+**Done (tooling):** added a FK-safe Flask CLI command to purge leftover test/seed accounts and
+all their dependent rows (and refresh the leaderboard sorted sets):
+
+```
+flask --app starter cleanup-test-users               # dry run — lists matches only
+flask --app starter cleanup-test-users --yes         # actually delete (default test/seed pattern)
+flask --app starter cleanup-test-users --username test --yes   # target one account
+```
+
+Default match is a deliberately narrow pattern (`test`/`testuser`/`seed`/`demo`/`dummy`/`deneme`…)
+so real users aren't caught; `--pattern <regex>` overrides. Covered by tests in
+`test_remaining_work.py`.
+**⚠️ Owner action:** this still has to be **run against prod** (EC2) by the owner — the sandbox
+has no prod DB access. Optionally still worth gating the global leaderboard behind a minimum
+cohort size until density grows.
 
 ## ✅ Public landing page
 **Done:** `templates/landing.html` + public `GET /welcome` (`app/blueprints/pages.py`) — hero
@@ -57,13 +66,19 @@ Events wired: `register_submit`/`register_success`, `setup_step_0..3`, `first_me
 `first_plan_generated`, `upgrade_intent`, `invite_copy`, landing CTA clicks. "Activation" = the
 once-only `activation` event fired on first meal **or** first plan.
 
-## 🟠 ⚠️ Avatar: stop inlining ~245 KB base64 on every page
-**What:** `profile_picture` is `db.Text`, rendered inline into every HTML response
-(uncacheable).
-**Why deferred:** requires wiring uploads through `s3_helper.py`, a model/storage change, and
-a migration/backfill of existing avatars.
-**Plan:** store avatars in S3, render a cacheable `<img>` URL with `loading="lazy"` + fixed
-width/height; keep the 500 KB validator as an upload guard.
+## ✅ Avatar: stop inlining ~245 KB base64 on every page
+**Done (now that the S3 bucket exists):** new `User.profile_picture_key` column + `User.avatar_src`
+resolver; `app/services/avatars.py::set_user_avatar` uploads the avatar to S3 (prefix `avatars/`,
+via `s3_helper.upload_image`) and stores only the object key, clearing the base64 from the column
+so HTML responses no longer carry ~245 KB. Display sites (dashboard, drawer/header, friends,
+leaderboard, chat, premium, edit-profile, JSON serializers) all read `avatar_src`, which returns a
+short-lived pre-signed URL; list avatars render with `loading="lazy" decoding="async"`. The 500 KB
++ real-image validator is kept as the upload guard. **Graceful fallback:** if S3 is disabled
+(local without bucket, tests) or an upload fails, it transparently falls back to the old base64
+column — so nothing breaks where S3 isn't configured. Covered by `test_remaining_work.py`.
+**Remaining (optional):** a one-off backfill to migrate *existing* base64 avatars in prod to S3
+(new/changed avatars migrate automatically on next save); pre-signed URLs aren't long-cacheable —
+CloudFront/public-read would improve that later.
 
 ## ✅ Never-idle pages (battery / CPU)  *(mostly done)*
 **Done:** the dashboard tip carousel + `ins-pbar` now pause on `document.hidden` and skip

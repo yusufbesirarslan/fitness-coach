@@ -61,7 +61,7 @@ def invite(code):
 def premium():
     return render_template("premium.html", freemium=FREEMIUM,
         username=current_user.username,
-        profile_picture=current_user.profile_picture,
+        profile_picture=current_user.avatar_src,
         is_premium=bool(current_user.is_premium))
 
 

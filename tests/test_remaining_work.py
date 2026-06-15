@@ -154,6 +154,96 @@ def test_all_main_pages_render(client, make_user, login):
             assert "_head" not in r.get_data(as_text=True)  # include çözüldü
 
 
+# ---------------------------------------------------------------------------
+# Avatar S3 depolama (etkin → S3 anahtarı, kapalı → eski base64)
+# ---------------------------------------------------------------------------
+
+def _png_data_url():
+    from tests.test_validators import _image_data_url
+    return _image_data_url("PNG")
+
+
+def test_avatar_stored_as_base64_when_s3_disabled(client, auth_user):
+    # Test ortamında S3 kapalı (S3_BUCKET_NAME boş) → eski davranış korunur.
+    pic = _png_data_url()
+    r = client.post("/edit-profile", json={"username": "testuser", "profile_picture": pic})
+    assert r.status_code == 200
+    db.session.expire_all()
+    u = db.session.get(User, auth_user.id)
+    assert u.profile_picture == pic
+    assert u.profile_picture_key is None
+    assert u.avatar_src == pic
+
+
+def test_avatar_uploaded_to_s3_when_enabled(client, auth_user, monkeypatch):
+    import s3_helper
+    monkeypatch.setattr(s3_helper, "is_enabled", lambda: True)
+    monkeypatch.setattr(s3_helper, "upload_image",
+                        lambda *a, **k: "avatars/1/2026/06/abc.png")
+    monkeypatch.setattr(s3_helper, "generate_presigned_url",
+                        lambda key, **k: "https://signed.example/" + key)
+
+    r = client.post("/edit-profile", json={"username": "testuser",
+                                           "profile_picture": _png_data_url()})
+    assert r.status_code == 200
+    db.session.expire_all()
+    u = db.session.get(User, auth_user.id)
+    assert u.profile_picture_key == "avatars/1/2026/06/abc.png"
+    assert u.profile_picture is None  # base64 HTML'den çıkarıldı
+    assert u.avatar_src == "https://signed.example/avatars/1/2026/06/abc.png"
+
+
+def test_avatar_clear_removes_both(client, auth_user, monkeypatch):
+    auth_user.profile_picture_key = "avatars/x.png"
+    db.session.commit()
+    r = client.post("/edit-profile", json={"username": "testuser", "profile_picture": ""})
+    assert r.status_code == 200
+    db.session.expire_all()
+    u = db.session.get(User, auth_user.id)
+    assert u.profile_picture is None and u.profile_picture_key is None
+    assert u.avatar_src is None
+
+
+# ---------------------------------------------------------------------------
+# cleanup-test-users CLI
+# ---------------------------------------------------------------------------
+
+def test_cleanup_dry_run_lists_without_deleting(app, make_user):
+    make_user("test")
+    make_user("gercek")
+    runner = app.test_cli_runner()
+    res = runner.invoke(args=["cleanup-test-users"])
+    assert "test" in res.output
+    assert "KURU ÇALIŞMA" in res.output
+    assert User.query.filter_by(username="test").first() is not None  # silinmedi
+
+
+def test_cleanup_yes_purges_user_and_dependents(app, make_user):
+    from app.models import Friendship, WeeklyLog
+    victim = make_user("test")
+    keep = make_user("gercek")
+    db.session.add(WeeklyLog(user_id=victim.id, weight=70))
+    db.session.add(Friendship(sender_id=victim.id, receiver_id=keep.id, status="accepted"))
+    db.session.commit()
+
+    runner = app.test_cli_runner()
+    res = runner.invoke(args=["cleanup-test-users", "--yes"])
+    assert "silindi" in res.output
+
+    assert User.query.filter_by(username="test").first() is None
+    assert User.query.filter_by(username="gercek").first() is not None
+    assert WeeklyLog.query.filter_by(user_id=victim.id).count() == 0
+    assert Friendship.query.count() == 0
+
+
+def test_cleanup_does_not_match_real_users(app, make_user):
+    make_user("ahmet")
+    make_user("besir290")
+    runner = app.test_cli_runner()
+    res = runner.invoke(args=["cleanup-test-users"])
+    assert "bulunamadı" in res.output
+
+
 def test_templates_compile():
     """Her şablon Jinja'da derlenebilmeli (blok/include sözdizimi sağlığı)."""
     from app import create_app

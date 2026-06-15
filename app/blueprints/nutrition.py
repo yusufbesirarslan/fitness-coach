@@ -687,7 +687,7 @@ def review_meals():
 @bp.route("/nutrition")
 @login_required
 def nutrition():
-    return render_template("nutrition.html", username=current_user.username, profile_picture=current_user.profile_picture)
+    return render_template("nutrition.html", username=current_user.username, profile_picture=current_user.avatar_src)
 
 
 @bp.route("/nutrition-plan", methods=["POST"])
