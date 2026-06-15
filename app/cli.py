@@ -9,10 +9,10 @@ from app.services.gamification import run_weekly_rollover
 def seed_quests():
     """Insert default daily quests into the database."""
     defaults = [
-        {"title": "Daily Login", "description": "Bugün uygulamaya giriş yap", "points_reward": 10, "quest_type": "login"},
-        {"title": "Log a Workout", "description": "Bir antrenman planı oluştur veya kaydet", "points_reward": 50, "quest_type": "workout_logged"},
-        {"title": "Help a Friend", "description": "Bir arkadaşına mesaj gönder", "points_reward": 30, "quest_type": "suggestion_sent"},
-        {"title": "Log a Meal", "description": "Bugün bir öğün kaydet", "points_reward": 20, "quest_type": "meal_logged"},
+        {"title": "Günlük Giriş", "description": "Bugün uygulamaya giriş yap", "points_reward": 10, "quest_type": "login"},
+        {"title": "Antrenman Kaydet", "description": "Bir antrenman planı oluştur veya kaydet", "points_reward": 50, "quest_type": "workout_logged"},
+        {"title": "Bir Arkadaşına Yardım Et", "description": "Bir arkadaşına mesaj gönder", "points_reward": 30, "quest_type": "suggestion_sent"},
+        {"title": "Öğün Kaydet", "description": "Bugün bir öğün kaydet", "points_reward": 20, "quest_type": "meal_logged"},
     ]
     for q in defaults:
         existing = DailyQuest.query.filter_by(quest_type=q["quest_type"]).first()

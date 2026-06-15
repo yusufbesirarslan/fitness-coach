@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Görevler — Fitness Coach</title>
+  <title>Görevler — FitX</title>
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/theme.css">
   <link rel="stylesheet" href="/static/nav.css">
@@ -98,9 +98,11 @@
       font-size: 20px;
       flex-shrink: 0;
     }
-    .quest-emoji.login    { background: var(--volt-dim); }
-    .quest-emoji.workout  { background: var(--orange-dim); }
-    .quest-emoji.social   { background: var(--blue-dim); }
+    .quest-emoji.login      { background: var(--volt-dim); }
+    .quest-emoji.workout    { background: var(--orange-dim); }
+    .quest-emoji.social     { background: var(--blue-dim); }
+    .quest-emoji.supplement { background: var(--green-dim); }
+    .quest-emoji.meal       { background: var(--volt-dim); }
 
     .quest-title {
       font-family: 'Bebas Neue', sans-serif;
@@ -217,8 +219,8 @@
     {% for item in quest_data %}
     <div class="quest-card {% if item.status == 'claimed' %}claimed{% endif %}" id="quest-{{ item.quest.id }}">
       <div class="quest-header">
-        <div class="quest-emoji {% if item.quest.quest_type == 'login' %}login{% elif item.quest.quest_type == 'workout_logged' %}workout{% else %}social{% endif %}">
-          {% if item.quest.quest_type == 'login' %}&#128272;{% elif item.quest.quest_type == 'workout_logged' %}&#127947;{% else %}&#129309;{% endif %}
+        <div class="quest-emoji {% if item.quest.quest_type == 'login' %}login{% elif item.quest.quest_type == 'workout_logged' %}workout{% elif item.quest.quest_type == 'supplement_added' %}supplement{% elif item.quest.quest_type == 'meal_logged' %}meal{% else %}social{% endif %}">
+          {% if item.quest.quest_type == 'login' %}&#128272;{% elif item.quest.quest_type == 'workout_logged' %}&#127947;{% elif item.quest.quest_type == 'supplement_added' %}&#128138;{% elif item.quest.quest_type == 'meal_logged' %}&#127869;{% else %}&#129309;{% endif %}
         </div>
         <div class="quest-title">{{ item.quest.title }}</div>
       </div>

@@ -72,7 +72,7 @@ def log_progress():
     return jsonify({"message" : message})
 
 
-@bp.route("/progress")
+@bp.route("/api/progress")
 @login_required
 def progress():
     logs = WeeklyLog.query.filter_by(user_id=current_user.id)\
@@ -90,6 +90,14 @@ def progress():
             json.dumps(result, ensure_ascii=False),
             mimetype="application/json"
         )
+
+
+# Eski /progress adresi ham JSON döndürüyordu; kullanıcı (link/yer imi/tahmin)
+# oraya düşerse kod görmesin diye ilerleme sayfasına yönlendir.
+@bp.route("/progress")
+@login_required
+def progress_redirect():
+    return redirect(url_for("tracking.progress_page"))
 
 
 @bp.route("/checkin", methods=["POST"])

@@ -24,7 +24,7 @@ trust) · 🟠 P1 (high impact) · 🟡 P2 (polish). Tick the box when done.
 
 ## 🔴 P0 — Broken / trust-breaking (do first)
 
-- [ ] **`/progress` returns raw JSON `[]` in the browser.** The UI is at `/progress-page`;
+- [x] **`/progress` returns raw JSON `[]` in the browser.** The UI is at `/progress-page`;
   the bare `/progress` route is the weight-log API. — Where: `app/blueprints/tracking.py:75`
   (API) vs `:305` (page). — Why: a guessed/bookmarked/shared link shows raw code, looks
   broken. — Fix: rename API → `/api/progress`; redirect `/progress` → the page.
@@ -36,12 +36,12 @@ trust) · 🟠 P1 (high impact) · 🟡 P2 (polish). Tick the box when done.
   `static/nav.css:250 !important`). — Why: feels like two apps; most jarring inconsistency.
   — Fix: make the v3 hybrid shell canonical, convert those two pages, delete `.sidebar*`. — 🎨 📈 🙂
 
-- [ ] **Three brand names: FITX / FC / FITNESS COACH.** — Where: `index.html:28` (FITX),
+- [x] **Three brand names: FITX / FC / FITNESS COACH.** — Where: `index.html:28` (FITX),
   `chat.html:180` & `edit_profile.html:185` (FC), `login.html:70` & `register.html:75`
   (FITNESS COACH). — Why: destroys recall/recommendation/branded search; reads as a prototype.
   — Fix: standardize on **FitX** everywhere, including `<title>` tags. — 🎨 📈 🙂
 
-- [ ] **AI training plan prescribes 7 days/week with zero rest days.** Cardio days are just
+- [x] **AI training plan prescribes 7 days/week with zero rest days.** Cardio days are just
   "Bisiklet" with no detail. — Where: `/training` (plan generator service). — Why: visibly
   unsafe advice on the product's core promise → distrust + liability; poisons word-of-mouth.
   — Fix: constrain generator to ≥1 rest/active-recovery day, expand cardio detail, add a
@@ -67,10 +67,12 @@ trust) · 🟠 P1 (high impact) · 🟡 P2 (polish). Tick the box when done.
   not on login/register/setup. — Why: the signup→activation funnel is unmeasurable. — Fix:
   GA in `_base.html`; events for `register_submit/success`, `setup_step_n`, `first_meal_logged`,
   `first_plan_generated`; define "activation". — 📈
-- [ ] **No favicon / meta description / Open-Graph / Twitter cards** in any template. — Why:
+- [x] **No favicon / meta description / Open-Graph / Twitter cards** in any template. — Why:
   default tab icon, poor SEO, ugly link unfurls (kills the social feature's virality). — Fix:
   add favicon + `<meta name="description">` + OG/Twitter tags + branded share image in `_base.html`.
   — 🎨 📈
+  - ✅ Done (no `_base.html` yet): added `static/favicon.svg` + favicon link on login/register/setup/index;
+    meta description + OG/Twitter on the public login & register pages.
 
 ### Activation & retention
 - [ ] **`/setup` asks for body data before showing value.** — Where: `templates/setup.html:250`.
@@ -101,7 +103,7 @@ trust) · 🟠 P1 (high impact) · 🟡 P2 (polish). Tick the box when done.
   `setInterval(...,8000)` `index.html:673` + `ins-pbar` 8s loop `dashboard.css:360`; Chart.js +
   sparkline canvases. — Fix: pause on `document.hidden`/`prefers-reduced-motion`, clear interval
   when off-screen, ensure Chart.js animation settles. — 🎨 📈
-- [ ] **Duplicate `/nutrition-plan/active` fetch on load.** — Where: `static/nutrition.js:470` &
+- [x] **Duplicate `/nutrition-plan/active` fetch on load.** — Where: `static/nutrition.js:470` &
   `:542`, called back-to-back at `:1282–1283`; refetched on tab switch `:45`. — Fix: fetch once,
   cache in a module var, share to both renderers. — 🎨 📈
 - [ ] **Render-blocking third-party Google Fonts, no preconnect, inconsistent weights.** — Where:
@@ -109,7 +111,7 @@ trust) · 🟠 P1 (high impact) · 🟡 P2 (polish). Tick the box when done.
   self-host woff2 (`font-display:swap`) + unify weights in `_base.html`. — 🎨 📈
 
 ### Localization & trust
-- [ ] **Mixed Turkish/English UI** — English quest names with Turkish descriptions; "SUPPLEMENT
+- [x] **Mixed Turkish/English UI** — English quest names with Turkish descriptions; "SUPPLEMENT
   STACK" / nav "Supplements"; status labels English. — Where: `app/db_init.py:100-108`,
   `app/cli.py:12-14`, `templates/supplements.html`, nav. — Fix: localize all user-facing strings
   (also fixes the "ACTİVE" bug). — 📈 🙂 🎨
@@ -127,10 +129,10 @@ trust) · 🟠 P1 (high impact) · 🟡 P2 (polish). Tick the box when done.
 
 ## 🟡 P2 — Polish & consistency
 
-- [ ] **Turkish-locale uppercase bug ("Active" → "ACTİVE").** — Where: `.status-badge{text-transform:
+- [x] **Turkish-locale uppercase bug ("Active" → "ACTİVE").** — Where: `.status-badge{text-transform:
   uppercase}` `manage_stack.html:86` on English values `:154,216,236`. — Fix: localize labels
   ("Aktif/Azalıyor/Bitti"); decouple display text from the stored enum. — 🎨 🙂
-- [ ] **Heading splits a single word mid-stem** ("ARKADAŞLARIN" → "ARKADAŞ / LARIN"). — Where:
+- [x] **Heading splits a single word mid-stem** ("ARKADAŞLARIN" → "ARKADAŞ / LARIN"). — Where:
   `templates/friends.html:161`; accent pattern `theme.css:468`. — Fix: don't hardcode `<br>`;
   accent whole/second word; wrap naturally. — 🎨 🙂
 - [ ] **Hardcoded colors bypass the token system.** — Where: ring/trend `#FF4D4D/#FFB020/#CCFF00`
@@ -144,8 +146,9 @@ trust) · 🟠 P1 (high impact) · 🟡 P2 (polish). Tick the box when done.
   — Fix: fold auth rules into the token system; retire `style.css`. — 🎨
 - [ ] **Dead CSS shipped to every user** — `.glass`/`.glass-volt` (`theme.css:178`, zero refs);
   `.sidebar`/`.bottom-nav` force-hidden (`nav.css:250–251`); unused `@keyframes`. — Fix: delete. — 🎨
-- [ ] **Backslash in avatar href `"\edit-profile"`.** — Where: `manage_stack.html:110`,
+- [x] **Backslash in avatar href `"\edit-profile"`.** — Where: `manage_stack.html:110`,
   `leaderboard.html:165`, `friends.html:140`. — Fix: `/edit-profile` (ideally `url_for`). — 🎨
+  - ✅ Already correct in current code — all three use `/edit-profile` (forward slash).
 - [ ] **Desktop reads as a stretched mobile layout** (centered column, big empty gaps, mismatched
   card heights). — Where: `theme.css:92` (`--content-max`), `dashboard.css`. — Fix: desktop
   breakpoint that rebalances the bento (stretch/masonry) or adds a right rail. — 🎨 🙂
@@ -170,12 +173,13 @@ trust) · 🟠 P1 (high impact) · 🟡 P2 (polish). Tick the box when done.
 ---
 
 ## ✅ Quick wins (high impact ÷ low effort — grab these first)
-- [ ] `/progress` JSON route (P0) — small route change.
-- [ ] GA into `_base.html` + funnel events (P1).
-- [ ] Favicon + meta description + OG/Twitter tags (P1).
-- [ ] Dedupe `/nutrition-plan/active` fetch (P1).
-- [ ] Localize quest names + nav "Supplements" + status labels → fixes "ACTİVE" too (P1/P2).
-- [ ] Fix heading word-split and the `\edit-profile` backslash (P2).
+- [x] `/progress` JSON route (P0) — small route change.
+- [~] GA into `_base.html` + funnel events (P1). — GA added to login/register/setup (funnel
+  acquisition pages) + index; no shared `_base.html` and no custom funnel events yet.
+- [x] Favicon + meta description + OG/Twitter tags (P1).
+- [x] Dedupe `/nutrition-plan/active` fetch (P1).
+- [x] Localize quest names + nav "Supplements" + status labels → fixes "ACTİVE" too (P1/P2).
+- [x] Fix heading word-split and the `\edit-profile` backslash (P2).
 - [ ] Reconcile dashboard vs check-in weight source (P1).
 
 ## 🔎 Worth verifying on a real device (couldn't confirm live)

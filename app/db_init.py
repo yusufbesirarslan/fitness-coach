@@ -51,6 +51,12 @@ def init_database(app):
             'ALTER TABLE custom_meal_item ADD COLUMN serving_quantity FLOAT',
             'ALTER TABLE "user" ADD COLUMN weekly_xp INTEGER DEFAULT 0',
             'ALTER TABLE "user" ADD COLUMN last_reward_week VARCHAR(10)',
+            # Görev isimlerini Türkçeleştir (eski İngilizce kayıtları da güncelle)
+            "UPDATE daily_quest SET title = 'Günlük Giriş' WHERE quest_type = 'login'",
+            "UPDATE daily_quest SET title = 'Antrenman Kaydet' WHERE quest_type = 'workout_logged'",
+            "UPDATE daily_quest SET title = 'Bir Arkadaşına Yardım Et' WHERE quest_type = 'suggestion_sent'",
+            "UPDATE daily_quest SET title = 'Dolabını Güncelle' WHERE quest_type = 'supplement_added'",
+            "UPDATE daily_quest SET title = 'Öğün Kaydet' WHERE quest_type = 'meal_logged'",
         ]
         for sql in migrations:
             try:
@@ -97,16 +103,16 @@ def init_database(app):
             db.session.rollback()
         if DailyQuest.query.count() == 0:
             for q in [
-                DailyQuest(title="Daily Login", description="Bugün uygulamaya giriş yap", points_reward=10, quest_type="login"),
-                DailyQuest(title="Log a Workout", description="Bir antrenman planı oluştur veya kaydet", points_reward=50, quest_type="workout_logged"),
-                DailyQuest(title="Help a Friend", description="Bir arkadaşına mesaj gönder", points_reward=30, quest_type="suggestion_sent"),
+                DailyQuest(title="Günlük Giriş", description="Bugün uygulamaya giriş yap", points_reward=10, quest_type="login"),
+                DailyQuest(title="Antrenman Kaydet", description="Bir antrenman planı oluştur veya kaydet", points_reward=50, quest_type="workout_logged"),
+                DailyQuest(title="Bir Arkadaşına Yardım Et", description="Bir arkadaşına mesaj gönder", points_reward=30, quest_type="suggestion_sent"),
             ]:
                 db.session.add(q)
             db.session.commit()
         if not DailyQuest.query.filter_by(quest_type="supplement_added").first():
             db.session.add(DailyQuest(
-                title="Update Your Stack",
-                description="Supplement stack'ine yeni bir ürün ekle",
+                title="Dolabını Güncelle",
+                description="Supplement dolabına yeni bir ürün ekle",
                 points_reward=25, quest_type="supplement_added"
             ))
             db.session.commit()

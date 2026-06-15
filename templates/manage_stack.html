@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Supplement Stack — Fitness Coach</title>
+    <title>Supplement Dolabı — FitX</title>
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
@@ -129,7 +129,7 @@
     <div class="stack-wrap">
 
         <div class="page-hdr">
-            <h1>SUPPLEMENT<br><span>STACK</span></h1>
+            <h1>SUPPLEMENT<br><span>DOLABI</span></h1>
             <p>Kullandığın takviyeleri ekle, derecelendir ve profilinde sergile.</p>
         </div>
 
@@ -151,9 +151,9 @@
 
             <div class="chip-row">
                 <label>Durum</label>
-                <button class="cat-chip active" data-action="fxPickStatus" data-status="Active">Active</button>
-                <button class="cat-chip" data-action="fxPickStatus" data-status="Low Stock">Low Stock</button>
-                <button class="cat-chip" data-action="fxPickStatus" data-status="Finished">Finished</button>
+                <button class="cat-chip active" data-action="fxPickStatus" data-status="Active">Aktif</button>
+                <button class="cat-chip" data-action="fxPickStatus" data-status="Low Stock">Azalıyor</button>
+                <button class="cat-chip" data-action="fxPickStatus" data-status="Finished">Bitti</button>
             </div>
 
             <div class="star-group">
@@ -201,7 +201,7 @@
         </div>
 
         <!-- ══ EXISTING LIST ══ -->
-        <div class="list-title">MEVCUT STACK'İN</div>
+        <div class="list-title">MEVCUT DOLABIN</div>
         <div class="supp-grid" id="supp-list">
             {% if supplements %}
                 {% for s in supplements %}
@@ -213,7 +213,7 @@
                                 <div class="supp-name">{{ s.product_name }}</div>
                                 <div class="supp-brand">{{ s.brand }} · {{ s.category }}</div>
                             </div>
-                            <span class="status-badge {% if s.status == 'Active' %}status-active{% elif s.status == 'Low Stock' %}status-low{% else %}status-finished{% endif %}">{{ s.status }}</span>
+                            <span class="status-badge {% if s.status == 'Active' %}status-active{% elif s.status == 'Low Stock' %}status-low{% else %}status-finished{% endif %}">{{ {'Active':'Aktif','Low Stock':'Azalıyor','Finished':'Bitti'}.get(s.status, s.status) }}</span>
                         </div>
                         <div class="supp-ratings">
                             {% if s.rating_effect %}
@@ -233,9 +233,9 @@
                         <div class="supp-review">"{{ s.review_text }}"</div>
                         {% endif %}
                         <div class="supp-actions">
-                            <button class="supp-act-btn" data-action="quickStatus" data-args='[{{ s.id }},"Active"]'>Active</button>
-                            <button class="supp-act-btn" data-action="quickStatus" data-args='[{{ s.id }},"Low Stock"]'>Low Stock</button>
-                            <button class="supp-act-btn" data-action="quickStatus" data-args='[{{ s.id }},"Finished"]'>Finished</button>
+                            <button class="supp-act-btn" data-action="quickStatus" data-args='[{{ s.id }},"Active"]'>Aktif</button>
+                            <button class="supp-act-btn" data-action="quickStatus" data-args='[{{ s.id }},"Low Stock"]'>Azalıyor</button>
+                            <button class="supp-act-btn" data-action="quickStatus" data-args='[{{ s.id }},"Finished"]'>Bitti</button>
                             <button class="supp-act-btn del" data-action="deleteSupplement" data-args='[{{ s.id }}]'>Sil</button>
                         </div>
                     </div>
