@@ -453,6 +453,7 @@ async function selectPlan(i, plan, score) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ plan, score })
     });
+    invalidateActivePlan();
     document.querySelectorAll('.plan-card').forEach(c => c.classList.remove('chosen'));
     document.querySelectorAll('.btn-select-plan').forEach(b => { b.textContent = 'BU PLANI SEÇ'; b.classList.remove('chosen'); });
     document.getElementById(`plan-card-${i}`).classList.add('chosen');
@@ -465,10 +466,24 @@ async function selectPlan(i, plan, score) {
   }
 }
 
+/* ── AKTİF PLAN CACHE ──
+   loadActivePlan() ve loadQuickAddSection() açılışta arka arkaya çağrılıyordu;
+   ikisi de /nutrition-plan/active'i çekince istek iki kez gidiyordu. In-flight
+   promise'i paylaşarak tek isteğe indir; plan değişince invalidateActivePlan(). */
+let _activePlanCache = null;
+function getActivePlan(force = false) {
+  if (force || !_activePlanCache) {
+    _activePlanCache = fetch('/nutrition-plan/active')
+      .then(r => r.json())
+      .catch(err => { _activePlanCache = null; throw err; });
+  }
+  return _activePlanCache;
+}
+function invalidateActivePlan() { _activePlanCache = null; }
+
 async function loadActivePlan() {
   try {
-    const res = await fetch('/nutrition-plan/active');
-    const d   = await res.json();
+    const d = await getActivePlan();
     if (!d.exists) return;
     renderActivePlanDetail(d.plan, d.score, d.created_at);
     document.getElementById('active-plan-detail').style.display = 'block';
@@ -539,8 +554,7 @@ function resetPlan() {
 async function loadQuickAddSection() {
   const container = document.getElementById('quick-add-cards');
   try {
-    const res = await fetch('/nutrition-plan/active');
-    const d   = await res.json();
+    const d = await getActivePlan();
 
     if (!d.exists) {
       container.innerHTML = `
