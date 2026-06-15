@@ -4,7 +4,7 @@ import os
 from flask import Flask
 
 from app.config import configure_app
-from app.extensions import db, login_manager, limiter, migrate
+from app.extensions import db, login_manager, limiter, migrate, warn_if_limiter_degraded
 from app.cli import register_cli
 from app.db_init import init_database
 
@@ -40,6 +40,7 @@ def create_app():
     app.before_request(generate_csp_nonce)
     app.before_request(_csrf_protect)
     limiter.init_app(app)
+    warn_if_limiter_degraded(app)
     app.before_request(maybe_weekly_rollover)
     app.before_request(update_streak)
     app.context_processor(inject_csp_nonce)

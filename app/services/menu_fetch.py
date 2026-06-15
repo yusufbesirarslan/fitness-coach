@@ -20,6 +20,23 @@ def _is_safe_public_ip(ip_str):
                 or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
 
 
+_ALLOWED_PORTS = {80, 443}
+
+
+def _port_ok(parsed):
+    """Açık port yalnızca 80/443 olabilir; varsayılan (None) kabul edilir.
+
+    Adres kontrolü (_resolve_host_safely) IP'yi doğrular ama PORT'u doğrulamaz —
+    saldırgan public-ama-iç bir IP'nin keyfi yüksek portuna (ör. :22, :6379,
+    :5432) yönelterek iç servis taraması yapabilirdi. Bozuk port (.port ValueError)
+    da reddedilir (SSRF sertleştirme)."""
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    return port is None or port in _ALLOWED_PORTS
+
+
 def _resolve_host_safely(hostname):
     """Resolve hostname; raise ValueError if any address is non-public.
 
@@ -106,6 +123,8 @@ def _safe_requests_get(url, *, timeout, headers=None, cookies=None,
         p = urlparse(current)
         if p.scheme not in ("http", "https") or not p.hostname:
             raise http_req.exceptions.InvalidURL("Geçersiz URL.")
+        if not _port_ok(p):
+            raise ValueError("Yalnızca 80/443 portlarına izin verilir.")
         safe_ips = _resolve_host_safely(p.hostname)  # ValueError if non-public
         with _pin_getaddrinfo(p.hostname, safe_ips[0]):
             r = http_req.get(current, timeout=timeout, stream=True,
@@ -153,6 +172,8 @@ def _validate_menu_url(url):
         return None, None, "Yalnızca HTTP/HTTPS desteklenir."
     if not parsed.hostname:
         return None, None, "Geçersiz URL."
+    if not _port_ok(parsed):
+        return None, None, "Yalnızca 80/443 portlarına izin verilir."
 
     try:
         _resolve_host_safely(parsed.hostname)
@@ -254,6 +275,8 @@ def _fetch_page(url, timeout=10):
         p = urlparse(target_url)
         if p.scheme not in ("http", "https") or not p.hostname:
             raise http_req.exceptions.InvalidURL("Geçersiz URL.")
+        if not _port_ok(p):
+            raise ValueError("Yalnızca 80/443 portlarına izin verilir.")
         safe_ips = _resolve_host_safely(p.hostname)
         # stream=True so the TCP connect (which resolves DNS) happens inside the
         # pinned window; the body is downloaded later via _read_capped.

@@ -382,7 +382,8 @@ def complete_workout():
     if quest_result:
         response["quest_awarded"] = quest_result
     if pump_image_key:
-        response["pump_image_url"] = s3_helper.generate_presigned_url(pump_image_key, expires_in=3600)
+        response["pump_image_url"] = s3_helper.generate_presigned_url(
+            pump_image_key, expires_in=3600, expected_user_id=current_user.id)
     return jsonify(response)
 
 

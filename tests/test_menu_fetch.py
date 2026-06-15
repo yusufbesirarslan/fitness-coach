@@ -85,7 +85,9 @@ def test_validate_url_blocks_internal_hosts():
     # localhost gerçekten 127.0.0.1'e çözülür — mock'suz uçtan uca koruma.
     _, _, err = _validate_menu_url("http://localhost/menu")
     assert err == "İç ağ adresleri engellendi."
-    _, _, err = _validate_menu_url("http://127.0.0.1:8080/admin")
+    # Port yok → host kontrolü çalışır (port 8080 olsaydı önce port kuralına takılırdı,
+    # bkz test_validate_url_blocks_nonstandard_ports).
+    _, _, err = _validate_menu_url("http://127.0.0.1/admin")
     assert err == "İç ağ adresleri engellendi."
 
 
@@ -108,6 +110,36 @@ def test_validate_url_strips_tracking_params_and_fragment(monkeypatch):
         "https://restoran.example/menu?utm_source=ig&fbclid=x&kategori=ana#bolum")
     assert err is None
     assert clean == "https://restoran.example/menu?kategori=ana"
+
+
+@pytest.mark.parametrize("url", [
+    "https://restoran.example:22/menu",      # SSH — iç servis tarama yüzeyi
+    "http://restoran.example:6379/menu",     # Redis
+    "https://restoran.example:99999/menu",   # bozuk port → .port ValueError
+])
+def test_validate_url_blocks_nonstandard_ports(url):
+    # Port kontrolü DNS çözümlemeden ÖNCE — mock gerekmez (S3, SSRF).
+    _, _, err = _validate_menu_url(url)
+    assert err == "Yalnızca 80/443 portlarına izin verilir."
+
+
+@pytest.mark.parametrize("url", [
+    "https://restoran.example/menu",
+    "https://restoran.example:443/menu",
+    "http://restoran.example:80/menu",
+])
+def test_validate_url_allows_standard_ports(monkeypatch, url):
+    monkeypatch.setattr(menu_fetch, "_resolve_host_safely", lambda h: ["93.184.216.34"])
+    _, _, err = _validate_menu_url(url)
+    assert err is None
+
+
+def test_safe_get_redirect_to_nonstandard_port_blocked(monkeypatch):
+    monkeypatch.setattr(menu_fetch, "_resolve_host_safely", lambda h: ["93.184.216.34"])
+    monkeypatch.setattr(requests, "get",
+                        lambda url, **kw: _Resp(302, headers={"Location": "http://evil.example:22/"}))
+    with pytest.raises(ValueError, match="80/443"):
+        menu_fetch._safe_requests_get("https://ilk.example/", timeout=5)
 
 
 # ---------------------------------------------------------------------------
