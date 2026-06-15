@@ -311,9 +311,19 @@ def today_activity():
 
 
 @bp.route("/progress-page")
-@login_required  
+@login_required
 def progress_page():
-    return render_template("progress.html", username=current_user.username, profile_picture=current_user.profile_picture)
+    # Tek kilo kaynağı: current_user.weight (panodaki değerle aynı). Henüz set
+    # edilmemişse son check-in'e düş — böylece check-in formu sabit bir sayı
+    # yerine kullanıcının gerçek güncel kilosuyla ön-dolar.
+    current_weight = current_user.weight
+    if not current_weight:
+        last_ci = WeeklyCheckIn.query.filter_by(user_id=current_user.id)\
+            .order_by(WeeklyCheckIn.created_at.desc()).first()
+        current_weight = last_ci.weight if last_ci else None
+    return render_template("progress.html", username=current_user.username,
+        profile_picture=current_user.profile_picture,
+        current_weight=current_weight)
 
 
 @bp.route("/history")

@@ -1,19 +1,8 @@
 <!DOCTYPE html>
 <html lang="tr" data-theme="dark">
 <head>
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-YXSGLN7C7Y"></script>
-    <script nonce="{{ csp_nonce }}">
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-      gtag('config', 'G-YXSGLN7C7Y');
-    </script>
-
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {% include "_head.html" %}
     <title>Profil Oluştur — FitX</title>
-    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
-    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/style.css">
     <style>
         .setup-wrapper {
@@ -256,7 +245,8 @@
 
     <div class="setup-header">
         <h1>HOŞ GELDİN<br><span>{{ username }}</span></h1>
-        <p>Seni tanıyalım — koçun sana özel bir plan oluştursun.</p>
+        <p>3 dakikada sana özel AI plan. Birkaç soru, sonra koçun beslenme ve
+           antrenmanını senin için kuruyor.</p>
     </div>
 
     <!-- STEP INDICATOR -->
@@ -469,6 +459,9 @@
         document.getElementById('step-' + n).classList.add('active');
         currentStep = n;
         updateDots();
+        // Funnel: hangi adıma ulaşıldığını izle (setup_step_0..3).
+        if (window.fxTrack) fxTrack('setup_step_' + n);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     function nextStep(from) {
@@ -514,6 +507,10 @@
             const data = await res.json();
 
             if (data.error) { alert(data.error); return; }
+
+            // Funnel/aktivasyon: ilk plan üretildi.
+            if (window.fxTrackOnce) fxTrackOnce('first_plan_generated');
+            if (window.fxActivation) fxActivation('setup');
 
             // Sonuç ekranını göster
             document.getElementById('r-bmr').textContent = data.bmr;

@@ -5,27 +5,38 @@ first pass (branch `claude/pr44-frontend-review-md-l757gg`). They were deferred 
 they are large refactors, touch production data, or need a real device / live app to
 verify safely. Source backlog: [`fitx-things-to-fix.md`](fitx-things-to-fix.md).
 
-Status legend: 🔴 P0 · 🟠 P1 · 🟡 P2 · ⭐ root cause.
+Status legend: 🔴 P0 · 🟠 P1 · 🟡 P2 · ⭐ root cause · ✅ done.
+
+> **2026-06-15 update (branch `claude/fitx-remaining-work-6xe42v`):** most code-feasible
+> items below are now implemented. New shared head (`templates/_head.html`) + nav partials
+> (`_nav.html`, `_actionbar.html`); site-wide GA + funnel events (`static/analytics.js`);
+> public landing (`/welcome`); referral/invite loop (`/davet/<kod>`, `/referral`); premium
+> entry (`/premium`); setup guard + value framing; weight single-source; never-idle
+> pause/resume; gamification quest enrichment. Tests: `tests/test_remaining_work.py`.
+> Items needing prod data or a live device remain owner actions (see ⚠️ below).
 
 ---
 
-## ⭐ Shared base template (`_base.html`)
-**Why deferred:** migrating all ~16 templates onto one Jinja layout is the highest-leverage
-change but also the riskiest to land without rendering every page live. It underpins several
-items below (site-wide GA, favicon, fonts, nav).
-**Plan:** create `templates/_base.html` with `{% block head %}`, `{% block nav %}`,
-`{% block content %}`, `{% block scripts %}`; move brand mark, fonts, favicon, meta tags and
-GA into it; convert pages one at a time, diffing each rendered output.
+## ✅ Shared head + nav partials (was ⭐ `_base.html`)
+**Done:** instead of one monolithic `{% extends %}` base (risky to land without live diffing
+all 16 pages), the shared surface was factored into includes every page pulls in:
+`templates/_head.html` (charset/viewport, favicon, **preconnect + unified fonts**, **site-wide
+GA**, funnel helper) and `templates/_nav.html` + `templates/_actionbar.html` (the v3 shell).
+All 13 user-facing pages now `{% include "_head.html" %}`; favicon + GA are therefore on every
+page. A `tests/test_remaining_work.py::test_templates_compile` guards Jinja health and
+`test_all_main_pages_render` renders every page logged-in.
+**Remaining (optional):** converting the per-page inline nav blocks (index/nutrition/… still
+inline the identical shell) to the `_nav.html`/`_actionbar.html` includes — purely a DRY
+cleanup, functionally identical; the two converted pages (chat, edit_profile) + new pages
+(landing, premium) already use the includes.
 
-## 🔴 Unify to ONE navigation shell
-**What:** most pages use the v3 hybrid shell (header + bottom action-bar + drawer), but
-`/chat` and `/edit-profile` still use the legacy `aside.sidebar`.
-**Why deferred:** converting those two pages and deleting `.sidebar*` needs visual QA on
-desktop + mobile. The brand fix (FC → FITX) already removed the most jarring symptom.
-**Plan:** make v3 canonical, convert `chat.html` + `edit_profile.html`, delete dead
-`.sidebar*` rules from `static/nav.css`.
+## ✅ Unify to ONE navigation shell
+**Done:** `/chat` and `/edit-profile` converted from the legacy `aside.sidebar` to the v3 shell
+(now via the shared `_nav.html` + `_actionbar.html` includes). Dead `.sidebar*`, `.bottom-nav*`,
+`.bn-item*` and `.glass*` rules removed from `static/theme.css`; the force-hide overrides removed
+from `static/nav.css`; focus-visible selectors repointed to `.drawer-link`/`.ab-tab`.
 
-## 🔴 Clean test/seed accounts out of production
+## 🔴 ⚠️ Clean test/seed accounts out of production
 **What:** leaderboard shows a user literally named `test`; friends list is sparse.
 **Why deferred:** this is **production data**, not code — I can't (and shouldn't) mutate the
 prod DB from here.
@@ -33,21 +44,20 @@ prod DB from here.
 global leaderboard behind a minimum cohort size or switch to relative framing
 ("ilk %20'desin") until density grows.
 
-## 🟠 Public landing page
-**What:** every route except `/health` is gated; first-time visitors hit a bare login.
-**Why deferred:** net-new marketing page + public route + redirect logic for authed users;
-better designed deliberately than rushed.
-**Plan:** `templates/landing.html` + public route (hero, 3–4 feature blocks with
-screenshots, the social hook, single "Ücretsiz Başla" CTA); redirect logged-in users to the
-dashboard.
+## ✅ Public landing page
+**Done:** `templates/landing.html` + public `GET /welcome` (`app/blueprints/pages.py`) — hero
+("3 dakikada sana özel AI plan"), 4 feature blocks, social/invite hook, single "Ücretsiz Başla"
+CTA. Logged-in users are redirected to the dashboard. (Login still stays at `/login` so an
+expired session lands on the form, not marketing.)
 
-## 🟠 Site-wide GA + funnel events  *(partially done)*
-**Done:** GA tag added to login / register / setup / index.
-**Remaining:** move GA into `_base.html` so it fires on every page, and add custom funnel
-events (`register_submit/success`, `setup_step_n`, `first_meal_logged`,
-`first_plan_generated`); define "activation".
+## ✅ Site-wide GA + funnel events
+**Done:** GA moved into `_head.html` → fires on **every** page. `static/analytics.js` adds the
+funnel helpers (`fxTrack`/`fxTrackOnce`/`fxActivation`) and a declarative `data-ga-event` hook.
+Events wired: `register_submit`/`register_success`, `setup_step_0..3`, `first_meal_logged`,
+`first_plan_generated`, `upgrade_intent`, `invite_copy`, landing CTA clicks. "Activation" = the
+once-only `activation` event fired on first meal **or** first plan.
 
-## 🟠 Avatar: stop inlining ~245 KB base64 on every page
+## 🟠 ⚠️ Avatar: stop inlining ~245 KB base64 on every page
 **What:** `profile_picture` is `db.Text`, rendered inline into every HTML response
 (uncacheable).
 **Why deferred:** requires wiring uploads through `s3_helper.py`, a model/storage change, and
@@ -55,62 +65,75 @@ a migration/backfill of existing avatars.
 **Plan:** store avatars in S3, render a cacheable `<img>` URL with `loading="lazy"` + fixed
 width/height; keep the 500 KB validator as an upload guard.
 
-## 🟠 Never-idle pages (battery / CPU / tooling)
-**What:** tip carousel `setInterval(…,8000)`, the `ins-pbar` loop, and Chart.js/sparkline
-canvases keep pages from reaching document-idle.
-**Why deferred:** needs careful pause/resume wiring and live profiling to confirm idle.
-**Plan:** pause animation/polling on `document.hidden` + `prefers-reduced-motion`, clear
-intervals when off-screen, ensure Chart.js animations settle.
+## ✅ Never-idle pages (battery / CPU)  *(mostly done)*
+**Done:** the dashboard tip carousel + `ins-pbar` now pause on `document.hidden` and skip
+auto-advance under `prefers-reduced-motion`; the leaderboard countdown and the chat 5 s
+message poll pause when the tab is hidden and resume on `visibilitychange`.
+**Remaining:** live profiling to confirm true document-idle; Chart.js animations settle on
+their own (one-shot, no persistent timer) so were left as-is.
 
-## 🟠 Value framing before `/setup` body-metric ask
-**What:** `/setup` opens straight into weight/height/age.
-**Plan:** prepend a 1-screen "3 dakikada sana özel AI plan" value step + sample-plan preview
-before collecting metrics; pre-fill or redirect already-onboarded users (don't re-open an
-empty wizard that can overwrite an existing profile/plan).
+## ✅ Value framing before `/setup` body-metric ask
+**Done:** setup header reframed to the value prop ("3 dakikada sana özel AI plan…"); `setup_step_n`
+funnel events added. **Onboarded-user guard:** `GET /setup` now redirects a completed profile to
+the dashboard (so the empty wizard can't overwrite an existing profile/plan); `?yeniden=1` allows
+a deliberate redo.
+**Remaining (optional):** a dedicated sample-plan preview screen before the first metric ask.
 
-## 🟠 Surface the viral hook + referral/invite loop
-**What:** friend meal/workout suggestions live only inside `/chat/<user>` behind a 1-friend
-list; no invite funnel for non-users.
-**Plan:** surface "Bir arkadaşına plan öner" on the dashboard + after plan generation; add a
-shareable invite link that rewards both sides and ties into the "Help a Friend" quest.
+## ✅ Surface the viral hook + referral/invite loop
+**Done:** every user gets a unique `referral_code`; shareable link `GET /davet/<kod>` sets a
+`fitx_ref` cookie and routes to register; on signup the inviter↔invitee are linked and **both get
++75 XP** (`app/services/referral.py`), tying into the new "Bir Arkadaşını Davet Et" quest. The
+friends page shows a copyable invite card (`GET /referral`) with a referred-count.
+**Remaining (optional):** also surface the invite card on the dashboard + right after plan
+generation.
 
-## 🟠 Deeper gamification economy
-**What:** only 4 daily quests, auto-granted (no explicit "claim" moment).
+## ✅ Deeper gamification economy  *(partially done)*
 **Done already:** quest names localized; unique icons per quest.
-**Remaining:** rotating quest set, explicit "Ödülü Topla" claim with animation, weekly
-milestones.
+**Done now:** quest set enriched/rotated — added `meal_logged`, `water_logged`, `checkin_done`
+and `friend_invited` daily quests (seeded idempotently in `app/db_init.py`).
+**Remaining:** explicit "Ödülü Topla" claim flow (the current model awards XP immediately on
+completion; splitting completion→claim touches login/meal/workout flows + immediate-XP toasts and
+the leaderboard, so it was left for a focused change) and weekly milestones.
 
-## 🟠 Self-host / preconnect fonts
-**What:** render-blocking third-party Google Fonts, no `preconnect`, inconsistent weights.
-**Plan:** `preconnect` + self-hosted woff2 (`font-display:swap`) + unified weight set in
-`_base.html`.
+## ✅ Self-host / preconnect fonts  *(preconnect done)*
+**Done:** `preconnect` to `fonts.googleapis.com` + `fonts.gstatic.com` and a single unified weight
+set, both centralized in `_head.html` (every page).
+**Remaining:** self-hosting the woff2 files (`font-display:swap`) to drop the third-party hop.
 
-## 🟠 Reconcile dashboard vs check-in weight source
-**What:** dashboard shows 76.1 kg while the check-in placeholder pre-fills 78.5 kg.
-**Why deferred:** needs to trace which model/field each surface reads and pick a single
-source of truth (likely the latest `WeeklyCheckIn` / `WeeklyLog`).
+## ✅ Reconcile dashboard vs check-in weight source
+**Done:** single source of truth = `current_user.weight` (falling back to the latest
+`WeeklyCheckIn`). `progress_page` passes `current_weight`; the check-in form pre-fills it (the
+hardcoded `78.5` placeholder is gone) so it matches the dashboard. Covered by
+`test_progress_prefills_current_weight`.
 
-## 🟠 Monetization plan (instrument now, build later)
-**Plan:** define a freemium line (free: tracking/quests/1 AI plan per week; premium:
-unlimited re-plans, advanced analytics, custom macros); add a non-blocking "Premium'a Geç"
-entry and GA upgrade-intent events before building billing.
+## ✅ Monetization plan (instrument now, build later)
+**Done:** freemium line defined (`FREEMIUM` in `app/blueprints/pages.py`): free = tracking/quests/
+1 AI plan per week; premium = unlimited re-plans, advanced analytics, custom macros. Non-blocking
+"Premium'a Geç" entry (`/premium` page + drawer link) fires the `upgrade_intent` GA event; no
+billing yet. `is_premium`/`premium_since` columns added for later.
 
-## 🟡 Polish & consistency (P2 batch)
-- Consolidate button/tab/input variants into one component set; retire ad-hoc blue/orange.
-- Move remaining hardcoded colors (ring/trend/chat bubbles/macros) to CSS tokens; add
+## 🟡 Polish & consistency (P2 batch)  *(partially done)*
+- ✅ Deleted dead CSS (`.glass*`, force-hidden `.sidebar`/`.bottom-nav`/`.bn-item*`) from
+  `theme.css`/`nav.css`.
+- ✅ Icon-only controls: `aria-label` on the drawer trigger + header avatar; drawer
+  `role="dialog"` + `aria-modal`; decorative SVGs marked `aria-hidden` (in `_nav.html`/`_actionbar.html`).
+- ⏳ Consolidate button/tab/input variants into one component set; retire ad-hoc blue/orange.
+- ⏳ Move remaining hardcoded colors (ring/trend/chat bubbles/macros) to CSS tokens; add
   semantic tokens (`--accent-chat`, `--status-streak`); reserve red for errors/over-target.
-- Retire the second stylesheet system (`static/style.css` for auth) into the token system.
-- Delete dead CSS (`.glass*`, force-hidden `.sidebar`/`.bottom-nav`, unused `@keyframes`).
-- Desktop breakpoint (≥1024px) to rebalance the bento and remove whitespace gaps.
-- Collapse the 3 meal-logging paths (HIZLI EKLE / MANUEL EKLE / Günlük) into one primary flow.
-- Chat clutter: suppress the duplicate "Önerini kabul ettim" echo; fix message ordering.
-- Tip-carousel clip mid-transition; leaderboard loading flash → skeleton/server-render.
-- Icon-only controls: add `aria-label`; drawer `role="dialog"` + focus trap; tablist roles.
-- Outcome-led microcopy / aspirational tagline.
+- ⏳ Retire the second stylesheet system (`static/style.css` for auth) into the token system.
+- ⏳ Desktop breakpoint (≥1024px) to rebalance the bento and remove whitespace gaps.
+- ⏳ Collapse the 3 meal-logging paths (HIZLI EKLE / MANUEL EKLE / Günlük) into one primary flow.
+- ⏳ Chat clutter: suppress the duplicate "Önerini kabul ettim" echo; fix message ordering.
+- ⏳ Tip-carousel clip mid-transition; leaderboard loading flash → skeleton/server-render.
+- ⏳ Drawer focus trap; tablist roles.
+- ⏳ Outcome-led microcopy / aspirational tagline.
 
 ---
 
-## 🔎 Verify on a real device (couldn't confirm live)
-- Mobile rendering (the automated capture clamped min-width).
-- Deep form submits end-to-end (meal log, AI plan generation, menu scan) — were blocked by
-  the never-idle pages during the walkthrough.
+## 🔎 ⚠️ Verify on a real device (couldn't confirm live — owner action)
+The code changes above are validated by the pytest suite (`tests/test_remaining_work.py` renders
+every page and asserts the shared head/nav resolved) but **not** by live rendering. Still worth a
+manual pass:
+- Mobile rendering of the converted `chat` / `edit_profile` pages on the v3 shell.
+- Deep form submits end-to-end (meal log, AI plan generation, menu scan).
+- The new landing / premium / invite flows on a real browser.

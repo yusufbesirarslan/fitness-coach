@@ -99,92 +99,9 @@ body {
   .main-content { padding: var(--s5) var(--s5) 116px; }
 }
 
-/* ── 5. SIDEBAR ───────────────────────────────────── */
-.sidebar {
-  position: fixed; left: 0; top: 0;
-  height: 100vh; width: var(--sidebar-w);
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  z-index: 50;
-  display: flex; flex-direction: column;
-  padding: var(--s3) var(--s2);
-}
-
-.sidebar-logo {
-  font-family: var(--font-display);
-  font-size: 26px; letter-spacing: 5px; color: var(--volt);
-  padding: 0 var(--s1); margin-bottom: var(--s5);
-}
-
-.sidebar-nav   { display: flex; flex-direction: column; gap: 2px; flex: 1; }
-
-.sidebar-link {
-  display: flex; align-items: center; gap: 12px;
-  padding: 11px 12px; border-radius: var(--r-md);
-  text-decoration: none; color: var(--text-3);
-  font-size: 14px; font-weight: 500;
-  transition: all var(--t-base);
-}
-.sidebar-link:hover  { color: var(--text);   background: rgba(255,255,255,0.04); }
-.sidebar-link:active { transform: scale(0.98); }
-.sidebar-link.active { color: var(--volt);   background: var(--volt-dim); }
-.sidebar-link svg    { width: 17px; height: 17px; flex-shrink: 0; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-
-.sidebar-sep { height: 1px; background: var(--border); margin: var(--s2) 0; }
-
-.sidebar-user {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px; border-radius: var(--r-md);
-  background: rgba(255,255,255,0.03);
-}
-.sidebar-avatar {
-  width: 34px; height: 34px; border-radius: 50%;
-  background: linear-gradient(135deg, var(--volt) 0%, var(--blue) 100%);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 700; color: #121212; flex-shrink: 0;
-}
-.sidebar-name     { font-size: 13px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sidebar-logout   { font-size: 11px; color: var(--text-3); text-decoration: none; margin-top: 2px; display: inline-block; transition: color var(--t-fast); }
-.sidebar-logout:hover { color: var(--red); }
-
-@media (max-width: 1023px) { .sidebar { display: none; } }
-
-/* ── 6. BOTTOM NAV ────────────────────────────────── */
-.bottom-nav {
-  position: fixed; bottom: 0; left: 0; right: 0;
-  height: var(--bottom-nav-h);
-  background: rgba(20,20,20,0.97);
-  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-  border-top: 1px solid var(--border);
-  display: none; z-index: 50;
-  padding-bottom: env(safe-area-inset-bottom, 0);
-}
-.bottom-nav-inner { display: flex; width: 100%; height: 100%; }
-.bn-item {
-  flex: 1; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 3px;
-  text-decoration: none; color: var(--text-3);
-  font-size: 9px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
-  transition: color var(--t-base), transform var(--t-fast);
-}
-.bn-item.active  { color: var(--volt); }
-.bn-item:hover   { color: var(--text-2); }
-.bn-item:active  { transform: scale(0.92); }
-.bn-item svg     { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-
-@media (max-width: 1023px) { .bottom-nav { display: block; } }
-
-/* ── 7. GLASSMORPHISM ─────────────────────────────── */
-.glass {
-  background: rgba(30,30,30,0.72);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--border);
-}
-.glass-volt {
-  background: rgba(204,255,0,0.07);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(204,255,0,0.18);
-}
+/* ── 5–7. (kaldırıldı) Eski sidebar / bottom-nav / glass kabuğu artık tek v3
+   navigasyon kabuğuyla (static/nav.css: global-header + drawer + action-bar)
+   değiştirildi. İlgili ölü kurallar ve .glass* yardımcıları temizlendi. */
 
 /* ── 8. CARDS ─────────────────────────────────────── */
 .card {
@@ -569,8 +486,8 @@ button:focus-visible,
 .tab-btn:focus-visible,
 .chip:focus-visible,
 .meal-type-opt:focus-visible,
-.sidebar-link:focus-visible,
-.bn-item:focus-visible,
+.drawer-link:focus-visible,
+.ab-tab:focus-visible,
 [role="button"]:focus-visible {
   outline: 2px solid var(--volt);
   outline-offset: 2px;

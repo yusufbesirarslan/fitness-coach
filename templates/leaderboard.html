@@ -1,10 +1,8 @@
 <!DOCTYPE html>
 <html lang="tr" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    {% include "_head.html" %}
     <title>Liderlik — FitX</title>
-    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <style>
@@ -365,7 +363,17 @@ async function loadBoard(scope) {
 }
 
 applyCountdownVisibility();
-setInterval(() => { if (currentTimeframe === 'weekly') updateCountdown(); }, 60000);
+// Geri sayımı yalnızca sekme görünürken güncelle (pil/CPU — never-idle).
+let _cdTimer = null;
+function _startCountdown() {
+    if (_cdTimer) clearInterval(_cdTimer);
+    _cdTimer = setInterval(() => { if (currentTimeframe === 'weekly') updateCountdown(); }, 60000);
+}
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { clearInterval(_cdTimer); _cdTimer = null; }
+    else { if (currentTimeframe === 'weekly') updateCountdown(); _startCountdown(); }
+});
+_startCountdown();
 
 loadBoard('friends');
 </script>

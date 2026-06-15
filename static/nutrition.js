@@ -216,6 +216,9 @@ async function logMeal() {
     if (d.error) { showToast(d.error, 'error'); return; }
     input.value = '';
     showToast('Öğün kaydedildi! ✓', 'success');
+    // Funnel/aktivasyon: ilk öğün kaydı.
+    if (window.fxTrackOnce) fxTrackOnce('first_meal_logged');
+    if (window.fxActivation) fxActivation('meal');
     if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
     loadTodayData();
   } catch (e) {
@@ -1272,6 +1275,8 @@ async function logDiaryMeal(mealName) {
     const d = await res.json();
     if (d.error) { showToast(d.error, 'error'); return; }
     showToast(mealName + ' kaydedildi! ✓', 'success');
+    if (window.fxTrackOnce) fxTrackOnce('first_meal_logged');
+    if (window.fxActivation) fxActivation('meal');
     if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
     loadDiary();
   } catch (e) { showToast('Kayıt hatası', 'error'); }
