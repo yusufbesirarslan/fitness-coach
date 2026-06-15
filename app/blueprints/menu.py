@@ -13,6 +13,7 @@ from app.extensions import _user_or_ip_key, limiter, redis_client
 from app.models import MealLog, UserSession
 from app.services.ai_nutrition import MAX_MENU_ITEMS, _cap_items_round_robin, _estimate_macros_llm, _estimate_serving_weights_llm, _extract_categorized_items, _primary_dish_type
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
+from app.timeutil import day_key
 from app.services.foodcache import _cache_macros, _get_cached_macros
 from app.services.menu_extract import _content_has_food_items, _discover_menu_links, _extract_framework_state, _extract_page_sections, _menu_score, _try_wordpress_api
 from app.services.menu_fetch import _fetch_page, _is_google_drive_url, _process_google_drive_url, _validate_menu_url
@@ -235,7 +236,7 @@ def analyze_menu():
     if not sess or not sess.target_calories:
         return jsonify({"error": "Profil verileri eksik."}), 400
 
-    today_str = datetime.utcnow().strftime("%d.%m")
+    today_str = day_key()
     meals = MealLog.query.filter_by(user_id=current_user.id, tarih=today_str).all()
     consumed = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
     for m in meals:

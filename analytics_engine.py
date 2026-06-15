@@ -6,7 +6,9 @@ into the conversation context. All model classes are
 passed in from the caller to avoid circular imports.
 """
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
+
+from app.timeutil import app_today, utc_day_bounds
 
 
 def get_nudges(user, db, models, prev_last_login=None):
@@ -23,7 +25,7 @@ def get_nudges(user, db, models, prev_last_login=None):
     """
     nudges = []
     now = datetime.utcnow()
-    today = date.today()
+    today = app_today()
 
     _check_missing_logs(user, db, models, now, nudges)
     _check_streak_at_risk(user, today, nudges, prev_last_login)
@@ -88,11 +90,12 @@ def _check_protein_goal(user, db, models, today, nudges):
     weekly_protein_goal = sess.target_calories * 0.3 / 4 * 7
 
     week_start = today - timedelta(days=today.weekday())
+    week_start_utc, _ = utc_day_bounds(week_start)
     total = db.session.query(
         db.func.coalesce(db.func.sum(MealLog.protein), 0)
     ).filter(
         MealLog.user_id == user.id,
-        MealLog.created_at >= datetime.combine(week_start, datetime.min.time()),
+        MealLog.created_at >= week_start_utc,
     ).scalar()
 
     if weekly_protein_goal > 0 and total >= weekly_protein_goal * 0.9:

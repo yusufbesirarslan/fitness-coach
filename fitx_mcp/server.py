@@ -13,8 +13,22 @@ import os
 import json
 import time
 import threading
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from contextlib import contextmanager
+
+# Sabit uygulama saat dilimi (app.timeutil ile aynı): MCP sunucusu standalone
+# çalışabildiği için tüm app paketini çekmemek adına burada inline tutulur.
+_APP_TZ = ZoneInfo("Europe/Istanbul")
+
+
+def _app_today():
+    return datetime.now(_APP_TZ).date()
+
+
+def _day_key():
+    """ISO 'YYYY-MM-DD' gün anahtarı (Istanbul) — meal_log.tarih ile aynı biçim."""
+    return _app_today().isoformat()
 
 import psycopg2
 import psycopg2.extras
@@ -125,7 +139,7 @@ def get_user_fitness_summary(user_id: int) -> str:
         cur.execute(
             "SELECT SUM(kalori) as total_cal, COUNT(*) as meal_count "
             "FROM meal_log WHERE user_id = %s AND tarih = %s",
-            (user_id, date.today().strftime("%d.%m")),
+            (user_id, _day_key()),
         )
         today_meals = cur.fetchone()
 
@@ -588,7 +602,7 @@ def log_nutrition_entry(user_id: int, food_item: str, calories: float, protein: 
             "INSERT INTO meal_log (user_id, ogun, yemekler, kalori, protein, karb, yag, tarih, source, created_at) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
             (user_id, "AI Koç", food_item.strip(), calories, protein, carbs, fat,
-             datetime.utcnow().strftime("%d.%m"), "coach", datetime.utcnow()),
+             _day_key(), "coach", datetime.utcnow()),
         )
         row = cur.fetchone()
 
@@ -626,7 +640,7 @@ def log_nutrition_entry(user_id: int, food_item: str, calories: float, protein: 
 @mcp.tool()
 def generate_weekly_report(user_id: int) -> str:
     """Kullanıcının haftalık performans raporunu oluşturur: bu hafta vs geçen hafta karşılaştırması."""
-    today = date.today()
+    today = _app_today()
     this_week_start = today - timedelta(days=today.weekday())
     last_week_start = this_week_start - timedelta(days=7)
 
@@ -728,7 +742,7 @@ def analyze_and_rank_menu(raw_menu_text: str, user_id: int) -> str:
         if not sess or not sess["target_calories"]:
             return json.dumps({"error": "Kullanıcı profil verisi bulunamadı."}, ensure_ascii=False)
 
-        today = date.today().strftime("%d.%m")
+        today = _day_key()
         cur.execute(
             "SELECT COALESCE(SUM(kalori), 0) as cal, COALESCE(SUM(protein), 0) as pro, "
             "COALESCE(SUM(karb), 0) as carb, COALESCE(SUM(yag), 0) as fat "

@@ -9,6 +9,7 @@ from app.services.ai_nutrition import _estimate_macros_llm, _estimate_serving_we
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
 from app.services.foodcache import _cache_macros, _get_cached_macros
 from app.services.gamification import award_xp, complete_quest_for_user, get_level, get_title, log_activity
+from app.timeutil import day_key
 
 
 bp = Blueprint("social", __name__)
@@ -299,7 +300,7 @@ def _process_meal_suggestion_accept(msg):
         entry = MealLog(
             user_id=current_user.id, ogun=ogun_title,
             yemekler=msg.body[:200], kalori=0, protein=0, karb=0, yag=0,
-            tarih=datetime.utcnow().strftime("%d.%m")
+            tarih=day_key()
         )
         db.session.add(entry)
         return None
@@ -363,7 +364,7 @@ def _process_meal_suggestion_accept(msg):
         protein=round(total["protein"], 1),
         karb=round(total["carbs"], 1),
         yag=round(total["fat"], 1),
-        tarih=datetime.utcnow().strftime("%d.%m")
+        tarih=day_key()
     )
     db.session.add(entry)
     current_app.logger.info(f"[SUGGESTION] Logged meal: {ogun_title} → {total['calories']:.0f} kcal")

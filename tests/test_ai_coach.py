@@ -143,8 +143,8 @@ def test_commit_meal_without_pending_is_safe(auth_user):
 def test_today_totals_count_meals_from_any_source(auth_user):
     # Faz B unification: diyari ve koç AYNI deftere (MealLog) yazar; koçun
     # 'bugün tüketilen / kalan bütçe' hesabı her iki giriş yolunu da görür.
-    from datetime import datetime
-    today = datetime.utcnow().strftime("%d.%m")
+    from app.timeutil import day_key
+    today = day_key()
     db.session.add(MealLog(user_id=auth_user.id, ogun="Öğle", yemekler="diyari yemeği",
                            kalori=400, protein=30, karb=40, yag=10, tarih=today, source="diary"))
     db.session.add(MealLog(user_id=auth_user.id, ogun="AI Koç", yemekler="koç yemeği",

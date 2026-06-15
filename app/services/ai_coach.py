@@ -12,6 +12,7 @@ from app.services.ai import _heavy_chat
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
 from app.services.fatsecret import _food_search_fatsecret, _food_search_static
 from app.services.gamification import award_xp, log_activity
+from app.timeutil import day_key, utc_day_bounds
 
 
 COACH_SYSTEM_PROMPT = """Sen FitX uygulamasının elit, destekleyici ama gerçekçi AI Beslenme & Fitness Koçusun. Kullanıcının veritabanına HEM okuma HEM yazma erişimin var ve bunu ARAÇLAR (function calling) üzerinden yaparsın.
@@ -175,7 +176,7 @@ def _today_nutrition_totals(user_id):
     menu.py'deki 'consumed' ile AYNI tarih anahtarını (utcnow %d.%m) kullanır ki
     koçun 'kalan bütçe'si ile menü analizinin 'kalanı' birebir tutarlı olsun.
     (Faz C tarih semantiğini tüm okuyucularda birlikte ISO/Istanbul'a taşıyacak.)"""
-    today_key = datetime.utcnow().strftime("%d.%m")
+    today_key = day_key()
     row = db.session.query(
         db.func.coalesce(db.func.sum(MealLog.kalori), 0),
         db.func.coalesce(db.func.sum(MealLog.protein), 0),
@@ -221,14 +222,16 @@ def _remaining_macros_for_user(user_id):
 
 
 def _today_workout_totals(user_id):
-    """Bugünün antrenman toplam volümü."""
-    start = datetime.combine(datetime.utcnow().date(), datetime.min.time())
+    """Bugünün antrenman toplam volümü (Istanbul günü; created_at UTC olduğu için
+    UTC sınırlarıyla karşılaştırılır)."""
+    start, end = utc_day_bounds()
     row = db.session.query(
         db.func.coalesce(db.func.sum(WorkoutLog.volume), 0),
         db.func.count(WorkoutLog.id),
     ).filter(
         WorkoutLog.user_id == user_id,
         WorkoutLog.created_at >= start,
+        WorkoutLog.created_at < end,
     ).first()
     return {"total_volume": round(row[0], 1), "entry_count": row[1]}
 
@@ -320,7 +323,7 @@ def _tool_confirm_and_commit_meal_log(user_id):
     db.session.add(MealLog(
         user_id=user_id, ogun="AI Koç", yemekler=name,
         kalori=cal, protein=pro, karb=carb, yag=fat,
-        tarih=datetime.utcnow().strftime("%d.%m"), source="coach",
+        tarih=day_key(), source="coach",
     ))
     db.session.delete(pending)  # staged satırı temizle (state geçişi tamamlandı)
     award_xp(user_id, 10)
