@@ -73,7 +73,6 @@ def _fetch_coach_context(user_id, question=""):
         get_user_supplement_stack,
         get_friend_activities,
         get_user_nutrition_log,
-        generate_weekly_report,
     )
     parts = []
     try:

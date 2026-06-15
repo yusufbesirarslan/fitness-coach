@@ -133,17 +133,3 @@ def not_found(e):
 
 def server_error(e):
     return "Internal Server Error", 500
-
-
-
-def register_hooks(app):
-    app.before_request(generate_csp_nonce)
-    app.before_request(_csrf_protect)
-    app.before_request(maybe_weekly_rollover)
-    app.before_request(update_streak)
-    app.context_processor(inject_csp_nonce)
-    app.context_processor(inject_rank)
-    app.after_request(set_csp_header)
-    app.errorhandler(429)(ratelimit_exceeded)
-    app.errorhandler(404)(not_found)
-    app.errorhandler(500)(server_error)
