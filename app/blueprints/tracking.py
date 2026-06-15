@@ -6,7 +6,7 @@ from flask_login import current_user, login_required
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
-from app.models import DailyActivity, User, UserDailyNutrition, UserSession, WeeklyCheckIn, WeeklyLog, WorkoutLog
+from app.models import DailyActivity, MealLog, User, UserSession, WeeklyCheckIn, WeeklyLog, WorkoutLog
 from app.services.ai_coach import generate_checkin_feedback
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
 
@@ -372,7 +372,7 @@ def dashboard_nudges():
     try:
         models = {
             "WorkoutLog": WorkoutLog,
-            "UserDailyNutrition": UserDailyNutrition,
+            "MealLog": MealLog,
             "UserSession": UserSession,
         }
         raw_nudges = get_nudges(User.query.get(current_user.id), db, models,

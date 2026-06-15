@@ -12,7 +12,7 @@ import pytest
 
 from app.blueprints import training as training_bp
 from app.extensions import db
-from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog
+from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
 from tests.test_validators import _image_data_url
 
 PLAN_JSON = {
@@ -150,6 +150,11 @@ def test_complete_awards_xp_and_records_pump_check(client, workout_ready, monkey
     check = PumpCheck.query.filter_by(user_id=workout_ready.id).one()
     assert check.valid is True
     assert check.image_key is None                    # S3 kapalı (test env)
+
+    # Faz B/F6: UI antrenman tamamlama artık kanonik WorkoutLog da yazar —
+    # haftalık rapor ve "48 saattir antrenman yok" dürtüsü gerçek antrenmanı görsün.
+    wlog = WorkoutLog.query.filter_by(user_id=workout_ready.id).one()
+    assert wlog.exercise_name.startswith("Antrenman tamamlandı")
 
     # Aynı gün ikinci tamamlama reddedilir.
     again = client.post("/workout/complete",

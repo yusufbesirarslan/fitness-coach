@@ -16,7 +16,7 @@ def get_nudges(user, db, models, prev_last_login=None):
     Args:
         user: Current User object
         db: SQLAlchemy db instance
-        models: dict with keys 'WorkoutLog', 'UserDailyNutrition', 'UserSession'
+        models: dict with keys 'WorkoutLog', 'MealLog', 'UserSession'
         prev_last_login: kullanıcının bu istekten ÖNCEKI last_login değeri. Verilmezse
             user.last_login kullanılır. update_streak before_request hook'u last_login'i
             "bugün" yaptığından, seri-riski dürtüsü aksi halde asla tetiklenmezdi.
@@ -36,16 +36,16 @@ def get_nudges(user, db, models, prev_last_login=None):
 def _check_missing_logs(user, db, models, now, nudges):
     cutoff = now - timedelta(hours=48)
     WorkoutLog = models["WorkoutLog"]
-    UserDailyNutrition = models["UserDailyNutrition"]
+    MealLog = models["MealLog"]
 
     recent_workout = WorkoutLog.query.filter(
         WorkoutLog.user_id == user.id,
         WorkoutLog.created_at >= cutoff,
     ).first()
 
-    recent_nutrition = UserDailyNutrition.query.filter(
-        UserDailyNutrition.user_id == user.id,
-        UserDailyNutrition.created_at >= cutoff,
+    recent_nutrition = MealLog.query.filter(
+        MealLog.user_id == user.id,
+        MealLog.created_at >= cutoff,
     ).first()
 
     if not recent_workout and not recent_nutrition:
@@ -78,7 +78,7 @@ def _check_streak_at_risk(user, today, nudges, prev_last_login=None):
 
 def _check_protein_goal(user, db, models, today, nudges):
     UserSession = models["UserSession"]
-    UserDailyNutrition = models["UserDailyNutrition"]
+    MealLog = models["MealLog"]
 
     sess = UserSession.query.filter_by(user_id=user.id)\
         .order_by(UserSession.created_at.desc()).first()
@@ -89,10 +89,10 @@ def _check_protein_goal(user, db, models, today, nudges):
 
     week_start = today - timedelta(days=today.weekday())
     total = db.session.query(
-        db.func.coalesce(db.func.sum(UserDailyNutrition.protein), 0)
+        db.func.coalesce(db.func.sum(MealLog.protein), 0)
     ).filter(
-        UserDailyNutrition.user_id == user.id,
-        UserDailyNutrition.created_at >= datetime.combine(week_start, datetime.min.time()),
+        MealLog.user_id == user.id,
+        MealLog.created_at >= datetime.combine(week_start, datetime.min.time()),
     ).scalar()
 
     if weekly_protein_goal > 0 and total >= weekly_protein_goal * 0.9:

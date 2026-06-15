@@ -585,19 +585,20 @@ def log_nutrition_entry(user_id: int, food_item: str, calories: float, protein: 
             return json.dumps({"error": "Kullanıcı bulunamadı"}, ensure_ascii=False)
 
         cur.execute(
-            "INSERT INTO user_daily_nutrition (user_id, food_item, calories, protein, carbs, fat, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (user_id, food_item.strip(), calories, protein, carbs, fat, datetime.utcnow()),
+            "INSERT INTO meal_log (user_id, ogun, yemekler, kalori, protein, karb, yag, tarih, source, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (user_id, "AI Koç", food_item.strip(), calories, protein, carbs, fat,
+             datetime.utcnow().strftime("%d.%m"), "coach", datetime.utcnow()),
         )
         row = cur.fetchone()
 
         cur.execute(
-            "SELECT COALESCE(SUM(calories), 0) as total_cal, "
+            "SELECT COALESCE(SUM(kalori), 0) as total_cal, "
             "COALESCE(SUM(protein), 0) as total_protein, "
-            "COALESCE(SUM(carbs), 0) as total_carbs, "
-            "COALESCE(SUM(fat), 0) as total_fat, "
+            "COALESCE(SUM(karb), 0) as total_carbs, "
+            "COALESCE(SUM(yag), 0) as total_fat, "
             "COUNT(*) as entry_count "
-            "FROM user_daily_nutrition WHERE user_id = %s AND created_at::date = CURRENT_DATE",
+            "FROM meal_log WHERE user_id = %s AND created_at::date = CURRENT_DATE",
             (user_id,),
         )
         today = cur.fetchone()
@@ -654,16 +655,16 @@ def generate_weekly_report(user_id: int) -> str:
         last_week_vol = cur.fetchone()["vol"]
 
         cur.execute(
-            "SELECT COALESCE(SUM(calories), 0) as cal, COALESCE(SUM(protein), 0) as pro, "
-            "COALESCE(SUM(carbs), 0) as carb, COALESCE(SUM(fat), 0) as fat, COUNT(*) as entries "
-            "FROM user_daily_nutrition WHERE user_id = %s AND created_at::date >= %s",
+            "SELECT COALESCE(SUM(kalori), 0) as cal, COALESCE(SUM(protein), 0) as pro, "
+            "COALESCE(SUM(karb), 0) as carb, COALESCE(SUM(yag), 0) as fat, COUNT(*) as entries "
+            "FROM meal_log WHERE user_id = %s AND created_at::date >= %s",
             (user_id, this_week_start),
         )
         this_week_nutrition = cur.fetchone()
 
         cur.execute(
-            "SELECT COALESCE(SUM(calories), 0) as cal, COALESCE(SUM(protein), 0) as pro "
-            "FROM user_daily_nutrition "
+            "SELECT COALESCE(SUM(kalori), 0) as cal, COALESCE(SUM(protein), 0) as pro "
+            "FROM meal_log "
             "WHERE user_id = %s AND created_at::date >= %s AND created_at::date < %s",
             (user_id, last_week_start, this_week_start),
         )

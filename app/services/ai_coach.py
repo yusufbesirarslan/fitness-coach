@@ -7,7 +7,7 @@ from flask import current_app, g, session
 
 from app.config import OPENAI_MODEL
 from app.extensions import db, openai_client
-from app.models import PendingAction, User, UserDailyNutrition, UserSession, WorkoutLog
+from app.models import MealLog, PendingAction, User, UserSession, WorkoutLog
 from app.services.ai import _heavy_chat
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
 from app.services.fatsecret import _food_search_fatsecret, _food_search_static
@@ -113,7 +113,7 @@ def _fetch_coach_context(user_id, question=""):
     try:
         models = {
             "WorkoutLog": WorkoutLog,
-            "UserDailyNutrition": UserDailyNutrition,
+            "MealLog": MealLog,
             "UserSession": UserSession,
         }
         nudges = get_nudges(User.query.get(user_id), db, models,
@@ -171,17 +171,20 @@ def _coach_search_food(query):
 
 
 def _today_nutrition_totals(user_id):
-    """Bugünün beslenme toplamları (SQLAlchemy ile, DB-agnostik)."""
-    start = datetime.combine(datetime.utcnow().date(), datetime.min.time())
+    """Bugünün beslenme toplamları (MealLog — tek kanonik beslenme defteri).
+    menu.py'deki 'consumed' ile AYNI tarih anahtarını (utcnow %d.%m) kullanır ki
+    koçun 'kalan bütçe'si ile menü analizinin 'kalanı' birebir tutarlı olsun.
+    (Faz C tarih semantiğini tüm okuyucularda birlikte ISO/Istanbul'a taşıyacak.)"""
+    today_key = datetime.utcnow().strftime("%d.%m")
     row = db.session.query(
-        db.func.coalesce(db.func.sum(UserDailyNutrition.calories), 0),
-        db.func.coalesce(db.func.sum(UserDailyNutrition.protein), 0),
-        db.func.coalesce(db.func.sum(UserDailyNutrition.carbs), 0),
-        db.func.coalesce(db.func.sum(UserDailyNutrition.fat), 0),
-        db.func.count(UserDailyNutrition.id),
+        db.func.coalesce(db.func.sum(MealLog.kalori), 0),
+        db.func.coalesce(db.func.sum(MealLog.protein), 0),
+        db.func.coalesce(db.func.sum(MealLog.karb), 0),
+        db.func.coalesce(db.func.sum(MealLog.yag), 0),
+        db.func.count(MealLog.id),
     ).filter(
-        UserDailyNutrition.user_id == user_id,
-        UserDailyNutrition.created_at >= start,
+        MealLog.user_id == user_id,
+        MealLog.tarih == today_key,
     ).first()
     return {
         "calories": round(row[0]),
@@ -196,7 +199,7 @@ def _remaining_macros_for_user(user_id):
     """Kullanicinin bugun KALAN gunluk makro butcesi.
 
     UserSession hedef kalorisinden hedef-makro dagilimi (analyze_menu ile ayni
-    formul) cikarilir, bugun UserDailyNutrition'a islenen tuketim dusulur.
+    formul) cikarilir, bugun MealLog'a islenen tuketim dusulur.
     Deterministik; LLM yok. Profil/hedef yoksa None doner.
     """
     sess = (UserSession.query.filter_by(user_id=user_id)
@@ -293,8 +296,9 @@ def _tool_fetch_nutrition_and_stage_log(user_id, food_query):
 
 
 def _tool_confirm_and_commit_meal_log(user_id):
-    """TOOL (commit): En son staged meal'i kalıcı UserDailyNutrition kaydına taşı,
-    PendingAction satırını sil. Durum geçişi: staged → committed."""
+    """TOOL (commit): En son staged meal'i kalıcı MealLog kaydına taşı (tek kanonik
+    beslenme defteri — diyari/menü ile aynı tablo), PendingAction satırını sil.
+    Durum geçişi: staged → committed."""
     pending = (PendingAction.query
                .filter_by(user_id=user_id, action_type="log_meal")
                .order_by(PendingAction.created_at.desc())
@@ -313,9 +317,10 @@ def _tool_confirm_and_commit_meal_log(user_id):
     fat = float(data.get("fat", 0) or 0)
     name = (data.get("food_name") or "Yemek")[:200]
 
-    db.session.add(UserDailyNutrition(
-        user_id=user_id, food_item=name,
-        calories=cal, protein=pro, carbs=carb, fat=fat,
+    db.session.add(MealLog(
+        user_id=user_id, ogun="AI Koç", yemekler=name,
+        kalori=cal, protein=pro, karb=carb, yag=fat,
+        tarih=datetime.utcnow().strftime("%d.%m"), source="coach",
     ))
     db.session.delete(pending)  # staged satırı temizle (state geçişi tamamlandı)
     award_xp(user_id, 10)

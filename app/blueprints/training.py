@@ -7,7 +7,7 @@ from flask_login import current_user, login_required
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
-from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog
+from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
 from app.services.ai import _heavy_chat
 from app.services.gamification import award_xp, complete_quest_for_user, get_level, get_title, log_activity
 from app.services.menu_extract import validate_pump_check
@@ -358,6 +358,15 @@ def complete_workout():
         user_id=current_user.id, image_key=pump_image_key,
         location_type=location_type, description=description,
         valid=True, fallback=check.get("fallback", False),
+    ))
+    # UI antrenman tamamlama artık kanonik WorkoutLog satırı da yazar. Aksi halde
+    # haftalık rapor, "bugünkü hacim" ve "48 saattir antrenman yok" dürtüsü gerçek
+    # antrenmanları GÖRMÜYORDU — WorkoutLog'u yalnızca AI koç yazıyordu (F6).
+    # UI egzersiz kırılımı vermiyor; tamamlanan seansı işaretleyen tek satır yazılır.
+    db.session.add(WorkoutLog(
+        user_id=current_user.id,
+        exercise_name="Antrenman tamamlandı (Pump Check)",
+        sets=1, reps=1, weight_kg=0, volume=0,
     ))
     # ─────────────────────────────────────────────────────────────────────────
 
