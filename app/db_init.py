@@ -122,6 +122,13 @@ def init_database(app):
                 points_reward=25, quest_type="supplement_added"
             ))
             db.session.commit()
+        if not DailyQuest.query.filter_by(quest_type="meal_logged").first():
+            db.session.add(DailyQuest(
+                title="Log a Meal",
+                description="Bugün bir öğün kaydet",
+                points_reward=20, quest_type="meal_logged"
+            ))
+            db.session.commit()
 
         # Görev ekonomisini derinleştir: dönüşümlü ek görevler (su / check-in / davet).
         # Idempotent — her quest_type yalnızca bir kez eklenir.

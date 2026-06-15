@@ -6,24 +6,29 @@ into the conversation context. All model classes are
 passed in from the caller to avoid circular imports.
 """
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
+
+from app.timeutil import app_today, utc_day_bounds
 
 
-def get_nudges(user, db, models):
+def get_nudges(user, db, models, prev_last_login=None):
     """
     Return a list of proactive nudge strings for the given user.
 
     Args:
         user: Current User object
         db: SQLAlchemy db instance
-        models: dict with keys 'WorkoutLog', 'UserDailyNutrition', 'UserSession'
+        models: dict with keys 'WorkoutLog', 'MealLog', 'UserSession'
+        prev_last_login: kullanıcının bu istekten ÖNCEKI last_login değeri. Verilmezse
+            user.last_login kullanılır. update_streak before_request hook'u last_login'i
+            "bugün" yaptığından, seri-riski dürtüsü aksi halde asla tetiklenmezdi.
     """
     nudges = []
     now = datetime.utcnow()
-    today = date.today()
+    today = app_today()
 
     _check_missing_logs(user, db, models, now, nudges)
-    _check_streak_at_risk(user, today, nudges)
+    _check_streak_at_risk(user, today, nudges, prev_last_login)
     _check_protein_goal(user, db, models, today, nudges)
     _check_weekly_report_day(today, nudges)
 
@@ -33,16 +38,16 @@ def get_nudges(user, db, models):
 def _check_missing_logs(user, db, models, now, nudges):
     cutoff = now - timedelta(hours=48)
     WorkoutLog = models["WorkoutLog"]
-    UserDailyNutrition = models["UserDailyNutrition"]
+    MealLog = models["MealLog"]
 
     recent_workout = WorkoutLog.query.filter(
         WorkoutLog.user_id == user.id,
         WorkoutLog.created_at >= cutoff,
     ).first()
 
-    recent_nutrition = UserDailyNutrition.query.filter(
-        UserDailyNutrition.user_id == user.id,
-        UserDailyNutrition.created_at >= cutoff,
+    recent_nutrition = MealLog.query.filter(
+        MealLog.user_id == user.id,
+        MealLog.created_at >= cutoff,
     ).first()
 
     if not recent_workout and not recent_nutrition:
@@ -62,9 +67,9 @@ def _check_missing_logs(user, db, models, now, nudges):
         )
 
 
-def _check_streak_at_risk(user, today, nudges):
+def _check_streak_at_risk(user, today, nudges, prev_last_login=None):
     streak = user.streak_count or 0
-    last_login = user.last_login
+    last_login = prev_last_login if prev_last_login is not None else user.last_login
 
     if streak >= 5 and last_login and last_login < today:
         nudges.append(
@@ -75,21 +80,25 @@ def _check_streak_at_risk(user, today, nudges):
 
 def _check_protein_goal(user, db, models, today, nudges):
     UserSession = models["UserSession"]
-    UserDailyNutrition = models["UserDailyNutrition"]
+    MealLog = models["MealLog"]
 
     sess = UserSession.query.filter_by(user_id=user.id)\
         .order_by(UserSession.created_at.desc()).first()
     if not sess or not sess.target_calories:
         return
 
-    weekly_protein_goal = sess.target_calories * 0.3 / 4 * 7
+    # Protein hedefi yüzdesi koç/menü ile tutarlı: kas kazanmada %30, aksi halde %25
+    # (eski sabit %30, diğer hesaplarla çelişiyordu — F8).
+    protein_pct = 0.30 if (sess.goal or "") == "kas kazanma" else 0.25
+    weekly_protein_goal = sess.target_calories * protein_pct / 4 * 7
 
     week_start = today - timedelta(days=today.weekday())
+    week_start_utc, _ = utc_day_bounds(week_start)
     total = db.session.query(
-        db.func.coalesce(db.func.sum(UserDailyNutrition.protein), 0)
+        db.func.coalesce(db.func.sum(MealLog.protein), 0)
     ).filter(
-        UserDailyNutrition.user_id == user.id,
-        UserDailyNutrition.created_at >= datetime.combine(week_start, datetime.min.time()),
+        MealLog.user_id == user.id,
+        MealLog.created_at >= week_start_utc,
     ).scalar()
 
     if weekly_protein_goal > 0 and total >= weekly_protein_goal * 0.9:

@@ -22,9 +22,12 @@ def main():
     procs.append(flask_proc)
 
     print("[FitX] Starting MCP server (HTTP) on :8100 ...")
+    # --http taşıması FITX_MCP_ALLOW_HTTP=1 olmadan açılmayı reddeder (loopback arkası
+    # güvenlik kapısı). Dev launcher bu yüzden bayrağı yalnızca MCP süreci için verir.
+    mcp_env = {**env, "FITX_MCP_ALLOW_HTTP": "1"}
     mcp_proc = subprocess.Popen(
         [sys.executable, "-m", "fitx_mcp", "--http"],
-        env=env,
+        env=mcp_env,
     )
     procs.append(mcp_proc)
 

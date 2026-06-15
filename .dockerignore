@@ -16,7 +16,6 @@ instance/
 .claude/
 .vscode/
 *.log
-_test_script.js
 
 # Docker ile ilgili dosyalar imaj içine gerekmez
 Dockerfile

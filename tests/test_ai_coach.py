@@ -12,7 +12,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.extensions import db
-from app.models import PendingAction, User, UserDailyNutrition, UserSession, WorkoutLog
+from app.models import MealLog, PendingAction, User, UserSession, WorkoutLog
 from app.services import ai_coach
 from app.services.ai_coach import (
     _coach_search_food,
@@ -124,8 +124,11 @@ def test_commit_meal_moves_staged_to_permanent_log(auth_user, monkeypatch):
     assert result["status"] == "committed"
     assert result["xp_awarded"] == 10
     assert result["today_totals"]["calories"] == 495
-    entry = UserDailyNutrition.query.filter_by(user_id=auth_user.id).one()
-    assert entry.food_item == "Tavuk Göğsü"
+    # Koç artık tek kanonik deftere (MealLog) yazar — diyari/menü ile aynı tablo (Faz B).
+    entry = MealLog.query.filter_by(user_id=auth_user.id).one()
+    assert entry.yemekler == "Tavuk Göğsü"
+    assert entry.source == "coach"
+    assert entry.ogun == "AI Koç"
     assert PendingAction.query.count() == 0              # staged satır silindi
     db.session.expire_all()
     assert db.session.get(User, auth_user.id).rank_points == 10
@@ -134,7 +137,23 @@ def test_commit_meal_moves_staged_to_permanent_log(auth_user, monkeypatch):
 def test_commit_meal_without_pending_is_safe(auth_user):
     result = json.loads(ai_coach._tool_confirm_and_commit_meal_log(auth_user.id))
     assert result["status"] == "no_pending"
-    assert UserDailyNutrition.query.count() == 0
+    assert MealLog.query.count() == 0
+
+
+def test_today_totals_count_meals_from_any_source(auth_user):
+    # Faz B unification: diyari ve koç AYNI deftere (MealLog) yazar; koçun
+    # 'bugün tüketilen / kalan bütçe' hesabı her iki giriş yolunu da görür.
+    from app.timeutil import day_key
+    today = day_key()
+    db.session.add(MealLog(user_id=auth_user.id, ogun="Öğle", yemekler="diyari yemeği",
+                           kalori=400, protein=30, karb=40, yag=10, tarih=today, source="diary"))
+    db.session.add(MealLog(user_id=auth_user.id, ogun="AI Koç", yemekler="koç yemeği",
+                           kalori=100, protein=10, karb=5, yag=2, tarih=today, source="coach"))
+    db.session.commit()
+
+    totals = ai_coach._today_nutrition_totals(auth_user.id)
+    assert totals["calories"] == 500
+    assert totals["entry_count"] == 2
 
 
 def test_stage_workout_defaults_and_commit(auth_user):

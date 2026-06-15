@@ -29,7 +29,8 @@ def test_init_database_seeds_quests_and_stamps_alembic(boot_app):
     from app.models import DailyQuest
 
     quest_types = {q.quest_type for q in DailyQuest.query.all()}
-    assert {"login", "workout_logged", "suggestion_sent", "supplement_added"} <= quest_types
+    assert {"login", "workout_logged", "suggestion_sent", "supplement_added",
+            "meal_logged"} <= quest_types
 
     # Taze DB boot'ta Alembic zincirine damgalanır (manuel stamp gerekmez).
     assert inspect(db.engine).has_table("alembic_version")

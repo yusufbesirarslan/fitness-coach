@@ -10,11 +10,11 @@ from types import SimpleNamespace
 
 from analytics_engine import _check_streak_at_risk, _check_weekly_report_day, get_nudges
 from app.extensions import db
-from app.models import User, UserDailyNutrition, UserSession, WorkoutLog
+from app.models import MealLog, User, UserSession, WorkoutLog
 
 MODELS = {
     "WorkoutLog": WorkoutLog,
-    "UserDailyNutrition": UserDailyNutrition,
+    "MealLog": MealLog,
     "UserSession": UserSession,
 }
 
@@ -43,7 +43,7 @@ def test_only_workout_logged_nudges_nutrition(make_user):
 
 def test_only_nutrition_logged_nudges_workout(make_user):
     user = make_user("carol", last_login=date.today())
-    db.session.add(UserDailyNutrition(user_id=user.id, food_item="muz", calories=100))
+    db.session.add(MealLog(user_id=user.id, ogun="öğün", yemekler="muz", kalori=100))
     db.session.commit()
     types = _nudge_types(user)
     assert "NUDGE_NO_WORKOUT" in types
@@ -53,7 +53,7 @@ def test_only_nutrition_logged_nudges_workout(make_user):
 def test_recent_logs_silence_missing_log_nudges(make_user):
     user = make_user("dave", last_login=date.today())
     db.session.add(WorkoutLog(user_id=user.id, exercise_name="squat", sets=3, reps=5))
-    db.session.add(UserDailyNutrition(user_id=user.id, food_item="muz", calories=100))
+    db.session.add(MealLog(user_id=user.id, ogun="öğün", yemekler="muz", kalori=100))
     db.session.commit()
     types = _nudge_types(user)
     assert not types & {"NUDGE_MISSING_LOGS", "NUDGE_NO_WORKOUT", "NUDGE_NO_NUTRITION"}
@@ -88,16 +88,34 @@ def test_streak_at_risk_thresholds():
     assert nudges == []  # bugün zaten aktif
 
 
+def test_streak_risk_uses_prev_last_login_when_provided():
+    # update_streak before_request hook last_login'i "bugün" yapar; get_nudges'a
+    # ÖNCEKI değer (dün) geçilince seri-riski dürtüsü yine de tetiklenmeli (F3).
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+
+    nudges = []
+    _check_streak_at_risk(SimpleNamespace(streak_count=6, last_login=today),
+                          today, nudges, prev_last_login=yesterday)
+    assert any(n.startswith("NUDGE_STREAK_RISK") for n in nudges)
+
+    # Gün içi sonraki istekte prev de bugün olur → tetiklenmez.
+    nudges = []
+    _check_streak_at_risk(SimpleNamespace(streak_count=6, last_login=today),
+                          today, nudges, prev_last_login=today)
+    assert nudges == []
+
+
 # ---------------------------------------------------------------------------
 # Haftalık protein hedefi — hedef kalorinin %30'u / 4 kcal * 7 gün, %90 eşiği.
 # ---------------------------------------------------------------------------
 
 def test_protein_goal_nudge_at_90_percent(make_user):
     user = make_user("frank", last_login=date.today())
-    db.session.add(UserSession(user_id=user.id, target_calories=2000))
-    # Haftalık hedef 1050 g; %90 = 945 g.
-    db.session.add(UserDailyNutrition(user_id=user.id, food_item="tavuk",
-                                      calories=4000, protein=950))
+    # kas kazanma → %30 protein: haftalık hedef 1050 g; %90 = 945 g (F8).
+    db.session.add(UserSession(user_id=user.id, target_calories=2000, goal="kas kazanma"))
+    db.session.add(MealLog(user_id=user.id, ogun="öğün", yemekler="tavuk",
+                           kalori=4000, protein=950))
     db.session.commit()
     assert "NUDGE_PROTEIN_GOAL" in _nudge_types(user)
 
@@ -105,8 +123,8 @@ def test_protein_goal_nudge_at_90_percent(make_user):
 def test_protein_goal_silent_below_90_percent(make_user):
     user = make_user("grace", last_login=date.today())
     db.session.add(UserSession(user_id=user.id, target_calories=2000))
-    db.session.add(UserDailyNutrition(user_id=user.id, food_item="tavuk",
-                                      calories=2000, protein=500))
+    db.session.add(MealLog(user_id=user.id, ogun="öğün", yemekler="tavuk",
+                           kalori=2000, protein=500))
     db.session.commit()
     assert "NUDGE_PROTEIN_GOAL" not in _nudge_types(user)
 

@@ -102,10 +102,18 @@ def upload_image(image_bytes, content_type="image/jpeg", prefix="uploads", user_
         raise S3Error(str(e)) from e
 
 
-def generate_presigned_url(key, expires_in=3600):
+def generate_presigned_url(key, expires_in=3600, expected_user_id=None):
     """Özel bir nesne için geçici pre-signed GET URL'i üret (varsayılan 1 saat).
-    Frontend görseli bu URL ile güvenle render eder. Hata/boş anahtarda None."""
+    Frontend görseli bu URL ile güvenle render eder. Hata/boş anahtarda None.
+
+    expected_user_id verilirse, anahtarın o kullanıcıya ait olduğu (yol içinde
+    '/<user_id>/' geçtiği — bkz _build_key) doğrulanır; eşleşmezse imzalanmaz.
+    Sahiplik sınırında savunma derinliği (S5)."""
     if not key:
+        return None
+    if expected_user_id is not None and f"/{expected_user_id}/" not in key:
+        logger.warning("[S3] Pre-signed URL reddedildi: anahtar (%s) kullanıcı %s ile eşleşmiyor.",
+                       key, expected_user_id)
         return None
     try:
         client = _get_client()

@@ -156,9 +156,9 @@ def test_analyze_requires_text_and_profile(client, auth_user):
 
 def test_analyze_scores_items_and_computes_budget(client, profile_session, monkeypatch):
     # Bugün 500 kcal yenmiş — kalan bütçeye yansımalı.
+    from app.timeutil import day_key
     db.session.add(MealLog(user_id=profile_session.id, ogun="Kahvaltı", yemekler="x",
-                           kalori=500, protein=30, karb=50, yag=15,
-                           tarih=__import__("datetime").datetime.utcnow().strftime("%d.%m")))
+                           kalori=500, protein=30, karb=50, yag=15, tarih=day_key()))
     db.session.commit()
     _mock_pipeline(monkeypatch, {"Ana Yemekler": ["Izgara Tavuk"]},
                    per_serving={"Izgara Tavuk": CHICKEN})

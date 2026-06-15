@@ -76,3 +76,12 @@ def test_presigned_url_roundtrip_and_fail_open(s3_on, monkeypatch):
     assert generate_presigned_url("") is None
     monkeypatch.setattr(s3_helper, "_client", _FakeS3(fail=True))
     assert generate_presigned_url("meals/x.png") is None  # hata → None (fail-open)
+
+
+def test_presigned_url_ownership_check(s3_on):
+    # Anahtar yolu <prefix>/<user_id>/... — sahibine imzalanır, başkasına imzalanmaz (S5).
+    key = "pump-checks/42/2026/06/abc.jpg"
+    assert generate_presigned_url(key, expected_user_id=42) is not None
+    assert generate_presigned_url(key, expected_user_id=99) is None
+    # expected_user_id verilmezse eski davranış (kontrol yok).
+    assert generate_presigned_url(key) is not None

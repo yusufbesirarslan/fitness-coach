@@ -40,7 +40,9 @@ def test_search_query_too_short_returns_empty(client, auth_user):
 
 
 def test_search_cache_hit_skips_lookup(client, auth_user, monkeypatch):
-    foodcache._macro_cache["muz"] = BANANA
+    # Koç araması 100g-bazlı yazar; arama da o bazdan okur. (Eski test düz
+    # _macro_cache["muz"] yazıp düz .get(q) hatasını maskeliyordu — F2.)
+    foodcache._cache_macros({"muz": BANANA}, "per_100g")
     foodcache._food_id_cache["muz"] = "42"
 
     def boom(q):

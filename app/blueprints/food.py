@@ -6,7 +6,7 @@ from app.config import FATSECRET_API_URL, FOOD_SEARCH_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter
 from app.services.ai_coach import _coach_search_food
 from app.services.fatsecret import _food_get_servings, _fs_get, _get_fatsecret_token
-from app.services.foodcache import _cache_food_id, _food_id_cache, _macro_cache
+from app.services.foodcache import _cache_food_id, _food_id_cache, _get_cached_macros
 
 
 bp = Blueprint("food", __name__)
@@ -20,7 +20,10 @@ def food_search():
     if len(q) < 2:
         return jsonify({"results": []})
 
-    cached = _macro_cache.get(q)
+    # Koç araması 100g-bazlı yazar; aynı bazdan oku (eski kod düz _macro_cache.get(q)
+    # ile iki-katmanlı sözlüğe baktığı için DAİMA ıskalıyordu — bkz foodcache.py).
+    hits, _ = _get_cached_macros([q], "per_100g")
+    cached = hits.get(q)
     if cached:
         cached_fid = _food_id_cache.get(q.lower(), "")
         current_app.logger.debug("food_search cache hit for '%s', food_id=%s", q, cached_fid or "(none)")

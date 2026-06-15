@@ -13,8 +13,22 @@ import os
 import json
 import time
 import threading
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from contextlib import contextmanager
+
+# Sabit uygulama saat dilimi (app.timeutil ile aynı): MCP sunucusu standalone
+# çalışabildiği için tüm app paketini çekmemek adına burada inline tutulur.
+_APP_TZ = ZoneInfo("Europe/Istanbul")
+
+
+def _app_today():
+    return datetime.now(_APP_TZ).date()
+
+
+def _day_key():
+    """ISO 'YYYY-MM-DD' gün anahtarı (Istanbul) — meal_log.tarih ile aynı biçim."""
+    return _app_today().isoformat()
 
 import psycopg2
 import psycopg2.extras
@@ -125,7 +139,7 @@ def get_user_fitness_summary(user_id: int) -> str:
         cur.execute(
             "SELECT SUM(kalori) as total_cal, COUNT(*) as meal_count "
             "FROM meal_log WHERE user_id = %s AND tarih = %s",
-            (user_id, date.today().strftime("%d.%m")),
+            (user_id, _day_key()),
         )
         today_meals = cur.fetchone()
 
@@ -585,19 +599,20 @@ def log_nutrition_entry(user_id: int, food_item: str, calories: float, protein: 
             return json.dumps({"error": "Kullanıcı bulunamadı"}, ensure_ascii=False)
 
         cur.execute(
-            "INSERT INTO user_daily_nutrition (user_id, food_item, calories, protein, carbs, fat, created_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id",
-            (user_id, food_item.strip(), calories, protein, carbs, fat, datetime.utcnow()),
+            "INSERT INTO meal_log (user_id, ogun, yemekler, kalori, protein, karb, yag, tarih, source, created_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id",
+            (user_id, "AI Koç", food_item.strip(), calories, protein, carbs, fat,
+             _day_key(), "coach", datetime.utcnow()),
         )
         row = cur.fetchone()
 
         cur.execute(
-            "SELECT COALESCE(SUM(calories), 0) as total_cal, "
+            "SELECT COALESCE(SUM(kalori), 0) as total_cal, "
             "COALESCE(SUM(protein), 0) as total_protein, "
-            "COALESCE(SUM(carbs), 0) as total_carbs, "
-            "COALESCE(SUM(fat), 0) as total_fat, "
+            "COALESCE(SUM(karb), 0) as total_carbs, "
+            "COALESCE(SUM(yag), 0) as total_fat, "
             "COUNT(*) as entry_count "
-            "FROM user_daily_nutrition WHERE user_id = %s AND created_at::date = CURRENT_DATE",
+            "FROM meal_log WHERE user_id = %s AND created_at::date = CURRENT_DATE",
             (user_id,),
         )
         today = cur.fetchone()
@@ -625,7 +640,7 @@ def log_nutrition_entry(user_id: int, food_item: str, calories: float, protein: 
 @mcp.tool()
 def generate_weekly_report(user_id: int) -> str:
     """Kullanıcının haftalık performans raporunu oluşturur: bu hafta vs geçen hafta karşılaştırması."""
-    today = date.today()
+    today = _app_today()
     this_week_start = today - timedelta(days=today.weekday())
     last_week_start = this_week_start - timedelta(days=7)
 
@@ -654,16 +669,16 @@ def generate_weekly_report(user_id: int) -> str:
         last_week_vol = cur.fetchone()["vol"]
 
         cur.execute(
-            "SELECT COALESCE(SUM(calories), 0) as cal, COALESCE(SUM(protein), 0) as pro, "
-            "COALESCE(SUM(carbs), 0) as carb, COALESCE(SUM(fat), 0) as fat, COUNT(*) as entries "
-            "FROM user_daily_nutrition WHERE user_id = %s AND created_at::date >= %s",
+            "SELECT COALESCE(SUM(kalori), 0) as cal, COALESCE(SUM(protein), 0) as pro, "
+            "COALESCE(SUM(karb), 0) as carb, COALESCE(SUM(yag), 0) as fat, COUNT(*) as entries "
+            "FROM meal_log WHERE user_id = %s AND created_at::date >= %s",
             (user_id, this_week_start),
         )
         this_week_nutrition = cur.fetchone()
 
         cur.execute(
-            "SELECT COALESCE(SUM(calories), 0) as cal, COALESCE(SUM(protein), 0) as pro "
-            "FROM user_daily_nutrition "
+            "SELECT COALESCE(SUM(kalori), 0) as cal, COALESCE(SUM(protein), 0) as pro "
+            "FROM meal_log "
             "WHERE user_id = %s AND created_at::date >= %s AND created_at::date < %s",
             (user_id, last_week_start, this_week_start),
         )
@@ -727,7 +742,7 @@ def analyze_and_rank_menu(raw_menu_text: str, user_id: int) -> str:
         if not sess or not sess["target_calories"]:
             return json.dumps({"error": "Kullanıcı profil verisi bulunamadı."}, ensure_ascii=False)
 
-        today = date.today().strftime("%d.%m")
+        today = _day_key()
         cur.execute(
             "SELECT COALESCE(SUM(kalori), 0) as cal, COALESCE(SUM(protein), 0) as pro, "
             "COALESCE(SUM(karb), 0) as carb, COALESCE(SUM(yag), 0) as fat "

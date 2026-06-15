@@ -63,6 +63,22 @@ class _LazyAnthropicBedrock:
 bedrock_client = _LazyAnthropicBedrock()
 
 
+def warn_if_limiter_degraded(app):
+    """Redis yapılandırılmış ama erişilemiyorsa uyar. Limiter bu durumda bellek
+    yedeğine düşer (in_memory_fallback_enabled): rate-limit ve özellikle kullanıcı-
+    başı login throttle (brute-force koruması) tek-süreç/geçici hale gelir. Sessizce
+    bozulmasın diye boot'ta görünür kıl (S6)."""
+    if redis_client is None:
+        return
+    try:
+        redis_client.ping()
+    except Exception as e:
+        app.logger.warning(
+            "[LIMITER] Redis erişilemiyor (%s: %s) — rate-limit ve login throttle "
+            "bellek-yedeğine düştü; çok-süreçli/yeniden-başlatmada zayıflar.",
+            type(e).__name__, e)
+
+
 def _user_or_ip_key():
     """Rate-limit key: the user id when logged in, else the client IP. The AI
     routes are all @login_required, so in practice each account gets its own

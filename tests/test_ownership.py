@@ -151,3 +151,28 @@ def test_diary_log_foreign_meal_not_found(owner, attacker_client):
     assert attacker_client.post(f"/api/diary/meal/{meal.id}/log").status_code == 404
     db.session.expire_all()
     assert db.session.get(CustomMeal, meal.id).is_logged is False
+
+
+# ---------------------------------------------------------------------------
+# AI Koç in-process araçları — user_id ASLA LLM'den gelmez; istek bağlamında
+# current_user ile eşleşmeyen user_id reddedilir (S1, savunma derinliği).
+# ---------------------------------------------------------------------------
+
+def test_coach_principal_rejects_foreign_user_id(app, owner, make_user):
+    from flask_login import login_user
+    from app.services.ai_coach import _assert_principal
+
+    mallory = make_user("mallory_coach")
+    with app.test_request_context():
+        login_user(owner)
+        _assert_principal(owner.id)                  # kendi id'si → sorun yok
+        with pytest.raises(PermissionError):
+            _assert_principal(mallory.id)            # başka kullanıcı → reddedilir
+
+
+def test_coach_principal_noop_without_request_context(owner):
+    # İstek bağlamı yoksa (CLI / in-process / test) kontrol atlanır — mevcut
+    # davranışı bozmasın diye.
+    from app.services.ai_coach import _assert_principal
+    _assert_principal(owner.id)
+    _assert_principal(owner.id + 999)

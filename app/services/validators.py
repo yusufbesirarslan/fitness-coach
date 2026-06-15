@@ -147,7 +147,8 @@ def _meal_photo_url(meal):
     key = getattr(meal, "photo_key", None)
     if not key or not s3_helper.is_enabled():
         return None
-    return s3_helper.generate_presigned_url(key, expires_in=3600)
+    return s3_helper.generate_presigned_url(key, expires_in=3600,
+                                            expected_user_id=getattr(meal, "user_id", None))
 
 
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")

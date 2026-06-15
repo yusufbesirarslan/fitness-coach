@@ -3,15 +3,16 @@ import json
 import re
 import nutrition_pipeline
 from datetime import datetime
-from flask import current_app, session
+from flask import current_app, g, session
 
 from app.config import OPENAI_MODEL
 from app.extensions import db, openai_client
-from app.models import PendingAction, User, UserDailyNutrition, UserSession, WorkoutLog
+from app.models import MealLog, PendingAction, User, UserSession, WorkoutLog
 from app.services.ai import _heavy_chat
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
 from app.services.fatsecret import _food_search_fatsecret, _food_search_static
 from app.services.gamification import award_xp, log_activity
+from app.timeutil import day_key, utc_day_bounds
 
 
 COACH_SYSTEM_PROMPT = """Sen FitX uygulamasının elit, destekleyici ama gerçekçi AI Beslenme & Fitness Koçusun. Kullanıcının veritabanına HEM okuma HEM yazma erişimin var ve bunu ARAÇLAR (function calling) üzerinden yaparsın.
@@ -63,7 +64,20 @@ KURALLAR:
 - Tonu: elit, destekleyici, veri odaklı."""
 
 
+def _assert_principal(user_id):
+    """Savunma derinliği: in-process koç/MCP araçları yalnızca kimliği doğrulanmış
+    kullanıcı için çalışmalı. user_id ASLA LLM'den gelmez; yine de bir istek
+    bağlamında çağrıldıysak current_user ile eşleştiğini doğrula (gelecekteki bir
+    yanlış kullanım çapraz-kullanıcı okuma/yazmaya dönüşmesin)."""
+    from flask import has_request_context
+    from flask_login import current_user
+    if has_request_context() and getattr(current_user, "is_authenticated", False) \
+            and current_user.id != user_id:
+        raise PermissionError("user_id, kimliği doğrulanmış kullanıcıyla eşleşmiyor")
+
+
 def _fetch_coach_context(user_id, question=""):
+    _assert_principal(user_id)
     # Not: Beslenme makroları artık koç araçları (fetch_nutrition_and_stage_log)
     # üzerinden tek yoldan gelir; burada FatSecret verisi enjekte ETMİYORUZ ki
     # model rakip bir veri kaynağı görüp staging adımını atlamasın.
@@ -73,7 +87,6 @@ def _fetch_coach_context(user_id, question=""):
         get_user_supplement_stack,
         get_friend_activities,
         get_user_nutrition_log,
-        generate_weekly_report,
     )
     parts = []
     try:
@@ -101,10 +114,11 @@ def _fetch_coach_context(user_id, question=""):
     try:
         models = {
             "WorkoutLog": WorkoutLog,
-            "UserDailyNutrition": UserDailyNutrition,
+            "MealLog": MealLog,
             "UserSession": UserSession,
         }
-        nudges = get_nudges(User.query.get(user_id), db, models)
+        nudges = get_nudges(User.query.get(user_id), db, models,
+                            getattr(g, "prev_last_login", None))
         if nudges:
             parts.append("[PROAKTİF BİLDİRİMLER]\n" + "\n".join(nudges))
     except Exception:
@@ -158,17 +172,20 @@ def _coach_search_food(query):
 
 
 def _today_nutrition_totals(user_id):
-    """Bugünün beslenme toplamları (SQLAlchemy ile, DB-agnostik)."""
-    start = datetime.combine(datetime.utcnow().date(), datetime.min.time())
+    """Bugünün beslenme toplamları (MealLog — tek kanonik beslenme defteri).
+    menu.py'deki 'consumed' ile AYNI tarih anahtarını (utcnow %d.%m) kullanır ki
+    koçun 'kalan bütçe'si ile menü analizinin 'kalanı' birebir tutarlı olsun.
+    (Faz C tarih semantiğini tüm okuyucularda birlikte ISO/Istanbul'a taşıyacak.)"""
+    today_key = day_key()
     row = db.session.query(
-        db.func.coalesce(db.func.sum(UserDailyNutrition.calories), 0),
-        db.func.coalesce(db.func.sum(UserDailyNutrition.protein), 0),
-        db.func.coalesce(db.func.sum(UserDailyNutrition.carbs), 0),
-        db.func.coalesce(db.func.sum(UserDailyNutrition.fat), 0),
-        db.func.count(UserDailyNutrition.id),
+        db.func.coalesce(db.func.sum(MealLog.kalori), 0),
+        db.func.coalesce(db.func.sum(MealLog.protein), 0),
+        db.func.coalesce(db.func.sum(MealLog.karb), 0),
+        db.func.coalesce(db.func.sum(MealLog.yag), 0),
+        db.func.count(MealLog.id),
     ).filter(
-        UserDailyNutrition.user_id == user_id,
-        UserDailyNutrition.created_at >= start,
+        MealLog.user_id == user_id,
+        MealLog.tarih == today_key,
     ).first()
     return {
         "calories": round(row[0]),
@@ -183,7 +200,7 @@ def _remaining_macros_for_user(user_id):
     """Kullanicinin bugun KALAN gunluk makro butcesi.
 
     UserSession hedef kalorisinden hedef-makro dagilimi (analyze_menu ile ayni
-    formul) cikarilir, bugun UserDailyNutrition'a islenen tuketim dusulur.
+    formul) cikarilir, bugun MealLog'a islenen tuketim dusulur.
     Deterministik; LLM yok. Profil/hedef yoksa None doner.
     """
     sess = (UserSession.query.filter_by(user_id=user_id)
@@ -205,14 +222,16 @@ def _remaining_macros_for_user(user_id):
 
 
 def _today_workout_totals(user_id):
-    """Bugünün antrenman toplam volümü."""
-    start = datetime.combine(datetime.utcnow().date(), datetime.min.time())
+    """Bugünün antrenman toplam volümü (Istanbul günü; created_at UTC olduğu için
+    UTC sınırlarıyla karşılaştırılır)."""
+    start, end = utc_day_bounds()
     row = db.session.query(
         db.func.coalesce(db.func.sum(WorkoutLog.volume), 0),
         db.func.count(WorkoutLog.id),
     ).filter(
         WorkoutLog.user_id == user_id,
         WorkoutLog.created_at >= start,
+        WorkoutLog.created_at < end,
     ).first()
     return {"total_volume": round(row[0], 1), "entry_count": row[1]}
 
@@ -280,8 +299,9 @@ def _tool_fetch_nutrition_and_stage_log(user_id, food_query):
 
 
 def _tool_confirm_and_commit_meal_log(user_id):
-    """TOOL (commit): En son staged meal'i kalıcı UserDailyNutrition kaydına taşı,
-    PendingAction satırını sil. Durum geçişi: staged → committed."""
+    """TOOL (commit): En son staged meal'i kalıcı MealLog kaydına taşı (tek kanonik
+    beslenme defteri — diyari/menü ile aynı tablo), PendingAction satırını sil.
+    Durum geçişi: staged → committed."""
     pending = (PendingAction.query
                .filter_by(user_id=user_id, action_type="log_meal")
                .order_by(PendingAction.created_at.desc())
@@ -300,9 +320,10 @@ def _tool_confirm_and_commit_meal_log(user_id):
     fat = float(data.get("fat", 0) or 0)
     name = (data.get("food_name") or "Yemek")[:200]
 
-    db.session.add(UserDailyNutrition(
-        user_id=user_id, food_item=name,
-        calories=cal, protein=pro, carbs=carb, fat=fat,
+    db.session.add(MealLog(
+        user_id=user_id, ogun="AI Koç", yemekler=name,
+        kalori=cal, protein=pro, karb=carb, yag=fat,
+        tarih=day_key(), source="coach",
     ))
     db.session.delete(pending)  # staged satırı temizle (state geçişi tamamlandı)
     award_xp(user_id, 10)
@@ -471,6 +492,7 @@ COACH_TOOLS = [
 def _dispatch_coach_tool(user_id, name, arguments_json):
     """LLM'in istediği aracı sunucu tarafında çalıştır. user_id ASLA LLM'den
     gelmez — güvenlik için current_user'dan enjekte edilir. JSON string döndürür."""
+    _assert_principal(user_id)
     try:
         args = json.loads(arguments_json) if arguments_json else {}
     except (json.JSONDecodeError, TypeError):

@@ -357,8 +357,9 @@ def validate_pump_check(image_bytes, location_type, user_description):
         # }
         # ─────────────────────────────────────────────────────────────────────
 
-        # MOCK davranışı: biçimi geçerli her gönderimi kabul et.
-        return {"valid": True, "reason": "Pump Check doğrulandı.", "fallback": False}
+        # MOCK davranışı: biçimi geçerli her gönderimi kabul et. DÜRÜST mesaj:
+        # gerçek görsel doğrulama henüz yok, bu yüzden "doğrulandı" DEME (F7).
+        return {"valid": True, "reason": "Pump Check kaydedildi (otomatik görsel doğrulama yakında).", "fallback": False}
     except Exception as e:
         # Görsel servis hatası (timeout / API down) → kullanıcıyı engelleme (fail-open).
         current_app.logger.warning(f"[PUMP CHECK] AI failed, failing open: {type(e).__name__}: {e}")
