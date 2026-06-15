@@ -18,7 +18,7 @@ def supplements_page():
         .order_by(Supplement.created_at.desc()).all()
     return render_template("manage_stack.html",
         username=current_user.username,
-        profile_picture=current_user.profile_picture,
+        profile_picture=current_user.avatar_src,
         supplements=supps,
         categories=SUPPLEMENT_CATEGORIES,
         statuses=SUPPLEMENT_STATUSES,

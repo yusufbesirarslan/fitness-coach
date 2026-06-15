@@ -20,7 +20,7 @@ bp = Blueprint("training", __name__)
 @bp.route("/training")
 @login_required
 def training():
-    return render_template("training.html", username=current_user.username, profile_picture=current_user.profile_picture)
+    return render_template("training.html", username=current_user.username, profile_picture=current_user.avatar_src)
 
 
 @bp.route("/training-plan", methods=["POST"])

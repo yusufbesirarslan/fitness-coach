@@ -26,7 +26,7 @@ def home():
     last_weight_update = (last_checkin.created_at.isoformat() + "Z") if last_checkin else ""
     return render_template("index.html",
         username=current_user.username,
-        profile_picture=current_user.profile_picture,
+        profile_picture=current_user.avatar_src,
         streak_count=current_user.streak_count or 0,
         last_weight_update=last_weight_update,
     )
@@ -322,7 +322,7 @@ def progress_page():
             .order_by(WeeklyCheckIn.created_at.desc()).first()
         current_weight = last_ci.weight if last_ci else None
     return render_template("progress.html", username=current_user.username,
-        profile_picture=current_user.profile_picture,
+        profile_picture=current_user.avatar_src,
         current_weight=current_weight)
 
 

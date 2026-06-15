@@ -204,7 +204,7 @@ def _lb_serialize(u, rank, timeframe="all_time"):
         "id": u.id,
         "username": u.username,
         "full_name": u.full_name or u.username,
-        "profile_picture": u.profile_picture,
+        "profile_picture": u.avatar_src,
         "level": get_level(u.rank_points or 0),
         "xp": xp,
         "streak": u.streak_count or 0,

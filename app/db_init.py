@@ -56,6 +56,7 @@ def init_database(app):
             'ALTER TABLE "user" ADD COLUMN referred_by_id INTEGER',
             'ALTER TABLE "user" ADD COLUMN is_premium BOOLEAN DEFAULT false',
             'ALTER TABLE "user" ADD COLUMN premium_since TIMESTAMP',
+            'ALTER TABLE "user" ADD COLUMN profile_picture_key VARCHAR(300)',
             # Görev isimlerini Türkçeleştir (eski İngilizce kayıtları da güncelle)
             "UPDATE daily_quest SET title = 'Günlük Giriş' WHERE quest_type = 'login'",
             "UPDATE daily_quest SET title = 'Antrenman Kaydet' WHERE quest_type = 'workout_logged'",

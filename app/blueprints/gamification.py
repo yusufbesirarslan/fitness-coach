@@ -16,7 +16,7 @@ bp = Blueprint("gamification", __name__)
 def leaderboard_page():
     return render_template("leaderboard.html",
         username=current_user.username,
-        profile_picture=current_user.profile_picture)
+        profile_picture=current_user.avatar_src)
 
 
 @bp.route("/leaderboard/data")
@@ -79,7 +79,7 @@ def quests():
 
     return render_template("quests.html",
         username=current_user.username,
-        profile_picture=current_user.profile_picture,
+        profile_picture=current_user.avatar_src,
         quest_data=quest_data
     )
 
