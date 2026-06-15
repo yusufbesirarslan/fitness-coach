@@ -3,7 +3,7 @@ import json
 import re
 import nutrition_pipeline
 from datetime import datetime
-from flask import current_app, session
+from flask import current_app, g, session
 
 from app.config import OPENAI_MODEL
 from app.extensions import db, openai_client
@@ -63,7 +63,20 @@ KURALLAR:
 - Tonu: elit, destekleyici, veri odaklı."""
 
 
+def _assert_principal(user_id):
+    """Savunma derinliği: in-process koç/MCP araçları yalnızca kimliği doğrulanmış
+    kullanıcı için çalışmalı. user_id ASLA LLM'den gelmez; yine de bir istek
+    bağlamında çağrıldıysak current_user ile eşleştiğini doğrula (gelecekteki bir
+    yanlış kullanım çapraz-kullanıcı okuma/yazmaya dönüşmesin)."""
+    from flask import has_request_context
+    from flask_login import current_user
+    if has_request_context() and getattr(current_user, "is_authenticated", False) \
+            and current_user.id != user_id:
+        raise PermissionError("user_id, kimliği doğrulanmış kullanıcıyla eşleşmiyor")
+
+
 def _fetch_coach_context(user_id, question=""):
+    _assert_principal(user_id)
     # Not: Beslenme makroları artık koç araçları (fetch_nutrition_and_stage_log)
     # üzerinden tek yoldan gelir; burada FatSecret verisi enjekte ETMİYORUZ ki
     # model rakip bir veri kaynağı görüp staging adımını atlamasın.
@@ -103,7 +116,8 @@ def _fetch_coach_context(user_id, question=""):
             "UserDailyNutrition": UserDailyNutrition,
             "UserSession": UserSession,
         }
-        nudges = get_nudges(User.query.get(user_id), db, models)
+        nudges = get_nudges(User.query.get(user_id), db, models,
+                            getattr(g, "prev_last_login", None))
         if nudges:
             parts.append("[PROAKTİF BİLDİRİMLER]\n" + "\n".join(nudges))
     except Exception:
@@ -470,6 +484,7 @@ COACH_TOOLS = [
 def _dispatch_coach_tool(user_id, name, arguments_json):
     """LLM'in istediği aracı sunucu tarafında çalıştır. user_id ASLA LLM'den
     gelmez — güvenlik için current_user'dan enjekte edilir. JSON string döndürür."""
+    _assert_principal(user_id)
     try:
         args = json.loads(arguments_json) if arguments_json else {}
     except (json.JSONDecodeError, TypeError):

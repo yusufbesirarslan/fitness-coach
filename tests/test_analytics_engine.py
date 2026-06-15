@@ -88,6 +88,24 @@ def test_streak_at_risk_thresholds():
     assert nudges == []  # bugün zaten aktif
 
 
+def test_streak_risk_uses_prev_last_login_when_provided():
+    # update_streak before_request hook last_login'i "bugün" yapar; get_nudges'a
+    # ÖNCEKI değer (dün) geçilince seri-riski dürtüsü yine de tetiklenmeli (F3).
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+
+    nudges = []
+    _check_streak_at_risk(SimpleNamespace(streak_count=6, last_login=today),
+                          today, nudges, prev_last_login=yesterday)
+    assert any(n.startswith("NUDGE_STREAK_RISK") for n in nudges)
+
+    # Gün içi sonraki istekte prev de bugün olur → tetiklenmez.
+    nudges = []
+    _check_streak_at_risk(SimpleNamespace(streak_count=6, last_login=today),
+                          today, nudges, prev_last_login=today)
+    assert nudges == []
+
+
 # ---------------------------------------------------------------------------
 # Haftalık protein hedefi — hedef kalorinin %30'u / 4 kcal * 7 gün, %90 eşiği.
 # ---------------------------------------------------------------------------

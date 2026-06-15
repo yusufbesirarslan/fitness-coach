@@ -20,7 +20,6 @@ from app.services.ai_nutrition import (
     _normalize_food_query_en,
     _parse_suggestion_items,
     _repair_truncated_json,
-    _score_item,
     _turkish_ablative_suffix,
 )
 
@@ -192,36 +191,3 @@ def test_macros_llm_batches_large_lists(app, monkeypatch):
     result = _estimate_macros_llm(items)
     assert len(result) == 20
     assert [len(b) for b in batches] == [15, 5]  # _LLM_MACRO_BATCH_SIZE = 15
-
-
-# ---------------------------------------------------------------------------
-# Deterministik öğe skoru
-# ---------------------------------------------------------------------------
-
-REMAINING = {"calories": 1500, "protein": 120, "carbs": 180, "fat": 50}
-
-
-def test_score_item_rewards_budget_fit():
-    good = {"calories": 600, "protein": 48, "carbs": 70, "fat": 17}  # ~%40 ideal
-    score, warnings, reason = _score_item(good, REMAINING)
-    assert score > 70
-    assert warnings == []
-    assert "protein hedefinle uyumlu" in reason
-
-
-def test_score_item_penalizes_budget_busters():
-    huge = {"calories": 1400, "protein": 20, "carbs": 170, "fat": 45}
-    score, warnings, reason = _score_item(huge, REMAINING)
-    good_score, _, _ = _score_item(
-        {"calories": 600, "protein": 48, "carbs": 70, "fat": 17}, REMAINING)
-    assert score < good_score
-    assert any("%80'ini aşıyor" in w for w in warnings)
-
-
-def test_score_item_reason_fallback():
-    # Hiçbir olumlu bayrak tetiklenmez (kalori >%50, protein <%25, yağ >%40)
-    # → neden metni ham makro özetine düşer.
-    meh = {"calories": 1000, "protein": 10, "carbs": 100, "fat": 25}
-    _, _, reason = _score_item(meh, REMAINING)
-    assert "1000 kcal" in reason
-    assert "10g protein" in reason

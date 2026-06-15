@@ -98,6 +98,10 @@ def update_streak():
                 current_user.streak_count = (current_user.streak_count or 0) + 1
             else:
                 current_user.streak_count = 1
+            # Bu istekten ÖNCEKI last_login'i sakla: get_nudges seri-riski dürtüsünü
+            # "günün ilk isteğinde henüz aktif değildi" mantığıyla doğru tetiklesin
+            # (aksi halde aşağıdaki güncelleme yüzünden asla tetiklenmez).
+            g.prev_last_login = current_user.last_login
             current_user.last_login = today
             streak = current_user.streak_count
             if streak in (7, 14, 30, 60, 100):
@@ -132,4 +136,4 @@ def not_found(e):
 
 
 def server_error(e):
-    return "Internal Server Error", 500
+    return render_template("500.html"), 500

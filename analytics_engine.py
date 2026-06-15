@@ -9,7 +9,7 @@ passed in from the caller to avoid circular imports.
 from datetime import datetime, date, timedelta
 
 
-def get_nudges(user, db, models):
+def get_nudges(user, db, models, prev_last_login=None):
     """
     Return a list of proactive nudge strings for the given user.
 
@@ -17,13 +17,16 @@ def get_nudges(user, db, models):
         user: Current User object
         db: SQLAlchemy db instance
         models: dict with keys 'WorkoutLog', 'UserDailyNutrition', 'UserSession'
+        prev_last_login: kullanıcının bu istekten ÖNCEKI last_login değeri. Verilmezse
+            user.last_login kullanılır. update_streak before_request hook'u last_login'i
+            "bugün" yaptığından, seri-riski dürtüsü aksi halde asla tetiklenmezdi.
     """
     nudges = []
     now = datetime.utcnow()
     today = date.today()
 
     _check_missing_logs(user, db, models, now, nudges)
-    _check_streak_at_risk(user, today, nudges)
+    _check_streak_at_risk(user, today, nudges, prev_last_login)
     _check_protein_goal(user, db, models, today, nudges)
     _check_weekly_report_day(today, nudges)
 
@@ -62,9 +65,9 @@ def _check_missing_logs(user, db, models, now, nudges):
         )
 
 
-def _check_streak_at_risk(user, today, nudges):
+def _check_streak_at_risk(user, today, nudges, prev_last_login=None):
     streak = user.streak_count or 0
-    last_login = user.last_login
+    last_login = prev_last_login if prev_last_login is not None else user.last_login
 
     if streak >= 5 and last_login and last_login < today:
         nudges.append(
