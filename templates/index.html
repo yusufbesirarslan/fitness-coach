@@ -118,7 +118,7 @@
                 </svg>
                 <div class="cal-center">
                     <div class="cal-center-num" id="cal-num">—</div>
-                    <div class="cal-center-lbl">kcal</div>
+                    <div class="cal-center-lbl">kcal kaldı</div>
                 </div>
             </div>
             <div class="cal-legend">
@@ -336,7 +336,7 @@
      ══════════════════════════════════════ -->
 <script nonce="{{ csp_nonce }}">
 let quickAddOpen = false, tipIdx = 0, sparkChart = null, userGoal = null;
-let selectedIntensity = 'moderate', currentActivityCals = 0;
+let selectedIntensity = 'moderate', currentActivityCals = 0, currentConsumedCals = 0;
 
 const TIPS = [
     { icon:'📈', text:'<strong>Progressive Overload</strong> — Her hafta ağırlık veya tekrar sayını küçük artışlarla yükselt. Kas büyümesinin temel formülü budur.', src:'Spor Fizyolojisi' },
@@ -408,6 +408,7 @@ function renderStreak(n) {
 /* ═══ CALORIE RING ═══ */
 function updateCalRing(consumed, target, activityCals) {
     activityCals = activityCals || 0;
+    currentConsumedCals = consumed;
     const effectiveTarget = target + activityCals;
     const remaining = Math.max(effectiveTarget - consumed, 0);
     const circ  = 276.46;
@@ -416,7 +417,7 @@ function updateCalRing(consumed, target, activityCals) {
     ring.style.strokeDashoffset = circ * (1 - ratio);
     ring.style.stroke = ratio >= 1 ? '#FF4D4D' : ratio >= 0.85 ? '#FFB020' : '#CCFF00';
 
-    document.getElementById('cal-num').textContent      = consumed;
+    document.getElementById('cal-num').textContent      = remaining;
     document.getElementById('cal-consumed').textContent = consumed + ' kcal';
     document.getElementById('cal-remain').textContent   = remaining + ' kcal';
     document.getElementById('cal-target').textContent   = target + ' kcal';
@@ -718,9 +719,8 @@ async function refreshActivitySummary() {
             document.getElementById('act-total-cal').textContent = currentActivityCals;
             document.getElementById('act-total-dist').textContent = data.total_distance;
         }
-        const consumed = parseInt(document.getElementById('cal-num').textContent) || 0;
         const target = parseInt(document.getElementById('cal-target').textContent) || 2000;
-        updateCalRing(consumed, target, currentActivityCals);
+        updateCalRing(currentConsumedCals, target, currentActivityCals);
     } catch(e) {}
 }
 
