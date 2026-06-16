@@ -1,7 +1,11 @@
 # CSP Sertleştirme: Satır-içi `onclick` → `addEventListener` Göçü
 
-> Durum: **PLANLI / ertelendi** (S2). Bu belge, `script-src-attr 'unsafe-inline'`
-> direktifini güvenle kaldırmak için yapılacak göçü tarif eder. Henüz uygulanmadı.
+> Durum: **TAMAMLANDI** (origin/main `9d11bd6`). Göç `static/actions.js` ile yapıldı:
+> genel olay-delegasyonu (`data-action` / `data-args` / `data-action-self` /
+> `data-action-input` / `-change` / `-keydown`, ayrıca `fxToggleClass` / `fxSetText` /
+> `fxValue` / `fxClickTarget` / `fxHref` yardımcıları ve `CW.send` gibi noktalı adlar).
+> `app/hooks.py` artık `script-src-attr 'none'` gönderiyor ve şablon/statikte satır-içi
+> `on*` handler KALMADI. Aşağıdaki tasarım/sıralama tarihsel referans için tutuluyor.
 
 ## Amaç
 
