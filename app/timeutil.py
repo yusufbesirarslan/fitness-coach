@@ -35,6 +35,21 @@ def day_key(dt=None):
     return dt.date().isoformat()
 
 
+def app_date_of(dt):
+    """Bir datetime'ın Istanbul gün tarihini (date) döndür.
+
+    created_at sütunları datetime.utcnow() ile NAIVE UTC yazıldığından, tz bilgisi
+    yoksa UTC varsayılır (day_key'in "naive=APP_TZ" kuralından bilinçli olarak
+    farklı). Geçen-gün hesapları bu fonksiyondan geçmeli; aksi halde UTC günü geç
+    saatte (Istanbul sabahı) yazılan kayıt bir gün kayar.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(APP_TZ).date()
+
+
 def utc_day_bounds(d=None):
     """Verilen (veya bugünkü) Istanbul gününün [başlangıç, bitiş) sınırlarını
     NAIVE UTC datetime olarak döndür.

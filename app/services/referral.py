@@ -17,14 +17,19 @@ _ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
 REFERRAL_REWARD_XP = 75  # davetçi ve davet edilen için ayrı ayrı
 
 
-def generate_referral_code(length=7):
-    """Kullanılmayan benzersiz bir davet kodu üret."""
-    for _ in range(20):
+def generate_referral_code(length=16):
+    """Kullanılmayan benzersiz bir davet kodu üret.
+
+    16 karakter × 31-harfli alfabe ≈ 79 bit entropi: kriptografik olarak
+    (secrets) rastgele ve tahmin/sıralı numaralandırmaya kapalı. Kolon
+    String(16) — uzunluk kolonu aşmamalı.
+    """
+    for _ in range(50):
         code = "".join(secrets.choice(_ALPHABET) for _ in range(length))
         if not User.query.filter_by(referral_code=code).first():
             return code
-    # Aşırı düşük olasılıkta çarpışma — daha uzun koda geç.
-    return "".join(secrets.choice(_ALPHABET) for _ in range(length + 3))
+    # 79-bit keyspace'te buraya pratikte hiç düşülmez; son çare yine 16 karakter.
+    return "".join(secrets.choice(_ALPHABET) for _ in range(length))
 
 
 def ensure_referral_code(user):

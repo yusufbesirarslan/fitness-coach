@@ -35,6 +35,10 @@ MET_CONFIG = {
 
 
 def calculate_activity_calories(steps, intensity, weight_kg, height_cm):
+    # Eksik/0 profil girdisi sessizce 0 kalori döndürüp geçersiz veriyi
+    # maskelemesin: stride boy'a, kalori kiloya bağlı — ikisi de pozitif olmalı.
+    if height_cm <= 0 or weight_kg <= 0:
+        raise ValueError("calculate_activity_calories: height_cm ve weight_kg pozitif olmalı")
     config = MET_CONFIG.get(intensity, MET_CONFIG["moderate"])
     stride_cm = height_cm * 0.414
     distance_km = steps * stride_cm / 100_000

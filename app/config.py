@@ -11,12 +11,29 @@ load_dotenv()
 
 _BOOT_TS = int(time.time())  # cache-bust static assets on each deploy
 FATSECRET_TOKEN_URL = "https://oauth.fatsecret.com/connect/token"
-FATSECRET_BASE_URL = os.environ.get("FATSECRET_BASE_URL", "http://18.153.156.28:3000")
+# Güvensiz bir varsayılan YOK: ayarlanmazsa boş kalır ve _enforce_fatsecret_tls
+# uyarır. Eski hardcoded "http://<public-ip>:3000" varsayılanı, FATSECRET_BASE_URL
+# prod'da ayarlanmazsa OAuth bearer token'ını düz metin HTTP üzerinde sızdırıyordu.
+FATSECRET_BASE_URL = os.environ.get("FATSECRET_BASE_URL", "")
 FATSECRET_API_URL = f"{FATSECRET_BASE_URL}/rest/server.api"
 _REDIS_URL = os.environ.get("REDIS_URL")
 LB_ALLTIME_KEY = "lb:global:alltime"
 LB_WEEKLY_KEY  = "lb:global:weekly"
 _IS_DEV = os.environ.get("FLASK_DEBUG") == "1" or os.environ.get("FLASK_ENV") == "development"
+
+# CSP img-src için S3 host(lar)ı: geniş `https://*.amazonaws.com` joker'i yerine
+# yalnızca bu uygulamanın kovasına/bölgesine izin ver (virtual-hosted + path-style
+# pre-signed URL biçimleri). Kova ayarlı değilse (lokal/test) avatar zaten base64
+# (data:) olduğundan S3 host'u eklenmez.
+_S3_BUCKET = os.environ.get("S3_BUCKET_NAME", "").strip()
+_S3_REGION = os.environ.get("AWS_REGION", "eu-central-1")
+if _S3_BUCKET:
+    CSP_IMG_S3_HOSTS = (
+        f"https://{_S3_BUCKET}.s3.{_S3_REGION}.amazonaws.com "
+        f"https://s3.{_S3_REGION}.amazonaws.com"
+    )
+else:
+    CSP_IMG_S3_HOSTS = ""
 AI_RATELIMIT = "30 per hour"           # OpenAI text/vision generation
 SCRAPE_RATELIMIT = "20 per hour"       # menu scraper (outbound fetch + AI; also SSRF surface)
 FOOD_SEARCH_RATELIMIT = "60 per hour"  # food search (LLM only fires on a FatSecret miss)
@@ -34,24 +51,31 @@ BEDROCK_ENABLED = os.getenv("BEDROCK_ENABLED", "0") == "1"  # açık opt-in; pro
 
 def _enforce_fatsecret_tls(app):
     from urllib.parse import urlparse as _urlparse
+    if not FATSECRET_BASE_URL:
+        app.logger.warning(
+            "FATSECRET_BASE_URL ayarlı değil — FatSecret entegrasyonu çalışmaz. "
+            "https:// bir endpoint'e işaret ettir.")
+        return
     p = _urlparse(FATSECRET_BASE_URL)
     host = (p.hostname or "").lower()
     is_local = host in ("localhost", "127.0.0.1", "::1")
     if p.scheme == "https" or is_local:
         return
-    if _IS_DEV:
+    # Düz metin HTTP + loopback dışı: debug olsun olmasın engelle. Token Authorization
+    # header'ında gidiyor; cleartext kabul edilemez. Lokal http proxy'e karşı test
+    # için bilinçli FATSECRET_ALLOW_INSECURE=1 escape-hatch'i gerekir.
+    if os.environ.get("FATSECRET_ALLOW_INSECURE") == "1":
         app.logger.warning(
-            "FATSECRET_BASE_URL uses plaintext http (%s) — the FatSecret bearer "
-            "token is exposed on the wire. Use https:// outside local dev.",
+            "FATSECRET_BASE_URL düz metin http (%s) — FATSECRET_ALLOW_INSECURE=1 ile "
+            "izin verildi. Bearer token tel üzerinde açıkta; yalnızca lokal test için.",
             FATSECRET_BASE_URL,
         )
         return
     raise RuntimeError(
-        "FATSECRET_BASE_URL must use https:// in production — the FatSecret "
-        "OAuth token is sent in the Authorization header and would otherwise be "
-        "transmitted in cleartext. Point FATSECRET_BASE_URL at an https:// "
-        "endpoint (terminate TLS in front of the proxy), or set FLASK_DEBUG=1 "
-        "for local http testing."
+        "FATSECRET_BASE_URL must use https:// — the FatSecret OAuth token is sent "
+        "in the Authorization header and would otherwise travel in cleartext. Point "
+        "FATSECRET_BASE_URL at an https:// endpoint (terminate TLS in front of the "
+        "proxy), or set FATSECRET_ALLOW_INSECURE=1 for local http testing."
     )
 
 

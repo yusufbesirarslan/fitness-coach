@@ -134,8 +134,15 @@ def run_weekly_rollover(now=None, force_week=None):
     try:
         db.session.commit()
     except Exception:
-        # Concurrent run won the race (week_key UNIQUE) — safe to ignore.
+        # Concurrent run won the race (week_key UNIQUE) — safe to ignore, but log
+        # so the race is observable rather than silent (3.7).
         db.session.rollback()
+        try:
+            from flask import current_app
+            current_app.logger.info(
+                "[ROLLOVER] %s zaten işlendi (eşzamanlı yarış — UNIQUE çakışması)", week_key)
+        except Exception:
+            pass
         return {"status": "already_processed", "week_key": week_key}
 
     lb_rebuild()  # weekly_xp sıfırlandı + kazananlara XP eklendi → setleri yeniden kur

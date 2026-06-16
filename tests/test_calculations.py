@@ -87,6 +87,14 @@ def test_activity_calories_zero_steps():
     assert calculate_activity_calories(0, "brisk", 70, 170) == (0.0, 0.0, 0.0)
 
 
+def test_activity_calories_rejects_nonpositive_profile():
+    # Eksik profil (boy/kilo 0) sessizce 0 döndürmemeli — geçersiz girdi maskelenmesin (F1.3).
+    with pytest.raises(ValueError):
+        calculate_activity_calories(10_000, "moderate", weight_kg=0, height_cm=170)
+    with pytest.raises(ValueError):
+        calculate_activity_calories(10_000, "moderate", weight_kg=70, height_cm=0)
+
+
 def test_activity_calories_unknown_intensity_uses_moderate():
     assert calculate_activity_calories(10_000, "turbo", 70, 170) == \
         calculate_activity_calories(10_000, "moderate", 70, 170)

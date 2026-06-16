@@ -48,7 +48,7 @@ def invite(code):
     if current_user.is_authenticated:
         return redirect(url_for("tracking.home"))
     resp = redirect(target)
-    clean = (code or "").strip().upper()[:12]
+    clean = (code or "").strip().upper()[:16]  # davet kodu 16 karaktere yükseltildi
     if clean and User.query.filter_by(referral_code=clean).first():
         # 30 gün; SameSite=Lax — sadece kendi sitemizden gelen kayıt akışında okunur.
         resp.set_cookie("fitx_ref", clean, max_age=60 * 60 * 24 * 30,

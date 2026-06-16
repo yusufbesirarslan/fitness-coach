@@ -8,7 +8,7 @@ yerel karışımı) regresyonlarını engeller.
 """
 from datetime import date, datetime
 
-from app.timeutil import APP_TZ, UTC, day_key, display_ddmm, utc_day_bounds
+from app.timeutil import APP_TZ, UTC, app_date_of, day_key, display_ddmm, utc_day_bounds
 
 
 def test_day_key_is_iso_and_istanbul_aware():
@@ -37,6 +37,15 @@ def test_utc_day_bounds_for_istanbul_day():
     start, end = utc_day_bounds(date(2026, 6, 15))
     assert start == datetime(2026, 6, 14, 21, 0)
     assert end == datetime(2026, 6, 15, 21, 0)
+
+
+def test_app_date_of_treats_naive_as_utc():
+    # created_at NAIVE UTC yazılır: 2026-06-15 21:30 UTC = Istanbul 2026-06-16 (F1.2).
+    assert app_date_of(datetime(2026, 6, 15, 21, 30)) == date(2026, 6, 16)
+    assert app_date_of(datetime(2026, 6, 15, 20, 30)) == date(2026, 6, 15)
+    # tz-aware girdi de doğru çevrilir.
+    assert app_date_of(datetime(2026, 6, 15, 21, 30, tzinfo=UTC)) == date(2026, 6, 16)
+    assert app_date_of(None) is None
 
 
 def test_display_ddmm_keeps_ui_format():
