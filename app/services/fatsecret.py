@@ -598,6 +598,14 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
                     est_g = nutrition_pipeline.estimate_serving_grams(serving_text)
                     status, conv = nutrition_pipeline.gate_per_serving(dish_type, macros, est_g)
                     if status == "accept":
+                        # Kimlik-hatasi kapisi: porsiyon-makulluk (miktar) gecse bile
+                        # kayit yanlis YEMEGE carpmis olabilir → ekmek bazli yemekte
+                        # 0 karb (ekmeksiz patty) ya da protein-adli yemekte ~0 protein
+                        # (sos eslesmesi). Reddet → oge LLM yedegine duser (gercekci).
+                        if (nutrition_pipeline.is_breadbased_zero_carb(macros, dish_type)
+                                or nutrition_pipeline.is_protein_dish_low_protein(name, macros, dish_type)):
+                            current_app.logger.info(f"[MACRO ENGINE] FatSecret kimlik-hatasi reddedildi '{name}' ({dish_type}): {macros}")
+                            continue
                         per_serving[name] = macros
                         found_serving = True
                         current_app.logger.info(f"[MACRO ENGINE] FatSecret per-serving match: '{name}' → Cal={macros['calories']}, P={macros['protein']}, C={macros['carbs']}, F={macros['fat']}")
