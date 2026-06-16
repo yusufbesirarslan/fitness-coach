@@ -30,7 +30,7 @@ def are_friends(user_a_id, user_b_id):
 def friends_page():
     return render_template("friends.html",
         username=current_user.username,
-        profile_picture=current_user.profile_picture)
+        profile_picture=current_user.avatar_src)
 
 
 @bp.route("/friends/list")
@@ -47,14 +47,14 @@ def friends_list():
         lvl = get_level(xp)
         friends.append({"id": friend.id, "username": friend.username,
                         "full_name": friend.full_name or friend.username,
-                        "profile_picture": friend.profile_picture,
+                        "profile_picture": friend.avatar_src,
                         "rank_title": get_title(lvl),
                         "level": lvl})
 
     pending_in = Friendship.query.filter_by(receiver_id=current_user.id, status="pending").all()
     incoming = [{"request_id": p.id, "username": p.sender.username,
                  "full_name": p.sender.full_name or p.sender.username,
-                 "profile_picture": p.sender.profile_picture} for p in pending_in]
+                 "profile_picture": p.sender.avatar_src} for p in pending_in]
 
     pending_out = Friendship.query.filter_by(sender_id=current_user.id, status="pending").all()
     outgoing = [{"request_id": p.id, "username": p.receiver.username} for p in pending_out]
@@ -82,7 +82,7 @@ def friends_search():
         ).first()
         status = existing.status if existing else None
         results.append({"username": u.username, "full_name": u.full_name or u.username,
-                        "profile_picture": u.profile_picture, "status": status})
+                        "profile_picture": u.avatar_src, "status": status})
     return jsonify({"users": results})
 
 
@@ -160,10 +160,10 @@ def chat_page(username):
     other_lvl = get_level(other_xp)
     return render_template("chat.html",
         username=current_user.username,
-        profile_picture=current_user.profile_picture,
+        profile_picture=current_user.avatar_src,
         other_username=other.username,
         other_full_name=other.full_name or other.username,
-        other_profile_picture=other.profile_picture,
+        other_profile_picture=other.avatar_src,
         other_rank_title=get_title(other_lvl),
         other_level=other_lvl)
 

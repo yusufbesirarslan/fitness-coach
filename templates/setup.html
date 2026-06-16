@@ -1,10 +1,8 @@
 <!DOCTYPE html>
 <html lang="tr" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Profil Oluştur — Fitness Coach</title>
-    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+    {% include "_head.html" %}
+    <title>Profil Oluştur — FitX</title>
     <link rel="stylesheet" href="/static/style.css">
     <style>
         .setup-wrapper {
@@ -247,7 +245,8 @@
 
     <div class="setup-header">
         <h1>HOŞ GELDİN<br><span>{{ username }}</span></h1>
-        <p>Seni tanıyalım — koçun sana özel bir plan oluştursun.</p>
+        <p>3 dakikada sana özel AI plan. Birkaç soru, sonra koçun beslenme ve
+           antrenmanını senin için kuruyor.</p>
     </div>
 
     <!-- STEP INDICATOR -->
@@ -288,7 +287,7 @@
                 </div>
             </div>
             <div class="step-buttons">
-                <button class="step-btn step-btn-next" data-action="nextStep" data-step="0">DEVAM ET</button>
+                <button class="step-btn step-btn-next" data-action="nextStep" data-args="[0]">DEVAM ET</button>
             </div>
         </div>
     </div>
@@ -299,7 +298,7 @@
             <div class="step-title">Hedefin Ne?</div>
             <div class="step-sub">Planın buna göre şekillenecek.</div>
             <div class="option-cards" id="goal-cards">
-                <div class="option-card" data-action="selectOption" data-type="goal" data-value="kilo verme">
+                <div class="option-card" data-action="selectOption" data-args='["goal","kilo verme"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">🔥</div>
                     <div class="option-card-text">
@@ -307,7 +306,7 @@
                         <div class="option-card-desc">Yağ yakımı ve kalori açığı odaklı</div>
                     </div>
                 </div>
-                <div class="option-card" data-action="selectOption" data-type="goal" data-value="kas kazanma">
+                <div class="option-card" data-action="selectOption" data-args='["goal","kas kazanma"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">💪</div>
                     <div class="option-card-text">
@@ -317,8 +316,8 @@
                 </div>
             </div>
             <div class="step-buttons">
-                <button class="step-btn step-btn-back" data-action="prevStep" data-step="1">GERİ</button>
-                <button class="step-btn step-btn-next" data-action="nextStep" data-step="1">DEVAM ET</button>
+                <button class="step-btn step-btn-back" data-action="prevStep" data-args="[1]">GERİ</button>
+                <button class="step-btn step-btn-next" data-action="nextStep" data-args="[1]">DEVAM ET</button>
             </div>
         </div>
     </div>
@@ -329,7 +328,7 @@
             <div class="step-title">Fitness Seviyen</div>
             <div class="step-sub">Şu anki durumunu en iyi hangisi tanımlıyor?</div>
             <div class="option-cards" id="level-cards">
-                <div class="option-card" data-action="selectOption" data-type="level" data-value="beginner">
+                <div class="option-card" data-action="selectOption" data-args='["level","beginner"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">🌱</div>
                     <div class="option-card-text">
@@ -337,7 +336,7 @@
                         <div class="option-card-desc">Yeni başlıyorum veya uzun süredir ara verdim</div>
                     </div>
                 </div>
-                <div class="option-card" data-action="selectOption" data-type="level" data-value="intermediate">
+                <div class="option-card" data-action="selectOption" data-args='["level","intermediate"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">⚡</div>
                     <div class="option-card-text">
@@ -345,7 +344,7 @@
                         <div class="option-card-desc">Düzenli antrenman yapıyorum, temeller sağlam</div>
                     </div>
                 </div>
-                <div class="option-card" data-action="selectOption" data-type="level" data-value="advanced">
+                <div class="option-card" data-action="selectOption" data-args='["level","advanced"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">🏆</div>
                     <div class="option-card-text">
@@ -355,8 +354,8 @@
                 </div>
             </div>
             <div class="step-buttons">
-                <button class="step-btn step-btn-back" data-action="prevStep" data-step="2">GERİ</button>
-                <button class="step-btn step-btn-next" data-action="nextStep" data-step="2">DEVAM ET</button>
+                <button class="step-btn step-btn-back" data-action="prevStep" data-args="[2]">GERİ</button>
+                <button class="step-btn step-btn-next" data-action="nextStep" data-args="[2]">DEVAM ET</button>
             </div>
         </div>
     </div>
@@ -367,7 +366,7 @@
             <div class="step-title">Günlük Aktiviten</div>
             <div class="step-sub">İş ve günlük yaşamındaki hareketlilik.</div>
             <div class="option-cards" id="activity-cards">
-                <div class="option-card" data-action="selectOption" data-type="activity" data-value="sedentary">
+                <div class="option-card" data-action="selectOption" data-args='["activity","sedentary"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">🪑</div>
                     <div class="option-card-text">
@@ -375,7 +374,7 @@
                         <div class="option-card-desc">Masa başı iş, çoğunlukla oturuyorum</div>
                     </div>
                 </div>
-                <div class="option-card" data-action="selectOption" data-type="activity" data-value="active">
+                <div class="option-card" data-action="selectOption" data-args='["activity","active"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">🚶</div>
                     <div class="option-card-text">
@@ -383,7 +382,7 @@
                         <div class="option-card-desc">Haftada 3-5 gün hareket ediyorum</div>
                     </div>
                 </div>
-                <div class="option-card" data-action="selectOption" data-type="activity" data-value="very_active">
+                <div class="option-card" data-action="selectOption" data-args='["activity","very_active"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">🏃</div>
                     <div class="option-card-text">
@@ -393,7 +392,7 @@
                 </div>
             </div>
             <div class="step-buttons">
-                <button class="step-btn step-btn-back" data-action="prevStep" data-step="3">GERİ</button>
+                <button class="step-btn step-btn-back" data-action="prevStep" data-args="[3]">GERİ</button>
                 <button class="step-btn step-btn-next" id="finish-btn" data-action="finishSetup">PROFİLİ OLUŞTUR</button>
             </div>
         </div>
@@ -420,7 +419,7 @@
             </div>
             <div class="result-message" id="r-message"></div>
             <div class="step-buttons" style="justify-content:center">
-                <button class="step-btn step-btn-next" data-action="goHome">BAŞLAYALIM</button>
+                <button class="step-btn step-btn-next" data-action="fxHref" data-href="/">BAŞLAYALIM</button>
             </div>
         </div>
     </div>
@@ -460,6 +459,9 @@
         document.getElementById('step-' + n).classList.add('active');
         currentStep = n;
         updateDots();
+        // Funnel: hangi adıma ulaşıldığını izle (setup_step_0..3).
+        if (window.fxTrack) fxTrack('setup_step_' + n);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     function nextStep(from) {
@@ -506,6 +508,10 @@
 
             if (data.error) { alert(data.error); return; }
 
+            // Funnel/aktivasyon: ilk plan üretildi.
+            if (window.fxTrackOnce) fxTrackOnce('first_plan_generated');
+            if (window.fxActivation) fxActivation('setup');
+
             // Sonuç ekranını göster
             document.getElementById('r-bmr').textContent = data.bmr;
             document.getElementById('r-tdee').textContent = data.tdee;
@@ -532,19 +538,8 @@
             btn.style.opacity = '1';
         }
     }
-
-    // Delegated handlers (CSP: replaces inline onclick)
-    document.addEventListener('click', (e) => {
-        const el = e.target.closest('[data-action]'); if (!el) return;
-        const a = el.dataset.action;
-        if      (a === 'toggleTheme')  toggleTheme();
-        else if (a === 'nextStep')     nextStep(Number(el.dataset.step));
-        else if (a === 'prevStep')     prevStep(Number(el.dataset.step));
-        else if (a === 'selectOption') selectOption(el.dataset.type, el.dataset.value, el);
-        else if (a === 'finishSetup')  finishSetup();
-        else if (a === 'goHome')       window.location.href = '/';
-    });
 </script>
+<script src="/static/actions.js"></script>
 
 </body>
 </html>

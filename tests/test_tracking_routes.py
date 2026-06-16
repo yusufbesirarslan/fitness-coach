@@ -63,9 +63,15 @@ def test_log_comparison_messages(client, auth_user):
 def test_progress_returns_logs_in_order(client, auth_user):
     client.post("/log", json={"weight": 80, "note": "ilk"})
     client.post("/log", json={"weight": 79})
-    logs = client.get("/progress").get_json()
+    logs = client.get("/api/progress").get_json()
     assert [l["kilo"] for l in logs] == [80.0, 79.0]
     assert logs[0]["not"] == "ilk"
+
+
+def test_progress_redirects_to_page(client, auth_user):
+    res = client.get("/progress")
+    assert res.status_code == 302
+    assert "/progress-page" in res.headers["Location"]
 
 
 # ---------------------------------------------------------------------------

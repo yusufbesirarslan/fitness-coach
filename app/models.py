@@ -30,6 +30,10 @@ class User(UserMixin, db.Model):
     profile_complete = db.Column(db.Boolean, default=False)
 
     profile_picture  = db.Column(db.Text, nullable=True)
+    # S3'e taşınan avatarın nesne anahtarı. Doluysa avatar S3'ten (pre-signed URL)
+    # gösterilir ve profile_picture (base64) temizlenir — böylece ~245 KB base64
+    # her HTML yanıtına gömülmez. Boşsa eski base64 davranışına düşülür.
+    profile_picture_key = db.Column(db.String(300), nullable=True)
     full_name        = db.Column(db.String(150), nullable=True)
     target_weight    = db.Column(db.Float, nullable=True)
     goal_type        = db.Column(db.String(10), nullable=True)
@@ -39,11 +43,38 @@ class User(UserMixin, db.Model):
     last_reward_week = db.Column(db.String(10), nullable=True)  # ISO week of last seen reward popup, e.g. "2026-W22"
     last_login       = db.Column(db.Date, nullable=True)
 
+    # Davet/referral döngüsü: her kullanıcının paylaşılabilir tek davet kodu olur;
+    # referred_by_id, bu kullanıcıyı getiren davetçiyi işaret eder (çift taraflı ödül).
+    referral_code    = db.Column(db.String(12), unique=True, nullable=True)
+    referred_by_id   = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+
+    # Para kazanma: freemium hattı. is_premium şu an yalnızca instrümantasyon için
+    # tutulur (billing yok); GET /premium upgrade-intent GA olayı ile takip edilir.
+    is_premium       = db.Column(db.Boolean, default=False, server_default='false')
+    premium_since    = db.Column(db.DateTime, nullable=True)
+
+    referrer = db.relationship("User", remote_side=[id], backref="referrals")
+
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+
+    @property
+    def avatar_src(self):
+        """Gösterim için avatar kaynağı. S3 anahtarı varsa kısa ömürlü pre-signed
+        URL üret; yoksa eski base64 data-URL'i (veya None) döndür. Hata/kapalı S3'te
+        anahtar varsa None döner → şablon baş harf rozetine düşer. Asla istisna atmaz
+        (liste sayfaları çok sayıda avatar render eder)."""
+        if self.profile_picture_key:
+            import s3_helper
+            if s3_helper.is_enabled():
+                url = s3_helper.generate_presigned_url(self.profile_picture_key, expires_in=21600)
+                if url:
+                    return url
+            return None
+        return self.profile_picture
 
     def __repr__(self):
         return f"<User {self.username}>"

@@ -246,6 +246,6 @@
   .main-content { margin-left: auto !important; margin-right: auto !important; }
 }
 
-/* Hide legacy nav elements */
-.sidebar { display: none !important; }
-.bottom-nav { display: none !important; }
+/* Premium çekmece bağlantısı — voltaj vurgusuyla ayrışsın. */
+.drawer-link-premium { color: var(--volt); }
+.drawer-link-premium:hover { color: var(--volt); background: var(--volt-dim); }

@@ -501,6 +501,11 @@
       });
     },
 
+    // data-action köprüsü: data-dd niteliğindeki (escape'li) JSON'u addToLog'a aktarır.
+    addDishFromEl: function (el) {
+      this.addToLog(el, el.dataset.dd);
+    },
+
     addToLog: function (btn, dishJson) {
       var d;
       try { d = JSON.parse(dishJson); } catch (e) { return; }
@@ -570,7 +575,7 @@
         return '<span class="cw-dish-warn">' + self._esc(w) + '</span>';
       }).join('');
       var m = dd.macros || {};
-      var onclickData = this._esc(JSON.stringify(JSON.stringify(dd)));
+      var ddJson = this._esc(JSON.stringify(dd));
       return '<div class="cw-dish' + (isTop ? ' top' : '') + '">' +
           '<div class="cw-dish-h">' +
             '<div class="cw-dish-name">' + this._esc(dd.name) + '</div>' +
@@ -584,7 +589,7 @@
             '<div class="cw-dish-macro"><span>' + m.fat + 'g</span> yağ</div>' +
           '</div>' +
           (warns ? '<div class="cw-dish-warns">' + warns + '</div>' : '') +
-          '<button class="cw-dish-add" onclick="CW.addToLog(this, ' + onclickData + ')">Günlük Kayda Ekle</button>' +
+          '<button class="cw-dish-add" data-action="CW.addDishFromEl" data-dd="' + ddJson + '">Günlük Kayda Ekle</button>' +
         '</div>';
     },
 

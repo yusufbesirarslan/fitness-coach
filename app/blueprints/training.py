@@ -20,7 +20,7 @@ bp = Blueprint("training", __name__)
 @bp.route("/training")
 @login_required
 def training():
-    return render_template("training.html", username=current_user.username, profile_picture=current_user.profile_picture)
+    return render_template("training.html", username=current_user.username, profile_picture=current_user.avatar_src)
 
 
 @bp.route("/training-plan", methods=["POST"])
@@ -42,7 +42,14 @@ def training_plan_generate():
     current_activity = last.current_activity
     tdee             = last.tdee
 
-    gun_sayisi       = data.get("gun_sayisi", 3)
+    try:
+        gun_sayisi   = int(data.get("gun_sayisi", 3))
+    except (TypeError, ValueError):
+        gun_sayisi   = 3
+    # Güvenlik: haftada en az 1 dinlenme/aktif toparlanma günü kalsın.
+    # 7 günlük "dinlenmesiz" program sakatlık riski ve kötü programlama → max 6.
+    gun_sayisi       = max(1, min(gun_sayisi, 6))
+    dinlenme_gun     = 7 - gun_sayisi
     ekipman          = data.get("ekipman", "spor_salonu")
     odak             = data.get("odak", "tum_vucut")
     sure             = data.get("sure", 45)
@@ -113,7 +120,9 @@ def training_plan_generate():
             f"Kardiyo günlerini ağırlık antrenmanı günleriyle akıllıca birleştir veya ayrı günlere koy.\n"
             f"HIIT'i ağırlık günüyle aynı güne koyma — LISS ise aynı gün olabilir.\n"
             f"Her kardiyo seansı için tahmini kalori yakımını belirt.\n"
-            f"Kardiyo günlerinin tipini 'kardiyo' olarak işaretle."
+            f"Kardiyo günlerinin tipini 'kardiyo' olarak işaretle.\n"
+            f"Kardiyo gününün 'odak' alanına tür + süre + tempo yaz (örn. 'Bisiklet — 30 dk orta tempo (LISS)') "
+            f"ve 'egzersizler' listesine yapı/ısınma-soğuma içeren en az 1 kardiyo girdisi ekle — sadece 'Bisiklet' yazma."
         )
     else:
         kardiyo_text = "Kardiyo istemiyor — sadece ağırlık antrenmanı planla."
@@ -205,7 +214,11 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
         f"{split_rehber}\n"
         f"\n"
         f"PROGRAM KURALLARI:\n"
-        f"1. Haftanın tam 7 günü için plan yap (Pazartesi'den Pazar'a).\n"
+        f"1. Haftanın tam 7 günü için plan yap (Pazartesi'den Pazar'a): {gun_sayisi} antrenman günü + "
+        f"{dinlenme_gun} dinlenme günü. Dinlenme günlerini tip='dinlenme', odak='Aktif Toparlanma', "
+        f"egzersizler=[] olarak işaretle. EN AZ 1 dinlenme/aktif toparlanma günü ZORUNLUDUR — "
+        f"asla 7 gün üst üste antrenman yazma. Dinlenme günlerini hafta içine dengeli dağıt "
+        f"(art arda iki ağır günden sonra dinlenme koy).\n"
         f"2. Yukarıdaki split yapısına uy — sırt günü MUTLAKA programda yer alsın.\n"
         f"3. Sırt günü için EGZERSİZ REHBERİ'ndeki listeden EN AZ 5 FARKLI egzersiz seç:\n"
         f"   - En az 1 yatay çekiş (Row ailesi)\n"

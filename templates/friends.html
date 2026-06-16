@@ -1,10 +1,8 @@
 <!DOCTYPE html>
 <html lang="tr" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arkadaşlar — Fitness Coach</title>
-    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    {% include "_head.html" %}
+    <title>Arkadaşlar — FitX</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <style>
@@ -158,7 +156,7 @@
 <main class="main-content">
 
     <div class="page-hdr">
-        <h1>ARKADAŞ<br><span>LARIN</span></h1>
+        <h1>ARKADAŞLAR<span>IN</span></h1>
         <p>Arkadaş ekle, istekleri yönet, sohbet başlat.</p>
     </div>
 
@@ -169,6 +167,21 @@
             <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             <input type="text" class="search-input" id="search-input" placeholder="Kullanıcı adı ara..." autocomplete="off">
             <div class="search-results" id="search-results"></div>
+        </div>
+
+        <!-- ── INVITE / REFERRAL ── -->
+        <div class="section-card" style="margin-bottom:24px;">
+            <div class="section-title">ARKADAŞINI DAVET ET</div>
+            <p style="font-size:13px;color:var(--text-2);margin:6px 0 14px;font-weight:300;">
+                Davet bağlantını paylaş — arkadaşın katılınca ikiniz de <strong style="color:var(--volt);">+75 XP</strong> kazanın.
+            </p>
+            <div style="display:flex;gap:8px;">
+                <input type="text" id="invite-link" readonly value="Yükleniyor…"
+                       style="flex:1;min-width:0;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,0.04);border:1px solid var(--border);color:var(--text-2);font-size:13px;">
+                <button id="invite-copy-btn" data-action="copyInvite" data-ga-event="invite_copy"
+                        style="flex-shrink:0;padding:12px 18px;border-radius:10px;background:var(--volt);color:#121212;border:none;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">Kopyala</button>
+            </div>
+            <div id="invite-meta" style="font-size:12px;color:var(--text-3);margin-top:10px;"></div>
         </div>
 
         <!-- ── PENDING REQUESTS ── -->
@@ -226,7 +239,7 @@ function escapeHTML(str) {
 
 function avatarHTML(pp, name, cls) {
     cls = cls || 'fr-avatar';
-    if (pp) return '<div class="'+cls+'"><img src="'+escapeHTML(pp).replace(/"/g,'&quot;')+'"></div>';
+    if (pp) return '<div class="'+cls+'"><img src="'+escapeHTML(pp).replace(/"/g,'&quot;')+'" loading="lazy" decoding="async" alt=""></div>';
     const letter = (name || 'U')[0].toUpperCase();
     return '<div class="'+cls+'">'+escapeHTML(letter)+'</div>';
 }
@@ -291,8 +304,8 @@ async function loadFriends() {
             '<div class="fr-row">' + avatarHTML(r.profile_picture, r.username) +
             '<div class="fr-info"><div class="fr-name">'+escapeHTML(r.full_name)+'</div><div class="fr-handle">@'+escapeHTML(r.username)+'</div></div>' +
             '<div class="fr-actions">' +
-            '<button class="btn-accept" onclick="acceptReq('+r.request_id+')">Kabul</button>' +
-            '<button class="btn-reject" onclick="rejectReq('+r.request_id+')">Reddet</button>' +
+            '<button class="btn-accept" data-action="acceptReq" data-args="['+r.request_id+']">Kabul</button>' +
+            '<button class="btn-reject" data-action="rejectReq" data-args="['+r.request_id+']">Reddet</button>' +
             '</div></div>'
         ).join('');
     } else {
@@ -332,8 +345,39 @@ async function rejectReq(id) {
     else toast(data.error, 'error');
 }
 
+// ── Invite / referral ──
+let inviteUrl = '';
+async function loadReferral() {
+    try {
+        const res = await fetch('/referral');
+        if (!res.ok) return;
+        const data = await res.json();
+        inviteUrl = data.invite_url || '';
+        const inp = document.getElementById('invite-link');
+        if (inp) inp.value = inviteUrl;
+        const meta = document.getElementById('invite-meta');
+        if (meta) meta.textContent = data.referred_count
+            ? (data.referred_count + ' kişi davetinle katıldı 🎉')
+            : 'Henüz kimseyi davet etmedin.';
+    } catch (e) { /* yoksay */ }
+}
+
+async function copyInvite() {
+    if (!inviteUrl) return;
+    try {
+        await navigator.clipboard.writeText(inviteUrl);
+        toast('Davet bağlantısı kopyalandı!', 'success');
+    } catch (e) {
+        const inp = document.getElementById('invite-link');
+        if (inp) { inp.focus(); inp.select(); }
+        toast('Bağlantıyı seçip kopyalayabilirsin.', 'info');
+    }
+}
+
 loadFriends();
+loadReferral();
 </script>
 <script src="/static/nav.js"></script>
+<script src="/static/actions.js"></script>
 </body>
 </html>

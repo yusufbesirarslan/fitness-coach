@@ -51,6 +51,18 @@ def init_database(app):
             'ALTER TABLE custom_meal_item ADD COLUMN serving_quantity FLOAT',
             'ALTER TABLE "user" ADD COLUMN weekly_xp INTEGER DEFAULT 0',
             'ALTER TABLE "user" ADD COLUMN last_reward_week VARCHAR(10)',
+            # Davet/referral + freemium kolonları (idempotent — kolon varsa sessizce geçilir)
+            'ALTER TABLE "user" ADD COLUMN referral_code VARCHAR(12)',
+            'ALTER TABLE "user" ADD COLUMN referred_by_id INTEGER',
+            'ALTER TABLE "user" ADD COLUMN is_premium BOOLEAN DEFAULT false',
+            'ALTER TABLE "user" ADD COLUMN premium_since TIMESTAMP',
+            'ALTER TABLE "user" ADD COLUMN profile_picture_key VARCHAR(300)',
+            # Görev isimlerini Türkçeleştir (eski İngilizce kayıtları da güncelle)
+            "UPDATE daily_quest SET title = 'Günlük Giriş' WHERE quest_type = 'login'",
+            "UPDATE daily_quest SET title = 'Antrenman Kaydet' WHERE quest_type = 'workout_logged'",
+            "UPDATE daily_quest SET title = 'Bir Arkadaşına Yardım Et' WHERE quest_type = 'suggestion_sent'",
+            "UPDATE daily_quest SET title = 'Dolabını Güncelle' WHERE quest_type = 'supplement_added'",
+            "UPDATE daily_quest SET title = 'Öğün Kaydet' WHERE quest_type = 'meal_logged'",
         ]
         for sql in migrations:
             try:
@@ -97,16 +109,16 @@ def init_database(app):
             db.session.rollback()
         if DailyQuest.query.count() == 0:
             for q in [
-                DailyQuest(title="Daily Login", description="Bugün uygulamaya giriş yap", points_reward=10, quest_type="login"),
-                DailyQuest(title="Log a Workout", description="Bir antrenman planı oluştur veya kaydet", points_reward=50, quest_type="workout_logged"),
-                DailyQuest(title="Help a Friend", description="Bir arkadaşına mesaj gönder", points_reward=30, quest_type="suggestion_sent"),
+                DailyQuest(title="Günlük Giriş", description="Bugün uygulamaya giriş yap", points_reward=10, quest_type="login"),
+                DailyQuest(title="Antrenman Kaydet", description="Bir antrenman planı oluştur veya kaydet", points_reward=50, quest_type="workout_logged"),
+                DailyQuest(title="Bir Arkadaşına Yardım Et", description="Bir arkadaşına mesaj gönder", points_reward=30, quest_type="suggestion_sent"),
             ]:
                 db.session.add(q)
             db.session.commit()
         if not DailyQuest.query.filter_by(quest_type="supplement_added").first():
             db.session.add(DailyQuest(
-                title="Update Your Stack",
-                description="Supplement stack'ine yeni bir ürün ekle",
+                title="Dolabını Güncelle",
+                description="Supplement dolabına yeni bir ürün ekle",
                 points_reward=25, quest_type="supplement_added"
             ))
             db.session.commit()
@@ -117,6 +129,27 @@ def init_database(app):
                 points_reward=20, quest_type="meal_logged"
             ))
             db.session.commit()
+
+        # Görev ekonomisini derinleştir: dönüşümlü ek görevler (su / check-in / davet).
+        # Idempotent — her quest_type yalnızca bir kez eklenir.
+        _extra_quests = [
+            ("meal_logged",      "Öğün Kaydet",          "Bugün bir öğün kaydet",                         15),
+            ("water_logged",     "Su Hedefi",            "Bugün su takibini güncelle",                    10),
+            ("checkin_done",     "Haftalık Check-in",    "Kilonu güncelle veya check-in yap",             20),
+            ("friend_invited",   "Bir Arkadaşını Davet Et", "Davet bağlantını bir arkadaşınla paylaş",    40),
+        ]
+        for qtype, title, desc, pts in _extra_quests:
+            if not DailyQuest.query.filter_by(quest_type=qtype).first():
+                db.session.add(DailyQuest(title=title, description=desc,
+                                          points_reward=pts, quest_type=qtype))
+        db.session.commit()
+
+        # Davet kodu olmayan mevcut kullanıcılara tek seferlik backfill.
+        try:
+            from app.services.referral import backfill_referral_codes
+            backfill_referral_codes()
+        except Exception:
+            db.session.rollback()
 
         # Şema az önce create_all + legacy ALTER'larla güncel hâle geldi; DB henüz
         # Alembic zincirinde değilse baseline'ı çalıştırmadan "head" olarak damgala.

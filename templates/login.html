@@ -1,10 +1,16 @@
 <!DOCTYPE html>
 <html lang="tr" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Giriş Yap — Fitness Coach</title>
-    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+    {% include "_head.html" %}
+    <title>Giriş Yap — FitX</title>
+    <meta name="description" content="FitX — yapay zekâ koçunla kişiye özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.">
+    <meta property="og:title" content="FitX — Yapay Zekâ Fitness Koçun">
+    <meta property="og:description" content="Sana özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.">
+    <meta property="og:type" content="website">
+    <meta property="og:image" content="/static/favicon.svg">
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="FitX — Yapay Zekâ Fitness Koçun">
+    <meta name="twitter:description" content="Sana özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.">
     <link rel="stylesheet" href="/static/style.css">
     <style>
         .auth-wrapper {
@@ -67,7 +73,7 @@
 
     <div class="auth-wrapper">
         <div class="auth-card">
-            <div class="auth-logo">FITNESS COACH</div>
+            <div class="auth-logo">FITX</div>
             <div class="auth-subtitle">Hesabına giriş yap</div>
 
             <div class="auth-error" id="error-msg"></div>
@@ -122,13 +128,8 @@
         document.getElementById("password").addEventListener("keydown", e => {
             if (e.key === "Enter") login();
         });
-
-        // Delegated click handlers (CSP: replaces inline onclick)
-        document.addEventListener("click", e => {
-            const el = e.target.closest("[data-action]"); if (!el) return;
-            ({ toggleTheme, login })[el.dataset.action]?.();
-        });
     </script>
+    <script src="/static/actions.js"></script>
 
 </body>
 </html>

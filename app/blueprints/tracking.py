@@ -27,7 +27,7 @@ def home():
     last_weight_update = (last_checkin.created_at.isoformat() + "Z") if last_checkin else ""
     return render_template("index.html",
         username=current_user.username,
-        profile_picture=current_user.profile_picture,
+        profile_picture=current_user.avatar_src,
         streak_count=current_user.streak_count or 0,
         last_weight_update=last_weight_update,
     )
@@ -73,7 +73,7 @@ def log_progress():
     return jsonify({"message" : message})
 
 
-@bp.route("/progress")
+@bp.route("/api/progress")
 @login_required
 def progress():
     logs = WeeklyLog.query.filter_by(user_id=current_user.id)\
@@ -91,6 +91,14 @@ def progress():
             json.dumps(result, ensure_ascii=False),
             mimetype="application/json"
         )
+
+
+# Eski /progress adresi ham JSON döndürüyordu; kullanıcı (link/yer imi/tahmin)
+# oraya düşerse kod görmesin diye ilerleme sayfasına yönlendir.
+@bp.route("/progress")
+@login_required
+def progress_redirect():
+    return redirect(url_for("tracking.progress_page"))
 
 
 @bp.route("/checkin", methods=["POST"])
@@ -304,9 +312,19 @@ def today_activity():
 
 
 @bp.route("/progress-page")
-@login_required  
+@login_required
 def progress_page():
-    return render_template("progress.html", username=current_user.username, profile_picture=current_user.profile_picture)
+    # Tek kilo kaynağı: current_user.weight (panodaki değerle aynı). Henüz set
+    # edilmemişse son check-in'e düş — böylece check-in formu sabit bir sayı
+    # yerine kullanıcının gerçek güncel kilosuyla ön-dolar.
+    current_weight = current_user.weight
+    if not current_weight:
+        last_ci = WeeklyCheckIn.query.filter_by(user_id=current_user.id)\
+            .order_by(WeeklyCheckIn.created_at.desc()).first()
+        current_weight = last_ci.weight if last_ci else None
+    return render_template("progress.html", username=current_user.username,
+        profile_picture=current_user.avatar_src,
+        current_weight=current_weight)
 
 
 @bp.route("/history")

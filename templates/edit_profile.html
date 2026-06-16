@@ -1,11 +1,10 @@
 <!DOCTYPE html>
 <html lang="tr" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Profil Düzenle — Fitness Coach</title>
-    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    {% include "_head.html" %}
+    <title>Profil Düzenle — FitX</title>
     <link rel="stylesheet" href="/static/theme.css">
+    <link rel="stylesheet" href="/static/nav.css">
     <style>
     .profile-wrap { max-width: 600px; margin: 0 auto; }
 
@@ -170,69 +169,17 @@
     /* ── safe area ── */
     .main-content { padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
     @media (max-width: 768px) {
-        .sidebar { display: none; }
-        .main-content { margin-left: 0; padding-bottom: calc(32px + env(safe-area-inset-bottom, 0px)); }
+        .main-content { margin-left: 0; padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
     }
     </style>
 </head>
-<body>
+{% set nav_active = 'profile' %}
+<body class="page-body">
 
 <!-- ── TOAST CONTAINER ── -->
 <div class="toast-wrap" id="toast-wrap"></div>
 
-<!-- ── SIDEBAR (desktop) ── -->
-<aside class="sidebar">
-    <div class="sidebar-logo">FC</div>
-    <nav class="sidebar-nav">
-        <a href="/" class="sidebar-link">
-            <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-            Ana Sayfa
-        </a>
-        <a href="/nutrition" class="sidebar-link">
-            <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
-            Beslenme
-        </a>
-        <a href="/training" class="sidebar-link">
-            <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
-            Antrenman
-        </a>
-        <a href="/supplements" class="sidebar-link">
-            <svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
-            Supplements
-        </a>
-        <a href="/progress-page" class="sidebar-link">
-            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-            İlerleme
-        </a>
-        <a href="/friends" class="sidebar-link">
-            <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            Arkadaşlar
-        </a>
-        <a href="/leaderboard" class="sidebar-link">
-            <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            Kulüp
-        </a>
-        <a href="/quests" class="sidebar-link">
-            <svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-            Görevler
-        </a>
-    </nav>
-    <div class="sidebar-sep"></div>
-    <div class="sidebar-user">
-        <a href="/edit-profile" style="display:flex;align-items:center;gap:10px;text-decoration:none;flex:1;min-width:0;">
-            {% if profile_picture %}
-                <img src="{{ profile_picture }}" style="width:34px;height:34px;border-radius:50%;object-fit:cover;">
-            {% else %}
-                <div class="sidebar-avatar">{{ username[0]|upper if username else 'U' }}</div>
-            {% endif %}
-            <div style="overflow:hidden">
-                <div class="sidebar-name">{{ username }}</div>
-                <span style="font-size:11px;color:var(--text-3);">Lvl {{ user_level }} · {{ user_title }}</span>
-            </div>
-        </a>
-        <a href="/logout" class="sidebar-logout" title="Çıkış yap" style="margin-left:auto;">→</a>
-    </div>
-</aside>
+{% include "_nav.html" %}
 
 <!-- ── MAIN CONTENT ── -->
 <main class="main-content">
@@ -250,7 +197,7 @@
 
         <!-- ── AVATAR DISPLAY ── -->
         <div class="avatar-section">
-            <div class="avatar-lg" id="avatar-display" data-action="openAvatarPicker">
+            <div class="avatar-lg" id="avatar-display" data-action="fxClickTarget" data-target="avatar-file-input">
                 {% if profile_picture %}
                     <img src="{{ profile_picture }}" alt="Profil" id="avatar-img">
                 {% else %}
@@ -295,11 +242,11 @@
                 <div class="form-field">
                     <label>Fitness Hedefi</label>
                     <div class="goal-cards">
-                        <div class="goal-card{% if goal == 'kilo verme' %} selected{% endif %}" data-action="selectGoal" data-goal="kilo verme">
+                        <div class="goal-card{% if goal == 'kilo verme' %} selected{% endif %}" data-action="selectGoal" data-args='["kilo verme"]'>
                             <div class="goal-card-icon">🏃</div>
                             <div class="goal-card-label">Kilo Verme</div>
                         </div>
-                        <div class="goal-card{% if goal == 'kas kazanma' %} selected{% endif %}" data-action="selectGoal" data-goal="kas kazanma">
+                        <div class="goal-card{% if goal == 'kas kazanma' %} selected{% endif %}" data-action="selectGoal" data-args='["kas kazanma"]'>
                             <div class="goal-card-icon">💪</div>
                             <div class="goal-card-label">Kas Kazanma</div>
                         </div>
@@ -362,6 +309,7 @@
     </div>
 </main>
 
+{% include "_actionbar.html" %}
 
 <script nonce="{{ csp_nonce }}">
 let selectedGoal = '{{ goal }}';
@@ -451,15 +399,8 @@ async function saveProfile() {
         btn.textContent = 'KAYDET';
     }
 }
-
-// Delegated click handlers (CSP: replaces inline onclick)
-document.addEventListener('click', (e) => {
-    const el = e.target.closest('[data-action]'); if (!el) return;
-    const a = el.dataset.action;
-    if      (a === 'openAvatarPicker') document.getElementById('avatar-file-input').click();
-    else if (a === 'selectGoal')       selectGoal(el.dataset.goal, el);
-    else if (a === 'saveProfile')      saveProfile();
-});
 </script>
+<script src="/static/nav.js"></script>
+<script src="/static/actions.js"></script>
 </body>
 </html>

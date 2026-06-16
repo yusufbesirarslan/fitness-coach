@@ -1,10 +1,8 @@
 ﻿<!DOCTYPE html>
 <html lang="tr">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>İlerleme — Fitness Coach</title>
-    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+    {% include "_head.html" %}
+    <title>İlerleme — FitX</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -107,7 +105,7 @@
 
 <!-- GLOBAL HEADER -->
 <header class="global-header">
-    <button class="drawer-trigger" onclick="fxToggleDrawer()"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+    <button class="drawer-trigger" data-action="fxToggleDrawer"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
     <span class="header-brand">FITX</span>
     <div class="header-spacer"></div>
     <a href="/edit-profile" class="header-avatar" title="Profil">{% if profile_picture %}<img src="{{ profile_picture }}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">{% else %}{{ username[0]|upper if username else 'U' }}{% endif %}</a>
@@ -143,15 +141,15 @@
 
     <!-- TABS -->
     <div class="tab-bar" role="tablist">
-        <button class="tab-btn active" onclick="switchTab('checkin', this)">
+        <button class="tab-btn active" data-action="switchTab" data-args='["checkin"]'>
             <svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
             Check-In
         </button>
-        <button class="tab-btn" onclick="switchTab('charts', this)">
+        <button class="tab-btn" data-action="switchTab" data-args='["charts"]'>
             <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
             Grafikler
         </button>
-        <button class="tab-btn" onclick="switchTab('history', this)">
+        <button class="tab-btn" data-action="switchTab" data-args='["history"]'>
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
             Geçmiş
         </button>
@@ -166,7 +164,9 @@
             <div class="form-grid">
                 <div class="form-group">
                     <label class="form-lbl">Güncel Kilo (kg)</label>
-                    <input type="number" id="ci-weight" placeholder="78.5" step="0.1">
+                    <input type="number" id="ci-weight" step="0.1"
+                           placeholder="{{ '%g'|format(current_weight) if current_weight else 'örn. 78.5' }}"
+                           value="{{ '%g'|format(current_weight) if current_weight else '' }}">
                 </div>
                 <div class="form-group">
                     <label class="form-lbl">Not (isteğe bağlı)</label>
@@ -176,7 +176,7 @@
                 <div class="slider-group form-full">
                     <label class="form-lbl">Antrenman Yoğunluğu</label>
                     <div class="slider-row">
-                        <input type="range" id="ci-yogunluk" min="1" max="5" value="3" oninput="document.getElementById('yogunluk-val').textContent=this.value">
+                        <input type="range" id="ci-yogunluk" min="1" max="5" value="3" data-action-input="fxSetText" data-target="yogunluk-val">
                         <div class="slider-val" id="yogunluk-val">3</div>
                     </div>
                     <div class="slider-labels"><span>Çok düşük</span><span>Çok yüksek</span></div>
@@ -185,7 +185,7 @@
                 <div class="slider-group form-full">
                     <label class="form-lbl">Yorgunluk / Fatigue</label>
                     <div class="slider-row">
-                        <input type="range" id="ci-fatigue" min="1" max="5" value="3" oninput="document.getElementById('fatigue-val').textContent=this.value">
+                        <input type="range" id="ci-fatigue" min="1" max="5" value="3" data-action-input="fxSetText" data-target="fatigue-val">
                         <div class="slider-val" id="fatigue-val">3</div>
                     </div>
                     <div class="slider-labels"><span>Hiç yorgun değil</span><span>Çok yorgun</span></div>
@@ -194,7 +194,7 @@
                 <div class="slider-group form-full">
                     <label class="form-lbl">Uyku Kalitesi</label>
                     <div class="slider-row">
-                        <input type="range" id="ci-uyku" min="1" max="5" value="3" oninput="document.getElementById('uyku-val').textContent=this.value">
+                        <input type="range" id="ci-uyku" min="1" max="5" value="3" data-action-input="fxSetText" data-target="uyku-val">
                         <div class="slider-val" id="uyku-val">3</div>
                     </div>
                     <div class="slider-labels"><span>Çok kötü</span><span>Çok iyi</span></div>
@@ -203,7 +203,7 @@
                 <div class="slider-group form-full">
                     <label class="form-lbl">Beslenme Uyumu</label>
                     <div class="slider-row">
-                        <input type="range" id="ci-beslenme" min="1" max="5" value="3" oninput="document.getElementById('beslenme-val').textContent=this.value">
+                        <input type="range" id="ci-beslenme" min="1" max="5" value="3" data-action-input="fxSetText" data-target="beslenme-val">
                         <div class="slider-val" id="beslenme-val">3</div>
                     </div>
                     <div class="slider-labels"><span>Hiç uyamadım</span><span>Tam uyum</span></div>
@@ -213,14 +213,14 @@
                     <label class="form-lbl">Progressive Overload</label>
                     <div class="section-sub" style="margin-bottom:10px">Bu hafta ağırlık veya tekrar artırabildin mi?</div>
                     <div class="overload-grid">
-                        <div class="overload-chip selected" onclick="selectOverload('evet',this)">Evet ✓</div>
-                        <div class="overload-chip" onclick="selectOverload('kismen',this)">Kısmen ~</div>
-                        <div class="overload-chip" onclick="selectOverload('hayir',this)">Hayır ✗</div>
+                        <div class="overload-chip selected" data-action="selectOverload" data-args='["evet"]'>Evet ✓</div>
+                        <div class="overload-chip" data-action="selectOverload" data-args='["kismen"]'>Kısmen ~</div>
+                        <div class="overload-chip" data-action="selectOverload" data-args='["hayir"]'>Hayır ✗</div>
                     </div>
                 </div>
             </div>
 
-            <button class="btn-volt w-full" id="checkin-btn" onclick="submitCheckin()">CHECK-IN GÖNDER</button>
+            <button class="btn-volt w-full" id="checkin-btn" data-action="submitCheckin">CHECK-IN GÖNDER</button>
         </div>
 
         <div class="feedback-card" id="feedback-card">
@@ -445,5 +445,6 @@
 
 <script src="/static/coach_widget.js"></script>
 <script src="/static/nav.js"></script>
+<script src="/static/actions.js"></script>
 </body>
 </html>
