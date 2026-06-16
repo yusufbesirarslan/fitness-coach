@@ -2,7 +2,7 @@
 import json
 import re
 import nutrition_pipeline
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import current_app, g, session
 
 from app.config import OPENAI_MODEL
@@ -283,6 +283,7 @@ def _tool_fetch_nutrition_and_stage_log(user_id, food_query):
         )
 
     # Tek aktif 'staged' meal: önceki bekleyenleri temizle, yenisini yaz, commit et.
+    _cleanup_stale_pending(user_id)
     PendingAction.query.filter_by(user_id=user_id, action_type="log_meal").delete()
     db.session.add(PendingAction(user_id=user_id, action_type="log_meal", payload=payload))
     db.session.commit()
@@ -320,12 +321,21 @@ def _tool_confirm_and_commit_meal_log(user_id):
     fat = float(data.get("fat", 0) or 0)
     name = (data.get("food_name") or "Yemek")[:200]
 
+    # Satırı önce atomik 'sahiplen': eşzamanlı çift-onayda (double-confirm) yalnızca
+    # biri 1 satır siler; diğeri 0 alır ve çift loglamadan döner (3.10 idempotent).
+    claimed = PendingAction.query.filter_by(id=pending.id).delete(synchronize_session=False)
+    if not claimed:
+        db.session.rollback()
+        return json.dumps({
+            "status": "no_pending",
+            "message": "Bu kayıt zaten işlendi.",
+        }, ensure_ascii=False)
+
     db.session.add(MealLog(
         user_id=user_id, ogun="AI Koç", yemekler=name,
         kalori=cal, protein=pro, karb=carb, yag=fat,
         tarih=day_key(), source="coach",
     ))
-    db.session.delete(pending)  # staged satırı temizle (state geçişi tamamlandı)
     award_xp(user_id, 10)
     log_activity(user_id, "nutrition_logged", f"{name} — {round(cal)} kcal")
     db.session.commit()
@@ -339,6 +349,28 @@ def _tool_confirm_and_commit_meal_log(user_id):
         "xp_awarded": 10,
         "today_totals": _today_nutrition_totals(user_id),
     }, ensure_ascii=False)
+
+
+_PENDING_TTL = timedelta(hours=1)
+
+
+def _cleanup_stale_pending(user_id, max_age=_PENDING_TTL):
+    """Onaylanmadan bayatlamış (>1 saat) bekleyen aksiyonları toplu sil (3.10).
+
+    Onay hiç gelmeyen 'staged' kayıtlar birikip sonraki bir 'evet'te yanlış/eski
+    bir yemeği loglayabilir; periyodik toplu temizlik bu riski kapatır. Commit
+    çağırana bırakılmaz — kendi içinde idempotenttir, hata boğulur."""
+    try:
+        cutoff = datetime.utcnow() - max_age
+        deleted = (PendingAction.query
+                   .filter(PendingAction.user_id == user_id,
+                           PendingAction.created_at < cutoff)
+                   .delete(synchronize_session=False))
+        if deleted:
+            current_app.logger.info(
+                "[PENDING] %d bayat bekleyen aksiyon temizlendi (user=%s)", deleted, user_id)
+    except Exception:
+        db.session.rollback()
 
 
 def _tool_stage_workout_log(user_id, exercise_name, sets, reps, weight_kg):
@@ -364,6 +396,7 @@ def _tool_stage_workout_log(user_id, exercise_name, sets, reps, weight_kg):
         "sets": sets, "reps": reps, "weight_kg": weight,
         "volume": round(sets * reps * weight, 1),
     }
+    _cleanup_stale_pending(user_id)
     PendingAction.query.filter_by(user_id=user_id, action_type="log_workout").delete()
     db.session.add(PendingAction(user_id=user_id, action_type="log_workout", payload=payload))
     db.session.commit()
@@ -388,13 +421,21 @@ def _tool_confirm_and_commit_workout_log(user_id):
         }, ensure_ascii=False)
 
     d = pending.payload or {}
+    # Satırı önce atomik 'sahiplen' (double-confirm idempotency — 3.10).
+    claimed = PendingAction.query.filter_by(id=pending.id).delete(synchronize_session=False)
+    if not claimed:
+        db.session.rollback()
+        return json.dumps({
+            "status": "no_pending",
+            "message": "Bu kayıt zaten işlendi.",
+        }, ensure_ascii=False)
+
     db.session.add(WorkoutLog(
         user_id=user_id,
         exercise_name=(d.get("exercise_name") or "Egzersiz")[:120],
         sets=int(d.get("sets", 3)), reps=int(d.get("reps", 10)),
         weight_kg=float(d.get("weight_kg", 0)), volume=float(d.get("volume", 0)),
     ))
-    db.session.delete(pending)
     award_xp(user_id, 15)
     log_activity(user_id, "workout_completed",
                  f"{d.get('exercise_name')} — {d.get('sets')}x{d.get('reps')} @ {d.get('weight_kg')}kg")

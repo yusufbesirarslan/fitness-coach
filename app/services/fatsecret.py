@@ -49,7 +49,16 @@ def _get_fatsecret_token() -> str:
             timeout=10,
         )
         resp.raise_for_status()
-        data = resp.json()
+        try:
+            data = resp.json()
+        except ValueError as e:
+            # Hata sayfası/HTML döndüyse json() patlar; önbelleği bozma, anlamlı hata ver.
+            raise RuntimeError(f"FatSecret token yanıtı JSON değil: {e}") from e
+        if not isinstance(data, dict) or data.get("error") or not data.get("access_token"):
+            # OAuth hata yükü ({"error": "..."}) veya eksik access_token: data["access_token"]
+            # ham KeyError yerine açık hata at, önbelleği ASLA boş/yanlış token'la doldurma.
+            err = data.get("error") if isinstance(data, dict) else data
+            raise RuntimeError(f"FatSecret token alınamadı: {err}")
         _fs_token_cache["token"] = data["access_token"]
         _fs_token_cache["expires_at"] = time.time() + data.get("expires_in", 86400)
         return data["access_token"]

@@ -89,6 +89,27 @@ def test_token_http_error_propagates(monkeypatch):
         _get_fatsecret_token()
 
 
+def test_token_error_payload_raises_and_leaves_cache_unset(monkeypatch):
+    # 200 + OAuth hata yükü ({"error": ...}): data["access_token"] ham KeyError yerine
+    # açık RuntimeError; önbellek kirletilmemeli (F1.4).
+    monkeypatch.setenv("FATSECRET_CLIENT_ID", "cid")
+    monkeypatch.setenv("FATSECRET_CLIENT_SECRET", "csecret")
+    monkeypatch.setattr(fatsecret, "_fs_post",
+                        lambda url, **kw: _Resp({"error": "invalid_client"}))
+    with pytest.raises(RuntimeError, match="FatSecret token alınamadı"):
+        _get_fatsecret_token()
+    assert fatsecret._fs_token_cache["token"] is None
+
+
+def test_token_missing_access_token_raises(monkeypatch):
+    monkeypatch.setenv("FATSECRET_CLIENT_ID", "cid")
+    monkeypatch.setenv("FATSECRET_CLIENT_SECRET", "csecret")
+    monkeypatch.setattr(fatsecret, "_fs_post", lambda url, **kw: _Resp({"expires_in": 3600}))
+    with pytest.raises(RuntimeError, match="FatSecret token alınamadı"):
+        _get_fatsecret_token()
+    assert fatsecret._fs_token_cache["token"] is None
+
+
 # ---------------------------------------------------------------------------
 # food_description ayrıştırma
 # ---------------------------------------------------------------------------
