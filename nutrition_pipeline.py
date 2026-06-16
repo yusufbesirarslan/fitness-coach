@@ -42,6 +42,13 @@ MAX_SERVING_MACRO_G = 300.0
 # takilmiyordu; bu mutlak yag tavani agirliktan bagimsiz olarak yakalar.
 MAX_SERVING_FAT_G = 150.0
 
+# Tek bir insan porsiyonundaki KARBONHIDRAT icin ayri tavan (yag tavaniyla ayni
+# mantik). Genel makro tavani (300 g) cok gevsek: bir tabak en buyuk pilav/makarna
+# bile ~120-150 g karbi gecmez. Bunun ustu (saha vakasi: 'Asya Usulu Acili Tavuk'
+# 244 g karb / 1480 kcal) sisirilmis/halusinasyon tahminidir. Atwater tutarli
+# oldugu icin enerji kontrolune takilmiyordu; bu mutlak karb tavani yakalar.
+MAX_SERVING_CARB_G = 200.0
+
 # Protein+Karb+Yag gram toplami porsiyon agirligini bu kadar gram asabilir
 # (kayan nokta yuvarlama paylari icin kucuk tolerans).
 MACRO_WEIGHT_TOLERANCE_G = 1.0
@@ -302,6 +309,11 @@ def check_serving(serving):
     if fat > MAX_SERVING_FAT_G:
         is_valid = False
         reasons.append("fat_exceeds_serving_max")
+    # Karb, genel makro tavanindan daha siki bir esige tabi: tek tabakta >200 g
+    # karb fiziksel olarak imkansiz (sisirilmis/halusinasyon tahminini yakalar).
+    if carbs > MAX_SERVING_CARB_G:
+        is_valid = False
+        reasons.append("carbs_exceed_serving_max")
 
     # Atwater / enerji korunumu.
     expected_cal = 4.0 * protein + 4.0 * carbs + 9.0 * fat
@@ -370,6 +382,71 @@ def is_implausibly_low_menu_kcal(macros, min_kcal=MENU_MIN_DISH_KCAL):
     is_pure_fat_ingredient ile ayni menu-sanitize damarinda yer alir."""
     cal = _num(macros.get("calories"))
     return 0.0 < cal < min_kcal
+
+
+# Ekmek/hamur bazli yemekler (burger, pizza, makarna) icin asgari karb (gram):
+# bu turlerin tabaninda ekmek/hamur vardir → karb pratikte hicbir zaman ~0 olmaz.
+# 0 karbli bir 'burger/pizza/makarna' kaydi ekmeksiz koftedir (FatSecret patty-only)
+# ya da yanlis eslesmedir → reddedilip LLM'e (ekmek karbini ekleyen) birakilmali.
+BREADBASED_MIN_CARB_G = 8.0
+_BREADBASED_DISH_TYPES = frozenset({"burger", "pizza", "pasta"})
+
+
+def is_breadbased_zero_carb(macros, dish_type):
+    """Ekmek/hamur bazli yemek (burger/pizza/makarna) sifir-karbli mi? (kimlik hatasi)
+
+    Saha vakasi (ai-chatbot-menu.txt): 'Chicken Burger' → 82 g protein, 0 g karb
+    (ekmeksiz koftenin FatSecret kaydi). Burger/pizza/makarna her zaman ekmek/hamur
+    icerir → karb 0 olamaz. ``dish_type`` bread-bazli sinifta VE ``calories > 0`` VE
+    ``carbs < BREADBASED_MIN_CARB_G`` ise True (kayit yanlis → cagiran reddetmeli).
+    Saf fonksiyon (LLM/ag yok); ``dish_type`` cagiran tarafindan cozulur."""
+    if dish_type not in _BREADBASED_DISH_TYPES:
+        return False
+    cal = _num(macros.get("calories")) if macros else 0.0
+    if cal <= 0:
+        return False
+    return _num(macros.get("carbs")) < BREADBASED_MIN_CARB_G
+
+
+# Adinda acik protein kaynagi gecen bir yemek bu gramin altinda protein
+# icermemeli; altindaysa eslesme yemegin kendisine degil bir sosa/garniture
+# carpmistir (saha vakasi: 'Sweet Chili Soslu Tavuk' → 4 g protein, sos kaydi).
+PROTEIN_DISH_MIN_G = 8.0
+# Turkce karakterleri ASCII'ye katlar (saf modul: app/ai_nutrition importu YOK).
+# Anahtar eslestirmesi aksandan bagimsiz olsun ('Köfte'→'kofte', 'Balık'→'balik').
+_TR_FOLD_LOWER = str.maketrans({
+    "ç": "c", "Ç": "c", "ğ": "g", "Ğ": "g", "ı": "i", "I": "i", "İ": "i",
+    "ö": "o", "Ö": "o", "ş": "s", "Ş": "s", "ü": "u", "Ü": "u",
+})
+# Foldlandiktan sonra ASCII alt-dize olarak aranir (TR + EN). Corba/salata turleri
+# haric tutulur (tavuk corbasi/salatasi mesru dusuk protein yogunlugu icerebilir).
+# NOT: 'hindi' (hindi eti) bilincli olarak yok — 'Hindistan' (hindistan cevizi =
+# coconut) icinde alt-dize olarak gecip dusuk-proteinli hindistan cevizli tatlilari
+# yanlis reddederdi; hindi-eti ana yemegi nadir, collision riski daha buyuk.
+_PROTEIN_SOURCE_KEYWORDS = (
+    "tavuk", "chicken", "biftek", "steak", "kofte", "balik", "somon", "salmon",
+    "karides", "shrimp", "dana", "kuzu", "bonfile", "schnitzel", "snitzel",
+)
+_PROTEIN_DISH_EXCLUDE_TYPES = frozenset({"soup", "salad"})
+
+
+def is_protein_dish_low_protein(name, macros, dish_type=None):
+    """Adinda protein kaynagi gecen yemek imkansiz-dusuk proteinli mi? (kimlik hatasi)
+
+    Ad bir protein kaynagi (tavuk/et/balik...) iceriyorsa VE tur corba/salata DEGILSE
+    VE ``0 < protein < PROTEIN_DISH_MIN_G`` ise True → eslesme yemege degil bir
+    sosa/garniture carpmistir; cagiran reddedip LLM'e birakmali. Esik bilincli
+    dusuk (yalniz 4 g gibi net hatalari yakalar, mesru hafif yemekleri bozmaz).
+    Saf fonksiyon (LLM/ag yok)."""
+    if not name:
+        return False
+    if dish_type in _PROTEIN_DISH_EXCLUDE_TYPES:
+        return False
+    folded = str(name).translate(_TR_FOLD_LOWER).lower()
+    if not any(kw in folded for kw in _PROTEIN_SOURCE_KEYWORDS):
+        return False
+    protein = _num(macros.get("protein")) if macros else 0.0
+    return 0.0 < protein < PROTEIN_DISH_MIN_G
 
 
 # ---------------------------------------------------------------------------

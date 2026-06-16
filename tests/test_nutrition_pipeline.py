@@ -716,3 +716,98 @@ class TestIsLowForStatedGrams:
         assert is_low_for_stated_grams(_macros(125, 18, 9, 2), 0) is False
         assert is_low_for_stated_grams(_macros(0, 0, 0, 0), 220) is False
         assert is_low_for_stated_grams(None, 220) is False
+
+
+# ---------------------------------------------------------------------------
+# Mutlak karb tavani (MAX_SERVING_CARB_G): yag tavaniyla ayni mantik. Genel makro
+# tavani (300 g) cok gevsek; tek tabakta >200 g karb imkansiz (saha vakasi:
+# 'Asya Usulu Acili Tavuk' 244 g karb / 1480 kcal Atwater-tutarli oldugu icin
+# enerji kontrolune takilmiyordu).
+# ---------------------------------------------------------------------------
+
+class TestServingCarbCap:
+    def test_carb_just_over_cap_discarded(self):
+        # 201 g karb: kalori (~1000<3000) ve diger tavanlar altinda ama karb-tavanini
+        # asar → carbs_exceed_serving_max ile elenir.
+        valid, _flags, reasons = check_serving(_serving(0, 1000, 10, 201, 10))
+        assert valid is False
+        assert "carbs_exceed_serving_max" in reasons
+
+    def test_field_case_244g_carb_discarded(self):
+        # 'Asya Usulu Acili Tavuk' saha degeri: 1480 kcal / 244 g karb.
+        valid, _flags, reasons = check_serving(_serving(0, 1480, 60, 244, 28))
+        assert valid is False
+        assert "carbs_exceed_serving_max" in reasons
+
+    def test_carb_at_cap_passes(self):
+        # 200 g == tavan; gecmeli (genel makro tavani 300 altinda, Atwater tutarli).
+        valid, _flags, reasons = check_serving(_serving(0, 1000, 10, 200, 10))
+        assert valid is True
+        assert "carbs_exceed_serving_max" not in reasons
+
+    def test_realistic_high_carb_dish_kept(self):
+        # 150 g karb (noodle/buyuk pizza) MESRU → korunur (false positive yok).
+        valid, _flags, reasons = check_serving(_serving(0, 1155, 74, 150, 24))
+        assert valid is True
+        assert reasons == []
+
+
+class TestIsBreadbasedZeroCarb:
+    """Ekmek/hamur bazli yemek (burger/pizza/makarna) 0 karb olamaz: ekmeksiz
+    patty/yanlis eslesme. Saha vakasi: 'Chicken Burger' 82g protein, 0g karb."""
+
+    def test_zero_carb_burger_flagged(self):
+        assert np.is_breadbased_zero_carb(_macros(717, 82, 0, 41), "burger") is True
+        assert np.is_breadbased_zero_carb(_macros(765, 87, 0, 44), "burger") is True
+
+    def test_zero_carb_pizza_and_pasta_flagged(self):
+        assert np.is_breadbased_zero_carb(_macros(900, 40, 2, 50), "pizza") is True
+        assert np.is_breadbased_zero_carb(_macros(700, 30, 5, 35), "pasta") is True
+
+    def test_carbed_bread_dish_not_flagged(self):
+        # Gercek (karbli) burger/pizza → bayraklanmaz.
+        assert np.is_breadbased_zero_carb(_macros(620, 46, 33, 32), "burger") is False
+        assert np.is_breadbased_zero_carb(_macros(850, 40, 90, 35), "pizza") is False
+
+    def test_non_breadbased_type_never_flagged(self):
+        # Salata/corba/bilinmeyen tur 0 karb olabilir → kapsam disi.
+        assert np.is_breadbased_zero_carb(_macros(300, 30, 0, 18), "salad") is False
+        assert np.is_breadbased_zero_carb(_macros(300, 30, 0, 18), None) is False
+
+    def test_zero_calorie_not_flagged(self):
+        # calories<=0 ayri "veri yok" durumu; burada True donmemeli.
+        assert np.is_breadbased_zero_carb(_macros(0, 0, 0, 0), "burger") is False
+
+
+class TestIsProteinDishLowProtein:
+    """Adinda protein kaynagi gecen yemek ~0 protein icermemeli (sos/garnitur
+    eslesmesi). Saha vakasi: 'Sweet Chili Soslu Tavuk' → 4 g protein."""
+
+    def test_field_case_flagged(self):
+        assert np.is_protein_dish_low_protein(
+            "Sweet Chılı Soslu Tavuk", _macros(390, 4, 23, 32), None) is True
+
+    def test_accent_folding(self):
+        # 'Köfte'/'Balık' aksanli adlar foldlanip yakalanir.
+        assert np.is_protein_dish_low_protein("Izgara Köfte", _macros(300, 5, 10, 25)) is True
+        assert np.is_protein_dish_low_protein("Tava Balık", _macros(200, 6, 5, 16)) is True
+
+    def test_soup_and_salad_excluded(self):
+        # Tavuk corbasi/salatasi mesru dusuk protein yogunlugu → kapsam disi.
+        assert np.is_protein_dish_low_protein(
+            "Tavuk Çorbası", _macros(120, 4, 14, 4), "soup") is False
+        assert np.is_protein_dish_low_protein(
+            "Tavuklu Salata", _macros(200, 5, 10, 15), "salad") is False
+
+    def test_high_protein_dish_not_flagged(self):
+        # Esigin (8 g) ustunde protein → bayraklanmaz.
+        assert np.is_protein_dish_low_protein("Tavuklu Bowl", _macros(820, 74, 90, 22)) is False
+
+    def test_non_protein_dish_ignored(self):
+        # Protein kaynagi adi yoksa → karar yok (False), proteini dusuk olsa bile.
+        assert np.is_protein_dish_low_protein("Patates Tava", _macros(350, 5, 60, 15)) is False
+        assert np.is_protein_dish_low_protein("", _macros(0, 0, 0, 0)) is False
+
+    def test_zero_protein_not_flagged(self):
+        # protein<=0 ayri "veri yok" durumu; kati 0<protein<esik araliginda True.
+        assert np.is_protein_dish_low_protein("Izgara Tavuk", _macros(0, 0, 0, 0)) is False

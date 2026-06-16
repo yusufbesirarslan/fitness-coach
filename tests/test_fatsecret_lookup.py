@@ -150,3 +150,31 @@ def test_lookup_no_candidates_leaves_item_for_llm(app, monkeypatch):
     _lookup(monkeypatch, {})
     per_serving, per_100g = fatsecret._lookup_macros_fatsecret(["Bilinmeyen"], "tok")
     assert per_serving == {} and per_100g == {}
+
+
+def test_lookup_rejects_breadbased_zero_carb_for_llm(app, monkeypatch):
+    # Saha hatasi: 'Chicken Burger' → 82g protein, 0g karb (ekmeksiz patty kaydi).
+    # Porsiyon banttan gecse de (717<800) kimlik-kapisi reddeder → oge LLM'e duser.
+    _lookup(monkeypatch, {"Chicken Burger": [
+        {"food_name": "Chicken Burger Patty",
+         "food_description": _desc("Per 1 serving", 717, 82, 0, 41)}]})
+    per_serving, per_100g = fatsecret._lookup_macros_fatsecret(["Chicken Burger"], "tok")
+    assert per_serving == {} and per_100g == {}
+
+
+def test_lookup_rejects_protein_dish_with_near_zero_protein(app, monkeypatch):
+    # Saha hatasi: 'Sweet Chili Soslu Tavuk' → 4g protein (tavuga degil sosa eslesti).
+    _lookup(monkeypatch, {"Sweet Chili Soslu Tavuk": [
+        {"food_name": "Sweet Chili Sauce",
+         "food_description": _desc("Per 1 serving", 390, 4, 23, 32)}]})
+    per_serving, per_100g = fatsecret._lookup_macros_fatsecret(["Sweet Chili Soslu Tavuk"], "tok")
+    assert per_serving == {} and per_100g == {}
+
+
+def test_lookup_accepts_legit_burger_with_carbs(app, monkeypatch):
+    # Kimlik-kapisi over-reject etmemeli: gercek (karbli, proteinli) burger kabul edilir.
+    _lookup(monkeypatch, {"Cheeseburger": [
+        {"food_name": "Cheeseburger",
+         "food_description": _desc("Per 1 serving", 620, 35, 40, 30)}]})
+    per_serving, _ = fatsecret._lookup_macros_fatsecret(["Cheeseburger"], "tok")
+    assert per_serving["Cheeseburger"]["calories"] == 620.0

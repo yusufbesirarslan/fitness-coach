@@ -190,7 +190,28 @@ def test_macros_llm_batches_large_lists(app, monkeypatch):
     items = [f"yemek{i}" for i in range(20)]
     result = _estimate_macros_llm(items)
     assert len(result) == 20
-    assert [len(b) for b in batches] == [15, 5]  # _LLM_MACRO_BATCH_SIZE = 15
+    # Batch'ler artik PARALEL calisir → tamamlanma sirasi belirsiz; boyut kumesini
+    # sirasiz dogrula (15 + 5 = _LLM_MACRO_BATCH_SIZE bolumlemesi).
+    assert sorted(len(b) for b in batches) == [5, 15]
+
+
+def test_macros_llm_parallel_merges_all_batches(app, monkeypatch):
+    # Gercek _estimate_macros_llm_batch + thread-pool yolu: _heavy_chat'i mock'la,
+    # prompt'taki tum 'yemekN' adlarini echo eden bir JSON dondur. 3 batch (15/15/2)
+    # → paralel yol; her batch worker'i kendi app_context'inde calismali (cokmemeli)
+    # ve sonuclar eksiksiz birlesmeli.
+    import re as _re
+
+    def fake_heavy(messages, system_prompt=None, **kw):
+        names = set(_re.findall(r"yemek\d+", messages[0]["content"]))
+        return json.dumps({n: {"calories": 300, "protein": 20, "carbs": 30, "fat": 10}
+                           for n in names})
+
+    monkeypatch.setattr(ai_nutrition, "_heavy_chat", fake_heavy)
+    items = [f"yemek{i}" for i in range(32)]   # 32 → 3 batch → paralel yol
+    result = _estimate_macros_llm(items)
+    assert len(result) == 32
+    assert all(result[n]["calories"] == 300.0 for n in items)
 
 
 # ---------------------------------------------------------------------------
