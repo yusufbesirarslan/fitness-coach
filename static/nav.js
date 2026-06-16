@@ -34,6 +34,14 @@
     backdrop.addEventListener('click', fxCloseDrawer);
   }
 
+  /* ── Delegated drawer trigger (CSP: replaces inline onclick) ──
+     Every page that loads nav.js renders <button class="drawer-trigger"
+     data-action="fxToggleDrawer">; this single listener handles all of them. */
+  document.addEventListener('click', function (e) {
+    var trigger = e.target.closest('[data-action="fxToggleDrawer"]');
+    if (trigger) fxToggleDrawer();
+  });
+
   /* ── Swipe-to-close drawer ─────────────────────────── */
   let touchStartX = 0;
   let touchCurrentX = 0;

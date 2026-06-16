@@ -160,7 +160,7 @@
 <div class="toast-wrap" id="toast-wrap"></div>
 
 <header class="global-header">
-    <button class="drawer-trigger" onclick="fxToggleDrawer()"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+    <button class="drawer-trigger" data-action="fxToggleDrawer"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
     <span class="header-brand">FITX</span><div class="header-spacer"></div>
     <a href="/edit-profile" class="header-avatar" title="Profil">{% if profile_picture %}<img src="{{ profile_picture }}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">{% else %}{{ username[0]|upper if username else 'U' }}{% endif %}</a>
 </header>
@@ -190,13 +190,13 @@
             <span id="lb-countdown" class="lb-countdown" aria-live="polite"></span>
         </div>
         <div class="lb-controls">
-            <select id="lb-zaman" class="lb-zaman" aria-label="Zaman aralığı" onchange="setTimeframe(this.value)">
+            <select id="lb-zaman" class="lb-zaman" aria-label="Zaman aralığı" data-action="setTimeframe">
                 <option value="all_time">Tüm Zamanlar</option>
                 <option value="weekly">Haftalık</option>
             </select>
             <div class="lb-tabs">
-                <button class="lb-tab active" data-scope="friends" onclick="loadBoard('friends')">Arkadaşlar</button>
-                <button class="lb-tab" data-scope="global" onclick="loadBoard('global')">Genel</button>
+                <button class="lb-tab active" data-scope="friends" data-action="loadBoard">Arkadaşlar</button>
+                <button class="lb-tab" data-scope="global" data-action="loadBoard">Genel</button>
             </div>
         </div>
         <div id="lb-list" class="lb-list">
@@ -363,6 +363,16 @@ async function loadBoard(scope) {
         list.innerHTML = '<div class="loading-text">Sıralama yüklenirken hata oluştu.</div>';
     }
 }
+
+// Delegated handlers (CSP: replaces inline onclick/onchange)
+document.addEventListener('click', e => {
+    const el = e.target.closest('[data-action="loadBoard"]');
+    if (el) loadBoard(el.dataset.scope);
+});
+document.addEventListener('change', e => {
+    const el = e.target.closest('[data-action="setTimeframe"]');
+    if (el) setTimeframe(el.value);
+});
 
 applyCountdownVisibility();
 setInterval(() => { if (currentTimeframe === 'weekly') updateCountdown(); }, 60000);

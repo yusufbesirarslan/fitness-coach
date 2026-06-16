@@ -22,7 +22,7 @@
 
 <!-- GLOBAL HEADER -->
 <header class="global-header">
-    <button class="drawer-trigger" onclick="fxToggleDrawer()">
+    <button class="drawer-trigger" data-action="fxToggleDrawer">
         <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
     <span class="header-brand">FITX</span>
@@ -114,7 +114,7 @@
 
     <!-- ═══ CALORIE RING ═══ -->
     <div class="bc b-1">
-        <div class="bc-lbl"><span class="bc-dot" style="background:#CCFF00"></span>Günlük Kalori</div>
+        <div class="bc-lbl">Günlük Kalori</div>
         <div class="cal-wrap">
             <div class="cal-ring-pos">
                 <svg style="transform:rotate(-90deg);display:block;" viewBox="0 0 120 120" width="110" height="110">
@@ -128,7 +128,7 @@
                 </svg>
                 <div class="cal-center">
                     <div class="cal-center-num" id="cal-num">—</div>
-                    <div class="cal-center-lbl">kcal</div>
+                    <div class="cal-center-lbl">kalan</div>
                 </div>
             </div>
             <div class="cal-legend">
@@ -158,16 +158,16 @@
 
     <!-- ═══ ACTIVITY TRACKER ═══ -->
     <div class="bc b-1">
-        <div class="bc-lbl"><span class="bc-dot" style="background:#00C48C"></span>Aktivite Takibi</div>
+        <div class="bc-lbl">Aktivite Takibi</div>
         <div class="act-intensity" id="act-intensity">
-            <button class="act-int-btn" data-int="light" onclick="selectIntensity('light')">Hafif</button>
-            <button class="act-int-btn active" data-int="moderate" onclick="selectIntensity('moderate')">Orta</button>
-            <button class="act-int-btn" data-int="brisk" onclick="selectIntensity('brisk')">Tempolu</button>
-            <button class="act-int-btn" data-int="fast" onclick="selectIntensity('fast')">Hızlı</button>
+            <button class="act-int-btn" data-int="light" data-action="selectIntensity">Hafif</button>
+            <button class="act-int-btn active" data-int="moderate" data-action="selectIntensity">Orta</button>
+            <button class="act-int-btn" data-int="brisk" data-action="selectIntensity">Tempolu</button>
+            <button class="act-int-btn" data-int="fast" data-action="selectIntensity">Hızlı</button>
         </div>
         <div class="act-form">
             <input type="number" class="act-input" id="act-steps" placeholder="Adım sayısı" min="1" max="100000">
-            <button class="act-btn" id="act-btn" onclick="logActivity()">KAYDET</button>
+            <button class="act-btn" id="act-btn" data-action="logActivity">KAYDET</button>
         </div>
         <div class="act-summary" id="act-summary" style="display:none">
             <div class="act-stat"><span class="act-stat-val" id="act-total-steps">0</span><span class="act-stat-lbl">adım</span></div>
@@ -178,7 +178,7 @@
 
     <!-- ═══ WEIGHT EVOLUTION — 2 cols ═══ -->
     <div class="bc b-2" style="display:flex;flex-direction:column;">
-        <div class="bc-lbl"><span class="bc-dot" style="background:#CCFF00"></span>Kilo Takibi</div>
+        <div class="bc-lbl">Kilo Takibi</div>
 
         <div class="w-display">
             <div class="w-big" id="w-kg">—</div>
@@ -197,7 +197,7 @@
 
         <div class="w-form">
             <input type="number" class="w-input" id="w-input" placeholder="Güncel kilonuzu girin…" step="0.1" min="30" max="300">
-            <button class="w-btn" id="w-btn" onclick="doUpdateWeight()">GÜNCELLE</button>
+            <button class="w-btn" id="w-btn" data-action="doUpdateWeight">GÜNCELLE</button>
         </div>
 
         <div class="w-meta" id="w-meta" style="display:none">
@@ -209,7 +209,7 @@
 
     <!-- ═══ AI INSIGHT FEED (Daily Tip) ═══ -->
     <div class="bc b-1" style="display:flex;flex-direction:column;z-index:1;">
-        <div class="bc-lbl"><span class="bc-dot" style="background:rgba(204,255,0,0.75)"></span>Günün İpucu</div>
+        <div class="bc-lbl">Günün İpucu</div>
         <div id="ins-body">
             <div class="ins-slide" id="ins-slide">
                 <span class="ins-icon" id="ins-icon">⚡</span>
@@ -218,9 +218,9 @@
             </div>
         </div>
         <div class="ins-nav">
-            <button class="ins-btn" onclick="prevTip()">← Önceki</button>
+            <button class="ins-btn" data-action="prevTip">← Önceki</button>
             <div class="ins-dots" id="ins-dots"></div>
-            <button class="ins-btn" onclick="nextTip()">Sonraki →</button>
+            <button class="ins-btn" data-action="nextTip">Sonraki →</button>
         </div>
         <div class="ins-progress"><div class="ins-pbar" id="ins-pbar"></div></div>
     </div>
@@ -273,7 +273,7 @@
      QUICK ADD FAB — Bottom Left
      ══════════════════════════════════════ -->
 <div class="quick-add-wrap" id="quick-add-wrap">
-    <button class="quick-add-btn" id="quick-add-btn" onclick="toggleQuickAdd()">
+    <button class="quick-add-btn" id="quick-add-btn" data-action="toggleQuickAdd">
         <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     </button>
     <div class="quick-add-actions" id="quick-add-actions">
@@ -337,7 +337,7 @@
         </div>
         <h2 class="reward-title" id="reward-title">TEBRİKLER!</h2>
         <p class="reward-body" id="reward-body"></p>
-        <button class="reward-btn" id="reward-btn" onclick="dismissReward()">Devam Et</button>
+        <button class="reward-btn" id="reward-btn" data-action="dismissReward">Devam Et</button>
     </div>
 </div>
 
@@ -347,6 +347,7 @@
 <script nonce="{{ csp_nonce }}">
 let quickAddOpen = false, tipIdx = 0, sparkChart = null, userGoal = null;
 let selectedIntensity = 'moderate', currentActivityCals = 0;
+let currentConsumed = 0, currentTarget = 2000;
 
 const TIPS = [
     { icon:'📈', text:'<strong>Progressive Overload</strong> — Her hafta ağırlık veya tekrar sayını küçük artışlarla yükselt. Kas büyümesinin temel formülü budur.', src:'Spor Fizyolojisi' },
@@ -418,6 +419,9 @@ function renderStreak(n) {
 /* ═══ CALORIE RING ═══ */
 function updateCalRing(consumed, target, activityCals) {
     activityCals = activityCals || 0;
+    currentConsumed = consumed;
+    currentTarget = target;
+    // Aktiviteyle yakılan kalori günlük hedefe eklenir → kalan kaloriyi artırır.
     const effectiveTarget = target + activityCals;
     const remaining = Math.max(effectiveTarget - consumed, 0);
     const circ  = 276.46;
@@ -426,7 +430,7 @@ function updateCalRing(consumed, target, activityCals) {
     ring.style.strokeDashoffset = circ * (1 - ratio);
     ring.style.stroke = ratio >= 1 ? '#FF4D4D' : ratio >= 0.85 ? '#FFB020' : '#CCFF00';
 
-    document.getElementById('cal-num').textContent      = consumed;
+    document.getElementById('cal-num').textContent      = remaining;
     document.getElementById('cal-consumed').textContent = consumed + ' kcal';
     document.getElementById('cal-remain').textContent   = remaining + ' kcal';
     document.getElementById('cal-target').textContent   = target + ' kcal';
@@ -713,9 +717,7 @@ async function refreshActivitySummary() {
             document.getElementById('act-total-cal').textContent = currentActivityCals;
             document.getElementById('act-total-dist').textContent = data.total_distance;
         }
-        const consumed = parseInt(document.getElementById('cal-num').textContent) || 0;
-        const target = parseInt(document.getElementById('cal-target').textContent) || 2000;
-        updateCalRing(consumed, target, currentActivityCals);
+        updateCalRing(currentConsumed, currentTarget, currentActivityCals);
     } catch(e) {}
 }
 
@@ -825,6 +827,20 @@ function updateStreakBonus() {
         bonus.textContent = '3 gün seri yap → ×1.1 XP Bonus açılır';
     }
 }
+
+// Delegated click handlers (CSP: replaces inline onclick). dismissReward is
+// declared in the reward <script> block below but is global by then.
+document.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action]'); if (!el) return;
+    const a = el.dataset.action;
+    if      (a === 'selectIntensity') selectIntensity(el.dataset.int);
+    else if (a === 'logActivity')     logActivity();
+    else if (a === 'doUpdateWeight')  doUpdateWeight();
+    else if (a === 'prevTip')         prevTip();
+    else if (a === 'nextTip')         nextTip();
+    else if (a === 'toggleQuickAdd')  toggleQuickAdd();
+    else if (a === 'dismissReward' && typeof dismissReward === 'function') dismissReward();
+});
 
 init();
 </script>

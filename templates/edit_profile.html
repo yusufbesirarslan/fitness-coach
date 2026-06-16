@@ -250,7 +250,7 @@
 
         <!-- ── AVATAR DISPLAY ── -->
         <div class="avatar-section">
-            <div class="avatar-lg" id="avatar-display" onclick="document.getElementById('avatar-file-input').click()">
+            <div class="avatar-lg" id="avatar-display" data-action="openAvatarPicker">
                 {% if profile_picture %}
                     <img src="{{ profile_picture }}" alt="Profil" id="avatar-img">
                 {% else %}
@@ -295,11 +295,11 @@
                 <div class="form-field">
                     <label>Fitness Hedefi</label>
                     <div class="goal-cards">
-                        <div class="goal-card{% if goal == 'kilo verme' %} selected{% endif %}" onclick="selectGoal('kilo verme', this)">
+                        <div class="goal-card{% if goal == 'kilo verme' %} selected{% endif %}" data-action="selectGoal" data-goal="kilo verme">
                             <div class="goal-card-icon">🏃</div>
                             <div class="goal-card-label">Kilo Verme</div>
                         </div>
-                        <div class="goal-card{% if goal == 'kas kazanma' %} selected{% endif %}" onclick="selectGoal('kas kazanma', this)">
+                        <div class="goal-card{% if goal == 'kas kazanma' %} selected{% endif %}" data-action="selectGoal" data-goal="kas kazanma">
                             <div class="goal-card-icon">💪</div>
                             <div class="goal-card-label">Kas Kazanma</div>
                         </div>
@@ -312,7 +312,7 @@
                 </div>
             </div>
 
-            <button class="save-btn" id="save-btn" onclick="saveProfile()">KAYDET</button>
+            <button class="save-btn" id="save-btn" data-action="saveProfile">KAYDET</button>
         </div>
 
         <!-- ── SUPPLEMENT STACK ── -->
@@ -451,6 +451,15 @@ async function saveProfile() {
         btn.textContent = 'KAYDET';
     }
 }
+
+// Delegated click handlers (CSP: replaces inline onclick)
+document.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-action]'); if (!el) return;
+    const a = el.dataset.action;
+    if      (a === 'openAvatarPicker') document.getElementById('avatar-file-input').click();
+    else if (a === 'selectGoal')       selectGoal(el.dataset.goal, el);
+    else if (a === 'saveProfile')      saveProfile();
+});
 </script>
 </body>
 </html>
