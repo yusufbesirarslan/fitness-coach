@@ -2,15 +2,8 @@
 <html lang="tr" data-theme="dark">
 <head>
     {% include "_head.html" %}
-    <title>Giriş Yap — FitX</title>
-    <meta name="description" content="FitX — yapay zekâ koçunla kişiye özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.">
-    <meta property="og:title" content="FitX — Yapay Zekâ Fitness Koçun">
-    <meta property="og:description" content="Sana özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.">
-    <meta property="og:type" content="website">
-    <meta property="og:image" content="/static/favicon.svg">
-    <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="FitX — Yapay Zekâ Fitness Koçun">
-    <meta name="twitter:description" content="Sana özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.">
+    <title>E-posta Doğrulama — FitX</title>
+    <meta name="description" content="FitX hesabını doğrula — e-postana gönderilen kodu gir.">
     <link rel="stylesheet" href="/static/style.css">
     <style>
         .auth-wrapper {
@@ -60,24 +53,16 @@
             color:var(--red,#ff6b6b); border-radius:8px; padding:12px 16px;
             font-size:14px; margin-bottom:16px; display:none;
         }
-        .auth-divider {
-            display:flex; align-items:center; text-align:center;
-            margin:20px 0 4px; color:var(--text2); font-size:12px;
-            letter-spacing:1px; text-transform:uppercase;
+        .auth-success {
+            background:var(--accent-glow); border:1px solid var(--accent);
+            color:var(--accent); border-radius:8px; padding:12px 16px;
+            font-size:14px; margin-bottom:16px; display:none;
         }
-        .auth-divider::before, .auth-divider::after {
-            content:''; flex:1; height:1px; background:var(--border);
+        .link-btn {
+            background:none; border:none; color:var(--accent); cursor:pointer;
+            font-size:14px; padding:0; border-bottom:1px solid var(--accent-glow);
         }
-        .auth-divider span { padding:0 12px; }
-        .auth-btn-alt {
-            display:block; text-align:center; text-decoration:none;
-            box-sizing:border-box; background:transparent;
-            color:var(--accent); border:1px solid var(--accent);
-        }
-        .auth-btn-alt:hover { background:var(--accent-glow); transform:translateY(-1px); }
-        .theme-corner {
-            position:fixed; top:20px; right:20px;
-        }
+        .theme-corner { position:fixed; top:20px; right:20px; }
     </style>
 </head>
 <body>
@@ -89,31 +74,28 @@
     <div class="auth-wrapper">
         <div class="auth-card">
             <div class="auth-logo">FITX</div>
-            <div class="auth-subtitle">Hesabına giriş yap</div>
+            <div class="auth-subtitle">E-postanı doğrula</div>
 
             <div class="auth-error" id="error-msg"></div>
-            {% if auth_error %}
-            <div class="auth-error" style="display:block">{{ auth_error }}</div>
-            {% endif %}
+            <div class="auth-success" id="success-msg"></div>
 
             <div class="form-group">
                 <label>Kullanıcı Adı</label>
-                <input type="text" id="username" placeholder="Kullanıcı Adın">
+                <input type="text" id="username" value="{{ username }}" placeholder="Kullanıcı adın">
             </div>
             <div class="form-group">
-                <label>Şifre</label>
-                <input type="password" id="password" placeholder="Şifren">
+                <label>Doğrulama Kodu</label>
+                <input type="text" id="code" inputmode="numeric" autocomplete="one-time-code"
+                       placeholder="E-postana gelen kod">
             </div>
 
-            <button class="auth-btn" data-action="login">GİRİŞ YAP</button>
-
-            {% if cognito_enabled %}
-            <div class="auth-divider"><span>veya</span></div>
-            <a class="auth-btn auth-btn-alt" href="/login/cognito">E-POSTA İLE GİRİŞ</a>
-            {% endif %}
+            <button class="auth-btn" data-action="verifyCode">DOĞRULA</button>
 
             <div class="auth-footer">
-                Hesabın yok mu? <a href="/register">Kayıt ol</a>
+                Kod gelmedi mi? <button class="link-btn" data-action="resendCode">Tekrar gönder</button>
+            </div>
+            <div class="auth-footer">
+                <a href="/login">Giriş ekranına dön</a>
             </div>
         </div>
     </div>
@@ -127,32 +109,54 @@
             localStorage.setItem('theme', html.dataset.theme);
         }
 
-        async function login() {
-            const username = document.getElementById("username").value;
-            const password = document.getElementById("password").value;
+        function showError(msg) {
+            document.getElementById("success-msg").style.display = "none";
+            const el = document.getElementById("error-msg");
+            el.textContent = msg;
+            el.style.display = "block";
+        }
+        function showSuccess(msg) {
+            document.getElementById("error-msg").style.display = "none";
+            const el = document.getElementById("success-msg");
+            el.textContent = msg;
+            el.style.display = "block";
+        }
 
-            const response = await fetch("/login", {
+        async function verifyCode() {
+            const username = document.getElementById("username").value.trim();
+            const code = document.getElementById("code").value.trim();
+            if (!username || !code) { showError("Kullanıcı adı ve kod zorunludur."); return; }
+
+            const response = await fetch("/verify", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ username, password })
+                body: JSON.stringify({ username, code })
             });
-
             const data = await response.json();
-
             if (response.ok) {
-                window.location.href = "/";
-            } else if (data.needs_verification) {
-                // E-posta henüz doğrulanmamış → doğrulama sayfasına yönlendir.
-                window.location.href = "/verify?u=" + encodeURIComponent(data.username || username);
+                showSuccess(data.message + " Yönlendiriliyorsunuz...");
+                setTimeout(() => window.location.href = "/login", 1500);
             } else {
-                const errorDiv = document.getElementById("error-msg");
-                errorDiv.textContent = data.error;
-                errorDiv.style.display = "block";
+                showError(data.error);
             }
         }
 
-        document.getElementById("password").addEventListener("keydown", e => {
-            if (e.key === "Enter") login();
+        async function resendCode() {
+            const username = document.getElementById("username").value.trim();
+            if (!username) { showError("Önce kullanıcı adını gir."); return; }
+
+            const response = await fetch("/verify/resend", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({ username })
+            });
+            const data = await response.json();
+            if (response.ok) { showSuccess(data.message); }
+            else { showError(data.error); }
+        }
+
+        document.getElementById("code").addEventListener("keydown", e => {
+            if (e.key === "Enter") verifyCode();
         });
     </script>
     <script src="/static/actions.js"></script>
