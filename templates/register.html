@@ -65,6 +65,21 @@
             color:var(--accent); border-radius:8px; padding:12px 16px;
             font-size:14px; margin-bottom:16px; display:none;
         }
+        .auth-divider {
+            display:flex; align-items:center; text-align:center;
+            margin:20px 0 4px; color:var(--text2); font-size:12px;
+            letter-spacing:1px; text-transform:uppercase;
+        }
+        .auth-divider::before, .auth-divider::after {
+            content:''; flex:1; height:1px; background:var(--border);
+        }
+        .auth-divider span { padding:0 12px; }
+        .auth-btn-alt {
+            display:block; text-align:center; text-decoration:none;
+            box-sizing:border-box; background:transparent;
+            color:var(--accent); border:1px solid var(--accent);
+        }
+        .auth-btn-alt:hover { background:var(--accent-glow); transform:translateY(-1px); }
         .theme-corner {
             position:fixed; top:20px; right:20px;
         }
@@ -98,6 +113,11 @@
             </div>
 
             <button class="auth-btn" data-action="register">KAYIT OL</button>
+
+            {% if cognito_enabled %}
+            <div class="auth-divider"><span>veya</span></div>
+            <a class="auth-btn auth-btn-alt" href="/login/cognito">E-POSTA İLE DEVAM ET</a>
+            {% endif %}
 
             <div class="auth-footer">
                 Zaten hesabın var mı? <a href="/login">Giriş yap</a>

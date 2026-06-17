@@ -15,6 +15,14 @@ db = SQLAlchemy()
 migrate = Migrate()
 login_manager = LoginManager()
 login_manager.login_view = "auth.login"
+# Authlib OAuth (Cognito OIDC). Authlib kurulu değilse (örn. authlib'siz eski lokal
+# venv) import'ta TÜM uygulamayı düşürmemek için guard'la — Cognito route'ları o
+# durumda 404 döner. boto3/anthropic lazy-guard deseniyle aynı mantık.
+try:
+    from authlib.integrations.flask_client import OAuth
+    oauth = OAuth()
+except Exception:  # pragma: no cover - authlib opsiyonel bağımlılık
+    oauth = None
 redis_client = redis.from_url(_REDIS_URL, decode_responses=True) if _REDIS_URL else None
 _LIMITER_STORAGE = _REDIS_URL or "memory://"
 limiter = Limiter(
