@@ -26,6 +26,7 @@ def create_app():
     login_manager.init_app(app)
 
     register_blueprints(app)
+    register_cognito(app)
 
     @app.route("/health")
     def health():
@@ -53,6 +54,37 @@ def create_app():
     register_cli(app)
     init_database(app)
     return app
+
+
+def register_cognito(app):
+    """Amazon Cognito OIDC istemcisini (varsa) kaydet.
+
+    COGNITO_* ayarlı değilse veya Authlib kurulu değilse sessizce atlanır —
+    Cognito route'ları o durumda 404 döner ve klasik kullanıcı adı/şifre girişi
+    etkilenmez. server_metadata_url ilk kullanımda (login) lazily çekilir; boot'ta
+    ağ çağrısı YAPILMAZ. client_secret boşsa (public client) PKCE kullanılır."""
+    from app.config import (COGNITO_ENABLED, COGNITO_APP_CLIENT_ID,
+                            COGNITO_CLIENT_SECRET, COGNITO_METADATA_URL)
+    from app.extensions import oauth
+    if not COGNITO_ENABLED:
+        return
+    if oauth is None:
+        app.logger.warning(
+            "COGNITO_* ayarlı ama Authlib kurulu değil — e-posta ile giriş "
+            "devre dışı. `pip install Authlib` ile etkinleştir.")
+        return
+    oauth.init_app(app)
+    oauth.register(
+        name="oidc",
+        client_id=COGNITO_APP_CLIENT_ID,
+        client_secret=COGNITO_CLIENT_SECRET or None,
+        server_metadata_url=COGNITO_METADATA_URL,
+        client_kwargs={
+            "scope": "openid email profile",
+            "code_challenge_method": "S256",  # PKCE (public client için zorunlu)
+        },
+    )
+    app.logger.info("[COGNITO] OIDC istemcisi kayıtlı (e-posta ile giriş etkin).")
 
 
 def register_blueprints(app):

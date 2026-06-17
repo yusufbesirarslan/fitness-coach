@@ -46,6 +46,11 @@ class User(UserMixin, db.Model):
     last_reward_week = db.Column(db.String(10), nullable=True)  # ISO week of last seen reward popup, e.g. "2026-W22"
     last_login       = db.Column(db.Date, nullable=True)
 
+    # Amazon Cognito (e-posta ile giriş) kimlik bağı. Cognito 'sub' claim'i —
+    # e-posta değişse bile aynı yerel hesaba sabit kalır. Yalnızca Cognito ile
+    # giren kullanıcılarda doludur; klasik kullanıcı adı/şifre hesaplarında NULL.
+    cognito_sub      = db.Column(db.String(64), unique=True, nullable=True)
+
     # Davet/referral döngüsü: her kullanıcının paylaşılabilir tek davet kodu olur;
     # referred_by_id, bu kullanıcıyı getiren davetçiyi işaret eder (çift taraflı ödül).
     referral_code    = db.Column(db.String(16), unique=True, nullable=True)
