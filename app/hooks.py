@@ -6,7 +6,7 @@ from flask_login import current_user
 
 from app.config import _BOOT_TS, CSP_IMG_S3_HOSTS
 from app.extensions import db
-from app.services.gamification import _last_rollover_check, award_xp, get_level, get_title, lb_sync_user, log_activity, run_weekly_rollover
+from app.services.gamification import _last_rollover_check, _mark_lb_dirty, award_xp, get_level, get_title, log_activity, run_weekly_rollover
 from app.timeutil import app_today
 
 
@@ -132,8 +132,10 @@ def update_streak():
                 log_activity(current_user.id, "streak_milestone",
                              f"{streak} günlük seri yakalanadı!")
                 award_xp(current_user.id, streak * 2)
+            # streak tiebreak'i değişti → commit sonrası Redis sync (after_commit).
+            # Milestone yoksa award_xp dirty işaretlemez; burada elle işaretliyoruz.
+            _mark_lb_dirty(current_user.id)
             db.session.commit()
-            lb_sync_user(current_user)  # streak tiebreak'i değişti → Redis'i güncelle
 
 
 def inject_rank():

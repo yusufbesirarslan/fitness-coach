@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 from flask import jsonify
 from flask_login import current_user
+from sqlalchemy import event
 
 from app.config import LB_ALLTIME_KEY, LB_WEEKLY_KEY
 from app.extensions import db, redis_client
@@ -44,12 +45,41 @@ def lb_rebuild():
         pass
 
 
+def _mark_lb_dirty(user_id):
+    """Kullanıcıyı 'commit sonrası Redis sync gerekli' olarak işaretle. Eski davranış
+    (award_xp içinde anında lb_sync_user) commit ÖNCESI yazıyordu; rollback olunca
+    liderlik tablosu yukarı sürükleniyordu (H1-Redis). Artık sync after_commit'te."""
+    if user_id is None:
+        return
+    db.session.info.setdefault("lb_dirty", set()).add(user_id)
+
+
+@event.listens_for(db.session, "after_commit")
+def _flush_lb_dirty(session):
+    """Commit BAŞARILI olduktan sonra işaretli kullanıcıları Redis'e yaz (H1-Redis).
+    Redis yoksa lb_sync_user zaten sessizce geçer."""
+    dirty = session.info.pop("lb_dirty", None)
+    if not dirty:
+        return
+    for uid in dirty:
+        u = User.query.get(uid)
+        if u:
+            lb_sync_user(u)
+
+
+@event.listens_for(db.session, "after_rollback")
+@event.listens_for(db.session, "after_soft_rollback")
+def _drop_lb_dirty(session, *args):
+    """Rollback'te işaretleri at — XP kalıcı olmadı, Redis'e yazma."""
+    session.info.pop("lb_dirty", None)
+
+
 def award_xp(user_id, amount):
     user = User.query.get(user_id)
     if user:
         user.rank_points = (user.rank_points or 0) + amount
         user.weekly_xp = (user.weekly_xp or 0) + amount
-        lb_sync_user(user)  # Redis'i anında güncelle (kalıcılık route commit'inde)
+        _mark_lb_dirty(user_id)  # Redis sync commit BAŞARILI olduktan sonra (after_commit)
         return user.rank_points
     return None
 
@@ -159,7 +189,10 @@ def get_today_progress(user_id):
     ).all()
 
 
-def complete_quest_for_user(user_id, quest_type):
+def _claim_quest(user_id, quest_type):
+    """Görev ilerlemesini + XP'yi + activity'yi session'a EKLER ama COMMIT ETMEZ.
+    Çağıran kendi transaction'ında commit eder (atomiklik için — C1). Görev yoksa
+    veya bugün zaten alındıysa None döner (session'a hiçbir şey eklemeden)."""
     quest = DailyQuest.query.filter_by(quest_type=quest_type, is_active=True).first()
     if not quest:
         return None
@@ -169,27 +202,27 @@ def complete_quest_for_user(user_id, quest_type):
     ).first()
     if existing:
         return None
+    db.session.add(UserQuestProgress(
+        user_id=user_id, quest_id=quest.id, date_key=today_key, is_claimed=True))
+    new_total = award_xp(user_id, quest.points_reward)
+    log_activity(user_id, "quest_completed", f"'{quest.title}' görevini tamamladı")
+    level = get_level(new_total)
+    return {"awarded": True, "xp": quest.points_reward, "new_total": new_total,
+            "quest_title": quest.title, "level": level, "title": get_title(level)}
+
+
+def complete_quest_for_user(user_id, quest_type):
+    """Tek-görev kısayolu: _claim_quest + kendi commit'i (mevcut tüm çağıranlar için
+    davranış AYNI kalır). Atomik akışlarda doğrudan _claim_quest kullan."""
+    result = _claim_quest(user_id, quest_type)
+    if result is None:
+        return None
     try:
-        progress = UserQuestProgress(
-            user_id=user_id, quest_id=quest.id,
-            date_key=today_key, is_claimed=True
-        )
-        db.session.add(progress)
-        new_total = award_xp(user_id, quest.points_reward)
-        log_activity(user_id, "quest_completed", f"'{quest.title}' görevini tamamladı")
         db.session.commit()
-        level = get_level(new_total)
-        return {
-            "awarded": True,
-            "xp": quest.points_reward,
-            "new_total": new_total,
-            "quest_title": quest.title,
-            "level": level,
-            "title": get_title(level)
-        }
     except Exception:
         db.session.rollback()
         return None
+    return result
 
 
 LEADERBOARD_TOP_N = 100  # size of the visible top list

@@ -33,6 +33,14 @@ def _cognito_available():
     return COGNITO_ENABLED and oauth is not None
 
 
+def _login_fresh(user):
+    """Oturum sabitlemeye (session fixation) karşı: giriş ÖNCESI mevcut oturumu
+    temizle, sonra login_user ile taze, kimliği bağlı bir oturum kur. Çerez içeriği
+    değiştiği için saldırganın sabitlediği ön-giriş çerezi yeniden kullanılamaz."""
+    session.clear()
+    login_user(user)
+
+
 def _login_username_key():
     """Per-account login rate-limit key: the submitted username (lowercased).
 
@@ -161,7 +169,7 @@ def login():
         # Kimlik bütünlüğü: dönen sub yerel kayıtla eşleşmeli.
         if claims.get("sub") and claims["sub"] != user.cognito_sub:
             return jsonify({"error": "Kullanıcı adı veya şifre hatalı"}), 401
-        login_user(user)
+        _login_fresh(user)
         quest_result = complete_quest_for_user(user.id, "login")
         response = {"message": f"Hoş geldin {user.username}!"}
         if quest_result:
@@ -179,7 +187,7 @@ def login():
     if not password_ok:
         return jsonify({"error": "Kullanıcı adı veya şifre hatalı"}) , 401
 
-    login_user(user)
+    _login_fresh(user)
     quest_result = complete_quest_for_user(user.id, "login")
     response = {"message": f"Hoş geldin {user.username}!"}
     if quest_result:
@@ -267,7 +275,7 @@ def cognito_callback():
         current_app.logger.info("[COGNITO] hesap bağlama reddedildi: %s", e)
         return redirect(url_for("auth.login", err="link"))
 
-    login_user(user)
+    _login_fresh(user)
     session["via_cognito"] = True  # /logout'un Cognito oturumunu da kapatması için
     complete_quest_for_user(user.id, "login")  # /login ile aynı yan etki
     resp = redirect(url_for("tracking.home"))  # eksik profil → home oradan setup'a yönlendirir
