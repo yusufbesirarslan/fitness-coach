@@ -15,6 +15,10 @@ db = SQLAlchemy()
 migrate = Migrate()
 login_manager = LoginManager()
 login_manager.login_view = "auth.login"
+# H1: oturum kaçırmaya karşı güçlü koruma. Kimlik (IP+User-Agent) değişince
+# Flask-Login oturumu siler. (Mobilde IP değişince yeniden giriş gerekebilir —
+# bilinçli güvenlik/UX dengesi.)
+login_manager.session_protection = "strong"
 # Authlib OAuth (Cognito OIDC). Authlib kurulu değilse (örn. authlib'siz eski lokal
 # venv) import'ta TÜM uygulamayı düşürmemek için guard'la — Cognito route'ları o
 # durumda 404 döner. boto3/anthropic lazy-guard deseniyle aynı mantık.

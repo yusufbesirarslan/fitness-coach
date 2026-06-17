@@ -606,14 +606,17 @@ def log_nutrition_entry(user_id: int, food_item: str, calories: float, protein: 
         )
         row = cur.fetchone()
 
+        # C2: günlük toplamı Istanbul gün anahtarıyla (tarih) topla — INSERT'teki
+        # tarih=_day_key() ile aynı. Eski `created_at::date = CURRENT_DATE` UTC
+        # gününe bakıyordu; 00:00–03:00 Istanbul arası toplamlar yanlış çıkıyordu.
         cur.execute(
             "SELECT COALESCE(SUM(kalori), 0) as total_cal, "
             "COALESCE(SUM(protein), 0) as total_protein, "
             "COALESCE(SUM(karb), 0) as total_carbs, "
             "COALESCE(SUM(yag), 0) as total_fat, "
             "COUNT(*) as entry_count "
-            "FROM meal_log WHERE user_id = %s AND created_at::date = CURRENT_DATE",
-            (user_id,),
+            "FROM meal_log WHERE user_id = %s AND tarih = %s",
+            (user_id, _day_key()),
         )
         today = cur.fetchone()
 

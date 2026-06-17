@@ -127,7 +127,7 @@ class UserSession(db.Model):
 
 class WeeklyLog(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
-    user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
     weight     = db.Column(db.Float, nullable=False)
     note       = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -138,7 +138,7 @@ class WeeklyLog(db.Model):
 
 class WeeklyCheckIn(db.Model):
     id                = db.Column(db.Integer, primary_key=True)
-    user_id           = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    user_id           = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
     weight            = db.Column(db.Float, nullable=False)
     yogunluk          = db.Column(db.Integer)      # 1-5 arası
     fatigue           = db.Column(db.Integer)       # 1-5 arası
@@ -155,7 +155,7 @@ class WeeklyCheckIn(db.Model):
 
 class NutritionPlan(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
-    user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
     plan_data  = db.Column(db.Text, nullable=False)  # JSON olarak sakla
     score      = db.Column(db.Float)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -166,7 +166,7 @@ class NutritionPlan(db.Model):
 
 class TrainingPlan(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
-    user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
     plan_data  = db.Column(db.Text, nullable=False)
     score      = db.Column(db.Float)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -202,6 +202,10 @@ class MealLog(db.Model):
             "(karb IS NULL OR (karb >= 0 AND karb <= 50000)) AND "
             "(yag IS NULL OR (yag >= 0 AND yag <= 50000))",
             name="ck_meal_log_macro_bounds"),
+        # DB1: her beslenme sayfası user_id + tarih ile sorguluyor — kanonik en çok
+        # yazılan defter; (user_id, tarih) kompozit indeksi user_id-only sorguları da
+        # (leftmost prefix) karşılar.
+        db.Index("ix_meal_log_user_id_tarih", "user_id", "tarih"),
     )
 
     def __repr__(self):
@@ -236,7 +240,7 @@ class PumpCheck(db.Model):
     """Antrenman tamamlama doğrulaması ('Pump Check'). Yüklenen ortam fotoğrafı
     S3'e konur; burada yalnızca nesne anahtarı ve doğrulama sonucu saklanır."""
     id            = db.Column(db.Integer, primary_key=True)
-    user_id       = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    user_id       = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
     image_key     = db.Column(db.String(300), nullable=True)  # S3 nesne anahtarı
     location_type = db.Column(db.String(50))
     description   = db.Column(db.String(200))
@@ -288,7 +292,7 @@ class Activity(db.Model):
 
 class Supplement(db.Model):
     id                   = db.Column(db.Integer, primary_key=True)
-    user_id              = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    user_id              = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
     product_name         = db.Column(db.String(150), nullable=False)
     brand                = db.Column(db.String(100), nullable=False)
     category             = db.Column(db.String(30), nullable=False, default="Other")

@@ -8,10 +8,10 @@ from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
 from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
 from app.services.ai import _heavy_chat
-from app.services.gamification import award_xp, complete_quest_for_user, get_level, get_title, log_activity
+from app.services.gamification import _claim_quest, award_xp, get_level, get_title, log_activity
 from app.services.menu_extract import validate_pump_check
 from app.services.validators import validate_pump_check_image
-from app.timeutil import app_today
+from app.timeutil import app_today, utc_day_bounds
 
 
 bp = Blueprint("training", __name__)
@@ -330,14 +330,16 @@ def complete_workout():
     if not plan:
         return jsonify({"error": "Aktif antrenman planın yok."}), 400
 
-    today_key = app_today().isoformat()
-    quest = DailyQuest.query.filter_by(quest_type="workout_logged", is_active=True).first()
-    if quest:
-        existing = UserQuestProgress.query.filter_by(
-            user_id=current_user.id, quest_id=quest.id, date_key=today_key
-        ).first()
-        if existing:
-            return jsonify({"error": "Bugünkü antrenmanını zaten tamamladın!"}), 400
+    # M3: görev satırından BAĞIMSIZ günlük idempotency. "workout_logged" görevi
+    # tohumlanmamışsa eski guard hiç çalışmıyordu → tekrar XP. Bugün zaten bir Pump
+    # Check varsa antrenman tamamlanmış sayılır (PumpCheck yalnızca başarıda yazılır).
+    start_utc, end_utc = utc_day_bounds()
+    if PumpCheck.query.filter(
+        PumpCheck.user_id == current_user.id,
+        PumpCheck.created_at >= start_utc,
+        PumpCheck.created_at < end_utc,
+    ).first():
+        return jsonify({"error": "Bugünkü antrenmanını zaten tamamladın!"}), 400
 
     # ── PUMP CHECK GATE ──────────────────────────────────────────────────────
     # Antrenman tamamlanmadan önce ortam fotoğrafı + konum AI ile doğrulanmalı.
@@ -387,11 +389,18 @@ def complete_workout():
     # henüz mock. Bonus, doğrulama değil "foto ekledin" ödülü olarak dürüstçe sunulur.
     base_xp = 10
     photo_bonus = 25
-    quest_result = complete_quest_for_user(current_user.id, "workout_logged")
+    # C1: tüm yan etkiler (PumpCheck, WorkoutLog, görev, XP, activity) TEK transaction.
+    # Görev/XP rollback olursa base+photo XP de geri alınır — orphan XP yok.
+    quest_result = _claim_quest(current_user.id, "workout_logged")
     new_total = award_xp(current_user.id, base_xp + photo_bonus)
     log_activity(current_user.id, "workout_completed",
                  "Bugünkü antrenmanını tamamladı (foto eklendi)")
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.warning("[WORKOUT] commit başarısız: %s: %s", type(e).__name__, e)
+        return jsonify({"error": "Bir hata oluştu, tekrar dene."}), 500
 
     total_xp = base_xp + photo_bonus + (quest_result["xp"] if quest_result else 0)
     level = get_level(new_total)
