@@ -155,7 +155,11 @@
                 const successDiv = document.getElementById("success-msg");
                 successDiv.textContent = data.message + " Yönlendiriliyorsunuz...";
                 successDiv.style.display = "block";
-                setTimeout(() => window.location.href = "/login", 1500);
+                // Native Cognito kaydı: e-posta doğrulama gerekiyor → /verify sayfasına.
+                const dest = data.needs_verification
+                    ? "/verify?u=" + encodeURIComponent(data.username || username)
+                    : "/login";
+                setTimeout(() => window.location.href = dest, 1500);
             } else {
                 document.getElementById("success-msg").style.display = "none";
                 const errorDiv = document.getElementById("error-msg");

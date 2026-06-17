@@ -141,6 +141,97 @@ def test_logout_without_any_headers_allowed(client, make_user):
 
 
 # ---------------------------------------------------------------------------
+# Native Amazon Cognito kayıt/doğrulama/giriş akışı (COGNITO_ENABLED True iken).
+# Cognito ağ çağrıları (cognito_idp) tamamen mock'lanır — hermetik kalır.
+# ---------------------------------------------------------------------------
+
+import pytest
+
+from app.blueprints import auth as auth_bp
+from app.services import cognito_idp
+from app.services.cognito_idp import CognitoIdpError
+
+
+@pytest.fixture
+def cognito_native(monkeypatch):
+    """COGNITO_ENABLED'ı aç ve cognito_idp çağrılarını yakala. Yakalanan
+    argümanları (özellikle Cognito'ya geçen `name`) sınama için kaydeder."""
+    monkeypatch.setattr(auth_bp, "COGNITO_ENABLED", True)
+    captured = {"confirmed": set()}
+
+    def fake_sign_up(username, password, email, name):
+        captured["sign_up"] = {"username": username, "email": email, "name": name}
+        return f"sub-{username}"
+
+    def fake_confirm(username, code):
+        captured["confirm"] = {"username": username, "code": code}
+        captured["confirmed"].add(username)
+
+    def fake_initiate(username, password):
+        # Doğrulanmamışsa (henüz confirm edilmedi) Cognito gibi davran.
+        if username not in captured["confirmed"]:
+            raise CognitoIdpError("E-postan henüz doğrulanmadı.", "UserNotConfirmedException")
+        return {"sub": f"sub-{username}", "email": f"{username}@example.com",
+                "email_verified": True, "name": username}
+
+    monkeypatch.setattr(cognito_idp, "sign_up", fake_sign_up)
+    monkeypatch.setattr(cognito_idp, "confirm_sign_up", fake_confirm)
+    monkeypatch.setattr(cognito_idp, "initiate_auth", fake_initiate)
+    return captured
+
+
+def test_cognito_register_passes_name_and_requires_verification(client, cognito_native):
+    response = _register(client, "cognitouser")
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["needs_verification"] is True
+    assert body["username"] == "cognitouser"
+    # name parametresi Cognito'ya GEÇMELİ (havuzun zorunlu attribute'u olabilir).
+    assert cognito_native["sign_up"]["name"] == "cognitouser"
+
+    # Yerel kayıt cognito_sub ile oluşmalı; parola hash'i kullanılamaz olmalı.
+    user = User.query.filter_by(username="cognitouser").one()
+    assert user.cognito_sub == "sub-cognitouser"
+    assert not user.check_password("Sifre123")
+
+
+def test_cognito_login_before_verify_redirects_to_verification(client, cognito_native):
+    _register(client, "unverified")
+    response = client.post("/login", json={"username": "unverified", "password": "Sifre123"})
+    assert response.status_code == 403
+    body = response.get_json()
+    assert body["needs_verification"] is True
+    assert body["username"] == "unverified"
+
+
+def test_cognito_verify_then_login_succeeds(client, cognito_native):
+    _register(client, "verifyme")
+
+    confirm = client.post("/verify", json={"username": "verifyme", "code": "123456"})
+    assert confirm.status_code == 200
+    assert cognito_native["confirm"]["code"] == "123456"
+
+    response = client.post("/login", json={"username": "verifyme", "password": "Sifre123"})
+    assert response.status_code == 200
+    assert client.get("/supplements").status_code == 200  # oturum kuruldu
+
+
+def test_cognito_verify_resend(client, cognito_native, monkeypatch):
+    _register(client, "resendme")
+    sent = {}
+    monkeypatch.setattr(cognito_idp, "resend_code", lambda username: sent.update(u=username))
+    response = client.post("/verify/resend", json={"username": "resendme"})
+    assert response.status_code == 200
+    assert sent["u"] == "resendme"
+
+
+def test_verify_routes_404_when_cognito_disabled(client):
+    # COGNITO_ENABLED False (varsayılan) → doğrulama uçları kapalı.
+    assert client.get("/verify?u=x").status_code == 404
+    assert client.post("/verify", json={"username": "x", "code": "1"}).status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # Rate limit — 5/saat kayıt limiti ve Türkçe 429 yanıtı.
 # ---------------------------------------------------------------------------
 
