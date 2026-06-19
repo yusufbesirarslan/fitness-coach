@@ -9,6 +9,10 @@ services:
   web:
     build: .
     restart: unless-stopped
+    # Tek EC2 host'unda bir Pillow/AI bellek sıçraması ya da kaçak süreç tüm
+    # host'u OOM'a sürükleyip her şeyi düşürebilir. Servis başına bellek tavanı
+    # koy (env ile override edilebilir — instance boyutuna göre ayarla).
+    mem_limit: ${WEB_MEM_LIMIT:-1g}
     # Yalnızca loopback'e bağla — Flask doğrudan internete açık değil,
     # sadece host nginx reverse-proxy üzerinden erişilir.
     ports:
@@ -24,12 +28,18 @@ services:
       db:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
 
   redis:
     image: redis:alpine
     container_name: fitx-redis
     restart: always
+    mem_limit: ${REDIS_MEM_LIMIT:-256m}
+    # maxmemory + eviction olmadan leaderboard sorted-set'leri ve limiter depolaması
+    # sınırsız büyüyüp host'u OOM'a sürükleyebilir. allkeys-lru: bellek dolunca en az
+    # kullanılanı at — leaderboard Postgres'ten yeniden kurulabilir (kaynak Postgres),
+    # limiter eviction'ı yalnızca rate-limit sayaçlarını sıfırlar (kabul edilebilir).
+    command: redis-server --maxmemory ${REDIS_MAXMEMORY:-200mb} --maxmemory-policy allkeys-lru --save 60 1
     # Sadece loopback'e bağla — uygulama compose ağından "redis:6379" ile erişir;
     # host eşlemesi yalnızca EC2 üzerinden redis-cli ile bakmak içindir, dışarı kapalı.
     ports:
@@ -37,10 +47,17 @@ services:
     volumes:
       # Konteyner silinse bile sorted-set verisi kalır (Postgres yine de kaynaktır).
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   db:
     image: postgres:18-alpine
     restart: unless-stopped
+    mem_limit: ${DB_MEM_LIMIT:-512m}
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-fitx}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}

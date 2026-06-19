@@ -270,8 +270,20 @@ def _food_search_fatsecret(q):
         # onbellek ve diger besinler bozulur (todos.txt §1 — referans paylasimi).
         per_100g = dict(macros)
         if is_serving:
-            est = _estimate_serving_weights_llm([f.get("food_name", q)])
-            weight_g = est.get(f.get("food_name", q), 150.0)
+            food_name = f.get("food_name", q)
+            est, fb = _estimate_serving_weights_llm([food_name], return_fallbacks=True)
+            weight_g = est.get(food_name, 150.0)
+            # Ağırlık gerçek bir LLM tahmini değil de fallback (örn. 150g varsayılan)
+            # ise, per-serving → per-100g ölçekleme sistematik olarak yanlış olur
+            # (gerçek porsiyon 350g iken ~2.3× şişer). Düşük güvenli boyutlandırmayı
+            # logla; ölçekleme yine de yapılır ama check_serving deterministik
+            # sağlık kontrolü absürt sonuçları eler (TRIAGE_FIXES #4).
+            if food_name in fb:
+                current_app.logger.warning(
+                    "[FATSECRET] '%s' per-serving makrosu fallback ağırlık (%.0fg) ile "
+                    "per-100g'ye ölçekleniyor — düşük güvenli, hatalı olabilir.",
+                    food_name, weight_g,
+                )
             if weight_g and weight_g > 0:
                 scale = 100.0 / weight_g
                 per_100g = {

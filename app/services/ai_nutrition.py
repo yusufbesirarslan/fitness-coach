@@ -562,13 +562,17 @@ def _parse_suggestion_items(body_text):
     return []
 
 
-def _estimate_serving_weights_llm(items, fallback_weights=None):
+def _estimate_serving_weights_llm(items, fallback_weights=None, return_fallbacks=False):
     # fallback_weights: ad → gram; LLM tahmini yok/aralık-dışıyken düz 150 g
     # yerine kullanılır (menü hattı tür-bazlı varsayılan geçer; koç hattı eski
     # 150 g davranışını korur — parametre verilmezse değişiklik yok).
+    # return_fallbacks=True: (results, fallback_set) döner — çağıran, gerçek LLM
+    # tahmini yerine fallback ağırlık kullanılan (düşük güvenli) yemekleri bilir
+    # ve per-100g ölçeklemeyi atlamak/uyarmak için kullanabilir (TRIAGE_FIXES #4).
     if not items:
-        return {}
+        return ({}, set()) if return_fallbacks else {}
     fallback_weights = fallback_weights or {}
+    fallbacks = set()
     current_app.logger.info(f"[MACRO ENGINE] Estimating serving weights for {len(items)} per-100g items")
     items_str = "\n".join(f"- {name}" for name in items)
     prompt = f"""Sen bir restoran şefi ve beslenme uzmanısın. Aşağıdaki yemeklerin Türkiye'de standart bir restoranda servis edilen 1 PORSİYONUNUN ortalama ağırlığını GRAM cinsinden tahmin et.
@@ -615,12 +619,15 @@ SADECE aşağıdaki JSON formatında yanıt ver:
                     results[name] = float(grams)
                 else:
                     results[name] = fallback_weights.get(name, 150.0)
-                    current_app.logger.info(f"[MACRO ENGINE] Serving weight fallback {results[name]:.0f}g for '{name}' (raw={grams})")
+                    fallbacks.add(name)
+                    current_app.logger.warning(f"[MACRO ENGINE] Serving weight fallback {results[name]:.0f}g for '{name}' (raw={grams}) — düşük güvenli boyutlandırma")
             current_app.logger.info(f"[MACRO ENGINE] Serving weights resolved: {results}")
-            return results
+            return (results, fallbacks) if return_fallbacks else results
     except Exception as e:
         current_app.logger.info(f"[MACRO ENGINE] LLM SERVING WEIGHT ERROR: {type(e).__name__}: {e}")
-    return {n: fallback_weights.get(n, 150.0) for n in items}
+    # Tüm yemekler için fallback (LLM tamamen başarısız) — hepsi düşük güvenli.
+    results = {n: fallback_weights.get(n, 150.0) for n in items}
+    return (results, set(items)) if return_fallbacks else results
 
 
 def _repair_truncated_json(raw_json):

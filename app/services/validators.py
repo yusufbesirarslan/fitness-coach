@@ -15,6 +15,16 @@ def _to_float(value, default=0.0):
         return default
 
 
+def _to_int(value, default=0):
+    """Kullanıcı JSON'undan gelen sayıyı güvenle int'e çevir; geçersiz/eksik/boş
+    ("" veya "yüksek" gibi) ise default döner (500 yerine). Önce float'tan geçer
+    ki "3.0" gibi string'ler de kabul edilsin."""
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return default
+
+
 
 _PROFILE_PIC_RE = re.compile(
     r'^data:image/(png|jpe?g|gif|webp);base64,([A-Za-z0-9+/]+={0,2})$'

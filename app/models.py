@@ -254,8 +254,8 @@ class PumpCheck(db.Model):
 
 class Friendship(db.Model):
     id          = db.Column(db.Integer, primary_key=True)
-    sender_id   = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
-    receiver_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    sender_id   = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    receiver_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
     status      = db.Column(db.String(10), default="pending")
     created_at  = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -269,8 +269,8 @@ class Friendship(db.Model):
 
 class Message(db.Model):
     id           = db.Column(db.Integer, primary_key=True)
-    sender_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
-    receiver_id  = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    sender_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    receiver_id  = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
     body         = db.Column(db.Text, nullable=False)
     timestamp    = db.Column(db.DateTime, default=datetime.utcnow)
     is_read      = db.Column(db.Boolean, default=False)

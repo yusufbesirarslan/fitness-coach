@@ -217,11 +217,14 @@ def test_meal_log_ai_path_with_fitness_normalization(client, auth_user, monkeypa
     assert entry.yemekler == "2 ölçek whey ve muz"  # DB'ye orijinal metin yazılır
 
 
-def test_meal_log_ai_garbage_saves_zeros(client, auth_user, monkeypatch):
+def test_meal_log_ai_unparseable_returns_error_no_save(client, auth_user, monkeypatch):
+    # AI yanıtı parse edilemezse kanonik MealLog defterine sıfır-makro satırı
+    # YAZILMAMALI (TRIAGE_FIXES #1) — hata döner, kayıt eklenmez.
     monkeypatch.setattr(nutrition_bp, "_openai_chat", lambda **kw: "hesaplayamadım")
-    body = client.post("/meal-log", json={"ogun": "Öğle", "yemekler": "şey"}).get_json()
-    assert body["nutrients"] == {"kalori": 0, "protein": 0, "karb": 0, "yag": 0}
-    assert MealLog.query.count() == 1  # giriş yine de kaydedilir
+    resp = client.post("/meal-log", json={"ogun": "Öğle", "yemekler": "şey"})
+    assert resp.status_code == 502
+    assert "error" in resp.get_json()
+    assert MealLog.query.count() == 0  # bozuk satır defter'e yazılmaz
 
 
 def test_meal_log_non_numeric_ai_values_zeroed(client, auth_user, monkeypatch):

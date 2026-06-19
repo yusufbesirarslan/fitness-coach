@@ -8,6 +8,7 @@ from app.extensions import _user_or_ip_key, db, limiter
 from app.models import DailyActivity, MealLog, User, UserSession, WeeklyCheckIn, WeeklyLog, WorkoutLog
 from app.services.ai_coach import generate_checkin_feedback
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
+from app.services.validators import _to_int
 from app.timeutil import app_date_of, app_today, utc_day_bounds
 
 
@@ -116,13 +117,15 @@ def checkin():
     except ValueError:
         return jsonify({"error": "Kilo sayısal olmalıdır"}), 400
 
-    yogunluk    = int(data.get("yogunluk", 3))
-    fatigue     = int(data.get("fatigue", 3))
+    # Bozuk/eksik payload ("yogunluk": "" veya "yüksek") int() ile 500 atardı;
+    # _to_int güvenle varsayılana düşer.
+    yogunluk    = _to_int(data.get("yogunluk", 3), 3)
+    fatigue     = _to_int(data.get("fatigue", 3), 3)
     overload    = data.get("progressive_overload", "kismen")
     if overload not in ("evet", "hayir", "kismen"):
         overload = "kismen"
-    uyku        = int(data.get("uyku_kalitesi", 3))
-    beslenme    = int(data.get("beslenme_uyumu", 3))
+    uyku        = _to_int(data.get("uyku_kalitesi", 3), 3)
+    beslenme    = _to_int(data.get("beslenme_uyumu", 3), 3)
     note        = data.get("note", "")
 
     # Önceki check-in'i al
