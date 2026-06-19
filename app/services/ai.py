@@ -95,6 +95,42 @@ def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
         raise RuntimeError(f"AI servisi hatası: {e}")
 
 
+def _bedrock_validate_image(image_bytes, media_type, prompt, max_tokens=400, temperature=0.0):
+    """Bedrock (Claude Sonnet) çok-kipli doğrulama: bir görsel + metin promptu gönderir,
+    modelin ham metin yanıtını (genelde katı JSON) string olarak döndürür.
+
+    Anthropic Messages API GÖRSEL BLOĞU kullanır — OpenAI'ın `image_url`'ü DEĞİL:
+        {"type":"image","source":{"type":"base64","media_type":..., "data": <b64>}}
+    Yalnızca BEDROCK_ENABLED ve anthropic paketi mevcutken çağrılmalı (çağıran kontrol
+    eder). Hata durumunda _claude_chat ile aynı Türkçe RuntimeError'ları fırlatır;
+    çağıranlar fail-open/fallback için yakalar."""
+    import base64
+    if media_type not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
+        media_type = "image/jpeg"
+    b64 = base64.b64encode(image_bytes).decode("utf-8")
+    content = [
+        {"type": "text", "text": prompt},
+        {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
+    ]
+    try:
+        resp = bedrock_client.messages.create(
+            model=BEDROCK_MODEL,
+            max_tokens=min(max_tokens, BEDROCK_MAX_TOKENS),
+            messages=[{"role": "user", "content": content}],
+            temperature=temperature,
+        )
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                return block.text
+        return ""
+    except anthropic.RateLimitError:
+        raise RuntimeError("AI servisi şu an yoğun (rate limit). Lütfen biraz sonra tekrar deneyin.")
+    except (anthropic.APITimeoutError, anthropic.APIConnectionError):
+        raise RuntimeError("AI servisine ulaşılamadı (zaman aşımı). Lütfen tekrar deneyin.")
+    except anthropic.APIError as e:
+        raise RuntimeError(f"AI servisi hatası: {e}")
+
+
 def _heavy_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
     """Ağır görev yönlendiricisi: Bedrock açıksa Claude Sonnet'e gider, aksi halde veya
     herhangi bir hatada OpenAI'ya şeffafça düşer. İmza `_openai_chat` ile aynıdır, böylece

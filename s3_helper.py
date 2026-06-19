@@ -44,6 +44,22 @@ _EXT_BY_MIME = {
     "image/gif": "gif",
 }
 
+# Ters eşleme: nesne anahtarındaki uzantıdan media_type (Bedrock görsel bloğu
+# media_type'ı bekler). Bilinmeyen uzantı → güvenli varsayılan image/jpeg.
+_MIME_BY_EXT = {
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+    "gif": "image/gif",
+}
+
+
+def media_type_for_key(key):
+    """Bir S3 anahtarının uzantısından Bedrock-uyumlu media_type döndür."""
+    ext = (key or "").rsplit(".", 1)[-1].lower() if "." in (key or "") else ""
+    return _MIME_BY_EXT.get(ext, "image/jpeg")
+
 _client = None  # tembel (lazy) oluşturulup önbelleğe alınır
 
 
@@ -99,6 +115,29 @@ def upload_image(image_bytes, content_type="image/jpeg", prefix="uploads", user_
         return key
     except (BotoCoreError, ClientError) as e:
         logger.warning("[S3] Yükleme başarısız (%s): %s: %s", key, type(e).__name__, e)
+        raise S3Error(str(e)) from e
+
+
+def get_object_bytes(key, expected_user_id=None):
+    """Bir S3 nesnesinin ham baytlarını indir (örn. Bedrock'a görsel bloğu olarak
+    göndermek için). Hata/boş anahtarda S3Error yükseltir — çağıran yakalayıp
+    zarifçe düşer.
+
+    expected_user_id verilirse, anahtarın o kullanıcıya ait olduğu (yol içinde
+    '/<user_id>/' geçtiği — bkz _build_key) ÖNCE doğrulanır; eşleşmezse indirme
+    yapılmaz. LLM'in sağladığı anahtarlarda IDOR sınırı (savunma derinliği)."""
+    if not key:
+        raise S3Error("Nesne anahtarı boş.")
+    if expected_user_id is not None and f"/{expected_user_id}/" not in key:
+        logger.warning("[S3] İndirme reddedildi: anahtar (%s) kullanıcı %s ile eşleşmiyor.",
+                       key, expected_user_id)
+        raise S3Error("Sahiplik doğrulaması başarısız.")
+    try:
+        client = _get_client()
+        resp = client.get_object(Bucket=S3_BUCKET_NAME, Key=key)
+        return resp["Body"].read()
+    except (BotoCoreError, ClientError) as e:
+        logger.warning("[S3] İndirme başarısız (%s): %s: %s", key, type(e).__name__, e)
         raise S3Error(str(e)) from e
 
 

@@ -321,49 +321,70 @@ def validate_pump_check(image_bytes, location_type, user_description):
 
     Return: {"valid": bool, "reason": str, "fallback": bool}
 
-    NOT: Şu an MOCK. Gerçek görsel doğrulama, _extract_text_from_image()'deki OpenAI
-    vision desenini (gpt-4o-mini) birebir izleyerek aşağıdaki PLUG POINT bölümüne takılır.
-    Çağıranlar sağlayıcıyı bilmek zorunda kalmasın diye yapılandırılmış bir sözlük döner.
-    """
+    BEDROCK_ENABLED iken Bedrock (Claude Sonnet) çok-kipli doğrulama yapar; aksi halde
+    veya HERHANGİ bir hatada FAIL-OPEN olur (valid=True, fallback=True) — bir Bedrock
+    kesintisi /workout/complete'i ASLA bloklamamalı. Çağıranlar sağlayıcıyı bilmek
+    zorunda kalmasın diye yapılandırılmış bir sözlük döner."""
     location_type = (location_type or "").strip() or "belirtilmedi"
     user_description = (user_description or "").strip() or "belirtilmedi"
 
+    from app.config import BEDROCK_ENABLED
+    from app.services.ai import _bedrock_validate_image, anthropic as _anthropic
+
+    # Bedrock kapalı/paket yok → dürüst MOCK: biçimi geçerli her gönderimi kabul et,
+    # "doğrulandı" DEME (otomatik görsel doğrulama yok).
+    if not (BEDROCK_ENABLED and _anthropic is not None):
+        return {"valid": True, "reason": "Pump Check kaydedildi (otomatik görsel doğrulama yakında).", "fallback": False}
+
     prompt = (
-        f"Analyze if the provided image matches the user's claimed workout "
-        f"location type '{location_type}' and description '{user_description}'. "
-        f"Check if the environment looks like a gym, home workout area, or relevant "
-        f"fitness space based on their input. Return a boolean response."
+        f"Sen bir fitness uygulamasının 'Pump Check' doğrulayıcısısın. Kullanıcı şu "
+        f"ortamda antrenman yaptığını beyan etti — konum tipi: '{location_type}', "
+        f"açıklama: '{user_description}'. Görselin bir spor salonu, ev antrenman alanı "
+        f"veya ilgili bir fitness ortamı olup olmadığını ve beyanla uyuşup uyuşmadığını "
+        f"değerlendir. SADECE şu katı JSON'u döndür, başka hiçbir şey yazma: "
+        f'{{"is_gym": true|false, "reason": "kısa Türkçe gerekçe"}}'
     )
-    current_app.logger.info(f"[PUMP CHECK] prompt: {prompt}")
 
     try:
-        # ── PLUG POINT: gerçek görsel doğrulama çağrısını buraya tak ──────────
-        # import base64
-        # img, mime = _compress_image_for_vision(image_bytes)
-        # b64 = base64.b64encode(img).decode("utf-8")
-        # resp = openai_client.chat.completions.create(
-        #     model=OPENAI_MODEL, max_tokens=10, temperature=0.0,
-        #     messages=[{"role": "user", "content": [
-        #         {"type": "text", "text": prompt + " Answer strictly 'true' or 'false'."},
-        #         {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
-        #     ]}])
-        # answer = (resp.choices[0].message.content or "").strip().lower()
-        # is_valid = answer.startswith("true")
-        # return {
-        #     "valid": is_valid, "fallback": False,
-        #     "reason": "Pump Check doğrulandı." if is_valid else
-        #               "Fotoğraf belirttiğin ortamla eşleşmedi. Antrenman alanını "
-        #               "net gösteren bir kare deneyebilir misin?",
-        # }
-        # ─────────────────────────────────────────────────────────────────────
-
-        # MOCK davranışı: biçimi geçerli her gönderimi kabul et. DÜRÜST mesaj:
-        # gerçek görsel doğrulama henüz yok, bu yüzden "doğrulandı" DEME (F7).
-        return {"valid": True, "reason": "Pump Check kaydedildi (otomatik görsel doğrulama yakında).", "fallback": False}
+        img = image_bytes
+        media_type = "image/jpeg"
+        if image_bytes and len(image_bytes) > 1_500_000:
+            from app.services.menu_ocr import _compress_image_for_vision
+            img, media_type = _compress_image_for_vision(image_bytes)
+        raw = _bedrock_validate_image(img, media_type, prompt, max_tokens=200)
+        data = _parse_validation_json(raw)
+        if "is_gym" not in data:
+            # Model JSON döndürmedi → karar yok. Pump Check BİLİNÇLİ olarak fail-open:
+            # meşru bir antrenmanı, ayrıştırılamayan bir yanıt yüzünden bloklama.
+            current_app.logger.info("[PUMP CHECK] yanıt ayrıştırılamadı, fail-open")
+            return {"valid": True, "reason": "Doğrulama belirsiz (kaydedildi).", "fallback": True}
+        is_valid = bool(data.get("is_gym"))
+        reason = (str(data.get("reason", "")) or "").strip()[:200]
+        return {
+            "valid": is_valid,
+            "fallback": False,
+            "reason": reason or ("Pump Check doğrulandı." if is_valid else
+                                 "Fotoğraf belirttiğin antrenman ortamıyla eşleşmedi. "
+                                 "Antrenman alanını net gösteren bir kare dener misin?"),
+        }
     except Exception as e:
-        # Görsel servis hatası (timeout / API down) → kullanıcıyı engelleme (fail-open).
+        # Görsel servis hatası (timeout / API down / parse) → kullanıcıyı engelleme (fail-open).
         current_app.logger.warning(f"[PUMP CHECK] AI failed, failing open: {type(e).__name__}: {e}")
         return {"valid": True, "reason": "Doğrulama atlandı (servis hatası).", "fallback": True}
+
+
+def _parse_validation_json(raw):
+    """Modelin ham yanıtından ilk {...} JSON nesnesini ayıkla. Bozuk/eksik girdide
+    boş sözlük döner (çağıran fail-open ya da varsayılan değerlerle ilerler)."""
+    s = (raw or "").strip().replace("```json", "").replace("```", "")
+    start = s.find("{")
+    end = s.rfind("}") + 1
+    if start != -1 and end > start:
+        s = s[start:end]
+    try:
+        return json.loads(s)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return {}
 
 
 _MENU_WARN_TR = {

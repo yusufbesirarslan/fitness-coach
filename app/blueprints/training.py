@@ -189,6 +189,25 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
   Bacak: Squat, Lunge, Glute Bridge, Romanian Deadlift (dambıl), Step-Up
 """
 
+    # Sakatlık-bilinçli uyarlama (soft-adapt): kayıtlı sakatlık varsa plana kısıt
+    # ekle. Tam "durdur ve sor" iş akışı sohbet koçundadır (manage_user_memory);
+    # form bunu yalnızca TÜKETİR — sakatlık verisi yoksa normal planlar (bloklamaz).
+    _meta = getattr(current_user, "user_metadata", None) or {}
+    _injuries = _meta.get("injuries")
+    injury_text = ""
+    if _injuries and str(_injuries).strip().lower() not in ("", "hiçbiri", "hicbiri", "yok", "none"):
+        injury_text = (
+            f"\nSAKATLIK / SAĞLIK KISITLARI (ZORUNLU UYARLAMA):\n"
+            f"- Kullanıcının bildirdiği durum: {str(_injuries)[:200]}\n"
+            f"- Egzersiz seçimi, hacim ve şiddeti bu duruma göre GÜVENLİ uyarla; riskli "
+            f"hareketleri düşük-darbeli/daha güvenli alternatiflerle değiştir.\n"
+            f"- Örnekler: Menisküs/diz → ağır squat/lunge yerine leg press, box squat, düşük darbe; "
+            f"Kifoz → arka zincir + ekstansiyon vurgusu, ağır overhead'den kaçın; "
+            f"Bel/disk → ağır eksenel yük (deadlift/back squat) yerine destekli varyasyonlar; "
+            f"Omuz → ağır bench/overhead yerine nötr tutuş ve kontrollü ROM.\n"
+            f"- İlgili egzersizin 'not' alanına sakatlık-güvenliği ipucu ekle.\n"
+        )
+
     prompt = (
         f"Sen 10+ yıllık deneyimli bir kişisel antrenörsün. Türkçe yaz, İngilizce egzersiz isimlerini kullanabilirsin.\n"
         f"\n"
@@ -212,6 +231,7 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
         f"\n"
         f"ÖNERİLEN SPLIT YAPISI ({gun_sayisi} gün için):\n"
         f"{split_rehber}\n"
+        f"{injury_text}"
         f"\n"
         f"PROGRAM KURALLARI:\n"
         f"1. Haftanın tam 7 günü için plan yap (Pazartesi'den Pazar'a): {gun_sayisi} antrenman günü + "

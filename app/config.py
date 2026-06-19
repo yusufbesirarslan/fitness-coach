@@ -47,6 +47,10 @@ BEDROCK_REGION = os.getenv("BEDROCK_REGION") or os.getenv("AWS_REGION", "eu-cent
 BEDROCK_MODEL = os.getenv("BEDROCK_MODEL", "global.anthropic.claude-sonnet-4-5-20250929-v1:0")
 BEDROCK_MAX_TOKENS = int(os.getenv("BEDROCK_MAX_TOKENS", "8000"))
 BEDROCK_ENABLED = os.getenv("BEDROCK_ENABLED", "0") == "1"  # açık opt-in; prod .env'de =1
+# Bedrock prompt caching (cache_control: ephemeral). Statik sistem promptu + araç
+# tanımları önbelleğe alınır; deploy bölgesinde (eu-central-1) doğrulanana kadar
+# KARANLIK gönder (varsayılan kapalı). Yalnızca tool-use koç döngüsünü etkiler.
+BEDROCK_PROMPT_CACHE = os.getenv("BEDROCK_PROMPT_CACHE", "0") == "1"
 
 # ── Amazon Cognito (e-posta ile giriş — OIDC / Hosted UI) ──
 # Kullanıcı havuzu ve app client .env'den gelir. App client'ın bir "client secret"i
