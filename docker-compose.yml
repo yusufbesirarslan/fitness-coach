@@ -1,6 +1,8 @@
 # FitX — tek EC2 üzerinde Docker Compose ile çalıştırma.
 # Host üzerindeki nginx (bkz. nginx.conf) gelen istekleri 127.0.0.1:5000'e
-# (web servisi) yönlendirir. db sadece compose ağı içinden erişilebilir.
+# (web servisi) yönlendirir. Veritabanı artık AWS RDS PostgreSQL'dir (aynı VPC,
+# private erişim); bağlantı .env'deki DATABASE_URL'den gelir. Bundled "db" servisi
+# KALDIRILDI.
 #
 # ${VAR:-default} değerleri proje kökündeki .env dosyasından okunur
 # (compose otomatik olarak .env'i değişken ikamesi için yükler).
@@ -19,14 +21,12 @@ services:
       - "127.0.0.1:5000:5000"
     env_file:
       - .env
-    environment:
-      # Compose içindeki Postgres'e bağlan; host'u "db" servis adı çözer.
-      # .env'deki DATABASE_URL'i bilinçli olarak override ediyoruz ki
-      # uygulama her zaman compose db'sine baksın.
-      DATABASE_URL: postgresql://${POSTGRES_USER:-fitx}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}@db:5432/${POSTGRES_DB:-fitx}
+    # Veritabanı: AWS RDS PostgreSQL. Bağlantı .env'deki DATABASE_URL'den gelir;
+    # compose ARTIK override ETMEZ (önceden bundled "db" servisine yönlendiriyordu).
+    # .env'de DATABASE_URL=postgresql://...rds.amazonaws.com:5432/... ZORUNLU,
+    # yoksa uygulama sessizce SQLite'a düşer (bkz. app/config.py:112). RDS dış/her
+    # zaman ayakta olduğu için web yalnızca redis'e bağımlı.
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_healthy
 
@@ -54,30 +54,5 @@ services:
       retries: 5
       start_period: 5s
 
-  db:
-    image: postgres:18-alpine
-    restart: unless-stopped
-    mem_limit: ${DB_MEM_LIMIT:-512m}
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-fitx}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
-      POSTGRES_DB: ${POSTGRES_DB:-fitx}
-      # postgres:18+ varsayilan veri dizinini degistirdi: mount /var/lib/postgresql/data'da
-      # olunca "unused mount/volume" hatasiyla boot patliyor. PGDATA'yi eski yola sabitleyip
-      # mevcut mount'u koruyoruz (alternatif: mount'u /var/lib/postgresql'e tasimak).
-      PGDATA: /var/lib/postgresql/data
-    volumes:
-      # Konteyner silinse bile veri kaybolmaz.
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      # web, db "healthy" olana kadar başlamaz; starter.py import sırasında
-      # db.create_all() çağırdığı için Postgres hazır olmadan boot başarısız olur.
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fitx} -d ${POSTGRES_DB:-fitx}"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-
 volumes:
-  pgdata:
   redis_data:
