@@ -545,6 +545,7 @@ def log_meal():
 
     nutrients = {"kalori": 0, "protein": 0, "karb": 0, "yag": 0}
     raw = ""
+    parsed_ok = False
 
     try:
         raw = _openai_chat(
@@ -560,16 +561,26 @@ def log_meal():
         end = raw.rfind("}") + 1
         if start != -1 and end > start:
             raw = raw[start:end]
-        
+
         nutrients = json.loads(raw)
         for key in ("kalori", "protein", "karb", "yag"):
             try:
                 nutrients[key] = round(float(nutrients.get(key, 0)), 1)
             except (TypeError, ValueError):
                 nutrients[key] = 0
+        parsed_ok = True
     except Exception as e:
         current_app.logger.info(f"MEAL LOG ERROR: {e}")
         current_app.logger.info(f"RAW: {raw}")
+
+    # AI çağrısı/JSON parse başarısızsa nutrients tümü 0 kalır; bunu kanonik
+    # MealLog defterine YAZMA — kalıcı sıfır-makro satırı günlük toplamları,
+    # protein nudge'ını ve haftalık raporları bozar (sessizce). Hatayı kullanıcıya
+    # döndür ki tekrar denesin; commit etme.
+    if not parsed_ok:
+        return jsonify({
+            "error": "Öğün besin değerleri hesaplanamadı, lütfen tekrar deneyin."
+        }), 502
 
     today = day_key()
 

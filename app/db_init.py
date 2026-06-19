@@ -68,8 +68,13 @@ def init_database(app):
             try:
                 db.session.execute(db.text(sql))
                 db.session.commit()
-            except Exception:
+            except Exception as e:
                 db.session.rollback()
+                # Çoğu hata beklenen idempotent durum ("column already exists");
+                # bu yüzden debug seviyesi — ama tamamen yutma ki gerçek bir ALTER
+                # başarısızlığı gerektiğinde teşhis edilebilsin (TRIAGE_FIXES #6).
+                app.logger.debug("[DB] idempotent ALTER atlandı: %s — %s: %s",
+                                 sql, type(e).__name__, e)
 
         # PL/pgSQL trigger for PostgreSQL activity calorie auto-calculation
         try:

@@ -408,11 +408,40 @@ _fs_token_lock = threading.Lock()
 _fs_token_cache = {"token": None, "expires_at": 0}
 
 FATSECRET_TOKEN_URL = "https://oauth.fatsecret.com/connect/token"
-FATSECRET_BASE_URL = os.environ.get("FATSECRET_BASE_URL", "http://18.153.156.28:3000")
+# Güvensiz varsayılan YOK: ayarlanmazsa boş kalır. Eski hardcoded
+# "http://<public-ip>:3000" varsayılanı OAuth bearer token'ını düz metin HTTP
+# üzerinde sızdırıyordu (app/config.py ile aynı sorun). MCP sunucusu standalone
+# çalışabildiği için TLS zorunluluğu burada da uygulanır (_enforce_fatsecret_tls).
+FATSECRET_BASE_URL = os.environ.get("FATSECRET_BASE_URL", "")
 FATSECRET_API_URL = f"{FATSECRET_BASE_URL}/rest/server.api"
 
 
+def _enforce_fatsecret_tls() -> None:
+    """app/config.py:_enforce_fatsecret_tls'in MCP karşılığı. Bearer token
+    Authorization header'ında gittiğinden düz metin HTTP (loopback dışı) kabul
+    edilmez. Ayarlanmamış/güvensiz URL'de FatSecret çağrısını reddet."""
+    from urllib.parse import urlparse as _urlparse
+    if not FATSECRET_BASE_URL:
+        raise RuntimeError(
+            "FATSECRET_BASE_URL ayarlı değil — FatSecret entegrasyonu çalışmaz. "
+            "https:// bir endpoint'e işaret ettir."
+        )
+    p = _urlparse(FATSECRET_BASE_URL)
+    host = (p.hostname or "").lower()
+    is_local = host in ("localhost", "127.0.0.1", "::1")
+    if p.scheme == "https" or is_local:
+        return
+    if os.environ.get("FATSECRET_ALLOW_INSECURE") == "1":
+        return
+    raise RuntimeError(
+        "FATSECRET_BASE_URL must use https:// — the FatSecret OAuth token is sent "
+        "in the Authorization header and would otherwise travel in cleartext. "
+        "Point FATSECRET_BASE_URL at an https:// endpoint."
+    )
+
+
 def _get_fatsecret_token() -> str:
+    _enforce_fatsecret_tls()
     with _fs_token_lock:
         if _fs_token_cache["token"] and time.time() < _fs_token_cache["expires_at"] - 60:
             return _fs_token_cache["token"]
