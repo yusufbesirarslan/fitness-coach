@@ -63,3 +63,55 @@ def test_supplements_page_lists_own_stack(client, auth_user, make_user):
     page = client.get("/supplements").get_data(as_text=True)
     assert "BenimUrunum" in page
     assert "GizliUrun" not in page           # başka kullanıcının stack'i sızmaz
+
+
+# ---------------------------------------------------------------------------
+# Düzenleme / silme — alan temizliği ve sahiplik kapısı.
+# ---------------------------------------------------------------------------
+
+def test_edit_updates_fields_and_sanitizes(client, auth_user):
+    sid = _add(client).get_json()["id"]
+    resp = client.post(f"/supplement/edit/{sid}", json={
+        "product_name": "  Yeni İsim  ", "brand": "  ", "category": "Creatine",
+        "status": "Bilinmeyen", "rating_effect": 5, "rating_taste": 9,
+        "review_text": "  harika  ", "price_paid": "120.5", "is_public": True,
+    })
+    assert resp.status_code == 200
+
+    db.session.expire_all()
+    supp = db.session.get(Supplement, sid)
+    assert supp.product_name == "Yeni İsim"   # trim'lendi
+    assert supp.brand == "ON"                 # boş brand yok sayıldı (eski değer kalır)
+    assert supp.category == "Creatine"
+    assert supp.status != "Bilinmeyen"        # geçersiz durum yazılmadı
+    assert supp.rating_effect == 5
+    assert supp.rating_taste is None          # 1-5 dışı → None
+    assert supp.review_text == "harika"
+    assert supp.price_paid == 120.5
+    assert supp.is_public is True
+
+
+def test_edit_foreign_supplement_forbidden(client, auth_user, make_user):
+    other = make_user("baskasi")
+    supp = Supplement(user_id=other.id, product_name="Onunki", brand="X")
+    db.session.add(supp)
+    db.session.commit()
+    resp = client.post(f"/supplement/edit/{supp.id}", json={"product_name": "Çaldım"})
+    assert resp.status_code == 403
+    db.session.expire_all()
+    assert db.session.get(Supplement, supp.id).product_name == "Onunki"  # değişmedi
+
+
+def test_delete_removes_own_supplement(client, auth_user):
+    sid = _add(client).get_json()["id"]
+    assert client.post(f"/supplement/delete/{sid}").status_code == 200
+    assert db.session.get(Supplement, sid) is None
+
+
+def test_delete_foreign_supplement_forbidden(client, auth_user, make_user):
+    other = make_user("sahibi")
+    supp = Supplement(user_id=other.id, product_name="Onunki", brand="X")
+    db.session.add(supp)
+    db.session.commit()
+    assert client.post(f"/supplement/delete/{supp.id}").status_code == 403
+    assert db.session.get(Supplement, supp.id) is not None  # silinmedi

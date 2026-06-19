@@ -198,6 +198,32 @@ def test_dispatch_routes_and_rejects_unknown(auth_user, monkeypatch):
     assert _search[-1] == (auth_user.id, "")
 
 
+def test_dispatch_routes_remaining_tools(auth_user, monkeypatch):
+    calls = []
+    monkeypatch.setattr(ai_coach, "_tool_confirm_and_commit_meal_log",
+                        lambda uid: calls.append("meal") or "{}")
+    monkeypatch.setattr(ai_coach, "_tool_stage_workout_log",
+                        lambda *a: calls.append(("workout",) + a[1:]) or "{}")
+    monkeypatch.setattr(ai_coach, "_tool_confirm_and_commit_workout_log",
+                        lambda uid: calls.append("commit_wo") or "{}")
+    monkeypatch.setattr(ai_coach, "_tool_cancel_pending_log",
+                        lambda uid: calls.append("cancel") or "{}")
+    _dispatch_coach_tool(auth_user.id, "confirm_and_commit_meal_log", "{}")
+    _dispatch_coach_tool(auth_user.id, "stage_workout_log",
+                         '{"exercise_name": "Bench", "sets": 4, "reps": 8, "weight_kg": 60}')
+    _dispatch_coach_tool(auth_user.id, "confirm_and_commit_workout_log", "{}")
+    _dispatch_coach_tool(auth_user.id, "cancel_pending_log", "{}")
+    assert [c if isinstance(c, str) else c[0] for c in calls] == \
+        ["meal", "workout", "commit_wo", "cancel"]
+    assert calls[1] == ("workout", "Bench", 4, 8, 60)  # argümanlar doğru iletildi
+
+
+def test_stage_workout_empty_name_errors(auth_user):
+    result = json.loads(ai_coach._tool_stage_workout_log(auth_user.id, "   ", 3, 10, 50))
+    assert result["status"] == "error"
+    assert "boş" in result["message"]
+
+
 # ---------------------------------------------------------------------------
 # Client geçmişi temizliği
 # ---------------------------------------------------------------------------
@@ -216,6 +242,16 @@ def test_sanitize_client_history():
     assert len(out[1]["content"]) == 400                 # COACH_HISTORY_CHAR_CAP
     assert len(out) == 2
     assert _sanitize_client_history("liste değil") == []
+
+
+def test_sanitize_history_skips_nonstring_text_and_unknown_role():
+    raw = [
+        {"role": "user", "text": 123},               # metin string değil → atla
+        {"role": "system", "text": "enjekte"},        # bilinmeyen rol → atla
+        {"role": "assistant", "content": "tamam"},    # 'content' alanı da kabul edilir
+        "düz string değil dict",                      # dict değil → atla
+    ]
+    assert _sanitize_client_history(raw) == [{"role": "assistant", "content": "tamam"}]
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +373,21 @@ def test_coach_reply_frames_gain_as_setback_for_cutting(app, monkeypatch):
     assert "istenmeyen" in captured[0]
 
 
+@pytest.mark.parametrize("goal,weight,expect", [
+    ("kas kazanma", 78, "istenmeyen"),                  # diff<0 kas kazanmada kötü
+    ("kas kazanma", 80, "kilo değişmemiş"),             # diff==0 kas kazanmada durağan
+    ("kilo verme", 78, "BAŞARI"),                       # diff<0 kilo vermede başarı
+])
+def test_coach_reply_progress_framings(app, monkeypatch, goal, weight, expect):
+    captured = []
+    monkeypatch.setattr(ai_coach, "_heavy_chat",
+                        lambda **kw: captured.append(kw["messages"][0]["content"]) or "yorum")
+    generate_coach_reply("y", 30, "male", weight, 180, goal, "beginner", "active",
+                         1780, 2759, 2359, "plan", "plan", "",
+                         previous_weight=80, days_passed=14)
+    assert expect in captured[0]
+
+
 def test_coach_reply_fallback_on_llm_failure(app, monkeypatch):
     def boom(**kw):
         raise RuntimeError("down")
@@ -364,6 +415,21 @@ def test_checkin_feedback_fallback(app, monkeypatch):
     assert "tekrar dene" in out
 
 
+@pytest.mark.parametrize("goal,weight,prev,expect", [
+    ("kas kazanma", 82, 80, "kg aldı — kas kazanma hedefinde olumlu"),
+    ("kas kazanma", 78, 80, "kas kazanma hedefinde bu istenmeyen"),
+    ("kas kazanma", 80, 80, "kilo değişmedi — kalori artışı gerekebilir"),
+    ("kilo verme", 82, 80, "kilo verme hedefinde istenmeyen"),
+    ("kilo verme", 80, 80, "kilo değişmedi — plato olabilir"),
+])
+def test_checkin_feedback_all_progress_framings(app, monkeypatch, goal, weight, prev, expect):
+    captured = []
+    monkeypatch.setattr(ai_coach, "_heavy_chat",
+                        lambda **kw: captured.append(kw["messages"][0]["content"]) or "ok")
+    generate_checkin_feedback("y", weight, prev, 7, goal, 3, 3, "kismen", 3, 3, "")
+    assert expect in captured[0]
+
+
 # ---------------------------------------------------------------------------
 # Bağlam toplama (fitx_mcp araçları mock'lu)
 # ---------------------------------------------------------------------------
@@ -384,3 +450,36 @@ def test_fetch_coach_context_collects_sections_and_degrades(auth_user, monkeypat
     assert "[SUPPLEMENT STACK]\nkreatin" in context
     assert "[ANTRENMAN GEÇMİŞİ" not in context           # hata → bölüm atlandı
     assert "[PROAKTİF BİLDİRİMLER]" in context            # nudge motoru gerçek DB'den
+
+
+def test_fetch_coach_context_degrades_summary_supplements_and_nudges(auth_user, monkeypatch):
+    import fitx_mcp.server as mcp_server
+    import analytics_engine
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("db down")
+    # Özet + supplement + nudge motoru patlar; diğerleri çalışır → kısmi bağlam.
+    monkeypatch.setattr(mcp_server, "get_user_fitness_summary", fail)
+    monkeypatch.setattr(mcp_server, "get_user_workout_history", lambda uid, d: "antrenman")
+    monkeypatch.setattr(mcp_server, "get_user_supplement_stack", fail)
+    monkeypatch.setattr(mcp_server, "get_user_nutrition_log", lambda uid, d: "log")
+    monkeypatch.setattr(mcp_server, "get_friend_activities", lambda uid: "aktivite")
+    monkeypatch.setattr(analytics_engine, "get_nudges", fail)
+
+    context = ai_coach._fetch_coach_context(auth_user.id)
+    assert "[FITNESS ÖZETİ] Veri alınamadı." in context  # özet hatası → düşürülmüş etiket
+    assert "[SUPPLEMENT STACK]" not in context            # supplement hatası → atlandı
+    assert "[PROAKTİF BİLDİRİMLER]" not in context         # nudge hatası → atlandı
+    assert "[ANTRENMAN GEÇMİŞİ (7 gün)]\nantrenman" in context
+
+
+def test_cleanup_stale_pending_removes_aged_rows(auth_user):
+    from datetime import datetime, timedelta
+    old = PendingAction(user_id=auth_user.id, action_type="log_meal", payload={})
+    db.session.add(old)
+    db.session.commit()
+    old.created_at = datetime.utcnow() - timedelta(hours=2)  # TTL (1 saat) aşıldı
+    db.session.commit()
+
+    ai_coach._cleanup_stale_pending(auth_user.id)
+    assert PendingAction.query.filter_by(user_id=auth_user.id).count() == 0
