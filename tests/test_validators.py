@@ -17,6 +17,8 @@ from PIL import Image
 
 from app.services.validators import (
     _to_float,
+    _to_int,
+    _verify_image_bytes,
     validate_email,
     validate_meal_photo,
     validate_password,
@@ -62,6 +64,38 @@ def test_to_float_falls_back_on_garbage():
     assert _to_float("abc") == 0.0
     assert _to_float({"x": 1}, default=7.5) == 7.5
     assert _to_float("", default=None) is None
+
+
+def test_to_int_accepts_numeric_and_falls_back():
+    assert _to_int("3.0") == 3      # önce float'tan geçer
+    assert _to_int(7) == 7
+    assert _to_int("yüksek") == 0   # geçersiz → default
+    assert _to_int(None, default=-1) == -1
+    assert _to_int("", default=5) == 5
+
+
+# ---------------------------------------------------------------------------
+# _verify_image_bytes — sahte image/* MIME ve desteklenmeyen format reddi.
+# ---------------------------------------------------------------------------
+
+def test_verify_image_accepts_real_image(app):
+    buf = io.BytesIO()
+    Image.new("RGB", (3, 3), "blue").save(buf, format="PNG")
+    with app.app_context():
+        assert _verify_image_bytes(buf.getvalue()) is None
+
+
+def test_verify_image_rejects_garbage(app):
+    with app.app_context():
+        assert _verify_image_bytes(b"not an image at all") == "Geçerli bir görsel dosyası değil."
+
+
+def test_verify_image_rejects_unsupported_format(app):
+    # Gerçek bir görsel ama izinli set (JPEG/PNG/GIF/WEBP) dışında → reddedilir.
+    buf = io.BytesIO()
+    Image.new("RGB", (3, 3), "green").save(buf, format="BMP")
+    with app.app_context():
+        assert _verify_image_bytes(buf.getvalue()) == "Desteklenmeyen görsel formatı."
 
 
 # ---------------------------------------------------------------------------
@@ -213,3 +247,55 @@ def test_meal_photo_valid_and_invalid():
     image_bytes, _, error = validate_meal_photo("https://evil.example/x.jpg")
     assert image_bytes is None
     assert error is not None
+
+
+def test_pump_check_image_undecodable_base64_rejected():
+    # Regex'e uyan ama base64 olarak çözülemeyen gövde (geçersiz uzunluk) → decode_failed.
+    image_bytes, _, error = validate_pump_check_image("data:image/png;base64,A")
+    assert image_bytes is None
+    assert "çözümlenemedi" in error
+
+
+def test_pump_check_image_valid_dataurl_but_not_an_image_rejected():
+    # Geçerli base64 ama görsel DEĞİL (sahte image/* MIME) → bad_image.
+    fake = base64.b64encode(b"this is plain text, not an image").decode()
+    image_bytes, _, error = validate_pump_check_image(f"data:image/png;base64,{fake}")
+    assert image_bytes is None
+    assert "görsel" in error
+
+
+def test_profile_picture_undecodable_base64_rejected():
+    cleaned, error = validate_profile_picture("data:image/png;base64,A")
+    assert cleaned is None
+    assert "çözümlenemedi" in error
+
+
+# ---------------------------------------------------------------------------
+# _meal_photo_url — S3 etkinse pre-signed URL üretir, değilse None.
+# ---------------------------------------------------------------------------
+
+def test_meal_photo_url_none_without_key_or_s3(monkeypatch):
+    import app.services.validators as v
+    from types import SimpleNamespace
+    monkeypatch.setattr(v.s3_helper, "is_enabled", lambda: True)
+    # anahtar yok → None
+    assert v._meal_photo_url(SimpleNamespace(photo_key=None, user_id=1)) is None
+    # anahtar var ama S3 kapalı → None
+    monkeypatch.setattr(v.s3_helper, "is_enabled", lambda: False)
+    assert v._meal_photo_url(SimpleNamespace(photo_key="k", user_id=1)) is None
+
+
+def test_meal_photo_url_returns_presigned_when_enabled(monkeypatch):
+    import app.services.validators as v
+    from types import SimpleNamespace
+    monkeypatch.setattr(v.s3_helper, "is_enabled", lambda: True)
+    captured = {}
+
+    def fake_presign(key, expires_in, expected_user_id):
+        captured.update(key=key, user=expected_user_id)
+        return "https://signed.example/x"
+
+    monkeypatch.setattr(v.s3_helper, "generate_presigned_url", fake_presign)
+    url = v._meal_photo_url(SimpleNamespace(photo_key="meals/7.jpg", user_id=42))
+    assert url == "https://signed.example/x"
+    assert captured == {"key": "meals/7.jpg", "user": 42}

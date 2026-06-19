@@ -157,3 +157,76 @@ def test_vision_ocr_api_failure_returns_empty(app, monkeypatch):
             raise RuntimeError("openai down")
     monkeypatch.setattr(menu_ocr, "openai_client", _Boom())
     assert _extract_text_from_image(b"img") == ""
+
+
+def test_vision_ocr_compresses_oversized_image(app, monkeypatch):
+    fake = _FakeVision("ok")
+    monkeypatch.setattr(menu_ocr, "openai_client", fake)
+    compressed = {}
+    monkeypatch.setattr(menu_ocr, "_compress_image_for_vision",
+                        lambda b, *a, **k: (compressed.setdefault("hit", True), (b"tiny", "image/jpeg"))[1])
+    _extract_text_from_image(b"x" * 1_500_001, "image/png")  # >1.5MB → sıkıştırılır
+    assert compressed.get("hit") is True
+    image_part = fake.calls[0]["messages"][1]["content"][1]
+    assert image_part["image_url"]["url"].startswith("data:image/jpeg;base64,")
+
+
+# ---------------------------------------------------------------------------
+# _extract_pdf_pages_via_vision — taranmış sayfaları görsele çevirip OCR'a verir.
+# ---------------------------------------------------------------------------
+
+class _FakePage:
+    def __init__(self, raises=False):
+        self._raises = raises
+
+    def to_image(self, resolution=200):
+        if self._raises:
+            raise RuntimeError("render failed")
+
+        class _Original:
+            def save(self, buf, format):
+                buf.write(b"FAKEPNGBYTES")
+
+        return type("Img", (), {"original": _Original()})()
+
+
+class _FakePdf:
+    def __init__(self, pages):
+        self.pages = pages
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def test_extract_pdf_pages_via_vision_renders_and_ocrs(app, monkeypatch):
+    import pdfplumber
+    pdf = _FakePdf([_FakePage(), _FakePage()])
+    monkeypatch.setattr(pdfplumber, "open", lambda b: pdf)
+    monkeypatch.setattr(menu_ocr, "_extract_text_from_image",
+                        lambda img_bytes, content_type: "Adana Kebap 250")
+    with app.app_context():
+        out = menu_ocr._extract_pdf_pages_via_vision(b"pdfdata", [0, 1])
+    assert "[Sayfa 1]" in out and "[Sayfa 2]" in out
+    assert out.count("Adana Kebap 250") == 2
+    assert pdf.closed is True  # finally: pdf.close()
+
+
+def test_extract_pdf_pages_via_vision_skips_out_of_range_and_render_errors(app, monkeypatch):
+    import pdfplumber
+    # Tek sayfa; index 5 aralık dışı (atlanır), sayfa 0 render'da patlar (yutulur).
+    monkeypatch.setattr(pdfplumber, "open", lambda b: _FakePdf([_FakePage(raises=True)]))
+    monkeypatch.setattr(menu_ocr, "_extract_text_from_image",
+                        lambda *a, **k: "ASLA ÇAĞRILMAZ")
+    with app.app_context():
+        out = menu_ocr._extract_pdf_pages_via_vision(b"pdfdata", [5, 0])
+    assert out == ""  # hiçbir sayfa OCR metni üretmedi
+
+
+def test_extract_pdf_pages_via_vision_open_failure_returns_empty(app, monkeypatch):
+    import pdfplumber
+    def boom(b):
+        raise RuntimeError("cannot open")
+    monkeypatch.setattr(pdfplumber, "open", boom)
+    with app.app_context():
+        assert menu_ocr._extract_pdf_pages_via_vision(b"pdfdata", [0]) == ""
