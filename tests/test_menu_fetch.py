@@ -381,3 +381,90 @@ def test_drive_timeout_message(app, monkeypatch):
     monkeypatch.setattr(menu_fetch, "_safe_requests_get", boom)
     _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/T/view")
     assert "zaman aşımı" in err
+
+
+def test_drive_blocked_host_value_error(app, monkeypatch):
+    def boom(url, **kw):
+        raise ValueError("İç ağ adresleri engellendi.")
+    monkeypatch.setattr(menu_fetch, "_safe_requests_get", boom)
+    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/V/view")
+    assert "çözümlenemedi" in err
+
+
+def test_drive_connection_error_message(app, monkeypatch):
+    def boom(url, **kw):
+        raise requests.exceptions.ConnectionError("reset")
+    monkeypatch.setattr(menu_fetch, "_safe_requests_get", boom)
+    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/C/view")
+    assert "bağlantı hatası" in err and "ConnectionError" in err
+
+
+def test_drive_streamed_body_exceeds_cap(app, monkeypatch):
+    # Content-Length yok ama akış sırasında 50MB aşılır → indirme kesilir.
+    big = b"x" * (50 * 1024 * 1024 + 8)
+    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "text/plain"}, body=big))
+    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/BIG/view")
+    assert "çok büyük" in err
+
+
+def test_drive_virus_scan_confirmation_followed(app, monkeypatch):
+    # İlk yanıt Drive'ın "virus scan" onay HTML'i → uc-download-link takip edilir.
+    confirm_html = (b"<html><body>virus scan warning"
+                    b"<a id='uc-download-link' href='/uc?confirm=t&id=X'>download anyway</a>"
+                    b"</body></html>")
+    first = _Resp(200, headers={"Content-Type": "text/html"}, body=confirm_html)
+    second = _Resp(200, headers={"Content-Type": "text/plain"}, body=MENU_TEXT.encode())
+    calls = iter([first, second])
+    monkeypatch.setattr(menu_fetch, "_safe_requests_get", lambda url, **kw: next(calls))
+    result, err = menu_fetch._process_google_drive_url(
+        "https://drive.google.com/uc?export=download&id=X")
+    assert err is None
+    assert "Adana Kebap" in result["body_text"]
+
+
+def test_drive_pdf_text_too_short(app, monkeypatch):
+    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "application/pdf"},
+                              body=b"%PDF-1.4 fake"))
+    monkeypatch.setattr(menu_fetch, "_extract_text_from_pdf", lambda b: "kısa")
+    result, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/P/view")
+    assert result is None and "çıkarılamadı" in err
+
+
+def test_drive_corrupt_pdf_message(app, monkeypatch):
+    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "application/pdf"},
+                              body=b"%PDF-1.4 fake"))
+    monkeypatch.setattr(menu_fetch, "_extract_text_from_pdf",
+                        lambda b: (_ for _ in ()).throw(ValueError("PDF_CORRUPT")))
+    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/Q/view")
+    assert "bozuk" in err
+
+
+def test_drive_plain_text_too_short(app, monkeypatch):
+    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "text/plain"}, body=b"az"))
+    result, err = menu_fetch._process_google_drive_url(
+        "https://docs.google.com/document/d/D/edit")
+    assert result is None and "çıkarılamadı" in err
+
+
+def test_drive_image_too_big(app, monkeypatch):
+    big_img = b"\x89PNG" + b"x" * (10 * 1024 * 1024 + 4)
+    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "image/png"}, body=big_img))
+    _, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/IMG/view")
+    assert "çok büyük" in err
+
+
+def test_drive_image_ocr_too_short(app, monkeypatch):
+    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "image/jpeg"}, body=b"\xff\xd8 fake"))
+    monkeypatch.setattr(menu_fetch, "_extract_text_from_image", lambda b, ct: "x")
+    result, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/J/view")
+    assert result is None and "okunamadı" in err
+
+
+def test_drive_html_fallback_extraction(app, monkeypatch):
+    html = (b"<html><head><style>x</style></head><body>"
+            + MENU_TEXT.encode() + b"</body></html>")
+    _drive(monkeypatch, _Resp(200, headers={"Content-Type": "text/html"}, body=html))
+    result, err = menu_fetch._process_google_drive_url("https://drive.google.com/file/d/H/view")
+    assert err is None
+    assert result["title"] == "Google Drive Menü"
+    assert "Adana Kebap" in result["body_text"]

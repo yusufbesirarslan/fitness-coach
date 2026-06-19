@@ -15,11 +15,13 @@ from app.services.ai_nutrition import (
     _estimate_macros_llm,
     _estimate_macros_llm_batch,
     _estimate_serving_weights_llm,
+    _extract_categorized_items,
     _food_search_llm,
     _normalize_food_queries_en,
     _normalize_food_query_en,
     _parse_suggestion_items,
     _repair_truncated_json,
+    _salvage_truncated_categories,
     _turkish_ablative_suffix,
 )
 
@@ -180,6 +182,135 @@ def test_macros_batch_recovers_truncated_output(app, monkeypatch):
 def test_macros_batch_no_json_returns_empty(app, monkeypatch):
     _fake_chat(monkeypatch, "hesaplayamadım")
     assert _estimate_macros_llm_batch(["x"]) == {}
+
+
+def test_macros_batch_empty_input_short_circuits():
+    assert _estimate_macros_llm_batch([]) == {}
+
+
+def test_macros_batch_includes_category_and_grams_hints(app, monkeypatch):
+    cap = []
+    _fake_chat(monkeypatch, json.dumps({"Margarita": {"calories": 800, "protein": 20,
+                                                      "carbs": 90, "fat": 35}}), capture=cap)
+    _estimate_macros_llm_batch(["Margarita"], category_map={"Margarita": "Pizzalar"},
+                               grams_hint={"Margarita": 420})
+    prompt = cap[0]["messages"][0]["content"]
+    assert "menü kategorisi: Pizzalar" in prompt
+    assert "porsiyon ≈420 g" in prompt
+    assert "asla\n100 g için" in prompt or "100 g için" in prompt  # grams_rule eklendi
+
+
+def test_macros_batch_unrepairable_json_returns_empty(app, monkeypatch):
+    _fake_chat(monkeypatch, '{"x": ')   # parse de onarım da başarısız → {}
+    assert _estimate_macros_llm_batch(["x"]) == {}
+
+
+def test_macros_batch_non_numeric_value_filtered(app, monkeypatch):
+    _fake_chat(monkeypatch, json.dumps({"Çorba": {"calories": "abc", "protein": 5,
+                                                 "carbs": 10, "fat": 2}}))
+    # calories sayıya çözülemedi → 0 → öğe elenir.
+    assert _estimate_macros_llm_batch(["Çorba"]) == {}
+
+
+def test_macros_batch_swallows_llm_exception(app, monkeypatch):
+    _fake_chat(monkeypatch, RuntimeError("bedrock down"))
+    assert _estimate_macros_llm_batch(["x"]) == {}
+
+
+def test_repair_truncated_json_handles_escaped_quote():
+    # İçinde kaçışlı tırnak olan tam JSON: escape mantığı string sınırını şaşırmamalı.
+    raw = '{"a": "b\\"c"} sonradan gelen çöp'
+    assert json.loads(_repair_truncated_json(raw)) == {"a": 'b"c'}
+
+
+def test_macros_llm_empty_items_returns_empty():
+    assert _estimate_macros_llm([]) == {}
+
+
+def test_macros_llm_single_batch_with_grams_hint(app, monkeypatch):
+    cap = []
+    _fake_chat(monkeypatch, json.dumps({"Pilav": {"calories": 300, "protein": 6,
+                                                 "carbs": 55, "fat": 5}}), capture=cap)
+    result = _estimate_macros_llm(["Pilav"], grams_hint={"Pilav": 250})  # tek batch yolu
+    assert result["Pilav"]["calories"] == 300.0
+    assert "porsiyon ≈250 g" in cap[0]["messages"][0]["content"]
+
+
+# ---------------------------------------------------------------------------
+# _salvage_truncated_categories — kesik JSON'dan tamamlanmış öğeleri kurtarma
+# ---------------------------------------------------------------------------
+
+def test_salvage_recovers_complete_items_only():
+    raw = '{"categories": {"Çorbalar": ["Mercimek", "Ezo'
+    assert _salvage_truncated_categories(raw) == {"Çorbalar": ["Mercimek"]}
+
+
+def test_salvage_handles_escaped_quote_in_item():
+    raw = '{"categories": {"C": ["a\\"b", "tr'
+    assert _salvage_truncated_categories(raw) == {"C": ['a"b']}
+
+
+def test_salvage_no_brace_returns_none():
+    assert _salvage_truncated_categories("hiç json yok") is None
+
+
+def test_salvage_unbalanced_close_returns_none():
+    assert _salvage_truncated_categories("{}}") is None
+
+
+def test_salvage_non_dict_categories_returns_none():
+    assert _salvage_truncated_categories('{"categories": ["a"') is None
+
+
+# ---------------------------------------------------------------------------
+# _extract_categorized_items — hata/kurtarma dalları + ipucu enjeksiyonu
+# ---------------------------------------------------------------------------
+
+def test_extract_no_json_braces_returns_empty(app, monkeypatch):
+    _fake_chat(monkeypatch, "üzgünüm, çıkaramadım")
+    assert _extract_categorized_items("Pizza 90") == {}
+
+
+def test_extract_salvages_truncated_response(app, monkeypatch):
+    _fake_chat(monkeypatch, '{"categories": {"Çorbalar": ["Mercimek", "Ezo')
+    assert _extract_categorized_items("uzun menü") == {"Çorbalar": ["Mercimek"]}
+
+
+def test_extract_salvage_finds_nothing_returns_empty(app, monkeypatch):
+    _fake_chat(monkeypatch, "{[[[ tamamen bozuk")
+    assert _extract_categorized_items("menü") == {}
+
+
+def test_extract_unexpected_structure_returns_empty(app, monkeypatch):
+    _fake_chat(monkeypatch, '{"categories": "düz metin"}')
+    assert _extract_categorized_items("menü") == {}
+
+
+def test_extract_adds_heading_and_drive_hints(app, monkeypatch):
+    cap = []
+    _fake_chat(monkeypatch, '{"categories": {"Genel": ["pizza"]}}', capture=cap)
+    _extract_categorized_items("Pizza 90", headings=["Kahvaltılar", "Tatlılar"],
+                               menu_source="google_drive")
+    prompt = cap[0]["messages"][0]["content"]
+    assert "tespit edilen başlıklar" in prompt
+    assert "Kahvaltılar, Tatlılar" in prompt
+    assert "PDF/görsel/doküman" in prompt  # doc_hint eklendi
+
+
+def test_extract_strips_markdown_fences(app, monkeypatch):
+    _fake_chat(monkeypatch, '```json\n{"categories": {"Genel": ["lahmacun"]}}\n```')
+    assert _extract_categorized_items("menü") == {"Genel": ["lahmacun"]}
+
+
+def test_extract_malformed_braces_and_failed_salvage_returns_empty(app, monkeypatch):
+    # Parantezli ama geçersiz JSON: json.loads patlar, kurtarma da boş → {}.
+    _fake_chat(monkeypatch, '{"categories": {bad json}}')
+    assert _extract_categorized_items("menü") == {}
+
+
+def test_extract_swallows_llm_exception(app, monkeypatch):
+    _fake_chat(monkeypatch, RuntimeError("bedrock down"))
+    assert _extract_categorized_items("menü") == {}
 
 
 def test_macros_llm_batches_large_lists(app, monkeypatch):

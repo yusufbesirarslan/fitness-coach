@@ -12,7 +12,12 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.services.ai_nutrition import _food_tokens, _is_relevant_food  # noqa: E402
+from app.services.ai_nutrition import (  # noqa: E402
+    _food_tokens,
+    _is_relevant_food,
+    _is_specific_match,
+    _token_match_count,
+)
 
 
 def test_irrelevant_fatsecret_matches_are_rejected():
@@ -71,3 +76,42 @@ def test_no_meaningful_token_does_not_overfilter():
     # Sorgu yalnızca miktar/stopword içeriyorsa (anlamlı token yok) sonuç elenmez.
     assert _food_tokens("2 adet") == set()
     assert _is_relevant_food("2 adet", "Anything At All") is True
+
+
+def test_relevant_false_when_name_has_no_meaningful_tokens():
+    # Ad anlamlı token içermiyorsa (yalnızca kısa/gürültü) eşleşme yok.
+    assert _is_relevant_food("banana", "a x 1") is False
+
+
+# ---------------------------------------------------------------------------
+# _token_match_count — örtüşen anlamlı token SAYISI (spesifiklik sıralaması).
+# ---------------------------------------------------------------------------
+
+def test_token_match_count_exact_and_prefix():
+    assert _token_match_count("tavuk burger", "Tavuk Burger Menu") == 2  # tam eşleşmeler
+    assert _token_match_count("banana", "Bananas Split") == 1            # ≥4 harf önek
+    assert _token_match_count("tavuk salata", "Tavuk Izgara") == 1       # yalnız 'tavuk'
+
+
+def test_token_match_count_zero_when_no_meaningful_tokens():
+    assert _token_match_count("2 adet", "Anything") == 0   # sorguda anlamlı token yok
+    assert _token_match_count("banana", "a x") == 0        # adda anlamlı token yok
+
+
+# ---------------------------------------------------------------------------
+# _is_specific_match — kompozit adlar + yemek-türü tutarlılığı (katı kapı).
+# ---------------------------------------------------------------------------
+
+def test_specific_match_requires_two_tokens_for_composite_query():
+    # 2+ token'lı sorgu, tek genel kategori kelimesini paylaşmak YETMEZ.
+    assert _is_specific_match("tavuk burger", "Mantar Burger") is False  # yalnız 'burger'
+    assert _is_specific_match("tavuk burger", "Tavuk Burger Klasik") is True
+
+
+def test_specific_match_dish_type_must_agree():
+    # 'Keçi Peyniri Salatası' (salata) → 'Goat Cheese' bileşene çökmesin diye reddedilir.
+    assert _is_specific_match("keci peyniri salatasi", "Goat Cheese") is False
+
+
+def test_specific_match_no_tokens_does_not_overfilter():
+    assert _is_specific_match("2 adet", "Anything At All") is True
