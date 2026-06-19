@@ -13,7 +13,6 @@ from types import SimpleNamespace
 import pytest
 
 from app.services import ai
-from app.extensions import bedrock_client as _real_bedrock_client
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +179,32 @@ def test_claude_chat_maps_api_error(monkeypatch):
 # Lazy istemci: import sırasında AWS/anthropic'e dokunmaz
 # ---------------------------------------------------------------------------
 
-def test_bedrock_client_is_lazy_not_constructed():
-    # __getattr__ tetiklenmeden _client None kalır (anahtar/paket gerekmez).
-    assert _real_bedrock_client._client is None
+def test_bedrock_client_is_lazy_not_constructed(monkeypatch):
+    # Süreç-global singleton'ın _client'ı, önceki herhangi bir Bedrock kullanımıyla
+    # kalıcı olarak kirlenebilir (sınıf değil instance attribute'una yazılır ve
+    # singleton tüm süreç boyunca paylaşılır). Bu yüzden lazy davranışı TAZE bir
+    # instance üzerinde doğrula — sıra/kirlilikten bağımsız ve daha kesin.
+    from app.extensions import _LazyAnthropicBedrock
+    fresh = _LazyAnthropicBedrock()
+    assert fresh._client is None  # __getattr__ tetiklenene dek istemci kurulmaz
+
+    # İlk attribute erişimi istemciyi lazy kurar. anthropic import'unu sahteleyip
+    # ağ/AWS anahtarı OLMADAN kurulumun doğru argümanlarla tetiklendiğini doğrula.
+    import sys
+    import types
+
+    constructed = {}
+
+    class _FakeBedrock:
+        def __init__(self, **kwargs):
+            constructed.update(kwargs)
+            self.messages = "sentinel"
+
+    fake_anthropic = types.ModuleType("anthropic")
+    fake_anthropic.AnthropicBedrock = _FakeBedrock
+    monkeypatch.setitem(sys.modules, "anthropic", fake_anthropic)
+
+    assert fresh.messages == "sentinel"             # erişim __getattr__'i tetikledi
+    assert isinstance(fresh._client, _FakeBedrock)  # artık kuruldu ve cache'lendi
+    assert "aws_region" in constructed              # bölge ile kuruldu
+    assert "api_key" not in constructed             # token asla argüman olarak geçmez

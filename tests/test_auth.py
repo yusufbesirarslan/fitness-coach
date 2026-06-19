@@ -248,3 +248,51 @@ def test_register_rate_limit_returns_429_json(client):
     finally:
         limiter.enabled = False
         limiter.reset()
+
+
+# ---------------------------------------------------------------------------
+# Cognito hata dalları — kayıt IDP hatası, giriş sub uyuşmazlığı/yetkisizlik.
+# ---------------------------------------------------------------------------
+
+def test_cognito_register_idp_error_returns_400(client, cognito_native, monkeypatch):
+    def boom(username, password, email, name):
+        raise CognitoIdpError("Bu kullanıcı adı zaten kayıtlı.", "UsernameExistsException")
+    monkeypatch.setattr(cognito_idp, "sign_up", boom)
+    response = _register(client, "dupuser")
+    assert response.status_code == 400
+    assert "zaten kayıtlı" in response.get_json()["error"]
+    # Yerel kayıt OLUŞMAMALI — IDP hatası erken döner.
+    assert User.query.filter_by(username="dupuser").first() is None
+
+
+def test_cognito_login_sub_mismatch_rejected(client, cognito_native, monkeypatch):
+    _register(client, "verifyme")
+    client.post("/verify", json={"username": "verifyme", "code": "123456"})
+    # Cognito kimlik bütünlüğü kapısı: dönen sub yerel kayıtla EŞLEŞMEZSE reddet.
+    monkeypatch.setattr(cognito_idp, "initiate_auth",
+                        lambda u, p: {"sub": "BASKA-SUB", "email": f"{u}@example.com"})
+    response = client.post("/login", json={"username": "verifyme", "password": "Sifre123"})
+    assert response.status_code == 401
+    assert "hatalı" in response.get_json()["error"]
+
+
+def test_cognito_login_not_authorized_returns_401(client, cognito_native, monkeypatch):
+    _register(client, "verifyme")
+    client.post("/verify", json={"username": "verifyme", "code": "123456"})
+    monkeypatch.setattr(cognito_idp, "initiate_auth", lambda u, p: (_ for _ in ()).throw(
+        CognitoIdpError("Kullanıcı adı veya şifre hatalı.", "NotAuthorizedException")))
+    response = client.post("/login", json={"username": "verifyme", "password": "yanlis"})
+    assert response.status_code == 401
+    assert response.get_json().get("needs_verification") is None  # doğrulama değil, yetki hatası
+
+
+def test_login_returns_quest_awarded_when_login_quest_exists(client, make_user, login):
+    from app.extensions import db
+    from app.models import DailyQuest
+    make_user("questuser")
+    db.session.add(DailyQuest(title="Günlük Giriş", points_reward=10, quest_type="login"))
+    db.session.commit()
+
+    response = login("questuser")
+    assert response.status_code == 200
+    assert response.get_json()["quest_awarded"]  # login quest tamamlandı → ödül döndü

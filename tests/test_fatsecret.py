@@ -293,3 +293,80 @@ def test_food_id_cache_normalizes_and_caps():
         foodcache._cache_food_id(f"yemek{i}", str(i))
     assert len(foodcache._food_id_cache) == foodcache._FOOD_ID_CACHE_MAX
     foodcache._food_id_cache.clear()
+
+
+# ---------------------------------------------------------------------------
+# _fs_search_foods — tek arama çağrısı; hata/biçim toleransı (ağ yok).
+# ---------------------------------------------------------------------------
+
+def test_fs_search_foods_normalizes_single_dict_to_list(monkeypatch):
+    # FatSecret tek sonuçta 'food' alanını liste yerine TEK dict döndürebilir.
+    payload = {"foods": {"food": {"food_name": "Banana", "food_id": "9"}}}
+    monkeypatch.setattr(fatsecret, "_fs_get", lambda url, **kw: _Resp(payload))
+    foods = fatsecret._fs_search_foods("banana", "tok")
+    assert foods == [{"food_name": "Banana", "food_id": "9"}]
+
+
+def test_fs_search_foods_error_payload_returns_empty(monkeypatch):
+    monkeypatch.setattr(fatsecret, "_fs_get",
+                        lambda url, **kw: _Resp({"error": {"code": 13, "message": "rate"}}))
+    assert fatsecret._fs_search_foods("x", "tok") == []
+
+
+def test_fs_search_foods_no_results_returns_empty(monkeypatch):
+    monkeypatch.setattr(fatsecret, "_fs_get", lambda url, **kw: _Resp({"foods": {}}))
+    assert fatsecret._fs_search_foods("x", "tok") == []
+
+
+def test_fs_search_foods_exception_returns_empty(app):
+    # current_app.logger.warning erişimi için app context gerekir; _fs_get gerçekten
+    # ağ'a çıkmaya çalışıp (host unroutable) patlar → [] döner, sessizce yutulur.
+    with app.app_context():
+        assert fatsecret._fs_search_foods("x", "tok") == []
+
+
+# ---------------------------------------------------------------------------
+# _food_search_static — yerleşik son-çare veritabanı.
+# ---------------------------------------------------------------------------
+
+def test_static_search_matches_substring_both_directions():
+    # Sorgu anahtarı içerir ('tavuklu' ⊃ 'tavuk') ya da anahtar sorguyu içerir.
+    results = fatsecret._food_search_static("tavuklu sandviç")
+    assert results and all(r["per_100g"]["calories"] > 0 for r in results)
+    assert all(r["is_per_serving"] is False for r in results)
+    assert results[0]["serving"] == "Per 100g"
+
+
+def test_static_search_no_match_returns_empty():
+    assert fatsecret._food_search_static("kuantum köpüğü") == []
+
+
+def test_static_search_caps_results_at_eight(monkeypatch):
+    many = [{"name": f"X{i}", "calories": 100, "protein": 1, "carbs": 1, "fat": 1}
+            for i in range(20)]
+    monkeypatch.setitem(fatsecret._STATIC_FOODS, "zzfake", many)
+    results = fatsecret._food_search_static("zzfake")
+    assert len(results) == 8  # matches[:8]
+
+
+# ---------------------------------------------------------------------------
+# _food_search_fatsecret — per-serving makroyu per-100g'ye ölçekleme.
+# ---------------------------------------------------------------------------
+
+def test_food_search_scales_per_serving_to_100g(monkeypatch):
+    monkeypatch.setattr(fatsecret, "_get_fatsecret_token", lambda: "tok")
+    payload = {"foods": {"food": [{
+        "food_name": "Tabak Pilav", "food_id": "77", "food_type": "Generic",
+        "food_description": "Per 1 serving - Calories: 300kcal | Fat: 6g | Carbs: 50g | Protein: 8g",
+    }]}}
+    monkeypatch.setattr(fatsecret, "_fs_get", lambda url, **kw: _Resp(payload))
+    # 200g'lik GERÇEK bir LLM tahmini (fallback DEĞİL) → ölçek = 100/200 = 0.5.
+    monkeypatch.setattr(fatsecret, "_estimate_serving_weights_llm",
+                        lambda names, return_fallbacks=False: ({"Tabak Pilav": 200.0}, set()))
+
+    results = fatsecret._food_search_fatsecret("pilav")
+    r = results[0]
+    assert r["is_per_serving"] is True
+    assert r["macros"]["calories"] == 300.0          # porsiyon başına ham değer
+    assert r["per_100g"]["calories"] == 150.0        # 300 * 0.5 → 100g'ye ölçeklendi
+    assert r["per_100g"]["carbs"] == 25.0
