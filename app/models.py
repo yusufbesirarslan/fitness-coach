@@ -2,6 +2,7 @@
 import logging
 from datetime import datetime
 from flask_login import UserMixin
+from sqlalchemy.dialects.postgresql import JSONB
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.extensions import db, login_manager
@@ -61,6 +62,13 @@ class User(UserMixin, db.Model):
     # tutulur (billing yok); GET /premium upgrade-intent GA olayı ile takip edilir.
     is_premium       = db.Column(db.Boolean, default=False, server_default='false')
     premium_since    = db.Column(db.DateTime, nullable=True)
+
+    # Esnek kullanıcı metadata deposu (anahtar/değer): tıbbi durumlar/sakatlıklar
+    # ("injuries"), tercihler ("equipment_available", "fitness_goals") AI koç
+    # `manage_user_memory` aracı üzerinden buraya yazılıp okunur. Prod (RDS)
+    # PostgreSQL'de JSONB, lokal SQLite'ta JSON. Kod None'ı {} olarak ele alır.
+    # NOT: kolon adı `user_metadata` — `metadata` declarative sınıflarda ayrılmış.
+    user_metadata    = db.Column(JSONB().with_variant(db.JSON(), "sqlite"), nullable=True)
 
     referrer = db.relationship("User", remote_side=[id], backref="referrals")
 

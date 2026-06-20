@@ -25,6 +25,18 @@ os.environ["FITX_SKIP_DB_INIT"] = "1"  # tables come from db.create_all() in the
 # çözümlenemeyen host'a bağlanmaya çalışır. Boş string ata: load_dotenv mevcut
 # değeri override ETMEZ → redis_client=None, limiter memory:// (hermetik).
 os.environ["REDIS_URL"] = ""
+# BEDROCK_ENABLED: .env'de prod için =1; testlerde KAPALI olmalı — açıksa AI koç
+# döngüsü gerçek (lazy) AnthropicBedrock istemcisini kurup AWS'ye çıkmaya çalışır.
+# Boş string ata (load_dotenv mevcut değeri override etmez) → hermetik. Bedrock
+# yolunu sınayan testler bunu kendi içinde monkeypatch'ler.
+os.environ["BEDROCK_ENABLED"] = "0"
+# S3 + Cognito: .env'de prod değerleri var; testlerde KAPALI olmalı. Açık kalırsa
+# testler gerçek AWS'ye çıkar — S3 yüklemeleri prod kovasına yazar, register akışı
+# gerçek Cognito'ya gider. Suite zaten "varsayılan kapalı" varsayar (test_s3_helper /
+# test_cognito her durumu kendi içinde monkeypatch'ler). Boş ata → hermetik.
+os.environ["S3_BUCKET_NAME"] = ""
+os.environ["COGNITO_USER_POOL_ID"] = ""
+os.environ["COGNITO_APP_CLIENT_ID"] = ""
 os.environ.pop("FLASK_DEBUG", None)
 os.environ.pop("FLASK_ENV", None)
 
