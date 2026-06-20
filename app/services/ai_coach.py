@@ -122,6 +122,13 @@ def _fetch_profile_and_trends(user_id):
         if user and user.goal_type:
             lines.append(f"- hedef tipi (goal_type): {user.goal_type}")
         parts.append("[KULLANICI PROFİLİ & HAFIZA]\n" + "\n".join(lines))
+        # Kayıtlı sakatlık varsa KATI, yapısal kontrendikasyon direktifini de enjekte
+        # et — form jeneratörüyle AYNI motor (app/services/injury_constraints). Böylece
+        # koç "hangi hareketler yasak / güvenli alternatif ne" konusunda tutarlı kalır.
+        from app.services import injury_constraints
+        directive = injury_constraints.build_injury_directive(meta.get("injuries"))
+        if directive:
+            parts.append(directive.strip())
     except Exception:
         pass
 
