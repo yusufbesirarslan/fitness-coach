@@ -30,6 +30,13 @@ os.environ["REDIS_URL"] = ""
 # Boş string ata (load_dotenv mevcut değeri override etmez) → hermetik. Bedrock
 # yolunu sınayan testler bunu kendi içinde monkeypatch'ler.
 os.environ["BEDROCK_ENABLED"] = "0"
+# S3 + Cognito: .env'de prod değerleri var; testlerde KAPALI olmalı. Açık kalırsa
+# testler gerçek AWS'ye çıkar — S3 yüklemeleri prod kovasına yazar, register akışı
+# gerçek Cognito'ya gider. Suite zaten "varsayılan kapalı" varsayar (test_s3_helper /
+# test_cognito her durumu kendi içinde monkeypatch'ler). Boş ata → hermetik.
+os.environ["S3_BUCKET_NAME"] = ""
+os.environ["COGNITO_USER_POOL_ID"] = ""
+os.environ["COGNITO_APP_CLIENT_ID"] = ""
 os.environ.pop("FLASK_DEBUG", None)
 os.environ.pop("FLASK_ENV", None)
 
