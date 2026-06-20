@@ -13,7 +13,7 @@ import os
 import json
 import time
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from contextlib import contextmanager
 
@@ -29,6 +29,19 @@ def _app_today():
 def _day_key():
     """ISO 'YYYY-MM-DD' gün anahtarı (Istanbul) — meal_log.tarih ile aynı biçim."""
     return _app_today().isoformat()
+
+
+def _utc_day_bounds():
+    """Istanbul gününün [başlangıç, bitiş) UTC sınırları (naive). created_at gibi
+    UTC saklanan (tarih kolonu olmayan) tablolarda Istanbul gününe göre gruplamak
+    için — `created_at::date = CURRENT_DATE` UTC gününe bakıp 00:00–03:00 Istanbul
+    arası kayıtları yanlış güne atıyordu."""
+    start_local = datetime.now(_APP_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+    end_local = start_local + timedelta(days=1)
+    return (
+        start_local.astimezone(timezone.utc).replace(tzinfo=None),
+        end_local.astimezone(timezone.utc).replace(tzinfo=None),
+    )
 
 import psycopg2
 import psycopg2.extras
@@ -591,10 +604,14 @@ def log_workout_entry(user_id: int, exercise_name: str, sets: int, reps: int, we
         )
         row = cur.fetchone()
 
+        # Günlük toplamı Istanbul gün sınırlarıyla topla (created_at UTC saklanıyor).
+        # Eski `created_at::date = CURRENT_DATE` DB-sunucu/UTC gününe bakıyordu;
+        # gece yarısı civarı toplamlar yanlış güne kayıyordu (meal_log ile aynı fix).
+        day_start, day_end = _utc_day_bounds()
         cur.execute(
             "SELECT COALESCE(SUM(volume), 0) as total_volume, COUNT(*) as entry_count "
-            "FROM workout_log WHERE user_id = %s AND created_at::date = CURRENT_DATE",
-            (user_id,),
+            "FROM workout_log WHERE user_id = %s AND created_at >= %s AND created_at < %s",
+            (user_id, day_start, day_end),
         )
         today = cur.fetchone()
 
