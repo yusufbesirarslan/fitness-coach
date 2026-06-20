@@ -4,6 +4,8 @@ instance/
 *.db
 *.pyc
 .pytest_cache/
+.venv/
+venv/
 
 # Bedrock / AWS uzun ömürlü anahtarlar & kimlik dosyaları — ASLA commit etme
 .env.*

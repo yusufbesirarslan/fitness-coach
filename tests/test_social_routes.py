@@ -6,6 +6,8 @@ sohbet (okundu işaretleme dahil) ve öneri kabulündeki makro hattı
 
     python -m pytest tests/test_social_routes.py -v
 """
+from datetime import datetime, timedelta
+
 import pytest
 
 from app.blueprints import social as social_bp
@@ -73,14 +75,30 @@ def test_friend_request_lifecycle(client, auth_user, make_user):
 
 def test_friend_request_after_rejection_reopens(client, auth_user, make_user):
     other = make_user("once_reddetti")
+    # Cooldown süresinden eski bir reddedilme: yeniden istek serbest.
     db.session.add(Friendship(sender_id=other.id, receiver_id=auth_user.id,
-                              status="rejected"))
+                              status="rejected",
+                              created_at=datetime.utcnow() - timedelta(hours=25)))
     db.session.commit()
 
     assert client.post("/friend/request/once_reddetti").status_code == 200
     fr = Friendship.query.one()
     assert fr.status == "pending"
     assert fr.sender_id == auth_user.id   # yön yeni istek sahibine döner
+
+
+def test_friend_request_after_recent_rejection_blocked(client, auth_user, make_user):
+    # Yeni reddedilmiş bir istek cooldown içinde yeniden atılamaz (nuisance re-spam
+    # koruması) → 429 ve kayıt 'rejected' kalır.
+    other = make_user("yeni_reddetti")
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=other.id,
+                              status="rejected",
+                              created_at=datetime.utcnow() - timedelta(minutes=5)))
+    db.session.commit()
+
+    resp = client.post("/friend/request/yeni_reddetti")
+    assert resp.status_code == 429
+    assert Friendship.query.one().status == "rejected"
 
 
 def test_friend_accept_awards_xp_both_sides(client, auth_user, make_user, login):
