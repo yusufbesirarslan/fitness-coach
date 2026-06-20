@@ -10,12 +10,16 @@ from types import SimpleNamespace
 
 from analytics_engine import _check_streak_at_risk, _check_weekly_report_day, get_nudges
 from app.extensions import db
-from app.models import MealLog, User, UserSession, WorkoutLog
+from app.models import (MealLog, User, UserSession, WaterLog, WeeklyCheckIn,
+                        WorkoutLog)
+from app.timeutil import app_today
 
 MODELS = {
     "WorkoutLog": WorkoutLog,
     "MealLog": MealLog,
     "UserSession": UserSession,
+    "WeeklyCheckIn": WeeklyCheckIn,
+    "WaterLog": WaterLog,
 }
 
 
@@ -147,3 +151,88 @@ def test_weekly_report_only_on_monday_and_sunday():
     assert fires(date(2026, 6, 8)) is True    # Pazartesi
     assert fires(date(2026, 6, 14)) is True   # Pazar
     assert fires(date(2026, 6, 10)) is False  # Çarşamba
+
+
+# ---------------------------------------------------------------------------
+# Toparlanma sinyalleri — son check-in'de uyku <=2 veya yorgunluk >=4.
+# ---------------------------------------------------------------------------
+
+def test_recovery_nudge_on_poor_sleep_or_high_fatigue(make_user):
+    user = make_user("ivan", last_login=date.today())
+    db.session.add(WeeklyCheckIn(user_id=user.id, weight=80, uyku_kalitesi=2,
+                                 fatigue=3, progressive_overload="evet"))
+    db.session.commit()
+    assert "NUDGE_RECOVERY" in _nudge_types(user)
+
+
+def test_recovery_nudge_silent_when_recovered(make_user):
+    user = make_user("judy", last_login=date.today())
+    db.session.add(WeeklyCheckIn(user_id=user.id, weight=80, uyku_kalitesi=4,
+                                 fatigue=2, progressive_overload="evet"))
+    db.session.commit()
+    assert "NUDGE_RECOVERY" not in _nudge_types(user)
+
+
+# ---------------------------------------------------------------------------
+# Progresif yüklenme duraksaması — en güncel check-in'de "hayir".
+# ---------------------------------------------------------------------------
+
+def test_overload_stall_nudge(make_user):
+    user = make_user("mallory", last_login=date.today())
+    db.session.add(WeeklyCheckIn(user_id=user.id, weight=80, uyku_kalitesi=4,
+                                 fatigue=2, progressive_overload="hayir"))
+    db.session.commit()
+    assert "NUDGE_OVERLOAD_STALL" in _nudge_types(user)
+
+
+def test_overload_stall_uses_latest_checkin(make_user):
+    user = make_user("niaj", last_login=date.today())
+    old = datetime.utcnow() - timedelta(days=7)
+    db.session.add(WeeklyCheckIn(user_id=user.id, weight=80, uyku_kalitesi=4, fatigue=2,
+                                 progressive_overload="hayir", created_at=old))
+    db.session.add(WeeklyCheckIn(user_id=user.id, weight=80, uyku_kalitesi=4, fatigue=2,
+                                 progressive_overload="evet"))
+    db.session.commit()
+    assert "NUDGE_OVERLOAD_STALL" not in _nudge_types(user)
+
+
+# ---------------------------------------------------------------------------
+# Hidrasyon — son 7 günde ortalama günlük su < 6 bardak.
+# ---------------------------------------------------------------------------
+
+def test_low_hydration_nudge_below_threshold(make_user):
+    user = make_user("olivia", last_login=date.today())
+    today = app_today()
+    for i in range(3):
+        db.session.add(WaterLog(user_id=user.id, count=3,
+                                date_key=(today - timedelta(days=i)).isoformat()))
+    db.session.commit()
+    assert "NUDGE_LOW_HYDRATION" in _nudge_types(user)
+
+
+def test_hydration_silent_when_adequate(make_user):
+    user = make_user("peggy", last_login=date.today())
+    today = app_today()
+    for i in range(3):
+        db.session.add(WaterLog(user_id=user.id, count=8,
+                                date_key=(today - timedelta(days=i)).isoformat()))
+    db.session.commit()
+    assert "NUDGE_LOW_HYDRATION" not in _nudge_types(user)
+
+
+def test_hydration_silent_without_records(make_user):
+    user = make_user("rupert", last_login=date.today())
+    assert "NUDGE_LOW_HYDRATION" not in _nudge_types(user)
+
+
+def test_new_nudges_disabled_when_models_absent(make_user):
+    # Eski çağıran (yalnızca 3 model) WeeklyCheckIn/WaterLog geçmezse yeni
+    # dürtüler sessizce devre dışı kalmalı (geriye dönük uyum).
+    user = make_user("sybil", last_login=date.today())
+    db.session.add(WeeklyCheckIn(user_id=user.id, weight=80, uyku_kalitesi=1,
+                                 fatigue=5, progressive_overload="hayir"))
+    db.session.commit()
+    legacy = {"WorkoutLog": WorkoutLog, "MealLog": MealLog, "UserSession": UserSession}
+    types = {n.split(":")[0] for n in get_nudges(user, db, legacy)}
+    assert "NUDGE_RECOVERY" not in types
+    assert "NUDGE_OVERLOAD_STALL" not in types

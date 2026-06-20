@@ -10,8 +10,9 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.config import (BEDROCK_ENABLED, BEDROCK_MAX_TOKENS, BEDROCK_MODEL,
                         BEDROCK_PROMPT_CACHE, OPENAI_MODEL)
 from app.extensions import bedrock_client, db, openai_client
-from app.models import (MealLog, PendingAction, PumpCheck, User, UserSession,
-                        WaterLog, WeeklyLog, WorkoutLog)
+from app.models import (DailyActivity, MealLog, PendingAction, PumpCheck, User,
+                        UserSession, WaterLog, WeeklyCheckIn, WeeklyLog,
+                        WorkoutLog)
 from app.services.ai import _bedrock_validate_image, _heavy_chat, anthropic as _anthropic
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
 from app.services.fatsecret import _food_search_fatsecret, _food_search_static
@@ -23,7 +24,8 @@ COACH_SYSTEM_PROMPT = """Sen FitX uygulamasının elit, destekleyici ama gerçek
 
 VERİ KAYNAKLARIN:
 - Beslenme verileri FatSecret API'den geliyor — makroları ASLA tahmin etme, daima aracı çağır.
-- Günlük aktivite verileri Apple Health (HealthKit) ve Android Health Connect'ten senkronize ediliyor (adım sayısı, kalori yakımı).
+- Günlük aktivite verileri Apple Health (HealthKit) ve Android Health Connect'ten senkronize edilir ve [GÜNLÜK AKTİVİTE] bloğunda sana sağlanır (adım, mesafe, yakılan kalori).
+- HER istekte kullanıcının güncel verisi sana verilir: [KULLANICI PROFİLİ & HAFIZA] (sakatlık, beslenme kısıtları, ekipman, hedefler), [HAFTALIK CHECK-IN TRENDİ] (uyku kalitesi, yorgunluk, progresif yüklenme, beslenme uyumu) ve [GÜNLÜK AKTİVİTE]. Önerilerini DAİMA bu verilere dayandır; zaten verilmiş bu bilgileri kullanıcıya tekrar SORMA.
 - Bu verileri analiz ederek kişiye özel, veri odaklı önerilerde bulun.
 
 ═══ BESLENME LOGLAMA İŞ AKIŞI (ÇOK ÖNEMLİ) ═══
@@ -32,17 +34,19 @@ Kullanıcı bir yiyecek/içecek YEDİĞİNİ söylediğinde VEYA makrolarını/k
 2. Dönen makroları kullanıcıya KISA ve NET sun (kalori | P | K | Y + porsiyon), sonra AÇIKÇA onay iste: "Günlüğüne kaydedeyim mi?". Araç bir `evaluation.compatibility_score` (0-100) döndürürse onu da AYNEN aktar.
 3. Kullanıcı onaylarsa ("evet", "kaydet", "olur" vb.) `confirm_and_commit_meal_log` aracını çağır. Onay GELMEDEN asla bu aracı çağırma — merak amaçlı sorular yanlışlıkla loglanmamalı.
 4. Kullanıcı reddederse/iptal ederse ("hayır", "iptal", "vazgeç") `cancel_pending_log` aracını çağır.
+ÖNEMLİ: Yiyecek önerirken veya değerlendirirken [KULLANICI PROFİLİ & HAFIZA]'daki dietary_restrictions'a (alerji/intolerans/diyet) MUTLAKA uy — kısıtlı besinleri ASLA önerme, uygun alternatif sun.
 Antrenman için aynı mantık: `stage_workout_log` → onay → `confirm_and_commit_workout_log`.
 
 ═══ SAKATLIK KONTROLÜ (ANTRENMAN PLANLAMADAN ÖNCE) ═══
 Kullanıcı bir antrenman planı/programı ister VEYA egzersiz önerisi beklerken:
-1. ÖNCE `manage_user_memory` aracını `action="get", key="injuries"` ile çağırıp kayıtlı sakatlık/tıbbi durum verisini kontrol et.
-2. Veri YOKSA (boş/None): plan üretimini DURDUR ve kullanıcıya sakatlık/tıbbi durumunu sor (ör. "Menisküs, Kifoz, Skolyoz gibi bir durumun var mı? Yoksa 'Hiçbiri' yaz."). Cevabı almadan egzersiz önerme.
+1. Kayıtlı sakatlık/tıbbi durum [KULLANICI PROFİLİ & HAFIZA]'daki "injuries" alanında SANA ZATEN VERİLİR — önce oraya bak, gereksiz araç çağrısı yapma. (Yalnızca bu blok hiç gelmediyse `manage_user_memory` `action="get", key="injuries"` ile oku.)
+2. "injuries" KAYIT YOK ise: plan üretimini DURDUR ve kullanıcıya sakatlık/tıbbi durumunu sor (ör. "Menisküs, Kifoz, Skolyoz gibi bir durumun var mı? Yoksa 'Hiçbiri' yaz."). Cevabı almadan egzersiz önerme.
 3. Kullanıcı cevap verince `manage_user_memory` aracını `action="update", key="injuries"` ile çağırıp KAYDET.
-4. Sonraki tüm antrenman önerilerinde bu kısıtlara MUTLAKA uy: egzersiz seçimi, hacim ve şiddeti sakatlığı tamamen koruyacak şekilde uyarla (ör. Menisküs → ağır squat/lunge yerine leg press/box squat ve düşük-darbe; Kifoz → arka zincir + ekstansiyon vurgusu, ağır overhead'den kaçın). "Hiçbiri" ise normal planla.
+4. injuries doluysa bu kısıtlara MUTLAKA uy: egzersiz seçimi, hacim ve şiddeti sakatlığı tamamen koruyacak şekilde uyarla (ör. Menisküs → ağır squat/lunge yerine leg press/box squat ve düşük-darbe; Kifoz → arka zincir + ekstansiyon vurgusu, ağır overhead'den kaçın). "Hiçbiri" ise normal planla.
 
 ═══ DİĞER ARAÇLAR ═══
-- Kullanıcının geçmiş metriklerini (kalori, su, kilo, kaldırılan hacim) sorgulamak için `query_fitx_metrics` aracını kullan — sayıları tahmin etme. Uyku verisi henüz mevcut değildir.
+- Kullanıcının geçmiş metriklerini (kalori, su, kilo, kaldırılan hacim) sorgulamak için `query_fitx_metrics` aracını kullan — sayıları tahmin etme. Uyku SÜRESİ (saat) takibi yoktur; ancak subjektif uyku kalitesi (1-5) [HAFTALIK CHECK-IN TRENDİ]'nde verilir, oradan oku.
+- Antrenman şiddetini [HAFTALIK CHECK-IN TRENDİ]'ne göre ayarla: uyku kalitesi düşük (≤2) veya yorgunluk yüksek (≥4) ise hacmi/şiddeti düşür ve deload/toparlanma öner; progresif yüklenme "hayir" ise küçük bir yük/tekrar artışı ya da teknik odağı öner.
 - Kullanıcı bir spor salonu/antrenman fotoğrafı (S3 anahtarı) paylaşırsa `analyze_gym_photo` ile doğrula.
 - Uzun süreli tercihleri (hedefler, ekipman) `manage_user_memory` ile sakla/oku.
 
@@ -92,6 +96,80 @@ def _assert_principal(user_id):
         raise PermissionError("user_id, kimliği doğrulanmış kullanıcıyla eşleşmiyor")
 
 
+def _fetch_profile_and_trends(user_id):
+    """Kullanıcının uzun-süreli profilini ve kendi bildirdiği trendleri bağlama
+    enjekte eder; böylece koç HER yanıtta kullanıcının gerçek verisine dayanır,
+    yalnızca anlık loglara değil. SQLAlchemy ORM ile DOĞRUDAN okur (fitx_mcp /
+    psycopg2'ye bağlı değil) → lokal/SQLite ortamında da çalışır. Her bölüm kendi
+    try/except'inde: bir sorgu patlarsa diğer bölümler yine de döner."""
+    parts = []
+
+    # [KULLANICI PROFİLİ & HAFIZA] — manage_user_memory ile yazılan kalıcı veriler.
+    # injuries/dietary_restrictions BOŞ olsa bile açıkça belirt: koç sakatlığı
+    # sormalı, kısıtlama yokken de bunu bilerek serbest öneri yapabilmeli.
+    try:
+        user = User.query.get(user_id)
+        meta = dict((user.user_metadata or {}) if user else {})
+        lines = [
+            f"- sakatlık/tıbbi durum (injuries): {meta.get('injuries') or 'KAYIT YOK — plan vermeden önce kullanıcıya sor'}",
+            f"- beslenme kısıtları (dietary_restrictions): {meta.get('dietary_restrictions') or 'kayıt yok'}",
+        ]
+        for key in ("equipment_available", "fitness_goals", "preferences"):
+            if meta.get(key):
+                lines.append(f"- {key}: {meta[key]}")
+        if user and user.target_weight:
+            lines.append(f"- hedef kilo (target_weight): {user.target_weight} kg")
+        if user and user.goal_type:
+            lines.append(f"- hedef tipi (goal_type): {user.goal_type}")
+        parts.append("[KULLANICI PROFİLİ & HAFIZA]\n" + "\n".join(lines))
+    except Exception:
+        pass
+
+    # [HAFTALIK CHECK-IN TRENDİ] — kullanıcının kendi bildirdiği toparlanma/uyum
+    # sinyalleri (uyku, yorgunluk, progresif yüklenme, beslenme uyumu). Antrenman
+    # şiddeti/deload kararları bunlara dayanmalı.
+    try:
+        checkins = (WeeklyCheckIn.query.filter_by(user_id=user_id)
+                    .order_by(WeeklyCheckIn.created_at.desc()).limit(4).all())
+        if checkins:
+            rows = []
+            for c in checkins:
+                d = c.created_at.date().isoformat() if c.created_at else "?"
+                line = (f"- {d}: kilo {c.weight}kg | yoğunluk {c.yogunluk}/5 | "
+                        f"yorgunluk {c.fatigue}/5 | uyku kalitesi {c.uyku_kalitesi}/5 | "
+                        f"beslenme uyumu {c.beslenme_uyumu}/5 | progresif yüklenme: "
+                        f"{c.progressive_overload or '?'}")
+                if c.note:
+                    line += f" | not: {c.note}"
+                rows.append(line)
+            parts.append(f"[HAFTALIK CHECK-IN TRENDİ (son {len(rows)}, yeni→eski)]\n"
+                         + "\n".join(rows))
+    except Exception:
+        pass
+
+    # [GÜNLÜK AKTİVİTE (7 gün)] — Apple Health / Health Connect senkronu (adım,
+    # mesafe, yakılan kalori). Toplam enerji harcaması resmini tamamlar.
+    try:
+        lo = (app_today() - timedelta(days=6)).isoformat()
+        hi = app_today().isoformat()
+        rows = DailyActivity.query.filter(
+            DailyActivity.user_id == user_id,
+            DailyActivity.date_key >= lo, DailyActivity.date_key <= hi).all()
+        if rows:
+            steps = sum(r.steps or 0 for r in rows)
+            kcal = sum(r.calories_burned or 0 for r in rows)
+            dist = sum(r.distance_km or 0 for r in rows)
+            active_days = len({r.date_key for r in rows})
+            parts.append(
+                "[GÜNLÜK AKTİVİTE (7 gün)]\n"
+                f"- toplam adım: {steps} | yakılan kalori: {round(kcal)} kcal | "
+                f"mesafe: {round(dist, 1)} km | aktif gün: {active_days}/7")
+    except Exception:
+        pass
+
+    return parts
+
+
 def _fetch_coach_context(user_id, question=""):
     _assert_principal(user_id)
     # Not: Beslenme makroları artık koç araçları (fetch_nutrition_and_stage_log)
@@ -109,6 +187,9 @@ def _fetch_coach_context(user_id, question=""):
         parts.append(f"[FITNESS ÖZETİ]\n{get_user_fitness_summary(user_id)}")
     except Exception:
         parts.append("[FITNESS ÖZETİ] Veri alınamadı.")
+    # Kalıcı profil + kendi bildirdiği trendler (sakatlık, beslenme kısıtı, uyku/
+    # yorgunluk, günlük aktivite). MCP'den BAĞIMSIZ — doğrudan ORM ile okunur.
+    parts.extend(_fetch_profile_and_trends(user_id))
     try:
         parts.append(f"[ANTRENMAN GEÇMİŞİ (7 gün)]\n{get_user_workout_history(user_id, 7)}")
     except Exception:
@@ -132,6 +213,8 @@ def _fetch_coach_context(user_id, question=""):
             "WorkoutLog": WorkoutLog,
             "MealLog": MealLog,
             "UserSession": UserSession,
+            "WeeklyCheckIn": WeeklyCheckIn,
+            "WaterLog": WaterLog,
         }
         nudges = get_nudges(User.query.get(user_id), db, models,
                             getattr(g, "prev_last_login", None))
@@ -579,10 +662,12 @@ def _tool_query_fitx_metrics(user_id, metric_type, date_range):
                           ensure_ascii=False)
 
     if metric_type == "sleep_hours":
-        # Uygulamada uyku SÜRESİ verisi YOK (yalnızca subjektif kalite 1-5 var).
-        # Veri uydurma — dürüstçe desteklenmiyor de.
+        # Uyku SÜRESİ (saat) verisi YOK; yalnızca subjektif kalite (1-5) var ve o da
+        # [HAFTALIK CHECK-IN TRENDİ] bağlam bloğunda zaten sağlanıyor. Veri uydurma.
         return json.dumps({"status": "unsupported", "metric_type": "sleep_hours",
-                           "message": "Uyku süresi takibi henüz mevcut değil."}, ensure_ascii=False)
+                           "message": "Uyku süresi (saat) takibi yok. Subjektif uyku "
+                                      "kalitesi (1-5) için [HAFTALIK CHECK-IN TRENDİ] "
+                                      "bağlam bloğuna bak."}, ensure_ascii=False)
 
     base = {"status": "ok", "metric_type": metric_type, "date_range": date_range}
 

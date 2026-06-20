@@ -12,7 +12,9 @@ from types import SimpleNamespace
 import pytest
 
 from app.extensions import db
-from app.models import MealLog, PendingAction, User, UserSession, WorkoutLog
+from app.models import (DailyActivity, MealLog, PendingAction, User, UserSession,
+                        WeeklyCheckIn, WorkoutLog)
+from app.timeutil import app_today
 from app.services import ai_coach
 from app.services.ai_coach import (
     _coach_search_food,
@@ -471,6 +473,62 @@ def test_fetch_coach_context_degrades_summary_supplements_and_nudges(auth_user, 
     assert "[SUPPLEMENT STACK]" not in context            # supplement hatası → atlandı
     assert "[PROAKTİF BİLDİRİMLER]" not in context         # nudge hatası → atlandı
     assert "[ANTRENMAN GEÇMİŞİ (7 gün)]\nantrenman" in context
+
+
+def test_fetch_profile_and_trends_surfaces_memory_checkins_activity(auth_user):
+    # Kalıcı hafıza (manage_user_memory ile yazılan veriler).
+    auth_user.user_metadata = {"injuries": "Menisküs",
+                               "dietary_restrictions": "laktoz intoleransı",
+                               "equipment_available": "dumbbell, bench"}
+    auth_user.target_weight = 82.0
+    auth_user.goal_type = "cut"
+    # Haftalık check-in: düşük uyku / yüksek yorgunluk / duraksamış yüklenme.
+    db.session.add(WeeklyCheckIn(user_id=auth_user.id, weight=85.0, yogunluk=4,
+                                 fatigue=5, uyku_kalitesi=2, beslenme_uyumu=3,
+                                 progressive_overload="hayir", note="dizim ağrıyor"))
+    # Günlük aktivite (son 7 gün içinde).
+    db.session.add(DailyActivity(user_id=auth_user.id, steps=8000,
+                                 calories_burned=350, distance_km=6.0,
+                                 duration_min=60, date_key=app_today().isoformat()))
+    db.session.commit()
+
+    blob = "\n\n".join(ai_coach._fetch_profile_and_trends(auth_user.id))
+    assert "[KULLANICI PROFİLİ & HAFIZA]" in blob
+    assert "Menisküs" in blob
+    assert "laktoz intoleransı" in blob
+    assert "dumbbell, bench" in blob
+    assert "82.0 kg" in blob
+    assert "[HAFTALIK CHECK-IN TRENDİ" in blob
+    assert "uyku kalitesi 2/5" in blob
+    assert "progresif yüklenme: hayir" in blob
+    assert "[GÜNLÜK AKTİVİTE (7 gün)]" in blob
+    assert "toplam adım: 8000" in blob
+
+
+def test_fetch_profile_and_trends_flags_missing_injuries_and_omits_empty(auth_user):
+    # injuries kaydı yoksa profil bloğu DAİMA gelir ve koç sorması için işaretlenir;
+    # check-in / aktivite verisi olmayan bölümler atlanır (gürültü üretme).
+    blob = "\n\n".join(ai_coach._fetch_profile_and_trends(auth_user.id))
+    assert "[KULLANICI PROFİLİ & HAFIZA]" in blob
+    assert "injuries): KAYIT YOK" in blob
+    assert "[HAFTALIK CHECK-IN TRENDİ" not in blob
+    assert "[GÜNLÜK AKTİVİTE" not in blob
+
+
+def test_fetch_coach_context_includes_profile_section(auth_user, monkeypatch):
+    import fitx_mcp.server as mcp_server
+    # MCP bölümlerini sabitle; asıl ilgi profil bloğunun bağlama girmesi.
+    monkeypatch.setattr(mcp_server, "get_user_fitness_summary", lambda uid: "özet")
+    monkeypatch.setattr(mcp_server, "get_user_workout_history", lambda uid, d: "antrenman")
+    monkeypatch.setattr(mcp_server, "get_user_supplement_stack", lambda uid: "supp")
+    monkeypatch.setattr(mcp_server, "get_user_nutrition_log", lambda uid, d: "log")
+    monkeypatch.setattr(mcp_server, "get_friend_activities", lambda uid: "arkadaş")
+    auth_user.user_metadata = {"dietary_restrictions": "vegan"}
+    db.session.commit()
+
+    context = ai_coach._fetch_coach_context(auth_user.id, "ne yiyeyim?")
+    assert "[KULLANICI PROFİLİ & HAFIZA]" in context
+    assert "vegan" in context
 
 
 def test_cleanup_stale_pending_removes_aged_rows(auth_user):
