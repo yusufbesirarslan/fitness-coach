@@ -81,6 +81,96 @@ def test_plan_prompt_includes_cardio_preferences(client, with_session, monkeypat
 
 
 # ---------------------------------------------------------------------------
+# Sakatlık (injuries) — kalıcılık, katı direktif, post-filtre güvenlik ağı
+# ---------------------------------------------------------------------------
+
+# Bel fıtığı için kontrendike (Deadlift) + güvenli (Leg Press) içeren plan.
+INJURY_PLAN = {
+    "program": [{"gun": "Pazartesi", "tip": "antrenman", "odak": "Full",
+                 "sure_dk": 45, "tahmini_kalori": 380, "egzersizler": [
+                     {"isim": "Conventional Deadlift", "set": 4, "tekrar": "5",
+                      "dinlenme": "120 sn", "not": "ağır kaldır"},
+                     {"isim": "Leg Press", "set": 3, "tekrar": "10",
+                      "dinlenme": "90 sn", "not": "kontrollü"},
+                 ]}],
+    "haftalik_ozet": {"yogunluk_skoru": 8, "denge_skoru": 8, "uygunluk_skoru": 9},
+}
+
+
+def test_plan_persists_posted_injuries(client, with_session, auth_user, monkeypatch):
+    from app.models import User
+    monkeypatch.setattr(training_bp, "_heavy_chat",
+                        lambda **kwargs: json.dumps(PLAN_JSON, ensure_ascii=False))
+
+    client.post("/training-plan", json={"injuries": "Menisküs"})
+
+    db.session.expire_all()
+    user = db.session.get(User, auth_user.id)
+    assert (user.user_metadata or {}).get("injuries") == "Menisküs"
+
+
+def test_plan_prompt_includes_strict_injury_directive(client, with_session, monkeypatch):
+    captured = {}
+
+    def fake_chat(**kwargs):
+        captured["prompt"] = kwargs["messages"][0]["content"]
+        return json.dumps(PLAN_JSON, ensure_ascii=False)
+    monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
+
+    client.post("/training-plan", json={"injuries": "bel fıtığı"})
+    assert "KONTRENDİKASYON" in captured["prompt"]
+    assert "deadlift" in captured["prompt"].lower()   # yasak hareket
+    assert "Bird Dog" in captured["prompt"]            # güvenli alternatif
+
+
+def test_plan_flags_contraindicated_exercise_that_slips_through(client, with_session, monkeypatch):
+    monkeypatch.setattr(training_bp, "_heavy_chat",
+                        lambda **kwargs: json.dumps(INJURY_PLAN, ensure_ascii=False))
+
+    body = client.post("/training-plan", json={"injuries": "bel fıtığı"}).get_json()
+
+    warnings = body["injury_warnings"]
+    assert len(warnings) == 1
+    assert warnings[0]["egzersiz"] == "Conventional Deadlift"
+    assert warnings[0]["neden"] == "deadlift"
+
+    exs = body["program"][0]["egzersizler"]
+    assert exs[0]["not"].startswith("⚠️ SAKATLIK RİSKİ")
+    assert exs[1]["not"] == "kontrollü"               # güvenli egzersiz dokunulmadan kalır
+
+
+def test_plan_without_injuries_is_unconstrained(client, with_session, monkeypatch):
+    captured = {}
+
+    def fake_chat(**kwargs):
+        captured["prompt"] = kwargs["messages"][0]["content"]
+        return json.dumps(PLAN_JSON, ensure_ascii=False)
+    monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
+
+    body = client.post("/training-plan", json={}).get_json()
+    assert body["injury_warnings"] == []
+    assert "KONTRENDİKASYON" not in captured["prompt"]
+
+
+def test_plan_hicbiri_clears_stored_injuries(client, with_session, auth_user, monkeypatch):
+    from app.models import User
+    captured = {}
+
+    def fake_chat(**kwargs):
+        captured["prompt"] = kwargs["messages"][0]["content"]
+        return json.dumps(PLAN_JSON, ensure_ascii=False)
+    monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
+
+    client.post("/training-plan", json={"injuries": "Menisküs"})
+    client.post("/training-plan", json={"injuries": "Hiçbiri"})
+
+    db.session.expire_all()
+    user = db.session.get(User, auth_user.id)
+    assert (user.user_metadata or {}).get("injuries") == "Hiçbiri"
+    assert "KONTRENDİKASYON" not in captured["prompt"]   # 'Hiçbiri' → kısıt yok
+
+
+# ---------------------------------------------------------------------------
 # Plan kaydet / aktif plan
 # ---------------------------------------------------------------------------
 
