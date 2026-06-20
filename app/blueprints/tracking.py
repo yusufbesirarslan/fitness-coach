@@ -5,7 +5,7 @@ from flask_login import current_user, login_required
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
-from app.models import DailyActivity, MealLog, User, UserSession, WeeklyCheckIn, WeeklyLog, WorkoutLog
+from app.models import DailyActivity, MealLog, User, UserSession, WaterLog, WeeklyCheckIn, WeeklyLog, WorkoutLog
 from app.services.ai_coach import generate_checkin_feedback
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
 from app.services.validators import _to_int
@@ -395,12 +395,17 @@ def dashboard_nudges():
         "NUDGE_STREAK_RISK": "Serin risk altında! Bugün giriş yaparak kesintisiz serinizi koruyun.",
         "NUDGE_PROTEIN_GOAL": "Haftalık protein hedefinin %90'ına ulaştın — harika gidiyorsun!",
         "NUDGE_WEEKLY_REPORT": "Bugün haftalık rapor günü. Koçundan performans özetini iste!",
+        "NUDGE_RECOVERY": "Son check-in'de uyku/yorgunluk sinyallerin zorlu görünüyor. Bu hafta şiddeti biraz düşür, toparlanmaya ve uykuya öncelik ver.",
+        "NUDGE_OVERLOAD_STALL": "Progresif yüklenmen duraksamış. Küçük bir yük/tekrar artışı veya teknik odağıyla ilerlemeyi tekrar başlat.",
+        "NUDGE_LOW_HYDRATION": "Son günlerde su alımın düşük görünüyor. Gün içine yayılmış şekilde su içmeyi hedefle.",
     }
     try:
         models = {
             "WorkoutLog": WorkoutLog,
             "MealLog": MealLog,
             "UserSession": UserSession,
+            "WeeklyCheckIn": WeeklyCheckIn,
+            "WaterLog": WaterLog,
         }
         raw_nudges = get_nudges(User.query.get(current_user.id), db, models,
                                 getattr(g, "prev_last_login", None))

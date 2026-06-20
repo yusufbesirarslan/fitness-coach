@@ -31,6 +31,9 @@ def get_nudges(user, db, models, prev_last_login=None):
     _check_streak_at_risk(user, today, nudges, prev_last_login)
     _check_protein_goal(user, db, models, today, nudges)
     _check_weekly_report_day(today, nudges)
+    _check_recovery_signals(user, db, models, nudges)
+    _check_overload_stall(user, db, models, nudges)
+    _check_hydration(user, db, models, today, nudges)
 
     return nudges
 
@@ -113,4 +116,65 @@ def _check_weekly_report_day(today, nudges):
         nudges.append(
             "NUDGE_WEEKLY_REPORT: Bugün haftalık rapor günü. "
             "generate_weekly_report aracını kullanarak haftalık performans özetini sun."
+        )
+
+
+def _latest_checkin(user, models):
+    """En güncel WeeklyCheckIn (yoksa None). Model dict'te yoksa (eski çağıran)
+    sessizce None — yeni dürtüler bu durumda devre dışı kalır."""
+    WeeklyCheckIn = models.get("WeeklyCheckIn")
+    if WeeklyCheckIn is None:
+        return None
+    return WeeklyCheckIn.query.filter_by(user_id=user.id)\
+        .order_by(WeeklyCheckIn.created_at.desc()).first()
+
+
+def _check_recovery_signals(user, db, models, nudges):
+    """Son check-in'de uyku kalitesi düşük (<=2) VEYA yorgunluk yüksek (>=4) ise
+    toparlanma/deload öner. Aşırı antrenmanı erken yakalar."""
+    ci = _latest_checkin(user, models)
+    if not ci:
+        return
+    poor_sleep = ci.uyku_kalitesi is not None and ci.uyku_kalitesi <= 2
+    high_fatigue = ci.fatigue is not None and ci.fatigue >= 4
+    if poor_sleep or high_fatigue:
+        nudges.append(
+            f"NUDGE_RECOVERY: Son check-in'de uyku kalitesi {ci.uyku_kalitesi}/5, "
+            f"yorgunluk {ci.fatigue}/5. Antrenman hacmini/şiddetini düşürmeyi, "
+            f"toparlanma ve uykuyu önceliklendirmeyi öner."
+        )
+
+
+def _check_overload_stall(user, db, models, nudges):
+    """Son check-in'de progresif yüklenme 'hayir' ise program ayarı öner."""
+    ci = _latest_checkin(user, models)
+    if not ci:
+        return
+    if (ci.progressive_overload or "").strip().lower() == "hayir":
+        nudges.append(
+            "NUDGE_OVERLOAD_STALL: Progresif yüklenme duraksamış (son check-in: hayır). "
+            "Küçük bir yük/tekrar artışı, set ekleme veya teknik/tempo odağı öner."
+        )
+
+
+def _check_hydration(user, db, models, today, nudges):
+    """Son 7 günde ortalama günlük su (bardak) eşiğin altındaysa nazikçe hatırlat.
+    Bir bardak ≈ 240 ml; eşik 6 bardak ≈ 1.5 L. Hiç kayıt yoksa sessiz — loglamama
+    durumunu zaten MISSING_LOGS yakalar, burada yanlış pozitif üretme."""
+    WaterLog = models.get("WaterLog")
+    if WaterLog is None:
+        return
+    lo = (today - timedelta(days=6)).isoformat()
+    hi = today.isoformat()
+    rows = WaterLog.query.filter(
+        WaterLog.user_id == user.id,
+        WaterLog.date_key >= lo, WaterLog.date_key <= hi).all()
+    if not rows:
+        return
+    days = len({r.date_key for r in rows})
+    avg_cups = sum(r.count or 0 for r in rows) / days if days else 0
+    if avg_cups < 6:
+        nudges.append(
+            f"NUDGE_LOW_HYDRATION: Son {days} günde ortalama günlük su ~{round(avg_cups, 1)} "
+            f"bardak (≈{round(avg_cups * 240)} ml) — düşük. Su alımını artırmayı nazikçe öner."
         )
