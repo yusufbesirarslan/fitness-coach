@@ -34,7 +34,12 @@ def create_app():
     @app.route("/health")
     def health():
         # Konteyner sağlık kontrolü (Docker HEALTHCHECK). Auth gerektirmez, body okumaz.
-        return {"status": "ok"}, 200
+        # limiter_storage: "redis"/"memory"/"degraded" — "degraded" iken brute-force
+        # login throttle süreç-yerel + geçici olur. DİKKAT: status DAİMA 200 — Redis
+        # kaybı web konteynerini "unhealthy" yapıp gereksiz yere yeniden başlatmasın
+        # (uygulama zarifçe bellek-yedeğine düşer); bu alan yalnızca izleme sinyalidir.
+        from app.extensions import limiter_storage_status
+        return {"status": "ok", "limiter_storage": limiter_storage_status()}, 200
 
     # before_request order must match the original monolith:
     #   _csrf_protect -> (limiter) _check_request_limit -> maybe_weekly_rollover -> update_streak

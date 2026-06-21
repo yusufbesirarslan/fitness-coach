@@ -13,7 +13,7 @@ import os
 import json
 import time
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from contextlib import contextmanager
 
@@ -40,6 +40,7 @@ def _utc_day_bounds(d=None):
     kolonu yoktur; 'Istanbul günü' aralığını bununla doğru karşılaştırmak için
     `created_at::date = CURRENT_DATE` (UTC günü) yerine bu sınırlar kullanılır —
     aksi halde 00:00–03:00 Istanbul arası toplamlar yanlış güne düşer (C2 sınıfı).
+    `d` parametresi haftalık rapor gibi geçmiş gün sınırlarını da hesaplar.
     """
     if d is None:
         d = _app_today()

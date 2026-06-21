@@ -100,6 +100,21 @@ def test_csp_header_present_and_locked_down(client):
     assert directives["script-src-attr"] == "script-src-attr 'none'"
     assert directives["frame-ancestors"] == "frame-ancestors 'none'"
     assert directives["object-src"] == "object-src 'none'"
+    # style-src-elem: <style> blokları nonce ister, 'unsafe-inline' YOK — XSS ile
+    # enjekte edilen <style> çalışmaz. Dinamik style="" nitelikleri style-src-attr
+    # üzerinden 'unsafe-inline' ile yaşamaya devam eder (progress-bar genişlikleri).
+    assert "'nonce-" in directives["style-src-elem"]
+    assert "'unsafe-inline'" not in directives["style-src-elem"]
+    assert directives["style-src-attr"] == "style-src-attr 'unsafe-inline'"
+
+
+def test_csp_style_nonce_matches_template(client):
+    # Şablondaki <style nonce="..."> bloğu başlıktaki style-src-elem nonce'u ile
+    # imzalanmalı; aksi halde modern tarayıcı stil bloğunu bloklar.
+    response = client.get("/login")
+    style_elem = _csp_directives(response)["style-src-elem"]
+    nonce = style_elem.split("'nonce-")[1].split("'")[0]
+    assert nonce and f'<style nonce="{nonce}"' in response.get_data(as_text=True)
 
 
 def test_csp_nonce_changes_per_request(client):

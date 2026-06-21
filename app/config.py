@@ -2,6 +2,7 @@
 import logging
 import os
 import time
+from datetime import timedelta
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 
@@ -115,7 +116,10 @@ def _enforce_fatsecret_tls(app):
 
 
 def configure_app(app):
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1)
+    # Tek güvenilir reverse proxy (host nginx) arkasında: X-Forwarded-For/-Proto'nun
+    # yanı sıra -Host ve -Port'a da güven; url_for(_external)/redirect'ler ve secure
+    # cookie kararları için doğru host/şema/port'u Flask'ın görmesini sağlar.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
     _LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
     _gunicorn_logger = logging.getLogger("gunicorn.error")
     if _gunicorn_logger.handlers:
@@ -153,3 +157,7 @@ def configure_app(app):
     app.config["REMEMBER_COOKIE_HTTPONLY"] = True
     app.config["REMEMBER_COOKIE_SAMESITE"] = "Lax"
     app.config["REMEMBER_COOKIE_SECURE"] = not _IS_DEV
+    # Kalıcı oturum ömrünü açıkça sınırla — Flask varsayılanı 31 gün. Env ile
+    # ayarlanabilir (gün), aksi halde 7 gün. Çerez/oturum maruziyetini kısaltır.
+    _session_days = int(os.environ.get("PERMANENT_SESSION_LIFETIME_DAYS", "7"))
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=_session_days)

@@ -76,20 +76,33 @@ class _LazyAnthropicBedrock:
 bedrock_client = _LazyAnthropicBedrock()
 
 
-def warn_if_limiter_degraded(app):
-    """Redis yapılandırılmış ama erişilemiyorsa uyar. Limiter bu durumda bellek
-    yedeğine düşer (in_memory_fallback_enabled): rate-limit ve özellikle kullanıcı-
-    başı login throttle (brute-force koruması) tek-süreç/geçici hale gelir. Sessizce
-    bozulmasın diye boot'ta görünür kıl (S6)."""
+def limiter_storage_status():
+    """Limiter depolama durumunu döndür: "memory" (Redis yapılandırılmamış —
+    lokal/dev), "redis" (yapılandırılmış ve erişilebilir) veya "degraded"
+    (yapılandırılmış ama PING başarısız → bellek-yedeğine düşülmüş).
+
+    "degraded" güvenlik açısından önemlidir: rate-limit ve özellikle kullanıcı-
+    başı login throttle (brute-force koruması) o anda süreç-yerel + geçici (yeniden
+    başlatmada sıfırlanır) ve birden çok worker'a yayılmaz. /health bu değeri
+    raporlar ki harici izleme sessiz bozulmayı yakalayabilsin (S6)."""
     if redis_client is None:
-        return
+        return "memory"
     try:
         redis_client.ping()
-    except Exception as e:
-        app.logger.warning(
-            "[LIMITER] Redis erişilemiyor (%s: %s) — rate-limit ve login throttle "
-            "bellek-yedeğine düştü; çok-süreçli/yeniden-başlatmada zayıflar.",
-            type(e).__name__, e)
+        return "redis"
+    except Exception:
+        return "degraded"
+
+
+def warn_if_limiter_degraded(app):
+    """Redis yapılandırılmış ama erişilemiyorsa boot'ta görünür şekilde uyar.
+    Limiter bu durumda bellek yedeğine düşer (in_memory_fallback_enabled).
+    Çalışma anındaki durum /health üzerinden de izlenebilir (limiter_storage_status)."""
+    if limiter_storage_status() == "degraded":
+        app.logger.error(
+            "[LIMITER] Redis erişilemiyor — rate-limit ve login throttle "
+            "bellek-yedeğine düştü; çok-süreçli/yeniden-başlatmada zayıflar. "
+            "/health limiter_storage=degraded raporlar.")
 
 
 # Login throttle sağlık durumu, kısa süreli cache'lenir: Redis düştüğünde her

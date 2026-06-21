@@ -40,7 +40,18 @@ def set_csp_header(response):
         f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net "
         "https://*.googletagmanager.com; "
         "script-src-attr 'none'; "
+        # style-src: 'unsafe-inline' fallback yalnızca style-src-elem/-attr'ı
+        # desteklemeyen ESKİ tarayıcılar için tutulur. Modern tarayıcılar daha
+        # SIKI alt-direktifleri uygular:
+        #   style-src-elem: <style> blokları + <link> stylesheet → 'unsafe-inline'
+        #     KALDIRILDI; satır-içi <style> blokları artık per-request NONCE ister
+        #     (XSS ile enjekte edilen <style> — CSS exfil/UI-redress vektörü — çalışmaz).
+        #   style-src-attr 'unsafe-inline': dinamik style="..." nitelikleri (örn.
+        #     progress-bar genişlikleri) nonce alamadığından kaçınılmaz; bu dar
+        #     vektör açık kalır ama tam <style> enjeksiyonundan çok daha sınırlıdır.
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        f"style-src-elem 'self' 'nonce-{nonce}' https://fonts.googleapis.com; "
+        "style-src-attr 'unsafe-inline'; "
         "font-src 'self' https://fonts.gstatic.com data:; "
         f"img-src 'self' data: {s3_src}"
         "https://*.google-analytics.com https://*.googletagmanager.com; "

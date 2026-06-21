@@ -4,7 +4,7 @@
      just before </body> in any authenticated page template.
      Communicates with /ask endpoint. Exposes window.CW.receiveCheckinFeedback(text).
      ═══════════════════════════════════════════════════════════════ -->
-<style>
+<style nonce="{{ csp_nonce }}">
   /* ── Root container ── */
   #cw-root {
     position: fixed;
