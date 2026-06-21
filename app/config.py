@@ -41,6 +41,9 @@ FOOD_SEARCH_RATELIMIT = "60 per hour"  # food search (LLM only fires on a FatSec
 # throttle. UI 300ms debounce'lu olduğundan meşru typeahead bu tavanı zorlamaz;
 # kullanıcı/IP başına anahtarlanır.
 SEARCH_RATELIMIT = "20 per minute; 200 per hour"
+# Freemium: AI plan üretiminde sunucu-taraflı haftalık kota (app/services/premium).
+# Operasyonel kapatma anahtarı; üretimde varsayılan AÇIK.
+AI_PLAN_QUOTA_ENABLED = os.getenv("AI_PLAN_QUOTA_ENABLED", "1") == "1"
 # Sonnet (Bedrock) pahalı olduğundan, ağır ÜRETKEN Sonnet route'larına AI_RATELIMIT
 # üstüne binen, daha sıkı kullanıcı-başı ikinci tavan. Env ile ayarlanabilir.
 BEDROCK_RATELIMIT = os.getenv("BEDROCK_RATELIMIT", "10 per hour")
@@ -122,6 +125,7 @@ def configure_app(app):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
     app.config["SQLALCHEMY_DATABASE_URI"] = database_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    app.config["AI_PLAN_QUOTA_ENABLED"] = AI_PLAN_QUOTA_ENABLED
     _secret_key = os.environ.get("SECRET_KEY")
     if not _secret_key:
         # Allow boot without SECRET_KEY only in explicit debug mode, and generate

@@ -12,6 +12,7 @@ from app.services import injury_constraints
 from app.services.ai import _heavy_chat
 from app.services.gamification import _claim_quest, award_xp, get_level, get_title, log_activity
 from app.services.menu_extract import validate_pump_check
+from app.services.premium import premium_ai_plan_gate
 from app.services.validators import validate_pump_check_image
 from app.timeutil import app_today, utc_day_bounds
 
@@ -34,6 +35,7 @@ def training():
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 @limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # Sonnet üretimi: daha sıkı tavan
+@premium_ai_plan_gate("training")  # non-premium: haftada 1 üretim
 def training_plan_generate():
     data = request.get_json(silent=True) or {}
 

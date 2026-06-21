@@ -74,6 +74,9 @@ def app():
     flask_app.test_client_class = AutoOriginClient
     # Rate limits off by default; the dedicated rate-limit tests re-enable.
     limiter.enabled = False
+    # Freemium AI-plan kotası da kapalı; davranış testleri planı tekrar tekrar
+    # üretebilsin. Kotanın kendisini sınayan testler config'i açar.
+    flask_app.config["AI_PLAN_QUOTA_ENABLED"] = False
     # Disarm the 5-minute weekly-rollover hook so request-driven tests are
     # deterministic; rollover is tested by calling run_weekly_rollover directly.
     gamification._last_rollover_check[0] = datetime.utcnow()

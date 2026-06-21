@@ -10,6 +10,7 @@ from app.extensions import _user_or_ip_key, db, limiter
 from app.models import CustomMeal, CustomMealItem, MealLog, NutritionPlan, UserSession
 from app.services.ai import PORTION_SANITY_RULE, _heavy_chat, _openai_chat
 from app.services.gamification import complete_quest_for_user
+from app.services.premium import premium_ai_plan_gate
 from app.services.validators import _meal_photo_url, _to_float, validate_meal_photo
 from app.timeutil import app_today, day_key, display_ddmm
 
@@ -728,6 +729,7 @@ def nutrition():
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 @limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # Sonnet üretimi: daha sıkı tavan
+@premium_ai_plan_gate("nutrition")  # non-premium: haftada 1 üretim
 def nutrition_plan_generate():
     data = request.get_json(silent=True) or {}
     FOOD_DATABASE = {
