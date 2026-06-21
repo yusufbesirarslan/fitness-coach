@@ -34,6 +34,16 @@
         .option-chip-text { font-size: 14px; font-weight: 400; color: var(--text); }
         .option-chip-sub { font-size: 11px; color: var(--text-3); }
 
+        /* Sakatlık serbest-metin girişi */
+        .injury-input {
+            width: 100%; margin-top: 10px; box-sizing: border-box;
+            background: var(--surface-2); color: var(--text);
+            border: 1px solid var(--border); border-radius: var(--r-sm);
+            padding: 12px 14px; font-size: 14px; font-family: inherit;
+        }
+        .injury-input::placeholder { color: var(--text-4); }
+        .injury-input:focus { outline: none; border-color: rgba(204,255,0,0.5); }
+
         .active-plan-banner {
             background: var(--volt-dim); border: 1px solid rgba(204,255,0,0.2);
             border-radius: var(--r-lg); padding: 16px 20px; margin-bottom: 24px;
@@ -544,6 +554,15 @@
             </div>
         </div>
 
+        <!-- SAKATLIK / SAĞLIK DURUMU -->
+        <div class="section">
+            <div class="section-title">Sakatlık / Sağlık Durumu</div>
+            <div class="section-sub">Varsa sakatlık ya da tıbbi durumunu seç — program, riskli hareketlerden kaçınıp güvenli alternatifler koyacak şekilde uyarlanır. Yoksa "Hiçbiri" seç.</div>
+            <div class="option-grid" id="injury-grid"></div>
+            <input type="text" id="injury-other" class="injury-input" maxlength="200"
+                   placeholder="Diğer / detay (ör. sağ omuz sıkışması, kronik bel ağrısı)">
+        </div>
+
         <button class="btn-volt" id="submit-btn" data-action="generatePlan" style="margin-top:8px">PROGRAMIMI OLUŞTUR</button>
 
         <!-- SONUÇLAR (yeni oluşturulan plan önizlemesi) -->
@@ -724,7 +743,8 @@ document.addEventListener('click', e => {
     const selections = {
         gun_sayisi: 3, ekipman: "spor_salonu", odak: "tum_vucut", sure: 45,
         kardiyo_tipi: "yok", kardiyo_gun: 0, kardiyo_sure: 20,
-        kardiyo_yogunluk: "orta", antrenman_tarzi: "genel", odak_hedef: "genel"
+        kardiyo_yogunluk: "orta", antrenman_tarzi: "genel", odak_hedef: "genel",
+        injuries: {{ injuries|tojson }}   // kayıtlı sakatlık (varsa) ile ön-doldurulur
     };
     let currentPlan = null, currentScore = null;
 
@@ -778,6 +798,65 @@ document.addEventListener('click', e => {
         KARDIYO_OPTIONS.yogunluk.forEach(o => document.getElementById("kardiyo-yogunluk-grid").appendChild(createOptionChip(o, "kardiyo-yogunluk-grid", "kardiyo_yogunluk", "orta")));
         TARZI_OPTIONS.forEach(o  => document.getElementById("tarzi-grid").appendChild(createOptionChip(o, "tarzi-grid", "antrenman_tarzi", "genel")));
         HEDEF_OPTIONS.forEach(o  => document.getElementById("hedef-grid").appendChild(createOptionChip(o, "hedef-grid", "odak_hedef", "genel")));
+    }
+
+    // ── SAKATLIK SEÇİCİ (çoklu-seçim) ──
+    // Yaygın durumlar için hızlı chip'ler + serbest metin. TEK doğruluk kaynağı
+    // serbest-metin alanıdır (#injury-other); chip'ler yalnızca onu düzenler. Bu metin
+    // /training-plan'a gider; backend (app/services/injury_constraints) klinik
+    // kontrendikasyona çevirir. "Hiçbiri" literal gönderilir → kayıtlı sakatlığı
+    // temizleyebilmek için (boş string backend'de kayıtlı veriyi SİLMEZ).
+    const COMMON_INJURIES = ["Menisküs", "Diz", "Kifoz", "Skolyoz", "Bel fıtığı",
+        "Bel ağrısı", "Omuz", "Bilek", "Dirsek", "Ayak bileği", "Kalça", "Boyun"];
+    const NONE_LABEL = "Hiçbiri";
+
+    function injuryTokens() {
+        return (document.getElementById("injury-other").value || "")
+            .split(",").map(s => s.trim()).filter(Boolean);
+    }
+    function syncInjuryChips() {
+        const lc  = injuryTokens().map(t => t.toLowerCase());
+        const val = (document.getElementById("injury-other").value || "").trim().toLowerCase();
+        document.querySelectorAll("#injury-grid .option-chip").forEach(chip => {
+            const label = chip.dataset.label;
+            const selected = label === NONE_LABEL
+                ? (val === "" || val === NONE_LABEL.toLowerCase())
+                : lc.includes(label.toLowerCase());
+            chip.classList.toggle("selected", selected);
+        });
+    }
+    function setInjuryValue(text) {
+        const input = document.getElementById("injury-other");
+        input.value = text;
+        selections.injuries = text.trim();
+        syncInjuryChips();
+    }
+    function makeInjuryChip(label) {
+        const chip = document.createElement("div");
+        chip.className = "option-chip";
+        chip.dataset.label = label;
+        chip.innerHTML = `<div class="option-chip-dot"></div><div><div class="option-chip-text">${label}</div></div>`;
+        chip.addEventListener("click", () => {
+            if (label === NONE_LABEL) { setInjuryValue(NONE_LABEL); return; }
+            // 'Hiçbiri' token'ını at, tıklanan etiketi aç/kapat.
+            let tokens = injuryTokens().filter(t => t.toLowerCase() !== NONE_LABEL.toLowerCase());
+            const idx = tokens.findIndex(t => t.toLowerCase() === label.toLowerCase());
+            if (idx >= 0) tokens.splice(idx, 1); else tokens.push(label);
+            setInjuryValue(tokens.join(", "));
+        });
+        return chip;
+    }
+    function setupInjuryPicker() {
+        const grid = document.getElementById("injury-grid");
+        grid.appendChild(makeInjuryChip(NONE_LABEL));
+        COMMON_INJURIES.forEach(l => grid.appendChild(makeInjuryChip(l)));
+        const input = document.getElementById("injury-other");
+        input.addEventListener("input", () => {
+            selections.injuries = input.value.trim();
+            syncInjuryChips();
+        });
+        input.value = selections.injuries || "";   // sunucudan gelen kayıtlı değer
+        syncInjuryChips();
     }
 
     // ── LOAD INFO ──
@@ -1245,6 +1324,7 @@ document.addEventListener('click', e => {
     })();
 
     populateOptions();
+    setupInjuryPicker();
     loadInfo();
     loadActivePlan().then(() => checkWorkoutCompleted());
 </script>

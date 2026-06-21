@@ -39,17 +39,47 @@ def test_csrf_cross_site_referer_rejected(raw_client):
     assert response.status_code == 403
 
 
+def _with_token(raw_client, token="tok-abc"):
+    """Oturuma synchronizer token tohumla ve eşleşen başlığı döndür."""
+    with raw_client.session_transaction() as sess:
+        sess["_csrf_token"] = token
+    return {"X-CSRFToken": token}
+
+
 def test_csrf_same_origin_post_passes(raw_client):
-    # Aynı origin → CSRF kapısını geçer; yanlış şifre 401'i view'dan gelir.
+    # Aynı origin + geçerli token → CSRF kapısını geçer; yanlış şifre 401'i view'dan gelir.
+    headers = {"Origin": "http://localhost", **_with_token(raw_client)}
     response = raw_client.post("/login", json={"username": "x", "password": "y"},
-                               headers={"Origin": "http://localhost"})
+                               headers=headers)
     assert response.status_code == 401
 
 
 def test_csrf_same_origin_referer_passes(raw_client):
+    headers = {"Referer": "http://localhost/login", **_with_token(raw_client)}
     response = raw_client.post("/login", json={"username": "x", "password": "y"},
-                               headers={"Referer": "http://localhost/login"})
+                               headers=headers)
     assert response.status_code == 401
+
+
+def test_csrf_valid_origin_but_missing_token_rejected(raw_client):
+    # Layer 2: Origin doğru olsa bile token yoksa reddedilir (defense-in-depth).
+    response = raw_client.post("/login", json={"username": "x", "password": "y"},
+                               headers={"Origin": "http://localhost"})
+    assert response.status_code == 403
+
+
+def test_csrf_valid_origin_but_wrong_token_rejected(raw_client):
+    _with_token(raw_client, token="gercek-token")
+    response = raw_client.post("/login", json={"username": "x", "password": "y"},
+                               headers={"Origin": "http://localhost",
+                                        "X-CSRFToken": "yanlis-token"})
+    assert response.status_code == 403
+
+
+def test_csrf_token_injected_into_page(client):
+    # Token şablona <meta name="csrf-token"> olarak sızdırılmalı (frontend okur).
+    html = client.get("/login").get_data(as_text=True)
+    assert 'name="csrf-token"' in html
 
 
 def test_csrf_does_not_apply_to_get(raw_client):

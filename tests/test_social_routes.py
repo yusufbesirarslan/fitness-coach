@@ -60,6 +60,23 @@ def test_friends_search_excludes_self_and_reports_status(client, auth_user, make
     assert users["testbekleyen"] == "pending"
 
 
+def test_friends_search_rate_limited(client, auth_user):
+    """Kullanıcı-adı sayımına karşı /friends/search 429 ile sınırlanır."""
+    from app.extensions import limiter
+
+    limiter.reset()
+    limiter.enabled = True
+    try:
+        for _ in range(20):                 # SEARCH_RATELIMIT: 20 per minute
+            assert client.get("/friends/search?q=ab").status_code == 200
+        blocked = client.get("/friends/search?q=ab")
+        assert blocked.status_code == 429
+        assert "Çok fazla deneme" in blocked.get_json()["error"]
+    finally:
+        limiter.enabled = False
+        limiter.reset()
+
+
 # ---------------------------------------------------------------------------
 # Arkadaşlık isteği yaşam döngüsü
 # ---------------------------------------------------------------------------

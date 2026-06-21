@@ -3,7 +3,9 @@
 
 
 def calculate_bmr(weight, height, age, gender):
-    if gender.lower() == "male":
+    # gender None/eksik olabilir (profil yarım) → AttributeError yerine kadın
+    # formülüne düş (mevcut "male dışı = female" sözleşmesiyle aynı).
+    if (gender or "").lower() == "male":
         return 10 * weight + 6.25 * height - 5 * age + 5
     return 10 * weight + 6.25 * height - 5 * age - 161
 
@@ -15,13 +17,14 @@ def calculate_tdee(bmr, current_activity):
         "active"    : 1.55,
         "very_active": 1.75
     }
-    return bmr * multipliers.get(current_activity.lower(), 1.2)
+    return bmr * multipliers.get((current_activity or "").lower(), 1.2)
 
 
 def calculate_target(tdee, goal):
-    if goal.lower() == "kilo verme":
+    goal = (goal or "").lower()      # goal None/eksik → koruma (TDEE'yi olduğu gibi döndür)
+    if goal == "kilo verme":
         return tdee - 400
-    elif goal.lower() == "kas kazanma":
+    elif goal == "kas kazanma":
         return tdee + 300
     return tdee
 
@@ -56,12 +59,13 @@ def generate_training_plan(goal, level):
         ("kas kazanma", "intermediate"): "Haftada 4 gün hipertrofi odaklı split",
         ("kas kazanma", "advanced")    : "Haftada 5 gün split program",
     }
-    return plans.get((goal.lower(), level.lower()), "Standart plan")
+    return plans.get(((goal or "").lower(), (level or "").lower()), "Standart plan")
 
 
 def generate_nutrition_plan(goal, target_calories):
-    if goal.lower() == "kilo verme":
+    goal = (goal or "").lower()      # goal None/eksik → koruma (standart plana düş)
+    if goal == "kilo verme":
         return f"Günlük {target_calories:.0f} kcal — yüksek protein, düşük işlenmiş karbonhidrat"
-    elif goal.lower() == "kas kazanma":
+    elif goal == "kas kazanma":
         return f"Günlük {target_calories:.0f} kcal — kalori fazlası, protein ağırlıklı"
     return "Standart beslenme planı"

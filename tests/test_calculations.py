@@ -38,6 +38,16 @@ def test_bmr_gender_case_insensitive():
     assert calculate_bmr(80, 180, 30, "FEMALE") == 1614
 
 
+def test_calc_functions_guard_none_inputs():
+    # Yarım profil (None gender/goal/activity/level) AttributeError yerine
+    # güvenli varsayılana düşmeli.
+    assert calculate_bmr(80, 180, 30, None) == 1614          # None → kadın formülü
+    assert calculate_tdee(1000, None) == pytest.approx(1200)  # None → sedentary
+    assert calculate_target(2000, None) == 2000              # None → değişmez
+    assert generate_training_plan(None, None) == "Standart plan"
+    assert generate_nutrition_plan(None, 2000) == "Standart beslenme planı"
+
+
 # ---------------------------------------------------------------------------
 # TDEE — aktivite çarpanları ve bilinmeyen anahtar fallback'i
 # ---------------------------------------------------------------------------

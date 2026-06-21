@@ -20,10 +20,14 @@ mcp[cli]==1.28.0
 requests==2.34.2
 Brotli==1.2.0
 beautifulsoup4==4.15.0
+# Güvenilmeyen yükleme (PDF/görsel) ayrıştırıcıları — Dependabot (.github/dependabot.yml)
+# yükseltme PR'ları açar; pin'ler tekrarlanabilir build için sabit kalır.
 pdfplumber==0.11.10
 Pillow==12.2.0
 boto3==1.43.34
 redis==5.2.1
+# Hata izleme — yalnızca SENTRY_DSN ayarlıysa etkin (app/observability.py).
+sentry-sdk[flask]==2.63.0
 # dev/test
 pytest==9.1.1
 pytest-cov==7.1.0

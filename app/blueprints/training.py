@@ -3,13 +3,16 @@ import json
 import s3_helper
 from flask import Blueprint, current_app, jsonify, render_template, request
 from flask_login import current_user, login_required
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
 from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
+from app.services import injury_constraints
 from app.services.ai import _heavy_chat
 from app.services.gamification import _claim_quest, award_xp, get_level, get_title, log_activity
 from app.services.menu_extract import validate_pump_check
+from app.services.premium import premium_ai_plan_gate
 from app.services.validators import validate_pump_check_image
 from app.timeutil import app_today, utc_day_bounds
 
@@ -20,13 +23,19 @@ bp = Blueprint("training", __name__)
 @bp.route("/training")
 @login_required
 def training():
-    return render_template("training.html", username=current_user.username, profile_picture=current_user.avatar_src)
+    # Kayıtlı sakatlık verisini forma ön-doldur (yapışkan alan). None-güvenli.
+    _meta = getattr(current_user, "user_metadata", None) or {}
+    injuries = _meta.get("injuries") or ""
+    return render_template("training.html", username=current_user.username,
+                           profile_picture=current_user.avatar_src,
+                           injuries=injuries)
 
 
 @bp.route("/training-plan", methods=["POST"])
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 @limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # Sonnet üretimi: daha sıkı tavan
+@premium_ai_plan_gate("training")  # non-premium: haftada 1 üretim
 def training_plan_generate():
     data = request.get_json(silent=True) or {}
 
@@ -189,24 +198,30 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
   Bacak: Squat, Lunge, Glute Bridge, Romanian Deadlift (dambıl), Step-Up
 """
 
-    # Sakatlık-bilinçli uyarlama (soft-adapt): kayıtlı sakatlık varsa plana kısıt
-    # ekle. Tam "durdur ve sor" iş akışı sohbet koçundadır (manage_user_memory);
-    # form bunu yalnızca TÜKETİR — sakatlık verisi yoksa normal planlar (bloklamaz).
+    # ── Sakatlık-bilinçli uyarlama ────────────────────────────────────────────
+    # Form 'injuries' gönderdiyse kalıcı profile (user_metadata.injuries) yaz: alan
+    # kullanıcı için "yapışkan" olur ve sohbet koçu da AYNI veriyi görür (tek kaynak).
+    # Boş/None gönderim kayıtlı veriyi SİLMEZ — yalnızca dolu, değişen değer yazılır.
+    posted_injuries = data.get("injuries")
+    if isinstance(posted_injuries, str) and posted_injuries.strip():
+        try:
+            meta = dict(current_user.user_metadata or {})
+            if meta.get("injuries") != posted_injuries.strip():
+                meta["injuries"] = posted_injuries.strip()[:2000]
+                current_user.user_metadata = meta
+                flag_modified(current_user, "user_metadata")  # JSON kolon mutasyonu izlenmez
+                db.session.commit()
+        except Exception:
+            db.session.rollback()
+            current_app.logger.warning("[INJURY] sakatlık kaydı başarısız", exc_info=True)
+
+    # Kayıtlı (veya az önce yazılan) sakatlıktan KATI, yapısal kontrendikasyon
+    # direktifi üret. Klinik bilgi tabanı app/services/injury_constraints'te (tek
+    # doğruluk kaynağı; sohbet koçu da aynı motoru kullanır). Sakatlık yoksa boş
+    # string döner → jeneratör normal planlar (bloklamaz, null-güvenli).
     _meta = getattr(current_user, "user_metadata", None) or {}
     _injuries = _meta.get("injuries")
-    injury_text = ""
-    if _injuries and str(_injuries).strip().lower() not in ("", "hiçbiri", "hicbiri", "yok", "none"):
-        injury_text = (
-            f"\nSAKATLIK / SAĞLIK KISITLARI (ZORUNLU UYARLAMA):\n"
-            f"- Kullanıcının bildirdiği durum: {str(_injuries)[:200]}\n"
-            f"- Egzersiz seçimi, hacim ve şiddeti bu duruma göre GÜVENLİ uyarla; riskli "
-            f"hareketleri düşük-darbeli/daha güvenli alternatiflerle değiştir.\n"
-            f"- Örnekler: Menisküs/diz → ağır squat/lunge yerine leg press, box squat, düşük darbe; "
-            f"Kifoz → arka zincir + ekstansiyon vurgusu, ağır overhead'den kaçın; "
-            f"Bel/disk → ağır eksenel yük (deadlift/back squat) yerine destekli varyasyonlar; "
-            f"Omuz → ağır bench/overhead yerine nötr tutuş ve kontrollü ROM.\n"
-            f"- İlgili egzersizin 'not' alanına sakatlık-güvenliği ipucu ekle.\n"
-        )
+    injury_text = injury_constraints.build_injury_directive(_injuries)
 
     prompt = (
         f"Sen 10+ yıllık deneyimli bir kişisel antrenörsün. Türkçe yaz, İngilizce egzersiz isimlerini kullanabilirsin.\n"
@@ -282,6 +297,30 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
             raw = raw[start:end]
         plan = json.loads(raw)
 
+        # ── Sakatlık güvenlik ağı (son filtre) ─────────────────────────────────
+        # LLM, katı direktife rağmen kontrendike bir hareket koyduysa yakala:
+        # egzersizin 'not' alanına GÖRÜNÜR uyarı ekle ve logla. Plan yapısını
+        # bozmamak için sessizce SİLMEYİZ (gün egzersizsiz kalmasın) — bu görünür
+        # uyarı + log savunma derinliğidir; birincil zorlama istemdeki direktiftir.
+        injury_warnings = []
+        if _injuries:
+            for gun in (plan.get("program") or []):
+                for ex in (gun.get("egzersizler") or []):
+                    if not isinstance(ex, dict):
+                        continue
+                    isim = ex.get("isim", "")
+                    hit = injury_constraints.find_contraindicated(isim, _injuries)
+                    if hit:
+                        warn = f"⚠️ SAKATLIK RİSKİ ({hit}) — güvenli alternatifle değiştir"
+                        note = (ex.get("not") or "").strip()
+                        ex["not"] = f"{warn}. {note}".strip()
+                        injury_warnings.append(
+                            {"gun": gun.get("gun"), "egzersiz": isim, "neden": hit})
+            if injury_warnings:
+                current_app.logger.warning(
+                    "[INJURY] %d kontrendike egzersiz plana sızdı (user=%s): %s",
+                    len(injury_warnings), current_user.id, injury_warnings)
+
         ozet     = plan.get("haftalik_ozet", {})
         yogunluk = ozet.get("yogunluk_skoru", 0)
         denge    = ozet.get("denge_skoru", 0)
@@ -305,10 +344,11 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
             score_label = "Kötü"
 
         return jsonify({
-            "program"      : plan["program"],
-            "haftalik_ozet": ozet,
-            "overall_score": overall,
-            "score_label"  : score_label
+            "program"        : plan["program"],
+            "haftalik_ozet"  : ozet,
+            "overall_score"  : overall,
+            "score_label"    : score_label,
+            "injury_warnings": injury_warnings,
         })
 
     except json.JSONDecodeError:

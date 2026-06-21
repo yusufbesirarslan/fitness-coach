@@ -25,12 +25,17 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 - tests/ — pytest (menü çıkarımı, makro alaka, nutrition pipeline)
 - .env — SECRET_KEY, DATABASE_URL, POSTGRES_*, FATSECRET_*, OPENAI_API_KEY, OPENAI_MODEL, AWS_REGION, S3_BUCKET_NAME, REDIS_URL (commit etme)
   - Örnek için .env.example'a bak. OpenAI anahtarı .env'den okunur, asla hardcode edilmez.
+  - Opsiyonel güvenlik/freemium/gözlem anahtarları (hepsinin makul varsayılanı var):
+    - `AI_PLAN_QUOTA_ENABLED` (vars. 1) — non-premium'a haftada 1 AI plan üretimi (app/services/premium.py). 0 = kota kapalı.
+    - `LOGIN_FAIL_CLOSED` (vars. 1) — Redis erişilemezse login 503 (brute-force throttle güvenilir değilken). 0 = eski fail-open.
+    - `SENTRY_DSN` (yoksa kapalı) + opsiyonel `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE` — hata izleme (app/observability.py). DSN yoksa no-op.
 
 ## Veritabanı
 Lokal: SQLite (instance/chatbot.db). Prod/Docker: PostgreSQL (DATABASE_URL ile).
-Beslenme TEK kanonik defterde tutulur: MealLog (UI + AI koç + menü; UserDailyNutrition
-artık YAZILMIYOR, eski veriler MealLog'a taşındı). MealLog.tarih ISO 'YYYY-MM-DD'
-(Istanbul); gün anahtarları için app/timeutil kullan.
+Beslenme TEK kanonik defterde tutulur: MealLog (UI + AI koç + menü). Eski
+UserDailyNutrition verisi MealLog'a taşındı ve tablo düşürüldü (migration
+f6a7b8c9d0e1). MealLog.tarih ISO 'YYYY-MM-DD' (Istanbul); gün anahtarları için
+app/timeutil kullan.
 Tablolar boot'ta db.create_all() ile oluşur (app/db_init.py); ayrıca Alembic baseline migration mevcut.
 Şema değişikliği akışı (yeni değişiklikler için tercih edilen yol):
 1. Modeli app/models.py'de değiştir
@@ -41,7 +46,7 @@ Tablolar boot'ta db.create_all() ile oluşur (app/db_init.py); ayrıca Alembic b
    Manuel `flask db upgrade` / `stamp head` yalnızca lokal işler için gerekir.
 Modeller: User, UserSession, WeeklyLog, WeeklyCheckIn, NutritionPlan, TrainingPlan, MealLog,
 PendingAction, PumpCheck, Friendship, Message, Activity, Supplement, DailyQuest,
-UserQuestProgress, WeeklyWinner, WeeklyResetLog, WaterLog, WorkoutLog, UserDailyNutrition,
+UserQuestProgress, WeeklyWinner, WeeklyResetLog, WaterLog, WorkoutLog,
 DailyActivity, CustomMeal, CustomMealItem
 
 ## Kurallar
@@ -51,6 +56,14 @@ DailyActivity, CustomMeal, CustomMealItem
 - CSP: başlık Flask'ta üretilir (app/hooks.py). Şablona yeni satır-içi <script> eklerken
   MUTLAKA `<script nonce="{{ csp_nonce }}">` yaz, yoksa tarayıcı bloklar. Dış script
   yalnızca cdn.jsdelivr.net ve *.googletagmanager.com'dan (GA) yüklenebilir.
+- CSRF: tüm POST/PUT/PATCH/DELETE iki katmandan geçer (app/hooks.py `_csrf_protect`):
+  Origin/Referer + per-session synchronizer token. Token `<meta name="csrf-token">`
+  (_head.html, `csrf_token` context processor) ile verilir; static/csrf.js `window.fetch`'i
+  sararak durum-değiştiren aynı-origin fetch'lere `X-CSRFToken` başlığını OTOMATİK ekler.
+  Yeni fetch çağrısı ek iş istemez; AMA: (1) yeni sayfa `_head.html`'i include etmeli,
+  (2) durum-değiştiren bir istek fetch DIŞINDA (XHR/sendBeacon) yapılıyorsa X-CSRFToken
+  başlığını elle ekle, (3) state-changing route'u GET olarak açma (kapı yalnızca yazma
+  metodlarında çalışır).
 - Deploy: push to main → .github/workflows/deploy.yml (AWS SSM) EC2'de compose'u
   yeniden kurar ve host nginx'teki eski CSP add_header satırını otomatik temizler.
 - Sorgular daima current_user.id'ye scope'lanır; ID ile yüklenen kayıtlarda sahiplik kontrolü zorunlu

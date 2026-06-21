@@ -226,7 +226,7 @@ class PendingAction(db.Model):
     Kullanıcı bir yemeğin makrolarını sorduğunda veya yediğini söylediğinde,
     veri DOĞRUDAN kalıcı log'a yazılmaz; önce buraya geçici olarak konur. Böylece
     sadece meraktan sorulan ("kaç kalori?") şeyler yanlışlıkla loglanmaz.
-    Kullanıcı onayladığında payload kalıcı kayda (UserDailyNutrition / WorkoutLog)
+    Kullanıcı onayladığında payload kalıcı kayda (MealLog / WorkoutLog)
     taşınır ve buradaki satır silinir → durum geçişi: staged → committed.
 
     payload (JSON): log_meal için {food_name, calories, protein, carbs, fat,
@@ -387,19 +387,6 @@ class WorkoutLog(db.Model):
     created_at    = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     user = db.relationship("User", backref="workout_logs")
-
-
-class UserDailyNutrition(db.Model):
-    id         = db.Column(db.Integer, primary_key=True)
-    user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
-    food_item  = db.Column(db.String(200), nullable=False)
-    calories   = db.Column(db.Float, nullable=False, default=0)
-    protein    = db.Column(db.Float, nullable=False, default=0)
-    carbs      = db.Column(db.Float, nullable=False, default=0)
-    fat        = db.Column(db.Float, nullable=False, default=0)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
-
-    user = db.relationship("User", backref="daily_nutrition")
 
 
 class DailyActivity(db.Model):

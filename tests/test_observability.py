@@ -1,0 +1,32 @@
+"""Hata izleme + yapısal istek logu (app/observability.py).
+
+Sentry DSN yoksa kurulum no-op (hermetik test ağ'a çıkmaz). İstek logu logfmt
+biçiminde üretilir; /health gürültüsü atlanır.
+
+    python -m pytest tests/test_observability.py -v
+"""
+import logging
+
+
+def test_init_sentry_noop_without_dsn(app, monkeypatch):
+    monkeypatch.delenv("SENTRY_DSN", raising=False)
+    from app.observability import init_sentry
+    # DSN yoksa sessizce döner (sentry_sdk import bile edilmez); hata fırlatmamalı.
+    init_sentry(app)
+
+
+def test_request_is_logged_logfmt(client, caplog):
+    with caplog.at_level(logging.INFO):
+        client.get("/login")
+    line = next((r.getMessage() for r in caplog.records
+                 if "request method=GET path=/login" in r.getMessage()), None)
+    assert line is not None
+    assert "status=200" in line
+    assert "dur_ms=" in line
+    assert "user=" in line
+
+
+def test_health_requests_not_logged(client, caplog):
+    with caplog.at_level(logging.INFO):
+        client.get("/health")
+    assert not any("path=/health" in r.getMessage() for r in caplog.records)

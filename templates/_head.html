@@ -4,6 +4,11 @@
    ekler. Yeni satır-içi <script> için CSP nonce'u gerekir (app/hooks.py). #}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+{# CSRF synchronizer token — csrf.js bunu durum-değiştiren fetch'lere X-CSRFToken
+   başlığı olarak ekler; sunucu oturumdaki değerle doğrular. Script <head>'de
+   SENKRON yüklenir ki gövde fetch'lerinden önce window.fetch sarmalansın. #}
+<meta name="csrf-token" content="{{ csrf_token }}">
+<script src="/static/csrf.js?v={{ _v }}"></script>
 <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
 
 <link rel="preconnect" href="https://fonts.googleapis.com">

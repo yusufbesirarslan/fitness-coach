@@ -47,18 +47,32 @@ from werkzeug.datastructures import Headers  # noqa: E402
 _STATE_CHANGING = {"POST", "PUT", "PATCH", "DELETE"}
 
 
+_TEST_CSRF_TOKEN = "test-csrf-token"
+
+
 class AutoOriginClient(FlaskClient):
-    """Test client that sends a same-origin Origin header on state-changing
-    requests — exactly what a real browser fetch() does — so requests pass the
-    Origin-based CSRF guard (app/hooks.py). Tests that exercise the guard
-    itself either pass their own Origin/Referer or use the `raw_client`
-    fixture, which adds nothing."""
+    """Test client that mimics a real browser fetch() on state-changing requests
+    so they pass both CSRF layers (app/hooks.py):
+      - a same-origin Origin header (layer 1: Origin/Referer)
+      - an X-CSRFToken header matching a token seeded into the session
+        (layer 2: synchronizer token)
+    Tests that exercise the guard itself pass their own headers or use the
+    `raw_client` fixture, which adds nothing."""
 
     def open(self, *args, **kwargs):
         if kwargs.get("method", "GET").upper() in _STATE_CHANGING:
             headers = Headers(kwargs.get("headers") or {})
             if "Origin" not in headers and "Referer" not in headers:
                 headers["Origin"] = "http://localhost"
+            if "X-CSRFToken" not in headers:
+                # Oturuma token tohumla ve aynısını başlık olarak gönder — gerçek
+                # tarayıcının meta etiketinden okuyup gönderdiği akışın eşi.
+                with self.session_transaction() as sess:
+                    token = sess.get("_csrf_token")
+                    if not token:
+                        token = _TEST_CSRF_TOKEN
+                        sess["_csrf_token"] = token
+                headers["X-CSRFToken"] = token
             kwargs["headers"] = headers
         return super().open(*args, **kwargs)
 
@@ -74,6 +88,9 @@ def app():
     flask_app.test_client_class = AutoOriginClient
     # Rate limits off by default; the dedicated rate-limit tests re-enable.
     limiter.enabled = False
+    # Freemium AI-plan kotası da kapalı; davranış testleri planı tekrar tekrar
+    # üretebilsin. Kotanın kendisini sınayan testler config'i açar.
+    flask_app.config["AI_PLAN_QUOTA_ENABLED"] = False
     # Disarm the 5-minute weekly-rollover hook so request-driven tests are
     # deterministic; rollover is tested by calling run_weekly_rollover directly.
     gamification._last_rollover_check[0] = datetime.utcnow()
