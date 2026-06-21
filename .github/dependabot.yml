@@ -1,0 +1,20 @@
+# Dependabot: bağımlılık güncellemelerini haftalık PR olarak öner.
+# Özellikle güvenilmeyen yükleme ayrıştırıcıları (Pillow/pdfplumber) ve
+# güvenlik-kritik paketler için sürüm açıklarını kapatmayı kolaylaştırır.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      # Gürültüyü azaltmak için patch/minor güncellemeleri tek PR'da topla.
+      python-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

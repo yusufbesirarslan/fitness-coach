@@ -43,8 +43,12 @@ _DEFAULT_TEST_RE = re.compile(
 def _purge_user(user):
     """Bir kullanıcıyı ve ona bağlı tüm satırları FK-güvenli sırada sil.
 
-    Modellerde ON DELETE CASCADE yok; bu yüzden bağımlı tablolar önce temizlenir.
-    Bu kullanıcının davet ettiği kişilerin referred_by_id'si NULL'a çekilir.
+    FK'lerde artık ON DELETE CASCADE var (migration a1b2c3d4e5f6 + model ondelete),
+    yani Postgres'te user silmek bağımlıları zaten süpürürdü. Yine de bağımlıları
+    elle siliyoruz: SQLite (lokal/test) FK eylemlerini varsayılan olarak
+    zorlamaz (PRAGMA foreign_keys kapalı), ve açık silme niyeti belirsizliğe yer
+    bırakmaz. Bu kullanıcının davet ettiği kişilerin referred_by_id'si NULL'a
+    çekilir (FK'de SET NULL olsa da burada da açıkça yapılır).
     """
     from app.models import (
         Activity, CustomMeal, CustomMealItem, DailyActivity, Friendship, MealLog,
