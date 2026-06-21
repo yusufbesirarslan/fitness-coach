@@ -1,8 +1,11 @@
-"""Route tests for the nutrition blueprint (app/blueprints/nutrition.py).
+"""Route tests for the nutrition blueprint (app/blueprints/nutrition/).
 
 Beslenme günlüğü (porsiyon/gram matematiği, upsert, loglama), plan kaydetme,
 plandan hızlı ekleme, AI'lı öğün loglama (fitness sözlüğü normalizasyonu ve
 override yolu dahil) ve plan üretimi — LLM mock'lu.
+
+Not: blueprint artık paket; AI yardımcıları alt-modüllerde yaşar
+(_openai_chat → meallog, _heavy_chat → plan), monkeypatch'ler oraya hedeflenir.
 
     python -m pytest tests/test_nutrition_routes.py -v
 """
@@ -11,6 +14,8 @@ import json
 import pytest
 
 from app.blueprints import nutrition as nutrition_bp
+from app.blueprints.nutrition import meallog as nutrition_meallog
+from app.blueprints.nutrition import plan as nutrition_plan
 from app.extensions import db
 from app.models import CustomMeal, CustomMealItem, MealLog, NutritionPlan, UserSession
 
@@ -190,7 +195,7 @@ def test_meal_log_rejects_bad_photo(client, auth_user):
 def test_meal_log_override_macros_skips_ai(client, auth_user, monkeypatch):
     def boom(**kwargs):
         raise AssertionError("override varken AI çağrılmamalı")
-    monkeypatch.setattr(nutrition_bp, "_openai_chat", boom)
+    monkeypatch.setattr(nutrition_meallog, "_openai_chat", boom)
 
     body = client.post("/meal-log", json={
         "ogun": "Akşam", "yemekler": "tavuk",
@@ -205,7 +210,7 @@ def test_meal_log_ai_path_with_fitness_normalization(client, auth_user, monkeypa
     def fake_chat(**kwargs):
         captured["prompt"] = kwargs["messages"][0]["content"]
         return '```json\n{"kalori": 240, "protein": 48, "karb": 6, "yag": 3}\n```'
-    monkeypatch.setattr(nutrition_bp, "_openai_chat", fake_chat)
+    monkeypatch.setattr(nutrition_meallog, "_openai_chat", fake_chat)
 
     body = client.post("/meal-log", json={
         "ogun": "Ara Öğün", "yemekler": "2 ölçek whey ve muz"}).get_json()
@@ -220,7 +225,7 @@ def test_meal_log_ai_path_with_fitness_normalization(client, auth_user, monkeypa
 def test_meal_log_ai_unparseable_returns_error_no_save(client, auth_user, monkeypatch):
     # AI yanıtı parse edilemezse kanonik MealLog defterine sıfır-makro satırı
     # YAZILMAMALI (TRIAGE_FIXES #1) — hata döner, kayıt eklenmez.
-    monkeypatch.setattr(nutrition_bp, "_openai_chat", lambda **kw: "hesaplayamadım")
+    monkeypatch.setattr(nutrition_meallog, "_openai_chat", lambda **kw: "hesaplayamadım")
     resp = client.post("/meal-log", json={"ogun": "Öğle", "yemekler": "şey"})
     assert resp.status_code == 502
     assert "error" in resp.get_json()
@@ -228,7 +233,7 @@ def test_meal_log_ai_unparseable_returns_error_no_save(client, auth_user, monkey
 
 
 def test_meal_log_non_numeric_ai_values_zeroed(client, auth_user, monkeypatch):
-    monkeypatch.setattr(nutrition_bp, "_openai_chat",
+    monkeypatch.setattr(nutrition_meallog, "_openai_chat",
                         lambda **kw: '{"kalori": "çok", "protein": 30, "karb": 1, "yag": 2}')
     body = client.post("/meal-log", json={"ogun": "Öğle", "yemekler": "tavuk"}).get_json()
     assert body["nutrients"]["kalori"] == 0
@@ -271,7 +276,7 @@ def test_review_returns_ai_text_and_totals(client, auth_user, monkeypatch):
     db.session.add(UserSession(user_id=auth_user.id, target_calories=2000,
                                goal="kilo verme"))
     db.session.commit()
-    monkeypatch.setattr(nutrition_bp, "_openai_chat", lambda **kw: "Gayet dengeli.")
+    monkeypatch.setattr(nutrition_meallog, "_openai_chat", lambda **kw: "Gayet dengeli.")
     body = client.post("/meal-log/review", json={}).get_json()
     assert body == {"review": "Gayet dengeli.", "total_calories": 800, "target": 2000}
 
@@ -281,7 +286,7 @@ def test_review_ai_failure_falls_back(client, auth_user, monkeypatch):
 
     def boom(**kwargs):
         raise RuntimeError("openai down")
-    monkeypatch.setattr(nutrition_bp, "_openai_chat", boom)
+    monkeypatch.setattr(nutrition_meallog, "_openai_chat", boom)
     body = client.post("/meal-log/review", json={}).get_json()
     assert "tekrar dene" in body["review"]
 
@@ -308,7 +313,7 @@ def test_nutrition_plan_scores_selection_and_returns_plans(client, auth_user, mo
     db.session.add(UserSession(user_id=auth_user.id, target_calories=2300,
                                goal="kas kazanma"))
     db.session.commit()
-    monkeypatch.setattr(nutrition_bp, "_heavy_chat",
+    monkeypatch.setattr(nutrition_plan, "_heavy_chat",
                         lambda **kw: json.dumps(PLAN_RESPONSE, ensure_ascii=False))
 
     body = client.post("/nutrition-plan",
@@ -323,7 +328,7 @@ def test_nutrition_plan_scores_selection_and_returns_plans(client, auth_user, mo
 def test_nutrition_plan_bad_llm_json_returns_500(client, auth_user, monkeypatch):
     db.session.add(UserSession(user_id=auth_user.id, target_calories=2000, goal="x"))
     db.session.commit()
-    monkeypatch.setattr(nutrition_bp, "_heavy_chat", lambda **kw: "plan yapamadım")
+    monkeypatch.setattr(nutrition_plan, "_heavy_chat", lambda **kw: "plan yapamadım")
     assert client.post("/nutrition-plan", json=PLAN_REQUEST).status_code == 500
 
 
