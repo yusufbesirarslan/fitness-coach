@@ -36,8 +36,8 @@ def create_app():
     # before_request order must match the original monolith:
     #   _csrf_protect -> (limiter) _check_request_limit -> maybe_weekly_rollover -> update_streak
     from app.hooks import _csrf_protect, generate_csp_nonce, inject_csp_nonce, \
-        maybe_weekly_rollover, set_csp_header, update_streak, inject_rank, \
-        ratelimit_exceeded, not_found, server_error
+        inject_csrf_token, maybe_weekly_rollover, set_csp_header, update_streak, \
+        inject_rank, ratelimit_exceeded, not_found, server_error
     app.before_request(generate_csp_nonce)
     app.before_request(_csrf_protect)
     limiter.init_app(app)
@@ -45,6 +45,7 @@ def create_app():
     app.before_request(maybe_weekly_rollover)
     app.before_request(update_streak)
     app.context_processor(inject_csp_nonce)
+    app.context_processor(inject_csrf_token)
     app.context_processor(inject_rank)
     app.after_request(set_csp_header)
     app.errorhandler(429)(ratelimit_exceeded)
