@@ -126,27 +126,41 @@ def maybe_weekly_rollover():
 
 
 def update_streak():
-    if current_user.is_authenticated:
-        today = app_today()
-        if current_user.last_login != today:
-            if current_user.last_login == today - timedelta(days=1):
-                current_user.streak_count = (current_user.streak_count or 0) + 1
-            else:
-                current_user.streak_count = 1
-            # Bu istekten ÖNCEKI last_login'i sakla: get_nudges seri-riski dürtüsünü
-            # "günün ilk isteğinde henüz aktif değildi" mantığıyla doğru tetiklesin
-            # (aksi halde aşağıdaki güncelleme yüzünden asla tetiklenmez).
-            g.prev_last_login = current_user.last_login
-            current_user.last_login = today
-            streak = current_user.streak_count
-            if streak in (7, 14, 30, 60, 100):
-                log_activity(current_user.id, "streak_milestone",
-                             f"{streak} günlük seri yakalanadı!")
-                award_xp(current_user.id, streak * 2)
-            # streak tiebreak'i değişti → commit sonrası Redis sync (after_commit).
-            # Milestone yoksa award_xp dirty işaretlemez; burada elle işaretliyoruz.
-            _mark_lb_dirty(current_user.id)
-            db.session.commit()
+    if not current_user.is_authenticated:
+        return
+    today = app_today()
+    # Hızlı yol: gün değişmediyse kilit/sorgu maliyeti olmadan çık (en sık durum).
+    if current_user.last_login == today:
+        return
+    user = current_user._get_current_object()
+    # Günün İLK isteği: eşzamanlı thread'ler (tek worker, çok thread) streak'i iki
+    # kez artırıp milestone XP'sini çift vermesin diye kullanıcı satırını kilitle.
+    # SQLite'ta (lokal/test) with_for_update sessizce yok sayılır; Postgres'te (prod)
+    # satırı serileştirir ve kilitten sonraki yeniden kontrol ikinci thread'i eler.
+    try:
+        db.session.refresh(user, with_for_update=True)
+    except Exception:
+        db.session.rollback()  # detached/lock hatası → kilitsiz devam (eski davranış)
+    if user.last_login == today:
+        return
+    if user.last_login == today - timedelta(days=1):
+        user.streak_count = (user.streak_count or 0) + 1
+    else:
+        user.streak_count = 1
+    # Bu istekten ÖNCEKI last_login'i sakla: get_nudges seri-riski dürtüsünü
+    # "günün ilk isteğinde henüz aktif değildi" mantığıyla doğru tetiklesin
+    # (aksi halde aşağıdaki güncelleme yüzünden asla tetiklenmez).
+    g.prev_last_login = user.last_login
+    user.last_login = today
+    streak = user.streak_count
+    if streak in (7, 14, 30, 60, 100):
+        log_activity(user.id, "streak_milestone",
+                     f"{streak} günlük seri yakalanadı!")
+        award_xp(user.id, streak * 2)
+    # streak tiebreak'i değişti → commit sonrası Redis sync (after_commit).
+    # Milestone yoksa award_xp dirty işaretlemez; burada elle işaretliyoruz.
+    _mark_lb_dirty(user.id)
+    db.session.commit()
 
 
 def inject_rank():
