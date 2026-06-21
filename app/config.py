@@ -117,7 +117,19 @@ def configure_app(app):
     else:
         logging.basicConfig(level=getattr(logging, _LOG_LEVEL, logging.INFO))
         app.logger.setLevel(getattr(logging, _LOG_LEVEL, logging.INFO))
-    database_url = os.environ.get("DATABASE_URL", "sqlite:///chatbot.db")
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        # Prod'da sessizce container-içi SQLite'a düşmek veri kaybı demektir
+        # (her redeploy'da dosya sıfırlanır). SECRET_KEY ile aynı mantık: SQLite
+        # fallback'e yalnızca açık debug/lokal modda izin ver.
+        if _IS_DEV:
+            database_url = "sqlite:///chatbot.db"
+            app.logger.warning("DATABASE_URL not set; using local SQLite (dev only).")
+        else:
+            raise RuntimeError(
+                "DATABASE_URL environment variable must be set. "
+                "Set FLASK_DEBUG=1 to allow a local SQLite fallback for development."
+            )
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
     app.config["SQLALCHEMY_DATABASE_URI"] = database_url
