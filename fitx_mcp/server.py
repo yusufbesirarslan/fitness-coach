@@ -20,6 +20,7 @@ from contextlib import contextmanager
 # Sabit uygulama saat dilimi (app.timeutil ile aynı): MCP sunucusu standalone
 # çalışabildiği için tüm app paketini çekmemek adına burada inline tutulur.
 _APP_TZ = ZoneInfo("Europe/Istanbul")
+_UTC = ZoneInfo("UTC")
 
 
 def _app_today():
@@ -29,6 +30,23 @@ def _app_today():
 def _day_key():
     """ISO 'YYYY-MM-DD' gün anahtarı (Istanbul) — meal_log.tarih ile aynı biçim."""
     return _app_today().isoformat()
+
+
+def _utc_day_bounds(d=None):
+    """Verilen (veya bugünkü) Istanbul gününün [başlangıç, bitiş) sınırlarını
+    NAIVE UTC datetime olarak döndür (app.timeutil.utc_day_bounds ile aynı).
+
+    workout_log.created_at, datetime.utcnow() (naive UTC) ile yazılır ve `tarih`
+    kolonu yoktur; 'Istanbul günü' aralığını bununla doğru karşılaştırmak için
+    `created_at::date = CURRENT_DATE` (UTC günü) yerine bu sınırlar kullanılır —
+    aksi halde 00:00–03:00 Istanbul arası toplamlar yanlış güne düşer (C2 sınıfı).
+    """
+    if d is None:
+        d = _app_today()
+    start_local = datetime(d.year, d.month, d.day, tzinfo=_APP_TZ)
+    start_utc = start_local.astimezone(_UTC).replace(tzinfo=None)
+    end_utc = (start_local + timedelta(days=1)).astimezone(_UTC).replace(tzinfo=None)
+    return start_utc, end_utc
 
 import psycopg2
 import psycopg2.extras
@@ -591,10 +609,15 @@ def log_workout_entry(user_id: int, exercise_name: str, sets: int, reps: int, we
         )
         row = cur.fetchone()
 
+        # C2 sınıfı: günlük toplamı Istanbul gün sınırlarıyla topla. Eski
+        # `created_at::date = CURRENT_DATE` UTC gününe bakıyordu; 00:00–03:00
+        # Istanbul arası "bugün" yanlış çıkıyordu. workout_log'da tarih kolonu yok,
+        # bu yüzden naive-UTC created_at'i UTC gün-sınırlarıyla filtreliyoruz.
+        day_start, day_end = _utc_day_bounds()
         cur.execute(
             "SELECT COALESCE(SUM(volume), 0) as total_volume, COUNT(*) as entry_count "
-            "FROM workout_log WHERE user_id = %s AND created_at::date = CURRENT_DATE",
-            (user_id,),
+            "FROM workout_log WHERE user_id = %s AND created_at >= %s AND created_at < %s",
+            (user_id, day_start, day_end),
         )
         today = cur.fetchone()
 
@@ -675,6 +698,12 @@ def generate_weekly_report(user_id: int) -> str:
     today = _app_today()
     this_week_start = today - timedelta(days=today.weekday())
     last_week_start = this_week_start - timedelta(days=7)
+    # C2 sınıfı: hafta sınırlarını UTC olarak hesapla (created_at naive UTC).
+    # `created_at::date` UTC gününe bakıyordu → gece geç saatlerde (Istanbul)
+    # yazılan kayıtlar yanlış haftaya kayıyordu. this_week_start_utc aynı zamanda
+    # geçen haftanın (dışlayıcı) üst sınırıdır.
+    this_week_start_utc, _ = _utc_day_bounds(this_week_start)
+    last_week_start_utc, _ = _utc_day_bounds(last_week_start)
 
     with get_conn() as conn:
         cur = conn.cursor()
@@ -687,32 +716,32 @@ def generate_weekly_report(user_id: int) -> str:
         cur.execute(
             "SELECT exercise_name, SUM(volume) as total_vol, SUM(sets) as total_sets, "
             "COUNT(*) as entries, MAX(weight_kg) as max_weight "
-            "FROM workout_log WHERE user_id = %s AND created_at::date >= %s "
+            "FROM workout_log WHERE user_id = %s AND created_at >= %s "
             "GROUP BY exercise_name ORDER BY total_vol DESC",
-            (user_id, this_week_start),
+            (user_id, this_week_start_utc),
         )
         this_week_workouts = cur.fetchall()
 
         cur.execute(
             "SELECT COALESCE(SUM(volume), 0) as vol FROM workout_log "
-            "WHERE user_id = %s AND created_at::date >= %s AND created_at::date < %s",
-            (user_id, last_week_start, this_week_start),
+            "WHERE user_id = %s AND created_at >= %s AND created_at < %s",
+            (user_id, last_week_start_utc, this_week_start_utc),
         )
         last_week_vol = cur.fetchone()["vol"]
 
         cur.execute(
             "SELECT COALESCE(SUM(kalori), 0) as cal, COALESCE(SUM(protein), 0) as pro, "
             "COALESCE(SUM(karb), 0) as carb, COALESCE(SUM(yag), 0) as fat, COUNT(*) as entries "
-            "FROM meal_log WHERE user_id = %s AND created_at::date >= %s",
-            (user_id, this_week_start),
+            "FROM meal_log WHERE user_id = %s AND created_at >= %s",
+            (user_id, this_week_start_utc),
         )
         this_week_nutrition = cur.fetchone()
 
         cur.execute(
             "SELECT COALESCE(SUM(kalori), 0) as cal, COALESCE(SUM(protein), 0) as pro "
             "FROM meal_log "
-            "WHERE user_id = %s AND created_at::date >= %s AND created_at::date < %s",
-            (user_id, last_week_start, this_week_start),
+            "WHERE user_id = %s AND created_at >= %s AND created_at < %s",
+            (user_id, last_week_start_utc, this_week_start_utc),
         )
         last_week_nutrition = cur.fetchone()
 

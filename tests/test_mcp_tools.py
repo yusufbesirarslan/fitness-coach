@@ -289,6 +289,17 @@ def test_level_and_title_helpers():
     assert server._title(51) == "Antrenman Tanrısı"
 
 
+def test_utc_day_bounds_maps_istanbul_day():
+    from datetime import date, datetime, timedelta
+
+    # Istanbul UTC+3 (DST yok): 2026-06-15 Istanbul günü → [06-14 21:00, 06-15 21:00) UTC.
+    start, end = server._utc_day_bounds(date(2026, 6, 15))
+    assert start == datetime(2026, 6, 14, 21, 0)
+    assert end == datetime(2026, 6, 15, 21, 0)
+    assert start.tzinfo is None and end.tzinfo is None   # naive UTC (created_at ile uyumlu)
+    assert end - start == timedelta(days=1)
+
+
 def test_parse_fatsecret_desc():
     parsed = server._parse_fatsecret_desc(
         "Per 100g - Calories: 165kcal | Fat: 3,57g | Carbs: 0.00g | Protein: 31.02g")
