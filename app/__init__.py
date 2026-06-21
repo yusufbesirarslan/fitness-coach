@@ -21,6 +21,9 @@ def create_app():
     )
     configure_app(app)
 
+    from app.observability import init_sentry
+    init_sentry(app)  # SENTRY_DSN yoksa no-op
+
     db.init_app(app)
     migrate.init_app(app, db)
     login_manager.init_app(app)
@@ -38,6 +41,9 @@ def create_app():
     from app.hooks import _csrf_protect, generate_csp_nonce, inject_csp_nonce, \
         inject_csrf_token, maybe_weekly_rollover, set_csp_header, update_streak, \
         inject_rank, ratelimit_exceeded, not_found, server_error
+    from app.observability import log_request, start_request_timer
+    # İstek süresini en baştan ölç (diğer before_request'lerden önce).
+    app.before_request(start_request_timer)
     app.before_request(generate_csp_nonce)
     app.before_request(_csrf_protect)
     limiter.init_app(app)
@@ -48,6 +54,7 @@ def create_app():
     app.context_processor(inject_csrf_token)
     app.context_processor(inject_rank)
     app.after_request(set_csp_header)
+    app.after_request(log_request)
     app.errorhandler(429)(ratelimit_exceeded)
     app.errorhandler(404)(not_found)
     app.errorhandler(500)(server_error)
