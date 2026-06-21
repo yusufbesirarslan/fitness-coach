@@ -6,6 +6,7 @@ from flask import current_app
 
 from app.services.ai import PORTION_SANITY_RULE, _heavy_chat, _openai_chat
 from app.services.foodcache import _cache_macros
+from app.services.validators import _to_float
 
 
 # Türkçe karakterleri ASCII'ye katlar — alaka eşleştirmesi aksandan bağımsız olsun.
@@ -310,13 +311,20 @@ def _food_search_llm(q):
         if text.startswith("```"):
             text = text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         items = json.loads(text)
+        if isinstance(items, dict):
+            # Model bazen liste yerine {"foods":[...]} sarmalayabilir.
+            items = next((v for v in items.values() if isinstance(v, list)), [])
         results = []
         for item in items:
+            if not isinstance(item, dict):
+                continue
+            # _to_float ile alan-bazında güvenli çevrim: tek bir besinin bozuk
+            # makrosu (ör. "yok") float() ile tüm 5'lik partiyi düşürmesin.
             per_100g = {
-                "calories": float(item.get("calories", 0)),
-                "protein": float(item.get("protein", 0)),
-                "carbs": float(item.get("carbs", 0)),
-                "fat": float(item.get("fat", 0)),
+                "calories": _to_float(item.get("calories", 0)),
+                "protein": _to_float(item.get("protein", 0)),
+                "carbs": _to_float(item.get("carbs", 0)),
+                "fat": _to_float(item.get("fat", 0)),
             }
             name = item.get("name", q)
             _cache_macros({name: per_100g}, basis="per_100g")
