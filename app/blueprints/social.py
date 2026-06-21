@@ -3,7 +3,8 @@ from datetime import datetime
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
-from app.extensions import db
+from app.config import SEARCH_RATELIMIT
+from app.extensions import _user_or_ip_key, db, limiter
 from app.models import Friendship, MealLog, Message, User
 from app.services.ai_nutrition import _estimate_macros_llm, _estimate_serving_weights_llm, _parse_suggestion_items, _turkish_ablative_suffix
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
@@ -64,6 +65,7 @@ def friends_list():
 
 @bp.route("/friends/search")
 @login_required
+@limiter.limit(SEARCH_RATELIMIT, key_func=_user_or_ip_key)
 def friends_search():
     q = request.args.get("q", "").strip()
     if len(q) < 2:

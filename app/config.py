@@ -37,6 +37,10 @@ else:
 AI_RATELIMIT = "30 per hour"           # OpenAI text/vision generation
 SCRAPE_RATELIMIT = "20 per hour"       # menu scraper (outbound fetch + AI; also SSRF surface)
 FOOD_SEARCH_RATELIMIT = "60 per hour"  # food search (LLM only fires on a FatSecret miss)
+# Kullanıcı arama (/friends/search): kullanıcı-adı sayımına (enumeration) karşı
+# throttle. UI 300ms debounce'lu olduğundan meşru typeahead bu tavanı zorlamaz;
+# kullanıcı/IP başına anahtarlanır.
+SEARCH_RATELIMIT = "20 per minute; 200 per hour"
 # Sonnet (Bedrock) pahalı olduğundan, ağır ÜRETKEN Sonnet route'larına AI_RATELIMIT
 # üstüne binen, daha sıkı kullanıcı-başı ikinci tavan. Env ile ayarlanabilir.
 BEDROCK_RATELIMIT = os.getenv("BEDROCK_RATELIMIT", "10 per hour")
