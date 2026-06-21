@@ -28,9 +28,10 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 
 ## Veritabanı
 Lokal: SQLite (instance/chatbot.db). Prod/Docker: PostgreSQL (DATABASE_URL ile).
-Beslenme TEK kanonik defterde tutulur: MealLog (UI + AI koç + menü; UserDailyNutrition
-artık YAZILMIYOR, eski veriler MealLog'a taşındı). MealLog.tarih ISO 'YYYY-MM-DD'
-(Istanbul); gün anahtarları için app/timeutil kullan.
+Beslenme TEK kanonik defterde tutulur: MealLog (UI + AI koç + menü). Eski
+UserDailyNutrition verisi MealLog'a taşındı ve tablo düşürüldü (migration
+f6a7b8c9d0e1). MealLog.tarih ISO 'YYYY-MM-DD' (Istanbul); gün anahtarları için
+app/timeutil kullan.
 Tablolar boot'ta db.create_all() ile oluşur (app/db_init.py); ayrıca Alembic baseline migration mevcut.
 Şema değişikliği akışı (yeni değişiklikler için tercih edilen yol):
 1. Modeli app/models.py'de değiştir
@@ -41,7 +42,7 @@ Tablolar boot'ta db.create_all() ile oluşur (app/db_init.py); ayrıca Alembic b
    Manuel `flask db upgrade` / `stamp head` yalnızca lokal işler için gerekir.
 Modeller: User, UserSession, WeeklyLog, WeeklyCheckIn, NutritionPlan, TrainingPlan, MealLog,
 PendingAction, PumpCheck, Friendship, Message, Activity, Supplement, DailyQuest,
-UserQuestProgress, WeeklyWinner, WeeklyResetLog, WaterLog, WorkoutLog, UserDailyNutrition,
+UserQuestProgress, WeeklyWinner, WeeklyResetLog, WaterLog, WorkoutLog,
 DailyActivity, CustomMeal, CustomMealItem
 
 ## Kurallar

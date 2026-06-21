@@ -53,7 +53,7 @@ def _purge_user(user):
     from app.models import (
         Activity, CustomMeal, CustomMealItem, DailyActivity, Friendship, MealLog,
         Message, NutritionPlan, PendingAction, PumpCheck, Supplement, TrainingPlan,
-        User, UserDailyNutrition, UserQuestProgress, UserSession, WaterLog,
+        User, UserQuestProgress, UserSession, WaterLog,
         WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog,
     )
     uid = user.id
@@ -68,7 +68,7 @@ def _purge_user(user):
     for Model in (UserSession, WeeklyLog, WeeklyCheckIn, NutritionPlan, TrainingPlan,
                   MealLog, PendingAction, PumpCheck, Activity, Supplement,
                   UserQuestProgress, WeeklyWinner, WaterLog, WorkoutLog,
-                  UserDailyNutrition, DailyActivity, CustomMeal):
+                  DailyActivity, CustomMeal):
         Model.query.filter_by(user_id=uid).delete(synchronize_session=False)
 
     Friendship.query.filter(
