@@ -44,6 +44,10 @@ SEARCH_RATELIMIT = "20 per minute; 200 per hour"
 # Freemium: AI plan üretiminde sunucu-taraflı haftalık kota (app/services/premium).
 # Operasyonel kapatma anahtarı; üretimde varsayılan AÇIK.
 AI_PLAN_QUOTA_ENABLED = os.getenv("AI_PLAN_QUOTA_ENABLED", "1") == "1"
+# Redis (dağıtık login throttle) erişilemezse login fail-closed olsun mu (503)?
+# Varsayılan AÇIK: Redis kesintisinde brute-force in-memory yedeğinden sızmasın.
+# Kapatılırsa eski fail-open davranış (kesintide login açık kalır) geri gelir.
+LOGIN_FAIL_CLOSED = os.getenv("LOGIN_FAIL_CLOSED", "1") == "1"
 # Sonnet (Bedrock) pahalı olduğundan, ağır ÜRETKEN Sonnet route'larına AI_RATELIMIT
 # üstüne binen, daha sıkı kullanıcı-başı ikinci tavan. Env ile ayarlanabilir.
 BEDROCK_RATELIMIT = os.getenv("BEDROCK_RATELIMIT", "10 per hour")
@@ -126,6 +130,7 @@ def configure_app(app):
     app.config["SQLALCHEMY_DATABASE_URI"] = database_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["AI_PLAN_QUOTA_ENABLED"] = AI_PLAN_QUOTA_ENABLED
+    app.config["LOGIN_FAIL_CLOSED"] = LOGIN_FAIL_CLOSED
     _secret_key = os.environ.get("SECRET_KEY")
     if not _secret_key:
         # Allow boot without SECRET_KEY only in explicit debug mode, and generate

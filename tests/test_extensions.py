@@ -28,3 +28,31 @@ def test_lazy_client_delegates_to_real_client():
     # (conftest sahte bir anahtar sağlar; ağ çağrısı yapılmaz).
     assert hasattr(openai_client, "chat")
     assert openai_client._client is not None
+
+
+class _FakePingRedis:
+    def __init__(self, ok):
+        self._ok = ok
+
+    def ping(self):
+        if not self._ok:
+            raise ConnectionError("redis down")
+        return True
+
+
+def test_login_throttle_available_no_redis(monkeypatch):
+    import app.extensions as ext
+    monkeypatch.setattr(ext, "redis_client", None)
+    # Redis yapılandırılmamış → tek-süreç store kasıtlı → True.
+    assert ext.login_throttle_available() is True
+
+
+def test_login_throttle_available_redis_up_and_down(monkeypatch):
+    import app.extensions as ext
+    monkeypatch.setattr(ext, "redis_client", _FakePingRedis(ok=True))
+    ext._LOGIN_THROTTLE_HEALTH["checked_at"] = 0.0   # cache'i sıfırla
+    assert ext.login_throttle_available() is True
+
+    monkeypatch.setattr(ext, "redis_client", _FakePingRedis(ok=False))
+    ext._LOGIN_THROTTLE_HEALTH["checked_at"] = 0.0   # yeniden kontrolü zorla
+    assert ext.login_throttle_available() is False

@@ -8,7 +8,7 @@ from flask_limiter.util import get_remote_address
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.config import COGNITO_ENABLED, COGNITO_HOSTED_DOMAIN, COGNITO_APP_CLIENT_ID
-from app.extensions import db, limiter, oauth
+from app.extensions import db, limiter, login_throttle_available, oauth
 from app.models import User
 from app.services import cognito_idp
 from app.services.cognito import CognitoLinkError, get_or_create_user
@@ -148,6 +148,16 @@ def login():
         auth_error = _AUTH_ERRORS.get(request.args.get("err", ""))
         return render_template("login.html", cognito_enabled=_cognito_available(),
                                auth_error=auth_error)
+    # Fail-closed: Redis (dağıtık brute-force throttle) erişilemiyorsa login'i
+    # reddet. Aksi halde limiter bellek-yedeğine düşer ve dağıtık deneme sayımı
+    # zayıflar; saldırgan throttle'ı çok-süreçli ortamda aşabilir. Diğer route'lar
+    # fail-open kalır (kullanılabilirlik tercihi).
+    if current_app.config.get("LOGIN_FAIL_CLOSED", True) and not login_throttle_available():
+        current_app.logger.warning(
+            "[LOGIN] Redis erişilemiyor — login fail-closed (503), brute-force "
+            "throttle güvenilir değil.")
+        return jsonify({"error": "Giriş geçici olarak kullanılamıyor. "
+                                 "Lütfen birazdan tekrar deneyin."}), 503
     data = request.get_json(silent=True) or {}
     username = data.get("username")
     password = data.get("password")

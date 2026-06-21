@@ -92,6 +92,48 @@ def test_protected_route_redirects_anonymous_to_login(client):
     assert "/login" in response.headers["Location"]
 
 
+def test_login_fail_closed_when_redis_down(client, make_user, monkeypatch):
+    """Redis (dağıtık brute-force throttle) erişilemiyorsa login 503 döner."""
+    import app.extensions as ext
+
+    class _DownRedis:
+        def ping(self):
+            raise ConnectionError("redis down")
+
+    make_user("carol")
+    monkeypatch.setattr(ext, "redis_client", _DownRedis())
+    ext._LOGIN_THROTTLE_HEALTH["checked_at"] = 0.0   # cache'i sıfırla
+
+    blocked = client.post("/login", json={"username": "carol", "password": "Sifre123"})
+    assert blocked.status_code == 503
+    assert "geçici" in blocked.get_json()["error"].lower()
+
+    # Redis geri gelince login normal çalışır.
+    monkeypatch.setattr(ext, "redis_client", None)
+    ext._LOGIN_THROTTLE_HEALTH["checked_at"] = 0.0
+    ok = client.post("/login", json={"username": "carol", "password": "Sifre123"})
+    assert ok.status_code == 200
+
+
+def test_login_fail_closed_disabled_by_config(client, make_user, monkeypatch):
+    """LOGIN_FAIL_CLOSED kapalıysa Redis düşse bile eski fail-open davranış sürer."""
+    import app.extensions as ext
+
+    class _DownRedis:
+        def ping(self):
+            raise ConnectionError("redis down")
+
+    make_user("dave")
+    monkeypatch.setattr(ext, "redis_client", _DownRedis())
+    ext._LOGIN_THROTTLE_HEALTH["checked_at"] = 0.0
+    client.application.config["LOGIN_FAIL_CLOSED"] = False
+    try:
+        ok = client.post("/login", json={"username": "dave", "password": "Sifre123"})
+        assert ok.status_code == 200
+    finally:
+        client.application.config["LOGIN_FAIL_CLOSED"] = True
+
+
 def test_login_username_rate_key_normalized():
     # Dağıtık brute-force kapısı kullanıcı adına göre anahtarlanır (IP'ye değil).
     from flask import Flask
