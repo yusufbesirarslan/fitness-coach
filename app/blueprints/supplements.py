@@ -83,7 +83,7 @@ def supplement_add():
 @bp.route("/supplement/edit/<int:sid>", methods=["POST"])
 @login_required
 def supplement_edit(sid):
-    supp = Supplement.query.get_or_404(sid)
+    supp = db.get_or_404(Supplement, sid)
     if supp.user_id != current_user.id:
         return jsonify({"error": "Yetkiniz yok."}), 403
 
@@ -128,7 +128,7 @@ def supplement_edit(sid):
 @bp.route("/supplement/delete/<int:sid>", methods=["POST"])
 @login_required
 def supplement_delete(sid):
-    supp = Supplement.query.get_or_404(sid)
+    supp = db.get_or_404(Supplement, sid)
     if supp.user_id != current_user.id:
         return jsonify({"error": "Yetkiniz yok."}), 403
     db.session.delete(supp)

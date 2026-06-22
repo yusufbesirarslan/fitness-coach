@@ -205,6 +205,13 @@ def log_meal():
 @bp.route("/meal-log/today")
 @login_required
 def today_meals():
+    """KANONİK 'bugün yenenler' defteri ve toplamları (MealLog — tek doğru kaynak).
+
+    Ana sayfa/beslenme halkaları (templates/index.html, static/nutrition.js
+    loadTodayData) günlük kalori/makro toplamı için YALNIZCA bunu kullanır.
+    DİKKAT: /api/diary/today toplamlarıyla TOPLANMAZ — diary'de 'kaydedilmiş'
+    (is_logged) öğünler zaten buraya MealLog satırı olarak yazılır; iki yüzeyi
+    toplamak çift sayım olur (bkz. diary_today docstring)."""
     today = day_key()
     meals = MealLog.query.filter_by(user_id=current_user.id, tarih=today)\
         .order_by(MealLog.created_at.asc()).all()

@@ -62,7 +62,7 @@ def _flush_lb_dirty(session):
     if not dirty:
         return
     for uid in dirty:
-        u = User.query.get(uid)
+        u = db.session.get(User, uid)
         if u:
             lb_sync_user(u)
 
@@ -75,7 +75,7 @@ def _drop_lb_dirty(session, *args):
 
 
 def award_xp(user_id, amount):
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if user:
         user.rank_points = (user.rank_points or 0) + amount
         user.weekly_xp = (user.weekly_xp or 0) + amount

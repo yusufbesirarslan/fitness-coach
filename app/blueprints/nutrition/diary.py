@@ -138,7 +138,7 @@ def diary_create_meal():
 @bp.route("/api/diary/meal/<int:meal_id>/item", methods=["POST"])
 @login_required
 def diary_add_item(meal_id):
-    meal = CustomMeal.query.get(meal_id)
+    meal = db.session.get(CustomMeal, meal_id)
     if not meal or meal.user_id != current_user.id:
         return jsonify({"error": "Öğün bulunamadı"}), 404
     if meal.is_logged:
@@ -220,7 +220,7 @@ def diary_add_item(meal_id):
 @bp.route("/api/diary/item/<int:item_id>", methods=["PATCH"])
 @login_required
 def diary_update_item(item_id):
-    item = CustomMealItem.query.get(item_id)
+    item = db.session.get(CustomMealItem, item_id)
     if not item or item.meal.user_id != current_user.id:
         return jsonify({"error": "Besin bulunamadı"}), 404
     if item.meal.is_logged:
@@ -282,7 +282,7 @@ def diary_update_item(item_id):
 @bp.route("/api/diary/item/<int:item_id>", methods=["DELETE"])
 @login_required
 def diary_delete_item(item_id):
-    item = CustomMealItem.query.get(item_id)
+    item = db.session.get(CustomMealItem, item_id)
     if not item or item.meal.user_id != current_user.id:
         return jsonify({"error": "Besin bulunamadı"}), 404
     if item.meal.is_logged:
@@ -295,7 +295,7 @@ def diary_delete_item(item_id):
 @bp.route("/api/diary/meal/<int:meal_id>/log", methods=["POST"])
 @login_required
 def diary_log_meal(meal_id):
-    meal = CustomMeal.query.get(meal_id)
+    meal = db.session.get(CustomMeal, meal_id)
     if not meal or meal.user_id != current_user.id:
         return jsonify({"error": "Öğün bulunamadı"}), 404
     if meal.is_logged:
@@ -349,6 +349,13 @@ def diary_log_meal(meal_id):
 @bp.route("/api/diary/today")
 @login_required
 def diary_today():
+    """Diary-builder görünümü: bugünün CustomMeal'leri + diary'ye özel grand_total.
+
+    Bu, beslenme defterinin (diary sekmesi) KENDİ toplamıdır; kullanıcının gün
+    içinde diary'de oluşturduğu tüm öğünleri (kaydedilmiş + devam eden) gösterir.
+    KANONİK 'bugün yenenler' kaynağı DEĞİLDİR — o /meal-log/today (MealLog).
+    'Kaydedilmiş' (is_logged) bir öğün ayrıca MealLog'a da yazıldığından, bu
+    grand_total /meal-log/today toplamıyla ASLA TOPLANMAMALIDIR (çift sayım)."""
     today_key = app_today().isoformat()
     meals = CustomMeal.query.filter_by(
         user_id=current_user.id, date_key=today_key

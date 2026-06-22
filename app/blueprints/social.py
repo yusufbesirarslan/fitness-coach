@@ -149,7 +149,7 @@ def friend_request(username):
 @bp.route("/friend/accept/<int:request_id>", methods=["POST"])
 @login_required
 def friend_accept(request_id):
-    fr = Friendship.query.get_or_404(request_id)
+    fr = db.get_or_404(Friendship, request_id)
     if fr.receiver_id != current_user.id:
         return jsonify({"error": "Bu isteği kabul etme yetkiniz yok."}), 403
     if fr.status != "pending":
@@ -166,7 +166,7 @@ def friend_accept(request_id):
 @bp.route("/friend/reject/<int:request_id>", methods=["POST"])
 @login_required
 def friend_reject(request_id):
-    fr = Friendship.query.get_or_404(request_id)
+    fr = db.get_or_404(Friendship, request_id)
     if fr.receiver_id != current_user.id:
         return jsonify({"error": "Bu isteği reddetme yetkiniz yok."}), 403
     if fr.status != "pending":
@@ -283,7 +283,7 @@ def send_suggestion(username):
 @bp.route("/suggest/respond/<int:msg_id>", methods=["POST"])
 @login_required
 def respond_suggestion(msg_id):
-    msg = Message.query.get_or_404(msg_id)
+    msg = db.get_or_404(Message, msg_id)
     if msg.receiver_id != current_user.id:
         return jsonify({"error": "Bu öneri size ait değil."}), 403
     if msg.message_type not in ("suggestion_meal", "suggestion_workout"):
@@ -318,7 +318,7 @@ def respond_suggestion(msg_id):
 
 
 def _process_meal_suggestion_accept(msg):
-    sender = User.query.get(msg.sender_id)
+    sender = db.session.get(User, msg.sender_id)
     sender_name = sender.full_name or sender.username if sender else "Arkadaş"
     suffix = _turkish_ablative_suffix(sender_name)
     ogun_title = f"{sender_name}{suffix} alınan öneri"

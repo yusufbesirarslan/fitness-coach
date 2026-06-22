@@ -109,7 +109,7 @@ def _fetch_profile_and_trends(user_id):
     # injuries/dietary_restrictions BOŞ olsa bile açıkça belirt: koç sakatlığı
     # sormalı, kısıtlama yokken de bunu bilerek serbest öneri yapabilmeli.
     try:
-        user = User.query.get(user_id)
+        user = db.session.get(User, user_id)
         meta = dict((user.user_metadata or {}) if user else {})
         lines = [
             f"- sakatlık/tıbbi durum (injuries): {meta.get('injuries') or 'KAYIT YOK — plan vermeden önce kullanıcıya sor'}",
@@ -225,7 +225,7 @@ def _fetch_coach_context(user_id, question=""):
             "WeeklyCheckIn": WeeklyCheckIn,
             "WaterLog": WaterLog,
         }
-        nudges = get_nudges(User.query.get(user_id), db, models,
+        nudges = get_nudges(db.session.get(User, user_id), db, models,
                             getattr(g, "prev_last_login", None))
         if nudges:
             parts.append("[PROAKTİF BİLDİRİMLER]\n" + "\n".join(nudges))
@@ -576,7 +576,7 @@ def _tool_manage_user_memory(user_id, action, key=None, value=None):
     User.user_metadata (JSON) ile eşlenir. user_id ASLA LLM'den gelmez."""
     action = (action or "").strip().lower()
     key = (key or "").strip()
-    user = User.query.get(user_id)
+    user = db.session.get(User, user_id)
     if not user:
         return json.dumps({"status": "error", "message": "Kullanıcı bulunamadı."}, ensure_ascii=False)
     meta = dict(user.user_metadata or {})

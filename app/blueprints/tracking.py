@@ -424,7 +424,7 @@ def dashboard_nudges():
             "WeeklyCheckIn": WeeklyCheckIn,
             "WaterLog": WaterLog,
         }
-        raw_nudges = get_nudges(User.query.get(current_user.id), db, models,
+        raw_nudges = get_nudges(db.session.get(User, current_user.id), db, models,
                                 getattr(g, "prev_last_login", None))
         cleaned = []
         for n in (raw_nudges or []):
