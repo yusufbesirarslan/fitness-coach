@@ -3,6 +3,7 @@ import json
 import s3_helper
 from flask import Blueprint, current_app, jsonify, render_template, request
 from flask_login import current_user, login_required
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
@@ -433,6 +434,7 @@ def complete_workout():
         user_id=current_user.id, image_key=pump_image_key,
         location_type=location_type, description=description,
         valid=True, fallback=check.get("fallback", False),
+        date_key=app_today().isoformat(),
     ))
     # UI antrenman tamamlama artık kanonik WorkoutLog satırı da yazar. Aksi halde
     # haftalık rapor, "bugünkü hacim" ve "48 saattir antrenman yok" dürtüsü gerçek
@@ -457,6 +459,12 @@ def complete_workout():
                  "Bugünkü antrenmanını tamamladı (foto eklendi)")
     try:
         db.session.commit()
+    except IntegrityError:
+        # TOCTOU yarışı: başka bir eşzamanlı istek bugünün PumpCheck'ini araya
+        # yazdı; uq_pump_check_day ikinci commit'i reddetti. TÜM yan etkiler
+        # (XP/quest/WorkoutLog dahil) rollback olur → çift XP yok.
+        db.session.rollback()
+        return jsonify({"error": "Bugünkü antrenmanını zaten tamamladın!"}), 400
     except Exception as e:
         db.session.rollback()
         current_app.logger.warning("[WORKOUT] commit başarısız: %s: %s", type(e).__name__, e)
@@ -534,10 +542,22 @@ def set_water():
     row = WaterLog.query.filter_by(user_id=current_user.id, date_key=today_key).first()
     if row:
         row.count = count
+        db.session.commit()
     else:
         row = WaterLog(user_id=current_user.id, date_key=today_key, count=count)
         db.session.add(row)
-    db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # Yarış: günün ilk iki eşzamanlı isteği de "satır yok" gördü;
+            # uq_user_water_day ikinci INSERT'i reddetti. Rollback edip mevcut
+            # satırı çekerek güncelle (500 yerine tutarlı sonuç).
+            db.session.rollback()
+            row = WaterLog.query.filter_by(user_id=current_user.id, date_key=today_key).first()
+            if row is None:
+                raise
+            row.count = count
+            db.session.commit()
     return jsonify({"count": row.count, "goal": WATER_GOAL})
 
 

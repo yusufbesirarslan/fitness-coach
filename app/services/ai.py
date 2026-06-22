@@ -40,19 +40,28 @@ def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
             max_tokens=max_tokens,
             temperature=temperature,
         )
+        # `choices` içerik filtresinde boş, `message.content` ise refuse/length
+        # durumlarında None olabilir. Çağıranların çoğu dönüşe doğrudan .strip()
+        # uyguluyor; ham IndexError/None'ı buraya hapsedip her zaman str döndür.
+        if not resp.choices:
+            logger.warning("OpenAI yanıtı boş choices döndürdü (içerik filtresi olası)")
+            return ""
         choice = resp.choices[0]
         if getattr(choice, "finish_reason", None) == "length":
             # Yanıt max_tokens sınırında kesildi: çıktı eksik/bozuk olabilir.
             # Sessizce yutulmasın — çağıranların parse hataları bu uyarıyla
             # ilişkilendirilebilsin (docs/menu-extraction-truncation-risk.md).
             logger.warning("OpenAI yanıtı max_tokens=%s sınırında kesildi (finish_reason=length)", max_tokens)
-        return choice.message.content
+        return choice.message.content or ""
     except RateLimitError:
         raise RuntimeError("AI servisi şu an yoğun (rate limit). Lütfen biraz sonra tekrar deneyin.")
     except (APITimeoutError, APIConnectionError):
         raise RuntimeError("AI servisine ulaşılamadı (zaman aşımı). Lütfen tekrar deneyin.")
     except APIError as e:
-        raise RuntimeError(f"AI servisi hatası: {e}")
+        # Ham sağlayıcı hatası kullanıcıya sızmasın (iç ayrıntı/anahtar metası
+        # içerebilir); detayı logla, kullanıcıya jenerik mesaj dön.
+        logger.warning("OpenAI APIError: %s", e)
+        raise RuntimeError("AI servisi hatası. Lütfen tekrar deneyin.")
 
 
 def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
@@ -92,7 +101,8 @@ def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
     except (anthropic.APITimeoutError, anthropic.APIConnectionError):
         raise RuntimeError("AI servisine ulaşılamadı (zaman aşımı). Lütfen tekrar deneyin.")
     except anthropic.APIError as e:  # APIStatusError bunun alt sınıfıdır — tek except yeter
-        raise RuntimeError(f"AI servisi hatası: {e}")
+        logger.warning("Claude/Bedrock APIError: %s", e)
+        raise RuntimeError("AI servisi hatası. Lütfen tekrar deneyin.")
 
 
 def _bedrock_validate_image(image_bytes, media_type, prompt, max_tokens=400, temperature=0.0):
@@ -128,7 +138,8 @@ def _bedrock_validate_image(image_bytes, media_type, prompt, max_tokens=400, tem
     except (anthropic.APITimeoutError, anthropic.APIConnectionError):
         raise RuntimeError("AI servisine ulaşılamadı (zaman aşımı). Lütfen tekrar deneyin.")
     except anthropic.APIError as e:
-        raise RuntimeError(f"AI servisi hatası: {e}")
+        logger.warning("Bedrock görsel doğrulama APIError: %s", e)
+        raise RuntimeError("AI servisi hatası. Lütfen tekrar deneyin.")
 
 
 def _heavy_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):

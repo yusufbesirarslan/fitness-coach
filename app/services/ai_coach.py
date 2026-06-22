@@ -5,6 +5,7 @@ import s3_helper
 import nutrition_pipeline
 from datetime import datetime, timedelta
 from flask import current_app, g, session
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import (BEDROCK_ENABLED, BEDROCK_MAX_TOKENS, BEDROCK_MODEL,
@@ -130,7 +131,7 @@ def _fetch_profile_and_trends(user_id):
         if directive:
             parts.append(directive.strip())
     except Exception:
-        pass
+        current_app.logger.warning("[COACH] profil/hafıza bağlamı alınamadı", exc_info=True)
 
     # [HAFTALIK CHECK-IN TRENDİ] — kullanıcının kendi bildirdiği toparlanma/uyum
     # sinyalleri (uyku, yorgunluk, progresif yüklenme, beslenme uyumu). Antrenman
@@ -152,7 +153,7 @@ def _fetch_profile_and_trends(user_id):
             parts.append(f"[HAFTALIK CHECK-IN TRENDİ (son {len(rows)}, yeni→eski)]\n"
                          + "\n".join(rows))
     except Exception:
-        pass
+        current_app.logger.warning("[COACH] haftalık check-in bağlamı alınamadı", exc_info=True)
 
     # [GÜNLÜK AKTİVİTE (7 gün)] — Apple Health / Health Connect senkronu (adım,
     # mesafe, yakılan kalori). Toplam enerji harcaması resmini tamamlar.
@@ -172,7 +173,7 @@ def _fetch_profile_and_trends(user_id):
                 f"- toplam adım: {steps} | yakılan kalori: {round(kcal)} kcal | "
                 f"mesafe: {round(dist, 1)} km | aktif gün: {active_days}/7")
     except Exception:
-        pass
+        current_app.logger.warning("[COACH] günlük aktivite bağlamı alınamadı", exc_info=True)
 
     return parts
 
@@ -193,6 +194,7 @@ def _fetch_coach_context(user_id, question=""):
     try:
         parts.append(f"[FITNESS ÖZETİ]\n{get_user_fitness_summary(user_id)}")
     except Exception:
+        current_app.logger.warning("[COACH] fitness özeti alınamadı", exc_info=True)
         parts.append("[FITNESS ÖZETİ] Veri alınamadı.")
     # Kalıcı profil + kendi bildirdiği trendler (sakatlık, beslenme kısıtı, uyku/
     # yorgunluk, günlük aktivite). MCP'den BAĞIMSIZ — doğrudan ORM ile okunur.
@@ -200,19 +202,19 @@ def _fetch_coach_context(user_id, question=""):
     try:
         parts.append(f"[ANTRENMAN GEÇMİŞİ (7 gün)]\n{get_user_workout_history(user_id, 7)}")
     except Exception:
-        pass
+        current_app.logger.warning("[COACH] antrenman geçmişi alınamadı", exc_info=True)
     try:
         parts.append(f"[SUPPLEMENT STACK]\n{get_user_supplement_stack(user_id)}")
     except Exception:
-        pass
+        current_app.logger.warning("[COACH] supplement stack alınamadı", exc_info=True)
     try:
         parts.append(f"[BESLENME LOGU (3 gün)]\n{get_user_nutrition_log(user_id, 3)}")
     except Exception:
-        pass
+        current_app.logger.warning("[COACH] beslenme logu alınamadı", exc_info=True)
     try:
         parts.append(f"[ARKADAŞ AKTİVİTELERİ]\n{get_friend_activities(user_id)}")
     except Exception:
-        pass
+        current_app.logger.warning("[COACH] arkadaş aktiviteleri alınamadı", exc_info=True)
 
     from analytics_engine import get_nudges
     try:
@@ -228,7 +230,7 @@ def _fetch_coach_context(user_id, question=""):
         if nudges:
             parts.append("[PROAKTİF BİLDİRİMLER]\n" + "\n".join(nudges))
     except Exception:
-        pass
+        current_app.logger.warning("[COACH] proaktif bildirimler alınamadı", exc_info=True)
 
     return "\n\n".join(parts)
 
@@ -778,6 +780,13 @@ def _tool_analyze_gym_photo(user_id, s3_key):
         current_app.logger.warning("[ANALYZE PHOTO] Bedrock başarısız: %s: %s", type(e).__name__, e)
         return json.dumps({"status": "error", "message": "Görsel analizi şu an yapılamadı."},
                           ensure_ascii=False)
+    if not (raw or "").strip():
+        # Boş model yanıtı (transport/model aksaklığı): _parse_photo_validation bunu
+        # is_gym:false'a çevirip "burası spor salonu değil" gibi YANLIŞ bir cevaba
+        # dönüştürürdü. Gerçek "değil" kararından ayır, hata olarak dön.
+        current_app.logger.warning("[ANALYZE PHOTO] Bedrock boş yanıt döndürdü")
+        return json.dumps({"status": "error", "message": "Görsel analizi şu an yapılamadı."},
+                          ensure_ascii=False)
     result = _parse_photo_validation(raw)
 
     if not result["is_gym"]:
@@ -799,7 +808,8 @@ def _tool_analyze_gym_photo(user_id, s3_key):
 
     db.session.add(PumpCheck(
         user_id=user_id, image_key=s3_key, location_type="ai_tool",
-        description=result["reason"][:200], valid=True, fallback=False))
+        description=result["reason"][:200], valid=True, fallback=False,
+        date_key=app_today().isoformat()))
     db.session.add(WorkoutLog(
         user_id=user_id, exercise_name="Antrenman tamamlandı (Pump Check)",
         sets=1, reps=1, weight_kg=0, volume=0))
@@ -809,6 +819,14 @@ def _tool_analyze_gym_photo(user_id, s3_key):
     log_activity(user_id, "workout_completed", "Pump Check doğrulandı (AI koç)")
     try:
         db.session.commit()
+    except IntegrityError:
+        # TOCTOU yarışı: başka bir istek (UI veya AI tool) bugünün PumpCheck'ini
+        # araya yazdı; uq_pump_check_day ikinciyi reddetti → çift XP yok.
+        db.session.rollback()
+        return json.dumps({"status": "already_done", "is_gym": True,
+                           "form_rating": result["form_rating"], "reason": result["reason"],
+                           "awarded": False, "message": "Bugünkü antrenmanını zaten tamamladın."},
+                          ensure_ascii=False)
     except Exception as e:
         db.session.rollback()
         current_app.logger.warning("[ANALYZE PHOTO] commit başarısız: %s: %s", type(e).__name__, e)
@@ -964,28 +982,40 @@ def _dispatch_coach_tool(user_id, name, arguments_json):
     except (json.JSONDecodeError, TypeError):
         args = {}
 
-    if name == "fetch_nutrition_and_stage_log":
-        return _tool_fetch_nutrition_and_stage_log(user_id, args.get("food_query", ""))
-    if name == "confirm_and_commit_meal_log":
-        return _tool_confirm_and_commit_meal_log(user_id)
-    if name == "stage_workout_log":
-        return _tool_stage_workout_log(
-            user_id, args.get("exercise_name", ""),
-            args.get("sets"), args.get("reps"), args.get("weight_kg"),
-        )
-    if name == "confirm_and_commit_workout_log":
-        return _tool_confirm_and_commit_workout_log(user_id)
-    if name == "cancel_pending_log":
-        return _tool_cancel_pending_log(user_id)
-    if name == "manage_user_memory":
-        return _tool_manage_user_memory(
-            user_id, args.get("action", ""), args.get("key"), args.get("value"))
-    if name == "query_fitx_metrics":
-        return _tool_query_fitx_metrics(
-            user_id, args.get("metric_type", ""), args.get("date_range", ""))
-    if name == "analyze_gym_photo":
-        return _tool_analyze_gym_photo(user_id, args.get("s3_key", ""))
-    return json.dumps({"status": "error", "message": f"Bilinmeyen araç: {name}"}, ensure_ascii=False)
+    # Araç gövdesindeki beklenmeyen hatayı (özellikle DB commit/delete) merkezi
+    # olarak yakala: oturumu rollback ile temizle (kirli transaction sonraki
+    # commit'i de patlatmasın) ve koç turunu çökertmek yerine modele hata durumu
+    # döndür. _assert_principal KASTEN bunun DIŞINDA — güvenlik ihlali dostça bir
+    # mesaja dönüşmemeli, propagate etmeli.
+    try:
+        if name == "fetch_nutrition_and_stage_log":
+            return _tool_fetch_nutrition_and_stage_log(user_id, args.get("food_query", ""))
+        if name == "confirm_and_commit_meal_log":
+            return _tool_confirm_and_commit_meal_log(user_id)
+        if name == "stage_workout_log":
+            return _tool_stage_workout_log(
+                user_id, args.get("exercise_name", ""),
+                args.get("sets"), args.get("reps"), args.get("weight_kg"),
+            )
+        if name == "confirm_and_commit_workout_log":
+            return _tool_confirm_and_commit_workout_log(user_id)
+        if name == "cancel_pending_log":
+            return _tool_cancel_pending_log(user_id)
+        if name == "manage_user_memory":
+            return _tool_manage_user_memory(
+                user_id, args.get("action", ""), args.get("key"), args.get("value"))
+        if name == "query_fitx_metrics":
+            return _tool_query_fitx_metrics(
+                user_id, args.get("metric_type", ""), args.get("date_range", ""))
+        if name == "analyze_gym_photo":
+            return _tool_analyze_gym_photo(user_id, args.get("s3_key", ""))
+        return json.dumps({"status": "error", "message": f"Bilinmeyen araç: {name}"}, ensure_ascii=False)
+    except Exception:
+        db.session.rollback()
+        current_app.logger.warning("[COACH] araç '%s' çalışırken hata", name, exc_info=True)
+        return json.dumps({"status": "error",
+                           "message": "Araç çalışırken bir hata oluştu, tekrar dener misin?"},
+                          ensure_ascii=False)
 
 
 COACH_HISTORY_LIMIT = 6          # son 3 alışveriş (user+assistant) yeterli bağlam
@@ -1093,6 +1123,11 @@ def _run_coach_conversation_openai(user_id, question, context, history):
             max_tokens=700,
             temperature=0.6,
         )
+        if not resp.choices:
+            # İçerik filtresi boş choices döndürebilir; ham IndexError yerine
+            # boş final_text ile çık (çağıran yönlendirici dostça mesaja düşer).
+            current_app.logger.warning("[COACH] OpenAI boş choices döndürdü")
+            break
         msg = resp.choices[0].message
         tool_calls = msg.tool_calls or []
 

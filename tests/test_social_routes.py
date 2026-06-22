@@ -118,6 +118,22 @@ def test_friend_request_after_recent_rejection_blocked(client, auth_user, make_u
     assert Friendship.query.one().status == "rejected"
 
 
+def test_friend_request_rejected_null_created_at_not_blocked(client, auth_user, make_user):
+    # created_at NULL (eski kayıt) ise cooldown UYGULANMAMALI — eksik zaman damgası
+    # meşru yeniden denemeyi sonsuza dek bloklamamalı (geri dönük cooldown bug'ı).
+    other = make_user("zamansiz_red")
+    fr = Friendship(sender_id=other.id, receiver_id=auth_user.id, status="rejected")
+    db.session.add(fr)
+    db.session.commit()
+    # created_at kolon-default'u INSERT'te dolduğu için NULL'ı UPDATE ile zorla.
+    fr.created_at = None
+    db.session.commit()
+    assert Friendship.query.one().created_at is None   # önkoşul: gerçekten NULL
+
+    assert client.post("/friend/request/zamansiz_red").status_code == 200
+    assert Friendship.query.one().status == "pending"
+
+
 def test_friend_accept_awards_xp_both_sides(client, auth_user, make_user, login):
     sender = make_user("istekci")
     fr = Friendship(sender_id=sender.id, receiver_id=auth_user.id, status="pending")

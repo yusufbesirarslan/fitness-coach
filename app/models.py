@@ -254,7 +254,16 @@ class PumpCheck(db.Model):
     description   = db.Column(db.String(200))
     valid         = db.Column(db.Boolean, default=True)
     fallback      = db.Column(db.Boolean, default=False)  # AI atlandıysa (fail-open)
+    # Günlük idempotency anahtarı (Istanbul ISO 'YYYY-MM-DD'). Aşağıdaki UNIQUE
+    # ile birlikte, eşzamanlı iki "antrenmanı tamamla" isteğinin TOCTOU yarışında
+    # ikinci kez PumpCheck/XP yazmasını DB seviyesinde engeller (created_at-bazlı
+    # uygulama kontrolü tek başına yarışa açıktı → çift XP).
+    date_key      = db.Column(db.String(10), nullable=True, index=True)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "date_key", name="uq_pump_check_day"),
+    )
 
     def __repr__(self):
         return f"<PumpCheck {self.user_id} - {self.created_at}>"

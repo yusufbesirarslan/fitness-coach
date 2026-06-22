@@ -2,6 +2,7 @@
 import json
 from flask import Blueprint, Response, g, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
+from sqlalchemy.exc import IntegrityError
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
@@ -272,19 +273,35 @@ def log_daily_activity():
         user_id=current_user.id, date_key=today_key, intensity=intensity
     ).first()
 
+    def _apply(target):
+        target.steps = steps
+        target.calories_burned = calories
+        target.distance_km = distance
+        target.duration_min = duration
+
     if existing:
-        existing.steps = steps
-        existing.calories_burned = calories
-        existing.distance_km = distance
-        existing.duration_min = duration
+        _apply(existing)
+        db.session.commit()
     else:
         db.session.add(DailyActivity(
             user_id=current_user.id, steps=steps, intensity=intensity,
             calories_burned=calories, distance_km=distance,
             duration_min=duration, date_key=today_key
         ))
+        try:
+            db.session.commit()
+        except IntegrityError:
+            # Yarış: eşzamanlı iki istek de "satır yok" gördü; uq_daily_activity
+            # ikinci INSERT'i reddetti. Rollback edip mevcut satırı güncelle.
+            db.session.rollback()
+            existing = DailyActivity.query.filter_by(
+                user_id=current_user.id, date_key=today_key, intensity=intensity
+            ).first()
+            if existing is None:
+                raise
+            _apply(existing)
+            db.session.commit()
 
-    db.session.commit()
     return jsonify({
         "message": f"{steps} adım kaydedildi.",
         "calories_burned": calories,

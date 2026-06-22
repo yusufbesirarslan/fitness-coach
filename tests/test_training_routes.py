@@ -240,6 +240,7 @@ def test_complete_awards_xp_and_records_pump_check(client, workout_ready, monkey
     check = PumpCheck.query.filter_by(user_id=workout_ready.id).one()
     assert check.valid is True
     assert check.image_key is None                    # S3 kapalı (test env)
+    assert check.date_key is not None                 # günlük idempotency anahtarı yazıldı
 
     # Faz B/F6: UI antrenman tamamlama artık kanonik WorkoutLog da yazar —
     # haftalık rapor ve "48 saattir antrenman yok" dürtüsü gerçek antrenmanı görsün.
@@ -251,6 +252,19 @@ def test_complete_awards_xp_and_records_pump_check(client, workout_ready, monkey
                         json={"image": _image_data_url("JPEG")})
     assert again.status_code == 400
     assert "zaten" in again.get_json()["error"]
+
+
+def test_pump_check_day_unique_constraint(client, auth_user):
+    # uq_pump_check_day: aynı kullanıcı + gün için ikinci PumpCheck DB seviyesinde
+    # reddedilir → eşzamanlı 'antrenmanı tamamla' yarışında çift XP'yi engeller.
+    from sqlalchemy.exc import IntegrityError
+    today = date.today().isoformat()
+    db.session.add(PumpCheck(user_id=auth_user.id, valid=True, date_key=today))
+    db.session.commit()
+    db.session.add(PumpCheck(user_id=auth_user.id, valid=True, date_key=today))
+    with pytest.raises(IntegrityError):
+        db.session.commit()
+    db.session.rollback()
 
 
 def test_workout_status_flips_after_completion(client, workout_ready, monkeypatch):
