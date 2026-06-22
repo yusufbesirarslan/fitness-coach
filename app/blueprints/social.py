@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
+from sqlalchemy.exc import IntegrityError
 
 from app.config import SEARCH_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
@@ -120,9 +121,10 @@ def friend_request(username):
             # Cooldown: reddedilen istek hemen yeniden atılamaz (nuisance re-spam
             # koruması). existing.created_at, friend_reject'te reddedilme anına
             # güncellenir; o andan beri yeterli süre geçmediyse reddet.
-            last_change = existing.created_at or datetime.utcnow()
-            elapsed = datetime.utcnow() - last_change
-            if elapsed < _REJECTED_REQUEST_COOLDOWN:
+            # created_at NULL ise (eski kayıt) cooldown'ı UYGULAMA — eksik zaman
+            # damgası meşru yeniden denemeyi sonsuza dek bloklamamalı.
+            last_change = existing.created_at
+            if last_change is not None and (datetime.utcnow() - last_change) < _REJECTED_REQUEST_COOLDOWN:
                 return jsonify({"error": "Bu kullanıcı isteğini reddetti. "
                                          "Bir süre sonra tekrar deneyebilirsin."}), 429
             existing.status = "pending"
@@ -134,14 +136,20 @@ def friend_request(username):
 
     friendship = Friendship(sender_id=current_user.id, receiver_id=target.id)
     db.session.add(friendship)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Yarış: iki eşzamanlı istek de "existing is None" gördü; uq_friendship
+        # ikinciyi reddetti. 500 yerine "zaten bekleyen istek" davranışına düş.
+        db.session.rollback()
+        return jsonify({"error": "Zaten bekleyen bir istek var."}), 400
     return jsonify({"message": f"{username} kullanıcısına istek gönderildi."})
 
 
 @bp.route("/friend/accept/<int:request_id>", methods=["POST"])
 @login_required
 def friend_accept(request_id):
-    fr = Friendship.query.get_or_404(request_id)
+    fr = db.get_or_404(Friendship, request_id)
     if fr.receiver_id != current_user.id:
         return jsonify({"error": "Bu isteği kabul etme yetkiniz yok."}), 403
     if fr.status != "pending":
@@ -158,7 +166,7 @@ def friend_accept(request_id):
 @bp.route("/friend/reject/<int:request_id>", methods=["POST"])
 @login_required
 def friend_reject(request_id):
-    fr = Friendship.query.get_or_404(request_id)
+    fr = db.get_or_404(Friendship, request_id)
     if fr.receiver_id != current_user.id:
         return jsonify({"error": "Bu isteği reddetme yetkiniz yok."}), 403
     if fr.status != "pending":
@@ -275,7 +283,7 @@ def send_suggestion(username):
 @bp.route("/suggest/respond/<int:msg_id>", methods=["POST"])
 @login_required
 def respond_suggestion(msg_id):
-    msg = Message.query.get_or_404(msg_id)
+    msg = db.get_or_404(Message, msg_id)
     if msg.receiver_id != current_user.id:
         return jsonify({"error": "Bu öneri size ait değil."}), 403
     if msg.message_type not in ("suggestion_meal", "suggestion_workout"):
@@ -310,7 +318,7 @@ def respond_suggestion(msg_id):
 
 
 def _process_meal_suggestion_accept(msg):
-    sender = User.query.get(msg.sender_id)
+    sender = db.session.get(User, msg.sender_id)
     sender_name = sender.full_name or sender.username if sender else "Arkadaş"
     suffix = _turkish_ablative_suffix(sender_name)
     ogun_title = f"{sender_name}{suffix} alınan öneri"

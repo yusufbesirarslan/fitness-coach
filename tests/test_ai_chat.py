@@ -79,3 +79,16 @@ def test_chat_maps_openai_errors_to_friendly_runtime_errors(monkeypatch, exc_nam
 
     with pytest.raises(RuntimeError, match=expected):
         _openai_chat([{"role": "user", "content": "x"}])
+
+
+def test_chat_none_content_returns_empty_string(monkeypatch):
+    # OpenAI refuse/length durumunda message.content None olabilir; çağıranların
+    # çoğu dönüşe .strip() uyguluyor → None değil "" dönmeli (AttributeError yok).
+    monkeypatch.setattr(ai, "openai_client", _FakeClient(_resp(content=None)))
+    assert _openai_chat([{"role": "user", "content": "x"}]) == ""
+
+
+def test_chat_empty_choices_returns_empty_string(monkeypatch):
+    # İçerik filtresi boş choices döndürebilir → IndexError yerine "" dönmeli.
+    monkeypatch.setattr(ai, "openai_client", _FakeClient(SimpleNamespace(choices=[])))
+    assert _openai_chat([{"role": "user", "content": "x"}]) == ""

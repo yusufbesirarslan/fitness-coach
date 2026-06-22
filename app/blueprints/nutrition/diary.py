@@ -25,10 +25,25 @@ def _sanitize_meal_macros(kalori, protein, karb, yag):
     is_valid, _flags, reasons = _np.check_serving(serving)
     if not is_valid:
         current_app.logger.warning("[NUTRITION] Plan makroları makul değil %s — kısılıyor", reasons)
-        kalori = min(kalori, _np.MAX_SERVING_KCAL)
-        protein = min(protein, _np.MAX_SERVING_MACRO_G)
-        karb = min(karb, _np.MAX_SERVING_MACRO_G)
-        yag = min(yag, _np.MAX_SERVING_FAT_G)
+        # Her makroyu BAĞIMSIZ kırpmak Atwater tutarlılığını bozardı (örn. kalori
+        # 3000'e inerken protein/karb/yağ hâlâ ~3750 kcal'i ima eder). Tüm makroları
+        # TEK katsayıyla oransal ölçekle: en kötü ihlal eden boyut katsayıyı belirler,
+        # böylece her tavana uyulur ve oranlar korunur (clamp_to_band ile aynı ruh).
+        ratios = []
+        if kalori and kalori > _np.MAX_SERVING_KCAL:
+            ratios.append(_np.MAX_SERVING_KCAL / kalori)
+        if protein and protein > _np.MAX_SERVING_MACRO_G:
+            ratios.append(_np.MAX_SERVING_MACRO_G / protein)
+        if karb and karb > _np.MAX_SERVING_MACRO_G:
+            ratios.append(_np.MAX_SERVING_MACRO_G / karb)
+        if yag and yag > _np.MAX_SERVING_FAT_G:
+            ratios.append(_np.MAX_SERVING_FAT_G / yag)
+        scale = min(ratios) if ratios else 1.0
+        if scale < 1.0:
+            kalori = round((kalori or 0) * scale, 1)
+            protein = round((protein or 0) * scale, 1)
+            karb = round((karb or 0) * scale, 1)
+            yag = round((yag or 0) * scale, 1)
     return kalori, protein, karb, yag
 
 
@@ -123,7 +138,7 @@ def diary_create_meal():
 @bp.route("/api/diary/meal/<int:meal_id>/item", methods=["POST"])
 @login_required
 def diary_add_item(meal_id):
-    meal = CustomMeal.query.get(meal_id)
+    meal = db.session.get(CustomMeal, meal_id)
     if not meal or meal.user_id != current_user.id:
         return jsonify({"error": "Öğün bulunamadı"}), 404
     if meal.is_logged:
@@ -205,7 +220,7 @@ def diary_add_item(meal_id):
 @bp.route("/api/diary/item/<int:item_id>", methods=["PATCH"])
 @login_required
 def diary_update_item(item_id):
-    item = CustomMealItem.query.get(item_id)
+    item = db.session.get(CustomMealItem, item_id)
     if not item or item.meal.user_id != current_user.id:
         return jsonify({"error": "Besin bulunamadı"}), 404
     if item.meal.is_logged:
@@ -267,7 +282,7 @@ def diary_update_item(item_id):
 @bp.route("/api/diary/item/<int:item_id>", methods=["DELETE"])
 @login_required
 def diary_delete_item(item_id):
-    item = CustomMealItem.query.get(item_id)
+    item = db.session.get(CustomMealItem, item_id)
     if not item or item.meal.user_id != current_user.id:
         return jsonify({"error": "Besin bulunamadı"}), 404
     if item.meal.is_logged:
@@ -280,7 +295,7 @@ def diary_delete_item(item_id):
 @bp.route("/api/diary/meal/<int:meal_id>/log", methods=["POST"])
 @login_required
 def diary_log_meal(meal_id):
-    meal = CustomMeal.query.get(meal_id)
+    meal = db.session.get(CustomMeal, meal_id)
     if not meal or meal.user_id != current_user.id:
         return jsonify({"error": "Öğün bulunamadı"}), 404
     if meal.is_logged:
@@ -334,6 +349,13 @@ def diary_log_meal(meal_id):
 @bp.route("/api/diary/today")
 @login_required
 def diary_today():
+    """Diary-builder görünümü: bugünün CustomMeal'leri + diary'ye özel grand_total.
+
+    Bu, beslenme defterinin (diary sekmesi) KENDİ toplamıdır; kullanıcının gün
+    içinde diary'de oluşturduğu tüm öğünleri (kaydedilmiş + devam eden) gösterir.
+    KANONİK 'bugün yenenler' kaynağı DEĞİLDİR — o /meal-log/today (MealLog).
+    'Kaydedilmiş' (is_logged) bir öğün ayrıca MealLog'a da yazıldığından, bu
+    grand_total /meal-log/today toplamıyla ASLA TOPLANMAMALIDIR (çift sayım)."""
     today_key = app_today().isoformat()
     meals = CustomMeal.query.filter_by(
         user_id=current_user.id, date_key=today_key

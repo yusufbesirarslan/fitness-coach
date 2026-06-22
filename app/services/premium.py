@@ -85,9 +85,12 @@ def premium_ai_plan_gate(kind):
                              "Premium'a geç.",
                     "premium_required": True,
                 }), 402
-            resp = fn(*args, **kwargs)
-            status = resp[1] if isinstance(resp, tuple) else 200
-            if status == 200:
+            # Dönüşü Response'a normalize et: tuple `(body, code)`, düz body VEYA
+            # doğrudan Response nesnesi olabilir. Eski "tuple değilse 200 say"
+            # sezgisi, hata statüslü bir Response döndüren route'ta kotayı yanlışça
+            # tüketiyordu. Gerçek status_code üzerinden karar ver.
+            resp = current_app.make_response(fn(*args, **kwargs))
+            if resp.status_code == 200:
                 record_ai_plan_generation(current_user, kind)
             return resp
         return wrapper

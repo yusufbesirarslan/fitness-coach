@@ -777,10 +777,10 @@ Tüm {len(batch_items)} yemek için değer ver. Sadece JSON döndür, başka bir
                     results[name] = macros
 
         return results
-    except Exception as e:
-        import traceback
-        current_app.logger.info(f"[MACRO ENGINE] LLM BATCH ERROR: {type(e).__name__}: {e}")
-        traceback.print_exc()
+    except Exception:
+        # traceback.print_exc() stdout'a yazıyordu — log altyapısına (ve Sentry'ye)
+        # ulaşmıyordu. exc_info ile tam izi logger üzerinden ver.
+        current_app.logger.warning("[MACRO ENGINE] LLM BATCH ERROR", exc_info=True)
     return {}
 
 

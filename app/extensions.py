@@ -8,11 +8,31 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_limiter.util import get_remote_address
 from flask_login import LoginManager, current_user
 from openai import OpenAI
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
 
 from app.config import _REDIS_URL, BEDROCK_REGION
 
 
 db = SQLAlchemy()
+
+
+@event.listens_for(Engine, "connect")
+def _enforce_sqlite_foreign_keys(dbapi_connection, connection_record):
+    """SQLite'ta yabancı anahtar kısıtlarını zorla (varsayılan KAPALI).
+
+    Prod Postgres'te FK ON DELETE CASCADE her zaman geçerli; SQLite (lokal/test)
+    varsayılan olarak FK'leri yok sayar. Bu pragma olmadan passive_deletes=True
+    olan ilişkilerde kullanıcı silindiğinde çocuk satırlar SESSİZCE öksüz kalır
+    ve dev/test, prod'dan farklı davranır. Yalnızca SQLite bağlantılarına uygulanır
+    (psycopg2 bağlantısında sqlite3.Connection değil → atlanır)."""
+    import sqlite3
+    if isinstance(dbapi_connection, sqlite3.Connection):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+
 migrate = Migrate()
 login_manager = LoginManager()
 login_manager.login_view = "auth.login"

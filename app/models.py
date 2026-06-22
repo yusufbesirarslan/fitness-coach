@@ -13,7 +13,7 @@ _logger = logging.getLogger(__name__)
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User.query.get(int(user_id))
+    return db.session.get(User, int(user_id))
 
 
 class User(UserMixin, db.Model):
@@ -192,7 +192,10 @@ class MealLog(db.Model):
     protein    = db.Column(db.Float)
     karb       = db.Column(db.Float)
     yag        = db.Column(db.Float)
-    tarih      = db.Column(db.String(10))
+    # Kanonik gün anahtarı (Istanbul ISO 'YYYY-MM-DD'). NOT NULL + default: NULL
+    # tarih satırları per-gün sorgularından SESSİZCE kaçardı. Tüm yazma yolları
+    # zaten tarih veriyor; default yalnızca güvenlik ağı (app/timeutil tek kaynak).
+    tarih      = db.Column(db.String(10), nullable=False, default=lambda: app_today().isoformat())
     source     = db.Column(db.String(20), default="manual")
     photo_key  = db.Column(db.String(300), nullable=True)  # S3 nesne anahtarı (opsiyonel)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -238,7 +241,7 @@ class PendingAction(db.Model):
     payload     = db.Column(db.JSON, nullable=False)
     created_at  = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
-    user = db.relationship("User", backref="pending_actions")
+    user = db.relationship("User", backref=db.backref("pending_actions", passive_deletes=True))
 
     def __repr__(self):
         return f"<PendingAction {self.user_id} - {self.action_type} - {self.created_at}>"
@@ -254,7 +257,16 @@ class PumpCheck(db.Model):
     description   = db.Column(db.String(200))
     valid         = db.Column(db.Boolean, default=True)
     fallback      = db.Column(db.Boolean, default=False)  # AI atlandıysa (fail-open)
+    # Günlük idempotency anahtarı (Istanbul ISO 'YYYY-MM-DD'). Aşağıdaki UNIQUE
+    # ile birlikte, eşzamanlı iki "antrenmanı tamamla" isteğinin TOCTOU yarışında
+    # ikinci kez PumpCheck/XP yazmasını DB seviyesinde engeller (created_at-bazlı
+    # uygulama kontrolü tek başına yarışa açıktı → çift XP).
+    date_key      = db.Column(db.String(10), nullable=True, index=True)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "date_key", name="uq_pump_check_day"),
+    )
 
     def __repr__(self):
         return f"<PumpCheck {self.user_id} - {self.created_at}>"
@@ -271,8 +283,8 @@ class Friendship(db.Model):
         db.UniqueConstraint("sender_id", "receiver_id", name="uq_friendship"),
     )
 
-    sender   = db.relationship("User", foreign_keys=[sender_id], backref="sent_requests")
-    receiver = db.relationship("User", foreign_keys=[receiver_id], backref="received_requests")
+    sender   = db.relationship("User", foreign_keys=[sender_id], backref=db.backref("sent_requests", passive_deletes=True))
+    receiver = db.relationship("User", foreign_keys=[receiver_id], backref=db.backref("received_requests", passive_deletes=True))
 
 
 class Message(db.Model):
@@ -284,8 +296,8 @@ class Message(db.Model):
     is_read      = db.Column(db.Boolean, default=False)
     message_type = db.Column(db.String(50), default="text")
 
-    sender   = db.relationship("User", foreign_keys=[sender_id], backref="sent_messages")
-    receiver = db.relationship("User", foreign_keys=[receiver_id], backref="received_messages")
+    sender   = db.relationship("User", foreign_keys=[sender_id], backref=db.backref("sent_messages", passive_deletes=True))
+    receiver = db.relationship("User", foreign_keys=[receiver_id], backref=db.backref("received_messages", passive_deletes=True))
 
 
 class Activity(db.Model):
@@ -295,7 +307,7 @@ class Activity(db.Model):
     content       = db.Column(db.String(300), nullable=False)
     timestamp     = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
-    user = db.relationship("User", backref="activities")
+    user = db.relationship("User", backref=db.backref("activities", passive_deletes=True))
 
 
 class Supplement(db.Model):
@@ -314,7 +326,7 @@ class Supplement(db.Model):
     is_public            = db.Column(db.Boolean, default=True)
     created_at           = db.Column(db.DateTime, default=datetime.utcnow)
 
-    user = db.relationship("User", backref="supplements")
+    user = db.relationship("User", backref=db.backref("supplements", passive_deletes=True))
 
 
 class DailyQuest(db.Model):
@@ -338,7 +350,7 @@ class UserQuestProgress(db.Model):
         db.UniqueConstraint("user_id", "quest_id", "date_key", name="uq_user_quest_day"),
     )
 
-    user  = db.relationship("User", backref="quest_progress")
+    user  = db.relationship("User", backref=db.backref("quest_progress", passive_deletes=True))
     quest = db.relationship("DailyQuest", backref="progress_entries")
 
 
@@ -352,7 +364,7 @@ class WeeklyWinner(db.Model):
     notified   = db.Column(db.Boolean, default=False, server_default='false')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    user = db.relationship("User", backref="weekly_wins")
+    user = db.relationship("User", backref=db.backref("weekly_wins", passive_deletes=True))
 
 
 class WeeklyResetLog(db.Model):
@@ -386,7 +398,7 @@ class WorkoutLog(db.Model):
     volume        = db.Column(db.Float, nullable=False, default=0)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
-    user = db.relationship("User", backref="workout_logs")
+    user = db.relationship("User", backref=db.backref("workout_logs", passive_deletes=True))
 
 
 class DailyActivity(db.Model):
@@ -400,7 +412,7 @@ class DailyActivity(db.Model):
     date_key        = db.Column(db.String(10), nullable=False)
     created_at      = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
-    user = db.relationship("User", backref="daily_activities")
+    user = db.relationship("User", backref=db.backref("daily_activities", passive_deletes=True))
 
     __table_args__ = (
         db.UniqueConstraint("user_id", "date_key", "intensity", name="uq_daily_activity"),
@@ -415,7 +427,7 @@ class CustomMeal(db.Model):
     is_logged  = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    user  = db.relationship("User", backref="custom_meals")
+    user  = db.relationship("User", backref=db.backref("custom_meals", passive_deletes=True))
     items = db.relationship("CustomMealItem", backref="meal",
                             cascade="all, delete-orphan",
                             order_by="CustomMealItem.id")

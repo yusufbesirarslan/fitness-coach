@@ -6,6 +6,7 @@ from flask_login import current_user
 
 from app.config import _BOOT_TS, CSP_IMG_S3_HOSTS
 from app.extensions import db
+from app.models import User
 from app.services.gamification import _last_rollover_check, _mark_lb_dirty, award_xp, get_level, get_title, log_activity, run_weekly_rollover
 from app.timeutil import app_today
 
@@ -159,27 +160,39 @@ def maybe_weekly_rollover():
 
 
 def update_streak():
-    if current_user.is_authenticated:
-        today = app_today()
-        if current_user.last_login != today:
-            if current_user.last_login == today - timedelta(days=1):
-                current_user.streak_count = (current_user.streak_count or 0) + 1
-            else:
-                current_user.streak_count = 1
-            # Bu istekten ÖNCEKI last_login'i sakla: get_nudges seri-riski dürtüsünü
-            # "günün ilk isteğinde henüz aktif değildi" mantığıyla doğru tetiklesin
-            # (aksi halde aşağıdaki güncelleme yüzünden asla tetiklenmez).
-            g.prev_last_login = current_user.last_login
-            current_user.last_login = today
-            streak = current_user.streak_count
-            if streak in (7, 14, 30, 60, 100):
-                log_activity(current_user.id, "streak_milestone",
-                             f"{streak} günlük seri yakalanadı!")
-                award_xp(current_user.id, streak * 2)
-            # streak tiebreak'i değişti → commit sonrası Redis sync (after_commit).
-            # Milestone yoksa award_xp dirty işaretlemez; burada elle işaretliyoruz.
-            _mark_lb_dirty(current_user.id)
-            db.session.commit()
+    if not current_user.is_authenticated:
+        return
+    today = app_today()
+    # Hızlı yol: bugün zaten işlendiyse kilit alma (isteklerin çoğu buraya düşer).
+    if current_user.last_login == today:
+        return
+    # Günün İLK isteği. 8 thread'lik gunicorn'da aynı kullanıcının paralel
+    # istekleri (sayfa açılışında birden çok fetch) ikisi de last_login != today
+    # görüp streak'i iki kez artırabilir / milestone XP'yi iki kez verebilirdi.
+    # Kullanıcı satırını kilitleyip tekrar kontrol ederek tek artışı garanti et.
+    user = db.session.query(User).filter_by(id=current_user.id).with_for_update().first()
+    if user is None or user.last_login == today:
+        # Başka bir istek bu kullanıcı için zaten güncelledi.
+        db.session.commit()  # FOR UPDATE kilidini serbest bırak
+        return
+    if user.last_login == today - timedelta(days=1):
+        user.streak_count = (user.streak_count or 0) + 1
+    else:
+        user.streak_count = 1
+    # Bu istekten ÖNCEKI last_login'i sakla: get_nudges seri-riski dürtüsünü
+    # "günün ilk isteğinde henüz aktif değildi" mantığıyla doğru tetiklesin
+    # (aksi halde aşağıdaki güncelleme yüzünden asla tetiklenmez).
+    g.prev_last_login = user.last_login
+    user.last_login = today
+    streak = user.streak_count
+    if streak in (7, 14, 30, 60, 100):
+        log_activity(user.id, "streak_milestone",
+                     f"{streak} günlük seri yakalandı!")
+        award_xp(user.id, streak * 2)
+    # streak tiebreak'i değişti → commit sonrası Redis sync (after_commit).
+    # Milestone yoksa award_xp dirty işaretlemez; burada elle işaretliyoruz.
+    _mark_lb_dirty(user.id)
+    db.session.commit()
 
 
 def inject_rank():
