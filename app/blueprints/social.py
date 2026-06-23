@@ -154,7 +154,17 @@ def friend_accept(request_id):
         return jsonify({"error": "Bu isteği kabul etme yetkiniz yok."}), 403
     if fr.status != "pending":
         return jsonify({"error": "Bu istek zaten işlenmiş."}), 400
-    fr.status = "accepted"
+
+    # Atomik sahiplen: eşzamanlı iki POST /friend/accept de status=='pending' görüp
+    # ödül verebilir (check-then-act yarışı → çift +50 XP + çift feed satırı). Koşullu
+    # UPDATE yalnızca BİRİNE 1 satır verir; diğeri 0 alır ve ödülsüz döner
+    # (tracking.py/hooks.py'deki guarded-update deseninin eşi).
+    updated = Friendship.query.filter_by(id=fr.id, status="pending")\
+        .update({"status": "accepted"}, synchronize_session=False)
+    if not updated:
+        db.session.rollback()
+        return jsonify({"error": "Bu istek zaten işlenmiş."}), 400
+
     award_xp(fr.sender_id, 50)
     award_xp(fr.receiver_id, 50)
     log_activity(fr.sender_id, "new_friend", f"{fr.receiver.username} ile arkadaş oldu")
