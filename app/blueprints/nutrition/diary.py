@@ -18,34 +18,17 @@ from app.timeutil import app_today, day_key
 
 
 def _sanitize_meal_macros(kalori, protein, karb, yag):
-    """LLM plan makrolarını nutrition_pipeline kapısıyla (menü hattıyla aynı)
+    """LLM plan makrolarını nutrition_pipeline kapısıyla (menü/koç hattıyla aynı)
     denetle; fiziksel olarak imkânsız değerleri makul tavanlara kıs — aksi halde
-    bir LLM saçmalığı (örn. 9999 kcal) doğrudan MealLog'a sızıyordu (F9)."""
+    bir LLM saçmalığı (örn. 9999 kcal) doğrudan MealLog'a sızıyordu (F9).
+
+    Oransal kırpma mantığı tek kaynakta (nutrition_pipeline.clamp_serving_macros);
+    burada yalnızca kısılma olduysa loglarız."""
     import nutrition_pipeline as _np
-    serving = {"calories": kalori, "protein": protein, "carbs": karb, "fat": yag}
-    is_valid, _flags, reasons = _np.check_serving(serving)
-    if not is_valid:
-        current_app.logger.warning("[NUTRITION] Plan makroları makul değil %s — kısılıyor", reasons)
-        # Her makroyu BAĞIMSIZ kırpmak Atwater tutarlılığını bozardı (örn. kalori
-        # 3000'e inerken protein/karb/yağ hâlâ ~3750 kcal'i ima eder). Tüm makroları
-        # TEK katsayıyla oransal ölçekle: en kötü ihlal eden boyut katsayıyı belirler,
-        # böylece her tavana uyulur ve oranlar korunur (clamp_to_band ile aynı ruh).
-        ratios = []
-        if kalori and kalori > _np.MAX_SERVING_KCAL:
-            ratios.append(_np.MAX_SERVING_KCAL / kalori)
-        if protein and protein > _np.MAX_SERVING_MACRO_G:
-            ratios.append(_np.MAX_SERVING_MACRO_G / protein)
-        if karb and karb > _np.MAX_SERVING_MACRO_G:
-            ratios.append(_np.MAX_SERVING_MACRO_G / karb)
-        if yag and yag > _np.MAX_SERVING_FAT_G:
-            ratios.append(_np.MAX_SERVING_FAT_G / yag)
-        scale = min(ratios) if ratios else 1.0
-        if scale < 1.0:
-            kalori = round((kalori or 0) * scale, 1)
-            protein = round((protein or 0) * scale, 1)
-            karb = round((karb or 0) * scale, 1)
-            yag = round((yag or 0) * scale, 1)
-    return kalori, protein, karb, yag
+    clamped = _np.clamp_serving_macros(kalori, protein, karb, yag)
+    if clamped != (kalori, protein, karb, yag):
+        current_app.logger.warning("[NUTRITION] Plan makroları makul değil — kısılıyor")
+    return clamped
 
 
 @bp.route("/api/quick-add-meal", methods=["POST"])

@@ -142,6 +142,27 @@ def test_commit_meal_without_pending_is_safe(auth_user):
     assert MealLog.query.count() == 0
 
 
+def test_commit_meal_clamps_absurd_staged_macros(auth_user):
+    # Staged makrolar porsiyon-sanity kapısından geçmeden kanonik deftere
+    # yazılıyordu (diyari/menü/UI hepsi kısarken koç yolu atlıyordu). Fiziksel
+    # olarak imkânsız bir porsiyon (9999 kcal) makul tavanlara kısılmalı.
+    import nutrition_pipeline as np
+    db.session.add(PendingAction(
+        user_id=auth_user.id, action_type="log_meal",
+        payload={"food_name": "saçma porsiyon", "calories": 9999,
+                 "protein": 500, "carbs": 400, "fat": 300}))
+    db.session.commit()
+
+    result = json.loads(ai_coach._tool_confirm_and_commit_meal_log(auth_user.id))
+    assert result["status"] == "committed"
+
+    entry = MealLog.query.filter_by(user_id=auth_user.id).one()
+    assert entry.kalori <= np.MAX_SERVING_KCAL          # 9999 → 3000'e kısıldı
+    assert entry.kalori < 9999
+    assert entry.protein <= np.MAX_SERVING_MACRO_G
+    assert entry.yag <= np.MAX_SERVING_FAT_G
+
+
 def test_today_totals_count_meals_from_any_source(auth_user):
     # Faz B unification: diyari ve koç AYNI deftere (MealLog) yazar; koçun
     # 'bugün tüketilen / kalan bütçe' hesabı her iki giriş yolunu da görür.

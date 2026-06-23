@@ -429,6 +429,16 @@ def _tool_confirm_and_commit_meal_log(user_id):
     fat = float(data.get("fat", 0) or 0)
     name = (data.get("food_name") or "Yemek")[:200]
 
+    # Staged makrolar (FatSecret/LLM kaynaklı) porsiyon-sanity kapısından geçmeden
+    # kanonik deftere yazılıyordu — diyari/menü/UI hepsi kısarken koç yolu atlıyordu.
+    # Fiziksel olarak imkânsız bir porsiyonu (örn. 9999 kcal) makul tavanlara kıs.
+    clamped = nutrition_pipeline.clamp_serving_macros(cal, pro, carb, fat)
+    if clamped != (cal, pro, carb, fat):
+        current_app.logger.warning(
+            "[COACH] Staged makrolar makul değil (%s) — kısılıyor %s → %s",
+            name, (cal, pro, carb, fat), clamped)
+        cal, pro, carb, fat = clamped
+
     # Satırı önce atomik 'sahiplen': eşzamanlı çift-onayda (double-confirm) yalnızca
     # biri 1 satır siler; diğeri 0 alır ve çift loglamadan döner (3.10 idempotent).
     claimed = PendingAction.query.filter_by(id=pending.id).delete(synchronize_session=False)
