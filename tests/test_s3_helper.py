@@ -85,3 +85,12 @@ def test_presigned_url_ownership_check(s3_on):
     assert generate_presigned_url(key, expected_user_id=99) is None
     # expected_user_id verilmezse eski davranış (kontrol yok).
     assert generate_presigned_url(key) is not None
+
+
+def test_presigned_url_ownership_parses_segment_not_substring(s3_on):
+    # Sahip 2. segment (index 1). Substring eşleşmesi, user_id başka bir segmentte
+    # geçen anahtarı yanlışlıkla KABUL ederdi; segment eşitliği etmez (#10).
+    # Sahibi 99 ama yolda '/42/' geçen anahtar 42 için İMZALANMAMALI.
+    sneaky = "pump-checks/99/2026/06/42/evil.jpg"
+    assert generate_presigned_url(sneaky, expected_user_id=42) is None
+    assert generate_presigned_url(sneaky, expected_user_id=99) is not None
