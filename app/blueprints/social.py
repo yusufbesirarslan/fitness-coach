@@ -210,13 +210,13 @@ def chat_page(username):
 @bp.route("/chat/<username>/messages")
 @login_required
 def chat_messages(username):
+    # SALT-OKUNUR (GET): okundu işaretleme buradan KALDIRILDI. CSRF guard yalnızca
+    # yazma metodlarında çalıştığından, bir GET'in karşı tarafın mesajlarını
+    # okundu yapması korumasız bir durum değişikliğiydi (prefetch/cross-origin ile
+    # tetiklenebilir). Okundu işareti artık POST /chat/<username>/read'de.
     other = User.query.filter_by(username=username).first_or_404()
     if not are_friends(current_user.id, other.id):
         return jsonify({"error": "Arkadaş değilsiniz."}), 403
-
-    Message.query.filter_by(sender_id=other.id, receiver_id=current_user.id, is_read=False)\
-        .update({"is_read": True})
-    db.session.commit()
 
     messages = Message.query.filter(
         db.or_(
@@ -231,6 +231,21 @@ def chat_messages(username):
          "message_type": m.message_type or "text"}
         for m in messages
     ]})
+
+
+@bp.route("/chat/<username>/read", methods=["POST"])
+@login_required
+def chat_mark_read(username):
+    """Karşı taraftan gelen okunmamış mesajları okundu işaretle (durum değiştirir →
+    CSRF-korumalı POST). chat_messages GET'inden ayrıldı."""
+    other = User.query.filter_by(username=username).first_or_404()
+    if not are_friends(current_user.id, other.id):
+        return jsonify({"error": "Arkadaş değilsiniz."}), 403
+
+    Message.query.filter_by(sender_id=other.id, receiver_id=current_user.id, is_read=False)\
+        .update({"is_read": True})
+    db.session.commit()
+    return jsonify({"ok": True})
 
 
 @bp.route("/chat/<username>/send", methods=["POST"])

@@ -324,6 +324,12 @@ async function loadMessages() {
     if (!res.ok) return;
     const data = await res.json();
     renderMessages(data.messages);
+    // Okundu işaretleme durum DEĞİŞTİREN bir işlem → ayrı CSRF-korumalı POST
+    // (csrf.js fetch sarmalayıcısı X-CSRFToken'ı otomatik ekler). Yalnızca karşı
+    // taraftan mesaj varsa gönder (boşuna yazma yapma).
+    if (data.messages.some(m => !m.is_mine)) {
+        fetch('/chat/' + OTHER + '/read', { method: 'POST' });
+    }
 }
 
 async function sendMessage() {

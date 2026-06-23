@@ -192,9 +192,19 @@ def test_chat_send_and_read_cycle(client, auth_user, friend):
     body = client.get("/chat/arkadas/messages").get_json()
     assert [(m["body"], m["is_mine"]) for m in body["messages"]] == \
         [("selam", True), ("cevap", False)]
-    # Thread açıldığında karşı tarafın mesajı okundu işaretlenir.
-    incoming = Message.query.filter_by(sender_id=friend.id).one()
-    assert incoming.is_read is True
+    # GET artık okundu İŞARETLEMEZ — durum değiştiren işlem CSRF-korumalı POST'a
+    # taşındı (state-changing route'u GET olarak açma kuralı).
+    assert Message.query.filter_by(sender_id=friend.id).one().is_read is False
+    # Okundu işareti yalnızca POST /chat/<username>/read ile.
+    assert client.post("/chat/arkadas/read").status_code == 200
+    assert Message.query.filter_by(sender_id=friend.id).one().is_read is True
+
+
+def test_chat_mark_read_requires_friend_and_post(client, auth_user, make_user):
+    yabanci = make_user("yabanci_okundu")
+    # Arkadaş değil → 403; GET ise route yok (yalnızca POST) → 405.
+    assert client.post("/chat/yabanci_okundu/read").status_code == 403
+    assert client.get("/chat/yabanci_okundu/read").status_code == 405
 
 
 # ---------------------------------------------------------------------------
