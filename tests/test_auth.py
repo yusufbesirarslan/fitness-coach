@@ -307,6 +307,26 @@ def test_cognito_register_idp_error_returns_400(client, cognito_native, monkeypa
     assert User.query.filter_by(username="dupuser").first() is None
 
 
+def test_cognito_register_local_commit_failure_returns_clean_error(client, cognito_native, monkeypatch):
+    # Cognito sign_up başarılı olduktan SONRA yerel commit patlarsa (eşzamanlı bir
+    # kayıt aynı e-postayı pre-check ile commit ARASINA sıkıştırdı) → 500 yerine
+    # temiz hata; Cognito orphan loglanır (#7).
+    from app.extensions import db
+
+    def racing_sign_up(username, password, email, name):
+        # Pre-check geçtikten sonra çağrılır: araya çakışan bir kayıt sıkıştır
+        # (aynı e-posta) → bizim INSERT'imiz email unique kısıtını ihlal etsin.
+        db.session.add(User(username="araya_giren", email=email, password_hash="x"))
+        db.session.commit()
+        return f"sub-{username}"
+    monkeypatch.setattr(cognito_idp, "sign_up", racing_sign_up)
+
+    resp = _register(client, "yarisan", email="dup@example.com")
+    assert resp.status_code != 500
+    assert resp.status_code == 409
+    assert User.query.filter_by(username="yarisan").first() is None  # yerel kayıt oluşmadı
+
+
 def test_cognito_login_sub_mismatch_rejected(client, cognito_native, monkeypatch):
     _register(client, "verifyme")
     client.post("/verify", json={"username": "verifyme", "code": "123456"})

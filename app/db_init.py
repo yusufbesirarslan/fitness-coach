@@ -139,8 +139,10 @@ def init_database(app):
 
         # Görev ekonomisini derinleştir: dönüşümlü ek görevler (su / check-in / davet).
         # Idempotent — her quest_type yalnızca bir kez eklenir.
+        # NOT: meal_logged BURADA tekrar TANIMLANMAZ — yukarıdaki özel blok (first-
+        # writer-wins, ödül 20) zaten ekliyor. Mükerrer 15'lik giriş hep ölü kalıyor
+        # ve seeding sırası değişirse latent tutarsızlık yaratıyordu (#15).
         _extra_quests = [
-            ("meal_logged",      "Öğün Kaydet",          "Bugün bir öğün kaydet",                         15),
             ("water_logged",     "Su Hedefi",            "Bugün su takibini güncelle",                    10),
             ("checkin_done",     "Haftalık Check-in",    "Kilonu güncelle veya check-in yap",             20),
             ("friend_invited",   "Bir Arkadaşını Davet Et", "Davet bağlantını bir arkadaşınla paylaş",    40),

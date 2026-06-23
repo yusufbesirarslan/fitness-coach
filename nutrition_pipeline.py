@@ -332,6 +332,42 @@ def check_serving(serving):
     return is_valid, flags, reasons
 
 
+def clamp_serving_macros(calories, protein, carbs, fat):
+    """Tek bir porsiyonun makrolarini fiziksel tavanlara ORANSAL kis.
+
+    ``check_serving`` porsiyonu gecersiz bulursa (orn. 9999 kcal saçma deger),
+    en kotu ihlal eden boyutun katsayisiyla TUM makrolari TEK oranla olcekler —
+    boylece her tavana uyulur ve Atwater oranlari korunur (her boyutu bagimsiz
+    kirpmak protein/karb/yag toplamini kaloriyle tutarsiz birakirdi).
+
+    Donus: ``(calories, protein, carbs, fat)`` — gecersizse kirpilmis ve 1
+    ondaliga yuvarli; gecerliyse girdi aynen (yuvarlamadan).
+
+    UI/diyari/menu/koc yollarinin HEPSI bunu kanonik MealLog'a yazmadan once
+    cagirmali — aksi halde bir LLM/FatSecret sacmaligi deftere sizar (DB CHECK
+    yalnizca >100000 kcal gibi kaba tasmayi yakalar, "3000 kcal" cöpünü degil).
+    """
+    serving = {"calories": calories, "protein": protein, "carbs": carbs, "fat": fat}
+    is_valid, _flags, _reasons = check_serving(serving)
+    if is_valid:
+        return calories, protein, carbs, fat
+
+    ratios = []
+    if calories and calories > MAX_SERVING_KCAL:
+        ratios.append(MAX_SERVING_KCAL / calories)
+    if protein and protein > MAX_SERVING_MACRO_G:
+        ratios.append(MAX_SERVING_MACRO_G / protein)
+    if carbs and carbs > MAX_SERVING_MACRO_G:
+        ratios.append(MAX_SERVING_MACRO_G / carbs)
+    if fat and fat > MAX_SERVING_FAT_G:
+        ratios.append(MAX_SERVING_FAT_G / fat)
+    scale = min(ratios) if ratios else 1.0
+    if scale < 1.0:
+        return (round((calories or 0) * scale, 1), round((protein or 0) * scale, 1),
+                round((carbs or 0) * scale, 1), round((fat or 0) * scale, 1))
+    return calories, protein, carbs, fat
+
+
 # Saf yag/sivi-yag bilesenini ayirt etmek icin: kalorinin bu kesrinden fazlasi
 # yagdan geliyorsa ve protein+karb yok denecek kadar azsa, girdi bir YEMEK degil
 # bir BILESEN (zeytinyagi, tereyagi, ayciçek yagi...) profilindedir.

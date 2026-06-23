@@ -256,7 +256,7 @@ def update_weight():
 @login_required
 def log_daily_activity():
     data = request.get_json(silent=True) or {}
-    steps = int(data.get("steps", 0))
+    steps = _to_int(data.get("steps", 0), 0)  # sayısal olmayan/boş → 0 (500 yerine)
     intensity = data.get("intensity", "moderate")
 
     if intensity not in MET_CONFIG:

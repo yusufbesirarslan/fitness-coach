@@ -31,15 +31,18 @@ _FOOD_ID_CACHE_MAX = 1000
 def _get_cached_macros(item_names, basis="per_serving"):
     # setdefault: dis sozluk temizlense bile (test fixture'lari .clear() yapar)
     # namespace kendini onarir.
-    cache = _macro_cache.setdefault(basis, {})
+    # Okuma da _cache_lock altinda: es zamanli eviction (next(iter)+del) ile
+    # cakismasin. Donen sozlukler KOPYA — tuketici mutasyonu onbellegi bozmasin (#12).
     hits = {}
     misses = []
-    for name in item_names:
-        cached = cache.get(name)
-        if cached is not None:
-            hits[name] = cached
-        else:
-            misses.append(name)
+    with _cache_lock:
+        cache = _macro_cache.setdefault(basis, {})
+        for name in item_names:
+            cached = cache.get(name)
+            if cached is not None:
+                hits[name] = dict(cached)
+            else:
+                misses.append(name)
     return hits, misses
 
 
@@ -51,7 +54,9 @@ def _cache_macros(macro_map, basis="per_serving"):
                 if len(cache) >= _MACRO_CACHE_MAX:
                     oldest = next(iter(cache))
                     del cache[oldest]
-                cache[name] = macros
+                # KOPYA sakla — uretici map'i sonradan mutasyon ederse onbellek
+                # etkilenmesin (referansla paylasim aliasing'i, #12).
+                cache[name] = dict(macros)
 
 
 def _cache_food_id(name, fid):

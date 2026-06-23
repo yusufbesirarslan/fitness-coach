@@ -281,6 +281,26 @@ def test_macro_cache_skips_zero_calories_and_caps_size():
     cache.clear()
 
 
+def test_macro_cache_defensive_copy_isolates_mutations():
+    # Önbellek makro sözlüklerini REFERANSLA değil kopyayla tutmalı (#12): ne
+    # üreticinin sonradan map'i mutasyonu ne de tüketicinin döndürülen sözlüğü
+    # mutasyonu önbelleği bozmamalı.
+    cache = foodcache._macro_cache.setdefault("per_serving", {})
+    cache.clear()
+
+    source = {"calories": 100, "protein": 10}
+    foodcache._cache_macros({"tavuk": source}, basis="per_serving")
+    source["calories"] = 999  # üretici sonradan mutasyon → önbellek etkilenmemeli
+
+    hits, _ = foodcache._get_cached_macros(["tavuk"], basis="per_serving")
+    assert hits["tavuk"]["calories"] == 100
+
+    hits["tavuk"]["calories"] = -1  # tüketici döndürüleni mutasyon → önbellek bozulmamalı
+    again, _ = foodcache._get_cached_macros(["tavuk"], basis="per_serving")
+    assert again["tavuk"]["calories"] == 100
+    cache.clear()
+
+
 def test_food_id_cache_normalizes_and_caps():
     foodcache._food_id_cache.clear()
     foodcache._cache_food_id("Muz", "42")

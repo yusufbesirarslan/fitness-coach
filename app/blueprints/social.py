@@ -154,7 +154,17 @@ def friend_accept(request_id):
         return jsonify({"error": "Bu isteği kabul etme yetkiniz yok."}), 403
     if fr.status != "pending":
         return jsonify({"error": "Bu istek zaten işlenmiş."}), 400
-    fr.status = "accepted"
+
+    # Atomik sahiplen: eşzamanlı iki POST /friend/accept de status=='pending' görüp
+    # ödül verebilir (check-then-act yarışı → çift +50 XP + çift feed satırı). Koşullu
+    # UPDATE yalnızca BİRİNE 1 satır verir; diğeri 0 alır ve ödülsüz döner
+    # (tracking.py/hooks.py'deki guarded-update deseninin eşi).
+    updated = Friendship.query.filter_by(id=fr.id, status="pending")\
+        .update({"status": "accepted"}, synchronize_session=False)
+    if not updated:
+        db.session.rollback()
+        return jsonify({"error": "Bu istek zaten işlenmiş."}), 400
+
     award_xp(fr.sender_id, 50)
     award_xp(fr.receiver_id, 50)
     log_activity(fr.sender_id, "new_friend", f"{fr.receiver.username} ile arkadaş oldu")
@@ -200,13 +210,13 @@ def chat_page(username):
 @bp.route("/chat/<username>/messages")
 @login_required
 def chat_messages(username):
+    # SALT-OKUNUR (GET): okundu işaretleme buradan KALDIRILDI. CSRF guard yalnızca
+    # yazma metodlarında çalıştığından, bir GET'in karşı tarafın mesajlarını
+    # okundu yapması korumasız bir durum değişikliğiydi (prefetch/cross-origin ile
+    # tetiklenebilir). Okundu işareti artık POST /chat/<username>/read'de.
     other = User.query.filter_by(username=username).first_or_404()
     if not are_friends(current_user.id, other.id):
         return jsonify({"error": "Arkadaş değilsiniz."}), 403
-
-    Message.query.filter_by(sender_id=other.id, receiver_id=current_user.id, is_read=False)\
-        .update({"is_read": True})
-    db.session.commit()
 
     messages = Message.query.filter(
         db.or_(
@@ -221,6 +231,21 @@ def chat_messages(username):
          "message_type": m.message_type or "text"}
         for m in messages
     ]})
+
+
+@bp.route("/chat/<username>/read", methods=["POST"])
+@login_required
+def chat_mark_read(username):
+    """Karşı taraftan gelen okunmamış mesajları okundu işaretle (durum değiştirir →
+    CSRF-korumalı POST). chat_messages GET'inden ayrıldı."""
+    other = User.query.filter_by(username=username).first_or_404()
+    if not are_friends(current_user.id, other.id):
+        return jsonify({"error": "Arkadaş değilsiniz."}), 403
+
+    Message.query.filter_by(sender_id=other.id, receiver_id=current_user.id, is_read=False)\
+        .update({"is_read": True})
+    db.session.commit()
+    return jsonify({"ok": True})
 
 
 @bp.route("/chat/<username>/send", methods=["POST"])
@@ -314,6 +339,10 @@ def respond_suggestion(msg_id):
     if action == "accept" and nutrients:
         resp["nutrients"] = nutrients
         resp["message"] = f"Kabul edildi! {int(nutrients['kalori'])} kcal eklendi"
+    elif action == "accept" and "meal" in msg.message_type and nutrients is None:
+        # Öneri kabul edildi ama makrolar hesaplanamadı → öğün GÜNLÜĞE EKLENMEDI
+        # (sıfır-makro satırı yazılmaz). Kullanıcıya sessiz başarı yerine durumu bildir.
+        resp["message"] = "Kabul edildi, ancak besin değerleri hesaplanamadı — öğün günlüğe eklenmedi."
     return jsonify(resp)
 
 
@@ -325,13 +354,12 @@ def _process_meal_suggestion_accept(msg):
 
     items = _parse_suggestion_items(msg.body)
     if not items:
-        current_app.logger.warning(f"[SUGGESTION] Could not parse items from: {msg.body[:100]}")
-        entry = MealLog(
-            user_id=current_user.id, ogun=ogun_title,
-            yemekler=msg.body[:200], kalori=0, protein=0, karb=0, yag=0,
-            tarih=day_key()
-        )
-        db.session.add(entry)
+        # Gövde öğelere ayrıştırılamadı: kanonik MealLog defterine SIFIR-makro satırı
+        # YAZMA — kalıcı sıfır satırı günlük toplamları, protein nudge'ını ve haftalık
+        # raporları sessizce bozar (meallog.py'deki aynı koruma). Yalnızca metadata logla.
+        current_app.logger.warning(
+            "[SUGGESTION] Öneri gövdesi ayrıştırılamadı (msg=%s, len=%s) — öğün loglanmadı.",
+            msg.id, len(msg.body or ""))
         return None
 
     total = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
@@ -346,7 +374,7 @@ def _process_meal_suggestion_accept(msg):
                 per_serving, per_100g_items = _lookup_macros_fatsecret(uncached, token)
                 macro_map.update(per_serving)
             except Exception as e:
-                current_app.logger.warning(f"[SUGGESTION] FatSecret failed, using LLM fallback: {e}")
+                current_app.logger.warning("[SUGGESTION] FatSecret başarısız, LLM yedeğine düşülüyor: %s", type(e).__name__)
 
             if per_100g_items:
                 weights = _estimate_serving_weights_llm(list(per_100g_items.keys()))
@@ -374,7 +402,7 @@ def _process_meal_suggestion_accept(msg):
             total["fat"] += m.get("fat", 0)
 
     except Exception as e:
-        current_app.logger.warning(f"[SUGGESTION] Macro lookup pipeline failed: {type(e).__name__}: {e}")
+        current_app.logger.warning("[SUGGESTION] Makro hattı hatası: %s", type(e).__name__)
         try:
             llm_macros = _estimate_macros_llm(items)
             for item in items:
@@ -386,6 +414,14 @@ def _process_meal_suggestion_accept(msg):
         except Exception:
             pass
 
+    # Parse/lookup/LLM hepsi başarısız olup toplam tümüyle sıfır kaldıysa kanonik
+    # deftere SIFIR-makro satırı YAZMA (yukarıdaki ayrıştırma-hatası ile aynı gerekçe).
+    if total["calories"] <= 0 and total["protein"] <= 0 and total["carbs"] <= 0 and total["fat"] <= 0:
+        current_app.logger.warning(
+            "[SUGGESTION] Makrolar hesaplanamadı (msg=%s, %s öğe) — öğün loglanmadı.",
+            msg.id, len(items))
+        return None
+
     entry = MealLog(
         user_id=current_user.id, ogun=ogun_title,
         yemekler=", ".join(items),
@@ -396,5 +432,5 @@ def _process_meal_suggestion_accept(msg):
         tarih=day_key()
     )
     db.session.add(entry)
-    current_app.logger.info(f"[SUGGESTION] Logged meal: {ogun_title} → {total['calories']:.0f} kcal")
+    current_app.logger.info("[SUGGESTION] Öğün loglandı (msg=%s) → %.0f kcal", msg.id, total["calories"])
     return {"kalori": entry.kalori, "protein": entry.protein, "karb": entry.karb, "yag": entry.yag}

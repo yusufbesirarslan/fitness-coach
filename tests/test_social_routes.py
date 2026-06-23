@@ -192,9 +192,19 @@ def test_chat_send_and_read_cycle(client, auth_user, friend):
     body = client.get("/chat/arkadas/messages").get_json()
     assert [(m["body"], m["is_mine"]) for m in body["messages"]] == \
         [("selam", True), ("cevap", False)]
-    # Thread açıldığında karşı tarafın mesajı okundu işaretlenir.
-    incoming = Message.query.filter_by(sender_id=friend.id).one()
-    assert incoming.is_read is True
+    # GET artık okundu İŞARETLEMEZ — durum değiştiren işlem CSRF-korumalı POST'a
+    # taşındı (state-changing route'u GET olarak açma kuralı).
+    assert Message.query.filter_by(sender_id=friend.id).one().is_read is False
+    # Okundu işareti yalnızca POST /chat/<username>/read ile.
+    assert client.post("/chat/arkadas/read").status_code == 200
+    assert Message.query.filter_by(sender_id=friend.id).one().is_read is True
+
+
+def test_chat_mark_read_requires_friend_and_post(client, auth_user, make_user):
+    yabanci = make_user("yabanci_okundu")
+    # Arkadaş değil → 403; GET ise route yok (yalnızca POST) → 405.
+    assert client.post("/chat/yabanci_okundu/read").status_code == 403
+    assert client.get("/chat/yabanci_okundu/read").status_code == 405
 
 
 # ---------------------------------------------------------------------------
@@ -281,13 +291,31 @@ def test_accept_meal_suggestion_llm_fallback_for_missing(client, auth_user, frie
     assert body["nutrients"]["kalori"] == 400.0
 
 
-def test_accept_meal_suggestion_unparseable_body_logs_raw(client, auth_user, friend, monkeypatch):
+def test_accept_meal_suggestion_unparseable_body_skips_meallog(client, auth_user, friend, monkeypatch):
+    # Gövde ayrıştırılamıyorsa kanonik MealLog defterine SIFIR-makro satırı YAZILMAZ
+    # (aksi halde günlük toplamlar/protein nudge/haftalık rapor sessizce bozulur).
     monkeypatch.setattr(social_bp, "_parse_suggestion_items", lambda body: [])
     msg = _send_suggestion(client, friend, auth_user, "suggestion_meal", "??!!")
     body = client.post(f"/suggest/respond/{msg.id}", json={"action": "accept"}).get_json()
     assert "nutrients" not in body
-    meal = MealLog.query.filter_by(user_id=auth_user.id).one()
-    assert meal.kalori == 0
+    assert MealLog.query.filter_by(user_id=auth_user.id).count() == 0
+
+
+def test_accept_meal_suggestion_all_zero_macros_skips_meallog(client, auth_user, friend, monkeypatch):
+    # Makro hattı + LLM yedeği ikisi de boş dönüp toplam tümüyle sıfır kalırsa,
+    # yine sıfır-makro satırı yazmamalı (kanonik defter bozulmaz).
+    monkeypatch.setattr(social_bp, "_parse_suggestion_items", lambda body: ["gizem"])
+
+    def no_token():
+        raise RuntimeError("fatsecret down")
+    monkeypatch.setattr(social_bp, "_get_fatsecret_token", no_token)
+    monkeypatch.setattr(social_bp, "_estimate_macros_llm",
+                        lambda items, category_map=None: {})
+
+    msg = _send_suggestion(client, friend, auth_user, "suggestion_meal", "gizem")
+    body = client.post(f"/suggest/respond/{msg.id}", json={"action": "accept"}).get_json()
+    assert "nutrients" not in body
+    assert MealLog.query.filter_by(user_id=auth_user.id).count() == 0
 
 
 def test_friends_page_renders(client, auth_user):

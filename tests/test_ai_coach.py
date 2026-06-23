@@ -142,6 +142,27 @@ def test_commit_meal_without_pending_is_safe(auth_user):
     assert MealLog.query.count() == 0
 
 
+def test_commit_meal_clamps_absurd_staged_macros(auth_user):
+    # Staged makrolar porsiyon-sanity kapısından geçmeden kanonik deftere
+    # yazılıyordu (diyari/menü/UI hepsi kısarken koç yolu atlıyordu). Fiziksel
+    # olarak imkânsız bir porsiyon (9999 kcal) makul tavanlara kısılmalı.
+    import nutrition_pipeline as np
+    db.session.add(PendingAction(
+        user_id=auth_user.id, action_type="log_meal",
+        payload={"food_name": "saçma porsiyon", "calories": 9999,
+                 "protein": 500, "carbs": 400, "fat": 300}))
+    db.session.commit()
+
+    result = json.loads(ai_coach._tool_confirm_and_commit_meal_log(auth_user.id))
+    assert result["status"] == "committed"
+
+    entry = MealLog.query.filter_by(user_id=auth_user.id).one()
+    assert entry.kalori <= np.MAX_SERVING_KCAL          # 9999 → 3000'e kısıldı
+    assert entry.kalori < 9999
+    assert entry.protein <= np.MAX_SERVING_MACRO_G
+    assert entry.yag <= np.MAX_SERVING_FAT_G
+
+
 def test_today_totals_count_meals_from_any_source(auth_user):
     # Faz B unification: diyari ve koç AYNI deftere (MealLog) yazar; koçun
     # 'bugün tüketilen / kalan bütçe' hesabı her iki giriş yolunu da görür.
@@ -175,12 +196,23 @@ def test_stage_workout_defaults_and_commit(auth_user):
     assert result["status"] == "no_pending"
 
 
-def test_cancel_removes_all_pending(auth_user, monkeypatch):
+def test_cancel_removes_only_latest_pending(auth_user, monkeypatch):
+    # Tek 'iptal' hem staged meal'i hem staged workout'u BİRDEN silmemeli (#11):
+    # yalnızca en son stage edilen kaydı hedefler.
     _stage_meal(monkeypatch, auth_user)
-    ai_coach._tool_stage_workout_log(auth_user.id, "Squat", 3, 10, 60)
+    ai_coach._tool_stage_workout_log(auth_user.id, "Squat", 3, 10, 60)  # en yeni
     result = json.loads(ai_coach._tool_cancel_pending_log(auth_user.id))
-    assert result == {"status": "cancelled", "removed": 2}
-    assert PendingAction.query.count() == 0
+    assert result["status"] == "cancelled"
+    assert result["removed"] == 1
+    assert result["cancelled_type"] == "log_workout"
+    remaining = PendingAction.query.filter_by(user_id=auth_user.id).all()
+    assert len(remaining) == 1
+    assert remaining[0].action_type == "log_meal"   # meal hâlâ bekliyor
+
+
+def test_cancel_without_pending_is_safe(auth_user):
+    result = json.loads(ai_coach._tool_cancel_pending_log(auth_user.id))
+    assert result == {"status": "cancelled", "removed": 0}
 
 
 def test_dispatch_routes_and_rejects_unknown(auth_user, monkeypatch):

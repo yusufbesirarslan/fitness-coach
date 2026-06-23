@@ -54,7 +54,15 @@ def consume_referral(new_user, code):
     if not referrer or referrer.id == new_user.id:
         return None
 
-    new_user.referred_by_id = referrer.id
+    # Atomik sahiplen: aynı yeni kullanıcı için iki eşzamanlı çağrı (gövde `ref` +
+    # cookie `fitx_ref`, ya da yeniden gönderilen POST) ikisi de referred_by_id IS
+    # NULL görüp çift REFERRAL_REWARD_XP verebilir. Koşullu UPDATE yalnızca BİRİNE 1
+    # satır verir; diğeri 0 alır ve ödülsüz döner (friend_accept ile aynı desen).
+    claimed = User.query.filter_by(id=new_user.id, referred_by_id=None)\
+        .update({"referred_by_id": referrer.id}, synchronize_session=False)
+    if not claimed:
+        db.session.rollback()
+        return None
     award_xp(referrer.id, REFERRAL_REWARD_XP)
     award_xp(new_user.id, REFERRAL_REWARD_XP)
     log_activity(referrer.id, "new_friend",

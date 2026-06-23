@@ -85,6 +85,17 @@ def _get_client():
     return _client
 
 
+def _key_belongs_to(key, user_id):
+    """Anahtarın sahibinin `user_id` olup olmadığını SEGMENT eşitliğiyle doğrula.
+
+    Anahtar düzeni: ``<prefix>/<user_id>/<YYYY>/<MM>/<uuid>.<ext>`` (bkz _build_key)
+    → sahip 2. segment (index 1). Eski substring kontrolü (``/<id>/ in key``) bir
+    id'nin BAŞKA bir segmentte (örn. fazladan bir yol parçası) geçtiği anahtarı
+    yanlışlıkla kabul edebiliyordu; segment eşitliği bu kırılganlığı kapatır (#10)."""
+    parts = (key or "").split("/")
+    return len(parts) >= 2 and parts[1] == str(user_id)
+
+
 def _build_key(prefix, content_type, user_id):
     """Çakışmayı önlemek için global benzersiz bir nesne anahtarı üret:
     <prefix>/<user_id>/<YYYY>/<MM>/<uuid4hex>.<ext>"""
@@ -128,7 +139,7 @@ def get_object_bytes(key, expected_user_id=None):
     yapılmaz. LLM'in sağladığı anahtarlarda IDOR sınırı (savunma derinliği)."""
     if not key:
         raise S3Error("Nesne anahtarı boş.")
-    if expected_user_id is not None and f"/{expected_user_id}/" not in key:
+    if expected_user_id is not None and not _key_belongs_to(key, expected_user_id):
         logger.warning("[S3] İndirme reddedildi: anahtar (%s) kullanıcı %s ile eşleşmiyor.",
                        key, expected_user_id)
         raise S3Error("Sahiplik doğrulaması başarısız.")
@@ -150,7 +161,7 @@ def generate_presigned_url(key, expires_in=3600, expected_user_id=None):
     Sahiplik sınırında savunma derinliği (S5)."""
     if not key:
         return None
-    if expected_user_id is not None and f"/{expected_user_id}/" not in key:
+    if expected_user_id is not None and not _key_belongs_to(key, expected_user_id):
         logger.warning("[S3] Pre-signed URL reddedildi: anahtar (%s) kullanıcı %s ile eşleşmiyor.",
                        key, expected_user_id)
         return None
