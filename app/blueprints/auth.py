@@ -5,6 +5,7 @@ from flask import (Blueprint, abort, current_app, jsonify, redirect,
                    render_template, request, session, url_for)
 from flask_login import login_required, login_user, logout_user
 from flask_limiter.util import get_remote_address
+from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.config import COGNITO_ENABLED, COGNITO_HOSTED_DOMAIN, COGNITO_APP_CLIENT_ID
@@ -114,7 +115,23 @@ def register():
         user.password_hash = generate_password_hash(secrets.token_urlsafe(32))
         ensure_referral_code(user)
         db.session.add(user)
-        db.session.commit()
+        try:
+            db.session.commit()
+        except Exception as e:
+            # Cognito kullanıcı OLUŞTU ama yerel kayıt başarısız → Cognito ORPHAN
+            # (Cognito'da hesap var, yerelde yok). UNSIGNED public client admin-delete
+            # yapamaz; ops temizliği/retry için AÇIKÇA logla — 500 ile sessizce yutma.
+            # Retry: aynı kullanıcı adıyla yeniden kayıt Cognito'dan UsernameExists
+            # alır; kullanıcı doğrulama+giriş yapınca get_or_create_user yerel kaydı
+            # bağlar (cognito_sub eşleşmesiyle), yani kullanıcı kilitlenmez.
+            db.session.rollback()
+            current_app.logger.error(
+                "[REGISTER] Cognito sign_up başarılı ama yerel commit başarısız "
+                "(username=%s) — Cognito orphan olası, manuel temizlik/retry gerekir: %s",
+                username, type(e).__name__)
+            if isinstance(e, IntegrityError):
+                return jsonify({"error": "Bu kullanıcı adı veya e-posta zaten kullanımda."}), 409
+            return jsonify({"error": "Kayıt tamamlanamadı, lütfen tekrar deneyin."}), 503
         referred = bool(consume_referral(user, ref_code))
         resp = jsonify({"message": "Hesabın oluşturuldu! E-postana gönderilen "
                                    "doğrulama kodunu gir.",
