@@ -314,6 +314,10 @@ def respond_suggestion(msg_id):
     if action == "accept" and nutrients:
         resp["nutrients"] = nutrients
         resp["message"] = f"Kabul edildi! {int(nutrients['kalori'])} kcal eklendi"
+    elif action == "accept" and "meal" in msg.message_type and nutrients is None:
+        # Öneri kabul edildi ama makrolar hesaplanamadı → öğün GÜNLÜĞE EKLENMEDI
+        # (sıfır-makro satırı yazılmaz). Kullanıcıya sessiz başarı yerine durumu bildir.
+        resp["message"] = "Kabul edildi, ancak besin değerleri hesaplanamadı — öğün günlüğe eklenmedi."
     return jsonify(resp)
 
 
@@ -325,13 +329,12 @@ def _process_meal_suggestion_accept(msg):
 
     items = _parse_suggestion_items(msg.body)
     if not items:
-        current_app.logger.warning(f"[SUGGESTION] Could not parse items from: {msg.body[:100]}")
-        entry = MealLog(
-            user_id=current_user.id, ogun=ogun_title,
-            yemekler=msg.body[:200], kalori=0, protein=0, karb=0, yag=0,
-            tarih=day_key()
-        )
-        db.session.add(entry)
+        # Gövde öğelere ayrıştırılamadı: kanonik MealLog defterine SIFIR-makro satırı
+        # YAZMA — kalıcı sıfır satırı günlük toplamları, protein nudge'ını ve haftalık
+        # raporları sessizce bozar (meallog.py'deki aynı koruma). Yalnızca metadata logla.
+        current_app.logger.warning(
+            "[SUGGESTION] Öneri gövdesi ayrıştırılamadı (msg=%s, len=%s) — öğün loglanmadı.",
+            msg.id, len(msg.body or ""))
         return None
 
     total = {"calories": 0, "protein": 0, "carbs": 0, "fat": 0}
@@ -346,7 +349,7 @@ def _process_meal_suggestion_accept(msg):
                 per_serving, per_100g_items = _lookup_macros_fatsecret(uncached, token)
                 macro_map.update(per_serving)
             except Exception as e:
-                current_app.logger.warning(f"[SUGGESTION] FatSecret failed, using LLM fallback: {e}")
+                current_app.logger.warning("[SUGGESTION] FatSecret başarısız, LLM yedeğine düşülüyor: %s", type(e).__name__)
 
             if per_100g_items:
                 weights = _estimate_serving_weights_llm(list(per_100g_items.keys()))
@@ -374,7 +377,7 @@ def _process_meal_suggestion_accept(msg):
             total["fat"] += m.get("fat", 0)
 
     except Exception as e:
-        current_app.logger.warning(f"[SUGGESTION] Macro lookup pipeline failed: {type(e).__name__}: {e}")
+        current_app.logger.warning("[SUGGESTION] Makro hattı hatası: %s", type(e).__name__)
         try:
             llm_macros = _estimate_macros_llm(items)
             for item in items:
@@ -386,6 +389,14 @@ def _process_meal_suggestion_accept(msg):
         except Exception:
             pass
 
+    # Parse/lookup/LLM hepsi başarısız olup toplam tümüyle sıfır kaldıysa kanonik
+    # deftere SIFIR-makro satırı YAZMA (yukarıdaki ayrıştırma-hatası ile aynı gerekçe).
+    if total["calories"] <= 0 and total["protein"] <= 0 and total["carbs"] <= 0 and total["fat"] <= 0:
+        current_app.logger.warning(
+            "[SUGGESTION] Makrolar hesaplanamadı (msg=%s, %s öğe) — öğün loglanmadı.",
+            msg.id, len(items))
+        return None
+
     entry = MealLog(
         user_id=current_user.id, ogun=ogun_title,
         yemekler=", ".join(items),
@@ -396,5 +407,5 @@ def _process_meal_suggestion_accept(msg):
         tarih=day_key()
     )
     db.session.add(entry)
-    current_app.logger.info(f"[SUGGESTION] Logged meal: {ogun_title} → {total['calories']:.0f} kcal")
+    current_app.logger.info("[SUGGESTION] Öğün loglandı (msg=%s) → %.0f kcal", msg.id, total["calories"])
     return {"kalori": entry.kalori, "protein": entry.protein, "karb": entry.karb, "yag": entry.yag}
