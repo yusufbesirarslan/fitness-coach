@@ -73,6 +73,38 @@ def test_diary_create_meal_upserts(client, auth_user):
     assert again == {"meal_id": first["meal_id"], "exists": True}
 
 
+def test_diary_create_meal_race_returns_existing(client, auth_user, monkeypatch):
+    """İki eşzamanlı POST aynı (user, meal_name, date_key) için existence-check'i
+    aşıp ikisi de INSERT denerse, ikincisi uq_custom_meal_day'i ihlal eder. Bu
+    IntegrityError 500 yerine yakalanmalı: rollback + re-query → mevcut satır."""
+    from app.blueprints.nutrition import diary as diary_mod
+
+    first = client.post("/api/diary/meal", json={"meal_name": "Akşam"}).get_json()
+    assert first["exists"] is False
+
+    # Yarışı simüle et: bir sonraki istekte ilk existence-check None görsün (sanki
+    # eşzamanlı istek henüz commit etmedi); INSERT ise uq ihlaliyle patlasın.
+    real_query = diary_mod.CustomMeal.query
+    state = {"first_check": True}
+
+    class _RaceQuery:
+        def filter_by(self, **kw):
+            real = real_query.filter_by(**kw)
+            if state["first_check"]:
+                state["first_check"] = False
+                class _Miss:
+                    def first(self_inner):
+                        return None
+                return _Miss()
+            return real
+
+    monkeypatch.setattr(diary_mod.CustomMeal, "query", _RaceQuery())
+
+    resp = client.post("/api/diary/meal", json={"meal_name": "Akşam"})
+    assert resp.status_code == 200
+    assert resp.get_json() == {"meal_id": first["meal_id"], "exists": True}
+
+
 @pytest.fixture
 def meal_id(client, auth_user):
     return client.post("/api/diary/meal", json={"meal_name": "Öğle"}).get_json()["meal_id"]

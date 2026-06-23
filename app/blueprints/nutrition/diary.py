@@ -7,6 +7,7 @@ ve davranış AYNI (aynı `nutrition` blueprint'i, aynı endpoint adları). Orta
 import json
 from flask import current_app, jsonify, request
 from flask_login import current_user, login_required
+from sqlalchemy.exc import IntegrityError
 
 from app.blueprints.nutrition import bp
 from app.extensions import db
@@ -131,7 +132,19 @@ def diary_create_meal():
 
     meal = CustomMeal(user_id=current_user.id, meal_name=meal_name, date_key=date_key)
     db.session.add(meal)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Yarış: eşzamanlı iki POST da existence-check'i aştı; uq_custom_meal_day
+        # ikinci INSERT'i reddetti. 500 yerine rollback + re-query → mevcut satırı
+        # döndür (set_water / log_daily_activity ile aynı desen).
+        db.session.rollback()
+        existing = CustomMeal.query.filter_by(
+            user_id=current_user.id, meal_name=meal_name, date_key=date_key
+        ).first()
+        if existing:
+            return jsonify({"meal_id": existing.id, "exists": True})
+        raise
     return jsonify({"meal_id": meal.id, "exists": False})
 
 
