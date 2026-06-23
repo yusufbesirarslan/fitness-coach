@@ -28,9 +28,15 @@ def test_init_database_seeds_quests_and_stamps_alembic(boot_app):
     from app.extensions import db
     from app.models import DailyQuest
 
-    quest_types = {q.quest_type for q in DailyQuest.query.all()}
+    quests = DailyQuest.query.all()
+    quest_types = {q.quest_type for q in quests}
     assert {"login", "workout_logged", "suggestion_sent", "supplement_added",
             "meal_logged"} <= quest_types
+
+    # meal_logged tek tanım (mükerrer 20/15 değil) — ödül deterministik olmalı.
+    meal_quests = [q for q in quests if q.quest_type == "meal_logged"]
+    assert len(meal_quests) == 1
+    assert meal_quests[0].points_reward == 20
 
     # Taze DB boot'ta Alembic zincirine damgalanır (manuel stamp gerekmez).
     assert inspect(db.engine).has_table("alembic_version")
