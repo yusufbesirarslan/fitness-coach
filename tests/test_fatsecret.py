@@ -246,6 +246,43 @@ def test_food_search_filters_implausible_and_sorts_generic_first(monkeypatch):
     assert results[0]["per_100g"] is not results[0]["macros"]  # önbellek referans paylaşımı yok
 
 
+def _per_serving_payload(name="Karışık Izgara", fid="9"):
+    return {"foods": {"food": [
+        {"food_name": name, "food_id": fid, "food_type": "Generic",
+         "food_description": "Per 1 serving - Calories: 500kcal | Fat: 20g | Carbs: 40g | Protein: 30g"},
+    ]}}
+
+
+def test_food_search_skips_caching_low_confidence_fallback_weight(app, monkeypatch):
+    # Per-serving girdi + servis ağırlığı LLM tahmini DEĞİL fallback ise (#13):
+    # ~2.3× şişebilen per-100g değeri ÖNBELLEĞE YAZILMAMALI (gelecekteki aramaları
+    # zehirlememeli). Sonuç yine de bu istek için döner.
+    foodcache._macro_cache["per_100g"].clear()
+    monkeypatch.setattr(fatsecret, "_get_fatsecret_token", lambda: "tok")
+    monkeypatch.setattr(fatsecret, "_fs_get", lambda url, **kw: _Resp(_per_serving_payload()))
+    # Ağırlık LLM'i fallback'e düşsün (gerçek tahmin yok) → düşük güvenli.
+    monkeypatch.setattr(fatsecret, "_estimate_serving_weights_llm",
+                        lambda items, return_fallbacks=False: ({items[0]: 150.0}, set(items)))
+
+    results = fatsecret._food_search_fatsecret("karışık ızgara")
+    assert results and results[0]["name"] == "Karışık Izgara"     # istek için yine döner
+    assert "Karışık Izgara" not in foodcache._macro_cache["per_100g"]  # önbelleğe yazılmadı
+
+
+def test_food_search_caches_when_weight_is_real_estimate(app, monkeypatch):
+    # Kontrast: servis ağırlığı gerçek LLM tahmini (fallback değil) ise per-100g
+    # değeri normal şekilde önbelleğe yazılır.
+    foodcache._macro_cache["per_100g"].clear()
+    monkeypatch.setattr(fatsecret, "_get_fatsecret_token", lambda: "tok")
+    monkeypatch.setattr(fatsecret, "_fs_get", lambda url, **kw: _Resp(_per_serving_payload()))
+    monkeypatch.setattr(fatsecret, "_estimate_serving_weights_llm",
+                        lambda items, return_fallbacks=False: ({items[0]: 350.0}, set()))  # boş fallback
+
+    results = fatsecret._food_search_fatsecret("karışık ızgara")
+    assert results and results[0]["name"] == "Karışık Izgara"
+    assert "Karışık Izgara" in foodcache._macro_cache["per_100g"]   # güvenilir → önbellekte
+
+
 def test_food_search_error_payload_returns_none(monkeypatch):
     monkeypatch.setattr(fatsecret, "_get_fatsecret_token", lambda: "tok")
     monkeypatch.setattr(fatsecret, "_fs_get",

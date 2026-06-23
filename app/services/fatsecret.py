@@ -269,19 +269,21 @@ def _food_search_fatsecret(q):
         # _macro_cache'e konursa, ileride biri yerinde (in-place) degistirdiginde
         # onbellek ve diger besinler bozulur (todos.txt §1 — referans paylasimi).
         per_100g = dict(macros)
+        low_confidence = False
         if is_serving:
             food_name = f.get("food_name", q)
             est, fb = _estimate_serving_weights_llm([food_name], return_fallbacks=True)
             weight_g = est.get(food_name, 150.0)
             # Ağırlık gerçek bir LLM tahmini değil de fallback (örn. 150g varsayılan)
             # ise, per-serving → per-100g ölçekleme sistematik olarak yanlış olur
-            # (gerçek porsiyon 350g iken ~2.3× şişer). Düşük güvenli boyutlandırmayı
-            # logla; ölçekleme yine de yapılır ama check_serving deterministik
-            # sağlık kontrolü absürt sonuçları eler (TRIAGE_FIXES #4).
-            if food_name in fb:
+            # (gerçek porsiyon 350g iken ~2.3× şişer). Bu istek için best-effort
+            # ölçeklenir ama aşağıda ÖNBELLEĞE YAZILMAZ (düşük güvenli baseline kalıcı
+            # olmasın); check_serving yine de imkânsız sonuçları eler (TRIAGE_FIXES #4).
+            low_confidence = food_name in fb
+            if low_confidence:
                 current_app.logger.warning(
                     "[FATSECRET] '%s' per-serving makrosu fallback ağırlık (%.0fg) ile "
-                    "per-100g'ye ölçekleniyor — düşük güvenli, hatalı olabilir.",
+                    "per-100g'ye ölçekleniyor — düşük güvenli, önbelleğe yazılmayacak.",
                     food_name, weight_g,
                 )
             if weight_g and weight_g > 0:
@@ -307,7 +309,12 @@ def _food_search_fatsecret(q):
 
         name = f.get("food_name", "")
         fid = f.get("food_id", "")
-        _cache_macros({name: per_100g}, basis="per_100g")
+        # Düşük güvenli (fallback ağırlıkla ölçeklenmiş) per-100g değerini ÖNBELLEĞE
+        # YAZMA — gerçek porsiyon bilinmediğinden ~2.3× şişebilir ve kalıcı yanlış bir
+        # baseline olarak gelecekteki tüm aramaları zehirler (#13). Bu istek için yine
+        # döndürülür; sonraki aramada belki daha iyi bir ağırlık tahminiyle çözülür.
+        if not low_confidence:
+            _cache_macros({name: per_100g}, basis="per_100g")
         if fid:
             _cache_food_id(name, fid)
         results.append({
