@@ -153,6 +153,12 @@ def test_activity_log_validation(client, complete_user):
                        json={"steps": 100, "intensity": "turbo"}).status_code == 400
     assert client.post("/api/activity/log",
                        json={"steps": 0, "intensity": "moderate"}).status_code == 400
+    # Sayısal olmayan/boş steps 500 ValueError fırlatmamalı → _to_int ile 0'a düşer
+    # ve "pozitif olmalı" 400 guard'ına yakalanır.
+    assert client.post("/api/activity/log",
+                       json={"steps": "abc", "intensity": "moderate"}).status_code == 400
+    assert client.post("/api/activity/log",
+                       json={"steps": "", "intensity": "moderate"}).status_code == 400
 
 
 def test_activity_log_and_today_aggregation(client, complete_user):
