@@ -196,12 +196,23 @@ def test_stage_workout_defaults_and_commit(auth_user):
     assert result["status"] == "no_pending"
 
 
-def test_cancel_removes_all_pending(auth_user, monkeypatch):
+def test_cancel_removes_only_latest_pending(auth_user, monkeypatch):
+    # Tek 'iptal' hem staged meal'i hem staged workout'u BİRDEN silmemeli (#11):
+    # yalnızca en son stage edilen kaydı hedefler.
     _stage_meal(monkeypatch, auth_user)
-    ai_coach._tool_stage_workout_log(auth_user.id, "Squat", 3, 10, 60)
+    ai_coach._tool_stage_workout_log(auth_user.id, "Squat", 3, 10, 60)  # en yeni
     result = json.loads(ai_coach._tool_cancel_pending_log(auth_user.id))
-    assert result == {"status": "cancelled", "removed": 2}
-    assert PendingAction.query.count() == 0
+    assert result["status"] == "cancelled"
+    assert result["removed"] == 1
+    assert result["cancelled_type"] == "log_workout"
+    remaining = PendingAction.query.filter_by(user_id=auth_user.id).all()
+    assert len(remaining) == 1
+    assert remaining[0].action_type == "log_meal"   # meal hâlâ bekliyor
+
+
+def test_cancel_without_pending_is_safe(auth_user):
+    result = json.loads(ai_coach._tool_cancel_pending_log(auth_user.id))
+    assert result == {"status": "cancelled", "removed": 0}
 
 
 def test_dispatch_routes_and_rejects_unknown(auth_user, monkeypatch):

@@ -568,10 +568,22 @@ def _tool_confirm_and_commit_workout_log(user_id):
 
 
 def _tool_cancel_pending_log(user_id):
-    """TOOL: Kullanıcı reddederse tüm bekleyen staged kayıtları sil."""
-    removed = PendingAction.query.filter_by(user_id=user_id).delete()
+    """TOOL: Kullanıcı reddederse SON stage edilen kaydı sil (meal VEYA workout).
+
+    Tüm bekleyenleri silmek yerine en yenisini hedefler — tek bir 'iptal' hem
+    staged meal'i hem staged workout'u birden silmesin (#11). Kullanıcı genelde
+    en son sunulan kaydı reddeder; o da en yeni olandır."""
+    pending = (PendingAction.query
+               .filter_by(user_id=user_id)
+               .order_by(PendingAction.created_at.desc(), PendingAction.id.desc())
+               .first())
+    if not pending:
+        return json.dumps({"status": "cancelled", "removed": 0}, ensure_ascii=False)
+    cancelled_type = pending.action_type
+    removed = PendingAction.query.filter_by(id=pending.id).delete()
     db.session.commit()
-    return json.dumps({"status": "cancelled", "removed": removed}, ensure_ascii=False)
+    return json.dumps({"status": "cancelled", "removed": removed,
+                       "cancelled_type": cancelled_type}, ensure_ascii=False)
 
 
 # ── manage_user_memory ───────────────────────────────────────────────────────
