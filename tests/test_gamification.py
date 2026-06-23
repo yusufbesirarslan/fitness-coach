@@ -68,6 +68,25 @@ def test_award_xp_unknown_user_returns_none(app):
     assert award_xp(999_999, 10) is None
 
 
+def test_award_xp_emits_level_up_on_boundary_cross(make_user):
+    # 500-puan seviye sınırı geçilince feed'e level_up aktivitesi düşmeli (#14).
+    from app.models import Activity
+    user = make_user("levelci", rank_points=480)  # level 1
+    award_xp(user.id, 50)                          # 530 → level 2
+    db.session.commit()
+    acts = Activity.query.filter_by(user_id=user.id, activity_type="level_up").all()
+    assert len(acts) == 1
+    assert "2" in acts[0].content                  # 2. seviye
+
+
+def test_award_xp_no_level_up_within_same_level(make_user):
+    from app.models import Activity
+    user = make_user("ayni", rank_points=100)      # level 1
+    award_xp(user.id, 50)                          # 150 → hâlâ level 1
+    db.session.commit()
+    assert Activity.query.filter_by(user_id=user.id, activity_type="level_up").count() == 0
+
+
 # ---------------------------------------------------------------------------
 # Günlük görevler — günde bir kez, bilinmeyen tip sessizce None.
 # ---------------------------------------------------------------------------

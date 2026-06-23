@@ -77,10 +77,18 @@ def _drop_lb_dirty(session, *args):
 def award_xp(user_id, amount):
     user = db.session.get(User, user_id)
     if user:
-        user.rank_points = (user.rank_points or 0) + amount
+        old_points = user.rank_points or 0
+        new_points = old_points + amount
+        user.rank_points = new_points
         user.weekly_xp = (user.weekly_xp or 0) + amount
         _mark_lb_dirty(user_id)  # Redis sync commit BAŞARILI olduktan sonra (after_commit)
-        return user.rank_points
+        # 500-puan seviye sınırı geçildiyse feed'e level_up aktivitesi düş. Daha önce
+        # hiç üretilmiyordu — ACTIVITY_ICONS["level_up"] tanımlıydı ama ölü config'di (#14).
+        new_level = get_level(new_points)
+        if new_level > get_level(old_points):
+            log_activity(user_id, "level_up",
+                         f"{new_level}. seviyeye ulaştı! ({get_title(new_level)})")
+        return new_points
     return None
 
 
