@@ -144,12 +144,35 @@ def ratelimit_exceeded(e):
     return jsonify({"error": "Çok fazla deneme yaptınız. Lütfen biraz sonra tekrar deneyin."}), 429
 
 
-def maybe_weekly_rollover():
-    now = datetime.utcnow()
+def _rollover_throttle_passed(now):
+    """5-dk rollover-kontrol throttle'ı — bu istek kontrolü çalıştırmalı mı?
+
+    Redis varsa FLEET-GENELİ: tüm gunicorn worker'ları tek bir Redis anahtarını
+    (NX+EX 300s) paylaşır → 5 dk'da yalnızca BİR worker rollover kontrolünü çalıştırır.
+    Redis yoksa/erişilemezse süreç-içi `_last_rollover_check`'e düşer (eski tek-worker
+    davranışı). Throttle yalnızca bir SIKLIK optimizasyonudur — rollover'ın kendisi
+    WeeklyResetLog UNIQUE kısıtıyla zaten idempotent; throttle birkaç worker'da birden
+    geçse bile çift ödül OLMAZ. Bu sayede worker sayısı güvenle >1'e çıkarılabilir (#17)."""
+    from app.extensions import redis_client
+    if redis_client is not None:
+        try:
+            # NX: anahtar yoksa kur (True) → bu worker kontrol etsin. Varsa (son 5 dk'da
+            # biri kontrol etmiş) None → atla. EX 300: pencere 5 dk sonra kendini siler.
+            return bool(redis_client.set("fitx:rollover_check", "1", nx=True, ex=300))
+        except Exception:
+            pass  # Redis erişilemiyor → süreç-içi yedeğe düş
+
     last = _last_rollover_check[0]
     if last is not None and (now - last).total_seconds() < 300:
-        return
+        return False
     _last_rollover_check[0] = now
+    return True
+
+
+def maybe_weekly_rollover():
+    now = datetime.utcnow()
+    if not _rollover_throttle_passed(now):
+        return
     try:
         run_weekly_rollover(now)
     except Exception:

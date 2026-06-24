@@ -1,0 +1,85 @@
+name: CI
+
+# Test paketi + şema-drift guard'ı. Deploy (deploy.yml) yalnızca main'e push'ta
+# çalışır; bu workflow PR'larda ve main'de testleri ve migration tutarlılığını
+# doğrular (TRIAGE #16).
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  tests:
+    name: pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"   # Dockerfile ile aynı taban
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run tests
+        # conftest.py tüm env'i hermetik kurar (in-memory SQLite, sahte anahtarlar,
+        # REDIS_URL boş) → ek servise gerek yok.
+        run: python -m pytest -q
+
+  migration-drift:
+    name: schema-drift guard
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: fitx_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # FITX_SKIP_DB_INIT=1 → boot'taki create_all + ham ALTER'lar atlanır; şema
+      # YALNIZCA Alembic zincirinden gelir. Böylece "modeller migration head'iyle
+      # uyuşuyor mu?" sorusu anlamlı olur (create_all şemayı modellerden kursa
+      # kontrol her zaman yeşil olurdu — anlamsız).
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/fitx_ci
+      SECRET_KEY: ci-secret-not-used
+      OPENAI_API_KEY: ci-key-not-used
+      FATSECRET_BASE_URL: https://fatsecret.invalid
+      REDIS_URL: ""
+      BEDROCK_ENABLED: "0"
+      S3_BUCKET_NAME: ""
+      COGNITO_USER_POOL_ID: ""
+      COGNITO_APP_CLIENT_ID: ""
+      FITX_SKIP_DB_INIT: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Apply Alembic migration chain
+        run: flask --app starter db upgrade
+      - name: Check models match migration head
+        # `flask db check`, modellerle (app/models.py) migration head'i arasında bir
+        # autogenerate farkı varsa sıfır-olmayan kodla döner → bir model değişikliği
+        # migration'a yansıtılmamış demektir (CLAUDE.md şema-değişikliği akışının
+        # gözden kaçırdığı durum).
+        #
+        # ⚠️ continue-on-error: BUGÜN bloklamaz, yalnızca RAPORLAR. Proje şeması hâlâ
+        # create_all + ham ALTER + Alembic karışımı (TRIAGE #16/db_init.py); mevcut
+        # drift bu adımı kırmızı gösterebilir. Drift sıfırlanıp ham ALTER'lar düzgün
+        # migration'lara taşındığında bu satırı SİL → guard bloklayıcı olur.
+        continue-on-error: true
+        run: flask --app starter db check

@@ -200,3 +200,54 @@ def test_streak_non_milestone_awards_nothing(client, make_user, login):
 def test_unknown_path_renders_404(client):
     response = client.get("/boyle-bir-sayfa-yok")
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Haftalık rollover throttle — Redis varsa fleet-geneli, yoksa süreç-içi (#17).
+# ---------------------------------------------------------------------------
+
+class _ThrottleRedis:
+    """NX+EX SET semantiği taşıyan minimal sahte Redis (throttle testleri için)."""
+    def __init__(self, fail=False):
+        self.store = {}
+        self.fail = fail
+
+    def set(self, key, val, nx=False, ex=None):
+        if self.fail:
+            raise RuntimeError("redis down")
+        if nx and key in self.store:
+            return None
+        self.store[key] = val
+        return True
+
+
+def test_rollover_throttle_redis_shared_across_workers(monkeypatch):
+    # Redis varsa throttle FLEET-GENELİ: iki ayrı çağrı (iki worker'ı temsil eder)
+    # aynı NX anahtarını paylaşır → yalnızca biri kontrol çalıştırır.
+    from app import hooks
+    from datetime import datetime
+    monkeypatch.setattr("app.extensions.redis_client", _ThrottleRedis())
+    now = datetime.utcnow()
+    assert hooks._rollover_throttle_passed(now) is True
+    assert hooks._rollover_throttle_passed(now) is False
+
+
+def test_rollover_throttle_falls_back_to_in_memory_when_no_redis(monkeypatch):
+    from app import hooks
+    from app.services import gamification
+    from datetime import datetime
+    monkeypatch.setattr("app.extensions.redis_client", None)
+    gamification._last_rollover_check[0] = None
+    now = datetime.utcnow()
+    assert hooks._rollover_throttle_passed(now) is True    # ilk: kontrol et
+    assert hooks._rollover_throttle_passed(now) is False   # 5 dk içinde: atla
+
+
+def test_rollover_throttle_redis_error_falls_back_to_in_memory(monkeypatch):
+    from app import hooks
+    from app.services import gamification
+    from datetime import datetime
+    monkeypatch.setattr("app.extensions.redis_client", _ThrottleRedis(fail=True))
+    gamification._last_rollover_check[0] = None
+    now = datetime.utcnow()
+    assert hooks._rollover_throttle_passed(now) is True    # Redis patladı → süreç-içi yedek
