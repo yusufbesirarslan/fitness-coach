@@ -1,9 +1,10 @@
 """user FK'lerine ON DELETE CASCADE/SET NULL, UserSession index, MealLog CHECK,
 referral_code -> VARCHAR(16)
 
-Bu migration YALNIZCA mevcut (alembic_version'lı) Postgres DB'leri içindir; taze
-DB'ler şemayı zaten güncel modellerden (db.create_all) alır ve bu revizyon stamp
-ile "uygulanmış" işaretlenir. SQLite (test) ortamında no-op'tur.
+Prod'da bu migration mevcut (alembic_version'lı) Postgres DB'leri üzerinde çalışır;
+taze DB'ler şemayı güncel modellerden (db.create_all) alır. Tüm adımlar idempotent
+yazıldığından zincir taze bir Postgres DB'sinde de baştan oynatılabilir (CI
+şema-drift guard, FITX_SKIP_DB_INIT=1). SQLite (test) ortamında no-op'tur.
 
 Revision ID: a1b2c3d4e5f6
 Revises: 9be792c80008
@@ -82,6 +83,19 @@ def upgrade():
         # SQLite/diğer: taze şema create_all'dan zaten ondelete ile gelir; no-op.
         return
 
+    # 0) referral_code / referred_by_id sütunlarını idempotent oluştur. Bu sütunlar
+    #    yalnızca modellerde (db.create_all) tanımlıydı; HİÇBİR migration onları
+    #    yaratmıyordu. Salt-migration zincirinde (CI şema-drift guard,
+    #    FITX_SKIP_DB_INIT=1) bu yüzden aşağıdaki ALTER (referral_code) ve FK
+    #    yeniden-kurulumu (referred_by_id) "column does not exist" ile patlıyordu.
+    #    Mevcut prod DB'lerinde sütunlar create_all'dan zaten var → IF NOT EXISTS no-op.
+    op.execute('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS referral_code VARCHAR(16)')
+    op.execute('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS referred_by_id INTEGER')
+    op.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS uq_user_referral_code '
+        'ON "user" (referral_code)'
+    )
+
     # 1) referral_code'u 16 karaktere genişlet (yüksek-entropi davet kodları).
     op.execute('ALTER TABLE "user" ALTER COLUMN referral_code TYPE VARCHAR(16)')
 
@@ -131,4 +145,5 @@ def downgrade():
         )
 
     op.execute('DROP INDEX IF EXISTS ix_user_session_user_id')
+    op.execute('DROP INDEX IF EXISTS uq_user_referral_code')
     op.execute('ALTER TABLE "user" ALTER COLUMN referral_code TYPE VARCHAR(12)')
