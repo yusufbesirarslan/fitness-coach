@@ -62,12 +62,14 @@ def supplement_add():
         price_paid=_to_float(data["price_paid"], None) if data.get("price_paid") else None,
         is_public=data.get("is_public", True),
     )
+    # İlk supplement bonusu deterministik olmalı: count'u add'DEN ÖNCE al. Eskiden
+    # count add'den sonraydı; autoflush pending satırı da sayınca first_entry yanlış
+    # False oluyor, bonus yalnızca post-commit `count()==1` şansına kalıyordu (D2/B4).
+    prior_count = Supplement.query.filter_by(user_id=current_user.id).count()
     db.session.add(supp)
-
-    first_entry = Supplement.query.filter_by(user_id=current_user.id).count() == 0
     db.session.commit()
 
-    if first_entry or Supplement.query.filter_by(user_id=current_user.id).count() == 1:
+    if prior_count == 0:
         award_xp(current_user.id, 25)
         db.session.commit()
 
