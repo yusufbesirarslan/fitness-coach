@@ -2,7 +2,7 @@
 <html lang="tr" data-theme="dark">
 <head>
     {% include "_head.html" %}
-    <title>Profil Düzenle — FitX</title>
+    <title>Profil Düzenle — AxisAI</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <style nonce="{{ csp_nonce }}">
@@ -14,8 +14,8 @@
         width: 96px; height: 96px; border-radius: 50%; flex-shrink: 0;
         display: flex; align-items: center; justify-content: center;
         font-family: 'Bebas Neue', sans-serif; font-size: 40px; letter-spacing: 2px;
-        color: #121212; background: linear-gradient(135deg, #CCFF00, #A8D400);
-        overflow: hidden; border: 3px solid rgba(204,255,0,0.3);
+        color: #121212; background: linear-gradient(135deg, #3D8BFF, #1E6FE0);
+        overflow: hidden; border: 3px solid rgba(61,139,255,0.3);
     }
     .avatar-lg img { width: 100%; height: 100%; object-fit: cover; }
     .avatar-lg { position: relative; cursor: pointer; }
@@ -64,7 +64,7 @@
     }
     .form-section::before {
         content: ''; position: absolute; top: 0; left: 0; right: 0;
-        height: 2px; background: linear-gradient(90deg, #CCFF00, transparent);
+        height: 2px; background: linear-gradient(90deg, #3D8BFF, transparent);
     }
     .form-section-title {
         font-family: 'Bebas Neue', sans-serif; font-size: 20px;
@@ -84,8 +84,8 @@
         box-sizing: border-box;
     }
     .form-field input:focus {
-        border-color: rgba(204,255,0,0.45);
-        box-shadow: 0 0 0 3px rgba(204,255,0,0.06);
+        border-color: rgba(61,139,255,0.45);
+        box-shadow: 0 0 0 3px rgba(61,139,255,0.06);
     }
     .form-field .field-hint { font-size: 12px; color: var(--text-3); margin-top: 4px; }
 
@@ -96,23 +96,23 @@
         border-radius: 12px; padding: 16px; cursor: pointer;
         text-align: center; transition: all 0.2s;
     }
-    .goal-card:hover { border-color: rgba(204,255,0,0.3); }
-    .goal-card.selected { border-color: #CCFF00; background: rgba(204,255,0,0.06); }
+    .goal-card:hover { border-color: rgba(61,139,255,0.3); }
+    .goal-card.selected { border-color: #3D8BFF; background: rgba(61,139,255,0.06); }
     .goal-card-icon { font-size: 28px; margin-bottom: 6px; }
     .goal-card-label {
         font-size: 13px; font-weight: 600; color: var(--text);
     }
-    .goal-card.selected .goal-card-label { color: #CCFF00; }
+    .goal-card.selected .goal-card-label { color: #3D8BFF; }
 
     /* ── save button ── */
     .save-btn {
         width: 100%; margin-top: 24px; padding: 14px;
         font-family: 'Bebas Neue', sans-serif; font-size: 18px;
-        letter-spacing: 3px; color: #121212; background: #CCFF00;
+        letter-spacing: 3px; color: #121212; background: #3D8BFF;
         border: none; border-radius: 10px; cursor: pointer;
         transition: background 0.2s, box-shadow 0.2s;
     }
-    .save-btn:hover { background: #A8D400; box-shadow: 0 0 20px rgba(204,255,0,0.15); }
+    .save-btn:hover { background: #1E6FE0; box-shadow: 0 0 20px rgba(61,139,255,0.15); }
     .save-btn:disabled { opacity: 0.5; cursor: default; }
 
     @media (max-width: 600px) {

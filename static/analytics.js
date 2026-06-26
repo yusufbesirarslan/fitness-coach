@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════
-   FITX — Funnel / aktivasyon olayları (Google Analytics)
+   AxisAI — Funnel / aktivasyon olayları (Google Analytics)
    gtag() _head.html'de tanımlanır; burada anlamlı olayları
    tek noktadan gönderir ve data-attribute'larla bağlarız.
    ═══════════════════════════════════════════════════════ */

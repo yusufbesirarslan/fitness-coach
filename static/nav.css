@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════
-   FITX — HYBRID NAVIGATION SYSTEM v3.0
+   AxisAI — HYBRID NAVIGATION SYSTEM v3.0
    Global Header · Sidebar Drawer · 4+1 Action Bar · QR Overlay
    ═══════════════════════════════════════════════════════ */
 
@@ -42,9 +42,15 @@
 }
 
 .header-brand {
+  display: inline-flex; align-items: center; gap: 9px;
   font-family: var(--font-display);
   font-size: 22px; letter-spacing: 4px; color: var(--volt);
   line-height: 1;
+}
+.brand-mark {
+  width: 28px; height: 28px; border-radius: 7px;
+  display: block; flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.45);
 }
 
 .header-spacer { flex: 1; }

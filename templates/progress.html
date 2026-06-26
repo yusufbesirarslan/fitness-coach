@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
     {% include "_head.html" %}
-    <title>İlerleme — FitX</title>
+    <title>İlerleme — AxisAI</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -33,7 +33,7 @@
             -webkit-appearance: none;
         }
         input:focus, select:focus, textarea:focus {
-            border-color: rgba(204,255,0,0.45); box-shadow: 0 0 0 3px rgba(204,255,0,0.07);
+            border-color: rgba(61,139,255,0.45); box-shadow: 0 0 0 3px rgba(61,139,255,0.07);
         }
         textarea { resize: vertical; min-height: 60px; }
 
@@ -69,11 +69,11 @@
             cursor: pointer; transition: all var(--t-fast); font-size: 13px; color: var(--text-2);
             user-select: none;
         }
-        .overload-chip:hover { border-color: rgba(204,255,0,0.35); }
-        .overload-chip.selected { background: var(--volt-dim); border-color: rgba(204,255,0,0.5); color: var(--volt); }
+        .overload-chip:hover { border-color: rgba(61,139,255,0.35); }
+        .overload-chip.selected { background: var(--volt-dim); border-color: rgba(61,139,255,0.5); color: var(--volt); }
 
         /* FEEDBACK */
-        .feedback-card { background: var(--volt-dim); border: 1px solid rgba(204,255,0,0.2); border-radius: var(--r-lg); padding: 20px; margin-top: 16px; display: none; }
+        .feedback-card { background: var(--volt-dim); border: 1px solid rgba(61,139,255,0.2); border-radius: var(--r-lg); padding: 20px; margin-top: 16px; display: none; }
         .feedback-card.visible { display: block; animation: slide-up 0.25s ease; }
         .feedback-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
         .feedback-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--volt); display: flex; align-items: center; justify-content: center; font-size: 14px; }
@@ -106,7 +106,7 @@
 <!-- GLOBAL HEADER -->
 <header class="global-header">
     <button class="drawer-trigger" data-action="fxToggleDrawer"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
-    <span class="header-brand">FITX</span>
+    <span class="header-brand"><img class="brand-mark" src="/static/icon-holo.png" alt="">AxisAI</span>
     <div class="header-spacer"></div>
     <a href="/edit-profile" class="header-avatar" title="Profil">{% if profile_picture %}<img src="{{ profile_picture }}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">{% else %}{{ username[0]|upper if username else 'U' }}{% endif %}</a>
 </header>
@@ -387,9 +387,9 @@
             type: 'line',
             data: { labels, datasets: [{
                 label: 'Kilo (kg)', data: data.map(d => d.kilo),
-                borderColor: '#CCFF00', backgroundColor: 'rgba(204,255,0,0.08)',
+                borderColor: '#3D8BFF', backgroundColor: 'rgba(61,139,255,0.08)',
                 fill: true, tension: 0.35, pointRadius: 5, pointHoverRadius: 8,
-                pointBackgroundColor: '#CCFF00', borderWidth: 2
+                pointBackgroundColor: '#3D8BFF', borderWidth: 2
             }]},
             options: { ...baseOpts, scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, beginAtZero: false } } }
         });
@@ -398,7 +398,7 @@
         metricsChart = new Chart(document.getElementById('metricsChart'), {
             type: 'line',
             data: { labels, datasets: [
-                { label: 'Yoğunluk', data: data.map(d => d.yogunluk), borderColor: '#CCFF00', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
+                { label: 'Yoğunluk', data: data.map(d => d.yogunluk), borderColor: '#3D8BFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
                 { label: 'Yorgunluk', data: data.map(d => d.fatigue),  borderColor: '#FF4D4D', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false }
             ]},
             options: { ...baseOpts, scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, min: 0, max: 5 } } }

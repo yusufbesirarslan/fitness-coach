@@ -2,7 +2,7 @@
 <html lang="tr" data-theme="dark">
 <head>
     {% include "_head.html" %}
-    <title>Liderlik — FitX</title>
+    <title>Liderlik — AxisAI</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <style nonce="{{ csp_nonce }}">
@@ -51,7 +51,7 @@
     .lb-tab:hover:not(.active) { color: var(--text-2); background: rgba(255,255,255,0.04); }
     .lb-tab.active {
         background: var(--volt-dim); color: var(--volt);
-        border: 1px solid rgba(204,255,0,0.22);
+        border: 1px solid rgba(61,139,255,0.22);
     }
 
     /* ── Rows ── */
@@ -67,8 +67,8 @@
         transition: border-color 0.2s;
     }
     .lb-row.me {
-        background: rgba(204,255,0,0.06);
-        border-color: rgba(204,255,0,0.30);
+        background: rgba(61,139,255,0.06);
+        border-color: rgba(61,139,255,0.30);
         border-left: 3px solid var(--volt);
         padding-left: 11px;
     }
@@ -93,7 +93,7 @@
         width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
         display: flex; align-items: center; justify-content: center;
         font-family: 'Bebas Neue', sans-serif; font-size: 17px;
-        color: #121212; background: linear-gradient(135deg, #CCFF00, #A8D400);
+        color: #121212; background: linear-gradient(135deg, #3D8BFF, #1E6FE0);
         overflow: hidden;
     }
     .lb-avatar img { width: 100%; height: 100%; object-fit: cover; }
@@ -123,7 +123,7 @@
         z-index: 90;
         padding: 8px var(--s2);
         background: rgba(20,24,8,0.92);
-        border-top: 1px solid rgba(204,255,0,0.30);
+        border-top: 1px solid rgba(61,139,255,0.30);
         backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
     }
     .lb-sticky .lb-wrap { margin: 0 auto; }
@@ -159,7 +159,7 @@
 
 <header class="global-header">
     <button class="drawer-trigger" data-action="fxToggleDrawer"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
-    <span class="header-brand">FITX</span><div class="header-spacer"></div>
+    <span class="header-brand"><img class="brand-mark" src="/static/icon-holo.png" alt="">AxisAI</span><div class="header-spacer"></div>
     <a href="/edit-profile" class="header-avatar" title="Profil">{% if profile_picture %}<img src="{{ profile_picture }}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">{% else %}{{ username[0]|upper if username else 'U' }}{% endif %}</a>
 </header>
 <div id="fx-drawer-backdrop" class="drawer-backdrop"></div>

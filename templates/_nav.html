@@ -5,7 +5,7 @@
     <button class="drawer-trigger" data-action="fxToggleDrawer" aria-label="Menüyü aç" aria-controls="fx-drawer" aria-expanded="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <span class="header-brand">FITX</span>
+    <span class="header-brand"><img class="brand-mark" src="/static/icon-holo.png" alt="">AxisAI</span>
     <div class="header-spacer"></div>
     <a href="/edit-profile" class="header-avatar" title="Profil" aria-label="Profilim">
         {% if profile_picture %}<img src="{{ profile_picture }}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">{% else %}{{ username[0]|upper if username else 'U' }}{% endif %}
