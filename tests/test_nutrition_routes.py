@@ -236,6 +236,23 @@ def test_meal_log_override_macros_skips_ai(client, auth_user, monkeypatch):
     assert body["nutrients"] == {"kalori": 495.0, "protein": 62.0, "karb": 0.0, "yag": 10.5}
 
 
+def test_meal_log_override_macros_clamped_to_physical_bounds(client, auth_user, monkeypatch):
+    # C1: request-kontrollü override değerleri kanonik MealLog'a YAZILMADAN ÖNCE
+    # fiziksel-sağlık kapısından (clamp_serving_macros) geçmeli — DB CHECK yalnızca
+    # >100000 kcal kaba taşmayı yakalar, "99999 kcal" çöpünü değil.
+    monkeypatch.setattr(nutrition_meallog, "_openai_chat",
+                        lambda **kw: (_ for _ in ()).throw(AssertionError("AI çağrılmamalı")))
+    body = client.post("/meal-log", json={
+        "ogun": "Akşam", "yemekler": "tavuk",
+        "override_macros": {"kalori": 99999, "protein": 9999, "karb": 9999, "yag": 9999},
+    }).get_json()
+    n = body["nutrients"]
+    assert n["kalori"] <= 3000 and n["protein"] <= 300 and n["karb"] <= 300 and n["yag"] <= 150
+    # Kalıcı satır da kısılmış olmalı (defter bozulmadı).
+    entry = MealLog.query.filter_by(user_id=auth_user.id).one()
+    assert entry.kalori <= 3000 and entry.yag <= 150
+
+
 def test_meal_log_ai_path_with_fitness_normalization(client, auth_user, monkeypatch):
     captured = {}
 
