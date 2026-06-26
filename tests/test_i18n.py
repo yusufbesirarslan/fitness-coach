@@ -88,6 +88,17 @@ def test_landing_renders_localized(client):
     assert "Ücretsiz Başla" not in en_body
 
 
+def test_dashboard_renders_localized(app, client, make_user, login):
+    # Dashboard (/) login + profile_complete ister.
+    make_user("dashen", profile_complete=True, language="en")
+    login("dashen")
+    body = client.get("/").get_data(as_text=True)
+    assert "Daily Calories" in body and "Activity Tracking" in body
+    assert "Günlük Kalori" not in body
+    # EN tip dizisi seçili olmalı (TR tip metni gövdede olmamalı)
+    assert "Sports Physiology" in body
+
+
 def test_authenticated_locale_follows_user(app, client, make_user, login):
     """Girişli kullanıcının language alanı locale'i belirler (session'dan bağımsız)."""
     make_user("enfan", language="en")
