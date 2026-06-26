@@ -46,7 +46,7 @@ def log_progress():
     
     try:
         weight = float(weight)
-    except ValueError:
+    except (ValueError, TypeError):  # liste/dict gibi JSON tipleri TypeError verir → 500 yerine 400 (D5)
         return jsonify({"error" : "Kilo sayısal olmalıdır"}), 400
     
     entry = WeeklyLog(
@@ -68,7 +68,9 @@ def log_progress():
         if diff < 0:
             message += f"Geçen kayda göre {abs(diff)} kg verdin. 🔥"
         elif diff > 0:
-            message = f"Geçen kayda göre {abs(diff)} kg aldın."
+            # D6: '=' yerine '+=' — aksi halde kilo ALMA dalında "kg kaydedildi"
+            # önekı düşüyor (diğer dallar += ile ekliyor).
+            message += f"Geçen kayda göre {abs(diff)} kg aldın."
         else:
             message += "Geçen kayıtla aynı kilo. Tutarlısın."
     return jsonify({"message" : message})
@@ -115,7 +117,7 @@ def checkin():
 
     try:
         weight = float(weight)
-    except ValueError:
+    except (ValueError, TypeError):  # liste/dict gibi JSON tipleri TypeError verir → 500 yerine 400 (D5)
         return jsonify({"error": "Kilo sayısal olmalıdır"}), 400
 
     # Bozuk/eksik payload ("yogunluk": "" veya "yüksek") int() ile 500 atardı;
@@ -212,7 +214,7 @@ def update_weight():
 
     try:
         weight = float(weight)
-    except ValueError:
+    except (ValueError, TypeError):  # liste/dict gibi JSON tipleri TypeError verir → 500 yerine 400 (D5)
         return jsonify({"error": "Kilo sayısal olmalıdır"}), 400
 
     current_user.weight = weight
