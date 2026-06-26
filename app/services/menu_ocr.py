@@ -9,14 +9,17 @@ def _sanitize_menu_text(text):
     import re as _re
     if not text:
         return ""
-    replacements = {
-        'Ä±': 'ı', 'Ä': 'ğ', 'Ã¼': 'ü',
-        'Ã¶': 'ö', 'Ã§': 'ç', 'Å': 'ş',
-        'Ä°': 'İ', 'Ä': 'Ğ', 'Ã': 'Ü',
-        'Ã': 'Ö', 'Ã': 'Ç', 'Å': 'Ş',
-    }
-    for bad, good in replacements.items():
-        text = text.replace(bad, good)
+    # Mojibake onarımı: UTF-8 baytları latin-1 sanılarak çözülmüş metin (Google
+    # Drive/OCR menü metninde sık görülür). Eski elle-yazılı eşleme tablosu çakışan
+    # sözlük anahtarları yüzünden 12 girdinin ~8'ine çöküyor ve Türkçe küçük harf
+    # onarımlarını kaybediyordu (A1). Yerine guard'lı latin-1→utf-8 round-trip:
+    # gerçek mojibake'yi onarır, zaten temiz Türkçe metni (ı/ş/ğ latin-1'e
+    # kodlanamaz → hata) ya da geçersiz UTF-8 üretecek metni olduğu gibi bırakır.
+    if any(marker in text for marker in ('Ã', 'Ä', 'Å', 'Â')):
+        try:
+            text = text.encode('latin-1').decode('utf-8')
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            pass
     text = _re.sub(r'[^\S\n]+', ' ', text)
     text = _re.sub(r' {2,}', ' ', text)
     text = _re.sub(r'(\n\s*){3,}', '\n\n', text)
@@ -175,6 +178,11 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
                 ]},
             ],
         )
+        # İçerik filtresi/boş yanıtta choices boş gelebilir — _openai_chat'teki
+        # aynı korumayı buraya da koy ki resp.choices[0] IndexError fırlatmasın (A2).
+        if not resp.choices:
+            current_app.logger.warning("[VISION OCR] Boş choices (içerik filtresi olabilir) — boş metin döndürülüyor")
+            return ""
         result = (resp.choices[0].message.content or "").strip()
         current_app.logger.info(f"[VISION OCR] Extracted {len(result)} chars")
         return result
