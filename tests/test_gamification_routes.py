@@ -83,6 +83,20 @@ def test_reward_check_and_dismiss_cycle(client, auth_user):
     assert db.session.get(User, auth_user.id).last_reward_week == "2026-W23"
 
 
+def test_reward_dismiss_records_newest_week(client, auth_user):
+    # D3: birden çok görülmemiş kazançta last_reward_week EN YENİ haftaya
+    # ayarlanmalı (sırasız sorgu eski haftayı seçebiliyordu). Sığ→derin sırada ekle.
+    db.session.add(WeeklyWinner(user_id=auth_user.id, week_key="2026-W24",
+                                rank=2, xp_awarded=300, notified=False))
+    db.session.add(WeeklyWinner(user_id=auth_user.id, week_key="2026-W22",
+                                rank=1, xp_awarded=500, notified=False))
+    db.session.commit()
+
+    assert client.post("/leaderboard/reward-dismiss").get_json() == {"ok": True}
+    db.session.expire_all()
+    assert db.session.get(User, auth_user.id).last_reward_week == "2026-W24"
+
+
 def test_reward_check_not_leaked_to_other_user(client, auth_user, make_users_bulk):
     other = make_users_bulk(1)[0]
     db.session.add(WeeklyWinner(user_id=other.id, week_key="2026-W23",

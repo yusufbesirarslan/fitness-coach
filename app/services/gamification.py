@@ -7,7 +7,7 @@ from sqlalchemy import event
 from app.config import LB_ALLTIME_KEY, LB_WEEKLY_KEY
 from app.extensions import db, redis_client
 from app.models import Activity, DailyQuest, Friendship, User, UserQuestProgress, WeeklyResetLog, WeeklyWinner
-from app.timeutil import app_today
+from app.timeutil import app_now, app_today
 
 
 def _lb_score(xp, streak):
@@ -132,8 +132,13 @@ WEEKLY_REWARDS = {1: 500, 2: 300, 3: 150}
 
 
 def _last_completed_week_key(now=None):
-    """ISO 'YYYY-Www' of the most recently completed week (boundary = Sunday 23:59 UTC)."""
-    now = now or datetime.utcnow()
+    """ISO 'YYYY-Www' of the most recently completed week (boundary = Sunday 23:59 Istanbul).
+
+    weekly_xp Istanbul günlerinde biriktiği için hafta sınırı da Istanbul'da
+    hesaplanmalı (B1) — naive UTC, gün dönümü yakınında yanlış ISO haftası verip
+    top-3 ödülünü/sıfırlamayı XP'nin kazanıldığı pencereyle hizasız bırakıyordu.
+    """
+    now = now or app_now()
     monday = (now - timedelta(days=now.isoweekday() - 1)).replace(
         hour=0, minute=0, second=0, microsecond=0)
     sunday_2359 = monday + timedelta(days=6, hours=23, minutes=59)

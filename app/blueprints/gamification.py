@@ -59,7 +59,10 @@ def reward_dismiss():
     for r in rows:
         r.notified = True
     if rows:
-        current_user.last_reward_week = rows[0].week_key
+        # Sorgu sırasız: rows[0] keyfi olabilir; birden çok görülmemiş kazançta
+        # last_reward_week ESKİ haftaya kayabilirdi (D3). En yeni haftayı al —
+        # week_key 'YYYY-Www' leksikografik olarak kronolojik sıralanır.
+        current_user.last_reward_week = max(r.week_key for r in rows)
     db.session.commit()
     return jsonify({"ok": True})
 

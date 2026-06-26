@@ -27,7 +27,12 @@ def seed_quests():
 def weekly_reset_cmd():
     """Snapshot the weekly board, award top-3 XP, reset weekly_xp. Idempotent.
 
-    EC2 host cron `59 23 * * 0` (Sunday 23:59 UTC) ile çalışır (Railway kaldırıldı):
+    Hafta sınırı artık Istanbul'da hesaplanır (B1: weekly_xp Istanbul günlerinde
+    birikir). EC2 host cron `59 23 * * 0` (Sunday 23:59 UTC = Pazartesi 02:59
+    Istanbul) tamamlanmış haftadan hemen sonra çalışır; idempotent olduğu için
+    (WeeklyResetLog) bu ~3 saatlik gecikme yalnızca bildirimi geciktirir, yanlış
+    hafta işlemez. Sınıra tam hizalamak istenirse cron'u `59 20 * * 0` (Sunday
+    20:59 UTC = Pazar 23:59 Istanbul) yapın.
         flask --app starter weekly-reset
     """
     click.echo(run_weekly_rollover())
