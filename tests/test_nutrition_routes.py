@@ -60,6 +60,21 @@ def test_quick_add_meal(client, auth_user):
     assert entry.ogun == "Öğle"
 
 
+def test_quick_add_meal_handles_malformed_plan(client, auth_user):
+    # A4: LLM planı sayısal-olmayan makro / liste-olmayan yemekler içerebilir →
+    # 500 yerine güvenli değerlerle eklenmeli.
+    plan = {"ogle": {"yemekler": "Tek string yemek", "kalori": "400 kcal",
+                     "protein": None, "karb": 30, "yag": 5}}
+    client.post("/nutrition-plan/save", json={"plan": plan, "score": 8.0})
+    resp = client.post("/api/quick-add-meal", json={"meal_key": "ogle"})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["nutrients"]["kalori"] == 0      # "400 kcal" → güvenli 0
+    assert body["nutrients"]["karb"] == 30.0
+    entry = MealLog.query.filter_by(user_id=auth_user.id).one()
+    assert entry.yemekler == "Tek string yemek"  # str → tek elemanlı listeye indirildi
+
+
 # ---------------------------------------------------------------------------
 # Günlük (diary) — öğün oluşturma + besin matematiği
 # ---------------------------------------------------------------------------
@@ -113,6 +128,19 @@ def meal_id(client, auth_user):
 def test_diary_add_item_requires_name(client, meal_id):
     response = client.post(f"/api/diary/meal/{meal_id}/item", json={})
     assert response.status_code == 400
+
+
+def test_diary_add_item_negative_metric_no_negative_macros(client, meal_id):
+    # B8: negatif metric_serving_amount negatif gram/per-100g üretip MealLog'a
+    # sızıyordu. Artık ≥0'a kısılır — hiçbir makro/gram negatif olamaz.
+    client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "Hile", "serving_id": "s1", "serving_quantity": 1,
+        "serving_calories": 100, "serving_protein": 5,
+        "metric_serving_amount": -50}).get_json()
+    item = CustomMealItem.query.filter_by(custom_meal_id=meal_id).one()
+    assert item.grams >= 0
+    assert (item.per_100g_calories or 0) >= 0
+    assert (item.per_100g_protein or 0) >= 0
 
 
 def test_diary_add_item_grams_based_scaling(client, meal_id):

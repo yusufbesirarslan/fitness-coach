@@ -52,20 +52,33 @@ def quick_add_meal():
     if not plan_record:
         return jsonify({"error": "Aktif beslenme planı bulunamadı."}), 404
 
-    plan = json.loads(plan_record.plan_data)
-    meal = plan.get(meal_key)
+    # plan_data LLM üretimi ve şema doğrulaması yapılmadan kaydediliyor — bozuk
+    # JSON / beklenmedik tipler 500 yerine temiz hata döndürmeli (A4).
+    try:
+        plan = json.loads(plan_record.plan_data)
+    except (json.JSONDecodeError, TypeError):
+        plan = {}
+    meal = plan.get(meal_key) if isinstance(plan, dict) else None
 
-    if not meal:
+    if not isinstance(meal, dict):
         return jsonify({"error": "Bu öğün planda tanımlı değil."}), 404
 
-    yemekler = ", ".join(meal.get("yemekler", []))
+    # yemekler liste olmayabilir / öğeleri str olmayabilir → güvenle str listesine indir.
+    raw_yemekler = meal.get("yemekler", [])
+    if isinstance(raw_yemekler, str):
+        raw_yemekler = [raw_yemekler]
+    elif not isinstance(raw_yemekler, list):
+        raw_yemekler = []
+    yemekler = ", ".join(str(y) for y in raw_yemekler if y is not None)
     today    = day_key()
 
+    # Makrolar da LLM'den; bare float() yerine _to_float (örn. "400 kcal" → 0) ki
+    # sayısal-olmayan değer 500 atmasın — diğer makro girişleriyle tutarlı.
     kalori, protein, karb, yag = _sanitize_meal_macros(
-        round(float(meal.get("kalori",  0)), 1),
-        round(float(meal.get("protein", 0)), 1),
-        round(float(meal.get("karb",    0)), 1),
-        round(float(meal.get("yag",     0)), 1),
+        round(_to_float(meal.get("kalori",  0)), 1),
+        round(_to_float(meal.get("protein", 0)), 1),
+        round(_to_float(meal.get("karb",    0)), 1),
+        round(_to_float(meal.get("yag",     0)), 1),
     )
     entry = MealLog(
         user_id  = current_user.id,
@@ -149,12 +162,15 @@ def diary_add_item(meal_id):
 
     srv_id = data.get("serving_id")
     if srv_id:
-        qty = _to_float(data.get("serving_quantity", 1), 1)
+        # Negatif client değerleri negatif gram/per-100g makro üretip MealLog'a
+        # sızıyordu (B8) — koç/menü hatlarının aksine diary clamp çağırmıyor.
+        # Gram/miktarı negatife düşürme: <0 → 0 (falsy guard devreye girer).
+        qty = max(_to_float(data.get("serving_quantity", 1), 1), 0)
         srv_cal = _to_float(data.get("serving_calories", 0))
         srv_pro = _to_float(data.get("serving_protein", 0))
         srv_carb = _to_float(data.get("serving_carbs", 0))
         srv_fat = _to_float(data.get("serving_fat", 0))
-        metric_amt = _to_float(data.get("metric_serving_amount", 0))
+        metric_amt = max(_to_float(data.get("metric_serving_amount", 0)), 0)
         grams = round(metric_amt * qty, 1) if metric_amt else 0
         p100_cal = round(srv_cal / metric_amt * 100, 2) if metric_amt else 0
         p100_pro = round(srv_pro / metric_amt * 100, 2) if metric_amt else 0
@@ -226,12 +242,13 @@ def diary_update_item(item_id):
     srv_id = data.get("serving_id")
 
     if srv_id:
-        qty = _to_float(data.get("serving_quantity", 1), 1)
+        # B8: negatif değerleri ≥0'a kıs (negatif makro MealLog'a sızmasın).
+        qty = max(_to_float(data.get("serving_quantity", 1), 1), 0)
         srv_cal = _to_float(data.get("serving_calories", 0))
         srv_pro = _to_float(data.get("serving_protein", 0))
         srv_carb = _to_float(data.get("serving_carbs", 0))
         srv_fat = _to_float(data.get("serving_fat", 0))
-        metric_amt = _to_float(data.get("metric_serving_amount", 0))
+        metric_amt = max(_to_float(data.get("metric_serving_amount", 0)), 0)
         item.serving_id = str(srv_id)
         item.serving_description = data.get("serving_description", "")
         item.serving_quantity = qty
