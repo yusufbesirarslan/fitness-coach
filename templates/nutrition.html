@@ -1,8 +1,8 @@
 ﻿<!DOCTYPE html>
-<html lang="tr" data-theme="dark">
+<html lang="{{ locale }}" data-theme="dark">
 <head>
   {% include "_head.html" %}
-  <title>Beslenme — AxisAI</title>
+  <title>{{ t('nutrition.page_title') }}</title>
   <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
   <style nonce="{{ csp_nonce }}">
@@ -232,59 +232,59 @@
 <!-- ── LOADING OVERLAY ── -->
 <div class="loading-overlay" id="loading">
   <div class="loading-spinner"></div>
-  <div class="loading-text">Hesaplanıyor...</div>
+  <div class="loading-text">{{ t('nutrition.calculating') }}</div>
 </div>
 
 <!-- ── WATER MODAL ── -->
 <div class="modal-overlay" id="water-modal" data-action-self="closeWater">
   <div class="modal-box">
-    <div class="modal-title">SU KAYDET</div>
-    <p style="font-size:14px;color:var(--text-2);margin-bottom:20px;">Bugün ne kadar su içtin?</p>
+    <div class="modal-title">{{ t('nutrition.water_title') }}</div>
+    <p style="font-size:14px;color:var(--text-2);margin-bottom:20px;">{{ t('nutrition.water_q') }}</p>
     <select class="fc-input" id="water-amount" style="margin-bottom:16px;">
-      <option value="250">1 bardak — 250 ml</option>
-      <option value="500">2 bardak — 500 ml</option>
-      <option value="750">3 bardak — 750 ml</option>
-      <option value="1000">1 litre — 1000 ml</option>
-      <option value="1500">1.5 litre</option>
-      <option value="2000">2 litre</option>
+      <option value="250">{{ t('nutrition.water_1cup') }}</option>
+      <option value="500">{{ t('nutrition.water_2cup') }}</option>
+      <option value="750">{{ t('nutrition.water_3cup') }}</option>
+      <option value="1000">{{ t('nutrition.water_1l') }}</option>
+      <option value="1500">{{ t('nutrition.water_15l') }}</option>
+      <option value="2000">{{ t('nutrition.water_2l') }}</option>
     </select>
-    <button class="btn-volt w-full" data-action="logWater">KAYDET</button>
-    <button class="btn-ghost w-full" style="margin-top:8px;width:100%;" data-action="closeWater">İptal</button>
+    <button class="btn-volt w-full" data-action="logWater">{{ t('nutrition.save') }}</button>
+    <button class="btn-ghost w-full" style="margin-top:8px;width:100%;" data-action="closeWater">{{ t('nutrition.cancel') }}</button>
   </div>
 </div>
 
 <!-- ── SERVING SELECTOR MODAL ── -->
 <div class="modal-overlay" id="serving-modal" data-action-self="closeServingModal">
   <div class="modal-box">
-    <div class="modal-title" id="sm-title">BESİN EKLE</div>
+    <div class="modal-title" id="sm-title">{{ t('nutrition.add_food_title') }}</div>
     <div id="sm-food-name" style="font-size:15px;color:var(--text);font-weight:600;margin-bottom:4px;"></div>
     <div id="sm-brand" style="font-size:12px;color:var(--text-3);margin-bottom:16px;"></div>
     <div id="sm-body">
       <div id="sm-loading" style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
         <div class="diary-serving-loading"></div>
-        <span style="font-size:13px;color:var(--text-3);">Porsiyon seçenekleri yükleniyor...</span>
+        <span style="font-size:13px;color:var(--text-3);">{{ t('nutrition.serving_loading') }}</span>
       </div>
       <div id="sm-serving-row" style="display:none;margin-bottom:12px;">
-        <label style="font-size:11px;color:var(--text-3);letter-spacing:1px;font-weight:600;display:block;margin-bottom:6px;">PORSİYON</label>
+        <label style="font-size:11px;color:var(--text-3);letter-spacing:1px;font-weight:600;display:block;margin-bottom:6px;">{{ t('nutrition.serving_label') }}</label>
         <select class="fc-input" id="sm-serving-select" data-action-change="updateSmPreview" style="width:100%;"></select>
       </div>
       <div id="sm-gram-row" style="display:none;margin-bottom:12px;">
-        <label style="font-size:11px;color:var(--text-3);letter-spacing:1px;font-weight:600;display:block;margin-bottom:6px;">MİKTAR (GRAM)</label>
+        <label style="font-size:11px;color:var(--text-3);letter-spacing:1px;font-weight:600;display:block;margin-bottom:6px;">{{ t('nutrition.gram_label') }}</label>
         <input type="number" class="fc-input" id="sm-gram-input" value="100" min="1" step="10" data-action-input="updateSmPreview" style="width:100%;">
       </div>
       <div id="sm-qty-row" style="display:none;margin-bottom:16px;">
-        <label style="font-size:11px;color:var(--text-3);letter-spacing:1px;font-weight:600;display:block;margin-bottom:6px;">ADET</label>
+        <label style="font-size:11px;color:var(--text-3);letter-spacing:1px;font-weight:600;display:block;margin-bottom:6px;">{{ t('nutrition.qty_label') }}</label>
         <input type="number" class="fc-input" id="sm-qty-input" value="1" min="0.5" step="0.5" data-action-input="updateSmPreview" style="width:100%;">
       </div>
     </div>
     <div id="sm-macros" style="display:flex;justify-content:space-between;background:var(--surface);border-radius:12px;padding:12px 16px;margin-bottom:20px;">
       <div style="text-align:center;"><div style="font-size:18px;font-weight:700;color:var(--volt);" id="sm-cal">0</div><div style="font-size:10px;color:var(--text-3);">KCAL</div></div>
-      <div style="text-align:center;"><div style="font-size:18px;font-weight:700;color:#60A5FA;" id="sm-pro">0</div><div style="font-size:10px;color:var(--text-3);">PROTEİN</div></div>
-      <div style="text-align:center;"><div style="font-size:18px;font-weight:700;color:#FB923C;" id="sm-carb">0</div><div style="font-size:10px;color:var(--text-3);">KARB</div></div>
-      <div style="text-align:center;"><div style="font-size:18px;font-weight:700;color:#4ADE80;" id="sm-fat">0</div><div style="font-size:10px;color:var(--text-3);">YAĞ</div></div>
+      <div style="text-align:center;"><div style="font-size:18px;font-weight:700;color:#60A5FA;" id="sm-pro">0</div><div style="font-size:10px;color:var(--text-3);">{{ t('nutrition.macro_protein_abbr') }}</div></div>
+      <div style="text-align:center;"><div style="font-size:18px;font-weight:700;color:#FB923C;" id="sm-carb">0</div><div style="font-size:10px;color:var(--text-3);">{{ t('nutrition.macro_carb_abbr') }}</div></div>
+      <div style="text-align:center;"><div style="font-size:18px;font-weight:700;color:#4ADE80;" id="sm-fat">0</div><div style="font-size:10px;color:var(--text-3);">{{ t('nutrition.macro_fat_abbr') }}</div></div>
     </div>
-    <button class="btn-volt w-full" id="sm-confirm-btn" data-action="confirmServingModal">EKLE</button>
-    <button class="btn-ghost w-full" style="margin-top:8px;width:100%;" data-action="closeServingModal">İptal</button>
+    <button class="btn-volt w-full" id="sm-confirm-btn" data-action="confirmServingModal">{{ t('nutrition.add') }}</button>
+    <button class="btn-ghost w-full" style="margin-top:8px;width:100%;" data-action="closeServingModal">{{ t('nutrition.cancel') }}</button>
   </div>
 </div>
 
@@ -298,7 +298,7 @@
     </button>
     <span class="header-brand"><img class="brand-mark" src="/static/icon-holo.png" alt="">AxisAI</span>
     <div class="header-spacer"></div>
-    <a href="/edit-profile" class="header-avatar" title="Profil">
+    <a href="/edit-profile" class="header-avatar" title="{{ t('nav.profile') }}">
         {% if profile_picture %}
         <img src="{{ profile_picture }}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">
         {% else %}
@@ -333,16 +333,16 @@
         </div>
     </div>
     <nav class="drawer-nav">
-        <div class="drawer-section-label">Keşfet</div>
-        <a href="/quests" class="drawer-link"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>Görevler</a>
-        <a href="/supplements" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>Supplement Dolabı</a>
-        <a href="/progress-page" class="drawer-link"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>İlerleme</a>
-        <a href="/friends" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Arkadaşlarım</a>
+        <div class="drawer-section-label">{{ t('nav.section_explore') }}</div>
+        <a href="/quests" class="drawer-link"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>{{ t('nav.quests') }}</a>
+        <a href="/supplements" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>{{ t('nav.supplements') }}</a>
+        <a href="/progress-page" class="drawer-link"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>{{ t('nav.progress') }}</a>
+        <a href="/friends" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>{{ t('nav.friends') }}</a>
         <div class="drawer-sep"></div>
-        <a href="/edit-profile" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Profilim</a>
+        <a href="/edit-profile" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>{{ t('nav.my_profile') }}</a>
     </nav>
     <div class="drawer-footer">
-        <a href="/logout" class="drawer-logout"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Çıkış Yap</a>
+        <a href="/logout" class="drawer-logout"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>{{ t('nav.logout') }}</a>
     </div>
 </aside>
 
@@ -351,31 +351,31 @@
 
   <!-- Page Header -->
   <div class="page-hdr">
-    <h1>BES<span>LENME</span></h1>
-    <p>Günlük öğünlerini takip et, beslenme planı oluştur.</p>
+    <h1>{{ t('nutrition.h1_a') }}<span>{{ t('nutrition.h1_b') }}</span></h1>
+    <p>{{ t('nutrition.page_sub') }}</p>
   </div>
 
   <!-- Tab Bar -->
   <div class="tab-bar" role="tablist">
     <button class="tab-btn active" data-action="switchTab" data-args='["today"]' role="tab">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-      Bugün
+      {{ t('nutrition.tab_today') }}
     </button>
     <button class="tab-btn" data-action="switchTab" data-args='["diary"]' role="tab">
       <svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-      Günlük
+      {{ t('nutrition.tab_diary') }}
     </button>
     <button class="tab-btn" data-action="switchTab" data-args='["plan"]' role="tab">
       <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-      AI Plan
+      {{ t('nutrition.tab_plan') }}
     </button>
     <button class="tab-btn" data-action="switchTab" data-args='["history"]' role="tab">
       <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-      Geçmiş
+      {{ t('nutrition.tab_history') }}
     </button>
     <button class="tab-btn" data-action="switchTab" data-args='["water"]' role="tab">
       <svg viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
-      Su Takibi
+      {{ t('nutrition.tab_water') }}
     </button>
   </div>
 
@@ -408,13 +408,13 @@
         <!-- Macro bars -->
         <div style="min-width:0;">
           <div style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:16px;">
-            Hedef: <span id="ring-target" style="color:var(--text-2);">—</span> kcal
+            {{ t('nutrition.target_label') }} <span id="ring-target" style="color:var(--text-2);">—</span> kcal
           </div>
           <div class="macro-bars">
             <!-- Protein -->
             <div class="macro-row">
               <div class="macro-row-hdr">
-                <span class="macro-name">Protein</span>
+                <span class="macro-name">{{ t('nutrition.macro_protein') }}</span>
                 <span class="macro-val"><span id="macro-protein">0</span>g</span>
               </div>
               <div class="pbar-track">
@@ -424,7 +424,7 @@
             <!-- Karbonhidrat -->
             <div class="macro-row">
               <div class="macro-row-hdr">
-                <span class="macro-name">Karbonhidrat</span>
+                <span class="macro-name">{{ t('nutrition.macro_carb') }}</span>
                 <span class="macro-val"><span id="macro-karb">0</span>g</span>
               </div>
               <div class="pbar-track">
@@ -434,7 +434,7 @@
             <!-- Yağ -->
             <div class="macro-row">
               <div class="macro-row-hdr">
-                <span class="macro-name">Yağ</span>
+                <span class="macro-name">{{ t('nutrition.macro_fat') }}</span>
                 <span class="macro-val"><span id="macro-yag">0</span>g</span>
               </div>
               <div class="pbar-track">
@@ -447,7 +447,7 @@
     </div>
 
     <!-- Today's Meals -->
-    <div class="sec-label">Bugünkü Öğünler</div>
+    <div class="sec-label">{{ t('nutrition.todays_meals') }}</div>
     <div id="today-meals-list">
       <!-- Skeleton -->
       <div class="skel-card" id="today-skeleton">
@@ -461,7 +461,7 @@
     <div id="quick-add-section" style="margin-top:16px;">
       <div class="fc-divider">
         <div class="fc-divider-line"></div>
-        <div class="fc-divider-lbl">Hızlı Ekle</div>
+        <div class="fc-divider-lbl">{{ t('nutrition.quick_add') }}</div>
         <div class="fc-divider-line"></div>
       </div>
 
@@ -469,8 +469,8 @@
       <button class="qab" id="qab-water" data-action="quickAddWater" type="button" style="margin-bottom:4px;">
         <span class="qab-icon">💧</span>
         <div class="qab-info">
-          <div class="qab-title">Su — 1 Bardak</div>
-          <div class="qab-sub" id="qab-water-sub">Bugün 0 / 8 bardak</div>
+          <div class="qab-title">{{ t('nutrition.water_1cup_btn') }}</div>
+          <div class="qab-sub" id="qab-water-sub">{{ t('nutrition.water_progress', n=0, goal=8) }}</div>
         </div>
         <svg class="qab-check" viewBox="0 0 24 24" fill="none"
              stroke="#3D8BFF" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
@@ -491,44 +491,44 @@
     <!-- ── Log Meal Form ── -->
     <div class="fc-divider" style="margin-top:20px;">
       <div class="fc-divider-line"></div>
-      <div class="fc-divider-lbl">Manuel Ekle</div>
+      <div class="fc-divider-lbl">{{ t('nutrition.manual_add') }}</div>
       <div class="fc-divider-line"></div>
     </div>
 
     <div class="card" style="padding:24px;">
       <div class="meal-type-grid" id="meal-type-grid">
         <div class="meal-type-opt selected" data-action="selectMealType" data-args='["Kahvaltı"]'>
-          <span class="emoji">🍳</span>Kahvaltı
+          <span class="emoji">🍳</span>{{ t('nutrition.meal_breakfast') }}
         </div>
         <div class="meal-type-opt" data-action="selectMealType" data-args='["Öğle"]'>
-          <span class="emoji">🥗</span>Öğle
+          <span class="emoji">🥗</span>{{ t('nutrition.meal_lunch') }}
         </div>
         <div class="meal-type-opt" data-action="selectMealType" data-args='["Akşam"]'>
-          <span class="emoji">🍽️</span>Akşam
+          <span class="emoji">🍽️</span>{{ t('nutrition.meal_dinner') }}
         </div>
         <div class="meal-type-opt" data-action="selectMealType" data-args='["Ara Öğün"]'>
-          <span class="emoji">🥜</span>Ara Öğün
+          <span class="emoji">🥜</span>{{ t('nutrition.meal_snack') }}
         </div>
       </div>
       <!-- Food autocomplete search -->
       <div style="position:relative;margin-bottom:12px;">
         <input class="fc-input" id="food-search-input"
-          placeholder="Besin ara... (örn: tavuk göğsü)"
+          placeholder="{{ t('nutrition.search_ph') }}"
           autocomplete="off">
         <div id="food-autocomplete-dropdown" class="autocomplete-dropdown" style="display:none;"></div>
       </div>
 
       <!-- Selected foods list -->
       <div id="selected-foods-list" style="margin-bottom:12px;display:none;">
-        <div style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;">Seçilen Besinler</div>
+        <div style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;">{{ t('nutrition.selected_foods') }}</div>
         <div id="selected-foods-items"></div>
         <div id="selected-foods-totals" style="margin-top:8px;padding:10px;background:rgba(61,139,255,0.05);border:1px solid rgba(61,139,255,0.14);border-radius:8px;font-size:12px;color:var(--text-2);"></div>
       </div>
 
       <textarea class="fc-input" id="meal-input"
-        placeholder="veya serbest metin gir: 3 yumurta, tam buğday ekmeği 2 dilim..."></textarea>
+        placeholder="{{ t('nutrition.meal_input_ph') }}"></textarea>
       <button class="btn-volt w-full" style="margin-top:12px;" data-action="logMeal">
-        ÖĞÜN KAYDET
+        {{ t('nutrition.log_meal') }}
       </button>
     </div>
 
@@ -541,7 +541,7 @@
   <div class="tab-panel" id="panel-diary">
 
     <div style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:16px;">
-      Günlük Oluşturucu
+      {{ t('nutrition.diary_builder') }}
     </div>
 
     <div id="diary-meals">
@@ -550,7 +550,7 @@
 
     <!-- Grand total -->
     <div class="card" id="diary-grand-total" style="padding:16px;margin-top:16px;display:none;">
-      <div style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:8px;">Günlük Toplam</div>
+      <div style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.14em;text-transform:uppercase;margin-bottom:8px;">{{ t('nutrition.daily_total') }}</div>
       <div class="apd-macro-grid">
         <div class="apd-macro-item">
           <div class="apd-macro-val" id="diary-total-cal">0</div>
@@ -558,15 +558,15 @@
         </div>
         <div class="apd-macro-item">
           <div class="apd-macro-val" id="diary-total-pro">0g</div>
-          <div class="apd-macro-lbl">Protein</div>
+          <div class="apd-macro-lbl">{{ t('nutrition.macro_protein') }}</div>
         </div>
         <div class="apd-macro-item">
           <div class="apd-macro-val" id="diary-total-karb">0g</div>
-          <div class="apd-macro-lbl">Karb</div>
+          <div class="apd-macro-lbl">{{ t('nutrition.carb_short') }}</div>
         </div>
         <div class="apd-macro-item">
           <div class="apd-macro-val" id="diary-total-fat">0g</div>
-          <div class="apd-macro-lbl">Yağ</div>
+          <div class="apd-macro-lbl">{{ t('nutrition.macro_fat') }}</div>
         </div>
       </div>
     </div>
@@ -588,30 +588,30 @@
     <!-- Food Selection -->
     <div class="card" style="padding:24px;margin-bottom:20px;">
 
-      <div class="cat-label">🥩 Protein — Hayvansal</div>
+      <div class="cat-label">{{ t('nutrition.cat_protein_animal') }}</div>
       <div class="chip-grid" id="protein-hayvansal"></div>
 
-      <div class="cat-label">🌿 Protein — Bitkisel</div>
+      <div class="cat-label">{{ t('nutrition.cat_protein_plant') }}</div>
       <div class="chip-grid" id="protein-bitkisel"></div>
 
-      <div class="cat-label">🍞 Karbonhidrat</div>
+      <div class="cat-label">{{ t('nutrition.cat_carb') }}</div>
       <div class="chip-grid" id="karb-list"></div>
 
-      <div class="cat-label">🥑 Sağlıklı Yağ</div>
+      <div class="cat-label">{{ t('nutrition.cat_fat') }}</div>
       <div class="chip-grid" id="yag-list"></div>
 
       <!-- Custom food -->
-      <div class="cat-label">➕ Özel Gıda</div>
+      <div class="cat-label">{{ t('nutrition.cat_custom') }}</div>
       <div class="custom-food-row">
-        <input class="fc-input" id="custom-input" placeholder="Gıda ekle…" style="flex:1;">
-        <button class="btn-ghost" data-action="addCustomFood">Ekle</button>
+        <input class="fc-input" id="custom-input" placeholder="{{ t('nutrition.custom_ph') }}" style="flex:1;">
+        <button class="btn-ghost" data-action="addCustomFood">{{ t('nutrition.add_btn') }}</button>
       </div>
       <div class="custom-tags" id="custom-tags"></div>
     </div>
 
     <button class="btn-volt w-full" id="plan-btn" data-action="generatePlan">
       <svg viewBox="0 0 24 24" style="width:17px;height:17px;stroke:#121212;fill:none;stroke-width:2.2;stroke-linecap:round;"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93A10 10 0 1 0 4.93 19.07"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83"/></svg>
-      PLAN OLUŞTUR
+      {{ t('nutrition.plan_create') }}
     </button>
 
     <!-- Plan Results -->
@@ -632,15 +632,15 @@
 
     <!-- Weekly chart -->
     <div class="card" style="padding:24px;margin-bottom:20px;">
-      <div style="font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--text-3);margin-bottom:16px;">Haftalık Kalori</div>
+      <div style="font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--text-3);margin-bottom:16px;">{{ t('nutrition.weekly_cal') }}</div>
       <div class="bar-chart-wrap" id="weekly-chart">
         <!-- JS ile doldurulacak -->
-        <div style="flex:1;text-align:center;color:var(--text-3);font-size:13px;align-self:center;">Veri yükleniyor…</div>
+        <div style="flex:1;text-align:center;color:var(--text-3);font-size:13px;align-self:center;">{{ t('nutrition.loading_data') }}</div>
       </div>
     </div>
 
     <!-- History list -->
-    <div class="sec-label">Öğün Geçmişi</div>
+    <div class="sec-label">{{ t('nutrition.meal_history') }}</div>
     <div id="history-list">
       <div class="skel-card" style="margin-bottom:12px;">
         <div class="skeleton" style="height:14px;width:30%;"></div>
@@ -679,19 +679,19 @@
 <nav class="action-bar">
     <a href="/" class="ab-tab">
         <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-        <span>Ana Sayfa</span>
+        <span>{{ t('nav.home') }}</span>
     </a>
     <a href="/training" class="ab-tab">
         <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
-        <span>Antrenman</span>
+        <span>{{ t('nav.training') }}</span>
     </a>
     <a href="/nutrition" class="ab-tab active">
         <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
-        <span>Beslenme</span>
+        <span>{{ t('nav.nutrition') }}</span>
     </a>
     <a href="/leaderboard" class="ab-tab">
         <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        <span>Kulüp</span>
+        <span>{{ t('nav.club') }}</span>
     </a>
 </nav>
 
@@ -706,13 +706,13 @@
             <button class="fab-sub" data-action="fxQuickWater">
                 <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg>
             </button>
-            <div class="fab-lbl">Su Kaydet</div>
+            <div class="fab-lbl">{{ t('nutrition.fab_water') }}</div>
         </div>
         <div class="fab-row">
             <button class="fab-sub" data-action="fxQuickScroll">
                 <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
-            <div class="fab-lbl">Öğün Ekle</div>
+            <div class="fab-lbl">{{ t('nutrition.fab_meal') }}</div>
         </div>
     </div>
 </div>
