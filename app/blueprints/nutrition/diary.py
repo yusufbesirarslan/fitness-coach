@@ -60,7 +60,9 @@ def quick_add_meal():
         plan = {}
     meal = plan.get(meal_key) if isinstance(plan, dict) else None
 
-    if not isinstance(meal, dict):
+    # Boş/None/dict-olmayan meal reddedilir (eski `if not meal` davranışı korunur) —
+    # aksi halde boş öğün kanonik deftere 0-makro satır yazardı.
+    if not isinstance(meal, dict) or not meal:
         return jsonify({"error": "Bu öğün planda tanımlı değil."}), 404
 
     # yemekler liste olmayabilir / öğeleri str olmayabilir → güvenle str listesine indir.

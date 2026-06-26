@@ -75,6 +75,13 @@ def test_quick_add_meal_handles_malformed_plan(client, auth_user):
     assert entry.yemekler == "Tek string yemek"  # str → tek elemanlı listeye indirildi
 
 
+def test_quick_add_meal_empty_meal_dict_rejected(client, auth_user):
+    # A4: boş öğün ({}) 0-makro satır yazmamalı — eski `if not meal` davranışı korunur.
+    client.post("/nutrition-plan/save", json={"plan": {"ogle": {}}, "score": 8.0})
+    assert client.post("/api/quick-add-meal", json={"meal_key": "ogle"}).status_code == 404
+    assert MealLog.query.filter_by(user_id=auth_user.id).count() == 0
+
+
 # ---------------------------------------------------------------------------
 # Günlük (diary) — öğün oluşturma + besin matematiği
 # ---------------------------------------------------------------------------
