@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
     {% include "_head.html" %}
-    <title>FitX — Dashboard</title>
+    <title>AxisAI — Dashboard</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/dashboard.css">
     <link rel="stylesheet" href="/static/nav.css">
@@ -15,7 +15,7 @@
     <button class="drawer-trigger" data-action="fxToggleDrawer">
         <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <span class="header-brand">FITX</span>
+    <span class="header-brand"><img class="brand-mark" src="/static/icon-holo.png" alt="">AxisAI</span>
     <div class="header-spacer"></div>
     <a href="/edit-profile" class="header-avatar" title="Profil">
         {% if profile_picture %}
@@ -104,13 +104,13 @@
 
     <!-- ═══ CALORIE RING ═══ -->
     <div class="bc b-1">
-        <div class="bc-lbl"><span class="bc-dot" style="background:#CCFF00"></span>Günlük Kalori</div>
+        <div class="bc-lbl"><span class="bc-dot" style="background:#3D8BFF"></span>Günlük Kalori</div>
         <div class="cal-wrap">
             <div class="cal-ring-pos">
                 <svg style="transform:rotate(-90deg);display:block;" viewBox="0 0 120 120" width="110" height="110">
                     <circle cx="60" cy="60" r="44" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="10"/>
                     <circle cx="60" cy="60" r="44" fill="none"
-                        stroke="#CCFF00" stroke-width="10" stroke-linecap="round"
+                        stroke="#3D8BFF" stroke-width="10" stroke-linecap="round"
                         stroke-dasharray="276.46" stroke-dashoffset="276.46"
                         id="cal-ring"
                         style="transition:stroke-dashoffset 0.9s cubic-bezier(0.4,0,0.2,1),stroke 0.4s ease"
@@ -123,7 +123,7 @@
             </div>
             <div class="cal-legend">
                 <div class="cal-row">
-                    <div class="cal-dot" style="background:#CCFF00"></div>
+                    <div class="cal-dot" style="background:#3D8BFF"></div>
                     <div class="cal-row-lbl">Tüketilen</div>
                     <div class="cal-row-val" id="cal-consumed">—</div>
                 </div>
@@ -168,7 +168,7 @@
 
     <!-- ═══ WEIGHT EVOLUTION — 2 cols ═══ -->
     <div class="bc b-2" style="display:flex;flex-direction:column;">
-        <div class="bc-lbl"><span class="bc-dot" style="background:#CCFF00"></span>Kilo Takibi</div>
+        <div class="bc-lbl"><span class="bc-dot" style="background:#3D8BFF"></span>Kilo Takibi</div>
 
         <div class="w-display">
             <div class="w-big" id="w-kg">—</div>
@@ -199,7 +199,7 @@
 
     <!-- ═══ AI INSIGHT FEED (Daily Tip) ═══ -->
     <div class="bc b-1" style="display:flex;flex-direction:column;z-index:1;">
-        <div class="bc-lbl"><span class="bc-dot" style="background:rgba(204,255,0,0.75)"></span>Günün İpucu</div>
+        <div class="bc-lbl"><span class="bc-dot" style="background:rgba(61,139,255,0.75)"></span>Günün İpucu</div>
         <div id="ins-body">
             <div class="ins-slide" id="ins-slide">
                 <span class="ins-icon" id="ins-icon">⚡</span>
@@ -415,7 +415,7 @@ function updateCalRing(consumed, target, activityCals) {
     const ratio = effectiveTarget > 0 ? Math.min(consumed / effectiveTarget, 1) : 0;
     const ring  = document.getElementById('cal-ring');
     ring.style.strokeDashoffset = circ * (1 - ratio);
-    ring.style.stroke = ratio >= 1 ? '#FF4D4D' : ratio >= 0.85 ? '#FFB020' : '#CCFF00';
+    ring.style.stroke = ratio >= 1 ? '#FF4D4D' : ratio >= 0.85 ? '#FFB020' : '#3D8BFF';
 
     document.getElementById('cal-num').textContent      = remaining;
     document.getElementById('cal-consumed').textContent = consumed + ' kcal';
@@ -427,7 +427,7 @@ function updateCalRing(consumed, target, activityCals) {
 
 /* ═══ SPARKLINE ═══ */
 function renderSparkline(weights, labels, lineColor) {
-    const color = lineColor || '#CCFF00';
+    const color = lineColor || '#3D8BFF';
     const canvas = document.getElementById('sparkline');
     document.getElementById('spark-empty').style.display = 'none';
     canvas.style.display = 'block';
@@ -462,7 +462,7 @@ function renderSparkline(weights, labels, lineColor) {
                 tooltip: {
                     enabled: true,
                     backgroundColor: '#1E1E1E', borderColor: '#2A2A2A', borderWidth: 1,
-                    titleColor: '#9A9A9A', bodyColor: '#CCFF00',
+                    titleColor: '#9A9A9A', bodyColor: '#3D8BFF',
                     padding: 10, cornerRadius: 8,
                     callbacks: {
                         title: (items) => items[0].label,
@@ -537,7 +537,7 @@ async function loadSparkline() {
         const weights = last7.map(d => parseFloat(d.kilo));
         const labels  = last7.map(d => d.tarih);
 
-        let trendColor = '#CCFF00';
+        let trendColor = '#3D8BFF';
         if (last7.length >= 2) {
             const cur  = weights[weights.length - 1];
             const prev = weights[weights.length - 2];
@@ -546,12 +546,12 @@ async function loadSparkline() {
             const isLoss = userGoal === 'kilo verme';
             if (diff < 0) {
                 const aligned = isLoss;
-                trendColor = aligned ? '#CCFF00' : '#FF4D4D';
+                trendColor = aligned ? '#3D8BFF' : '#FF4D4D';
                 el.innerHTML = `<span class="w-arrow">↓</span> ${Math.abs(diff)} kg son girişe göre`;
                 el.className = 'w-delta ' + (aligned ? 'goal-ok' : 'goal-warn');
             } else if (diff > 0) {
                 const aligned = !isLoss;
-                trendColor = aligned ? '#CCFF00' : '#FF4D4D';
+                trendColor = aligned ? '#3D8BFF' : '#FF4D4D';
                 el.innerHTML = `<span class="w-arrow">↑</span> ${diff} kg son girişe göre`;
                 el.className = 'w-delta ' + (aligned ? 'goal-ok' : 'goal-warn');
             } else {

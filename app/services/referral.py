@@ -66,7 +66,7 @@ def consume_referral(new_user, code):
     award_xp(referrer.id, REFERRAL_REWARD_XP)
     award_xp(new_user.id, REFERRAL_REWARD_XP)
     log_activity(referrer.id, "new_friend",
-                 f"{new_user.username} davetinle FitX'e katıldı")
+                 f"{new_user.username} davetinle AxisAI'e katıldı")
     db.session.commit()
     # Davet eden için günlük "Bir Arkadaşını Davet Et" görevini tamamla.
     complete_quest_for_user(referrer.id, "friend_invited")

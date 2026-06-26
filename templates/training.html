@@ -2,7 +2,7 @@
 <html lang="tr">
 <head>
     {% include "_head.html" %}
-    <title>Antrenman — FitX</title>
+    <title>Antrenman — AxisAI</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <style nonce="{{ csp_nonce }}">
@@ -27,8 +27,8 @@
             border-radius: var(--r-sm); padding: 10px 16px;
             cursor: pointer; transition: all var(--t-fast); user-select: none;
         }
-        .option-chip:hover { border-color: rgba(204,255,0,0.35); }
-        .option-chip.selected { background: var(--volt-dim); border-color: rgba(204,255,0,0.5); }
+        .option-chip:hover { border-color: rgba(61,139,255,0.35); }
+        .option-chip.selected { background: var(--volt-dim); border-color: rgba(61,139,255,0.5); }
         .option-chip-dot { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--text-3); transition: all var(--t-fast); flex-shrink: 0; }
         .option-chip.selected .option-chip-dot { background: var(--volt); border-color: var(--volt); }
         .option-chip-text { font-size: 14px; font-weight: 400; color: var(--text); }
@@ -42,10 +42,10 @@
             padding: 12px 14px; font-size: 14px; font-family: inherit;
         }
         .injury-input::placeholder { color: var(--text-4); }
-        .injury-input:focus { outline: none; border-color: rgba(204,255,0,0.5); }
+        .injury-input:focus { outline: none; border-color: rgba(61,139,255,0.5); }
 
         .active-plan-banner {
-            background: var(--volt-dim); border: 1px solid rgba(204,255,0,0.2);
+            background: var(--volt-dim); border: 1px solid rgba(61,139,255,0.2);
             border-radius: var(--r-lg); padding: 16px 20px; margin-bottom: 24px;
             display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
         }
@@ -101,13 +101,13 @@
         .day-more { font-size: 11px; color: var(--text-3); font-style: italic; margin-top: 4px; }
 
         /* TODAY HIGHLIGHT */
-        .day-card.today { border: 2px solid #CCFF00; box-shadow: 0 0 15px rgba(204,255,0,0.15); opacity: 1; }
+        .day-card.today { border: 2px solid #3D8BFF; box-shadow: 0 0 15px rgba(61,139,255,0.15); opacity: 1; }
         .day-card.today.rest { opacity: 1; }
         .day-card.not-today { opacity: 0.55; }
         .day-card.not-today:hover { opacity: 0.85; }
         .today-badge {
             position: absolute; top: 8px; right: 8px; z-index: 2;
-            background: #CCFF00; color: #000;
+            background: #3D8BFF; color: #000;
             font-size: 9px; font-weight: 700;
             padding: 2px 8px; border-radius: 4px;
             letter-spacing: 0.5px; line-height: 1.4;
@@ -116,24 +116,24 @@
         /* TODAY BANNER */
         .today-banner {
             display: flex; align-items: center; gap: 12px;
-            background: var(--surface-2); border: 1px solid rgba(204,255,0,0.25);
-            border-left: 3px solid #CCFF00;
+            background: var(--surface-2); border: 1px solid rgba(61,139,255,0.25);
+            border-left: 3px solid #3D8BFF;
             border-radius: var(--r-md); padding: 14px 20px; margin-bottom: 20px;
         }
-        .today-banner-icon { color: #CCFF00; font-size: 14px; flex-shrink: 0; }
+        .today-banner-icon { color: #3D8BFF; font-size: 14px; flex-shrink: 0; }
         #today-banner-text {
             font-family: var(--font-display); font-size: 17px;
             letter-spacing: 2px; color: var(--text-2); font-weight: 700;
             text-transform: uppercase;
         }
-        .today-focus { color: #CCFF00; font-weight: 700; }
+        .today-focus { color: #3D8BFF; font-weight: 700; }
         .today-focus.off { color: var(--text-3); }
         .today-banner.rest-day { border-left-color: var(--text-3); border-color: var(--border); }
         .today-banner.rest-day .today-banner-icon { color: var(--text-3); }
 
         /* DETAIL PANEL */
         .detail-panel {
-            background: var(--surface-2); border: 1px solid rgba(204,255,0,0.3);
+            background: var(--surface-2); border: 1px solid rgba(61,139,255,0.3);
             border-radius: var(--r-lg); padding: 24px; margin-top: 16px;
             display: none; position: relative;
         }
@@ -165,12 +165,12 @@
             cursor: pointer; transition: all var(--t-base); margin-top: 24px;
         }
         .save-plan-btn:hover { background: var(--volt-dark); box-shadow: var(--shadow-volt); }
-        .save-plan-btn.saved { background: rgba(255,255,255,0.04); color: var(--volt); border: 1px solid rgba(204,255,0,0.4); cursor: default; }
+        .save-plan-btn.saved { background: rgba(255,255,255,0.04); color: var(--volt); border: 1px solid rgba(61,139,255,0.4); cursor: default; }
 
         /* ── ACTIVE PLAN VIEW ── */
         .apv-header {
             display: flex; align-items: center; justify-content: space-between;
-            background: var(--surface-2); border: 1px solid rgba(204,255,0,0.25);
+            background: var(--surface-2); border: 1px solid rgba(61,139,255,0.25);
             border-radius: var(--r-lg); padding: 20px 24px; margin-bottom: 24px;
             flex-wrap: wrap; gap: 16px; position: relative; overflow: hidden;
         }
@@ -193,7 +193,7 @@
         }
 
         .finish-workout-btn {
-            background: var(--volt, #CCFF00); color: #000;
+            background: var(--volt, #3D8BFF); color: #000;
             font-family: var(--font-display); font-size: 16px; letter-spacing: 2px;
             padding: 14px 32px; border: none; border-radius: var(--r-sm);
             cursor: pointer; transition: opacity 0.2s, background 0.3s;
@@ -248,7 +248,7 @@
             background: rgba(255,255,255,0.02); cursor: pointer;
             transition: border-color var(--t-fast), background var(--t-fast);
         }
-        .pump-dropzone:hover { border-color: rgba(204,255,0,0.45); background: var(--volt-dim); }
+        .pump-dropzone:hover { border-color: rgba(61,139,255,0.45); background: var(--volt-dim); }
         .pump-dz-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; }
         .pump-dz-empty svg { width: 30px; height: 30px; stroke: var(--text-3); fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
         .pump-dropzone-text { font-size: 13px; color: var(--text-2); font-weight: 500; }
@@ -320,7 +320,7 @@
     <button class="drawer-trigger" data-action="fxToggleDrawer">
         <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <span class="header-brand">FITX</span>
+    <span class="header-brand"><img class="brand-mark" src="/static/icon-holo.png" alt="">AxisAI</span>
     <div class="header-spacer"></div>
     <a href="/edit-profile" class="header-avatar" title="Profil">
         {% if profile_picture %}
@@ -893,7 +893,7 @@ document.addEventListener('click', e => {
 
             // Score color & label
             const score = parseFloat(data.score) || 0;
-            const scoreColor = score >= 8 ? '#CCFF00' : score >= 6 ? '#FFB020' : '#FF4D4D';
+            const scoreColor = score >= 8 ? '#3D8BFF' : score >= 6 ? '#FFB020' : '#FF4D4D';
             const scoreLabel = score >= 8 ? 'Mükemmel Program' : score >= 6 ? 'İyi Program' : 'Orta Program';
 
             document.getElementById('apv-score').textContent  = score;
@@ -1183,7 +1183,7 @@ document.addEventListener('click', e => {
         saveBtn.textContent = "PROGRAMI KAYDET";
 
         // Score
-        const scoreColors = { "İyi": "#CCFF00", "Orta": "#FFB020", "Kötü": "#FF4D4D" };
+        const scoreColors = { "İyi": "#3D8BFF", "Orta": "#FFB020", "Kötü": "#FF4D4D" };
         const color = scoreColors[data.score_label] || "#9A9A9A";
         const ozet  = data.haftalik_ozet || {};
 

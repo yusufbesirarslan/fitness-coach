@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════
-   FITX — HYBRID NAVIGATION v3.0
+   AxisAI — HYBRID NAVIGATION v3.0
    Drawer · Swipe gestures
    ═══════════════════════════════════════════════════════ */
 

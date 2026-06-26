@@ -68,7 +68,7 @@ function updateRing(eaten, target) {
   const offset = RING_CIRC * (1 - pct);
   const ring = document.getElementById('calorie-ring');
   ring.style.strokeDashoffset = offset;
-  ring.style.stroke = eaten > target * 1.05 ? '#FF4D4D' : '#CCFF00';
+  ring.style.stroke = eaten > target * 1.05 ? '#FF4D4D' : '#3D8BFF';
   document.getElementById('ring-eaten').textContent = Math.round(eaten);
   document.getElementById('ring-pct').textContent   = Math.round(pct * 100) + '%';
   document.getElementById('ring-target').textContent = Math.round(target);
@@ -320,7 +320,7 @@ function createFoodChip(name, category) {
     const isSelected = el.classList.toggle('selected');
     if (isSelected) selected[category].add(name);
     else            selected[category].delete(name);
-    el.querySelector('.chip-dot').style.background = isSelected ? '#CCFF00' : '';
+    el.querySelector('.chip-dot').style.background = isSelected ? '#3D8BFF' : '';
   });
   return el;
 }
@@ -392,7 +392,7 @@ function renderPlans(data) {
   document.getElementById('plan-results').style.display = 'block';
 
   // Score banner
-  const scoreColors = { 'İyi': '#CCFF00', 'Orta': '#FFB020', 'Kötü': '#FF4D4D' };
+  const scoreColors = { 'İyi': '#3D8BFF', 'Orta': '#FFB020', 'Kötü': '#FF4D4D' };
   const color = scoreColors[data.score_label] || '#9A9A9A';
   document.getElementById('score-banner-wrap').innerHTML = `
     <div class="score-banner" style="margin-bottom:24px;">
@@ -587,7 +587,7 @@ async function loadQuickAddSection() {
             <div class="qab-sub">${sub}</div>
           </div>
           <svg class="qab-check" viewBox="0 0 24 24" fill="none"
-               stroke="#CCFF00" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+               stroke="#3D8BFF" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="20 6 9 17 4 12"/>
           </svg>
           <svg class="qab-plus" viewBox="0 0 24 24" fill="none"

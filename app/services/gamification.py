@@ -104,7 +104,7 @@ def get_title(level):
     elif level <= 20:
         return "Kas Mimarı"
     elif level <= 50:
-        return "FitX Efsanesi"
+        return "AxisAI Efsanesi"
     else:
         return "Antrenman Tanrısı"
 

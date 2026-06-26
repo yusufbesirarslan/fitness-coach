@@ -2,7 +2,7 @@
 <html lang="tr" data-theme="dark">
 <head>
   {% include "_head.html" %}
-  <title>Beslenme — FitX</title>
+  <title>Beslenme — AxisAI</title>
   <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
   <style nonce="{{ csp_nonce }}">
@@ -53,7 +53,7 @@
     .apd-sub { font-size:12px; color:var(--text-3); }
     .apd-macro-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin-bottom:20px; }
     @media(max-width:500px){ .apd-macro-grid { grid-template-columns:repeat(2,1fr); } }
-    .apd-macro-item { background:rgba(204,255,0,0.05); border:1px solid rgba(204,255,0,0.14); border-radius:12px; padding:14px; text-align:center; }
+    .apd-macro-item { background:rgba(61,139,255,0.05); border:1px solid rgba(61,139,255,0.14); border-radius:12px; padding:14px; text-align:center; }
     .apd-macro-val { font-family:var(--font-display); font-size:22px; color:var(--volt); letter-spacing:1px; line-height:1.1; }
     .apd-macro-lbl { font-size:10px; color:var(--text-3); text-transform:uppercase; letter-spacing:0.1em; margin-top:4px; }
     .apd-meal { background:var(--surface-2); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:10px; }
@@ -69,19 +69,19 @@
     /* ── Quick Add from Plan ── */
     .qab {
       display:flex; align-items:center; gap:12px; width:100%;
-      background:rgba(204,255,0,0.04); border:1.5px solid rgba(204,255,0,0.16);
+      background:rgba(61,139,255,0.04); border:1.5px solid rgba(61,139,255,0.16);
       border-radius:12px; padding:13px 16px; cursor:pointer;
       transition:background 0.18s, border-color 0.18s, transform 0.14s;
       text-align:left;
     }
-    .qab:hover:not(.qab-done) { background:rgba(204,255,0,0.09); border-color:rgba(204,255,0,0.38); transform:translateY(-1px); }
+    .qab:hover:not(.qab-done) { background:rgba(61,139,255,0.09); border-color:rgba(61,139,255,0.38); transform:translateY(-1px); }
     .qab:active:not(.qab-done) { transform:translateY(0); }
-    .qab.qab-done { background:rgba(204,255,0,0.10); border-color:#CCFF00; cursor:default; }
+    .qab.qab-done { background:rgba(61,139,255,0.10); border-color:#3D8BFF; cursor:default; }
     .qab-icon { font-size:20px; flex-shrink:0; }
     .qab-info { flex:1; min-width:0; }
     .qab-title { font-family:var(--font-display); font-size:14px; letter-spacing:1.2px; color:var(--text); line-height:1.2; }
     .qab-sub { font-size:11.5px; color:var(--text-3); margin-top:3px; }
-    .qab-plus { width:18px; height:18px; flex-shrink:0; color:#CCFF00; stroke:#CCFF00; transition:transform 0.15s; }
+    .qab-plus { width:18px; height:18px; flex-shrink:0; color:#3D8BFF; stroke:#3D8BFF; transition:transform 0.15s; }
     .qab:hover:not(.qab-done) .qab-plus { transform:scale(1.25); }
     .qab-check { width:18px; height:18px; flex-shrink:0; display:none; }
     @keyframes qab-pop { 0%{transform:scale(0.6);opacity:0} 70%{transform:scale(1.2)} 100%{transform:scale(1);opacity:1} }
@@ -91,7 +91,7 @@
       font-size:13px; color:var(--text-3); text-align:center; cursor:pointer;
       transition:border-color 0.18s, color 0.18s;
     }
-    .qab-no-plan:hover { border-color:rgba(204,255,0,0.3); color:var(--volt); }
+    .qab-no-plan:hover { border-color:rgba(61,139,255,0.3); color:var(--volt); }
 
     /* ── AUTOCOMPLETE ── */
     .autocomplete-dropdown {
@@ -104,7 +104,7 @@
       padding:12px 16px; cursor:pointer;
       border-bottom:1px solid var(--border); transition:background 0.15s;
     }
-    .autocomplete-item:hover { background:rgba(204,255,0,0.06); }
+    .autocomplete-item:hover { background:rgba(61,139,255,0.06); }
     .autocomplete-item:last-child { border-bottom:none; }
     .ac-name { font-size:14px; color:var(--text); font-weight:500; }
     .ac-brand { font-size:11px; color:var(--text-3); }
@@ -128,7 +128,7 @@
       padding:2px 8px; border-radius:20px; font-weight:600;
       display:inline-block; margin-left:8px; vertical-align:middle;
     }
-    .source-badge.ai { border:1px solid rgba(204,255,0,0.2); color:rgba(204,255,0,0.6); }
+    .source-badge.ai { border:1px solid rgba(61,139,255,0.2); color:rgba(61,139,255,0.6); }
     .source-badge.diary { border:1px solid rgba(255,255,255,0.15); color:var(--text-3); }
 
     /* ── DIARY BUILDER ── */
@@ -296,7 +296,7 @@
     <button class="drawer-trigger" data-action="fxToggleDrawer">
         <svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
     </button>
-    <span class="header-brand">FITX</span>
+    <span class="header-brand"><img class="brand-mark" src="/static/icon-holo.png" alt="">AxisAI</span>
     <div class="header-spacer"></div>
     <a href="/edit-profile" class="header-avatar" title="Profil">
         {% if profile_picture %}
@@ -394,12 +394,12 @@
             <circle class="ring-track" cx="60" cy="60" r="48" stroke-width="8"/>
             <circle class="ring-fill" id="calorie-ring"
               cx="60" cy="60" r="48" stroke-width="8"
-              stroke="#CCFF00"
+              stroke="#3D8BFF"
               stroke-dasharray="301.6"
               stroke-dashoffset="301.6"/>
           </svg>
           <div class="ring-label">
-            <div style="font-family:'Bebas Neue';font-size:30px;color:#CCFF00;letter-spacing:1px;line-height:1;" id="ring-eaten">0</div>
+            <div style="font-family:'Bebas Neue';font-size:30px;color:#3D8BFF;letter-spacing:1px;line-height:1;" id="ring-eaten">0</div>
             <div style="font-size:11px;color:var(--text-3);font-weight:600;margin-top:2px;">kcal</div>
             <div style="font-size:10px;color:var(--text-3);font-weight:500;" id="ring-pct">0%</div>
           </div>
@@ -473,7 +473,7 @@
           <div class="qab-sub" id="qab-water-sub">Bugün 0 / 8 bardak</div>
         </div>
         <svg class="qab-check" viewBox="0 0 24 24" fill="none"
-             stroke="#CCFF00" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+             stroke="#3D8BFF" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="20 6 9 17 4 12"/>
         </svg>
         <svg class="qab-plus" viewBox="0 0 24 24" fill="none"
@@ -522,7 +522,7 @@
       <div id="selected-foods-list" style="margin-bottom:12px;display:none;">
         <div style="font-size:11px;color:var(--text-3);font-weight:700;letter-spacing:0.1em;text-transform:uppercase;margin-bottom:8px;">Seçilen Besinler</div>
         <div id="selected-foods-items"></div>
-        <div id="selected-foods-totals" style="margin-top:8px;padding:10px;background:rgba(204,255,0,0.05);border:1px solid rgba(204,255,0,0.14);border-radius:8px;font-size:12px;color:var(--text-2);"></div>
+        <div id="selected-foods-totals" style="margin-top:8px;padding:10px;background:rgba(61,139,255,0.05);border:1px solid rgba(61,139,255,0.14);border-radius:8px;font-size:12px;color:var(--text-2);"></div>
       </div>
 
       <textarea class="fc-input" id="meal-input"

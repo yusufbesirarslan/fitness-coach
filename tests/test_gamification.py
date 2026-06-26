@@ -38,7 +38,7 @@ def test_level_thresholds(xp, level):
     (1, "Fitness Yolcusu"), (5, "Fitness Yolcusu"),
     (6, "Demir Bükücü"), (10, "Demir Bükücü"),
     (11, "Kas Mimarı"), (20, "Kas Mimarı"),
-    (21, "FitX Efsanesi"), (50, "FitX Efsanesi"),
+    (21, "AxisAI Efsanesi"), (50, "AxisAI Efsanesi"),
     (51, "Antrenman Tanrısı"),
 ])
 def test_title_boundaries(level, title):

@@ -21,7 +21,7 @@ from app.services.gamification import _claim_quest, award_xp, log_activity
 from app.timeutil import app_today, day_key, utc_day_bounds
 
 
-COACH_SYSTEM_PROMPT = """Sen FitX uygulamasının elit, destekleyici ama gerçekçi AI Beslenme & Fitness Koçusun. Kullanıcının veritabanına HEM okuma HEM yazma erişimin var ve bunu ARAÇLAR (function calling) üzerinden yaparsın.
+COACH_SYSTEM_PROMPT = """Sen AxisAI uygulamasının elit, destekleyici ama gerçekçi AI Beslenme & Fitness Koçusun. Kullanıcının veritabanına HEM okuma HEM yazma erişimin var ve bunu ARAÇLAR (function calling) üzerinden yaparsın.
 
 VERİ KAYNAKLARIN:
 - Beslenme verileri FatSecret API'den geliyor — makroları ASLA tahmin etme, daima aracı çağır.

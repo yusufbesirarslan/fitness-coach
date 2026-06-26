@@ -2,12 +2,12 @@
 <html lang="tr" data-theme="dark">
 <head>
     {% include "_head.html" %}
-    <title>FitX — Yapay Zekâ Fitness Koçun</title>
-    <meta name="description" content="FitX'e ücretsiz katıl — yapay zekâ koçunla 3 dakikada kişiye özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.">
-    <meta property="og:title" content="FitX — Yapay Zekâ Fitness Koçun">
+    <title>AxisAI — Yapay Zekâ Fitness Koçun</title>
+    <meta name="description" content="AxisAI'e ücretsiz katıl — yapay zekâ koçunla 3 dakikada kişiye özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.">
+    <meta property="og:title" content="AxisAI — Yapay Zekâ Fitness Koçun">
     <meta property="og:description" content="3 dakikada sana özel AI plan. Takip et, arkadaşlarınla yarış, hedefine ulaş.">
     <meta property="og:type" content="website">
-    <meta property="og:image" content="/static/favicon.svg">
+    <meta property="og:image" content="/static/icon-holo.png">
     <meta name="twitter:card" content="summary">
     <link rel="stylesheet" href="/static/style.css">
     <style nonce="{{ csp_nonce }}">
@@ -17,8 +17,13 @@
             padding: 20px 0;
         }
         .lp-brand {
+            display: inline-flex; align-items: center; gap: 10px;
             font-family: 'Bebas Neue', sans-serif; font-size: 30px;
             letter-spacing: 4px; color: var(--accent);
+        }
+        .lp-brand-mark {
+            width: 36px; height: 36px; border-radius: 9px;
+            display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.4);
         }
         .lp-nav a.lp-login {
             color: var(--text2); text-decoration: none; font-size: 14px; font-weight: 500;
@@ -88,7 +93,7 @@
 
 <div class="lp">
     <nav class="lp-nav">
-        <span class="lp-brand">FITX</span>
+        <span class="lp-brand"><img class="lp-brand-mark" src="/static/icon-holo.png" alt="">AxisAI</span>
         <a href="/login" class="lp-login">Giriş Yap</a>
     </nav>
 
@@ -130,7 +135,7 @@
         <a href="/register" class="lp-cta" data-ga-event="landing_cta_click_social">Hemen Katıl</a>
     </section>
 
-    <div class="lp-footer">© FitX — Yapay zekâ fitness koçun.</div>
+    <div class="lp-footer">© AxisAI — Yapay zekâ fitness koçun.</div>
 </div>
 
 <script nonce="{{ csp_nonce }}">

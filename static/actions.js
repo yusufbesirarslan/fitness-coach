@@ -1,4 +1,4 @@
-/* FitX olay-delegasyonu — satır-içi on* (onclick/oninput/...) işleyicilerinin
+/* AxisAI olay-delegasyonu — satır-içi on* (onclick/oninput/...) işleyicilerinin
  * yerini alır. Böylece CSP'den script-src-attr 'unsafe-inline' kaldırılabilir
  * (bkz. app/hooks.py). Öğeler davranışlarını HTML nitelikleriyle bildirir:
  *
