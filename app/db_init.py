@@ -112,8 +112,14 @@ def init_database(app):
                 FOR EACH ROW EXECUTE FUNCTION calc_activity_calories();
             """))
             db.session.commit()
-        except Exception:
+        except Exception as e:
             db.session.rollback()
+            # PL/pgSQL trigger yalnızca Postgres'te kurulur; SQLite (lokal/test) bunu
+            # beklenen şekilde reddeder. Postgres'te başarısızlık ise GERÇEK bir sorun
+            # → görünür yap, sessizce yutma (S8: prod'da teşhis edilebilsin).
+            if db.engine.dialect.name == "postgresql":
+                app.logger.warning("[DB] activity-calorie trigger kurulamadı: %s: %s",
+                                   type(e).__name__, e)
         if DailyQuest.query.count() == 0:
             for q in [
                 DailyQuest(title="Günlük Giriş", description="Bugün uygulamaya giriş yap", points_reward=10, quest_type="login"),
