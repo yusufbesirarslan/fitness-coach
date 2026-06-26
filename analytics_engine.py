@@ -8,7 +8,7 @@ passed in from the caller to avoid circular imports.
 
 from datetime import datetime, timedelta
 
-from app.timeutil import app_today, utc_day_bounds
+from app.timeutil import app_today
 
 
 def get_nudges(user, db, models, prev_last_login=None):
@@ -96,12 +96,16 @@ def _check_protein_goal(user, db, models, today, nudges):
     weekly_protein_goal = sess.target_calories * protein_pct / 4 * 7
 
     week_start = today - timedelta(days=today.weekday())
-    week_start_utc, _ = utc_day_bounds(week_start)
+    # Kanonik gün anahtarı MealLog.tarih (Istanbul ISO) ile sorgula — created_at
+    # (naive UTC) kullanmak gün dönümü yakınındaki öğünleri yanlış haftaya
+    # büküyordu; uygulamanın geri kalanı (_today_nutrition_totals, analyze_menu)
+    # zaten tarih üzerinden gidiyor (B2/A7).
     total = db.session.query(
         db.func.coalesce(db.func.sum(MealLog.protein), 0)
     ).filter(
         MealLog.user_id == user.id,
-        MealLog.created_at >= week_start_utc,
+        MealLog.tarih >= week_start.isoformat(),
+        MealLog.tarih <= today.isoformat(),
     ).scalar()
 
     if weekly_protein_goal > 0 and total >= weekly_protein_goal * 0.9:

@@ -138,6 +138,18 @@ def test_protein_goal_needs_a_session_with_target(make_user):
     assert "NUDGE_PROTEIN_GOAL" not in _nudge_types(user)
 
 
+def test_protein_goal_ignores_meals_outside_current_week(make_user):
+    # B2/A7: pencere kanonik MealLog.tarih ile hesaplanır. Bu haftanın dışındaki
+    # (14 gün önce) yüksek-protein öğünü toplama GİRMEMELİ → nudge tetiklenmez.
+    user = make_user("ivan", last_login=date.today())
+    db.session.add(UserSession(user_id=user.id, target_calories=2000, goal="kas kazanma"))
+    old_day = (app_today() - timedelta(days=14)).isoformat()
+    db.session.add(MealLog(user_id=user.id, ogun="öğün", yemekler="tavuk",
+                           kalori=4000, protein=950, tarih=old_day))
+    db.session.commit()
+    assert "NUDGE_PROTEIN_GOAL" not in _nudge_types(user)
+
+
 # ---------------------------------------------------------------------------
 # Haftalık rapor günü — Pazartesi (0) ve Pazar (6).
 # ---------------------------------------------------------------------------
