@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="tr" data-theme="dark">
+<html lang="{{ locale }}" data-theme="dark">
 <head>
     {% include "_head.html" %}
-    <title>E-posta Doğrulama — AxisAI</title>
+    <title>{{ t('verify.title') }} — AxisAI</title>
     <meta name="description" content="AxisAI hesabını doğrula — e-postana gönderilen kodu gir.">
     <link rel="stylesheet" href="/static/style.css">
     <style nonce="{{ csp_nonce }}">
@@ -67,40 +67,58 @@
             background:none; border:none; color:var(--accent); cursor:pointer;
             font-size:14px; padding:0; border-bottom:1px solid var(--accent-glow);
         }
-        .theme-corner { position:fixed; top:20px; right:20px; }
+        .theme-corner {
+            position:fixed; top:20px; right:20px;
+            display:flex; align-items:center; gap:10px;
+        }
+        .lang-switch {
+            display:inline-flex; gap:2px; background:var(--bg3);
+            border:1px solid var(--border); border-radius:8px; padding:2px;
+        }
+        .lang-opt {
+            font-family:'DM Sans',sans-serif; font-size:12px; font-weight:600;
+            letter-spacing:0.05em; color:var(--text2); background:none; border:none;
+            border-radius:6px; padding:5px 9px; cursor:pointer; transition:all .2s;
+        }
+        .lang-opt.on { background:var(--accent); color:#0a0a0a; }
+        .lang-opt:not(.on):hover { color:var(--text); }
     </style>
 </head>
 <body>
 
     <div class="theme-corner">
-        <button class="theme-toggle" data-action="toggleTheme"></button>
+        <div class="lang-switch" role="group" aria-label="{{ t('lang.aria') }}">
+            <button type="button" class="lang-opt{% if locale == 'tr' %} on{% endif %}" data-action="setLang" data-args='["tr"]'>TR</button>
+            <button type="button" class="lang-opt{% if locale == 'en' %} on{% endif %}" data-action="setLang" data-args='["en"]'>EN</button>
+        </div>
+        <button class="theme-toggle" data-action="toggleTheme" aria-label="{{ t('theme.aria') }}"></button>
     </div>
 
     <div class="auth-wrapper">
         <div class="auth-card">
             <div class="auth-logo"><img class="auth-logo-mark" src="/static/icon-holo.png" alt="">AxisAI</div>
-            <div class="auth-subtitle">E-postanı doğrula</div>
+            <div class="auth-subtitle">{{ t('verify.subtitle') }}</div>
 
             <div class="auth-error" id="error-msg"></div>
             <div class="auth-success" id="success-msg"></div>
 
             <div class="form-group">
-                <label>Kullanıcı Adı</label>
-                <input type="text" id="username" value="{{ username }}" placeholder="Kullanıcı adın">
+                <label>{{ t('form.username') }}</label>
+                <input type="text" id="username" value="{{ username }}" placeholder="{{ t('verify.username_ph') }}">
             </div>
             <div class="form-group">
-                <label>Doğrulama Kodu</label>
+                <label>{{ t('verify.code_label') }}</label>
                 <input type="text" id="code" inputmode="numeric" autocomplete="one-time-code"
-                       placeholder="E-postana gelen kod">
+                       placeholder="{{ t('verify.code_ph') }}">
             </div>
 
-            <button class="auth-btn" data-action="verifyCode">DOĞRULA</button>
+            <button class="auth-btn" data-action="verifyCode">{{ t('verify.submit') }}</button>
 
             <div class="auth-footer">
-                Kod gelmedi mi? <button class="link-btn" data-action="resendCode">Tekrar gönder</button>
+                {{ t('verify.no_code') }} <button class="link-btn" data-action="resendCode">{{ t('verify.resend') }}</button>
             </div>
             <div class="auth-footer">
-                <a href="/login">Giriş ekranına dön</a>
+                <a href="/login">{{ t('verify.back_login') }}</a>
             </div>
         </div>
     </div>
@@ -130,7 +148,7 @@
         async function verifyCode() {
             const username = document.getElementById("username").value.trim();
             const code = document.getElementById("code").value.trim();
-            if (!username || !code) { showError("Kullanıcı adı ve kod zorunludur."); return; }
+            if (!username || !code) { showError(t('verify.username_code_required')); return; }
 
             const response = await fetch("/verify", {
                 method: "POST",
@@ -139,7 +157,7 @@
             });
             const data = await response.json();
             if (response.ok) {
-                showSuccess(data.message + " Yönlendiriliyorsunuz...");
+                showSuccess(data.message + " " + t('common.redirecting'));
                 setTimeout(() => window.location.href = "/login", 1500);
             } else {
                 showError(data.error);
@@ -148,7 +166,7 @@
 
         async function resendCode() {
             const username = document.getElementById("username").value.trim();
-            if (!username) { showError("Önce kullanıcı adını gir."); return; }
+            if (!username) { showError(t('verify.enter_username_first')); return; }
 
             const response = await fetch("/verify/resend", {
                 method: "POST",

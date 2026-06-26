@@ -22,7 +22,12 @@ class User(UserMixin, db.Model):
     email         = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(200), nullable=False)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
-    
+
+    # Arayüz/koç dili tercihi: 'tr' | 'en'. Kayıt sırasında (kayıt-öncesi TR/EN
+    # seçimi) yazılır, ayarlardan değiştirilebilir. Varsayılan 'tr' → mevcut
+    # kullanıcılar Türkçe kalır. Locale çözümü app/i18n.resolve_locale'da.
+    language      = db.Column(db.String(5), default="tr", server_default="tr")
+
     # Profil bilgileri
     weight           = db.Column(db.Float)
     height           = db.Column(db.Float)

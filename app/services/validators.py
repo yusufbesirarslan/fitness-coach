@@ -4,6 +4,8 @@ import s3_helper
 from flask import current_app
 from werkzeug.security import generate_password_hash
 
+from app.i18n import t
+
 
 def _to_float(value, default=0.0):
     """Kullanıcı JSON'undan gelen sayıyı güvenle float'a çevir; geçersiz/eksikse
@@ -171,11 +173,11 @@ def validate_username(name):
     HTML/JS/URL contexts on the client (defense against stored XSS).
     """
     if not name or len(name) < 3:
-        return "Kullanıcı adı en az 3 karakter olmalıdır."
+        return t("validate.username_min")
     if len(name) > 80:
-        return "Kullanıcı adı en fazla 80 karakter olabilir."
+        return t("validate.username_max")
     if not USERNAME_RE.match(name):
-        return "Kullanıcı adı yalnızca harf, rakam, nokta, alt çizgi ve tire içerebilir."
+        return t("validate.username_charset")
     return None
 
 
@@ -187,13 +189,13 @@ def validate_password(password):
     does per request (avoids a DoS via a megabyte-long password).
     """
     if not password or len(password) < 8:
-        return "Şifre en az 8 karakter olmalıdır."
+        return t("validate.password_min")
     if len(password) > 128:
-        return "Şifre en fazla 128 karakter olabilir."
+        return t("validate.password_max")
     if not any(c.isalpha() for c in password):
-        return "Şifre en az bir harf içermelidir."
+        return t("validate.password_letter")
     if not any(c.isdigit() for c in password):
-        return "Şifre en az bir rakam içermelidir."
+        return t("validate.password_digit")
     return None
 
 
@@ -203,7 +205,7 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 def validate_email(email):
     """Return an error message if the email is malformed, else None."""
     if not email or len(email) > 120 or not EMAIL_RE.match(email):
-        return "Geçerli bir e-posta adresi girin."
+        return t("validate.email_invalid")
     return None
 
 

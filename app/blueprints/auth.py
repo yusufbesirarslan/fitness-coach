@@ -3,7 +3,7 @@ import secrets
 
 from flask import (Blueprint, abort, current_app, jsonify, redirect,
                    render_template, request, session, url_for)
-from flask_login import login_required, login_user, logout_user
+from flask_login import current_user, login_required, login_user, logout_user
 from flask_limiter.util import get_remote_address
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -17,17 +17,31 @@ from app.services.cognito_idp import CognitoIdpError
 from app.services.gamification import complete_quest_for_user
 from app.services.referral import consume_referral, ensure_referral_code
 from app.services.validators import _DUMMY_PW_HASH, validate_email, validate_password, validate_username
+from app.i18n import AVAILABLE_LOCALES, set_locale, t
 
 
 bp = Blueprint("auth", __name__)
 
-# /login?err=<code> → kullanıcıya gösterilecek Türkçe mesaj (Cognito geri dönüş
-# hatalarını güvenli, sabit bir kümeyle eşler; ham hata sızdırılmaz).
-_AUTH_ERRORS = {
-    "cognito": "E-posta ile giriş tamamlanamadı. Lütfen tekrar deneyin.",
-    "link": "Bu e-posta zaten kayıtlı. Kullanıcı adı/şifre ile giriş yap ya da "
-            "Cognito'da e-postanı doğrulayıp tekrar dene.",
+# /login?err=<code> → kullanıcıya gösterilecek mesajın çeviri anahtarı (Cognito
+# geri dönüş hatalarını güvenli, sabit bir kümeyle eşler; ham hata sızdırılmaz).
+_AUTH_ERROR_KEYS = {
+    "cognito": "auth.err_cognito",
+    "link": "auth.err_link",
 }
+
+
+@bp.route("/set-language", methods=["POST"])
+def set_language():
+    """Anonim/giriş-öncesi TR/EN seçimi. Dili session'a yazar; girişliyse
+    hesaba da kalıcılaştırır. CSRF: durum-değiştiren POST → _csrf_protect korur."""
+    data = request.get_json(silent=True) or {}
+    lang = (data.get("lang") or "").strip().lower()
+    if not set_locale(lang):
+        return jsonify({"error": t("auth.set_lang_invalid")}), 400
+    if current_user.is_authenticated:
+        current_user.language = lang
+        db.session.commit()
+    return jsonify({"ok": True, "language": lang})
 
 
 def _cognito_available():
@@ -40,6 +54,10 @@ def _login_fresh(user):
     değiştiği için saldırganın sabitlediği ön-giriş çerezi yeniden kullanılamaz."""
     session.clear()
     login_user(user)
+    # Oturum temizlendi → kullanıcının dil tercihini geri yükle (anon istek
+    # akışında g.locale tutarlı kalsın; resolve_locale zaten user.language okur).
+    if getattr(user, "language", None) in AVAILABLE_LOCALES:
+        session["lang"] = user.language
 
 
 def _login_username_key():
@@ -67,9 +85,14 @@ def register():
     username = data.get("username")
     email = (data.get("email") or "").strip()
     password = data.get("password")
+    # Kayıt-öncesi seçilen dil: gövdeden gelir; yoksa session'daki seçime, o da
+    # yoksa varsayılana düşer. Yeni kullanıcıya kalıcılaştırılır.
+    chosen_lang = data.get("language")
+    if chosen_lang not in AVAILABLE_LOCALES:
+        chosen_lang = session.get("lang") if session.get("lang") in AVAILABLE_LOCALES else "tr"
 
     if not username or not email or not password:
-        return jsonify({"error" : "Tüm alanlar zorunludur"}), 400
+        return jsonify({"error": t("auth.all_fields_required")}), 400
 
     password_error = validate_password(password)
     if password_error:
@@ -91,7 +114,7 @@ def register():
     # e-mail login / reset flow, so the residual exposure is low.
     if (User.query.filter_by(username=username).first()
             or User.query.filter_by(email=email).first()):
-        return jsonify({"error": "Bu kullanıcı adı veya e-posta zaten kullanımda."}), 400
+        return jsonify({"error": t("auth.user_or_email_taken")}), 400
 
     # Davet döngüsü: kayıt davet bağlantısından geldiyse (cookie veya body)
     # davetçi ile bağla ve iki tarafa da XP ver.
@@ -111,7 +134,7 @@ def register():
         # KULLANILAMAZ yap — giriş yalnızca Cognito üzerinden (cognito_sub dolu →
         # yerel parola yolu hiç çalışmaz). app/services/cognito.py ile aynı desen.
         user = User(username=username, email=email, cognito_sub=sub or None,
-                    full_name=username)
+                    full_name=username, language=chosen_lang)
         user.password_hash = generate_password_hash(secrets.token_urlsafe(32))
         ensure_referral_code(user)
         db.session.add(user)
@@ -130,11 +153,11 @@ def register():
                 "(username=%s) — Cognito orphan olası, manuel temizlik/retry gerekir: %s",
                 username, type(e).__name__)
             if isinstance(e, IntegrityError):
-                return jsonify({"error": "Bu kullanıcı adı veya e-posta zaten kullanımda."}), 409
-            return jsonify({"error": "Kayıt tamamlanamadı, lütfen tekrar deneyin."}), 503
+                return jsonify({"error": t("auth.user_or_email_taken")}), 409
+            return jsonify({"error": t("auth.register_failed")}), 503
         referred = bool(consume_referral(user, ref_code))
-        resp = jsonify({"message": "Hesabın oluşturuldu! E-postana gönderilen "
-                                   "doğrulama kodunu gir.",
+        session["lang"] = chosen_lang
+        resp = jsonify({"message": t("auth.register_verify_sent"),
                         "needs_verification": True, "username": username,
                         "referred": referred})
         if request.cookies.get("fitx_ref"):
@@ -142,14 +165,15 @@ def register():
         return resp
 
     # Cognito kapalı → klasik yerel-yalnız kayıt (geriye dönük uyum).
-    user = User(username = username , email = email)
+    user = User(username=username, email=email, language=chosen_lang)
     user.set_password(password)
     ensure_referral_code(user)
     db.session.add(user)
     db.session.commit()
     referred = bool(consume_referral(user, ref_code))
+    session["lang"] = chosen_lang
 
-    resp = jsonify({"message": f"Hoş geldin {username}, hesabın oluşturuldu!",
+    resp = jsonify({"message": t("auth.register_done", username=username),
                     "referred": referred})
     if request.cookies.get("fitx_ref"):
         resp.delete_cookie("fitx_ref")
@@ -162,7 +186,8 @@ def register():
                deduct_when=lambda response: response.status_code == 401)
 def login():
     if request.method == "GET":
-        auth_error = _AUTH_ERRORS.get(request.args.get("err", ""))
+        err_key = _AUTH_ERROR_KEYS.get(request.args.get("err", ""))
+        auth_error = t(err_key) if err_key else None
         return render_template("login.html", cognito_enabled=_cognito_available(),
                                auth_error=auth_error)
     # Fail-closed: Redis (dağıtık brute-force throttle) erişilemiyorsa login'i
@@ -173,8 +198,7 @@ def login():
         current_app.logger.warning(
             "[LOGIN] Redis erişilemiyor — login fail-closed (503), brute-force "
             "throttle güvenilir değil.")
-        return jsonify({"error": "Giriş geçici olarak kullanılamıyor. "
-                                 "Lütfen birazdan tekrar deneyin."}), 503
+        return jsonify({"error": t("auth.login_unavailable")}), 503
     data = request.get_json(silent=True) or {}
     username = data.get("username")
     password = data.get("password")
@@ -195,10 +219,10 @@ def login():
             return jsonify({"error": e.message}), 401
         # Kimlik bütünlüğü: dönen sub yerel kayıtla eşleşmeli.
         if claims.get("sub") and claims["sub"] != user.cognito_sub:
-            return jsonify({"error": "Kullanıcı adı veya şifre hatalı"}), 401
+            return jsonify({"error": t("auth.bad_credentials")}), 401
         _login_fresh(user)
         quest_result = complete_quest_for_user(user.id, "login")
-        response = {"message": f"Hoş geldin {user.username}!"}
+        response = {"message": t("auth.welcome", username=user.username)}
         if quest_result:
             response["quest_awarded"] = quest_result
         return jsonify(response)
@@ -212,7 +236,7 @@ def login():
         password_ok = False
 
     if not password_ok:
-        return jsonify({"error": "Kullanıcı adı veya şifre hatalı"}) , 401
+        return jsonify({"error": t("auth.bad_credentials")}), 401
 
     _login_fresh(user)
     quest_result = complete_quest_for_user(user.id, "login")
@@ -242,12 +266,12 @@ def verify_confirm():
     username = (data.get("username") or "").strip()
     code = (data.get("code") or "").strip()
     if not username or not code:
-        return jsonify({"error": "Kullanıcı adı ve doğrulama kodu zorunludur."}), 400
+        return jsonify({"error": t("auth.verify_fields_required")}), 400
     try:
         cognito_idp.confirm_sign_up(username, code)
     except CognitoIdpError as e:
         return jsonify({"error": e.message}), 400
-    return jsonify({"message": "E-postan doğrulandı! Şimdi giriş yapabilirsin."})
+    return jsonify({"message": t("auth.verify_done")})
 
 
 @bp.route("/verify/resend", methods=["POST"])
@@ -259,12 +283,12 @@ def verify_resend():
     data = request.get_json(silent=True) or {}
     username = (data.get("username") or "").strip()
     if not username:
-        return jsonify({"error": "Kullanıcı adı zorunludur."}), 400
+        return jsonify({"error": t("auth.username_required")}), 400
     try:
         cognito_idp.resend_code(username)
     except CognitoIdpError as e:
         return jsonify({"error": e.message}), 400
-    return jsonify({"message": "Yeni doğrulama kodu e-postana gönderildi."})
+    return jsonify({"message": t("auth.resend_done")})
 
 
 @bp.route("/login/cognito")

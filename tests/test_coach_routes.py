@@ -70,9 +70,9 @@ def test_ask_requires_question(client, auth_user):
 
 def test_ask_passes_context_and_history(client, auth_user, monkeypatch):
     seen = {}
-    monkeypatch.setattr(coach_bp, "_fetch_coach_context", lambda uid, q: "bağlam")
+    monkeypatch.setattr(coach_bp, "_fetch_coach_context", lambda uid, q, language="tr": "bağlam")
 
-    def fake_conversation(user_id, question, context, history):
+    def fake_conversation(user_id, question, context, history, language="tr"):
         seen.update(user_id=user_id, question=question, context=context, history=history)
         return "cevap"
     monkeypatch.setattr(coach_bp, "_run_coach_conversation", fake_conversation)
@@ -85,28 +85,28 @@ def test_ask_passes_context_and_history(client, auth_user, monkeypatch):
 
 
 def test_ask_non_list_history_dropped(client, auth_user, monkeypatch):
-    monkeypatch.setattr(coach_bp, "_fetch_coach_context", lambda uid, q: "")
+    monkeypatch.setattr(coach_bp, "_fetch_coach_context", lambda uid, q, language="tr": "")
     seen = {}
     monkeypatch.setattr(coach_bp, "_run_coach_conversation",
-                        lambda uid, q, c, h: seen.setdefault("history", h) or "ok")
+                        lambda uid, q, c, h, language="tr": seen.setdefault("history", h) or "ok")
     client.post("/ask", json={"question": "soru", "history": "bozuk"})
     assert seen["history"] is None
 
 
 def test_ask_context_failure_degrades_gracefully(client, auth_user, monkeypatch):
-    def boom(uid, q):
+    def boom(uid, q, language="tr"):
         raise RuntimeError("psycopg2 yok")
     monkeypatch.setattr(coach_bp, "_fetch_coach_context", boom)
     monkeypatch.setattr(coach_bp, "_run_coach_conversation",
-                        lambda uid, q, context, h: f"context=[{context}]")
+                        lambda uid, q, context, h, language="tr": f"context=[{context}]")
     response = client.post("/ask", json={"question": "soru"})
     assert response.get_json()["answer"] == "context=[]"
 
 
 def test_ask_conversation_failure_returns_500(client, auth_user, monkeypatch):
-    monkeypatch.setattr(coach_bp, "_fetch_coach_context", lambda uid, q: "")
+    monkeypatch.setattr(coach_bp, "_fetch_coach_context", lambda uid, q, language="tr": "")
 
-    def boom(*args):
+    def boom(*args, **kwargs):
         raise RuntimeError("openai down")
     monkeypatch.setattr(coach_bp, "_run_coach_conversation", boom)
     response = client.post("/ask", json={"question": "soru"})

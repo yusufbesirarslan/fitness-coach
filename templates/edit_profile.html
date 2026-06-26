@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="tr" data-theme="dark">
+<html lang="{{ locale }}" data-theme="dark">
 <head>
     {% include "_head.html" %}
     <title>Profil Düzenle — AxisAI</title>
@@ -256,6 +256,20 @@
                     <label for="target_weight">Hedef Kilo (kg)</label>
                     <input type="number" id="target_weight" placeholder="Hedef kilonuz" value="{{ target_weight or '' }}" step="0.1" min="30" max="300">
                     <div class="field-hint">Ulaşmak istediğiniz kilo (opsiyonel).</div>
+                </div>
+                <div class="form-field">
+                    <label>{{ t('settings.language') }}</label>
+                    <div class="goal-cards">
+                        <div class="goal-card{% if locale == 'tr' %} selected{% endif %}" data-action="setLang" data-args='["tr"]'>
+                            <div class="goal-card-icon">🇹🇷</div>
+                            <div class="goal-card-label">Türkçe</div>
+                        </div>
+                        <div class="goal-card{% if locale == 'en' %} selected{% endif %}" data-action="setLang" data-args='["en"]'>
+                            <div class="goal-card-icon">🇬🇧</div>
+                            <div class="goal-card-label">English</div>
+                        </div>
+                    </div>
+                    <div class="field-hint">{{ t('settings.language_hint') }}</div>
                 </div>
             </div>
 

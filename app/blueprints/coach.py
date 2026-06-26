@@ -7,6 +7,7 @@ from app.extensions import _user_or_ip_key, db, limiter
 from app.models import UserSession
 from app.services.ai_coach import _fetch_coach_context, _run_coach_conversation, generate_coach_reply
 from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee, generate_nutrition_plan, generate_training_plan
+from app.i18n import t
 from app.timeutil import app_date_of, app_today
 
 
@@ -24,14 +25,14 @@ def chat():
                        "gender", "goal", "fitness_level", "current_activity"]
     for field in required_fields:
         if not data.get(field):
-            return jsonify({"reply": f"{field} alanı eksik"}), 400
+            return jsonify({"reply": t("coach.field_missing", field=field)}), 400
 
     try:
         weight = float(data["weight"])
         height = float(data["height"])
         age    = int(data["age"])
     except ValueError:
-        return jsonify({"reply": "Kilo, boy ve yaş sayısal olmalıdır."}), 400
+        return jsonify({"reply": t("coach.numeric_required")}), 400
 
     name             = current_user.username  # formdan değil, oturumdan al
     gender           = data["gender"]
@@ -68,7 +69,8 @@ def chat():
                           bmr, tdee, target_calories,
                           training_plan, nutrition_plan,
                           user_message,
-                          previous_weight, days_passed
+                          previous_weight, days_passed,
+                          language=current_user.language
                       )
     
     new_session = UserSession(
@@ -120,19 +122,21 @@ def ask_coach():
         client_history = None
 
     if not question:
-        return jsonify({"error": "Bir soru yaz."}), 400
+        return jsonify({"error": t("coach.ask_something")}), 400
 
     # Bağlam toplama psycopg2-bağımlı fitx_mcp.server'a dokunur; local'de veya
     # geçici çökmede graceful degrade etsin diye sarmalanır — function-calling
     # akışı (FatSecret + SQLAlchemy) buna bağlı değil, yine de çalışır.
+    lang = current_user.language
     try:
-        context = _fetch_coach_context(current_user.id, question)
+        context = _fetch_coach_context(current_user.id, question, language=lang)
     except Exception:
         context = ""
 
     try:
-        answer = _run_coach_conversation(current_user.id, question, context, client_history)
+        answer = _run_coach_conversation(current_user.id, question, context,
+                                         client_history, language=lang)
         return jsonify({"answer": answer})
     except Exception:
         current_app.logger.exception("Koç yanıtı üretilemedi")
-        return jsonify({"error": "Yanıt şu an alınamadı, lütfen tekrar dene."}), 500
+        return jsonify({"error": t("coach.reply_failed")}), 500

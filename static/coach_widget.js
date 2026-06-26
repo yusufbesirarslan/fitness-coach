@@ -39,11 +39,11 @@
       '<div id="cw-qr-menu" role="menu">' +
         '<button class="cw-qr-opt" id="cw-qr-scan" role="menuitem">' +
           '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3"/><path d="M20 14v3h-3"/><path d="M14 20h3"/></svg>' +
-          'QR Tara' +
+          t('coach.qr_scan') +
         '</button>' +
         '<button class="cw-qr-opt" id="cw-qr-url" role="menuitem">' +
           '<svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>' +
-          'URL Gir' +
+          t('coach.url_enter') +
         '</button>' +
       '</div>' +
 
@@ -59,8 +59,8 @@
         '<button id="cw-qr" aria-label="Menü tara">' +
           '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3"/><path d="M20 14v3h-3"/><path d="M14 20h3"/></svg>' +
         '</button>' +
-        '<input type="text" id="cw-input" placeholder="Bir şey sor..." autocomplete="off">' +
-        '<button id="cw-send" aria-label="Gönder">' +
+        '<input type="text" id="cw-input" placeholder="' + t('coach.placeholder') + '" autocomplete="off">' +
+        '<button id="cw-send" aria-label="' + t('coach.send') + '">' +
           '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
             '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>' +
           '</svg>' +
@@ -83,7 +83,7 @@
 
     '</div>' +
 
-    '<button id="cw-fab" aria-label="Koçuna sor">' +
+    '<button id="cw-fab" aria-label="' + t('coach.fab') + '">' +
       '<span id="cw-badge" aria-hidden="true"></span>' +
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
         '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>' +
@@ -145,7 +145,7 @@
       } catch (_) { this.messages = []; }
 
       if (this.messages.length === 0) {
-        this._push('bot', 'Merhaba! 💪 Ben AI fitness koçunum. Antrenman, beslenme veya sağlıkla ilgili her şeyi sorabilirsin. Menü taramak için soldaki QR ikonuna dokun.');
+        this._push('bot', t('coach.greeting'));
       } else {
         this._render();
       }
@@ -195,16 +195,16 @@
       .then(function (r) { return r.json(); })
       .then(function (d) {
         self._setLoading(false);
-        self._push('bot', d.answer || d.error || 'Yanıt alınamadı.');
+        self._push('bot', d.answer || d.error || t('coach.no_reply'));
       })
       .catch(function () {
         self._setLoading(false);
-        self._push('bot', 'Bağlantı hatası. Lütfen tekrar dene.');
+        self._push('bot', t('coach.conn_error'));
       });
     },
 
     receiveCheckinFeedback: function (text) {
-      this._push('bot', '📊 Check-in Geri Bildirimi\n\n' + text);
+      this._push('bot', t('coach.checkin_feedback') + '\n\n' + text);
       if (!this.open) {
         this.unread = true;
         document.getElementById('cw-badge').style.display = 'block';
@@ -438,7 +438,7 @@
 
     _push: function (role, text) {
       var now  = new Date();
-      var time = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+      var time = now.toLocaleTimeString(window.LOCALE === 'en' ? 'en-US' : 'tr-TR', { hour: '2-digit', minute: '2-digit' });
       this.messages.push({ role: role, text: text, time: time });
       try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(this.messages.slice(-MAX_MESSAGES))); } catch (_) {}
       this._render();
@@ -447,7 +447,7 @@
 
     _pushMenu: function (result) {
       var now  = new Date();
-      var time = now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+      var time = now.toLocaleTimeString(window.LOCALE === 'en' ? 'en-US' : 'tr-TR', { hour: '2-digit', minute: '2-digit' });
       var picks = (result.coach_picks || []).length;
       this.messages.push({ role: 'bot', type: 'menu', data: result, text: 'Menü analizi (' + picks + ' öneri)', time: time });
       try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(this.messages.slice(-MAX_MESSAGES))); } catch (_) {}
@@ -519,7 +519,7 @@
       var container = document.getElementById('cw-msgs');
       if (!container) return;
       if (!this.messages.length && !this.busy) {
-        container.innerHTML = '<div class="cw-empty">Koçuna bir şey sor...</div>';
+        container.innerHTML = '<div class="cw-empty">' + t('coach.empty') + '</div>';
         return;
       }
       var self = this;
@@ -572,7 +572,7 @@
     _showNotify: function () {
       var n = document.getElementById('cw-notify');
       if (!n) return;
-      n.innerHTML = '<span style="font-size:15px">💬</span>Koçundan yeni bir mesaj var!';
+      n.innerHTML = '<span style="font-size:15px">💬</span>' + t('coach.new_message');
       n.classList.add('cw-show');
       clearTimeout(this._toastT);
       this._toastT = setTimeout(function () { n.classList.remove('cw-show'); }, 5000);

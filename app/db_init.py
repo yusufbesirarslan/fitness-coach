@@ -59,6 +59,8 @@ def init_database(app):
             'ALTER TABLE "user" ADD COLUMN profile_picture_key VARCHAR(300)',
             # AI koç hafızası (sakatlıklar/tercihler) — JSONB (RDS PostgreSQL).
             'ALTER TABLE "user" ADD COLUMN user_metadata JSONB',
+            # Dil tercihi (TR/EN) — idempotent güvenlik ağı (migration c4d5e6f7a8b9).
+            'ALTER TABLE "user" ADD COLUMN language VARCHAR(5) DEFAULT \'tr\'',
             # Görev isimlerini Türkçeleştir (eski İngilizce kayıtları da güncelle)
             "UPDATE daily_quest SET title = 'Günlük Giriş' WHERE quest_type = 'login'",
             "UPDATE daily_quest SET title = 'Antrenman Kaydet' WHERE quest_type = 'workout_logged'",

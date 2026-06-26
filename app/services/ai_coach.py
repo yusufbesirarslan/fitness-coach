@@ -77,12 +77,44 @@ YANIT FORMATI:
 - Uzun paragraflar yerine aksiyon odaklı kısa maddeler kullan.
 
 KURALLAR:
-- Türkçe yaz, kullanıcıya "sen" diye hitap et.
 - Kısa, net, samimi ve veri odaklı konuş.
 - Genel geçer tavsiye VERME — her yanıt kullanıcının verisine dayansın.
 - Emin olmadığın tıbbi konularda doktora yönlendir. Tıbbi teşhis veya reçete VERME.
 - Kas kazanma hedefinde kilo artışı OLUMLU, kilo vermede azalış OLUMLU.
 - Tonu: elit, destekleyici, veri odaklı."""
+
+
+# Kullanıcı diline göre çıktı direktifi. Sistem promptunun gövdesi (talimatlar,
+# araç akışları) Türkçe kalır — model Türkçe talimatı okuyup İngilizce yanıtlayabilir;
+# kritik olan ÇIKTI dilini net dayatmaktır.
+_COACH_LANG_DIRECTIVE = {
+    "tr": ("═══ DİL ═══\n"
+           "- Yanıtının TAMAMINI Türkçe yaz; kullanıcıya \"sen\" diye hitap et. "
+           "Veriler veya talimatlar başka dilde olsa bile Türkçe yanıt ver."),
+    "en": ("═══ LANGUAGE ═══\n"
+           "- Write your ENTIRE response in English; address the user as \"you\". "
+           "Even though the user's data, the context blocks (e.g. [KULLANICI PROFİLİ], "
+           "[GÜNLÜK AKTİVİTE]) and these instructions are written in Turkish, you MUST "
+           "reply ONLY in English. Translate any Turkish labels/values into natural "
+           "English. Do not output Turkish words."),
+}
+
+# Sağlayıcı hatasında gösterilen dostça yedek metinler (dile göre).
+_COACH_FALLBACKS = {
+    "tr": {"error": "Bir şeyler ters gitti, tekrar dener misin?",
+           "tool": "İşlemi tamamlayamadım, tekrar dener misin?"},
+    "en": {"error": "Something went wrong — could you try again?",
+           "tool": "I couldn't complete that — could you try again?"},
+}
+
+
+def _coach_lang(language):
+    return language if language in ("tr", "en") else "tr"
+
+
+def build_coach_system(language="tr"):
+    """Koç sistem promptu + dile özgü çıktı direktifi (TR/EN)."""
+    return COACH_SYSTEM_PROMPT + "\n\n" + _COACH_LANG_DIRECTIVE[_coach_lang(language)]
 
 
 def _assert_principal(user_id):
@@ -178,7 +210,7 @@ def _fetch_profile_and_trends(user_id):
     return parts
 
 
-def _fetch_coach_context(user_id, question=""):
+def _fetch_coach_context(user_id, question="", language="tr"):
     _assert_principal(user_id)
     # Not: Beslenme makroları artık koç araçları (fetch_nutrition_and_stage_log)
     # üzerinden tek yoldan gelir; burada FatSecret verisi enjekte ETMİYORUZ ki
@@ -226,7 +258,7 @@ def _fetch_coach_context(user_id, question=""):
             "WaterLog": WaterLog,
         }
         nudges = get_nudges(db.session.get(User, user_id), db, models,
-                            getattr(g, "prev_last_login", None))
+                            getattr(g, "prev_last_login", None), language=language)
         if nudges:
             parts.append("[PROAKTİF BİLDİRİMLER]\n" + "\n".join(nudges))
     except Exception:
@@ -1081,7 +1113,7 @@ class _BedrockFallback(Exception):
     çalıştırmaktan kaçınmak için)."""
 
 
-def _run_coach_conversation(user_id, question, context, client_history=None):
+def _run_coach_conversation(user_id, question, context, client_history=None, language="tr"):
     """Koç sohbeti yönlendiricisi: ortak mesajları kurar, Bedrock açıksa Bedrock
     araç-kullanım döngüsünü dener (ilk çağrı hatasında OpenAI'ya şeffafça düşer),
     aksi halde mevcut OpenAI döngüsünü çalıştırır; sonra geçmişi kalıcılaştırır.
@@ -1104,16 +1136,16 @@ def _run_coach_conversation(user_id, question, context, client_history=None):
     final_text = None
     if BEDROCK_ENABLED and _anthropic is not None:
         try:
-            final_text = _run_coach_conversation_bedrock(user_id, question, context, history)
+            final_text = _run_coach_conversation_bedrock(user_id, question, context, history, language)
         except _BedrockFallback as e:
             current_app.logger.warning(
                 "[COACH] Bedrock ilk çağrı başarısız, OpenAI'ya düşülüyor: %s", e)
             final_text = None
     if final_text is None:
-        final_text = _run_coach_conversation_openai(user_id, question, context, history)
+        final_text = _run_coach_conversation_openai(user_id, question, context, history, language)
 
     if not final_text:
-        final_text = "Bir şeyler ters gitti, tekrar dener misin?"
+        final_text = _COACH_FALLBACKS[_coach_lang(language)]["error"]
 
     # Geçmiş client'ta (widget sessionStorage) tutuluyor; client modunda session'a
     # YAZMA. Yalnızca client history göndermezse eski cookie geçmişini güncelle.
@@ -1126,10 +1158,10 @@ def _run_coach_conversation(user_id, question, context, client_history=None):
     return final_text
 
 
-def _run_coach_conversation_openai(user_id, question, context, history):
+def _run_coach_conversation_openai(user_id, question, context, history, language="tr"):
     """OpenAI function-calling döngüsü: system → (gerekirse araç çağrıları) → final metin.
     Geçmişi session'a YAZMAZ (çağıran yönlendirici halleder)."""
-    messages = [{"role": "system", "content": COACH_SYSTEM_PROMPT}]
+    messages = [{"role": "system", "content": build_coach_system(language)}]
     if context:
         messages.append({"role": "system", "content": f"[KULLANICI VERİSİ]\n{context}"})
     messages.extend(history)
@@ -1173,22 +1205,23 @@ def _run_coach_conversation_openai(user_id, question, context, history):
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
         # Döngü başa döner: model araç sonuçlarıyla final metni üretir ya da zincirler.
     else:
-        final_text = "İşlemi tamamlayamadım, tekrar dener misin?"
+        final_text = _COACH_FALLBACKS[_coach_lang(language)]["tool"]
     return final_text
 
 
-def _build_bedrock_system(context):
-    """Bedrock `system` parametresini kur. Caching açıkken statik COACH_SYSTEM_PROMPT'u
-    ephemeral cache breakpoint ile işaretle; DEĞİŞKEN [KULLANICI VERİSİ] daima
-    önbelleğe-alınan bloğun SONRASINA gelir (asla içine gömülmez — sessiz invalidasyon).
-    Caching kapalıyken düz string yeterli."""
+def _build_bedrock_system(context, language="tr"):
+    """Bedrock `system` parametresini kur. Caching açıkken dile özgü sistem
+    promptunu ephemeral cache breakpoint ile işaretle; DEĞİŞKEN [KULLANICI VERİSİ]
+    daima önbelleğe-alınan bloğun SONRASINA gelir (asla içine gömülmez — sessiz
+    invalidasyon). Caching kapalıyken düz string yeterli."""
+    system_prompt = build_coach_system(language)
     if BEDROCK_PROMPT_CACHE:
-        blocks = [{"type": "text", "text": COACH_SYSTEM_PROMPT,
+        blocks = [{"type": "text", "text": system_prompt,
                    "cache_control": {"type": "ephemeral"}}]
         if context:
             blocks.append({"type": "text", "text": f"[KULLANICI VERİSİ]\n{context}"})
         return blocks
-    sys = COACH_SYSTEM_PROMPT
+    sys = system_prompt
     if context:
         sys += f"\n\n[KULLANICI VERİSİ]\n{context}"
     return sys
@@ -1211,7 +1244,7 @@ def _first_text_block(resp):
     return ""
 
 
-def _run_coach_conversation_bedrock(user_id, question, context, history):
+def _run_coach_conversation_bedrock(user_id, question, context, history, language="tr"):
     """Bedrock (Anthropic Messages API) araç-kullanım döngüsü. stop_reason=='tool_use'
     olduğu sürece araçları çalıştırır, tool_result'ları geri besler ve modelin final
     metnine (stop_reason=='end_turn') ulaşana dek zincirler (güvenli üst sınır).
@@ -1219,7 +1252,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history):
     İlk create() çağrısı hiçbir araç çalışmadan hata verirse _BedrockFallback fırlatır
     (yönlendirici OpenAI'ya düşer). Bir araç YAN ETKİ ürettikten sonraki hatada
     sağlayıcı DEĞİŞTİRİLMEZ — yumuşak hata metni döner."""
-    system = _build_bedrock_system(context)
+    system = _build_bedrock_system(context, language)
     tools = _anthropic_tools_for_call()
     convo = [dict(m) for m in history] + [{"role": "user", "content": question}]
     # Anthropic ilk mesajın 'user' rolünde olmasını şart koşar; baştaki assistant
@@ -1273,7 +1306,7 @@ def generate_coach_reply(name, age, gender, weight, height,
                          bmr, tdee, target_calories,
                          training_plan, nutrition_plan,
                          user_message,
-                         previous_weight=None, days_passed=None):
+                         previous_weight=None, days_passed=None, language="tr"):
 
     activity_labels = {
         "sedentary"  : "hareketsiz (masa başı iş)",
@@ -1337,10 +1370,18 @@ def generate_coach_reply(name, age, gender, weight, height,
                 f"KİLO VERME hedefinde plato olabilir. "
                 f"Kalori açığını gözden geçirmesini öner."
             )
+    if _coach_lang(language) == "en":
+        lang_line = ('You speak ENGLISH. Address the user directly as "you". Write your '
+                     'ENTIRE answer in English and translate the Turkish section headers '
+                     'below into natural English headers.')
+    else:
+        lang_line = ('Türkçe konuşuyorsun. Kullanıcıya "sen" diye hitap et, hiçbir zaman '
+                     '"siz" kullanma. Yanıtında tek bir İngilizce kelime bile kullanma, '
+                     'tamamen Türkçe yaz.')
+
     prompt = f"""Sen deneyimli, samimi ve motive edici bir kişisel fitness koçusun.
-Şeker boyamıyorsun ama insanı kırmıyorsun da. Türkçe konuşuyorsun.
-Kullanıcıya "sen" diye hitap et, hiçbir zaman "siz" kullanma.
-Yanıtında tek bir İngilizce kelime bile kullanma, tamamen Türkçe yaz.
+Şeker boyamıyorsun ama insanı kırmıyorsun da.
+{lang_line}
 Tavsiyelerin bu kişinin spesifik verilerine dayansın — genel geçer şeyler söyleme.
 "ÇOK ÖNEMLİ: Kas kazanma hedefinde kilo artışı OLUMLUDUR, bunu asla negatif algılama. "
 "Kilo verme hedefinde kilo azalışı OLUMLUDUR. "
@@ -1378,18 +1419,23 @@ MOTİVASYON:
     try:
         return _heavy_chat(
             messages=[{"role": "user", "content": prompt}],
-            system_prompt="Sen bir fitness koçusun. Türkçe, samimi, spesifik ve motive edici konuş. Sayılar ve süreler kullan.",
+            system_prompt=("You are a fitness coach. Speak English — friendly, specific, "
+                           "motivating; use numbers and durations."
+                           if _coach_lang(language) == "en"
+                           else "Sen bir fitness koçusun. Türkçe, samimi, spesifik ve motive edici konuş. Sayılar ve süreler kullan."),
             max_tokens=700,
             temperature=0.7,
         )
     except Exception:
         current_app.logger.exception("Koç yorumu üretilemedi")
-        return "Koç yorumu şu an alınamıyor, lütfen tekrar dene."
+        return ("Coach feedback is unavailable right now, please try again."
+                if _coach_lang(language) == "en"
+                else "Koç yorumu şu an alınamıyor, lütfen tekrar dene.")
 
 
 def generate_checkin_feedback(name, weight, prev_weight, days_passed,
                                goal, yogunluk, fatigue, overload,
-                               uyku, beslenme, note):
+                               uyku, beslenme, note, language="tr"):
 
     yogunluk_labels = {1:"çok düşük",2:"düşük",3:"orta",4:"yüksek",5:"çok yüksek"}
     fatigue_labels  = {1:"hiç yorgun değil",2:"biraz yorgun",3:"normal",4:"yorgun",5:"çok yorgun"}
@@ -1415,8 +1461,12 @@ def generate_checkin_feedback(name, weight, prev_weight, days_passed,
             else:
                 progress = f"{days_passed} günde kilo değişmedi — plato olabilir."
 
-    prompt = f"""Sen bir kişisel fitness koçusun. Türkçe yaz, İngilizce kullanma.
-Kullanıcıya "sen" diye hitap et.
+    checkin_lang = ('Write your ENTIRE feedback in English; address the user as "you". '
+                    'The data below is in Turkish — translate it as needed.'
+                    if _coach_lang(language) == "en"
+                    else 'Türkçe yaz, İngilizce kullanma. Kullanıcıya "sen" diye hitap et.')
+
+    prompt = f"""Sen bir kişisel fitness koçusun. {checkin_lang}
 
 Haftalık check-in verileri:
 - İsim: {name}
@@ -1438,10 +1488,14 @@ Uyku kötüyse bunun etkisini açıkla."""
     try:
         return _heavy_chat(
             messages=[{"role": "user", "content": prompt}],
-            system_prompt="Sen bir fitness koçusun. Kısa, spesifik, motive edici Türkçe konuş.",
+            system_prompt=("You are a fitness coach. Speak concise, specific, motivating English."
+                           if _coach_lang(language) == "en"
+                           else "Sen bir fitness koçusun. Kısa, spesifik, motive edici Türkçe konuş."),
             max_tokens=400,
             temperature=0.7,
         )
     except Exception:
         current_app.logger.exception("Check-in geri bildirimi üretilemedi")
-        return "Geri bildirim şu an alınamadı, lütfen tekrar dene."
+        return ("Feedback is unavailable right now, please try again."
+                if _coach_lang(language) == "en"
+                else "Geri bildirim şu an alınamadı, lütfen tekrar dene.")
