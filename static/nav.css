@@ -255,3 +255,17 @@
 /* Premium çekmece bağlantısı — voltaj vurgusuyla ayrışsın. */
 .drawer-link-premium { color: var(--volt); }
 .drawer-link-premium:hover { color: var(--volt); background: var(--volt-dim); }
+
+/* Çekmece içi TR/EN dil anahtarı (logout'un altında). */
+.drawer-lang {
+  display: flex; gap: 4px; margin-top: 12px;
+  background: var(--surface-3); border: 1px solid var(--border);
+  border-radius: var(--r-sm); padding: 3px;
+}
+.drawer-lang-opt {
+  flex: 1; font-family: var(--font-body); font-size: 12px; font-weight: 700;
+  letter-spacing: 0.06em; color: var(--text-3); background: none; border: none;
+  border-radius: 6px; padding: 6px 0; cursor: pointer; transition: all var(--t-fast);
+}
+.drawer-lang-opt.on { background: var(--volt); color: #0A0A0C; }
+.drawer-lang-opt:not(.on):hover { color: var(--text); }

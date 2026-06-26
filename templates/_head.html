@@ -9,6 +9,11 @@
    SENKRON yüklenir ki gövde fetch'lerinden önce window.fetch sarmalansın. #}
 <meta name="csrf-token" content="{{ csrf_token }}">
 <script src="/static/csrf.js?v={{ _v }}"></script>
+{# i18n: aktif dilin sözlüğü (locales/{tr,en}.json) window.I18N'e enjekte edilir;
+   i18n.js `t(key,vars)` ve `setLang(lang)` yardımcılarını sunar. csrf.js'ten SONRA
+   yüklenir ki setLang'in fetch'i X-CSRFToken ile sarmalanmış olsun. #}
+<script nonce="{{ csp_nonce }}">window.I18N = {{ i18n_json|safe }}; window.LOCALE = "{{ locale }}";</script>
+<script src="/static/i18n.js?v={{ _v }}"></script>
 <link rel="icon" href="/static/icon-holo.png?v={{ _v }}" type="image/png">
 <link rel="apple-touch-icon" href="/static/icon-holo.png?v={{ _v }}">
 

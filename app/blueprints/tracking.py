@@ -154,7 +154,8 @@ def checkin():
     # AI koç geri bildirimi
     coach_feedback = generate_checkin_feedback(
         current_user.username, weight, prev_weight, days_passed,
-        goal, yogunluk, fatigue, overload, uyku, beslenme, note
+        goal, yogunluk, fatigue, overload, uyku, beslenme, note,
+        language=current_user.language
     )
 
     entry = WeeklyCheckIn(

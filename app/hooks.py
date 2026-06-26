@@ -91,6 +91,20 @@ def inject_csrf_token():
     return {"csrf_token": get_csrf_token()}
 
 
+def inject_i18n():
+    """Şablonlara çeviri yardımcısını sun: `t` (callable), `locale` (aktif dil)
+    ve `i18n_json` (window.I18N'e enjekte edilen, aktif dilin tam sözlüğü).
+    g.locale resolve_locale (before_request) tarafından set edilir."""
+    import json as _json
+    from app.i18n import t, current_locale, catalog
+    loc = current_locale()
+    return {
+        "t": t,
+        "locale": loc,
+        "i18n_json": _json.dumps(catalog(loc), ensure_ascii=False),
+    }
+
+
 def _csrf_protect():
     """Reject state-changing requests that fail our two CSRF layers.
 
@@ -141,7 +155,8 @@ def _csrf_validate_token():
 
 
 def ratelimit_exceeded(e):
-    return jsonify({"error": "Çok fazla deneme yaptınız. Lütfen biraz sonra tekrar deneyin."}), 429
+    from app.i18n import t
+    return jsonify({"error": t("error.rate_limited")}), 429
 
 
 def _rollover_throttle_passed(now):

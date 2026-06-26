@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="tr" data-theme="dark">
+<html lang="{{ locale }}" data-theme="dark">
 <head>
     {% include "_head.html" %}
     <title>AxisAI — Yapay Zekâ Fitness Koçun</title>
@@ -82,13 +82,28 @@
         .lp-social p { color: var(--text2); font-weight: 300; max-width: 520px; margin: 0 auto 24px; line-height: 1.6; }
 
         .lp-footer { text-align: center; color: var(--text2); font-size: 13px; padding: 0 0 48px; font-weight: 300; }
-        .theme-corner { position: fixed; top: 18px; right: 18px; z-index: 5; }
+        .theme-corner { position: fixed; top: 18px; right: 18px; z-index: 5; display: flex; align-items: center; gap: 10px; }
+        .lang-switch {
+            display: inline-flex; gap: 2px; background: var(--bg3);
+            border: 1px solid var(--border); border-radius: 8px; padding: 2px;
+        }
+        .lang-opt {
+            font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 600;
+            letter-spacing: 0.05em; color: var(--text2); background: none; border: none;
+            border-radius: 6px; padding: 5px 9px; cursor: pointer; transition: all .2s;
+        }
+        .lang-opt.on { background: var(--accent); color: #0a0a0a; }
+        .lang-opt:not(.on):hover { color: var(--text); }
     </style>
 </head>
 <body>
 
 <div class="theme-corner">
-    <button class="theme-toggle" data-action="toggleTheme" aria-label="Tema değiştir"></button>
+    <div class="lang-switch" role="group" aria-label="{{ t('lang.aria') }}">
+        <button type="button" class="lang-opt{% if locale == 'tr' %} on{% endif %}" data-action="setLang" data-args='["tr"]'>TR</button>
+        <button type="button" class="lang-opt{% if locale == 'en' %} on{% endif %}" data-action="setLang" data-args='["en"]'>EN</button>
+    </div>
+    <button class="theme-toggle" data-action="toggleTheme" aria-label="{{ t('theme.aria') }}"></button>
 </div>
 
 <div class="lp">
