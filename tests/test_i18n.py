@@ -77,6 +77,17 @@ def test_register_defaults_language_to_tr(app, client):
     assert user.language == "tr"
 
 
+def test_landing_renders_localized(client):
+    # Landing /welcome'da (anonim); / login-gated dashboard.
+    tr_body = client.get("/welcome").get_data(as_text=True)
+    assert "Ücretsiz Başla" in tr_body
+    # EN'e geç → İngilizce gövde
+    client.post("/set-language", json={"lang": "en"})
+    en_body = client.get("/welcome").get_data(as_text=True)
+    assert "Start Free" in en_body
+    assert "Ücretsiz Başla" not in en_body
+
+
 def test_authenticated_locale_follows_user(app, client, make_user, login):
     """Girişli kullanıcının language alanı locale'i belirler (session'dan bağımsız)."""
     make_user("enfan", language="en")

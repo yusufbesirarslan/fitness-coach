@@ -2,10 +2,10 @@
 <html lang="{{ locale }}" data-theme="dark">
 <head>
     {% include "_head.html" %}
-    <title>AxisAI — Yapay Zekâ Fitness Koçun</title>
-    <meta name="description" content="AxisAI'e ücretsiz katıl — yapay zekâ koçunla 3 dakikada kişiye özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.">
-    <meta property="og:title" content="AxisAI — Yapay Zekâ Fitness Koçun">
-    <meta property="og:description" content="3 dakikada sana özel AI plan. Takip et, arkadaşlarınla yarış, hedefine ulaş.">
+    <title>{{ t('landing.page_title') }}</title>
+    <meta name="description" content="{{ t('landing.meta_desc') }}">
+    <meta property="og:title" content="{{ t('landing.page_title') }}">
+    <meta property="og:description" content="{{ t('landing.og_desc') }}">
     <meta property="og:type" content="website">
     <meta property="og:image" content="/static/icon-holo.png">
     <meta name="twitter:card" content="summary">
@@ -109,48 +109,46 @@
 <div class="lp">
     <nav class="lp-nav">
         <span class="lp-brand"><img class="lp-brand-mark" src="/static/icon-holo.png" alt="">AxisAI</span>
-        <a href="/login" class="lp-login">Giriş Yap</a>
+        <a href="/login" class="lp-login">{{ t('landing.nav_login') }}</a>
     </nav>
 
     <section class="lp-hero">
-        <h1>3 dakikada<br><span>sana özel AI plan</span></h1>
-        <p>Yapay zekâ koçun beslenme ve antrenmanını kişiselleştirir; ilerlemeni takip eder,
-           arkadaşlarınla motive olursun. Kredi kartı yok, taahhüt yok.</p>
-        <a href="/register" class="lp-cta" data-ga-event="landing_cta_click">Ücretsiz Başla</a>
-        <span class="lp-cta-sub">Zaten üyesin? <a href="/login" style="color:var(--accent);text-decoration:none;">Giriş yap</a></span>
+        <h1>{{ t('landing.hero_h1_a') }}<br><span>{{ t('landing.hero_h1_b') }}</span></h1>
+        <p>{{ t('landing.hero_p') }}</p>
+        <a href="/register" class="lp-cta" data-ga-event="landing_cta_click">{{ t('landing.cta_start') }}</a>
+        <span class="lp-cta-sub">{{ t('landing.cta_sub_pre') }} <a href="/login" style="color:var(--accent);text-decoration:none;">{{ t('landing.cta_sub_login') }}</a></span>
     </section>
 
     <section class="lp-features">
         <div class="lp-feature">
             <div class="ic">🤖</div>
-            <h3>AI Koç</h3>
-            <p>Hedefine göre kişiye özel beslenme ve antrenman planı; sorularını anında yanıtlar.</p>
+            <h3>{{ t('landing.feat1_h') }}</h3>
+            <p>{{ t('landing.feat1_p') }}</p>
         </div>
         <div class="lp-feature">
             <div class="ic">📊</div>
-            <h3>İlerleme Takibi</h3>
-            <p>Kilo, makro ve antrenman geçmişini tek yerde gör; haftalık check-in ile yönünü bul.</p>
+            <h3>{{ t('landing.feat2_h') }}</h3>
+            <p>{{ t('landing.feat2_p') }}</p>
         </div>
         <div class="lp-feature">
             <div class="ic">🔥</div>
-            <h3>Seriler & Görevler</h3>
-            <p>Günlük görevleri tamamla, XP kazan, serini koru. Alışkanlık oyuna dönüşsün.</p>
+            <h3>{{ t('landing.feat3_h') }}</h3>
+            <p>{{ t('landing.feat3_p') }}</p>
         </div>
         <div class="lp-feature">
             <div class="ic">🤝</div>
-            <h3>Arkadaşlarınla</h3>
-            <p>Arkadaş ekle, öğün/antrenman öner, liderlik tablosunda yarış.</p>
+            <h3>{{ t('landing.feat4_h') }}</h3>
+            <p>{{ t('landing.feat4_p') }}</p>
         </div>
     </section>
 
     <section class="lp-social">
-        <h2>Tek başına değilsin</h2>
-        <p>Bir arkadaşını davet et, ikiniz de XP kazanın. Birlikte daha tutarlı,
-           daha motive — ve sonuçlar daha kalıcı.</p>
-        <a href="/register" class="lp-cta" data-ga-event="landing_cta_click_social">Hemen Katıl</a>
+        <h2>{{ t('landing.social_h') }}</h2>
+        <p>{{ t('landing.social_p') }}</p>
+        <a href="/register" class="lp-cta" data-ga-event="landing_cta_click_social">{{ t('landing.social_cta') }}</a>
     </section>
 
-    <div class="lp-footer">© AxisAI — Yapay zekâ fitness koçun.</div>
+    <div class="lp-footer">{{ t('landing.footer') }}</div>
 </div>
 
 <script nonce="{{ csp_nonce }}">
