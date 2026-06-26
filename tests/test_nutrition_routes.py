@@ -60,6 +60,28 @@ def test_quick_add_meal(client, auth_user):
     assert entry.ogun == "Öğle"
 
 
+def test_quick_add_meal_handles_malformed_plan(client, auth_user):
+    # A4: LLM planı sayısal-olmayan makro / liste-olmayan yemekler içerebilir →
+    # 500 yerine güvenli değerlerle eklenmeli.
+    plan = {"ogle": {"yemekler": "Tek string yemek", "kalori": "400 kcal",
+                     "protein": None, "karb": 30, "yag": 5}}
+    client.post("/nutrition-plan/save", json={"plan": plan, "score": 8.0})
+    resp = client.post("/api/quick-add-meal", json={"meal_key": "ogle"})
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["nutrients"]["kalori"] == 0      # "400 kcal" → güvenli 0
+    assert body["nutrients"]["karb"] == 30.0
+    entry = MealLog.query.filter_by(user_id=auth_user.id).one()
+    assert entry.yemekler == "Tek string yemek"  # str → tek elemanlı listeye indirildi
+
+
+def test_quick_add_meal_empty_meal_dict_rejected(client, auth_user):
+    # A4: boş öğün ({}) 0-makro satır yazmamalı — eski `if not meal` davranışı korunur.
+    client.post("/nutrition-plan/save", json={"plan": {"ogle": {}}, "score": 8.0})
+    assert client.post("/api/quick-add-meal", json={"meal_key": "ogle"}).status_code == 404
+    assert MealLog.query.filter_by(user_id=auth_user.id).count() == 0
+
+
 # ---------------------------------------------------------------------------
 # Günlük (diary) — öğün oluşturma + besin matematiği
 # ---------------------------------------------------------------------------
@@ -113,6 +135,19 @@ def meal_id(client, auth_user):
 def test_diary_add_item_requires_name(client, meal_id):
     response = client.post(f"/api/diary/meal/{meal_id}/item", json={})
     assert response.status_code == 400
+
+
+def test_diary_add_item_negative_metric_no_negative_macros(client, meal_id):
+    # B8: negatif metric_serving_amount negatif gram/per-100g üretip MealLog'a
+    # sızıyordu. Artık ≥0'a kısılır — hiçbir makro/gram negatif olamaz.
+    client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "Hile", "serving_id": "s1", "serving_quantity": 1,
+        "serving_calories": 100, "serving_protein": 5,
+        "metric_serving_amount": -50}).get_json()
+    item = CustomMealItem.query.filter_by(custom_meal_id=meal_id).one()
+    assert item.grams >= 0
+    assert (item.per_100g_calories or 0) >= 0
+    assert (item.per_100g_protein or 0) >= 0
 
 
 def test_diary_add_item_grams_based_scaling(client, meal_id):
@@ -234,6 +269,23 @@ def test_meal_log_override_macros_skips_ai(client, auth_user, monkeypatch):
         "override_macros": {"kalori": "495", "protein": 62, "karb": 0, "yag": 10.5},
     }).get_json()
     assert body["nutrients"] == {"kalori": 495.0, "protein": 62.0, "karb": 0.0, "yag": 10.5}
+
+
+def test_meal_log_override_macros_clamped_to_physical_bounds(client, auth_user, monkeypatch):
+    # C1: request-kontrollü override değerleri kanonik MealLog'a YAZILMADAN ÖNCE
+    # fiziksel-sağlık kapısından (clamp_serving_macros) geçmeli — DB CHECK yalnızca
+    # >100000 kcal kaba taşmayı yakalar, "99999 kcal" çöpünü değil.
+    monkeypatch.setattr(nutrition_meallog, "_openai_chat",
+                        lambda **kw: (_ for _ in ()).throw(AssertionError("AI çağrılmamalı")))
+    body = client.post("/meal-log", json={
+        "ogun": "Akşam", "yemekler": "tavuk",
+        "override_macros": {"kalori": 99999, "protein": 9999, "karb": 9999, "yag": 9999},
+    }).get_json()
+    n = body["nutrients"]
+    assert n["kalori"] <= 3000 and n["protein"] <= 300 and n["karb"] <= 300 and n["yag"] <= 150
+    # Kalıcı satır da kısılmış olmalı (defter bozulmadı).
+    entry = MealLog.query.filter_by(user_id=auth_user.id).one()
+    assert entry.kalori <= 3000 and entry.yag <= 150
 
 
 def test_meal_log_ai_path_with_fitness_normalization(client, auth_user, monkeypatch):

@@ -279,7 +279,7 @@ def analyze_menu():
               f"first 300 chars: {raw_text[:300]}")
         return jsonify({"success": False, "error": "OUTPUT_PARSING_FAILED",
                         "message": "Menü metni işlenirken bir hata oluştu. Lütfen tekrar deneyin.",
-                        "items": [], "categories": {}}), 200
+                        "items": [], "categories": {}}), 422
 
     all_items = []
     for cat, items in categorized.items():
@@ -290,7 +290,7 @@ def analyze_menu():
     if not all_items:
         return jsonify({"success": False, "error": "OUTPUT_PARSING_FAILED",
                         "message": "Menü metni işlenirken bir hata oluştu. Lütfen tekrar deneyin.",
-                        "items": [], "categories": {}}), 200
+                        "items": [], "categories": {}}), 422
 
     # MAX_MENU_ITEMS ai_nutrition'dan gelir: istem ("toplam en fazla N yemek"),
     # bu kırpma ve LLM çıkış bütçesi (_MENU_EXTRACT_MAX_TOKENS) tek kaynaktan hizalı.

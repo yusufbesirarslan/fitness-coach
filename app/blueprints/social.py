@@ -319,6 +319,11 @@ def respond_suggestion(msg_id):
     if action not in ("accept", "decline"):
         return jsonify({"error": "Geçersiz işlem."}), 400
 
+    # Öğün mü antrenman mı kararını ORİJİNAL tipten ver — aşağıda message_type'a
+    # "_accepted"/"_declined" eklendikten sonra substring kontrolü mantığı mutasyona
+    # bağlardı (B7).
+    is_meal = msg.message_type == "suggestion_meal"
+    nutrients = None
     if action == "accept":
         msg.message_type = msg.message_type + "_accepted"
         reply = Message(sender_id=current_user.id, receiver_id=msg.sender_id,
@@ -326,8 +331,7 @@ def respond_suggestion(msg_id):
                         message_type="text")
         db.session.add(reply)
 
-        nutrients = None
-        if "meal" in msg.message_type:
+        if is_meal:
             nutrients = _process_meal_suggestion_accept(msg)
     else:
         msg.message_type = msg.message_type + "_declined"
@@ -339,7 +343,7 @@ def respond_suggestion(msg_id):
     if action == "accept" and nutrients:
         resp["nutrients"] = nutrients
         resp["message"] = f"Kabul edildi! {int(nutrients['kalori'])} kcal eklendi"
-    elif action == "accept" and "meal" in msg.message_type and nutrients is None:
+    elif action == "accept" and is_meal and nutrients is None:
         # Öneri kabul edildi ama makrolar hesaplanamadı → öğün GÜNLÜĞE EKLENMEDI
         # (sıfır-makro satırı yazılmaz). Kullanıcıya sessiz başarı yerine durumu bildir.
         resp["message"] = "Kabul edildi, ancak besin değerleri hesaplanamadı — öğün günlüğe eklenmedi."

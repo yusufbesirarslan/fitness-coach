@@ -52,7 +52,7 @@ def init_database(app):
             'ALTER TABLE "user" ADD COLUMN weekly_xp INTEGER DEFAULT 0',
             'ALTER TABLE "user" ADD COLUMN last_reward_week VARCHAR(10)',
             # Davet/referral + freemium kolonları (idempotent — kolon varsa sessizce geçilir)
-            'ALTER TABLE "user" ADD COLUMN referral_code VARCHAR(12)',
+            'ALTER TABLE "user" ADD COLUMN referral_code VARCHAR(16)',
             'ALTER TABLE "user" ADD COLUMN referred_by_id INTEGER',
             'ALTER TABLE "user" ADD COLUMN is_premium BOOLEAN DEFAULT false',
             'ALTER TABLE "user" ADD COLUMN premium_since TIMESTAMP',
@@ -112,8 +112,14 @@ def init_database(app):
                 FOR EACH ROW EXECUTE FUNCTION calc_activity_calories();
             """))
             db.session.commit()
-        except Exception:
+        except Exception as e:
             db.session.rollback()
+            # PL/pgSQL trigger yalnızca Postgres'te kurulur; SQLite (lokal/test) bunu
+            # beklenen şekilde reddeder. Postgres'te başarısızlık ise GERÇEK bir sorun
+            # → görünür yap, sessizce yutma (S8: prod'da teşhis edilebilsin).
+            if db.engine.dialect.name == "postgresql":
+                app.logger.warning("[DB] activity-calorie trigger kurulamadı: %s: %s",
+                                   type(e).__name__, e)
         if DailyQuest.query.count() == 0:
             for q in [
                 DailyQuest(title="Günlük Giriş", description="Bugün uygulamaya giriş yap", points_reward=10, quest_type="login"),
@@ -131,7 +137,7 @@ def init_database(app):
             db.session.commit()
         if not DailyQuest.query.filter_by(quest_type="meal_logged").first():
             db.session.add(DailyQuest(
-                title="Log a Meal",
+                title="Öğün Kaydet",
                 description="Bugün bir öğün kaydet",
                 points_reward=20, quest_type="meal_logged"
             ))

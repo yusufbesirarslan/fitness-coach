@@ -32,6 +32,18 @@ def test_sanitize_fixes_mojibake_and_whitespace():
     assert _sanitize_menu_text(None) == ""
 
 
+def test_sanitize_repairs_lowercase_turkish_mojibake():
+    # A1: eski elle-yazılı tablo küçük harf ü/ş/ç onarımlarını çakışan anahtarlar
+    # yüzünden kaybediyordu. Guard'lı round-trip hepsini onarır.
+    # "Güveç şiş" → UTF-8 baytları latin-1 olarak çözülmüş hâli.
+    clean = "Güveç şiş"
+    # UTF-8 baytlarını latin-1 sanarak çöz → klasik mojibake (Ã¼/Ã§/ÅŸ ...).
+    mojibake = clean.encode("utf-8").decode("latin-1")
+    assert _sanitize_menu_text(mojibake) == clean
+    # Zaten temiz Türkçe metin bozulmadan geçer (ı/ş latin-1'e kodlanamaz → atlanır).
+    assert _sanitize_menu_text("Mercimek Çorbası ışıl") == "Mercimek Çorbası ışıl"
+
+
 # ---------------------------------------------------------------------------
 # PDF çıkarımı
 # ---------------------------------------------------------------------------
@@ -157,6 +169,29 @@ def test_vision_ocr_api_failure_returns_empty(app, monkeypatch):
             raise RuntimeError("openai down")
     monkeypatch.setattr(menu_ocr, "openai_client", _Boom())
     assert _extract_text_from_image(b"img") == ""
+
+
+def test_vision_ocr_empty_choices_returns_empty(app, monkeypatch):
+    # A2: içerik filtresi boş choices döndürebilir. Guard olmadan resp.choices[0]
+    # IndexError fırlatır; guard varsa "" döner. choices hem falsy hem de indeksleme
+    # yapılınca "sızıntı" üretecek şekilde kurulur — yalnızca guard çalışırsa "" gelir.
+    class _Choices:
+        def __bool__(self): return False
+        def __len__(self): return 0
+        def __getitem__(self, i):
+            return type("C", (), {"message": type("M", (), {"content": "SIZAN"})()})()
+
+    class _Resp:
+        choices = _Choices()
+
+    class _Client:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    return _Resp()
+    monkeypatch.setattr(menu_ocr, "openai_client", _Client())
+    assert _extract_text_from_image(b"img", "image/png") == ""
 
 
 def test_vision_ocr_compresses_oversized_image(app, monkeypatch):

@@ -398,6 +398,14 @@ def test_static_search_no_match_returns_empty():
     assert fatsecret._food_search_static("kuantum köpüğü") == []
 
 
+def test_static_search_short_key_no_false_substring(monkeypatch):
+    # A3: kısa anahtar 'bal' (bal/honey) ile 'balık' (fish) birbirine sızmamalı.
+    bal = fatsecret._food_search_static("bal")
+    assert bal and all("Bal" == r["name"] for r in bal)          # yalnızca honey
+    balik = fatsecret._food_search_static("balık ızgara")
+    assert balik and all("Bal" != r["name"] for r in balik)      # honey YOK, fish var
+
+
 def test_static_search_caps_results_at_eight(monkeypatch):
     many = [{"name": f"X{i}", "calories": 100, "protein": 1, "carbs": 1, "fat": 1}
             for i in range(20)]

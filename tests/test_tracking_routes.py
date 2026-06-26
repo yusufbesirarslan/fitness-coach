@@ -54,10 +54,18 @@ def test_log_comparison_messages(client, auth_user):
     assert "1.5 kg verdin" in lost.get_json()["message"]
 
     gained = client.post("/log", json={"weight": 80})
-    assert "1.5 kg aldın" in gained.get_json()["message"]
+    gained_msg = gained.get_json()["message"]
+    assert "1.5 kg aldın" in gained_msg
+    assert "kaydedildi" in gained_msg          # D6: kilo alma dalında önek düşmemeli
 
     same = client.post("/log", json={"weight": 80})
     assert "aynı kilo" in same.get_json()["message"]
+
+
+def test_log_rejects_non_scalar_weight(client, auth_user):
+    # D5: liste/dict gibi JSON tipleri float()'ta TypeError verir → 500 yerine 400.
+    assert client.post("/log", json={"weight": [80]}).status_code == 400
+    assert client.post("/log", json={"weight": {"v": 80}}).status_code == 400
 
 
 def test_progress_returns_logs_in_order(client, auth_user):

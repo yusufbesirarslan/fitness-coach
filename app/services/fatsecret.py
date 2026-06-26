@@ -440,10 +440,18 @@ _STATIC_FOODS = {
 
 def _food_search_static(q):
     """Last-resort fallback: match against built-in food database."""
+    import re as _re
     q_lower = q.lower().strip()
     matches = []
     for key, foods in _STATIC_FOODS.items():
-        if q_lower in key or key in q_lower:
+        # Eski iki-yönlü substring eşleşmesi yanlış besin döndürüyordu (A3): 'bal'
+        # (honey) sorgusu 'balık' (fish) anahtarına ('bal' ⊂ 'balık'), 'balık ızgara'
+        # sorgusu da kısa 'bal' anahtarına sızıyordu. Artık yalnızca anahtar→sorgu
+        # yönü; kısa anahtarlar (<4) yalnızca TAM SÖZCÜK olarak eşleşir, uzunlar
+        # ('tavuk' ⊂ 'tavuklu sandviç') substring eşleşmeyi sürdürür.
+        if q_lower == key:
+            matches.extend(foods)
+        elif key in q_lower and (len(key) >= 4 or _re.search(r'\b' + _re.escape(key) + r'\b', q_lower)):
             matches.extend(foods)
     if not matches:
         return []

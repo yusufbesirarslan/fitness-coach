@@ -206,7 +206,9 @@ def test_analyze_extraction_failure_returns_parsing_error(client, profile_sessio
     monkeypatch.setattr(menu_bp, "_extract_categorized_items", failing_extract)
 
     response = client.post("/api/menu/analyze", json={"menu_text": MENU_TEXT})
-    assert response.status_code == 200
+    # B9: çıkarım başarısızlığı artık 422 (eskiden 200 idi → client retry/error
+    # monitoring'i devre dışı bırakıyordu). Gövde aynı kalır (success:False + mesaj).
+    assert response.status_code == 422
     body = response.get_json()
     assert body["success"] is False
     assert body["error"] == "OUTPUT_PARSING_FAILED"

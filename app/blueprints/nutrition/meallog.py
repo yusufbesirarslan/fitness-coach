@@ -77,12 +77,18 @@ def log_meal():
 
     override = data.get("override_macros")
     if override and isinstance(override, dict):
-        nutrients = {
-            "kalori": round(_to_float(override.get("kalori", 0)), 1),
-            "protein": round(_to_float(override.get("protein", 0)), 1),
-            "karb": round(_to_float(override.get("karb", 0)), 1),
-            "yag": round(_to_float(override.get("yag", 0)), 1),
-        }
+        # Kullanıcı override'ı doğrudan kanonik MealLog'a YAZMADAN ÖNCE fiziksel-
+        # sağlık kapısından geçir (menü/koç/diary hatlarıyla aynı tek kaynak) —
+        # aksi halde request-kontrollü çöp (örn. 9999 kcal) deftere sızıp günlük
+        # toplamları, protein nudge'ını ve haftalık raporları bozardı (C1).
+        import nutrition_pipeline as _np
+        kalori, protein, karb, yag = _np.clamp_serving_macros(
+            round(_to_float(override.get("kalori", 0)), 1),
+            round(_to_float(override.get("protein", 0)), 1),
+            round(_to_float(override.get("karb", 0)), 1),
+            round(_to_float(override.get("yag", 0)), 1),
+        )
+        nutrients = {"kalori": kalori, "protein": protein, "karb": karb, "yag": yag}
         today = day_key()
         entry = MealLog(
             user_id=current_user.id, ogun=ogun, yemekler=yemekler,
