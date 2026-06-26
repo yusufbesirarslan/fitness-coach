@@ -99,6 +99,18 @@ def test_dashboard_renders_localized(app, client, make_user, login):
     assert "Sports Physiology" in body
 
 
+def test_nutrition_renders_localized(app, client, make_user, login):
+    make_user("nuten", profile_complete=True, language="en")
+    login("nuten")
+    r = client.get("/nutrition")
+    assert r.status_code == 200, r.status_code
+    body = r.get_data(as_text=True)
+    assert "Today's Meals" in body and "Manual Add" in body and "LOG MEAL" in body
+    assert "Bugünkü Öğünler" not in body
+    # Öğün tipi data-args TR kalmalı (backend kanonik değer)
+    assert 'data-args=\'["Kahvaltı"]\'' in body
+
+
 def test_authenticated_locale_follows_user(app, client, make_user, login):
     """Girişli kullanıcının language alanı locale'i belirler (session'dan bağımsız)."""
     make_user("enfan", language="en")
