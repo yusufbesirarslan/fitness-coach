@@ -253,3 +253,99 @@ def test_premium_features_localized(app, client, make_user, login):
     login("premtr")
     tr_body = client.get("/premium").get_data(as_text=True)
     assert "Haftada 1 yapay zekâ planı" in tr_body
+
+
+# ── AI plan üretimi: prompt dile göre, JSON anahtarları/kanonik alanlar TR kalır ──
+
+def test_nutrition_plan_prompt_localized(app, client, make_user, login, monkeypatch):
+    """EN kullanıcıda beslenme planı prompt'u İngilizce içerik ister; JSON ANAHTARLARI
+    (planlar/kahvalti/...) her dilde TR kalır (frontend kontratı)."""
+    from app.extensions import db
+    from app.models import UserSession
+    import app.blueprints.nutrition.plan as planmod
+
+    cap = {}
+    def fake_heavy(messages, system_prompt=None, **kw):
+        cap["prompt"] = messages[0]["content"]
+        cap["system"] = system_prompt
+        return '{"planlar": []}'
+    monkeypatch.setattr(planmod, "_heavy_chat", fake_heavy)
+
+    u = make_user("nutplanen", language="en")
+    login("nutplanen")
+    db.session.add(UserSession(user_id=u.id, target_calories=2000, goal="kilo verme"))
+    db.session.commit()
+    payload = {"proteins": ["Tavuk Göğsü"], "carbs": ["Pirinç"], "fats": ["Zeytinyağı"]}
+    r = client.post("/nutrition-plan", json=payload)
+    assert r.status_code == 200, r.get_data(as_text=True)
+    assert "ENGLISH" in cap["prompt"]                 # içerik dili EN
+    assert '"planlar"' in cap["prompt"]               # JSON anahtarları TR (kontrat)
+    assert "Türkçe" not in (cap["system"] or "")
+
+
+def test_nutrition_plan_prompt_turkish_for_tr_user(app, client, make_user, login, monkeypatch):
+    from app.extensions import db
+    from app.models import UserSession
+    import app.blueprints.nutrition.plan as planmod
+
+    cap = {}
+    monkeypatch.setattr(planmod, "_heavy_chat",
+                        lambda messages, system_prompt=None, **kw: cap.update(
+                            prompt=messages[0]["content"]) or '{"planlar": []}')
+    u = make_user("nutplantr", language="tr")
+    login("nutplantr")
+    db.session.add(UserSession(user_id=u.id, target_calories=2000, goal="kilo verme"))
+    db.session.commit()
+    r = client.post("/nutrition-plan", json={"proteins": ["Tavuk Göğsü"],
+                                             "carbs": ["Pirinç"], "fats": ["Zeytinyağı"]})
+    assert r.status_code == 200
+    assert "Türkçe yaz" in cap["prompt"] and "ENGLISH" not in cap["prompt"]
+
+
+def test_training_plan_prompt_localized_keeps_canonical_fields(app, client, make_user, login, monkeypatch):
+    """EN antrenman planı: içerik EN istenir AMA 'gun' (gün adı) ve 'tip' alanları
+    KANONIK TÜRKÇE kalmalı (getTodayTurkish eşleşmesi + JS tip mantığı)."""
+    from app.extensions import db
+    from app.models import UserSession
+    import app.blueprints.training as trainmod
+
+    cap = {}
+    def fake_heavy(messages, system_prompt=None, **kw):
+        cap["prompt"] = messages[0]["content"]
+        cap["system"] = system_prompt
+        return '{"program": [], "haftalik_ozet": {}}'
+    monkeypatch.setattr(trainmod, "_heavy_chat", fake_heavy)
+
+    u = make_user("trplanen", language="en")
+    login("trplanen")
+    db.session.add(UserSession(user_id=u.id, goal="kas_kutlesi", fitness_level="beginner",
+                               current_activity="orta", tdee=2400))
+    db.session.commit()
+    r = client.post("/training-plan", json={"gun_sayisi": 3})
+    assert r.status_code == 200, r.get_data(as_text=True)
+    p = cap["prompt"]
+    assert "ENGLISH" in p                              # içerik dili EN
+    assert "Pazartesi" in p and "antrenman" in p       # gun/tip kanonik TR korunur
+    assert '"gun"' in p and '"tip"' in p
+    # system prompt da kanonik alanları korumayı söylüyor
+    assert "antrenman/dinlenme/kardiyo" in cap["system"]
+
+
+def test_plan_no_session_error_localized(app, client, make_user, login):
+    """Plan üretim hata mesajları (oturum yok) dile göre döner."""
+    make_user("noplanen", language="en")
+    login("noplanen")
+    r = client.post("/nutrition-plan", json={"proteins": ["x"], "carbs": ["y"], "fats": ["z"]})
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "First create your plan from the home page."
+
+
+def test_training_html_day_label_coupling():
+    """training.html: gün adı GÖRÜNEN map'i var; eşleşme hâlâ kanonik TR güne dayanır."""
+    import os
+    p = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates", "training.html")
+    html = open(p, encoding="utf-8").read()
+    assert "DAY_LABELS_EN" in html and "function dayLabel" in html
+    assert "esc(dayLabel(gun.gun))" in html               # görünen ad çevrilir
+    assert "gun.gun === todayName" in html                # eşleşme kanonik TR kalır
+    assert "'Pazartesi':'Monday'" in html

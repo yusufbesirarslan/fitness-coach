@@ -609,5 +609,9 @@
   "premium.feat_prem.2": "Advanced analytics & weekly report",
   "premium.feat_prem.3": "Custom macro targets",
 
-  "training.workout_done": "You completed today's workout! +{xp} XP! (photo +{bonus})"
+  "training.workout_done": "You completed today's workout! +{xp} XP! (photo +{bonus})",
+
+  "plan.no_session": "First create your plan from the home page.",
+  "plan.gen_failed": "Couldn't generate the plan, please try again.",
+  "nutrition.plan.pick_one": "Pick at least one food from each category."
 }

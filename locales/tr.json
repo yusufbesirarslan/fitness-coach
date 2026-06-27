@@ -609,5 +609,9 @@
   "premium.feat_prem.2": "Gelişmiş analizler & haftalık rapor",
   "premium.feat_prem.3": "Özel makro hedefleri",
 
-  "training.workout_done": "Bugünkü antrenmanı tamamladın! +{xp} XP! (foto +{bonus})"
+  "training.workout_done": "Bugünkü antrenmanı tamamladın! +{xp} XP! (foto +{bonus})",
+
+  "plan.no_session": "Önce ana sayfadan planını oluştur.",
+  "plan.gen_failed": "Plan oluşturulamadı, tekrar dene.",
+  "nutrition.plan.pick_one": "Her kategoriden en az bir gıda seç."
 }
