@@ -651,6 +651,10 @@ var _EN = (window.LOCALE === 'en');
 /* Sakatlık: görünen etiket EN, değer (backend'e giden) TR kalır. */
 var INJURY_LABELS_EN = { 'Hiçbiri':'None','Menisküs':'Meniscus','Diz':'Knee','Kifoz':'Kyphosis','Skolyoz':'Scoliosis','Bel fıtığı':'Herniated disc','Bel ağrısı':'Lower-back pain','Omuz':'Shoulder','Bilek':'Wrist','Dirsek':'Elbow','Ayak bileği':'Ankle','Kalça':'Hip','Boyun':'Neck' };
 function injuryLabel(v) { return (_EN && INJURY_LABELS_EN[v]) ? INJURY_LABELS_EN[v] : v; }
+/* Gün adı: backend plan değeri (gun) TR KALIR — getTodayTurkish() ile eşleşir ve
+   plan kanonik anahtarıdır; yalnızca GÖRÜNEN ad EN'e çevrilir. */
+var DAY_LABELS_EN = { 'Pazartesi':'Monday','Salı':'Tuesday','Çarşamba':'Wednesday','Perşembe':'Thursday','Cuma':'Friday','Cumartesi':'Saturday','Pazar':'Sunday' };
+function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; }
 let quickAddOpen = false;
 function toggleQuickAdd() {
     quickAddOpen = !quickAddOpen;
@@ -982,7 +986,7 @@ document.addEventListener('click', e => {
             card.innerHTML = `
                 <div class="day-card-header">
                     ${isToday ? '<div class="today-badge">' + __t('training.today_badge') + '</div>' : ''}
-                    <div class="day-name">${esc(gun.gun)}</div>
+                    <div class="day-name">${esc(dayLabel(gun.gun))}</div>
                     <div class="day-odak">${isRest ? 'Off Day' : esc(odakText)}</div>
                 </div>
                 <div class="day-card-body">
@@ -999,7 +1003,7 @@ document.addEventListener('click', e => {
     }
 
     function showApvDetail(gun) {
-        document.getElementById('apv-detail-title').textContent = `${gun.gun} — ${gun.odak}`;
+        document.getElementById('apv-detail-title').textContent = `${dayLabel(gun.gun)} — ${gun.odak}`;
         document.getElementById('apv-detail-sub').textContent   = `${gun.sure_dk} ${__t('training.minutes')} · ~${gun.tahmini_kalori} kcal`;
         document.getElementById('apv-detail-exercises').innerHTML = (gun.egzersizler || []).map(e => `
             <tr>
@@ -1238,7 +1242,7 @@ document.addEventListener('click', e => {
             card.innerHTML = `
                 <div class="day-card-header">
                     ${isToday ? '<div class="today-badge">' + __t('training.today_badge') + '</div>' : ''}
-                    <div class="day-name">${esc(gun.gun)}</div>
+                    <div class="day-name">${esc(dayLabel(gun.gun))}</div>
                     <div class="day-odak">${isRest ? 'Off Day' : esc(odakText)}</div>
                 </div>
                 <div class="day-card-body">
@@ -1274,7 +1278,7 @@ document.addEventListener('click', e => {
     }
 
     function showDetail(gun) {
-        document.getElementById("detail-title").textContent = gun.gun + " — " + gun.odak;
+        document.getElementById("detail-title").textContent = dayLabel(gun.gun) + " — " + gun.odak;
         document.getElementById("detail-sub").textContent   = `${gun.sure_dk} ${__t('training.minutes')} · ~${gun.tahmini_kalori} kcal`;
         document.getElementById("detail-exercises").innerHTML = (gun.egzersizler || []).map(e => `
             <tr>

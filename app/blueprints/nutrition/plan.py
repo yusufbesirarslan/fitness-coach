@@ -11,6 +11,7 @@ from flask_login import current_user, login_required
 from app.blueprints.nutrition import bp
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
+from app.i18n import current_locale, t
 from app.models import NutritionPlan, UserSession
 from app.services.ai import _heavy_chat
 from app.services.premium import premium_ai_plan_gate
@@ -112,7 +113,7 @@ def nutrition_plan_generate():
         .first()
 
     if not last:
-        return jsonify({"error": "Önce ana sayfadan planını oluştur."}), 400
+        return jsonify({"error": t("plan.no_session")}), 400
 
     target_calories = last.target_calories
     goal            = last.goal
@@ -124,7 +125,7 @@ def nutrition_plan_generate():
     custom_foods      = data.get("custom_foods", [])
 
     if not selected_proteins or not selected_carbs or not selected_fats:
-        return jsonify({"error": "Her kategoriden en az bir gıda seç."}), 400
+        return jsonify({"error": t("nutrition.plan.pick_one")}), 400
 
     # Seçilen gıdaların ortalama skorunu hesapla
     def avg_score(foods):
@@ -157,73 +158,106 @@ def nutrition_plan_generate():
         score_label = "Kötü"
         score_color = "red"
 
-    # AI'a gönder
-    custom_text = ""
-    if custom_foods:
-        custom_text = f"\nKullanıcının eklediği özel gıdalar: {', '.join(custom_foods)}"
+    # AI'a gönder — dile göre prompt. JSON ANAHTARLARI (planlar/kahvalti/ogle/aksam/
+    # ara_ogun/yemekler/isim/toplam_*) HER DİLDE TÜRKÇE KALIR: frontend (nutrition.js)
+    # bu anahtarları parse eder. Yalnızca DEĞERLER (yemek adları) dile göre yazılır.
+    lang = current_locale()
 
-    prompt = f"""Sen bir beslenme uzmanısın. Türkçe yaz, İngilizce kelime kullanma.
-
-Kullanıcı bilgileri:
-- Günlük hedef kalori: {round(target_calories)} kcal
-- Hedef: {goal}
-
-Kullanıcının tercih ettiği gıdalar:
-- Protein kaynakları: {', '.join(selected_proteins)}
-- Karbonhidrat kaynakları: {', '.join(selected_carbs)}
-- Yağ kaynakları: {', '.join(selected_fats)}
-{custom_text}
-
-SADECE bu gıdaları kullanarak 3 FARKLI günlük beslenme planı oluştur (Plan A, Plan B, Plan C).
-Her plan tam olarak {round(target_calories)} kcal civarında olsun (±100 kcal tolerans).
-Her plan kahvaltı, öğle, akşam ve ara öğün içersin.
-Her öğünde gram veya adet olarak miktar belirt.
-Tüm kalori ve makro değerlerini gerçek sayı olarak hesapla ve yaz.
-
-Yanıtını SADECE şu JSON formatında ver, başka hiçbir şey yazma.
-Örnek format (değerler örnek, gerçek değerleri hesapla):
-{{
+    # Paylaşılan JSON şablon örneği — anahtarlar TR (kanonik kontrat).
+    json_example = """{
   "planlar": [
-    {{
+    {
       "isim": "Plan A",
-      "kahvalti": {{"yemekler": ["Yumurta - 3 adet", "Tam buğday ekmeği - 2 dilim"], "kalori": 420, "protein": 28, "karb": 35, "yag": 18}},
-      "ogle": {{"yemekler": ["Tavuk göğsü - 150g", "Pirinç - 100g"], "kalori": 380, "protein": 48, "karb": 28, "yag": 5}},
-      "aksam": {{"yemekler": ["Kırmızı et - 120g", "Tatlı patates - 150g"], "kalori": 450, "protein": 38, "karb": 30, "yag": 20}},
-      "ara_ogun": {{"yemekler": ["Yoğurt - 200g", "Muz - 1 adet"], "kalori": 227, "protein": 22, "karb": 30, "yag": 1}},
+      "kahvalti": {"yemekler": ["Yumurta - 3 adet", "Tam buğday ekmeği - 2 dilim"], "kalori": 420, "protein": 28, "karb": 35, "yag": 18},
+      "ogle": {"yemekler": ["Tavuk göğsü - 150g", "Pirinç - 100g"], "kalori": 380, "protein": 48, "karb": 28, "yag": 5},
+      "aksam": {"yemekler": ["Kırmızı et - 120g", "Tatlı patates - 150g"], "kalori": 450, "protein": 38, "karb": 30, "yag": 20},
+      "ara_ogun": {"yemekler": ["Yoğurt - 200g", "Muz - 1 adet"], "kalori": 227, "protein": 22, "karb": 30, "yag": 1},
       "toplam_kalori": 1477,
       "toplam_protein": 136,
       "toplam_karb": 123,
       "toplam_yag": 44
-    }},
-    {{
+    },
+    {
       "isim": "Plan B",
-      "kahvalti": {{"yemekler": ["yemek - miktar"], "kalori": 400, "protein": 25, "karb": 40, "yag": 15}},
-      "ogle": {{"yemekler": ["yemek - miktar"], "kalori": 450, "protein": 40, "karb": 35, "yag": 10}},
-      "aksam": {{"yemekler": ["yemek - miktar"], "kalori": 500, "protein": 42, "karb": 38, "yag": 18}},
-      "ara_ogun": {{"yemekler": ["yemek - miktar"], "kalori": 200, "protein": 15, "karb": 20, "yag": 6}},
+      "kahvalti": {"yemekler": ["yemek - miktar"], "kalori": 400, "protein": 25, "karb": 40, "yag": 15},
+      "ogle": {"yemekler": ["yemek - miktar"], "kalori": 450, "protein": 40, "karb": 35, "yag": 10},
+      "aksam": {"yemekler": ["yemek - miktar"], "kalori": 500, "protein": 42, "karb": 38, "yag": 18},
+      "ara_ogun": {"yemekler": ["yemek - miktar"], "kalori": 200, "protein": 15, "karb": 20, "yag": 6},
       "toplam_kalori": 1550,
       "toplam_protein": 122,
       "toplam_karb": 133,
       "toplam_yag": 49
-    }},
-    {{
+    },
+    {
       "isim": "Plan C",
-      "kahvalti": {{"yemekler": ["yemek - miktar"], "kalori": 380, "protein": 22, "karb": 42, "yag": 12}},
-      "ogle": {{"yemekler": ["yemek - miktar"], "kalori": 430, "protein": 38, "karb": 40, "yag": 12}},
-      "aksam": {{"yemekler": ["yemek - miktar"], "kalori": 520, "protein": 44, "karb": 35, "yag": 22}},
-      "ara_ogun": {{"yemekler": ["yemek - miktar"], "kalori": 210, "protein": 18, "karb": 22, "yag": 5}},
+      "kahvalti": {"yemekler": ["yemek - miktar"], "kalori": 380, "protein": 22, "karb": 42, "yag": 12},
+      "ogle": {"yemekler": ["yemek - miktar"], "kalori": 430, "protein": 38, "karb": 40, "yag": 12},
+      "aksam": {"yemekler": ["yemek - miktar"], "kalori": 520, "protein": 44, "karb": 35, "yag": 22},
+      "ara_ogun": {"yemekler": ["yemek - miktar"], "kalori": 210, "protein": 18, "karb": 22, "yag": 5},
       "toplam_kalori": 1540,
       "toplam_protein": 122,
       "toplam_karb": 139,
       "toplam_yag": 51
-    }}
+    }
   ]
-}}"""
+}"""
+
+    if lang == "en":
+        custom_text = (f"\nUser's custom foods: {', '.join(custom_foods)}"
+                       if custom_foods else "")
+        prompt = (
+            "You are a nutrition expert. Write ALL meal/food text values in ENGLISH "
+            "(translate the Turkish source food names). KEEP the JSON keys EXACTLY as "
+            "shown below — they are in Turkish (planlar, kahvalti, ogle, aksam, ara_ogun, "
+            "yemekler, isim, kalori, protein, karb, yag, toplam_*); translate ONLY the values.\n\n"
+            "User info:\n"
+            f"- Daily target calories: {round(target_calories)} kcal\n"
+            f"- Goal: {goal}\n\n"
+            "User's preferred foods:\n"
+            f"- Protein sources: {', '.join(selected_proteins)}\n"
+            f"- Carb sources: {', '.join(selected_carbs)}\n"
+            f"- Fat sources: {', '.join(selected_fats)}\n"
+            f"{custom_text}\n\n"
+            "Using ONLY these foods, create 3 DIFFERENT daily meal plans (Plan A, Plan B, Plan C).\n"
+            f"Each plan must be around {round(target_calories)} kcal (±100 kcal tolerance).\n"
+            "Each plan must include breakfast, lunch, dinner and a snack.\n"
+            "Specify the amount in grams or pieces for each item.\n"
+            "Calculate and write all calorie and macro values as real numbers.\n\n"
+            "Respond ONLY in the JSON format below, write nothing else. Keep the keys exactly "
+            "as shown; put the food text in English.\n"
+            "Example format (values are examples, compute the real ones):\n"
+            + json_example
+        )
+        system_prompt = ("You are a nutrition expert. Return ONLY valid JSON, nothing else. "
+                         "Keep the JSON keys exactly as given (Turkish); translate values to English.")
+    else:
+        custom_text = (f"\nKullanıcının eklediği özel gıdalar: {', '.join(custom_foods)}"
+                       if custom_foods else "")
+        prompt = (
+            "Sen bir beslenme uzmanısın. Türkçe yaz, İngilizce kelime kullanma.\n\n"
+            "Kullanıcı bilgileri:\n"
+            f"- Günlük hedef kalori: {round(target_calories)} kcal\n"
+            f"- Hedef: {goal}\n\n"
+            "Kullanıcının tercih ettiği gıdalar:\n"
+            f"- Protein kaynakları: {', '.join(selected_proteins)}\n"
+            f"- Karbonhidrat kaynakları: {', '.join(selected_carbs)}\n"
+            f"- Yağ kaynakları: {', '.join(selected_fats)}\n"
+            f"{custom_text}\n\n"
+            "SADECE bu gıdaları kullanarak 3 FARKLI günlük beslenme planı oluştur (Plan A, Plan B, Plan C).\n"
+            f"Her plan tam olarak {round(target_calories)} kcal civarında olsun (±100 kcal tolerans).\n"
+            "Her plan kahvaltı, öğle, akşam ve ara öğün içersin.\n"
+            "Her öğünde gram veya adet olarak miktar belirt.\n"
+            "Tüm kalori ve makro değerlerini gerçek sayı olarak hesapla ve yaz.\n\n"
+            "Yanıtını SADECE şu JSON formatında ver, başka hiçbir şey yazma.\n"
+            "Örnek format (değerler örnek, gerçek değerleri hesapla):\n"
+            + json_example
+        )
+        system_prompt = "Sen bir beslenme uzmanısın. SADECE geçerli JSON döndür, başka hiçbir şey yazma."
 
     try:
         raw = _heavy_chat(
             messages=[{"role": "user", "content": prompt}],
-            system_prompt="Sen bir beslenme uzmanısın. SADECE geçerli JSON döndür, başka hiçbir şey yazma.",
+            system_prompt=system_prompt,
             max_tokens=2000,
             temperature=0.3,
         ).strip()
@@ -243,7 +277,7 @@ Yanıtını SADECE şu JSON formatında ver, başka hiçbir şey yazma.
         })
 
     except json.JSONDecodeError:
-        return jsonify({"error": "Plan oluşturulamadı, tekrar dene."}), 500
+        return jsonify({"error": t("plan.gen_failed")}), 500
     except Exception:
         current_app.logger.exception("Plan oluşturma hatası")
         return jsonify({"error": "Plan oluşturulamadı, lütfen tekrar dene."}), 500

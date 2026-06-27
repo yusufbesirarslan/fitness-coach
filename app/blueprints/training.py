@@ -8,7 +8,7 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
-from app.i18n import t
+from app.i18n import current_locale, t
 from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
 from app.services import injury_constraints
 from app.services.ai import _heavy_chat
@@ -46,7 +46,7 @@ def training_plan_generate():
         .first()
 
     if not last:
-        return jsonify({"error": "Önce ana sayfadan planını oluştur."}), 400
+        return jsonify({"error": t("plan.no_session")}), 400
 
     goal             = last.goal
     fitness_level    = last.fitness_level
@@ -225,8 +225,30 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
     _injuries = _meta.get("injuries")
     injury_text = injury_constraints.build_injury_directive(_injuries)
 
+    # Plan İÇERİĞİ dile göre üretilir; AMA "gun" (gün adı, getTodayTurkish() ile
+    # eşleşir) ve "tip" (antrenman/dinlenme/kardiyo, JS mantığı eşleşir) HER DİLDE
+    # KANONIK TÜRKÇE KALIR. Yalnızca odak/isim/not gibi serbest metinler çevrilir.
+    lang = current_locale()
+    if lang == "en":
+        persona = (
+            "You are a personal trainer with 10+ years of experience. Write the plan CONTENT in ENGLISH.\n"
+            "STRICT FIELD RULES — do NOT break these:\n"
+            "- The \"gun\" field MUST be a Turkish weekday name, exactly one of: "
+            "Pazartesi, Salı, Çarşamba, Perşembe, Cuma, Cumartesi, Pazar. Do NOT translate it.\n"
+            "- The \"tip\" field MUST be exactly one of: antrenman, dinlenme, kardiyo. Do NOT translate it.\n"
+            "- Write \"odak\", every exercise \"isim\", and every \"not\" (technique tip) in ENGLISH.\n"
+            "The instructions and JSON example below are in Turkish; follow them but produce ENGLISH "
+            "text for the allowed fields.\n"
+        )
+        system_prompt = ("You are an experienced personal trainer. Return ONLY valid JSON, nothing else. "
+                         "No markdown, no explanation. Keep \"gun\" as Turkish weekday names and \"tip\" "
+                         "as one of antrenman/dinlenme/kardiyo; write the other text fields in English.")
+    else:
+        persona = "Sen 10+ yıllık deneyimli bir kişisel antrenörsün. Türkçe yaz, İngilizce egzersiz isimlerini kullanabilirsin.\n"
+        system_prompt = "Sen deneyimli bir kişisel antrenörsün. SADECE geçerli JSON döndür, başka hiçbir şey yazma. Markdown, açıklama veya yorum ekleme."
+
     prompt = (
-        f"Sen 10+ yıllık deneyimli bir kişisel antrenörsün. Türkçe yaz, İngilizce egzersiz isimlerini kullanabilirsin.\n"
+        f"{persona}"
         f"\n"
         f"Kullanıcı bilgileri:\n"
         f"- Hedef: {goal}\n"
@@ -288,7 +310,7 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
     try:
         raw = _heavy_chat(
             messages=[{"role": "user", "content": prompt}],
-            system_prompt="Sen deneyimli bir kişisel antrenörsün. SADECE geçerli JSON döndür, başka hiçbir şey yazma. Markdown, açıklama veya yorum ekleme.",
+            system_prompt=system_prompt,
             max_tokens=4000,
             temperature=0.4,
         ).strip()
@@ -354,7 +376,7 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
         })
 
     except json.JSONDecodeError:
-        return jsonify({"error": "Plan oluşturulamadı, tekrar dene."}), 500
+        return jsonify({"error": t("plan.gen_failed")}), 500
     except Exception:
         current_app.logger.exception("Plan oluşturma hatası")
         return jsonify({"error": "Plan oluşturulamadı, lütfen tekrar dene."}), 500
