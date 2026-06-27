@@ -111,6 +111,22 @@ def test_nutrition_renders_localized(app, client, make_user, login):
     assert 'data-args=\'["Kahvaltı"]\'' in body
 
 
+def test_training_renders_localized(app, client, make_user, login):
+    make_user("tren", profile_complete=True, language="en")
+    login("tren")
+    r = client.get("/training")
+    assert r.status_code == 200, r.status_code
+    body = r.get_data(as_text=True)
+    # UI chrome İngilizce
+    assert "Training Style" in body and "Equipment" in body and "CREATE MY PROGRAM" in body
+    assert "Antrenman Tarzı" not in body
+    # Kuplaj koruması: OPTIONS val kodları + gün adları + pump değerleri TR kalır
+    assert '"spor_salonu"' in body and '"tum_vucut"' in body      # OPTIONS val
+    assert "getTodayTurkish" in body and "'Pazartesi'" in body     # backend gün eşleşmesi
+    assert '<option value="Spor Salonu"' in body                   # pump-location değeri
+    assert "fitx_workout_completed_" in body                       # localStorage anahtarı
+
+
 def test_nutrition_js_keeps_canonical_values():
     """nutrition.js kuplaj koruması: görünen metin EN olabilir ama backend'e giden
     KANONIK değerler (öğün tipi, plan besin adları, diary öğün anahtarları) Türkçe
