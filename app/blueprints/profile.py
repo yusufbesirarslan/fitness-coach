@@ -4,6 +4,7 @@ from flask_login import current_user, login_required
 
 from app.blueprints.supplements import CATEGORY_ICONS
 from app.extensions import db
+from app.i18n import t
 from app.models import Supplement, User, UserSession
 from app.services.avatars import set_user_avatar
 from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee, generate_nutrition_plan, generate_training_plan
@@ -29,7 +30,7 @@ def setup():
     required = ["weight", "height", "age", "gender", "goal", "fitness_level", "current_activity"]
     for field in required:
         if not data.get(field):
-            return jsonify({"error": f"{field} alanı eksik"}), 400
+            return jsonify({"error": t("coach.field_missing", field=field)}), 400
 
     try:
         current_user.weight           = float(data["weight"])
@@ -48,7 +49,7 @@ def setup():
                 pass
         db.session.commit()
     except ValueError:
-        return jsonify({"error": "Kilo, boy ve yaş sayısal olmalıdır"}), 400
+        return jsonify({"error": t("route.body_numeric")}), 400
 
     # İlk oturumu oluştur
     bmr             = calculate_bmr(current_user.weight, current_user.height, current_user.age, current_user.gender)
@@ -71,7 +72,7 @@ def setup():
     db.session.commit()
 
     return jsonify({
-        "message": "Profil kaydedildi.",
+        "message": t("route.profile_saved"),
         "bmr": round(bmr),
         "tdee": round(tdee),
         "target_calories": round(target_calories)
@@ -108,10 +109,10 @@ def edit_profile():
 
     if new_username != current_user.username:
         if User.query.filter_by(username=new_username).first():
-            return jsonify({"error": "Bu kullanıcı adı zaten alınmış."}), 400
+            return jsonify({"error": t("route.username_taken")}), 400
 
     if len(new_full_name) > 150:
-        return jsonify({"error": "Ad soyad en fazla 150 karakter olabilir."}), 400
+        return jsonify({"error": t("route.name_too_long")}), 400
 
     if "profile_picture" in data:
         # S3 açıksa avatarı S3'e koyar (key saklar, base64'ü temizler); kapalıysa
@@ -122,7 +123,7 @@ def edit_profile():
 
     valid_goals = ["kilo verme", "kas kazanma", ""]
     if new_goal not in valid_goals:
-        return jsonify({"error": "Geçersiz hedef seçimi."}), 400
+        return jsonify({"error": t("route.invalid_goal")}), 400
 
     current_user.username = new_username
     current_user.full_name = new_full_name if new_full_name else None
@@ -138,4 +139,4 @@ def edit_profile():
             pass
 
     db.session.commit()
-    return jsonify({"message": "Profil başarıyla güncellendi!"})
+    return jsonify({"message": t("route.profile_updated")})

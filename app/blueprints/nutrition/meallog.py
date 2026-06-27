@@ -12,6 +12,7 @@ from flask_login import current_user, login_required
 from app.blueprints.nutrition import bp
 from app.config import AI_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
+from app.i18n import current_locale, t
 from app.models import MealLog, UserSession
 from app.services.ai import PORTION_SANITY_RULE, _openai_chat
 from app.services.gamification import complete_quest_for_user
@@ -28,7 +29,7 @@ def log_meal():
     yemekler = data.get("yemekler", "")
 
     if not ogun or not yemekler:
-        return jsonify({"error": "Öğün ve yemekler zorunludur"}), 400
+        return jsonify({"error": t("route.meal_foods_required")}), 400
 
     # Opsiyonel öğün fotoğrafı: doğrula ve (varsa) S3'e yükle. S3 hatası öğün
     # kaydını bloklamaz (fail-open) — yalnızca foto atlanır.
@@ -98,7 +99,7 @@ def log_meal():
         )
         db.session.add(entry)
         db.session.commit()
-        resp = {"message": f"{ogun} kaydedildi.", "nutrients": nutrients}
+        resp = {"message": t("route.x_logged", name=ogun), "nutrients": nutrients}
         if meal_photo_key:
             resp["photo_url"] = _meal_photo_url(entry)
         return jsonify(resp)
@@ -177,7 +178,7 @@ def log_meal():
     # döndür ki tekrar denesin; commit etme.
     if not parsed_ok:
         return jsonify({
-            "error": "Öğün besin değerleri hesaplanamadı, lütfen tekrar deneyin."
+            "error": t("route.meal_calc_failed")
         }), 502
 
     today = day_key()
@@ -198,7 +199,7 @@ def log_meal():
 
     quest_result = complete_quest_for_user(current_user.id, "meal_logged")
     response = {
-        "message": f"{ogun} kaydedildi.",
+        "message": t("route.x_logged", name=ogun),
         "nutrients": nutrients,
     }
     if meal_photo_key:
@@ -279,7 +280,7 @@ def review_meals():
     meals = MealLog.query.filter_by(user_id=current_user.id, tarih=today).all()
 
     if not meals:
-        return jsonify({"error": "Bugün kayıtlı öğün yok."}), 400
+        return jsonify({"error": t("route.no_meals_today")}), 400
 
     last_session = UserSession.query.filter_by(user_id=current_user.id)\
         .order_by(UserSession.created_at.desc()).first()
@@ -293,31 +294,51 @@ def review_meals():
         meals_text += f"- {m.ogun}: {m.yemekler} ({m.kalori} kcal, P:{m.protein}g K:{m.karb}g Y:{m.yag}g)\n"
         total_cal += m.kalori or 0
 
-    prompt = (
-        f"Sen bir beslenme koçusun. Türkçe yaz, İngilizce kullanma.\n"
-        f"Kullanıcıya 'sen' diye hitap et.\n\n"
-        f"Kullanıcının hedefi: {goal}\n"
-        f"Günlük kalori hedefi: {round(target)} kcal\n"
-        f"Bugün toplam: {round(total_cal)} kcal\n\n"
-        f"Bugün yedikleri:\n{meals_text}\n"
-        f"Bu günü değerlendir:\n"
-        f"- Kalori hedefine ulaştı mı?\n"
-        f"- Makro dağılımı dengeli mi?\n"
-        f"- Biyoyararlanım açısından nasıl?\n"
-        f"- Gluten içeriği yüksek mi?\n"
-        f"- Değiştirilmesi gereken bir şey var mı?\n"
-        f"Kısa ve spesifik ol, 4-5 cümle yeterli."
-    )
+    # Değerlendirme metni kullanıcıya gösterilir → dile göre üret. meals_text içindeki
+    # öğün/yemek adları (kanonik) girdi bağlamıdır; AI hedef dilde özetler.
+    if current_locale() == "en":
+        prompt = (
+            "You are a nutrition coach. Write in English. Address the user as 'you'.\n\n"
+            f"User's goal: {goal}\n"
+            f"Daily calorie target: {round(target)} kcal\n"
+            f"Total today: {round(total_cal)} kcal\n\n"
+            f"What they ate today:\n{meals_text}\n"
+            "Evaluate today:\n"
+            "- Did they reach the calorie target?\n"
+            "- Is the macro distribution balanced?\n"
+            "- How is it in terms of bioavailability?\n"
+            "- Is the gluten content high?\n"
+            "- Is there anything that should change?\n"
+            "Be short and specific, 4-5 sentences is enough."
+        )
+        system_prompt = "You are a nutrition coach. Speak briefly, specifically, in English."
+    else:
+        prompt = (
+            f"Sen bir beslenme koçusun. Türkçe yaz, İngilizce kullanma.\n"
+            f"Kullanıcıya 'sen' diye hitap et.\n\n"
+            f"Kullanıcının hedefi: {goal}\n"
+            f"Günlük kalori hedefi: {round(target)} kcal\n"
+            f"Bugün toplam: {round(total_cal)} kcal\n\n"
+            f"Bugün yedikleri:\n{meals_text}\n"
+            f"Bu günü değerlendir:\n"
+            f"- Kalori hedefine ulaştı mı?\n"
+            f"- Makro dağılımı dengeli mi?\n"
+            f"- Biyoyararlanım açısından nasıl?\n"
+            f"- Gluten içeriği yüksek mi?\n"
+            f"- Değiştirilmesi gereken bir şey var mı?\n"
+            f"Kısa ve spesifik ol, 4-5 cümle yeterli."
+        )
+        system_prompt = "Sen bir beslenme koçusun. Kısa, spesifik, Türkçe konuş."
 
     try:
         review = _openai_chat(
             messages=[{"role": "user", "content": prompt}],
-            system_prompt="Sen bir beslenme koçusun. Kısa, spesifik, Türkçe konuş.",
+            system_prompt=system_prompt,
             max_tokens=400,
             temperature=0.7,
         )
     except Exception:
         current_app.logger.exception("Öğün değerlendirmesi üretilemedi")
-        review = "Değerlendirme şu an alınamadı, lütfen tekrar dene."
+        review = t("route.eval_failed")
 
     return jsonify({"review": review, "total_calories": round(total_cal), "target": round(target)})

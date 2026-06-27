@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.blueprints.nutrition import bp
 from app.extensions import db
+from app.i18n import t
 from app.models import CustomMeal, CustomMealItem, MealLog, NutritionPlan
 from app.services.gamification import complete_quest_for_user
 from app.services.validators import _to_float
@@ -44,13 +45,13 @@ def quick_add_meal():
         "ara_ogun": "Ara Öğün"
     }
     if meal_key not in MEAL_LABELS:
-        return jsonify({"error": "Geçersiz öğün anahtarı."}), 400
+        return jsonify({"error": t("route.invalid_meal_key")}), 400
 
     plan_record = NutritionPlan.query.filter_by(user_id=current_user.id)\
         .order_by(NutritionPlan.created_at.desc()).first()
 
     if not plan_record:
-        return jsonify({"error": "Aktif beslenme planı bulunamadı."}), 404
+        return jsonify({"error": t("route.no_active_nutrition_plan")}), 404
 
     # plan_data LLM üretimi ve şema doğrulaması yapılmadan kaydediliyor — bozuk
     # JSON / beklenmedik tipler 500 yerine temiz hata döndürmeli (A4).
@@ -63,7 +64,7 @@ def quick_add_meal():
     # Boş/None/dict-olmayan meal reddedilir (eski `if not meal` davranışı korunur) —
     # aksi halde boş öğün kanonik deftere 0-makro satır yazardı.
     if not isinstance(meal, dict) or not meal:
-        return jsonify({"error": "Bu öğün planda tanımlı değil."}), 404
+        return jsonify({"error": t("route.meal_not_in_plan")}), 404
 
     # yemekler liste olmayabilir / öğeleri str olmayabilir → güvenle str listesine indir.
     raw_yemekler = meal.get("yemekler", [])
@@ -98,7 +99,7 @@ def quick_add_meal():
 
     quest_result = complete_quest_for_user(current_user.id, "meal_logged")
     response = {
-        "message": f"{MEAL_LABELS[meal_key]} planından eklendi.",
+        "message": t("route.added_from_plan", meal=MEAL_LABELS[meal_key]),
         "nutrients": {
             "kalori":  entry.kalori,
             "protein": entry.protein,
@@ -120,7 +121,7 @@ def diary_create_meal():
 
     valid_meals = ("Kahvaltı", "Öğle", "Akşam", "Ara Öğün")
     if meal_name not in valid_meals:
-        return jsonify({"error": "Geçersiz öğün adı"}), 400
+        return jsonify({"error": t("route.invalid_meal_name")}), 400
 
     existing = CustomMeal.query.filter_by(
         user_id=current_user.id, meal_name=meal_name, date_key=date_key
@@ -151,16 +152,16 @@ def diary_create_meal():
 def diary_add_item(meal_id):
     meal = db.session.get(CustomMeal, meal_id)
     if not meal or meal.user_id != current_user.id:
-        return jsonify({"error": "Öğün bulunamadı"}), 404
+        return jsonify({"error": t("route.meal_not_found")}), 404
     if meal.is_logged:
-        return jsonify({"error": "Bu öğün zaten kaydedilmiş"}), 400
+        return jsonify({"error": t("route.meal_already_logged")}), 400
 
     data = request.get_json(silent=True) or {}
     food_name = data.get("food_name", "").strip()
     food_id = data.get("fatsecret_food_id", "")
 
     if not food_name:
-        return jsonify({"error": "Besin adı gerekli"}), 400
+        return jsonify({"error": t("route.food_name_required")}), 400
 
     srv_id = data.get("serving_id")
     if srv_id:
@@ -236,9 +237,9 @@ def diary_add_item(meal_id):
 def diary_update_item(item_id):
     item = db.session.get(CustomMealItem, item_id)
     if not item or item.meal.user_id != current_user.id:
-        return jsonify({"error": "Besin bulunamadı"}), 404
+        return jsonify({"error": t("route.food_not_found")}), 404
     if item.meal.is_logged:
-        return jsonify({"error": "Bu öğün zaten kaydedilmiş"}), 400
+        return jsonify({"error": t("route.meal_already_logged")}), 400
 
     data = request.get_json(silent=True) or {}
     srv_id = data.get("serving_id")
@@ -299,9 +300,9 @@ def diary_update_item(item_id):
 def diary_delete_item(item_id):
     item = db.session.get(CustomMealItem, item_id)
     if not item or item.meal.user_id != current_user.id:
-        return jsonify({"error": "Besin bulunamadı"}), 404
+        return jsonify({"error": t("route.food_not_found")}), 404
     if item.meal.is_logged:
-        return jsonify({"error": "Bu öğün zaten kaydedilmiş"}), 400
+        return jsonify({"error": t("route.meal_already_logged")}), 400
     db.session.delete(item)
     db.session.commit()
     return jsonify({"deleted": True})
@@ -312,11 +313,11 @@ def diary_delete_item(item_id):
 def diary_log_meal(meal_id):
     meal = db.session.get(CustomMeal, meal_id)
     if not meal or meal.user_id != current_user.id:
-        return jsonify({"error": "Öğün bulunamadı"}), 404
+        return jsonify({"error": t("route.meal_not_found")}), 404
     if meal.is_logged:
-        return jsonify({"error": "Bu öğün zaten kaydedilmiş"}), 400
+        return jsonify({"error": t("route.meal_already_logged")}), 400
     if not meal.items:
-        return jsonify({"error": "Öğüne en az bir besin ekle"}), 400
+        return jsonify({"error": t("route.add_one_food")}), 400
 
     total_cal = sum(i.calories for i in meal.items)
     total_pro = sum(i.protein for i in meal.items)
@@ -348,7 +349,7 @@ def diary_log_meal(meal_id):
 
     quest_result = complete_quest_for_user(current_user.id, "meal_logged")
     response = {
-        "message": f"{meal.meal_name} kaydedildi.",
+        "message": t("route.x_logged", name=meal.meal_name),
         "nutrients": {
             "kalori": entry.kalori,
             "protein": entry.protein,

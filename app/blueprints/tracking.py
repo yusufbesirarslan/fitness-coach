@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
+from app.i18n import t
 from app.models import DailyActivity, MealLog, User, UserSession, WaterLog, WeeklyCheckIn, WeeklyLog, WorkoutLog
 from app.services.ai_coach import generate_checkin_feedback
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
@@ -42,12 +43,12 @@ def log_progress():
     note = data.get("note", "")
 
     if not weight:
-        return jsonify({"error" : "Kilo zorunludur"}), 400
+        return jsonify({"error" : t("route.weight_required")}), 400
     
     try:
         weight = float(weight)
     except (ValueError, TypeError):  # liste/dict gibi JSON tipleri TypeError verir → 500 yerine 400 (D5)
-        return jsonify({"error" : "Kilo sayısal olmalıdır"}), 400
+        return jsonify({"error" : t("route.weight_numeric")}), 400
     
     entry = WeeklyLog(
         user_id = current_user.id,
@@ -62,17 +63,17 @@ def log_progress():
     .order_by(WeeklyLog.created_at.desc())\
     .offset(1).first()
 
-    message = f"{weight} kg kaydedildi."
+    message = t("route.weight_logged", weight=weight)
     if previous:
         diff = round(weight - previous.weight , 1)
         if diff < 0:
-            message += f"Geçen kayda göre {abs(diff)} kg verdin. 🔥"
+            message += t("route.weight_lost", diff=abs(diff))
         elif diff > 0:
             # D6: '=' yerine '+=' — aksi halde kilo ALMA dalında "kg kaydedildi"
             # önekı düşüyor (diğer dallar += ile ekliyor).
-            message += f"Geçen kayda göre {abs(diff)} kg aldın."
+            message += t("route.weight_gained", diff=abs(diff))
         else:
-            message += "Geçen kayıtla aynı kilo. Tutarlısın."
+            message += t("route.weight_same")
     return jsonify({"message" : message})
 
 
@@ -113,12 +114,12 @@ def checkin():
 
     weight = data.get("weight")
     if not weight:
-        return jsonify({"error": "Kilo zorunludur"}), 400
+        return jsonify({"error": t("route.weight_required")}), 400
 
     try:
         weight = float(weight)
     except (ValueError, TypeError):  # liste/dict gibi JSON tipleri TypeError verir → 500 yerine 400 (D5)
-        return jsonify({"error": "Kilo sayısal olmalıdır"}), 400
+        return jsonify({"error": t("route.weight_numeric")}), 400
 
     # Bozuk/eksik payload ("yogunluk": "" veya "yüksek") int() ile 500 atardı;
     # _to_int güvenle varsayılana düşer.
@@ -173,7 +174,7 @@ def checkin():
     db.session.commit()
 
     return jsonify({
-        "message": "Check-in kaydedildi.",
+        "message": t("route.checkin_saved"),
         "coach_feedback": coach_feedback
     })
 
@@ -211,12 +212,12 @@ def update_weight():
     weight = data.get("weight")
 
     if not weight:
-        return jsonify({"error": "Kilo zorunludur"}), 400
+        return jsonify({"error": t("route.weight_required")}), 400
 
     try:
         weight = float(weight)
     except (ValueError, TypeError):  # liste/dict gibi JSON tipleri TypeError verir → 500 yerine 400 (D5)
-        return jsonify({"error": "Kilo sayısal olmalıdır"}), 400
+        return jsonify({"error": t("route.weight_numeric")}), 400
 
     current_user.weight = weight
 
@@ -263,9 +264,9 @@ def log_daily_activity():
     intensity = data.get("intensity", "moderate")
 
     if intensity not in MET_CONFIG:
-        return jsonify({"error": "Geçersiz yoğunluk"}), 400
+        return jsonify({"error": t("route.invalid_intensity")}), 400
     if steps <= 0:
-        return jsonify({"error": "Adım sayısı pozitif olmalı"}), 400
+        return jsonify({"error": t("route.steps_positive")}), 400
 
     weight = current_user.weight or 70
     height = current_user.height or 170
@@ -306,7 +307,7 @@ def log_daily_activity():
             db.session.commit()
 
     return jsonify({
-        "message": f"{steps} adım kaydedildi.",
+        "message": t("route.steps_logged", steps=steps),
         "calories_burned": calories,
         "distance_km": distance,
         "duration_min": duration

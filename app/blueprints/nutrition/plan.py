@@ -25,7 +25,7 @@ def save_nutrition_plan():
     score = data.get("score")
 
     if not plan:
-        return jsonify({"error": "Plan verisi eksik"}), 400
+        return jsonify({"error": t("route.plan_data_missing")}), 400
 
     # Eski planı sil, yenisini kaydet
     NutritionPlan.query.filter_by(user_id=current_user.id).delete()
@@ -38,7 +38,7 @@ def save_nutrition_plan():
     db.session.add(new_plan)
     db.session.commit()
 
-    return jsonify({"message": "Plan kaydedildi."})
+    return jsonify({"message": t("route.plan_saved")})
 
 
 @bp.route("/nutrition-plan/active")
@@ -280,4 +280,4 @@ def nutrition_plan_generate():
         return jsonify({"error": t("plan.gen_failed")}), 500
     except Exception:
         current_app.logger.exception("Plan oluşturma hatası")
-        return jsonify({"error": "Plan oluşturulamadı, lütfen tekrar dene."}), 500
+        return jsonify({"error": t("route.plan_failed")}), 500

@@ -379,7 +379,7 @@ EV / MİNİMAL EKİPMAN (barfiks, dambıl, direnç bandı):
         return jsonify({"error": t("plan.gen_failed")}), 500
     except Exception:
         current_app.logger.exception("Plan oluşturma hatası")
-        return jsonify({"error": "Plan oluşturulamadı, lütfen tekrar dene."}), 500
+        return jsonify({"error": t("route.plan_failed")}), 500
 
 
 @bp.route("/training-plan/save", methods=["POST"])
@@ -390,7 +390,7 @@ def save_training_plan():
     score = data.get("score")
 
     if not plan:
-        return jsonify({"error": "Plan verisi eksik"}), 400
+        return jsonify({"error": t("route.plan_data_missing")}), 400
 
     TrainingPlan.query.filter_by(user_id=current_user.id).delete()
 
@@ -402,7 +402,7 @@ def save_training_plan():
     db.session.add(new_plan)
     db.session.commit()
 
-    return jsonify({"message": "Antrenman planı kaydedildi."})
+    return jsonify({"message": t("route.training_plan_saved")})
 
 
 @bp.route("/workout/complete", methods=["POST"])
@@ -412,7 +412,7 @@ def complete_workout():
     plan = TrainingPlan.query.filter_by(user_id=current_user.id)\
         .order_by(TrainingPlan.created_at.desc()).first()
     if not plan:
-        return jsonify({"error": "Aktif antrenman planın yok."}), 400
+        return jsonify({"error": t("route.no_active_training_plan")}), 400
 
     # M3: görev satırından BAĞIMSIZ günlük idempotency. "workout_logged" görevi
     # tohumlanmamışsa eski guard hiç çalışmıyordu → tekrar XP. Bugün zaten bir Pump
@@ -423,7 +423,8 @@ def complete_workout():
         PumpCheck.created_at >= start_utc,
         PumpCheck.created_at < end_utc,
     ).first():
-        return jsonify({"error": "Bugünkü antrenmanını zaten tamamladın!"}), 400
+        return jsonify({"error": t("route.workout_already_done"),
+                        "code": "already_completed"}), 400
 
     # ── PUMP CHECK GATE ──────────────────────────────────────────────────────
     # Antrenman tamamlanmadan önce ortam fotoğrafı + konum AI ile doğrulanmalı.
@@ -487,11 +488,12 @@ def complete_workout():
         # yazdı; uq_pump_check_day ikinci commit'i reddetti. TÜM yan etkiler
         # (XP/quest/WorkoutLog dahil) rollback olur → çift XP yok.
         db.session.rollback()
-        return jsonify({"error": "Bugünkü antrenmanını zaten tamamladın!"}), 400
+        return jsonify({"error": t("route.workout_already_done"),
+                        "code": "already_completed"}), 400
     except Exception as e:
         db.session.rollback()
         current_app.logger.warning("[WORKOUT] commit başarısız: %s: %s", type(e).__name__, e)
-        return jsonify({"error": "Bir hata oluştu, tekrar dene."}), 500
+        return jsonify({"error": t("route.generic_error_retry")}), 500
 
     total_xp = base_xp + photo_bonus + (quest_result["xp"] if quest_result else 0)
     level = get_level(new_total)
@@ -558,7 +560,7 @@ def set_water():
     try:
         count = int(data.get("count", 0))
     except (TypeError, ValueError):
-        return jsonify({"error": "Geçersiz değer."}), 400
+        return jsonify({"error": t("route.invalid_value")}), 400
     count = max(0, min(count, WATER_GOAL))  # 0..8 arası kıs
 
     today_key = app_today().isoformat()

@@ -62,11 +62,11 @@ def _verify_image_bytes(image_bytes):
         # read format/size first, then check structural integrity.
         im.verify()
     except Exception:
-        return "Geçerli bir görsel dosyası değil."
+        return t("route.img_invalid")
     if width * height > _MAX_IMAGE_PIXELS:
-        return "Görsel çözünürlüğü çok yüksek."
+        return t("route.img_too_large")
     if fmt not in _ALLOWED_IMAGE_FORMATS:
-        return "Desteklenmeyen görsel formatı."
+        return t("route.img_unsupported")
     return None
 
 

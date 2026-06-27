@@ -3,6 +3,7 @@ from flask import Blueprint, jsonify, render_template, request
 from flask_login import current_user, login_required
 
 from app.extensions import db
+from app.i18n import t
 from app.models import Supplement
 from app.services.gamification import award_xp, complete_quest_for_user, log_activity
 from app.services.validators import _to_float
@@ -32,7 +33,7 @@ def supplement_add():
     name = (data.get("product_name") or "").strip()
     brand = (data.get("brand") or "").strip()
     if not name or not brand:
-        return jsonify({"error": "Ürün adı ve marka zorunludur."}), 400
+        return jsonify({"error": t("manage_stack.required")}), 400
 
     category = data.get("category", "Other")
     if category not in SUPPLEMENT_CATEGORIES:
@@ -76,7 +77,7 @@ def supplement_add():
     log_activity(current_user.id, "new_supplement", f"{name} ({category}) stack'ine eklendi")
     quest_result = complete_quest_for_user(current_user.id, "supplement_added")
 
-    response = {"message": "Supplement eklendi!", "id": supp.id}
+    response = {"message": t("route.supp_added"), "id": supp.id}
     if quest_result:
         response["quest_awarded"] = quest_result
     return jsonify(response)
@@ -87,7 +88,7 @@ def supplement_add():
 def supplement_edit(sid):
     supp = db.get_or_404(Supplement, sid)
     if supp.user_id != current_user.id:
-        return jsonify({"error": "Yetkiniz yok."}), 403
+        return jsonify({"error": t("route.no_permission")}), 403
 
     data = request.get_json(silent=True) or {}
 
@@ -124,7 +125,7 @@ def supplement_edit(sid):
         supp.is_public = bool(data["is_public"])
 
     db.session.commit()
-    return jsonify({"message": "Supplement güncellendi!"})
+    return jsonify({"message": t("route.supp.updated")})
 
 
 @bp.route("/supplement/delete/<int:sid>", methods=["POST"])
@@ -132,10 +133,10 @@ def supplement_edit(sid):
 def supplement_delete(sid):
     supp = db.get_or_404(Supplement, sid)
     if supp.user_id != current_user.id:
-        return jsonify({"error": "Yetkiniz yok."}), 403
+        return jsonify({"error": t("route.no_permission")}), 403
     db.session.delete(supp)
     db.session.commit()
-    return jsonify({"message": "Supplement silindi."})
+    return jsonify({"message": t("route.supp_deleted")})
 
 
 SUPPLEMENT_CATEGORIES = ["Protein", "Amino Acid", "Pre-Workout", "Vitamin/Health", "Creatine", "Other"]
