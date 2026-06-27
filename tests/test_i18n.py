@@ -111,6 +111,20 @@ def test_nutrition_renders_localized(app, client, make_user, login):
     assert 'data-args=\'["Kahvaltı"]\'' in body
 
 
+def test_nutrition_js_keeps_canonical_values():
+    """nutrition.js kuplaj koruması: görünen metin EN olabilir ama backend'e giden
+    KANONIK değerler (öğün tipi, plan besin adları, diary öğün anahtarları) Türkçe
+    KALMALI — aksi halde FatSecret araması / MealLog.ogun eşleşmesi bozulur."""
+    import os
+    p = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "nutrition.js")
+    js = open(p, encoding="utf-8").read()
+    assert "selectedMealType = 'Kahvaltı'" in js
+    assert "'Tavuk Göğsü'" in js and "'Pirinç'" in js   # plan besin değerleri (AI prompt'a gider)
+    assert "{ key: 'Kahvaltı'" in js                     # diary öğün anahtarı (backend meal_name)
+    # i18n alias + görünen-etiket map'leri kurulu
+    assert "var __t" in js and "MEAL_LABELS_EN" in js and "FOOD_LABELS_EN" in js
+
+
 def test_authenticated_locale_follows_user(app, client, make_user, login):
     """Girişli kullanıcının language alanı locale'i belirler (session'dan bağımsız)."""
     make_user("enfan", language="en")
