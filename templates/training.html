@@ -1,8 +1,8 @@
 ﻿<!DOCTYPE html>
-<html lang="tr">
+<html lang="{{ locale }}">
 <head>
     {% include "_head.html" %}
-    <title>Antrenman — AxisAI</title>
+    <title>{{ t('training.page_title') }}</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <style nonce="{{ csp_nonce }}">
@@ -322,7 +322,7 @@
     </button>
     <span class="header-brand"><img class="brand-mark" src="/static/icon-holo.png" alt="">AxisAI</span>
     <div class="header-spacer"></div>
-    <a href="/edit-profile" class="header-avatar" title="Profil">
+    <a href="/edit-profile" class="header-avatar" title="{{ t('nav.profile') }}">
         {% if profile_picture %}
         <img src="{{ profile_picture }}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">
         {% else %}
@@ -357,23 +357,23 @@
         </div>
     </div>
     <nav class="drawer-nav">
-        <div class="drawer-section-label">Keşfet</div>
-        <a href="/quests" class="drawer-link"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>Görevler</a>
-        <a href="/supplements" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>Supplement Dolabı</a>
-        <a href="/progress-page" class="drawer-link"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>İlerleme</a>
-        <a href="/friends" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Arkadaşlarım</a>
+        <div class="drawer-section-label">{{ t('nav.section_explore') }}</div>
+        <a href="/quests" class="drawer-link"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>{{ t('nav.quests') }}</a>
+        <a href="/supplements" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>{{ t('nav.supplements') }}</a>
+        <a href="/progress-page" class="drawer-link"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>{{ t('nav.progress') }}</a>
+        <a href="/friends" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>{{ t('nav.friends') }}</a>
         <div class="drawer-sep"></div>
-        <a href="/edit-profile" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Profilim</a>
+        <a href="/edit-profile" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>{{ t('nav.my_profile') }}</a>
     </nav>
     <div class="drawer-footer">
-        <a href="/logout" class="drawer-logout"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Çıkış Yap</a>
+        <a href="/logout" class="drawer-logout"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>{{ t('nav.logout') }}</a>
     </div>
 </aside>
 
 <!-- ── LOADING OVERLAY ── -->
 <div class="loading-overlay" id="loading">
     <div class="loading-spinner"></div>
-    <div class="loading-text">Program hazırlanıyor...</div>
+    <div class="loading-text">{{ t('training.loading') }}</div>
 </div>
 
 <!-- ── PUMP CHECK MODAL ── -->
@@ -382,43 +382,43 @@
         <div class="pump-head">
             <div>
                 <div class="pump-title" id="pump-title">PUMP CHECK</div>
-                <div class="pump-sub">Antrenmanını tamamlamak için ortamının bir fotoğrafını yükle — yapay zekâ doğrulasın.</div>
+                <div class="pump-sub">{{ t('training.pump_sub') }}</div>
             </div>
-            <button type="button" class="pump-close" id="pump-close" aria-label="Kapat">&times;</button>
+            <button type="button" class="pump-close" id="pump-close" aria-label="{{ t('training.close') }}">&times;</button>
         </div>
 
-        <div class="pump-dropzone" id="pump-dropzone" role="button" tabindex="0" aria-label="Pump Check fotoğrafı yükle">
+        <div class="pump-dropzone" id="pump-dropzone" role="button" tabindex="0" aria-label="{{ t('training.pump_upload_aria') }}">
             <div class="pump-dz-empty">
                 <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                <div class="pump-dropzone-text">Fotoğraf çek veya yükle</div>
-                <div class="pump-dropzone-hint">Spor salonu, ev ya da antrenman alanın</div>
+                <div class="pump-dropzone-text">{{ t('training.pump_take_photo') }}</div>
+                <div class="pump-dropzone-hint">{{ t('training.pump_hint') }}</div>
             </div>
             <div class="pump-preview">
-                <img id="pump-preview-img" alt="Pump Check fotoğrafı önizleme">
-                <span class="pump-preview-badge">Değiştir</span>
+                <img id="pump-preview-img" alt="{{ t('training.pump_preview_alt') }}">
+                <span class="pump-preview-badge">{{ t('training.change') }}</span>
             </div>
         </div>
         <input type="file" id="pump-file-input" accept="image/*" hidden>
 
         <div class="pump-field">
-            <label class="pump-label" for="pump-location">Nerede antrenman yaptın?</label>
+            <label class="pump-label" for="pump-location">{{ t('training.pump_where') }}</label>
             <select id="pump-location" class="fc-input">
-                <option value="Ev">Ev</option>
-                <option value="Spor Salonu" selected>Spor Salonu</option>
-                <option value="Diğer:">Diğer:</option>
+                <option value="Ev">{{ t('training.loc_home') }}</option>
+                <option value="Spor Salonu" selected>{{ t('training.loc_gym') }}</option>
+                <option value="Diğer:">{{ t('training.loc_other') }}</option>
             </select>
         </div>
 
         <div class="pump-field">
-            <label class="pump-label" for="pump-desc">Kısa açıklama</label>
-            <input type="text" id="pump-desc" class="fc-input" maxlength="140" placeholder="Bugün antrenmanını nerde yaptın?">
+            <label class="pump-label" for="pump-desc">{{ t('training.pump_desc_label') }}</label>
+            <input type="text" id="pump-desc" class="fc-input" maxlength="140" placeholder="{{ t('training.pump_desc_ph') }}">
         </div>
 
         <div class="pump-error" id="pump-error" role="alert" aria-live="polite"></div>
 
         <div class="pump-actions">
-            <button type="button" class="btn-ghost" id="pump-cancel">Vazgeç</button>
-            <button type="button" class="btn-volt" id="pump-submit" data-action="submitPumpCheck">Antrenmanı Tamamla</button>
+            <button type="button" class="btn-ghost" id="pump-cancel">{{ t('training.cancel') }}</button>
+            <button type="button" class="btn-volt" id="pump-submit" data-action="submitPumpCheck">{{ t('training.complete_workout') }}</button>
         </div>
     </div>
 </div>
@@ -427,8 +427,8 @@
 <main class="main-content">
 
     <div class="page-hdr">
-        <h1>ANTRENMAN<br><span>PROGRAMI</span></h1>
-        <p>Tercihlerini belirle, haftalık antrenman programını oluştur.</p>
+        <h1>{{ t('training.h1_a') }}<br><span>{{ t('training.h1_b') }}</span></h1>
+        <p>{{ t('training.page_sub') }}</p>
     </div>
 
     <!-- ══ AKTİF PLAN GÖRÜNÜMÜ (plan varsa göster) ══ -->
@@ -437,12 +437,12 @@
         <!-- Header: score + meta -->
         <div class="apv-header">
             <div>
-                <div class="apv-title">AKTİF PROGRAMIN</div>
+                <div class="apv-title">{{ t('training.active_program') }}</div>
                 <div class="apv-meta" id="apv-meta"></div>
             </div>
             <div class="apv-score-wrap">
                 <div class="apv-score" id="apv-score">—</div>
-                <div class="apv-score-lbl">/ 10 Puan</div>
+                <div class="apv-score-lbl">{{ t('training.points') }}</div>
             </div>
         </div>
 
@@ -453,7 +453,7 @@
         </div>
 
         <!-- Weekly grid -->
-        <div class="apv-section-title">Haftalık Program</div>
+        <div class="apv-section-title">{{ t('training.weekly_program') }}</div>
         <div class="weekly-grid" id="apv-weekly-grid"></div>
 
         <!-- Day detail panel -->
@@ -464,7 +464,7 @@
             <div class="exercise-table-wrap">
                 <table class="exercise-table">
                     <thead><tr>
-                        <th>Egzersiz</th><th>Set</th><th>Tekrar</th><th>Dinlenme</th>
+                        <th>{{ t('training.ex') }}</th><th>{{ t('training.set') }}</th><th>{{ t('training.reps') }}</th><th>{{ t('training.rest') }}</th>
                     </tr></thead>
                     <tbody id="apv-detail-exercises"></tbody>
                 </table>
@@ -476,12 +476,12 @@
 
         <!-- Finish Today's Workout -->
         <div id="finish-workout-wrap" style="text-align:center;margin-top:24px;display:none">
-            <button class="finish-workout-btn" id="finish-workout-btn" data-action="finishWorkout">&#x2714; Bugünkü Antrenmanı Tamamla</button>
+            <button class="finish-workout-btn" id="finish-workout-btn" data-action="finishWorkout">&#x2714; {{ t('training.finish_today') }}</button>
         </div>
 
         <!-- Reset -->
         <div style="text-align:center;margin-top:36px;padding-bottom:48px">
-            <button class="reset-plan-btn" data-action="resetPlan">↺ &nbsp;Programı Sıfırla / Yeni Plan Oluştur</button>
+            <button class="reset-plan-btn" data-action="resetPlan">↺ &nbsp;{{ t('training.reset_plan') }}</button>
         </div>
 
     </div>
@@ -491,85 +491,85 @@
 
         <!-- BİLGİ BANNER -->
         <div class="info-banner" id="info-banner">
-            <div class="info-item"><div class="info-label">Hedef</div><div class="info-val" id="info-goal">—</div></div>
-            <div class="info-item"><div class="info-label">Seviye</div><div class="info-val" id="info-level">—</div></div>
+            <div class="info-item"><div class="info-label">{{ t('training.info_goal') }}</div><div class="info-val" id="info-goal">—</div></div>
+            <div class="info-item"><div class="info-label">{{ t('training.info_level') }}</div><div class="info-val" id="info-level">—</div></div>
             <div class="info-item"><div class="info-label">TDEE</div><div class="info-val" id="info-tdee">—</div></div>
         </div>
 
         <!-- GÜN SAYISI -->
         <div class="section">
-            <div class="section-title">Haftada Kaç Gün?</div>
-            <div class="section-sub">Antrenman yapabileceğin gün sayısını seç.</div>
+            <div class="section-title">{{ t('training.days_q') }}</div>
+            <div class="section-sub">{{ t('training.days_sub') }}</div>
             <div class="option-grid" id="gun-grid"></div>
         </div>
 
         <!-- ANTRENMAN TARZI -->
         <div class="section">
-            <div class="section-title">Antrenman Tarzı</div>
-            <div class="section-sub">Hangi tarzda antrenman yapmak istiyorsun?</div>
+            <div class="section-title">{{ t('training.style_title') }}</div>
+            <div class="section-sub">{{ t('training.style_sub') }}</div>
             <div class="option-grid" id="tarzi-grid"></div>
         </div>
 
         <!-- ÖNCELİKLİ HEDEF -->
         <div class="section">
-            <div class="section-title">Öncelikli Hedef</div>
-            <div class="section-sub">Bu programda neye odaklanmak istiyorsun?</div>
+            <div class="section-title">{{ t('training.goal_title') }}</div>
+            <div class="section-sub">{{ t('training.goal_sub') }}</div>
             <div class="option-grid" id="hedef-grid"></div>
         </div>
 
         <!-- EKİPMAN -->
         <div class="section">
-            <div class="section-title">Ekipman</div>
-            <div class="section-sub">Hangi ortamda antrenman yapıyorsun?</div>
+            <div class="section-title">{{ t('training.equip_title') }}</div>
+            <div class="section-sub">{{ t('training.equip_sub') }}</div>
             <div class="option-grid" id="ekipman-grid"></div>
         </div>
 
         <!-- ODAK -->
         <div class="section">
-            <div class="section-title">Odak Bölge</div>
-            <div class="section-sub">Hangi bölgeye odaklanmak istiyorsun?</div>
+            <div class="section-title">{{ t('training.focus_title') }}</div>
+            <div class="section-sub">{{ t('training.focus_sub') }}</div>
             <div class="option-grid" id="odak-grid"></div>
         </div>
 
         <!-- SÜRE -->
         <div class="section">
-            <div class="section-title">Antrenman Süresi</div>
-            <div class="section-sub">Her antrenman için ne kadar süren var?</div>
+            <div class="section-title">{{ t('training.dur_title') }}</div>
+            <div class="section-sub">{{ t('training.dur_sub') }}</div>
             <div class="option-grid" id="sure-grid"></div>
         </div>
 
         <!-- KARDİYO -->
         <div class="section">
-            <div class="section-title">Kardiyo</div>
-            <div class="section-sub">Kardiyo yapmak istiyor musun? Türünü ve detaylarını seç.</div>
-            <div class="cat-label" style="margin-top:0">Kardiyo Türü</div>
+            <div class="section-title">{{ t('training.cardio_title') }}</div>
+            <div class="section-sub">{{ t('training.cardio_sub') }}</div>
+            <div class="cat-label" style="margin-top:0">{{ t('training.cardio_type') }}</div>
             <div class="option-grid" id="kardiyo-tip-grid"></div>
             <div id="kardiyo-details" style="display:none; margin-top:16px;">
-                <div class="cat-label">Haftada Kaç Gün Kardiyo?</div>
+                <div class="cat-label">{{ t('training.cardio_days') }}</div>
                 <div class="option-grid" id="kardiyo-gun-grid"></div>
-                <div class="cat-label" style="margin-top:16px">Kardiyo Süresi</div>
+                <div class="cat-label" style="margin-top:16px">{{ t('training.cardio_dur') }}</div>
                 <div class="option-grid" id="kardiyo-sure-grid"></div>
-                <div class="cat-label" style="margin-top:16px">Kardiyo Yoğunluğu</div>
+                <div class="cat-label" style="margin-top:16px">{{ t('training.cardio_intensity') }}</div>
                 <div class="option-grid" id="kardiyo-yogunluk-grid"></div>
             </div>
         </div>
 
         <!-- SAKATLIK / SAĞLIK DURUMU -->
         <div class="section">
-            <div class="section-title">Sakatlık / Sağlık Durumu</div>
-            <div class="section-sub">Varsa sakatlık ya da tıbbi durumunu seç — program, riskli hareketlerden kaçınıp güvenli alternatifler koyacak şekilde uyarlanır. Yoksa "Hiçbiri" seç.</div>
+            <div class="section-title">{{ t('training.injury_title') }}</div>
+            <div class="section-sub">{{ t('training.injury_sub') }}</div>
             <div class="option-grid" id="injury-grid"></div>
             <input type="text" id="injury-other" class="injury-input" maxlength="200"
-                   placeholder="Diğer / detay (ör. sağ omuz sıkışması, kronik bel ağrısı)">
+                   placeholder="{{ t('training.injury_other_ph') }}">
         </div>
 
-        <button class="btn-volt" id="submit-btn" data-action="generatePlan" style="margin-top:8px">PROGRAMIMI OLUŞTUR</button>
+        <button class="btn-volt" id="submit-btn" data-action="generatePlan" style="margin-top:8px">{{ t('training.create_program') }}</button>
 
         <!-- SONUÇLAR (yeni oluşturulan plan önizlemesi) -->
         <div id="results" style="display:none">
             <div class="fc-divider" style="margin-top:40px">
                 <div class="fc-divider-line"></div>
-                <div class="fc-divider-lbl">Haftalık Programın</div>
+                <div class="fc-divider-lbl">{{ t('training.your_weekly') }}</div>
                 <div class="fc-divider-line"></div>
             </div>
 
@@ -583,7 +583,7 @@
                 <div class="exercise-table-wrap">
                     <table class="exercise-table">
                         <thead><tr>
-                            <th>Egzersiz</th><th>Set</th><th>Tekrar</th><th>Dinlenme</th>
+                            <th>{{ t('training.ex') }}</th><th>{{ t('training.set') }}</th><th>{{ t('training.reps') }}</th><th>{{ t('training.rest') }}</th>
                         </tr></thead>
                         <tbody id="detail-exercises"></tbody>
                     </table>
@@ -591,7 +591,7 @@
             </div>
 
             <div class="weekly-summary" id="weekly-summary"></div>
-            <button class="save-plan-btn" id="save-btn" data-action="savePlan">PROGRAMI KAYDET</button>
+            <button class="save-plan-btn" id="save-btn" data-action="savePlan">{{ t('training.save_program') }}</button>
         </div>
 
     </div><!-- /setup-form -->
@@ -601,19 +601,19 @@
 <nav class="action-bar">
     <a href="/" class="ab-tab">
         <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-        <span>Ana Sayfa</span>
+        <span>{{ t('nav.home') }}</span>
     </a>
     <a href="/training" class="ab-tab active">
         <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg>
-        <span>Antrenman</span>
+        <span>{{ t('nav.training') }}</span>
     </a>
     <a href="/nutrition" class="ab-tab">
         <svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>
-        <span>Beslenme</span>
+        <span>{{ t('nav.nutrition') }}</span>
     </a>
     <a href="/leaderboard" class="ab-tab">
         <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        <span>Kulüp</span>
+        <span>{{ t('nav.club') }}</span>
     </a>
 </nav>
 
@@ -627,13 +627,13 @@
             <button class="fab-sub" data-action="fxOpenSetupForm">
                 <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             </button>
-            <div class="fab-lbl">Program Oluştur</div>
+            <div class="fab-lbl">{{ t('training.fab_create') }}</div>
         </div>
         <div class="fab-row">
             <button class="fab-sub" data-action="fxTriggerFinish">
                 <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
             </button>
-            <div class="fab-lbl">Antrenmanı Bitir</div>
+            <div class="fab-lbl">{{ t('training.fab_finish') }}</div>
         </div>
     </div>
 </div>
@@ -642,6 +642,15 @@
 <div class="toast-wrap" id="toast-wrap"></div>
 
 <script nonce="{{ csp_nonce }}">
+/* ── i18n (PR6) ── görünen metin EN olur; backend'e giden KANONIK değerler
+   (OPTIONS val, sakatlık adı, gün adı, goal/level/score key) Türkçe KALIR →
+   training-plan / injury_constraints eşleşmesi bozulmaz. window.t bazı yerlerdeki
+   yerel `t` ile çakışmasın diye __t aliası. */
+var __t = (window.t) || function (k, v) { return k; };
+var _EN = (window.LOCALE === 'en');
+/* Sakatlık: görünen etiket EN, değer (backend'e giden) TR kalır. */
+var INJURY_LABELS_EN = { 'Hiçbiri':'None','Menisküs':'Meniscus','Diz':'Knee','Kifoz':'Kyphosis','Skolyoz':'Scoliosis','Bel fıtığı':'Herniated disc','Bel ağrısı':'Lower-back pain','Omuz':'Shoulder','Bilek':'Wrist','Dirsek':'Elbow','Ayak bileği':'Ankle','Kalça':'Hip','Boyun':'Neck' };
+function injuryLabel(v) { return (_EN && INJURY_LABELS_EN[v]) ? INJURY_LABELS_EN[v] : v; }
 let quickAddOpen = false;
 function toggleQuickAdd() {
     quickAddOpen = !quickAddOpen;
@@ -669,73 +678,73 @@ document.addEventListener('click', e => {
     // ── OPTIONS DATA ──
     const OPTIONS = {
         gun: [
-            { val: 3, label: "3 Gün",  sub: "Başlangıç dostu" },
-            { val: 4, label: "4 Gün",  sub: "Dengeli split" },
-            { val: 5, label: "5 Gün",  sub: "Yoğun program" },
-            { val: 6, label: "6 Gün",  sub: "İleri seviye" }
+            { val: 3, label: "3 Gün",  sub: "Başlangıç dostu", en: "3 Days", es: "Beginner-friendly" },
+            { val: 4, label: "4 Gün",  sub: "Dengeli split",   en: "4 Days", es: "Balanced split" },
+            { val: 5, label: "5 Gün",  sub: "Yoğun program",   en: "5 Days", es: "Intense program" },
+            { val: 6, label: "6 Gün",  sub: "İleri seviye",    en: "6 Days", es: "Advanced" }
         ],
         ekipman: [
-            { val: "spor_salonu", label: "Spor Salonu", sub: "Tam ekipman" },
-            { val: "ev",          label: "Ev",          sub: "Vücut ağırlığı" },
-            { val: "minimal",     label: "Minimal",     sub: "Dambıl + bant" }
+            { val: "spor_salonu", label: "Spor Salonu", sub: "Tam ekipman",   en: "Gym",     es: "Full equipment" },
+            { val: "ev",          label: "Ev",          sub: "Vücut ağırlığı", en: "Home",    es: "Bodyweight" },
+            { val: "minimal",     label: "Minimal",     sub: "Dambıl + bant",  en: "Minimal", es: "Dumbbells + band" }
         ],
         odak: [
-            { val: "tum_vucut", label: "Tüm Vücut",   sub: "Dengeli gelişim" },
-            { val: "ust_vucut", label: "Üst Vücut",   sub: "Göğüs, sırt, omuz" },
-            { val: "sirt",      label: "Sırt Odaklı", sub: "Lat, trapez, rhomboid" },
-            { val: "alt_vucut", label: "Alt Vücut",   sub: "Bacak, kalça" },
-            { val: "core",      label: "Core",         sub: "Karın, bel" }
+            { val: "tum_vucut", label: "Tüm Vücut",   sub: "Dengeli gelişim",     en: "Full Body",    es: "Balanced development" },
+            { val: "ust_vucut", label: "Üst Vücut",   sub: "Göğüs, sırt, omuz",   en: "Upper Body",   es: "Chest, back, shoulders" },
+            { val: "sirt",      label: "Sırt Odaklı", sub: "Lat, trapez, rhomboid", en: "Back-Focused", es: "Lats, traps, rhomboids" },
+            { val: "alt_vucut", label: "Alt Vücut",   sub: "Bacak, kalça",        en: "Lower Body",   es: "Legs, glutes" },
+            { val: "core",      label: "Core",         sub: "Karın, bel",          en: "Core",         es: "Abs, lower back" }
         ],
         sure: [
-            { val: 30, label: "30 Dakika", sub: "Kısa ve yoğun" },
-            { val: 45, label: "45 Dakika", sub: "Standart" },
-            { val: 60, label: "60 Dakika", sub: "Kapsamlı" },
-            { val: 90, label: "90 Dakika", sub: "İleri seviye" }
+            { val: 30, label: "30 Dakika", sub: "Kısa ve yoğun", en: "30 Minutes", es: "Short and intense" },
+            { val: 45, label: "45 Dakika", sub: "Standart",      en: "45 Minutes", es: "Standard" },
+            { val: 60, label: "60 Dakika", sub: "Kapsamlı",      en: "60 Minutes", es: "Comprehensive" },
+            { val: 90, label: "90 Dakika", sub: "İleri seviye",  en: "90 Minutes", es: "Advanced" }
         ]
     };
     const TARZI_OPTIONS = [
-        { val:"genel",        label:"Genel Fitness",  sub:"Karışık antrenman" },
-        { val:"crossfit",     label:"CrossFit",       sub:"WOD, fonksiyonel" },
-        { val:"calisthenics", label:"Kalistenik",     sub:"Vücut ağırlığı" },
-        { val:"powerlifting", label:"Powerlifting",   sub:"Güç odaklı" },
-        { val:"bodybuilding", label:"Bodybuilding",   sub:"Kas izolasyonu" },
-        { val:"fonksiyonel",  label:"Fonksiyonel",    sub:"Mobilite odaklı" }
+        { val:"genel",        label:"Genel Fitness",  sub:"Karışık antrenman", en:"General Fitness", es:"Mixed training" },
+        { val:"crossfit",     label:"CrossFit",       sub:"WOD, fonksiyonel",  en:"CrossFit",        es:"WOD, functional" },
+        { val:"calisthenics", label:"Kalistenik",     sub:"Vücut ağırlığı",    en:"Calisthenics",    es:"Bodyweight" },
+        { val:"powerlifting", label:"Powerlifting",   sub:"Güç odaklı",        en:"Powerlifting",    es:"Strength-focused" },
+        { val:"bodybuilding", label:"Bodybuilding",   sub:"Kas izolasyonu",    en:"Bodybuilding",    es:"Muscle isolation" },
+        { val:"fonksiyonel",  label:"Fonksiyonel",    sub:"Mobilite odaklı",   en:"Functional",      es:"Mobility-focused" }
     ];
     const HEDEF_OPTIONS = [
-        { val:"genel",       label:"Genel Sağlık",  sub:"Dengeli gelişim" },
-        { val:"guc",         label:"Güç",            sub:"Maksimum kuvvet" },
-        { val:"kondisyon",   label:"Kondisyon",      sub:"Dayanıklılık" },
-        { val:"kas_kutlesi", label:"Kas Kütlesi",   sub:"Hipertrofi" },
-        { val:"yag_yakimi",  label:"Yağ Yakımı",    sub:"Rekomposizyon" },
-        { val:"esneklik",    label:"Esneklik",       sub:"Mobilite" }
+        { val:"genel",       label:"Genel Sağlık",  sub:"Dengeli gelişim",  en:"General Health", es:"Balanced development" },
+        { val:"guc",         label:"Güç",            sub:"Maksimum kuvvet",  en:"Strength",       es:"Maximum force" },
+        { val:"kondisyon",   label:"Kondisyon",      sub:"Dayanıklılık",     en:"Conditioning",   es:"Endurance" },
+        { val:"kas_kutlesi", label:"Kas Kütlesi",   sub:"Hipertrofi",       en:"Muscle Mass",    es:"Hypertrophy" },
+        { val:"yag_yakimi",  label:"Yağ Yakımı",    sub:"Rekomposizyon",    en:"Fat Loss",       es:"Recomposition" },
+        { val:"esneklik",    label:"Esneklik",       sub:"Mobilite",         en:"Flexibility",    es:"Mobility" }
     ];
     const KARDIYO_OPTIONS = {
         tip: [
-            { val:"yok",       label:"Kardiyo Yok",  sub:"Sadece ağırlık" },
-            { val:"kosu",      label:"Koşu",          sub:"Dış mekan / bant" },
-            { val:"bisiklet",  label:"Bisiklet",      sub:"Sabit veya dış mekan" },
-            { val:"yuzme",     label:"Yüzme",         sub:"Havuz" },
-            { val:"ip_atlama", label:"İp Atlama",     sub:"Ev / salon" },
-            { val:"yuruyus",   label:"Yürüyüş",      sub:"Tempolu yürüyüş" },
-            { val:"karisik",   label:"Karışık",       sub:"Farklı türler" }
+            { val:"yok",       label:"Kardiyo Yok",  sub:"Sadece ağırlık",      en:"No Cardio",  es:"Weights only" },
+            { val:"kosu",      label:"Koşu",          sub:"Dış mekan / bant",    en:"Running",    es:"Outdoor / treadmill" },
+            { val:"bisiklet",  label:"Bisiklet",      sub:"Sabit veya dış mekan", en:"Cycling",    es:"Stationary or outdoor" },
+            { val:"yuzme",     label:"Yüzme",         sub:"Havuz",               en:"Swimming",   es:"Pool" },
+            { val:"ip_atlama", label:"İp Atlama",     sub:"Ev / salon",          en:"Jump Rope",  es:"Home / gym" },
+            { val:"yuruyus",   label:"Yürüyüş",      sub:"Tempolu yürüyüş",     en:"Walking",    es:"Brisk walking" },
+            { val:"karisik",   label:"Karışık",       sub:"Farklı türler",       en:"Mixed",      es:"Various types" }
         ],
         gun:  [
-            { val:2, label:"2 Gün", sub:"Hafif" },
-            { val:3, label:"3 Gün", sub:"Orta" },
-            { val:4, label:"4 Gün", sub:"Yoğun" },
-            { val:5, label:"5 Gün", sub:"Çok yoğun" }
+            { val:2, label:"2 Gün", sub:"Hafif",     en:"2 Days", es:"Light" },
+            { val:3, label:"3 Gün", sub:"Orta",      en:"3 Days", es:"Moderate" },
+            { val:4, label:"4 Gün", sub:"Yoğun",     en:"4 Days", es:"Intense" },
+            { val:5, label:"5 Gün", sub:"Çok yoğun", en:"5 Days", es:"Very intense" }
         ],
         sure: [
-            { val:15, label:"15 dk", sub:"Kısa HIIT" },
-            { val:20, label:"20 dk", sub:"Standart" },
-            { val:30, label:"30 dk", sub:"Orta" },
-            { val:45, label:"45 dk", sub:"Uzun" }
+            { val:15, label:"15 dk", sub:"Kısa HIIT", en:"15 min", es:"Short HIIT" },
+            { val:20, label:"20 dk", sub:"Standart",  en:"20 min", es:"Standard" },
+            { val:30, label:"30 dk", sub:"Orta",      en:"30 min", es:"Moderate" },
+            { val:45, label:"45 dk", sub:"Uzun",      en:"45 min", es:"Long" }
         ],
         yogunluk: [
-            { val:"dusuk",   label:"Düşük (LISS)", sub:"Yağ yakımı odaklı" },
-            { val:"orta",    label:"Orta",          sub:"Genel kondisyon" },
-            { val:"yuksek",  label:"Yüksek (HIIT)", sub:"Kısa ve yoğun" },
-            { val:"karisik", label:"Karışık",       sub:"Gün gün değişen" }
+            { val:"dusuk",   label:"Düşük (LISS)", sub:"Yağ yakımı odaklı", en:"Low (LISS)",  es:"Fat-loss focused" },
+            { val:"orta",    label:"Orta",          sub:"Genel kondisyon",   en:"Moderate",    es:"General conditioning" },
+            { val:"yuksek",  label:"Yüksek (HIIT)", sub:"Kısa ve yoğun",     en:"High (HIIT)", es:"Short and intense" },
+            { val:"karisik", label:"Karışık",       sub:"Gün gün değişen",   en:"Mixed",       es:"Varies day to day" }
         ]
     };
 
@@ -766,8 +775,8 @@ document.addEventListener('click', e => {
         chip.innerHTML = `
             <div class="option-chip-dot"></div>
             <div>
-                <div class="option-chip-text">${item.label}</div>
-                <div class="option-chip-sub">${item.sub}</div>
+                <div class="option-chip-text">${_EN ? (item.en || item.label) : item.label}</div>
+                <div class="option-chip-sub">${_EN ? (item.es || item.sub) : item.sub}</div>
             </div>
         `;
         chip.addEventListener("click", () => {
@@ -835,7 +844,7 @@ document.addEventListener('click', e => {
         const chip = document.createElement("div");
         chip.className = "option-chip";
         chip.dataset.label = label;
-        chip.innerHTML = `<div class="option-chip-dot"></div><div><div class="option-chip-text">${label}</div></div>`;
+        chip.innerHTML = `<div class="option-chip-dot"></div><div><div class="option-chip-text">${injuryLabel(label)}</div></div>`;
         chip.addEventListener("click", () => {
             if (label === NONE_LABEL) { setInjuryValue(NONE_LABEL); return; }
             // 'Hiçbiri' token'ını at, tıklanan etiketi aç/kapat.
@@ -865,8 +874,8 @@ document.addEventListener('click', e => {
             const res  = await fetch("/last-session");
             const data = await res.json();
             if (data.exists) {
-                const goalLabels  = { "kilo verme": "Kilo Ver", "kas kazanma": "Kas Kazan" };
-                const levelLabels = { "beginner": "Başlangıç", "intermediate": "Orta", "advanced": "İleri" };
+                const goalLabels  = { "kilo verme": __t('training.goal_loss'), "kas kazanma": __t('training.goal_gain') };
+                const levelLabels = { "beginner": __t('training.level_beginner'), "intermediate": __t('training.level_intermediate'), "advanced": __t('training.level_advanced') };
                 document.getElementById("info-goal").textContent  = goalLabels[data.goal]  || data.goal;
                 document.getElementById("info-level").textContent = levelLabels[data.fitness_level] || data.fitness_level;
                 document.getElementById("info-tdee").textContent  = Math.round(data.target_calories || 0) + " kcal";
@@ -894,12 +903,12 @@ document.addEventListener('click', e => {
             // Score color & label
             const score = parseFloat(data.score) || 0;
             const scoreColor = score >= 8 ? '#3D8BFF' : score >= 6 ? '#FFB020' : '#FF4D4D';
-            const scoreLabel = score >= 8 ? 'Mükemmel Program' : score >= 6 ? 'İyi Program' : 'Orta Program';
+            const scoreLabel = score >= 8 ? __t('training.score_excellent') : score >= 6 ? __t('training.score_good') : __t('training.score_fair');
 
             document.getElementById('apv-score').textContent  = score;
             document.getElementById('apv-score').style.color  = scoreColor;
             document.getElementById('apv-meta').textContent   =
-                `${data.created_at} tarihinde oluşturuldu · ${scoreLabel}`;
+                __t('training.created_on', { date: data.created_at, label: scoreLabel });
 
             // Weekly grid
             renderApvGrid(activePlan);
@@ -915,7 +924,7 @@ document.addEventListener('click', e => {
                 const exNames = (todayWorkout.egzersizler || []).map(e => e.isim).filter(Boolean);
                 focusText = (todayWorkout.odak || exNames[0] || todayWorkout.tip || 'ANTRENMAN').toUpperCase();
             }
-            bannerText.innerHTML = 'BUGÜN: <span class="today-focus' + (isRest ? ' off' : '') + '">' + focusText + '</span>';
+            bannerText.innerHTML = __t('training.today_prefix') + ' <span class="today-focus' + (isRest ? ' off' : '') + '">' + focusText + '</span>';
             banner.className = 'today-banner' + (isRest ? ' rest-day' : '');
             banner.style.display = 'flex';
 
@@ -926,15 +935,15 @@ document.addEventListener('click', e => {
             document.getElementById('apv-summary').innerHTML = `
                 <div class="summary-card">
                     <div class="summary-val">${antrenmanGun}</div>
-                    <div class="summary-label">Antrenman Günü</div>
+                    <div class="summary-label">${__t('training.workout_day')}</div>
                 </div>
                 <div class="summary-card">
                     <div class="summary-val">${toplamKalori}</div>
-                    <div class="summary-label">Haftalık Kalori</div>
+                    <div class="summary-label">${__t('training.weekly_cal')}</div>
                 </div>
                 <div class="summary-card">
                     <div class="summary-val">${toplamDakika}</div>
-                    <div class="summary-label">Toplam Dakika</div>
+                    <div class="summary-label">${__t('training.total_min')}</div>
                 </div>
             `;
 
@@ -968,20 +977,20 @@ document.addEventListener('click', e => {
                 (isToday  ? ' today'   : ' not-today');
             const exs     = gun.egzersizler || [];
             const preview = exs.slice(0, 3).map(e => `<div class="day-ex">${esc(e.isim)}</div>`).join('');
-            const more    = exs.length > 3 ? `<div class="day-more">+${exs.length - 3} daha</div>` : '';
+            const more    = exs.length > 3 ? `<div class="day-more">+${exs.length - 3} ${__t('training.more')}</div>` : '';
             const odakText = gun.odak || (exs[0] && exs[0].isim) || '';
             card.innerHTML = `
                 <div class="day-card-header">
-                    ${isToday ? '<div class="today-badge">BUGÜN</div>' : ''}
+                    ${isToday ? '<div class="today-badge">' + __t('training.today_badge') + '</div>' : ''}
                     <div class="day-name">${esc(gun.gun)}</div>
                     <div class="day-odak">${isRest ? 'Off Day' : esc(odakText)}</div>
                 </div>
                 <div class="day-card-body">
                     ${!isRest ? `
-                        <div class="day-stat"><span>Süre</span><span>${gun.sure_dk} dk</span></div>
-                        <div class="day-stat"><span>Kalori</span><span>~${gun.tahmini_kalori} kcal</span></div>
+                        <div class="day-stat"><span>${__t('training.duration')}</span><span>${gun.sure_dk} dk</span></div>
+                        <div class="day-stat"><span>${__t('training.calories')}</span><span>~${gun.tahmini_kalori} kcal</span></div>
                         <div class="day-exercises">${preview}${more}</div>
-                    ` : `<div style="font-size:13px;color:var(--text-3);margin-top:8px">Dinlenme günü</div>`}
+                    ` : `<div style="font-size:13px;color:var(--text-3);margin-top:8px">${__t('training.rest_day')}</div>`}
                 </div>
             `;
             if (!isRest) card.addEventListener('click', () => showApvDetail(gun));
@@ -991,7 +1000,7 @@ document.addEventListener('click', e => {
 
     function showApvDetail(gun) {
         document.getElementById('apv-detail-title').textContent = `${gun.gun} — ${gun.odak}`;
-        document.getElementById('apv-detail-sub').textContent   = `${gun.sure_dk} dakika · ~${gun.tahmini_kalori} kcal`;
+        document.getElementById('apv-detail-sub').textContent   = `${gun.sure_dk} ${__t('training.minutes')} · ~${gun.tahmini_kalori} kcal`;
         document.getElementById('apv-detail-exercises').innerHTML = (gun.egzersizler || []).map(e => `
             <tr>
                 <td>${esc(e.isim)}${e.not ? `<div class="ex-not">${esc(e.not)}</div>` : ''}</td>
@@ -1018,7 +1027,7 @@ document.addEventListener('click', e => {
         const btn = document.getElementById('finish-workout-btn');
         if (!btn) return;
         btn.disabled = true;
-        btn.textContent = '✓ Antrenman Tamamlandı';
+        btn.textContent = __t('training.workout_done');
         btn.classList.add('completed');
     }
 
@@ -1058,7 +1067,7 @@ document.addEventListener('click', e => {
         const submit = document.getElementById('pump-submit');
         submit.disabled = false;
         submit.classList.remove('loading');
-        submit.textContent = 'Antrenmanı Tamamla';
+        submit.textContent = __t('training.complete_workout');
         modal.classList.add('active');
         document.body.style.overflow = 'hidden';
         setTimeout(() => document.getElementById('pump-dropzone').focus(), 50);
@@ -1086,8 +1095,8 @@ document.addEventListener('click', e => {
 
     function handlePumpFile(file) {
         if (!file) return;
-        if (!file.type || !file.type.startsWith('image/')) { showPumpError('Lütfen bir görsel dosyası seç.'); return; }
-        if (file.size > 5 * 1024 * 1024) { showPumpError('Fotoğraf çok büyük (maks 5MB).'); return; }
+        if (!file.type || !file.type.startsWith('image/')) { showPumpError(__t('training.pump_pick_image')); return; }
+        if (file.size > 5 * 1024 * 1024) { showPumpError(__t('training.photo_too_big')); return; }
         const reader = new FileReader();
         reader.onload = function(ev) {
             pumpImageData = ev.target.result;
@@ -1099,12 +1108,12 @@ document.addEventListener('click', e => {
     }
 
     async function submitPumpCheck() {
-        if (!pumpImageData) { showPumpError('Önce bir Pump Check fotoğrafı yükle.'); return; }
+        if (!pumpImageData) { showPumpError(__t('training.pump_upload_first')); return; }
         clearPumpError();
         const submit = document.getElementById('pump-submit');
         submit.disabled = true;
         submit.classList.add('loading');
-        submit.innerHTML = '<span class="pump-busy"><span class="pump-spinner"></span>DOĞRULANIYOR...</span>';
+        submit.innerHTML = '<span class="pump-busy"><span class="pump-spinner"></span>' + __t('training.verifying') + '</span>';
         const payload = {
             image: pumpImageData,
             location_type: document.getElementById('pump-location').value,
@@ -1128,16 +1137,16 @@ document.addEventListener('click', e => {
                 closePumpCheck();
             } else {
                 // 422 = doğrulama eşleşmedi, 400 = eksik/biçim hatası → modalda göster, yeniden dene.
-                showPumpError(data.error || 'Doğrulama başarısız oldu. Tekrar dene.');
+                showPumpError(data.error || __t('training.verify_failed'));
                 submit.disabled = false;
                 submit.classList.remove('loading');
-                submit.textContent = 'Antrenmanı Tamamla';
+                submit.textContent = __t('training.complete_workout');
             }
         } catch (err) {
-            showPumpError('Bağlantı hatası. Tekrar dene.');
+            showPumpError(__t('training.conn_error_retry'));
             submit.disabled = false;
             submit.classList.remove('loading');
-            submit.textContent = 'Antrenmanı Tamamla';
+            submit.textContent = __t('training.complete_workout');
         }
     }
 
@@ -1153,7 +1162,7 @@ document.addEventListener('click', e => {
         const btn     = document.getElementById("submit-btn");
         const loading = document.getElementById("loading");
         btn.classList.add("loading");
-        btn.textContent = "HAZIRLANIYOR...";
+        btn.textContent = __t('training.preparing');
         loading.classList.add("active");
 
         try {
@@ -1168,10 +1177,10 @@ document.addEventListener('click', e => {
             currentScore = data.overall_score;
             renderResults(data);
         } catch (err) {
-            showToast("Hata: " + err.message, 'error');
+            showToast(__t('training.error_prefix') + err.message, 'error');
         } finally {
             btn.classList.remove("loading");
-            btn.textContent = "PROGRAMIMI OLUŞTUR";
+            btn.textContent = __t('training.create_program');
             loading.classList.remove("active");
         }
     }
@@ -1180,7 +1189,7 @@ document.addEventListener('click', e => {
         document.getElementById("results").style.display = "block";
         const saveBtn = document.getElementById("save-btn");
         saveBtn.classList.remove("saved");
-        saveBtn.textContent = "PROGRAMI KAYDET";
+        saveBtn.textContent = __t('training.save_program');
 
         // Score
         const scoreColors = { "İyi": "#3D8BFF", "Orta": "#FFB020", "Kötü": "#FF4D4D" };
@@ -1190,21 +1199,21 @@ document.addEventListener('click', e => {
         document.getElementById("score-banner").innerHTML = `
             <div class="score-val" style="color:${color}">${data.overall_score}</div>
             <div class="score-info">
-                <div class="score-label-big" style="color:${color}">${data.score_label} Program</div>
-                <div class="score-desc">Yoğunluk, kas dengesi ve fitness seviyene uygunluk ortalaması</div>
+                <div class="score-label-big" style="color:${color}">${(_EN ? ({'İyi':'Good','Orta':'Fair','Kötü':'Poor'}[data.score_label] || data.score_label) : data.score_label)} ${__t('training.program_word')}</div>
+                <div class="score-desc">${__t('training.score_desc')}</div>
                 <div class="score-bars">
                     <div class="score-bar-row">
-                        <span class="score-bar-label">Yoğunluk</span>
+                        <span class="score-bar-label">${__t('training.bar_intensity')}</span>
                         <div class="score-bar-track"><div class="score-bar-fill" style="width:${(ozet.yogunluk_skoru||7)*10}%;background:${color}"></div></div>
                         <span class="score-bar-val">${ozet.yogunluk_skoru||7}/10</span>
                     </div>
                     <div class="score-bar-row">
-                        <span class="score-bar-label">Denge</span>
+                        <span class="score-bar-label">${__t('training.bar_balance')}</span>
                         <div class="score-bar-track"><div class="score-bar-fill" style="width:${(ozet.denge_skoru||7)*10}%;background:${color}"></div></div>
                         <span class="score-bar-val">${ozet.denge_skoru||7}/10</span>
                     </div>
                     <div class="score-bar-row">
-                        <span class="score-bar-label">Uygunluk</span>
+                        <span class="score-bar-label">${__t('training.bar_fit')}</span>
                         <div class="score-bar-track"><div class="score-bar-fill" style="width:${(ozet.uygunluk_skoru||7)*10}%;background:${color}"></div></div>
                         <span class="score-bar-val">${ozet.uygunluk_skoru||7}/10</span>
                     </div>
@@ -1224,20 +1233,20 @@ document.addEventListener('click', e => {
             card.className = "day-card" + (isRest ? " rest" : "") + (isCardio ? " kardiyo" : "") + (isToday ? " today" : " not-today");
             const exercises = gun.egzersizler || [];
             const preview   = exercises.slice(0, 3).map(e => `<div class="day-ex">${esc(e.isim)}</div>`).join("");
-            const more      = exercises.length > 3 ? `<div class="day-more">+${exercises.length - 3} daha</div>` : "";
+            const more      = exercises.length > 3 ? `<div class="day-more">+${exercises.length - 3} ${__t('training.more')}</div>` : "";
             const odakText = gun.odak || (exercises[0] && exercises[0].isim) || '';
             card.innerHTML = `
                 <div class="day-card-header">
-                    ${isToday ? '<div class="today-badge">BUGÜN</div>' : ''}
+                    ${isToday ? '<div class="today-badge">' + __t('training.today_badge') + '</div>' : ''}
                     <div class="day-name">${esc(gun.gun)}</div>
                     <div class="day-odak">${isRest ? 'Off Day' : esc(odakText)}</div>
                 </div>
                 <div class="day-card-body">
                     ${!isRest ? `
-                        <div class="day-stat"><span>Süre</span><span>${gun.sure_dk} dk</span></div>
-                        <div class="day-stat"><span>Kalori</span><span>~${gun.tahmini_kalori} kcal</span></div>
+                        <div class="day-stat"><span>${__t('training.duration')}</span><span>${gun.sure_dk} dk</span></div>
+                        <div class="day-stat"><span>${__t('training.calories')}</span><span>~${gun.tahmini_kalori} kcal</span></div>
                         <div class="day-exercises">${preview}${more}</div>
-                    ` : `<div style="font-size:13px;color:var(--text-3);margin-top:8px">Dinlenme günü</div>`}
+                    ` : `<div style="font-size:13px;color:var(--text-3);margin-top:8px">${__t('training.rest_day')}</div>`}
                 </div>
             `;
             if (!isRest) card.addEventListener("click", () => showDetail(gun));
@@ -1249,15 +1258,15 @@ document.addEventListener('click', e => {
         document.getElementById("weekly-summary").innerHTML = `
             <div class="summary-card">
                 <div class="summary-val">${ozet.toplam_antrenman_gun || selections.gun_sayisi}</div>
-                <div class="summary-label">Antrenman Günü</div>
+                <div class="summary-label">${__t('training.workout_day')}</div>
             </div>
             <div class="summary-card">
                 <div class="summary-val">${toplam_kalori}</div>
-                <div class="summary-label">Haftalık Kalori</div>
+                <div class="summary-label">${__t('training.weekly_cal')}</div>
             </div>
             <div class="summary-card">
                 <div class="summary-val">${data.program.filter(g => g.tip !== "dinlenme").length * selections.sure}</div>
-                <div class="summary-label">Toplam Dakika</div>
+                <div class="summary-label">${__t('training.total_min')}</div>
             </div>
         `;
 
@@ -1266,7 +1275,7 @@ document.addEventListener('click', e => {
 
     function showDetail(gun) {
         document.getElementById("detail-title").textContent = gun.gun + " — " + gun.odak;
-        document.getElementById("detail-sub").textContent   = `${gun.sure_dk} dakika · ~${gun.tahmini_kalori} kcal`;
+        document.getElementById("detail-sub").textContent   = `${gun.sure_dk} ${__t('training.minutes')} · ~${gun.tahmini_kalori} kcal`;
         document.getElementById("detail-exercises").innerHTML = (gun.egzersizler || []).map(e => `
             <tr>
                 <td>${esc(e.isim)}${e.not ? `<div class="ex-not">${esc(e.not)}</div>` : ""}</td>
@@ -1294,13 +1303,13 @@ document.addEventListener('click', e => {
                 body: JSON.stringify({ plan: currentPlan, score: currentScore })
             });
             await res.json();
-            btn.textContent = "✓ KAYDEDİLDİ";
+            btn.textContent = __t('training.saved');
             btn.classList.add("saved");
-            showToast("Program kaydedildi!", 'success');
+            showToast(__t('training.program_saved'), 'success');
             // Reload and switch to active plan view
             await loadActivePlan();
         } catch (err) {
-            showToast("Kayıt hatası: " + err.message, 'error');
+            showToast(__t('training.save_error_prefix') + err.message, 'error');
         }
     }
 
