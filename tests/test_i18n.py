@@ -373,6 +373,33 @@ def test_route_message_turkish_for_tr_user(app, client, make_user, login):
     assert r.get_json()["error"] == "Arkadaş değilsiniz."
 
 
+def test_edit_profile_renders_en(app, client, make_user, login):
+    """edit_profile (ayarlar) sayfası EN render; dil endonimi 'Türkçe' korunur,
+    hedef data-args kanonik (backend) kalır."""
+    make_user("epen", language="en")
+    login("epen")
+    body = client.get("/edit-profile").get_data(as_text=True)
+    assert "EDIT YOUR INFO" in body and "Target Weight" in body and "SAVE" in body
+    assert "BİLGİLERİNİ DÜZENLE" not in body and "Hedef Kilo" not in body
+    assert "Türkçe" in body                         # dil adı kendi dilinde
+    assert '["kilo verme"]' in body                 # goal kanonik değer
+
+
+def test_chat_page_renders_en(app, client, make_user, login):
+    """chat sayfası EN render; öneri tipi kodları (message_type/data-type) kanonik kalır."""
+    from app.extensions import db
+    from app.models import Friendship
+    u = make_user("chatme", language="en")
+    friend = make_user("chatfriend")
+    db.session.add(Friendship(sender_id=u.id, receiver_id=friend.id, status="accepted"))
+    db.session.commit()
+    login("chatme")
+    body = client.get("/chat/chatfriend").get_data(as_text=True)
+    assert "SUGGEST TO A FRIEND" in body and "Type your message" in body
+    assert "ARKADAŞINA ÖNER" not in body and "Mesajını yaz" not in body
+    assert "suggestion_meal" in body                # kanonik öneri tipi kodu
+
+
 def test_workout_already_done_uses_structured_code(app, client, make_user, login):
     """Kuplaj düzeltmesi: 'zaten tamamlandı' artık metin değil yapısal `code` ile
     bildirilir (error metni i18n'lendi, frontend code'a bakar)."""

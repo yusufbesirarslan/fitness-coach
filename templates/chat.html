@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="tr" data-theme="dark">
+<html lang="{{ locale }}" data-theme="dark">
 <head>
     {% include "_head.html" %}
-    <title>Sohbet — {{ other_username }} — AxisAI</title>
+    <title>{{ t('chat.title_prefix') }} — {{ other_username }} — AxisAI</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <style nonce="{{ csp_nonce }}">
@@ -196,18 +196,18 @@
                 <div class="chat-handle">@{{ other_username }} <span class="rank-badge">{{ other_rank_title }}</span> <span class="level-badge">Lvl {{ other_level }}</span></div>
             </div>
             <div style="margin-left:auto;">
-                <button class="suggest-toggle" data-action="openSuggestModal" title="Öneri gönder">💡</button>
+                <button class="suggest-toggle" data-action="openSuggestModal" title="{{ t('chat.suggest_tooltip') }}">💡</button>
             </div>
         </div>
 
         <!-- ── MESSAGES ── -->
         <div class="chat-messages" id="chat-messages">
-            <div class="chat-empty" id="chat-empty">Mesaj yükleniyor...</div>
+            <div class="chat-empty" id="chat-empty">{{ t('chat.loading') }}</div>
         </div>
 
         <!-- ── INPUT ── -->
         <div class="chat-input-bar">
-            <input type="text" class="chat-input" id="msg-input" placeholder="Mesajını yaz..." maxlength="2000" autocomplete="off">
+            <input type="text" class="chat-input" id="msg-input" placeholder="{{ t('chat.input_ph') }}" maxlength="2000" autocomplete="off">
             <button class="chat-send" id="send-btn" data-action="sendMessage">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
             </button>
@@ -221,20 +221,21 @@
 <!-- SUGGESTION MODAL -->
 <div class="sug-modal-overlay" id="sug-modal">
     <div class="sug-modal">
-        <h3>ARKADAŞINA ÖNER</h3>
+        <h3>{{ t('chat.suggest_title') }}</h3>
         <div class="sug-modal-tabs">
-            <button class="sug-tab active" data-type="suggestion_meal" data-action="setSugType">🍎 Öğün Öner</button>
-            <button class="sug-tab" data-type="suggestion_workout" data-action="setSugType">💪 Antrenman Öner</button>
+            <button class="sug-tab active" data-type="suggestion_meal" data-action="setSugType">🍎 {{ t('chat.suggest_meal') }}</button>
+            <button class="sug-tab" data-type="suggestion_workout" data-action="setSugType">💪 {{ t('chat.suggest_workout') }}</button>
         </div>
-        <textarea class="sug-textarea" id="sug-text" placeholder="Önerini yaz..."></textarea>
-        <button class="sug-send-btn" data-action="sendSuggestion">GÖNDER</button>
+        <textarea class="sug-textarea" id="sug-text" placeholder="{{ t('chat.suggest_ph') }}"></textarea>
+        <button class="sug-send-btn" data-action="sendSuggestion">{{ t('common.send') }}</button>
         <div style="text-align:center;margin-top:8px;">
-            <button data-action="closeSuggestModal" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:13px;">İptal</button>
+            <button data-action="closeSuggestModal" style="background:none;border:none;color:var(--text-3);cursor:pointer;font-size:13px;">{{ t('common.cancel') }}</button>
         </div>
     </div>
 </div>
 
 <script nonce="{{ csp_nonce }}">
+var __t = (window.t) || function (k) { return k; };
 const OTHER = '{{ other_username }}';
 const msgContainer = document.getElementById('chat-messages');
 const msgInput = document.getElementById('msg-input');
@@ -267,7 +268,7 @@ function setSugType(btn) {
 
 function renderSuggestionCard(m) {
     const isMeal = m.message_type.includes('meal');
-    const typeLabel = isMeal ? '🍎 ÖĞÜN ÖNERİSİ' : '💪 ANTRENMAN ÖNERİSİ';
+    const typeLabel = isMeal ? '🍎 ' + __t('chat.meal_suggestion_label') : '💪 ' + __t('chat.workout_suggestion_label');
     const typeClass = isMeal ? 'meal' : 'workout';
     const isAccepted = m.message_type.includes('_accepted');
     const isDeclined = m.message_type.includes('_declined');
@@ -276,14 +277,14 @@ function renderSuggestionCard(m) {
     let actionsHTML = '';
     if (isPending && !m.is_mine) {
         actionsHTML = '<div class="sug-actions">' +
-            '<button class="sug-btn accept" data-action="respondSuggestion" data-args=\'['+m.id+',"accept"]\'>Kabul Et</button>' +
-            '<button class="sug-btn decline" data-action="respondSuggestion" data-args=\'['+m.id+',"decline"]\'>Reddet</button></div>';
+            '<button class="sug-btn accept" data-action="respondSuggestion" data-args=\'['+m.id+',"accept"]\'>'+__t('chat.accept')+'</button>' +
+            '<button class="sug-btn decline" data-action="respondSuggestion" data-args=\'['+m.id+',"decline"]\'>'+__t('chat.decline')+'</button></div>';
     } else if (isAccepted) {
-        actionsHTML = '<div class="sug-status accepted">✅ Kabul edildi</div>';
+        actionsHTML = '<div class="sug-status accepted">✅ '+__t('chat.accepted')+'</div>';
     } else if (isDeclined) {
-        actionsHTML = '<div class="sug-status declined">Reddedildi</div>';
+        actionsHTML = '<div class="sug-status declined">'+__t('chat.declined')+'</div>';
     } else if (isPending && m.is_mine) {
-        actionsHTML = '<div class="sug-status" style="color:var(--text-3);">Yanıt bekleniyor...</div>';
+        actionsHTML = '<div class="sug-status" style="color:var(--text-3);">'+__t('chat.awaiting')+'</div>';
     }
 
     return '<div class="msg-suggestion"><div class="sug-type '+typeClass+'">'+typeLabel+'</div>' +
@@ -292,7 +293,7 @@ function renderSuggestionCard(m) {
 
 function renderMessages(messages) {
     if (!messages.length) {
-        emptyEl.textContent = 'Henüz mesaj yok. İlk mesajı sen gönder!';
+        emptyEl.textContent = __t('chat.no_messages');
         return;
     }
     emptyEl.style.display = 'none';
@@ -357,7 +358,7 @@ async function sendMessage() {
 
 async function sendSuggestion() {
     const body = document.getElementById('sug-text').value.trim();
-    if (!body) { toast('Öneri boş olamaz', 'error'); return; }
+    if (!body) { toast(__t('chat.suggestion_empty'), 'error'); return; }
 
     const res = await fetch('/suggest/' + OTHER, {
         method: 'POST',
@@ -367,7 +368,7 @@ async function sendSuggestion() {
     const data = await res.json();
     if (!res.ok) { toast(data.error, 'error'); return; }
 
-    toast('Öneri gönderildi!', 'success');
+    toast(__t('chat.suggestion_sent'), 'success');
     document.getElementById('sug-text').value = '';
     closeSuggestModal();
     loadMessages();
@@ -388,7 +389,7 @@ async function respondSuggestion(msgId, action, btn) {
         });
         const data = await res.json();
         if (!res.ok) {
-            toast(data.error || 'Bir hata oluştu', 'error');
+            toast(data.error || __t('common.error'), 'error');
             siblingBtns.forEach(b => { b.disabled = false; });
             btn.textContent = originalText;
             return;
@@ -398,11 +399,11 @@ async function respondSuggestion(msgId, action, btn) {
         if (actionsDiv) {
             const statusDiv = document.createElement('div');
             statusDiv.className = 'sug-status ' + (action === 'accept' ? 'accepted' : 'declined');
-            statusDiv.textContent = action === 'accept' ? '✅ Kabul edildi' : 'Reddedildi';
+            statusDiv.textContent = action === 'accept' ? '✅ ' + __t('chat.accepted') : __t('chat.declined');
             actionsDiv.replaceWith(statusDiv);
         }
     } catch (e) {
-        toast('Bağlantı hatası, tekrar dene', 'error');
+        toast(__t('common.conn_error_retry'), 'error');
         siblingBtns.forEach(b => { b.disabled = false; });
         btn.textContent = originalText;
     }

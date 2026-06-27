@@ -2,7 +2,7 @@
 <html lang="{{ locale }}" data-theme="dark">
 <head>
     {% include "_head.html" %}
-    <title>Profil Düzenle — AxisAI</title>
+    <title>{{ t('editprofile.page_title') }}</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <style nonce="{{ csp_nonce }}">
@@ -187,10 +187,10 @@
     <div class="page-hdr">
         <a href="/" class="back-btn">
             <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
-            Ana Sayfa
+            {{ t('common.home') }}
         </a>
-        <h1>PROFİL<br><span>AYARLARI</span></h1>
-        <p>Bilgilerini güncelle, istatistiklerini takip et.</p>
+        <h1>{{ t('editprofile.h1_a') }}<br><span>{{ t('editprofile.h1_b') }}</span></h1>
+        <p>{{ t('editprofile.page_sub') }}</p>
     </div>
 
     <div class="profile-wrap">
@@ -217,7 +217,7 @@
             <div class="stat-badge streak">
                 <div class="stat-icon">🔥</div>
                 <div class="stat-val">{{ streak_count }}</div>
-                <div class="stat-lbl">Günlük Seri</div>
+                <div class="stat-lbl">{{ t('editprofile.streak') }}</div>
             </div>
             <div class="stat-badge rank">
                 <div class="stat-icon">⭐</div>
@@ -228,34 +228,34 @@
 
         <!-- ── EDITABLE FORM ── -->
         <div class="form-section">
-            <div class="form-section-title">BİLGİLERİNİ DÜZENLE</div>
+            <div class="form-section-title">{{ t('editprofile.edit_info') }}</div>
             <div class="form-grid">
                 <div class="form-field">
-                    <label for="full_name">Ad Soyad</label>
-                    <input type="text" id="full_name" placeholder="Adın ve soyadın" value="{{ full_name }}" maxlength="150">
+                    <label for="full_name">{{ t('editprofile.full_name') }}</label>
+                    <input type="text" id="full_name" placeholder="{{ t('editprofile.full_name_ph') }}" value="{{ full_name }}" maxlength="150">
                 </div>
                 <div class="form-field">
-                    <label for="username">Kullanıcı Adı</label>
-                    <input type="text" id="username" placeholder="Kullanıcı adın" value="{{ username }}" maxlength="80">
-                    <div class="field-hint">En az 3 karakter, benzersiz olmalı.</div>
+                    <label for="username">{{ t('editprofile.username') }}</label>
+                    <input type="text" id="username" placeholder="{{ t('editprofile.username_ph') }}" value="{{ username }}" maxlength="80">
+                    <div class="field-hint">{{ t('editprofile.username_hint') }}</div>
                 </div>
                 <div class="form-field">
-                    <label>Fitness Hedefi</label>
+                    <label>{{ t('editprofile.fitness_goal') }}</label>
                     <div class="goal-cards">
                         <div class="goal-card{% if goal == 'kilo verme' %} selected{% endif %}" data-action="selectGoal" data-args='["kilo verme"]'>
                             <div class="goal-card-icon">🏃</div>
-                            <div class="goal-card-label">Kilo Verme</div>
+                            <div class="goal-card-label">{{ t('editprofile.goal_loss') }}</div>
                         </div>
                         <div class="goal-card{% if goal == 'kas kazanma' %} selected{% endif %}" data-action="selectGoal" data-args='["kas kazanma"]'>
                             <div class="goal-card-icon">💪</div>
-                            <div class="goal-card-label">Kas Kazanma</div>
+                            <div class="goal-card-label">{{ t('editprofile.goal_gain') }}</div>
                         </div>
                     </div>
                 </div>
                 <div class="form-field">
-                    <label for="target_weight">Hedef Kilo (kg)</label>
-                    <input type="number" id="target_weight" placeholder="Hedef kilonuz" value="{{ target_weight or '' }}" step="0.1" min="30" max="300">
-                    <div class="field-hint">Ulaşmak istediğiniz kilo (opsiyonel).</div>
+                    <label for="target_weight">{{ t('editprofile.target_weight') }}</label>
+                    <input type="number" id="target_weight" placeholder="{{ t('editprofile.target_weight_ph') }}" value="{{ target_weight or '' }}" step="0.1" min="30" max="300">
+                    <div class="field-hint">{{ t('editprofile.target_weight_hint') }}</div>
                 </div>
                 <div class="form-field">
                     <label>{{ t('settings.language') }}</label>
@@ -273,12 +273,12 @@
                 </div>
             </div>
 
-            <button class="save-btn" id="save-btn" data-action="saveProfile">KAYDET</button>
+            <button class="save-btn" id="save-btn" data-action="saveProfile">{{ t('common.save') }}</button>
         </div>
 
         <!-- ── SUPPLEMENT STACK ── -->
         <div class="stack-section">
-            <div class="stack-section-title">GÜNCEL SUPPLEMENT STACK</div>
+            <div class="stack-section-title">{{ t('editprofile.stack_title') }}</div>
             {% if supplements %}
             <div class="stack-grid">
                 {% for s in supplements %}
@@ -292,16 +292,16 @@
                         <div class="stack-brand">{{ s.brand }} · {{ s.category }}</div>
                         <div class="stack-ratings">
                             {% if s.rating_effect %}
-                            <span class="stack-rating-item">Etki: <span class="mini-stars">{{ '★' * s.rating_effect }}{{ '☆' * (5 - s.rating_effect) }}</span></span>
+                            <span class="stack-rating-item">{{ t('manage_stack.effect') }}: <span class="mini-stars">{{ '★' * s.rating_effect }}{{ '☆' * (5 - s.rating_effect) }}</span></span>
                             {% endif %}
                             {% if s.rating_taste %}
-                            <span class="stack-rating-item">Lezzet: <span class="mini-stars">{{ '★' * s.rating_taste }}{{ '☆' * (5 - s.rating_taste) }}</span></span>
+                            <span class="stack-rating-item">{{ t('manage_stack.taste') }}: <span class="mini-stars">{{ '★' * s.rating_taste }}{{ '☆' * (5 - s.rating_taste) }}</span></span>
                             {% endif %}
                             {% if s.rating_digestion %}
-                            <span class="stack-rating-item">Sindirim: <span class="mini-stars">{{ '★' * s.rating_digestion }}{{ '☆' * (5 - s.rating_digestion) }}</span></span>
+                            <span class="stack-rating-item">{{ t('manage_stack.digestion') }}: <span class="mini-stars">{{ '★' * s.rating_digestion }}{{ '☆' * (5 - s.rating_digestion) }}</span></span>
                             {% endif %}
                             {% if s.rating_price %}
-                            <span class="stack-rating-item">Fiyat: <span class="mini-stars">{{ '★' * s.rating_price }}{{ '☆' * (5 - s.rating_price) }}</span></span>
+                            <span class="stack-rating-item">{{ t('manage_stack.price') }}: <span class="mini-stars">{{ '★' * s.rating_price }}{{ '☆' * (5 - s.rating_price) }}</span></span>
                             {% endif %}
                         </div>
                         {% if s.review_text %}
@@ -311,11 +311,11 @@
                 </div>
                 {% endfor %}
             </div>
-            <a href="/supplements" class="stack-link">Stack'ini Düzenle →</a>
+            <a href="/supplements" class="stack-link">{{ t('editprofile.edit_stack') }}</a>
             {% else %}
             <div class="stack-empty">
-                Henüz supplement eklemedin.<br>
-                <a href="/supplements" class="stack-link">+ İlk Supplement'ini Ekle</a>
+                {{ t('editprofile.no_supps') }}<br>
+                <a href="/supplements" class="stack-link">{{ t('editprofile.add_first_supp') }}</a>
             </div>
             {% endif %}
         </div>
@@ -326,6 +326,7 @@
 {% include "_actionbar.html" %}
 
 <script nonce="{{ csp_nonce }}">
+var __t = (window.t) || function (k) { return k; };
 let selectedGoal = '{{ goal }}';
 
 function selectGoal(goal, el) {
@@ -359,7 +360,7 @@ let pendingAvatar = null;
 document.getElementById('avatar-file-input').addEventListener('change', function(e) {
     const file = e.target.files[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { toast('Maksimum dosya boyutu 2MB.', 'error'); return; }
+    if (file.size > 2 * 1024 * 1024) { toast(__t('editprofile.avatar_max'), 'error'); return; }
     const reader = new FileReader();
     reader.onload = function(ev) {
         const base64 = ev.target.result;
@@ -373,7 +374,7 @@ document.getElementById('avatar-file-input').addEventListener('change', function
         const letter = display.querySelector('span');
         if (letter) letter.remove();
         if (!display.querySelector('img')) display.insertBefore(img, overlay);
-        toast('Profil fotoğrafı güncellendi.', 'success');
+        toast(__t('editprofile.avatar_updated'), 'success');
     };
     reader.readAsDataURL(file);
 });
@@ -381,7 +382,7 @@ document.getElementById('avatar-file-input').addEventListener('change', function
 async function saveProfile() {
     const btn = document.getElementById('save-btn');
     btn.disabled = true;
-    btn.textContent = 'KAYDEDİLİYOR...';
+    btn.textContent = __t('common.saving');
 
     const payload = {
         full_name: document.getElementById('full_name').value.trim(),
@@ -401,16 +402,16 @@ async function saveProfile() {
         });
         const data = await res.json();
         if (!res.ok) {
-            toast(data.error || 'Bir hata oluştu.', 'error');
+            toast(data.error || __t('common.error'), 'error');
         } else {
             toast(data.message, 'success');
             setTimeout(() => location.reload(), 800);
         }
     } catch (e) {
-        toast('Bağlantı hatası.', 'error');
+        toast(__t('common.conn_error'), 'error');
     } finally {
         btn.disabled = false;
-        btn.textContent = 'KAYDET';
+        btn.textContent = __t('common.save');
     }
 }
 </script>
