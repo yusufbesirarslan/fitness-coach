@@ -240,7 +240,7 @@ def login():
 
     _login_fresh(user)
     quest_result = complete_quest_for_user(user.id, "login")
-    response = {"message": f"Hoş geldin {user.username}!"}
+    response = {"message": t("auth.welcome", username=user.username)}
     if quest_result:
         response["quest_awarded"] = quest_result
     return jsonify(response)
@@ -347,13 +347,13 @@ def logout():
     sec_site = request.headers.get("Sec-Fetch-Site")
     if sec_site:
         if sec_site not in ("same-origin", "same-site", "none"):
-            abort(403, description="CSRF doğrulaması başarısız.")
+            abort(403, description=t("route.csrf_failed"))
     else:
         referer = request.headers.get("Referer")
         if referer:
             from urllib.parse import urlparse
             if urlparse(referer).hostname != request.host.split(":")[0]:
-                abort(403, description="CSRF doğrulaması başarısız.")
+                abort(403, description=t("route.csrf_failed"))
     via_cognito = session.pop("via_cognito", False)
     logout_user()
     # Cognito ile girildiyse ve Hosted UI domain'i ayarlıysa Cognito oturumunu da

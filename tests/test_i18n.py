@@ -349,3 +349,48 @@ def test_training_html_day_label_coupling():
     assert "esc(dayLabel(gun.gun))" in html               # görünen ad çevrilir
     assert "gun.gun === todayName" in html                # eşleşme kanonik TR kalır
     assert "'Pazartesi':'Monday'" in html
+
+
+# ── Route mesajları (jsonify error/message) dile göre ──
+
+def test_route_error_messages_localized(app, client, make_user, login):
+    """Blueprint jsonify hata mesajları kullanıcının diline göre döner."""
+    make_user("otherperson")                 # var olan ama arkadaş OLMAYAN kullanıcı
+    make_user("routeen", language="en")
+    login("routeen")
+    # arkadaş olmayan kullanıcıyla sohbet → "You're not friends." (EN)
+    r = client.get("/chat/otherperson/messages")
+    assert r.status_code == 403, r.status_code
+    assert r.get_json()["error"] == "You're not friends."
+
+
+def test_route_message_turkish_for_tr_user(app, client, make_user, login):
+    make_user("otherperson2")
+    make_user("routetr", language="tr")
+    login("routetr")
+    r = client.get("/chat/otherperson2/messages")
+    assert r.status_code == 403
+    assert r.get_json()["error"] == "Arkadaş değilsiniz."
+
+
+def test_workout_already_done_uses_structured_code(app, client, make_user, login):
+    """Kuplaj düzeltmesi: 'zaten tamamlandı' artık metin değil yapısal `code` ile
+    bildirilir (error metni i18n'lendi, frontend code'a bakar)."""
+    from app.extensions import db
+    from app.models import PumpCheck, TrainingPlan
+    u = make_user("dblworkout", language="en")
+    login("dblworkout")
+    # complete_workout önce aktif TrainingPlan ister; sonra bugünkü PumpCheck'i
+    # görünce "already_completed" döndürür.
+    db.session.add(TrainingPlan(user_id=u.id, plan_data="{}"))
+    db.session.add(PumpCheck(user_id=u.id, valid=True, location_type="Spor Salonu"))
+    db.session.commit()
+    r = client.post("/workout/complete", json={"image": "x"})
+    assert r.status_code == 400
+    body = r.get_json()
+    assert body["code"] == "already_completed"
+    assert body["error"] == "You've already completed today's workout!"  # EN
+    # Frontend artık ham TR substring'ine ('zaten') değil code'a bakar
+    import os
+    th = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates", "training.html")
+    assert "data.code === 'already_completed'" in open(th, encoding="utf-8").read()

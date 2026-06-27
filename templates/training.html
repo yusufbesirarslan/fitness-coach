@@ -1130,9 +1130,10 @@ document.addEventListener('click', e => {
                 body: JSON.stringify(payload)
             });
             const data = await res.json().catch(() => ({}));
-            // Sunucu "zaten tamamladın" derse (ör. başka cihazda yapıldı) bunu
-            // hata değil, tamamlanmış kabul et.
-            const already = !res.ok && (data.error || '').includes('zaten');
+            // Sunucu "zaten tamamlandı" yapısal kodunu (ör. başka cihazda yapıldı)
+            // dönerse bunu hata değil, tamamlanmış kabul et. Dile bağımlı metin
+            // yerine code alanına bak (i18n: error metni artık çevriliyor).
+            const already = !res.ok && data.code === 'already_completed';
             if (res.ok || already) {
                 if (res.ok) showToast(data.message, 'success');
                 markWorkoutCompleted();

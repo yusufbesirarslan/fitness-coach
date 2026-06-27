@@ -6,6 +6,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.config import SEARCH_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
+from app.i18n import t
 from app.models import Friendship, MealLog, Message, User
 from app.services.ai_nutrition import _estimate_macros_llm, _estimate_serving_weights_llm, _parse_suggestion_items, _turkish_ablative_suffix
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
@@ -102,9 +103,9 @@ def friends_search():
 def friend_request(username):
     target = User.query.filter_by(username=username).first()
     if not target:
-        return jsonify({"error": "Kullanıcı bulunamadı."}), 404
+        return jsonify({"error": t("route.user_not_found")}), 404
     if target.id == current_user.id:
-        return jsonify({"error": "Kendinize istek gönderemezsiniz."}), 400
+        return jsonify({"error": t("route.no_self_request")}), 400
 
     existing = Friendship.query.filter(
         db.or_(
@@ -114,9 +115,9 @@ def friend_request(username):
     ).first()
     if existing:
         if existing.status == "accepted":
-            return jsonify({"error": "Zaten arkadaşsınız."}), 400
+            return jsonify({"error": t("route.already_friends")}), 400
         if existing.status == "pending":
-            return jsonify({"error": "Zaten bekleyen bir istek var."}), 400
+            return jsonify({"error": t("route.request_pending")}), 400
         if existing.status == "rejected":
             # Cooldown: reddedilen istek hemen yeniden atılamaz (nuisance re-spam
             # koruması). existing.created_at, friend_reject'te reddedilme anına
@@ -125,14 +126,13 @@ def friend_request(username):
             # damgası meşru yeniden denemeyi sonsuza dek bloklamamalı.
             last_change = existing.created_at
             if last_change is not None and (datetime.utcnow() - last_change) < _REJECTED_REQUEST_COOLDOWN:
-                return jsonify({"error": "Bu kullanıcı isteğini reddetti. "
-                                         "Bir süre sonra tekrar deneyebilirsin."}), 429
+                return jsonify({"error": t("route.request_declined_cooldown")}), 429
             existing.status = "pending"
             existing.sender_id = current_user.id
             existing.receiver_id = target.id
             existing.created_at = datetime.utcnow()
             db.session.commit()
-            return jsonify({"message": f"{username} kullanıcısına istek gönderildi."})
+            return jsonify({"message": t("route.request_sent", username=username)})
 
     friendship = Friendship(sender_id=current_user.id, receiver_id=target.id)
     db.session.add(friendship)
@@ -142,8 +142,8 @@ def friend_request(username):
         # Yarış: iki eşzamanlı istek de "existing is None" gördü; uq_friendship
         # ikinciyi reddetti. 500 yerine "zaten bekleyen istek" davranışına düş.
         db.session.rollback()
-        return jsonify({"error": "Zaten bekleyen bir istek var."}), 400
-    return jsonify({"message": f"{username} kullanıcısına istek gönderildi."})
+        return jsonify({"error": t("route.request_pending")}), 400
+    return jsonify({"message": t("route.request_sent", username=username)})
 
 
 @bp.route("/friend/accept/<int:request_id>", methods=["POST"])
@@ -151,9 +151,9 @@ def friend_request(username):
 def friend_accept(request_id):
     fr = db.get_or_404(Friendship, request_id)
     if fr.receiver_id != current_user.id:
-        return jsonify({"error": "Bu isteği kabul etme yetkiniz yok."}), 403
+        return jsonify({"error": t("route.no_accept_permission")}), 403
     if fr.status != "pending":
-        return jsonify({"error": "Bu istek zaten işlenmiş."}), 400
+        return jsonify({"error": t("route.request_handled")}), 400
 
     # Atomik sahiplen: eşzamanlı iki POST /friend/accept de status=='pending' görüp
     # ödül verebilir (check-then-act yarışı → çift +50 XP + çift feed satırı). Koşullu
@@ -163,14 +163,14 @@ def friend_accept(request_id):
         .update({"status": "accepted"}, synchronize_session=False)
     if not updated:
         db.session.rollback()
-        return jsonify({"error": "Bu istek zaten işlenmiş."}), 400
+        return jsonify({"error": t("route.request_handled")}), 400
 
     award_xp(fr.sender_id, 50)
     award_xp(fr.receiver_id, 50)
     log_activity(fr.sender_id, "new_friend", f"{fr.receiver.username} ile arkadaş oldu")
     log_activity(fr.receiver_id, "new_friend", f"{fr.sender.username} ile arkadaş oldu")
     db.session.commit()
-    return jsonify({"message": f"{fr.sender.username} ile artık arkadaşsınız! +50 XP!", "points_awarded": 50})
+    return jsonify({"message": t("route.now_friends", username=fr.sender.username), "points_awarded": 50})
 
 
 @bp.route("/friend/reject/<int:request_id>", methods=["POST"])
@@ -178,15 +178,15 @@ def friend_accept(request_id):
 def friend_reject(request_id):
     fr = db.get_or_404(Friendship, request_id)
     if fr.receiver_id != current_user.id:
-        return jsonify({"error": "Bu isteği reddetme yetkiniz yok."}), 403
+        return jsonify({"error": t("route.no_decline_permission")}), 403
     if fr.status != "pending":
-        return jsonify({"error": "Bu istek zaten işlenmiş."}), 400
+        return jsonify({"error": t("route.request_handled")}), 400
     fr.status = "rejected"
     # created_at'i reddedilme anına güncelle: friend_request rejected-branch'i bu
     # damgayı yeniden-istek cooldown'u (_REJECTED_REQUEST_COOLDOWN) için kullanır.
     fr.created_at = datetime.utcnow()
     db.session.commit()
-    return jsonify({"message": "İstek reddedildi."})
+    return jsonify({"message": t("route.request_declined")})
 
 
 @bp.route("/chat/<username>")
@@ -216,7 +216,7 @@ def chat_messages(username):
     # tetiklenebilir). Okundu işareti artık POST /chat/<username>/read'de.
     other = User.query.filter_by(username=username).first_or_404()
     if not are_friends(current_user.id, other.id):
-        return jsonify({"error": "Arkadaş değilsiniz."}), 403
+        return jsonify({"error": t("route.not_friends")}), 403
 
     messages = Message.query.filter(
         db.or_(
@@ -240,7 +240,7 @@ def chat_mark_read(username):
     CSRF-korumalı POST). chat_messages GET'inden ayrıldı."""
     other = User.query.filter_by(username=username).first_or_404()
     if not are_friends(current_user.id, other.id):
-        return jsonify({"error": "Arkadaş değilsiniz."}), 403
+        return jsonify({"error": t("route.not_friends")}), 403
 
     Message.query.filter_by(sender_id=other.id, receiver_id=current_user.id, is_read=False)\
         .update({"is_read": True})
@@ -253,14 +253,14 @@ def chat_mark_read(username):
 def chat_send(username):
     other = User.query.filter_by(username=username).first_or_404()
     if not are_friends(current_user.id, other.id):
-        return jsonify({"error": "Arkadaş değilsiniz."}), 403
+        return jsonify({"error": t("route.not_friends")}), 403
 
     data = request.get_json(silent=True) or {}
     body = (data.get("body") or "").strip()
     if not body:
-        return jsonify({"error": "Mesaj boş olamaz."}), 400
+        return jsonify({"error": t("route.message_empty")}), 400
     if len(body) > 2000:
-        return jsonify({"error": "Mesaj çok uzun."}), 400
+        return jsonify({"error": t("route.message_too_long")}), 400
 
     msg_type = data.get("message_type", "text")
     if msg_type not in ("text", "suggestion_meal", "suggestion_workout"):
@@ -271,7 +271,7 @@ def chat_send(username):
     db.session.add(msg)
     db.session.commit()
     quest_result = complete_quest_for_user(current_user.id, "suggestion_sent")
-    response = {"message": "Gönderildi.", "id": msg.id,
+    response = {"message": t("route.sent"), "id": msg.id,
                 "timestamp": msg.timestamp.strftime("%H:%M"),
                 "message_type": msg_type}
     if quest_result:
@@ -284,22 +284,22 @@ def chat_send(username):
 def send_suggestion(username):
     other = User.query.filter_by(username=username).first_or_404()
     if not are_friends(current_user.id, other.id):
-        return jsonify({"error": "Arkadaş değilsiniz."}), 403
+        return jsonify({"error": t("route.not_friends")}), 403
 
     data = request.get_json(silent=True) or {}
     stype = data.get("type")
     body = (data.get("body") or "").strip()
     if stype not in ("suggestion_meal", "suggestion_workout"):
-        return jsonify({"error": "Geçersiz öneri tipi."}), 400
+        return jsonify({"error": t("route.invalid_suggestion_type")}), 400
     if not body:
-        return jsonify({"error": "Öneri boş olamaz."}), 400
+        return jsonify({"error": t("route.suggestion_empty")}), 400
 
     msg = Message(sender_id=current_user.id, receiver_id=other.id,
                   body=body, message_type=stype)
     db.session.add(msg)
     db.session.commit()
     quest_result = complete_quest_for_user(current_user.id, "suggestion_sent")
-    response = {"message": "Öneri gönderildi!", "id": msg.id}
+    response = {"message": t("route.suggestion_sent"), "id": msg.id}
     if quest_result:
         response["quest_awarded"] = quest_result
     return jsonify(response)
@@ -310,14 +310,14 @@ def send_suggestion(username):
 def respond_suggestion(msg_id):
     msg = db.get_or_404(Message, msg_id)
     if msg.receiver_id != current_user.id:
-        return jsonify({"error": "Bu öneri size ait değil."}), 403
+        return jsonify({"error": t("route.suggestion_not_yours")}), 403
     if msg.message_type not in ("suggestion_meal", "suggestion_workout"):
-        return jsonify({"error": "Bu bir öneri mesajı değil."}), 400
+        return jsonify({"error": t("route.not_suggestion")}), 400
 
     data = request.get_json(silent=True) or {}
     action = data.get("action")
     if action not in ("accept", "decline"):
-        return jsonify({"error": "Geçersiz işlem."}), 400
+        return jsonify({"error": t("route.invalid_action")}), 400
 
     # Öğün mü antrenman mı kararını ORİJİNAL tipten ver — aşağıda message_type'a
     # "_accepted"/"_declined" eklendikten sonra substring kontrolü mantığı mutasyona
@@ -338,15 +338,15 @@ def respond_suggestion(msg_id):
 
     db.session.commit()
 
-    resp = {"message": "Kabul edildi!" if action == "accept" else "Reddedildi.",
+    resp = {"message": t("route.accepted") if action == "accept" else t("route.declined"),
             "new_type": msg.message_type}
     if action == "accept" and nutrients:
         resp["nutrients"] = nutrients
-        resp["message"] = f"Kabul edildi! {int(nutrients['kalori'])} kcal eklendi"
+        resp["message"] = t("route.accepted_kcal", kcal=int(nutrients['kalori']))
     elif action == "accept" and is_meal and nutrients is None:
         # Öneri kabul edildi ama makrolar hesaplanamadı → öğün GÜNLÜĞE EKLENMEDI
         # (sıfır-makro satırı yazılmaz). Kullanıcıya sessiz başarı yerine durumu bildir.
-        resp["message"] = "Kabul edildi, ancak besin değerleri hesaplanamadı — öğün günlüğe eklenmedi."
+        resp["message"] = t("route.accepted_no_calc")
     return jsonify(resp)
 
 

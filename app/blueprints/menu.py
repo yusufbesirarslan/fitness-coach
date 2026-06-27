@@ -10,6 +10,7 @@ from flask_login import current_user, login_required
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT, SCRAPE_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter, redis_client
+from app.i18n import t
 from app.models import MealLog, UserSession
 from app.services.ai_nutrition import MAX_MENU_ITEMS, _cap_items_round_robin, _estimate_macros_llm, _estimate_serving_weights_llm, _extract_categorized_items, _primary_dish_type
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
@@ -57,7 +58,7 @@ def proxy_scan_menu():
     data = request.get_json(silent=True) or {}
     url = (data or {}).get("url", "").strip()
     if not url:
-        return jsonify({"error": "URL gerekli."}), 400
+        return jsonify({"error": t("route.url_required")}), 400
 
     base_parsed, clean_url, err = _validate_menu_url(url)
     if err:
@@ -97,13 +98,13 @@ def proxy_scan_menu():
         # _resolve_host_safely raises ValueError on a blocked redirect target.
         return jsonify({"error": str(e)}), 400
     except http_req.exceptions.Timeout:
-        return jsonify({"error": "Zaman aşımı — site yanıt vermedi."}), 504
+        return jsonify({"error": t("route.menu.timeout")}), 504
     except http_req.exceptions.RequestException as e:
-        return jsonify({"error": f"Bağlantı hatası: {type(e).__name__}"}), 502
+        return jsonify({"error": t("route.menu.conn_error", err=type(e).__name__)}), 502
 
     content_type = resp.headers.get("Content-Type", "")
     if "html" not in content_type and "text" not in content_type:
-        return jsonify({"error": "Desteklenmeyen içerik tipi."}), 415
+        return jsonify({"error": t("route.menu.unsupported_type")}), 415
 
     raw_html = resp.text
     current_app.logger.info(f"[SCRAPER] Page 1 (main) — {url} — HTTP {resp.status_code} — {len(raw_html)} bytes")
@@ -164,7 +165,7 @@ def proxy_scan_menu():
         current_app.logger.info(f"[SCRAPER] Section extraction empty — used full-body fallback: {len(body_text)} chars")
 
     if not body_text or len(body_text.strip()) < 20:
-        return jsonify({"error": "Menü içeriği şu anda korumalı veya okunamıyor. Lütfen linki kontrol edip tekrar deneyiniz."}), 422
+        return jsonify({"error": t("route.menu.unreadable")}), 422
 
     import re as _re
     body_text = _re.sub(r'\s{3,}', '  ', body_text)
@@ -227,14 +228,14 @@ def analyze_menu():
         return jsonify({
             "success": False,
             "error": "EMPTY_MENU_TEXT",
-            "message": "Menü dökümanından anlamlı bir metin çıkarılamadı. Lütfen dosyanın taranabilir ve okunabilir bir menü içerdiğinden emin olun.",
+            "message": t("route.menu.empty_text"),
             "items": [], "categories": {},
         }), 400
 
     sess = UserSession.query.filter_by(user_id=current_user.id)\
         .order_by(UserSession.created_at.desc()).first()
     if not sess or not sess.target_calories:
-        return jsonify({"error": "Profil verileri eksik."}), 400
+        return jsonify({"error": t("route.profile_data_missing")}), 400
 
     today_str = day_key()
     meals = MealLog.query.filter_by(user_id=current_user.id, tarih=today_str).all()
@@ -278,7 +279,7 @@ def analyze_menu():
               f"has_food_keywords={_content_has_food_items(raw_text)}, "
               f"first 300 chars: {raw_text[:300]}")
         return jsonify({"success": False, "error": "OUTPUT_PARSING_FAILED",
-                        "message": "Menü metni işlenirken bir hata oluştu. Lütfen tekrar deneyin.",
+                        "message": t("route.menu.parse_failed"),
                         "items": [], "categories": {}}), 422
 
     all_items = []
@@ -289,7 +290,7 @@ def analyze_menu():
 
     if not all_items:
         return jsonify({"success": False, "error": "OUTPUT_PARSING_FAILED",
-                        "message": "Menü metni işlenirken bir hata oluştu. Lütfen tekrar deneyin.",
+                        "message": t("route.menu.parse_failed"),
                         "items": [], "categories": {}}), 422
 
     # MAX_MENU_ITEMS ai_nutrition'dan gelir: istem ("toplam en fazla N yemek"),
@@ -439,7 +440,7 @@ def analyze_menu():
         if has_macros:
             score, warnings, reason = _menu_score(macros, remaining)
         else:
-            score, warnings, reason = 0, [], "Besin değerleri hesaplanamadı"
+            score, warnings, reason = 0, [], t("route.macros_unavailable")
 
         item_obj = {
             "name": name,
