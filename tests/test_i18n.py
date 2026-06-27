@@ -127,6 +127,26 @@ def test_training_renders_localized(app, client, make_user, login):
     assert "fitx_workout_completed_" in body                       # localStorage anahtarı
 
 
+def test_secondary_pages_render_en(app, client, make_user, login):
+    make_user("secen", profile_complete=True, language="en")
+    login("secen")
+    checks = {
+        "/quests": ("Complete your daily quests", "Günlük görevlerini"),
+        "/premium": ("GO PREMIUM", "PREMIUM'A GEÇ"),
+        "/friends": ("INVITE A FRIEND", "ARKADAŞINI DAVET ET"),
+        "/leaderboard": ("All Time", "Tüm Zamanlar"),
+    }
+    for path, (en_str, tr_str) in checks.items():
+        r = client.get(path)
+        assert r.status_code == 200, (path, r.status_code)
+        body = r.get_data(as_text=True)
+        assert en_str in body, path
+        assert tr_str not in body, path
+    # leaderboard kuplaj: timeframe/scope değerleri kanonik kalır
+    lb = client.get("/leaderboard").get_data(as_text=True)
+    assert 'value="all_time"' in lb and 'data-args=\'["friends"]\'' in lb
+
+
 def test_nutrition_js_keeps_canonical_values():
     """nutrition.js kuplaj koruması: görünen metin EN olabilir ama backend'e giden
     KANONIK değerler (öğün tipi, plan besin adları, diary öğün anahtarları) Türkçe
