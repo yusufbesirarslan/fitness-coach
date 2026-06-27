@@ -147,6 +147,26 @@ def test_secondary_pages_render_en(app, client, make_user, login):
     assert 'value="all_time"' in lb and 'data-args=\'["friends"]\'' in lb
 
 
+def test_final_pages_render_en(app, client, make_user, login):
+    make_user("finen", profile_complete=True, language="en")
+    login("finen")
+    for path, en_str, tr_str in [
+        ("/progress-page", "Weekly Check-In", "Haftalık Check-In"),
+        ("/supplements", "ADD NEW SUPPLEMENT", "YENİ SUPPLEMENT EKLE"),
+    ]:
+        r = client.get(path)
+        assert r.status_code == 200, (path, r.status_code)
+        body = r.get_data(as_text=True)
+        assert en_str in body and tr_str not in body, path
+    # setup: profili TAMAMLANMAMIŞ kullanıcı görür
+    make_user("setupen", language="en")
+    login("setupen")
+    sbody = client.get("/setup").get_data(as_text=True)
+    assert "What's Your Goal?" in sbody and "Hedefin Ne?" not in sbody
+    # setup kuplaj: seçenek değerleri kanonik (backend) kalır
+    assert '["goal","kilo verme"]' in sbody and '["level","beginner"]' in sbody
+
+
 def test_nutrition_js_keeps_canonical_values():
     """nutrition.js kuplaj koruması: görünen metin EN olabilir ama backend'e giden
     KANONIK değerler (öğün tipi, plan besin adları, diary öğün anahtarları) Türkçe
