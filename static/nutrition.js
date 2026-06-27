@@ -5,6 +5,30 @@ let targetCalories = 2000;
 let selectedMealType = 'Kahvaltı';
 let quickAddOpen = false;
 
+/* ── i18n (PR5) ──
+   Görünen metin İngilizce olur; backend'e giden KANONIK değerler (öğün tipi,
+   plan hızlı-seçim besin adı, skor etiketi) Türkçe KALIR → FatSecret araması ve
+   MealLog.ogun eşleşmesi bozulmaz. Bu dosyada bazı fonksiyonlarda yerel `t`
+   değişkeni var (ör. showToast, reduce) → global çeviriyi __t aliasıyla çağır. */
+var __t = (window.t) || function (k) { return k; };
+var _EN = (window.LOCALE === 'en');
+/* Makro kısaltmaları: TR P/K/Y → EN P/C/F (yalnızca görünen etiket). */
+var MA = _EN ? { p: 'P', k: 'C', y: 'F' } : { p: 'P', k: 'K', y: 'Y' };
+/* Öğün tipi: kanonik TR değer → görünen etiket. */
+var MEAL_LABELS_EN = { 'Kahvaltı': 'Breakfast', 'Öğle': 'Lunch', 'Akşam': 'Dinner', 'Ara Öğün': 'Snack' };
+/* Plan hızlı-seçim besinleri: değer backend'e gider (TR), etiket görünür (EN). */
+var FOOD_LABELS_EN = {
+  'Tavuk Göğsü':'Chicken Breast','Yumurta':'Egg','Ton Balığı':'Tuna','Kırmızı Et':'Red Meat','Yoğurt':'Yogurt','Somon':'Salmon','Hindi':'Turkey',
+  'Mercimek':'Lentils','Nohut':'Chickpeas','Tofu':'Tofu','Kinoa':'Quinoa','Edamame':'Edamame','Fasulye':'Beans',
+  'Yulaf Ezmesi':'Oatmeal','Pirinç':'Rice','Bulgur':'Bulgur','Tatlı Patates':'Sweet Potato','Tam Buğday Ekmeği':'Whole Wheat Bread','Muz':'Banana','Elma':'Apple','Makarna':'Pasta',
+  'Zeytinyağı':'Olive Oil','Avokado':'Avocado','Badem':'Almonds','Ceviz':'Walnuts','Fındık':'Hazelnuts','Fıstık Ezmesi':'Peanut Butter'
+};
+/* Skor etiketi: backend TR döndürür → görünen etiket. */
+var SCORE_LABELS_EN = { 'İyi': 'Good', 'Orta': 'Fair', 'Kötü': 'Poor' };
+function mealLabel(v)  { return (_EN && MEAL_LABELS_EN[v])  ? MEAL_LABELS_EN[v]  : v; }
+function foodLabel(v)  { return (_EN && FOOD_LABELS_EN[v])  ? FOOD_LABELS_EN[v]  : v; }
+function scoreLabel(v) { return (_EN && SCORE_LABELS_EN[v]) ? SCORE_LABELS_EN[v] : v; }
+
 /* ── HTML ESCAPE (XSS guard — innerHTML'e giren kullanıcı/AI/FatSecret metni) ── */
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => (
@@ -18,7 +42,7 @@ function formatServingLabel(desc, metricAmt, calories, isBulk) {
   if (metricAmt > 0 && !/^\d+\s*g$/i.test(desc))
     label += ' (' + Math.round(metricAmt) + 'g)';
   label += ' — ' + Math.round(calories) + ' kcal';
-  if (isBulk) label += ' ⚠ tüm tarif';
+  if (isBulk) label += ' ⚠ ' + __t('nutrition.full_recipe');
   return label;
 }
 
@@ -136,26 +160,26 @@ function renderTodayMeals(meals) {
     el.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon"><svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/></svg></div>
-        <div class="empty-title">Bugün henüz öğün girilmedi</div>
-        <div class="empty-sub">Aşağıdaki formdan öğünlerini ekle, AI besin değerlerini hesaplasın.</div>
+        <div class="empty-title">${__t('nutrition.empty_today_title')}</div>
+        <div class="empty-sub">${__t('nutrition.empty_today_sub')}</div>
       </div>`;
     return;
   }
   el.innerHTML = meals.map(m => {
     let badge = '';
-    if (m.source === 'ai_plan') badge = '<span class="source-badge ai">AI Planı</span>';
-    else if (m.source === 'diary') badge = '<span class="source-badge diary">Manuel Günlük</span>';
+    if (m.source === 'ai_plan') badge = '<span class="source-badge ai">' + __t('nutrition.badge_ai') + '</span>';
+    else if (m.source === 'diary') badge = '<span class="source-badge diary">' + __t('nutrition.badge_diary') + '</span>';
     return `
     <div class="meal-log-card" style="margin-bottom:10px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <span class="meal-badge">${m.ogun}${badge}</span>
+        <span class="meal-badge">${mealLabel(m.ogun)}${badge}</span>
         <span style="font-family:'Bebas Neue';font-size:18px;color:var(--volt);letter-spacing:1px;">${Math.round(m.kalori)} kcal</span>
       </div>
       <div style="font-size:14px;color:var(--text);font-weight:300;line-height:1.6;margin-bottom:10px;">${esc(m.yemekler)}</div>
       <div style="display:flex;gap:16px;padding-top:10px;border-top:1px solid var(--border);">
-        <span style="font-size:12px;color:var(--text-2);">P: <strong style="color:var(--text);">${Math.round(m.protein)}g</strong></span>
-        <span style="font-size:12px;color:var(--text-2);">K: <strong style="color:var(--text);">${Math.round(m.karb)}g</strong></span>
-        <span style="font-size:12px;color:var(--text-2);">Y: <strong style="color:var(--text);">${Math.round(m.yag)}g</strong></span>
+        <span style="font-size:12px;color:var(--text-2);">${MA.p}: <strong style="color:var(--text);">${Math.round(m.protein)}g</strong></span>
+        <span style="font-size:12px;color:var(--text-2);">${MA.k}: <strong style="color:var(--text);">${Math.round(m.karb)}g</strong></span>
+        <span style="font-size:12px;color:var(--text-2);">${MA.y}: <strong style="color:var(--text);">${Math.round(m.yag)}g</strong></span>
       </div>
     </div>`;
   }).join('');
@@ -191,11 +215,11 @@ async function logMeal() {
       selectedFoods = [];
       renderSelectedFoods();
       input.value = '';
-      showToast('Öğün kaydedildi! ✓', 'success');
+      showToast(__t('nutrition.meal_saved'), 'success');
       if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
       loadTodayData();
     } catch (e) {
-      showToast('Bağlantı hatası: ' + e.message, 'error');
+      showToast(__t('nutrition.conn_error_prefix') + e.message, 'error');
     } finally {
       loading.classList.remove('active');
     }
@@ -203,7 +227,7 @@ async function logMeal() {
   }
 
   const yemekler = input.value.trim();
-  if (!yemekler) { showToast('Ne yediğini yaz veya yukarıdan besin ara.', 'error'); return; }
+  if (!yemekler) { showToast(__t('nutrition.write_or_search'), 'error'); return; }
 
   loading.classList.add('active');
   try {
@@ -215,14 +239,14 @@ async function logMeal() {
     const d = await res.json();
     if (d.error) { showToast(d.error, 'error'); return; }
     input.value = '';
-    showToast('Öğün kaydedildi! ✓', 'success');
+    showToast(__t('nutrition.meal_saved'), 'success');
     // Funnel/aktivasyon: ilk öğün kaydı.
     if (window.fxTrackOnce) fxTrackOnce('first_meal_logged');
     if (window.fxActivation) fxActivation('meal');
     if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
     loadTodayData();
   } catch (e) {
-    showToast('Bağlantı hatası: ' + e.message, 'error');
+    showToast(__t('nutrition.conn_error_prefix') + e.message, 'error');
   } finally {
     loading.classList.remove('active');
   }
@@ -231,7 +255,7 @@ async function logMeal() {
 /* ── AI REVIEW ── */
 async function getReview() {
   const btn = document.getElementById('review-btn');
-  btn.textContent = 'DEĞERLENDİRİLİYOR…';
+  btn.textContent = __t('nutrition.evaluating');
   btn.disabled = true;
   try {
     const res = await fetch('/meal-log/review', {
@@ -242,9 +266,9 @@ async function getReview() {
     document.getElementById('review-text').innerHTML = esc(d.review || d.message || '').replace(/\n/g, '<br>');
     document.getElementById('review-card').classList.add('visible');
   } catch (e) {
-    showToast('Değerlendirme alınamadı.', 'error');
+    showToast(__t('nutrition.eval_failed'), 'error');
   } finally {
-    btn.textContent = 'GÜN SONU AI DEĞERLENDİRMESİ';
+    btn.textContent = __t('nutrition.eod_review');
     btn.disabled = false;
   }
 }
@@ -261,7 +285,7 @@ async function loadMealHistory() {
     // History list
     const list = document.getElementById('history-list');
     if (!data.length) {
-      list.innerHTML = `<div class="empty-state"><div class="empty-icon"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="empty-title">Henüz kayıt yok</div></div>`;
+      list.innerHTML = `<div class="empty-state"><div class="empty-icon"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="empty-title">${__t('nutrition.no_records')}</div></div>`;
       return;
     }
     list.innerHTML = data.map(day => `
@@ -269,15 +293,15 @@ async function loadMealHistory() {
         <div class="history-day-hdr">
           <div class="history-date">${day.tarih}</div>
           <div class="history-totals">
-            <span class="history-total">Kalori: <span>${Math.round(day.totals.kalori)}</span></span>
-            <span class="history-total">P: <span>${Math.round(day.totals.protein)}g</span></span>
-            <span class="history-total">K: <span>${Math.round(day.totals.karb)}g</span></span>
-            <span class="history-total">Y: <span>${Math.round(day.totals.yag)}g</span></span>
+            <span class="history-total">${__t('nutrition.calories_label')} <span>${Math.round(day.totals.kalori)}</span></span>
+            <span class="history-total">${MA.p}: <span>${Math.round(day.totals.protein)}g</span></span>
+            <span class="history-total">${MA.k}: <span>${Math.round(day.totals.karb)}g</span></span>
+            <span class="history-total">${MA.y}: <span>${Math.round(day.totals.yag)}g</span></span>
           </div>
         </div>
         ${day.meals.map(m => `
           <div class="history-meal">
-            <div class="history-meal-type">${m.ogun} · ${Math.round(m.kalori)} kcal</div>
+            <div class="history-meal-type">${mealLabel(m.ogun)} · ${Math.round(m.kalori)} kcal</div>
             <div class="history-meal-foods">${esc(m.yemekler)}</div>
           </div>`).join('')}
       </div>`).join('');
@@ -288,7 +312,7 @@ async function loadMealHistory() {
 
 function renderWeeklyChart(days) {
   const chart = document.getElementById('weekly-chart');
-  if (!days.length) { chart.innerHTML = '<div style="flex:1;text-align:center;color:var(--text-3);font-size:13px;align-self:center;">Veri yok</div>'; return; }
+  if (!days.length) { chart.innerHTML = '<div style="flex:1;text-align:center;color:var(--text-3);font-size:13px;align-self:center;">' + __t('nutrition.no_data') + '</div>'; return; }
   const maxKal = Math.max(...days.map(d => d.totals.kalori || 0), 1);
   chart.innerHTML = days.map(d => {
     const pct = Math.round((d.totals.kalori || 0) / maxKal * 100);
@@ -315,7 +339,7 @@ const customFoods = [];
 function createFoodChip(name, category) {
   const el = document.createElement('div');
   el.className = 'chip';
-  el.innerHTML = `<span class="chip-dot"></span>${name}`;
+  el.innerHTML = `<span class="chip-dot"></span>${esc(foodLabel(name))}`;
   el.addEventListener('click', () => {
     const isSelected = el.classList.toggle('selected');
     if (isSelected) selected[category].add(name);
@@ -355,14 +379,14 @@ function removeCustomFood(el) {
 
 /* ── GENERATE PLAN ── */
 async function generatePlan() {
-  if (!selected.proteins.size) { showToast('En az bir protein kaynağı seç.', 'error'); return; }
-  if (!selected.carbs.size)    { showToast('En az bir karbonhidrat kaynağı seç.', 'error'); return; }
-  if (!selected.fats.size)     { showToast('En az bir yağ kaynağı seç.', 'error'); return; }
+  if (!selected.proteins.size) { showToast(__t('nutrition.need_protein'), 'error'); return; }
+  if (!selected.carbs.size)    { showToast(__t('nutrition.need_carb'), 'error'); return; }
+  if (!selected.fats.size)     { showToast(__t('nutrition.need_fat'), 'error'); return; }
 
   const btn = document.getElementById('plan-btn');
   const loading = document.getElementById('loading');
   btn.classList.add('loading');
-  btn.textContent = 'HAZIRLANIYOR...';
+  btn.textContent = __t('nutrition.preparing');
   loading.classList.add('active');
 
   try {
@@ -380,10 +404,10 @@ async function generatePlan() {
     if (data.error) { showToast(data.error, 'error'); return; }
     renderPlans(data);
   } catch (e) {
-    showToast('Plan oluşturulamadı: ' + e.message, 'error');
+    showToast(__t('nutrition.plan_failed_prefix') + e.message, 'error');
   } finally {
     btn.classList.remove('loading');
-    btn.textContent = 'PLAN OLUŞTUR';
+    btn.textContent = __t('nutrition.plan_create');
     loading.classList.remove('active');
   }
 }
@@ -398,8 +422,8 @@ function renderPlans(data) {
     <div class="score-banner" style="margin-bottom:24px;">
       <div class="score-big" style="color:${color};">${data.overall_score}</div>
       <div>
-        <div class="score-label" style="color:${color};">${data.score_label} Plan</div>
-        <div class="score-desc">Mikro değer, biyoyararlanım ve gluten skoru ortalaması</div>
+        <div class="score-label" style="color:${color};">${scoreLabel(data.score_label)} ${__t('nutrition.plan_word')}</div>
+        <div class="score-desc">${__t('nutrition.score_desc')}</div>
       </div>
     </div>`;
 
@@ -408,10 +432,10 @@ function renderPlans(data) {
   grid.innerHTML = '';
   data.planlar.forEach((plan, i) => {
     const meals = [
-      { key:'kahvalti',  label:'Kahvaltı' },
-      { key:'ogle',      label:'Öğle'     },
-      { key:'aksam',     label:'Akşam'    },
-      { key:'ara_ogun',  label:'Ara Öğün' }
+      { key:'kahvalti',  label: __t('nutrition.meal_breakfast') },
+      { key:'ogle',      label: __t('nutrition.meal_lunch')     },
+      { key:'aksam',     label: __t('nutrition.meal_dinner')    },
+      { key:'ara_ogun',  label: __t('nutrition.meal_snack')     }
     ];
     const mealsHtml = meals.map(m => {
       const ml = plan[m.key];
@@ -434,13 +458,13 @@ function renderPlans(data) {
       <div class="plan-card-body">
         ${mealsHtml}
         <div class="plan-macro-grid">
-          <div class="plan-macro-item"><div class="plan-macro-val">${plan.toplam_protein ?? '—'}g</div><div class="plan-macro-lbl">Protein</div></div>
-          <div class="plan-macro-item"><div class="plan-macro-val">${plan.toplam_karb ?? '—'}g</div><div class="plan-macro-lbl">Karb</div></div>
-          <div class="plan-macro-item"><div class="plan-macro-val">${plan.toplam_yag ?? '—'}g</div><div class="plan-macro-lbl">Yağ</div></div>
+          <div class="plan-macro-item"><div class="plan-macro-val">${plan.toplam_protein ?? '—'}g</div><div class="plan-macro-lbl">${__t('nutrition.macro_protein')}</div></div>
+          <div class="plan-macro-item"><div class="plan-macro-val">${plan.toplam_karb ?? '—'}g</div><div class="plan-macro-lbl">${__t('nutrition.carb_short')}</div></div>
+          <div class="plan-macro-item"><div class="plan-macro-val">${plan.toplam_yag ?? '—'}g</div><div class="plan-macro-lbl">${__t('nutrition.macro_fat')}</div></div>
         </div>
         <button class="btn-select-plan" id="sel-btn-${i}"
           data-action="selectPlan" data-args="${JSON.stringify([i, plan, data.overall_score]).replace(/"/g,'&quot;')}">
-          BU PLANI SEÇ
+          ${__t('nutrition.select_plan')}
         </button>
       </div>`;
     grid.appendChild(card);
@@ -458,14 +482,14 @@ async function selectPlan(i, plan, score) {
     });
     invalidateActivePlan();
     document.querySelectorAll('.plan-card').forEach(c => c.classList.remove('chosen'));
-    document.querySelectorAll('.btn-select-plan').forEach(b => { b.textContent = 'BU PLANI SEÇ'; b.classList.remove('chosen'); });
+    document.querySelectorAll('.btn-select-plan').forEach(b => { b.textContent = __t('nutrition.select_plan'); b.classList.remove('chosen'); });
     document.getElementById(`plan-card-${i}`).classList.add('chosen');
     const btn = document.getElementById(`sel-btn-${i}`);
-    btn.textContent = '✓ AKTİF PLAN';
+    btn.textContent = __t('nutrition.active_plan');
     btn.classList.add('chosen');
-    showToast('Plan kaydedildi!', 'success');
+    showToast(__t('nutrition.plan_saved'), 'success');
   } catch (e) {
-    showToast('Kayıt hatası: ' + e.message, 'error');
+    showToast(__t('nutrition.save_error_prefix') + e.message, 'error');
   }
 }
 
@@ -496,10 +520,10 @@ async function loadActivePlan() {
 
 function renderActivePlanDetail(plan, score, createdAt) {
   const meals = [
-    { key: 'kahvalti', label: 'Kahvaltı',  icon: '🍳' },
-    { key: 'ogle',     label: 'Öğle',      icon: '🥗' },
-    { key: 'aksam',    label: 'Akşam',     icon: '🍽️' },
-    { key: 'ara_ogun', label: 'Ara Öğün',  icon: '🥜' }
+    { key: 'kahvalti', label: __t('nutrition.meal_breakfast'), icon: '🍳' },
+    { key: 'ogle',     label: __t('nutrition.meal_lunch'),     icon: '🥗' },
+    { key: 'aksam',    label: __t('nutrition.meal_dinner'),    icon: '🍽️' },
+    { key: 'ara_ogun', label: __t('nutrition.meal_snack'),     icon: '🥜' }
   ];
 
   const mealsHtml = meals.map(m => {
@@ -520,10 +544,10 @@ function renderActivePlanDetail(plan, score, createdAt) {
   document.getElementById('active-plan-detail').innerHTML = `
     <div class="apd-header">
       <div>
-        <div class="apd-title">${esc(plan.isim || 'Aktif Plan')}</div>
-        <div class="apd-sub">${createdAt} · Skor: ${score}/10</div>
+        <div class="apd-title">${esc(plan.isim || __t('nutrition.active_plan_name'))}</div>
+        <div class="apd-sub">${createdAt} · ${__t('nutrition.score_text')} ${score}/10</div>
       </div>
-      <button class="btn-ghost" data-action="resetPlan">+ Yeni Plan Oluştur</button>
+      <button class="btn-ghost" data-action="resetPlan">${__t('nutrition.new_plan')}</button>
     </div>
 
     <div class="apd-macro-grid">
@@ -533,15 +557,15 @@ function renderActivePlanDetail(plan, score, createdAt) {
       </div>
       <div class="apd-macro-item">
         <div class="apd-macro-val">${plan.toplam_protein ?? '—'}g</div>
-        <div class="apd-macro-lbl">Protein</div>
+        <div class="apd-macro-lbl">${__t('nutrition.macro_protein')}</div>
       </div>
       <div class="apd-macro-item">
         <div class="apd-macro-val">${plan.toplam_karb ?? '—'}g</div>
-        <div class="apd-macro-lbl">Karb</div>
+        <div class="apd-macro-lbl">${__t('nutrition.carb_short')}</div>
       </div>
       <div class="apd-macro-item">
         <div class="apd-macro-val">${plan.toplam_yag ?? '—'}g</div>
-        <div class="apd-macro-lbl">Yağ</div>
+        <div class="apd-macro-lbl">${__t('nutrition.macro_fat')}</div>
       </div>
     </div>
 
@@ -562,22 +586,22 @@ async function loadQuickAddSection() {
     if (!d.exists) {
       container.innerHTML = `
         <div class="qab-no-plan" data-action="fxGoToPlanTab">
-          📋 Henüz aktif planın yok — Plan Oluştur sekmesine git →
+          ${__t('nutrition.no_active_plan')}
         </div>`;
       return;
     }
 
     const MEALS = [
-      { key: 'kahvalti', label: 'Kahvaltı',  icon: '🍳' },
-      { key: 'ogle',     label: 'Öğle',      icon: '🥗' },
-      { key: 'aksam',    label: 'Akşam',     icon: '🍽️' },
-      { key: 'ara_ogun', label: 'Ara Öğün',  icon: '🥜' }
+      { key: 'kahvalti', label: __t('nutrition.meal_breakfast'), icon: '🍳' },
+      { key: 'ogle',     label: __t('nutrition.meal_lunch'),     icon: '🥗' },
+      { key: 'aksam',    label: __t('nutrition.meal_dinner'),    icon: '🍽️' },
+      { key: 'ara_ogun', label: __t('nutrition.meal_snack'),     icon: '🥜' }
     ];
 
     container.innerHTML = MEALS.map(m => {
       const ml  = d.plan[m.key];
       if (!ml) return '';
-      const sub = `${ml.kalori ?? '—'} kcal · ${ml.protein ?? '—'}g protein · ${ml.karb ?? '—'}g karb`;
+      const sub = `${ml.kalori ?? '—'} kcal · ${ml.protein ?? '—'}g ${__t('nutrition.unit_protein')} · ${ml.karb ?? '—'}g ${__t('nutrition.unit_carb')}`;
       return `
         <button class="qab" id="qab-${m.key}"
           data-action="quickAddMeal" data-args='["${m.key}","${m.label}"]' type="button">
@@ -621,11 +645,11 @@ async function quickAddMeal(mealKey, mealLabel, btn) {
     btn.style.opacity = '1';
     btn.querySelector('.qab-plus').style.display  = 'none';
 
-    showToast(`${mealLabel} eklendi ✓`, 'success');
+    showToast(`${mealLabel} ${__t('nutrition.added_suffix')}`, 'success');
     loadTodayData(); // live-refresh calorie ring + macro bars
 
   } catch (e) {
-    showToast('Eklenemedi: ' + e.message, 'error');
+    showToast(__t('nutrition.add_failed_prefix') + e.message, 'error');
     btn.disabled = false;
     btn.style.opacity = '1';
   }
@@ -663,7 +687,7 @@ function writeWaterCache(n) {
 }
 function setWaterSub(n) {
   const sub = document.getElementById('qab-water-sub');
-  if (sub) sub.textContent = `Bugün ${n} / ${WATER_GOAL_N} bardak`;
+  if (sub) sub.textContent = __t('nutrition.water_progress', { n: n, goal: WATER_GOAL_N });
 }
 
 /* Sayacı kaydet: bellek + cache + sunucu (fire-and-forget) */
@@ -708,10 +732,10 @@ function renderWater(count, animate) {
   if (btn) {
     if (count >= WATER_GOAL_N) {
       btn.disabled = true;
-      btn.innerHTML = '✓ &nbsp;Günlük hedefe ulaştın!';
+      btn.innerHTML = __t('nutrition.water_goal_btn');
     } else {
       btn.disabled = false;
-      btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Bardak Ekle';
+      btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> ' + __t('nutrition.add_cup');
     }
   }
 }
@@ -731,8 +755,8 @@ function buildWaterGlasses() {
       saveWaterCount(next);
       renderWater(next);
       if (next > cur) {
-        if (next === WATER_GOAL_N) showToast('Günlük su hedefine ulaştın!', 'success');
-        else showToast(`${next}. bardak içildi`, 'info');
+        if (next === WATER_GOAL_N) showToast(__t('nutrition.water_goal_reached'), 'success');
+        else showToast(__t('nutrition.cup_drunk', { n: next }), 'info');
       }
     });
     c.appendChild(g);
@@ -745,20 +769,20 @@ function addWater() {
   const next = waterCount + 1;
   saveWaterCount(next);
   renderWater(next);
-  if (next === WATER_GOAL_N) showToast('Günlük su hedefine ulaştın!', 'success');
-  else showToast(`${next}. bardak içildi`, 'info');
+  if (next === WATER_GOAL_N) showToast(__t('nutrition.water_goal_reached'), 'success');
+  else showToast(__t('nutrition.cup_drunk', { n: next }), 'info');
 }
 
 /* "Hızlı Ekle" su butonu ("Bugün" sekmesi) */
 async function quickAddWater(btn) {
-  if (waterCount >= WATER_GOAL_N) { showToast('Günlük su hedefine ulaştın! 🎉', 'success'); return; }
+  if (waterCount >= WATER_GOAL_N) { showToast(__t('nutrition.water_goal_reached') + ' 🎉', 'success'); return; }
   const next = waterCount + 1;
   saveWaterCount(next);
   renderWater(next);
   btn.querySelector('.qab-plus').style.display = 'none';
   btn.querySelector('.qab-check').style.display = '';
-  if (next >= WATER_GOAL_N) showToast('Günlük su hedefine ulaştın! 🎉', 'success');
-  else showToast(`${next}. bardak içildi 💧`, 'info');
+  if (next >= WATER_GOAL_N) showToast(__t('nutrition.water_goal_reached') + ' 🎉', 'success');
+  else showToast(__t('nutrition.cup_drunk', { n: next }) + ' 💧', 'info');
   setTimeout(() => {
     btn.querySelector('.qab-plus').style.display = '';
     btn.querySelector('.qab-check').style.display = 'none';
@@ -784,7 +808,7 @@ function closeWater() { document.getElementById('water-modal').classList.remove(
 function logWater() {
   const ml = document.getElementById('water-amount').value;
   closeWater();
-  showToast(`${ml} ml su kaydedildi 💧`, 'success');
+  showToast(__t('nutrition.water_logged_ml', { ml: ml }), 'success');
 }
 
 /* ── SCROLL TO FORM ── */
@@ -821,7 +845,7 @@ async function searchFood(query) {
     const res = await fetch('/api/food/search?q=' + encodeURIComponent(query), { signal: acController.signal });
     const data = await res.json();
     if (!data.results.length) {
-      dropdown.innerHTML = '<div class="autocomplete-item" style="color:var(--text-3);cursor:default;">Sonuç bulunamadı — serbest metin kullanabilirsiniz</div>';
+      dropdown.innerHTML = '<div class="autocomplete-item" style="color:var(--text-3);cursor:default;">' + __t('nutrition.no_result_freetext') + '</div>';
       dropdown.style.display = 'block';
       return;
     }
@@ -829,7 +853,7 @@ async function searchFood(query) {
       const fj = JSON.stringify(f).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
       return `<div class="autocomplete-item" data-action="fxSelectFood" data-f="${fj}">
         <div class="ac-name">${esc(f.name)}${f.brand ? ' <span class="ac-brand">(' + esc(f.brand) + ')</span>' : ''}</div>
-        <div class="ac-macros"><strong>${Math.round(f.macros.calories)}</strong> kcal · P: ${Math.round(f.macros.protein)}g · K: ${Math.round(f.macros.carbs)}g · Y: ${Math.round(f.macros.fat)}g${f.serving ? ' · ' + esc(f.serving) : ''}</div>
+        <div class="ac-macros"><strong>${Math.round(f.macros.calories)}</strong> kcal · ${MA.p}: ${Math.round(f.macros.protein)}g · ${MA.k}: ${Math.round(f.macros.carbs)}g · ${MA.y}: ${Math.round(f.macros.fat)}g${f.serving ? ' · ' + esc(f.serving) : ''}</div>
       </div>`;
     }).join('');
     dropdown.style.display = 'block';
@@ -861,14 +885,14 @@ function renderSelectedFoods() {
       <button class="sf-remove" data-action="removeSelectedFood" data-args="[${i}]">✕</button>
       <div style="flex:1;min-width:0;">
         <div style="font-size:13px;color:var(--text);">${esc(f.name)}</div>
-        <div style="font-size:11px;color:var(--text-3);">${Math.round(f.per_100g.calories)} kcal · P:${Math.round(f.per_100g.protein)}g K:${Math.round(f.per_100g.carbs)}g Y:${Math.round(f.per_100g.fat)}g</div>
+        <div style="font-size:11px;color:var(--text-3);">${Math.round(f.per_100g.calories)} kcal · ${MA.p}:${Math.round(f.per_100g.protein)}g ${MA.k}:${Math.round(f.per_100g.carbs)}g ${MA.y}:${Math.round(f.per_100g.fat)}g</div>
       </div>
     </div>`).join('');
   const t = selectedFoods.reduce((acc, f) => ({
     cal: acc.cal + (f.per_100g.calories || 0), p: acc.p + (f.per_100g.protein || 0),
     k: acc.k + (f.per_100g.carbs || 0), y: acc.y + (f.per_100g.fat || 0)
   }), {cal:0, p:0, k:0, y:0});
-  totals.innerHTML = 'Toplam: <strong style="color:var(--volt);">' + Math.round(t.cal) + '</strong> kcal · P: ' + Math.round(t.p) + 'g · K: ' + Math.round(t.k) + 'g · Y: ' + Math.round(t.y) + 'g';
+  totals.innerHTML = __t('nutrition.total_label') + ' <strong style="color:var(--volt);">' + Math.round(t.cal) + '</strong> kcal · ' + MA.p + ': ' + Math.round(t.p) + 'g · ' + MA.k + ': ' + Math.round(t.k) + 'g · ' + MA.y + ': ' + Math.round(t.y) + 'g';
 }
 
 document.addEventListener('click', e => {
@@ -956,7 +980,7 @@ function renderDiary(data) {
       return `<div class="diary-food-row" data-item-id="${item.id}">
         <div style="flex:1;min-width:0;">
           <div style="font-size:13px;color:var(--text);">${esc(item.food_name)}</div>
-          <div style="font-size:11px;color:var(--text-3);">${Math.round(item.calories)} kcal · P:${Math.round(item.protein)}g K:${Math.round(item.carbs)}g Y:${Math.round(item.fat)}g</div>
+          <div style="font-size:11px;color:var(--text-3);">${Math.round(item.calories)} kcal · ${MA.p}:${Math.round(item.protein)}g ${MA.k}:${Math.round(item.carbs)}g ${MA.y}:${Math.round(item.fat)}g</div>
         </div>
         ${unitHtml}
         ${!isLogged ? '<button class="sf-remove" data-action="deleteDiaryItem" data-args="[' + item.id + ']">✕</button>' : ''}
@@ -968,20 +992,20 @@ function renderDiary(data) {
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
           <div style="display:flex;align-items:center;gap:10px;">
             <span style="font-size:20px;">${dm.icon}</span>
-            <span style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1.5px;color:var(--text);">${dm.key}</span>
+            <span style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1.5px;color:var(--text);">${mealLabel(dm.key)}</span>
           </div>
           <span style="font-family:'Bebas Neue';font-size:16px;color:var(--volt);">${Math.round(totals.calories)} kcal</span>
         </div>
         <div class="diary-items-list">${itemsHtml}</div>
         ${!isLogged ? `
         <div style="position:relative;margin-top:10px;">
-          <input class="fc-input diary-food-search" placeholder="Besin ara..."
+          <input class="fc-input diary-food-search" placeholder="${__t('nutrition.search_short')}"
             data-action-input="fxDiaryFoodSearch" data-meal="${dm.key}" autocomplete="off">
           <div class="autocomplete-dropdown diary-ac" style="display:none;"></div>
         </div>
-        <button class="btn-volt w-full" style="margin-top:10px;" data-action="logDiaryMeal" data-args='["${dm.key}"]'>ÖĞÜNÜ KAYDET</button>
+        <button class="btn-volt w-full" style="margin-top:10px;" data-action="logDiaryMeal" data-args='["${dm.key}"]'>${__t('nutrition.log_this_meal')}</button>
         ` : `
-        <div style="text-align:center;padding:8px;color:#00C48C;font-size:12px;font-weight:600;letter-spacing:0.1em;">✓ KAYDEDİLDİ</div>
+        <div style="text-align:center;padding:8px;color:#00C48C;font-size:12px;font-weight:600;letter-spacing:0.1em;">${__t('nutrition.logged')}</div>
         `}
       </div>`;
   }).join('');
@@ -1016,7 +1040,7 @@ function diaryFoodSearch(input, mealName) {
       const res = await fetch('/api/food/search?q=' + encodeURIComponent(q), { signal: diaryAcController.signal });
       const data = await res.json();
       if (!data.results.length) {
-        dropdown.innerHTML = '<div class="autocomplete-item" style="color:var(--text-3);">Sonuç bulunamadı</div>';
+        dropdown.innerHTML = '<div class="autocomplete-item" style="color:var(--text-3);">' + __t('nutrition.no_result') + '</div>';
         dropdown.style.display = 'block';
         return;
       }
@@ -1024,7 +1048,7 @@ function diaryFoodSearch(input, mealName) {
         const fj = JSON.stringify(f).replace(/&/g,'&amp;').replace(/'/g,'&#39;').replace(/"/g,'&quot;');
         return `<div class="autocomplete-item" data-action="fxAddDiaryFood" data-meal="${mealName}" data-f="${fj}">
           <div class="ac-name">${esc(f.name)}</div>
-          <div class="ac-macros"><strong>${Math.round(f.per_100g.calories)}</strong> kcal/100g · P:${Math.round(f.per_100g.protein)}g · K:${Math.round(f.per_100g.carbs)}g · Y:${Math.round(f.per_100g.fat)}g${f.serving && f.is_per_serving ? ' · ' + esc(f.serving) : ''}</div>
+          <div class="ac-macros"><strong>${Math.round(f.per_100g.calories)}</strong> kcal/100g · ${MA.p}:${Math.round(f.per_100g.protein)}g · ${MA.k}:${Math.round(f.per_100g.carbs)}g · ${MA.y}:${Math.round(f.per_100g.fat)}g${f.serving && f.is_per_serving ? ' · ' + esc(f.serving) : ''}</div>
         </div>`;
       }).join('');
       dropdown.style.display = 'block';
@@ -1123,7 +1147,7 @@ async function confirmServingModal() {
   if (!_smFood || !_smMealName) return;
   const btn = document.getElementById('sm-confirm-btn');
   btn.disabled = true;
-  btn.textContent = 'EKLENİYOR...';
+  btn.textContent = __t('nutrition.adding');
 
   const card = document.querySelector('[data-meal-name="' + _smMealName + '"]');
   let mealId = card.dataset.mealId;
@@ -1175,9 +1199,9 @@ async function confirmServingModal() {
     if (d.error) { showToast(d.error, 'error'); return; }
     closeServingModal();
     loadDiary();
-  } catch (e) { showToast('Ekleme hatası', 'error'); }
+  } catch (e) { showToast(__t('nutrition.add_error'), 'error'); }
   btn.disabled = false;
-  btn.textContent = 'EKLE';
+  btn.textContent = __t('nutrition.add');
 }
 
 function addDiaryFood(mealName, food) {
@@ -1192,7 +1216,7 @@ async function updateDiaryGrams(itemId, grams) {
       body: JSON.stringify({ grams: parseFloat(grams) })
     });
     loadDiary();
-  } catch (e) { showToast('Güncelleme hatası', 'error'); }
+  } catch (e) { showToast(__t('nutrition.update_error'), 'error'); }
 }
 
 async function updateDiaryServing(itemId, servingId, foodId) {
@@ -1217,7 +1241,7 @@ async function updateDiaryServing(itemId, servingId, foodId) {
       })
     });
     loadDiary();
-  } catch (e) { showToast('Güncelleme hatası', 'error'); }
+  } catch (e) { showToast(__t('nutrition.update_error'), 'error'); }
 }
 
 async function updateDiaryServingQty(itemId, qty, foodId) {
@@ -1244,7 +1268,7 @@ async function updateDiaryServingQty(itemId, qty, foodId) {
       body: JSON.stringify(body)
     });
     loadDiary();
-  } catch (e) { showToast('Güncelleme hatası', 'error'); }
+  } catch (e) { showToast(__t('nutrition.update_error'), 'error'); }
 }
 
 async function updateDiaryServingQtyOnly(itemId, qty) {
@@ -1256,30 +1280,30 @@ async function updateDiaryServingQtyOnly(itemId, qty) {
       body: JSON.stringify({ serving_quantity: qty })
     });
     loadDiary();
-  } catch (e) { showToast('Güncelleme hatası', 'error'); }
+  } catch (e) { showToast(__t('nutrition.update_error'), 'error'); }
 }
 
 async function deleteDiaryItem(itemId) {
   try {
     await fetch('/api/diary/item/' + itemId, { method: 'DELETE' });
     loadDiary();
-  } catch (e) { showToast('Silme hatası', 'error'); }
+  } catch (e) { showToast(__t('nutrition.delete_error'), 'error'); }
 }
 
 async function logDiaryMeal(mealName) {
   const card = document.querySelector('[data-meal-name="' + mealName + '"]');
   const mealId = card.dataset.mealId;
-  if (!mealId) { showToast('Önce besin ekle', 'error'); return; }
+  if (!mealId) { showToast(__t('nutrition.add_food_first'), 'error'); return; }
   try {
     const res = await fetch('/api/diary/meal/' + mealId + '/log', { method: 'POST' });
     const d = await res.json();
     if (d.error) { showToast(d.error, 'error'); return; }
-    showToast(mealName + ' kaydedildi! ✓', 'success');
+    showToast(__t('nutrition.meal_saved_named', { meal: mealLabel(mealName) }), 'success');
     if (window.fxTrackOnce) fxTrackOnce('first_meal_logged');
     if (window.fxActivation) fxActivation('meal');
     if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
     loadDiary();
-  } catch (e) { showToast('Kayıt hatası', 'error'); }
+  } catch (e) { showToast(__t('nutrition.save_error'), 'error'); }
 }
 
 document.addEventListener('click', e => {
