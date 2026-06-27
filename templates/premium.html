@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="tr" data-theme="dark">
+<html lang="{{ locale }}" data-theme="dark">
 <head>
     {% include "_head.html" %}
-    <title>Premium — AxisAI</title>
+    <title>{{ t('premium.page_title') }}</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <style nonce="{{ csp_nonce }}">
@@ -62,20 +62,20 @@
     <div class="prem-wrap">
         <div class="prem-hero">
             <h1>AxisAI <span>Premium</span></h1>
-            <p>Daha hızlı sonuç için sınırsız plan ve gelişmiş analizler.</p>
+            <p>{{ t('premium.hero_sub') }}</p>
         </div>
 
         <div class="plan-grid">
             <div class="plan-card">
-                <div class="plan-name">ÜCRETSİZ</div>
-                <div class="plan-tag">Şu an kullandığın</div>
+                <div class="plan-name">{{ t('premium.free') }}</div>
+                <div class="plan-tag">{{ t('premium.current') }}</div>
                 <ul class="plan-list">
                     {% for f in freemium.free %}<li>{{ f }}</li>{% endfor %}
                 </ul>
             </div>
             <div class="plan-card pro">
                 <div class="plan-name">PREMIUM</div>
-                <div class="plan-tag">Yakında</div>
+                <div class="plan-tag">{{ t('premium.coming_soon') }}</div>
                 <ul class="plan-list">
                     {% for f in freemium.premium %}<li>{{ f }}</li>{% endfor %}
                 </ul>
@@ -83,13 +83,13 @@
         </div>
 
         {% if is_premium %}
-        <div class="prem-active">★ Premium üyeliğin aktif. Teşekkürler!</div>
+        <div class="prem-active">{{ t('premium.active') }}</div>
         {% else %}
         <button class="prem-cta" data-action="premiumIntent"
                 data-ga-event="upgrade_intent" data-ga-params='{"source":"premium_page"}'>
-            PREMIUM'A GEÇ
+            {{ t('premium.cta') }}
         </button>
-        <div class="prem-note">Henüz ödeme almıyoruz — ilgini bildir, hazır olunca ilk sen haberdar ol.</div>
+        <div class="prem-note">{{ t('premium.note') }}</div>
         {% endif %}
     </div>
 </main>
@@ -103,7 +103,7 @@ function premiumIntent() {
     const wrap = document.getElementById('toast-wrap');
     const t = document.createElement('div');
     t.className = 'toast';
-    t.textContent = 'İlgin kaydedildi — Premium hazır olunca haber vereceğiz!';
+    t.textContent = (window.t || (k => k))('premium.interest_saved');
     wrap.appendChild(t);
     setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3200);
 }
