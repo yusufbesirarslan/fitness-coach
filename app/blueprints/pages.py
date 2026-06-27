@@ -9,6 +9,7 @@ from flask import Blueprint, jsonify, redirect, render_template, request, url_fo
 from flask_login import current_user, login_required
 
 from app.extensions import db
+from app.i18n import t
 from app.models import User
 from app.services.referral import ensure_referral_code
 
@@ -17,18 +18,17 @@ bp = Blueprint("pages", __name__)
 
 
 # Freemium hattı — billing inşa edilmeden önce instrümantasyon ve UI için tek kaynak.
-FREEMIUM = {
-    "free": [
-        "Günlük takip, görevler ve seriler",
-        "Haftada 1 yapay zekâ planı",
-        "Arkadaş & liderlik tablosu",
-    ],
-    "premium": [
-        "Sınırsız yeniden planlama",
-        "Gelişmiş analizler & haftalık rapor",
-        "Özel makro hedefleri",
-    ],
+# Metinler katalogdan (locales/*.json) dile göre üretilir; aşağıdaki anahtarlar
+# kanonik sıra/yapıyı belirler.
+_FREEMIUM_KEYS = {
+    "free": ["premium.feat_free.1", "premium.feat_free.2", "premium.feat_free.3"],
+    "premium": ["premium.feat_prem.1", "premium.feat_prem.2", "premium.feat_prem.3"],
 }
+
+
+def _freemium():
+    """Aktif dile göre freemium özellik listeleri (render her istekte g.locale ile)."""
+    return {tier: [t(k) for k in keys] for tier, keys in _FREEMIUM_KEYS.items()}
 
 
 @bp.route("/welcome")
@@ -59,7 +59,7 @@ def invite(code):
 @bp.route("/premium")
 @login_required
 def premium():
-    return render_template("premium.html", freemium=FREEMIUM,
+    return render_template("premium.html", freemium=_freemium(),
         username=current_user.username,
         profile_picture=current_user.avatar_src,
         is_premium=bool(current_user.is_premium))

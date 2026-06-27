@@ -97,6 +97,8 @@ def get_level(xp):
 
 
 def get_title(level):
+    """Seviye → KANONIK (Türkçe) ünvan. Aktivite feed'ine yazılan içerik ve
+    dahili kullanım buradan; GÖRÜNEN ünvan için level_title() kullan (dile göre)."""
     if level <= 5:
         return "Fitness Yolcusu"
     elif level <= 10:
@@ -107,6 +109,27 @@ def get_title(level):
         return "AxisAI Efsanesi"
     else:
         return "Antrenman Tanrısı"
+
+
+# Seviye eşiği → katalog anahtarı. get_title ile AYNI sınırlar; ünvanı dile göre
+# göstermek için (drawer/quests/friends/toast). Kanonik değer get_title'da kalır.
+def _level_key(level):
+    if level <= 5:
+        return "level.t1"
+    elif level <= 10:
+        return "level.t2"
+    elif level <= 20:
+        return "level.t3"
+    elif level <= 50:
+        return "level.t4"
+    return "level.t5"
+
+
+def level_title(level, locale=None):
+    """Seviye → GÖRÜNEN ünvan (g.locale ya da verilen dile göre). İstek bağlamı
+    dışında çağrılırsa t() sessizce varsayılana (tr) düşer."""
+    from app.i18n import t
+    return t(_level_key(level), locale=locale)
 
 
 ACTIVITY_ICONS = {
@@ -220,8 +243,11 @@ def _claim_quest(user_id, quest_type):
     new_total = award_xp(user_id, quest.points_reward)
     log_activity(user_id, "quest_completed", f"'{quest.title}' görevini tamamladı")
     level = get_level(new_total)
+    # quest_title/title GÖRÜNEN (toast) → dile göre; feed içeriği kanonik TR kalır.
+    from app.i18n import t_or
     return {"awarded": True, "xp": quest.points_reward, "new_total": new_total,
-            "quest_title": quest.title, "level": level, "title": get_title(level)}
+            "quest_title": t_or("quest.%s.title" % quest_type, quest.title),
+            "level": level, "title": level_title(level)}
 
 
 def complete_quest_for_user(user_id, quest_type):

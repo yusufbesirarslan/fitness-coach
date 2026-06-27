@@ -4,6 +4,7 @@ from flask_login import current_user, login_required
 
 from app.config import LB_ALLTIME_KEY, LB_WEEKLY_KEY
 from app.extensions import db, redis_client
+from app.i18n import t_or
 from app.models import DailyQuest, WeeklyWinner
 from app.services.gamification import _leaderboard_via_postgres, _leaderboard_via_redis, get_today_progress
 
@@ -78,7 +79,12 @@ def quests():
     for q in all_quests:
         prog = progress_map.get(q.id)
         status = "claimed" if prog else "pending"
-        quest_data.append({"quest": q, "status": status})
+        # Başlık/açıklama GÖRÜNEN → dile göre; katalogda yoksa kanonik DB metnine düşer.
+        quest_data.append({
+            "quest": q, "status": status,
+            "title": t_or("quest.%s.title" % q.quest_type, q.title),
+            "desc": t_or("quest.%s.desc" % q.quest_type, q.description),
+        })
 
     return render_template("quests.html",
         username=current_user.username,

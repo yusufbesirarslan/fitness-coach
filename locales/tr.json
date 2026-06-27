@@ -583,5 +583,31 @@
   "coach.field_missing": "{field} alanı eksik",
   "coach.numeric_required": "Kilo, boy ve yaş sayısal olmalıdır.",
   "coach.ask_something": "Bir soru yaz.",
-  "coach.reply_failed": "Yanıt şu an alınamadı, lütfen tekrar dene."
+  "coach.reply_failed": "Yanıt şu an alınamadı, lütfen tekrar dene.",
+
+  "quest.login.title": "Günlük Giriş",
+  "quest.login.desc": "Bugün uygulamaya giriş yap",
+  "quest.workout_logged.title": "Antrenman Kaydet",
+  "quest.workout_logged.desc": "Bir antrenman planı oluştur veya kaydet",
+  "quest.suggestion_sent.title": "Bir Arkadaşına Yardım Et",
+  "quest.suggestion_sent.desc": "Bir arkadaşına mesaj gönder",
+  "quest.supplement_added.title": "Dolabını Güncelle",
+  "quest.supplement_added.desc": "Supplement dolabına yeni bir ürün ekle",
+  "quest.meal_logged.title": "Öğün Kaydet",
+  "quest.meal_logged.desc": "Bugün bir öğün kaydet",
+
+  "level.t1": "Fitness Yolcusu",
+  "level.t2": "Demir Bükücü",
+  "level.t3": "Kas Mimarı",
+  "level.t4": "AxisAI Efsanesi",
+  "level.t5": "Antrenman Tanrısı",
+
+  "premium.feat_free.1": "Günlük takip, görevler ve seriler",
+  "premium.feat_free.2": "Haftada 1 yapay zekâ planı",
+  "premium.feat_free.3": "Arkadaş & liderlik tablosu",
+  "premium.feat_prem.1": "Sınırsız yeniden planlama",
+  "premium.feat_prem.2": "Gelişmiş analizler & haftalık rapor",
+  "premium.feat_prem.3": "Özel makro hedefleri",
+
+  "training.workout_done": "Bugünkü antrenmanı tamamladın! +{xp} XP! (foto +{bonus})"
 }

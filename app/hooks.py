@@ -7,7 +7,7 @@ from flask_login import current_user
 from app.config import _BOOT_TS, CSP_IMG_S3_HOSTS
 from app.extensions import db
 from app.models import User
-from app.services.gamification import _last_rollover_check, _mark_lb_dirty, award_xp, get_level, get_title, log_activity, run_weekly_rollover
+from app.services.gamification import _last_rollover_check, _mark_lb_dirty, award_xp, get_level, level_title, log_activity, run_weekly_rollover
 from app.timeutil import app_today
 
 
@@ -238,16 +238,17 @@ def inject_rank():
     if current_user.is_authenticated:
         xp = current_user.rank_points or 0
         level = get_level(xp)
-        title = get_title(level)
+        title = level_title(level)  # GÖRÜNEN ünvan → g.locale'a göre
         xp_in_level = xp % 500
         return {**base,
             "rank_points": xp, "rank_title": title,
             "user_xp": xp, "user_level": level, "user_title": title,
             "xp_in_level": xp_in_level, "xp_for_next": 500,
         }
+    anon_title = level_title(1)
     return {**base,
-        "rank_points": 0, "rank_title": "Fitness Yolcusu",
-        "user_xp": 0, "user_level": 1, "user_title": "Fitness Yolcusu",
+        "rank_points": 0, "rank_title": anon_title,
+        "user_xp": 0, "user_level": 1, "user_title": anon_title,
         "xp_in_level": 0, "xp_for_next": 500,
     }
 

@@ -583,5 +583,31 @@
   "coach.field_missing": "The {field} field is missing",
   "coach.numeric_required": "Weight, height and age must be numeric.",
   "coach.ask_something": "Type a question.",
-  "coach.reply_failed": "Couldn't get a response right now, please try again."
+  "coach.reply_failed": "Couldn't get a response right now, please try again.",
+
+  "quest.login.title": "Daily Login",
+  "quest.login.desc": "Log in to the app today",
+  "quest.workout_logged.title": "Log a Workout",
+  "quest.workout_logged.desc": "Create or log a training plan",
+  "quest.suggestion_sent.title": "Help a Friend",
+  "quest.suggestion_sent.desc": "Send a message to a friend",
+  "quest.supplement_added.title": "Update Your Stack",
+  "quest.supplement_added.desc": "Add a new item to your supplement stack",
+  "quest.meal_logged.title": "Log a Meal",
+  "quest.meal_logged.desc": "Log a meal today",
+
+  "level.t1": "Fitness Traveler",
+  "level.t2": "Iron Bender",
+  "level.t3": "Muscle Architect",
+  "level.t4": "AxisAI Legend",
+  "level.t5": "Workout God",
+
+  "premium.feat_free.1": "Daily tracking, quests and streaks",
+  "premium.feat_free.2": "1 AI plan per week",
+  "premium.feat_free.3": "Friends & leaderboard",
+  "premium.feat_prem.1": "Unlimited re-planning",
+  "premium.feat_prem.2": "Advanced analytics & weekly report",
+  "premium.feat_prem.3": "Custom macro targets",
+
+  "training.workout_done": "You completed today's workout! +{xp} XP! (photo +{bonus})"
 }

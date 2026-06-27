@@ -10,7 +10,7 @@ from app.models import Friendship, MealLog, Message, User
 from app.services.ai_nutrition import _estimate_macros_llm, _estimate_serving_weights_llm, _parse_suggestion_items, _turkish_ablative_suffix
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
 from app.services.foodcache import _cache_macros, _get_cached_macros
-from app.services.gamification import award_xp, complete_quest_for_user, get_level, get_title, log_activity
+from app.services.gamification import award_xp, complete_quest_for_user, get_level, level_title, log_activity
 from app.timeutil import day_key
 
 
@@ -58,7 +58,7 @@ def friends_list():
         friends.append({"id": friend.id, "username": friend.username,
                         "full_name": friend.full_name or friend.username,
                         "profile_picture": friend.avatar_src,
-                        "rank_title": get_title(lvl),
+                        "rank_title": level_title(lvl),
                         "level": lvl})
 
     pending_in = Friendship.query.filter_by(receiver_id=current_user.id, status="pending").all()
@@ -203,7 +203,7 @@ def chat_page(username):
         other_username=other.username,
         other_full_name=other.full_name or other.username,
         other_profile_picture=other.avatar_src,
-        other_rank_title=get_title(other_lvl),
+        other_rank_title=level_title(other_lvl),
         other_level=other_lvl)
 
 

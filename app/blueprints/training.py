@@ -8,10 +8,11 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
+from app.i18n import t
 from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
 from app.services import injury_constraints
 from app.services.ai import _heavy_chat
-from app.services.gamification import _claim_quest, award_xp, get_level, get_title, log_activity
+from app.services.gamification import _claim_quest, award_xp, get_level, level_title, log_activity
 from app.services.menu_extract import validate_pump_check
 from app.services.premium import premium_ai_plan_gate
 from app.services.validators import validate_pump_check_image
@@ -473,12 +474,12 @@ def complete_workout():
     total_xp = base_xp + photo_bonus + (quest_result["xp"] if quest_result else 0)
     level = get_level(new_total)
     response = {
-        "message": f"Bugünkü antrenmanı tamamladın! +{total_xp} XP! (foto +{photo_bonus})",
+        "message": t("training.workout_done", xp=total_xp, bonus=photo_bonus),
         "points_awarded": total_xp,
         "pump_bonus": photo_bonus,
         "new_total": new_total,
         "level": level,
-        "title": get_title(level)
+        "title": level_title(level)
     }
     if quest_result:
         response["quest_awarded"] = quest_result
