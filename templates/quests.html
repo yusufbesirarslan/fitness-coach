@@ -220,9 +220,9 @@
         <div class="quest-emoji {% if item.quest.quest_type == 'login' %}login{% elif item.quest.quest_type == 'workout_logged' %}workout{% elif item.quest.quest_type == 'supplement_added' %}supplement{% elif item.quest.quest_type == 'meal_logged' %}meal{% else %}social{% endif %}">
           {% if item.quest.quest_type == 'login' %}&#128272;{% elif item.quest.quest_type == 'workout_logged' %}&#127947;{% elif item.quest.quest_type == 'supplement_added' %}&#128138;{% elif item.quest.quest_type == 'meal_logged' %}&#127869;{% else %}&#129309;{% endif %}
         </div>
-        <div class="quest-title">{{ item.quest.title }}</div>
+        <div class="quest-title">{{ item.title }}</div>
       </div>
-      <div class="quest-desc">{{ item.quest.description }}</div>
+      <div class="quest-desc">{{ item.desc }}</div>
       <div class="quest-footer">
         <div class="quest-reward">+{{ item.quest.points_reward }} XP</div>
         {% if item.status == 'pending' %}

@@ -188,3 +188,68 @@ def test_authenticated_locale_follows_user(app, client, make_user, login):
     body = client.get("/login").get_data(as_text=True)
     # /login GET girişliyken de render edilir; EN locale beklenir
     assert "Sign in to your account" in body
+
+
+# ── Backend-kaynaklı metinler (görev/seviye başlıkları, premium özellikleri) ──
+
+def test_level_title_localized():
+    """level_title() seviye ünvanını dile göre verir; get_title() KANONIK (tr) kalır."""
+    from app.services.gamification import get_title, level_title
+    assert level_title(1, locale="en") == "Fitness Traveler"
+    assert level_title(1, locale="tr") == "Fitness Yolcusu"
+    assert level_title(25, locale="en") == "AxisAI Legend"
+    # Kanonik değer dilden bağımsız (feed içeriği + dahili kullanım buradan)
+    assert get_title(1) == "Fitness Yolcusu"
+    assert get_title(25) == "AxisAI Efsanesi"
+
+
+def test_quest_titles_localized(app, client, make_user, login):
+    """Görev başlık/açıklaması GÖRÜNEN katmanda dile göre; DB seed'i TR kanonik kalır."""
+    from app.extensions import db
+    from app.models import DailyQuest
+    db.session.add(DailyQuest(title="Günlük Giriş", description="Bugün uygulamaya giriş yap",
+                              points_reward=10, quest_type="login"))
+    db.session.add(DailyQuest(title="Öğün Kaydet", description="Bugün bir öğün kaydet",
+                              points_reward=20, quest_type="meal_logged"))
+    db.session.commit()
+    make_user("questen", language="en")
+    login("questen")
+    body = client.get("/quests").get_data(as_text=True)
+    assert "Daily Login" in body and "Log a Meal" in body
+    assert "Günlük Giriş" not in body and "Öğün Kaydet" not in body
+
+
+def test_quest_title_falls_back_to_db_for_unknown_type(app, client, make_user, login):
+    """Katalogda anahtarı olmayan quest_type → ham anahtar DEĞİL, kanonik DB metni."""
+    from app.extensions import db
+    from app.models import DailyQuest
+    db.session.add(DailyQuest(title="Özel Görev", description="Özel açıklama",
+                              points_reward=15, quest_type="custom_xyz"))
+    db.session.commit()
+    make_user("fallbacken", language="en")
+    login("fallbacken")
+    body = client.get("/quests").get_data(as_text=True)
+    assert "Özel Görev" in body            # DB metni gösterildi
+    assert "quest.custom_xyz.title" not in body  # ham anahtar SIZMADI
+
+
+def test_drawer_level_title_localized(app, client, make_user, login):
+    """inject_rank → drawer/rank ünvanı kullanıcının diline göre (level_title)."""
+    make_user("ranken", language="en")     # rank_points=0 → seviye 1
+    login("ranken")
+    body = client.get("/quests").get_data(as_text=True)
+    assert "Fitness Traveler" in body and "Fitness Yolcusu" not in body
+
+
+def test_premium_features_localized(app, client, make_user, login):
+    """Premium/free özellik listeleri dile göre üretilir (FREEMIUM katalog anahtarları)."""
+    make_user("premen", language="en")
+    login("premen")
+    body = client.get("/premium").get_data(as_text=True)
+    assert "1 AI plan per week" in body and "Unlimited re-planning" in body
+    assert "Haftada 1 yapay zekâ planı" not in body
+    # TR kullanıcı Türkçe görür
+    make_user("premtr", language="tr")
+    login("premtr")
+    tr_body = client.get("/premium").get_data(as_text=True)
+    assert "Haftada 1 yapay zekâ planı" in tr_body

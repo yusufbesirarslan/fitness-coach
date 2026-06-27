@@ -75,6 +75,14 @@ def t(key, locale=None, **kwargs):
     return val
 
 
+def t_or(key, fallback, locale=None, **kwargs):
+    """t() gibi ama anahtar HİÇBİR sözlükte yoksa `fallback` döner (anahtarın
+    kendisi değil). Kanonik DB değerleri (ör. yeni bir quest_type'ın seed başlığı)
+    katalogda karşılığı olmadığında ham anahtar yerine DB metnini göstermek için."""
+    val = t(key, locale=locale, **kwargs)
+    return fallback if val == key else val
+
+
 def catalog(locale=None):
     """Bir dilin TAM sözlüğü (tr tabanı üzerine seçili dil) — window.I18N'e
     enjekte etmek için. Böylece JS'te de eksik anahtar Türkçeye düşer."""
