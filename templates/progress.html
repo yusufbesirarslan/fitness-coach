@@ -1,8 +1,8 @@
 ﻿<!DOCTYPE html>
-<html lang="tr">
+<html lang="{{ locale }}">
 <head>
     {% include "_head.html" %}
-    <title>İlerleme — AxisAI</title>
+    <title>{{ t('progress.page_title') }}</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -108,7 +108,7 @@
     <button class="drawer-trigger" data-action="fxToggleDrawer"><svg viewBox="0 0 24 24"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
     <span class="header-brand"><img class="brand-mark" src="/static/icon-holo.png" alt="">AxisAI</span>
     <div class="header-spacer"></div>
-    <a href="/edit-profile" class="header-avatar" title="Profil">{% if profile_picture %}<img src="{{ profile_picture }}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">{% else %}{{ username[0]|upper if username else 'U' }}{% endif %}</a>
+    <a href="/edit-profile" class="header-avatar" title="{{ t('nav.profile') }}">{% if profile_picture %}<img src="{{ profile_picture }}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">{% else %}{{ username[0]|upper if username else 'U' }}{% endif %}</a>
 </header>
 <div id="fx-drawer-backdrop" class="drawer-backdrop"></div>
 <aside id="fx-drawer" class="drawer">
@@ -120,23 +120,23 @@
         <div class="drawer-xp"><div class="drawer-xp-label"><span class="drawer-xp-level">Level {{ user_level }}</span><span class="drawer-xp-val">{{ xp_in_level }} / {{ xp_for_next }} XP</span></div><div class="drawer-xp-track"><div class="drawer-xp-fill" style="width:{{ (xp_in_level / xp_for_next * 100)|int }}%"></div></div></div>
     </div>
     <nav class="drawer-nav">
-        <div class="drawer-section-label">Keşfet</div>
-        <a href="/quests" class="drawer-link"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>Görevler</a>
-        <a href="/supplements" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>Supplement Dolabı</a>
-        <a href="/progress-page" class="drawer-link active"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>İlerleme</a>
-        <a href="/friends" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Arkadaşlarım</a>
+        <div class="drawer-section-label">{{ t('nav.section_explore') }}</div>
+        <a href="/quests" class="drawer-link"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>{{ t('nav.quests') }}</a>
+        <a href="/supplements" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>{{ t('nav.supplements') }}</a>
+        <a href="/progress-page" class="drawer-link active"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>{{ t('nav.progress') }}</a>
+        <a href="/friends" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>{{ t('nav.friends') }}</a>
         <div class="drawer-sep"></div>
-        <a href="/edit-profile" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>Profilim</a>
+        <a href="/edit-profile" class="drawer-link"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>{{ t('nav.my_profile') }}</a>
     </nav>
-    <div class="drawer-footer"><a href="/logout" class="drawer-logout"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>Çıkış Yap</a></div>
+    <div class="drawer-footer"><a href="/logout" class="drawer-logout"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>{{ t('nav.logout') }}</a></div>
 </aside>
 
 <!-- ── MAIN CONTENT ── -->
 <main class="main-content">
 
     <div class="page-hdr">
-        <h1>İLERLEME<br><span>TAKİBİ</span></h1>
-        <p>Haftalık check-in yap, grafiklerle ilerlemeni takip et. Sağ alttaki widget'tan koçuna sor.</p>
+        <h1>{{ t('progress.h1_a') }}<br><span>{{ t('progress.h1_b') }}</span></h1>
+        <p>{{ t('progress.page_sub') }}</p>
     </div>
 
     <!-- TABS -->
@@ -147,86 +147,86 @@
         </button>
         <button class="tab-btn" data-action="switchTab" data-args='["charts"]'>
             <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            Grafikler
+            {{ t('progress.tab_charts') }}
         </button>
         <button class="tab-btn" data-action="switchTab" data-args='["history"]'>
             <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            Geçmiş
+            {{ t('progress.tab_history') }}
         </button>
     </div>
 
     <!-- TAB 1: CHECK-IN -->
     <div class="tab-panel active" id="tab-checkin">
         <div class="checkin-card">
-            <div class="section-title">Haftalık Check-In</div>
-            <div class="section-sub">Bu haftanı değerlendir, koçun sana geri bildirim versin.</div>
+            <div class="section-title">{{ t('progress.checkin_title') }}</div>
+            <div class="section-sub">{{ t('progress.checkin_sub') }}</div>
 
             <div class="form-grid">
                 <div class="form-group">
-                    <label class="form-lbl">Güncel Kilo (kg)</label>
+                    <label class="form-lbl">{{ t('progress.current_weight') }}</label>
                     <input type="number" id="ci-weight" step="0.1"
-                           placeholder="{{ '%g'|format(current_weight) if current_weight else 'örn. 78.5' }}"
+                           placeholder="{{ '%g'|format(current_weight) if current_weight else t('progress.weight_ph') }}"
                            value="{{ '%g'|format(current_weight) if current_weight else '' }}">
                 </div>
                 <div class="form-group">
-                    <label class="form-lbl">Not (isteğe bağlı)</label>
-                    <input type="text" id="ci-note" placeholder="Bu hafta nasıl geçti?">
+                    <label class="form-lbl">{{ t('progress.note_label') }}</label>
+                    <input type="text" id="ci-note" placeholder="{{ t('progress.note_ph') }}">
                 </div>
 
                 <div class="slider-group form-full">
-                    <label class="form-lbl">Antrenman Yoğunluğu</label>
+                    <label class="form-lbl">{{ t('progress.intensity') }}</label>
                     <div class="slider-row">
                         <input type="range" id="ci-yogunluk" min="1" max="5" value="3" data-action-input="fxSetText" data-target="yogunluk-val">
                         <div class="slider-val" id="yogunluk-val">3</div>
                     </div>
-                    <div class="slider-labels"><span>Çok düşük</span><span>Çok yüksek</span></div>
+                    <div class="slider-labels"><span>{{ t('progress.slider_verylow') }}</span><span>{{ t('progress.slider_veryhigh') }}</span></div>
                 </div>
 
                 <div class="slider-group form-full">
-                    <label class="form-lbl">Yorgunluk / Fatigue</label>
+                    <label class="form-lbl">{{ t('progress.fatigue') }}</label>
                     <div class="slider-row">
                         <input type="range" id="ci-fatigue" min="1" max="5" value="3" data-action-input="fxSetText" data-target="fatigue-val">
                         <div class="slider-val" id="fatigue-val">3</div>
                     </div>
-                    <div class="slider-labels"><span>Hiç yorgun değil</span><span>Çok yorgun</span></div>
+                    <div class="slider-labels"><span>{{ t('progress.slider_notired') }}</span><span>{{ t('progress.slider_verytired') }}</span></div>
                 </div>
 
                 <div class="slider-group form-full">
-                    <label class="form-lbl">Uyku Kalitesi</label>
+                    <label class="form-lbl">{{ t('progress.sleep') }}</label>
                     <div class="slider-row">
                         <input type="range" id="ci-uyku" min="1" max="5" value="3" data-action-input="fxSetText" data-target="uyku-val">
                         <div class="slider-val" id="uyku-val">3</div>
                     </div>
-                    <div class="slider-labels"><span>Çok kötü</span><span>Çok iyi</span></div>
+                    <div class="slider-labels"><span>{{ t('progress.slider_verybad') }}</span><span>{{ t('progress.slider_verygood') }}</span></div>
                 </div>
 
                 <div class="slider-group form-full">
-                    <label class="form-lbl">Beslenme Uyumu</label>
+                    <label class="form-lbl">{{ t('progress.nutrition_adh') }}</label>
                     <div class="slider-row">
                         <input type="range" id="ci-beslenme" min="1" max="5" value="3" data-action-input="fxSetText" data-target="beslenme-val">
                         <div class="slider-val" id="beslenme-val">3</div>
                     </div>
-                    <div class="slider-labels"><span>Hiç uyamadım</span><span>Tam uyum</span></div>
+                    <div class="slider-labels"><span>{{ t('progress.slider_noadherence') }}</span><span>{{ t('progress.slider_fulladherence') }}</span></div>
                 </div>
 
                 <div class="form-group form-full">
                     <label class="form-lbl">Progressive Overload</label>
-                    <div class="section-sub" style="margin-bottom:10px">Bu hafta ağırlık veya tekrar artırabildin mi?</div>
+                    <div class="section-sub" style="margin-bottom:10px">{{ t('progress.overload_q') }}</div>
                     <div class="overload-grid">
-                        <div class="overload-chip selected" data-action="selectOverload" data-args='["evet"]'>Evet ✓</div>
-                        <div class="overload-chip" data-action="selectOverload" data-args='["kismen"]'>Kısmen ~</div>
-                        <div class="overload-chip" data-action="selectOverload" data-args='["hayir"]'>Hayır ✗</div>
+                        <div class="overload-chip selected" data-action="selectOverload" data-args='["evet"]'>{{ t('progress.overload_yes') }}</div>
+                        <div class="overload-chip" data-action="selectOverload" data-args='["kismen"]'>{{ t('progress.overload_partial') }}</div>
+                        <div class="overload-chip" data-action="selectOverload" data-args='["hayir"]'>{{ t('progress.overload_no') }}</div>
                     </div>
                 </div>
             </div>
 
-            <button class="btn-volt w-full" id="checkin-btn" data-action="submitCheckin">CHECK-IN GÖNDER</button>
+            <button class="btn-volt w-full" id="checkin-btn" data-action="submitCheckin">{{ t('progress.submit_checkin') }}</button>
         </div>
 
         <div class="feedback-card" id="feedback-card">
             <div class="feedback-header">
                 <div class="feedback-avatar">🏋️</div>
-                <div class="feedback-title">Koç Geri Bildirimi</div>
+                <div class="feedback-title">{{ t('progress.coach_feedback') }}</div>
             </div>
             <div class="feedback-text" id="feedback-text"></div>
         </div>
@@ -235,27 +235,27 @@
     <!-- TAB 2: GRAFİKLER -->
     <div class="tab-panel" id="tab-charts">
         <div class="chart-card">
-            <div class="chart-title">Kilo Değişimi</div>
+            <div class="chart-title">{{ t('progress.chart_weight_title') }}</div>
             <div class="chart-container"><canvas id="weightChart"></canvas></div>
-            <div class="no-data" id="weight-nodata">Henüz veri yok — ilk check-in'ini yap.</div>
+            <div class="no-data" id="weight-nodata">{{ t('progress.no_data_checkin') }}</div>
         </div>
         <div class="chart-card">
-            <div class="chart-title">Performans Metrikleri</div>
+            <div class="chart-title">{{ t('progress.chart_metrics_title') }}</div>
             <div class="chart-container"><canvas id="metricsChart"></canvas></div>
-            <div class="no-data" id="metrics-nodata">Henüz veri yok.</div>
+            <div class="no-data" id="metrics-nodata">{{ t('progress.no_data') }}</div>
         </div>
         <div class="chart-card">
-            <div class="chart-title">Uyku & Beslenme Uyumu</div>
+            <div class="chart-title">{{ t('progress.chart_wellness_title') }}</div>
             <div class="chart-container"><canvas id="wellnessChart"></canvas></div>
-            <div class="no-data" id="wellness-nodata">Henüz veri yok.</div>
+            <div class="no-data" id="wellness-nodata">{{ t('progress.no_data') }}</div>
         </div>
     </div>
 
     <!-- TAB 3: GEÇMİŞ -->
     <div class="tab-panel" id="tab-history">
-        <div class="section-title">Check-In Geçmişi</div>
-        <div class="section-sub">Tüm haftalık check-in kayıtların ve koç geri bildirimleri.</div>
-        <div id="history-list"><div class="no-data">Henüz check-in yok.</div></div>
+        <div class="section-title">{{ t('progress.checkin_history') }}</div>
+        <div class="section-sub">{{ t('progress.history_sub') }}</div>
+        <div id="history-list"><div class="no-data">{{ t('progress.no_checkin') }}</div></div>
     </div>
 
 
@@ -263,16 +263,17 @@
 
 <!-- 4+1 ACTION BAR -->
 <nav class="action-bar">
-    <a href="/" class="ab-tab"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>Ana Sayfa</span></a>
-    <a href="/training" class="ab-tab"><svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg><span>Antrenman</span></a>
-    <a href="/nutrition" class="ab-tab"><svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg><span>Beslenme</span></a>
-    <a href="/leaderboard" class="ab-tab"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span>Kulüp</span></a>
+    <a href="/" class="ab-tab"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg><span>{{ t('nav.home') }}</span></a>
+    <a href="/training" class="ab-tab"><svg viewBox="0 0 24 24"><path d="M6.5 6.5h11"/><path d="M6.5 17.5h11"/><path d="M3 8.5v7"/><path d="M21 8.5v7"/><rect x="1" y="7" width="4" height="10" rx="1"/><rect x="19" y="7" width="4" height="10" rx="1"/></svg><span>{{ t('nav.training') }}</span></a>
+    <a href="/nutrition" class="ab-tab"><svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg><span>{{ t('nav.nutrition') }}</span></a>
+    <a href="/leaderboard" class="ab-tab"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg><span>{{ t('nav.club') }}</span></a>
 </nav>
 
 <!-- ── TOAST ── -->
 <div class="toast-wrap" id="toast-wrap"></div>
 
 <script nonce="{{ csp_nonce }}">
+    var __t = (window.t) || function (k, v) { return k; };
     // ── TOAST ──
     function showToast(msg, type='info') {
         const icons = { success:'✓', error:'✗', info:'ℹ' };
@@ -316,7 +317,7 @@
 
         const btn = document.getElementById('checkin-btn');
         btn.classList.add('loading');
-        btn.textContent = 'GÖNDERİLİYOR...';
+        btn.textContent = __t('progress.sending');
 
         try {
             const res = await fetch('/checkin', {
@@ -352,7 +353,7 @@
             showToast('Hata: ' + err.message, 'error');
         } finally {
             btn.classList.remove('loading');
-            btn.textContent = 'CHECK-IN GÖNDER';
+            btn.textContent = __t('progress.submit_checkin');
         }
     }
 
@@ -386,7 +387,7 @@
         weightChart = new Chart(document.getElementById('weightChart'), {
             type: 'line',
             data: { labels, datasets: [{
-                label: 'Kilo (kg)', data: data.map(d => d.kilo),
+                label: __t('progress.chart_weight'), data: data.map(d => d.kilo),
                 borderColor: '#3D8BFF', backgroundColor: 'rgba(61,139,255,0.08)',
                 fill: true, tension: 0.35, pointRadius: 5, pointHoverRadius: 8,
                 pointBackgroundColor: '#3D8BFF', borderWidth: 2
@@ -398,8 +399,8 @@
         metricsChart = new Chart(document.getElementById('metricsChart'), {
             type: 'line',
             data: { labels, datasets: [
-                { label: 'Yoğunluk', data: data.map(d => d.yogunluk), borderColor: '#3D8BFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
-                { label: 'Yorgunluk', data: data.map(d => d.fatigue),  borderColor: '#FF4D4D', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false }
+                { label: __t('progress.chart_intensity'), data: data.map(d => d.yogunluk), borderColor: '#3D8BFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
+                { label: __t('progress.chart_fatigue'), data: data.map(d => d.fatigue),  borderColor: '#FF4D4D', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false }
             ]},
             options: { ...baseOpts, scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, min: 0, max: 5 } } }
         });
@@ -408,8 +409,8 @@
         wellnessChart = new Chart(document.getElementById('wellnessChart'), {
             type: 'line',
             data: { labels, datasets: [
-                { label: 'Uyku',     data: data.map(d => d.uyku),     borderColor: '#3D9EFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
-                { label: 'Beslenme', data: data.map(d => d.beslenme), borderColor: '#FFB020', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false }
+                { label: __t('progress.chart_sleep'),     data: data.map(d => d.uyku),     borderColor: '#3D9EFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
+                { label: __t('progress.chart_nutrition'), data: data.map(d => d.beslenme), borderColor: '#FFB020', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false }
             ]},
             options: { ...baseOpts, scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, min: 0, max: 5 } } }
         });
@@ -420,8 +421,8 @@
         const res  = await fetch('/checkin-history');
         const data = await res.json();
         const list = document.getElementById('history-list');
-        if (data.length === 0) { list.innerHTML = '<div class="no-data">Henüz check-in yok.</div>'; return; }
-        const overloadLabels = { 'evet':'Evet', 'hayir':'Hayır', 'kismen':'Kısmen' };
+        if (data.length === 0) { list.innerHTML = '<div class="no-data">' + __t('progress.no_checkin') + '</div>'; return; }
+        const overloadLabels = { 'evet': __t('progress.overload_yes_short'), 'hayir': __t('progress.overload_no_short'), 'kismen': __t('progress.overload_partial_short') };
         list.innerHTML = [...data].reverse().map(c => `
             <div class="history-card">
                 <div class="history-header-row">
@@ -429,11 +430,11 @@
                     <div class="history-weight-lbl">${c.kilo} kg</div>
                 </div>
                 <div class="history-stats">
-                    <div class="history-stat">Yoğunluk: <span>${c.yogunluk}/5</span></div>
-                    <div class="history-stat">Yorgunluk: <span>${c.fatigue}/5</span></div>
+                    <div class="history-stat">${__t('progress.hist_intensity')} <span>${c.yogunluk}/5</span></div>
+                    <div class="history-stat">${__t('progress.hist_fatigue')} <span>${c.fatigue}/5</span></div>
                     <div class="history-stat">Overload: <span>${overloadLabels[c.overload]||escapeHTML(c.overload)}</span></div>
-                    <div class="history-stat">Uyku: <span>${c.uyku}/5</span></div>
-                    <div class="history-stat">Beslenme: <span>${c.beslenme}/5</span></div>
+                    <div class="history-stat">${__t('progress.hist_sleep')} <span>${c.uyku}/5</span></div>
+                    <div class="history-stat">${__t('progress.hist_nutrition')} <span>${c.beslenme}/5</span></div>
                 </div>
                 ${c.feedback ? `<div class="history-feedback-txt">${escapeHTML(c.feedback).replace(/\n/g,'<br>')}</div>` : ''}
             </div>

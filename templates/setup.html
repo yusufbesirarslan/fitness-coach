@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="tr" data-theme="dark">
+<html lang="{{ locale }}" data-theme="dark">
 <head>
     {% include "_head.html" %}
-    <title>Profil Oluştur — AxisAI</title>
+    <title>{{ t('setup.page_title') }}</title>
     <link rel="stylesheet" href="/static/style.css">
     <style nonce="{{ csp_nonce }}">
         .setup-wrapper {
@@ -244,9 +244,8 @@
 <div class="setup-wrapper">
 
     <div class="setup-header">
-        <h1>HOŞ GELDİN<br><span>{{ username }}</span></h1>
-        <p>3 dakikada sana özel AI plan. Birkaç soru, sonra koçun beslenme ve
-           antrenmanını senin için kuruyor.</p>
+        <h1>{{ t('setup.welcome') }}<br><span>{{ username }}</span></h1>
+        <p>{{ t('setup.header_sub') }}</p>
     </div>
 
     <!-- STEP INDICATOR -->
@@ -263,31 +262,31 @@
     <!-- STEP 0: Fiziksel bilgiler -->
     <div class="step-content active" id="step-0">
         <div class="step-card">
-            <div class="step-title">Fiziksel Bilgilerin</div>
-            <div class="step-sub">Koçun sana doğru plan verebilmesi için bunlar gerekli.</div>
+            <div class="step-title">{{ t('setup.basics_title') }}</div>
+            <div class="step-sub">{{ t('setup.basics_sub') }}</div>
             <div class="form-grid">
                 <div class="form-group">
-                    <label>Kilo (kg)</label>
+                    <label>{{ t('setup.weight') }}</label>
                     <input type="number" id="s-weight" step="0.1">
                 </div>
                 <div class="form-group">
-                    <label>Boy (cm)</label>
+                    <label>{{ t('setup.height') }}</label>
                     <input type="number" id="s-height">
                 </div>
                 <div class="form-group">
-                    <label>Yaş</label>
+                    <label>{{ t('setup.age') }}</label>
                     <input type="number" id="s-age">
                 </div>
                 <div class="form-group">
-                    <label>Cinsiyet</label>
+                    <label>{{ t('setup.gender') }}</label>
                     <select id="s-gender">
-                        <option value="male">Erkek</option>
-                        <option value="female">Kadın</option>
+                        <option value="male">{{ t('setup.male') }}</option>
+                        <option value="female">{{ t('setup.female') }}</option>
                     </select>
                 </div>
             </div>
             <div class="step-buttons">
-                <button class="step-btn step-btn-next" data-action="nextStep" data-args="[0]">DEVAM ET</button>
+                <button class="step-btn step-btn-next" data-action="nextStep" data-args="[0]">{{ t('setup.continue') }}</button>
             </div>
         </div>
     </div>
@@ -295,29 +294,29 @@
     <!-- STEP 1: Hedef -->
     <div class="step-content" id="step-1">
         <div class="step-card">
-            <div class="step-title">Hedefin Ne?</div>
-            <div class="step-sub">Planın buna göre şekillenecek.</div>
+            <div class="step-title">{{ t('setup.goal_title') }}</div>
+            <div class="step-sub">{{ t('setup.goal_sub') }}</div>
             <div class="option-cards" id="goal-cards">
                 <div class="option-card" data-action="selectOption" data-args='["goal","kilo verme"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">🔥</div>
                     <div class="option-card-text">
-                        <div class="option-card-label">Kilo Verme</div>
-                        <div class="option-card-desc">Yağ yakımı ve kalori açığı odaklı</div>
+                        <div class="option-card-label">{{ t('setup.goal_loss') }}</div>
+                        <div class="option-card-desc">{{ t('setup.goal_loss_desc') }}</div>
                     </div>
                 </div>
                 <div class="option-card" data-action="selectOption" data-args='["goal","kas kazanma"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">💪</div>
                     <div class="option-card-text">
-                        <div class="option-card-label">Kas Kazanma</div>
-                        <div class="option-card-desc">Kas kütlesi artışı ve kalori fazlası</div>
+                        <div class="option-card-label">{{ t('setup.goal_gain') }}</div>
+                        <div class="option-card-desc">{{ t('setup.goal_gain_desc') }}</div>
                     </div>
                 </div>
             </div>
             <div class="step-buttons">
-                <button class="step-btn step-btn-back" data-action="prevStep" data-args="[1]">GERİ</button>
-                <button class="step-btn step-btn-next" data-action="nextStep" data-args="[1]">DEVAM ET</button>
+                <button class="step-btn step-btn-back" data-action="prevStep" data-args="[1]">{{ t('setup.back') }}</button>
+                <button class="step-btn step-btn-next" data-action="nextStep" data-args="[1]">{{ t('setup.continue') }}</button>
             </div>
         </div>
     </div>
@@ -325,37 +324,37 @@
     <!-- STEP 2: Seviye -->
     <div class="step-content" id="step-2">
         <div class="step-card">
-            <div class="step-title">Fitness Seviyen</div>
-            <div class="step-sub">Şu anki durumunu en iyi hangisi tanımlıyor?</div>
+            <div class="step-title">{{ t('setup.level_title') }}</div>
+            <div class="step-sub">{{ t('setup.level_sub') }}</div>
             <div class="option-cards" id="level-cards">
                 <div class="option-card" data-action="selectOption" data-args='["level","beginner"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">🌱</div>
                     <div class="option-card-text">
-                        <div class="option-card-label">Başlangıç</div>
-                        <div class="option-card-desc">Yeni başlıyorum veya uzun süredir ara verdim</div>
+                        <div class="option-card-label">{{ t('setup.level_beginner') }}</div>
+                        <div class="option-card-desc">{{ t('setup.level_beginner_desc') }}</div>
                     </div>
                 </div>
                 <div class="option-card" data-action="selectOption" data-args='["level","intermediate"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">⚡</div>
                     <div class="option-card-text">
-                        <div class="option-card-label">Orta Seviye</div>
-                        <div class="option-card-desc">Düzenli antrenman yapıyorum, temeller sağlam</div>
+                        <div class="option-card-label">{{ t('setup.level_inter') }}</div>
+                        <div class="option-card-desc">{{ t('setup.level_inter_desc') }}</div>
                     </div>
                 </div>
                 <div class="option-card" data-action="selectOption" data-args='["level","advanced"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">🏆</div>
                     <div class="option-card-text">
-                        <div class="option-card-label">İleri Seviye</div>
-                        <div class="option-card-desc">Yıllardır düzenli antrenman, tekniğim güçlü</div>
+                        <div class="option-card-label">{{ t('setup.level_adv') }}</div>
+                        <div class="option-card-desc">{{ t('setup.level_adv_desc') }}</div>
                     </div>
                 </div>
             </div>
             <div class="step-buttons">
-                <button class="step-btn step-btn-back" data-action="prevStep" data-args="[2]">GERİ</button>
-                <button class="step-btn step-btn-next" data-action="nextStep" data-args="[2]">DEVAM ET</button>
+                <button class="step-btn step-btn-back" data-action="prevStep" data-args="[2]">{{ t('setup.back') }}</button>
+                <button class="step-btn step-btn-next" data-action="nextStep" data-args="[2]">{{ t('setup.continue') }}</button>
             </div>
         </div>
     </div>
@@ -363,37 +362,37 @@
     <!-- STEP 3: Aktivite + Sonuç -->
     <div class="step-content" id="step-3">
         <div class="step-card">
-            <div class="step-title">Günlük Aktiviten</div>
-            <div class="step-sub">İş ve günlük yaşamındaki hareketlilik.</div>
+            <div class="step-title">{{ t('setup.activity_title') }}</div>
+            <div class="step-sub">{{ t('setup.activity_sub') }}</div>
             <div class="option-cards" id="activity-cards">
                 <div class="option-card" data-action="selectOption" data-args='["activity","sedentary"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">🪑</div>
                     <div class="option-card-text">
-                        <div class="option-card-label">Hareketsiz</div>
-                        <div class="option-card-desc">Masa başı iş, çoğunlukla oturuyorum</div>
+                        <div class="option-card-label">{{ t('setup.act_sedentary') }}</div>
+                        <div class="option-card-desc">{{ t('setup.act_sedentary_desc') }}</div>
                     </div>
                 </div>
                 <div class="option-card" data-action="selectOption" data-args='["activity","active"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">🚶</div>
                     <div class="option-card-text">
-                        <div class="option-card-label">Aktif</div>
-                        <div class="option-card-desc">Haftada 3-5 gün hareket ediyorum</div>
+                        <div class="option-card-label">{{ t('setup.act_active') }}</div>
+                        <div class="option-card-desc">{{ t('setup.act_active_desc') }}</div>
                     </div>
                 </div>
                 <div class="option-card" data-action="selectOption" data-args='["activity","very_active"]'>
                     <div class="option-card-radio"></div>
                     <div class="option-card-icon">🏃</div>
                     <div class="option-card-text">
-                        <div class="option-card-label">Çok Aktif</div>
-                        <div class="option-card-desc">Haftada 5-6 gün yoğun hareket</div>
+                        <div class="option-card-label">{{ t('setup.act_very') }}</div>
+                        <div class="option-card-desc">{{ t('setup.act_very_desc') }}</div>
                     </div>
                 </div>
             </div>
             <div class="step-buttons">
-                <button class="step-btn step-btn-back" data-action="prevStep" data-args="[3]">GERİ</button>
-                <button class="step-btn step-btn-next" id="finish-btn" data-action="finishSetup">PROFİLİ OLUŞTUR</button>
+                <button class="step-btn step-btn-back" data-action="prevStep" data-args="[3]">{{ t('setup.back') }}</button>
+                <button class="step-btn step-btn-next" id="finish-btn" data-action="finishSetup">{{ t('setup.finish') }}</button>
             </div>
         </div>
     </div>
@@ -401,8 +400,8 @@
     <!-- RESULT SCREEN -->
     <div class="step-content" id="step-result">
         <div class="step-card" style="text-align:center">
-            <div class="step-title">PROFİLİN HAZIR! 🎉</div>
-            <div class="step-sub">Koçun seni bekliyor.</div>
+            <div class="step-title">{{ t('setup.ready_title') }}</div>
+            <div class="step-sub">{{ t('setup.ready_sub') }}</div>
             <div class="result-grid">
                 <div class="result-card">
                     <div class="result-val" id="r-bmr">—</div>
@@ -414,12 +413,12 @@
                 </div>
                 <div class="result-card">
                     <div class="result-val" id="r-target">—</div>
-                    <div class="result-label">Hedef Kalori</div>
+                    <div class="result-label">{{ t('setup.target_cal') }}</div>
                 </div>
             </div>
             <div class="result-message" id="r-message"></div>
             <div class="step-buttons" style="justify-content:center">
-                <button class="step-btn step-btn-next" data-action="fxHref" data-href="/">BAŞLAYALIM</button>
+                <button class="step-btn step-btn-next" data-action="fxHref" data-href="/">{{ t('setup.lets_go') }}</button>
             </div>
         </div>
     </div>
@@ -427,6 +426,7 @@
 </div>
 
 <script nonce="{{ csp_nonce }}">
+    var __t = (window.t) || function (k, v) { return k; };
     const savedTheme = localStorage.getItem('theme') || 'dark';
     document.documentElement.dataset.theme = savedTheme;
     function toggleTheme() {
@@ -470,10 +470,10 @@
             const w = document.getElementById('s-weight').value;
             const h = document.getElementById('s-height').value;
             const a = document.getElementById('s-age').value;
-            if (!w || !h || !a) { alert('Tüm alanları doldur.'); return; }
+            if (!w || !h || !a) { alert(__t('setup.fill_all')); return; }
         }
-        if (from === 1 && !selections.goal) { alert('Bir hedef seç.'); return; }
-        if (from === 2 && !selections.level) { alert('Fitness seviyeni seç.'); return; }
+        if (from === 1 && !selections.goal) { alert(__t('setup.pick_goal')); return; }
+        if (from === 2 && !selections.level) { alert(__t('setup.pick_level')); return; }
 
         showStep(from + 1);
     }
@@ -483,10 +483,10 @@
     }
 
     async function finishSetup() {
-        if (!selections.activity) { alert('Aktivite seviyeni seç.'); return; }
+        if (!selections.activity) { alert(__t('setup.pick_activity')); return; }
 
         const btn = document.getElementById('finish-btn');
-        btn.textContent = 'KAYDEDİLİYOR...';
+        btn.textContent = __t('setup.saving');
         btn.style.opacity = '0.7';
 
         try {
@@ -518,9 +518,9 @@
             document.getElementById('r-target').textContent = data.target_calories;
 
             const goalText = selections.goal === 'kas kazanma'
-                ? `Günlük ${data.target_calories} kcal alarak kas kütleni artıracaksın.`
-                : `Günlük ${data.target_calories} kcal ile hedefine ulaşacaksın.`;
-            document.getElementById('r-message').textContent = goalText + ' Koçun seni bekliyor!';
+                ? __t('setup.goal_gain_msg', { cal: data.target_calories })
+                : __t('setup.goal_loss_msg', { cal: data.target_calories });
+            document.getElementById('r-message').textContent = goalText + ' ' + __t('setup.coach_waiting');
 
             document.querySelectorAll('.step-content').forEach(s => s.classList.remove('active'));
             document.getElementById('step-result').classList.add('active');
@@ -532,9 +532,9 @@
             }
 
         } catch (err) {
-            alert('Hata: ' + err.message);
+            alert(__t('setup.error_prefix') + err.message);
         } finally {
-            btn.textContent = 'PROFİLİ OLUŞTUR';
+            btn.textContent = __t('setup.finish');
             btn.style.opacity = '1';
         }
     }
