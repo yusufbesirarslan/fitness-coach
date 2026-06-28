@@ -1,6 +1,37 @@
 """i18n (TR/EN) altyapısı testleri: t() fallback, locale çözümü, /set-language,
 kayıtta dil kalıcılığı ve koç sistem promptunun dile göre değişmesi."""
 
+import json
+import os
+import re
+
+
+def _load_locale(name):
+    root = os.path.dirname(os.path.dirname(__file__))
+    with open(os.path.join(root, "locales", f"{name}.json"), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def test_locale_key_parity_tr_en():
+    """CI kapısı: tr.json ve en.json AYNI anahtar kümesine sahip olmalı; aynı
+    anahtarın {placeholder} token'ları iki dilde eşleşmeli ve hiçbir değer boş
+    olmamalı. Anahtar/placeholder kayması t() fallback'lerini sessizce bozar
+    (i18n kritik-kuplajı). Bu test CI'de (pytest) merge'i bloklar."""
+    tr = _load_locale("tr")
+    en = _load_locale("en")
+
+    only_tr = sorted(set(tr) - set(en))
+    only_en = sorted(set(en) - set(tr))
+    assert not only_tr, f"yalnız tr.json'da olan anahtarlar: {only_tr}"
+    assert not only_en, f"yalnız en.json'da olan anahtarlar: {only_en}"
+
+    empty = sorted(k for k in tr if not str(tr[k]).strip() or not str(en.get(k, "")).strip())
+    assert not empty, f"boş çeviri değerleri: {empty}"
+
+    _ph = lambda s: set(re.findall(r"\{(\w+)\}", str(s)))
+    mismatch = sorted(k for k in tr if _ph(tr[k]) != _ph(en.get(k, "")))
+    assert not mismatch, f"placeholder uyuşmazlığı (TR vs EN): {mismatch}"
+
 
 def test_t_explicit_locale_and_fallback():
     from app.i18n import t

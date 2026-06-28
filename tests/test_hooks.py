@@ -132,6 +132,25 @@ def test_csp_nonce_in_header_matches_template(client):
     assert nonce and f'nonce="{nonce}"' in response.get_data(as_text=True)
 
 
+def test_csp_jsdelivr_pinned_to_exact_files(client):
+    # SEC1: jsdelivr artık geniş host (cdn.jsdelivr.net) DEĞİL — yalnızca SRI ile
+    # sabitlenmiş tam dosyalar script-src'de listeli. Kök/keyfi-yol yükleme kapalı.
+    tokens = _csp_directives(client.get("/health"))["script-src"].split()
+    assert "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" in tokens
+    assert "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js" in tokens
+    assert "https://cdn.jsdelivr.net" not in tokens  # geniş kök host kaynağı YOK
+
+
+def test_chart_js_tag_carries_sri(client, make_user, login):
+    # SEC1: dashboard'daki chart.js <script> etiketi sabit sürüm + integrity +
+    # crossorigin taşımalı (tarayıcı bütünlüğü doğrulasın).
+    make_user("sriuser", profile_complete=True)
+    login("sriuser")
+    body = client.get("/").get_data(as_text=True)
+    assert 'src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"' in body
+    assert 'integrity="sha384-' in body and 'crossorigin="anonymous"' in body
+
+
 # ---------------------------------------------------------------------------
 # update_streak — gün-sınırı mantığı ve milestone ödülleri.
 # ---------------------------------------------------------------------------
