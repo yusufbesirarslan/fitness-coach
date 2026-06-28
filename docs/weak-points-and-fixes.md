@@ -4,8 +4,9 @@ _Hazırlanma: 2026-06-21 · Kapsam: 2026-06-14 → 06-21 haftası incelemesi + a
 
 Bu doküman; haftalık kod incelemesinde çıkan zayıf noktaları, gereken
 düzeltmeleri ve önerileri **öncelik sırasına** göre toplar. Her madde:
-**ne / neden / nerede / nasıl** + öneri içerir. İlgili açık backlog için
-[`triage-remaining-fixes.md`](triage-remaining-fixes.md)'e de bakın.
+**ne / neden / nerede / nasıl** + öneri içerir. Güncel açık backlog için
+canonical tracker'a bak: [`STATUS.md`](STATUS.md). (Eski `triage-remaining-fixes.md`
+2026-06-28'de kaldırıldı — tüm maddeleri çözüldü; git geçmişinde duruyor.)
 
 Genel durum: hafta sağlam geçti — 835 test geçiyor, %91 kapsama, güvenlik
 bilinçli değişiklikler (Cognito auth, korumalı Bedrock tool-use koçu). Asıl
