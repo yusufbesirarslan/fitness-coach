@@ -55,11 +55,15 @@ class User(UserMixin, db.Model):
     # Amazon Cognito (e-posta ile giriş) kimlik bağı. Cognito 'sub' claim'i —
     # e-posta değişse bile aynı yerel hesaba sabit kalır. Yalnızca Cognito ile
     # giren kullanıcılarda doludur; klasik kullanıcı adı/şifre hesaplarında NULL.
-    cognito_sub      = db.Column(db.String(64), unique=True, nullable=True)
+    # Benzersizlik, kolon-içi `unique=True` (adsız constraint) yerine ADLI bir
+    # unique index ile (bkz. __table_args__) — migration zinciri bu indeksleri
+    # `uq_user_*` adıyla kurdu; model de aynı adı kullanınca autogenerate drift'i
+    # kapanır (I-M1: index-vs-constraint uyuşmazlığı).
+    cognito_sub      = db.Column(db.String(64), nullable=True)
 
     # Davet/referral döngüsü: her kullanıcının paylaşılabilir tek davet kodu olur;
     # referred_by_id, bu kullanıcıyı getiren davetçiyi işaret eder (çift taraflı ödül).
-    referral_code    = db.Column(db.String(16), unique=True, nullable=True)
+    referral_code    = db.Column(db.String(16), nullable=True)
     # Davetçi silinirse davet edilen kullanıcı SİLİNMEMELİ — bağ kopar (SET NULL).
     referred_by_id   = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="SET NULL"), nullable=True)
 
@@ -76,6 +80,15 @@ class User(UserMixin, db.Model):
     user_metadata    = db.Column(JSONB().with_variant(db.JSON(), "sqlite"), nullable=True)
 
     referrer = db.relationship("User", remote_side=[id], backref="referrals")
+
+    # cognito_sub / referral_code benzersizliği ADLI unique index olarak — migration
+    # zinciri bu indeksleri tam bu adlarla kurdu (uq_user_cognito_sub /
+    # uq_user_referral_code). Kolon-içi `unique=True` adsız constraint üretip
+    # autogenerate'i (schema-drift guard) sürekli kırmızı bırakıyordu (I-M1).
+    __table_args__ = (
+        db.Index("uq_user_cognito_sub", "cognito_sub", unique=True),
+        db.Index("uq_user_referral_code", "referral_code", unique=True),
+    )
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)

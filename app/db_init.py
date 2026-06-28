@@ -24,7 +24,14 @@ def init_database(app):
         try:
             from sqlalchemy import inspect as sa_inspect
             _has_alembic = sa_inspect(db.engine).has_table("alembic_version")
-            if _has_alembic and os.path.isdir(_migrations_dir):
+            # Boot'ta otomatik upgrade için kapatma anahtarı (I-M1). Tek-worker
+            # invariantı bozulup birden çok container/worker aynı RDS'e karşı
+            # ölçeklenirse eşzamanlı boot upgrade'leri yarışabilir; o durumda
+            # FITX_DB_AUTO_UPGRADE=0 ile boot upgrade'i kapat ve deploy'da
+            # tek-seferlik `flask db upgrade` job'ı çalıştır. Varsayılan "1" →
+            # mevcut davranış (per-boot upgrade) korunur.
+            if (_has_alembic and os.path.isdir(_migrations_dir)
+                    and os.environ.get("FITX_DB_AUTO_UPGRADE", "1") == "1"):
                 from flask_migrate import upgrade
                 upgrade()
         except Exception:
@@ -33,52 +40,13 @@ def init_database(app):
             app.logger.exception("[DB] Alembic upgrade başarısız — şema migration zinciri gerisinde kalmış olabilir.")
 
         db.create_all()
-        migrations = [
-            'ALTER TABLE "user" ADD COLUMN last_login DATE',
-            'ALTER TABLE supplement RENAME COLUMN rating_effectiveness TO rating_effect',
-            'ALTER TABLE supplement ADD COLUMN rating_digestion INTEGER',
-            'ALTER TABLE message ADD COLUMN message_type VARCHAR(20) DEFAULT \'text\'',
-            'ALTER TABLE "user" ADD COLUMN target_weight FLOAT',
-            'ALTER TABLE "user" ADD COLUMN goal_type VARCHAR(10)',
-            'ALTER TABLE "user" ALTER COLUMN profile_picture TYPE TEXT',
-            'ALTER TABLE message ALTER COLUMN message_type TYPE VARCHAR(50)',
-            'ALTER TABLE meal_log ALTER COLUMN ogun TYPE VARCHAR(100)',
-            'ALTER TABLE meal_log ADD COLUMN source VARCHAR(20) DEFAULT \'manual\'',
-            'ALTER TABLE meal_log ADD COLUMN photo_key VARCHAR(300)',
-            'UPDATE user_quest_progress SET is_claimed = true WHERE is_claimed = false',
-            'ALTER TABLE custom_meal_item ADD COLUMN serving_id VARCHAR(50)',
-            'ALTER TABLE custom_meal_item ADD COLUMN serving_description VARCHAR(200)',
-            'ALTER TABLE custom_meal_item ADD COLUMN serving_quantity FLOAT',
-            'ALTER TABLE "user" ADD COLUMN weekly_xp INTEGER DEFAULT 0',
-            'ALTER TABLE "user" ADD COLUMN last_reward_week VARCHAR(10)',
-            # Davet/referral + freemium kolonları (idempotent — kolon varsa sessizce geçilir)
-            'ALTER TABLE "user" ADD COLUMN referral_code VARCHAR(16)',
-            'ALTER TABLE "user" ADD COLUMN referred_by_id INTEGER',
-            'ALTER TABLE "user" ADD COLUMN is_premium BOOLEAN DEFAULT false',
-            'ALTER TABLE "user" ADD COLUMN premium_since TIMESTAMP',
-            'ALTER TABLE "user" ADD COLUMN profile_picture_key VARCHAR(300)',
-            # AI koç hafızası (sakatlıklar/tercihler) — JSONB (RDS PostgreSQL).
-            'ALTER TABLE "user" ADD COLUMN user_metadata JSONB',
-            # Dil tercihi (TR/EN) — idempotent güvenlik ağı (migration c4d5e6f7a8b9).
-            'ALTER TABLE "user" ADD COLUMN language VARCHAR(5) DEFAULT \'tr\'',
-            # Görev isimlerini Türkçeleştir (eski İngilizce kayıtları da güncelle)
-            "UPDATE daily_quest SET title = 'Günlük Giriş' WHERE quest_type = 'login'",
-            "UPDATE daily_quest SET title = 'Antrenman Kaydet' WHERE quest_type = 'workout_logged'",
-            "UPDATE daily_quest SET title = 'Bir Arkadaşına Yardım Et' WHERE quest_type = 'suggestion_sent'",
-            "UPDATE daily_quest SET title = 'Dolabını Güncelle' WHERE quest_type = 'supplement_added'",
-            "UPDATE daily_quest SET title = 'Öğün Kaydet' WHERE quest_type = 'meal_logged'",
-        ]
-        for sql in migrations:
-            try:
-                db.session.execute(db.text(sql))
-                db.session.commit()
-            except Exception as e:
-                db.session.rollback()
-                # Çoğu hata beklenen idempotent durum ("column already exists");
-                # bu yüzden debug seviyesi — ama tamamen yutma ki gerçek bir ALTER
-                # başarısızlığı gerektiğinde teşhis edilebilsin (TRIAGE_FIXES #6).
-                app.logger.debug("[DB] idempotent ALTER atlandı: %s — %s: %s",
-                                 sql, type(e).__name__, e)
+        # I-M1: eski ham idempotent ALTER/UPDATE döngüsü KALDIRILDI. Tüm kolonlar
+        # artık ya Alembic zincirinde (drift kapatan migration f1a2b3c4d5e6 dahil)
+        # ya da fresh DB'lerde yukarıdaki create_all ile geliyor; tek-seferlik veri
+        # düzeltmeleri (user_quest_progress.is_claimed backfill + quest başlıklarını
+        # TR'leştirme) de o migration'a taşındı. Böylece her boot'ta dönen tam-tablo
+        # UPDATE'i ve şema-drift'i gizleyen ~20 ham ALTER ortadan kalktı; migration
+        # zinciri artık şemanın tek doğruluk kaynağı (CI schema-drift guard bloklayıcı).
 
         # PL/pgSQL trigger for PostgreSQL activity calorie auto-calculation
         try:
