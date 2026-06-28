@@ -9,7 +9,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
 from app.i18n import current_locale, t
-from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
+from app.models import WORKOUT_COMPLETION_MARKER, DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
 from app.services import injury_constraints
 from app.services.ai import _heavy_chat
 from app.services.gamification import _claim_quest, award_xp, get_level, level_title, log_activity
@@ -466,7 +466,7 @@ def complete_workout():
     # UI egzersiz kırılımı vermiyor; tamamlanan seansı işaretleyen tek satır yazılır.
     db.session.add(WorkoutLog(
         user_id=current_user.id,
-        exercise_name="Antrenman tamamlandı (Pump Check)",
+        exercise_name=WORKOUT_COMPLETION_MARKER,
         sets=1, reps=1, weight_kg=0, volume=0,
     ))
     # ─────────────────────────────────────────────────────────────────────────

@@ -676,9 +676,20 @@ def _repair_truncated_json(raw_json):
         return raw_json[:last_valid]
     trimmed = raw_json.rstrip()
     trimmed = _re.sub(r',\s*$', '', trimmed)
-    trimmed = _re.sub(r'"[^"]*$', '', trimmed)
+    trimmed = _re.sub(r'"[^"]*$', '', trimmed)          # yarım kesilmiş string DEĞERini at
+    # A5: değer ortasında kesilince geriye değersiz bir `"key":` kalıyordu →
+    # `{"a": }` gibi GEÇERSİZ JSON üretiliyordu. Değersiz kalan son anahtar:iki-nokta'yı
+    # (ve varsa önündeki virgülü) de düşür ki kapanış geçerli olsun (önceki anahtarlar
+    # korunur).
+    trimmed = _re.sub(r',?\s*"[^"]*"\s*:\s*$', '', trimmed)
     trimmed = _re.sub(r',\s*$', '', trimmed)
     trimmed += '}' * depth
+    # A5: son güvenlik ağı — onarım yine de geçerli JSON üretmediyse (ör. anahtar
+    # ortasında kesim) çağıranın bozuk veriyle uğraşmaması için geçerli boş nesne döndür.
+    try:
+        json.loads(trimmed)
+    except (ValueError, TypeError):
+        return '{}'
     return trimmed
 
 

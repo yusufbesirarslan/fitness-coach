@@ -406,6 +406,14 @@ class WorkoutLog(db.Model):
     user = db.relationship("User", backref=db.backref("workout_logs", passive_deletes=True))
 
 
+# UI "antrenman tamamlandı" işaretçisi: complete_workout (UI) ve AI koç Pump Check
+# aracı, nudge'lar/"bugün antrenman yapıldı mı" sinyali görsün diye sentetik bir
+# WorkoutLog (volume=0) yazar. Bu işaretçi GERÇEK bir egzersiz DEĞİL; volume/sayım
+# raporlamasında gerçek egzersizlerden ayırmak için TEK kaynak sabit (D4). Hem iki
+# yazıcı hem de _today_workout_totals filtresi bu sabiti kullanır.
+WORKOUT_COMPLETION_MARKER = "Antrenman tamamlandı (Pump Check)"
+
+
 class DailyActivity(db.Model):
     id              = db.Column(db.Integer, primary_key=True)
     user_id         = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
