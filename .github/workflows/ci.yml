@@ -77,9 +77,7 @@ jobs:
         # migration'a yansıtılmamış demektir (CLAUDE.md şema-değişikliği akışının
         # gözden kaçırdığı durum).
         #
-        # ⚠️ continue-on-error: BUGÜN bloklamaz, yalnızca RAPORLAR. Proje şeması hâlâ
-        # create_all + ham ALTER + Alembic karışımı (TRIAGE #16/db_init.py); mevcut
-        # drift bu adımı kırmızı gösterebilir. Drift sıfırlanıp ham ALTER'lar düzgün
-        # migration'lara taşındığında bu satırı SİL → guard bloklayıcı olur.
-        continue-on-error: true
+        # I-M1 ile ham ALTER'lar migration zincirine taşındı ve drift sıfırlandı →
+        # bu guard artık BLOKLAYICI (continue-on-error kaldırıldı). Bir model
+        # değişikliği migration'sız gelirse CI kırmızı olur.
         run: flask --app starter db check
