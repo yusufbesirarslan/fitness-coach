@@ -16,7 +16,7 @@ from app.services.gamification import _claim_quest, award_xp, get_level, level_t
 from app.services.menu_extract import validate_pump_check
 from app.services.premium import premium_ai_plan_gate
 from app.services.validators import validate_pump_check_image
-from app.timeutil import app_today, utc_day_bounds
+from app.timeutil import app_today, display_dt, utc_day_bounds
 
 
 bp = Blueprint("training", __name__)
@@ -541,7 +541,7 @@ def get_active_training_plan():
         "exists"    : True,
         "plan"      : json.loads(plan.plan_data),
         "score"     : plan.score,
-        "created_at": plan.created_at.strftime("%d.%m.%Y")
+        "created_at": display_dt(plan.created_at, "%d.%m.%Y")
     })
 
 

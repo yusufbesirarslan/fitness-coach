@@ -583,6 +583,8 @@
   "coach.field_missing": "{field} alanı eksik",
   "coach.numeric_required": "Kilo, boy ve yaş sayısal olmalıdır.",
   "coach.ask_something": "Bir soru yaz.",
+  "coach.question_too_long": "Sorun çok uzun. Lütfen daha kısa yaz (en fazla 4000 karakter).",
+  "coach.chat_quota_reached": "Bu haftaki ücretsiz AI koç sohbeti hakkın doldu. Sınırsız sohbet için Premium'a geç.",
   "coach.reply_failed": "Yanıt şu an alınamadı, lütfen tekrar dene.",
 
   "quest.login.title": "Günlük Giriş",

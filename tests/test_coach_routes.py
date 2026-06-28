@@ -112,3 +112,35 @@ def test_ask_conversation_failure_returns_500(client, auth_user, monkeypatch):
     response = client.post("/ask", json={"question": "soru"})
     assert response.status_code == 500
     assert "tekrar dene" in response.get_json()["error"]
+
+
+def test_ask_rejects_oversized_question(client, auth_user, monkeypatch):
+    # H2: aşırı uzun soru token-maliyeti amplifikasyonu vektörüdür; modele
+    # gönderilmeden 400 ile reddedilmeli (sessiz kırpma değil).
+    called = {"run": False}
+    monkeypatch.setattr(coach_bp, "_fetch_coach_context", lambda uid, q, language="tr": "")
+
+    def fake_run(*args, **kwargs):
+        called["run"] = True
+        return "x"
+    monkeypatch.setattr(coach_bp, "_run_coach_conversation", fake_run)
+    response = client.post("/ask", json={"question": "x" * 4001})
+    assert response.status_code == 400
+    assert called["run"] is False  # pahalı döngüye hiç girilmedi
+
+
+def test_ask_quota_exhausted_returns_402(client, auth_user, monkeypatch):
+    # M4: haftalık AI sohbet kotası dolduğunda /ask 402 (premium_required) döner
+    # ve pahalı koç döngüsü hiç çalışmaz.
+    called = {"run": False}
+    monkeypatch.setattr(coach_bp, "remaining_ai_chats", lambda user: 0)
+    monkeypatch.setattr(coach_bp, "_fetch_coach_context", lambda uid, q, language="tr": "")
+
+    def fake_run(*args, **kwargs):
+        called["run"] = True
+        return "x"
+    monkeypatch.setattr(coach_bp, "_run_coach_conversation", fake_run)
+    response = client.post("/ask", json={"question": "protein?"})
+    assert response.status_code == 402
+    assert response.get_json()["premium_required"] is True
+    assert called["run"] is False

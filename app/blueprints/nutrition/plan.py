@@ -15,6 +15,7 @@ from app.i18n import current_locale, t
 from app.models import NutritionPlan, UserSession
 from app.services.ai import _heavy_chat
 from app.services.premium import premium_ai_plan_gate
+from app.timeutil import display_dt
 
 
 @bp.route("/nutrition-plan/save", methods=["POST"])
@@ -55,7 +56,7 @@ def get_active_nutrition_plan():
         "exists"    : True,
         "plan"      : json.loads(plan.plan_data),
         "score"     : plan.score,
-        "created_at": plan.created_at.strftime("%d.%m.%Y")
+        "created_at": display_dt(plan.created_at, "%d.%m.%Y")
     })
 
 

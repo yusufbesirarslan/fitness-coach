@@ -764,8 +764,14 @@ def _tool_query_fitx_metrics(user_id, metric_type, date_range):
             return json.dumps({**base, "value": None, "unit": "kg",
                                "message": "Bu aralıkta kilo kaydı yok."}, ensure_ascii=False)
         first, last = rows[0].weight, rows[-1].weight
+        # L1: WeeklyLog.weight NULL olabilir; round(None, 1) TypeError atardı
+        # (blanket except'e düşüp generic hataya dönerdi). None'ı açıkça karşıla.
+        if last is None:
+            return json.dumps({**base, "value": None, "unit": "kg",
+                               "message": "Bu aralıkta geçerli kilo kaydı yok."}, ensure_ascii=False)
+        change = round(last - first, 1) if first is not None else None
         return json.dumps({**base, "value": round(last, 1), "unit": "kg",
-                           "change": round(last - first, 1), "entries": len(rows)}, ensure_ascii=False)
+                           "change": change, "entries": len(rows)}, ensure_ascii=False)
 
     return json.dumps({"status": "error", "message": f"Bilinmeyen metric_type: {metric_type}"},
                       ensure_ascii=False)

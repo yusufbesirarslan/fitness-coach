@@ -38,6 +38,9 @@ def set_csp_header(response):
     s3_src = (CSP_IMG_S3_HOSTS + " ") if CSP_IMG_S3_HOSTS else ""
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
+        # L7 (kabul edilen tradeoff): `https://*.googletagmanager.com` joker host'u
+        # Google'ın resmî GA/gtag CSP rehberi gereği geniş bırakıldı (bölge/variant
+        # gtag host'ları); daraltmak GA'yı kırabilir. Düşük risk olarak kabul edildi.
         f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net "
         "https://*.googletagmanager.com; "
         "script-src-attr 'none'; "

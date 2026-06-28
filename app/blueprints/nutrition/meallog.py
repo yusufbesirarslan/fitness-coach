@@ -247,8 +247,22 @@ def today_meals():
 @bp.route("/meal-log/history")
 @login_required
 def meal_history():
-    meals = MealLog.query.filter_by(user_id=current_user.id)\
-        .order_by(MealLog.created_at.desc()).limit(50).all()
+    # Önce en yeni N GÜN'ün anahtarlarını al, sonra YALNIZCA o günlerin TÜM
+    # satırlarını çek. Eski "ilk 50 satır çek → sonra güne göre grupla" yaklaşımı,
+    # bir gün 50-satır sınırına denk geldiğinde o günün toplamını yalnızca sınır
+    # içindeki satırlardan hesaplayıp kalori/makroyu sessizce DÜŞÜK gösteriyordu
+    # (M2). Gün-sayısıyla sınırlamak her gösterilen günün tam toplamını garanti eder.
+    HISTORY_DAYS = 14
+    recent_days = [r[0] for r in db.session.query(MealLog.tarih)
+        .filter(MealLog.user_id == current_user.id)
+        .group_by(MealLog.tarih)
+        .order_by(MealLog.tarih.desc())
+        .limit(HISTORY_DAYS).all()]
+
+    meals = (MealLog.query.filter(
+        MealLog.user_id == current_user.id,
+        MealLog.tarih.in_(recent_days),
+    ).order_by(MealLog.created_at.desc()).all() if recent_days else [])
 
     days = {}
     for m in meals:
