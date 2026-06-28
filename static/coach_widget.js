@@ -127,9 +127,11 @@
   /* ── 4. CW object ── */
   var STORAGE_KEY  = 'fc_coach_messages';
   var MAX_MESSAGES = 60;
-  // jsdelivr: CSP script-src yalnızca 'self' + cdn.jsdelivr.net'e izin verir
-  // (unpkg.com politika dışıydı ve tarayıcı yüklemeyi engelliyordu).
+  // jsdelivr: CSP script-src bu TAM dosyaya sabitlenmiştir (SEC1 — geniş host
+  // joker'i kaldırıldı; hooks.py CSP'si aynı sabit URL'i listeler). SRI hash'i +
+  // crossorigin ile yüklenir; sürüm/hash değişirse hooks.py CSP'si de güncellenmeli.
   var QR_LIB_SRC   = 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js';
+  var QR_LIB_SRI   = 'sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+';
 
   var CW = window.CW = {
     open:     false,
@@ -317,6 +319,8 @@
         self._scanStatus('Tarayıcı yükleniyor...');
         var s = document.createElement('script');
         s.src = QR_LIB_SRC;
+        s.integrity = QR_LIB_SRI;       // SEC1: tedarik-zinciri bütünlük doğrulaması
+        s.crossOrigin = 'anonymous';    // SRI'nin cross-origin script'te çalışması için şart
         s.onload = function () { self._scanStatus(''); begin(); };
         s.onerror = function () { self._scanStatus('Tarayıcı yüklenemedi.'); };
         document.head.appendChild(s);
