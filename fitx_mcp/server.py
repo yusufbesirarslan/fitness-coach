@@ -12,10 +12,15 @@ Env vars:
 import os
 import json
 import time
+import logging
 import threading
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from contextlib import contextmanager
+
+# L4: print() yerine logger — stdout'a yazmak logging/Sentry altyapısını atlıyordu
+# (app tarafında zaten düzeltilmiş anti-pattern, bkz. ai_nutrition.py).
+logger = logging.getLogger("fitx_mcp.server")
 
 # Sabit uygulama saat dilimi (app.timeutil ile aynı): MCP sunucusu standalone
 # çalışabildiği için tüm app paketini çekmemek adına burada inline tutulur.
@@ -461,29 +466,42 @@ def _enforce_fatsecret_tls() -> None:
 
 def _get_fatsecret_token() -> str:
     _enforce_fatsecret_tls()
+    # M6: kilit, getirme dahil TÜM kritik bölümü kapsar (app-side fatsecret.py ile
+    # aynı). Eski sürümde kilit yalnızca önbellek OKUMASINI sarıyor, ağ çağrısı
+    # kilitsiz yapılıp yazma ayrı kilitte oluyordu → iki eşzamanlı çağrı ikisi de
+    # token çekerek thundering-herd yapabiliyordu. Token getirme seyrek olduğundan
+    # kilidi ağ çağrısı boyunca tutmak sorun değil.
     with _fs_token_lock:
         if _fs_token_cache["token"] and time.time() < _fs_token_cache["expires_at"] - 60:
             return _fs_token_cache["token"]
 
-    client_id = os.environ.get("FATSECRET_CLIENT_ID", "")
-    client_secret = os.environ.get("FATSECRET_CLIENT_SECRET", "")
-    if not client_id or not client_secret:
-        raise RuntimeError("FATSECRET_CLIENT_ID / FATSECRET_CLIENT_SECRET not set")
+        client_id = os.environ.get("FATSECRET_CLIENT_ID", "")
+        client_secret = os.environ.get("FATSECRET_CLIENT_SECRET", "")
+        if not client_id or not client_secret:
+            raise RuntimeError("FATSECRET_CLIENT_ID / FATSECRET_CLIENT_SECRET not set")
 
-    resp = requests.post(
-        FATSECRET_TOKEN_URL,
-        data={"grant_type": "client_credentials", "scope": "basic"},
-        auth=(client_id, client_secret),
-        timeout=10,
-    )
-    resp.raise_for_status()
-    data = resp.json()
+        resp = requests.post(
+            FATSECRET_TOKEN_URL,
+            data={"grant_type": "client_credentials", "scope": "basic"},
+            auth=(client_id, client_secret),
+            timeout=10,
+        )
+        resp.raise_for_status()
+        try:
+            data = resp.json()
+        except ValueError as e:
+            # Hata sayfası/HTML döndüyse json() patlar; önbelleği bozma, anlamlı hata ver.
+            raise RuntimeError(f"FatSecret token yanıtı JSON değil: {e}") from e
+        # M6: OAuth hata yükü ({"error": "..."}) veya eksik access_token: ham
+        # data["access_token"] KeyError yerine açık hata at; önbelleği ASLA boş/
+        # yanlış token'la doldurma (app-side ile aynı doğrulama).
+        if not isinstance(data, dict) or data.get("error") or not data.get("access_token"):
+            err = data.get("error") if isinstance(data, dict) else data
+            raise RuntimeError(f"FatSecret token alınamadı: {err}")
 
-    with _fs_token_lock:
         _fs_token_cache["token"] = data["access_token"]
         _fs_token_cache["expires_at"] = time.time() + data.get("expires_in", 86400)
-
-    return data["access_token"]
+        return data["access_token"]
 
 
 # ── TOOL 6: Nutrition Data Search (FatSecret) ─────────────────
@@ -575,12 +593,12 @@ def _parse_fatsecret_desc(desc: str) -> dict | None:
                 try:
                     parts[key] = float(num_str)
                 except ValueError:
-                    print(f"[FATSECRET PARSE] Failed to convert '{num_str}' from key='{key}', val='{val.strip()}'")
+                    logger.warning("[FATSECRET PARSE] Failed to convert '%s' from key='%s', val='%s'", num_str, key, val.strip())
                     parts[key] = 0.0
             else:
-                print(f"[FATSECRET PARSE] No number found in key='{key}', val='{val.strip()}'")
-    except Exception as e:
-        print(f"[FATSECRET PARSE] Exception parsing desc: {e} — desc='{desc[:200]}'")
+                logger.warning("[FATSECRET PARSE] No number found in key='%s', val='%s'", key, val.strip())
+    except Exception:
+        logger.warning("[FATSECRET PARSE] Exception parsing desc — desc='%s'", desc[:200], exc_info=True)
         return None
     return parts if len(parts) > 1 else None
 

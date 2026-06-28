@@ -55,9 +55,13 @@ def log_request(response):
         uid = current_user.id if current_user.is_authenticated else "-"
     except Exception:
         uid = "-"
+    # L6: ham X-Forwarded-For istemci-kontrollü (birden çok IP, sahte değer, hatta
+    # log-injection için satır-başı içerebilir). ProxyFix(x_for=1) zaten güvenilen
+    # tek proxy (host nginx) hop'undan gerçek istemci IP'sini remote_addr'a
+    # koyuyor; ham başlık yerine onu logla.
     current_app.logger.info(
         "request method=%s path=%s status=%s dur_ms=%s user=%s ip=%s",
         request.method, request.path, response.status_code, dur_ms, uid,
-        request.headers.get("X-Forwarded-For", request.remote_addr) or "-",
+        request.remote_addr or "-",
     )
     return response

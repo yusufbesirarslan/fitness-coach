@@ -583,6 +583,8 @@
   "coach.field_missing": "The {field} field is missing",
   "coach.numeric_required": "Weight, height and age must be numeric.",
   "coach.ask_something": "Type a question.",
+  "coach.question_too_long": "Your question is too long. Please shorten it (max 4000 characters).",
+  "coach.chat_quota_reached": "You've used up this week's free AI coach chats. Upgrade to Premium for unlimited chat.",
   "coach.reply_failed": "Couldn't get a response right now, please try again.",
 
   "quest.login.title": "Daily Login",
