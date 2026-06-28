@@ -11,9 +11,9 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.config import (BEDROCK_ENABLED, BEDROCK_MAX_TOKENS, BEDROCK_MODEL,
                         BEDROCK_PROMPT_CACHE, OPENAI_MODEL)
 from app.extensions import bedrock_client, db, openai_client
-from app.models import (DailyActivity, MealLog, PendingAction, PumpCheck, User,
-                        UserSession, WaterLog, WeeklyCheckIn, WeeklyLog,
-                        WorkoutLog)
+from app.models import (WORKOUT_COMPLETION_MARKER, DailyActivity, MealLog,
+                        PendingAction, PumpCheck, User, UserSession, WaterLog,
+                        WeeklyCheckIn, WeeklyLog, WorkoutLog)
 from app.services.ai import _bedrock_validate_image, _heavy_chat, anthropic as _anthropic
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
 from app.services.fatsecret import _food_search_fatsecret, _food_search_static
@@ -372,6 +372,11 @@ def _today_workout_totals(user_id):
         WorkoutLog.user_id == user_id,
         WorkoutLog.created_at >= start,
         WorkoutLog.created_at < end,
+        # D4: UI tamamlama-işaretçisi (volume=0) gerçek egzersiz değil; koç
+        # bağlamındaki "bugünkü hacim/egzersiz sayısı"nı şişirmesin (entry_count'ı
+        # kabartıyordu). "Antrenman yapıldı mı" sinyali ayrı yollardan (nudge/
+        # PumpCheck) hâlâ işaretçiyi görür.
+        WorkoutLog.exercise_name != WORKOUT_COMPLETION_MARKER,
     ).first()
     return {"total_volume": round(row[0], 1), "entry_count": row[1]}
 
@@ -871,7 +876,7 @@ def _tool_analyze_gym_photo(user_id, s3_key):
         description=result["reason"][:200], valid=True, fallback=False,
         date_key=app_today().isoformat()))
     db.session.add(WorkoutLog(
-        user_id=user_id, exercise_name="Antrenman tamamlandı (Pump Check)",
+        user_id=user_id, exercise_name=WORKOUT_COMPLETION_MARKER,
         sets=1, reps=1, weight_kg=0, volume=0))
     xp = 35  # /workout/complete ile aynı: 10 base + 25 foto bonusu
     quest = _claim_quest(user_id, "workout_logged")

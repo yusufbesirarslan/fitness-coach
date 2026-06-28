@@ -160,6 +160,22 @@ def test_repair_truncated_json():
     assert repaired["Adana Kebap"]["calories"] == 650
 
 
+def test_repair_truncated_json_mid_value():
+    # A5: DEĞER ortasında kesim → geriye değersiz `"key":` kalıp {"key": } gibi
+    # GEÇERSİZ JSON üretmemeli; önceki tam anahtarlar korunmalı, partial anahtar düşmeli.
+    truncated = '{"Adana": {"calories": 650}, "Kofte": "yarım kalan değer ortas'
+    repaired = json.loads(_repair_truncated_json(truncated))
+    assert repaired["Adana"]["calories"] == 650
+    assert "Kofte" not in repaired
+
+
+def test_repair_truncated_json_output_always_valid():
+    # A5 garantisi: çıktı HER ZAMAN geçerli JSON (parse edilebilir) olmalı — çeşitli
+    # mid-value/mid-key kesim biçimleri raise ETMEMELİ.
+    for raw in ('{"a": 1, "b": "yarı', '{"a": tru', '{"x": {"y":', '{"a": 1, "b'):
+        json.loads(_repair_truncated_json(raw))
+
+
 def test_macros_batch_parses_and_filters(app, monkeypatch):
     _fake_chat(monkeypatch, json.dumps({
         "Adana Kebap": {"calories": 650, "protein": 38, "carbs": 20, "fat": 45},
