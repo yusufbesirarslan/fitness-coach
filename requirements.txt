@@ -12,11 +12,11 @@ Authlib==1.7.2
 SQLAlchemy==2.0.51
 Werkzeug==3.1.8
 gunicorn==26.0.0
-openai==2.43.0
-anthropic[bedrock]==0.111.0
+openai==2.44.0
+anthropic[bedrock]==0.112.0
 psycopg2-binary==2.9.12
 python-dotenv==1.2.2
-mcp[cli]==1.28.0
+mcp[cli]==1.28.1
 requests==2.34.2
 Brotli==1.2.0
 beautifulsoup4==4.15.0
@@ -24,8 +24,8 @@ beautifulsoup4==4.15.0
 # yükseltme PR'ları açar; pin'ler tekrarlanabilir build için sabit kalır.
 pdfplumber==0.11.10
 Pillow==12.2.0
-boto3==1.43.34
-redis==8.0.0
+boto3==1.43.36
+redis==8.0.1
 # Hata izleme — yalnızca SENTRY_DSN ayarlıysa etkin (app/observability.py).
 sentry-sdk[flask]==2.63.0
 # dev/test
