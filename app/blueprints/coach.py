@@ -7,6 +7,7 @@ from app.extensions import _user_or_ip_key, db, limiter
 from app.models import UserSession
 from app.services.ai_coach import _fetch_coach_context, _run_coach_conversation, generate_coach_reply
 from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee, generate_nutrition_plan, generate_training_plan
+from app.services.premium import record_ai_chat, remaining_ai_chats
 from app.i18n import t
 from app.timeutil import app_date_of, app_today
 
@@ -124,6 +125,24 @@ def ask_coach():
     if not question:
         return jsonify({"error": t("coach.ask_something")}), 400
 
+    # H2: Soru uzunluğunu sınırla. Geçmiş zaten COACH_HISTORY_CHAR_CAP ile kapalı,
+    # ama mevcut SORU sınırsızdı; tool_choice="auto" + 5'e kadar araç döngüsüyle
+    # her istek sistem promptu + bağlam + DEV soruyu modele defalarca yeniden
+    # gönderebiliyordu → token-maliyeti amplifikasyonu (özellikle pahalı Bedrock
+    # yolunda). Aşırı uzun girdiyi sessizce kırpmak yerine 400 ile reddet.
+    MAX_QUESTION_CHARS = 4000
+    if len(question) > MAX_QUESTION_CHARS:
+        return jsonify({"error": t("coach.question_too_long")}), 400
+
+    # M4: /ask en pahalı yoldur (Bedrock Sonnet + FatSecret + öğe-başı LLM makro
+    # batch'leri). Plan üretimi gibi premium-duyarlı HAFTALIK kotaya tabi tut —
+    # non-premium için sınır, premium sınırsız. Salt rate-limit (30/saat)
+    # freemium niyetini karşılamıyor, sürekli pahalı çağrıya izin veriyordu.
+    if current_app.config.get("AI_CHAT_QUOTA_ENABLED", True) and \
+            remaining_ai_chats(current_user) == 0:
+        return jsonify({"error": t("coach.chat_quota_reached"),
+                        "premium_required": True}), 402
+
     # Bağlam toplama psycopg2-bağımlı fitx_mcp.server'a dokunur; local'de veya
     # geçici çökmede graceful degrade etsin diye sarmalanır — function-calling
     # akışı (FatSecret + SQLAlchemy) buna bağlı değil, yine de çalışır.
@@ -136,6 +155,10 @@ def ask_coach():
     try:
         answer = _run_coach_conversation(current_user.id, question, context,
                                          client_history, language=lang)
+        # Kotayı yalnızca BAŞARILI yanıtta tüket (başarısız deneme hakkı yakmasın —
+        # premium_ai_plan_gate ile aynı felsefe).
+        if current_app.config.get("AI_CHAT_QUOTA_ENABLED", True):
+            record_ai_chat(current_user)
         return jsonify({"answer": answer})
     except Exception:
         current_app.logger.exception("Koç yanıtı üretilemedi")

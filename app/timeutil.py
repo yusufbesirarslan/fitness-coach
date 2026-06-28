@@ -75,3 +75,27 @@ def display_ddmm(value):
         except ValueError:
             return value
     return value.strftime("%d.%m")
+
+
+def to_app_tz(dt):
+    """Naive-UTC (created_at) datetime'ı APP_TZ'ye (Istanbul) çevir — tz-aware döner.
+
+    created_at sütunları datetime.utcnow() ile NAIVE UTC yazıldığından, tz bilgisi
+    yoksa UTC varsayılır (app_date_of ile aynı kural). None → None.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(APP_TZ)
+
+
+def display_dt(dt, fmt="%d.%m"):
+    """Naive-UTC datetime'ı Istanbul saatine çevirip `fmt` ile biçimle (UI etiketi).
+
+    created_at gibi naive-UTC sütunlarının kullanıcıya gösterimi için TEK yol;
+    doğrudan ``dt.strftime(...)`` KULLANMA — ham UTC, gün/saat sınırlarını gece-yarısı
+    yakınında bir gün/birkaç saat kaydırır (CLAUDE.md: tüm gün/saat gösterimi
+    timeutil'den türemeli). None → '' (boş etiket)."""
+    local = to_app_tz(dt)
+    return local.strftime(fmt) if local else ""

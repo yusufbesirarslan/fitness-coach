@@ -10,6 +10,7 @@ gerektirmez.
 /nutrition-plan) konur, kaydetme uçlarına değil. Kota yalnızca BAŞARILI üretimde
 (HTTP 200) artırılır → başarısız denemeler hakkı yakmaz.
 """
+import os
 from functools import wraps
 
 from flask import current_app, jsonify
@@ -21,6 +22,12 @@ from app.timeutil import app_today
 
 # Ücretsiz planda plan-türü başına haftalık üretim hakkı.
 FREE_WEEKLY_AI_PLANS = 1
+
+# Ücretsiz planda haftalık AI koç sohbeti (/ask) hakkı. /ask en pahalı yoldur
+# (Bedrock Sonnet tool-loop); salt 30/saat rate-limit sürekli pahalı çağrıya izin
+# veriyordu (M4). Varsayılan cömert (yalnızca aşırı kötüye-kullanımı keser); ops
+# env ile ayarlayabilir. Premium → sınırsız.
+FREE_WEEKLY_AI_CHATS = int(os.getenv("FREE_WEEKLY_AI_CHATS", "200"))
 
 
 def _week_key(d=None):
@@ -61,6 +68,31 @@ def record_ai_plan_generation(user, kind):
     meta, q, wk = _quota(user)
     q["week"] = wk
     q[kind] = int(q.get(kind, 0)) + 1
+    meta["ai_plan_quota"] = q
+    user.user_metadata = meta
+    flag_modified(user, "user_metadata")  # JSON in-place değişimini garantiye al
+    db.session.commit()
+
+
+def remaining_ai_chats(user):
+    """Bu hafta `user` için kalan AI koç sohbeti (/ask) hakkı (premium → None).
+
+    Sayaç plan kotasıyla AYNI haftalık kovada ('ai_plan_quota') 'chat' anahtarında
+    tutulur; hafta dönünce plan sayaçlarıyla birlikte sıfırlanır."""
+    if getattr(user, "is_premium", False):
+        return None
+    _meta, q, _wk = _quota(user)
+    used = int(q.get("chat", 0))
+    return max(FREE_WEEKLY_AI_CHATS - used, 0)
+
+
+def record_ai_chat(user):
+    """Başarılı bir /ask çağrısını bu haftaya işle (premium'da no-op)."""
+    if getattr(user, "is_premium", False):
+        return
+    meta, q, wk = _quota(user)
+    q["week"] = wk
+    q["chat"] = int(q.get("chat", 0)) + 1
     meta["ai_plan_quota"] = q
     user.user_metadata = meta
     flag_modified(user, "user_metadata")  # JSON in-place değişimini garantiye al

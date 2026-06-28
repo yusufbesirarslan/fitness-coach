@@ -150,6 +150,37 @@ def test_diary_add_item_negative_metric_no_negative_macros(client, meal_id):
     assert (item.per_100g_protein or 0) >= 0
 
 
+def test_diary_add_item_clamps_absurd_macros(client, meal_id):
+    # H1: diary hattı eskiden YALNIZCA negatifleri 0'a çekiyordu; üst fiziksel-
+    # tavan yoktu, istemci serving_calories: 90000 değerini doğrudan CustomMealItem'a
+    # ve oradan kanonik MealLog'a sızdırabiliyordu. Artık clamp_serving_macros ile
+    # diğer tüm ingest hatlarıyla aynı tavana (MAX_SERVING_KCAL=3000) kısılır.
+    body = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "Hile", "serving_id": "s1", "serving_quantity": 1,
+        "metric_serving_amount": 100,
+        "serving_calories": 90000, "serving_protein": 0,
+        "serving_carbs": 0, "serving_fat": 0,
+    }).get_json()
+    assert 0 < body["calories"] <= 3000
+    item = db.session.get(CustomMealItem, body["item_id"])
+    assert 0 < item.calories <= 3000
+
+
+def test_diary_update_item_clamps_absurd_macros(client, meal_id):
+    # H1: güncelleme yolu da kısar — makul bir öğeyi sonradan 90000 kcal'lik bir
+    # serving'e PATCH etmek tavanı aşamaz.
+    item_id = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "yumurta", "grams": 100,
+        "per_100g": {"calories": 150, "protein": 12, "carbs": 1, "fat": 10},
+    }).get_json()["item_id"]
+    body = client.patch(f"/api/diary/item/{item_id}", json={
+        "serving_id": "s9", "serving_quantity": 1, "metric_serving_amount": 100,
+        "serving_calories": 90000, "serving_protein": 0,
+        "serving_carbs": 0, "serving_fat": 0,
+    }).get_json()
+    assert 0 < body["calories"] <= 3000
+
+
 def test_diary_add_item_grams_based_scaling(client, meal_id):
     body = client.post(f"/api/diary/meal/{meal_id}/item", json={
         "food_name": "pirinç", "grams": 200,

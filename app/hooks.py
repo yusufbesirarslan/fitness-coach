@@ -38,7 +38,16 @@ def set_csp_header(response):
     s3_src = (CSP_IMG_S3_HOSTS + " ") if CSP_IMG_S3_HOSTS else ""
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
-        f"script-src 'self' 'nonce-{nonce}' https://cdn.jsdelivr.net "
+        # SEC1: jsdelivr artık geniş `https://cdn.jsdelivr.net` host'u DEĞİL, yalnızca
+        # SRI ile sabitlenmiş TAM dosyalar (chart.js + html5-qrcode). Kök/keyfi-yol
+        # script yükleme kapandı; yeni bir jsdelivr varlığı eklenirse buraya da onun
+        # tam sürümlü URL'i eklenmeli (aksi halde tarayıcı bloklar).
+        # L7 (kabul edilen tradeoff): `https://*.googletagmanager.com` joker host'u
+        # Google'ın resmî GA/gtag CSP rehberi gereği geniş bırakıldı (bölge/variant
+        # gtag host'ları); daraltmak GA'yı kırabilir. Düşük risk olarak kabul edildi.
+        f"script-src 'self' 'nonce-{nonce}' "
+        "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js "
+        "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js "
         "https://*.googletagmanager.com; "
         "script-src-attr 'none'; "
         # style-src: 'unsafe-inline' fallback yalnızca style-src-elem/-attr'ı

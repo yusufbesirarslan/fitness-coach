@@ -213,6 +213,14 @@ def login():
         try:
             claims = cognito_idp.initiate_auth(username, password or "")
         except CognitoIdpError as e:
+            # M7 (kabul edilen tradeoff): UserNotConfirmedException, "kayıtlı ama
+            # doğrulanmamış" bir hesabı diğer hatalardan (generic bad_credentials,
+            # 401) ayırt ettirir → dar bir hesap-sayım (enumeration) sinyali. Bunu
+            # bilerek koruyoruz çünkü (a) doğrulanmamış kullanıcıyı /verify sayfasına
+            # yönlendiren meşru UX buna bağlı, (b) Cognito app client'ında
+            # PreventUserExistenceErrors AÇIK olduğunda bu istisna yalnızca parola
+            # DOĞRUYKEN döner (yani ipucu zaten başarılı parola kontrolünün
+            # arkasında), (c) per-username rate limit (15/15dk) kaba taramayı kısar.
             if e.code == "UserNotConfirmedException":
                 return jsonify({"error": e.message, "needs_verification": True,
                                 "username": username}), 403

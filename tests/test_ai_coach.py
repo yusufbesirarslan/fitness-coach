@@ -196,6 +196,20 @@ def test_stage_workout_defaults_and_commit(auth_user):
     assert result["status"] == "no_pending"
 
 
+def test_today_workout_totals_excludes_completion_marker(auth_user):
+    # D4: UI tamamlama-işaretçisi (volume=0) gerçek egzersiz değil; koç bağlamındaki
+    # "bugünkü hacim/egzersiz sayısı"nı şişirmemeli.
+    from app.models import WORKOUT_COMPLETION_MARKER
+    db.session.add(WorkoutLog(user_id=auth_user.id, exercise_name="Squat",
+                              sets=5, reps=5, weight_kg=100, volume=2500))
+    db.session.add(WorkoutLog(user_id=auth_user.id, exercise_name=WORKOUT_COMPLETION_MARKER,
+                              sets=1, reps=1, weight_kg=0, volume=0))
+    db.session.commit()
+    totals = ai_coach._today_workout_totals(auth_user.id)
+    assert totals["entry_count"] == 1          # yalnız gerçek egzersiz sayıldı
+    assert totals["total_volume"] == 2500.0
+
+
 def test_cancel_removes_only_latest_pending(auth_user, monkeypatch):
     # Tek 'iptal' hem staged meal'i hem staged workout'u BİRDEN silmemeli (#11):
     # yalnızca en son stage edilen kaydı hedefler.

@@ -32,6 +32,25 @@ def _sanitize_meal_macros(kalori, protein, karb, yag):
     return clamped
 
 
+def _clamp_item_macros(item):
+    """Bir CustomMealItem'in makrolarını nutrition_pipeline kapısından geçir
+    (menü/koç/quick-add/override hatlarıyla AYNI tek kaynak: clamp_serving_macros).
+
+    Diary hattı eskiden yalnızca negatifleri 0'a çekiyordu; üst fiziksel-tavan
+    uygulanmadığından istemci `serving_calories: 90000` gibi bir değeri doğrudan
+    CustomMealItem'a ve oradan kanonik MealLog'a sızdırabiliyordu — günlük
+    toplamları, protein nudge'ını ve haftalık raporları bozardı (H1). Per-item
+    kıyma, çok-öğeli meşru bir öğün toplamını bozmadan yalnızca aykırı öğeyi düzeltir.
+    """
+    import nutrition_pipeline as _np
+    cal, pro, carb, fat = _np.clamp_serving_macros(
+        item.calories or 0, item.protein or 0, item.carbs or 0, item.fat or 0)
+    if (cal, pro, carb, fat) != (item.calories, item.protein, item.carbs, item.fat):
+        current_app.logger.warning(
+            "[DIARY] Öğe makroları makul değil — kısılıyor (food=%s)", item.food_name)
+    item.calories, item.protein, item.carbs, item.fat = cal, pro, carb, fat
+
+
 @bp.route("/api/quick-add-meal", methods=["POST"])
 @login_required
 def quick_add_meal():
@@ -221,6 +240,9 @@ def diary_add_item(meal_id):
             per_100g_fat=p100_fat,
         )
 
+    # H1: kanonik deftere (MealLog) toplanmadan ÖNCE öğeyi fiziksel-sağlık
+    # kapısından geçir — diğer tüm ingest hatlarıyla aynı tek kaynak.
+    _clamp_item_macros(item)
     db.session.add(item)
     db.session.commit()
     return jsonify({
@@ -284,6 +306,9 @@ def diary_update_item(item_id):
         item.carbs = round((item.per_100g_carbs or 0) * scale, 1)
         item.fat = round((item.per_100g_fat or 0) * scale, 1)
 
+    # H1: her güncelleme dalından sonra (yeni serving, miktar/gram yeniden
+    # ölçekleme) öğeyi tekrar fiziksel-sağlık kapısından geçir.
+    _clamp_item_macros(item)
     db.session.commit()
     return jsonify({
         "item_id": item.id,

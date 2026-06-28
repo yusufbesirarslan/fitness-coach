@@ -164,6 +164,10 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
     try:
         resp = openai_client.chat.completions.create(
             model=OPENAI_MODEL,
+            # L5: çıktı 4000 token ile sınırlı (uzun menülerin tam OCR'ı için
+            # gerekli) ve girdi görseli >1.5MB ise üstte sıkıştırılıyor. Asıl
+            # maliyet guard'ı çağıran rotalardaki rate-limit (SCRAPE_RATELIMIT) +
+            # genel AI maliyet kontrolleridir (H2 girdi-cap, M4 sohbet kotası).
             max_tokens=4000,
             temperature=0.0,
             messages=[

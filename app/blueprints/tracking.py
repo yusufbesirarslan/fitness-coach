@@ -11,7 +11,7 @@ from app.models import DailyActivity, MealLog, User, UserSession, WaterLog, Week
 from app.services.ai_coach import generate_checkin_feedback
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
 from app.services.validators import _to_int
-from app.timeutil import app_date_of, app_today, utc_day_bounds
+from app.timeutil import app_date_of, app_today, display_dt, utc_day_bounds
 
 
 bp = Blueprint("tracking", __name__)
@@ -87,7 +87,7 @@ def progress():
     result = []
     for log in logs:
         result.append({
-            "tarih" : log.created_at.strftime("%d.%m"),
+            "tarih" : display_dt(log.created_at, "%d.%m"),
             "kilo" : log.weight,
             "not" : log.note
         })
@@ -189,7 +189,7 @@ def checkin_history():
     result = []
     for c in checkins:
         result.append({
-            "tarih"     : c.created_at.strftime("%d.%m"),
+            "tarih"     : display_dt(c.created_at, "%d.%m"),
             "kilo"      : c.weight,
             "yogunluk"  : c.yogunluk,
             "fatigue"   : c.fatigue,
@@ -221,17 +221,34 @@ def update_weight():
 
     current_user.weight = weight
 
-    bmr             = calculate_bmr(weight, current_user.height, current_user.age, current_user.gender)
-    tdee            = calculate_tdee(bmr, current_user.current_activity)
-    target_calories = calculate_target(tdee, current_user.goal)
-
     last_sess = UserSession.query.filter_by(user_id=current_user.id)\
         .order_by(UserSession.created_at.desc()).first()
-    if last_sess:
-        last_sess.weight          = weight
-        last_sess.bmr             = bmr
-        last_sess.tdee            = tdee
-        last_sess.target_calories = target_calories
+
+    # L2: BMR/TDEE/hedef-kalori yalnızca profil TAM olduğunda yeniden hesapla.
+    # Eksik current_activity/goal ile calculate_tdee sessizce sedanter (1.2)
+    # varsayıma düşüp bunu last_sess.target_calories'a yazıyordu; bu değer menü
+    # "kalan bütçe" ve protein hedefini sürüklediğinden yanlış bir sayıyı
+    # kalıcılaştırıyordu. Profil eksikse kiloyu güncelle ama türetilmiş hedefleri
+    # BOZMA — mevcut (varsa) son değerleri göster.
+    profile_ready = all([
+        current_user.height, current_user.age, current_user.gender,
+        current_user.current_activity, current_user.goal,
+    ])
+    if profile_ready:
+        bmr             = calculate_bmr(weight, current_user.height, current_user.age, current_user.gender)
+        tdee            = calculate_tdee(bmr, current_user.current_activity)
+        target_calories = calculate_target(tdee, current_user.goal)
+        if last_sess:
+            last_sess.weight          = weight
+            last_sess.bmr             = bmr
+            last_sess.tdee            = tdee
+            last_sess.target_calories = target_calories
+    else:
+        if last_sess:
+            last_sess.weight = weight
+        bmr             = last_sess.bmr if last_sess else None
+        tdee            = last_sess.tdee if last_sess else None
+        target_calories = last_sess.target_calories if last_sess else None
 
     # Gün sınırı Istanbul gününe göre (CLAUDE.md): UTC gece-yarısı kullanmak
     # Istanbul 00:00–03:00 arası check-in'i bir önceki güne sokar ve "bugünü
@@ -250,9 +267,10 @@ def update_weight():
     db.session.commit()
 
     return jsonify({
-        "bmr": round(bmr),
-        "tdee": round(tdee),
-        "target_calories": round(target_calories)
+        "bmr": round(bmr) if bmr is not None else None,
+        "tdee": round(tdee) if tdee is not None else None,
+        "target_calories": round(target_calories) if target_calories is not None else None,
+        "profile_incomplete": not profile_ready,
     })
 
 
@@ -273,38 +291,37 @@ def log_daily_activity():
     calories, distance, duration = calculate_activity_calories(steps, intensity, weight, height)
 
     today_key = app_today().isoformat()
-    existing = DailyActivity.query.filter_by(
-        user_id=current_user.id, date_key=today_key, intensity=intensity
-    ).first()
-
-    def _apply(target):
-        target.steps = steps
-        target.calories_burned = calories
-        target.distance_km = distance
-        target.duration_min = duration
-
-    if existing:
-        _apply(existing)
+    # "Bugünün aktivitesi" TEK bir niceliktir (adım + yoğunluk). Eski idempotency
+    # anahtarı (user_id, date_key, intensity) idi; yoğunluk açılır-menüsü
+    # değiştikçe light/moderate/brisk için AYRI satır yaratıyor, today_activity de
+    # kalorileri bunlar üzerinden TOPLAYARAK çift/üç sayım yapıyordu (M3). Artık
+    # günün TÜM satırlarını silip tek taze satır yazıyoruz → günde tam bir satır.
+    DailyActivity.query.filter_by(
+        user_id=current_user.id, date_key=today_key
+    ).delete(synchronize_session=False)
+    db.session.add(DailyActivity(
+        user_id=current_user.id, steps=steps, intensity=intensity,
+        calories_burned=calories, distance_km=distance,
+        duration_min=duration, date_key=today_key
+    ))
+    try:
         db.session.commit()
-    else:
-        db.session.add(DailyActivity(
-            user_id=current_user.id, steps=steps, intensity=intensity,
-            calories_burned=calories, distance_km=distance,
-            duration_min=duration, date_key=today_key
-        ))
-        try:
-            db.session.commit()
-        except IntegrityError:
-            # Yarış: eşzamanlı iki istek de "satır yok" gördü; uq_daily_activity
-            # ikinci INSERT'i reddetti. Rollback edip mevcut satırı güncelle.
-            db.session.rollback()
-            existing = DailyActivity.query.filter_by(
-                user_id=current_user.id, date_key=today_key, intensity=intensity
-            ).first()
-            if existing is None:
-                raise
-            _apply(existing)
-            db.session.commit()
+    except IntegrityError:
+        # Yarış: eşzamanlı iki istek de aynı (user_id, date_key, intensity)
+        # satırını ekledi; uq_daily_activity ikinci INSERT'i reddetti. Rollback
+        # edip o günün mevcut satırını güncelle.
+        db.session.rollback()
+        existing = DailyActivity.query.filter_by(
+            user_id=current_user.id, date_key=today_key
+        ).order_by(DailyActivity.id.desc()).first()
+        if existing is None:
+            raise
+        existing.steps = steps
+        existing.intensity = intensity
+        existing.calories_burned = calories
+        existing.distance_km = distance
+        existing.duration_min = duration
+        db.session.commit()
 
     return jsonify({
         "message": t("route.steps_logged", steps=steps),
@@ -318,25 +335,28 @@ def log_daily_activity():
 @login_required
 def today_activity():
     today_key = app_today().isoformat()
-    activities = DailyActivity.query.filter_by(
+    # Günün TEK (en yeni) aktivite satırını al — TOPLAMA YAPMA. log_daily_activity
+    # artık günde tek satır tutsa da, eski çoklu-satır (yoğunluk başına) veriye
+    # karşı da en yenisini seçmek çift sayımı kesin olarak önler (M3).
+    activity = DailyActivity.query.filter_by(
         user_id=current_user.id, date_key=today_key
-    ).all()
+    ).order_by(DailyActivity.id.desc()).first()
 
-    total_calories = sum(a.calories_burned or 0 for a in activities)
-    total_steps = sum(a.steps or 0 for a in activities)
-    total_distance = sum(a.distance_km or 0 for a in activities)
-
-    entries = [{
-        "intensity": a.intensity, "steps": a.steps,
-        "calories_burned": a.calories_burned,
-        "distance_km": a.distance_km, "duration_min": a.duration_min,
-    } for a in activities]
+    if activity is None:
+        return jsonify({
+            "total_calories": 0, "total_steps": 0,
+            "total_distance": 0, "entries": []
+        })
 
     return jsonify({
-        "total_calories": round(total_calories, 1),
-        "total_steps": total_steps,
-        "total_distance": round(total_distance, 2),
-        "entries": entries
+        "total_calories": round(activity.calories_burned or 0, 1),
+        "total_steps": activity.steps or 0,
+        "total_distance": round(activity.distance_km or 0, 2),
+        "entries": [{
+            "intensity": activity.intensity, "steps": activity.steps,
+            "calories_burned": activity.calories_burned,
+            "distance_km": activity.distance_km, "duration_min": activity.duration_min,
+        }]
     })
 
 
@@ -366,7 +386,7 @@ def history():
     result = []
     for s in sessions:
         result.append({
-            "tarih" : s.created_at.strftime("%d.%m.%Y %H:%M"),
+            "tarih" : display_dt(s.created_at, "%d.%m.%Y %H:%M"),
             "kilo" : s.weight,
             "hedef_kalori" : s.target_calories,
             "coach_reply" : s.coach_reply
@@ -401,7 +421,7 @@ def last_session():
         "target_calories" : s.target_calories,
         "target_weight"   : current_user.target_weight,
         "goal_type"       : current_user.goal_type,
-        "tarih"           : s.created_at.strftime("%d.%m.%Y")
+        "tarih"           : display_dt(s.created_at, "%d.%m.%Y")
     })
 
 

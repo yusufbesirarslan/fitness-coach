@@ -20,7 +20,6 @@ FATSECRET_API_URL = f"{FATSECRET_BASE_URL}/rest/server.api"
 _REDIS_URL = os.environ.get("REDIS_URL")
 LB_ALLTIME_KEY = "lb:global:alltime"
 LB_WEEKLY_KEY  = "lb:global:weekly"
-_IS_DEV = os.environ.get("FLASK_DEBUG") == "1" or os.environ.get("FLASK_ENV") == "development"
 
 # CSP img-src için S3 host(lar)ı: geniş `https://*.amazonaws.com` joker'i yerine
 # yalnızca bu uygulamanın kovasına/bölgesine izin ver (virtual-hosted + path-style
@@ -45,6 +44,10 @@ SEARCH_RATELIMIT = "20 per minute; 200 per hour"
 # Freemium: AI plan üretiminde sunucu-taraflı haftalık kota (app/services/premium).
 # Operasyonel kapatma anahtarı; üretimde varsayılan AÇIK.
 AI_PLAN_QUOTA_ENABLED = os.getenv("AI_PLAN_QUOTA_ENABLED", "1") == "1"
+# Freemium: AI koç sohbeti (/ask) için sunucu-taraflı haftalık kota (en pahalı
+# yol — Bedrock tool-loop). Operasyonel kapatma anahtarı; üretimde varsayılan AÇIK.
+# Sınır sayısı app.services.premium.FREE_WEEKLY_AI_CHATS (env: FREE_WEEKLY_AI_CHATS).
+AI_CHAT_QUOTA_ENABLED = os.getenv("AI_CHAT_QUOTA_ENABLED", "1") == "1"
 # Redis (dağıtık login throttle) erişilemezse login fail-closed olsun mu (503)?
 # Varsayılan AÇIK: Redis kesintisinde brute-force in-memory yedeğinden sızmasın.
 # Kapatılırsa eski fail-open davranış (kesintide login açık kalır) geri gelir.
@@ -120,6 +123,13 @@ def configure_app(app):
     # yanı sıra -Host ve -Port'a da güven; url_for(_external)/redirect'ler ve secure
     # cookie kararları için doğru host/şema/port'u Flask'ın görmesini sağlar.
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
+    # Dev/debug bayrağını configure_app içinde TEK kez değerlendir ve hem SECRET_KEY
+    # hem secure-cookie kararlarında AYNI değeri kullan (M9). Eskiden cookie kararı
+    # modül-yükü sabiti _IS_DEV'e, SECRET_KEY mantığı ise çağrı-anı env okumasına
+    # bakıyordu; bu asimetri, FLASK_ENV=development ile SECRET_KEY zorunluluğunu
+    # aşan bir kurulumda Secure cookie'leri de sessizce kapatabilirdi.
+    _is_dev = (os.environ.get("FLASK_DEBUG") == "1"
+               or os.environ.get("FLASK_ENV") == "development")
     _LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
     _gunicorn_logger = logging.getLogger("gunicorn.error")
     if _gunicorn_logger.handlers:
@@ -134,13 +144,14 @@ def configure_app(app):
     app.config["SQLALCHEMY_DATABASE_URI"] = database_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
     app.config["AI_PLAN_QUOTA_ENABLED"] = AI_PLAN_QUOTA_ENABLED
+    app.config["AI_CHAT_QUOTA_ENABLED"] = AI_CHAT_QUOTA_ENABLED
     app.config["LOGIN_FAIL_CLOSED"] = LOGIN_FAIL_CLOSED
     _secret_key = os.environ.get("SECRET_KEY")
     if not _secret_key:
         # Allow boot without SECRET_KEY only in explicit debug mode, and generate
         # a per-process random key so dev sessions still cannot be forged from
         # a known constant. Sessions invalidate on restart, which is fine in dev.
-        if os.environ.get("FLASK_DEBUG") == "1" or os.environ.get("FLASK_ENV") == "development":
+        if _is_dev:
             import secrets as _secrets
             _secret_key = _secrets.token_urlsafe(32)
             app.logger.warning("SECRET_KEY not set; using ephemeral dev key (sessions invalidate on restart).")
@@ -153,10 +164,10 @@ def configure_app(app):
     _enforce_fatsecret_tls(app)
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-    app.config["SESSION_COOKIE_SECURE"] = not _IS_DEV
+    app.config["SESSION_COOKIE_SECURE"] = not _is_dev
     app.config["REMEMBER_COOKIE_HTTPONLY"] = True
     app.config["REMEMBER_COOKIE_SAMESITE"] = "Lax"
-    app.config["REMEMBER_COOKIE_SECURE"] = not _IS_DEV
+    app.config["REMEMBER_COOKIE_SECURE"] = not _is_dev
     # Kalıcı oturum ömrünü açıkça sınırla — Flask varsayılanı 31 gün. Env ile
     # ayarlanabilir (gün), aksi halde 7 gün. Çerez/oturum maruziyetini kısaltır.
     _session_days = int(os.environ.get("PERMANENT_SESSION_LIFETIME_DAYS", "7"))

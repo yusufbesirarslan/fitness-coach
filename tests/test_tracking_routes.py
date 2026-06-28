@@ -173,14 +173,20 @@ def test_activity_log_and_today_aggregation(client, complete_user):
     first = client.post("/api/activity/log", json={"steps": 10_000, "intensity": "moderate"})
     assert first.get_json()["calories_burned"] > 0
 
-    # Aynı gün aynı yoğunluk → güncelleme (yeni satır yok).
+    # M3: "bugünün aktivitesi" TEK satırdır. Aynı gün tekrar loglamak — yoğunluk
+    # değişse bile — yeni satır EKLEMEZ, günün satırını DEĞİŞTİRİR. Eskiden
+    # yoğunluk başına ayrı satır açılıp today_activity'de kaloriler/adımlar
+    # TOPLANARAK çift/üç sayılıyordu (yoğunluk menüsünü değiştirmek kalori ekliyordu).
     client.post("/api/activity/log", json={"steps": 12_000, "intensity": "moderate"})
-    client.post("/api/activity/log", json={"steps": 2_000, "intensity": "brisk"})
-    assert DailyActivity.query.filter_by(user_id=complete_user.id).count() == 2
+    last = client.post("/api/activity/log", json={"steps": 2_000, "intensity": "brisk"})
+    assert DailyActivity.query.filter_by(user_id=complete_user.id).count() == 1
 
     today = client.get("/api/activity/today").get_json()
-    assert today["total_steps"] == 14_000
-    assert len(today["entries"]) == 2
+    # Toplama YOK: yalnızca en son loglanan tek satır yansır.
+    assert today["total_steps"] == 2_000
+    assert len(today["entries"]) == 1
+    assert today["entries"][0]["intensity"] == "brisk"
+    assert today["total_calories"] == last.get_json()["calories_burned"]
 
 
 # ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ from app.services.ai_nutrition import _estimate_macros_llm, _estimate_serving_we
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
 from app.services.foodcache import _cache_macros, _get_cached_macros
 from app.services.gamification import award_xp, complete_quest_for_user, get_level, level_title, log_activity
-from app.timeutil import day_key
+from app.timeutil import day_key, display_dt
 
 
 bp = Blueprint("social", __name__)
@@ -92,7 +92,11 @@ def friends_search():
                 db.and_(Friendship.sender_id == u.id, Friendship.receiver_id == current_user.id),
             )
         ).first()
-        status = existing.status if existing else None
+        # L3: 'rejected' durumunu DIŞARI sızdırma — aksi halde aratan kişi tam
+        # olarak reddedildiğini öğrenir (mahremiyet sızıntısı). 'accepted'/'pending'
+        # UI buton durumu için gösterilir; reddedilmiş ilişki "ilişki yok" gibi
+        # görünür ve yeniden-istek cooldown'u spam'i yine de kısar.
+        status = existing.status if existing and existing.status in ("accepted", "pending") else None
         results.append({"username": u.username, "full_name": u.full_name or u.username,
                         "profile_picture": u.avatar_src, "status": status})
     return jsonify({"users": results})
@@ -227,7 +231,7 @@ def chat_messages(username):
 
     return jsonify({"messages": [
         {"id": m.id, "sender": m.sender.username, "body": m.body,
-         "timestamp": m.timestamp.strftime("%H:%M"), "is_mine": m.sender_id == current_user.id,
+         "timestamp": display_dt(m.timestamp, "%H:%M"), "is_mine": m.sender_id == current_user.id,
          "message_type": m.message_type or "text"}
         for m in messages
     ]})
@@ -272,7 +276,7 @@ def chat_send(username):
     db.session.commit()
     quest_result = complete_quest_for_user(current_user.id, "suggestion_sent")
     response = {"message": t("route.sent"), "id": msg.id,
-                "timestamp": msg.timestamp.strftime("%H:%M"),
+                "timestamp": display_dt(msg.timestamp, "%H:%M"),
                 "message_type": msg_type}
     if quest_result:
         response["quest_awarded"] = quest_result
