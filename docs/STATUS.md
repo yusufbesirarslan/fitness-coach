@@ -2,8 +2,8 @@
 
 **This is the single canonical tracker.** Add new triage findings and their status
 *here* — do **not** create new `TRIAGE_<date>.md` files at the repo root (that sprawl
-is what this document replaces). Historical reports are preserved under
-[`docs/archive/`](archive/) and in git history.
+is what this document replaces). The historical point-in-time reports were pruned on
+2026-06-28 (all items resolved or captured below); they remain in git history if ever needed.
 
 Roadmap detail for the in-flight workstream lives in
 [`updates-plan-2026-06-28.md`](updates-plan-2026-06-28.md).
@@ -30,16 +30,16 @@ Last updated: 2026-06-28.
 | SEC1 | jsdelivr pinned + SRI; CSP narrowed to exact files | PR #100 |
 | i18n CI gate | TR/EN key/placeholder parity test blocks PRs | PR #100 |
 | A6 | `calculate_tdee` logs a warning on unknown activity (no longer silent) | already in tree |
-| A5 | `_repair_truncated_json` handles mid-value truncation + validates output | this PR |
-| D4 | Completion-marker `WorkoutLog` excluded from volume/count aggregation | this PR |
+| A5 | `_repair_truncated_json` handles mid-value truncation + validates output | PR #101 |
+| D4 | Completion-marker `WorkoutLog` excluded from volume/count aggregation | PR #101 |
+| I-M1 | Boot raw ALTER/UPDATE loop → Alembic chain (migration `f1a2b3c4d5e6`, inspector-guarded); schema-drift guard now **blocking**; `FITX_DB_AUTO_UPGRADE` gate added | PR #102 |
+| D7 | `user_metadata` JSONB-only raw `ALTER` removed together with the boot loop (column already has migration `e5f6a7b8c9d0`) — **subsumed by I-M1** | PR #102 |
 
 ## 🔧 Open / backlog
 
 | ID | Summary | Next action | Effort |
 |----|---------|-------------|:------:|
-| **I-M1** | Boot-time schema init (raw ALTERs + `create_all` + auto-upgrade in `db_init.py`) should move into proper Alembic migrations, gated behind a one-shot job | Dedicated PR; un-blocks the schema-drift CI guard (currently `continue-on-error`) | L |
-| **D7** | `user_metadata` legacy `ALTER` is `JSONB`-only → invalid on SQLite (`db_init.py`) | Fold into **I-M1** (guard by dialect / proper migration) | M |
-| **D4-mcp** | MCP server (`fitx_mcp/server.py`) computes its own workout totals and does **not** yet exclude the completion marker — app-side fixed this PR; MCP parity still open | Mirror the `WORKOUT_COMPLETION_MARKER` filter in the MCP SQL | S |
+| **D4-mcp** | MCP server (`fitx_mcp/server.py`) computes its own workout totals and does **not** yet exclude the completion marker — app-side fixed in PR #101; MCP parity still open | Mirror the `WORKOUT_COMPLETION_MARKER` filter in the MCP SQL | S |
 
 ## 🅾️ Accepted tradeoffs (won't fix — documented)
 
@@ -51,8 +51,9 @@ Last updated: 2026-06-28.
 | L5 | Vision OCR output is bounded (4000 tok) + rate-limited; cost covered by H2/M4 |
 | L7 | `style-src-attr 'unsafe-inline'` (dynamic bars) + GA wildcard host (Google's official CSP guidance) |
 
-## 📁 Archive
+## 📁 History
 
-Full historical reports: [`docs/archive/`](archive/) — `FIXES.md`, `TRIAGE.md`,
-`TRIAGE_FIXES.md`, `TRIAGE_2026-06-23/24/26/28.md`, and the earlier 2026-06-17 docs.
-They are point-in-time snapshots; treat **this file** as the current truth.
+The old point-in-time reports (`FIXES.md`, `TRIAGE.md`, `TRIAGE_FIXES.md`,
+`TRIAGE_2026-06-23/24/26/28.md`, and the 2026-06-17 docs) were pruned on 2026-06-28
+once all their items were resolved or captured above. They remain retrievable from git
+history (`git log --all -- 'docs/archive/*'`). Treat **this file** as the current truth.
