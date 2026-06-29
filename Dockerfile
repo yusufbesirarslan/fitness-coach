@@ -1,6 +1,10 @@
 # FitX Flask uygulaması — production imajı.
 # Python 3.11-slim tabanlı, gunicorn ile 5000 portundan servis eder.
-FROM python:3.11-slim
+# Base image @sha256 ile sabitlendi (3.2): tag float ediyordu ve aksi halde
+# tamamen pinlenmiş requirements'a rağmen build tekrarlanabilir değildi. Bu
+# çok-mimarili (multi-arch) index digest'tir; güncellerken yeni digest'i
+# `docker buildx imagetools inspect python:3.11-slim` ile al.
+FROM python:3.11-slim@sha256:b27df5841f3355e9473f9a516d38a6783b6c8dfeacaf2d14a240f443b368ddb6
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

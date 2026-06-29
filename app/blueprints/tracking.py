@@ -10,6 +10,7 @@ from app.i18n import t
 from app.models import DailyActivity, MealLog, User, UserSession, WaterLog, WeeklyCheckIn, WeeklyLog, WorkoutLog
 from app.services.ai_coach import generate_checkin_feedback
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
+from app.services.gamification import complete_quest_for_user
 from app.services.validators import _to_int
 from app.timeutil import app_date_of, app_today, display_dt, utc_day_bounds
 
@@ -173,10 +174,16 @@ def checkin():
     db.session.add(entry)
     db.session.commit()
 
-    return jsonify({
+    # "Haftalık Check-in" görevini ver (günde bir kez; zaten claimliyse None — 1.1).
+    quest_result = complete_quest_for_user(current_user.id, "checkin_done")
+
+    resp = {
         "message": t("route.checkin_saved"),
         "coach_feedback": coach_feedback
-    })
+    }
+    if quest_result:
+        resp["quest_awarded"] = quest_result
+    return jsonify(resp)
 
 
 @bp.route("/checkin-history")
@@ -266,12 +273,19 @@ def update_weight():
 
     db.session.commit()
 
-    return jsonify({
+    # Kilo güncellemesi de bir check-in sayılır → "Haftalık Check-in" görevini ver
+    # (günde bir kez; zaten claimliyse None — 1.1).
+    quest_result = complete_quest_for_user(current_user.id, "checkin_done")
+
+    resp = {
         "bmr": round(bmr) if bmr is not None else None,
         "tdee": round(tdee) if tdee is not None else None,
         "target_calories": round(target_calories) if target_calories is not None else None,
         "profile_incomplete": not profile_ready,
-    })
+    }
+    if quest_result:
+        resp["quest_awarded"] = quest_result
+    return jsonify(resp)
 
 
 @bp.route("/api/activity/log", methods=["POST"])

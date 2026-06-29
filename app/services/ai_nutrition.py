@@ -454,6 +454,13 @@ def _extract_categorized_items(raw_text, fw_state=None, headings=None, menu_sour
         # framework_state + ham metni birlikte ver ama toplam giriş bütçesini koru.
         menu_input = fw_state[:6000] + "\n\n" + raw_text[:_MENU_EXTRACT_MAX_CHARS - 6000]
 
+    # Sınırlayıcı (fence) jetonlarını veriden temizle: kazınan içerik birebir
+    # `MENU_DATA>>>` / `<<<MENU_DATA` taşırsa fence'i kapatıp prompt-injection
+    # alanına taşabilir. user_id sunucu-taraflı enjekte edildiği için çapraz-
+    # kullanıcı erişimi mümkün değil, ama hazırlanmış bir sayfa çıkarımı yönlendirebilir (3.7).
+    for _tok in ("<<<MENU_DATA", "MENU_DATA>>>"):
+        menu_input = menu_input.replace(_tok, "")
+
     heading_hint = ""
     if headings:
         # DİKKAT: bazı siteler (örn. BigChefs) HER YEMEĞİ ayrı bir başlık

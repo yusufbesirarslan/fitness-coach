@@ -12,7 +12,7 @@ from app.i18n import current_locale, t
 from app.models import WORKOUT_COMPLETION_MARKER, DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
 from app.services import injury_constraints
 from app.services.ai import _heavy_chat
-from app.services.gamification import _claim_quest, award_xp, get_level, level_title, log_activity
+from app.services.gamification import _claim_quest, award_xp, complete_quest_for_user, get_level, level_title, log_activity
 from app.services.menu_extract import validate_pump_check
 from app.services.premium import premium_ai_plan_gate
 from app.services.validators import validate_pump_check_image
@@ -583,7 +583,16 @@ def set_water():
                 raise
             row.count = count
             db.session.commit()
-    return jsonify({"count": row.count, "goal": WATER_GOAL})
+
+    # Su takibi güncellenince "Su Hedefi" görevini ver (günde bir kez claim edilir;
+    # complete_quest_for_user zaten claimliyse None döner). Önceden seed'leniyordu
+    # ama hiç claim edilmiyordu (ölü görev — 1.1).
+    resp = {"count": row.count, "goal": WATER_GOAL}
+    if count > 0:
+        quest_result = complete_quest_for_user(current_user.id, "water_logged")
+        if quest_result:
+            resp["quest_awarded"] = quest_result
+    return jsonify(resp)
 
 
 WATER_GOAL = 8  # bardak

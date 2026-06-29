@@ -115,14 +115,42 @@ def _extract_pdf_pages_via_vision(pdf_bytes, page_indices):
     return "\n\n".join(results)
 
 
+# Dekompresyon-bombası tavanı: küçük bir dosya devasa bir tuvale (ör. 100k×100k)
+# açılıp tam decode edilince tek gunicorn worker'ını OOM edebilir. Açılan görselin
+# piksel sayısı bu sınırı aşarsa decode ETMEDEN reddederiz (3.1). 50 MP gerçek
+# telefon/menü fotoğrafları için bolca yeterli; klasik bombalar bunun çok üstündedir.
+_MAX_IMAGE_PIXELS = 50_000_000
+
+
+class ImageTooLargeError(ValueError):
+    """Görselin tuval boyutu güvenli decode sınırını aşıyor (dekompresyon bombası riski)."""
+
+
 def _compress_image_for_vision(image_bytes, max_bytes=1_500_000):
     from PIL import Image
     import io
 
+    # PIL'in kendi guard'ı: tavanın 2 katında Image.open sırasında
+    # DecompressionBombError fırlatır. Biz ayrıca header'dan boyut kontrolü yapıyoruz
+    # (tavanın 1–2 katı aralığında PIL yalnızca uyarır, fırlatmaz).
+    Image.MAX_IMAGE_PIXELS = _MAX_IMAGE_PIXELS
+
     try:
         img = Image.open(io.BytesIO(image_bytes))
+        w, h = img.size  # header'dan okunur (lazy — piksel decode etmez)
+    except Image.DecompressionBombError as e:
+        current_app.logger.warning("[VISION] Görsel reddedildi (PIL bomb guard): %s", e)
+        raise ImageTooLargeError(str(e)) from e
     except Exception:
         return image_bytes, "image/jpeg"
+
+    # Header boyutu tavanı aşıyorsa decode tetiklenmeden reddet. Çağıranlar bunu
+    # yakalar (OCR boş döner / fail-open).
+    if w * h > _MAX_IMAGE_PIXELS:
+        current_app.logger.warning(
+            "[VISION] Görsel reddedildi: %dx%d (%d px > %d sınırı)",
+            w, h, w * h, _MAX_IMAGE_PIXELS)
+        raise ImageTooLargeError(f"image canvas too large: {w}x{h}")
 
     if img.mode in ("RGBA", "P"):
         img = img.convert("RGB")
@@ -148,7 +176,12 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
     import base64
 
     if len(image_bytes) > 1_500_000:
-        image_bytes, content_type = _compress_image_for_vision(image_bytes)
+        try:
+            image_bytes, content_type = _compress_image_for_vision(image_bytes)
+        except ImageTooLargeError:
+            # Dekompresyon-bombası riski → OCR yapmadan boş dön (çağıran "menü
+            # okunamadı" mesajı verir). Worker'ı OOM riskine atma (3.1).
+            return ""
 
     b64 = base64.b64encode(image_bytes).decode("utf-8")
     mime = content_type.split(";")[0].strip()

@@ -138,7 +138,16 @@ def configure_app(app):
     else:
         logging.basicConfig(level=getattr(logging, _LOG_LEVEL, logging.INFO))
         app.logger.setLevel(getattr(logging, _LOG_LEVEL, logging.INFO))
-    database_url = os.environ.get("DATABASE_URL", "sqlite:///chatbot.db")
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        # Prod'da DATABASE_URL eksikse hızlı patla: aksi halde efemeral SQLite'a
+        # düşülür ve redeploy'da veri sessizce kaybolurdu (3.5). Dev'de SQLite tamam.
+        if not _is_dev:
+            raise RuntimeError(
+                "DATABASE_URL is required in production. Set it (PostgreSQL), "
+                "or run in dev mode (FLASK_DEBUG=1 / FLASK_ENV=development) to "
+                "fall back to local SQLite.")
+        database_url = "sqlite:///chatbot.db"
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
     app.config["SQLALCHEMY_DATABASE_URI"] = database_url

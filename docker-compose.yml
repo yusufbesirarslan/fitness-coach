@@ -23,9 +23,10 @@ services:
       - .env
     # Veritabanı: AWS RDS PostgreSQL. Bağlantı .env'deki DATABASE_URL'den gelir;
     # compose ARTIK override ETMEZ (önceden bundled "db" servisine yönlendiriyordu).
-    # .env'de DATABASE_URL=postgresql://...rds.amazonaws.com:5432/... ZORUNLU,
-    # yoksa uygulama sessizce SQLite'a düşer (bkz. app/config.py:112). RDS dış/her
-    # zaman ayakta olduğu için web yalnızca redis'e bağımlı.
+    # .env'de DATABASE_URL=postgresql://...rds.amazonaws.com:5432/... ZORUNLU;
+    # prod'da eksikse uygulama BOOT'ta hata verir (artık sessiz SQLite fallback
+    # YOK — bkz. app/config.py, 3.5). RDS dış/her zaman ayakta olduğu için web
+    # yalnızca redis'e bağımlı.
     depends_on:
       redis:
         condition: service_healthy
@@ -33,7 +34,8 @@ services:
   redis:
     image: redis:alpine
     container_name: fitx-redis
-    restart: always
+    # web ile tutarlı: manuel stop'a saygı duy (önceden 'always' idi — 3.11).
+    restart: unless-stopped
     mem_limit: ${REDIS_MEM_LIMIT:-256m}
     # maxmemory + eviction olmadan leaderboard sorted-set'leri ve limiter depolaması
     # sınırsız büyüyüp host'u OOM'a sürükleyebilir. allkeys-lru: bellek dolunca en az

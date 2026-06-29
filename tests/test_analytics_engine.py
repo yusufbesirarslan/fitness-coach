@@ -151,17 +151,19 @@ def test_protein_goal_ignores_meals_outside_current_week(make_user):
 
 
 # ---------------------------------------------------------------------------
-# Haftalık rapor günü — Pazartesi (0) ve Pazar (6).
+# Haftalık rapor günü — yalnızca Pazartesi (0). Eskiden Pazar+Pazartesi'de
+# (haftada iki kez) tetikleniyordu; sıfırlama sınırı Pazar 23:59 Istanbul
+# olduğu için rapor yeni haftanın ilk günü Pazartesi'dir (1.3).
 # ---------------------------------------------------------------------------
 
-def test_weekly_report_only_on_monday_and_sunday():
+def test_weekly_report_only_on_monday():
     def fires(d):
         nudges = []
         _check_weekly_report_day(d, nudges)
         return bool(nudges)
 
     assert fires(date(2026, 6, 8)) is True    # Pazartesi
-    assert fires(date(2026, 6, 14)) is True   # Pazar
+    assert fires(date(2026, 6, 14)) is False  # Pazar — artık tetiklenmez
     assert fires(date(2026, 6, 10)) is False  # Çarşamba
 
 

@@ -74,7 +74,12 @@ def supplement_add():
         award_xp(current_user.id, 25)
         db.session.commit()
 
+    # Activity yazısını HEMEN commit'le. Önceden yalnızca session'a eklenip
+    # commit'i bir sonraki complete_quest_for_user'a bırakıyordu; o da görev zaten
+    # claimliyse None dönüp commit ETMEDEN çıkıyor, böylece new_supplement satırı
+    # pending kalıp alakasız bir sonraki istekte düşebiliyordu (1.2).
     log_activity(current_user.id, "new_supplement", f"{name} ({category}) stack'ine eklendi")
+    db.session.commit()
     quest_result = complete_quest_for_user(current_user.id, "supplement_added")
 
     response = {"message": t("route.supp_added"), "id": supp.id}

@@ -86,7 +86,7 @@ def get_csrf_token():
     """Bu oturuma bağlı CSRF synchronizer token'ı döndür (yoksa üret ve sakla).
 
     Token, imzalı oturum çerezinde tutulur (sunucu-taraflı kanıt). Şablonlara
-    <meta name="csrf-token"> ile sızdırılır; frontend (static/actions.js) durum-
+    <meta name="csrf-token"> ile sızdırılır; frontend (static/csrf.js) durum-
     değiştiren her fetch'e X-CSRFToken başlığı olarak ekler. _csrf_protect bu
     başlığı oturumdaki değerle karşılaştırır."""
     token = session.get(_CSRF_SESSION_KEY)
@@ -124,7 +124,7 @@ def _csrf_protect():
       2) A per-session synchronizer token (X-CSRFToken header) must match the
          token stored in the session — an attacker cannot read it (cross-origin)
          nor set a custom header, so this holds even if a future change weakens
-         layer 1. The frontend adds the header globally (static/actions.js).
+         layer 1. The frontend adds the header globally (static/csrf.js).
     """
     if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
         return
