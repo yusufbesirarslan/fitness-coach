@@ -529,7 +529,7 @@ function renderActivePlanDetail(plan, score, createdAt) {
   const mealsHtml = meals.map(m => {
     const ml = plan[m.key];
     if (!ml) return '';
-    const items = (ml.yemekler || []).map(y => `<li>${y}</li>`).join('');
+    const items = (ml.yemekler || []).map(y => `<li>${esc(y)}</li>`).join('');
     return `
       <div class="apd-meal">
         <div class="apd-meal-hdr">

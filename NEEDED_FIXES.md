@@ -2,6 +2,26 @@
 
 _Generated from a 3-agent deep-dive triage (security, backend logic, structure/AI/frontend) of the `fitness-coach` codebase. No code was changed during triage — this document is the action list._
 
+## Status — resolved in this branch
+
+- ✅ **1.1** Dead `water_logged` / `checkin_done` quests now claimed in `set_water`, `checkin`, `update_weight`.
+- ✅ **1.2** `new_supplement` activity now committed atomically (no longer dropped).
+- ✅ **1.3** Weekly-report nudge fires Monday only (was Sun+Mon).
+- ✅ **1.5** Carb penalty-only contract documented (deliberate asymmetry).
+- ✅ **2.2** `/set-language` rate-limited (30/hour per IP).
+- ✅ **2.3** AI meal names escaped with `esc()` in `nutrition.js`.
+- ✅ **2.4** `edit_profile` username TOCTOU → `IntegrityError` returns friendly "taken".
+- ✅ **3.1** OCR decompression-bomb guard (`MAX_IMAGE_PIXELS` + header dim check + test).
+- ✅ **3.2** Docker base image digest-pinned (`@sha256:`).
+- ✅ **3.5** Prod fails fast when `DATABASE_URL` is unset (no silent SQLite fallback).
+- ✅ **3.6** `_food_id_cache` reads go through a locked accessor.
+- ✅ **3.7** Menu-data fence delimiters stripped from scraped input.
+- ✅ **3.8** `hooks.py` docstrings corrected (`csrf.js`, not `actions.js`).
+- ✅ **3.9** Orphaned `templates/_chat_widget.html` deleted.
+- ✅ **3.11** `docker-compose` redis `restart` aligned to `unless-stopped`.
+
+_Deferred (need a product/ops decision): 1.4 quick-add idempotency, 1.6/1.7 INFO consolidations, 2.1/2.5/2.6 (already bounded / doc-only), 3.3/3.4 deploy & TLS config, 3.10 single-worker note._
+
 ## Executive summary
 
 The codebase is **well-engineered and unusually security-conscious**. CSRF (two-layer), CSP (per-request nonce, no `unsafe-inline`), session hardening, SSRF defense on the menu scraper, S3/IDOR ownership scoping, and the MCP authorization gate are all carefully implemented with documented rationale. **No Critical or High security vulnerabilities were found.**

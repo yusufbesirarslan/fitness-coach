@@ -679,7 +679,10 @@ def score_compatibility(food_macros, remaining):
         kaldikca orantili-puruzsuz ceza alir (orn. saf karb, protein gerekirken)
         -> ~55-80 puan (binary collapse fix); ceza kalan profile gore degisir.
       * Kati kural: besin kalanin %100'unu (kalori VEYA yag) asarsa skor ANINDA 0
-        olur ve ``"Exceeds daily budget limit"`` uyarisi tetiklenir.
+        olur ve ``"Exceeds daily budget limit"`` uyarisi tetiklenir. KARBONHIDRAT
+        BILEREK haric: karb tasmasi hard-zero degil, ilerlemeli ceza + "High
+        carbohydrate load" uyarisi alir (kalori zaten karbi izledigi icin kalori
+        kapisi en kotu durumu yakalar) — bu asimetri tasarim geregidir (1.5).
       * Protein bonusu: kalan protein hedefi varsa ve besin kalori butcesine
         sigiyorsa proteinli besinler odullendirilir.
       * ``Score = max(0, min(100, round(100 - (P_cal+P_fat+P_carb+P_balance) + Bonus_Protein)))``.

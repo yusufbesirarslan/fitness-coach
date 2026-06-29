@@ -137,7 +137,11 @@ def _check_protein_goal(user, db, models, today, nudges, en=False):
 
 
 def _check_weekly_report_day(today, nudges, en=False):
-    if today.weekday() in (0, 6):
+    # Yalnızca Pazartesi (weekday()==0). Eskiden (0, 6) idi: Pazar VE Pazartesi
+    # ikisinde de tetiklenip dürtü haftada iki kez çıkıyordu. Haftalık sıfırlama
+    # sınırı Pazar 23:59 Istanbul olduğundan rapor günü yeni haftanın ilk günü
+    # Pazartesi'dir (1.3).
+    if today.weekday() == 0:
         nudges.append(
             "NUDGE_WEEKLY_REPORT: Today is weekly report day. "
             "Use the generate_weekly_report tool to present the weekly performance summary."

@@ -6,7 +6,7 @@ from app.config import FATSECRET_API_URL, FOOD_SEARCH_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter
 from app.services.ai_coach import _coach_search_food
 from app.services.fatsecret import _food_get_servings, _fs_get, _get_fatsecret_token
-from app.services.foodcache import _cache_food_id, _food_id_cache, _get_cached_macros
+from app.services.foodcache import _cache_food_id, _get_cached_food_id, _get_cached_macros
 
 
 bp = Blueprint("food", __name__)
@@ -25,7 +25,7 @@ def food_search():
     hits, _ = _get_cached_macros([q], "per_100g")
     cached = hits.get(q)
     if cached:
-        cached_fid = _food_id_cache.get(q.lower(), "")
+        cached_fid = _get_cached_food_id(q)
         current_app.logger.debug("food_search cache hit for '%s', food_id=%s", q, cached_fid or "(none)")
         return jsonify({"results": [{
             "name": q, "brand": "",
@@ -66,7 +66,7 @@ def food_servings_by_name():
         return jsonify({"servings": [], "food_id": ""})
 
     # Check food_id cache first (populated by previous FatSecret searches)
-    cached_fid = _food_id_cache.get(name.lower())
+    cached_fid = _get_cached_food_id(name) or None
     if cached_fid:
         current_app.logger.info("servings-by-name: cache hit food_id=%s for '%s'", cached_fid, name)
         servings = _food_get_servings(cached_fid)

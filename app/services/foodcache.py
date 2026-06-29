@@ -59,6 +59,16 @@ def _cache_macros(macro_map, basis="per_serving"):
                 cache[name] = dict(macros)
 
 
+def _get_cached_food_id(name, default=""):
+    """name → food_id okumasını kilit altında yap. Düz `_food_id_cache.get(...)`
+    okuması _cache_food_id'deki eviction `del`'iyle yarışıyordu; dict.get tek
+    başına bozulmasa da dokümante kilit disiplinine uymak için tutarlı tut (3.6)."""
+    if not name:
+        return default
+    with _cache_lock:
+        return _food_id_cache.get(name.lower(), default)
+
+
 def _cache_food_id(name, fid):
     """name → FatSecret food_id eşlemesini sınırlı (bounded) bir sözlükte tut.
 

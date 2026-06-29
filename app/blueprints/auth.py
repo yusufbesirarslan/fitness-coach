@@ -31,9 +31,12 @@ _AUTH_ERROR_KEYS = {
 
 
 @bp.route("/set-language", methods=["POST"])
+@limiter.limit("30 per hour", key_func=get_remote_address)
 def set_language():
     """Anonim/giriş-öncesi TR/EN seçimi. Dili session'a yazar; girişliyse
-    hesaba da kalıcılaştırır. CSRF: durum-değiştiren POST → _csrf_protect korur."""
+    hesaba da kalıcılaştırır. CSRF: durum-değiştiren POST → _csrf_protect korur.
+    Hafif rate-limit: @login_required değil ve girişliyken DB'ye yazıyor; anonim
+    kötüye kullanımı sınırla (2.2)."""
     data = request.get_json(silent=True) or {}
     lang = (data.get("lang") or "").strip().lower()
     if not set_locale(lang):

@@ -117,6 +117,20 @@ def test_compress_passes_through_non_image(app):
     assert mime == "image/jpeg"
 
 
+def test_compress_rejects_decompression_bomb(app, monkeypatch):
+    # Tavanı küçült: 2000x2000 (4 MP) görsel sınırı aşar → decode etmeden reddedilir (3.1).
+    monkeypatch.setattr(menu_ocr, "_MAX_IMAGE_PIXELS", 100)
+    with pytest.raises(menu_ocr.ImageTooLargeError):
+        _compress_image_for_vision(_png_bytes(size=(2000, 2000)))
+
+
+def test_extract_text_returns_empty_on_oversized_image(app, monkeypatch):
+    monkeypatch.setattr(menu_ocr, "_MAX_IMAGE_PIXELS", 100)
+    # >1.5MB olsun ki compress çağrılsın; trailing padding PNG'yi bozmaz.
+    payload = _png_bytes(size=(2000, 2000)) + b"\x00" * 1_500_001
+    assert _extract_text_from_image(payload, "image/png") == ""
+
+
 # ---------------------------------------------------------------------------
 # Vision OCR sarmalayıcısı
 # ---------------------------------------------------------------------------
