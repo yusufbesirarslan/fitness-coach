@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "general_fitness": {
+    "directive": "General fitness must be full body, safe, sustainable, and full body biased; use full body A/B structure, Zone 2, mobility, and simple double progression.",
+    "coverage": ["squat", "hinge", "horizontal_push", "vertical_push", "horizontal_pull", "vertical_pull", "core_anti_extension", "core_anti_rotation"],
+    "volume": {
+      "beginner": "2-3 sets per exercise, 6-10 hard sets per major pattern weekly",
+      "intermediate": "3-4 sets per exercise, 8-14 hard sets per major pattern weekly",
+      "advanced": "3-5 sets per exercise, tempo or density add-ons only when recovery allows"
+    },
+    "intensity": {
+      "beginner": "RPE 6-7, 2-4 reps in reserve",
+      "intermediate": "RPE 7-8, 1-3 reps in reserve",
+      "advanced": "RPE 7-9 with no frequent failure"
+    },
+    "progression": "Double progression: add reps first, then load; keep technique clean.",
+    "deload": "Every 4th week reduce volume 30-40%."
+  },
+  "bodybuilding": {
+    "directive": "Bodybuilding must be hipertrofi focused: structured mechanical tension plus metabolic stress, not random split volume.",
+    "coverage": ["chest", "back", "quads", "hamstrings", "glutes", "delts", "biceps", "triceps", "calves", "core"],
+    "volume": {
+      "beginner": "8-12 sets per muscle weekly with machine bias",
+      "intermediate": "12-18 sets per muscle weekly with compound plus isolation balance",
+      "advanced": "16-24 sets per muscle weekly only when recovery allows"
+    },
+    "intensity": {
+      "beginner": "RPE 6-8, no failure",
+      "intermediate": "Compound RPE 7-9, isolation RPE 8-9",
+      "advanced": "Advanced intensity techniques only on isolation work"
+    },
+    "progression": "Double progression plus cautious weekly set additions for intermediate and advanced users.",
+    "deload": "Every 4-6 weeks reduce volume 30-50% and cap RPE at 6-7.",
+    "fatigue_rule": "Control chest/shoulder/triceps overlap and leg-day systemic fatigue."
+  },
+  "powerlifting": {
+    "directive": "Powerlifting must treat squat, bench, and deadlift as ana kaldırış anchors with planned exposure and fatigue control.",
+    "coverage": ["squat", "bench_press", "deadlift", "horizontal_pull", "posterior_chain", "core_stability"],
+    "volume": {
+      "beginner": "3 day technique-first exposure, 2-4 main lift sets",
+      "intermediate": "4 day split with heavy and volume exposures",
+      "advanced": "Autoregulated high specificity with microloading"
+    },
+    "intensity": {
+      "beginner": "50-65% 1RM or RPE 6-7",
+      "intermediate": "70-85% 1RM or RPE 7-8",
+      "advanced": "RPE 7-9 with peak work sparingly"
+    },
+    "progression": "Add reps before load; upper lifts +2.5-5%, lower lifts up to +5% when bar speed and RPE allow.",
+    "deload": "Every 4-6 weeks reduce volume 30-50% and intensity 10-15%.",
+    "fatigue_rule": "Do not peak squat and deadlift in the same week; monitor deadlift CNS fatigue."
+  },
+  "crossfit": {
+    "directive": "CrossFit must be structured energy system training: strength, skill, gymnastics, conditioning, and controlled chaos.",
+    "coverage": ["squat", "hinge", "push", "pull", "olympic_lift_pattern", "gymnastics", "conditioning"],
+    "volume": {
+      "beginner": "50-70% WOD volume, lighter load, longer rest",
+      "intermediate": "Full WOD standard with moderate load",
+      "advanced": "Higher density, barbell cycling, and advanced gymnastics"
+    },
+    "intensity": {
+      "beginner": "Technique before intensity, metcon RPE 7-8",
+      "intermediate": "Strength RPE 7-9, metcon RPE 8-9",
+      "advanced": "Metcon RPE 8-10 with recovery days mandatory"
+    },
+    "progression": "Increase density or complexity only after movement quality is stable.",
+    "deload": "Every 4-6 weeks reduce WOD volume and high-intensity density.",
+    "fatigue_rule": "Never place two high-intensity days back to back."
+  },
+  "calisthenics": {
+    "directive": "Calisthenics must use progression tree logic for neural and mechanical skill acquisition.",
+    "coverage": ["vertical_push", "horizontal_push", "vertical_pull", "horizontal_pull", "core_anti_extension", "core_dynamic", "unilateral_leg_work", "skill_exposure"],
+    "volume": {
+      "beginner": "Assisted progressions, shorter holds, submaximal sets",
+      "intermediate": "Strict bodyweight movements with full ROM and moderate volume",
+      "advanced": "Weighted movements, isometric holds, high density circuits"
+    },
+    "intensity": {
+      "beginner": "RPE 6-7, stop before form breakdown",
+      "intermediate": "Strength days RPE 7-8, skill days RPE 5-6",
+      "advanced": "Circuit days RPE 8-9, skill work low fatigue"
+    },
+    "progression": "Do not skip skill dependencies; map movement to the next safe progression.",
+    "deload": "Reduce pull volume and circuit density every 4-6 weeks.",
+    "fatigue_rule": "Control pull-up volume and avoid failure because form breakdown is costly."
+  },
+  "functional": {
+    "directive": "Functional training must be movement pattern based: motor control, unilateral stability, mobility, and transfer to daily life.",
+    "coverage": ["squat", "hinge", "push", "pull", "unilateral", "core_anti_rotation", "mobility", "conditioning"],
+    "volume": {
+      "beginner": "2-3 sets, low complexity, controlled tempo",
+      "intermediate": "3-4 sets plus unilateral and circuit density",
+      "advanced": "Higher load, tempo, density, and complex circuits"
+    },
+    "intensity": {
+      "beginner": "RPE 6-7, no failure",
+      "intermediate": "RPE 6-8",
+      "advanced": "RPE 7-8 with density progression"
+    },
+    "progression": "Increase reps, tempo control, stability demand, then load.",
+    "deload": "Every 4th week reduce circuit rounds and loading.",
+    "fatigue_rule": "For low conditioning, reduce circuit volume and increase rest."
+  }
+}
+

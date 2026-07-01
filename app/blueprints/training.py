@@ -15,6 +15,8 @@ from app.services.ai import _heavy_chat
 from app.services.gamification import _claim_quest, award_xp, complete_quest_for_user, get_level, level_title, log_activity
 from app.services.menu_extract import validate_pump_check
 from app.services.premium import premium_ai_plan_gate
+from app.services.training_generation.response_validator import PlanValidationError
+from app.services.training_generation.service import generate_training_plan_payload
 from app.services.validators import validate_pump_check_image
 from app.timeutil import app_today, display_dt, utc_day_bounds
 
@@ -47,6 +49,21 @@ def training_plan_generate():
 
     if not last:
         return jsonify({"error": t("plan.no_session")}), 400
+
+    try:
+        return jsonify(generate_training_plan_payload(
+            current_user,
+            last,
+            data,
+            chat_fn=_heavy_chat,
+            language=current_locale(),
+            logger=current_app.logger,
+        ))
+    except (json.JSONDecodeError, PlanValidationError):
+        return jsonify({"error": t("plan.gen_failed")}), 500
+    except Exception:
+        current_app.logger.exception("Plan oluÅŸturma hatasÄ±")
+        return jsonify({"error": t("route.plan_failed")}), 500
 
     goal             = last.goal
     fitness_level    = last.fitness_level
