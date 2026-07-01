@@ -1,0 +1,7 @@
+PUSH DAY: bench press, incline dumbbell press, fly/pec deck, lateral raise, triceps pushdown, overhead triceps extension.
+PULL DAY: pulldown/pull-up, row, seated row, rear delt fly, curl, hammer curl.
+LEG DAY: squat or hack squat, leg press, Romanian deadlift, leg curl, leg extension, calf raise.
+HYPERTROPHY: beginner 8-12 sets/muscle/week, intermediate 12-18, advanced 16-24 only if recovery allows.
+FAILURE POLICY: no compound failure; isolation can approach failure for advanced users.
+FATIGUE: manage chest/shoulder/triceps overlap and high systemic fatigue after legs.
+

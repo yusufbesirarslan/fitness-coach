@@ -24,6 +24,30 @@ PLAN_JSON = {
 }
 
 
+PLAN_JSON["program"] = [
+    {"gun": "Pazartesi", "tip": "antrenman", "odak": "Sırt",
+     "sure_dk": 45, "tahmini_kalori": 380,
+     "egzersizler": [{"isim": "Lat Pulldown", "set": 3, "tekrar": "10-12",
+                      "dinlenme": "75 sn", "not": "kontrollü"}]},
+    {"gun": "Salı", "tip": "dinlenme", "odak": "Aktif Toparlanma",
+     "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+    {"gun": "Çarşamba", "tip": "antrenman", "odak": "Full Body",
+     "sure_dk": 45, "tahmini_kalori": 360,
+     "egzersizler": [{"isim": "Goblet Squat", "set": 3, "tekrar": "8-12",
+                      "dinlenme": "90 sn", "not": "RPE 7"}]},
+    {"gun": "Perşembe", "tip": "dinlenme", "odak": "Aktif Toparlanma",
+     "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+    {"gun": "Cuma", "tip": "antrenman", "odak": "Push Pull",
+     "sure_dk": 45, "tahmini_kalori": 370,
+     "egzersizler": [{"isim": "Seated Row", "set": 3, "tekrar": "10-12",
+                      "dinlenme": "75 sn", "not": "omuzları düşür"}]},
+    {"gun": "Cumartesi", "tip": "dinlenme", "odak": "Aktif Toparlanma",
+     "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+    {"gun": "Pazar", "tip": "dinlenme", "odak": "Aktif Toparlanma",
+     "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+]
+
+
 def _mock_plan(monkeypatch):
     raw = json.dumps(PLAN_JSON, ensure_ascii=False)
     monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kw: raw)

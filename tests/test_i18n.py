@@ -344,7 +344,35 @@ def test_training_plan_prompt_localized_keeps_canonical_fields(app, client, make
     def fake_heavy(messages, system_prompt=None, **kw):
         cap["prompt"] = messages[0]["content"]
         cap["system"] = system_prompt
-        return '{"program": [], "haftalik_ozet": {}}'
+        return json.dumps({
+            "program": [
+                {"gun": "Pazartesi", "tip": "antrenman", "odak": "Full Body",
+                 "sure_dk": 45, "tahmini_kalori": 320,
+                 "egzersizler": [{"isim": "Goblet Squat", "set": 3,
+                                  "tekrar": "8-12", "dinlenme": "90 sn",
+                                  "not": "controlled tempo"}]},
+                {"gun": "Salı", "tip": "dinlenme", "odak": "Active Recovery",
+                 "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+                {"gun": "Çarşamba", "tip": "antrenman", "odak": "Upper Body",
+                 "sure_dk": 45, "tahmini_kalori": 300,
+                 "egzersizler": [{"isim": "Seated Row", "set": 3,
+                                  "tekrar": "10-12", "dinlenme": "75 sn",
+                                  "not": "pull with control"}]},
+                {"gun": "Perşembe", "tip": "dinlenme", "odak": "Active Recovery",
+                 "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+                {"gun": "Cuma", "tip": "antrenman", "odak": "Lower Body",
+                 "sure_dk": 45, "tahmini_kalori": 330,
+                 "egzersizler": [{"isim": "Leg Press", "set": 3,
+                                  "tekrar": "10-12", "dinlenme": "90 sn",
+                                  "not": "smooth reps"}]},
+                {"gun": "Cumartesi", "tip": "dinlenme", "odak": "Active Recovery",
+                 "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+                {"gun": "Pazar", "tip": "dinlenme", "odak": "Active Recovery",
+                 "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+            ],
+            "haftalik_ozet": {"yogunluk_skoru": 7, "denge_skoru": 8,
+                              "uygunluk_skoru": 8},
+        }, ensure_ascii=False)
     monkeypatch.setattr(trainmod, "_heavy_chat", fake_heavy)
 
     u = make_user("trplanen", language="en")

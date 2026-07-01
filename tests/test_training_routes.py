@@ -23,6 +23,42 @@ PLAN_JSON = {
 }
 
 
+def _seven_day_program(first_exercise="Lat Pulldown", include_safe_leg_press=False):
+    first_exercises = [
+        {"isim": first_exercise, "set": 3, "tekrar": "10-12",
+         "dinlenme": "75 sn", "not": "kontrollü"}
+    ]
+    if include_safe_leg_press:
+        first_exercises.append(
+            {"isim": "Leg Press", "set": 3, "tekrar": "10",
+             "dinlenme": "90 sn", "not": "kontrollü"}
+        )
+    return [
+        {"gun": "Pazartesi", "tip": "antrenman", "odak": "Sırt",
+         "sure_dk": 45, "tahmini_kalori": 380, "egzersizler": first_exercises},
+        {"gun": "Salı", "tip": "dinlenme", "odak": "Aktif Toparlanma",
+         "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+        {"gun": "Çarşamba", "tip": "antrenman", "odak": "Full Body",
+         "sure_dk": 45, "tahmini_kalori": 360,
+         "egzersizler": [{"isim": "Goblet Squat", "set": 3, "tekrar": "8-12",
+                          "dinlenme": "90 sn", "not": "RPE 7"}]},
+        {"gun": "Perşembe", "tip": "dinlenme", "odak": "Aktif Toparlanma",
+         "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+        {"gun": "Cuma", "tip": "antrenman", "odak": "Push Pull",
+         "sure_dk": 45, "tahmini_kalori": 370,
+         "egzersizler": [{"isim": "Seated Row", "set": 3, "tekrar": "10-12",
+                          "dinlenme": "75 sn", "not": "omuzları düşür"}]},
+        {"gun": "Cumartesi", "tip": "dinlenme", "odak": "Aktif Toparlanma",
+         "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+        {"gun": "Pazar", "tip": "dinlenme", "odak": "Aktif Toparlanma",
+         "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+    ]
+
+
+PLAN_JSON["program"] = _seven_day_program()
+PLAN_JSON["haftalik_ozet"]["toplam_tahmini_kalori"] = 1110
+
+
 @pytest.fixture
 def with_session(auth_user):
     db.session.add(UserSession(user_id=auth_user.id, goal="kilo verme",
@@ -95,6 +131,9 @@ INJURY_PLAN = {
                  ]}],
     "haftalik_ozet": {"yogunluk_skoru": 8, "denge_skoru": 8, "uygunluk_skoru": 9},
 }
+
+
+INJURY_PLAN["program"] = _seven_day_program("Conventional Deadlift", include_safe_leg_press=True)
 
 
 def test_plan_persists_posted_injuries(client, with_session, auth_user, monkeypatch):
@@ -292,3 +331,23 @@ def test_water_defaults_and_roundtrip(client, auth_user):
 
 def test_training_page_renders(client, auth_user):
     assert client.get("/training").status_code == 200
+
+
+def test_plan_prompt_includes_deterministic_classification_and_style(client, with_session, monkeypatch):
+    captured = {}
+
+    def fake_chat(**kwargs):
+        captured["prompt"] = kwargs["messages"][0]["content"]
+        return json.dumps(PLAN_JSON, ensure_ascii=False)
+    monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
+
+    body = client.post("/training-plan", json={
+        "gun_sayisi": 3,
+        "antrenman_tarzi": "powerlifting",
+    }).get_json()
+
+    assert body["program"] == PLAN_JSON["program"]
+    assert body["classification"]["level"] in {"Beginner", "Intermediate", "Advanced"}
+    assert "Final classified level" in captured["prompt"]
+    assert "LLM sınıflandırma yapmayacak" in captured["prompt"]
+    assert "ana kaldırış" in captured["prompt"]
