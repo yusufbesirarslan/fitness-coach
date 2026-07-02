@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}" data-theme="dark">
+<head>
+    {% include "_head.html" %}
+    <title>{{ t('feed.page_title') }}</title>
+    <link rel="stylesheet" href="/static/theme.css">
+    <link rel="stylesheet" href="/static/nav.css">
+    <style nonce="{{ csp_nonce }}">
+    .feed-wrap { max-width: 620px; margin: 0 auto; display:flex; flex-direction:column; gap:14px; }
+    .feed-card { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden; }
+    .feed-head { display:flex; align-items:center; gap:10px; padding:14px 16px; }
+    .feed-avatar { width:40px; height:40px; border-radius:50%; background:linear-gradient(135deg,#3D8BFF,#1E6FE0); color:#121212; display:flex; align-items:center; justify-content:center; font-family:var(--font-display); overflow:hidden; }
+    .feed-avatar img { width:100%; height:100%; object-fit:cover; }
+    .feed-user { font-weight:700; color:var(--text); font-size:14px; }
+    .feed-time { color:var(--text-3); font-size:12px; }
+    .feed-img { width:100%; max-height:520px; object-fit:cover; display:block; background:rgba(255,255,255,0.03); }
+    .feed-body { padding:14px 16px 16px; display:flex; flex-direction:column; gap:12px; }
+    .feed-label { font-size:10px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; color:var(--text-3); margin-bottom:3px; }
+    .feed-value { font-size:14px; color:var(--text); line-height:1.45; }
+    .feed-actions { display:flex; gap:14px; color:var(--text-2); font-size:13px; align-items:center; }
+    .feed-action { background:none; border:0; color:inherit; cursor:pointer; font:inherit; padding:0; }
+    .feed-action.liked { color:var(--volt); }
+    .feed-skeleton { height:360px; border-radius:var(--r-md); background:linear-gradient(90deg,rgba(255,255,255,.03),rgba(255,255,255,.07),rgba(255,255,255,.03)); animation:pulse 1.2s infinite; }
+    .feed-empty { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); padding:32px; text-align:center; color:var(--text-3); }
+    @keyframes pulse { 0%{opacity:.6} 50%{opacity:1} 100%{opacity:.6} }
+    </style>
+</head>
+{% set nav_active = 'feed' %}
+<body class="page-body">
+<div class="toast-wrap" id="toast-wrap"></div>
+{% include "_nav.html" %}
+<main class="main-content">
+    <div class="page-hdr">
+        <h1>{{ t('feed.h1_a') }}<br><span>{{ t('feed.h1_b') }}</span></h1>
+        <p>{{ t('feed.page_sub') }}</p>
+    </div>
+    <div class="feed-wrap" id="feed-list">
+        <div class="feed-skeleton"></div>
+        <div class="feed-skeleton"></div>
+    </div>
+</main>
+{% include "_actionbar.html" %}
+<script nonce="{{ csp_nonce }}">
+var __t = window.t || function(k){ return k; };
+let feedPage = 1;
+let feedLoading = false;
+let feedHasMore = true;
+const feedList = document.getElementById('feed-list');
+function esc(v){ const d=document.createElement('div'); d.textContent=v == null ? '' : String(v); return d.innerHTML; }
+function avatar(post){ return post.userAvatar ? '<div class="feed-avatar"><img src="'+esc(post.userAvatar).replace(/"/g,'&quot;')+'" alt=""></div>' : '<div class="feed-avatar">'+esc((post.username||'U')[0].toUpperCase())+'</div>'; }
+function card(post){
+  return '<article class="feed-card" data-id="'+post.id+'"><div class="feed-head">'+avatar(post)+'<div><div class="feed-user">'+esc(post.username)+'</div><div class="feed-time">'+esc(post.timePosted)+'</div></div></div>'+
+    (post.imageUrl ? '<img class="feed-img" src="'+esc(post.imageUrl).replace(/"/g,'&quot;')+'" loading="lazy" decoding="async" alt="">' : '')+
+    '<div class="feed-body"><div><div class="feed-label">'+__t('feed.environment')+'</div><div class="feed-value">'+esc(post.environment)+'</div></div>'+
+    '<div><div class="feed-label">'+__t('feed.description')+'</div><div class="feed-value">'+esc(post.description)+'</div></div>'+
+    '<div class="feed-actions"><button class="feed-action '+(post.likedByMe?'liked':'')+'" data-like="'+post.id+'">'+post.likesCount+' '+__t('feed.likes')+'</button><button class="feed-action" data-comments="'+post.id+'">'+__t('feed.comments_count',{n:post.commentsCount})+'</button></div></div></article>';
+}
+async function loadFeed(){
+  if(feedLoading || !feedHasMore) return;
+  feedLoading = true;
+  const res = await fetch('/feed/data?page=' + feedPage);
+  const data = await res.json();
+  if(feedPage === 1) feedList.innerHTML = '';
+  if(!data.posts.length && feedPage === 1) feedList.innerHTML = '<div class="feed-empty">'+__t('feed.empty')+'</div>';
+  feedList.insertAdjacentHTML('beforeend', data.posts.map(card).join(''));
+  feedHasMore = data.hasMore;
+  feedPage = data.nextPage || feedPage;
+  feedLoading = false;
+}
+feedList.addEventListener('click', async (e) => {
+  const like = e.target.closest('[data-like]');
+  if(!like) return;
+  const id = like.dataset.like;
+  const liked = like.classList.contains('liked');
+  const res = await fetch('/pump-check/' + id + '/like', { method: liked ? 'DELETE' : 'POST' });
+  const data = await res.json();
+  if(res.ok){ like.classList.toggle('liked', data.liked); like.textContent = data.likesCount + ' ' + __t('feed.likes'); }
+});
+window.addEventListener('scroll', () => { if(window.innerHeight + window.scrollY > document.body.offsetHeight - 500) loadFeed(); });
+loadFeed();
+</script>
+<script src="/static/nav.js"></script>
+<script src="/static/actions.js"></script>
+</body>
+</html>

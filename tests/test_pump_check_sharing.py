@@ -245,3 +245,53 @@ def test_friend_select_list_recent_contacts_first(client, auth_user, make_user):
     body = client.get("/friends/select-list").get_json()
 
     assert [row["id"] for row in body["friends"]] == [recent_friend.id, old_friend.id]
+
+
+def test_feed_data_shows_current_user_and_friend_feed_posts(client, auth_user, make_user):
+    friend = make_user("friend")
+    stranger = make_user("stranger")
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=friend.id, status="accepted"))
+    db.session.add(PumpCheck(user_id=auth_user.id, visibility="feed", location_type="Gym", description="Mine", valid=True))
+    db.session.add(PumpCheck(user_id=friend.id, visibility="feed", location_type="Home", description="Friend", valid=True))
+    db.session.add(PumpCheck(user_id=stranger.id, visibility="feed", location_type="Gym", description="Nope", valid=True))
+    db.session.commit()
+
+    body = client.get("/feed/data").get_json()
+
+    descriptions = [post["description"] for post in body["posts"]]
+    assert descriptions == ["Friend", "Mine"]
+    assert "Nope" not in descriptions
+
+
+def test_feed_page_renders(client, auth_user):
+    assert client.get("/feed").status_code == 200
+
+
+def test_like_create_and_delete_updates_count(client, auth_user, make_user):
+    friend = make_user("friend")
+    db.session.add(Friendship(sender_id=friend.id, receiver_id=auth_user.id, status="accepted"))
+    check = PumpCheck(user_id=friend.id, visibility="feed", valid=True)
+    db.session.add(check)
+    db.session.commit()
+
+    assert client.post(f"/pump-check/{check.id}/like").get_json()["likesCount"] == 1
+    assert client.post(f"/pump-check/{check.id}/like").get_json()["likesCount"] == 1
+    assert client.delete(f"/pump-check/{check.id}/like").get_json()["likesCount"] == 0
+
+
+def test_comment_requires_visibility_and_updates_count(client, auth_user, make_user):
+    stranger = make_user("stranger")
+    check = PumpCheck(user_id=stranger.id, visibility="feed", valid=True)
+    db.session.add(check)
+    db.session.commit()
+
+    denied = client.post(f"/pump-check/{check.id}/comments", json={"body": "Nice"})
+    assert denied.status_code == 403
+
+    db.session.add(Friendship(sender_id=stranger.id, receiver_id=auth_user.id, status="accepted"))
+    db.session.commit()
+    ok = client.post(f"/pump-check/{check.id}/comments", json={"body": "Nice work"})
+    assert ok.status_code == 200
+    assert ok.get_json()["commentsCount"] == 1
+    comments = client.get(f"/pump-check/{check.id}/comments").get_json()["comments"]
+    assert comments[0]["body"] == "Nice work"

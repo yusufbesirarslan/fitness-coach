@@ -7,11 +7,12 @@ from sqlalchemy.exc import IntegrityError
 from app.config import SEARCH_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
 from app.i18n import t
-from app.models import Friendship, MealLog, Message, User
+from app.models import Friendship, MealLog, Message, PumpCheck, PumpCheckComment, PumpCheckLike, User
 from app.services.ai_nutrition import _estimate_macros_llm, _estimate_serving_weights_llm, _parse_suggestion_items, _turkish_ablative_suffix
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
 from app.services.foodcache import _cache_macros, _get_cached_macros
 from app.services.gamification import award_xp, complete_quest_for_user, get_level, level_title, log_activity
+from app.services.pump_checks import can_view_pump_check, get_friend_ids, serialize_pump_check_card
 from app.timeutil import day_key, display_dt
 
 
@@ -107,6 +108,103 @@ def friends_select_list():
         "profile_picture": u.avatar_src,
         "recent": u.id in recent_rank,
     } for u in users]})
+
+
+@bp.route("/feed")
+@login_required
+def feed_page():
+    return render_template("feed.html", username=current_user.username, profile_picture=current_user.avatar_src)
+
+
+@bp.route("/feed/data")
+@login_required
+def feed_data():
+    page = max(int(request.args.get("page", 1) or 1), 1)
+    per_page = min(max(int(request.args.get("per_page", 10) or 10), 1), 30)
+    visible_user_ids = get_friend_ids(current_user.id) | {current_user.id}
+    query = PumpCheck.query.filter(
+        PumpCheck.visibility == "feed",
+        PumpCheck.user_id.in_(visible_user_ids),
+    ).order_by(PumpCheck.created_at.desc(), PumpCheck.id.desc())
+    rows = query.offset((page - 1) * per_page).limit(per_page + 1).all()
+    posts = rows[:per_page]
+    return jsonify({
+        "posts": [serialize_pump_check_card(row, current_user.id) for row in posts],
+        "hasMore": len(rows) > per_page,
+        "nextPage": page + 1 if len(rows) > per_page else None,
+    })
+
+
+def _visible_pump_check_or_403(check_id):
+    check = db.session.get(PumpCheck, check_id)
+    if not check:
+        return None, (jsonify({"error": t("pump.not_found")}), 404)
+    if not can_view_pump_check(current_user.id, check):
+        return None, (jsonify({"error": t("route.not_friends")}), 403)
+    return check, None
+
+
+@bp.route("/pump-check/<int:check_id>/like", methods=["POST"])
+@login_required
+def pump_check_like(check_id):
+    check, error = _visible_pump_check_or_403(check_id)
+    if error:
+        return error
+    existing = PumpCheckLike.query.filter_by(pump_check_id=check.id, user_id=current_user.id).first()
+    if not existing:
+        db.session.add(PumpCheckLike(pump_check_id=check.id, user_id=current_user.id))
+        check.likes_count = (check.likes_count or 0) + 1
+        db.session.commit()
+    return jsonify({"liked": True, "likesCount": check.likes_count or 0})
+
+
+@bp.route("/pump-check/<int:check_id>/like", methods=["DELETE"])
+@login_required
+def pump_check_unlike(check_id):
+    check, error = _visible_pump_check_or_403(check_id)
+    if error:
+        return error
+    existing = PumpCheckLike.query.filter_by(pump_check_id=check.id, user_id=current_user.id).first()
+    if existing:
+        db.session.delete(existing)
+        check.likes_count = max((check.likes_count or 0) - 1, 0)
+        db.session.commit()
+    return jsonify({"liked": False, "likesCount": check.likes_count or 0})
+
+
+@bp.route("/pump-check/<int:check_id>/comments")
+@login_required
+def pump_check_comments(check_id):
+    check, error = _visible_pump_check_or_403(check_id)
+    if error:
+        return error
+    rows = PumpCheckComment.query.filter_by(pump_check_id=check.id).order_by(PumpCheckComment.created_at.asc()).all()
+    return jsonify({"comments": [{
+        "id": row.id,
+        "username": row.user.username,
+        "userAvatar": row.user.avatar_src,
+        "body": row.body,
+        "createdAt": display_dt(row.created_at, "%d.%m.%Y %H:%M"),
+    } for row in rows]})
+
+
+@bp.route("/pump-check/<int:check_id>/comments", methods=["POST"])
+@login_required
+def pump_check_comment_create(check_id):
+    check, error = _visible_pump_check_or_403(check_id)
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    body = (data.get("body") or "").strip()
+    if not body:
+        return jsonify({"error": t("route.message_empty")}), 400
+    if len(body) > 500:
+        return jsonify({"error": t("route.message_too_long")}), 400
+    comment = PumpCheckComment(pump_check_id=check.id, user_id=current_user.id, body=body)
+    db.session.add(comment)
+    check.comments_count = (check.comments_count or 0) + 1
+    db.session.commit()
+    return jsonify({"id": comment.id, "commentsCount": check.comments_count or 0})
 
 
 @bp.route("/friends/search")
