@@ -91,6 +91,17 @@
   "settings.language": "Dil",
   "settings.language_hint": "Uygulama ve koç dili.",
 
+  "wearables.title": "Wearables",
+  "wearables.connected": "Bağlı",
+  "wearables.not_connected": "Bağlı Değil",
+  "wearables.last_sync": "Son senkron:",
+  "wearables.sync_waiting": "Bağlandı, ilk senkron bekleniyor.",
+  "wearables.connect_hint": "Aktivite, uyku ve toparlanma verilerini bağla.",
+  "wearables.connect": "Bağla",
+  "wearables.sync_today": "Bugünü Senkronize Et",
+  "wearables.sync_done": "Wearable verileri senkronize edildi.",
+  "wearables.sync_failed": "Senkronizasyon başarısız.",
+
   "landing.page_title": "AxisAI — Yapay Zekâ Fitness Koçun",
   "landing.meta_desc": "AxisAI'e ücretsiz katıl — yapay zekâ koçunla 3 dakikada kişiye özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.",
   "landing.og_desc": "3 dakikada sana özel AI plan. Takip et, arkadaşlarınla yarış, hedefine ulaş.",

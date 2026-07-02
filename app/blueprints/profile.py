@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from app.blueprints.supplements import CATEGORY_ICONS
 from app.extensions import db
 from app.i18n import t
-from app.models import Supplement, User, UserSession
+from app.models import Supplement, User, UserSession, UserWearableConnection
 from app.services.avatars import set_user_avatar
 from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee, generate_nutrition_plan, generate_training_plan
 from app.services.validators import validate_username
@@ -87,6 +87,10 @@ def edit_profile():
         supps = Supplement.query.filter_by(user_id=current_user.id)\
             .filter(Supplement.status.in_(["Active", "Low Stock"]))\
             .order_by(Supplement.created_at.desc()).all()
+        wearable_connections = {
+            row.provider: row for row in UserWearableConnection.query
+            .filter_by(user_id=current_user.id).all()
+        }
         return render_template("edit_profile.html",
             username=current_user.username,
             full_name=current_user.full_name or "",
@@ -96,6 +100,7 @@ def edit_profile():
             streak_count=current_user.streak_count or 0,
             supplements=supps,
             icons=CATEGORY_ICONS,
+            wearable_connections=wearable_connections,
         )
 
     data = request.get_json(silent=True) or {}
