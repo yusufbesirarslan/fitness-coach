@@ -154,7 +154,11 @@ def pump_check_like(check_id):
     if not existing:
         db.session.add(PumpCheckLike(pump_check_id=check.id, user_id=current_user.id))
         check.likes_count = (check.likes_count or 0) + 1
-        db.session.commit()
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+            check = db.session.get(PumpCheck, check.id)
     return jsonify({"liked": True, "likesCount": check.likes_count or 0})
 
 

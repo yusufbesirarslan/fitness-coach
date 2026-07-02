@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timedelta
 
+from app.blueprints import social as social_bp
 from app.extensions import db
 from app.blueprints import training as training_bp
 from app.i18n import t
@@ -267,6 +268,13 @@ def test_feed_page_renders(client, auth_user):
     assert client.get("/feed").status_code == 200
 
 
+def test_feed_page_uses_shared_feed_nav_and_leaderboard_drawer(client, auth_user):
+    html = client.get("/feed").get_data(as_text=True)
+
+    assert 'href="/feed"' in html
+    assert 'href="/leaderboard"' in html
+
+
 def test_like_create_and_delete_updates_count(client, auth_user, make_user):
     friend = make_user("friend")
     db.session.add(Friendship(sender_id=friend.id, receiver_id=auth_user.id, status="accepted"))
@@ -277,6 +285,41 @@ def test_like_create_and_delete_updates_count(client, auth_user, make_user):
     assert client.post(f"/pump-check/{check.id}/like").get_json()["likesCount"] == 1
     assert client.post(f"/pump-check/{check.id}/like").get_json()["likesCount"] == 1
     assert client.delete(f"/pump-check/{check.id}/like").get_json()["likesCount"] == 0
+
+
+def test_like_duplicate_integrity_returns_stable_liked_state(client, auth_user, make_user, monkeypatch):
+    friend = make_user("friend")
+    db.session.add(Friendship(sender_id=friend.id, receiver_id=auth_user.id, status="accepted"))
+    check = PumpCheck(user_id=friend.id, visibility="feed", likes_count=1, valid=True)
+    db.session.add(check)
+    db.session.flush()
+    db.session.add(PumpCheckLike(pump_check_id=check.id, user_id=auth_user.id))
+    db.session.commit()
+
+    real_query = social_bp.PumpCheckLike.query
+    state = {"first_check": True}
+
+    class _RaceQuery:
+        def filter_by(self, **kw):
+            real = real_query.filter_by(**kw)
+            if state["first_check"]:
+                state["first_check"] = False
+
+                class _Miss:
+                    def first(self_inner):
+                        return None
+
+                return _Miss()
+            return real
+
+    monkeypatch.setattr(social_bp.PumpCheckLike, "query", _RaceQuery())
+
+    response = client.post(f"/pump-check/{check.id}/like")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"liked": True, "likesCount": 1}
+    assert PumpCheckLike.query.filter_by(pump_check_id=check.id, user_id=auth_user.id).count() == 1
+    assert db.session.get(PumpCheck, check.id).likes_count == 1
 
 
 def test_comment_requires_visibility_and_updates_count(client, auth_user, make_user):
