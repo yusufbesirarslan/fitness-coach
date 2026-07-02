@@ -8,10 +8,11 @@ from sqlalchemy.exc import IntegrityError
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
 from app.i18n import current_locale, t
-from app.models import WORKOUT_COMPLETION_MARKER, DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
+from app.models import Message, WORKOUT_COMPLETION_MARKER, DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
 from app.services.ai import _heavy_chat
 from app.services.gamification import _claim_quest, award_xp, complete_quest_for_user, get_level, level_title, log_activity
 from app.services.menu_extract import validate_pump_check
+from app.services.pump_checks import get_friend_ids
 from app.services.premium import premium_ai_plan_gate
 from app.services.training_generation.response_validator import PlanValidationError
 from app.services.training_generation.service import generate_training_plan_payload
@@ -20,6 +21,22 @@ from app.timeutil import app_today, display_dt, utc_day_bounds
 
 
 bp = Blueprint("training", __name__)
+
+
+def _parse_pump_visibility(data):
+    visibility = (data.get("visibility") or "feed").strip().lower()
+    if visibility not in {"feed", "friends", "private"}:
+        return None, [], t("pump.visibility_invalid")
+    raw_ids = data.get("shared_friend_ids") or []
+    try:
+        selected_ids = list(dict.fromkeys(int(x) for x in raw_ids))
+    except (TypeError, ValueError):
+        return None, [], t("pump.friend_ids_invalid")
+    if visibility == "friends" and not selected_ids:
+        return None, [], t("pump.friend_required")
+    if visibility != "friends":
+        selected_ids = []
+    return visibility, selected_ids, None
 
 
 @bp.route("/training")
@@ -118,6 +135,13 @@ def complete_workout():
 
     location_type = (data.get("location_type") or "")[:50]
     description = (data.get("description") or "")[:200]
+    visibility, selected_friend_ids, visibility_error = _parse_pump_visibility(data)
+    if visibility_error:
+        return jsonify({"error": visibility_error}), 400
+    if visibility == "friends":
+        accepted_ids = get_friend_ids(current_user.id)
+        if any(fid not in accepted_ids for fid in selected_friend_ids):
+            return jsonify({"error": t("pump.friend_ids_invalid")}), 400
 
     check = validate_pump_check(image_bytes, location_type, description)
     if not check["valid"]:
@@ -136,12 +160,31 @@ def complete_workout():
     except Exception as e:
         current_app.logger.info(f"[S3] Pump Check yüklemesi başarısız: {type(e).__name__}: {e}")
 
-    db.session.add(PumpCheck(
+    pump_check = PumpCheck(
         user_id=current_user.id, image_key=pump_image_key,
         location_type=location_type, description=description,
         valid=True, fallback=check.get("fallback", False),
         date_key=app_today().isoformat(),
-    ))
+        visibility=visibility,
+        shared_friend_ids=selected_friend_ids,
+    )
+    db.session.add(pump_check)
+    db.session.flush()
+    if visibility == "friends":
+        payload = json.dumps({
+            "pump_check_id": pump_check.id,
+            "image_key": pump_image_key,
+            "environment": location_type,
+            "description": description,
+            "created_at": pump_check.created_at.isoformat() if pump_check.created_at else None,
+        }, ensure_ascii=False)
+        for friend_id in selected_friend_ids:
+            db.session.add(Message(
+                sender_id=current_user.id,
+                receiver_id=friend_id,
+                body=payload,
+                message_type="pump_check",
+            ))
     # UI antrenman tamamlama artık kanonik WorkoutLog satırı da yazar. Aksi halde
     # haftalık rapor, "bugünkü hacim" ve "48 saattir antrenman yok" dürtüsü gerçek
     # antrenmanları GÖRMÜYORDU — WorkoutLog'u yalnızca AI koç yazıyordu (F6).
@@ -183,9 +226,12 @@ def complete_workout():
         "message": t("training.workout_done", xp=total_xp, bonus=photo_bonus),
         "points_awarded": total_xp,
         "pump_bonus": photo_bonus,
+        "pump_check_id": pump_check.id,
         "new_total": new_total,
         "level": level,
-        "title": level_title(level)
+        "title": level_title(level),
+        "visibility": visibility,
+        "shared_friend_ids": selected_friend_ids,
     }
     if quest_result:
         response["quest_awarded"] = quest_result

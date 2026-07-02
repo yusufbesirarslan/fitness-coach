@@ -627,6 +627,9 @@
   "plan.no_session": "First create your plan from the home page.",
   "plan.gen_failed": "Couldn't generate the plan, please try again.",
   "nutrition.plan.pick_one": "Pick at least one food from each category.",
+  "pump.visibility_invalid": "Choose where to share this Pump Check.",
+  "pump.friend_ids_invalid": "Select valid friends to share with.",
+  "pump.friend_required": "Select at least one friend.",
 
   "route.weight_numeric": "Weight must be numeric",
   "route.body_numeric": "Weight, height and age must be numeric",

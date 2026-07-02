@@ -73,6 +73,42 @@ def friends_list():
     return jsonify({"friends": friends, "incoming": incoming, "outgoing": outgoing})
 
 
+@bp.route("/friends/select-list")
+@login_required
+def friends_select_list():
+    q = (request.args.get("q") or "").strip().lower()
+    accepted = Friendship.query.filter(
+        Friendship.status == "accepted",
+        db.or_(Friendship.sender_id == current_user.id, Friendship.receiver_id == current_user.id)
+    ).all()
+    friend_ids = [f.receiver_id if f.sender_id == current_user.id else f.sender_id for f in accepted]
+    if not friend_ids:
+        return jsonify({"friends": []})
+
+    latest_rows = Message.query.filter(
+        db.or_(
+            db.and_(Message.sender_id == current_user.id, Message.receiver_id.in_(friend_ids)),
+            db.and_(Message.receiver_id == current_user.id, Message.sender_id.in_(friend_ids)),
+        )
+    ).order_by(Message.timestamp.desc()).all()
+    recent_rank = {}
+    for msg in latest_rows:
+        other_id = msg.receiver_id if msg.sender_id == current_user.id else msg.sender_id
+        recent_rank.setdefault(other_id, len(recent_rank))
+
+    users = User.query.filter(User.id.in_(friend_ids)).all()
+    if q:
+        users = [u for u in users if q in (u.username or "").lower() or q in (u.full_name or "").lower()]
+    users.sort(key=lambda u: (recent_rank.get(u.id, 10_000), (u.username or "").lower()))
+    return jsonify({"friends": [{
+        "id": u.id,
+        "username": u.username,
+        "full_name": u.full_name or u.username,
+        "profile_picture": u.avatar_src,
+        "recent": u.id in recent_rank,
+    } for u in users]})
+
+
 @bp.route("/friends/search")
 @login_required
 @limiter.limit(SEARCH_RATELIMIT, key_func=_user_or_ip_key)

@@ -280,6 +280,8 @@ def test_complete_awards_xp_and_records_pump_check(client, workout_ready, monkey
     assert check.valid is True
     assert check.image_key is None                    # S3 kapalı (test env)
     assert check.date_key is not None                 # günlük idempotency anahtarı yazıldı
+    assert check.visibility == "feed"
+    assert check.shared_friend_ids == []
 
     # Faz B/F6: UI antrenman tamamlama artık kanonik WorkoutLog da yazar —
     # haftalık rapor ve "48 saattir antrenman yok" dürtüsü gerçek antrenmanı görsün.

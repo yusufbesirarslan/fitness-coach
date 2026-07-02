@@ -627,6 +627,9 @@
   "plan.no_session": "Önce ana sayfadan planını oluştur.",
   "plan.gen_failed": "Plan oluşturulamadı, tekrar dene.",
   "nutrition.plan.pick_one": "Her kategoriden en az bir gıda seç.",
+  "pump.visibility_invalid": "Bu Pump Check'i nerede paylaşacağını seç.",
+  "pump.friend_ids_invalid": "Paylaşmak için geçerli arkadaşlar seç.",
+  "pump.friend_required": "En az bir arkadaş seç.",
 
   "route.weight_numeric": "Kilo sayısal olmalıdır",
   "route.body_numeric": "Kilo, boy ve yaş sayısal olmalıdır",

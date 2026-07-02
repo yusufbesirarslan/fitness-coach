@@ -1,12 +1,15 @@
+import json
 from datetime import datetime, timedelta
 
 from app.extensions import db
-from app.models import Friendship, PumpCheck, PumpCheckComment, PumpCheckLike
+from app.blueprints import training as training_bp
+from app.models import Friendship, Message, PumpCheck, PumpCheckComment, PumpCheckLike
 from app.services.pump_checks import (
     can_view_pump_check,
     get_friend_ids,
     serialize_pump_check_card,
 )
+from tests.test_validators import _image_data_url
 
 
 def _friend(a, b):
@@ -92,3 +95,75 @@ def test_serialize_pump_check_card_exposes_requested_fields(make_user):
         "key": "pump_check.sharing.feed",
         "value": "feed",
     }
+
+
+def _ready_for_workout(client, user):
+    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 8.0})
+
+
+def test_workout_complete_defaults_to_feed_visibility(client, auth_user, monkeypatch):
+    _ready_for_workout(client, auth_user)
+    monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
+
+    res = client.post("/workout/complete", json={"image": _image_data_url("JPEG"), "location_type": "Gym"})
+
+    assert res.status_code == 200
+    check = PumpCheck.query.filter_by(user_id=auth_user.id).one()
+    assert check.visibility == "feed"
+    assert check.shared_friend_ids == []
+
+
+def test_workout_complete_rejects_friends_visibility_without_recipients(client, auth_user, monkeypatch):
+    _ready_for_workout(client, auth_user)
+    monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
+
+    res = client.post("/workout/complete", json={
+        "image": _image_data_url("JPEG"),
+        "visibility": "friends",
+        "shared_friend_ids": [],
+    })
+
+    assert res.status_code == 400
+    assert PumpCheck.query.count() == 0
+
+
+def test_workout_complete_sends_pump_check_messages_to_selected_friends(client, auth_user, make_user, monkeypatch):
+    friend = make_user("friend")
+    other = make_user("other")
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=friend.id, status="accepted"))
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=other.id, status="accepted"))
+    db.session.commit()
+    _ready_for_workout(client, auth_user)
+    monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
+
+    res = client.post("/workout/complete", json={
+        "image": _image_data_url("JPEG"),
+        "location_type": "Gym",
+        "description": "Push day",
+        "visibility": "friends",
+        "shared_friend_ids": [friend.id],
+    })
+
+    assert res.status_code == 200
+    check = PumpCheck.query.filter_by(user_id=auth_user.id).one()
+    assert check.visibility == "friends"
+    assert check.shared_friend_ids == [friend.id]
+    msg = Message.query.filter_by(sender_id=auth_user.id, receiver_id=friend.id, message_type="pump_check").one()
+    payload = json.loads(msg.body)
+    assert payload["pump_check_id"] == check.id
+    assert payload["environment"] == "Gym"
+    assert Message.query.filter_by(receiver_id=other.id, message_type="pump_check").count() == 0
+
+
+def test_friend_select_list_recent_contacts_first(client, auth_user, make_user):
+    old_friend = make_user("alpha")
+    recent_friend = make_user("zeta")
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=old_friend.id, status="accepted"))
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=recent_friend.id, status="accepted"))
+    db.session.commit()
+    db.session.add(Message(sender_id=recent_friend.id, receiver_id=auth_user.id, body="hi"))
+    db.session.commit()
+
+    body = client.get("/friends/select-list").get_json()
+
+    assert [row["id"] for row in body["friends"]] == [recent_friend.id, old_friend.id]
