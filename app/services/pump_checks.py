@@ -4,6 +4,12 @@ from app.extensions import db
 from app.models import Friendship, PumpCheckLike
 from app.timeutil import display_dt
 
+_SHARING_STATUS_KEYS = {
+    "feed": "pump_check.sharing.feed",
+    "friends": "pump_check.sharing.friends",
+    "private": "pump_check.sharing.private",
+}
+
 
 def get_friend_ids(user_id):
     rows = Friendship.query.filter(
@@ -39,11 +45,10 @@ def pump_check_image_url(check, viewer_id, expires_in=3600):
 
 def sharing_status(check):
     visibility = check.visibility or "private"
-    if visibility == "feed":
-        return "Shared to Feed"
-    if visibility == "friends":
-        return "Shared to Friends"
-    return "Private"
+    return {
+        "key": _SHARING_STATUS_KEYS.get(visibility, _SHARING_STATUS_KEYS["private"]),
+        "value": visibility if visibility in _SHARING_STATUS_KEYS else "private",
+    }
 
 
 def serialize_pump_check_card(check, viewer_id, include_viewer_state=True):

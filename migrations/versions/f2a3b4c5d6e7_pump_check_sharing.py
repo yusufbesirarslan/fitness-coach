@@ -33,6 +33,7 @@ def upgrade():
     """)
     op.execute("CREATE INDEX IF NOT EXISTS ix_pump_check_like_pump_check_id ON pump_check_like (pump_check_id)")
     op.execute("CREATE INDEX IF NOT EXISTS ix_pump_check_like_user_id ON pump_check_like (user_id)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_pump_check_like_created_at ON pump_check_like (created_at)")
     op.execute("""
         CREATE TABLE IF NOT EXISTS pump_check_comment (
             id SERIAL PRIMARY KEY,
@@ -51,6 +52,7 @@ def downgrade():
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
         return
+    op.execute("DROP INDEX IF EXISTS ix_pump_check_like_created_at")
     op.execute("DROP TABLE IF EXISTS pump_check_comment")
     op.execute("DROP TABLE IF EXISTS pump_check_like")
     op.execute("DROP INDEX IF EXISTS ix_pump_check_visibility")

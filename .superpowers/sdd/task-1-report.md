@@ -70,3 +70,15 @@
 
 - The GREEN test run passed with existing suite warnings about `datetime.utcnow()` deprecations from current repo code and from the new test timestamp setup. These warnings did not fail the test run.
 - The migration intentionally no-ops outside PostgreSQL, matching the task brief. SQLite test coverage therefore validates model/service behavior, not migration DDL execution.
+
+## Review Fixes
+
+- Updated `app/services/pump_checks.py` so `sharing_status()` returns a stable localization payload instead of hard-coded English UI copy:
+  - `{"key": "pump_check.sharing.<status>", "value": "<status>"}`
+- Updated `tests/test_pump_check_sharing.py` to assert the serializer now exposes localization-safe `sharingStatus` data.
+- Updated `migrations/versions/f2a3b4c5d6e7_pump_check_sharing.py` to create and drop `ix_pump_check_like_created_at`, matching `PumpCheckLike.created_at index=True`.
+
+### Review Fix Verification
+
+- Command: `python -m pytest tests/test_pump_check_sharing.py -v`
+- Result: `4 passed, 25 warnings`

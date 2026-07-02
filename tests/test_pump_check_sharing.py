@@ -88,3 +88,7 @@ def test_serialize_pump_check_card_exposes_requested_fields(make_user):
     assert data["likesCount"] == 2
     assert data["commentsCount"] == 3
     assert data["visibility"] == "feed"
+    assert data["sharingStatus"] == {
+        "key": "pump_check.sharing.feed",
+        "value": "feed",
+    }
