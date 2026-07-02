@@ -156,6 +156,25 @@
     }
     .stack-link:hover { text-decoration: underline; }
 
+    .wearable-section { margin-top: 28px; }
+    .wearable-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .wearable-card {
+        background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
+        padding: 16px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .wearable-top { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+    .wearable-name { font-weight: 700; color: var(--text); }
+    .wearable-status { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
+    .wearable-status.on { color: #00C48C; }
+    .wearable-meta { font-size: 12px; color: var(--text-3); min-height: 18px; }
+    .wearable-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .wearable-btn {
+        border: 1px solid var(--border); border-radius: 8px; background: rgba(255,255,255,0.03);
+        color: var(--text); padding: 8px 10px; font-size: 12px; font-weight: 700; cursor: pointer;
+    }
+    .wearable-btn.primary { background: #3D8BFF; color: #121212; border-color: #3D8BFF; }
+    .wearable-btn:disabled { opacity: 0.5; cursor: default; }
+
     /* ── back button ── */
     .back-btn {
         display: inline-flex; align-items: center; gap: 6px;
@@ -170,6 +189,7 @@
     .main-content { padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
     @media (max-width: 768px) {
         .main-content { margin-left: 0; padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
+        .wearable-grid { grid-template-columns: 1fr; }
     }
     </style>
 </head>
@@ -274,6 +294,36 @@
             </div>
 
             <button class="save-btn" id="save-btn" data-action="saveProfile">{{ t('common.save') }}</button>
+        </div>
+
+        <div class="wearable-section">
+            <div class="stack-section-title">{{ t('wearables.title') }}</div>
+            <div class="wearable-grid">
+                {% for provider, label in [('whoop', 'WHOOP'), ('google_health', 'Google Health')] %}
+                {% set conn = wearable_connections.get(provider) if wearable_connections else None %}
+                <div class="wearable-card" data-provider-card="{{ provider }}">
+                    <div class="wearable-top">
+                        <div class="wearable-name">{{ label }}</div>
+                        <div class="wearable-status{% if conn %} on{% endif %}">
+                            {{ t('wearables.connected') if conn else t('wearables.not_connected') }}
+                        </div>
+                    </div>
+                    <div class="wearable-meta">
+                        {% if conn and conn.last_sync_at %}
+                            {{ t('wearables.last_sync') }} {{ conn.last_sync_at.strftime('%d.%m.%Y %H:%M') }}
+                        {% elif conn %}
+                            {{ t('wearables.sync_waiting') }}
+                        {% else %}
+                            {{ t('wearables.connect_hint') }}
+                        {% endif %}
+                    </div>
+                    <div class="wearable-actions">
+                        <button type="button" class="wearable-btn primary wearable-connect" data-provider="{{ provider }}">{{ t('wearables.connect') }}</button>
+                        <button type="button" class="wearable-btn wearable-sync" data-provider="{{ provider }}"{% if not conn %} disabled{% endif %}>{{ t('wearables.sync_today') }}</button>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
         </div>
 
         <!-- ── SUPPLEMENT STACK ── -->
@@ -414,6 +464,32 @@ async function saveProfile() {
         btn.textContent = __t('common.save');
     }
 }
+
+document.querySelectorAll('.wearable-connect').forEach(btn => {
+    btn.addEventListener('click', () => {
+        window.location.href = '/api/auth/wearable/' + btn.dataset.provider;
+    });
+});
+
+document.querySelectorAll('.wearable-sync').forEach(btn => {
+    btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+            const res = await fetch('/api/wearables/' + btn.dataset.provider + '/sync', { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok) {
+                toast(data.error || __t('wearables.sync_failed'), 'error');
+            } else {
+                toast(__t('wearables.sync_done'), 'success');
+                setTimeout(() => location.reload(), 700);
+            }
+        } catch (e) {
+            toast(__t('common.conn_error'), 'error');
+        } finally {
+            btn.disabled = false;
+        }
+    });
+});
 </script>
 <script src="/static/nav.js"></script>
 <script src="/static/actions.js"></script>

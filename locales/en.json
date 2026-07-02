@@ -91,6 +91,17 @@
   "settings.language": "Language",
   "settings.language_hint": "App and coach language.",
 
+  "wearables.title": "Wearables",
+  "wearables.connected": "Connected",
+  "wearables.not_connected": "Not Connected",
+  "wearables.last_sync": "Last sync:",
+  "wearables.sync_waiting": "Connected, first sync pending.",
+  "wearables.connect_hint": "Connect activity, sleep and recovery data.",
+  "wearables.connect": "Connect",
+  "wearables.sync_today": "Sync Today",
+  "wearables.sync_done": "Wearable data synced.",
+  "wearables.sync_failed": "Sync failed.",
+
   "landing.page_title": "AxisAI — Your AI Fitness Coach",
   "landing.meta_desc": "Join AxisAI for free — get a personalized nutrition and training plan in 3 minutes with your AI coach, track your progress and stay motivated with friends.",
   "landing.og_desc": "Your personal AI plan in 3 minutes. Track, compete with friends, reach your goal.",

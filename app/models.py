@@ -445,6 +445,106 @@ class DailyActivity(db.Model):
     )
 
 
+class UserWearableConnection(db.Model):
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider   = db.Column(db.String(40), nullable=False)
+    access_token_encrypted  = db.Column(db.Text, nullable=False)
+    refresh_token_encrypted = db.Column(db.Text, nullable=True)
+    token_expiry = db.Column(db.DateTime, nullable=True, index=True)
+    scopes       = db.Column(db.Text, nullable=True)
+    external_user_id = db.Column(db.String(120), nullable=True)
+    status       = db.Column(db.String(20), nullable=False, default="connected", server_default="connected")
+    last_sync_at = db.Column(db.DateTime, nullable=True)
+    created_at   = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at   = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = db.relationship("User", backref=db.backref("wearable_connections", passive_deletes=True))
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "provider", name="uq_wearable_connection_user_provider"),
+        db.Index("ix_wearable_connection_provider", "provider"),
+    )
+
+
+class WearableSleepLog(db.Model):
+    id       = db.Column(db.Integer, primary_key=True)
+    user_id  = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = db.Column(db.String(40), nullable=False)
+    source_id = db.Column(db.String(160), nullable=False)
+    date_key  = db.Column(db.String(10), nullable=False, index=True)
+    start_at  = db.Column(db.DateTime, nullable=True)
+    end_at    = db.Column(db.DateTime, nullable=True)
+    duration_min     = db.Column(db.Float, nullable=True)
+    deep_sleep_min   = db.Column(db.Float, nullable=True)
+    rem_sleep_min    = db.Column(db.Float, nullable=True)
+    light_sleep_min  = db.Column(db.Float, nullable=True)
+    awake_min        = db.Column(db.Float, nullable=True)
+    sleep_efficiency = db.Column(db.Float, nullable=True)
+    sleep_score      = db.Column(db.Float, nullable=True)
+    resting_heart_rate = db.Column(db.Float, nullable=True)
+    hrv_rmssd          = db.Column(db.Float, nullable=True)
+    raw_payload = db.Column(db.JSON, nullable=True)
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at  = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = db.relationship("User", backref=db.backref("wearable_sleep_logs", passive_deletes=True))
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "provider", "source_id", name="uq_wearable_sleep_source"),
+        db.Index("ix_wearable_sleep_user_day", "user_id", "date_key"),
+    )
+
+
+class WearableActivityLog(db.Model):
+    id       = db.Column(db.Integer, primary_key=True)
+    user_id  = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = db.Column(db.String(40), nullable=False)
+    date_key = db.Column(db.String(10), nullable=False, index=True)
+    source_id = db.Column(db.String(160), nullable=True)
+    steps = db.Column(db.Integer, nullable=False, default=0)
+    active_minutes = db.Column(db.Float, nullable=False, default=0)
+    calories_burned = db.Column(db.Float, nullable=False, default=0)
+    resting_heart_rate = db.Column(db.Float, nullable=True)
+    hrv_rmssd = db.Column(db.Float, nullable=True)
+    raw_payload = db.Column(db.JSON, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, index=True)
+
+    user = db.relationship("User", backref=db.backref("wearable_activity_logs", passive_deletes=True))
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "provider", "date_key", name="uq_wearable_activity_day"),
+        db.Index("ix_wearable_activity_user_day", "user_id", "date_key"),
+    )
+
+
+class WearableWorkoutLog(db.Model):
+    id       = db.Column(db.Integer, primary_key=True)
+    user_id  = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    provider = db.Column(db.String(40), nullable=False)
+    source_id = db.Column(db.String(160), nullable=False)
+    date_key  = db.Column(db.String(10), nullable=False, index=True)
+    sport_name = db.Column(db.String(120), nullable=True)
+    start_at = db.Column(db.DateTime, nullable=True)
+    end_at   = db.Column(db.DateTime, nullable=True)
+    calories_burned = db.Column(db.Float, nullable=True)
+    strain = db.Column(db.Float, nullable=True)
+    average_heart_rate = db.Column(db.Float, nullable=True)
+    max_heart_rate = db.Column(db.Float, nullable=True)
+    distance_km = db.Column(db.Float, nullable=True)
+    raw_payload = db.Column(db.JSON, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = db.relationship("User", backref=db.backref("wearable_workout_logs", passive_deletes=True))
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "provider", "source_id", name="uq_wearable_workout_source"),
+        db.Index("ix_wearable_workout_user_day", "user_id", "date_key"),
+    )
+
+
 class CustomMeal(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
     user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)

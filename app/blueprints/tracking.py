@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
 from app.i18n import t
-from app.models import DailyActivity, MealLog, User, UserSession, WaterLog, WeeklyCheckIn, WeeklyLog, WorkoutLog
+from app.models import DailyActivity, MealLog, User, UserSession, WaterLog, WearableActivityLog, WeeklyCheckIn, WeeklyLog, WorkoutLog
 from app.services.ai_coach import generate_checkin_feedback
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
 from app.services.gamification import complete_quest_for_user
@@ -349,6 +349,25 @@ def log_daily_activity():
 @login_required
 def today_activity():
     today_key = app_today().isoformat()
+    wearable = WearableActivityLog.query.filter_by(
+        user_id=current_user.id, date_key=today_key
+    ).order_by(WearableActivityLog.updated_at.desc(), WearableActivityLog.id.desc()).first()
+    if wearable is not None:
+        return jsonify({
+            "source": "wearable",
+            "provider": wearable.provider,
+            "total_calories": round(wearable.calories_burned or 0, 1),
+            "total_steps": wearable.steps or 0,
+            "total_distance": 0,
+            "entries": [{
+                "intensity": "wearable", "steps": wearable.steps or 0,
+                "calories_burned": wearable.calories_burned,
+                "distance_km": 0, "duration_min": wearable.active_minutes,
+                "resting_heart_rate": wearable.resting_heart_rate,
+                "hrv_rmssd": wearable.hrv_rmssd,
+            }]
+        })
+
     # Günün TEK (en yeni) aktivite satırını al — TOPLAMA YAPMA. log_daily_activity
     # artık günde tek satır tutsa da, eski çoklu-satır (yoğunluk başına) veriye
     # karşı da en yenisini seçmek çift sayımı kesin olarak önler (M3).
@@ -358,11 +377,15 @@ def today_activity():
 
     if activity is None:
         return jsonify({
+            "source": "manual",
+            "provider": None,
             "total_calories": 0, "total_steps": 0,
             "total_distance": 0, "entries": []
         })
 
     return jsonify({
+        "source": "manual",
+        "provider": None,
         "total_calories": round(activity.calories_burned or 0, 1),
         "total_steps": activity.steps or 0,
         "total_distance": round(activity.distance_km or 0, 2),
