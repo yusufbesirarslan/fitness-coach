@@ -91,13 +91,13 @@ def test_edit_updates_fields_and_sanitizes(client, auth_user):
     assert supp.is_public is True
 
 
-def test_edit_foreign_supplement_forbidden(client, auth_user, make_user):
+def test_edit_foreign_supplement_hidden(client, auth_user, make_user):
     other = make_user("baskasi")
     supp = Supplement(user_id=other.id, product_name="Onunki", brand="X")
     db.session.add(supp)
     db.session.commit()
     resp = client.post(f"/supplement/edit/{supp.id}", json={"product_name": "Çaldım"})
-    assert resp.status_code == 403
+    assert resp.status_code == 404
     db.session.expire_all()
     assert db.session.get(Supplement, supp.id).product_name == "Onunki"  # değişmedi
 
@@ -108,10 +108,10 @@ def test_delete_removes_own_supplement(client, auth_user):
     assert db.session.get(Supplement, sid) is None
 
 
-def test_delete_foreign_supplement_forbidden(client, auth_user, make_user):
+def test_delete_foreign_supplement_hidden(client, auth_user, make_user):
     other = make_user("sahibi")
     supp = Supplement(user_id=other.id, product_name="Onunki", brand="X")
     db.session.add(supp)
     db.session.commit()
-    assert client.post(f"/supplement/delete/{supp.id}").status_code == 403
+    assert client.post(f"/supplement/delete/{supp.id}").status_code == 404
     assert db.session.get(Supplement, supp.id) is not None  # silinmedi

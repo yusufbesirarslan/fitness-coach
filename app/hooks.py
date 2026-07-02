@@ -8,7 +8,7 @@ from app.config import _BOOT_TS, CSP_IMG_S3_HOSTS
 from app.extensions import db
 from app.models import User
 from app.services.gamification import _last_rollover_check, _mark_lb_dirty, award_xp, get_level, level_title, log_activity, run_weekly_rollover
-from app.timeutil import app_today
+from app.timeutil import app_now, app_today
 
 
 def generate_csp_nonce():
@@ -198,7 +198,7 @@ def maybe_weekly_rollover():
     if not _rollover_throttle_passed(now):
         return
     try:
-        run_weekly_rollover(now)
+        run_weekly_rollover(app_now())
     except Exception:
         db.session.rollback()
         # Sessizce yutma: rollover hatası liderlik/ödül tutarlılığını bozabilir,

@@ -44,14 +44,16 @@ def _verify_image_bytes(image_bytes):
     data wearing an image/* MIME, and not a decompression bomb. The regex only
     proves the data-URL is shaped like an image; this proves the payload is one.
 
-    Returns None on success or a user-facing error message. Fails OPEN (returns
-    None) only when Pillow is unavailable — that happens in local dev where the
-    dependency may be missing; production ships Pillow (see requirements.txt)."""
+    Returns None on success or a user-facing error message. In debug/dev only,
+    missing Pillow fails open to keep lightweight local setups usable; production
+    fails closed so image validation is never silently disabled."""
     try:
         from PIL import Image
     except Exception:
-        current_app.logger.warning("Pillow unavailable; skipping image content verification.")
-        return None
+        current_app.logger.warning("Pillow unavailable; image content verification failed closed.")
+        if current_app.debug:
+            return None
+        return t("route.img_invalid")
     import io as _io
     Image.MAX_IMAGE_PIXELS = _MAX_IMAGE_PIXELS
     try:

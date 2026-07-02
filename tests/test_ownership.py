@@ -51,7 +51,7 @@ def test_supplement_edit_foreign_record_forbidden(owner, attacker_client):
     supp = _make_supplement(owner)
     response = attacker_client.post(f"/supplement/edit/{supp.id}",
                                     json={"product_name": "HACKED"})
-    assert response.status_code == 403
+    assert response.status_code == 404
     db.session.expire_all()
     assert db.session.get(Supplement, supp.id).product_name == "Whey"
 
@@ -59,7 +59,7 @@ def test_supplement_edit_foreign_record_forbidden(owner, attacker_client):
 def test_supplement_delete_foreign_record_forbidden(owner, attacker_client):
     supp = _make_supplement(owner)
     response = attacker_client.post(f"/supplement/delete/{supp.id}")
-    assert response.status_code == 403
+    assert response.status_code == 404
     db.session.expire_all()
     assert db.session.get(Supplement, supp.id) is not None
 
@@ -88,8 +88,8 @@ def test_friend_request_accept_by_third_party_forbidden(owner, make_user, attack
     db.session.add(fr)
     db.session.commit()
 
-    assert attacker_client.post(f"/friend/accept/{fr.id}").status_code == 403
-    assert attacker_client.post(f"/friend/reject/{fr.id}").status_code == 403
+    assert attacker_client.post(f"/friend/accept/{fr.id}").status_code == 404
+    assert attacker_client.post(f"/friend/reject/{fr.id}").status_code == 404
     db.session.expire_all()
     assert db.session.get(Friendship, fr.id).status == "pending"
 
@@ -113,7 +113,7 @@ def test_suggestion_respond_by_non_recipient_forbidden(owner, make_user, attacke
     db.session.commit()
 
     response = attacker_client.post(f"/suggest/respond/{msg.id}", json={"accept": True})
-    assert response.status_code == 403
+    assert response.status_code == 404
 
 
 # ---------------------------------------------------------------------------

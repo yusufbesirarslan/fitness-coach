@@ -1,6 +1,8 @@
 # Fitness Coach (FitX)
 
-Flask + SQLAlchemy + OpenAI (gpt-4o-mini) + FatSecret API proxy.
+Flask + SQLAlchemy + Bedrock/Claude Sonnet (primary heavy AI path) + OpenAI
+(fallback/light paths, `gpt-4o-mini`) + FatSecret API proxy + Cognito OIDC +
+S3 avatar/meal image storage + Redis.
 Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 
 ## Yapı
@@ -14,21 +16,25 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 - app/cli.py — flask CLI komutları (seed-quests, weekly-reset)
 - app/timeutil.py — TEK gün/saat kaynağı: sabit Europe/Istanbul (app_today/day_key/utc_day_bounds). Tüm gün anahtarları buradan; doğrudan date.today()/utcnow().strftime("%d.%m") KULLANMA
 - app/blueprints/ — auth, profile, nutrition, food, menu, training, tracking, social, gamification, supplements, coach
-- app/services/ — ai, ai_coach, ai_nutrition, calculations, fatsecret, foodcache, gamification, menu_extract/fetch/ocr, validators
+- app/services/ — ai, ai_coach, ai_nutrition, calculations, fatsecret, foodcache, gamification, premium, referral, cognito/cognito_idp, avatars, injury_constraints, menu_extract/fetch/ocr, training_generation/, validators
 - fitx_mcp/ — MCP sunucusu (AI Coach DB araçları). DİKKAT: araçlar user_id'yi parametre alır, kendi yetkilendirmesi YOKTUR — yalnızca stdio/in-process kullan; HTTP taşıması FITX_MCP_ALLOW_HTTP=1 + loopback arkasındadır, asla public proxy'e koyma
 - nutrition_pipeline.py, analytics_engine.py — deterministik makro değerlendirme / nudge motoru
 - s3_helper.py — S3 görsel yükleme + pre-signed URL (EC2 IAM Instance Profile ile auth; AWS anahtarı hardcode YOK)
 - migrations/ — Alembic (Flask-Migrate) şema geçmişi
 - templates/ + static/ — Türkçe UI (index, nutrition, training, progress, setup, friends, chat, quests, leaderboard, ...)
-- Dockerfile / docker-compose.yml — web (gunicorn, tek worker) + db (postgres) + redis; hepsi loopback'e bağlı
+- Dockerfile / docker-compose.yml — web (gunicorn, tek worker/8 thread) + redis; Postgres artık compose içinde değil, prod'da external RDS/DATABASE_URL ile gelir; servisler loopback'e bağlı
 - nginx.conf — host reverse proxy: / → Flask:5000, /fatsecret/rest/server.api → loopback proxy (127.0.0.1:3000, aynı EC2; Bearer token tel üzerinde açıkta kalmasın)
 - tests/ — pytest (menü çıkarımı, makro alaka, nutrition pipeline)
-- .env — SECRET_KEY, DATABASE_URL, POSTGRES_*, FATSECRET_*, OPENAI_API_KEY, OPENAI_MODEL, AWS_REGION, S3_BUCKET_NAME, REDIS_URL (commit etme)
+- .env — SECRET_KEY, DATABASE_URL, FATSECRET_*, OPENAI_API_KEY, OPENAI_MODEL, BEDROCK_*, COGNITO_*, AWS_REGION, S3_BUCKET_NAME, REDIS_URL (commit etme)
   - Örnek için .env.example'a bak. OpenAI anahtarı .env'den okunur, asla hardcode edilmez.
   - Opsiyonel güvenlik/freemium/gözlem anahtarları (hepsinin makul varsayılanı var):
     - `AI_PLAN_QUOTA_ENABLED` (vars. 1) — non-premium'a haftada 1 AI plan üretimi (app/services/premium.py). 0 = kota kapalı.
     - `LOGIN_FAIL_CLOSED` (vars. 1) — Redis erişilemezse login 503 (brute-force throttle güvenilir değilken). 0 = eski fail-open.
     - `SENTRY_DSN` (yoksa kapalı) + opsiyonel `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE` — hata izleme (app/observability.py). DSN yoksa no-op.
+  - Operasyon notu: web konteyneri hâlâ tek gunicorn worker + 8 thread çalışır.
+    Coach/menu/plan AI çağrıları senkron ve bloklayıcıdır; 8 uzun AI isteği tüm
+    uygulama thread'lerini doldurabilir. Worker sayısını artırmadan önce in-memory
+    cache/limiter fallback varsayımlarını kaldır veya AI uçlarını ayrı worker/queue'ya taşı.
 
 ## Veritabanı
 Lokal: SQLite (instance/chatbot.db). Prod/Docker: PostgreSQL (DATABASE_URL ile).
@@ -65,5 +71,7 @@ DailyActivity, CustomMeal, CustomMealItem
   başlığını elle ekle, (3) state-changing route'u GET olarak açma (kapı yalnızca yazma
   metodlarında çalışır).
 - Deploy: push to main → .github/workflows/deploy.yml (AWS SSM) EC2'de compose'u
-  yeniden kurar ve host nginx'teki eski CSP add_header satırını otomatik temizler.
+  yeniden kurar, /health 200 gate'inden geçirmezse önceki commit'e rollback eder.
+  Host nginx'te eski `add_header Content-Security-Policy` satırı kalırsa deploy
+  canlı config'i sed ile değiştirmez; fail-fast yapar.
 - Sorgular daima current_user.id'ye scope'lanır; ID ile yüklenen kayıtlarda sahiplik kontrolü zorunlu

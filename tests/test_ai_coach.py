@@ -75,6 +75,21 @@ def test_coach_search_falls_back_to_static_then_llm(monkeypatch):
     assert _coach_search_food("egzotik meyve") == llm
 
 
+def test_openai_tool_loop_provider_error_returns_friendly_fallback(app, monkeypatch):
+    class _Completions:
+        def create(self, **kwargs):
+            raise RuntimeError("openai down")
+
+    fake_client = SimpleNamespace(chat=SimpleNamespace(completions=_Completions()))
+    monkeypatch.setattr(ai_coach, "openai_client", fake_client)
+
+    with app.test_request_context("/ask"):
+        reply = ai_coach._run_coach_conversation_openai(
+            user_id=1, question="protein?", context="", history=[], language="tr")
+
+    assert reply == "Bir şeyler ters gitti, tekrar dener misin?"
+
+
 # ---------------------------------------------------------------------------
 # Araçlar — staged → committed durum makinesi
 # ---------------------------------------------------------------------------

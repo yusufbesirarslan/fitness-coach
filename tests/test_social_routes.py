@@ -150,6 +150,16 @@ def test_friend_accept_awards_xp_both_sides(client, auth_user, make_user, login)
     assert client.post(f"/friend/accept/{fr.id}").status_code == 400  # zaten işlenmiş
 
 
+def test_friend_accept_foreign_request_returns_404(client, auth_user, make_user):
+    sender = make_user("istekci_foreign")
+    other_receiver = make_user("alici_foreign")
+    fr = Friendship(sender_id=sender.id, receiver_id=other_receiver.id, status="pending")
+    db.session.add(fr)
+    db.session.commit()
+
+    assert client.post(f"/friend/accept/{fr.id}").status_code == 404
+
+
 def test_friend_reject(client, auth_user, make_user):
     sender = make_user("istekci")
     fr = Friendship(sender_id=sender.id, receiver_id=auth_user.id, status="pending")
@@ -160,6 +170,16 @@ def test_friend_reject(client, auth_user, make_user):
     db.session.expire_all()
     assert db.session.get(Friendship, fr.id).status == "rejected"
     assert client.post(f"/friend/reject/{fr.id}").status_code == 400
+
+
+def test_friend_reject_foreign_request_returns_404(client, auth_user, make_user):
+    sender = make_user("red_sender_foreign")
+    other_receiver = make_user("red_receiver_foreign")
+    fr = Friendship(sender_id=sender.id, receiver_id=other_receiver.id, status="pending")
+    db.session.add(fr)
+    db.session.commit()
+
+    assert client.post(f"/friend/reject/{fr.id}").status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +258,18 @@ def test_respond_validation(client, auth_user, friend):
     msg = _send_suggestion(client, friend, auth_user)
     assert client.post(f"/suggest/respond/{msg.id}",
                        json={"action": "belki"}).status_code == 400    # geçersiz işlem
+
+
+def test_respond_suggestion_foreign_message_returns_404(client, auth_user, make_user):
+    sender = make_user("onerici_foreign")
+    other_receiver = make_user("onerilen_foreign")
+    msg = Message(sender_id=sender.id, receiver_id=other_receiver.id,
+                  body="öneri", message_type="suggestion_workout")
+    db.session.add(msg)
+    db.session.commit()
+
+    assert client.post(f"/suggest/respond/{msg.id}",
+                       json={"action": "accept"}).status_code == 404
 
 
 def test_decline_suggestion(client, auth_user, friend):

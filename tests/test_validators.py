@@ -8,6 +8,7 @@ testleri: DB / ağ / OpenAI çağrısı yok (Pillow gerçek görsel doğrulamada
     python -m pytest tests/test_validators.py -v
 """
 import base64
+import builtins
 import io
 import struct
 import zlib
@@ -96,6 +97,20 @@ def test_verify_image_rejects_unsupported_format(app):
     Image.new("RGB", (3, 3), "green").save(buf, format="BMP")
     with app.app_context():
         assert _verify_image_bytes(buf.getvalue()) == "Desteklenmeyen görsel formatı."
+
+
+def test_verify_image_fails_closed_when_pillow_missing_in_prod(app, monkeypatch):
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "PIL" or name.startswith("PIL."):
+            raise ImportError("Pillow missing")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    app.debug = False
+    with app.app_context():
+        assert _verify_image_bytes(b"fake") == "Geçerli bir görsel dosyası değil."
 
 
 # ---------------------------------------------------------------------------

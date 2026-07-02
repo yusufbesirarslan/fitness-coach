@@ -270,3 +270,20 @@ def test_rollover_throttle_redis_error_falls_back_to_in_memory(monkeypatch):
     gamification._last_rollover_check[0] = None
     now = datetime.utcnow()
     assert hooks._rollover_throttle_passed(now) is True    # Redis patladı → süreç-içi yedek
+
+
+def test_weekly_rollover_receives_istanbul_now(monkeypatch):
+    from datetime import datetime
+    from app import hooks
+    from app.timeutil import APP_TZ
+
+    istanbul_now = datetime(2026, 7, 6, 1, 30, tzinfo=APP_TZ)
+    captured = []
+
+    monkeypatch.setattr(hooks, "_rollover_throttle_passed", lambda now: True)
+    monkeypatch.setattr(hooks, "app_now", lambda: istanbul_now, raising=False)
+    monkeypatch.setattr(hooks, "run_weekly_rollover", lambda now: captured.append(now))
+
+    hooks.maybe_weekly_rollover()
+
+    assert captured == [istanbul_now]

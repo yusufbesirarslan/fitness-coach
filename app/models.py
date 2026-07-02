@@ -435,7 +435,7 @@ class DailyActivity(db.Model):
     calories_burned = db.Column(db.Float, nullable=False, default=0)
     distance_km     = db.Column(db.Float, nullable=False, default=0)
     duration_min    = db.Column(db.Float, nullable=False, default=0)
-    date_key        = db.Column(db.String(10), nullable=False)
+    date_key        = db.Column(db.String(10), nullable=False, default=lambda: app_today().isoformat())
     created_at      = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
     user = db.relationship("User", backref=db.backref("daily_activities", passive_deletes=True))

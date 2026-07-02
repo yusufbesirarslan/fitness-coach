@@ -11,6 +11,7 @@ import pytest
 from app.blueprints import tracking as tracking_bp
 from app.extensions import db
 from app.models import DailyActivity, UserSession, WeeklyCheckIn
+from app.timeutil import day_key
 
 
 @pytest.fixture
@@ -187,6 +188,14 @@ def test_activity_log_and_today_aggregation(client, complete_user):
     assert len(today["entries"]) == 1
     assert today["entries"][0]["intensity"] == "brisk"
     assert today["total_calories"] == last.get_json()["calories_burned"]
+
+
+def test_daily_activity_defaults_to_today_key(auth_user):
+    entry = DailyActivity(user_id=auth_user.id)
+    db.session.add(entry)
+    db.session.commit()
+
+    assert entry.date_key == day_key()
 
 
 # ---------------------------------------------------------------------------
