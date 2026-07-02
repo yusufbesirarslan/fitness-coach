@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 
 from app.extensions import db
 from app.blueprints import training as training_bp
+from app.i18n import t
 from app.models import Friendship, Message, PumpCheck, PumpCheckComment, PumpCheckLike
 from app.services.pump_checks import (
     can_view_pump_check,
@@ -124,6 +125,35 @@ def test_workout_complete_rejects_friends_visibility_without_recipients(client, 
     })
 
     assert res.status_code == 400
+    assert PumpCheck.query.count() == 0
+
+
+def test_workout_complete_rejects_non_list_shared_friend_ids(client, auth_user, monkeypatch):
+    _ready_for_workout(client, auth_user)
+    monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
+
+    res = client.post("/workout/complete", json={
+        "image": _image_data_url("JPEG"),
+        "visibility": "friends",
+        "shared_friend_ids": "12",
+    })
+
+    assert res.status_code == 400
+    assert res.get_json()["error"] == t("pump.friend_ids_invalid")
+    assert PumpCheck.query.count() == 0
+
+
+def test_workout_complete_rejects_non_string_visibility(client, auth_user, monkeypatch):
+    _ready_for_workout(client, auth_user)
+    monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
+
+    res = client.post("/workout/complete", json={
+        "image": _image_data_url("JPEG"),
+        "visibility": 7,
+    })
+
+    assert res.status_code == 400
+    assert res.get_json()["error"] == t("pump.visibility_invalid")
     assert PumpCheck.query.count() == 0
 
 

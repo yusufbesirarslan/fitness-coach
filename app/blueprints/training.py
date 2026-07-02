@@ -24,10 +24,20 @@ bp = Blueprint("training", __name__)
 
 
 def _parse_pump_visibility(data):
-    visibility = (data.get("visibility") or "feed").strip().lower()
+    raw_visibility = data.get("visibility")
+    if raw_visibility is None:
+        visibility = "feed"
+    elif isinstance(raw_visibility, str):
+        visibility = raw_visibility.strip().lower()
+    else:
+        return None, [], t("pump.visibility_invalid")
     if visibility not in {"feed", "friends", "private"}:
         return None, [], t("pump.visibility_invalid")
-    raw_ids = data.get("shared_friend_ids") or []
+    raw_ids = data.get("shared_friend_ids")
+    if raw_ids is None:
+        raw_ids = []
+    elif not isinstance(raw_ids, list):
+        return None, [], t("pump.friend_ids_invalid")
     try:
         selected_ids = list(dict.fromkeys(int(x) for x in raw_ids))
     except (TypeError, ValueError):
