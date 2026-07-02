@@ -38,10 +38,14 @@ def _parse_pump_visibility(data):
         raw_ids = []
     elif not isinstance(raw_ids, list):
         return None, [], t("pump.friend_ids_invalid")
-    try:
-        selected_ids = list(dict.fromkeys(int(x) for x in raw_ids))
-    except (TypeError, ValueError):
-        return None, [], t("pump.friend_ids_invalid")
+    selected_ids = []
+    seen_ids = set()
+    for raw_id in raw_ids:
+        if isinstance(raw_id, bool) or not isinstance(raw_id, int):
+            return None, [], t("pump.friend_ids_invalid")
+        if raw_id not in seen_ids:
+            seen_ids.add(raw_id)
+            selected_ids.append(raw_id)
     if visibility == "friends" and not selected_ids:
         return None, [], t("pump.friend_required")
     if visibility != "friends":

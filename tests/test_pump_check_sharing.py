@@ -143,6 +143,54 @@ def test_workout_complete_rejects_non_list_shared_friend_ids(client, auth_user, 
     assert PumpCheck.query.count() == 0
 
 
+def test_workout_complete_rejects_boolean_shared_friend_ids_entries(client, auth_user, monkeypatch):
+    _ready_for_workout(client, auth_user)
+    monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
+    monkeypatch.setattr(training_bp, "get_friend_ids", lambda user_id: {1})
+
+    res = client.post("/workout/complete", json={
+        "image": _image_data_url("JPEG"),
+        "visibility": "friends",
+        "shared_friend_ids": [True],
+    })
+
+    assert res.status_code == 400
+    assert res.get_json()["error"] == t("pump.friend_ids_invalid")
+    assert PumpCheck.query.count() == 0
+
+
+def test_workout_complete_rejects_float_shared_friend_ids_entries(client, auth_user, monkeypatch):
+    _ready_for_workout(client, auth_user)
+    monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
+    monkeypatch.setattr(training_bp, "get_friend_ids", lambda user_id: {1})
+
+    res = client.post("/workout/complete", json={
+        "image": _image_data_url("JPEG"),
+        "visibility": "friends",
+        "shared_friend_ids": [1.5],
+    })
+
+    assert res.status_code == 400
+    assert res.get_json()["error"] == t("pump.friend_ids_invalid")
+    assert PumpCheck.query.count() == 0
+
+
+def test_workout_complete_rejects_string_shared_friend_ids_entries(client, auth_user, monkeypatch):
+    _ready_for_workout(client, auth_user)
+    monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
+    monkeypatch.setattr(training_bp, "get_friend_ids", lambda user_id: {123})
+
+    res = client.post("/workout/complete", json={
+        "image": _image_data_url("JPEG"),
+        "visibility": "friends",
+        "shared_friend_ids": ["123"],
+    })
+
+    assert res.status_code == 400
+    assert res.get_json()["error"] == t("pump.friend_ids_invalid")
+    assert PumpCheck.query.count() == 0
+
+
 def test_workout_complete_rejects_non_string_visibility(client, auth_user, monkeypatch):
     _ready_for_workout(client, auth_user)
     monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
