@@ -424,6 +424,19 @@ def test_nutrition_plan_requires_session_and_selection(client, auth_user):
     assert response.status_code == 400                                            # seçim yok
 
 
+def test_nutrition_plan_rejects_session_without_target_calories(client, auth_user, monkeypatch):
+    db.session.add(UserSession(user_id=auth_user.id, target_calories=None,
+                               goal="kas kazanma"))
+    db.session.commit()
+    monkeypatch.setattr(nutrition_plan, "_heavy_chat",
+                        lambda **kw: (_ for _ in ()).throw(AssertionError("AI çağrılmamalı")))
+
+    response = client.post("/nutrition-plan", json=PLAN_REQUEST)
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]
+
+
 def test_nutrition_plan_scores_selection_and_returns_plans(client, auth_user, monkeypatch):
     db.session.add(UserSession(user_id=auth_user.id, target_calories=2300,
                                goal="kas kazanma"))

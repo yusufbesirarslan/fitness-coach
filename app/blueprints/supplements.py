@@ -91,9 +91,7 @@ def supplement_add():
 @bp.route("/supplement/edit/<int:sid>", methods=["POST"])
 @login_required
 def supplement_edit(sid):
-    supp = db.get_or_404(Supplement, sid)
-    if supp.user_id != current_user.id:
-        return jsonify({"error": t("route.no_permission")}), 403
+    supp = Supplement.query.filter_by(id=sid, user_id=current_user.id).first_or_404()
 
     data = request.get_json(silent=True) or {}
 
@@ -136,9 +134,7 @@ def supplement_edit(sid):
 @bp.route("/supplement/delete/<int:sid>", methods=["POST"])
 @login_required
 def supplement_delete(sid):
-    supp = db.get_or_404(Supplement, sid)
-    if supp.user_id != current_user.id:
-        return jsonify({"error": t("route.no_permission")}), 403
+    supp = Supplement.query.filter_by(id=sid, user_id=current_user.id).first_or_404()
     db.session.delete(supp)
     db.session.commit()
     return jsonify({"message": t("route.supp_deleted")})

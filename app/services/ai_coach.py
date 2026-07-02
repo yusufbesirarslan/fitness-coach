@@ -1180,14 +1180,18 @@ def _run_coach_conversation_openai(user_id, question, context, history, language
 
     final_text = ""
     for _ in range(_COACH_TOOL_LOOP_CAP):
-        resp = openai_client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=messages,
-            tools=COACH_TOOLS,
-            tool_choice="auto",
-            max_tokens=700,
-            temperature=0.6,
-        )
+        try:
+            resp = openai_client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=messages,
+                tools=COACH_TOOLS,
+                tool_choice="auto",
+                max_tokens=700,
+                temperature=0.6,
+            )
+        except Exception as e:
+            current_app.logger.warning("[COACH] OpenAI çağrısı başarısız: %s", type(e).__name__)
+            return _COACH_FALLBACKS[_coach_lang(language)]["error"]
         if not resp.choices:
             # İçerik filtresi boş choices döndürebilir; ham IndexError yerine
             # boş final_text ile çık (çağıran yönlendirici dostça mesaja düşer).

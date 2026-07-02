@@ -6,22 +6,48 @@ import time
 import requests as http_requests_lib
 import nutrition_pipeline
 from flask import current_app
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from app.config import FATSECRET_API_URL, FATSECRET_TOKEN_URL
 from app.services.ai_nutrition import _dish_types, _estimate_serving_weights_llm, _is_specific_match, _normalize_food_queries_en, _primary_dish_type, _token_match_count
 from app.services.foodcache import _cache_food_id, _cache_macros
 
 
+_fs_session = None
+_fs_session_lock = threading.Lock()
+
+
+def _get_fs_session():
+    global _fs_session
+    if _fs_session is not None:
+        return _fs_session
+    with _fs_session_lock:
+        if _fs_session is None:
+            session = http_requests_lib.Session()
+            retry = Retry(
+                total=2,
+                backoff_factor=0.25,
+                status_forcelist=(429, 502, 503, 504),
+                allowed_methods=frozenset({"GET", "POST"}),
+            )
+            adapter = HTTPAdapter(max_retries=retry, pool_connections=8, pool_maxsize=16)
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
+            _fs_session = session
+        return _fs_session
+
+
 def _fs_get(url, **kwargs):
     """GET request to FatSecret API."""
     kwargs.setdefault("timeout", 10)
-    return http_requests_lib.get(url, **kwargs)
+    return _get_fs_session().get(url, **kwargs)
 
 
 def _fs_post(url, **kwargs):
     """POST request to FatSecret API."""
     kwargs.setdefault("timeout", 10)
-    return http_requests_lib.post(url, **kwargs)
+    return _get_fs_session().post(url, **kwargs)
 
 
 _fs_token_lock = threading.Lock()
@@ -154,7 +180,7 @@ def _normalize_servings(results):
 def _food_get_servings(food_id):
     try:
         token = _get_fatsecret_token()
-        current_app.logger.info("_food_get_servings: got token for food_id=%s", food_id)
+        current_app.logger.debug("_food_get_servings: got token for food_id=%s", food_id)
     except Exception as e:
         current_app.logger.error("_food_get_servings: token failed: %s", e)
         return None
@@ -168,7 +194,7 @@ def _food_get_servings(food_id):
                 "format": "json",
             }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
             data = resp.json()
-            current_app.logger.info("_food_get_servings %s status=%s keys=%s",
+            current_app.logger.debug("_food_get_servings %s status=%s keys=%s",
                             method, resp.status_code, list(data.keys())[:5])
         except Exception as e:
             current_app.logger.warning("_food_get_servings %s failed: %s", method, e)
@@ -182,7 +208,7 @@ def _food_get_servings(food_id):
             servings_raw = data["food"]["servings"]["serving"]
             if isinstance(servings_raw, dict):
                 servings_raw = [servings_raw]
-            current_app.logger.info("_food_get_servings %s OK: %d servings", method, len(servings_raw))
+            current_app.logger.debug("_food_get_servings %s OK: %d servings", method, len(servings_raw))
             break
         except (KeyError, TypeError):
             current_app.logger.warning("_food_get_servings %s: no servings in response keys=%s",
@@ -199,7 +225,7 @@ def _food_get_servings(food_id):
         item = nutrition_pipeline.parse_fatsecret_serving(s)
         if float(s.get("metric_serving_amount") or 0) == 0:
             if item["metric_serving_amount"] > 0:
-                current_app.logger.info("_food_get_servings food_id=%s: '%s' metrik agirligi yok -> matris tahmini %.0fg",
+                current_app.logger.debug("_food_get_servings food_id=%s: '%s' metrik agirligi yok -> matris tahmini %.0fg",
                                 food_id, item["serving_description"] or "?", item["metric_serving_amount"])
             else:
                 current_app.logger.warning("_food_get_servings food_id=%s: serving '%s' has no metric_serving_amount",
@@ -568,7 +594,7 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
         try:
             foods = _fs_relevant_candidates(name, english_map.get(name, ""), token, category_map.get(name))
             if not foods:
-                current_app.logger.info(f"[MACRO ENGINE] FatSecret: '{name}' için alakalı eşleşme yok → LLM yedeği")
+                current_app.logger.debug(f"[MACRO ENGINE] FatSecret: '{name}' için alakalı eşleşme yok → LLM yedeği")
                 continue
 
             found_serving = False
@@ -598,7 +624,7 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
                 # Bu bir yemek degil bilesen → atla; gercek 'Olives' adayi veya LLM
                 # tahmini kazansin. (Yalnizca menu hatti; kocta yag loglamak serbest.)
                 if nutrition_pipeline.is_pure_fat_ingredient(macros):
-                    current_app.logger.info(f"[MACRO ENGINE] FatSecret saf-yag bileseni atlandi '{name}': {food.get('food_name','?')} {macros}")
+                    current_app.logger.debug(f"[MACRO ENGINE] FatSecret saf-yag bileseni atlandi '{name}': {food.get('food_name','?')} {macros}")
                     continue
 
                 # Deterministik saglik kontrolu: imkansiz girdiyi (kalori-makro enerji
@@ -612,7 +638,7 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
                     "fat": macros["fat"],
                 })
                 if not valid_fs:
-                    current_app.logger.info(f"[MACRO ENGINE] FatSecret implausible entry skipped for '{name}': {macros} reasons={_r}")
+                    current_app.logger.debug(f"[MACRO ENGINE] FatSecret implausible entry skipped for '{name}': {macros} reasons={_r}")
                     continue
 
                 if is_serv:
@@ -631,20 +657,20 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
                         # (sos eslesmesi). Reddet → oge LLM yedegine duser (gercekci).
                         if (nutrition_pipeline.is_breadbased_zero_carb(macros, dish_type)
                                 or nutrition_pipeline.is_protein_dish_low_protein(name, macros, dish_type)):
-                            current_app.logger.info(f"[MACRO ENGINE] FatSecret kimlik-hatasi reddedildi '{name}' ({dish_type}): {macros}")
+                            current_app.logger.debug(f"[MACRO ENGINE] FatSecret kimlik-hatasi reddedildi '{name}' ({dish_type}): {macros}")
                             continue
                         per_serving[name] = macros
                         found_serving = True
-                        current_app.logger.info(f"[MACRO ENGINE] FatSecret per-serving match: '{name}' → Cal={macros['calories']}, P={macros['protein']}, C={macros['carbs']}, F={macros['fat']}")
+                        current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-serving match: '{name}' → Cal={macros['calories']}, P={macros['protein']}, C={macros['carbs']}, F={macros['fat']}")
                         break
                     if status == "skip":
-                        current_app.logger.info(f"[MACRO ENGINE] FatSecret per-serving band-USTU atlandi '{name}' ({dish_type}): {macros}")
+                        current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-serving band-USTU atlandi '{name}' ({dish_type}): {macros}")
                         continue
                     # "convert": tam tabak degil → 100g-esdegeri olarak sakla; dongu
                     # surer ki band-ICI daha sonraki bir per-serving aday kazanabilsin.
                     if converted_baseline is None:
                         converted_baseline = conv
-                        current_app.logger.info(f"[MACRO ENGINE] FatSecret per-serving 100g-esdegerine cevrildi '{name}' ({dish_type}, est_g={est_g}): {macros} → {conv}")
+                        current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-serving 100g-esdegerine cevrildi '{name}' ({dish_type}, est_g={est_g}): {macros} → {conv}")
                     continue
                 if baseline_100g is None:
                     baseline_100g = macros
@@ -654,7 +680,7 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
                 chosen = baseline_100g or converted_baseline
                 if chosen:
                     per_100g[name] = chosen
-                    current_app.logger.info(f"[MACRO ENGINE] FatSecret per-100g baseline: '{name}' → Cal={chosen['calories']}/100g")
+                    current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-100g baseline: '{name}' → Cal={chosen['calories']}/100g")
 
         except Exception as e:
             current_app.logger.warning(f"[MACRO ENGINE] FatSecret lookup failed for '{name}': {type(e).__name__}: {e}")

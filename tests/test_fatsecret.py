@@ -34,6 +34,40 @@ class _Resp:
             raise requests.HTTPError(f"HTTP {self.status_code}")
 
 
+def test_http_helpers_use_shared_retrying_session(monkeypatch):
+    sessions = []
+
+    class _Session:
+        def __init__(self):
+            self.adapters = {}
+            self.calls = []
+            sessions.append(self)
+
+        def mount(self, prefix, adapter):
+            self.adapters[prefix] = adapter
+
+        def get(self, url, **kwargs):
+            self.calls.append(("GET", url, kwargs))
+            return _Resp({"ok": True})
+
+        def post(self, url, **kwargs):
+            self.calls.append(("POST", url, kwargs))
+            return _Resp({"ok": True})
+
+    monkeypatch.setattr(fatsecret.http_requests_lib, "Session", _Session)
+    monkeypatch.setattr(fatsecret, "_fs_session", None, raising=False)
+
+    fatsecret._fs_get("https://fatsecret.invalid/get")
+    fatsecret._fs_post("https://fatsecret.invalid/post")
+
+    assert len(sessions) == 1
+    session = sessions[0]
+    assert [c[0] for c in session.calls] == ["GET", "POST"]
+    assert session.calls[0][2]["timeout"] == 10
+    assert session.adapters["https://"].max_retries.total == 2
+    assert 503 in session.adapters["https://"].max_retries.status_forcelist
+
+
 @pytest.fixture(autouse=True)
 def _reset_token_cache():
     fatsecret._fs_token_cache.update({"token": None, "expires_at": 0})

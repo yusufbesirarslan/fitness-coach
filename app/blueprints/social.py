@@ -153,9 +153,7 @@ def friend_request(username):
 @bp.route("/friend/accept/<int:request_id>", methods=["POST"])
 @login_required
 def friend_accept(request_id):
-    fr = db.get_or_404(Friendship, request_id)
-    if fr.receiver_id != current_user.id:
-        return jsonify({"error": t("route.no_accept_permission")}), 403
+    fr = Friendship.query.filter_by(id=request_id, receiver_id=current_user.id).first_or_404()
     if fr.status != "pending":
         return jsonify({"error": t("route.request_handled")}), 400
 
@@ -180,9 +178,7 @@ def friend_accept(request_id):
 @bp.route("/friend/reject/<int:request_id>", methods=["POST"])
 @login_required
 def friend_reject(request_id):
-    fr = db.get_or_404(Friendship, request_id)
-    if fr.receiver_id != current_user.id:
-        return jsonify({"error": t("route.no_decline_permission")}), 403
+    fr = Friendship.query.filter_by(id=request_id, receiver_id=current_user.id).first_or_404()
     if fr.status != "pending":
         return jsonify({"error": t("route.request_handled")}), 400
     fr.status = "rejected"
@@ -312,9 +308,7 @@ def send_suggestion(username):
 @bp.route("/suggest/respond/<int:msg_id>", methods=["POST"])
 @login_required
 def respond_suggestion(msg_id):
-    msg = db.get_or_404(Message, msg_id)
-    if msg.receiver_id != current_user.id:
-        return jsonify({"error": t("route.suggestion_not_yours")}), 403
+    msg = Message.query.filter_by(id=msg_id, receiver_id=current_user.id).first_or_404()
     if msg.message_type not in ("suggestion_meal", "suggestion_workout"):
         return jsonify({"error": t("route.not_suggestion")}), 400
 

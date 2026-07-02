@@ -5,13 +5,11 @@
 - GET /premium    — freemium tanıtımı (billing yok; upgrade-intent GA olayı)
 - GET /referral   — panodaki davet kartı için JSON (kod + bağlantı + davet sayısı)
 """
-from flask import Blueprint, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 
-from app.extensions import db
 from app.i18n import t
 from app.models import User
-from app.services.referral import ensure_referral_code
 
 
 bp = Blueprint("pages", __name__)
@@ -68,10 +66,11 @@ def premium():
 @bp.route("/referral")
 @login_required
 def referral_data():
-    # Kod boot backfill'inde atanır; eski/yeni kenar durumları için tembel garanti.
+    # Kod kayıt sırasında veya boot backfill'inde atanır. Bu GET route'u salt-okunur
+    # kalmalı; eksik kod varsa deploy/backfill sorunu görünür olsun.
     if not current_user.referral_code:
-        ensure_referral_code(current_user)
-        db.session.commit()
+        current_app.logger.warning("[REFERRAL] Kullanıcının davet kodu eksik (user=%s)", current_user.id)
+        return jsonify({"error": t("route.user_not_found")}), 404
     invite_url = url_for("pages.invite", code=current_user.referral_code, _external=True)
     count = User.query.filter_by(referred_by_id=current_user.id).count()
     return jsonify({

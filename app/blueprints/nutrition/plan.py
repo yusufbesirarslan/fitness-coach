@@ -118,6 +118,8 @@ def nutrition_plan_generate():
 
     target_calories = last.target_calories
     goal            = last.goal
+    if target_calories is None:
+        return jsonify({"error": t("plan.no_session")}), 400
 
     # Seçilen gıdalar
     selected_proteins = data.get("proteins", [])

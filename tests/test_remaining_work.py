@@ -37,6 +37,22 @@ def test_register_assigns_referral_code(client):
     assert u.referral_code and len(u.referral_code) >= 6
 
 
+def test_referral_code_is_assigned_before_referral_get(client):
+    from app.blueprints import pages
+
+    client.post("/register", json={
+        "username": "refgetuser", "email": "refget@example.com", "password": "Sifre123"})
+    client.post("/login", json={"username": "refgetuser", "password": "Sifre123"})
+    user = User.query.filter_by(username="refgetuser").one()
+    assert user.referral_code
+    assert not hasattr(pages, "ensure_referral_code")
+
+    r = client.get("/referral")
+
+    assert r.status_code == 200
+    assert r.get_json()["code"] == user.referral_code
+
+
 def test_invite_sets_cookie_and_redirects(client, make_user):
     inviter = make_user("davetci")
     code = ensure_referral_code(inviter)
@@ -83,6 +99,8 @@ def test_self_referral_is_noop(client, make_user):
 
 
 def test_referral_endpoint_returns_code_and_url(client, auth_user):
+    ensure_referral_code(auth_user)
+    db.session.commit()
     r = client.get("/referral")
     assert r.status_code == 200
     data = r.get_json()
