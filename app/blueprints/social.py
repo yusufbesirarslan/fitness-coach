@@ -419,12 +419,15 @@ def chat_messages(username):
             "message_type": m.message_type or "text",
         }
         if (m.message_type or "") == "pump_check":
+            item["body"] = ""
             item["pump_check"] = None
             try:
                 raw = json.loads(m.body or "{}")
-                check = db.session.get(PumpCheck, int(raw.get("pump_check_id")))
-                if check and can_view_pump_check(current_user.id, check):
-                    item["pump_check"] = serialize_pump_check_card(check, current_user.id)
+                if isinstance(raw, dict):
+                    check_id = raw.get("pump_check_id")
+                    check = db.session.get(PumpCheck, int(check_id))
+                    if check and can_view_pump_check(current_user.id, check):
+                        item["pump_check"] = serialize_pump_check_card(check, current_user.id)
             except (TypeError, ValueError, json.JSONDecodeError):
                 item["pump_check"] = None
         payloads.append(item)

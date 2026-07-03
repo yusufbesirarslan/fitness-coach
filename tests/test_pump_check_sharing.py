@@ -295,7 +295,13 @@ def test_chat_messages_include_authorized_pump_check_payload(client, auth_user, 
         sender_id=auth_user.id,
         receiver_id=friend.id,
         message_type="pump_check",
-        body=json.dumps({"pump_check_id": check.id}),
+        body=json.dumps({
+            "pump_check_id": check.id,
+            "image_key": check.image_key,
+            "environment": check.location_type,
+            "description": check.description,
+            "created_at": "2026-07-02T14:05:00",
+        }),
     ))
     db.session.commit()
     original_generate_presigned_url = s3_helper.generate_presigned_url
@@ -310,6 +316,7 @@ def test_chat_messages_include_authorized_pump_check_payload(client, auth_user, 
 
     msg = body["messages"][0]
     assert msg["message_type"] == "pump_check"
+    assert msg["body"] == ""
     assert msg["pump_check"]["description"] == "Shared only"
     assert msg["pump_check"]["environment"] == "Gym"
     assert msg["pump_check"]["imageUrl"] is not None
@@ -338,7 +345,13 @@ def test_chat_messages_redact_unavailable_pump_check_payload(client, auth_user, 
         sender_id=auth_user.id,
         receiver_id=unselected.id,
         message_type="pump_check",
-        body=json.dumps({"pump_check_id": check.id}),
+        body=json.dumps({
+            "pump_check_id": check.id,
+            "image_key": check.image_key,
+            "environment": check.location_type,
+            "description": check.description,
+            "created_at": "2026-07-02T14:05:00",
+        }),
     ))
     db.session.commit()
 
@@ -348,8 +361,37 @@ def test_chat_messages_redact_unavailable_pump_check_payload(client, auth_user, 
 
     msg = body["messages"][0]
     assert msg["message_type"] == "pump_check"
+    assert msg["body"] == ""
     assert msg["pump_check"] is None
-    assert "Do not leak" not in json.dumps(msg)
+    payload = json.dumps(msg, sort_keys=True)
+    assert "Do not leak" not in payload
+    assert "pump_check_id" not in payload
+    assert "image_key" not in payload
+    assert "environment" not in payload
+    assert "created_at" not in payload
+
+
+def test_chat_messages_ignore_non_dict_pump_check_json(client, auth_user, make_user):
+    friend = make_user("friend")
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=friend.id, status="accepted"))
+    db.session.commit()
+    db.session.add(Message(
+        sender_id=auth_user.id,
+        receiver_id=friend.id,
+        message_type="pump_check",
+        body=json.dumps([]),
+    ))
+    db.session.commit()
+
+    client.post("/logout")
+    client.post("/login", json={"username": "friend", "password": "Sifre123"})
+    response = client.get("/chat/testuser/messages")
+
+    assert response.status_code == 200
+    msg = response.get_json()["messages"][0]
+    assert msg["message_type"] == "pump_check"
+    assert msg["body"] == ""
+    assert msg["pump_check"] is None
 
 
 def test_friend_select_list_recent_contacts_first(client, auth_user, make_user):
