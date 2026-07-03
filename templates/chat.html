@@ -167,6 +167,23 @@
         transition: background 0.2s;
     }
     .sug-send-btn:hover { background: #1E6FE0; }
+    .msg-pump-card {
+        background: var(--surface-2); border: 1px solid rgba(61,139,255,0.2);
+        border-radius: 14px; overflow: hidden; max-width: 260px;
+    }
+    .msg-pump-card img { width: 100%; max-height: 220px; object-fit: cover; display: block; }
+    .msg-pump-body { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .msg-pump-title {
+        font-size: 11px; font-weight: 700; letter-spacing: .08em;
+        text-transform: uppercase; color: var(--volt);
+    }
+    .msg-pump-meta { font-size: 11px; color: var(--text-3); }
+    .msg-pump-label {
+        font-size: 10px; font-weight: 700; letter-spacing: .12em;
+        color: var(--text-3); text-transform: uppercase;
+    }
+    .msg-pump-value { font-size: 13px; color: var(--text); line-height: 1.4; }
+    .msg-pump-missing { padding: 12px; color: var(--text-3); font-size: 13px; }
     </style>
 </head>
 {% set nav_active = 'friends' %}
@@ -291,6 +308,18 @@ function renderSuggestionCard(m) {
         '<div class="sug-body">'+escapeHTML(m.body)+'</div>'+actionsHTML+'</div>';
 }
 
+function renderPumpCheckCard(m) {
+    const p = m.pump_check;
+    if (!p) return '<div class="msg-pump-card"><div class="msg-pump-missing">'+__t('chat.pump_unavailable')+'</div></div>';
+    const cardTimestamp = p.timePosted || p.createdAt || '';
+    return '<div class="msg-pump-card">' +
+        (p.imageUrl ? '<img src="'+escapeHTML(p.imageUrl).replace(/"/g, '&quot;')+'" loading="lazy" decoding="async" alt="">' : '') +
+        '<div class="msg-pump-body"><div class="msg-pump-title">'+__t('chat.pump_title')+'</div>' +
+        (cardTimestamp ? '<div class="msg-pump-meta">'+escapeHTML(cardTimestamp)+'</div>' : '') +
+        '<div><div class="msg-pump-label">'+__t('feed.environment')+'</div><div class="msg-pump-value">'+escapeHTML(p.environment || '')+'</div></div>' +
+        '<div><div class="msg-pump-label">'+__t('feed.description')+'</div><div class="msg-pump-value">'+escapeHTML(p.description || '')+'</div></div></div></div>';
+}
+
 function renderMessages(messages) {
     if (!messages.length) {
         emptyEl.textContent = __t('chat.no_messages');
@@ -308,7 +337,10 @@ function renderMessages(messages) {
         row.dataset.id = m.id;
 
         const isSuggestion = m.message_type && m.message_type.startsWith('suggestion_');
-        if (isSuggestion) {
+        if (m.message_type === 'pump_check') {
+            row.innerHTML = '<div>' + renderPumpCheckCard(m) +
+                '<div class="msg-time">' + m.timestamp + '</div></div>';
+        } else if (isSuggestion) {
             row.innerHTML = '<div>' + renderSuggestionCard(m) +
                 '<div class="msg-time">' + m.timestamp + '</div></div>';
         } else {

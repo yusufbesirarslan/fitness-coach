@@ -18,6 +18,7 @@ from app.services.ai import _bedrock_validate_image, _heavy_chat, anthropic as _
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
 from app.services.fatsecret import _food_search_fatsecret, _food_search_static
 from app.services.gamification import _claim_quest, award_xp, log_activity
+from app.services.pump_checks import latest_training_plan_score
 from app.timeutil import app_date_of, app_today, day_key, utc_day_bounds
 
 
@@ -878,6 +879,7 @@ def _tool_analyze_gym_photo(user_id, s3_key):
     db.session.add(PumpCheck(
         user_id=user_id, image_key=s3_key, location_type="ai_tool",
         description=result["reason"][:200], valid=True, fallback=False,
+        workout_score=latest_training_plan_score(user_id),
         date_key=app_today().isoformat()))
     db.session.add(WorkoutLog(
         user_id=user_id, exercise_name=WORKOUT_COMPLETION_MARKER,

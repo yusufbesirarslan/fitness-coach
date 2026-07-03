@@ -273,6 +273,11 @@ class PumpCheck(db.Model):
     image_key     = db.Column(db.String(300), nullable=True)  # S3 nesne anahtarı
     location_type = db.Column(db.String(50))
     description   = db.Column(db.String(200))
+    workout_score = db.Column(db.Float, nullable=True)
+    visibility    = db.Column(db.String(20), nullable=False, default="private", server_default="private", index=True)
+    shared_friend_ids = db.Column(JSONB().with_variant(db.JSON(), "sqlite"), nullable=False, default=list)
+    likes_count   = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    comments_count = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     valid         = db.Column(db.Boolean, default=True)
     fallback      = db.Column(db.Boolean, default=False)  # AI atlandıysa (fail-open)
     # Günlük idempotency anahtarı (Istanbul ISO 'YYYY-MM-DD'). Aşağıdaki UNIQUE
@@ -286,8 +291,35 @@ class PumpCheck(db.Model):
         db.UniqueConstraint("user_id", "date_key", name="uq_pump_check_day"),
     )
 
+    user = db.relationship("User", backref=db.backref("pump_checks", passive_deletes=True))
+
     def __repr__(self):
         return f"<PumpCheck {self.user_id} - {self.created_at}>"
+
+
+class PumpCheckLike(db.Model):
+    id            = db.Column(db.Integer, primary_key=True)
+    pump_check_id = db.Column(db.Integer, db.ForeignKey("pump_check.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id       = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("pump_check_id", "user_id", name="uq_pump_check_like_user"),
+    )
+
+    pump_check = db.relationship("PumpCheck", backref=db.backref("likes", passive_deletes=True))
+    user = db.relationship("User", backref=db.backref("pump_check_likes", passive_deletes=True))
+
+
+class PumpCheckComment(db.Model):
+    id            = db.Column(db.Integer, primary_key=True)
+    pump_check_id = db.Column(db.Integer, db.ForeignKey("pump_check.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id       = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    body          = db.Column(db.String(500), nullable=False)
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    pump_check = db.relationship("PumpCheck", backref=db.backref("comments", passive_deletes=True))
+    user = db.relationship("User", backref=db.backref("pump_check_comments", passive_deletes=True))
 
 
 class Friendship(db.Model):

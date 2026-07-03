@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}" data-theme="dark">
+<head>
+    {% include "_head.html" %}
+    <title>{{ t('feed.page_title') }}</title>
+    <link rel="stylesheet" href="/static/theme.css">
+    <link rel="stylesheet" href="/static/nav.css">
+    <style nonce="{{ csp_nonce }}">
+    .feed-wrap { max-width: 620px; margin: 0 auto; display:flex; flex-direction:column; gap:14px; }
+    .feed-card { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden; }
+    .feed-head { display:flex; align-items:center; gap:10px; padding:14px 16px; }
+    .feed-avatar { width:40px; height:40px; border-radius:50%; background:linear-gradient(135deg,#3D8BFF,#1E6FE0); color:#121212; display:flex; align-items:center; justify-content:center; font-family:var(--font-display); overflow:hidden; }
+    .feed-avatar img { width:100%; height:100%; object-fit:cover; }
+    .feed-user { font-weight:700; color:var(--text); font-size:14px; }
+    .feed-time { color:var(--text-3); font-size:12px; }
+    .feed-img { width:100%; max-height:520px; object-fit:cover; display:block; background:rgba(255,255,255,0.03); }
+    .feed-img-fallback { position:relative; min-height:280px; overflow:hidden; background:
+      radial-gradient(circle at top right, rgba(61,139,255,.34), transparent 34%),
+      linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015)),
+      linear-gradient(135deg, rgba(14,17,24,.98), rgba(22,27,38,.98)); }
+    .feed-img-fallback::before,
+    .feed-img-fallback::after { content:""; position:absolute; inset:auto 18px 18px 18px; border-radius:16px; border:1px solid rgba(255,255,255,.06); }
+    .feed-img-fallback::before { top:18px; background:
+      linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02)),
+      repeating-linear-gradient(90deg, rgba(255,255,255,.03) 0, rgba(255,255,255,.03) 1px, transparent 1px, transparent 48px),
+      repeating-linear-gradient(180deg, rgba(255,255,255,.02) 0, rgba(255,255,255,.02) 1px, transparent 1px, transparent 48px); }
+    .feed-img-fallback::after { height:56px; inset:auto 18px 18px 18px; background:linear-gradient(90deg, rgba(61,139,255,.22), rgba(255,255,255,.03)); box-shadow:0 10px 32px rgba(0,0,0,.28); }
+    .feed-body { padding:14px 16px 16px; display:flex; flex-direction:column; gap:12px; }
+    .feed-label { font-size:10px; font-weight:700; letter-spacing:.14em; color:var(--text-3); margin-bottom:3px; }
+    .feed-value { font-size:14px; color:var(--text); line-height:1.45; }
+    .feed-actions { display:flex; gap:14px; color:var(--text-2); font-size:13px; align-items:center; }
+    .feed-action { background:none; border:0; color:inherit; cursor:pointer; font:inherit; padding:0; }
+    .feed-action.liked { color:var(--volt); }
+    .feed-action.is-busy { opacity:.65; pointer-events:none; }
+    .feed-skeleton { height:360px; border-radius:var(--r-md); background:linear-gradient(90deg,rgba(255,255,255,.03),rgba(255,255,255,.07),rgba(255,255,255,.03)); animation:pulse 1.2s infinite; }
+    .feed-empty { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); padding:32px; text-align:center; color:var(--text-3); }
+    .comments-sheet[hidden] { display:none; }
+    .comments-sheet { position:fixed; inset:0; z-index:60; display:flex; align-items:flex-end; justify-content:center; }
+    .comments-backdrop { position:absolute; inset:0; background:rgba(0,0,0,.62); border:0; padding:0; }
+    .comments-panel { position:relative; width:min(100%,540px); max-height:min(72vh,680px); background:linear-gradient(180deg,rgba(20,24,34,.98),rgba(14,17,24,.98)); border:1px solid rgba(61,139,255,.18); border-radius:14px 14px 0 0; box-shadow:0 -16px 50px rgba(0,0,0,.45); display:flex; flex-direction:column; overflow:hidden; }
+    .comments-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 18px; border-bottom:1px solid var(--border); }
+    .comments-title { font-family:var(--font-display); letter-spacing:.08em; font-size:14px; color:var(--text); }
+    .comments-close { border:1px solid var(--border); background:rgba(255,255,255,.03); color:var(--text-2); width:34px; height:34px; border-radius:999px; cursor:pointer; }
+    .comments-list { padding:16px 18px; overflow:auto; display:flex; flex-direction:column; gap:12px; min-height:160px; }
+    .comment-row { display:flex; gap:10px; align-items:flex-start; }
+    .comment-avatar { width:34px; height:34px; border-radius:50%; overflow:hidden; flex:0 0 auto; background:linear-gradient(135deg,#3D8BFF,#1E6FE0); color:#121212; display:flex; align-items:center; justify-content:center; font-family:var(--font-display); }
+    .comment-avatar img { width:100%; height:100%; object-fit:cover; }
+    .comment-card { flex:1; min-width:0; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); border-radius:12px; padding:10px 12px; }
+    .comment-meta { display:flex; align-items:baseline; gap:8px; margin-bottom:4px; }
+    .comment-user { color:var(--text); font-size:13px; font-weight:700; }
+    .comment-time { color:var(--text-3); font-size:11px; }
+    .comment-body { color:var(--text-2); font-size:13px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
+    .comments-state { color:var(--text-3); font-size:13px; text-align:center; padding:20px 12px; }
+    .comments-compose { padding:14px 18px 18px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:10px; }
+    .comments-input { width:100%; min-height:84px; resize:vertical; border-radius:12px; border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.03); color:var(--text); padding:12px 14px; font:inherit; }
+    .comments-input:focus { outline:none; border-color:rgba(61,139,255,.45); box-shadow:0 0 0 3px rgba(61,139,255,.14); }
+    .comments-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .comments-hint { color:var(--text-3); font-size:12px; }
+    .comments-submit { border:0; background:var(--volt); color:#101318; border-radius:999px; padding:10px 16px; font-weight:700; cursor:pointer; }
+    .comments-submit[disabled] { opacity:.6; cursor:default; }
+    @media (max-width: 640px) {
+      .comments-panel { width:100%; max-height:78vh; }
+    }
+    @keyframes pulse { 0%{opacity:.6} 50%{opacity:1} 100%{opacity:.6} }
+    </style>
+</head>
+{% set nav_active = 'feed' %}
+<body class="page-body">
+<div class="toast-wrap" id="toast-wrap"></div>
+{% include "_nav.html" %}
+<main class="main-content">
+    <div class="page-hdr">
+        <h1>{{ t('feed.h1_a') }}<br><span>{{ t('feed.h1_b') }}</span></h1>
+        <p>{{ t('feed.page_sub') }}</p>
+    </div>
+    <div class="feed-wrap" id="feed-list">
+        <div class="feed-skeleton"></div>
+        <div class="feed-skeleton"></div>
+    </div>
+</main>
+<section class="comments-sheet" id="comments-sheet" hidden>
+    <button class="comments-backdrop" type="button" id="comments-backdrop" aria-label="{{ t('feed.comments_close') }}"></button>
+    <div class="comments-panel" role="dialog" aria-modal="true" aria-labelledby="comments-title">
+        <div class="comments-head">
+            <div class="comments-title" id="comments-title">{{ t('feed.comments_title') }}</div>
+            <button class="comments-close" type="button" id="comments-close" aria-label="{{ t('feed.comments_close') }}">×</button>
+        </div>
+        <div class="comments-list" id="comments-list"></div>
+        <form class="comments-compose" id="comments-form">
+            <textarea class="comments-input" id="comments-input" maxlength="500" placeholder="{{ t('feed.comment_placeholder') }}"></textarea>
+            <div class="comments-foot">
+                <div class="comments-hint" id="comments-hint">{{ t('feed.comment_hint') }}</div>
+                <button class="comments-submit" id="comments-submit" type="submit">{{ t('feed.comment_post') }}</button>
+            </div>
+        </form>
+    </div>
+</section>
+{% include "_actionbar.html" %}
+<script nonce="{{ csp_nonce }}">
+var __t = window.t || function(k){ return k; };
+let feedPage = 1;
+let feedLoading = false;
+let feedHasMore = true;
+const feedList = document.getElementById('feed-list');
+const commentsSheet = document.getElementById('comments-sheet');
+const commentsBackdrop = document.getElementById('comments-backdrop');
+const commentsClose = document.getElementById('comments-close');
+const commentsList = document.getElementById('comments-list');
+const commentsForm = document.getElementById('comments-form');
+const commentsInput = document.getElementById('comments-input');
+const commentsSubmit = document.getElementById('comments-submit');
+const commentsHint = document.getElementById('comments-hint');
+let activeCommentsId = null;
+function esc(v){ const d=document.createElement('div'); d.textContent=v == null ? '' : String(v); return d.innerHTML; }
+function avatar(post){ return post.userAvatar ? '<div class="feed-avatar"><img src="'+esc(post.userAvatar).replace(/"/g,'&quot;')+'" alt=""></div>' : '<div class="feed-avatar">'+esc((post.username||'U')[0].toUpperCase())+'</div>'; }
+function commentAvatar(comment){ return comment.userAvatar ? '<div class="comment-avatar"><img src="'+esc(comment.userAvatar).replace(/"/g,'&quot;')+'" alt=""></div>' : '<div class="comment-avatar">'+esc((comment.username||'U')[0].toUpperCase())+'</div>'; }
+function cardMedia(post){
+  if(post.imageUrl){
+    return '<img class="feed-img" src="'+esc(post.imageUrl).replace(/"/g,'&quot;')+'" loading="lazy" decoding="async" alt="">';
+  }
+  return '<div class="feed-img feed-img-fallback" aria-hidden="true"></div>';
+}
+function card(post){
+  return '<article class="feed-card" data-id="'+post.id+'"><div class="feed-head">'+avatar(post)+'<div><div class="feed-user">'+esc(post.username)+'</div><div class="feed-time">'+esc(post.timePosted)+'</div></div></div>'+
+    cardMedia(post)+
+    '<div class="feed-body">'+
+    (post.workoutScore != null ? '<div><div class="feed-label">'+__t('feed.workout_score')+'</div><div class="feed-value">'+esc(post.workoutScore)+'</div></div>' : '')+
+    '<div><div class="feed-label">'+__t('feed.environment')+'</div><div class="feed-value">'+esc(post.environment)+'</div></div>'+
+    '<div><div class="feed-label">'+__t('feed.description')+'</div><div class="feed-value">'+esc(post.description)+'</div></div>'+
+    '<div class="feed-actions"><button class="feed-action '+(post.likedByMe?'liked':'')+'" data-like="'+post.id+'">'+post.likesCount+' '+__t('feed.likes')+'</button><button class="feed-action" data-comments="'+post.id+'">'+commentCountLabel(post.commentsCount)+'</button></div></div></article>';
+}
+function commentCountLabel(count){
+  return __t('feed.comments_count', {n: count});
+}
+function setCommentCount(id, count){
+  const button = feedList.querySelector('[data-comments="'+id+'"]');
+  if(button) button.textContent = commentCountLabel(count);
+}
+function renderComment(comment){
+  return '<div class="comment-row">'+commentAvatar(comment)+'<div class="comment-card"><div class="comment-meta"><span class="comment-user">'+esc(comment.username)+'</span><span class="comment-time">'+esc(comment.createdAt || '')+'</span></div><div class="comment-body">'+esc(comment.body)+'</div></div></div>';
+}
+function setCommentsState(key){
+  commentsList.innerHTML = '<div class="comments-state">'+esc(__t(key))+'</div>';
+}
+function openComments(id){
+  activeCommentsId = id;
+  commentsSheet.hidden = false;
+  document.body.style.overflow = 'hidden';
+  commentsInput.value = '';
+  commentsHint.textContent = __t('feed.comment_hint');
+  commentsInput.focus();
+  loadComments(id);
+}
+function closeComments(){
+  activeCommentsId = null;
+  commentsSheet.hidden = true;
+  document.body.style.overflow = '';
+}
+async function loadComments(id){
+  setCommentsState('feed.comments_loading');
+  try {
+    const res = await fetch('/pump-check/' + id + '/comments');
+    const data = await res.json();
+    if(!res.ok){
+      setCommentsState('feed.comments_error');
+      return;
+    }
+    if(activeCommentsId !== id) return;
+    if(!data.comments.length){
+      setCommentsState('feed.comments_empty');
+      return;
+    }
+    commentsList.innerHTML = data.comments.map(renderComment).join('');
+    commentsList.scrollTop = commentsList.scrollHeight;
+  } catch (err) {
+    setCommentsState('feed.comments_error');
+  }
+}
+async function loadFeed(){
+  if(feedLoading || !feedHasMore) return;
+  feedLoading = true;
+  try {
+    const res = await fetch('/feed/data?page=' + feedPage);
+    const data = await res.json();
+    if(feedPage === 1) feedList.innerHTML = '';
+    if(!data.posts.length && feedPage === 1){
+      feedList.innerHTML = '<div class="feed-empty">'+__t('feed.empty')+'</div>';
+    } else {
+      feedList.insertAdjacentHTML('beforeend', data.posts.map(card).join(''));
+    }
+    feedHasMore = data.hasMore;
+    feedPage = data.nextPage || feedPage;
+  } finally {
+    feedLoading = false;
+  }
+}
+feedList.addEventListener('click', async (e) => {
+  const like = e.target.closest('[data-like]');
+  if(like){
+    const id = like.dataset.like;
+    const liked = like.classList.contains('liked');
+    like.classList.add('is-busy');
+    try {
+      const res = await fetch('/pump-check/' + id + '/like', { method: liked ? 'DELETE' : 'POST' });
+      const data = await res.json();
+      if(res.ok){
+        like.classList.toggle('liked', data.liked);
+        like.textContent = data.likesCount + ' ' + __t('feed.likes');
+      }
+    } finally {
+      like.classList.remove('is-busy');
+    }
+    return;
+  }
+  const comments = e.target.closest('[data-comments]');
+  if(comments){
+    openComments(comments.dataset.comments);
+  }
+});
+commentsBackdrop.addEventListener('click', closeComments);
+commentsClose.addEventListener('click', closeComments);
+document.addEventListener('keydown', (e) => {
+  if(e.key === 'Escape' && !commentsSheet.hidden) closeComments();
+});
+commentsForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if(!activeCommentsId) return;
+  const body = commentsInput.value.trim();
+  if(!body){
+    commentsHint.textContent = __t('feed.comment_empty');
+    return;
+  }
+  commentsSubmit.disabled = true;
+  commentsHint.textContent = __t('feed.comment_posting');
+  try {
+    const res = await fetch('/pump-check/' + activeCommentsId + '/comments', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({body: body})
+    });
+    const data = await res.json();
+    if(!res.ok){
+      commentsHint.textContent = data.error || __t('feed.comments_error');
+      return;
+    }
+    commentsInput.value = '';
+    commentsHint.textContent = __t('feed.comment_hint');
+    setCommentCount(activeCommentsId, data.commentsCount || 0);
+    await loadComments(activeCommentsId);
+  } catch (err) {
+    commentsHint.textContent = __t('feed.comments_error');
+  } finally {
+    commentsSubmit.disabled = false;
+  }
+});
+window.addEventListener('scroll', () => { if(window.innerHeight + window.scrollY > document.body.offsetHeight - 500) loadFeed(); });
+loadFeed();
+</script>
+<script src="/static/nav.js"></script>
+<script src="/static/actions.js"></script>
+</body>
+</html>
