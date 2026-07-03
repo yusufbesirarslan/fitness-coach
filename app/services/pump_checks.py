@@ -51,7 +51,7 @@ def sharing_status(check):
     }
 
 
-def _normalize_workout_score(value):
+def normalize_workout_score(value):
     if value is None:
         return None
     try:
@@ -60,17 +60,17 @@ def _normalize_workout_score(value):
         return None
 
 
-def workout_score(check):
-    score = _normalize_workout_score(getattr(check, "score", None))
-    if score is not None:
-        return score
-    plan_query = TrainingPlan.query.filter(TrainingPlan.user_id == check.user_id)
-    if check.created_at is not None:
-        plan_query = plan_query.filter(TrainingPlan.created_at <= check.created_at)
-    plan = plan_query.order_by(TrainingPlan.created_at.desc(), TrainingPlan.id.desc()).first()
+def latest_training_plan_score(user_id):
+    plan = TrainingPlan.query.filter_by(user_id=user_id)\
+        .order_by(TrainingPlan.created_at.desc(), TrainingPlan.id.desc())\
+        .first()
     if plan is None:
         return None
-    return _normalize_workout_score(plan.score)
+    return normalize_workout_score(plan.score)
+
+
+def workout_score(check):
+    return normalize_workout_score(getattr(check, "workout_score", None))
 
 
 def serialize_pump_check_card(check, viewer_id, include_viewer_state=True):

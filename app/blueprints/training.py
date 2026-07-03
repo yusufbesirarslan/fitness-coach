@@ -12,7 +12,7 @@ from app.models import Message, WORKOUT_COMPLETION_MARKER, DailyQuest, PumpCheck
 from app.services.ai import _heavy_chat
 from app.services.gamification import _claim_quest, award_xp, complete_quest_for_user, get_level, level_title, log_activity
 from app.services.menu_extract import validate_pump_check
-from app.services.pump_checks import get_friend_ids
+from app.services.pump_checks import get_friend_ids, normalize_workout_score
 from app.services.premium import premium_ai_plan_gate
 from app.services.training_generation.response_validator import PlanValidationError
 from app.services.training_generation.service import generate_training_plan_payload
@@ -177,6 +177,7 @@ def complete_workout():
     pump_check = PumpCheck(
         user_id=current_user.id, image_key=pump_image_key,
         location_type=location_type, description=description,
+        workout_score=normalize_workout_score(plan.score),
         valid=True, fallback=check.get("fallback", False),
         date_key=app_today().isoformat(),
         visibility=visibility,

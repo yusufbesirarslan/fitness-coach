@@ -102,12 +102,12 @@ def test_serialize_pump_check_card_exposes_requested_fields(make_user):
 
 
 def test_serialize_pump_check_card_includes_workout_score_when_available(client, auth_user):
-    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 8.0})
     check = PumpCheck(
         user_id=auth_user.id,
         visibility="feed",
         location_type="Gym",
         description="Leg day.",
+        workout_score=8.0,
         created_at=datetime.utcnow(),
         valid=True,
     )
@@ -117,6 +117,23 @@ def test_serialize_pump_check_card_includes_workout_score_when_available(client,
     data = serialize_pump_check_card(check, auth_user.id)
 
     assert data["workoutScore"] == 8.0
+
+
+def test_workout_complete_persists_score_after_later_training_plan_replacement(client, auth_user, monkeypatch):
+    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 8.0})
+    monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
+
+    res = client.post("/workout/complete", json={"image": _image_data_url("JPEG"), "location_type": "Gym"})
+
+    assert res.status_code == 200
+    check = PumpCheck.query.filter_by(user_id=auth_user.id).one()
+    assert check.workout_score == 8.0
+
+    replace = client.post("/training-plan/save", json={"plan": {"v": 2}, "score": 5.0})
+
+    assert replace.status_code == 200
+    body = client.get("/feed/data").get_json()
+    assert body["posts"][0]["workoutScore"] == 8.0
 
 
 def _ready_for_workout(client, user):
@@ -382,12 +399,12 @@ def test_comment_requires_visibility_and_updates_count(client, auth_user, make_u
 
 
 def test_feed_data_exposes_workout_score_when_present(client, auth_user):
-    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 8.0})
     db.session.add(PumpCheck(
         user_id=auth_user.id,
         visibility="feed",
         location_type="Gym",
         description="Scored session",
+        workout_score=8.0,
         valid=True,
     ))
     db.session.commit()

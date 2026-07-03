@@ -273,6 +273,7 @@ class PumpCheck(db.Model):
     image_key     = db.Column(db.String(300), nullable=True)  # S3 nesne anahtarı
     location_type = db.Column(db.String(50))
     description   = db.Column(db.String(200))
+    workout_score = db.Column(db.Float, nullable=True)
     visibility    = db.Column(db.String(20), nullable=False, default="private", server_default="private", index=True)
     shared_friend_ids = db.Column(JSONB().with_variant(db.JSON(), "sqlite"), nullable=False, default=list)
     likes_count   = db.Column(db.Integer, nullable=False, default=0, server_default="0")
