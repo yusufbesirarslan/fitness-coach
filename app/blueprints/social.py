@@ -119,8 +119,14 @@ def feed_page():
 @bp.route("/feed/data")
 @login_required
 def feed_data():
-    page = max(int(request.args.get("page", 1) or 1), 1)
-    per_page = min(max(int(request.args.get("per_page", 10) or 10), 1), 30)
+    try:
+        page = max(int(request.args.get("page", 1) or 1), 1)
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        per_page = min(max(int(request.args.get("per_page", 10) or 10), 1), 30)
+    except (TypeError, ValueError):
+        per_page = 10
     visible_user_ids = get_friend_ids(current_user.id) | {current_user.id}
     query = PumpCheck.query.filter(
         PumpCheck.visibility == "feed",

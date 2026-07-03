@@ -412,3 +412,23 @@ def test_feed_data_exposes_workout_score_when_present(client, auth_user):
     body = client.get("/feed/data").get_json()
 
     assert body["posts"][0]["workoutScore"] == 8.0
+
+
+def test_feed_data_ignores_malformed_pagination_and_uses_defaults(client, auth_user):
+    db.session.add(PumpCheck(
+        user_id=auth_user.id,
+        visibility="feed",
+        location_type="Gym",
+        description="Fallback page",
+        valid=True,
+    ))
+    db.session.commit()
+
+    response = client.get("/feed/data?page=abc&per_page=xyz")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert len(body["posts"]) == 1
+    assert body["posts"][0]["description"] == "Fallback page"
+    assert body["hasMore"] is False
+    assert body["nextPage"] is None
