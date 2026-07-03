@@ -340,6 +340,26 @@ def test_feed_page_uses_shared_feed_nav_and_leaderboard_drawer(client, auth_user
     assert 'href="/leaderboard"' in html
 
 
+def test_feed_template_preserves_exact_metadata_label_casing():
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "templates" / "feed.html").read_text(encoding="utf-8")
+
+    assert ".feed-label" in html
+    assert "text-transform:uppercase" not in html
+    assert "__t('feed.environment')" in html
+    assert "__t('feed.description')" in html
+
+
+def test_feed_template_renders_fallback_media_region_without_image_url():
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "templates" / "feed.html").read_text(encoding="utf-8")
+
+    assert "feed-img-fallback" in html
+    assert "function cardMedia(post)" in html
+    assert "if(post.imageUrl)" in html
+    assert "feed-img feed-img-fallback" in html
+
+
 def test_standalone_nav_templates_use_feed_bottom_tab_and_keep_club_in_drawer():
     root = Path(__file__).resolve().parents[1]
     template_names = [
