@@ -193,7 +193,11 @@ def test_final_pages_render_en(app, client, make_user, login):
     make_user("setupen", language="en")
     login("setupen")
     sbody = client.get("/setup").get_data(as_text=True)
-    assert "What's Your Goal?" in sbody and "Hedefin Ne?" not in sbody
+    # Apostrofsuz bir dize seç: goal_title ("What's Your Goal?") sunucu tarafında
+    # Jinja autoescape ile `&#39;`e, window.I18N bloğunda ise |tojson ile
+    # `'`e kaçar (S2 güvenlik düzeltmesi) — düz literal artık gövdede yok.
+    assert "Your plan will be shaped around this." in sbody
+    assert "Planın buna göre şekillenecek." not in sbody
     # setup kuplaj: seçenek değerleri kanonik (backend) kalır
     assert '["goal","kilo verme"]' in sbody and '["level","beginner"]' in sbody
 

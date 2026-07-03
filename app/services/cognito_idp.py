@@ -163,8 +163,21 @@ def initiate_auth(username, password):
         )
     except Exception as e:
         raise _wrap(e)
+    # Cognito parolayı doğrulayıp token yerine bir CHALLENGE (SMS_MFA,
+    # SOFTWARE_TOKEN_MFA, NEW_PASSWORD_REQUIRED, ...) dönebilir. Bu durumda
+    # AuthenticationResult boştur; giriş TAMAMLANMAMIŞTIR. Boş claim döndürüp
+    # çağıranın bunu başarı sanmasına izin verme — açıkça reddet (auth bypass).
+    if resp.get("ChallengeName"):
+        raise CognitoIdpError(
+            "Ek doğrulama gerekiyor; bu akış desteklenmiyor.",
+            "ChallengeRequired",
+        )
     id_token = (resp.get("AuthenticationResult") or {}).get("IdToken", "")
-    return _decode_claims(id_token)
+    claims = _decode_claims(id_token)
+    # Token çözülemediyse (boş/bozuk) giriş başarılı sayılmamalı.
+    if not claims.get("sub"):
+        raise CognitoIdpError("Kimlik doğrulanamadı.", "NoIdentity")
+    return claims
 
 
 def _decode_claims(id_token):

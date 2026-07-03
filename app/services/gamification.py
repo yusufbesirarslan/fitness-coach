@@ -75,7 +75,11 @@ def _drop_lb_dirty(session, *args):
 
 
 def award_xp(user_id, amount):
-    user = db.session.get(User, user_id)
+    # Aynı kullanıcı için eşzamanlı XP verilişleri (8 thread'lik gunicorn'da paralel
+    # istekler) düz oku-değiştir-yaz ile kayıp güncellemeye → leaderboard eksik
+    # sayımına yol açardı. Satırı kilitle (update_streak ile aynı desen); SQLite'ta
+    # no-op ama Postgres'te grant'leri serileştirir. (D-M1)
+    user = db.session.query(User).filter_by(id=user_id).with_for_update().first()
     if user:
         old_points = user.rank_points or 0
         new_points = old_points + amount

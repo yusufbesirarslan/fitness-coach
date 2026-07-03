@@ -228,8 +228,11 @@ def login():
                 return jsonify({"error": e.message, "needs_verification": True,
                                 "username": username}), 403
             return jsonify({"error": e.message}), 401
-        # Kimlik bütünlüğü: dönen sub yerel kayıtla eşleşmeli.
-        if claims.get("sub") and claims["sub"] != user.cognito_sub:
+        # Kimlik bütünlüğü: giriş POZİTİF bir doğrulamadır — dönen sub DOLU
+        # olmalı VE yerel kayıtla eşleşmeli. Boş claim (MFA/challenge/bozuk
+        # token) asla başarı sayılmaz. (initiate_auth bu durumları zaten
+        # CognitoIdpError ile reddeder; burası ikinci savunma katmanı.)
+        if not claims.get("sub") or claims["sub"] != user.cognito_sub:
             return jsonify({"error": t("auth.bad_credentials")}), 401
         _login_fresh(user)
         quest_result = complete_quest_for_user(user.id, "login")

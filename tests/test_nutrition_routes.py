@@ -150,6 +150,37 @@ def test_diary_add_item_negative_metric_no_negative_macros(client, meal_id):
     assert (item.per_100g_protein or 0) >= 0
 
 
+def test_diary_add_item_negative_serving_macros_floored(client, meal_id):
+    # B6: negatif per-serving makrolar (serving_calories/protein/...) eskiden
+    # kırpılmadan CustomMealItem'a ve oradan MealLog'a sızıp günlük toplamları
+    # aşağı çekiyordu. Artık tüm makrolar ≥0'a taban yapılır.
+    body = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "Hile", "serving_id": "s1", "serving_quantity": 2,
+        "metric_serving_amount": 100,
+        "serving_calories": -500, "serving_protein": -30,
+        "serving_carbs": -20, "serving_fat": -10,
+    }).get_json()
+    assert body["calories"] >= 0
+    assert body["protein"] >= 0
+    assert body["carbs"] >= 0
+    assert body["fat"] >= 0
+    item = db.session.get(CustomMealItem, body["item_id"])
+    assert item.calories >= 0 and item.grams >= 0
+
+
+def test_diary_add_item_negative_grams_branch_floored(client, meal_id):
+    # B6: gram bazlı dalda negatif grams / negatif per_100g de MealLog'u
+    # bozabiliyordu. Makrolar ≥0'a kısılmalı.
+    body = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "Hile2", "grams": -200,
+        "per_100g": {"calories": 130, "protein": 2.7, "carbs": 28, "fat": 0.3},
+    }).get_json()
+    assert body["calories"] >= 0
+    assert body["protein"] >= 0
+    item = db.session.get(CustomMealItem, body["item_id"])
+    assert item.grams >= 0
+
+
 def test_diary_add_item_clamps_absurd_macros(client, meal_id):
     # H1: diary hattı eskiden YALNIZCA negatifleri 0'a çekiyordu; üst fiziksel-
     # tavan yoktu, istemci serving_calories: 90000 değerini doğrudan CustomMealItem'a

@@ -43,9 +43,23 @@ def _clamp_item_macros(item):
     kıyma, çok-öğeli meşru bir öğün toplamını bozmadan yalnızca aykırı öğeyi düzeltir.
     """
     import nutrition_pipeline as _np
+    # clamp_serving_macros yalnızca POZİTİF üst-tavan taşmalarını oransal kırpar;
+    # NEGATİF değerleri olduğu gibi geçirir. Bir istemci negatif serving_calories/
+    # grams/serving_quantity göndererek MealLog toplamlarını (protein nudge, haftalık
+    # rapor) aşağı çekebiliyordu (B6) — bu yüzden önce tüm makro/miktarları 0'a taban
+    # yap, sonra üst tavanı uygula. Böylece tüm diary dalları tek kapıdan korunur.
+    orig = (item.calories, item.protein, item.carbs, item.fat)
+    item.calories = max(item.calories or 0, 0)
+    item.protein = max(item.protein or 0, 0)
+    item.carbs = max(item.carbs or 0, 0)
+    item.fat = max(item.fat or 0, 0)
+    if item.grams is not None:
+        item.grams = max(item.grams, 0)
+    if item.serving_quantity is not None:
+        item.serving_quantity = max(item.serving_quantity, 0)
     cal, pro, carb, fat = _np.clamp_serving_macros(
-        item.calories or 0, item.protein or 0, item.carbs or 0, item.fat or 0)
-    if (cal, pro, carb, fat) != (item.calories, item.protein, item.carbs, item.fat):
+        item.calories, item.protein, item.carbs, item.fat)
+    if (cal, pro, carb, fat) != orig:
         current_app.logger.warning(
             "[DIARY] Öğe makroları makul değil — kısılıyor (food=%s)", item.food_name)
     item.calories, item.protein, item.carbs, item.fat = cal, pro, carb, fat

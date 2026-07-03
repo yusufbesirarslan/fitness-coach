@@ -212,7 +212,37 @@ def test_analyze_extraction_failure_returns_parsing_error(client, profile_sessio
     body = response.get_json()
     assert body["success"] is False
     assert body["error"] == "OUTPUT_PARSING_FAILED"
-    assert len(calls) == 2  # framework_state'siz ikinci deneme yapıldı
+    # fw_state gönderilmediğinde yeniden deneme YAPILMAZ: ikinci çağrı birebir
+    # aynı girdiyle (temperature=0) aynı sonucu üretirdi — en pahalı LLM çağrısını
+    # sebepsiz ikiye katlıyordu. Retry yalnızca fw_state İLE denenmişken anlamlı
+    # (aşağıdaki test_analyze_retries_without_framework_state).
+    assert len(calls) == 1
+
+
+def test_analyze_retries_without_framework_state(client, profile_session, monkeypatch):
+    """fw_state İLE yapılan ilk çıkarım boş dönerse, fw_state'siz İKİNCİ deneme
+    yapılır (fw_state bazen çıkarımı zehirler); o da çalışırsa sonuç kullanılır."""
+    calls = []
+
+    def extract(raw_text, fw_state=None, headings=None, menu_source=None):
+        calls.append(fw_state)
+        if fw_state:
+            return {}
+        return {"Ana Yemekler": ["Izgara Tavuk"]}
+
+    monkeypatch.setattr(menu_bp, "_extract_categorized_items", extract)
+    monkeypatch.setattr(menu_bp, "_get_fatsecret_token", lambda: "tok")
+    monkeypatch.setattr(menu_bp, "_lookup_macros_fatsecret",
+                        lambda names, tok, cmap=None: (
+                            {"Izgara Tavuk": {"calories": 400, "protein": 45, "carbs": 5, "fat": 20}}, {}))
+    monkeypatch.setattr(menu_bp, "_estimate_macros_llm",
+                        lambda names, cmap=None, grams_hint=None: {})
+
+    response = client.post("/api/menu/analyze",
+                           json={"menu_text": MENU_TEXT, "framework_state": '{"page": 1}'})
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+    assert calls == ['{"page": 1}', None]  # 1. deneme fw_state ile, 2. deneme fw_state'siz
 
 
 def test_analyze_serves_cached_items_without_fatsecret(client, profile_session, monkeypatch):
