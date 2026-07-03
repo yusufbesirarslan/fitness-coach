@@ -5,6 +5,7 @@ import threading
 import time
 import requests as http_requests_lib
 import nutrition_pipeline
+from concurrent.futures import ThreadPoolExecutor
 from flask import current_app
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -581,6 +582,13 @@ def _fs_relevant_candidates(name, english, token, category=None):
     return []
 
 
+# Eszamanli FatSecret sorgu tavani: oge basina 1-2 HTTP arama (ham + Ingilizce)
+# BAGIMSIZDIR; 80 ogelik menude seri dongu en kotu ~160 ardisik istek demekti
+# (5 sn timeout ile dakikalar). Baglanti havuzu (pool_maxsize=16) zaten hazir;
+# worker sayisi API'yi bogmayacak kadar sinirli tutulur.
+_FS_LOOKUP_MAX_WORKERS = 6
+
+
 def _lookup_macros_fatsecret(items, token, category_map=None):
     per_serving = {}
     per_100g = {}
@@ -590,14 +598,16 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
     # ayırt edici bağlam olarak iletilir ('Margarita'@Pizzalar → 'margherita pizza').
     # Hata → {} → yalnızca ham sorgu + kapı (yine de eski körlemesine davranıştan iyi).
     english_map = _normalize_food_queries_en(items, category_map)
-    for name in items:
+
+    def _lookup_one(name):
+        """Tek öğe için per-serving/per-100g çözümü: ("serving"|"100g", makrolar)
+        ya da None. Eski seri döngünün gövdesiyle birebir aynı karar mantığı."""
         try:
             foods = _fs_relevant_candidates(name, english_map.get(name, ""), token, category_map.get(name))
             if not foods:
                 current_app.logger.debug(f"[MACRO ENGINE] FatSecret: '{name}' için alakalı eşleşme yok → LLM yedeği")
-                continue
+                return None
 
-            found_serving = False
             baseline_100g = None
             converted_baseline = None
 
@@ -659,10 +669,8 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
                                 or nutrition_pipeline.is_protein_dish_low_protein(name, macros, dish_type)):
                             current_app.logger.debug(f"[MACRO ENGINE] FatSecret kimlik-hatasi reddedildi '{name}' ({dish_type}): {macros}")
                             continue
-                        per_serving[name] = macros
-                        found_serving = True
                         current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-serving match: '{name}' → Cal={macros['calories']}, P={macros['protein']}, C={macros['carbs']}, F={macros['fat']}")
-                        break
+                        return ("serving", macros)
                     if status == "skip":
                         current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-serving band-USTU atlandi '{name}' ({dish_type}): {macros}")
                         continue
@@ -675,15 +683,41 @@ def _lookup_macros_fatsecret(items, token, category_map=None):
                 if baseline_100g is None:
                     baseline_100g = macros
 
-            if not found_serving:
-                # Gercek 100g yogunlugu, per-serving'den cevrilmis esdegere tercih edilir.
-                chosen = baseline_100g or converted_baseline
-                if chosen:
-                    per_100g[name] = chosen
-                    current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-100g baseline: '{name}' → Cal={chosen['calories']}/100g")
+            # Gercek 100g yogunlugu, per-serving'den cevrilmis esdegere tercih edilir.
+            chosen = baseline_100g or converted_baseline
+            if chosen:
+                current_app.logger.debug(f"[MACRO ENGINE] FatSecret per-100g baseline: '{name}' → Cal={chosen['calories']}/100g")
+                return ("100g", chosen)
+            return None
 
         except Exception as e:
             current_app.logger.warning(f"[MACRO ENGINE] FatSecret lookup failed for '{name}': {type(e).__name__}: {e}")
+            return None
+
+    # Ogeler arasi sorgular bagimsiz → sinirli havuzla paralel. ex.map girdi
+    # sirasini korur; per_serving/per_100g sozlukleri items sirasiyla dolar
+    # (eski seri dongunun deterministik cikti sirasi degismez). Worker'lar
+    # current_app.logger kullandigindan her is kendi app_context'inde kosar
+    # (_estimate_macros_llm ile ayni desen).
+    if len(items) <= 1:
+        outcomes = [_lookup_one(n) for n in items]
+    else:
+        app = current_app._get_current_object()
+
+        def _lookup_with_ctx(name):
+            with app.app_context():
+                return _lookup_one(name)
+
+        with ThreadPoolExecutor(max_workers=min(_FS_LOOKUP_MAX_WORKERS, len(items))) as ex:
+            outcomes = list(ex.map(_lookup_with_ctx, items))
+
+    for name, outcome in zip(items, outcomes):
+        if not outcome:
             continue
+        kind, macros = outcome
+        if kind == "serving":
+            per_serving[name] = macros
+        else:
+            per_100g[name] = macros
     current_app.logger.info(f"[MACRO ENGINE] FatSecret totals: {len(per_serving)} per-serving, {len(per_100g)} per-100g, {len(items) - len(per_serving) - len(per_100g)} missed")
     return per_serving, per_100g

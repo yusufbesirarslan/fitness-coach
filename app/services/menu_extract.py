@@ -31,11 +31,15 @@ def _is_price_noise(text):
     return stripped.isdigit() and len(stripped) > 0
 
 
-def _extract_framework_state(html_text):
+def _extract_framework_state(html_text, soup=None):
+    """`soup` verilirse aynı HTML yeniden parse edilmez (çağıranın zaten
+    parse ettiği ağaç kullanılır — script tag'leri decompose edilmeden
+    çağrılmalı). Verilmezse eski davranış: kendi parse'ını yapar."""
     import re
     from bs4 import BeautifulSoup
 
-    soup = BeautifulSoup(html_text, "html.parser")
+    if soup is None:
+        soup = BeautifulSoup(html_text, "html.parser")
     script_tag = soup.find("script", {"id": "__NEXT_DATA__"})
     if script_tag and script_tag.string:
         try:
