@@ -708,6 +708,8 @@
   "chat.declined": "Declined",
   "chat.awaiting": "Awaiting response...",
   "chat.no_messages": "No messages yet. Send the first one!",
+  "chat.pump_title": "Pump Check",
+  "chat.pump_unavailable": "This Pump Check is no longer available.",
   "chat.suggestion_empty": "Suggestion can't be empty",
   "chat.suggestion_sent": "Suggestion sent!",
 

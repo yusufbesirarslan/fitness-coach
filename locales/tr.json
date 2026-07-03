@@ -708,6 +708,8 @@
   "chat.declined": "Reddedildi",
   "chat.awaiting": "Yanıt bekleniyor...",
   "chat.no_messages": "Henüz mesaj yok. İlk mesajı sen gönder!",
+  "chat.pump_title": "Pump Check",
+  "chat.pump_unavailable": "Bu Pump Check artik goruntulenemiyor.",
   "chat.suggestion_empty": "Öneri boş olamaz",
   "chat.suggestion_sent": "Öneri gönderildi!",
 

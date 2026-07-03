@@ -276,6 +276,37 @@ def test_workout_complete_sends_pump_check_messages_to_selected_friends(client, 
     assert Message.query.filter_by(receiver_id=other.id, message_type="pump_check").count() == 0
 
 
+def test_chat_messages_include_authorized_pump_check_payload(client, auth_user, make_user):
+    friend = make_user("friend")
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=friend.id, status="accepted"))
+    check = PumpCheck(
+        user_id=auth_user.id,
+        visibility="friends",
+        shared_friend_ids=[friend.id],
+        location_type="Gym",
+        description="Shared only",
+        valid=True,
+    )
+    db.session.add(check)
+    db.session.commit()
+    db.session.add(Message(
+        sender_id=auth_user.id,
+        receiver_id=friend.id,
+        message_type="pump_check",
+        body=json.dumps({"pump_check_id": check.id}),
+    ))
+    db.session.commit()
+
+    client.post("/logout")
+    client.post("/login", json={"username": "friend", "password": "Sifre123"})
+    body = client.get("/chat/testuser/messages").get_json()
+
+    msg = body["messages"][0]
+    assert msg["message_type"] == "pump_check"
+    assert msg["pump_check"]["description"] == "Shared only"
+    assert msg["pump_check"]["environment"] == "Gym"
+
+
 def test_friend_select_list_recent_contacts_first(client, auth_user, make_user):
     old_friend = make_user("alpha")
     recent_friend = make_user("zeta")
