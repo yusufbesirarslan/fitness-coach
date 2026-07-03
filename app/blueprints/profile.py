@@ -2,13 +2,15 @@
 from flask import Blueprint, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload
 
 from app.blueprints.supplements import CATEGORY_ICONS
 from app.extensions import db
 from app.i18n import t
-from app.models import Supplement, User, UserSession, UserWearableConnection
+from app.models import PumpCheck, Supplement, User, UserSession, UserWearableConnection
 from app.services.avatars import set_user_avatar
 from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee, generate_nutrition_plan, generate_training_plan
+from app.services.pump_checks import serialize_pump_check_card
 from app.services.validators import validate_username
 
 
@@ -153,3 +155,58 @@ def edit_profile():
         db.session.rollback()
         return jsonify({"error": t("route.username_taken")}), 400
     return jsonify({"message": t("route.profile_updated")})
+
+
+@bp.route("/pump-check-gallery")
+@login_required
+def pump_check_gallery():
+    return render_template(
+        "pump_check_gallery.html",
+        username=current_user.username,
+        profile_picture=current_user.avatar_src,
+    )
+
+
+@bp.route("/pump-check-gallery/data")
+@login_required
+def pump_check_gallery_data():
+    try:
+        page = max(int(request.args.get("page", 1) or 1), 1)
+    except (TypeError, ValueError):
+        page = 1
+    try:
+        per_page = min(max(int(request.args.get("per_page", 18) or 18), 1), 36)
+    except (TypeError, ValueError):
+        per_page = 18
+    rows = PumpCheck.query.filter_by(user_id=current_user.id).options(
+        joinedload(PumpCheck.user),
+    ).order_by(
+        PumpCheck.created_at.desc(),
+        PumpCheck.id.desc(),
+    ).offset(
+        (page - 1) * per_page,
+    ).limit(
+        per_page + 1,
+    ).all()
+    items = rows[:per_page]
+    return jsonify({
+        "items": [
+            serialize_pump_check_card(
+                row,
+                current_user.id,
+                image_visibility_preauthorized=True,
+            )
+            for row in items
+        ],
+        "hasMore": len(rows) > per_page,
+        "nextPage": page + 1 if len(rows) > per_page else None,
+    })
+
+
+@bp.route("/pump-check-gallery/<int:check_id>", methods=["DELETE"])
+@login_required
+def pump_check_gallery_delete(check_id):
+    check = PumpCheck.query.filter_by(id=check_id, user_id=current_user.id).first_or_404()
+    db.session.delete(check)
+    db.session.commit()
+    return jsonify({"ok": True})

@@ -451,6 +451,35 @@ def test_feed_page_renders(client, auth_user):
     assert client.get("/feed").status_code == 200
 
 
+def test_gallery_lists_only_current_user_pump_checks(client, auth_user, make_user):
+    other = make_user("other")
+    mine_feed = PumpCheck(user_id=auth_user.id, visibility="feed", description="Feed", valid=True)
+    mine_private = PumpCheck(user_id=auth_user.id, visibility="private", description="Private", valid=True)
+    not_mine = PumpCheck(user_id=other.id, visibility="feed", description="Other", valid=True)
+    db.session.add_all([mine_feed, mine_private, not_mine])
+    db.session.commit()
+
+    body = client.get("/pump-check-gallery/data").get_json()
+
+    assert [item["description"] for item in body["items"]] == ["Private", "Feed"]
+
+
+def test_gallery_page_renders(client, auth_user):
+    assert client.get("/pump-check-gallery").status_code == 200
+
+
+def test_gallery_delete_is_owner_only(client, auth_user, make_user):
+    other = make_user("other")
+    mine = PumpCheck(user_id=auth_user.id, visibility="feed", valid=True)
+    not_mine = PumpCheck(user_id=other.id, visibility="feed", valid=True)
+    db.session.add_all([mine, not_mine])
+    db.session.commit()
+
+    assert client.delete(f"/pump-check-gallery/{not_mine.id}").status_code == 404
+    assert client.delete(f"/pump-check-gallery/{mine.id}").status_code == 200
+    assert db.session.get(PumpCheck, mine.id) is None
+
+
 def test_feed_page_uses_shared_feed_nav_and_leaderboard_drawer(client, auth_user):
     html = client.get("/feed").get_data(as_text=True)
 
