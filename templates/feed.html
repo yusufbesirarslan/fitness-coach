@@ -106,7 +106,9 @@ function commentAvatar(comment){ return comment.userAvatar ? '<div class="commen
 function card(post){
   return '<article class="feed-card" data-id="'+post.id+'"><div class="feed-head">'+avatar(post)+'<div><div class="feed-user">'+esc(post.username)+'</div><div class="feed-time">'+esc(post.timePosted)+'</div></div></div>'+
     (post.imageUrl ? '<img class="feed-img" src="'+esc(post.imageUrl).replace(/"/g,'&quot;')+'" loading="lazy" decoding="async" alt="">' : '')+
-    '<div class="feed-body"><div><div class="feed-label">'+__t('feed.environment')+'</div><div class="feed-value">'+esc(post.environment)+'</div></div>'+
+    '<div class="feed-body">'+
+    (post.workoutScore != null ? '<div><div class="feed-label">'+__t('feed.workout_score')+'</div><div class="feed-value">'+esc(post.workoutScore)+'</div></div>' : '')+
+    '<div><div class="feed-label">'+__t('feed.environment')+'</div><div class="feed-value">'+esc(post.environment)+'</div></div>'+
     '<div><div class="feed-label">'+__t('feed.description')+'</div><div class="feed-value">'+esc(post.description)+'</div></div>'+
     '<div class="feed-actions"><button class="feed-action '+(post.likedByMe?'liked':'')+'" data-like="'+post.id+'">'+post.likesCount+' '+__t('feed.likes')+'</button><button class="feed-action" data-comments="'+post.id+'">'+commentCountLabel(post.commentsCount)+'</button></div></div></article>';
 }

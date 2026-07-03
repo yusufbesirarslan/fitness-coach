@@ -1,7 +1,7 @@
 import s3_helper
 
 from app.extensions import db
-from app.models import Friendship, PumpCheckLike
+from app.models import Friendship, PumpCheckLike, TrainingPlan
 from app.timeutil import display_dt
 
 _SHARING_STATUS_KEYS = {
@@ -51,6 +51,28 @@ def sharing_status(check):
     }
 
 
+def _normalize_workout_score(value):
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def workout_score(check):
+    score = _normalize_workout_score(getattr(check, "score", None))
+    if score is not None:
+        return score
+    plan_query = TrainingPlan.query.filter(TrainingPlan.user_id == check.user_id)
+    if check.created_at is not None:
+        plan_query = plan_query.filter(TrainingPlan.created_at <= check.created_at)
+    plan = plan_query.order_by(TrainingPlan.created_at.desc(), TrainingPlan.id.desc()).first()
+    if plan is None:
+        return None
+    return _normalize_workout_score(plan.score)
+
+
 def serialize_pump_check_card(check, viewer_id, include_viewer_state=True):
     user = check.user
     liked = False
@@ -67,7 +89,7 @@ def serialize_pump_check_card(check, viewer_id, include_viewer_state=True):
         "timePosted": display_dt(check.created_at, "%d.%m.%Y %H:%M"),
         "createdAt": check.created_at.isoformat() if check.created_at else None,
         "imageUrl": pump_check_image_url(check, viewer_id),
-        "workoutScore": None,
+        "workoutScore": workout_score(check),
         "environment": check.location_type or "",
         "description": check.description or "",
         "visibility": check.visibility or "private",

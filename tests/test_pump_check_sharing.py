@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from datetime import datetime, timedelta
 
 from app.blueprints import social as social_bp
@@ -92,11 +93,30 @@ def test_serialize_pump_check_card_exposes_requested_fields(make_user):
     assert data["description"] == "Upper body session."
     assert data["likesCount"] == 2
     assert data["commentsCount"] == 3
+    assert data["workoutScore"] is None
     assert data["visibility"] == "feed"
     assert data["sharingStatus"] == {
         "key": "pump_check.sharing.feed",
         "value": "feed",
     }
+
+
+def test_serialize_pump_check_card_includes_workout_score_when_available(client, auth_user):
+    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 8.0})
+    check = PumpCheck(
+        user_id=auth_user.id,
+        visibility="feed",
+        location_type="Gym",
+        description="Leg day.",
+        created_at=datetime.utcnow(),
+        valid=True,
+    )
+    db.session.add(check)
+    db.session.commit()
+
+    data = serialize_pump_check_card(check, auth_user.id)
+
+    assert data["workoutScore"] == 8.0
 
 
 def _ready_for_workout(client, user):
@@ -275,6 +295,27 @@ def test_feed_page_uses_shared_feed_nav_and_leaderboard_drawer(client, auth_user
     assert 'href="/leaderboard"' in html
 
 
+def test_standalone_nav_templates_use_feed_bottom_tab_and_keep_club_in_drawer():
+    root = Path(__file__).resolve().parents[1]
+    template_names = [
+        "friends.html",
+        "index.html",
+        "leaderboard.html",
+        "manage_stack.html",
+        "nutrition.html",
+        "progress.html",
+        "quests.html",
+        "training.html",
+    ]
+
+    for name in template_names:
+        html = (root / "templates" / name).read_text(encoding="utf-8")
+        assert 'href="/feed" class="ab-tab' in html, name
+        assert 'href="/leaderboard" class="ab-tab' not in html, name
+        assert 'href="/feed" class="drawer-link' in html, name
+        assert 'href="/leaderboard" class="drawer-link' in html, name
+
+
 def test_like_create_and_delete_updates_count(client, auth_user, make_user):
     friend = make_user("friend")
     db.session.add(Friendship(sender_id=friend.id, receiver_id=auth_user.id, status="accepted"))
@@ -338,3 +379,19 @@ def test_comment_requires_visibility_and_updates_count(client, auth_user, make_u
     assert ok.get_json()["commentsCount"] == 1
     comments = client.get(f"/pump-check/{check.id}/comments").get_json()["comments"]
     assert comments[0]["body"] == "Nice work"
+
+
+def test_feed_data_exposes_workout_score_when_present(client, auth_user):
+    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 8.0})
+    db.session.add(PumpCheck(
+        user_id=auth_user.id,
+        visibility="feed",
+        location_type="Gym",
+        description="Scored session",
+        valid=True,
+    ))
+    db.session.commit()
+
+    body = client.get("/feed/data").get_json()
+
+    assert body["posts"][0]["workoutScore"] == 8.0
