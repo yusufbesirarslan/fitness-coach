@@ -1,6 +1,10 @@
 import json
+import re
 from pathlib import Path
 from datetime import datetime, timedelta
+
+import s3_helper
+from sqlalchemy import event
 
 from app.blueprints import social as social_bp
 from app.extensions import db
@@ -605,7 +609,13 @@ def test_feed_data_batches_liked_state_and_preloads_card_users(client, auth_user
     seen = []
     real_serialize = social_bp.serialize_pump_check_card
 
-    def wrapped_serialize(check, viewer_id, include_viewer_state=True, liked_pump_check_ids=None):
+    def wrapped_serialize(
+        check,
+        viewer_id,
+        include_viewer_state=True,
+        liked_pump_check_ids=None,
+        image_visibility_preauthorized=False,
+    ):
         seen.append((check.id, liked_pump_check_ids))
         assert "user" in check.__dict__
         return real_serialize(
@@ -613,6 +623,7 @@ def test_feed_data_batches_liked_state_and_preloads_card_users(client, auth_user
             viewer_id,
             include_viewer_state=include_viewer_state,
             liked_pump_check_ids=liked_pump_check_ids,
+            image_visibility_preauthorized=image_visibility_preauthorized,
         )
 
     class _NoPerCardLikeLookup:
@@ -630,6 +641,55 @@ def test_feed_data_batches_liked_state_and_preloads_card_users(client, auth_user
         (second.id, {second.id}),
         (first.id, {second.id}),
     ]
+
+
+def test_feed_data_uses_preauthorized_feed_visibility_for_image_urls(client, auth_user, make_user, monkeypatch):
+    friend = make_user("friend")
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=friend.id, status="accepted"))
+    db.session.add_all([
+        PumpCheck(
+            user_id=auth_user.id,
+            visibility="feed",
+            description="mine",
+            image_key="pump-checks/1/2026/07/mine.jpg",
+            valid=True,
+        ),
+        PumpCheck(
+            user_id=friend.id,
+            visibility="feed",
+            description="friend",
+            image_key=f"pump-checks/{friend.id}/2026/07/friend.jpg",
+            valid=True,
+        ),
+    ])
+    db.session.commit()
+
+    calls = {"feed_friend_ids": 0}
+
+    def fake_feed_friend_ids(user_id):
+        assert user_id == auth_user.id
+        calls["feed_friend_ids"] += 1
+        return {friend.id}
+
+    def fail_can_view(viewer_id, check):
+        raise AssertionError(f"feed serializer should not re-check visibility for post {check.id}")
+
+    monkeypatch.setattr(social_bp, "get_friend_ids", fake_feed_friend_ids)
+    monkeypatch.setattr(pump_check_service, "can_view_pump_check", fail_can_view)
+    monkeypatch.setattr(
+        s3_helper,
+        "generate_presigned_url",
+        lambda key, expires_in=3600, expected_user_id=None: f"https://example.test/{key}",
+    )
+
+    response = client.get("/feed/data")
+
+    assert response.status_code == 200
+    body = response.get_json()
+    assert calls["feed_friend_ids"] == 1
+    assert [post["description"] for post in body["posts"]] == ["friend", "mine"]
+    assert body["posts"][0]["imageUrl"] == f"https://example.test/pump-checks/{friend.id}/2026/07/friend.jpg"
+    assert body["posts"][1]["imageUrl"] == "https://example.test/pump-checks/1/2026/07/mine.jpg"
 
 
 def test_feed_data_ignores_malformed_pagination_and_uses_defaults(client, auth_user):
@@ -650,3 +710,35 @@ def test_feed_data_ignores_malformed_pagination_and_uses_defaults(client, auth_u
     assert body["posts"][0]["description"] == "Fallback page"
     assert body["hasMore"] is False
     assert body["nextPage"] is None
+
+
+def test_pump_check_comments_batches_comment_authors(client, auth_user, make_user):
+    first_author = make_user("commenter1")
+    second_author = make_user("commenter2")
+    check = PumpCheck(user_id=auth_user.id, visibility="private", valid=True)
+    db.session.add(check)
+    db.session.flush()
+    db.session.add_all([
+        PumpCheckComment(pump_check_id=check.id, user_id=first_author.id, body="First"),
+        PumpCheckComment(pump_check_id=check.id, user_id=second_author.id, body="Second"),
+    ])
+    db.session.commit()
+
+    user_selects = []
+
+    def before_cursor_execute(conn, cursor, statement, parameters, context, executemany):
+        if re.search(r'FROM\s+"?user"?\b', statement, re.IGNORECASE):
+            user_selects.append(statement)
+
+    event.listen(db.engine, "before_cursor_execute", before_cursor_execute)
+    try:
+        response = client.get(f"/pump-check/{check.id}/comments")
+    finally:
+        event.remove(db.engine, "before_cursor_execute", before_cursor_execute)
+
+    assert response.status_code == 200
+    assert [row["body"] for row in response.get_json()["comments"]] == ["First", "Second"]
+    assert any(
+        re.search(r'FROM\s+"?user"?\b', statement, re.IGNORECASE) and " IN (" in statement
+        for statement in user_selects
+    ), user_selects

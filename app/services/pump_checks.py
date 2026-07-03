@@ -33,8 +33,10 @@ def can_view_pump_check(user_id, check):
     return False
 
 
-def pump_check_image_url(check, viewer_id, expires_in=3600):
-    if not check.image_key or not can_view_pump_check(viewer_id, check):
+def pump_check_image_url(check, viewer_id, expires_in=3600, visibility_preauthorized=False):
+    if not check.image_key:
+        return None
+    if not visibility_preauthorized and not can_view_pump_check(viewer_id, check):
         return None
     return s3_helper.generate_presigned_url(
         check.image_key,
@@ -73,7 +75,13 @@ def workout_score(check):
     return normalize_workout_score(getattr(check, "workout_score", None))
 
 
-def serialize_pump_check_card(check, viewer_id, include_viewer_state=True, liked_pump_check_ids=None):
+def serialize_pump_check_card(
+    check,
+    viewer_id,
+    include_viewer_state=True,
+    liked_pump_check_ids=None,
+    image_visibility_preauthorized=False,
+):
     user = check.user
     liked = False
     if include_viewer_state:
@@ -91,7 +99,11 @@ def serialize_pump_check_card(check, viewer_id, include_viewer_state=True, liked
         "userAvatar": user.avatar_src if user else None,
         "timePosted": display_dt(check.created_at, "%d.%m.%Y %H:%M"),
         "createdAt": check.created_at.isoformat() if check.created_at else None,
-        "imageUrl": pump_check_image_url(check, viewer_id),
+        "imageUrl": pump_check_image_url(
+            check,
+            viewer_id,
+            visibility_preauthorized=image_visibility_preauthorized,
+        ),
         "workoutScore": workout_score(check),
         "environment": check.location_type or "",
         "description": check.description or "",

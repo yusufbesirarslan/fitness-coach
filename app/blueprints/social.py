@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.config import SEARCH_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
@@ -150,6 +150,7 @@ def feed_data():
                 row,
                 current_user.id,
                 liked_pump_check_ids=liked_pump_check_ids,
+                image_visibility_preauthorized=True,
             )
             for row in posts
         ],
@@ -216,7 +217,13 @@ def pump_check_comments(check_id):
     check, error = _visible_pump_check_or_403(check_id)
     if error:
         return error
-    rows = PumpCheckComment.query.filter_by(pump_check_id=check.id).order_by(PumpCheckComment.created_at.asc()).all()
+    rows = PumpCheckComment.query.options(
+        selectinload(PumpCheckComment.user),
+    ).filter_by(
+        pump_check_id=check.id,
+    ).order_by(
+        PumpCheckComment.created_at.asc(),
+    ).all()
     return jsonify({"comments": [{
         "id": row.id,
         "username": row.user.username,
