@@ -180,9 +180,8 @@ def pump_check_unlike(check_id):
     check, error = _visible_pump_check_or_403(check_id)
     if error:
         return error
-    existing = PumpCheckLike.query.filter_by(pump_check_id=check.id, user_id=current_user.id).first()
-    if existing:
-        db.session.delete(existing)
+    deleted = PumpCheckLike.query.filter_by(pump_check_id=check.id, user_id=current_user.id).delete(synchronize_session=False)
+    if deleted:
         PumpCheck.query.filter_by(id=check.id).update({
             PumpCheck.likes_count: db.case(
                 (PumpCheck.likes_count > 0, PumpCheck.likes_count - 1),

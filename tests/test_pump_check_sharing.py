@@ -368,6 +368,38 @@ def test_like_create_and_delete_updates_count(client, auth_user, make_user):
     assert client.delete(f"/pump-check/{check.id}/like").get_json()["likesCount"] == 0
 
 
+def test_like_delete_skips_decrement_when_atomic_delete_finds_no_row(client, auth_user, make_user, monkeypatch):
+    friend = make_user("friend")
+    db.session.add(Friendship(sender_id=friend.id, receiver_id=auth_user.id, status="accepted"))
+    check = PumpCheck(user_id=friend.id, visibility="feed", likes_count=2, valid=True)
+    db.session.add(check)
+    db.session.flush()
+    db.session.add(PumpCheckLike(pump_check_id=check.id, user_id=auth_user.id))
+    db.session.commit()
+
+    real_like = db.session.query(PumpCheckLike).filter_by(pump_check_id=check.id, user_id=auth_user.id).one()
+
+    class _LikeQuery:
+        def filter_by(self, **kw):
+            assert kw == {"pump_check_id": check.id, "user_id": auth_user.id}
+            return self
+
+        def first(self):
+            return real_like
+
+        def delete(self, synchronize_session=False):
+            assert synchronize_session is False
+            return 0
+
+    monkeypatch.setattr(social_bp.PumpCheckLike, "query", _LikeQuery())
+    response = client.delete(f"/pump-check/{check.id}/like")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"liked": False, "likesCount": 2}
+    assert db.session.get(PumpCheck, check.id).likes_count == 2
+    assert db.session.query(PumpCheckLike).filter_by(pump_check_id=check.id, user_id=auth_user.id).count() == 1
+
+
 def test_like_duplicate_integrity_returns_stable_liked_state(client, auth_user, make_user, monkeypatch):
     friend = make_user("friend")
     db.session.add(Friendship(sender_id=friend.id, receiver_id=auth_user.id, status="accepted"))
