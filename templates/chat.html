@@ -177,6 +177,7 @@
         font-size: 11px; font-weight: 700; letter-spacing: .08em;
         text-transform: uppercase; color: var(--volt);
     }
+    .msg-pump-meta { font-size: 11px; color: var(--text-3); }
     .msg-pump-label {
         font-size: 10px; font-weight: 700; letter-spacing: .12em;
         color: var(--text-3); text-transform: uppercase;
@@ -310,9 +311,11 @@ function renderSuggestionCard(m) {
 function renderPumpCheckCard(m) {
     const p = m.pump_check;
     if (!p) return '<div class="msg-pump-card"><div class="msg-pump-missing">'+__t('chat.pump_unavailable')+'</div></div>';
+    const cardTimestamp = p.timePosted || p.createdAt || '';
     return '<div class="msg-pump-card">' +
         (p.imageUrl ? '<img src="'+escapeHTML(p.imageUrl).replace(/"/g, '&quot;')+'" loading="lazy" decoding="async" alt="">' : '') +
         '<div class="msg-pump-body"><div class="msg-pump-title">'+__t('chat.pump_title')+'</div>' +
+        (cardTimestamp ? '<div class="msg-pump-meta">'+escapeHTML(cardTimestamp)+'</div>' : '') +
         '<div><div class="msg-pump-label">'+__t('feed.environment')+'</div><div class="msg-pump-value">'+escapeHTML(p.environment || '')+'</div></div>' +
         '<div><div class="msg-pump-label">'+__t('feed.description')+'</div><div class="msg-pump-value">'+escapeHTML(p.description || '')+'</div></div></div></div>';
 }

@@ -285,6 +285,8 @@ def test_chat_messages_include_authorized_pump_check_payload(client, auth_user, 
         shared_friend_ids=[friend.id],
         location_type="Gym",
         description="Shared only",
+        image_key="pump-checks/1/2026/07/shared.jpg",
+        created_at=datetime(2026, 7, 2, 14, 5, 0),
         valid=True,
     )
     db.session.add(check)
@@ -296,15 +298,58 @@ def test_chat_messages_include_authorized_pump_check_payload(client, auth_user, 
         body=json.dumps({"pump_check_id": check.id}),
     ))
     db.session.commit()
+    original_generate_presigned_url = s3_helper.generate_presigned_url
+    s3_helper.generate_presigned_url = lambda key, expires_in=3600, expected_user_id=None: f"https://example.test/{key}"
 
-    client.post("/logout")
-    client.post("/login", json={"username": "friend", "password": "Sifre123"})
-    body = client.get("/chat/testuser/messages").get_json()
+    try:
+        client.post("/logout")
+        client.post("/login", json={"username": "friend", "password": "Sifre123"})
+        body = client.get("/chat/testuser/messages").get_json()
+    finally:
+        s3_helper.generate_presigned_url = original_generate_presigned_url
 
     msg = body["messages"][0]
     assert msg["message_type"] == "pump_check"
     assert msg["pump_check"]["description"] == "Shared only"
     assert msg["pump_check"]["environment"] == "Gym"
+    assert msg["pump_check"]["imageUrl"] is not None
+    assert msg["pump_check"]["timePosted"] == "02.07.2026 17:05"
+    assert msg["pump_check"]["createdAt"] == "2026-07-02T14:05:00"
+
+
+def test_chat_messages_redact_unavailable_pump_check_payload(client, auth_user, make_user):
+    selected = make_user("selected")
+    unselected = make_user("unselected")
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=selected.id, status="accepted"))
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=unselected.id, status="accepted"))
+    check = PumpCheck(
+        user_id=auth_user.id,
+        visibility="friends",
+        shared_friend_ids=[selected.id],
+        location_type="Gym",
+        description="Do not leak",
+        image_key="pump-checks/1/2026/07/private.jpg",
+        created_at=datetime(2026, 7, 2, 14, 5, 0),
+        valid=True,
+    )
+    db.session.add(check)
+    db.session.commit()
+    db.session.add(Message(
+        sender_id=auth_user.id,
+        receiver_id=unselected.id,
+        message_type="pump_check",
+        body=json.dumps({"pump_check_id": check.id}),
+    ))
+    db.session.commit()
+
+    client.post("/logout")
+    client.post("/login", json={"username": "unselected", "password": "Sifre123"})
+    body = client.get("/chat/testuser/messages").get_json()
+
+    msg = body["messages"][0]
+    assert msg["message_type"] == "pump_check"
+    assert msg["pump_check"] is None
+    assert "Do not leak" not in json.dumps(msg)
 
 
 def test_friend_select_list_recent_contacts_first(client, auth_user, make_user):
@@ -389,6 +434,15 @@ def test_feed_template_renders_fallback_media_region_without_image_url():
     assert "function cardMedia(post)" in html
     assert "if(post.imageUrl)" in html
     assert "feed-img feed-img-fallback" in html
+
+
+def test_chat_template_render_pump_check_card_includes_timestamp_and_unavailable_state():
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "templates" / "chat.html").read_text(encoding="utf-8")
+
+    assert "function renderPumpCheckCard(m)" in html
+    assert "chat.pump_unavailable" in html
+    assert "p.timePosted || p.createdAt || ''" in html
 
 
 def test_standalone_nav_templates_use_feed_bottom_tab_and_keep_club_in_drawer():
