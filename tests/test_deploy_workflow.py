@@ -19,7 +19,7 @@ def test_deploy_fails_on_live_nginx_csp_header_instead_of_sed_mutation():
 def test_deploy_health_gate_and_rollback_are_required():
     body = _deploy_yaml()
 
-    assert "http://127.0.0.1/health" in body
+    assert "http://127.0.0.1:5000/health" in body
     assert "%{http_code}" in body
     assert "PREV_COMMIT" in body
     assert "ROLLBACK" in body
