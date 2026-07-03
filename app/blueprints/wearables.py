@@ -3,6 +3,8 @@ from datetime import date
 from flask import Blueprint, jsonify, redirect, request, session, url_for
 from flask_login import current_user, login_required
 
+from app.config import SCRAPE_RATELIMIT
+from app.extensions import _user_or_ip_key, limiter
 from app.models import UserWearableConnection
 from app.services.wearables.adapters import WearableError, get_adapter
 from app.services.wearables.sync import sync_provider_day
@@ -69,6 +71,10 @@ def wearable_status():
 
 @bp.route("/api/wearables/<provider>/sync", methods=["POST"])
 @login_required
+# Her çağrı WHOOP/Google'a dışarı HTTP atar; limitsizken kullanıcı üçüncü-taraf
+# rate-limit tüketimi / maliyet amplifikasyonu için döngüye sokabilirdi (S4).
+# Diğer dış-fetch route'larıyla aynı kova (SCRAPE_RATELIMIT).
+@limiter.limit(SCRAPE_RATELIMIT, key_func=_user_or_ip_key)
 def wearable_sync(provider):
     raw_date = request.args.get("date")
     try:
@@ -85,6 +91,7 @@ def wearable_sync(provider):
 
 @bp.route("/api/wearables/whoop/<resource>")
 @login_required
+@limiter.limit(SCRAPE_RATELIMIT, key_func=_user_or_ip_key)  # dış WHOOP çağrısı (S4)
 def whoop_resource(resource):
     adapter = get_adapter("whoop")
     endpoint = adapter.resource_endpoints.get(resource)

@@ -36,7 +36,9 @@ def parse_preferences(data: dict, stored_injuries: str = "") -> TrainingPreferen
 
 def infer_movement_competency(last_session, preferences: TrainingPreferences) -> dict[str, int]:
     level = ((last_session.fitness_level if last_session else None) or "beginner").lower()
-    base = {"beginner": 1, "intermediate": 2, "advanced": 2}.get(level, 1)
+    # B17: advanced, intermediate ile aynı (2) idi → hareket alt-skoru advanced'ı
+    # ayırt edemiyordu. Skorlama zaten min(3, ...) ile kısıyor; advanced en üst (3).
+    base = {"beginner": 1, "intermediate": 2, "advanced": 3}.get(level, 1)
     if injury_constraints.has_constraints(preferences.injuries):
         base = max(0, base - 1)
     return {

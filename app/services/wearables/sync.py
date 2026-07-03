@@ -1,5 +1,7 @@
 from datetime import datetime
 
+from sqlalchemy.exc import IntegrityError
+
 from app.extensions import db
 from app.models import (UserWearableConnection, WearableActivityLog,
                         WearableSleepLog, WearableWorkoutLog)
@@ -59,13 +61,10 @@ def _upsert_activity(log):
     return row
 
 
-def sync_provider_day(user_id, provider, target_date=None):
-    target_date = target_date or app_today()
-    adapter = get_adapter(provider)
-    sleeps = adapter.fetch_sleep(user_id, target_date)
-    workouts = adapter.fetch_workouts(user_id, target_date)
-    activity = adapter.fetch_activity(user_id, target_date)
-
+def _apply_records(user_id, provider, sleeps, workouts, activity):
+    """SELECT-then-INSERT upsert'leri + last_sync_at güncellemesini uygular ve
+    tek commit'te yazar. Yeni satır ekleyip commit ettiğinden çağıran
+    IntegrityError'ı yakalayıp yeniden çalıştırabilir (re-fetch → UPDATE dalı)."""
     for sleep in sleeps:
         _upsert_sleep(sleep)
     for workout in workouts:
@@ -74,11 +73,31 @@ def sync_provider_day(user_id, provider, target_date=None):
         _upsert_activity(activity)
 
     conn = UserWearableConnection.query.filter_by(
-        user_id=user_id, provider=adapter.provider
+        user_id=user_id, provider=provider
     ).first()
     if conn:
         conn.last_sync_at = datetime.utcnow()
     db.session.commit()
+
+
+def sync_provider_day(user_id, provider, target_date=None):
+    target_date = target_date or app_today()
+    adapter = get_adapter(provider)
+    sleeps = adapter.fetch_sleep(user_id, target_date)
+    workouts = adapter.fetch_workouts(user_id, target_date)
+    # B10: çekilen workout listesini geçir → WHOOP workout uç noktası sync
+    # başına iki kez çağrılmasın (rate-limit israfı + olası tutarsızlık).
+    activity = adapter.fetch_activity(user_id, target_date, workouts=workouts)
+
+    # Eşzamanlı sync (çift tıklama / cron ile manuel POST çakışması, 1 worker/
+    # 8 thread) iki thread'in de row=None görüp add() etmesine, ikinci commit'in
+    # uq_wearable_* kısıtını ihlal etmesine yol açar. IntegrityError'da rollback
+    # + yeniden dene: bu kez re-fetch satırları bulur ve UPDATE dalına girer.
+    try:
+        _apply_records(user_id, adapter.provider, sleeps, workouts, activity)
+    except IntegrityError:
+        db.session.rollback()
+        _apply_records(user_id, adapter.provider, sleeps, workouts, activity)
     return {
         "provider": adapter.provider,
         "date_key": target_date.isoformat(),

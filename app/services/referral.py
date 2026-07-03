@@ -9,6 +9,8 @@ olasılığı düşük; yine de unique kolon + döngüyle garantiye alınır.
 """
 import secrets
 
+from sqlalchemy.exc import IntegrityError
+
 from app.extensions import db
 from app.models import User
 
@@ -74,13 +76,29 @@ def consume_referral(new_user, code):
 
 
 def backfill_referral_codes():
-    """Davet kodu olmayan tüm kullanıcılara kod ata (boot'ta bir kez)."""
+    """Davet kodu olmayan tüm kullanıcılara kod ata (boot'ta bir kez).
+
+    D-L4: generate_referral_code check-then-use olduğundan (üretim ile commit
+    arasında TOCTOU) uq_user_referral_code çarpışması ~79 bit'te ihmal edilebilir
+    ama teoride mümkün. Çarpışmada rollback + yeni kod ile birkaç kez yeniden
+    dene; ham IntegrityError'ı boot'a sızdırma."""
     missing = User.query.filter(
         db.or_(User.referral_code.is_(None), User.referral_code == "")
     ).all()
     if not missing:
         return 0
-    for u in missing:
-        u.referral_code = generate_referral_code()
-    db.session.commit()
-    return len(missing)
+    for _ in range(5):
+        for u in missing:
+            u.referral_code = generate_referral_code()
+        try:
+            db.session.commit()
+            return len(missing)
+        except IntegrityError:
+            db.session.rollback()
+            # Kod atanamayan (hâlâ boş) kullanıcıları yeniden hesapla ve tekrar dene.
+            missing = User.query.filter(
+                db.or_(User.referral_code.is_(None), User.referral_code == "")
+            ).all()
+            if not missing:
+                return 0
+    return 0

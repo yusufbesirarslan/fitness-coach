@@ -18,7 +18,7 @@ from app.services.ai import _bedrock_validate_image, _heavy_chat, anthropic as _
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
 from app.services.fatsecret import _food_search_fatsecret, _food_search_static
 from app.services.gamification import _claim_quest, award_xp, log_activity
-from app.timeutil import app_today, day_key, utc_day_bounds
+from app.timeutil import app_date_of, app_today, day_key, utc_day_bounds
 
 
 COACH_SYSTEM_PROMPT = """Sen AxisAI uygulamasının elit, destekleyici ama gerçekçi AI Beslenme & Fitness Koçusun. Kullanıcının veritabanına HEM okuma HEM yazma erişimin var ve bunu ARAÇLAR (function calling) üzerinden yaparsın.
@@ -174,7 +174,9 @@ def _fetch_profile_and_trends(user_id):
         if checkins:
             rows = []
             for c in checkins:
-                d = c.created_at.date().isoformat() if c.created_at else "?"
+                # B13: naive-UTC created_at.date() yerine Istanbul gününü kullan;
+                # 00:00–03:00 arası yazılan kayıt bir gün erken etiketlenmesin.
+                d = app_date_of(c.created_at).isoformat() if c.created_at else "?"
                 line = (f"- {d}: kilo {c.weight}kg | yoğunluk {c.yogunluk}/5 | "
                         f"yorgunluk {c.fatigue}/5 | uyku kalitesi {c.uyku_kalitesi}/5 | "
                         f"beslenme uyumu {c.beslenme_uyumu}/5 | progresif yüklenme: "
@@ -401,11 +403,13 @@ def _tool_fetch_nutrition_and_stage_log(user_id, food_query):
     grams = _extract_grams(food_query) or 100.0
     scale = grams / 100.0
     payload = {
+        # B5: get(..., 0) açık None değerinde 0 vermez → float(None) TypeError.
+        # `or 0` ile None/boş değerleri de 0'a indir.
         "food_name": (top.get("name") or food_query)[:200],
-        "calories": round(float(per_100g.get("calories", 0)) * scale, 1),
-        "protein": round(float(per_100g.get("protein", 0)) * scale, 1),
-        "carbs": round(float(per_100g.get("carbs", 0)) * scale, 1),
-        "fat": round(float(per_100g.get("fat", 0)) * scale, 1),
+        "calories": round(float(per_100g.get("calories") or 0) * scale, 1),
+        "protein": round(float(per_100g.get("protein") or 0) * scale, 1),
+        "carbs": round(float(per_100g.get("carbs") or 0) * scale, 1),
+        "fat": round(float(per_100g.get("fat") or 0) * scale, 1),
         "serving_size": f"{grams:g} g",
     }
 
@@ -1110,7 +1114,15 @@ def _sanitize_client_history(raw):
             continue
         text = text.strip()
         if text:
-            out.append({"role": role, "content": text[:COACH_HISTORY_CHAR_CAP]})
+            content = text[:COACH_HISTORY_CHAR_CAP]
+            # B15: Anthropic ardışık aynı-rol turlarında 400 verir; iki user (veya
+            # iki assistant) turu arka arkaya gelirse birleştir ki Bedrock çağrısı
+            # 400'lenip sessizce gpt-4o-mini yedeğine düşmesin.
+            if out and out[-1]["role"] == role:
+                merged = f"{out[-1]['content']}\n{content}"[:COACH_HISTORY_CHAR_CAP]
+                out[-1]["content"] = merged
+            else:
+                out.append({"role": role, "content": content})
     return out
 
 
@@ -1155,12 +1167,15 @@ def _run_coach_conversation(user_id, question, context, client_history=None, lan
     if final_text is None:
         final_text = _run_coach_conversation_openai(user_id, question, context, history, language)
 
+    is_error_fallback = not final_text
     if not final_text:
         final_text = _COACH_FALLBACKS[_coach_lang(language)]["error"]
 
     # Geçmiş client'ta (widget sessionStorage) tutuluyor; client modunda session'a
     # YAZMA. Yalnızca client history göndermezse eski cookie geçmişini güncelle.
-    if not use_client:
+    # B16: sağlayıcı hata-yedeği metnini geçmişe YAZMA — aksi halde bir sonraki
+    # turda bağlam olarak geri beslenip modeli kirletiyordu.
+    if not use_client and not is_error_fallback:
         new_history = history + [
             {"role": "user", "content": question[:COACH_HISTORY_CHAR_CAP]},
             {"role": "assistant", "content": final_text[:COACH_HISTORY_CHAR_CAP]},
@@ -1278,6 +1293,11 @@ def _run_coach_conversation_bedrock(user_id, question, context, history, languag
 
     tools_ran = 0
     for _ in range(_COACH_TOOL_LOOP_CAP):
+        # B4: create() YANINDA yanıt ayrıştırma da korunmalı — `resp.content` None
+        # (→ TypeError) gibi create sonrası hatalar önceden _BedrockFallback DIŞINDA
+        # kaçıp yönlendiricinin OpenAI yedeğini atlayarak koçu 500'lüyordu. Aynı
+        # tools_ran mantığını uygula: hiç araç çalışmadıysa OpenAI'ya düş, çalıştıysa
+        # sağlayıcı değiştirme (yan etkiyi tekrarlama) → yumuşak hata.
         try:
             resp = bedrock_client.messages.create(
                 model=BEDROCK_MODEL,
@@ -1286,31 +1306,33 @@ def _run_coach_conversation_bedrock(user_id, question, context, history, languag
                 messages=convo,
                 tools=tools,
             )
+
+            if getattr(resp, "stop_reason", None) != "tool_use":
+                text = _first_text_block(resp)
+                if text:
+                    return text
+                # Metin bloğu yok: hiç araç çalışmadıysa OpenAI'ya düş (soru
+                # cevaplanabilirdi); araç çalıştıysa sağlayıcı değiştirme.
+                if tools_ran == 0:
+                    raise _BedrockFallback("boş Bedrock yanıtı (metin bloğu yok)")
+                return "İşlemi tamamlayamadım, tekrar dener misin?"
+
+            # Araç isteyen assistant turunu (tool_use bloklarıyla) olduğu gibi ekle.
+            convo.append({"role": "assistant", "content": resp.content})
+            tool_results = []
+            for block in resp.content:
+                if getattr(block, "type", None) == "tool_use":
+                    out = _dispatch_coach_tool(user_id, block.name, json.dumps(block.input or {}))
+                    tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": out})
+                    tools_ran += 1
+            convo.append({"role": "user", "content": tool_results})
+        except _BedrockFallback:
+            raise
         except Exception as e:
             if tools_ran == 0:
                 raise _BedrockFallback(f"{type(e).__name__}: {e}")
-            current_app.logger.warning("[COACH][Bedrock] araç sonrası çağrı hatası: %s", e)
+            current_app.logger.warning("[COACH][Bedrock] araç sonrası çağrı/ayrıştırma hatası: %s", e)
             return "İşlemi tamamlayamadım, tekrar dener misin?"
-
-        if getattr(resp, "stop_reason", None) != "tool_use":
-            text = _first_text_block(resp)
-            if text:
-                return text
-            # Metin bloğu yok: hiç araç çalışmadıysa OpenAI'ya düş (soru cevaplanabilirdi);
-            # araç çalıştıysa sağlayıcı değiştirme (yan etkiyi tekrarlama) — yumuşak hata.
-            if tools_ran == 0:
-                raise _BedrockFallback("boş Bedrock yanıtı (metin bloğu yok)")
-            return "İşlemi tamamlayamadım, tekrar dener misin?"
-
-        # Araç isteyen assistant turunu (tool_use bloklarıyla birlikte) olduğu gibi ekle.
-        convo.append({"role": "assistant", "content": resp.content})
-        tool_results = []
-        for block in resp.content:
-            if getattr(block, "type", None) == "tool_use":
-                out = _dispatch_coach_tool(user_id, block.name, json.dumps(block.input or {}))
-                tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": out})
-                tools_ran += 1
-        convo.append({"role": "user", "content": tool_results})
         # Döngü başa döner: model araç sonuçlarıyla final metni üretir ya da zincirler.
 
     return "İşlemi tamamlayamadım, tekrar dener misin?"
@@ -1340,7 +1362,7 @@ def generate_coach_reply(name, age, gender, weight, height,
         if days_passed >= 7:
             sure = f"{days_passed // 7} hafta {days_passed % 7} gün"
 
-    if goal.lower() == "kas kazanma":
+    if (goal or "").lower() == "kas kazanma":  # B14: goal None → AttributeError guard
         # Kas kazanmada kilo artışı OLUMLU
         if diff > 0:
             progress_text = (
@@ -1461,7 +1483,7 @@ def generate_checkin_feedback(name, weight, prev_weight, days_passed,
     progress = "İlk check-in, geçmiş veri yok."
     if prev_weight and days_passed:
         diff = round(weight - prev_weight, 1)
-        if goal.lower() == "kas kazanma":
+        if (goal or "").lower() == "kas kazanma":  # B14: goal None guard
             if diff > 0:
                 progress = f"{days_passed} günde {abs(diff)} kg aldı — kas kazanma hedefinde olumlu."
             elif diff < 0:

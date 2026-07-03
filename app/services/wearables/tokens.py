@@ -18,10 +18,33 @@ class WearableConnectionView:
         return getattr(self.row, name)
 
 
+def _coerce_datetime(value):
+    """B21: token_expiry DateTime kolonuna ham string/epoch yazılmasın —
+    yalnızca datetime döndür (aksi halde None), böylece parse edilebilenler
+    dışında çöp değer kolona sızmaz."""
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)):
+        # Unix epoch (saniye) → naive UTC
+        try:
+            return datetime.utcfromtimestamp(value)
+        except (OverflowError, OSError, ValueError):
+            return None
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError:
+            return None
+    return None
+
+
 def _expiry_from_payload(token_data):
     expires_at = token_data.get("expires_at") or token_data.get("token_expiry")
     if expires_at:
-        return expires_at
+        coerced = _coerce_datetime(expires_at)
+        if coerced is not None:
+            return coerced
+        # parse edilemedi → expires_in'e düş
     expires_in = token_data.get("expires_in")
     if expires_in is None:
         return None

@@ -102,15 +102,18 @@ def inject_csrf_token():
 
 def inject_i18n():
     """Şablonlara çeviri yardımcısını sun: `t` (callable), `locale` (aktif dil)
-    ve `i18n_json` (window.I18N'e enjekte edilen, aktif dilin tam sözlüğü).
+    ve `i18n_catalog` (window.I18N'e enjekte edilen, aktif dilin tam sözlüğü —
+    HAM dict; şablon `|tojson` ile güvenli gömer).
     g.locale resolve_locale (before_request) tarafından set edilir."""
-    import json as _json
     from app.i18n import t, current_locale, catalog
     loc = current_locale()
     return {
         "t": t,
         "locale": loc,
-        "i18n_json": _json.dumps(catalog(loc), ensure_ascii=False),
+        # HAM dict döndür; şablonda `|tojson` kullanılır (json.dumps+|safe DEĞİL).
+        # `|tojson` `<`, `>`, `&`, U+2028/2029'u kaçırır → inline <script> içine
+        # güvenli gömülür; ham json.dumps `</script>` dizisini kaçırmıyordu (S2).
+        "i18n_catalog": catalog(loc),
     }
 
 

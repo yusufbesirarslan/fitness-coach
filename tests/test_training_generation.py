@@ -78,6 +78,51 @@ def test_injury_flag_downgrades_and_reduces_confidence():
     assert result.confidence <= 0.7
 
 
+def test_beginner_default_can_upgrade_with_stable_window():
+    # B2 regresyonu: saklı fitness_level'ı olmayıp "beginner" varsayılan olan bir
+    # kullanıcı, gözlenen performans yüksek VE stabilite penceresi (>=3 hafta)
+    # sağlandığında Beginner'ın üstüne çıkabilmeli.
+    result = classify_user(_features(
+        self_reported_level="beginner",
+        training_history_months=48,
+        weekly_frequency=5,
+        strength_proxy=1.2,
+        consistency_score=0.9,
+        performance_history=PerformanceHistory(
+            weekly_training_sessions=[5, 5, 4, 5],
+            volume_trend=[6000, 6200, 6400, 6600],
+            adherence_score=0.9,
+            fatigue_trend=2.0,
+            sleep_quality=4.0,
+            stable_score_weeks=4,
+        ),
+    ))
+    assert result.level != "Beginner"
+    assert "upgrade_requires_stability_window" not in result.constraints_applied
+
+
+def test_beginner_default_upgrade_blocked_without_stable_window():
+    # Aynı güçlü sinyaller ama stabilite penceresi < 3 hafta → yükseltme
+    # hysteresis ile Beginner'a geri çekilmeli.
+    result = classify_user(_features(
+        self_reported_level="beginner",
+        training_history_months=48,
+        weekly_frequency=5,
+        strength_proxy=1.2,
+        consistency_score=0.9,
+        performance_history=PerformanceHistory(
+            weekly_training_sessions=[5, 5, 4, 5],
+            volume_trend=[6000, 6200, 6400, 6600],
+            adherence_score=0.9,
+            fatigue_trend=2.0,
+            sleep_quality=4.0,
+            stable_score_weeks=1,
+        ),
+    ))
+    assert result.level == "Beginner"
+    assert "upgrade_requires_stability_window" in result.constraints_applied
+
+
 def test_recovery_factor_scales_down_for_age_frequency_fatigue_and_sleep():
     factor = recovery_capacity_factor(_features(
         age=54,
@@ -144,7 +189,7 @@ def test_response_validator_rejects_invalid_tip_and_wrong_training_day_count():
     wrong_count = {
         "program": [
             {"gun": "Pazartesi", "tip": "antrenman", "odak": "Full", "sure_dk": 45,
-             "tahmini_kalori": 300, "egzersizler": []},
+             "tahmini_kalori": 300, "egzersizler": [{"isim": "Squat"}]},
             {"gun": "Salı", "tip": "dinlenme", "odak": "Aktif Toparlanma", "sure_dk": 0,
              "tahmini_kalori": 0, "egzersizler": []},
             {"gun": "Çarşamba", "tip": "dinlenme", "odak": "Aktif Toparlanma", "sure_dk": 0,
@@ -163,3 +208,49 @@ def test_response_validator_rejects_invalid_tip_and_wrong_training_day_count():
 
     with pytest.raises(PlanValidationError, match="antrenman günü"):
         validate_generated_plan(wrong_count, prefs, injuries="")
+
+
+def _rest_day(gun):
+    return {"gun": gun, "tip": "dinlenme", "odak": "Aktif Toparlanma",
+            "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []}
+
+
+def test_response_validator_rejects_training_day_without_exercises():
+    # B7: "antrenman" günü egzersiz listesi boş olamaz.
+    prefs = TrainingPreferences(gun_sayisi=1, sure=45)
+    plan = {"program": [
+        {"gun": "Pazartesi", "tip": "antrenman", "odak": "Full", "sure_dk": 45,
+         "tahmini_kalori": 300, "egzersizler": []},
+    ] + [_rest_day(g) for g in ["Salı", "Çarşamba", "Perşembe", "Cuma",
+                                 "Cumartesi", "Pazar"]],
+        "haftalik_ozet": {}}
+    with pytest.raises(PlanValidationError, match="en az bir egzersiz"):
+        validate_generated_plan(plan, prefs, injuries="")
+
+
+def test_response_validator_rejects_duplicate_days():
+    # B8: gün adları benzersiz olmalı (7× "Pazartesi" reddedilir).
+    prefs = TrainingPreferences(gun_sayisi=0, sure=45)
+    plan = {"program": [_rest_day("Pazartesi") for _ in range(7)],
+            "haftalik_ozet": {}}
+    with pytest.raises(PlanValidationError, match="benzersiz"):
+        validate_generated_plan(plan, prefs, injuries="")
+
+
+def test_response_validator_parses_messy_numeric_fields():
+    # B9: "3-4" / "45 dk" / "~300" gibi değerler bare ValueError yerine
+    # savunmacı ayrıştırılmalı (generic 500'e düşmeden).
+    prefs = TrainingPreferences(gun_sayisi=1, sure=45)
+    plan = {"program": [
+        {"gun": "Pazartesi", "tip": "antrenman", "odak": "Full",
+         "sure_dk": "45 dk", "tahmini_kalori": "~300",
+         "egzersizler": [{"isim": "Squat", "set": "3-4", "tekrar": "8-12"}]},
+    ] + [_rest_day(g) for g in ["Salı", "Çarşamba", "Perşembe", "Cuma",
+                                 "Cumartesi", "Pazar"]],
+        "haftalik_ozet": {"yogunluk_skoru": "~8"}}
+    result, _warnings = validate_generated_plan(plan, prefs, injuries="")
+    day0 = result["program"][0]
+    assert day0["sure_dk"] == 45
+    assert day0["tahmini_kalori"] == 300
+    assert day0["egzersizler"][0]["set"] == 3
+    assert result["haftalik_ozet"]["yogunluk_skoru"] == 8

@@ -33,13 +33,26 @@ def create_app():
 
     @app.route("/health")
     def health():
-        # Konteyner sağlık kontrolü (Docker HEALTHCHECK). Auth gerektirmez, body okumaz.
+        # Konteyner sağlık kontrolü (Docker HEALTHCHECK) + deploy health-gate.
+        # DB erişilemezse gerçek her istek 500'lenir; bu durumda /health de 503
+        # dönmeli ki bozuk deploy otomatik rollback tetiklesin ve izleme fark etsin.
         # limiter_storage: "redis"/"memory"/"degraded" — "degraded" iken brute-force
-        # login throttle süreç-yerel + geçici olur. DİKKAT: status DAİMA 200 — Redis
-        # kaybı web konteynerini "unhealthy" yapıp gereksiz yere yeniden başlatmasın
-        # (uygulama zarifçe bellek-yedeğine düşer); bu alan yalnızca izleme sinyalidir.
+        # login throttle süreç-yerel + geçici olur; DB'nin aksine tek başına
+        # unhealthy saymayız (uygulama zarifçe bellek-yedeğine düşer, sadece sinyal).
+        from sqlalchemy import text
         from app.extensions import limiter_storage_status
-        return {"status": "ok", "limiter_storage": limiter_storage_status()}, 200
+        try:
+            db.session.execute(text("SELECT 1"))
+            db_ok = True
+        except Exception:
+            db.session.rollback()
+            db_ok = False
+        body = {
+            "status": "ok" if db_ok else "error",
+            "db": "ok" if db_ok else "error",
+            "limiter_storage": limiter_storage_status(),
+        }
+        return body, (200 if db_ok else 503)
 
     # before_request order must match the original monolith:
     #   _csrf_protect -> (limiter) _check_request_limit -> maybe_weekly_rollover -> update_streak
