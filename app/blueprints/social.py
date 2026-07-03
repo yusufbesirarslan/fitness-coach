@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user, login_required
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload
 
 from app.config import SEARCH_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
@@ -131,11 +132,27 @@ def feed_data():
     query = PumpCheck.query.filter(
         PumpCheck.visibility == "feed",
         PumpCheck.user_id.in_(visible_user_ids),
+    ).options(
+        joinedload(PumpCheck.user),
     ).order_by(PumpCheck.created_at.desc(), PumpCheck.id.desc())
     rows = query.offset((page - 1) * per_page).limit(per_page + 1).all()
     posts = rows[:per_page]
+    liked_pump_check_ids = set()
+    if posts:
+        liked_rows = db.session.query(PumpCheckLike.pump_check_id).filter(
+            PumpCheckLike.user_id == current_user.id,
+            PumpCheckLike.pump_check_id.in_([post.id for post in posts]),
+        ).all()
+        liked_pump_check_ids = {pump_check_id for pump_check_id, in liked_rows}
     return jsonify({
-        "posts": [serialize_pump_check_card(row, current_user.id) for row in posts],
+        "posts": [
+            serialize_pump_check_card(
+                row,
+                current_user.id,
+                liked_pump_check_ids=liked_pump_check_ids,
+            )
+            for row in posts
+        ],
         "hasMore": len(rows) > per_page,
         "nextPage": page + 1 if len(rows) > per_page else None,
     })

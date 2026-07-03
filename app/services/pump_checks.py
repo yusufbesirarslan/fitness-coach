@@ -73,14 +73,17 @@ def workout_score(check):
     return normalize_workout_score(getattr(check, "workout_score", None))
 
 
-def serialize_pump_check_card(check, viewer_id, include_viewer_state=True):
+def serialize_pump_check_card(check, viewer_id, include_viewer_state=True, liked_pump_check_ids=None):
     user = check.user
     liked = False
     if include_viewer_state:
-        liked = PumpCheckLike.query.filter_by(
-            pump_check_id=check.id,
-            user_id=viewer_id,
-        ).first() is not None
+        if liked_pump_check_ids is not None:
+            liked = check.id in liked_pump_check_ids
+        else:
+            liked = PumpCheckLike.query.filter_by(
+                pump_check_id=check.id,
+                user_id=viewer_id,
+            ).first() is not None
     return {
         "id": check.id,
         "userId": check.user_id,

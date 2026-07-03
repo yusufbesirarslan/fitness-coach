@@ -7,6 +7,7 @@ from app.extensions import db
 from app.blueprints import training as training_bp
 from app.i18n import t
 from app.models import Friendship, Message, PumpCheck, PumpCheckComment, PumpCheckLike
+from app.services import pump_checks as pump_check_service
 from app.services.pump_checks import (
     can_view_pump_check,
     get_friend_ids,
@@ -587,6 +588,48 @@ def test_feed_data_exposes_workout_score_when_present(client, auth_user):
     body = client.get("/feed/data").get_json()
 
     assert body["posts"][0]["workoutScore"] == 8.0
+
+
+def test_feed_data_batches_liked_state_and_preloads_card_users(client, auth_user, make_user, monkeypatch):
+    friend = make_user("friend")
+    other = make_user("other")
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=friend.id, status="accepted"))
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=other.id, status="accepted"))
+    first = PumpCheck(user_id=friend.id, visibility="feed", description="friend-post", valid=True)
+    second = PumpCheck(user_id=other.id, visibility="feed", description="other-post", valid=True)
+    db.session.add_all([first, second])
+    db.session.flush()
+    db.session.add(PumpCheckLike(pump_check_id=second.id, user_id=auth_user.id))
+    db.session.commit()
+
+    seen = []
+    real_serialize = social_bp.serialize_pump_check_card
+
+    def wrapped_serialize(check, viewer_id, include_viewer_state=True, liked_pump_check_ids=None):
+        seen.append((check.id, liked_pump_check_ids))
+        assert "user" in check.__dict__
+        return real_serialize(
+            check,
+            viewer_id,
+            include_viewer_state=include_viewer_state,
+            liked_pump_check_ids=liked_pump_check_ids,
+        )
+
+    class _NoPerCardLikeLookup:
+        def filter_by(self, **kw):
+            raise AssertionError(f"unexpected per-card like lookup: {kw}")
+
+    monkeypatch.setattr(social_bp, "serialize_pump_check_card", wrapped_serialize)
+    monkeypatch.setattr(pump_check_service.PumpCheckLike, "query", _NoPerCardLikeLookup())
+
+    body = client.get("/feed/data").get_json()
+
+    assert [post["description"] for post in body["posts"]] == ["other-post", "friend-post"]
+    assert [post["likedByMe"] for post in body["posts"]] == [True, False]
+    assert seen == [
+        (second.id, {second.id}),
+        (first.id, {second.id}),
+    ]
 
 
 def test_feed_data_ignores_malformed_pagination_and_uses_defaults(client, auth_user):
