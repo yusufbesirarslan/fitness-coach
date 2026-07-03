@@ -301,6 +301,29 @@ def test_feed_data_shows_current_user_and_friend_feed_posts(client, auth_user, m
     assert "Nope" not in descriptions
 
 
+def test_feed_data_excludes_friends_and_private_visibility_posts(client, auth_user, make_user):
+    friend = make_user("friend")
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=friend.id, status="accepted"))
+    db.session.add_all([
+        PumpCheck(user_id=auth_user.id, visibility="feed", description="mine-feed", valid=True),
+        PumpCheck(user_id=auth_user.id, visibility="friends", description="mine-friends", valid=True),
+        PumpCheck(user_id=auth_user.id, visibility="private", description="mine-private", valid=True),
+        PumpCheck(user_id=friend.id, visibility="feed", description="friend-feed", valid=True),
+        PumpCheck(user_id=friend.id, visibility="friends", description="friend-friends", valid=True),
+        PumpCheck(user_id=friend.id, visibility="private", description="friend-private", valid=True),
+    ])
+    db.session.commit()
+
+    body = client.get("/feed/data").get_json()
+
+    descriptions = [post["description"] for post in body["posts"]]
+    assert descriptions == ["friend-feed", "mine-feed"]
+    assert "mine-friends" not in descriptions
+    assert "mine-private" not in descriptions
+    assert "friend-friends" not in descriptions
+    assert "friend-private" not in descriptions
+
+
 def test_feed_page_renders(client, auth_user):
     assert client.get("/feed").status_code == 200
 
@@ -380,6 +403,68 @@ def test_like_duplicate_integrity_returns_stable_liked_state(client, auth_user, 
     assert db.session.get(PumpCheck, check.id).likes_count == 1
 
 
+def test_like_route_avoids_python_counter_read_modify_write(client, auth_user, monkeypatch):
+    state = {"count": 4, "update_values": None}
+
+    class _LoadedCheck:
+        id = 123
+        user_id = auth_user.id
+        visibility = "feed"
+
+        @property
+        def likes_count(self):
+            raise AssertionError("route read stale likes_count")
+
+    class _FreshCheck:
+        id = 123
+        user_id = auth_user.id
+        visibility = "feed"
+
+        @property
+        def likes_count(self):
+            return state["count"]
+
+    loaded = _LoadedCheck()
+    fresh = _FreshCheck()
+    get_state = {"calls": 0}
+
+    def fake_get(model, obj_id):
+        assert obj_id == 123
+        get_state["calls"] += 1
+        return loaded if get_state["calls"] == 1 else fresh
+
+    class _LikeQuery:
+        def filter_by(self, **kw):
+            return self
+
+        def first(self):
+            return None
+
+    class _PumpCheckQuery:
+        def filter_by(self, **kw):
+            assert kw == {"id": 123}
+            return self
+
+        def update(self, values, synchronize_session=False):
+            state["update_values"] = values
+            state["count"] += 1
+            return 1
+
+    monkeypatch.setattr(social_bp, "can_view_pump_check", lambda viewer_id, check: True)
+    monkeypatch.setattr(social_bp.PumpCheckLike, "query", _LikeQuery())
+    monkeypatch.setattr(social_bp.PumpCheck, "query", _PumpCheckQuery())
+    monkeypatch.setattr(social_bp.db.session, "get", fake_get)
+    monkeypatch.setattr(social_bp.db.session, "add", lambda obj: None)
+    monkeypatch.setattr(social_bp.db.session, "commit", lambda: None)
+
+    response = client.post("/pump-check/123/like")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"liked": True, "likesCount": 5}
+    assert state["update_values"] is not None
+    assert social_bp.PumpCheck.likes_count in state["update_values"]
+
+
 def test_comment_requires_visibility_and_updates_count(client, auth_user, make_user):
     stranger = make_user("stranger")
     check = PumpCheck(user_id=stranger.id, visibility="feed", valid=True)
@@ -396,6 +481,64 @@ def test_comment_requires_visibility_and_updates_count(client, auth_user, make_u
     assert ok.get_json()["commentsCount"] == 1
     comments = client.get(f"/pump-check/{check.id}/comments").get_json()["comments"]
     assert comments[0]["body"] == "Nice work"
+
+
+def test_comment_create_route_avoids_python_counter_read_modify_write(client, auth_user, monkeypatch):
+    state = {"count": 4, "update_values": None}
+
+    class _LoadedCheck:
+        id = 123
+        user_id = auth_user.id
+        visibility = "feed"
+
+        @property
+        def comments_count(self):
+            raise AssertionError("route read stale comments_count")
+
+    class _FreshCheck:
+        id = 123
+        user_id = auth_user.id
+        visibility = "feed"
+
+        @property
+        def comments_count(self):
+            return state["count"]
+
+    loaded = _LoadedCheck()
+    fresh = _FreshCheck()
+    get_state = {"calls": 0}
+
+    def fake_get(model, obj_id):
+        assert obj_id == 123
+        get_state["calls"] += 1
+        return loaded if get_state["calls"] == 1 else fresh
+
+    class _PumpCheckQuery:
+        def filter_by(self, **kw):
+            assert kw == {"id": 123}
+            return self
+
+        def update(self, values, synchronize_session=False):
+            state["update_values"] = values
+            state["count"] += 1
+            return 1
+
+    def fake_add(obj):
+        if isinstance(obj, PumpCheckComment):
+            obj.id = 77
+
+    monkeypatch.setattr(social_bp, "can_view_pump_check", lambda viewer_id, check: True)
+    monkeypatch.setattr(social_bp.PumpCheck, "query", _PumpCheckQuery())
+    monkeypatch.setattr(social_bp.db.session, "get", fake_get)
+    monkeypatch.setattr(social_bp.db.session, "add", fake_add)
+    monkeypatch.setattr(social_bp.db.session, "commit", lambda: None)
+
+    response = client.post("/pump-check/123/comments", json={"body": "Nice work"})
+
+    assert response.status_code == 200
+    assert response.get_json() == {"id": 77, "commentsCount": 5}
+    assert state["update_values"] is not None
+    assert social_bp.PumpCheck.comments_count in state["update_values"]
 
 
 def test_feed_data_exposes_workout_score_when_present(client, auth_user):

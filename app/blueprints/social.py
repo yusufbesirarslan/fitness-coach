@@ -150,6 +150,10 @@ def _visible_pump_check_or_403(check_id):
     return check, None
 
 
+def _reload_pump_check(check_id):
+    return db.session.get(PumpCheck, check_id)
+
+
 @bp.route("/pump-check/<int:check_id>/like", methods=["POST"])
 @login_required
 def pump_check_like(check_id):
@@ -158,13 +162,15 @@ def pump_check_like(check_id):
         return error
     existing = PumpCheckLike.query.filter_by(pump_check_id=check.id, user_id=current_user.id).first()
     if not existing:
+        PumpCheck.query.filter_by(id=check.id).update({
+            PumpCheck.likes_count: PumpCheck.likes_count + 1,
+        }, synchronize_session=False)
         db.session.add(PumpCheckLike(pump_check_id=check.id, user_id=current_user.id))
-        check.likes_count = (check.likes_count or 0) + 1
         try:
             db.session.commit()
         except IntegrityError:
             db.session.rollback()
-            check = db.session.get(PumpCheck, check.id)
+    check = _reload_pump_check(check.id)
     return jsonify({"liked": True, "likesCount": check.likes_count or 0})
 
 
@@ -177,8 +183,14 @@ def pump_check_unlike(check_id):
     existing = PumpCheckLike.query.filter_by(pump_check_id=check.id, user_id=current_user.id).first()
     if existing:
         db.session.delete(existing)
-        check.likes_count = max((check.likes_count or 0) - 1, 0)
+        PumpCheck.query.filter_by(id=check.id).update({
+            PumpCheck.likes_count: db.case(
+                (PumpCheck.likes_count > 0, PumpCheck.likes_count - 1),
+                else_=0,
+            ),
+        }, synchronize_session=False)
         db.session.commit()
+    check = _reload_pump_check(check.id)
     return jsonify({"liked": False, "likesCount": check.likes_count or 0})
 
 
@@ -212,8 +224,11 @@ def pump_check_comment_create(check_id):
         return jsonify({"error": t("route.message_too_long")}), 400
     comment = PumpCheckComment(pump_check_id=check.id, user_id=current_user.id, body=body)
     db.session.add(comment)
-    check.comments_count = (check.comments_count or 0) + 1
+    PumpCheck.query.filter_by(id=check.id).update({
+        PumpCheck.comments_count: PumpCheck.comments_count + 1,
+    }, synchronize_session=False)
     db.session.commit()
+    check = _reload_pump_check(check.id)
     return jsonify({"id": comment.id, "commentsCount": check.comments_count or 0})
 
 
