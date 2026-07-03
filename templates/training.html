@@ -283,6 +283,19 @@
 
         .pump-actions { display: flex; gap: 10px; margin-top: 4px; }
         .pump-actions .btn-volt { flex: 1; }
+        .pump-share-toggle { display:flex; gap:8px; background:rgba(255,255,255,0.03); border:1px solid var(--border); border-radius:var(--r-md); padding:5px; }
+        .pump-share-option { flex:1; height:38px; border:0; border-radius:var(--r-sm); background:transparent; color:var(--text-3); font-family:'DM Sans',sans-serif; font-weight:700; cursor:pointer; transition:all var(--t-fast); }
+        .pump-share-option.active { background:var(--volt-dim); color:var(--volt); border:1px solid rgba(61,139,255,0.22); }
+        .pump-friend-picker[hidden] { display:none; }
+        .pump-selected-friends { display:flex; flex-wrap:wrap; gap:6px; }
+        .pump-chip { border:1px solid rgba(61,139,255,.24); color:var(--volt); background:var(--volt-dim); border-radius:var(--r-full); padding:5px 8px; font-size:12px; display:inline-flex; gap:6px; align-items:center; }
+        .pump-chip button { border:0; background:none; color:inherit; cursor:pointer; }
+        .pump-friend-results { max-height:180px; overflow:auto; border:1px solid var(--border); border-radius:var(--r-md); background:rgba(255,255,255,0.02); }
+        .pump-friend-row { width:100%; border:0; background:none; color:var(--text); display:flex; align-items:center; gap:10px; padding:10px 12px; cursor:pointer; text-align:left; font:inherit; }
+        .pump-friend-row:hover { background:rgba(61,139,255,0.08); }
+        .pump-progress { height:4px; background:rgba(255,255,255,0.06); border-radius:var(--r-full); overflow:hidden; }
+        .pump-progress[hidden] { display:none; }
+        .pump-progress div { height:100%; width:0; background:var(--volt); transition:width .25s ease; }
         .pump-busy { display: inline-flex; align-items: center; gap: 8px; }
         .pump-spinner {
             width: 16px; height: 16px;
@@ -415,6 +428,21 @@
             <label class="pump-label" for="pump-desc">{{ t('training.pump_desc_label') }}</label>
             <input type="text" id="pump-desc" class="fc-input" maxlength="140" placeholder="{{ t('training.pump_desc_ph') }}">
         </div>
+
+        <div class="pump-field">
+            <div class="pump-label">{{ t('pump.share_to') }}</div>
+            <div class="pump-share-toggle" role="radiogroup" aria-label="{{ t('pump.share_to') }}">
+                <button type="button" class="pump-share-option active" data-share="feed" aria-pressed="true">{{ t('pump.share_feed') }}</button>
+                <button type="button" class="pump-share-option" data-share="friends" aria-pressed="false">{{ t('pump.share_friends') }}</button>
+            </div>
+        </div>
+        <div class="pump-field pump-friend-picker" id="pump-friend-picker" hidden>
+            <label class="pump-label" for="pump-friend-search">{{ t('pump.select_friends') }}</label>
+            <input type="text" id="pump-friend-search" class="fc-input" placeholder="{{ t('pump.search_friends') }}" autocomplete="off">
+            <div class="pump-selected-friends" id="pump-selected-friends"></div>
+            <div class="pump-friend-results" id="pump-friend-results"></div>
+        </div>
+        <div class="pump-progress" id="pump-progress" hidden><div id="pump-progress-bar"></div></div>
 
         <div class="pump-error" id="pump-error" role="alert" aria-live="polite"></div>
 
@@ -1061,6 +1089,14 @@ document.addEventListener('click', e => {
 
     // ── PUMP CHECK MODAL ──
     let pumpImageData = null;  // seçilen fotoğrafın base64 data-URL'i
+    let pumpVisibility = 'feed';
+    let pumpSelectedFriends = new Map();
+
+    function escapeHTML(str) {
+        const d = document.createElement('div');
+        d.textContent = str == null ? '' : String(str);
+        return d.innerHTML;
+    }
 
     function openPumpCheck() {
         const modal = document.getElementById('pump-check-modal');
@@ -1069,6 +1105,13 @@ document.addEventListener('click', e => {
         pumpImageData = null;
         document.getElementById('pump-dropzone').classList.remove('has-image');
         document.getElementById('pump-file-input').value = '';
+        pumpVisibility = 'feed';
+        pumpSelectedFriends = new Map();
+        setPumpShare('feed');
+        renderPumpSelectedFriends();
+        document.getElementById('pump-friend-search').value = '';
+        document.getElementById('pump-progress').hidden = true;
+        document.getElementById('pump-progress-bar').style.width = '0%';
         clearPumpError();
         const submit = document.getElementById('pump-submit');
         submit.disabled = false;
@@ -1099,6 +1142,42 @@ document.addEventListener('click', e => {
         el.classList.remove('visible');
     }
 
+    function setPumpShare(value) {
+        pumpVisibility = value;
+        document.querySelectorAll('.pump-share-option').forEach(btn => {
+            const active = btn.dataset.share === value;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+        document.getElementById('pump-friend-picker').hidden = value !== 'friends';
+        if (value === 'friends') loadPumpFriends();
+    }
+
+    function renderPumpSelectedFriends() {
+        const wrap = document.getElementById('pump-selected-friends');
+        wrap.innerHTML = Array.from(pumpSelectedFriends.values()).map(f =>
+            '<span class="pump-chip">@' + escapeHTML(f.username) + ' <button type="button" data-remove-friend="' + f.id + '" aria-label="' + __t('pump.remove_friend') + '">&times;</button></span>'
+        ).join('');
+    }
+
+    async function loadPumpFriends() {
+        const q = document.getElementById('pump-friend-search').value.trim();
+        try {
+            const res = await fetch('/friends/select-list?q=' + encodeURIComponent(q));
+            const data = await res.json();
+            document.getElementById('pump-friend-results').innerHTML = data.friends.map(f =>
+                '<button type="button" class="pump-friend-row" data-friend-id="' + f.id + '" data-username="' + escapeHTML(f.username).replace(/"/g, '&quot;') + '"><span>@' + escapeHTML(f.username) + '</span></button>'
+            ).join('') || '<div class="pump-dropzone-hint" style="padding:12px;">' + __t('pump.no_friends') + '</div>';
+        } catch (err) {
+            document.getElementById('pump-friend-results').innerHTML = '<div class="pump-dropzone-hint" style="padding:12px;">' + __t('pump.no_friends') + '</div>';
+        }
+    }
+
+    function setPumpProgress(percent) {
+        document.getElementById('pump-progress').hidden = false;
+        document.getElementById('pump-progress-bar').style.width = percent + '%';
+    }
+
     function handlePumpFile(file) {
         if (!file) return;
         if (!file.type || !file.type.startsWith('image/')) { showPumpError(__t('training.pump_pick_image')); return; }
@@ -1115,15 +1194,22 @@ document.addEventListener('click', e => {
 
     async function submitPumpCheck() {
         if (!pumpImageData) { showPumpError(__t('training.pump_upload_first')); return; }
+        if (pumpVisibility === 'friends' && pumpSelectedFriends.size === 0) {
+            showPumpError(__t('pump.friend_required'));
+            return;
+        }
         clearPumpError();
         const submit = document.getElementById('pump-submit');
         submit.disabled = true;
         submit.classList.add('loading');
         submit.innerHTML = '<span class="pump-busy"><span class="pump-spinner"></span>' + __t('training.verifying') + '</span>';
+        setPumpProgress(35);
         const payload = {
             image: pumpImageData,
             location_type: document.getElementById('pump-location').value,
-            description: document.getElementById('pump-desc').value.trim()
+            description: document.getElementById('pump-desc').value.trim(),
+            visibility: pumpVisibility,
+            shared_friend_ids: Array.from(pumpSelectedFriends.keys())
         };
         try {
             const res = await fetch('/workout/complete', {
@@ -1131,12 +1217,14 @@ document.addEventListener('click', e => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
+            setPumpProgress(75);
             const data = await res.json().catch(() => ({}));
             // Sunucu "zaten tamamlandı" yapısal kodunu (ör. başka cihazda yapıldı)
             // dönerse bunu hata değil, tamamlanmış kabul et. Dile bağımlı metin
             // yerine code alanına bak (i18n: error metni artık çevriliyor).
             const already = !res.ok && data.code === 'already_completed';
             if (res.ok || already) {
+                setPumpProgress(100);
                 if (res.ok) showToast(data.message, 'success');
                 markWorkoutCompleted();
                 // localStorage bazı mobil tarayıcılarda hata fırlatabilir; ayrı koru.
@@ -1145,12 +1233,16 @@ document.addEventListener('click', e => {
             } else {
                 // 422 = doğrulama eşleşmedi, 400 = eksik/biçim hatası → modalda göster, yeniden dene.
                 showPumpError(data.error || __t('training.verify_failed'));
+                document.getElementById('pump-progress').hidden = true;
+                document.getElementById('pump-progress-bar').style.width = '0%';
                 submit.disabled = false;
                 submit.classList.remove('loading');
                 submit.textContent = __t('training.complete_workout');
             }
         } catch (err) {
             showPumpError(__t('training.conn_error_retry'));
+            document.getElementById('pump-progress').hidden = true;
+            document.getElementById('pump-progress-bar').style.width = '0%';
             submit.disabled = false;
             submit.classList.remove('loading');
             submit.textContent = __t('training.complete_workout');
@@ -1333,6 +1425,25 @@ document.addEventListener('click', e => {
         fileInput.addEventListener('change', (e) => handlePumpFile(e.target.files[0]));
         document.getElementById('pump-close').addEventListener('click', closePumpCheck);
         document.getElementById('pump-cancel').addEventListener('click', closePumpCheck);
+        document.querySelectorAll('.pump-share-option').forEach(btn => {
+            btn.addEventListener('click', () => setPumpShare(btn.dataset.share));
+        });
+        document.getElementById('pump-friend-search').addEventListener('input', () => {
+            clearTimeout(window.__pumpFriendTimer);
+            window.__pumpFriendTimer = setTimeout(loadPumpFriends, 200);
+        });
+        document.getElementById('pump-friend-results').addEventListener('click', (e) => {
+            const row = e.target.closest('[data-friend-id]');
+            if (!row) return;
+            pumpSelectedFriends.set(Number(row.dataset.friendId), { id: Number(row.dataset.friendId), username: row.dataset.username });
+            renderPumpSelectedFriends();
+        });
+        document.getElementById('pump-selected-friends').addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-remove-friend]');
+            if (!btn) return;
+            pumpSelectedFriends.delete(Number(btn.dataset.removeFriend));
+            renderPumpSelectedFriends();
+        });
         modal.addEventListener('click', (e) => { if (e.target === modal) closePumpCheck(); });
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && modal.classList.contains('active')) closePumpCheck();

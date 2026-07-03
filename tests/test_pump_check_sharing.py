@@ -918,3 +918,36 @@ def test_pump_check_comments_batches_comment_authors(client, auth_user, make_use
         re.search(r'FROM\s+"?user"?\b', statement, re.IGNORECASE) and " IN (" in statement
         for statement in user_selects
     ), user_selects
+
+
+def test_training_pump_modal_has_share_selector_and_friend_picker():
+    root = Path(__file__).resolve().parents[1]
+    html = (root / "templates" / "training.html").read_text(encoding="utf-8")
+
+    assert "pump.share_to" in html
+    assert 'data-share="feed"' in html
+    assert 'data-share="friends"' in html
+    assert 'id="pump-friend-picker"' in html
+    assert 'id="pump-friend-search"' in html
+    assert 'id="pump-progress"' in html
+    assert "/friends/select-list?q=" in html
+    assert "visibility: pumpVisibility" in html
+    assert "shared_friend_ids: Array.from(pumpSelectedFriends.keys())" in html
+    assert "pump.friend_required" in html
+
+
+def test_pump_modal_locale_keys_exist_in_both_locales():
+    root = Path(__file__).resolve().parents[1]
+    keys = [
+        "pump.share_to",
+        "pump.share_feed",
+        "pump.share_friends",
+        "pump.select_friends",
+        "pump.search_friends",
+        "pump.remove_friend",
+        "pump.no_friends",
+    ]
+    for name in ("en.json", "tr.json"):
+        data = json.loads((root / "locales" / name).read_text(encoding="utf-8"))
+        for key in keys:
+            assert key in data, f"{key} missing from {name}"
