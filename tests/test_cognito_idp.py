@@ -212,10 +212,23 @@ def test_decode_claims_garbage_returns_empty():
     assert cognito_idp._decode_claims("") == {}
 
 
-def test_initiate_auth_missing_id_token_returns_empty_claims(monkeypatch):
-    fake = _FakeIdpClient(result={})  # AuthenticationResult yok
+def test_initiate_auth_missing_id_token_rejected(monkeypatch):
+    # AuthenticationResult yok → token yok → giriş POZİTİF doğrulama olduğundan
+    # boş claim döndürmek yerine reddedilmeli (auth bypass koruması).
+    fake = _FakeIdpClient(result={})
     _use_fake(monkeypatch, fake)
-    assert cognito_idp.initiate_auth("ali", "Sifre123") == {}
+    with pytest.raises(cognito_idp.CognitoIdpError):
+        cognito_idp.initiate_auth("ali", "Sifre123")
+
+
+def test_initiate_auth_challenge_rejected(monkeypatch):
+    # Cognito parolayı doğrulayıp MFA/challenge dönerse giriş TAMAMLANMAMIŞTIR;
+    # boş claim yerine açıkça reddedilmeli.
+    fake = _FakeIdpClient(result={"ChallengeName": "SOFTWARE_TOKEN_MFA",
+                                  "Session": "sess"})
+    _use_fake(monkeypatch, fake)
+    with pytest.raises(cognito_idp.CognitoIdpError):
+        cognito_idp.initiate_auth("ali", "Sifre123")
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 import os
 import secrets
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import urlencode
 
 import requests
@@ -23,9 +23,14 @@ def _parse_dt(value):
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except (TypeError, ValueError):
         return None
+    # tz-aware ise UTC'ye ÇEVİRİP naive'e indir; düz .replace(tzinfo=None) bir
+    # +03:00 damgasını 3 saat kaydırıp saklardı (B12). tz-naive ise olduğu gibi.
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 def _minutes_between(start, end):
@@ -115,6 +120,11 @@ class BaseWearableAdapter:
             raise WearableError(f"{self.provider} is not connected")
         if not force and conn.token_expiry and conn.token_expiry > _utcnow() + timedelta(minutes=5):
             return conn.access_token
+        # B22: expiry bilinmiyor (None) ama geçerli olabilecek bir erişim token'ı
+        # var → her istekte gereksiz yenileme yapma; onu kullan. Gerçekten
+        # geçersizse çağıran (_authed_json) 401'de force=True ile yeniler.
+        if not force and not conn.token_expiry and conn.access_token:
+            return conn.access_token
         if not conn.refresh_token:
             raise WearableError(f"{self.provider} refresh_token missing")
 
@@ -135,19 +145,36 @@ class BaseWearableAdapter:
         save_wearable_tokens(user_id, self.provider, data)
         return data["access_token"]
 
-    def request(self, endpoint, user_id, params=None):
+    def _authed_json(self, method, url, user_id, access_token=None, **kwargs):
+        """Bearer'lı HTTP çağrısı + 401→zorla-yenile→tek retry, JSON döndürür.
+
+        access_token AÇIKÇA verildiyse (örn. testler/tek-seferlik) doğrudan
+        kullanılır (yenileme/retry yok). Aksi halde token refresh_access_token'dan
+        gelir ve 401'de force refresh ile bir kez yeniden denenir. Tüm dış çağrılar
+        (WHOOP GET + Google GET/POST) bu tek kapıdan geçer ki bayat token sync'i
+        düşürmesin (B3)."""
+        http = requests.get if method.upper() == "GET" else requests.post
+        if access_token is not None:
+            headers = {**kwargs.pop("headers", {}), "Authorization": f"Bearer {access_token}"}
+            resp = http(url, headers=headers, timeout=10, **kwargs)
+            resp.raise_for_status()
+            return resp.json()
+        headers = {**kwargs.pop("headers", {})}
         token = self.refresh_access_token(user_id)
-        url = endpoint if endpoint.startswith("http") else f"{self.api_base}{endpoint}"
-        headers = {"Authorization": f"Bearer {token}"}
-        resp = requests.get(url, params=params or {}, headers=headers, timeout=10)
+        headers["Authorization"] = f"Bearer {token}"
+        resp = http(url, headers=headers, timeout=10, **kwargs)
         if resp.status_code == 401:
             token = self.refresh_access_token(user_id, force=True)
-            headers = {"Authorization": f"Bearer {token}"}
-            resp = requests.get(url, params=params or {}, headers=headers, timeout=10)
+            headers["Authorization"] = f"Bearer {token}"
+            resp = http(url, headers=headers, timeout=10, **kwargs)
         resp.raise_for_status()
         return resp.json()
 
-    def fetch_activity(self, user_id, target_date, access_token=None):
+    def request(self, endpoint, user_id, params=None):
+        url = endpoint if endpoint.startswith("http") else f"{self.api_base}{endpoint}"
+        return self._authed_json("GET", url, user_id, params=params or {})
+
+    def fetch_activity(self, user_id, target_date, access_token=None, workouts=None):
         raise NotImplementedError
 
     def fetch_sleep(self, user_id, target_date, access_token=None):
@@ -178,14 +205,14 @@ class WhoopAdapter(BaseWearableAdapter):
     def fetch_sleep(self, user_id, target_date, access_token=None):
         payload = self.request(self.resource_endpoints["sleep"], user_id, params=self._range_params(target_date))
         sleeps = []
-        for item in payload.get("records") or []:
+        for idx, item in enumerate(payload.get("records") or []):
             start = _parse_dt(item.get("start"))
             end = _parse_dt(item.get("end"))
             score = item.get("score") or {}
             stages = score.get("stage_summary") or {}
             sleeps.append(WearableSleepLog(
                 user_id=user_id, provider=self.provider,
-                source_id=str(item.get("id") or item.get("sleep_id") or f"whoop-sleep-{target_date.isoformat()}"),
+                source_id=str(item.get("id") or item.get("sleep_id") or f"whoop-sleep-{target_date.isoformat()}-{idx}"),
                 date_key=target_date.isoformat(),
                 start_at=start, end_at=end,
                 duration_min=_ms_to_min(stages.get("total_in_bed_time_milli")) or _minutes_between(start, end),
@@ -202,13 +229,13 @@ class WhoopAdapter(BaseWearableAdapter):
     def fetch_workouts(self, user_id, target_date, access_token=None):
         payload = self.request(self.resource_endpoints["workout"], user_id, params=self._range_params(target_date))
         workouts = []
-        for item in payload.get("records") or []:
+        for idx, item in enumerate(payload.get("records") or []):
             start = _parse_dt(item.get("start"))
             end = _parse_dt(item.get("end"))
             score = item.get("score") or {}
             workouts.append(WearableWorkoutLog(
                 user_id=user_id, provider=self.provider,
-                source_id=str(item.get("id") or item.get("workout_id") or f"whoop-workout-{target_date.isoformat()}"),
+                source_id=str(item.get("id") or item.get("workout_id") or f"whoop-workout-{target_date.isoformat()}-{idx}"),
                 date_key=target_date.isoformat(),
                 sport_name=item.get("sport_name") or item.get("sport_id"),
                 start_at=start, end_at=end,
@@ -221,8 +248,12 @@ class WhoopAdapter(BaseWearableAdapter):
             ))
         return workouts
 
-    def fetch_activity(self, user_id, target_date, access_token=None):
-        workouts = self.fetch_workouts(user_id, target_date, access_token)
+    def fetch_activity(self, user_id, target_date, access_token=None, workouts=None):
+        # B10: sync zaten fetch_workouts'u çağırıp listeyi geçirir → WHOOP
+        # workout uç noktasını sync başına iki kez çağırıp rate-limit'i boşa
+        # harcamayalım. Doğrudan çağrıda (liste verilmezse) eskisi gibi çek.
+        if workouts is None:
+            workouts = self.fetch_workouts(user_id, target_date, access_token)
         recovery = self.request(self.resource_endpoints["recovery"], user_id, params=self._range_params(target_date))
         score = {}
         records = recovery.get("records") or []
@@ -263,20 +294,19 @@ class GoogleHealthAdapter(BaseWearableAdapter):
     def extra_auth_params(self):
         return {"access_type": "offline", "prompt": "consent"}
 
-    def fetch_activity(self, user_id, target_date, access_token=None):
-        token = access_token or self.refresh_access_token(user_id)
-        headers = {"Authorization": f"Bearer {token}"}
+    def fetch_activity(self, user_id, target_date, access_token=None, workouts=None):
         start, end = utc_day_bounds(target_date)
         base = f"{self.api_base}/v1/users/me/dataTypes"
 
         def rollup(data_type):
-            resp = requests.post(
-                f"{base}/{data_type}/dailyRollup",
+            # B3: doğrudan requests.post yerine _authed_json → 401'de token
+            # yenilenip yeniden denenir (bayat Google token'ı sync'i düşürmesin).
+            data = self._authed_json(
+                "POST", f"{base}/{data_type}/dailyRollup", user_id,
+                access_token=access_token,
                 json={"startTime": start.isoformat() + "Z", "endTime": end.isoformat() + "Z"},
-                headers=headers, timeout=10,
             )
-            resp.raise_for_status()
-            return _first_rollup(resp.json())
+            return _first_rollup(data)
 
         steps = rollup("steps").get("steps", {}).get("countSum", 0)
         active = rollup("active-minutes").get("activeMinutes", {}).get("durationSumMillis", 0)
@@ -295,17 +325,15 @@ class GoogleHealthAdapter(BaseWearableAdapter):
         )
 
     def fetch_sleep(self, user_id, target_date, access_token=None):
-        token = access_token or self.refresh_access_token(user_id)
         start, end = utc_day_bounds(target_date)
-        resp = requests.get(
-            f"{self.api_base}/v1/users/me/dataTypes/sleep/dataPoints",
+        # B3: _authed_json ile 401→yenile→retry (doğrudan requests.get değil).
+        data = self._authed_json(
+            "GET", f"{self.api_base}/v1/users/me/dataTypes/sleep/dataPoints", user_id,
+            access_token=access_token,
             params={"startTime": start.isoformat() + "Z", "endTime": end.isoformat() + "Z"},
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
         )
-        resp.raise_for_status()
         sleeps = []
-        for item in resp.json().get("dataPoints") or []:
+        for idx, item in enumerate(data.get("dataPoints") or []):
             sleep = item.get("sleep") or {}
             interval = sleep.get("interval") or {}
             summary = sleep.get("summary") or {}
@@ -314,7 +342,7 @@ class GoogleHealthAdapter(BaseWearableAdapter):
             end_at = _parse_dt(interval.get("endTime"))
             sleeps.append(WearableSleepLog(
                 user_id=user_id, provider=self.provider,
-                source_id=str(item.get("name") or f"google-sleep-{target_date.isoformat()}"),
+                source_id=str(item.get("name") or f"google-sleep-{target_date.isoformat()}-{idx}"),
                 date_key=target_date.isoformat(),
                 start_at=start_at, end_at=end_at,
                 duration_min=_num(summary.get("minutesAsleep")) or _minutes_between(start_at, end_at),

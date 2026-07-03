@@ -112,16 +112,24 @@ def _extract_page_sections(html_text, soup_clean):
                 ld = json.loads(script.string)
                 items = ld if isinstance(ld, list) else [ld]
                 for item in items:
+                    # B18: JSON-LD listesi string/null da içerebilir → .get()
+                    # AttributeError'ı (json.JSONDecodeError, TypeError) yakalamasını
+                    # aşıp kaçardı. Dict olmayanları atla.
+                    if not isinstance(item, dict):
+                        continue
                     if item.get("@type") in ("Menu", "MenuSection", "Restaurant"):
                         menu_sec = item.get("hasMenuSection", [])
                         if not isinstance(menu_sec, list):
                             menu_sec = [menu_sec]
                         for sec in menu_sec:
+                            if not isinstance(sec, dict):
+                                continue
                             cat = sec.get("name", "Genel")
                             menu_items = sec.get("hasMenuItem", [])
                             if not isinstance(menu_items, list):
                                 menu_items = [menu_items]
-                            names = [mi.get("name", "") for mi in menu_items if mi.get("name")]
+                            names = [mi.get("name", "") for mi in menu_items
+                                     if isinstance(mi, dict) and mi.get("name")]
                             if names:
                                 sections.append({"category": cat, "text": "\n".join(names)})
             except (json.JSONDecodeError, TypeError):

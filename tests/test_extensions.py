@@ -77,11 +77,28 @@ def test_limiter_storage_status_degraded_when_ping_fails(monkeypatch):
 
 
 def test_health_reports_limiter_storage(app):
-    # /health DAİMA 200 döner (Redis kaybı konteyneri unhealthy yapmamalı) ve
-    # limiter depolama durumunu izleme için raporlar.
+    # DB erişilebilirken /health 200 döner ve limiter depolama durumunu
+    # izleme için raporlar. (Redis kaybı tek başına unhealthy saymaz.)
     client = app.test_client()
     resp = client.get("/health")
     assert resp.status_code == 200
     body = resp.get_json()
     assert body["status"] == "ok"
+    assert body["db"] == "ok"
     assert body["limiter_storage"] in ("memory", "redis", "degraded")
+
+
+def test_health_returns_503_when_db_unreachable(app, monkeypatch):
+    # DB erişilemezse /health 503 dönmeli ki bozuk deploy rollback tetiklesin.
+    from app.extensions import db
+    client = app.test_client()
+
+    def boom(*a, **k):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(db.session, "execute", boom)
+    resp = client.get("/health")
+    assert resp.status_code == 503
+    body = resp.get_json()
+    assert body["status"] == "error"
+    assert body["db"] == "error"

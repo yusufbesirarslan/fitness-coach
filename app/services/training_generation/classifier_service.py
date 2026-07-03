@@ -13,7 +13,12 @@ def classify_user(features: UserTrainingFeatures) -> ClassificationResult:
     contradiction = detect_contradiction(features)
 
     observed_cap = int(contradiction["observed_ceiling"])
-    final_numeric = min(suggested, reported, hard_cap, observed_cap)
+    # NOT: `reported` bilerek min()'e DAHİL DEĞİL — dahil olsaydı final_numeric her
+    # zaman <= reported olur, aşağıdaki hysteresis dalı ölü kod olurdu ve saklı
+    # fitness_level'ı olmayan (varsayılan "beginner") kullanıcılar gözlenen
+    # performanstan bağımsız Beginner'a kilitlenirdi. Güvenlik tavanları (hard_cap,
+    # observed_cap) yükseltmeyi hâlâ sınırlar; yükseltme ise stabilite penceresinden geçer.
+    final_numeric = min(suggested, hard_cap, observed_cap)
 
     # Hysteresis: upgrades require sustained evidence; safety downgrades are immediate.
     if final_numeric > reported and features.performance_history.stable_score_weeks < 3:

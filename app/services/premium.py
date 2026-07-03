@@ -18,6 +18,7 @@ from flask_login import current_user
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.extensions import db
+from app.models import User
 from app.timeutil import app_today
 
 # Ücretsiz planda plan-türü başına haftalık üretim hakkı.
@@ -61,17 +62,30 @@ def remaining_ai_plans(user, kind):
     return max(FREE_WEEKLY_AI_PLANS - used, 0)
 
 
-def record_ai_plan_generation(user, kind):
-    """Başarılı bir `kind` üretimini bu haftaya işle (premium'da no-op)."""
+def _record_counter(user, counter_key):
+    """Haftalık kota sayacını (`counter_key`) atomik olarak +1 işle.
+
+    Sayaç bütün user_metadata JSON'ının okunup yeniden yazılmasıyla tutulur; iki
+    eşzamanlı üretim düz oku-değiştir-yaz ile kayıp güncellemeye (her ikisi de
+    used=0 görüp used=1 yazması → tek artış) yol açardı. Satırı kilitleyip
+    metadata'yı KİLİT ALTINDA yeniden okuyarak artışları serileştir (D-M2).
+    SQLite'ta with_for_update no-op'tur; Postgres'te grant'leri serileştirir."""
     if getattr(user, "is_premium", False):
         return
-    meta, q, wk = _quota(user)
+    locked = db.session.query(User).filter_by(id=user.id).with_for_update().first()
+    target = locked or user
+    meta, q, wk = _quota(target)
     q["week"] = wk
-    q[kind] = int(q.get(kind, 0)) + 1
+    q[counter_key] = int(q.get(counter_key, 0)) + 1
     meta["ai_plan_quota"] = q
-    user.user_metadata = meta
-    flag_modified(user, "user_metadata")  # JSON in-place değişimini garantiye al
+    target.user_metadata = meta
+    flag_modified(target, "user_metadata")  # JSON in-place değişimini garantiye al
     db.session.commit()
+
+
+def record_ai_plan_generation(user, kind):
+    """Başarılı bir `kind` üretimini bu haftaya işle (premium'da no-op)."""
+    _record_counter(user, kind)
 
 
 def remaining_ai_chats(user):
@@ -88,15 +102,7 @@ def remaining_ai_chats(user):
 
 def record_ai_chat(user):
     """Başarılı bir /ask çağrısını bu haftaya işle (premium'da no-op)."""
-    if getattr(user, "is_premium", False):
-        return
-    meta, q, wk = _quota(user)
-    q["week"] = wk
-    q["chat"] = int(q.get("chat", 0)) + 1
-    meta["ai_plan_quota"] = q
-    user.user_metadata = meta
-    flag_modified(user, "user_metadata")  # JSON in-place değişimini garantiye al
-    db.session.commit()
+    _record_counter(user, "chat")
 
 
 def premium_ai_plan_gate(kind):

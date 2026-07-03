@@ -131,11 +131,13 @@ def _safe_requests_get(url, *, timeout, headers=None, cookies=None,
                              allow_redirects=False, headers=headers, cookies=cookies)
         if r.status_code in (301, 302, 303, 307, 308):
             loc = r.headers.get("Location")
-            r.close()  # release the unread streamed body before the next hop
-            if not loc:
-                return r
-            current = urljoin(current, loc)
-            continue
+            # B20: 3xx ama Location varsa gövdeyi bırakıp sıradaki hop'a geç;
+            # Location YOKSA takip edilemez → ham/kapalı streamed response'u
+            # cap'siz döndürme, aşağıdaki cap'li okuma yoluna düş.
+            if loc:
+                r.close()  # release the unread streamed body before the next hop
+                current = urljoin(current, loc)
+                continue
         if max_bytes is not None:
             total = 0
             chunks = []
@@ -290,11 +292,13 @@ def _fetch_page(url, timeout=10):
             r = _safe_get(current)
             if r.status_code in (301, 302, 303, 307, 308):
                 loc = r.headers.get("Location")
-                r.close()  # release the unread streamed body before next hop
-                if not loc:
-                    return r
-                current = urljoin(current, loc)
-                continue
+                # B20: Location varsa sıradaki hop'a geç; yoksa takip edilemez →
+                # ham streamed response'u cap'siz döndürmek yerine cap'li oku.
+                if loc:
+                    r.close()  # release the unread streamed body before next hop
+                    current = urljoin(current, loc)
+                    continue
+                return _read_capped(r)
             return _read_capped(r)
         raise http_req.exceptions.TooManyRedirects("Çok fazla yönlendirme.")
 
@@ -376,10 +380,19 @@ def _process_google_drive_url(url):
     if resp.status_code != 200:
         return None, f"Google Drive hatası: HTTP {resp.status_code}"
 
+    # B19: Content-Length sayısal olmayabilir (bozuk/uyumsuz sunucu); int()
+    # ham ValueError'ı çağıranın koruması dışında patlatırdı. Güvenle ayrıştır;
+    # ayrıştırılamıyorsa boyut kapısını atla (aşağıdaki streaming cap yine korur).
     content_length = resp.headers.get("Content-Length")
-    if content_length and int(content_length) > _DRIVE_MAX_BYTES:
+    declared_bytes = None
+    if content_length:
+        try:
+            declared_bytes = int(content_length)
+        except (TypeError, ValueError):
+            declared_bytes = None
+    if declared_bytes is not None and declared_bytes > _DRIVE_MAX_BYTES:
         resp.close()
-        size_mb = int(content_length) // (1024 * 1024)
+        size_mb = declared_bytes // (1024 * 1024)
         return None, f"Dosya çok büyük ({size_mb}MB). Maksimum 50MB desteklenir. Lütfen dosyayı küçültüp tekrar deneyin."
 
     content_type = resp.headers.get("Content-Type", "").lower()
