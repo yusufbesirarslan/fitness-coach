@@ -36,6 +36,7 @@
   "validate.email_invalid": "Enter a valid email address.",
 
   "error.rate_limited": "Too many attempts. Please try again a little later.",
+  "error.ai_busy": "The AI coach is handling too many requests right now — please try again in a few seconds.",
   "error.404_title": "Page Not Found",
   "error.404_body": "The page you're looking for couldn't be found.",
   "error.500_title": "Server Error",

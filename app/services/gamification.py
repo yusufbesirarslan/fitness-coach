@@ -77,14 +77,22 @@ def _drop_lb_dirty(session, *args):
 def award_xp(user_id, amount):
     # Aynı kullanıcı için eşzamanlı XP verilişleri (8 thread'lik gunicorn'da paralel
     # istekler) düz oku-değiştir-yaz ile kayıp güncellemeye → leaderboard eksik
-    # sayımına yol açardı. Satırı kilitle (update_streak ile aynı desen); SQLite'ta
-    # no-op ama Postgres'te grant'leri serileştirir. (D-M1)
-    user = db.session.query(User).filter_by(id=user_id).with_for_update().first()
-    if user:
-        old_points = user.rank_points or 0
+    # sayımına yol açardı. Satırı kilitle; SQLite'ta no-op ama Postgres'te
+    # grant'leri serileştirir. (D-M1)
+    # DİKKAT (C1): kilitli SELECT'i ENTITY olarak değil KOLON olarak oku. Entity
+    # sorgusu identity map'teki (istek başında yüklenmiş, süresi dolmamış)
+    # current_user örneğini döndürür ve taze DB değerlerini ATAR — kilit DB'de
+    # serileştirse de oku-değiştir-yaz bayat bellek değeriyle yapılır → kayıp
+    # güncelleme aynen sürer. Kolon sorgusu identity map'i atlar; autoflush da
+    # bekleyen değişiklikleri SELECT'ten önce DB'ye iter.
+    row = (db.session.query(User.rank_points, User.weekly_xp)
+           .filter_by(id=user_id).with_for_update().first())
+    if row is not None:
+        old_points = row[0] or 0
         new_points = old_points + amount
+        user = db.session.get(User, user_id)  # kilit bizde; identity map'ten gelir
         user.rank_points = new_points
-        user.weekly_xp = (user.weekly_xp or 0) + amount
+        user.weekly_xp = (row[1] or 0) + amount
         _mark_lb_dirty(user_id)  # Redis sync commit BAŞARILI olduktan sonra (after_commit)
         # 500-puan seviye sınırı geçildiyse feed'e level_up aktivitesi düş. Daha önce
         # hiç üretilmiyordu — ACTIVITY_ICONS["level_up"] tanımlıydı ama ölü config'di (#14).

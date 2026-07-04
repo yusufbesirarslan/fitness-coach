@@ -350,6 +350,27 @@ def test_meal_log_override_macros_clamped_to_physical_bounds(client, auth_user, 
     assert entry.kalori <= 3000 and entry.yag <= 150
 
 
+def test_meal_log_override_macros_awards_meal_logged_quest(client, auth_user, monkeypatch):
+    # C5: override yolu AI-hesaplı yolla AYNI 'meal_logged' görevini vermeli —
+    # elle makro giren kullanıcı günlük görev/XP'yi sessizce kaçırıyordu.
+    from app.models import DailyQuest, UserQuestProgress
+    db.session.add(DailyQuest(title="Öğün Kaydet", description="Bugün bir öğün kaydet",
+                              points_reward=20, quest_type="meal_logged"))
+    db.session.commit()
+    monkeypatch.setattr(nutrition_meallog, "_openai_chat",
+                        lambda **kw: (_ for _ in ()).throw(AssertionError("AI çağrılmamalı")))
+
+    body = client.post("/meal-log", json={
+        "ogun": "Akşam", "yemekler": "tavuk",
+        "override_macros": {"kalori": 495, "protein": 62, "karb": 0, "yag": 10.5},
+    }).get_json()
+
+    assert body["quest_awarded"]["xp"] == 20
+    assert UserQuestProgress.query.filter_by(user_id=auth_user.id).count() == 1
+    db.session.expire_all()
+    assert db.session.get(type(auth_user), auth_user.id).rank_points == 20
+
+
 def test_meal_log_ai_path_with_fitness_normalization(client, auth_user, monkeypatch):
     captured = {}
 

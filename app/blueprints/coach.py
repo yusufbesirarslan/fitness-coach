@@ -6,6 +6,7 @@ from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
 from app.models import UserSession
 from app.services.ai_coach import _fetch_coach_context, _run_coach_conversation, generate_coach_reply
+from app.services.ai_gate import ai_concurrency_gate
 from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee, generate_nutrition_plan, generate_training_plan
 from app.services.premium import record_ai_chat, remaining_ai_chats
 from app.i18n import t
@@ -19,6 +20,7 @@ bp = Blueprint("coach", __name__)
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 @limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # generate_coach_reply Sonnet'te: daha sıkı tavan
+@ai_concurrency_gate  # A1: bloklayıcı AI çağrıları tüm thread'leri doldurmasın
 def chat():
     data = request.get_json(silent=True) or {}
 
@@ -113,6 +115,7 @@ def chat():
 @bp.route("/ask", methods=["POST"])
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
+@ai_concurrency_gate  # A1: bloklayıcı AI çağrıları tüm thread'leri doldurmasın
 def ask_coach():
     data     = request.get_json(silent=True) or {}
     question = (data.get("question") or "").strip()

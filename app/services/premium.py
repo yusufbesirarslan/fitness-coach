@@ -39,18 +39,22 @@ def _week_key(d=None):
     return f"{iso[0]}-W{iso[1]:02d}"
 
 
-def _quota(user):
+def _quota_from_meta(raw_meta):
     """(yeni meta dict, bu haftanın kota dict'i, hafta anahtarı) döndür.
 
     Yeni hafta başladıysa kota sıfırdan sayılır (eski hafta verisi düşer).
     Dict'ler KOPYA olarak döner; çağıran mutasyonu sahibe geri yazmalı.
     """
-    meta = dict(getattr(user, "user_metadata", None) or {})
+    meta = dict(raw_meta or {})
     q = dict(meta.get("ai_plan_quota") or {})
     wk = _week_key()
     if q.get("week") != wk:
         q = {"week": wk}
     return meta, q, wk
+
+
+def _quota(user):
+    return _quota_from_meta(getattr(user, "user_metadata", None))
 
 
 def remaining_ai_plans(user, kind):
@@ -69,12 +73,18 @@ def _record_counter(user, counter_key):
     eşzamanlı üretim düz oku-değiştir-yaz ile kayıp güncellemeye (her ikisi de
     used=0 görüp used=1 yazması → tek artış) yol açardı. Satırı kilitleyip
     metadata'yı KİLİT ALTINDA yeniden okuyarak artışları serileştir (D-M2).
-    SQLite'ta with_for_update no-op'tur; Postgres'te grant'leri serileştirir."""
+    SQLite'ta with_for_update no-op'tur; Postgres'te grant'leri serileştirir.
+
+    DİKKAT (C1): kilitli okuma KOLON sorgusuyla yapılır. Entity sorgusu identity
+    map'teki (istek başında yüklenmiş) current_user'ı döndürür ve kilit altında
+    SELECT'lenen taze metadata'yı ATAR — iki eşzamanlı üretim yine ikisi de
+    used=0 okur, kota fiilen ×2 olurdu. Kolon sorgusu identity map'i atlar."""
     if getattr(user, "is_premium", False):
         return
-    locked = db.session.query(User).filter_by(id=user.id).with_for_update().first()
-    target = locked or user
-    meta, q, wk = _quota(target)
+    fresh_meta = (db.session.query(User.user_metadata)
+                  .filter_by(id=user.id).with_for_update().scalar())
+    target = db.session.get(User, user.id) or user  # kilit bizde
+    meta, q, wk = _quota_from_meta(fresh_meta)
     q["week"] = wk
     q[counter_key] = int(q.get(counter_key, 0)) + 1
     meta["ai_plan_quota"] = q

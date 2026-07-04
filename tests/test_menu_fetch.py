@@ -40,6 +40,10 @@ def test_public_ips_allowed(ip):
     "224.0.0.1", "0.0.0.0",                    # multicast / unspecified
     "::ffff:10.0.0.1",                         # IPv4-mapped IPv6 kaçağı
     "fc00::1",                                 # IPv6 ULA
+    "100.64.1.1",                              # CGNAT / paylaşımlı adres alanı (S1, RFC 6598)
+    "::ffff:100.64.1.1",                       # CGNAT, IPv4-mapped IPv6 kaçağı
+    "198.18.0.1",                              # benchmark bloğu (RFC 2544)
+    "192.0.2.10",                              # TEST-NET-1
     "saçma", "",                               # IP bile değil
 ])
 def test_internal_and_invalid_ips_blocked(ip):

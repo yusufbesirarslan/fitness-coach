@@ -472,8 +472,12 @@ class DailyActivity(db.Model):
 
     user = db.relationship("User", backref=db.backref("daily_activities", passive_deletes=True))
 
+    # C4: "günde tam bir satır" invariantını DB de zorlasın diye kısıt intensity
+    # İÇERMEZ — eski (user_id, date_key, intensity) kısıdı, farklı intensity'li
+    # iki eşzamanlı isteğin ikisinin de sil-ekle yapıp İKİ satır bırakmasına izin
+    # veriyordu (log_daily_activity'deki IntegrityError-upsert dalı hiç tetiklenmeden).
     __table_args__ = (
-        db.UniqueConstraint("user_id", "date_key", "intensity", name="uq_daily_activity"),
+        db.UniqueConstraint("user_id", "date_key", name="uq_daily_activity"),
     )
 
 

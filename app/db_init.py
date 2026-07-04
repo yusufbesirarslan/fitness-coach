@@ -30,14 +30,29 @@ def init_database(app):
             # FITX_DB_AUTO_UPGRADE=0 ile boot upgrade'i kapat ve deploy'da
             # tek-seferlik `flask db upgrade` job'ı çalıştır. Varsayılan "1" →
             # mevcut davranış (per-boot upgrade) korunur.
-            if (_has_alembic and os.path.isdir(_migrations_dir)
-                    and os.environ.get("FITX_DB_AUTO_UPGRADE", "1") == "1"):
+            _run_upgrade = (_has_alembic and os.path.isdir(_migrations_dir)
+                            and os.environ.get("FITX_DB_AUTO_UPGRADE", "1") == "1")
+        except Exception:
+            # Inspect hatası (örn. DB henüz erişilemez): eski davranışı koru —
+            # aşağıdaki create_all zaten aynı hatayla patlar ve boot'u durdurur.
+            db.session.rollback()
+            _run_upgrade = False
+            app.logger.exception("[DB] Şema inspect başarısız.")
+        if _run_upgrade:
+            try:
                 from flask_migrate import upgrade
                 upgrade()
-        except Exception:
-            # Migration hatası boot'u öldürmesin; logla ki deploy çıktısında görünsün.
-            db.session.rollback()
-            app.logger.exception("[DB] Alembic upgrade başarısız — şema migration zinciri gerisinde kalmış olabilir.")
+            except Exception:
+                # A4: migration hatası SESSİZCE yutulmaz. Eski davranış boot'u
+                # sürdürüyordu → uygulama kod'un gerisinde bir şemayla trafik
+                # alıyor, drift ilk 500'e kadar görünmez kalıyordu. Fail-fast:
+                # boot ölür → container unhealthy → deploy health gate rollback
+                # yapar. Acil kaçış: FITX_DB_UPGRADE_FAIL_OPEN=1 eski davranışı
+                # (logla + devam et) geri getirir.
+                db.session.rollback()
+                app.logger.exception("[DB] Alembic upgrade başarısız — şema migration zinciri gerisinde kalmış olabilir.")
+                if os.environ.get("FITX_DB_UPGRADE_FAIL_OPEN") != "1":
+                    raise
 
         db.create_all()
         # I-M1: eski ham idempotent ALTER/UPDATE döngüsü KALDIRILDI. Tüm kolonlar

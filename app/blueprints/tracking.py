@@ -321,9 +321,9 @@ def log_daily_activity():
     try:
         db.session.commit()
     except IntegrityError:
-        # Yarış: eşzamanlı iki istek de aynı (user_id, date_key, intensity)
-        # satırını ekledi; uq_daily_activity ikinci INSERT'i reddetti. Rollback
-        # edip o günün mevcut satırını güncelle.
+        # Yarış: eşzamanlı iki istek de aynı güne satır ekledi; uq_daily_activity
+        # (user_id, date_key — C4: intensity kısıtta YOK, farklı intensity'ler de
+        # çakışır) ikinci INSERT'i reddetti. Rollback edip günün satırını güncelle.
         db.session.rollback()
         existing = DailyActivity.query.filter_by(
             user_id=current_user.id, date_key=today_key

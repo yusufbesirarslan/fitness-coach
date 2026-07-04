@@ -220,19 +220,26 @@ def update_streak():
     # istekleri (sayfa açılışında birden çok fetch) ikisi de last_login != today
     # görüp streak'i iki kez artırabilir / milestone XP'yi iki kez verebilirdi.
     # Kullanıcı satırını kilitleyip tekrar kontrol ederek tek artışı garanti et.
-    user = db.session.query(User).filter_by(id=current_user.id).with_for_update().first()
-    if user is None or user.last_login == today:
+    # DİKKAT (C1): kilitli yeniden-kontrol KOLON sorgusuyla yapılmalı. Entity
+    # sorgusu identity map'ten istek başında yüklenen current_user'ı döndürür ve
+    # kilit altında SELECT'lenen taze last_login'i ATAR — diğer thread commit'lemiş
+    # olsa bile burada bayat "dün" görünür ve streak/milestone XP çift işlenirdi.
+    row = (db.session.query(User.last_login, User.streak_count)
+           .filter_by(id=current_user.id).with_for_update().first())
+    if row is None or row[0] == today:
         # Başka bir istek bu kullanıcı için zaten güncelledi.
         db.session.commit()  # FOR UPDATE kilidini serbest bırak
         return
-    if user.last_login == today - timedelta(days=1):
-        user.streak_count = (user.streak_count or 0) + 1
+    prev_last_login = row[0]
+    user = current_user._get_current_object()  # session'daki örnek; kilit bizde
+    if prev_last_login == today - timedelta(days=1):
+        user.streak_count = (row[1] or 0) + 1
     else:
         user.streak_count = 1
     # Bu istekten ÖNCEKI last_login'i sakla: get_nudges seri-riski dürtüsünü
     # "günün ilk isteğinde henüz aktif değildi" mantığıyla doğru tetiklesin
     # (aksi halde aşağıdaki güncelleme yüzünden asla tetiklenmez).
-    g.prev_last_login = user.last_login
+    g.prev_last_login = prev_last_login
     user.last_login = today
     streak = user.streak_count
     if streak in (7, 14, 30, 60, 100):

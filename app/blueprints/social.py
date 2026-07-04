@@ -626,13 +626,21 @@ def _process_meal_suggestion_accept(msg):
             msg.id, len(items))
         return None
 
+    # C2: kanonik MealLog defterine yazan HER yol gibi bu yol da fiziksel-sağlık
+    # kapısından geçmeli (meallog.py/diary/ai_coach ile aynı tek kaynak) — aksi
+    # halde FatSecret/LLM aykırı değeri ya da büyük fallback porsiyon ölçeği
+    # (yukarıdaki 150g varsayılanı) deftere saçma bir makro satırı sızdırır.
+    import nutrition_pipeline as _np
+    kalori, protein, karb, yag = _np.clamp_serving_macros(
+        round(total["calories"], 1), round(total["protein"], 1),
+        round(total["carbs"], 1), round(total["fat"], 1))
     entry = MealLog(
         user_id=current_user.id, ogun=ogun_title,
         yemekler=", ".join(items),
-        kalori=round(total["calories"], 1),
-        protein=round(total["protein"], 1),
-        karb=round(total["carbs"], 1),
-        yag=round(total["fat"], 1),
+        kalori=kalori,
+        protein=protein,
+        karb=karb,
+        yag=yag,
         tarih=day_key()
     )
     db.session.add(entry)
