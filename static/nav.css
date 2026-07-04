@@ -3,14 +3,8 @@
    Global Header · Sidebar Drawer · 4+1 Action Bar · QR Overlay
    ═══════════════════════════════════════════════════════ */
 
-/* ── TOKENS ─────────────────────────────────────────── */
-:root {
-  --header-h: 56px;
-  --action-bar-h: 68px;
-  --drawer-w: 280px;
-  --fab-size: 58px;
-  --fab-protrude: 22px;
-}
+/* Boyut token'ları (--header-h, --action-bar-h, --drawer-w, --fab-size,
+   --fab-protrude) artık static/tokens.css'te tanımlıdır. */
 
 /* ── 1. GLOBAL HEADER ────────────────────────────────── */
 .global-header {
@@ -33,8 +27,8 @@
   transition: background var(--t-fast);
   -webkit-tap-highlight-color: transparent;
 }
-.drawer-trigger:hover { background: rgba(255,255,255,0.06); }
-.drawer-trigger:active { background: rgba(255,255,255,0.10); }
+.drawer-trigger:hover { background: var(--overlay-6); }
+.drawer-trigger:active { background: var(--overlay-10); }
 .drawer-trigger svg {
   width: 22px; height: 22px;
   stroke: var(--text-2); fill: none;
@@ -59,7 +53,7 @@
   width: 34px; height: 34px; border-radius: 50%;
   background: linear-gradient(135deg, var(--volt) 0%, var(--blue) 100%);
   display: flex; align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 700; color: #121212;
+  font-size: 12px; font-weight: 700; color: var(--color-on-primary);
   flex-shrink: 0; cursor: pointer;
   transition: box-shadow var(--t-base);
 }
@@ -84,7 +78,7 @@
   border-right: 1px solid var(--border-2);
   z-index: 200;
   transform: translateX(-100%);
-  transition: transform 0.32s cubic-bezier(0.22,1,0.36,1);
+  transition: transform 0.32s var(--ease-out-quint);
   display: flex; flex-direction: column;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -104,7 +98,7 @@
   width: 48px; height: 48px; border-radius: 50%;
   background: linear-gradient(135deg, var(--volt) 0%, var(--blue) 100%);
   display: flex; align-items: center; justify-content: center;
-  font-size: 16px; font-weight: 700; color: #121212;
+  font-size: 16px; font-weight: 700; color: var(--color-on-primary);
   flex-shrink: 0;
 }
 
@@ -141,7 +135,7 @@
 .drawer-xp-fill {
   height: 100%; border-radius: 2px;
   background: linear-gradient(90deg, var(--volt), var(--volt-dark));
-  transition: width 0.6s cubic-bezier(0.22,1,0.36,1);
+  transition: width 0.6s var(--ease-out-quint);
 }
 
 .drawer-nav {
@@ -160,7 +154,7 @@
   transition: all var(--t-base);
   -webkit-tap-highlight-color: transparent;
 }
-.drawer-link:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+.drawer-link:hover { color: var(--text); background: var(--overlay-4); }
 .drawer-link.active { color: var(--volt); background: var(--volt-dim); }
 .drawer-link svg {
   width: 19px; height: 19px; flex-shrink: 0;
@@ -267,5 +261,5 @@
   letter-spacing: 0.06em; color: var(--text-3); background: none; border: none;
   border-radius: 6px; padding: 6px 0; cursor: pointer; transition: all var(--t-fast);
 }
-.drawer-lang-opt.on { background: var(--volt); color: #0A0A0C; }
+.drawer-lang-opt.on { background: var(--volt); color: var(--gray-950); }
 .drawer-lang-opt:not(.on):hover { color: var(--text); }

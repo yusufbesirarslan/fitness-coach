@@ -11,7 +11,7 @@
     /* ── Weekly countdown (visible only on the Haftalık timeframe) ── */
     .lb-countdown-wrap { display: none; justify-content: flex-end; margin-bottom: 10px; }
     .lb-countdown {
-        font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 600;
+        font-family: var(--font-body); font-size: 12px; font-weight: 600;
         letter-spacing: 0.03em; color: var(--text-3);
         font-variant-numeric: tabular-nums; transition: color 0.3s;
     }
@@ -24,7 +24,7 @@
         flex-shrink: 0; height: 50px; min-width: 132px;
         background: var(--surface-2); border: 1px solid var(--border);
         border-radius: var(--r-md); color: var(--text-2);
-        font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600;
+        font-family: var(--font-body); font-size: 13px; font-weight: 600;
         letter-spacing: 0.02em; cursor: pointer;
         padding: 0 34px 0 14px; -webkit-appearance: none; appearance: none;
         background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23A6A6A6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
@@ -44,11 +44,11 @@
     .lb-tab {
         flex: 1; height: 40px; border: none; cursor: pointer;
         background: transparent; color: var(--text-3);
-        font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 600;
+        font-family: var(--font-body); font-size: 13px; font-weight: 600;
         letter-spacing: 0.04em; border-radius: var(--r-sm);
         transition: all 0.2s; -webkit-tap-highlight-color: transparent;
     }
-    .lb-tab:hover:not(.active) { color: var(--text-2); background: rgba(255,255,255,0.04); }
+    .lb-tab:hover:not(.active) { color: var(--text-2); background: var(--overlay-4); }
     .lb-tab.active {
         background: var(--volt-dim); color: var(--volt);
         border: 1px solid rgba(61,139,255,0.22);
@@ -68,7 +68,7 @@
     }
     .lb-row.me {
         background: rgba(61,139,255,0.06);
-        border-color: rgba(61,139,255,0.30);
+        border-color: var(--volt-glow);
         border-left: 3px solid var(--volt);
         padding-left: 11px;
     }
@@ -85,15 +85,15 @@
     .lb-rank.rank-3 { color: #CD7F32; }
 
     .lb-rank {
-        font-family: 'Bebas Neue', sans-serif; font-size: 20px;
+        font-family: var(--font-display); font-size: 20px;
         color: var(--text-3); text-align: center; line-height: 1;
     }
 
     .lb-avatar {
         width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
         display: flex; align-items: center; justify-content: center;
-        font-family: 'Bebas Neue', sans-serif; font-size: 17px;
-        color: #121212; background: linear-gradient(135deg, #3D8BFF, #1E6FE0);
+        font-family: var(--font-display); font-size: 17px;
+        color: var(--color-on-primary); background: linear-gradient(135deg, var(--volt), var(--volt-dark));
         overflow: hidden;
     }
     .lb-avatar img { width: 100%; height: 100%; object-fit: cover; }
@@ -123,7 +123,7 @@
         z-index: 90;
         padding: 8px var(--s2);
         background: rgba(20,24,8,0.92);
-        border-top: 1px solid rgba(61,139,255,0.30);
+        border-top: 1px solid var(--volt-glow);
         backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
     }
     .lb-sticky .lb-wrap { margin: 0 auto; }
@@ -137,13 +137,13 @@
     }
     .empty-icon { font-size: 48px; margin-bottom: 16px; }
     .empty-title {
-        font-family: 'Bebas Neue', sans-serif; font-size: 22px;
+        font-family: var(--font-display); font-size: 22px;
         letter-spacing: 2px; color: var(--text); margin-bottom: 8px;
     }
     .empty-desc { font-size: 13px; color: var(--text-3); max-width: 300px; margin: 0 auto; }
     .lb-cta {
         display: inline-block; margin-top: 18px;
-        background: var(--volt); color: #121212;
+        background: var(--volt); color: var(--color-on-primary);
         font-size: 13px; font-weight: 700; text-decoration: none;
         padding: 10px 22px; border-radius: var(--r-full);
         transition: opacity 0.2s;
