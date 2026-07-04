@@ -1,0 +1,297 @@
+/* ═══════════════════════════════════════════════════════════════
+   AxisAI — DESIGN TOKENS (v1, Phase 1)
+   Tek kanonik token kaynağı. _head.html her sayfada BÜTÜN sayfa
+   CSS'lerinden ÖNCE yükler. Kurallar:
+     • Yeni kod YALNIZCA kanonik isimleri kullanır (--color-*, --space-*,
+       --radius-*, --text-*, --duration-* …).
+     • "Legacy aliases" bloğundaki eski isimler (--volt, --accent, --s1…)
+       yalnızca mevcut kodun kırılmaması içindir — yeni kodda KULLANMA.
+     • Görsel değerler mevcut üretim arayüzüyle birebir aynıdır; bu dosya
+       görünüm DEĞİŞTİRMEZ, kaynağı merkezileştirir.
+   Dokümantasyon: docs/design-system.md
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── 1. COLOR PRIMITIVES ─────────────────────────────────────
+     Ham palet. Sayfalar bunları DOĞRUDAN kullanmaz; semantik
+     token'lar (aşağıda) bunlara işaret eder. */
+  --gray-950: #0A0A0C;
+  --gray-900: #121212;   /* app background */
+  --gray-850: #1A1A1A;   /* surface 1 */
+  --gray-820: #1E1E1E;   /* surface 2 / card */
+  --gray-800: #252525;   /* surface 3 */
+  --gray-400: #4D4D4D;   /* text 4 (faint) */
+  --gray-300: #808080;   /* text 3 */
+  --gray-200: #A6A6A6;   /* text 2 */
+  --gray-50:  #F4F4F4;   /* text 1 */
+
+  --blue-300: #60A8FF;
+  --blue-400: #3D9EFF;
+  --blue-500: #3D8BFF;   /* brand primary (AxisAI electric blue) */
+  --blue-600: #1E6FE0;
+  --blue-vivid: #007BFF; /* info / secondary blue */
+
+  --red-500:   #FF4D4D;
+  --red-400:   #FF7070;
+  --green-500: #00C48C;
+  --amber-500: #FFB020;
+
+  /* Auth sayfalarının katı (solid) kenarlık grisi — style.css mirası.
+     Phase 3+: --color-border-1 ile birleştirilecek. */
+  --color-border-solid: #242424;
+
+  /* ── 2. SEMANTIC COLORS (dark = varsayılan tema) ───────────── */
+  --color-primary:        var(--blue-500);
+  --color-primary-strong: var(--blue-600);
+  --color-primary-soft:   rgba(61, 139, 255, 0.09);
+  --color-primary-glow:   rgba(61, 139, 255, 0.30);
+  --color-on-primary:     #121212; /* primary dolgu üstündeki metin/ikon */
+
+  --color-bg:        var(--gray-900);
+  --color-surface-1: var(--gray-850);
+  --color-surface-2: var(--gray-820);
+  --color-surface-3: var(--gray-800);
+
+  --color-text-1: var(--gray-50);
+  --color-text-2: var(--gray-200);
+  --color-text-3: var(--gray-300);
+  --color-text-4: var(--gray-400);
+
+  --color-success:      var(--green-500);
+  --color-success-soft: rgba(0, 196, 140, 0.12);
+  --color-warning:      var(--amber-500);
+  --color-warning-soft: rgba(255, 176, 32, 0.12);
+  --color-danger:       var(--red-500);
+  --color-danger-soft:  rgba(255, 77, 77, 0.12);
+  --color-info:         var(--blue-vivid);
+  --color-info-soft:    rgba(0, 123, 255, 0.10);
+
+  --color-border-1: rgba(255, 255, 255, 0.07); /* hairline */
+  --color-border-2: rgba(255, 255, 255, 0.13); /* hover/emphasis */
+
+  /* Etkileşim katmanları (hover/active zeminleri) — tema-farkındalıklı */
+  --overlay-2:  rgba(255, 255, 255, 0.02);
+  --overlay-3:  rgba(255, 255, 255, 0.03);
+  --overlay-4:  rgba(255, 255, 255, 0.04);
+  --overlay-6:  rgba(255, 255, 255, 0.06);
+  --overlay-10: rgba(255, 255, 255, 0.10);
+
+  /* ── 3. TYPOGRAPHY ───────────────────────────────────────────
+     UI yazı yüzü: Inter (Phase 1'de DM Sans'ın yerini aldı).
+     Display: Bebas Neue — sayfa yeniden tasarımları sonraki fazlarda. */
+  --font-sans: 'Inter', 'DM Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Bebas Neue', var(--font-sans);
+  --font-body: var(--font-sans);
+
+  /* Boyut skalası (UI metinleri sabit; display boyutları akışkan) */
+  --text-2xs:  10px;
+  --text-xs:   11px;
+  --text-sm:   12px;
+  --text-md:   13px;
+  --text-base: 14px;
+  --text-lg:   15px;
+  --text-xl:   17px;
+  --text-2xl:  20px;
+  --text-3xl:  24px;
+  --text-display-sm: clamp(28px, 4vw, 36px);
+  --text-display-md: clamp(32px, 5vw, 44px);
+  --text-display-lg: clamp(38px, 6vw, 52px);
+
+  --weight-light:     300;
+  --weight-regular:   400;
+  --weight-medium:    500;
+  --weight-semibold:  600;
+  --weight-bold:      700;
+  --weight-extrabold: 800;
+
+  --leading-none:    1;
+  --leading-tight:   1.2;
+  --leading-snug:    1.4;
+  --leading-normal:  1.6;
+  --leading-relaxed: 1.75;
+
+  --tracking-wide:   0.04em;
+  --tracking-wider:  0.08em;
+  --tracking-widest: 0.12em;
+  --tracking-label:  0.16em; /* uppercase mikro etiketler */
+
+  /* ── 4. SPACING (8-pt grid; 4px yarım adım serbest) ────────── */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-20: 80px;
+
+  /* ── 5. RADIUS ──────────────────────────────────────────────── */
+  --radius-xs:   4px;   /* badge, mikro parçalar */
+  --radius-sm:   8px;   /* chip, ghost buton, input(sm) */
+  --radius-md:   12px;  /* buton, input, banner */
+  --radius-lg:   16px;  /* kart */
+  --radius-xl:   24px;  /* bottom sheet üst köşeleri, hero */
+  --radius-full: 9999px;/* pill, avatar, progress bar */
+
+  /* ── 6. BORDER WIDTHS ───────────────────────────────────────── */
+  --border-w-1: 1px;
+  --border-w-2: 1.5px;
+  --border-w-3: 2px;
+
+  /* ── 7. ELEVATION / SHADOWS ─────────────────────────────────── */
+  --elevation-1: 0 1px 2px  rgba(0, 0, 0, 0.40);
+  --elevation-2: 0 4px 16px rgba(0, 0, 0, 0.45);
+  --elevation-3: 0 12px 32px rgba(0, 0, 0, 0.55);
+  --shadow-primary: 0 2px 10px rgba(61, 139, 255, 0.14);
+  --focus-ring: 0 0 0 3px rgba(61, 139, 255, 0.07);
+
+  /* ── 8. OPACITY ─────────────────────────────────────────────── */
+  --opacity-disabled: 0.65;
+  --opacity-muted:    0.7;
+  --opacity-faint:    0.85;
+
+  /* ── 9. ICON SIZES ──────────────────────────────────────────── */
+  --icon-xs: 14px;
+  --icon-sm: 16px;
+  --icon-md: 18px;
+  --icon-lg: 22px;
+  --icon-xl: 26px;
+
+  /* ── 10. MOTION ─────────────────────────────────────────────── */
+  --duration-fast:   0.14s;
+  --duration-base:   0.2s;
+  --duration-slow:   0.28s;
+  --duration-slower: 0.32s;
+  --ease-standard:  cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out-expo:  cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-bounce:    cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ── 11. Z-INDEX ────────────────────────────────────────────── */
+  --z-header:          100;
+  --z-drawer-backdrop: 199;
+  --z-drawer:          200;
+  --z-fab:             200;
+  --z-overlay:         300;
+  --z-toast:           400;
+
+  /* ── 12. LAYOUT & BREAKPOINTS ───────────────────────────────── */
+  --content-max:  1280px;
+  --header-h:     56px;
+  --action-bar-h: 68px;
+  --drawer-w:     280px;
+  --fab-size:     58px;
+  --fab-protrude: 22px;
+  /* Breakpoint referansları — CSS var'ları @media içinde ÇALIŞMAZ;
+     media query yazarken bu değerlerle (docs/design-system.md tablosu)
+     senkron kal. JS getComputedStyle ile okuyabilir. */
+  --bp-sm:  520px;
+  --bp-md:  640px;
+  --bp-lg:  768px;
+  --bp-xl:  1024px;
+  --bp-2xl: 1280px;
+
+  /* ═══ 13. LEGACY ALIASES — YENİ KODDA KULLANMA ═══════════════
+     theme.css v2 + style.css isimleri; mevcut yüzlerce referans
+     kırılmasın diye kanonik token'lara bağlandı. Fazlar ilerledikçe
+     kullanım azaltılıp kaldırılacak. */
+  /* theme.css v2 */
+  --bg:        var(--color-bg);
+  --surface:   var(--color-surface-1);
+  --surface-2: var(--color-surface-2);
+  --surface-3: var(--color-surface-3);
+  --border:    var(--color-border-1);
+  --border-2:  var(--color-border-2);
+  --volt:      var(--color-primary);
+  --volt-dim:  var(--color-primary-soft);
+  --volt-glow: var(--color-primary-glow);
+  --volt-dark: var(--color-primary-strong);
+  --blue:      var(--color-info);
+  --blue-dim:  var(--color-info-soft);
+  --blue-light: var(--blue-400);
+  --red:        var(--color-danger);
+  --red-dim:    var(--color-danger-soft);
+  --green:      var(--color-success);
+  --green-dim:  var(--color-success-soft);
+  --orange:     var(--color-warning);
+  --orange-dim: var(--color-warning-soft);
+  --text:   var(--color-text-1);
+  --text-2: var(--color-text-2);
+  --text-3: var(--color-text-3);
+  --text-4: var(--color-text-4);
+  --s1:  var(--space-2);
+  --s2:  var(--space-4);
+  --s3:  var(--space-6);
+  --s4:  var(--space-8);
+  --s5:  var(--space-10);
+  --s6:  var(--space-12);
+  --s8:  var(--space-16);
+  --s10: var(--space-20);
+  --r-sm:   var(--radius-sm);
+  --r-md:   var(--radius-md);
+  --r-lg:   var(--radius-lg);
+  --r-xl:   var(--radius-xl);
+  --r-full: var(--radius-full);
+  --shadow-sm:   var(--elevation-1);
+  --shadow-md:   var(--elevation-2);
+  --shadow-lg:   var(--elevation-3);
+  --shadow-volt: var(--shadow-primary);
+  --shadow-blue: 0 2px 10px rgba(0, 123, 255, 0.12);
+  --t-fast:   var(--duration-fast) var(--ease-standard);
+  --t-base:   var(--duration-base) var(--ease-standard);
+  --t-spring: var(--duration-slow) var(--ease-out-expo);
+  /* style.css (auth/onboarding) */
+  --accent:      var(--color-primary);
+  --accent2:     var(--color-primary-strong);
+  --accent-glow: var(--color-primary-soft);
+  --bg2:      var(--color-surface-1);
+  --bg3:      var(--color-surface-3);
+  --card:     var(--color-surface-2);
+  --input-bg: var(--color-surface-1);
+  --text2:    var(--color-text-2);
+  --text3:    var(--color-text-3);
+}
+
+/* ── 14. LIGHT THEME (hazırlık) ────────────────────────────────
+   <html data-theme="light"> ile sayfa bazında etkinleşir. Bugün tüm
+   sayfalar data-theme="dark" basar; değerler style.css'in mevcut
+   light temasından taşındı. Alias'lar semantik token'lara baktığı
+   için otomatik döner. */
+[data-theme="light"] {
+  --color-primary:        #1A66D0;
+  --color-primary-strong: #1550B8;
+  --color-primary-soft:   rgba(26, 102, 208, 0.10);
+  --color-primary-glow:   rgba(26, 102, 208, 0.30);
+  --color-on-primary:     #FFFFFF;
+
+  --color-bg:        #F5F5F0;
+  --color-surface-1: #EEEDE8;
+  --color-surface-2: #FFFFFF;
+  --color-surface-3: #E5E4DF;
+
+  --color-text-1: #1A1A1A;
+  --color-text-2: #5C5C5C;
+  --color-text-3: #808080;
+  --color-text-4: #A3A3A3;
+
+  --color-danger:  #DD4444;
+  --color-warning: #C89800;
+  --color-info:    #2A70C0;
+
+  --color-border-1: rgba(0, 0, 0, 0.10);
+  --color-border-2: rgba(0, 0, 0, 0.18);
+  --color-border-solid: #D5D4CF;
+
+  --overlay-2:  rgba(0, 0, 0, 0.02);
+  --overlay-3:  rgba(0, 0, 0, 0.03);
+  --overlay-4:  rgba(0, 0, 0, 0.04);
+  --overlay-6:  rgba(0, 0, 0, 0.06);
+  --overlay-10: rgba(0, 0, 0, 0.10);
+
+  --elevation-1: 0 1px 2px  rgba(0, 0, 0, 0.10);
+  --elevation-2: 0 4px 16px rgba(0, 0, 0, 0.12);
+  --elevation-3: 0 12px 32px rgba(0, 0, 0, 0.16);
+}

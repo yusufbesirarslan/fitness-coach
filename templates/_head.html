@@ -19,7 +19,13 @@
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,300&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+{# Tasarım sistemi: token'lar + bileşen kütüphanesi. Sayfa CSS'lerinden ÖNCE
+   yüklenmeli ki sayfa kuralları eşit özgüllükte kazanmaya devam etsin.
+   Dokümantasyon: docs/design-system.md #}
+<link rel="stylesheet" href="/static/tokens.css?v={{ _v }}">
+<link rel="stylesheet" href="/static/components.css?v={{ _v }}">
 
 <!-- Google Analytics (site geneli — funnel olayları static/analytics.js'te) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-YXSGLN7C7Y"></script>
