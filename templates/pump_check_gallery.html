@@ -56,6 +56,8 @@ const modal = document.getElementById('gallery-modal');
 const detail = document.getElementById('gallery-detail');
 let galleryItems = [];
 function esc(v){ const d=document.createElement('div'); d.textContent=v == null ? '' : String(v); return d.innerHTML; }
+// location_type kanonik TR ('Ev'/'Spor Salonu') gelir; görünen etiket display-map ile çevrilir.
+function envLabel(v){ const m = {'Ev': __t('training.loc_home'), 'Spor Salonu': __t('training.loc_gym')}; return m[v] || v; }
 function cardMedia(item){
   if(item.imageUrl){
     return '<img src="'+esc(item.imageUrl).replace(/"/g,'&quot;')+'" loading="lazy" decoding="async" alt="">';
@@ -73,7 +75,7 @@ function openDetail(item){
     '<div class="gallery-detail-body">' +
     '<h2 id="gallery-modal-title" style="margin:0;font-family:var(--font-display);letter-spacing:.08em;">' + esc(item.timePosted) + '</h2>' +
     (item.workoutScore != null ? '<div><div class="gallery-label">'+__t('feed.workout_score')+'</div><div class="gallery-value">'+esc(item.workoutScore)+'</div></div>' : '') +
-    '<div><div class="gallery-label">'+__t('feed.environment')+'</div><div class="gallery-value">'+esc(item.environment)+'</div></div>' +
+    '<div><div class="gallery-label">'+__t('feed.environment')+'</div><div class="gallery-value">'+esc(envLabel(item.environment))+'</div></div>' +
     '<div><div class="gallery-label">'+__t('feed.description')+'</div><div class="gallery-value">'+esc(item.description)+'</div></div>' +
     '<div><div class="gallery-label">'+__t('gallery.sharing_status')+'</div><div class="gallery-value">'+esc(__t(item.sharingStatus && item.sharingStatus.key ? item.sharingStatus.key : ""))+'</div></div>' +
     '<div class="gallery-actions"><button type="button" class="btn-ghost" data-close-gallery>'+__t('common.cancel')+'</button><button type="button" class="btn-ghost" data-delete-gallery="'+item.id+'">'+__t('gallery.delete')+'</button></div>' +

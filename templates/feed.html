@@ -112,6 +112,8 @@ const commentsSubmit = document.getElementById('comments-submit');
 const commentsHint = document.getElementById('comments-hint');
 let activeCommentsId = null;
 function esc(v){ const d=document.createElement('div'); d.textContent=v == null ? '' : String(v); return d.innerHTML; }
+// location_type kanonik TR ('Ev'/'Spor Salonu') gelir; görünen etiket display-map ile çevrilir.
+function envLabel(v){ const m = {'Ev': __t('training.loc_home'), 'Spor Salonu': __t('training.loc_gym')}; return m[v] || v; }
 function avatar(post){ return post.userAvatar ? '<div class="feed-avatar"><img src="'+esc(post.userAvatar).replace(/"/g,'&quot;')+'" alt=""></div>' : '<div class="feed-avatar">'+esc((post.username||'U')[0].toUpperCase())+'</div>'; }
 function commentAvatar(comment){ return comment.userAvatar ? '<div class="comment-avatar"><img src="'+esc(comment.userAvatar).replace(/"/g,'&quot;')+'" alt=""></div>' : '<div class="comment-avatar">'+esc((comment.username||'U')[0].toUpperCase())+'</div>'; }
 function cardMedia(post){
@@ -125,7 +127,7 @@ function card(post){
     cardMedia(post)+
     '<div class="feed-body">'+
     (post.workoutScore != null ? '<div><div class="feed-label">'+__t('feed.workout_score')+'</div><div class="feed-value">'+esc(post.workoutScore)+'</div></div>' : '')+
-    '<div><div class="feed-label">'+__t('feed.environment')+'</div><div class="feed-value">'+esc(post.environment)+'</div></div>'+
+    '<div><div class="feed-label">'+__t('feed.environment')+'</div><div class="feed-value">'+esc(envLabel(post.environment))+'</div></div>'+
     '<div><div class="feed-label">'+__t('feed.description')+'</div><div class="feed-value">'+esc(post.description)+'</div></div>'+
     '<div class="feed-actions"><button class="feed-action '+(post.likedByMe?'liked':'')+'" data-like="'+post.id+'">'+post.likesCount+' '+__t('feed.likes')+'</button><button class="feed-action" data-comments="'+post.id+'">'+commentCountLabel(post.commentsCount)+'</button></div></div></article>';
 }

@@ -1,5 +1,6 @@
 {
   "lang.aria": "Language",
+  "lang.switch_failed": "Could not switch language. Please try again.",
   "theme.aria": "Toggle theme",
   "common.redirecting": "Redirecting...",
 

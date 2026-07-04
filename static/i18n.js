@@ -23,15 +23,22 @@
 
   // Dil değiştir: session'a yaz (girişliyse hesaba da) ve sayfayı yenile.
   // CSRF: static/csrf.js window.fetch'i sarıp X-CSRFToken'ı otomatik ekler.
+  // Başarısız yanıt (403/429/400) veya ağ hatası SESSİZCE yutulmaz — eski
+  // davranış her durumda reload edip başarısızlığı gizliyordu ("TR seçtim ama
+  // hâlâ EN" şikâyetinin görünmez hâli).
   window.setLang = function (lang) {
     if (lang === window.LOCALE) return;
     fetch('/set-language', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ lang: lang })
-    }).then(function () {
-      try { localStorage.setItem('lang', lang); } catch (e) {}
-      window.location.reload();
-    }).catch(function () { window.location.reload(); });
+    }).then(function (res) {
+      if (res.ok) { window.location.reload(); return; }
+      console.warn('[i18n] set-language başarısız:', res.status);
+      alert(window.t('lang.switch_failed'));
+    }).catch(function (err) {
+      console.warn('[i18n] set-language ağ hatası:', err);
+      alert(window.t('lang.switch_failed'));
+    });
   };
 })();

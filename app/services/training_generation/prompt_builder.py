@@ -9,7 +9,13 @@ def build_system_prompt(language: str = "tr") -> str:
             "You are an experienced personal trainer. Return ONLY valid JSON. "
             "Keep gun as Turkish weekday names and tip as antrenman/dinlenme/kardiyo."
         )
-    return "Sen deneyimli bir kişisel antrenörsün. SADECE geçerli JSON döndür."
+    # Prompt gövdesi (contract + few-shot) İngilizce-ağırlıklı; tek satırlık
+    # zayıf yönerge modeli İngilizce içeriğe kaydırabiliyor → direktif vurgulu.
+    return (
+        "Sen deneyimli bir kişisel antrenörsün. SADECE geçerli JSON döndür. "
+        "odak, not ve tüm görünen metin alanlarını TÜRKÇE yaz — talimat ve "
+        "örnekler İngilizce olsa bile."
+    )
 
 
 def build_training_prompt(
@@ -22,7 +28,14 @@ def build_training_prompt(
     few_shot = load_few_shot(preferences.antrenman_tarzi)
     injury_text = injury_constraints.build_injury_directive(preferences.injuries)
     dinlenme_gun = 7 - preferences.gun_sayisi
-    output_language = "ENGLISH" if language == "en" else "Türkçe"
+    if language == "en":
+        lang_rule = "İçerik dili: ENGLISH; ama gun ve tip kanonik Türkçe kalacak."
+    else:
+        # Few-shot ve kural metinleri İngilizce; içerik dili kuralı vurgulu
+        # olmazsa model İngilizceye kayıyor (TR kullanıcı EN plan görüyordu).
+        lang_rule = ("İçerik dili: TÜRKÇE — odak, not ve tüm görünen metinler "
+                     "Türkçe yazılacak (yukarıdaki İngilizce kural/örnek "
+                     "metinlerine rağmen); gun ve tip kanonik Türkçe kalacak.")
     cardio_labels = {
         "kosu": "koşu",
         "bisiklet": "bisiklet",
@@ -75,7 +88,7 @@ PROGRAM RULES
 3. "tip" alanı sadece antrenman, dinlenme veya kardiyo olsun.
 4. Aynı ağır pattern iki gün üst üste gelmesin; recovery factor düşükse hacim ve RPE azalt.
 5. Her antrenman gününde gerçekçi egzersiz, set, tekrar, dinlenme ve kısa teknik not yaz.
-6. İçerik dili: {output_language}; ama gun ve tip kanonik Türkçe kalacak.
+6. {lang_rule}
 7. SADECE JSON döndür.
 
 JSON FORMAT

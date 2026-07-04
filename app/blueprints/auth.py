@@ -44,6 +44,11 @@ def set_language():
     if current_user.is_authenticated:
         current_user.language = lang
         db.session.commit()
+    else:
+        # Giriş-öncesi AÇIK seçim işareti: _login_fresh bunu görürse seçimi
+        # hesaba taşır. Bayraksız session['lang'] (örn. önceki kullanıcıdan
+        # artakalan) hesabı ezmez.
+        session["lang_explicit"] = True
     return jsonify({"ok": True, "language": lang})
 
 
@@ -55,8 +60,16 @@ def _login_fresh(user):
     """Oturum sabitlemeye (session fixation) karşı: giriş ÖNCESI mevcut oturumu
     temizle, sonra login_user ile taze, kimliği bağlı bir oturum kur. Çerez içeriği
     değiştiği için saldırganın sabitlediği ön-giriş çerezi yeniden kullanılamaz."""
+    # Giriş ekranında AÇIKÇA seçilen dil (set-language → lang_explicit) hesabın
+    # kayıtlı tercihini günceller — aksi halde kullanıcının az önceki TR/EN
+    # seçimi girişte sessizce eski tercihe dönüyordu. Bayraksız session['lang']
+    # (önceki oturumdan artakalan) hesabı EZMEZ.
+    explicit_lang = session.get("lang") if session.get("lang_explicit") else None
     session.clear()
     login_user(user)
+    if explicit_lang in AVAILABLE_LOCALES and explicit_lang != getattr(user, "language", None):
+        user.language = explicit_lang
+        db.session.commit()
     # Oturum temizlendi → kullanıcının dil tercihini geri yükle (anon istek
     # akışında g.locale tutarlı kalsın; resolve_locale zaten user.language okur).
     if getattr(user, "language", None) in AVAILABLE_LOCALES:
