@@ -15,7 +15,7 @@
     .search-input {
         width: 100%; padding: 14px 14px 14px 42px; border-radius: 12px;
         background: var(--surface-2); border: 1px solid var(--border);
-        color: var(--text); font-family: 'DM Sans', sans-serif; font-size: 14px;
+        color: var(--text); font-family: var(--font-body); font-size: 14px;
         outline: none; transition: border-color 0.2s, box-shadow 0.2s;
         box-sizing: border-box;
     }
@@ -36,14 +36,14 @@
     .search-results.show { display: block; }
     .sr-item {
         display: flex; align-items: center; gap: 10px; padding: 12px 14px;
-        border-bottom: 1px solid rgba(255,255,255,0.04); cursor: default;
+        border-bottom: 1px solid var(--overlay-4); cursor: default;
     }
     .sr-item:last-child { border-bottom: none; }
     .sr-avatar {
         width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
         display: flex; align-items: center; justify-content: center;
-        font-family: 'Bebas Neue', sans-serif; font-size: 16px;
-        color: #121212; background: linear-gradient(135deg, #3D8BFF, #1E6FE0);
+        font-family: var(--font-display); font-size: 16px;
+        color: var(--color-on-primary); background: linear-gradient(135deg, var(--volt), var(--volt-dark));
         overflow: hidden;
     }
     .sr-avatar img { width: 100%; height: 100%; object-fit: cover; }
@@ -53,12 +53,12 @@
     .sr-btn {
         padding: 6px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
         letter-spacing: 0.05em; border: none; cursor: pointer; transition: all 0.2s;
-        font-family: 'DM Sans', sans-serif;
+        font-family: var(--font-body);
     }
-    .sr-btn.add { background: #3D8BFF; color: #121212; }
-    .sr-btn.add:hover { background: #1E6FE0; }
-    .sr-btn.pending { background: rgba(255,255,255,0.06); color: var(--text-3); cursor: default; }
-    .sr-btn.accepted { background: rgba(61,139,255,0.1); color: #3D8BFF; cursor: default; }
+    .sr-btn.add { background: var(--volt); color: var(--color-on-primary); }
+    .sr-btn.add:hover { background: var(--volt-dark); }
+    .sr-btn.pending { background: var(--overlay-6); color: var(--text-3); cursor: default; }
+    .sr-btn.accepted { background: rgba(61,139,255,0.1); color: var(--volt); cursor: default; }
 
     /* ── section ── */
     .section-card {
@@ -70,32 +70,32 @@
         content: ''; position: absolute; top: 0; left: 0; right: 0;
         height: 2px;
     }
-    .section-card.incoming::before { background: linear-gradient(90deg, #FFB020, transparent); }
-    .section-card.friends-list::before { background: linear-gradient(90deg, #3D8BFF, transparent); }
+    .section-card.incoming::before { background: linear-gradient(90deg, var(--orange), transparent); }
+    .section-card.friends-list::before { background: linear-gradient(90deg, var(--volt), transparent); }
     .section-title {
-        font-family: 'Bebas Neue', sans-serif; font-size: 18px;
+        font-family: var(--font-display); font-size: 18px;
         letter-spacing: 3px; color: var(--text); margin-bottom: 16px;
         display: flex; align-items: center; gap: 8px;
     }
     .section-count {
-        background: rgba(61,139,255,0.12); color: #3D8BFF;
+        background: rgba(61,139,255,0.12); color: var(--volt);
         font-size: 11px; font-weight: 700; padding: 2px 8px;
         border-radius: 10px; letter-spacing: 0;
-        font-family: 'DM Sans', sans-serif;
+        font-family: var(--font-body);
     }
     .section-empty { font-size: 13px; color: var(--text-3); }
 
     /* ── friend/request row ── */
     .fr-row {
         display: flex; align-items: center; gap: 10px; padding: 10px 0;
-        border-bottom: 1px solid rgba(255,255,255,0.04);
+        border-bottom: 1px solid var(--overlay-4);
     }
     .fr-row:last-child { border-bottom: none; }
     .fr-avatar {
         width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
         display: flex; align-items: center; justify-content: center;
-        font-family: 'Bebas Neue', sans-serif; font-size: 18px;
-        color: #121212; background: linear-gradient(135deg, #3D8BFF, #1E6FE0);
+        font-family: var(--font-display); font-size: 18px;
+        color: var(--color-on-primary); background: linear-gradient(135deg, var(--volt), var(--volt-dark));
         overflow: hidden;
     }
     .fr-avatar img { width: 100%; height: 100%; object-fit: cover; }
@@ -105,26 +105,26 @@
     .fr-actions { display: flex; gap: 6px; }
     .btn-accept {
         padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
-        background: #3D8BFF; color: #121212; border: none; cursor: pointer;
-        font-family: 'DM Sans', sans-serif; transition: background 0.2s;
+        background: var(--volt); color: var(--color-on-primary); border: none; cursor: pointer;
+        font-family: var(--font-body); transition: background 0.2s;
     }
-    .btn-accept:hover { background: #1E6FE0; }
+    .btn-accept:hover { background: var(--volt-dark); }
     .btn-reject {
         padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
-        background: rgba(255,77,77,0.1); color: #FF4D4D; border: 1px solid rgba(255,77,77,0.2);
-        cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.2s;
+        background: rgba(255,77,77,0.1); color: var(--red); border: 1px solid rgba(255,77,77,0.2);
+        cursor: pointer; font-family: var(--font-body); transition: all 0.2s;
     }
     .btn-reject:hover { background: rgba(255,77,77,0.2); }
     .btn-chat {
         padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
-        background: rgba(61,158,255,0.1); color: #3D9EFF; border: 1px solid rgba(61,158,255,0.2);
-        cursor: pointer; font-family: 'DM Sans', sans-serif; transition: all 0.2s;
+        background: rgba(61,158,255,0.1); color: var(--blue-light); border: 1px solid rgba(61,158,255,0.2);
+        cursor: pointer; font-family: var(--font-body); transition: all 0.2s;
         text-decoration: none; display: inline-flex; align-items: center; gap: 4px;
     }
     .btn-chat:hover { background: rgba(61,158,255,0.2); }
 
     .loading-text { text-align: center; color: var(--text-3); padding: 20px; font-size: 13px; }
-    .rank-badge { font-size:10px; background:var(--volt,#3D8BFF); color:#000; padding:2px 8px; border-radius:10px; margin-left:6px; font-weight:600; display:inline-block; vertical-align:middle; }
+    .rank-badge { font-size:10px; background:var(--volt,var(--volt)); color:#000; padding:2px 8px; border-radius:10px; margin-left:6px; font-weight:600; display:inline-block; vertical-align:middle; }
     </style>
 </head>
 <body class="page-body">
@@ -181,7 +181,7 @@
                 <input type="text" id="invite-link" readonly value="{{ t('friends.loading') }}"
                        style="flex:1;min-width:0;padding:12px 14px;border-radius:10px;background:rgba(255,255,255,0.04);border:1px solid var(--border);color:var(--text-2);font-size:13px;">
                 <button id="invite-copy-btn" data-action="copyInvite" data-ga-event="invite_copy"
-                        style="flex-shrink:0;padding:12px 18px;border-radius:10px;background:var(--volt);color:#121212;border:none;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif;">{{ t('friends.copy') }}</button>
+                        style="flex-shrink:0;padding:12px 18px;border-radius:10px;background:var(--volt);color: var(--color-on-primary);border:none;font-weight:700;cursor:pointer;font-family:var(--font-body);">{{ t('friends.copy') }}</button>
             </div>
             <div id="invite-meta" style="font-size:12px;color:var(--text-3);margin-top:10px;"></div>
         </div>

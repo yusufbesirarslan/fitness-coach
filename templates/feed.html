@@ -9,11 +9,11 @@
     .feed-wrap { max-width: 620px; margin: 0 auto; display:flex; flex-direction:column; gap:14px; }
     .feed-card { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden; }
     .feed-head { display:flex; align-items:center; gap:10px; padding:14px 16px; }
-    .feed-avatar { width:40px; height:40px; border-radius:50%; background:linear-gradient(135deg,#3D8BFF,#1E6FE0); color:#121212; display:flex; align-items:center; justify-content:center; font-family:var(--font-display); overflow:hidden; }
+    .feed-avatar { width:40px; height:40px; border-radius:50%; background:linear-gradient(135deg,var(--volt),var(--volt-dark)); color: var(--color-on-primary); display:flex; align-items:center; justify-content:center; font-family:var(--font-display); overflow:hidden; }
     .feed-avatar img { width:100%; height:100%; object-fit:cover; }
     .feed-user { font-weight:700; color:var(--text); font-size:14px; }
     .feed-time { color:var(--text-3); font-size:12px; }
-    .feed-img { width:100%; max-height:520px; object-fit:cover; display:block; background:rgba(255,255,255,0.03); }
+    .feed-img { width:100%; max-height:520px; object-fit:cover; display:block; background:var(--overlay-3); }
     .feed-img-fallback { position:relative; min-height:280px; overflow:hidden; background:
       radial-gradient(circle at top right, rgba(61,139,255,.34), transparent 34%),
       linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015)),
@@ -43,7 +43,7 @@
     .comments-close { border:1px solid var(--border); background:rgba(255,255,255,.03); color:var(--text-2); width:34px; height:34px; border-radius:999px; cursor:pointer; }
     .comments-list { padding:16px 18px; overflow:auto; display:flex; flex-direction:column; gap:12px; min-height:160px; }
     .comment-row { display:flex; gap:10px; align-items:flex-start; }
-    .comment-avatar { width:34px; height:34px; border-radius:50%; overflow:hidden; flex:0 0 auto; background:linear-gradient(135deg,#3D8BFF,#1E6FE0); color:#121212; display:flex; align-items:center; justify-content:center; font-family:var(--font-display); }
+    .comment-avatar { width:34px; height:34px; border-radius:50%; overflow:hidden; flex:0 0 auto; background:linear-gradient(135deg,var(--volt),var(--volt-dark)); color: var(--color-on-primary); display:flex; align-items:center; justify-content:center; font-family:var(--font-display); }
     .comment-avatar img { width:100%; height:100%; object-fit:cover; }
     .comment-card { flex:1; min-width:0; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); border-radius:12px; padding:10px 12px; }
     .comment-meta { display:flex; align-items:baseline; gap:8px; margin-bottom:4px; }
