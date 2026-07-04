@@ -18,7 +18,7 @@
         }
         .lp-brand {
             display: inline-flex; align-items: center; gap: 10px;
-            font-family: 'Bebas Neue', sans-serif; font-size: 30px;
+            font-family: var(--font-display); font-size: 30px;
             letter-spacing: 4px; color: var(--accent);
         }
         .lp-brand-mark {
@@ -34,7 +34,7 @@
             text-align: center; padding: 56px 0 40px;
         }
         .lp-hero h1 {
-            font-family: 'Bebas Neue', sans-serif; font-size: clamp(40px, 8vw, 76px);
+            font-family: var(--font-display); font-size: clamp(40px, 8vw, 76px);
             line-height: 1.02; letter-spacing: 1px; color: var(--text); margin: 0 0 18px;
         }
         .lp-hero h1 span { color: var(--accent); }
@@ -43,8 +43,8 @@
             font-weight: 300; max-width: 560px; margin: 0 auto 28px; line-height: 1.6;
         }
         .lp-cta {
-            display: inline-block; font-family: 'Bebas Neue', sans-serif;
-            font-size: 20px; letter-spacing: 3px; color: #0a0a0a; background: var(--accent);
+            display: inline-block; font-family: var(--font-display);
+            font-size: 20px; letter-spacing: 3px; color: var(--gray-950); background: var(--accent);
             border: none; border-radius: 10px; padding: 16px 40px; cursor: pointer;
             text-decoration: none; transition: transform 0.15s, background 0.2s;
         }
@@ -61,7 +61,7 @@
         }
         .lp-feature .ic { font-size: 30px; line-height: 1; margin-bottom: 14px; }
         .lp-feature h3 {
-            font-family: 'Bebas Neue', sans-serif; font-size: 20px; letter-spacing: 1.5px;
+            font-family: var(--font-display); font-size: 20px; letter-spacing: 1.5px;
             color: var(--text); margin: 0 0 8px;
         }
         .lp-feature p { font-size: 14px; color: var(--text2); line-height: 1.55; margin: 0; font-weight: 300; }
@@ -76,7 +76,7 @@
             background: linear-gradient(90deg, var(--accent), transparent);
         }
         .lp-social h2 {
-            font-family: 'Bebas Neue', sans-serif; font-size: clamp(26px, 5vw, 38px);
+            font-family: var(--font-display); font-size: clamp(26px, 5vw, 38px);
             letter-spacing: 1px; color: var(--text); margin: 0 0 12px;
         }
         .lp-social p { color: var(--text2); font-weight: 300; max-width: 520px; margin: 0 auto 24px; line-height: 1.6; }
@@ -88,11 +88,11 @@
             border: 1px solid var(--border); border-radius: 8px; padding: 2px;
         }
         .lang-opt {
-            font-family: 'DM Sans', sans-serif; font-size: 12px; font-weight: 600;
+            font-family: var(--font-body); font-size: 12px; font-weight: 600;
             letter-spacing: 0.05em; color: var(--text2); background: none; border: none;
             border-radius: 6px; padding: 5px 9px; cursor: pointer; transition: all .2s;
         }
-        .lang-opt.on { background: var(--accent); color: #0a0a0a; }
+        .lang-opt.on { background: var(--accent); color: var(--gray-950); }
         .lang-opt:not(.on):hover { color: var(--text); }
     </style>
 </head>
