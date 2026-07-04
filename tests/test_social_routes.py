@@ -323,6 +323,26 @@ def test_accept_meal_suggestion_llm_fallback_for_missing(client, auth_user, frie
     assert body["nutrients"]["kalori"] == 400.0
 
 
+def test_accept_meal_suggestion_clamps_implausible_macros(client, auth_user, friend, monkeypatch):
+    # C2: öneri-kabul yolu kanonik MealLog'a yazan TEK clamp'siz yoldu — LLM/
+    # FatSecret aykırı değeri (örn. 9000 kcal) defteri bozmadan önce diğer tüm
+    # yollarla aynı fiziksel-sağlık kapısından (clamp_serving_macros) geçmeli.
+    monkeypatch.setattr(social_bp, "_parse_suggestion_items", lambda body: ["dev porsiyon"])
+
+    def no_token():
+        raise RuntimeError("fatsecret down")
+    monkeypatch.setattr(social_bp, "_get_fatsecret_token", no_token)
+    monkeypatch.setattr(social_bp, "_estimate_macros_llm", lambda items, category_map=None: {
+        "dev porsiyon": {"calories": 9000.0, "protein": 800.0, "carbs": 900.0, "fat": 500.0}})
+
+    msg = _send_suggestion(client, friend, auth_user, "suggestion_meal", "dev porsiyon")
+    body = client.post(f"/suggest/respond/{msg.id}", json={"action": "accept"}).get_json()
+
+    meal = MealLog.query.filter_by(user_id=auth_user.id).one()
+    assert meal.kalori <= 3000 and meal.protein <= 300 and meal.karb <= 300 and meal.yag <= 150
+    assert body["nutrients"]["kalori"] == meal.kalori
+
+
 def test_accept_meal_suggestion_unparseable_body_skips_meallog(client, auth_user, friend, monkeypatch):
     # Gövde ayrıştırılamıyorsa kanonik MealLog defterine SIFIR-makro satırı YAZILMAZ
     # (aksi halde günlük toplamlar/protein nudge/haftalık rapor sessizce bozulur).

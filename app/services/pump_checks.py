@@ -29,7 +29,11 @@ def can_view_pump_check(user_id, check):
     if visibility == "feed":
         return user_id in get_friend_ids(check.user_id)
     if visibility == "friends":
-        return user_id in set(check.shared_friend_ids or [])
+        # S2: paylaşım anında seçilmiş olması yetmez — arkadaşlık sonradan
+        # kaldırıldıysa erişim de düşmeli (bayat yetkilendirme). Hem saklanan
+        # listede OLMALI hem de HÂLÂ kabul edilmiş arkadaş olmalı.
+        return (user_id in set(check.shared_friend_ids or [])
+                and user_id in get_friend_ids(check.user_id))
     return False
 
 

@@ -4,6 +4,15 @@ _Generated from a fresh 3-agent deep dive (Security · Correctness/Bugs · Archi
 of the `fitness-coach` codebase. **Read-only triage — no code was changed.** This document is the
 action list._
 
+> **Durum güncellemesi (aynı gün):** Bu listedeki maddelerin tamamı ele alındı.
+> Kod düzeltmeleri: C1 (kilit altında kolon-okuma, 3 nokta + eşzamanlılık testleri),
+> C2 (clamp), C3 (dile göre yedek + geçmiş bastırma), C4 (kısıt `(user_id, date_key)`
+> + migration `c5d6e7f8a9b0`), C5 (override görev ödülü), S1 (`is_global` + deny-list),
+> S2 (arkadaşlık yeniden-doğrulama), A1 (`app/services/ai_gate.py` semaforu),
+> A3 (`pool_pre_ping`/`pool_recycle`), A4 (boot migration hatası artık FATAL),
+> A6 (prod'da error-level misconfig logları). Süreç/politika: A2 ve A5 CLAUDE.md'de
+> belgelendi (expand/contract migration kuralı; Redis==login availability tradeoff'u).
+
 This run re-assessed the **current** state of the branch and cross-checked the earlier triage
 docs (`NEEDED_FIXES.md`, `TRIAGE_FINDINGS.md`, `docs/triage-2026-07-02.md`). Several previously
 tracked HIGH items are now confirmed **fixed** (see "Delta vs. prior triage"). The headline of

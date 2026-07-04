@@ -30,6 +30,12 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
   - Opsiyonel güvenlik/freemium/gözlem anahtarları (hepsinin makul varsayılanı var):
     - `AI_PLAN_QUOTA_ENABLED` (vars. 1) — non-premium'a haftada 1 AI plan üretimi (app/services/premium.py). 0 = kota kapalı.
     - `LOGIN_FAIL_CLOSED` (vars. 1) — Redis erişilemezse login 503 (brute-force throttle güvenilir değilken). 0 = eski fail-open.
+      Bilinçli tradeoff (A5): Redis availability == login availability. Redis tek konteynerdir;
+      diğer her şey degrade eder (session=cookie, leaderboard→Postgres, foodcache→L1,
+      limiter→in-memory), yalnızca login 503 olur. /health `limiter_storage` alanından izle.
+    - `AI_MAX_CONCURRENCY` (vars. 5) + `AI_GATE_WAIT_SECONDS` (vars. 10) — ağır AI route'larında
+      eşzamanlılık tavanı (app/services/ai_gate.py); dolunca 503 + Retry-After. Thread rezervi
+      /health ve ucuz route'ları AI yükünden korur (A1).
     - `SENTRY_DSN` (yoksa kapalı) + opsiyonel `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE` — hata izleme (app/observability.py). DSN yoksa no-op.
   - Operasyon notu: web konteyneri hâlâ tek gunicorn worker + 8 thread çalışır.
     Coach/menu/plan AI çağrıları senkron ve bloklayıcıdır; 8 uzun AI isteği tüm
@@ -74,4 +80,11 @@ DailyActivity, CustomMeal, CustomMealItem
   yeniden kurar, /health 200 gate'inden geçirmezse önceki commit'e rollback eder.
   Host nginx'te eski `add_header Content-Security-Policy` satırı kalırsa deploy
   canlı config'i sed ile değiştirmez; fail-fast yapar.
+  DİKKAT (A2): rollback yalnızca KODU geri alır — boot'ta otomatik uygulanan DB
+  migration'ları geri ALMAZ. Migration'ları expand/contract (geriye uyumlu) yaz:
+  kolon/tablo DÜŞÜRME veya RENAME, eski kod en az bir başarılı deploy boyunca onsuz
+  çalışabiliyorsa gönderilir. Yıkıcı migration kaçınılmazsa: önce RDS snapshot al,
+  `FITX_DB_AUTO_UPGRADE=0` ile boot-upgrade'i kapat ve migration'ı ayrı tek seferlik
+  `flask db upgrade` adımı olarak çalıştır. Boot'ta migration hatası artık FATAL'dir
+  (app/db_init.py; kaçış: FITX_DB_UPGRADE_FAIL_OPEN=1) — health gate rollback yapar.
 - Sorgular daima current_user.id'ye scope'lanır; ID ile yüklenen kayıtlarda sahiplik kontrolü zorunlu

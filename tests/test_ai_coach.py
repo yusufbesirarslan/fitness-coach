@@ -390,6 +390,42 @@ def test_conversation_tool_loop_capped(auth_user, monkeypatch):
     assert len(llm.calls) == 5
 
 
+def test_bedrock_post_tool_fallback_is_localized(auth_user, monkeypatch):
+    # C3: Bedrock döngüsü araç sonrası hatada/boş yanıtta hard-coded Türkçe
+    # metin döndürüyordu — EN kullanıcı Türkçe hata görüyordu. Dile göre yedek dönmeli.
+    tool_block = SimpleNamespace(type="tool_use", name="cancel_pending_log",
+                                 input={}, id="t1")
+    first = SimpleNamespace(stop_reason="tool_use", content=[tool_block])
+    second = SimpleNamespace(stop_reason="end_turn", content=[])  # metin bloğu yok
+    calls = []
+
+    class _Msgs:
+        def create(self, **kw):
+            calls.append(kw)
+            return first if len(calls) == 1 else second
+
+    monkeypatch.setattr(ai_coach, "bedrock_client", SimpleNamespace(messages=_Msgs()))
+    monkeypatch.setattr(ai_coach, "_dispatch_coach_tool", lambda uid, name, args: "{}")
+
+    answer = ai_coach._run_coach_conversation_bedrock(
+        auth_user.id, "log a banana", "", [], language="en")
+    assert answer == ai_coach._COACH_FALLBACKS["en"]["tool"]
+    assert "İşlemi" not in answer
+
+
+def test_fallback_text_not_persisted_to_session_history(app, auth_user, monkeypatch):
+    # C3: sağlayıcı yedek metni (boş olmayan) cookie-geçmişine yazılıp sonraki
+    # turda bağlam olarak modele geri besleniyordu — hata-yedeği gibi bastırılmalı.
+    endless = _llm_msg(tool_calls=[_tool_call("cancel_pending_log")])
+    llm = _ScriptedLLM([endless] * 5)
+    monkeypatch.setattr(ai_coach, "openai_client", llm)
+    with app.test_request_context("/"):
+        from flask import session
+        answer = _run_coach_conversation(auth_user.id, "x", "", client_history=None)
+        assert answer == ai_coach._COACH_FALLBACKS["tr"]["tool"]
+        assert "coach_history" not in session
+
+
 def test_conversation_drops_trailing_user_turns_from_history(auth_user, monkeypatch):
     llm = _ScriptedLLM([_llm_msg("tamam")])
     monkeypatch.setattr(ai_coach, "openai_client", llm)

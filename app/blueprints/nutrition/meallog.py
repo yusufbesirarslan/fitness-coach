@@ -99,9 +99,14 @@ def log_meal():
         )
         db.session.add(entry)
         db.session.commit()
+        # C5: override yolu da AI-hesaplı yolla aynı 'meal_logged' görevini
+        # vermeli — kullanıcı makroyu elle girdi diye günlük görev/XP atlanmasın.
+        quest_result = complete_quest_for_user(current_user.id, "meal_logged")
         resp = {"message": t("route.x_logged", name=ogun), "nutrients": nutrients}
         if meal_photo_key:
             resp["photo_url"] = _meal_photo_url(entry)
+        if quest_result:
+            resp["quest_awarded"] = quest_result
         return jsonify(resp)
 
     prompt = (

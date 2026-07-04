@@ -1169,7 +1169,11 @@ def _run_coach_conversation(user_id, question, context, client_history=None, lan
     if final_text is None:
         final_text = _run_coach_conversation_openai(user_id, question, context, history, language)
 
-    is_error_fallback = not final_text
+    # C3: sağlayıcı döngülerinin döndürdüğü yedek metinler de hata-yedeğidir —
+    # boş metinle aynı muamele; aksi halde non-boş yedek cookie-geçmişine yazılıp
+    # sonraki turda bağlam olarak modele geri besleniyordu (B16'nın tamamlayıcısı).
+    _all_fallbacks = {txt for d in _COACH_FALLBACKS.values() for txt in d.values()}
+    is_error_fallback = (not final_text) or (final_text in _all_fallbacks)
     if not final_text:
         final_text = _COACH_FALLBACKS[_coach_lang(language)]["error"]
 
@@ -1317,7 +1321,9 @@ def _run_coach_conversation_bedrock(user_id, question, context, history, languag
                 # cevaplanabilirdi); araç çalıştıysa sağlayıcı değiştirme.
                 if tools_ran == 0:
                     raise _BedrockFallback("boş Bedrock yanıtı (metin bloğu yok)")
-                return "İşlemi tamamlayamadım, tekrar dener misin?"
+                # C3: hard-coded TR metin yerine dile göre yedek — EN kullanıcı
+                # Türkçe hata görmesin.
+                return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
 
             # Araç isteyen assistant turunu (tool_use bloklarıyla) olduğu gibi ekle.
             convo.append({"role": "assistant", "content": resp.content})
@@ -1334,10 +1340,10 @@ def _run_coach_conversation_bedrock(user_id, question, context, history, languag
             if tools_ran == 0:
                 raise _BedrockFallback(f"{type(e).__name__}: {e}")
             current_app.logger.warning("[COACH][Bedrock] araç sonrası çağrı/ayrıştırma hatası: %s", e)
-            return "İşlemi tamamlayamadım, tekrar dener misin?"
+            return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
         # Döngü başa döner: model araç sonuçlarıyla final metni üretir ya da zincirler.
 
-    return "İşlemi tamamlayamadım, tekrar dener misin?"
+    return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
 
 
 def generate_coach_reply(name, age, gender, weight, height,

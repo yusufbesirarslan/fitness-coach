@@ -198,6 +198,22 @@ def test_daily_activity_defaults_to_today_key(auth_user):
     assert entry.date_key == day_key()
 
 
+def test_daily_activity_unique_per_day_regardless_of_intensity(auth_user):
+    # C4: "günde tam bir satır" invariantını DB de zorlar. Eski kısıt intensity
+    # içerdiğinden farklı yoğunluklu iki eşzamanlı istek İKİ satır bırakabiliyordu
+    # (handler'ın sil-ekle'si çakışma üretmeden); artık ikinci INSERT reddedilir
+    # ve log_daily_activity'nin IntegrityError-upsert dalı gerçekten tetiklenir.
+    from sqlalchemy.exc import IntegrityError
+    db.session.add(DailyActivity(user_id=auth_user.id, steps=1000,
+                                 intensity="light", date_key="2026-07-04"))
+    db.session.commit()
+    db.session.add(DailyActivity(user_id=auth_user.id, steps=2000,
+                                 intensity="brisk", date_key="2026-07-04"))
+    with pytest.raises(IntegrityError):
+        db.session.commit()
+    db.session.rollback()
+
+
 # ---------------------------------------------------------------------------
 # Geçmiş / son oturum / nudge'lar
 # ---------------------------------------------------------------------------

@@ -70,6 +70,24 @@ def test_can_view_pump_check_enforces_visibility(make_user):
     assert can_view_pump_check(friend.id, private) is False
 
 
+def test_friends_share_revoked_after_unfriend(make_user):
+    # S2: "friends" paylaşımı saklanan shared_friend_ids listesine güvenip
+    # arkadaşlığın HÂLÂ sürdüğünü doğrulamıyordu — arkadaşlıktan çıkarılan
+    # kullanıcı tarihi gönderiyi görmeye devam ediyordu (bayat yetkilendirme).
+    owner = make_user("s2owner")
+    selected = make_user("s2selected")
+    _friend(owner, selected)
+    check = PumpCheck(user_id=owner.id, visibility="friends",
+                      shared_friend_ids=[selected.id], valid=True)
+    db.session.add(check)
+    db.session.commit()
+    assert can_view_pump_check(selected.id, check) is True
+
+    Friendship.query.filter_by(sender_id=owner.id, receiver_id=selected.id).delete()
+    db.session.commit()
+    assert can_view_pump_check(selected.id, check) is False
+
+
 def test_serialize_pump_check_card_exposes_requested_fields(make_user):
     owner = make_user("owner", full_name="Owner Person")
     check = PumpCheck(

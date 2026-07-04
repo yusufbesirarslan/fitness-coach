@@ -16,8 +16,15 @@ def _is_safe_public_ip(ip_str):
     # Unwrap IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) so the IPv4 checks apply.
     if isinstance(ip, _ipa.IPv6Address) and ip.ipv4_mapped is not None:
         ip = ip.ipv4_mapped
-    return not (ip.is_private or ip.is_loopback or ip.is_link_local
-                or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
+    # S1: salt deny-list yerine POZİTİF "küresel yönlendirilebilir" şartı.
+    # Deny-list, CGNAT/paylaşımlı adres alanını (100.64.0.0/10, RFC 6598) ve
+    # TEST-NET/benchmark (198.18.0.0/15, 192.0.0.0/24, ...) bloklarını KAÇIRIYORDU
+    # (Py 3.11'de is_private bunları kapsamaz). is_global IANA kaydını izler;
+    # eski deny-list, is_global semantiği Python sürümleri arasında oynadığı için
+    # emniyet kemeri olarak korunur (iki katman da geçmeli).
+    return ip.is_global and not (
+        ip.is_private or ip.is_loopback or ip.is_link_local
+        or ip.is_reserved or ip.is_multicast or ip.is_unspecified)
 
 
 _ALLOWED_PORTS = {80, 443}

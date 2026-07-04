@@ -10,6 +10,7 @@ from app.extensions import _user_or_ip_key, db, limiter
 from app.i18n import current_locale, t
 from app.models import Message, WORKOUT_COMPLETION_MARKER, DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
 from app.services.ai import _heavy_chat
+from app.services.ai_gate import ai_concurrency_gate
 from app.services.gamification import _claim_quest, award_xp, complete_quest_for_user, get_level, level_title, log_activity
 from app.services.menu_extract import validate_pump_check
 from app.services.pump_checks import get_friend_ids, normalize_workout_score
@@ -69,6 +70,7 @@ def training():
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 @limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # Sonnet üretimi: daha sıkı tavan
 @premium_ai_plan_gate("training")  # non-premium: haftada 1 üretim
+@ai_concurrency_gate  # A1: bloklayıcı AI çağrıları tüm thread'leri doldurmasın
 def training_plan_generate():
     data = request.get_json(silent=True) or {}
 

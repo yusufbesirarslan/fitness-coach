@@ -152,6 +152,17 @@ def configure_app(app):
         database_url = database_url.replace("postgres://", "postgresql://", 1)
     app.config["SQLALCHEMY_DATABASE_URI"] = database_url
     app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+    # A3: DB artık dış RDS — havuzdaki bağlantılar boşta kalınca (gece/az trafik)
+    # RDS/NAT idle-timeout'u veya failover onları sessizce koparır; ilk istekler
+    # "server closed the connection unexpectedly" 500'leri yer, /health'in
+    # SELECT 1'i bile flap edebilirdi. pre_ping ölü bağlantıyı kullanmadan önce
+    # yakalar; recycle (< RDS idle timeout) bağlantıları proaktif tazeler.
+    # SQLite'ta (lokal/test) gereksiz — yalnızca Postgres'te uygula.
+    if database_url.startswith("postgresql"):
+        app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+            "pool_pre_ping": True,
+            "pool_recycle": int(os.environ.get("DB_POOL_RECYCLE_SECONDS", "280")),
+        }
     app.config["AI_PLAN_QUOTA_ENABLED"] = AI_PLAN_QUOTA_ENABLED
     app.config["AI_CHAT_QUOTA_ENABLED"] = AI_CHAT_QUOTA_ENABLED
     app.config["LOGIN_FAIL_CLOSED"] = LOGIN_FAIL_CLOSED
@@ -171,6 +182,24 @@ def configure_app(app):
             )
     app.config["SECRET_KEY"] = _secret_key
     _enforce_fatsecret_tls(app)
+    # A6: prod'da sessizce yanlış moda düşen bayrakları GÖRÜNÜR yap. Bunlar
+    # boot'u durdurmaz (meşru geçici kullanımlar olabilir) ama error seviyesinde
+    # loglanır ki "her şey yeşil ama yanlış" durumu deploy çıktısında yakalansın.
+    if not _is_dev:
+        if "BEDROCK_ENABLED" not in os.environ:
+            app.logger.error(
+                "BEDROCK_ENABLED ayarlı değil (vars. 0) — birincil ağır AI yolu "
+                "(Bedrock/Sonnet) KAPALI, koç/menü/plan sessizce OpenAI %s'e düşer. "
+                "Prod .env'de BEDROCK_ENABLED=1 bekleniyor; bilinçliyse =0 yazın.",
+                OPENAI_MODEL)
+        if not FATSECRET_BASE_URL:
+            app.logger.error(
+                "FATSECRET_BASE_URL ayarlı değil — besin aramaları sessizce "
+                "başarısız olur (menü/koç/diary makro çözümü LLM tahminine düşer).")
+        if os.environ.get("FITX_SKIP_DB_INIT") == "1":
+            app.logger.error(
+                "FITX_SKIP_DB_INIT=1 prod'da AKTİF — create_all/migration/seed "
+                "atlanıyor. Bu bayrak yalnızca CI/migration komutları içindir.")
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = not _is_dev

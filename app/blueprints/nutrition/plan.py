@@ -14,6 +14,7 @@ from app.extensions import _user_or_ip_key, db, limiter
 from app.i18n import current_locale, t
 from app.models import NutritionPlan, UserSession
 from app.services.ai import _heavy_chat
+from app.services.ai_gate import ai_concurrency_gate
 from app.services.premium import premium_ai_plan_gate
 from app.timeutil import display_dt
 
@@ -71,6 +72,7 @@ def nutrition():
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 @limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # Sonnet üretimi: daha sıkı tavan
 @premium_ai_plan_gate("nutrition")  # non-premium: haftada 1 üretim
+@ai_concurrency_gate  # A1: bloklayıcı AI çağrıları tüm thread'leri doldurmasın
 def nutrition_plan_generate():
     data = request.get_json(silent=True) or {}
     FOOD_DATABASE = {
