@@ -463,6 +463,106 @@ def test_chat_page_renders_en(app, client, make_user, login):
     assert "suggestion_meal" in body                # kanonik öneri tipi kodu
 
 
+def test_login_adopts_explicit_prelogin_language(app, client, make_user):
+    """Giriş ekranında AÇIKÇA seçilen dil girişte hesabı güncellemeli. Önceki
+    davranış: _login_fresh hesabın eski dilini geri yüklüyor, kullanıcının az
+    önce yaptığı TR seçimi sessizce EN'e dönüyordu ('Türkçe seçtim ama uygulama
+    İngilizce' hatası)."""
+    from app.models import User
+    make_user("langswitch", language="en", profile_complete=True)
+    client.post("/set-language", json={"lang": "tr"})   # anonim AÇIK seçim
+    client.post("/login", json={"username": "langswitch", "password": "Sifre123"})
+    body = client.get("/").get_data(as_text=True)
+    assert "Günlük Kalori" in body
+    assert "Daily Calories" not in body
+    assert User.query.filter_by(username="langswitch").first().language == "tr"
+
+
+def test_login_keeps_account_language_without_explicit_choice(app, client, make_user):
+    """Bayraksız (açık seçim olmayan) session['lang'] artığı — örn. aynı
+    tarayıcıda önceki kullanıcıdan kalan — hesabın dil tercihini EZMEMELİ."""
+    from app.models import User
+    make_user("langkeep", language="en", profile_complete=True)
+    with client.session_transaction() as s:
+        s["lang"] = "tr"        # leftover; lang_explicit bayrağı YOK
+    client.post("/login", json={"username": "langkeep", "password": "Sifre123"})
+    body = client.get("/").get_data(as_text=True)
+    assert "Daily Calories" in body
+    assert User.query.filter_by(username="langkeep").first().language == "en"
+
+
+def test_rate_limit_response_localized(app, client, make_user, login):
+    """429 gövdesi kullanıcının dilinde dönmeli → resolve_locale, limiter'ın
+    before_request kancasından ÖNCE koşmalı (aksi halde g.locale yok → TR'ye düşer)."""
+    from app.extensions import limiter
+    make_user("limiten", language="en", profile_complete=True)
+    login("limiten")
+    limiter.enabled = True
+    try:
+        last = None
+        for _ in range(31):     # /set-language: 30 per hour per IP
+            last = client.post("/set-language", json={"lang": "en"})
+        assert last.status_code == 429
+        assert last.get_json()["error"] == \
+            "Too many attempts. Please try again a little later."
+    finally:
+        limiter.enabled = False
+        limiter.reset()
+
+
+def test_setlang_js_surfaces_failure():
+    """setLang başarısız yanıtı (403/429/400) sessizce yutmamalı: yalnızca
+    res.ok'ta reload, aksi halde çevrilmiş hata mesajı gösterilir."""
+    import os
+    p = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "i18n.js")
+    js = open(p, encoding="utf-8").read()
+    assert "res.ok" in js or "response.ok" in js
+    assert "lang.switch_failed" in js
+
+
+def test_training_prompt_turkish_content_directive():
+    """TR kullanıcının antrenman prompt'u İngilizce-ağırlıklı (contract + few-shot
+    EN); tek satırlık zayıf yönerge modeli İngilizceye kaydırabiliyor. Hem system
+    hem user prompt'ta VURGULU Türkçe içerik direktifi olmalı."""
+    from app.services.training_generation.models import (
+        ClassificationResult, ProgramContext, TrainingPreferences, UserTrainingFeatures)
+    from app.services.training_generation.prompt_builder import (
+        build_system_prompt, build_training_prompt)
+    prefs = TrainingPreferences()
+    feats = UserTrainingFeatures(
+        age=25, weight=80.0, height=180.0, goal="kas_kutlesi",
+        self_reported_level="beginner", current_activity="orta",
+        training_history_months=6, weekly_frequency=3, movement_competency={},
+        strength_proxy=1.0, consistency_score=0.5, injuries="")
+    cls = ClassificationResult(level="Beginner", confidence=0.9, score=30,
+                               score_breakdown={}, constraints_applied=[],
+                               risk_flags=[], reasoning_summary="")
+    ctx = ProgramContext(classified_level="Beginner", weekly_training_days=3,
+                         recovery_capacity_factor=1.0, volume_guideline="v",
+                         intensity_guideline="i", progression_guideline="p",
+                         deload_guideline="d", movement_coverage=["squat"],
+                         style_directive="s", risk_flags=[], constraints_applied=[])
+    assert "TÜRKÇE" in build_system_prompt("tr")
+    p_tr = build_training_prompt(feats, prefs, cls, ctx, language="tr")
+    assert "TÜRKÇE" in p_tr and "ENGLISH" not in p_tr
+    # EN davranışı korunur (mevcut kontrat)
+    p_en = build_training_prompt(feats, prefs, cls, ctx, language="en")
+    assert "ENGLISH" in p_en
+
+
+def test_feed_gallery_env_display_localized():
+    """feed/galeri kartları kanonik location_type ('Ev'/'Spor Salonu') değerini
+    HAM basmamalı; display-map (training.loc_home/loc_gym) üzerinden çevrilmeli
+    (EN kullanıcı 'Spor Salonu' görüyordu — i18n kanonik-değer kuplaj kuralı)."""
+    import os
+    root = os.path.dirname(os.path.dirname(__file__))
+    for name in ("feed.html", "pump_check_gallery.html"):
+        html = open(os.path.join(root, "templates", name), encoding="utf-8").read()
+        assert "envLabel" in html, name
+        assert "training.loc_home" in html and "training.loc_gym" in html, name
+        assert "esc(post.environment)" not in html and "esc(item.environment)" not in html, name
+
+
 def test_workout_already_done_uses_structured_code(app, client, make_user, login):
     """Kuplaj düzeltmesi: 'zaten tamamlandı' artık metin değil yapısal `code` ile
     bildirilir (error metni i18n'lendi, frontend code'a bakar)."""
