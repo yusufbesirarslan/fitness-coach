@@ -19,3 +19,34 @@ def test_app_templates_use_shared_shell_partials():
         # inline kopya kalmadı
         assert html.count('class="global-header"') == 0, name
         assert html.count('class="action-bar"') == 0, name
+
+
+def test_drawer_and_nav_js_are_gone():
+    for name in APP_TEMPLATES + ["_nav.html", "_actionbar.html"]:
+        html = (ROOT / "templates" / name).read_text(encoding="utf-8")
+        assert "fx-drawer" not in html, name
+        assert "drawer-trigger" not in html, name
+        assert "nav.js" not in html, name
+    assert not (ROOT / "static" / "nav.js").exists()
+    css = (ROOT / "static" / "nav.css").read_text(encoding="utf-8")
+    assert ".drawer" not in css
+
+
+def test_bottom_nav_has_five_tabs_and_marks_active(client, make_user, login):
+    make_user("shelluser", profile_complete=True)
+    login("shelluser")
+    html = client.get("/").get_data(as_text=True)
+    for href in ("/nutrition", "/training", "/progress-page", "/edit-profile"):
+        assert f'href="{href}" class="ab-tab' in html
+    assert 'href="/" class="ab-tab active"' in html
+    assert 'aria-current="page"' in html
+
+
+def test_secondary_pages_activate_profile_tab(client, auth_user):
+    html = client.get("/friends").get_data(as_text=True)
+    assert 'href="/edit-profile" class="ab-tab active"' in html
+
+
+def test_viewport_fit_cover_for_safe_areas():
+    head = (ROOT / "templates" / "_head.html").read_text(encoding="utf-8")
+    assert "viewport-fit=cover" in head

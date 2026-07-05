@@ -405,7 +405,7 @@ button:focus-visible,
 .tab-btn:focus-visible,
 .chip:focus-visible,
 .meal-type-opt:focus-visible,
-.drawer-link:focus-visible,
+.hub-link:focus-visible,
 .ab-tab:focus-visible,
 [role="button"]:focus-visible {
   outline: 2px solid var(--color-primary);

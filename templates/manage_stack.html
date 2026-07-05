@@ -102,7 +102,7 @@
 
 <div class="toast-wrap" id="toast-wrap"></div>
 
-{% set nav_active = 'supplements' %}
+{% set nav_active = 'profile' %}
 {% include "_nav.html" %}
 
 <!-- ── MAIN ── -->
@@ -331,7 +331,6 @@ async function deleteSupplement(id) {
     } catch(e) { toast(__t('manage_stack.conn_error'), 'error'); }
 }
 </script>
-<script src="/static/nav.js"></script>
 <script src="/static/actions.js"></script>
 </body>
 </html>
