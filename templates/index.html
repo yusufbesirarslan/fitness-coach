@@ -14,182 +14,184 @@
 {% include "_nav.html" %}
 
 <!-- ══════════════════════════════════════
-     MAIN CONTENT
+     MAIN CONTENT — AI COMMAND CENTER
      ══════════════════════════════════════ -->
 <main class="main-content">
+<div class="dash-grid">
 
-<!-- ═══ GREETING ROW ═══ -->
-<div class="greeting-row">
+  <!-- 1. IDENTITY -->
+  <section class="card dash-id">
+    <div class="avatar avatar-lg id-avatar">
+      {%- if profile_picture %}<img src="{{ profile_picture }}" alt="">{% else %}{{ username[0]|upper if username else 'U' }}{% endif -%}
+    </div>
     <div>
-        <div class="gr-eyebrow" id="g-eyebrow">DASHBOARD</div>
-        <h1 class="gr-title" id="g-title">{{ t('index.greeting') }} <span>{{ username }}</span></h1>
-        <p class="gr-sub" id="g-sub">{{ t('index.loading') }}</p>
+      <div class="id-hello" id="id-hello">{{ t('index.greeting') }}</div>
+      <div class="id-name">{{ username }}</div>
     </div>
-</div>
-
-<!-- ═══ BENTO GRID ═══ -->
-<div class="bento">
-
-    <!-- ═══ CALORIE RING ═══ -->
-    <div class="bc b-1">
-        <div class="bc-lbl"><span class="bc-dot" style="background:#3D8BFF"></span>{{ t('index.cal_daily') }}</div>
-        <div class="cal-wrap">
-            <div class="cal-ring-pos">
-                <svg style="transform:rotate(-90deg);display:block;" viewBox="0 0 120 120" width="110" height="110">
-                    <circle cx="60" cy="60" r="44" fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="10"/>
-                    <circle cx="60" cy="60" r="44" fill="none"
-                        stroke="#3D8BFF" stroke-width="10" stroke-linecap="round"
-                        stroke-dasharray="276.46" stroke-dashoffset="276.46"
-                        id="cal-ring"
-                        style="transition:stroke-dashoffset 0.9s cubic-bezier(0.4,0,0.2,1),stroke 0.4s ease"
-                    />
-                </svg>
-                <div class="cal-center">
-                    <div class="cal-center-num" id="cal-num">—</div>
-                    <div class="cal-center-lbl">{{ t('index.cal_remaining') }}</div>
-                </div>
-            </div>
-            <div class="cal-legend">
-                <div class="cal-row">
-                    <div class="cal-dot" style="background:#3D8BFF"></div>
-                    <div class="cal-row-lbl">{{ t('index.cal_consumed') }}</div>
-                    <div class="cal-row-val" id="cal-consumed">—</div>
-                </div>
-                <div class="cal-row">
-                    <div class="cal-dot" style="background:#252525;border:1px solid #333"></div>
-                    <div class="cal-row-lbl">{{ t('index.cal_remain') }}</div>
-                    <div class="cal-row-val" id="cal-remain">—</div>
-                </div>
-                <div class="cal-row">
-                    <div class="cal-dot" style="background:#00C48C"></div>
-                    <div class="cal-row-lbl">{{ t('index.cal_activity') }}</div>
-                    <div class="cal-row-val" id="cal-activity">0 kcal</div>
-                </div>
-                <div class="cal-row">
-                    <div class="cal-dot" style="background:#404040"></div>
-                    <div class="cal-row-lbl">{{ t('index.cal_target') }}</div>
-                    <div class="cal-row-val" id="cal-target">—</div>
-                </div>
-            </div>
-        </div>
+    <div class="id-meta">
+      <span class="id-chip xp">⚡ {{ user_xp }} XP</span>
+      <span class="id-chip streak">🔥 {{ t('index.streak_days', n=streak_count|default(0)) }}</span>
     </div>
+  </section>
 
-    <!-- ═══ ACTIVITY TRACKER ═══ -->
-    <div class="bc b-1">
-        <div class="bc-lbl"><span class="bc-dot" style="background:#00C48C"></span>{{ t('index.act_title') }}</div>
-        <div class="act-intensity" id="act-intensity">
-            <button class="act-int-btn" data-int="light" data-action="selectIntensity" data-args='["light"]'>{{ t('index.act_light') }}</button>
-            <button class="act-int-btn active" data-int="moderate" data-action="selectIntensity" data-args='["moderate"]'>{{ t('index.act_moderate') }}</button>
-            <button class="act-int-btn" data-int="brisk" data-action="selectIntensity" data-args='["brisk"]'>{{ t('index.act_brisk') }}</button>
-            <button class="act-int-btn" data-int="fast" data-action="selectIntensity" data-args='["fast"]'>{{ t('index.act_fast') }}</button>
-        </div>
-        <div class="act-form">
-            <input type="number" class="act-input" id="act-steps" placeholder="{{ t('index.act_steps_ph') }}" min="1" max="100000">
-            <button class="act-btn" id="act-btn" data-action="logActivity">{{ t('index.save') }}</button>
-        </div>
-        <div class="act-summary" id="act-summary" style="display:none">
-            <div class="act-stat"><span class="act-stat-val" id="act-total-steps">0</span><span class="act-stat-lbl">{{ t('index.unit_steps') }}</span></div>
-            <div class="act-stat"><span class="act-stat-val" id="act-total-cal">0</span><span class="act-stat-lbl">kcal</span></div>
-            <div class="act-stat"><span class="act-stat-val" id="act-total-dist">0</span><span class="act-stat-lbl">km</span></div>
-        </div>
+  <!-- 2. HERO — calories -->
+  <section class="card hero">
+    <div class="ring-wrap hero-ring" style="width:120px;height:120px;">
+      <svg class="ring-svg" viewBox="0 0 120 120" width="120" height="120">
+        <circle class="ring-track" cx="60" cy="60" r="52" stroke-width="10"/>
+        <circle class="ring-fill" id="cal-ring" cx="60" cy="60" r="52" stroke-width="10"
+                stroke="var(--color-primary)" stroke-dasharray="326.73" stroke-dashoffset="326.73"/>
+      </svg>
+      <div class="ring-label">
+        <div class="hero-num" id="cal-num">—</div>
+        <div class="hero-cap">{{ t('index.cal_remaining') }}</div>
+      </div>
     </div>
-
-    <!-- ═══ WEIGHT EVOLUTION — 2 cols ═══ -->
-    <div class="bc b-2" style="display:flex;flex-direction:column;">
-        <div class="bc-lbl"><span class="bc-dot" style="background:#3D8BFF"></span>{{ t('index.weight_title') }}</div>
-
-        <div class="w-display">
-            <div class="w-big" id="w-kg">—</div>
-            <div class="w-unit">kg</div>
-        </div>
-        <div class="w-delta" id="w-delta"></div>
-        <div class="w-goal-progress" id="w-goal-progress" style="display:none">
-            <div class="w-goal-text" id="w-goal-text"></div>
-            <div class="w-goal-bar-wrap"><div class="w-goal-bar" id="w-goal-bar"></div></div>
-        </div>
-
-        <div class="sparkline-wrap">
-            <canvas id="sparkline"></canvas>
-            <div id="spark-empty" style="display:none;font-size:12px;color:#606060;font-style:italic;padding-top:20px;">{{ t('index.no_checkin') }}</div>
-        </div>
-
-        <div class="w-form">
-            <input type="number" class="w-input" id="w-input" placeholder="{{ t('index.weight_input_ph') }}" step="0.1" min="30" max="300">
-            <button class="w-btn" id="w-btn" data-action="doUpdateWeight">{{ t('index.update') }}</button>
-        </div>
-
-        <div class="w-meta" id="w-meta" style="display:none">
-            <div><div class="wm-lbl">BMR</div><div class="wm-val" id="w-bmr">—</div></div>
-            <div><div class="wm-lbl">TDEE</div><div class="wm-val" id="w-tdee">—</div></div>
-            <div><div class="wm-lbl">{{ t('index.cal_target') }}</div><div class="wm-val" id="w-target">—</div></div>
-        </div>
+    <div class="hero-body">
+      <div class="hero-cap">{{ t('index.hero_goal') }}</div>
+      <div class="hero-goal" id="hero-goal">{{ t('index.cal_daily') }}</div>
+      <div class="hero-sub" id="hero-sub">—</div>
     </div>
+  </section>
 
-    <!-- ═══ AI INSIGHT FEED (Daily Tip) ═══ -->
-    <div class="bc b-1" style="display:flex;flex-direction:column;z-index:1;">
-        <div class="bc-lbl"><span class="bc-dot" style="background:rgba(61,139,255,0.75)"></span>{{ t('index.tip_title') }}</div>
-        <div id="ins-body">
-            <div class="ins-slide" id="ins-slide">
-                <span class="ins-icon" id="ins-icon">⚡</span>
-                <div class="ins-text" id="ins-text">{{ t('index.tip_loading') }}</div>
-                <div class="ins-source" id="ins-src">{{ t('index.tip_src_default') }}</div>
-            </div>
-        </div>
-        <div class="ins-nav">
-            <button class="ins-btn" data-action="prevTip">{{ t('index.prev') }}</button>
-            <div class="ins-dots" id="ins-dots"></div>
-            <button class="ins-btn" data-action="nextTip">{{ t('index.next') }}</button>
-        </div>
-        <div class="ins-progress"><div class="ins-pbar" id="ins-pbar"></div></div>
+  <!-- 3. AI NEXT ACTION -->
+  <section class="card next" id="next-card">
+    <div class="next-icon" id="next-icon">🎯</div>
+    <div class="next-body">
+      <div class="hero-cap">{{ t('index.next_action_label') }}</div>
+      <div class="next-title" id="next-title">…</div>
+      <div class="next-sub" id="next-sub"></div>
     </div>
+    <button class="btn-volt next-cta" id="next-cta" data-action="doNextAction">→</button>
+  </section>
 
-    <!-- ═══ JOURNEY MAP — full width ═══ -->
-    <div class="bc b-3 journey-card">
-        <div class="jm-header">
-            <div class="jm-level" id="jm-level">{{ user_level }}</div>
-            <div class="jm-info">
-                <div class="jm-title-text" id="jm-title">{{ user_title }}</div>
-                <div class="jm-xp-row">
-                    <span class="jm-xp-text" id="jm-xp">{{ xp_in_level }} / {{ xp_for_next }} XP</span>
-                    <span class="jm-streak-flame" id="jm-streak">
-                        <svg class="flame-icon" viewBox="0 0 24 24"><defs><linearGradient id="flameGrad" x1="0" y1="1" x2="0" y2="0"><stop offset="0%" stop-color="#FF6B00"/><stop offset="100%" stop-color="#FF2D7B"/></linearGradient></defs><path d="M12 2c.5 3.5-1 6-1 6s2-.5 3 1c1 1.5 0 4 0 4s1.5-1 2 .5.5 3.5-1 4.5-2 1-2 1 1-1.5 0-3-2-2-2-2-.5 2-2 3-1.5-1-1.5-1-.5 2.5-2 3-2-1-2-2 1.5-3 1.5-3-2 1.5-2.5 4c-.5 2.5 1 4 1 4s-3-1-3-5 3-8 5-10z" fill="url(#flameGrad)"/></svg>
-                        <span id="jm-streak-num">{{ t('index.streak_days', n=streak_count|default(0)) }}</span>
-                    </span>
-                </div>
-            </div>
-        </div>
-        <div class="jm-bar">
-            <div class="jm-bar-inner" id="jm-bar" style="width:{{ (xp_in_level / xp_for_next * 100)|int }}%"></div>
-        </div>
-        <div class="jm-bonus" id="jm-bonus"></div>
+  <!-- 4. QUICK ACTIONS -->
+  <section class="card">
+    <div class="sec-label">{{ t('index.quick_actions') }}</div>
+    <div class="qa-grid">
+      <a href="/nutrition" class="qa-tile">
+        <span class="qa-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/></svg></span>
+        <span class="qa-lbl">{{ t('index.qa_log_meal') }}</span>
+      </a>
+      <div class="qa-tile disabled" aria-disabled="true" title="{{ t('index.qa_soon') }}">
+        <span class="qa-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5a1 1 0 0 1 1-1h2M17 4h2a1 1 0 0 1 1 1v2M20 17v2a1 1 0 0 1-1 1h-2M7 20H5a1 1 0 0 1-1-1v-2M7 8v8M10 8v8M13 8v8M16 8v8"/></svg></span>
+        <span class="qa-lbl">{{ t('index.qa_barcode') }}</span>
+        <span class="qa-soon">{{ t('index.qa_soon') }}</span>
+      </div>
+      <button class="qa-tile" type="button" data-action="openMenuScan">
+        <span class="qa-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 3h16v18l-3-2-2 2-3-2-3 2-2-2-3 2V3z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg></span>
+        <span class="qa-lbl">{{ t('index.qa_menu') }}</span>
+      </button>
+      <a href="/training" class="qa-tile">
+        <span class="qa-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 6.5h11M6.5 17.5h11M4 9v6M20 9v6M8 8v8M16 8v8"/></svg></span>
+        <span class="qa-lbl">{{ t('index.qa_workout') }}</span>
+      </a>
     </div>
+  </section>
 
-</div><!-- /bento -->
+  <!-- 5. NUTRITION SUMMARY -->
+  <section class="card">
+    <div class="sec-label">{{ t('index.nutrition_summary') }}</div>
+    <div class="nutri-grid">
+      <div class="nutri-cell">
+        <div class="ring-wrap" style="width:62px;height:62px;">
+          <svg class="ring-svg" viewBox="0 0 62 62" width="62" height="62"><circle class="ring-track" cx="31" cy="31" r="26" stroke-width="6"/><circle class="ring-fill" id="nr-protein" cx="31" cy="31" r="26" stroke-width="6" stroke="var(--color-primary)" stroke-dasharray="163.36" stroke-dashoffset="163.36"/></svg>
+        </div>
+        <div class="nutri-val" id="nv-protein">—</div>
+        <div class="nutri-lbl">{{ t('index.macro_protein') }}</div>
+      </div>
+      <div class="nutri-cell">
+        <div class="ring-wrap" style="width:62px;height:62px;">
+          <svg class="ring-svg" viewBox="0 0 62 62" width="62" height="62"><circle class="ring-track" cx="31" cy="31" r="26" stroke-width="6"/><circle class="ring-fill" id="nr-carb" cx="31" cy="31" r="26" stroke-width="6" stroke="var(--color-warning)" stroke-dasharray="163.36" stroke-dashoffset="163.36"/></svg>
+        </div>
+        <div class="nutri-val" id="nv-carb">—</div>
+        <div class="nutri-lbl">{{ t('index.macro_carb') }}</div>
+      </div>
+      <div class="nutri-cell">
+        <div class="ring-wrap" style="width:62px;height:62px;">
+          <svg class="ring-svg" viewBox="0 0 62 62" width="62" height="62"><circle class="ring-track" cx="31" cy="31" r="26" stroke-width="6"/><circle class="ring-fill" id="nr-fat" cx="31" cy="31" r="26" stroke-width="6" stroke="var(--color-success)" stroke-dasharray="163.36" stroke-dashoffset="163.36"/></svg>
+        </div>
+        <div class="nutri-val" id="nv-fat">—</div>
+        <div class="nutri-lbl">{{ t('index.macro_fat') }}</div>
+      </div>
+      <div class="nutri-cell">
+        <div class="ring-wrap" style="width:62px;height:62px;">
+          <svg class="ring-svg" viewBox="0 0 62 62" width="62" height="62"><circle class="ring-track" cx="31" cy="31" r="26" stroke-width="6"/><circle class="ring-fill" id="nr-water" cx="31" cy="31" r="26" stroke-width="6" stroke="var(--color-info)" stroke-dasharray="163.36" stroke-dashoffset="163.36"/></svg>
+        </div>
+        <div class="nutri-val" id="nv-water">—</div>
+        <div class="nutri-lbl">{{ t('index.macro_water') }}</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. WEIGHT -->
+  <section class="card wt">
+    <div class="sec-label">{{ t('index.weight_title') }}</div>
+    <div class="wt-display"><div class="wt-big" id="w-kg">—</div><div class="wt-unit">kg</div></div>
+    <div class="wt-delta" id="w-delta"></div>
+    <div class="wt-goal" id="w-goal-progress" style="display:none">
+      <div class="wt-goal-text" id="w-goal-text"></div>
+      <div class="pbar-track"><div class="pbar-fill" id="w-goal-bar" style="width:0;background:linear-gradient(90deg,var(--color-primary),var(--color-primary-strong));"></div></div>
+    </div>
+    <div class="wt-spark"><canvas id="sparkline"></canvas><div id="spark-empty" style="display:none;font-size:var(--text-xs);color:var(--color-text-3);font-style:italic;padding-top:20px;">{{ t('index.no_checkin') }}</div></div>
+    <div class="wt-form">
+      <input type="number" class="wt-input" id="w-input" placeholder="{{ t('index.weight_input_ph') }}" step="0.1" min="30" max="300">
+      <button class="wt-btn" id="w-btn" data-action="doUpdateWeight">{{ t('index.update') }}</button>
+    </div>
+    <div class="wt-meta" id="w-meta" style="display:none">
+      <div><div class="wm-lbl">BMR</div><div class="wm-val" id="w-bmr">—</div></div>
+      <div><div class="wm-lbl">TDEE</div><div class="wm-val" id="w-tdee">—</div></div>
+      <div><div class="wm-lbl">{{ t('index.cal_target') }}</div><div class="wm-val" id="w-target">—</div></div>
+    </div>
+  </section>
+
+  <!-- 7. ACHIEVEMENTS -->
+  <section class="card ach">
+    <div class="sec-label">{{ t('index.achievements') }}</div>
+    <div class="ach-top">
+      <div class="ach-emblem">{% if user_level <= 5 %}🌱{% elif user_level <= 10 %}💪{% elif user_level <= 20 %}🔥{% else %}🏆{% endif %}</div>
+      <div class="ach-body">
+        <div class="ach-title">{{ user_title }}</div>
+        <div class="ach-xp"><span id="ach-xp">{{ xp_in_level }} / {{ xp_for_next }}</span> XP · {{ t('index.level_label') }} {{ user_level }}</div>
+      </div>
+    </div>
+    <div class="pbar-track"><div class="pbar-fill" id="ach-bar" style="width:{{ (xp_in_level / xp_for_next * 100)|int }}%;background:linear-gradient(90deg,var(--color-primary),var(--color-primary-strong));"></div></div>
+    <div class="ach-foot">
+      <span class="ach-streak">🔥 {{ t('index.streak_days', n=streak_count|default(0)) }}</span>
+      <a class="ach-link" href="/quests">{{ t('index.view_quests') }} →</a>
+    </div>
+    <div class="ach-xp" id="jm-bonus" style="min-height:14px;"></div>
+  </section>
+
+  <!-- 8. AI TIP -->
+  <section class="card tip">
+    <div class="sec-label">{{ t('index.tip_title') }}</div>
+    <div id="tip-body">
+      <div class="tip-slide" id="ins-slide">
+        <span class="tip-icon" id="ins-icon">⚡</span>
+        <div class="tip-text" id="ins-text">{{ t('index.tip_loading') }}</div>
+        <div class="tip-src" id="ins-src">{{ t('index.tip_src_default') }}</div>
+      </div>
+    </div>
+    <div class="tip-nav">
+      <button class="tip-btn" data-action="prevTip">{{ t('index.prev') }}</button>
+      <div class="tip-dots" id="ins-dots"></div>
+      <button class="tip-btn" data-action="nextTip">{{ t('index.next') }}</button>
+    </div>
+    <div class="tip-progress"><div class="tip-pbar" id="ins-pbar"></div></div>
+  </section>
+
+</div><!-- /dash-grid -->
 </main>
 
 {% include "_actionbar.html" %}
 
-<!-- ══════════════════════════════════════
-     QUICK ADD FAB — Bottom Left
-     ══════════════════════════════════════ -->
-<div class="quick-add-wrap" id="quick-add-wrap">
-    <button class="quick-add-btn" id="quick-add-btn" data-action="toggleQuickAdd">
-        <svg viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-    </button>
-    <div class="quick-add-actions" id="quick-add-actions">
-        <div class="fab-row">
-            <a href="/nutrition" class="fab-sub">
-                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/></svg>
-            </a>
-            <div class="fab-lbl">{{ t('index.fab_log_meal') }}</div>
-        </div>
-    </div>
-</div>
-
 <!-- TOAST -->
 <div class="toast-wrap" id="toast-wrap"></div>
 
-<!-- WEEKLY REWARD CELEBRATION MODAL -->
+<!-- ══════════════════════════════════════
+     WEEKLY REWARD CELEBRATION MODAL
+     ══════════════════════════════════════ -->
 <style nonce="{{ csp_nonce }}">
 .reward-overlay {
     position: fixed; inset: 0; z-index: 1000;
@@ -200,8 +202,8 @@
 .reward-overlay.open { display: flex; }
 .reward-card {
     width: 100%; max-width: 360px; text-align: center;
-    background: var(--surface-2); border: 1px solid var(--border-2);
-    border-radius: var(--r-lg); padding: 32px 28px 26px;
+    background: var(--color-surface-2); border: 1px solid var(--color-border-2);
+    border-radius: var(--radius-lg); padding: 32px 28px 26px;
     box-shadow: 0 24px 60px rgba(0,0,0,0.55);
     animation: rewardIn 0.2s var(--ease-out-expo);
 }
@@ -216,16 +218,16 @@
 .reward-trophy svg { width: 30px; height: 30px; stroke: #FFD700; fill: none; stroke-width: 1.8; }
 .reward-title {
     font-family: var(--font-display); font-size: 26px; letter-spacing: 1.5px;
-    color: var(--text); margin: 0 0 10px;
+    color: var(--color-text-1); margin: 0 0 10px;
 }
-.reward-body { font-size: 14px; line-height: 1.55; color: var(--text-2); margin: 0 0 24px; }
-.reward-body b { color: var(--text); font-weight: 700; }
-.reward-xp { color: var(--volt); font-weight: 700; }
+.reward-body { font-size: 14px; line-height: 1.55; color: var(--color-text-2); margin: 0 0 24px; }
+.reward-body b { color: var(--color-text-1); font-weight: 700; }
+.reward-xp { color: var(--color-primary); font-weight: 700; }
 .reward-btn {
     width: 100%; height: 48px; border: none; cursor: pointer;
-    background: var(--volt); color: var(--color-on-primary);
+    background: var(--color-primary); color: var(--color-on-primary);
     font-family: var(--font-body); font-size: 14px; font-weight: 700;
-    border-radius: var(--r-md); transition: opacity 0.2s;
+    border-radius: var(--radius-md); transition: opacity 0.2s;
 }
 .reward-btn:hover { opacity: 0.88; }
 @media (prefers-reduced-motion: reduce) { .reward-card { animation: none; } }
@@ -245,8 +247,10 @@
      JAVASCRIPT
      ══════════════════════════════════════ -->
 <script nonce="{{ csp_nonce }}">
-let quickAddOpen = false, tipIdx = 0, sparkChart = null, userGoal = null;
-let selectedIntensity = 'moderate', currentActivityCals = 0, currentConsumedCals = 0;
+let tipIdx = 0, sparkChart = null, userGoal = null;
+let currentConsumedCals = 0, currentTargetCals = 2000;
+let waterCount = 0, waterGoal = 8, workoutDone = false, mealsLogged = false;
+let nextAction = null;
 
 const TIPS_TR = [
     { icon:'📈', text:'<strong>Progressive Overload</strong> — Her hafta ağırlık veya tekrar sayını küçük artışlarla yükselt. Kas büyümesinin temel formülü budur.', src:'Spor Fizyolojisi' },
@@ -312,51 +316,119 @@ function toast(msg, type = 'info') {
 /* ═══ GREETING ═══ */
 function setGreeting(goal) {
     const h = new Date().getHours();
-    let gText, timeLabel;
-    if      (h >= 5  && h < 12) { gText = t('index.greet_morning'); timeLabel = t('index.time_morning'); }
-    else if (h >= 12 && h < 17) { gText = t('index.greet_noon');    timeLabel = t('index.time_noon'); }
-    else if (h >= 17 && h < 22) { gText = t('index.greet_evening'); timeLabel = t('index.time_evening'); }
-    else                         { gText = t('index.greet_night');   timeLabel = t('index.time_night'); }
-
-    const uname = document.querySelector('#g-title span').textContent;
-    document.getElementById('g-eyebrow').textContent = `${timeLabel} — COMMAND CENTER`;
-    document.getElementById('g-title').innerHTML = `${gText}, <span>${uname}</span>`;
-
-    const goalCfg = {
-        'kilo verme':  { sub: t('index.sub_loss') },
-        'kas kazanma': { sub: t('index.sub_gain') },
-    };
-    const cfg = goalCfg[goal] || { sub: t('index.sub_default') };
-    document.getElementById('g-sub').textContent  = cfg.sub;
+    let gText;
+    if      (h >= 5  && h < 12) gText = t('index.greet_morning');
+    else if (h >= 12 && h < 17) gText = t('index.greet_noon');
+    else if (h >= 17 && h < 22) gText = t('index.greet_evening');
+    else                        gText = t('index.greet_night');
+    const hello = document.getElementById('id-hello');
+    if (hello) hello.textContent = gText + ',';
+    userGoal = goal;
 }
 
 
-/* ═══ STREAK ═══ */
-/* Streak sunucuda (update_streak / streak_count) tutulur; cihazlar arası
-   tutarlı olması için her zaman sunucu değeri gösterilir. */
+/* ═══ STREAK (sunucu değeri) ═══ */
 function renderStreak(n) {
     const flameNum = document.getElementById('jm-streak-num');
     if (flameNum) flameNum.textContent = t('index.streak_days', { n: n });
 }
 
 
-/* ═══ CALORIE RING ═══ */
-function updateCalRing(consumed, target, activityCals) {
-    activityCals = activityCals || 0;
+/* ═══ CALORIE HERO RING ═══ */
+function updateCalRing(consumed, target) {
     currentConsumedCals = consumed;
-    const effectiveTarget = target + activityCals;
-    const remaining = Math.max(effectiveTarget - consumed, 0);
-    const circ  = 276.46;
-    const ratio = effectiveTarget > 0 ? Math.min(consumed / effectiveTarget, 1) : 0;
-    const ring  = document.getElementById('cal-ring');
+    currentTargetCals = target;
+    const circ = 326.73;                 // 2π·52
+    const ratio = target > 0 ? Math.min(consumed / target, 1) : 0;
+    const remaining = Math.max(target - consumed, 0);
+    const ring = document.getElementById('cal-ring');
     ring.style.strokeDashoffset = circ * (1 - ratio);
-    ring.style.stroke = ratio >= 1 ? '#FF4D4D' : ratio >= 0.85 ? '#FFB020' : '#3D8BFF';
+    ring.style.stroke = ratio >= 1 ? 'var(--color-danger)' : ratio >= 0.85 ? 'var(--color-warning)' : 'var(--color-primary)';
+    document.getElementById('cal-num').textContent = remaining;
+    document.getElementById('hero-sub').textContent = consumed + ' / ' + target + ' kcal';
+}
 
-    document.getElementById('cal-num').textContent      = remaining;
-    document.getElementById('cal-consumed').textContent = consumed + ' kcal';
-    document.getElementById('cal-remain').textContent   = remaining + ' kcal';
-    document.getElementById('cal-target').textContent   = target + ' kcal';
-    document.getElementById('cal-activity').textContent = '+' + activityCals + ' kcal';
+
+/* ═══ NUTRITION RINGS ═══ */
+function setRing(id, ratio) {
+    const circ = 163.36;                 // 2π·26
+    const el = document.getElementById(id);
+    if (el) el.style.strokeDashoffset = circ * (1 - Math.min(Math.max(ratio, 0), 1));
+}
+function updateNutrition(totals, target) {
+    const p = Math.round(totals.protein || 0), c = Math.round(totals.karb || 0), f = Math.round(totals.yag || 0);
+    const tp = Math.round(target * 0.30 / 4), tc = Math.round(target * 0.40 / 4), tf = Math.round(target * 0.30 / 9);
+    document.getElementById('nv-protein').textContent = p + '/' + tp + 'g';
+    document.getElementById('nv-carb').textContent    = c + '/' + tc + 'g';
+    document.getElementById('nv-fat').textContent     = f + '/' + tf + 'g';
+    setRing('nr-protein', p / Math.max(tp, 1));
+    setRing('nr-carb',    c / Math.max(tc, 1));
+    setRing('nr-fat',     f / Math.max(tf, 1));
+}
+function updateWaterRing(count, goal) {
+    goal = goal || 8;
+    document.getElementById('nv-water').textContent = count + '/' + goal;
+    setRing('nr-water', count / goal);
+}
+
+
+/* ═══ AI NEXT ACTION (deterministik) ═══ */
+function computeNextAction() {
+    const h = new Date().getHours();
+    const consumed = currentConsumedCals, target = currentTargetCals || 2000;
+    const set = (icon, title, sub, ctaLabel, kind) => ({ icon, title, sub, ctaLabel, kind });
+    if (h >= 5 && h < 11 && !mealsLogged)
+        return set('🍳', t('index.na_breakfast_title'), t('index.na_breakfast_sub'), t('index.na_cta_log'), 'nutrition');
+    if (h >= 11 && h < 16 && consumed < 0.35 * target)
+        return set('🥗', t('index.na_lunch_title'), t('index.na_lunch_sub'), t('index.na_cta_log'), 'nutrition');
+    if (h >= 16 && h < 22 && consumed < 0.75 * target)
+        return set('🍽️', t('index.na_dinner_title'), t('index.na_dinner_sub'), t('index.na_cta_log'), 'nutrition');
+    if (waterCount < waterGoal && h >= 12)
+        return set('💧', t('index.na_water_title'), t('index.na_water_sub', { n: waterCount }), t('index.na_cta_water'), 'water');
+    if (!workoutDone && h >= 8 && h < 22)
+        return set('🏋️', t('index.na_workout_title'), t('index.na_workout_sub'), t('index.na_cta_workout'), 'training');
+    return set('🎉', t('index.na_done_title'), t('index.na_done_sub'), t('index.na_cta_progress'), 'progress');
+}
+function renderNextAction() {
+    nextAction = computeNextAction();
+    document.getElementById('next-icon').textContent = nextAction.icon;
+    document.getElementById('next-title').textContent = nextAction.title;
+    document.getElementById('next-sub').textContent = nextAction.sub;
+    document.getElementById('next-cta').textContent = nextAction.ctaLabel;
+}
+async function doNextAction() {
+    if (!nextAction) return;
+    if (nextAction.kind === 'nutrition') { location.href = '/nutrition'; return; }
+    if (nextAction.kind === 'training')  { location.href = '/training';  return; }
+    if (nextAction.kind === 'progress')  { location.href = '/progress-page'; return; }
+    if (nextAction.kind === 'water') {
+        const next = Math.min(waterCount + 1, waterGoal);
+        try {
+            const res = await fetch('/water', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ count: next })
+            });
+            if (res.ok) {
+                waterCount = next;
+                updateWaterRing(waterCount, waterGoal);
+                renderNextAction();
+            }
+        } catch (e) { toast(t('index.conn_error'), 'error'); }
+    }
+}
+
+
+/* ═══ MENÜ TARA (coach widget) ═══ */
+function openMenuScan() {
+    if (window.CW && typeof CW.startScan === 'function') {
+        if (!CW.open && typeof CW.toggle === 'function') CW.toggle();
+        setTimeout(function () {
+            try { CW.startScan(); } catch (e) { location.href = '/nutrition'; }
+        }, 300);
+    } else {
+        location.href = '/nutrition';
+    }
 }
 
 
@@ -412,7 +484,6 @@ function renderSparkline(weights, labels, lineColor) {
 
 
 /* ═══ WEIGHT UPDATE ═══ */
-/* Son güncelleme zamanı sunucudan gelir (cihazlar arası tutarlı). */
 let lastWeightUpdateMs = (function () {
     const iso = "{{ last_weight_update|default('') }}";
     const t = iso ? Date.parse(iso) : NaN;
@@ -482,16 +553,16 @@ async function loadSparkline() {
             if (diff < 0) {
                 const aligned = isLoss;
                 trendColor = aligned ? '#3D8BFF' : '#FF4D4D';
-                el.innerHTML = `<span class="w-arrow">↓</span> ${Math.abs(diff)} ${t('index.kg_vs_last')}`;
-                el.className = 'w-delta ' + (aligned ? 'goal-ok' : 'goal-warn');
+                el.innerHTML = `<span class="wt-arrow">↓</span> ${Math.abs(diff)} ${t('index.kg_vs_last')}`;
+                el.className = 'wt-delta ' + (aligned ? 'goal-ok' : 'goal-warn');
             } else if (diff > 0) {
                 const aligned = !isLoss;
                 trendColor = aligned ? '#3D8BFF' : '#FF4D4D';
-                el.innerHTML = `<span class="w-arrow">↑</span> ${diff} ${t('index.kg_vs_last')}`;
-                el.className = 'w-delta ' + (aligned ? 'goal-ok' : 'goal-warn');
+                el.innerHTML = `<span class="wt-arrow">↑</span> ${diff} ${t('index.kg_vs_last')}`;
+                el.className = 'wt-delta ' + (aligned ? 'goal-ok' : 'goal-warn');
             } else {
                 el.innerHTML = t('index.same_as_last');
-                el.className = 'w-delta eq';
+                el.className = 'wt-delta eq';
                 trendColor = '#606060';
             }
         }
@@ -503,7 +574,7 @@ async function loadSparkline() {
 }
 
 
-/* ═══ AI TIPS ═══ */
+/* ═══ AI TIPS CAROUSEL ═══ */
 let tipTimer = null;
 
 function renderTip(i, animated, dir) {
@@ -518,11 +589,10 @@ function renderTip(i, animated, dir) {
     dots.innerHTML = '';
     for (let d = start; d < end; d++) {
         const dot = document.createElement('div');
-        dot.className = 'ins-dot' + (d === i ? ' on' : '');
+        dot.className = 'tip-dot' + (d === i ? ' on' : '');
         (function(idx) { dot.addEventListener('click', function() { goToTip(idx); }); })(d);
         dots.appendChild(dot);
     }
-    // Next: dot strip enters from the right and settles left into place.
     if (animated) {
         const dotDx = (dir || 1) > 0 ? 8 : -8;
         dots.animate(
@@ -541,17 +611,12 @@ function renderTip(i, animated, dir) {
     if (!animated) { applyContent(); return; }
 
     const slide   = document.getElementById('ins-slide');
-    // Carousel "next" sweep: old exits left, new enters from right.
     const outDx   = dir > 0 ? '-105%' : '105%';
     const inFrom  = dir > 0 ? '105%'  : '-105%';
     const easing  = 'cubic-bezier(0.22, 0.61, 0.36, 1)';
 
-    // Cancel any in-flight animation so back-to-back navigation stays clean.
     if (slide._tipAnim) { try { slide._tipAnim.cancel(); } catch (e) {} }
 
-    // Use Web Animations API — bypasses CSS transition pitfalls (batched
-    // class changes, reduced-motion overrides on .ins-slide) and guarantees
-    // the slide plays on every tip change.
     const outAnim = slide.animate(
         [ { transform: 'translateX(0)' }, { transform: 'translateX(' + outDx + ')' } ],
         { duration: 180, easing: easing, fill: 'forwards' }
@@ -577,14 +642,13 @@ function restartProgressBar() {
     if (!bar) return;
     bar.style.animation = 'none';
     bar.offsetHeight;
-    bar.style.animation = 'ins-fill 8s linear forwards';
+    bar.style.animation = 'tip-fill 8s linear forwards';
 }
 
 function goToTip(i, dir) {
     const prev = tipIdx;
     tipIdx = ((i % TIPS.length) + TIPS.length) % TIPS.length;
     if (dir === undefined) {
-        // Pick the shorter way around the ring for dot clicks.
         const fwd = (tipIdx - prev + TIPS.length) % TIPS.length;
         dir = (fwd === 0 || fwd <= TIPS.length / 2) ? 1 : -1;
     }
@@ -599,13 +663,10 @@ const _prefersReducedMotion = window.matchMedia
 
 function resetTipTimer() {
     if (tipTimer) { clearInterval(tipTimer); tipTimer = null; }
-    // Hareket azaltma tercihinde veya sekme arka plandayken otomatik döngü yok
-    // (pil/CPU — never-idle). Görünür olunca visibilitychange yeniden başlatır.
     if (_prefersReducedMotion || document.hidden) return;
     tipTimer = setInterval(function() { goToTip(tipIdx + 1, 1); }, 8000);
 }
 
-// Sekme gizlenince taşıyıcı/animasyon dursun, geri gelince devam etsin.
 document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
         if (tipTimer) { clearInterval(tipTimer); tipTimer = null; }
@@ -615,64 +676,22 @@ document.addEventListener('visibilitychange', function () {
 });
 
 
-/* ═══ ACTIVITY TRACKER ═══ */
-function selectIntensity(int) {
-    selectedIntensity = int;
-    document.querySelectorAll('.act-int-btn').forEach(b => b.classList.toggle('active', b.dataset.int === int));
-}
-
-async function logActivity() {
-    const stepsInput = document.getElementById('act-steps');
-    const steps = parseInt(stepsInput.value);
-    if (!steps || steps <= 0) { toast(t('index.steps_invalid'), 'error'); return; }
-
-    const btn = document.getElementById('act-btn');
-    btn.textContent = '…'; btn.disabled = true;
-    try {
-        const res = await fetch('/api/activity/log', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ steps, intensity: selectedIntensity })
-        });
-        const data = await res.json();
-        if (!res.ok) { toast(data.error || t('index.error'), 'error'); return; }
-        toast(data.message, 'success');
-        stepsInput.value = '';
-        await refreshActivitySummary();
-    } catch(e) { toast(t('index.conn_error'), 'error'); }
-    finally { btn.textContent = t('index.save'); btn.disabled = false; }
-}
-
-async function refreshActivitySummary() {
-    try {
-        const res = await fetch('/api/activity/today');
-        const data = await res.json();
-        currentActivityCals = Math.round(data.total_calories || 0);
-        if (data.total_steps > 0) {
-            document.getElementById('act-summary').style.display = 'flex';
-            document.getElementById('act-total-steps').textContent = data.total_steps;
-            document.getElementById('act-total-cal').textContent = currentActivityCals;
-            document.getElementById('act-total-dist').textContent = data.total_distance;
-        }
-        const target = parseInt(document.getElementById('cal-target').textContent) || 2000;
-        updateCalRing(currentConsumedCals, target, currentActivityCals);
-    } catch(e) {}
-}
-
-
-/* ═══ QUICK ADD FAB ═══ */
-function toggleQuickAdd() {
-    quickAddOpen = !quickAddOpen;
-    document.getElementById('quick-add-btn').classList.toggle('open', quickAddOpen);
-    document.getElementById('quick-add-actions').classList.toggle('open', quickAddOpen);
-}
-document.addEventListener('click', (e) => {
-    if (quickAddOpen && !e.target.closest('.quick-add-wrap')) {
-        quickAddOpen = false;
-        document.getElementById('quick-add-btn').classList.remove('open');
-        document.getElementById('quick-add-actions').classList.remove('open');
+/* ═══ STREAK BONUS ═══ */
+function updateStreakBonus() {
+    const streak = {{ streak_count|default(0) }};
+    const bonus = document.getElementById('jm-bonus');
+    if (!bonus) return;
+    let mult = 1.0;
+    if (streak >= 30) mult = 1.5;
+    else if (streak >= 14) mult = 1.3;
+    else if (streak >= 7) mult = 1.2;
+    else if (streak >= 3) mult = 1.1;
+    if (mult > 1.0) {
+        bonus.innerHTML = '<span class="bonus-active">×' + mult.toFixed(1) + ' ' + t('index.bonus_active') + '</span>';
+    } else {
+        bonus.textContent = t('index.bonus_hint');
     }
-});
+}
 
 
 /* ═══ INIT ═══ */
@@ -685,26 +704,28 @@ async function init() {
     resetTipTimer();
 
     try {
-        const [sessRes, mealRes, actRes] = await Promise.all([
+        const [sessRes, mealRes, waterRes, woRes] = await Promise.all([
             fetch('/last-session'),
             fetch('/meal-log/today'),
-            fetch('/api/activity/today')
+            fetch('/water'),
+            fetch('/workout/status')
         ]);
-        const sess     = await sessRes.json();
-        const meals    = await mealRes.json();
-        const activity = await actRes.json();
+        const sess  = await sessRes.json();
+        const meals = await mealRes.json();
+        const water = await waterRes.json();
+        const wo    = await woRes.json();
 
-        currentActivityCals = Math.round(activity.total_calories || 0);
-        if (activity.total_steps > 0) {
-            document.getElementById('act-summary').style.display = 'flex';
-            document.getElementById('act-total-steps').textContent = activity.total_steps;
-            document.getElementById('act-total-cal').textContent = currentActivityCals;
-            document.getElementById('act-total-dist').textContent = activity.total_distance;
-        }
+        waterCount = water.count || 0; waterGoal = water.goal || 8;
+        workoutDone = !!wo.completed;
+        const mealArr = (meals && meals.meals) ? meals.meals : [];
+        mealsLogged = mealArr.length > 0;
+        const totals = (meals && meals.totals) ? meals.totals : { kalori: 0, protein: 0, karb: 0, yag: 0 };
 
+        let target = 2000;
         if (sess.exists) {
             userGoal = sess.goal;
             setGreeting(sess.goal);
+            target = Math.round(sess.target_calories || 2000);
             const currentWeight = sess.weight || 0;
             document.getElementById('w-kg').textContent = currentWeight || '—';
 
@@ -716,8 +737,7 @@ async function init() {
             }
 
             if (sess.target_weight && currentWeight) {
-                const tw = sess.target_weight;
-                const gt = sess.goal_type;
+                const tw = sess.target_weight, gt = sess.goal_type;
                 const remaining = gt === 'loss' ? Math.max(currentWeight - tw, 0) : Math.max(tw - currentWeight, 0);
                 const goalEl = document.getElementById('w-goal-progress');
                 const textEl = document.getElementById('w-goal-text');
@@ -733,37 +753,24 @@ async function init() {
                     barEl.style.width = Math.max(pct, 5) + '%';
                 }
             }
-
-            const totals  = (meals && meals.totals) ? meals.totals : { kalori: 0 };
-            const target  = sess.target_calories || 2000;
-            updateCalRing(Math.round(totals.kalori || 0), Math.round(target), currentActivityCals);
         } else {
             setGreeting(null);
-            updateCalRing(0, 2000, 0);
         }
+
+        updateCalRing(Math.round(totals.kalori || 0), target);
+        updateNutrition(totals, target);
+        updateWaterRing(waterCount, waterGoal);
+        renderNextAction();
     } catch(e) {
         setGreeting(null);
-        updateCalRing(0, 2000, 0);
+        updateCalRing(0, 2000);
+        updateNutrition({}, 2000);
+        updateWaterRing(waterCount, waterGoal);
+        renderNextAction();
     }
 
     await loadSparkline();
     updateStreakBonus();
-}
-
-function updateStreakBonus() {
-    const streak = {{ streak_count|default(0) }};
-    const bonus = document.getElementById('jm-bonus');
-    if (!bonus) return;
-    let mult = 1.0;
-    if (streak >= 30) mult = 1.5;
-    else if (streak >= 14) mult = 1.3;
-    else if (streak >= 7) mult = 1.2;
-    else if (streak >= 3) mult = 1.1;
-    if (mult > 1.0) {
-        bonus.innerHTML = '<span class="bonus-active">×' + mult.toFixed(1) + ' ' + t('index.bonus_active') + '</span>';
-    } else {
-        bonus.textContent = t('index.bonus_hint');
-    }
 }
 
 init();

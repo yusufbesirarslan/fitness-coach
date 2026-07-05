@@ -96,6 +96,7 @@
 .ach-streak { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--color-warning); font-variant-numeric: tabular-nums; }
 .ach-link { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--color-primary); text-decoration: none; }
 .ach-link:hover { color: var(--color-primary-strong); }
+.ach-xp .bonus-active { color: var(--color-warning); font-weight: var(--weight-bold); }
 
 /* ── 8. AI Tip ───────────────────────────────────────── */
 .tip { display: flex; flex-direction: column; }

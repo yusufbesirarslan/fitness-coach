@@ -124,8 +124,8 @@ def test_dashboard_renders_localized(app, client, make_user, login):
     make_user("dashen", profile_complete=True, language="en")
     login("dashen")
     body = client.get("/").get_data(as_text=True)
-    assert "Daily Calories" in body and "Activity Tracking" in body
-    assert "Günlük Kalori" not in body
+    assert "Quick Actions" in body and "Nutrition Summary" in body
+    assert "Hızlı İşlemler" not in body
     # EN tip dizisi seçili olmalı (TR tip metni gövdede olmamalı)
     assert "Sports Physiology" in body
 
