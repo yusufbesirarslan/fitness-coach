@@ -4,7 +4,11 @@
    ═══════════════════════════════════════════════════════ */
 
 /* ── Layout grid ─────────────────────────────────────── */
-.dash-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-4); }
+/* minmax(0,1fr) (not bare 1fr = minmax(auto,1fr)): the `auto` floor would
+   absorb a grid item's min-content and inflate the whole grid — the weight
+   sparkline <canvas> pushed the track to ~719px and overflowed narrow
+   viewports. minmax(0,…) lets the track follow the container instead. */
+.dash-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-4); }
 .dash-grid > .card { animation: dash-rise 0.34s var(--ease-out-expo) backwards; }
 .dash-grid > .card:nth-child(1) { animation-delay: 0s; }
 .dash-grid > .card:nth-child(2) { animation-delay: 0.04s; }
@@ -73,6 +77,9 @@
 .wt-goal-text { font-size: var(--text-sm); color: var(--color-text-2); margin-bottom: 6px; }
 .wt-goal-text strong { color: var(--color-primary); font-weight: var(--weight-bold); }
 .wt-spark { height: 64px; position: relative; margin: var(--space-3) 0; }
+/* Guard: keep the Chart.js sparkline canvas from ever exceeding its card,
+   even during a first-paint resize race (belt-and-suspenders with minmax(0,1fr)). */
+.wt-spark canvas { max-width: 100%; }
 .wt-form { display: flex; gap: var(--space-2); align-items: center; margin-bottom: var(--space-4); }
 .wt-input { flex: 1; background: var(--color-surface-1); border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-sm); padding: 10px 14px; color: var(--color-text-1); font-family: var(--font-body); font-size: var(--text-md); outline: none; transition: border-color var(--duration-fast) var(--ease-standard); -webkit-appearance: none; }
 .wt-input:focus { border-color: var(--color-primary); box-shadow: var(--focus-ring); }
@@ -121,7 +128,7 @@
 /* Full-width rows span both columns; qa-card, nutri-card, .wt, .ach
    default to one column and pair up side-by-side. */
 @media (min-width: 768px) {
-  .dash-grid { grid-template-columns: repeat(2, 1fr); gap: var(--space-5); }
+  .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5); }
   .dash-id, .hero, .next, .tip { grid-column: span 2; }
 }
 
