@@ -5,7 +5,7 @@ from flask_login import current_user, login_required
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
 from app.models import UserSession
-from app.services.ai_coach import _fetch_coach_context, _run_coach_conversation, generate_coach_reply
+from app.services.ai_coach import _fetch_coach_context, _run_coach_conversation, generate_coach_reply, is_coach_error_fallback
 from app.services.ai_gate import ai_concurrency_gate
 from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee, generate_nutrition_plan, generate_training_plan
 from app.services.premium import record_ai_chat, remaining_ai_chats
@@ -159,8 +159,11 @@ def ask_coach():
         answer = _run_coach_conversation(current_user.id, question, context,
                                          client_history, language=lang)
         # Kotayı yalnızca BAŞARILI yanıtta tüket (başarısız deneme hakkı yakmasın —
-        # premium_ai_plan_gate ile aynı felsefe).
-        if current_app.config.get("AI_CHAT_QUOTA_ENABLED", True):
+        # premium_ai_plan_gate ile aynı felsefe). _run_coach_conversation sağlayıcı
+        # çökmesinde exception yerine dostça bir yedek METİN döndürür; bu durumda da
+        # kredi yakmamalı (INF-4).
+        if current_app.config.get("AI_CHAT_QUOTA_ENABLED", True) and \
+                not is_coach_error_fallback(answer):
             record_ai_chat(current_user)
         return jsonify({"answer": answer})
     except Exception:

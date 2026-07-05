@@ -175,7 +175,14 @@
         <div class="section-card" style="margin-bottom:24px;">
             <div class="section-title">{{ t('friends.invite_title') }}</div>
             <p style="font-size:13px;color:var(--text-2);margin:6px 0 14px;font-weight:300;">
-                {{ t('friends.invite_desc')|safe }}
+                {# SEC-3: çeviri metni OTOMATİK escape edilir; yalnızca +75 XP rozeti
+                   güvenli HTML olarak eklenir. Böylece katalog anahtarı ileride
+                   kullanıcı verisi taşısa bile stored-XSS sink'i olmaz. #}
+                {% set _invite_parts = t('friends.invite_desc').split('{xp}') %}
+                {{- _invite_parts[0] -}}
+                {%- if _invite_parts|length > 1 -%}
+                    <strong style="color:var(--volt);">+75 XP</strong>{{- _invite_parts[1] -}}
+                {%- endif -%}
             </p>
             <div style="display:flex;gap:8px;">
                 <input type="text" id="invite-link" readonly value="{{ t('friends.loading') }}"

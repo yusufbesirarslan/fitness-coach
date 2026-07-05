@@ -176,10 +176,23 @@ def test_logout_cross_site_referer_fallback_rejected(client, make_user):
     assert response.status_code == 403
 
 
-def test_logout_without_any_headers_allowed(client, make_user):
-    # Başlıksız doğrudan navigasyon (adres çubuğu) çalışmaya devam etmeli.
+def test_logout_without_any_headers_rejected(client, make_user):
+    # SEC-1: Sec-Fetch-Site VE Referer ikisi de yoksa default-DENY. Eskiden kontrol
+    # düşüp logout devam ediyordu (fail-open) → her iki başlığı da göndermeyen
+    # istemcilerde CSRF ile sessiz sign-out mümkündü.
     _login_as(client, make_user, "frank")
-    assert client.get("/logout").status_code == 302
+    assert client.get("/logout").status_code == 403
+    assert client.get("/supplements").status_code == 200  # hâlâ oturumda
+
+
+def test_logout_address_bar_navigation_signs_out(client, make_user):
+    # Gerçek adres-çubuğu navigasyonu modern tarayıcılarda Sec-Fetch-Site: none
+    # gönderir → çıkış çalışmaya devam eder (default-deny yalnızca başlıksız
+    # legacy/non-browser istemcileri etkiler).
+    _login_as(client, make_user, "grace")
+    response = client.get("/logout", headers={"Sec-Fetch-Site": "none"})
+    assert response.status_code == 302
+    assert client.get("/supplements").status_code == 302  # oturum kapandı
 
 
 # ---------------------------------------------------------------------------

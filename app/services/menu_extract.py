@@ -16,6 +16,19 @@ _CURRENCY_RE = re.compile(
 )
 
 
+# Framework-state atama desenleri (INF-6). Yalnızca atamanın BAŞINI yakalar;
+# JSON gövdesi regex ile DEĞİL, brace-depth ile doğrusal kesilir → geri-izleme yok.
+_FW_STATE_ASSIGN_PATTERNS = [
+    (re.compile(r'window\.__NEXT_DATA__\s*=\s*'), "next"),
+    (re.compile(r'window\.__NUXT__\s*=\s*'), "nuxt"),
+    (re.compile(r'window\.__DATA__\s*=\s*'), "data"),
+    (re.compile(r'window\.__INITIAL_STATE__\s*=\s*'), "state"),
+]
+# Doğrusal brace taramasına üst sınır — kötü niyetli devasa girdide tek thread'i
+# uzun süre meşgul etmesin (linear ama yine de sınırlı tut).
+_FW_STATE_MAX_JSON = 2_000_000
+
+
 def _is_price_noise(text):
     """Yemek ADI değil, yalnızca fiyat/sayı/para birimi olan satırları yakalar
     (örn. "120", "₺120", "120 TL", "85,50", "1.250,00 ₺", kategori sayacı "10").
@@ -48,32 +61,38 @@ def _extract_framework_state(html_text, soup=None):
         except (json.JSONDecodeError, ValueError):
             pass
 
-    patterns = [
-        (r'window\.__NEXT_DATA__\s*=\s*({.+})\s*;?\s*</script>', "next"),
-        (r'window\.__NUXT__\s*=\s*({.+})\s*;?\s*</script>', "nuxt"),
-        (r'window\.__DATA__\s*=\s*({.+})\s*;?\s*</script>', "data"),
-        (r'window\.__INITIAL_STATE__\s*=\s*({.+})\s*;?\s*</script>', "state"),
-    ]
-    for pattern, framework in patterns:
-        match = re.search(pattern, html_text, re.DOTALL)
-        if match:
-            raw = match.group(1)
-            depth = 0
-            end_idx = 0
-            for i, ch in enumerate(raw):
-                if ch == '{':
-                    depth += 1
-                elif ch == '}':
-                    depth -= 1
-                    if depth == 0:
-                        end_idx = i + 1
-                        break
-            if end_idx > 0:
-                try:
-                    state = json.loads(raw[:end_idx])
-                    return state, framework
-                except (json.JSONDecodeError, ValueError):
-                    continue
+    # INF-6: Eskiden bu yol `({.+})...</script>` GREEDY + re.DOTALL desenini ~3 MB'a
+    # varan ham HTML üzerinde çalıştırıyordu; hazırlanmış/şişkin bir sayfada çok
+    # sayıda `{`/`</script>` ağır geri-izleme (backtracking) ile tek worker
+    # thread'inde CPU amplifikasyonu yaratabiliyordu (INF-5 ile birleşince kötüleşir).
+    # Onun yerine: atamayı SINIRLI bir desenle (yalnızca `\s*`, geri-izleme yok) bul,
+    # sonra süslü-parantez derinliğini DOĞRUSAL (O(n)) yürüyerek JSON'ı kes. Aynı
+    # brace-depth semantiği korunur; json.loads sonucu doğrular.
+    for pattern, framework in _FW_STATE_ASSIGN_PATTERNS:
+        m = pattern.search(html_text)
+        if not m:
+            continue
+        start = m.end()
+        if start >= len(html_text) or html_text[start] != '{':
+            continue
+        depth = 0
+        end_idx = 0
+        scan_limit = min(len(html_text), start + _FW_STATE_MAX_JSON)
+        for i in range(start, scan_limit):
+            ch = html_text[i]
+            if ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    end_idx = i + 1
+                    break
+        if end_idx > start:
+            try:
+                state = json.loads(html_text[start:end_idx])
+                return state, framework
+            except (json.JSONDecodeError, ValueError):
+                continue
     return None, None
 
 

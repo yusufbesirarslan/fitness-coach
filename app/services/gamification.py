@@ -200,7 +200,13 @@ def run_weekly_rollover(now=None, force_week=None):
     for i, u in enumerate(top):
         rank = i + 1
         xp = WEEKLY_REWARDS[rank]
-        u.rank_points = (u.rank_points or 0) + xp  # reward feeds all-time only, not weekly
+        # BUG-4: ödül XP'sini award_xp'den geçir — 500-puan seviye sınırı aşılırsa
+        # level_up feed girdisini düşer ve _mark_lb_dirty ile Redis sync'i tetikler.
+        # Doğrudan rank_points += xp yazınca (eski hal) büyük XP sıçraması olsa bile
+        # "N. seviyeye ulaştı" aktivitesi hiç üretilmiyordu. award_xp weekly_xp'yi de
+        # artırır ama aşağıdaki toplu reset onu sıfırladığından ödül yine YALNIZCA
+        # all-time'a işler.
+        award_xp(u.id, xp)
         db.session.add(WeeklyWinner(user_id=u.id, week_key=week_key,
                                     rank=rank, xp_awarded=xp, notified=False))
         winners.append({"user_id": u.id, "rank": rank, "xp": xp})

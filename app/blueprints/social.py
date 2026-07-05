@@ -543,6 +543,12 @@ def respond_suggestion(msg_id):
     if action == "accept" and nutrients:
         resp["nutrients"] = nutrients
         resp["message"] = t("route.accepted_kcal", kcal=int(nutrients['kalori']))
+        # Öneri kabul ederek öğün loglamak da diğer MealLog yazan yollar (log_meal,
+        # quick_add_meal, diary_log_meal) gibi "Öğün Kaydet" görevini vermeli (BUG-3).
+        # Yalnızca gerçekten öğün yazıldığında (nutrients not None).
+        quest_result = complete_quest_for_user(current_user.id, "meal_logged")
+        if quest_result:
+            resp["quest_awarded"] = quest_result
     elif action == "accept" and is_meal and nutrients is None:
         # Öneri kabul edildi ama makrolar hesaplanamadı → öğün GÜNLÜĞE EKLENMEDI
         # (sıfır-makro satırı yazılmaz). Kullanıcıya sessiz başarı yerine durumu bildir.

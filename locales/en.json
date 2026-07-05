@@ -415,7 +415,7 @@
   "friends.page_sub": "Add friends, manage requests, start a chat.",
   "friends.search_ph": "Search by username...",
   "friends.invite_title": "INVITE A FRIEND",
-  "friends.invite_desc": "Share your invite link — when your friend joins, you both earn <strong style=\"color:var(--volt);\">+75 XP</strong>.",
+  "friends.invite_desc": "Share your invite link — when your friend joins, you both earn {xp}.",
   "friends.copy": "Copy",
   "friends.loading": "Loading...",
   "friends.incoming": "INCOMING REQUESTS",

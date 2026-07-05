@@ -106,6 +106,39 @@ def progress_redirect():
     return redirect(url_for("tracking.progress_page"))
 
 
+def _apply_weight_to_profile(weight, last_sess):
+    """Kiloyu kanonik profile (current_user.weight) yaz ve profil TAM ise
+    BMR/TDEE/hedef-kaloriyi son oturumda yeniden hesapla. Hem /update-weight
+    hem haftalık /checkin buradan geçer ki iki akış da current_user.weight'i
+    ve türetilmiş kalori hedeflerini güncel tutsun (BUG-1).
+
+    Profil eksikse (current_activity/goal yoksa) calculate_tdee sessizce
+    sedanter varsayıma düşer; bu yanlış değeri kalıcılaştırmamak için türetilmiş
+    hedeflere DOKUNMA, yalnızca kiloyu yaz (L2). (bmr, tdee, target, ready) döner.
+    """
+    current_user.weight = weight
+    profile_ready = all([
+        current_user.height, current_user.age, current_user.gender,
+        current_user.current_activity, current_user.goal,
+    ])
+    if profile_ready:
+        bmr             = calculate_bmr(weight, current_user.height, current_user.age, current_user.gender)
+        tdee            = calculate_tdee(bmr, current_user.current_activity)
+        target_calories = calculate_target(tdee, current_user.goal)
+        if last_sess:
+            last_sess.weight          = weight
+            last_sess.bmr             = bmr
+            last_sess.tdee            = tdee
+            last_sess.target_calories = target_calories
+    else:
+        if last_sess:
+            last_sess.weight = weight
+        bmr             = last_sess.bmr if last_sess else None
+        tdee            = last_sess.tdee if last_sess else None
+        target_calories = last_sess.target_calories if last_sess else None
+    return bmr, tdee, target_calories, profile_ready
+
+
 @bp.route("/checkin", methods=["POST"])
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
@@ -133,8 +166,13 @@ def checkin():
     beslenme    = _to_int(data.get("beslenme_uyumu", 3), 3)
     note        = data.get("note", "")
 
-    # Önceki check-in'i al
+    # Önceki check-in'i al. /update-weight yalnızca weight dolu, diğer metrikleri
+    # NULL "seyrek" satırlar yazar (BUG-5); bunları previous/days_passed hesabına
+    # katma — aksi halde aynı gün kilo güncelleyip check-in yapan kullanıcıda
+    # days_passed=0 çıkıp prev_weight o dakikaki değere sabitlenir. Gerçek
+    # check-in'ler daima yogunluk alanını taşır.
     previous = WeeklyCheckIn.query.filter_by(user_id=current_user.id)\
+        .filter(WeeklyCheckIn.yogunluk.isnot(None))\
         .order_by(WeeklyCheckIn.created_at.desc())\
         .first()
 
@@ -172,6 +210,12 @@ def checkin():
         coach_feedback=coach_feedback
     )
     db.session.add(entry)
+
+    # Haftalık check-in kilosunu kanonik profile taşı ve kalori hedeflerini
+    # yeniden hesapla (BUG-1). Aksi halde yalnızca /update-weight kullanmayan,
+    # her şeyi haftalık check-in ile takip eden kullanıcının current_user.weight'i
+    # kurulum değerinde donar; menü "kalan bütçe" ve protein nudge'ı bayatlar.
+    _apply_weight_to_profile(weight, last_session)
     db.session.commit()
 
     # "Haftalık Check-in" görevini ver (günde bir kez; zaten claimliyse None — 1.1).
@@ -189,7 +233,10 @@ def checkin():
 @bp.route("/checkin-history")
 @login_required
 def checkin_history():
+    # /update-weight kaynaklı seyrek satırları (yalnızca weight dolu) geçmişten
+    # çıkar; bunlar blank-metrikli satırlar olarak listeyi kirletiyordu (BUG-5).
     checkins = WeeklyCheckIn.query.filter_by(user_id=current_user.id)\
+        .filter(WeeklyCheckIn.yogunluk.isnot(None))\
         .order_by(WeeklyCheckIn.created_at.asc())\
         .all()
 
@@ -226,36 +273,13 @@ def update_weight():
     except (ValueError, TypeError):  # liste/dict gibi JSON tipleri TypeError verir → 500 yerine 400 (D5)
         return jsonify({"error": t("route.weight_numeric")}), 400
 
-    current_user.weight = weight
-
     last_sess = UserSession.query.filter_by(user_id=current_user.id)\
         .order_by(UserSession.created_at.desc()).first()
 
-    # L2: BMR/TDEE/hedef-kalori yalnızca profil TAM olduğunda yeniden hesapla.
-    # Eksik current_activity/goal ile calculate_tdee sessizce sedanter (1.2)
-    # varsayıma düşüp bunu last_sess.target_calories'a yazıyordu; bu değer menü
-    # "kalan bütçe" ve protein hedefini sürüklediğinden yanlış bir sayıyı
-    # kalıcılaştırıyordu. Profil eksikse kiloyu güncelle ama türetilmiş hedefleri
-    # BOZMA — mevcut (varsa) son değerleri göster.
-    profile_ready = all([
-        current_user.height, current_user.age, current_user.gender,
-        current_user.current_activity, current_user.goal,
-    ])
-    if profile_ready:
-        bmr             = calculate_bmr(weight, current_user.height, current_user.age, current_user.gender)
-        tdee            = calculate_tdee(bmr, current_user.current_activity)
-        target_calories = calculate_target(tdee, current_user.goal)
-        if last_sess:
-            last_sess.weight          = weight
-            last_sess.bmr             = bmr
-            last_sess.tdee            = tdee
-            last_sess.target_calories = target_calories
-    else:
-        if last_sess:
-            last_sess.weight = weight
-        bmr             = last_sess.bmr if last_sess else None
-        tdee            = last_sess.tdee if last_sess else None
-        target_calories = last_sess.target_calories if last_sess else None
+    # Kiloyu kanonik profile yaz + profil TAM ise BMR/TDEE/hedefi yeniden hesapla
+    # (ortak yardımcı; /checkin ile aynı davranış). Profil eksikse türetilmiş
+    # hedefleri BOZMA — bkz. _apply_weight_to_profile (L2).
+    bmr, tdee, target_calories, profile_ready = _apply_weight_to_profile(weight, last_sess)
 
     # Gün sınırı Istanbul gününe göre (CLAUDE.md): UTC gece-yarısı kullanmak
     # Istanbul 00:00–03:00 arası check-in'i bir önceki güne sokar ve "bugünü
