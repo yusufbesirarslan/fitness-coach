@@ -106,9 +106,10 @@ keep `nonce="{{ csp_nonce }}"`.
 
 - **Preserve:** every backend route; `_nav.html`/`_actionbar.html` includes with
   `nav_active='home'`; the Chart.js SRI `<script>` tag (asserted by
-  `test_chart_js_tag_carries_sri`); the weekly-reward modal; the quick-add FAB
-  (Log Meal) may be kept or folded into Quick Actions — folding is preferred to
-  reduce redundancy, but the FAB's removal must not break the shell.
+  `test_chart_js_tag_carries_sri`); the weekly-reward modal. **The quick-add FAB
+  (Log Meal) is removed and folded into the Quick Actions grid** (confirmed) —
+  the `Öğün Ekle` tile is the single meal-logging entry point; removal must not
+  break the shell.
 - **Remove:** the placeholder Activity/steps logging card (`.act-*`, intensity
   buttons, `/api/activity/log` UI). Steps auto-sync from device health is a
   future feature. `/api/activity/today` may still be read for the calorie ring's
