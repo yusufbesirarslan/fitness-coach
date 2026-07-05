@@ -209,8 +209,10 @@ markup'ı YASAK (regresyon: `tests/test_app_shell.py`):
 
 - `.global-header`/`.action-bar` zeminleri yarı saydam rgba literalleridir
   (blur zemini için token yok) — bilinçli istisna, nav.css'te not düşüldü.
-- `dashboard.css` ve `coach_widget.css` kendi ara-gri paletlerini taşır
-  (`#808088`, `#505058`, `#2A2A2A`…) — token karşılığı yok,
+- ✅ `dashboard.css` Phase 3'te tamamen kanonik token'lara taşındı (ara-gri
+  palet kaldırıldı); ana sayfa kabuğu artık `.card`/`.ring-*`/`.pbar-*`/
+  `.avatar`/`.badge`/`.sec-label` bileşenlerini yeniden kullanır. `coach_widget.css`
+  hâlâ kendi ara-gri paletini taşır (`#808088`, `#505058`, `#2A2A2A`…) —
   `--color-text-*`/`--color-surface-*`'e normalize edilecek.
 - `coach_widget.css`'te eski lime kalıntıları (`#99cc00`, `#d6ff1a` hover) —
   mavi temayla uyumsuz, widget elden geçirilirken düzeltilecek.
