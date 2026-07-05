@@ -52,6 +52,25 @@ def test_viewport_fit_cover_for_safe_areas():
     assert "viewport-fit=cover" in head
 
 
+SHELL_ROUTES = [
+    "/", "/nutrition", "/training", "/progress-page", "/quests", "/friends",
+    "/feed", "/leaderboard", "/supplements", "/premium", "/edit-profile",
+    "/pump-check-gallery",
+]
+
+
+def test_all_app_pages_render_shared_shell(client, make_user, login):
+    make_user("smokeuser", profile_complete=True)
+    login("smokeuser")
+    for route in SHELL_ROUTES:
+        resp = client.get(route)
+        assert resp.status_code == 200, route
+        html = resp.get_data(as_text=True)
+        assert 'class="global-header"' in html, route
+        assert 'class="action-bar"' in html, route
+        assert "fx-drawer" not in html, route
+
+
 def test_profile_hub_lists_secondary_destinations(client, auth_user):
     html = client.get("/edit-profile").get_data(as_text=True)
     for href in ("/friends", "/feed", "/leaderboard", "/quests",
