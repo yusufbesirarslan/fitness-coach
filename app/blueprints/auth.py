@@ -376,11 +376,17 @@ def logout():
         if sec_site not in ("same-origin", "same-site", "none"):
             abort(403, description=t("route.csrf_failed"))
     else:
+        # SEC-1: Sec-Fetch-Site yoksa Referer host'una düş. Referer DE yoksa
+        # default-DENY — eskiden kontrol düşüp logout devam ediyordu, böylece
+        # her iki başlığı da göndermeyen (legacy/non-browser) istemcilerde CSRF
+        # ile sessiz sign-out mümkündü. Meşru same-site <a> gezintisi normalde
+        # en az birini taşır.
         referer = request.headers.get("Referer")
-        if referer:
-            from urllib.parse import urlparse
-            if urlparse(referer).hostname != request.host.split(":")[0]:
-                abort(403, description=t("route.csrf_failed"))
+        if not referer:
+            abort(403, description=t("route.csrf_failed"))
+        from urllib.parse import urlparse
+        if urlparse(referer).hostname != request.host.split(":")[0]:
+            abort(403, description=t("route.csrf_failed"))
     via_cognito = session.pop("via_cognito", False)
     logout_user()
     # Cognito ile girildiyse ve Hosted UI domain'i ayarlıysa Cognito oturumunu da

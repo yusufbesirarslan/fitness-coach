@@ -14,7 +14,7 @@ from app.extensions import _user_or_ip_key, limiter, redis_client
 from app.i18n import t
 from app.models import MealLog, UserSession
 from app.services.ai_nutrition import MAX_MENU_ITEMS, _cap_items_round_robin, _estimate_macros_llm, _estimate_serving_weights_llm, _extract_categorized_items, _primary_dish_type
-from app.services.ai_gate import ai_concurrency_gate
+from app.services.ai_gate import ai_concurrency_gate, scrape_concurrency_gate
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
 from app.timeutil import day_key
 from app.services.foodcache import _cache_macros, _get_cached_macros
@@ -88,7 +88,7 @@ def _menu_scan_cache_key(clean_url):
 @bp.route("/api/proxy/scan-menu", methods=["POST"])
 @login_required
 @limiter.limit(SCRAPE_RATELIMIT, key_func=_user_or_ip_key)
-@ai_concurrency_gate  # A1: bloklayıcı fetch+AI çağrıları tüm thread'leri doldurmasın
+@scrape_concurrency_gate  # INF-5: ağ-bağımlı scrape AYRI semaforda — LLM slotlarını tutmasın
 def proxy_scan_menu():
     import requests as http_req
     from bs4 import BeautifulSoup

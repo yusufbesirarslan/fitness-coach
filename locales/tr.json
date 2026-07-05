@@ -415,7 +415,7 @@
   "friends.page_sub": "Arkadaş ekle, istekleri yönet, sohbet başlat.",
   "friends.search_ph": "Kullanıcı adı ara...",
   "friends.invite_title": "ARKADAŞINI DAVET ET",
-  "friends.invite_desc": "Davet bağlantını paylaş — arkadaşın katılınca ikiniz de <strong style=\"color:var(--volt);\">+75 XP</strong> kazanın.",
+  "friends.invite_desc": "Davet bağlantını paylaş — arkadaşın katılınca ikiniz de {xp} kazanın.",
   "friends.copy": "Kopyala",
   "friends.loading": "Yükleniyor...",
   "friends.incoming": "GELEN İSTEKLER",

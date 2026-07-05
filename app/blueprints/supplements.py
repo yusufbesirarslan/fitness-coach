@@ -4,7 +4,7 @@ from flask_login import current_user, login_required
 
 from app.extensions import db
 from app.i18n import t
-from app.models import Supplement
+from app.models import Supplement, User
 from app.services.gamification import award_xp, complete_quest_for_user, log_activity
 from app.services.validators import _to_float
 
@@ -63,9 +63,14 @@ def supplement_add():
         price_paid=_to_float(data["price_paid"], None) if data.get("price_paid") else None,
         is_public=data.get("is_public", True),
     )
-    # İlk supplement bonusu deterministik olmalı: count'u add'DEN ÖNCE al. Eskiden
-    # count add'den sonraydı; autoflush pending satırı da sayınca first_entry yanlış
-    # False oluyor, bonus yalnızca post-commit `count()==1` şansına kalıyordu (D2/B4).
+    # İlk supplement bonusu (25 XP) tam olarak BİR kez verilmeli. Eskiden count
+    # kilitsiz okunuyordu; iki eşzamanlı "ilk supplement" POST'u (çift-dokunma/
+    # retry) da prior_count==0 görüp çifte bonus verebiliyordu (BUG-2). Kararı
+    # kullanıcı satırı kilidiyle serileştir: kilidi count'tan ÖNCE al ve supp
+    # commit'ine kadar tut. FOR UPDATE ikinci eşzamanlı isteği ilk commit'lenene
+    # kadar bloklar; o da count'u ilk satır GÖRÜNÜR olduktan sonra yapıp 1 görür.
+    # (SQLite'ta no-op ama orada da tek yazar var.)
+    db.session.query(User.id).filter_by(id=current_user.id).with_for_update().first()
     prior_count = Supplement.query.filter_by(user_id=current_user.id).count()
     db.session.add(supp)
     db.session.commit()

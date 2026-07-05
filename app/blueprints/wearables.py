@@ -21,6 +21,10 @@ def _json_error(message, status=400):
 
 @bp.route("/api/auth/wearable/<provider>")
 @login_required
+# OAuth başlatma da (authorization_url dış sağlayıcıya yönlendirir) döngüye
+# sokulabilir; callback ise her çağrıda token exchange için dışarı HTTP atar.
+# İkisini de diğer dış-fetch route'larıyla aynı kovaya al (SEC-2).
+@limiter.limit(SCRAPE_RATELIMIT, key_func=_user_or_ip_key)
 def wearable_login(provider):
     try:
         adapter = get_adapter(provider)
@@ -33,6 +37,7 @@ def wearable_login(provider):
 
 @bp.route("/api/auth/callback/<provider>")
 @login_required
+@limiter.limit(SCRAPE_RATELIMIT, key_func=_user_or_ip_key)  # exchange_code dış HTTP (SEC-2)
 def wearable_callback(provider):
     try:
         adapter = get_adapter(provider)
