@@ -50,3 +50,11 @@ def test_secondary_pages_activate_profile_tab(client, auth_user):
 def test_viewport_fit_cover_for_safe_areas():
     head = (ROOT / "templates" / "_head.html").read_text(encoding="utf-8")
     assert "viewport-fit=cover" in head
+
+
+def test_profile_hub_lists_secondary_destinations(client, auth_user):
+    html = client.get("/edit-profile").get_data(as_text=True)
+    for href in ("/friends", "/feed", "/leaderboard", "/quests",
+                 "/supplements", "/premium", "/logout"):
+        assert f'href="{href}" class="hub-link' in html, href
+    assert 'data-action="setLang"' in html
