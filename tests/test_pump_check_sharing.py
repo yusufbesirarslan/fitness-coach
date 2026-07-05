@@ -534,25 +534,15 @@ def test_chat_template_render_pump_check_card_includes_timestamp_and_unavailable
     assert "p.timePosted || p.createdAt || ''" in html
 
 
-def test_standalone_nav_templates_use_feed_bottom_tab_and_keep_club_in_drawer():
+def test_shared_nav_partials_use_feed_bottom_tab_and_keep_club_in_drawer():
+    # Nav markup artık tek kaynakta: _actionbar.html (alt sekmeler) + _nav.html (çekmece).
     root = Path(__file__).resolve().parents[1]
-    template_names = [
-        "friends.html",
-        "index.html",
-        "leaderboard.html",
-        "manage_stack.html",
-        "nutrition.html",
-        "progress.html",
-        "quests.html",
-        "training.html",
-    ]
-
-    for name in template_names:
-        html = (root / "templates" / name).read_text(encoding="utf-8")
-        assert 'href="/feed" class="ab-tab' in html, name
-        assert 'href="/leaderboard" class="ab-tab' not in html, name
-        assert 'href="/feed" class="drawer-link' in html, name
-        assert 'href="/leaderboard" class="drawer-link' in html, name
+    bar = (root / "templates" / "_actionbar.html").read_text(encoding="utf-8")
+    assert 'href="/feed" class="ab-tab' in bar
+    assert 'href="/leaderboard" class="ab-tab' not in bar
+    drawer = (root / "templates" / "_nav.html").read_text(encoding="utf-8")
+    assert 'href="/feed" class="drawer-link' in drawer
+    assert 'href="/leaderboard" class="drawer-link' in drawer
 
 
 def test_like_create_and_delete_updates_count(client, auth_user, make_user):
