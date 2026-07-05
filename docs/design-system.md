@@ -111,7 +111,8 @@ grid'e çekilecek.
 
 `--z-header` 100 · `--z-drawer-backdrop` 199 · `--z-drawer` 200 · `--z-fab` 200
 · `--z-overlay` 300 (modal/sheet/loading) · `--z-toast` 400. Yeni katman
-eklemeden önce bu skalaya oturt.
+eklemeden önce bu skalaya oturt. (`--z-drawer*` ve `--drawer-w` Phase 2'de
+çekmece kaldırılınca kullanım dışı kaldı; token'lar miras olarak duruyor.)
 
 ### Layout & Breakpoint'ler
 
@@ -145,7 +146,7 @@ Mevcut sınıf adları kamu API'sidir — yeniden adlandırma yok. Kullanım ör
 | Avatar | `.avatar` + `.avatar-sm/-md/-lg/-xl` (28/34/48/64) | `<div class="avatar avatar-md">YA</div>` veya içine `<img>` |
 | Progress Ring | `.ring-wrap` > `.ring-svg` (`.ring-track` + `.ring-fill`) + `.ring-label` | SVG dairesel ilerleme |
 | Progress Bar | `.pbar-track` > `.pbar-fill` | genişlik JS ile |
-| Navigation Item | `.tab-bar` > `.tab-btn(.active)`, panel: `.tab-panel(.active)` | sayfa içi sekmeler (drawer/action-bar öğeleri nav.css'te, Phase 2 alanı) |
+| Navigation Item | `.tab-bar` > `.tab-btn(.active)`, panel: `.tab-panel(.active)` | sayfa içi sekmeler (uygulama kabuğu gezinmesi nav.css'te — aşağıdaki bölüm) |
 | FAB | `.quick-add-wrap` > `.quick-add-btn(.open)` + `.quick-add-actions` > `.fab-row` > `.fab-sub` + `.fab-lbl` | global hızlı ekleme |
 | Empty State | `.empty-state` > `.empty-icon` + `.empty-title` + `.empty-sub` | boş liste durumu |
 | Loading Skeleton | `.skeleton` (+ `.skeleton-text`, `.skeleton-circle`) | boyutu yerinde ver |
@@ -157,6 +158,38 @@ Mevcut sınıf adları kamu API'sidir — yeniden adlandırma yok. Kullanım ör
 
 Yenileri (Modal, Sheet, Badge, Avatar) Phase 1'de tanımlandı; sayfalar henüz
 ad-hoc kopyalarını kullanıyor — sayfa fazlarında bunlara geçirilecek.
+
+## Uygulama Kabuğu (static/nav.css — Phase 2)
+
+Tüm kimlikli sayfalar iki ortak parçayı include eder; sayfada satır-içi nav
+markup'ı YASAK (regresyon: `tests/test_app_shell.py`):
+
+```jinja
+{% set nav_active = 'home' %}   {# home | nutrition | training | progress | profile #}
+{% include "_nav.html" %}       {# üst başlık: marka + masaüstü sekmeleri + avatar #}
+...sayfa içeriği (<main class="main-content">)...
+{% include "_actionbar.html" %} {# alt sekme çubuğu (5 sekme, <1024px) #}
+```
+
+- **Sekmeler:** Ana Sayfa `/` · Beslenme `/nutrition` · Antrenman `/training`
+  · İlerleme `/progress-page` · Profil `/edit-profile`.
+- **İkincil sayfalar** (friends, chat, feed, leaderboard, quests, supplements,
+  premium, pump-check-gallery) `nav_active = 'profile'` işaretler ve Profil
+  sayfasındaki **hub**'dan erişilir (`.hub` > `.hub-section-label` +
+  `.hub-card` > `.hub-link` / `.hub-row`; dil anahtarı `.hub-lang(-opt)`,
+  çıkış `.hub-link-danger`, premium `.hub-link-premium`).
+- **Kırılım davranışı:** <1024px alt çubuk (`.action-bar` > `.ab-tab`,
+  safe-area `env(safe-area-inset-bottom)` — `_head.html` viewport'u
+  `viewport-fit=cover`); ≥1024px alt çubuk gizlenir, başlıkta yatay sekmeler
+  görünür (`.header-nav` > `.hn-link`).
+- **Sınıflar kamu API'sidir:** `.global-header .header-brand .header-avatar
+  .header-nav .hn-link .action-bar .ab-tab .hub-*` — yeniden adlandırma yok.
+- **Sayfa geçişi:** `.main-content` `page-enter` animasyonuyla girer
+  (reduced-motion'da kapalı). Alt boşluk tek yerden gelir: `.page-body`
+  (nav.css) sabit çubuk + safe-area payını verir; sayfalar kendi
+  padding-bottom hack'ini EKLEMEZ.
+- **Çekmece (drawer) kaldırıldı** (v3 → v4): `static/nav.js` silindi, kabuk
+  JS'siz çalışır. Aktif sekme `aria-current="page"` taşır.
 
 ## Genişletme Rehberi
 
@@ -172,10 +205,12 @@ ad-hoc kopyalarını kullanıyor — sayfa fazlarında bunlara geçirilecek.
 4. **Regresyon korumaları:** `tests/test_design_system.py` — _head.html
    kablosu, token sözleşmesi, bileşen envanteri.
 
-## Bilinen sapmalar / Phase 2+ TODO
+## Bilinen sapmalar / Phase 3+ TODO
 
+- `.global-header`/`.action-bar` zeminleri yarı saydam rgba literalleridir
+  (blur zemini için token yok) — bilinçli istisna, nav.css'te not düşüldü.
 - `dashboard.css` ve `coach_widget.css` kendi ara-gri paletlerini taşır
-  (`#808088`, `#505058`, `#2A2A2A`…) — token karşılığı yok, Phase 2'de
+  (`#808088`, `#505058`, `#2A2A2A`…) — token karşılığı yok,
   `--color-text-*`/`--color-surface-*`'e normalize edilecek.
 - `coach_widget.css`'te eski lime kalıntıları (`#99cc00`, `#d6ff1a` hover) —
   mavi temayla uyumsuz, widget elden geçirilirken düzeltilecek.
