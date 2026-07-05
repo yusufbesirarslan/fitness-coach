@@ -64,7 +64,7 @@
     @keyframes pulse { 0%{opacity:.6} 50%{opacity:1} 100%{opacity:.6} }
     </style>
 </head>
-{% set nav_active = 'feed' %}
+{% set nav_active = 'profile' %}
 <body class="page-body">
 <div class="toast-wrap" id="toast-wrap"></div>
 {% include "_nav.html" %}
@@ -258,7 +258,6 @@ commentsForm.addEventListener('submit', async (e) => {
 window.addEventListener('scroll', () => { if(window.innerHeight + window.scrollY > document.body.offsetHeight - 500) loadFeed(); });
 loadFeed();
 </script>
-<script src="/static/nav.js"></script>
 <script src="/static/actions.js"></script>
 </body>
 </html>

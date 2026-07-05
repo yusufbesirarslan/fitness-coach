@@ -124,8 +124,8 @@ def test_dashboard_renders_localized(app, client, make_user, login):
     make_user("dashen", profile_complete=True, language="en")
     login("dashen")
     body = client.get("/").get_data(as_text=True)
-    assert "Daily Calories" in body and "Activity Tracking" in body
-    assert "Günlük Kalori" not in body
+    assert "Quick Actions" in body and "Nutrition Summary" in body
+    assert "Hızlı İşlemler" not in body
     # EN tip dizisi seçili olmalı (TR tip metni gövdede olmamalı)
     assert "Sports Physiology" in body
 
@@ -268,11 +268,11 @@ def test_quest_title_falls_back_to_db_for_unknown_type(app, client, make_user, l
     assert "quest.custom_xyz.title" not in body  # ham anahtar SIZMADI
 
 
-def test_drawer_level_title_localized(app, client, make_user, login):
-    """inject_rank → drawer/rank ünvanı kullanıcının diline göre (level_title)."""
+def test_profile_level_title_localized(app, client, make_user, login):
+    """inject_rank → profil sayfası rütbe ünvanı kullanıcının diline göre (level_title)."""
     make_user("ranken", language="en")     # rank_points=0 → seviye 1
     login("ranken")
-    body = client.get("/quests").get_data(as_text=True)
+    body = client.get("/edit-profile").get_data(as_text=True)
     assert "Fitness Traveler" in body and "Fitness Yolcusu" not in body
 
 

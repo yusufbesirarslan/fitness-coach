@@ -175,20 +175,13 @@
     .wearable-btn.primary { background: var(--volt); color: var(--color-on-primary); border-color: var(--volt); }
     .wearable-btn:disabled { opacity: 0.5; cursor: default; }
 
-    /* ── back button ── */
-    .back-btn {
-        display: inline-flex; align-items: center; gap: 6px;
-        color: var(--text-3); text-decoration: none; font-size: 13px;
-        font-weight: 500; letter-spacing: 0.3px; margin-bottom: 8px;
-        transition: color 0.2s;
+    /* ── rütbe ünvanı (eski çekmece başlığından taşındı) ── */
+    .avatar-rank {
+        font-size: 11px; font-weight: 600; color: var(--volt);
+        letter-spacing: 0.06em; text-transform: uppercase; margin-top: 6px;
     }
-    .back-btn:hover { color: #fff; }
-    .back-btn svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 2; }
 
-    /* ── safe area ── */
-    .main-content { padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
     @media (max-width: 768px) {
-        .main-content { margin-left: 0; padding-bottom: calc(88px + env(safe-area-inset-bottom, 0px)); }
         .wearable-grid { grid-template-columns: 1fr; }
     }
     </style>
@@ -205,10 +198,6 @@
 <main class="main-content">
 
     <div class="page-hdr">
-        <a href="/" class="back-btn">
-            <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
-            {{ t('common.home') }}
-        </a>
         <h1>{{ t('editprofile.h1_a') }}<br><span>{{ t('editprofile.h1_b') }}</span></h1>
         <p>{{ t('editprofile.page_sub') }}</p>
     </div>
@@ -230,6 +219,7 @@
             <input type="file" id="avatar-file-input" accept="image/*" hidden>
             <div class="avatar-name">{{ full_name if full_name else username }}</div>
             <div class="avatar-handle">@{{ username }}</div>
+            <div class="avatar-rank">{{ user_title }} · Level {{ user_level }}</div>
         </div>
 
         <!-- ── GAMIFIED STATS (read-only) ── -->
@@ -245,6 +235,31 @@
                 <div class="stat-lbl">XP · Lvl {{ user_level }}</div>
             </div>
         </div>
+
+        <!-- ── HUB: ikincil gezinme (eski çekmecenin yeni evi) ── -->
+        <nav class="hub" aria-label="{{ t('nav.menu_nav') }}">
+            <div class="hub-section-label">{{ t('nav.section_explore') }}</div>
+            <div class="hub-card">
+                <a href="/friends" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>{{ t('nav.friends') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
+                <a href="/feed" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>{{ t('nav.feed') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
+                <a href="/leaderboard" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v18"/><path d="M19 3v18"/><path d="M5 7h14"/><path d="M8 11h8"/><path d="M10 15h4"/></svg>{{ t('nav.club') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
+                <a href="/quests" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>{{ t('nav.quests') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
+                <a href="/supplements" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9"/></svg>{{ t('nav.supplements') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
+                <a href="/premium" class="hub-link hub-link-premium" data-ga-event="premium_nav_click"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>{{ t('nav.premium') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
+            </div>
+            <div class="hub-section-label">{{ t('nav.section_settings') }}</div>
+            <div class="hub-card">
+                <div class="hub-row">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+                    {{ t('settings.language') }}
+                    <div class="hub-lang" role="group" aria-label="{{ t('lang.aria') }}">
+                        <button type="button" class="hub-lang-opt{% if locale == 'tr' %} on{% endif %}" data-action="setLang" data-args='["tr"]'>TR</button>
+                        <button type="button" class="hub-lang-opt{% if locale == 'en' %} on{% endif %}" data-action="setLang" data-args='["en"]'>EN</button>
+                    </div>
+                </div>
+                <a href="/logout" class="hub-link hub-link-danger"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>{{ t('nav.logout') }}</a>
+            </div>
+        </nav>
 
         <!-- ── EDITABLE FORM ── -->
         <div class="form-section" style="margin-bottom:24px;">
@@ -497,7 +512,6 @@ document.querySelectorAll('.wearable-sync').forEach(btn => {
     });
 });
 </script>
-<script src="/static/nav.js"></script>
 <script src="/static/actions.js"></script>
 </body>
 </html>

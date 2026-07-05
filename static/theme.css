@@ -21,14 +21,16 @@ body {
 /* ── 2. LAYOUT ────────────────────────────────────── */
 .page-body { min-height: 100vh; background: var(--bg); }
 
+/* Alt boşluk kabuktan gelir (.page-body, static/nav.css) — burada yalnızca
+   içerik nefes payı. */
 .main-content {
-  padding: var(--s3) var(--s2) 108px;
+  padding: var(--space-4) var(--space-4) var(--space-6);
   max-width: var(--content-max);
   margin: 0 auto;
 }
 
 @media (min-width: 768px) {
-  .main-content { padding: var(--s5) var(--s5) 116px; }
+  .main-content { padding: var(--space-6) var(--space-6) var(--space-8); }
 }
 
 /* ── 3. MEAL LOG CARDS ────────────────────────────── */

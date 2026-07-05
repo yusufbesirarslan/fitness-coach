@@ -498,11 +498,12 @@ def test_gallery_delete_is_owner_only(client, auth_user, make_user):
     assert db.session.get(PumpCheck, mine.id) is None
 
 
-def test_feed_page_uses_shared_feed_nav_and_leaderboard_drawer(client, auth_user):
+def test_feed_page_uses_shared_app_shell(client, auth_user):
     html = client.get("/feed").get_data(as_text=True)
 
-    assert 'href="/feed"' in html
-    assert 'href="/leaderboard"' in html
+    # feed artık Profil sekmesi altında ikincil sayfadır
+    assert 'href="/edit-profile" class="ab-tab active"' in html
+    assert 'class="global-header"' in html
 
 
 def test_feed_template_preserves_exact_metadata_label_casing():
@@ -534,25 +535,16 @@ def test_chat_template_render_pump_check_card_includes_timestamp_and_unavailable
     assert "p.timePosted || p.createdAt || ''" in html
 
 
-def test_standalone_nav_templates_use_feed_bottom_tab_and_keep_club_in_drawer():
+def test_shell_partials_have_five_tabs_and_no_drawer():
+    # Nav markup tek kaynakta: _actionbar.html (5 alt sekme) + _nav.html (başlık).
+    # Feed/Club artık Profil hub'ından erişilir (Phase 2).
     root = Path(__file__).resolve().parents[1]
-    template_names = [
-        "friends.html",
-        "index.html",
-        "leaderboard.html",
-        "manage_stack.html",
-        "nutrition.html",
-        "progress.html",
-        "quests.html",
-        "training.html",
-    ]
-
-    for name in template_names:
-        html = (root / "templates" / name).read_text(encoding="utf-8")
-        assert 'href="/feed" class="ab-tab' in html, name
-        assert 'href="/leaderboard" class="ab-tab' not in html, name
-        assert 'href="/feed" class="drawer-link' in html, name
-        assert 'href="/leaderboard" class="drawer-link' in html, name
+    bar = (root / "templates" / "_actionbar.html").read_text(encoding="utf-8")
+    for href in ('href="/"', 'href="/nutrition"', 'href="/training"',
+                 'href="/progress-page"', 'href="/edit-profile"'):
+        assert f'{href} class="ab-tab' in bar
+    header = (root / "templates" / "_nav.html").read_text(encoding="utf-8")
+    assert "drawer" not in header
 
 
 def test_like_create_and_delete_updates_count(client, auth_user, make_user):

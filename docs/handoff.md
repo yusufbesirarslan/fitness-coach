@@ -1,135 +1,162 @@
-# Phase 1 Handoff — AxisAI V2 Design System
+# Phase 3 Handoff — AxisAI V2 Ana Panel (AI Command Center)
 
-Date: 2026-07-04
-Branch: `feat/phase1-design-system` (base: `origin/main` @ 90b36cd)
-Plan: `docs/superpowers/plans/2026-07-04-phase1-design-system.md`
-Docs: `docs/design-system.md` (token + bileşen referansı — Phase 2 bunu okumalı)
+Date: 2026-07-05
+Branch: `feat/phase2-app-shell` (Phase 3 çalışması bu branch üzerinde devam etti)
+Spec: `docs/superpowers/specs/2026-07-05-phase3-home-dashboard-design.md`
+Plan: `docs/superpowers/plans/2026-07-05-phase3-home-dashboard.md`
+Docs: `docs/design-system.md` → dashboard.css artık token-uyumlu (aşağıda)
+Önceki faz: `docs/archive/handoff-2026-07-05-phase2-app-shell.md`
 
 ## Completed Work
 
-- **`static/tokens.css` (yeni):** tek kanonik token kaynağı — renk
-  (primitives → semantik → legacy alias), tipografi (Inter tabanlı skala,
-  ağırlık, satır yüksekliği, tracking), 8-pt boşluk skalası, radius, kenarlık
-  kalınlıkları, elevation/gölge, opaklık, ikon boyutları, hareket
-  (süre + easing), z-index skalası, layout sabitleri, breakpoint referansları
-  ve `[data-theme="light"]` override bloğu (light/dark hazırlığı).
-- **`static/components.css` (yeni):** 16 bileşenlik kütüphane — Button,
-  Input(+field), Card, **Modal (yeni)**, **Bottom Sheet (yeni)**,
-  **Badge (yeni)**, Chip, **Avatar (yeni)**, Progress Ring, Progress Bar,
-  Navigation Item (tabs), FAB, Empty State, Loading Skeleton (+varyantlar),
-  Stat Card, Section Header + Toast, Loading Overlay, Divider, keyframe'ler,
-  tabular-nums, focus-visible ve reduced-motion kuralları.
-- **Inter tipografisi:** `_head.html` Google Fonts'a Inter 300–800 eklendi;
-  `--font-body` artık Inter (DM Sans fallback olarak yüklü kalıyor).
-  `--font-display` Bebas Neue olarak korundu (başlık redesign'ı sonraki fazlar).
-- **Global kablo:** `_head.html` tokens.css + components.css'i tüm sayfalarda
-  sayfa CSS'lerinden önce yükler (kaskad sözleşmesi korunur).
-- **Hardcoded değer süpürmesi:** theme.css, style.css, nav.css, dashboard.css,
-  coach_widget.css + 18 şablonun satır-içi `<style>` bloğu — birebir eşleşen
-  renk/font/easing/boşluk literalleri token'lara çevrildi (≈300+ değişim).
-- **Tekilleştirme:** theme.css'in `:root` bloğu ve taşınan bileşen bölümleri
-  silindi; style.css'in tema blokları tokens.css'e devredildi; ölü kod
-  kaldırıldı (`.mobile-bottom-nav`, style.css'in kullanılmayan `.stat-card`'ı,
-  yinelenen `@keyframes spin`).
-- **Regresyon korumaları:** `tests/test_design_system.py` (asset kablosu,
-  token sözleşmesi, bileşen envanteri).
+Ana panel (`/`) baştan sona **"AI Command Center"** olarak yeniden tasarlandı.
+`templates/index.html` ve `static/dashboard.css` tamamen yeniden yazıldı; backend
+uçlarına ve iş mantığına DOKUNULMADI (tüm veri aynı endpoint'lerden geliyor).
+Panel `.dash-grid` içinde 8 bölümden oluşuyor (spec sırası):
+
+- **1 · Kimlik (`.dash-id`):** avatar, selamlama (`setGreeting` → `#id-hello`),
+  kullanıcı adı, XP çipi ve Streak çipi (`.id-chip.xp` / `.id-chip.streak`),
+  rütbe/level meta satırı.
+- **2 · Hero (`.hero`):** "Bugünkü Hedef", kalan kalori ve dairesel ilerleme
+  halkası (`updateCalRing(consumed, target)`, r=52 → çevre 326.73). Aktivite
+  kalorisi kaldırıldığı için ring artık 2 argümanlı (activity=0).
+- **3 · AI Sıradaki Aksiyon (`.next`) — panelin en kritik bölümü:** istemci
+  tarafı **deterministik kural motoru** (`computeNextAction` → `renderNextAction`
+  → `doNextAction`). Günün saatine göre öncelik: kahvaltı / öğle / akşam yemeği,
+  su iç, antrenmana başla, hepsi tamam. LLM ÇAĞRISI YOK (aşağıdaki karar #1).
+- **4 · Hızlı İşlemler (`.qa-grid`):** Öğün Ekle, Barkod Tara (devre dışı —
+  "yakında"), Menü Tarayıcı (koç widget'ını açar), Antrenmana Başla. Eski
+  bağımsız hızlı-ekle FAB bu grid'e katlandı.
+- **5 · Beslenme Özeti (`.nutri-grid`):** Protein / Karbonhidrat / Yağ / Su için
+  animasyonlu halkalar (`components.css` `.ring-*`, r=26 → çevre 163.36).
+  Makro hedefleri nutrition.js formülüyle: protein=hedef·0.30/4, karb=·0.40/4,
+  yağ=·0.30/9.
+- **6 · Kilo (`.wt`):** mini Chart.js sparkline (haftalık trend + delta),
+  kilo güncelleme formu (`doUpdateWeight` → `/update-weight`).
+- **7 · Başarımlar (`.ach`):** XP, rozet amblemi, streak, görevler linki;
+  streak bonus aktifken `.ach-xp.bonus-active`.
+- **8 · AI İpucu (`.tip`):** günlük öneri karuseli (TIPS_TR/TIPS_EN, dot +
+  ilerleme çubuğu, otomatik geçiş, `visibilitychange`'de duraklar).
+
+`dashboard.css` eski `--volt`/sabit-gri paletten **kanonik token'lara** taşındı
+(hiç `--volt`/hex/rgba kalmadı) ve `components.css` bileşenlerini (`.card`,
+`.ring-*`, `.pbar-*`, `.sec-label`, `.stat-card`) yeniden kullanıyor. ≥768px'te
+bento düzeni: `.dash-id/.hero/.next/.tip` 2 kolon, diğerleri 1 kolon.
 
 ## Files Modified
 
-- Yeni: `static/tokens.css`, `static/components.css`, `docs/design-system.md`,
-  `tests/test_design_system.py`, plan dosyası.
-- Değişen: `templates/_head.html`, `static/{theme,style,nav,dashboard,coach_widget}.css`,
-  şablonlar: index, nutrition, training, progress, chat, friends, feed,
-  leaderboard, quests, manage_stack, edit_profile, premium, landing, login,
-  register, setup, verify (`pump_check_gallery` değişmedi — zaten token'lıydı;
-  404/500 bilinçli dokunulmadı — bağımsız mini sayfalar).
-- `docs/handoff.md` yeniden yazıldı (önceki pump-check handoff'u
-  `docs/archive/handoff-2026-07-03-pump-check-sharing.md`).
+- Yeniden yazılan: `templates/index.html`, `static/dashboard.css`.
+- Değişen: `locales/tr.json` + `locales/en.json` (33 yeni `index.*` anahtarı;
+  `index.hero_goal`, `index.next_action_label`, `index.quick_actions`,
+  `index.nutrition_summary`, `index.achievements`, `index.qa_*`,
+  `index.macro_*`, `index.na_*`, `index.tip_*` vb.).
+- Test: `tests/test_i18n.py::test_dashboard_renders_localized` (assertion'lar yeni
+  markup'a göre: "Quick Actions" + "Nutrition Summary" var, "Hızlı İşlemler" yok;
+  "Sports Physiology" kontrolü korundu).
+- Docs: `docs/design-system.md` (dashboard.css gri-palet TODO'su ✅ ile
+  kapatıldı, token-uyumu notu eklendi), `docs/handoff.md` (bu dosya),
+  `docs/superpowers/specs/2026-07-05-phase3-home-dashboard-design.md` (spec),
+  `docs/superpowers/plans/2026-07-05-phase3-home-dashboard.md` (plan).
 
 ## Components Created or Refactored
 
-- Yeni tanım: Modal, Bottom Sheet, Badge (+5 varyant), Avatar (4 boyut),
-  `.btn-danger`, `.field/.field-label`, `.skeleton-text/.skeleton-circle`.
-- Konsolide (theme.css → components.css, sınıf adları değişmeden): btn-volt,
-  btn-ghost, fc-input, card, chip, tab-bar/tab-btn/tab-panel, ring-*, pbar-*,
-  quick-add-*/fab-*, empty-*, skeleton, sec-label/cat-label, toast-*,
-  loading-overlay, fc-divider.
-- Kanonikleşen: Stat Card (style.css'teki ölü kopya silindi, components.css'te
-  token'lı sürüm).
+- Yeni panel sınıfları: `.dash-grid`, `.dash-id/.id-avatar/.id-hello/.id-name/
+  .id-meta/.id-chip(.xp/.streak)`, `.hero/.hero-ring/.hero-num/.hero-cap/
+  .hero-body/.hero-goal/.hero-sub`, `.next/.next-icon/.next-body/.next-title/
+  .next-sub/.next-cta`, `.qa-grid/.qa-tile(.disabled)/.qa-ic/.qa-lbl/.qa-soon`,
+  `.nutri-grid/.nutri-cell/.nutri-val/.nutri-lbl`, `.wt/.wt-big/.wt-delta/
+  .wt-spark/.wt-form/.wt-input/.wt-btn/.wt-meta`, `.ach/.ach-emblem/.ach-title/
+  .ach-xp/.ach-streak/.ach-link`, `.tip/.tip-icon/.tip-text/.tip-src/.tip-nav/
+  .tip-btn/.tip-dots/.tip-dot(.on)/.tip-progress/.tip-pbar/.tip-slide`.
+- Yeniden kullanılan (yeni kopya YOK): `components.css` `.card`, `.ring-wrap/
+  .ring-svg/.ring-track/.ring-fill/.ring-label`, `.pbar-track/.pbar-fill`,
+  `.sec-label`, `.stat-card`, `.badge`, `.avatar`.
+- Kaldırılan: aktivite/adım kartı, bağımsız hızlı-ekle FAB, `updateCalRing`'in
+  3. (aktivite) argümanı, eski `--volt`/gri panel stilleri.
 
 ## Architectural Decisions
 
-1. **Zero-visual-change disiplini:** görünüm birebir korunur; tek istisna
-   gövde fontunun Inter'e geçmesi (faz gereksinimiydi). Yalnızca birebir değer
-   eşleşmeleri token'a çevrildi; token karşılığı olmayan yerel paletler
-   (dashboard/coach_widget grileri) bilinçli bırakıldı.
-2. **Alias stratejisi:** yüzlerce `--volt*`/`--accent*` referansı kırılmasın
-   diye legacy isimler tokens.css'te kanonik token'lara bağlandı. Yeni kod
-   yalnızca kanonik isim kullanır (politika docs/design-system.md'de).
-3. **Kaskad sözleşmesi:** tokens → components → sayfa CSS → sayfa inline;
-   sayfa kuralları eşit özgüllükte kazanmaya devam eder (taşımalar güvenli).
-4. **Tema hazırlığı:** semantik katman `[data-theme]` ile temalanır; auth
-   sayfalarındaki canlı light toggle davranışı birebir korundu (`--input-bg`
-   ve `--border` için tarihsel istisnalar tokens.css/style.css'te açıklandı).
-5. **Navigation Item kapsamı:** sekmeler (tab-bar) bileşenleşti; drawer ve
-   action-bar öğeleri Phase 2'nin (navigasyon fazı) alanı olduğundan nav.css'te
-   token'lanarak bırakıldı.
+1. **AI Sıradaki Aksiyon istemci tarafı kural motoru:** LLM çağrısı yok. CLAUDE.md
+   AI route'larının senkron/thread-bloklayıcı olduğunu (tek worker/8 thread)
+   uyarıyor; ana panel her açılışta çalıştığı için deterministik, saat-tabanlı
+   bir kural motoru (`computeNextAction`) seçildi. Ucuz, anında, offline-güvenli.
+2. **Barkod Tara = "yakında" (devre dışı kutu):** barkod tarayıcı backend'i yok;
+   tile `.qa-tile.disabled` + `.qa-soon` rozetiyle görünür ama tıklanamaz.
+3. **Menü Tarayıcı = global koç widget'ı:** `openMenuScan` → `window.CW.toggle()`
+   + `CW.startScan()`; widget yoksa `/nutrition`'a fallback.
+4. **Adım/aktivite kartı kaldırıldı:** yalnızca placeholder'dı (ileride cihaz
+   sağlık verisinden otomatik gelecek). "Adımları tamamla" AI aksiyonundan da
+   düştü; ring'de aktivite kalorisi 0 kabul edilir.
+5. **FAB → Hızlı İşlemler:** bağımsız yüzen buton grid'e katlandı (tek IA,
+   daha az yüzen öğe). Kullanıcı kararı.
+6. **CSS kanonik token'lar üzerine yeniden yazıldı:** `--volt`/hex/rgba yok;
+   `components.css` ring/bar/card'ları yeniden kullanılıyor (DRY).
+7. **Backend değişmedi:** `/last-session`, `/meal-log/today`, `/water`,
+   `/workout/status`, `/checkin-history`, `/update-weight`,
+   `/leaderboard/reward-check|reward-dismiss` aynen korundu.
 
 ## Verification Done
 
-- `python -m pytest -q` → **1081 passed, 0 failed** (temiz baz: 1078 + 3 yeni).
-- Selektör envanteri diff'i (origin/main vs yeni dosyalar): kayıp kural yok
-  (yalnızca bilinçli silinen ölü kod + taşınan `:root`).
-- Kimlikli sunucu smoke'u (scratch SQLite): /, nutrition, training, progress,
-  quests, friends, feed, leaderboard, edit-profile, supplements, premium,
-  pump-check-gallery, setup, login → hepsi 200 + tokens/components kablolu;
-  7 CSS dosyası 200.
+- `python -m pytest -q` → **1088 passed, 0 failed** (762s; Phase 2 bazı 1088 ile
+  aynı — panel yeniden yazımı test sayısını değiştirmedi, mevcut regresyonlar
+  yeşil kaldı).
+- Design-system token guard'ları geçiyor; `dashboard.css`'te `--volt`/hex/rgba
+  kalmadı (doğrulandı).
+- App-shell smoke'u (`tests/test_app_shell.py`) yeşil — yeni panel kabuğa
+  (global-header + action-bar) düzgün oturuyor.
+- i18n testi: EN katalog (`Quick Actions`/`Nutrition Summary`) var, TR karşılığı
+  (`Hızlı İşlemler`) render'da yok → lokalizasyon doğru.
+- **Görsel tarayıcı kontrolü YAPILAMADI** (Chrome eklentisi bu oturumda da bağlı
+  değil — Phase 1/2 ile aynı kısıt). Deploy öncesi göz kontrolü önerilir.
 
 ## Quality Metrics Review
 
-- **Responsiveness: iyi.** Tüm kırılımlar korundu; display boyutları için
-  clamp() token'ları eklendi. Zayıflık: tarihsel 900px sorguları breakpoint
-  skalasının dışında (Phase 2'de 1024'e çekilmeli).
-- **Accessibility: orta-iyi.** focus-visible halkaları, reduced-motion ve
-  tabular-nums korunup merkezileştirildi; `--focus-ring` token'ı eklendi.
-  Zayıflık: kontrast denetimi yapılmadı (özellikle dashboard'ın #505058
-  ara-grileri); Phase 2'de axe/kontrast taraması önerilir.
-- **Visual consistency: iyi (dark).** Tek token kaynağı + bileşen kütüphanesi.
-  Zayıflık: dashboard/coach_widget yerel gri paletleri ve coach widget'taki
-  lime kalıntıları (`#99cc00`, `#d6ff1a`) tutarsız — bilinçli ertelendi.
-- **Code maintainability: iyi.** theme.css 27→~11 KB'a indi; token/bileşen/
-  sayfa katmanları ayrıştı; her şey dokümante.
-- **Reusability: iyi.** 16 bileşen tek dosyada, tüm sayfalara yüklü; Modal/
-  Sheet/Badge/Avatar hazır ama sayfalar henüz ad-hoc kopyalarında (adaptasyon
-  sayfa fazlarında).
-- **Performance: nötr-iyi.** +2 küçük CSS isteği (`?v=` cache-bust'lı) karşılığı
-  yinelenen kurallar silindi; Inter eklendi ama DM Sans da geçiş boyunca
-  yükleniyor → font transferi arttı. DM Sans, inline literaller tamamen
-  temizlenince fonts URL'inden çıkarılmalı (Phase 2-3).
-- **UX clarity: değişmedi (kasıtlı).** Bu faz görsel yeniden tasarım yapmadı.
+- **Responsiveness: iyi.** Mobil tek kolon; ≥768px bento (hero/kimlik/aksiyon/
+  ipucu 2 kolon, hızlı-işlem/beslenme/kilo/başarım eşleşerek 1 kolon). Ring'ler
+  ve sparkline `max-width:100%`. Zayıflık: çok geniş masaüstünde (≥1280) panel
+  `--content-max` ile ortalı; ekstra kolon denenmedi.
+- **Accessibility: iyi yönde.** Anlamsal başlıklar, `.sec-label`, dokunma
+  hedefleri ≥44px, devre dışı tile `aria-disabled`. Zayıflık: kontrast/axe
+  taraması hâlâ yapılmadı (Phase 1'den devir); ring değerlerinin ekran
+  okuyucu metni tarayıcıda doğrulanmalı.
+- **Visual consistency: çok iyi.** Panel artık tamamen kanonik token'larda ve
+  paylaşılan `components.css` bileşenlerinde — Phase 2'de not düşülen
+  dashboard.css palet sapması KAPANDI.
+- **Code maintainability: iyi.** Tek şablon + tek CSS; ad-hoc ring/bar kopyası
+  yok, hepsi components.css'ten. Kural motoru saf fonksiyon (`computeNextAction`)
+  — test edilebilir.
+- **Reusability: iyi.** Ring/bar/card/badge bileşenleri yeniden kullanıldı; yeni
+  `.qa-*`, `.nutri-*`, `.tip-*` sınıfları panel-özel ama tutarlı adlandırmada.
+- **Performance: iyi.** AI aksiyonu istemci tarafı (ek AI thread yok); mevcut
+  endpoint'ler dışında yeni network yok; Chart.js zaten yükleniyordu (SRI'lı).
+- **UX clarity: iyi.** "Sıradaki en önemli iş" en üstte ve tek; hızlı işlemler
+  4'lü grid; ipucu karuseli pasif bilgi. Risk: kural motoru öncelikleri gerçek
+  kullanımda ayarlanmalı (ör. su hedefi eşiği).
 
 ## Known Issues
 
-- **Görsel doğrulama sunucu-taraflıdır:** Chrome eklentisi bu oturumda bağlı
-  değildi; piksel düzeyinde tarayıcı kontrolü yapılamadı. Deploy öncesi hızlı
-  bir göz kontrolü önerilir (özellikle login, index, training).
-- Inter geçişi metin metriklerini bir tık değiştirir (DM Sans'a çok yakın ama
-  birebir değil) — beklenen ve istenen değişiklik.
-- Chart.js konfiglerindeki `'DM Sans'`/renk literalleri JS içinde kaldı
-  (progress, index) — grafikler hâlâ DM Sans çizer.
-- 404/500 sayfaları tasarım sistemine bağlı değil (bağımsız, _head.html
-  içermiyor).
+- Piksel düzeyinde tarayıcı doğrulaması yok (yukarıda). Özellikle mobil 390px'te
+  ring hizası ve bento kırılımı deploy öncesi gözle kontrol edilmeli.
+- **Barkod Tara** devre dışı — backend gelene kadar "yakında". Etkinleştirmek
+  için tarayıcı endpoint'i + `qa-tile.disabled` kaldırılması gerekir.
+- **Adım/aktivite** kaldırıldı — cihaz sağlık entegrasyonu geldiğinde geri
+  eklenecek (aktivite kalorisi ring'e o zaman katılır).
+- AI Sıradaki Aksiyon **deterministik/istemci tarafı** — gerçek LLM önerisi
+  değil (bilinçli tradeoff, karar #1). İleride hafif bir günlük özet çağrısıyla
+  zenginleştirilebilir ama ana-panel-açılışında senkron AI'dan kaçınılmalı.
 - `.superpowers/sdd/*` ve `AGENTS.md` depo kökünde takip dışı scratch —
-  commit'lenmedi, dokunulmadı.
+  commit'lenmedi, dokunulmadı (Phase 2'den devam).
 
 ## Remaining Tasks / Next Recommended Steps
 
-1. **Phase 2 (Navigation & Layout):** `docs/design-system.md` + bu dosyayı
-   okuyarak başla; nav.css zaten token'lı, yapısal değişiklik oraya.
-2. Sayfalardaki ad-hoc modal/sheet/avatar/badge kopyalarını components.css
-   bileşenlerine geçir (sayfa fazlarında).
-3. dashboard.css + coach_widget.css ara-gri paletini semantik token'lara
-   normalize et; coach widget lime kalıntılarını temizle.
-4. 900px media query'lerini 1024'e, grid dışı boşlukları 8-pt'e çek.
-5. Legacy alias kullanımını kademeli azalt (yeni kod kanonik isim kullanır).
-6. Inline literaller bittiğinde DM Sans'ı fonts URL'inden çıkar.
+1. **Deploy öncesi görsel kontrol** (mobil 390px, tablet 768px, masaüstü 1280px):
+   hero ring, AI aksiyon kartı, hızlı işlemler grid'i, beslenme halkaları,
+   kilo sparkline, ipucu karuseli.
+2. **Barkod tarama backend'i** eklenince "yakında" tile'ını etkinleştir.
+3. **Kural motoru öncelikleri** gerçek kullanım verisiyle kalibre et (yemek/su/
+   antrenman eşikleri).
+4. Kontrast/axe taraması (Phase 1'den devir — panel dahil).
+5. Diğer sayfa içerikleri (nutrition/training/progress) hâlâ eski grid'leriyle;
+   panelle aynı 8-pt + components.css ritmine oturt.
+6. `coach_widget.css` lime/gri kalıntıları (Phase 1'den devir) — panel bitti,
+   sırada widget.
