@@ -3,7 +3,6 @@
 const RING_CIRC = 301.6; // 2π × 48
 let targetCalories = 2000;
 let selectedMealType = 'Kahvaltı';
-let quickAddOpen = false;
 
 /* ── i18n (PR5) ──
    Görünen metin İngilizce olur; backend'e giden KANONIK değerler (öğün tipi,
@@ -75,8 +74,6 @@ function switchTab(name, btn) {
    Tıklanan öğe (eski `this`) bazı eski çağrılarda ortada/başta argümandı ya da
    this.value iletiliyordu; delegasyon öğeyi sona koyduğu için bu ince
    sarmalayıcılar argüman sırasını ve değer okumayı korur. */
-function fxQuickWater()  { openWater(); toggleQuickAdd(); }
-function fxQuickScroll() { scrollToForm(); toggleQuickAdd(); }
 function fxGoToPlanTab() { switchTab('plan', document.querySelectorAll('.tab-btn')[1]); }
 function fxSelectFood(el) { selectFood(JSON.parse(el.dataset.f)); }
 function fxAddDiaryFood(el) { addDiaryFood(el.dataset.meal, JSON.parse(el.dataset.f)); }
@@ -266,7 +263,12 @@ function closeLogSheet() { document.getElementById('log-sheet').classList.remove
 function openManualSheet()  { closeLogSheet(); document.getElementById('manual-sheet').classList.add('open'); }
 function closeManualSheet() { document.getElementById('manual-sheet').classList.remove('open'); }
 
-/* ── VOICE PLACEHOLDER SHEET (mobil uygulamada) ── */
+/* ── VOICE PLACEHOLDER SHEET (mobil uygulamada) ──
+   Web MVP'de sesli giriş YOK; bileşen mimarisi native iOS/Android STT için hazır.
+   NATIVE-VOICE-HOOK: native STT metnini şuraya bağla:
+     selectMealTypeByValue(<algılanan öğün>); openManualSheet();
+     document.getElementById('meal-input').value = <transkript>;
+   Böylece UI/UX değişmeden native ses kaydı takılabilir. */
 function logVoice()        { closeLogSheet(); document.getElementById('voice-sheet').classList.add('open'); }
 function closeVoiceSheet() { document.getElementById('voice-sheet').classList.remove('open'); }
 
@@ -936,19 +938,6 @@ async function quickAddMeal(mealKey, mealLabel, btn) {
   }
 }
 
-/* ── QUICK ADD FAB ── */
-function toggleQuickAdd() {
-  quickAddOpen = !quickAddOpen;
-  document.getElementById('quick-add-btn').classList.toggle('open', quickAddOpen);
-  document.getElementById('quick-add-actions').classList.toggle('open', quickAddOpen);
-}
-document.addEventListener('click', e => {
-  if (quickAddOpen && !e.target.closest('.quick-add-wrap')) {
-    quickAddOpen = false;
-    document.getElementById('quick-add-btn').classList.remove('open');
-    document.getElementById('quick-add-actions').classList.remove('open');
-  }
-});
 
 /* ── SU TAKİBİ (Water tracking) — sunucuda saklanır (/water), cihazlar arası senkron ──
    "Su Takibi" sekmesindeki bardak widget'ı ile "Bugün" sekmesindeki Hızlı Ekle
@@ -1090,17 +1079,6 @@ function logWater() {
   const ml = document.getElementById('water-amount').value;
   closeWater();
   showToast(__t('nutrition.water_logged_ml', { ml: ml }), 'success');
-}
-
-/* ── SCROLL TO FORM ── */
-function scrollToForm() {
-  // Switch to today tab and scroll to log form
-  const todayTab = document.querySelector('.tab-btn');
-  switchTab('today', todayTab);
-  setTimeout(() => {
-    document.getElementById('meal-input').scrollIntoView({ behavior:'smooth', block:'center' });
-    document.getElementById('meal-input').focus();
-  }, 300);
 }
 
 /* ── FOOD AUTOCOMPLETE ── */
