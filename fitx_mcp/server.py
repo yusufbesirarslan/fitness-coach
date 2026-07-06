@@ -60,6 +60,18 @@ import requests
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
+# N6: MealLog'a yazan HER yol makroları kanonik clamp'ten geçirmeli (DB CHECK
+# yalnızca >100000 kcal kaba taşmayı yakalar, "3000 kcal çöpü"nü değil).
+# nutrition_pipeline saf modüldür (Flask/DB importu yok) — standalone MCP
+# sunucusuna güvenle çekilir. Doğrudan script çalıştırmada (`python
+# fitx_mcp/server.py`) repo kökü sys.path'te olmaz (yalnızca `-m fitx_mcp`'de
+# olur); kökü ekleyerek her iki giriş yolunda da import edilebilsin.
+import sys as _sys
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in _sys.path:
+    _sys.path.insert(0, _REPO_ROOT)
+from nutrition_pipeline import clamp_serving_macros
+
 load_dotenv()
 
 mcp = FastMCP(
@@ -662,6 +674,10 @@ def log_nutrition_entry(user_id: int, food_item: str, calories: float, protein: 
         return json.dumps({"error": "Yiyecek adı boş olamaz."}, ensure_ascii=False)
     if calories < 0 or protein < 0 or carbs < 0 or fat < 0:
         return json.dumps({"error": "Makro değerleri negatif olamaz."}, ensure_ascii=False)
+
+    # N6: in-app koç yolu (ai_coach.py) clamp'liyor; bu standalone MCP yazma yolu da
+    # kanonik tavanlara oranla kısmalı ki bir LLM saçmalığı (9999 kcal) deftere sızmasın.
+    calories, protein, carbs, fat = clamp_serving_macros(calories, protein, carbs, fat)
 
     with get_write_conn() as conn:
         cur = conn.cursor()

@@ -9,6 +9,7 @@ from app.extensions import _user_or_ip_key, db, limiter
 from app.i18n import t
 from app.models import DailyActivity, MealLog, User, UserSession, WaterLog, WearableActivityLog, WeeklyCheckIn, WeeklyLog, WorkoutLog
 from app.services.ai_coach import generate_checkin_feedback
+from app.services.ai_gate import ai_concurrency_gate
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
 from app.services.gamification import complete_quest_for_user
 from app.services.validators import _to_int
@@ -143,6 +144,7 @@ def _apply_weight_to_profile(weight, last_sess):
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 @limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # generate_checkin_feedback Sonnet'te: daha sıkı tavan
+@ai_concurrency_gate  # A1: bloklayıcı Bedrock/OpenAI çağrısı tüm thread'leri doldurmasın
 def checkin():
     data = request.get_json(silent=True) or {}
 

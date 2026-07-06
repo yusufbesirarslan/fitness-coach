@@ -123,6 +123,8 @@ def save_training_plan():
 @bp.route("/workout/complete", methods=["POST"])
 @login_required
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
+@limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # validate_pump_check Sonnet görü: daha sıkı tavan
+@ai_concurrency_gate  # A1: bloklayıcı Bedrock görü çağrısı tüm thread'leri doldurmasın
 def complete_workout():
     plan = TrainingPlan.query.filter_by(user_id=current_user.id)\
         .order_by(TrainingPlan.created_at.desc()).first()

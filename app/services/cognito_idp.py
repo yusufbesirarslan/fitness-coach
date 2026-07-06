@@ -59,10 +59,15 @@ def _get_client():
         import boto3
         from botocore import UNSIGNED
         from botocore.config import Config
+        # N5: açık connect/read timeout. initiate_auth LOGIN yolunda oturur
+        # (LOGIN_FAIL_CLOSED ile birleşince bir asılı çağrı thread baskısını
+        # büyütür); botocore varsayılanları (~60s + retry → dakikalar) yerine sınırla.
         _client = boto3.client(
             "cognito-idp",
             region_name=COGNITO_REGION,
-            config=Config(signature_version=UNSIGNED),
+            config=Config(signature_version=UNSIGNED,
+                          connect_timeout=5, read_timeout=10,
+                          retries={"max_attempts": 2}),
         )
     return _client
 
