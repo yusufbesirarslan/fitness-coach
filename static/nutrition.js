@@ -3,7 +3,6 @@
 const RING_CIRC = 301.6; // 2π × 48
 let targetCalories = 2000;
 let selectedMealType = 'Kahvaltı';
-let quickAddOpen = false;
 
 /* ── i18n (PR5) ──
    Görünen metin İngilizce olur; backend'e giden KANONIK değerler (öğün tipi,
@@ -62,21 +61,41 @@ function showToast(msg, type = 'info', duration = 3500) {
 
 /* ── TAB SYSTEM ── */
 function switchTab(name, btn) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.remove('active');
+    b.setAttribute('aria-selected', 'false');
+  });
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
+  btn.setAttribute('aria-selected', 'true');
   document.getElementById('panel-' + name).classList.add('active');
   if (name === 'today')   { loadTodayData(); loadQuickAddSection(); }
   if (name === 'diary')   { loadDiary(); }
   if (name === 'history') { loadMealHistory(); }
 }
 
+/* ── OVERLAY A11Y: Esc ile kapat + açılışta odağı içeri al ── */
+function _focusInto(el) {
+  if (!el) return;
+  var f = el.querySelector('input, select, textarea, button, [tabindex]');
+  if (f) { try { f.focus({ preventScroll: true }); } catch (e) { f.focus(); } }
+}
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  var scan = document.getElementById('scan-overlay');
+  if (scan && scan.classList.contains('open')) { closeScanOverlay(); return; }
+  var overlays = ['photo-modal', 'serving-modal', 'water-modal',
+                  'manual-sheet', 'voice-sheet', 'log-sheet'];
+  for (var i = 0; i < overlays.length; i++) {
+    var el = document.getElementById(overlays[i]);
+    if (el && el.classList.contains('open')) { el.classList.remove('open'); return; }
+  }
+});
+
 /* ── data-action köprüleri (CSP: satır-içi on* yerine) ──
    Tıklanan öğe (eski `this`) bazı eski çağrılarda ortada/başta argümandı ya da
    this.value iletiliyordu; delegasyon öğeyi sona koyduğu için bu ince
    sarmalayıcılar argüman sırasını ve değer okumayı korur. */
-function fxQuickWater()  { openWater(); toggleQuickAdd(); }
-function fxQuickScroll() { scrollToForm(); toggleQuickAdd(); }
 function fxGoToPlanTab() { switchTab('plan', document.querySelectorAll('.tab-btn')[1]); }
 function fxSelectFood(el) { selectFood(JSON.parse(el.dataset.f)); }
 function fxAddDiaryFood(el) { addDiaryFood(el.dataset.meal, JSON.parse(el.dataset.f)); }
@@ -146,43 +165,333 @@ async function loadTodayData() {
     };
     updateMacroBars(eaten, macroTargets);
 
-    // Render meals list
-    renderTodayMeals(today.meals || []);
+    // Render meal timeline
+    renderTimeline(today.meals || []);
 
   } catch (e) {
     console.error('loadTodayData', e);
   }
 }
 
-function renderTodayMeals(meals) {
-  const el = document.getElementById('today-meals-list');
-  if (!meals.length) {
-    el.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon"><svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/></svg></div>
-        <div class="empty-title">${__t('nutrition.empty_today_title')}</div>
-        <div class="empty-sub">${__t('nutrition.empty_today_sub')}</div>
-      </div>`;
+/* ── AI SCORE (client-side, deterministic) ──
+   Öğünün kendi makrolarından 0-100 + harf notu üretir. Ağ YOK, offline-güvenli
+   (Faz 3 kural motoruyla aynı felsefe). */
+function mealScore(m) {
+  var kcal = Math.max(+m.kalori || 0, 1);
+  var pK = (+m.protein || 0) * 4, cK = (+m.karb || 0) * 4, fK = (+m.yag || 0) * 9;
+  var sum = Math.max(pK + cK + fK, 1);
+  var pShare = pK / sum, cShare = cK / sum, fShare = fK / sum;
+  // 1) Protein yoğunluğu (0-40): ideal protein payı >= 0.30
+  var pScore = Math.min(pShare / 0.30, 1) * 40;
+  // 2) Makro denge (0-35): aşırı yağ (>0.40) veya karb (>0.60) payını cezalandır
+  var balance = 35;
+  if (fShare > 0.40) balance -= (fShare - 0.40) * 60;
+  if (cShare > 0.60) balance -= (cShare - 0.60) * 50;
+  balance = Math.max(0, balance);
+  // 3) Kalori makullüğü (0-25): 900 kcal'e kadar tam, sonra azalır
+  var cal = 25;
+  if (kcal > 900) cal -= Math.min((kcal - 900) / 30, 25);
+  cal = Math.max(0, cal);
+  var value = Math.round(pScore + balance + cal);
+  var grade, tone;
+  if (value >= 75)      { grade = 'A'; tone = 'success'; }
+  else if (value >= 55) { grade = 'B'; tone = 'success'; }
+  else if (value >= 40) { grade = 'C'; tone = 'warning'; }
+  else                  { grade = 'D'; tone = 'danger';  }
+  return { value: value, grade: grade, tone: tone };
+}
+
+/* ── MEAL TIMELINE ── */
+var SLOTS = [
+  { key: 'Kahvaltı', emoji: '🍳' },
+  { key: 'Öğle',     emoji: '🥗' },
+  { key: 'Akşam',    emoji: '🍽️' },
+  { key: 'Ara Öğün', emoji: '🥜' },
+];
+
+function fmtTime(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleTimeString(_EN ? 'en-GB' : 'tr-TR',
+      { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' });
+  } catch (e) { return ''; }
+}
+
+var _MEAL_PLACEHOLDER_SVG = '<svg viewBox="0 0 24 24"><path d="M3 2v7c0 1.1.9 2 2 2h.5V22M6 2v9M9 2v9M9 2v7c0 1.1-.9 2-2 2"/><path d="M18 2c-1.7 0-3 2-3 5.5S16 13 18 13s3-2 3-5.5S19.7 2 18 2zM18 13v9"/></svg>';
+
+function mealCardHTML(m) {
+  var s = mealScore(m);
+  var img = m.photo_url
+    ? '<img class="mc-img" src="' + esc(m.photo_url) + '" alt="">'
+    : '<div class="mc-img">' + _MEAL_PLACEHOLDER_SVG + '</div>';
+  var time = fmtTime(m.created_at);
+  return '<div class="meal-card">' + img +
+    '<div class="mc-body"><div class="mc-title">' + esc(m.yemekler) + '</div>' +
+      '<div class="mc-macros">' +
+        '<span>' + Math.round(m.kalori || 0) + ' kcal</span>' +
+        '<span>' + MA.p + ' <strong>' + Math.round(m.protein || 0) + '</strong></span>' +
+        '<span>' + MA.k + ' <strong>' + Math.round(m.karb || 0) + '</strong></span>' +
+        '<span>' + MA.y + ' <strong>' + Math.round(m.yag || 0) + '</strong></span>' +
+      '</div>' +
+      (time ? '<div class="mc-time">' + time + '</div>' : '') +
+    '</div>' +
+    '<div class="mc-side">' +
+      '<span class="badge badge-' + s.tone + '" title="' + __t('nutrition.ai_score') + ' ' + s.value + '/100">' + s.grade + '</span>' +
+      '<button class="mc-edit" data-action="quickEditMeal" data-args=\'["' + esc(m.ogun) + '"]\' aria-label="' + __t('nutrition.quick_edit') + '">' +
+        '<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>' +
+      '</button>' +
+    '</div></div>';
+}
+
+function renderTimeline(meals) {
+  var box = document.getElementById('meal-timeline');
+  if (!box) return;
+  var bySlot = { 'Kahvaltı': [], 'Öğle': [], 'Akşam': [], 'Ara Öğün': [] };
+  (meals || []).forEach(function (m) {
+    (bySlot[m.ogun] || bySlot['Ara Öğün']).push(m);
+  });
+  box.innerHTML = SLOTS.map(function (slot) {
+    var items = bySlot[slot.key] || [];
+    var kcal = items.reduce(function (a, m) { return a + (m.kalori || 0); }, 0);
+    var head = '<div class="slot-head"><span class="slot-emoji">' + slot.emoji +
+      '</span><span class="slot-name">' + esc(mealLabel(slot.key)) + '</span>' +
+      '<span class="slot-kcal">' + Math.round(kcal) + ' kcal</span></div>';
+    var body = items.length
+      ? items.map(mealCardHTML).join('')
+      : '<div class="slot-empty" data-action="logManualSlot" data-args=\'["' + esc(slot.key) +
+          '"]\'>+ ' + __t('nutrition.add_to_meal') + '</div>';
+    return '<div class="meal-slot">' + head + body + '</div>';
+  }).join('');
+}
+
+/* Öğün tipini programatik seç (quick edit / boş slot). */
+function selectMealTypeByValue(ogun) {
+  selectedMealType = ogun;
+  document.querySelectorAll('#meal-type-grid .meal-type-opt').forEach(function (o) {
+    o.classList.toggle('selected',
+      o.getAttribute('data-args') === '["' + ogun + '"]');
+  });
+}
+
+/* Quick edit / boş slota ekle → manuel giriş sayfasını açık öğünle aç. */
+function quickEditMeal(ogun)  { selectMealTypeByValue(ogun); openManualSheet(); }
+function logManualSlot(ogun)  { selectMealTypeByValue(ogun); openManualSheet(); }
+
+/* ── LOG BOTTOM SHEET (FAB) ── */
+function openLogSheet()  { var s = document.getElementById('log-sheet'); s.classList.add('open'); _focusInto(s); }
+function closeLogSheet() { document.getElementById('log-sheet').classList.remove('open'); }
+
+/* ── MANUAL ENTRY SHEET ── */
+function openManualSheet()  {
+  closeLogSheet();
+  var s = document.getElementById('manual-sheet');
+  s.classList.add('open');
+  var inp = document.getElementById('food-search-input');
+  if (inp) { try { inp.focus({ preventScroll: true }); } catch (e) { inp.focus(); } }
+}
+function closeManualSheet() { document.getElementById('manual-sheet').classList.remove('open'); }
+
+/* ── VOICE PLACEHOLDER SHEET (mobil uygulamada) ──
+   Web MVP'de sesli giriş YOK; bileşen mimarisi native iOS/Android STT için hazır.
+   NATIVE-VOICE-HOOK: native STT metnini şuraya bağla:
+     selectMealTypeByValue(<algılanan öğün>); openManualSheet();
+     document.getElementById('meal-input').value = <transkript>;
+   Böylece UI/UX değişmeden native ses kaydı takılabilir. */
+function logVoice()        { closeLogSheet(); document.getElementById('voice-sheet').classList.add('open'); }
+function closeVoiceSheet() { document.getElementById('voice-sheet').classList.remove('open'); }
+
+/* ── MENU SCANNER (mevcut koç widget'ını yeniden kullan) ── */
+function logMenuScan() {
+  closeLogSheet();
+  if (window.CW && typeof window.CW.startScan === 'function') {
+    window.CW.startScan();               // #cw-scan overlay'ini kendisi açar
+  } else {
+    showToast(__t('nutrition.menu_unavailable'), 'error');
+  }
+}
+
+/* ── MANUAL / TAKE PHOTO FAB OPTIONS ── */
+function logManual()    { openManualSheet(); }
+function logTakePhoto() { closeLogSheet(); document.getElementById('photo-input').click(); }
+
+/* ── TAKE PHOTO FLOW ── */
+var _photoDataUrl = null, _photoMealType = 'Kahvaltı';
+
+function _readFileAsDataURL(file) {
+  return new Promise(function (res, rej) {
+    var r = new FileReader();
+    r.onload = function () { res(r.result); };
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+async function onPhotoPicked(el) {
+  var file = el.files && el.files[0];
+  if (!file) return;
+  try {
+    _photoDataUrl = await _readFileAsDataURL(file);
+  } catch (e) {
+    showToast(__t('nutrition.photo_read_error'), 'error');
     return;
   }
-  el.innerHTML = meals.map(m => {
-    let badge = '';
-    if (m.source === 'ai_plan') badge = '<span class="source-badge ai">' + __t('nutrition.badge_ai') + '</span>';
-    else if (m.source === 'diary') badge = '<span class="source-badge diary">' + __t('nutrition.badge_diary') + '</span>';
-    return `
-    <div class="meal-log-card" style="margin-bottom:10px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <span class="meal-badge">${mealLabel(m.ogun)}${badge}</span>
-        <span style="font-family:'Bebas Neue';font-size:18px;color:var(--volt);letter-spacing:1px;">${Math.round(m.kalori)} kcal</span>
-      </div>
-      <div style="font-size:14px;color:var(--text);font-weight:300;line-height:1.6;margin-bottom:10px;">${esc(m.yemekler)}</div>
-      <div style="display:flex;gap:16px;padding-top:10px;border-top:1px solid var(--border);">
-        <span style="font-size:12px;color:var(--text-2);">${MA.p}: <strong style="color:var(--text);">${Math.round(m.protein)}g</strong></span>
-        <span style="font-size:12px;color:var(--text-2);">${MA.k}: <strong style="color:var(--text);">${Math.round(m.karb)}g</strong></span>
-        <span style="font-size:12px;color:var(--text-2);">${MA.y}: <strong style="color:var(--text);">${Math.round(m.yag)}g</strong></span>
-      </div>
-    </div>`;
-  }).join('');
+  el.value = '';                         // aynı dosyayı tekrar seçebilmek için sıfırla
+  openPhotoConfirm(_photoDataUrl);
+}
+
+function openPhotoConfirm(dataUrl) {
+  document.getElementById('photo-preview').src = dataUrl;
+  // Öğünü günün saatine göre öner
+  var h = new Date().getHours();
+  var suggested = h < 11 ? 'Kahvaltı' : h < 16 ? 'Öğle' : h < 22 ? 'Akşam' : 'Ara Öğün';
+  selectPhotoMealType(suggested);
+  document.getElementById('photo-note-input').value = '';
+  document.getElementById('photo-modal').classList.add('open');
+}
+function closePhotoConfirm() {
+  document.getElementById('photo-modal').classList.remove('open');
+  _photoDataUrl = null;
+}
+
+function selectPhotoMealType(ogun) {
+  _photoMealType = ogun;
+  document.querySelectorAll('#photo-meal-type-grid .meal-type-opt').forEach(function (o) {
+    o.classList.toggle('selected', o.getAttribute('data-args') === '["' + ogun + '"]');
+  });
+}
+
+async function submitPhotoMeal() {
+  if (!_photoDataUrl) return;
+  var note = document.getElementById('photo-note-input').value.trim();
+  var btn = document.getElementById('photo-confirm-btn');
+  btn.disabled = true;
+  var loading = document.getElementById('loading');
+  loading.classList.add('active');
+  try {
+    var res = await fetch('/meal-log', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ogun: _photoMealType,
+        yemekler: note || mealLabel(_photoMealType),
+        image: _photoDataUrl,
+      })
+    });
+    var d = await res.json();
+    if (d.error) { showToast(d.error, 'error'); return; }
+    showToast(__t('nutrition.meal_saved'), 'success');
+    if (window.fxActivation) fxActivation('meal');
+    if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
+    closePhotoConfirm();
+    loadTodayData();
+  } catch (e) {
+    showToast(__t('nutrition.conn_error_prefix') + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    loading.classList.remove('active');
+  }
+}
+
+/* ── BARCODE SCAN ──
+   Okuma: tarayıcı BarcodeDetector'ı (Chrome/Android); desteklenmiyorsa yalnız
+   manuel numara girişi. Çözme: /api/food/barcode → FatSecret → porsiyon modalı. */
+var _scanStream = null, _scanRAF = null, _scanBusy = false;
+
+function _suggestOgunByHour() {
+  var h = new Date().getHours();
+  return h < 11 ? 'Kahvaltı' : h < 16 ? 'Öğle' : h < 22 ? 'Akşam' : 'Ara Öğün';
+}
+
+function logScanBarcode() { closeLogSheet(); openScanOverlay(); }
+
+function openScanOverlay() {
+  var ov = document.getElementById('scan-overlay');
+  ov.classList.remove('manual-only');
+  ov.classList.add('open');
+  document.getElementById('barcode-manual-input').value = '';
+  if ('BarcodeDetector' in window && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+    startBarcodeScan();
+  } else {
+    showManualBarcodeOnly();
+  }
+}
+
+function showManualBarcodeOnly() {
+  document.getElementById('scan-overlay').classList.add('manual-only');
+  var hint = document.getElementById('scan-hint');
+  if (hint) hint.textContent = '';
+  var inp = document.getElementById('barcode-manual-input');
+  if (inp) inp.focus();
+}
+
+async function startBarcodeScan() {
+  var video = document.getElementById('scan-video');
+  try {
+    _scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+  } catch (e) {
+    showManualBarcodeOnly();
+    return;
+  }
+  video.srcObject = _scanStream;
+  try { await video.play(); } catch (e) { /* autoplay engeli — kullanıcı etkileşimi zaten var */ }
+  var det;
+  try {
+    det = new window.BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] });
+  } catch (e) {
+    showManualBarcodeOnly();
+    return;
+  }
+  var tick = async function () {
+    var ov = document.getElementById('scan-overlay');
+    if (!ov || !ov.classList.contains('open')) return;
+    try {
+      var codes = await det.detect(video);
+      if (codes && codes.length && codes[0].rawValue) {
+        resolveBarcode(codes[0].rawValue);
+        return;
+      }
+    } catch (e) { /* geçici algılama hatası — döngü sürer */ }
+    _scanRAF = requestAnimationFrame(tick);
+  };
+  _scanRAF = requestAnimationFrame(tick);
+}
+
+function stopBarcodeScan() {
+  if (_scanRAF) { cancelAnimationFrame(_scanRAF); _scanRAF = null; }
+  if (_scanStream) { _scanStream.getTracks().forEach(function (t) { t.stop(); }); _scanStream = null; }
+  var video = document.getElementById('scan-video');
+  if (video) video.srcObject = null;
+}
+
+function closeScanOverlay() {
+  stopBarcodeScan();
+  document.getElementById('scan-overlay').classList.remove('open');
+}
+
+function onBarcodeManual() {
+  var code = (document.getElementById('barcode-manual-input').value || '').trim();
+  if (code) resolveBarcode(code);
+}
+
+async function resolveBarcode(code) {
+  if (_scanBusy) return;
+  _scanBusy = true;
+  stopBarcodeScan();
+  closeScanOverlay();
+  showToast(__t('nutrition.barcode_looking'), 'info');
+  try {
+    var res = await fetch('/api/food/barcode?code=' + encodeURIComponent(code));
+    if (res.status === 404) { showToast(__t('nutrition.barcode_not_found'), 'error'); return; }
+    if (!res.ok) { showToast(__t('nutrition.barcode_error'), 'error'); return; }
+    var d = await res.json();
+    openMealLogServing(
+      { food_id: d.food_id, name: d.name || __t('nutrition.log_barcode'), brand: d.brand, servings: d.servings },
+      _suggestOgunByHour()
+    );
+  } catch (e) {
+    showToast(__t('nutrition.barcode_error'), 'error');
+  } finally {
+    _scanBusy = false;
+  }
 }
 
 /* ── LOG MEAL ── */
@@ -217,6 +526,7 @@ async function logMeal() {
       input.value = '';
       showToast(__t('nutrition.meal_saved'), 'success');
       if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
+      closeManualSheet();
       loadTodayData();
     } catch (e) {
       showToast(__t('nutrition.conn_error_prefix') + e.message, 'error');
@@ -244,6 +554,7 @@ async function logMeal() {
     if (window.fxTrackOnce) fxTrackOnce('first_meal_logged');
     if (window.fxActivation) fxActivation('meal');
     if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
+    closeManualSheet();
     loadTodayData();
   } catch (e) {
     showToast(__t('nutrition.conn_error_prefix') + e.message, 'error');
@@ -655,19 +966,6 @@ async function quickAddMeal(mealKey, mealLabel, btn) {
   }
 }
 
-/* ── QUICK ADD FAB ── */
-function toggleQuickAdd() {
-  quickAddOpen = !quickAddOpen;
-  document.getElementById('quick-add-btn').classList.toggle('open', quickAddOpen);
-  document.getElementById('quick-add-actions').classList.toggle('open', quickAddOpen);
-}
-document.addEventListener('click', e => {
-  if (quickAddOpen && !e.target.closest('.quick-add-wrap')) {
-    quickAddOpen = false;
-    document.getElementById('quick-add-btn').classList.remove('open');
-    document.getElementById('quick-add-actions').classList.remove('open');
-  }
-});
 
 /* ── SU TAKİBİ (Water tracking) — sunucuda saklanır (/water), cihazlar arası senkron ──
    "Su Takibi" sekmesindeki bardak widget'ı ile "Bugün" sekmesindeki Hızlı Ekle
@@ -811,17 +1109,6 @@ function logWater() {
   showToast(__t('nutrition.water_logged_ml', { ml: ml }), 'success');
 }
 
-/* ── SCROLL TO FORM ── */
-function scrollToForm() {
-  // Switch to today tab and scroll to log form
-  const todayTab = document.querySelector('.tab-btn');
-  switchTab('today', todayTab);
-  setTimeout(() => {
-    document.getElementById('meal-input').scrollIntoView({ behavior:'smooth', block:'center' });
-    document.getElementById('meal-input').focus();
-  }, 300);
-}
-
 /* ── FOOD AUTOCOMPLETE ── */
 let acTimeout = null;
 let selectedFoods = [];
@@ -892,7 +1179,7 @@ function renderSelectedFoods() {
     cal: acc.cal + (f.per_100g.calories || 0), p: acc.p + (f.per_100g.protein || 0),
     k: acc.k + (f.per_100g.carbs || 0), y: acc.y + (f.per_100g.fat || 0)
   }), {cal:0, p:0, k:0, y:0});
-  totals.innerHTML = __t('nutrition.total_label') + ' <strong style="color:var(--volt);">' + Math.round(t.cal) + '</strong> kcal · ' + MA.p + ': ' + Math.round(t.p) + 'g · ' + MA.k + ': ' + Math.round(t.k) + 'g · ' + MA.y + ': ' + Math.round(t.y) + 'g';
+  totals.innerHTML = __t('nutrition.total_label') + ' <strong style="color:var(--color-primary);">' + Math.round(t.cal) + '</strong> kcal · ' + MA.p + ': ' + Math.round(t.p) + 'g · ' + MA.k + ': ' + Math.round(t.k) + 'g · ' + MA.y + ': ' + Math.round(t.y) + 'g';
 }
 
 document.addEventListener('click', e => {
@@ -994,7 +1281,7 @@ function renderDiary(data) {
             <span style="font-size:20px;">${dm.icon}</span>
             <span style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1.5px;color:var(--text);">${mealLabel(dm.key)}</span>
           </div>
-          <span style="font-family:'Bebas Neue';font-size:16px;color:var(--volt);">${Math.round(totals.calories)} kcal</span>
+          <span style="font-family:'Bebas Neue';font-size:16px;color:var(--color-primary);">${Math.round(totals.calories)} kcal</span>
         </div>
         <div class="diary-items-list">${itemsHtml}</div>
         ${!isLogged ? `
@@ -1058,12 +1345,54 @@ function diaryFoodSearch(input, mealName) {
   }, 350);
 }
 
-/* ── SERVING MODAL STATE ── */
+/* ── SERVING MODAL STATE ──
+   İki mod: 'diary' (öğün oluşturucuya ekle — varsayılan) ve 'meallog' (barkod
+   → bugünkü zaman çizelgesine doğrudan kaydet). Aynı modal DOM'u yeniden kullanılır. */
 let _smFood = null;
 let _smMealName = null;
 let _smServings = null;
+let _smMode = 'diary';
+let _smLogOgun = 'Kahvaltı';
+
+/* Modal alanlarını başlangıç durumuna getir (gram modu görünür). */
+function _smResetFields(food) {
+  document.getElementById('sm-food-name').textContent = food.name || '';
+  document.getElementById('sm-brand').textContent = food.brand || '';
+  document.getElementById('sm-serving-row').style.display = 'none';
+  document.getElementById('sm-qty-row').style.display = 'none';
+  document.getElementById('sm-gram-row').style.display = 'block';
+  document.getElementById('sm-gram-input').value = 100;
+  document.getElementById('sm-qty-input').value = 1;
+  document.getElementById('sm-confirm-btn').disabled = false;
+  document.getElementById('serving-modal').classList.add('open');
+  updateSmPreview();
+}
+
+/* Porsiyon listesini modale uygula (fetch veya barkod ile hazır gelen). */
+function _smApplyServings(servings) {
+  document.getElementById('sm-loading').style.display = 'none';
+  if (servings && servings.length) {
+    _smServings = servings;
+    const select = document.getElementById('sm-serving-select');
+    select.innerHTML = servings.map(s =>
+      '<option value="' + s.serving_id + '">' +
+      esc(formatServingLabel(s.serving_description, s.metric_serving_amount, s.calories, s.is_bulk)) +
+      '</option>'
+    ).join('');
+    // Varsayılan: devasa "tüm tarif" porsiyonu (is_bulk) ASLA seçilmez.
+    const is100 = s => s.serving_description === '100 g' || s.serving_description === '100g';
+    let preferred = servings.findIndex(s => !s.is_bulk && !is100(s));
+    if (preferred < 0) preferred = servings.findIndex(is100);
+    if (preferred >= 0) select.selectedIndex = preferred;
+    document.getElementById('sm-serving-row').style.display = 'block';
+    document.getElementById('sm-qty-row').style.display = 'block';
+    document.getElementById('sm-gram-row').style.display = 'none';
+  }
+  updateSmPreview();
+}
 
 function openServingModal(mealName, food) {
+  _smMode = 'diary';
   _smFood = food;
   _smMealName = mealName;
   _smServings = null;
@@ -1071,56 +1400,43 @@ function openServingModal(mealName, food) {
   const searchInput = document.querySelector('[data-meal-name="' + mealName + '"] .diary-food-search');
   if (searchInput) { searchInput.value = ''; searchInput.nextElementSibling.style.display = 'none'; }
 
-  document.getElementById('sm-food-name').textContent = food.name;
-  document.getElementById('sm-brand').textContent = food.brand || '';
-  document.getElementById('sm-serving-row').style.display = 'none';
-  document.getElementById('sm-qty-row').style.display = 'none';
-  // Always show gram input as immediate default
-  document.getElementById('sm-gram-row').style.display = 'block';
-  document.getElementById('sm-gram-input').value = 100;
-  document.getElementById('sm-qty-input').value = 1;
-  document.getElementById('sm-confirm-btn').disabled = false;
-  document.getElementById('serving-modal').classList.add('open');
-  updateSmPreview();
+  _smResetFields(food);
 
   const lookupKey = food.food_id || food.name;
   if (!lookupKey) {
-    // No food_id and no name — stay in gram-only mode
     document.getElementById('sm-loading').style.display = 'none';
     return;
   }
   document.getElementById('sm-loading').style.display = 'flex';
-  fetchServings(lookupKey).then(servings => {
+  fetchServings(lookupKey).then(_smApplyServings);
+}
+
+/* Barkod akışı: çözülen besin + hazır porsiyonlarla modali 'meallog' modunda aç. */
+function openMealLogServing(food, ogun) {
+  _smMode = 'meallog';
+  _smFood = food;
+  _smMealName = null;
+  _smLogOgun = ogun || _smLogOgun;
+  _smServings = null;
+  _smResetFields(food);
+  if (food.servings && food.servings.length) {
+    _smApplyServings(food.servings);
+  } else if (food.food_id || food.name) {
+    document.getElementById('sm-loading').style.display = 'flex';
+    fetchServings(food.food_id || food.name).then(_smApplyServings);
+  } else {
     document.getElementById('sm-loading').style.display = 'none';
-    if (servings && servings.length) {
-      _smServings = servings;
-      const select = document.getElementById('sm-serving-select');
-      select.innerHTML = servings.map(s =>
-        '<option value="' + s.serving_id + '">' +
-        esc(formatServingLabel(s.serving_description, s.metric_serving_amount, s.calories, s.is_bulk)) +
-        '</option>'
-      ).join('');
-      // Varsayılan: devasa "tüm tarif" porsiyonu (is_bulk) ASLA seçilmez.
-      // Önce makul tek porsiyon, yoksa 100 g bazına düş.
-      const is100 = s => s.serving_description === '100 g' || s.serving_description === '100g';
-      let preferred = servings.findIndex(s => !s.is_bulk && !is100(s));
-      if (preferred < 0) preferred = servings.findIndex(is100);
-      if (preferred >= 0) select.selectedIndex = preferred;
-      document.getElementById('sm-serving-row').style.display = 'block';
-      document.getElementById('sm-qty-row').style.display = 'block';
-      // Hide gram row when servings are available (dropdown has 100g option)
-      document.getElementById('sm-gram-row').style.display = 'none';
-    }
-    updateSmPreview();
-  });
+  }
 }
 
 function closeServingModal() {
   document.getElementById('serving-modal').classList.remove('open');
-  _smFood = null; _smMealName = null; _smServings = null;
+  _smFood = null; _smMealName = null; _smServings = null; _smMode = 'diary';
 }
 
-function updateSmPreview() {
+/* Modaldeki mevcut seçimden makroları hesapla (porsiyon×adet veya gram).
+   Gram modu yalnızca per_100g varsa hesaplanır (barkod besininde olmayabilir). */
+function _smCurrentMacros() {
   let cal = 0, pro = 0, carb = 0, fat = 0;
   if (_smServings) {
     const select = document.getElementById('sm-serving-select');
@@ -1130,24 +1446,62 @@ function updateSmPreview() {
       cal = srv.calories * qty; pro = srv.protein * qty;
       carb = srv.carbs * qty; fat = srv.fat * qty;
     }
-  } else if (_smFood) {
+  } else if (_smFood && _smFood.per_100g) {
     const grams = parseFloat(document.getElementById('sm-gram-input').value) || 100;
     const p = _smFood.per_100g;
     const scale = grams / 100;
     cal = p.calories * scale; pro = p.protein * scale;
     carb = p.carbs * scale; fat = p.fat * scale;
   }
-  document.getElementById('sm-cal').textContent = Math.round(cal);
-  document.getElementById('sm-pro').textContent = Math.round(pro) + 'g';
-  document.getElementById('sm-carb').textContent = Math.round(carb) + 'g';
-  document.getElementById('sm-fat').textContent = Math.round(fat) + 'g';
+  return { kalori: cal, protein: pro, karb: carb, yag: fat };
+}
+
+function updateSmPreview() {
+  const m = _smCurrentMacros();
+  document.getElementById('sm-cal').textContent = Math.round(m.kalori);
+  document.getElementById('sm-pro').textContent = Math.round(m.protein) + 'g';
+  document.getElementById('sm-carb').textContent = Math.round(m.karb) + 'g';
+  document.getElementById('sm-fat').textContent = Math.round(m.yag) + 'g';
 }
 
 async function confirmServingModal() {
-  if (!_smFood || !_smMealName) return;
+  if (!_smFood) return;
   const btn = document.getElementById('sm-confirm-btn');
   btn.disabled = true;
   btn.textContent = __t('nutrition.adding');
+
+  // ── 'meallog' modu (barkod) → doğrudan bugünkü kanonik deftere yaz ──
+  if (_smMode === 'meallog') {
+    const macros = _smCurrentMacros();
+    try {
+      const res = await fetch('/meal-log', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ogun: _smLogOgun,
+          yemekler: _smFood.name || __t('nutrition.log_barcode'),
+          override_macros: {
+            kalori: macros.kalori, protein: macros.protein,
+            karb: macros.karb, yag: macros.yag,
+          },
+        })
+      });
+      const d = await res.json();
+      if (d.error) { showToast(d.error, 'error'); return; }
+      showToast(__t('nutrition.meal_saved'), 'success');
+      if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
+      closeServingModal();
+      loadTodayData();
+    } catch (e) {
+      showToast(__t('nutrition.add_error'), 'error');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = __t('nutrition.add');
+    }
+    return;
+  }
+
+  // ── 'diary' modu (öğün oluşturucu) ──
+  if (!_smMealName) { btn.disabled = false; btn.textContent = __t('nutrition.add'); return; }
 
   const card = document.querySelector('[data-meal-name="' + _smMealName + '"]');
   let mealId = card.dataset.mealId;

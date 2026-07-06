@@ -239,7 +239,8 @@ def today_meals():
             "karb": m.karb,
             "yag": m.yag,
             "source": getattr(m, "source", "manual") or "manual",
-            "photo_url": _meal_photo_url(m)
+            "photo_url": _meal_photo_url(m),
+            "created_at": m.created_at.isoformat() if m.created_at else None,
         })
         totals["kalori"]  += m.kalori or 0
         totals["protein"] += m.protein or 0

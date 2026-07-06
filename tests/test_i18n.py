@@ -136,7 +136,14 @@ def test_nutrition_renders_localized(app, client, make_user, login):
     r = client.get("/nutrition")
     assert r.status_code == 200, r.status_code
     body = r.get_data(as_text=True)
-    assert "Today's Meals" in body and "Manual Add" in body and "LOG MEAL" in body
+    # Faz 4: timeline + FAB kayıt sayfası. Manuel form artık bir sheet içinde.
+    # ("Today's Meals" apostrofu Jinja autoescape ile &#39;e döner — kırılgan;
+    #  yerine apostrofsuz, kararlı görünür dizeler kontrol edilir.)
+    assert "Manual Entry" in body and "LOG MEAL" in body
+    # FAB kayıt seçenekleri lokalize
+    assert "Add Meal" in body and "Scan Barcode" in body and "Take Photo" in body
+    # Voice = placeholder ("mobil uygulamada")
+    assert "In the mobile app" in body
     assert "Bugünkü Öğünler" not in body
     # Öğün tipi data-args TR kalmalı (backend kanonik değer)
     assert 'data-args=\'["Kahvaltı"]\'' in body

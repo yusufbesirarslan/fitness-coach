@@ -5,7 +5,7 @@ from flask_login import login_required
 from app.config import FOOD_SEARCH_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter
 from app.services.ai_coach import _coach_search_food
-from app.services.fatsecret import _food_get_servings, _fs_relevant_candidates, _get_fatsecret_token
+from app.services.fatsecret import _food_find_by_barcode, _food_get_servings, _fs_relevant_candidates, _get_fatsecret_token
 from app.services.foodcache import _cache_food_id, _get_cached_food_id, _get_cached_macros
 
 
@@ -40,6 +40,22 @@ def food_search():
     results = _coach_search_food(q)
 
     return jsonify({"results": results})
+
+
+@bp.route("/api/food/barcode")
+@login_required
+@limiter.limit(FOOD_SEARCH_RATELIMIT, key_func=_user_or_ip_key)
+def food_by_barcode():
+    """Barkod (EAN/UPC) → FatSecret ürünü + porsiyonlar. Barkod tarama akışı
+    (static/nutrition.js) buradan besin çözer, sonra mevcut porsiyon modaline
+    devreder — ayrı bir loglama yolu YOK."""
+    code = request.args.get("code", "").strip()
+    if not any(ch.isdigit() for ch in code):
+        return jsonify({"error": "invalid_barcode"}), 400
+    result = _food_find_by_barcode(code)
+    if not result:
+        return jsonify({"error": "not_found"}), 404
+    return jsonify(result)
 
 
 @bp.route("/api/food/<food_id>/servings")
