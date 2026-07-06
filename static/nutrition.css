@@ -389,6 +389,17 @@
 }
 .modal-box .modal-title { margin-bottom: var(--space-5); }
 
+/* ── 13c · FOCUS VISIBLE (keyboard) ───────────────────────────────── */
+.log-fab:focus-visible,
+.log-sheet-opt:focus-visible,
+.meal-card .mc-edit:focus-visible,
+.slot-empty:focus-visible,
+.scan-close:focus-visible,
+.qab:focus-visible {
+  outline: var(--focus-ring, 2px solid var(--color-primary));
+  outline-offset: 2px;
+}
+
 /* ── 14 · REDUCED MOTION ──────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .meal-card, .wg.just-filled, .qab-done .qab-check, .water-num { animation: none !important; transition: none !important; }

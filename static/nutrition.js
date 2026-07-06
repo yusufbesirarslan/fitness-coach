@@ -61,14 +61,36 @@ function showToast(msg, type = 'info', duration = 3500) {
 
 /* ── TAB SYSTEM ── */
 function switchTab(name, btn) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.remove('active');
+    b.setAttribute('aria-selected', 'false');
+  });
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
+  btn.setAttribute('aria-selected', 'true');
   document.getElementById('panel-' + name).classList.add('active');
   if (name === 'today')   { loadTodayData(); loadQuickAddSection(); }
   if (name === 'diary')   { loadDiary(); }
   if (name === 'history') { loadMealHistory(); }
 }
+
+/* ── OVERLAY A11Y: Esc ile kapat + açılışta odağı içeri al ── */
+function _focusInto(el) {
+  if (!el) return;
+  var f = el.querySelector('input, select, textarea, button, [tabindex]');
+  if (f) { try { f.focus({ preventScroll: true }); } catch (e) { f.focus(); } }
+}
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  var scan = document.getElementById('scan-overlay');
+  if (scan && scan.classList.contains('open')) { closeScanOverlay(); return; }
+  var overlays = ['photo-modal', 'serving-modal', 'water-modal',
+                  'manual-sheet', 'voice-sheet', 'log-sheet'];
+  for (var i = 0; i < overlays.length; i++) {
+    var el = document.getElementById(overlays[i]);
+    if (el && el.classList.contains('open')) { el.classList.remove('open'); return; }
+  }
+});
 
 /* ── data-action köprüleri (CSP: satır-içi on* yerine) ──
    Tıklanan öğe (eski `this`) bazı eski çağrılarda ortada/başta argümandı ya da
@@ -256,11 +278,17 @@ function quickEditMeal(ogun)  { selectMealTypeByValue(ogun); openManualSheet(); 
 function logManualSlot(ogun)  { selectMealTypeByValue(ogun); openManualSheet(); }
 
 /* ── LOG BOTTOM SHEET (FAB) ── */
-function openLogSheet()  { document.getElementById('log-sheet').classList.add('open'); }
+function openLogSheet()  { var s = document.getElementById('log-sheet'); s.classList.add('open'); _focusInto(s); }
 function closeLogSheet() { document.getElementById('log-sheet').classList.remove('open'); }
 
 /* ── MANUAL ENTRY SHEET ── */
-function openManualSheet()  { closeLogSheet(); document.getElementById('manual-sheet').classList.add('open'); }
+function openManualSheet()  {
+  closeLogSheet();
+  var s = document.getElementById('manual-sheet');
+  s.classList.add('open');
+  var inp = document.getElementById('food-search-input');
+  if (inp) { try { inp.focus({ preventScroll: true }); } catch (e) { inp.focus(); } }
+}
 function closeManualSheet() { document.getElementById('manual-sheet').classList.remove('open'); }
 
 /* ── VOICE PLACEHOLDER SHEET (mobil uygulamada) ──
