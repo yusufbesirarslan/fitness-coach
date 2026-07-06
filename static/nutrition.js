@@ -146,44 +146,125 @@ async function loadTodayData() {
     };
     updateMacroBars(eaten, macroTargets);
 
-    // Render meals list
-    renderTodayMeals(today.meals || []);
+    // Render meal timeline
+    renderTimeline(today.meals || []);
 
   } catch (e) {
     console.error('loadTodayData', e);
   }
 }
 
-function renderTodayMeals(meals) {
-  const el = document.getElementById('today-meals-list');
-  if (!meals.length) {
-    el.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon"><svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/></svg></div>
-        <div class="empty-title">${__t('nutrition.empty_today_title')}</div>
-        <div class="empty-sub">${__t('nutrition.empty_today_sub')}</div>
-      </div>`;
-    return;
-  }
-  el.innerHTML = meals.map(m => {
-    let badge = '';
-    if (m.source === 'ai_plan') badge = '<span class="source-badge ai">' + __t('nutrition.badge_ai') + '</span>';
-    else if (m.source === 'diary') badge = '<span class="source-badge diary">' + __t('nutrition.badge_diary') + '</span>';
-    return `
-    <div class="meal-log-card" style="margin-bottom:10px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-        <span class="meal-badge">${mealLabel(m.ogun)}${badge}</span>
-        <span style="font-family:'Bebas Neue';font-size:18px;color:var(--volt);letter-spacing:1px;">${Math.round(m.kalori)} kcal</span>
-      </div>
-      <div style="font-size:14px;color:var(--text);font-weight:300;line-height:1.6;margin-bottom:10px;">${esc(m.yemekler)}</div>
-      <div style="display:flex;gap:16px;padding-top:10px;border-top:1px solid var(--border);">
-        <span style="font-size:12px;color:var(--text-2);">${MA.p}: <strong style="color:var(--text);">${Math.round(m.protein)}g</strong></span>
-        <span style="font-size:12px;color:var(--text-2);">${MA.k}: <strong style="color:var(--text);">${Math.round(m.karb)}g</strong></span>
-        <span style="font-size:12px;color:var(--text-2);">${MA.y}: <strong style="color:var(--text);">${Math.round(m.yag)}g</strong></span>
-      </div>
-    </div>`;
+/* ── AI SCORE (client-side, deterministic) ──
+   Öğünün kendi makrolarından 0-100 + harf notu üretir. Ağ YOK, offline-güvenli
+   (Faz 3 kural motoruyla aynı felsefe). */
+function mealScore(m) {
+  var kcal = Math.max(+m.kalori || 0, 1);
+  var pK = (+m.protein || 0) * 4, cK = (+m.karb || 0) * 4, fK = (+m.yag || 0) * 9;
+  var sum = Math.max(pK + cK + fK, 1);
+  var pShare = pK / sum, cShare = cK / sum, fShare = fK / sum;
+  // 1) Protein yoğunluğu (0-40): ideal protein payı >= 0.30
+  var pScore = Math.min(pShare / 0.30, 1) * 40;
+  // 2) Makro denge (0-35): aşırı yağ (>0.40) veya karb (>0.60) payını cezalandır
+  var balance = 35;
+  if (fShare > 0.40) balance -= (fShare - 0.40) * 60;
+  if (cShare > 0.60) balance -= (cShare - 0.60) * 50;
+  balance = Math.max(0, balance);
+  // 3) Kalori makullüğü (0-25): 900 kcal'e kadar tam, sonra azalır
+  var cal = 25;
+  if (kcal > 900) cal -= Math.min((kcal - 900) / 30, 25);
+  cal = Math.max(0, cal);
+  var value = Math.round(pScore + balance + cal);
+  var grade, tone;
+  if (value >= 75)      { grade = 'A'; tone = 'success'; }
+  else if (value >= 55) { grade = 'B'; tone = 'success'; }
+  else if (value >= 40) { grade = 'C'; tone = 'warning'; }
+  else                  { grade = 'D'; tone = 'danger';  }
+  return { value: value, grade: grade, tone: tone };
+}
+
+/* ── MEAL TIMELINE ── */
+var SLOTS = [
+  { key: 'Kahvaltı', emoji: '🍳' },
+  { key: 'Öğle',     emoji: '🥗' },
+  { key: 'Akşam',    emoji: '🍽️' },
+  { key: 'Ara Öğün', emoji: '🥜' },
+];
+
+function fmtTime(iso) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleTimeString(_EN ? 'en-GB' : 'tr-TR',
+      { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Istanbul' });
+  } catch (e) { return ''; }
+}
+
+var _MEAL_PLACEHOLDER_SVG = '<svg viewBox="0 0 24 24"><path d="M3 2v7c0 1.1.9 2 2 2h.5V22M6 2v9M9 2v9M9 2v7c0 1.1-.9 2-2 2"/><path d="M18 2c-1.7 0-3 2-3 5.5S16 13 18 13s3-2 3-5.5S19.7 2 18 2zM18 13v9"/></svg>';
+
+function mealCardHTML(m) {
+  var s = mealScore(m);
+  var img = m.photo_url
+    ? '<img class="mc-img" src="' + esc(m.photo_url) + '" alt="">'
+    : '<div class="mc-img">' + _MEAL_PLACEHOLDER_SVG + '</div>';
+  var time = fmtTime(m.created_at);
+  return '<div class="meal-card">' + img +
+    '<div class="mc-body"><div class="mc-title">' + esc(m.yemekler) + '</div>' +
+      '<div class="mc-macros">' +
+        '<span>' + Math.round(m.kalori || 0) + ' kcal</span>' +
+        '<span>' + MA.p + ' <strong>' + Math.round(m.protein || 0) + '</strong></span>' +
+        '<span>' + MA.k + ' <strong>' + Math.round(m.karb || 0) + '</strong></span>' +
+        '<span>' + MA.y + ' <strong>' + Math.round(m.yag || 0) + '</strong></span>' +
+      '</div>' +
+      (time ? '<div class="mc-time">' + time + '</div>' : '') +
+    '</div>' +
+    '<div class="mc-side">' +
+      '<span class="badge badge-' + s.tone + '" title="' + __t('nutrition.ai_score') + ' ' + s.value + '/100">' + s.grade + '</span>' +
+      '<button class="mc-edit" data-action="quickEditMeal" data-args=\'["' + esc(m.ogun) + '"]\' aria-label="' + __t('nutrition.quick_edit') + '">' +
+        '<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>' +
+      '</button>' +
+    '</div></div>';
+}
+
+function renderTimeline(meals) {
+  var box = document.getElementById('meal-timeline');
+  if (!box) return;
+  var bySlot = { 'Kahvaltı': [], 'Öğle': [], 'Akşam': [], 'Ara Öğün': [] };
+  (meals || []).forEach(function (m) {
+    (bySlot[m.ogun] || bySlot['Ara Öğün']).push(m);
+  });
+  box.innerHTML = SLOTS.map(function (slot) {
+    var items = bySlot[slot.key] || [];
+    var kcal = items.reduce(function (a, m) { return a + (m.kalori || 0); }, 0);
+    var head = '<div class="slot-head"><span class="slot-emoji">' + slot.emoji +
+      '</span><span class="slot-name">' + esc(mealLabel(slot.key)) + '</span>' +
+      '<span class="slot-kcal">' + Math.round(kcal) + ' kcal</span></div>';
+    var body = items.length
+      ? items.map(mealCardHTML).join('')
+      : '<div class="slot-empty" data-action="logManualSlot" data-args=\'["' + esc(slot.key) +
+          '"]\'>+ ' + __t('nutrition.add_to_meal') + '</div>';
+    return '<div class="meal-slot">' + head + body + '</div>';
   }).join('');
 }
+
+/* Öğün tipini programatik seç (quick edit / boş slot). */
+function selectMealTypeByValue(ogun) {
+  selectedMealType = ogun;
+  document.querySelectorAll('#meal-type-grid .meal-type-opt').forEach(function (o) {
+    o.classList.toggle('selected',
+      o.getAttribute('data-args') === '["' + ogun + '"]');
+  });
+}
+
+/* Quick edit / boş slota ekle → manuel giriş sayfasını açık öğünle aç. */
+function quickEditMeal(ogun)  { selectMealTypeByValue(ogun); openManualSheet(); }
+function logManualSlot(ogun)  { selectMealTypeByValue(ogun); openManualSheet(); }
+
+/* ── LOG BOTTOM SHEET (FAB) ── */
+function openLogSheet()  { document.getElementById('log-sheet').classList.add('open'); }
+function closeLogSheet() { document.getElementById('log-sheet').classList.remove('open'); }
+
+/* ── MANUAL ENTRY SHEET ── */
+function openManualSheet()  { closeLogSheet(); document.getElementById('manual-sheet').classList.add('open'); }
+function closeManualSheet() { document.getElementById('manual-sheet').classList.remove('open'); }
 
 /* ── LOG MEAL ── */
 async function logMeal() {
