@@ -56,6 +56,12 @@ def _concurrency_gate(fn, semaphore, wait_seconds, max_concurrency, label):
             return fn(*args, **kwargs)
         finally:
             semaphore.release()
+
+    # İçe-bakış işareti (test_ai_gate coverage): hangi view'ların kapıyı taşıdığını
+    # dış dekoratörlerden (login_required/limiter/premium — hepsi functools.wraps
+    # kullanır, __dict__'i DIŞA kopyalar) tespit edebilmek için. @wraps fn.__dict__'i
+    # wrapper'a kopyaladıktan SONRA set edilir ki fn'in kendi işareti üzerine yazmasın.
+    wrapper._ai_concurrency_gated = True
     return wrapper
 
 

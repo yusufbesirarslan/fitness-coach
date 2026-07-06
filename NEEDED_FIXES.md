@@ -1,8 +1,97 @@
 # FitX — Triage Report & Needed Fixes
 
-_Generated from a 3-agent deep-dive triage (security, backend logic, structure/AI/frontend) of the `fitness-coach` codebase. No code was changed during triage — this document is the action list._
+_Living action list. Each run of the deep-dive triage appends its findings at the top and
+preserves prior history below. No code is changed during triage — this document is the list._
 
-## Status — resolved in this branch
+---
+
+# Run 2 — 2026-07-06 (3-agent deep dive: security · correctness · architecture)
+
+This pass re-ran the full triage. Most of Run 1's findings are resolved (see the appendix).
+The items below are **new** — not present in Run 1 — plus a few Run-1 items re-confirmed as
+still open. Line numbers were spot-checked against current source; the ★ items were
+re-verified directly against the code while writing this report.
+
+Headline: still **no CRITICAL and no clearly-exploitable HIGH security hole.** IDOR/ownership
+(the flagged rule) passes on every route examined. The standout new items are two holes in the
+**A1 concurrency-gate** mitigation and a wrong-food logging bug in a FatSecret route.
+
+## Priority shortlist
+
+| # | Sev | Track | Fix | File |
+|---|-----|-------|-----|------|
+| N1 ★ | HIGH | Robustness | Add `@ai_concurrency_gate` to `/workout/complete` (blocking Bedrock **vision**) | `app/blueprints/training.py:123-126` |
+| N2 | HIGH | Robustness | Add `@ai_concurrency_gate` to `/checkin` (blocking Bedrock/OpenAI) | `app/blueprints/tracking.py:142` |
+| N3 ★ | HIGH | Correctness | Relevance-gate `foods[0]` before returning/caching macros | `app/blueprints/food.py:111-121` |
+| N4 | MED | Correctness | Add macro floor + null-name guard to LLM food fallback | `app/services/ai_nutrition.py:327-344` |
+| N5 | MED | Robustness | Explicit timeouts on boto3 S3 + Cognito clients | `s3_helper.py:84`, `app/services/cognito_idp.py:62` |
+| N6 | MED | Correctness | Route MCP nutrition writes through `clamp_serving_macros` | `fitx_mcp/server.py:658-677` |
+
+### N1 ★ HIGH — `/workout/complete` runs a blocking Bedrock vision call with NO concurrency gate
+- **File:** `app/blueprints/training.py:123-126` (route) → `validate_pump_check` (`app/services/menu_extract.py:348,385`, Claude Sonnet multimodal), fired at `training.py:162`.
+- **Confirmed:** the route carries only `@login_required` + `@limiter.limit(AI_RATELIMIT)`. It is **missing `@ai_concurrency_gate`** and even lacks the `BEDROCK_RATELIMIT` its siblings use.
+- **Why it matters:** exactly the A1 failure mode `ai_gate.py` exists to prevent. Vision calls are the slowest/most expensive Bedrock path. 8 concurrent pump-check submissions (different users, each within its own per-user rate budget) can occupy all 8 gunicorn threads → starve `/health` and cheap routes → the Docker HEALTHCHECK / deploy health-gate flaps → **spurious rollback**.
+- **Fix:** add `@ai_concurrency_gate` as the innermost decorator (below the limiter) and `@limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)`.
+
+### N2 HIGH — `/checkin` runs a blocking Bedrock/OpenAI call with NO concurrency gate
+- **File:** `app/blueprints/tracking.py:142-195` → `generate_checkin_feedback` (`app/services/ai_coach.py:1510`).
+- **Detail:** has `AI_RATELIMIT` + `BEDROCK_RATELIMIT` but **no `@ai_concurrency_gate`**. Rate limits cap per-user *frequency*; the semaphore caps cross-user *concurrency* — same thread-starvation exposure as N1.
+- **Fix:** add `@ai_concurrency_gate` as the innermost decorator.
+- **Coverage gap:** only 5 routes carry the gate (`nutrition/plan.py:75`, `menu.py:279`, `menu.py:91`, `training.py:73`, `coach.py:23,118`). N1, N2, and the `/api/food/search` LLM fallback are ungated. **Add a test asserting every heavy-AI route carries the gate** — that omission is why N1/N2 went unnoticed.
+
+### N3 ★ HIGH — `food_servings_by_name` trusts `foods[0]` with no relevance gate
+- **File:** `app/blueprints/food.py:100-122` (esp. 111-121).
+- **Confirmed:** the route does a `max_results:1` FatSecret search, blindly takes `foods[0]`, calls `_cache_food_id(name, fid)`, and returns its servings for the user to log. This is the exact bug the team already fixed in `food_search` (comment at `food.py:37-39`: `'patates' → 'Soy Nuts'`) by switching to the relevance-gated `_coach_search_food` — **this sibling route was missed.**
+- **Scenario:** a Turkish dish not in `_TR_TO_EN` (e.g. "mercimek köftesi") → FatSecret returns an unrelated generic first → its macros are logged into the canonical `MealLog` (only upper-clamped), and the wrong `name → food_id` is persisted in the **global cache**, so every later lookup for that name stays wrong until eviction.
+- **Fix:** gate candidates through `_is_specific_match` / `_fs_relevant_candidates`, raise `max_results`, and only `_cache_food_id` on a relevance-verified match.
+
+### N4 MED — `_food_search_llm` has no macro floor / null-name guard
+- **File:** `app/services/ai_nutrition.py:327-344`. Unlike its sibling `_estimate_macros_llm_batch` (~811, which filters `calories > 0`), this coach fallback applies no `>0` floor, no `isinstance(item, dict)` check, and `name = item.get("name", q)` yields `None` on a JSON-null. A 0-kcal LLM row → staged via `PendingAction` → confirmed → written to `MealLog` (clamp only bounds the *upper* side). `None` name also becomes a cache key.
+- **Fix:** mirror the batch path — skip `calories <= 0`, require `isinstance(item, dict)`, `name = item.get("name") or q`.
+
+### N5 MED — boto3 S3 & Cognito clients have no explicit connect/read timeout
+- **File:** `s3_helper.py:84`, `app/services/cognito_idp.py:62-66`. Every `requests`/OpenAI/Bedrock call sets explicit timeouts; the boto3 clients rely on botocore defaults (~60s+retries → minutes). S3 sits on `/workout/complete` + meal-photo paths; `cognito-idp initiate_auth` sits on the **login** path (already `LOGIN_FAIL_CLOSED`, so a hang compounds thread pressure).
+- **Fix:** `config=Config(connect_timeout=5, read_timeout=10, retries={"max_attempts": 2})` on both clients.
+
+### N6 MED — MCP `log_nutrition_entry` writes to `MealLog` bypassing `clamp_serving_macros`
+- **File:** `fitx_mcp/server.py:658-677`. Only checks negatives, then inserts raw LLM macros. The clamp docstring says every ingest path MUST call it; the DB CHECK only catches >100000 kcal, "not 3000-kcal garbage." The in-app coach path (`ai_coach.py:506`) clamps; this standalone MCP write path does not. (MED: reachable only via stdio/in-process MCP transport.)
+- **Fix:** route values through `clamp_serving_macros` before INSERT.
+
+### New LOW / cleanup
+- **fatsecret null-`foods` → 500:** `app/services/fatsecret.py:271` `data.get("foods", {}).get("food", [])` sits *outside* the try; a present JSON-null returns `None` → `AttributeError` → 500 instead of empty. Same pattern at `food.py:111`. Fix: `foods = (data.get("foods") or {}).get("food", [])`.
+- **Bedrock text without `or ""`:** `app/services/ai.py:97,134` return `block.text` raw (vs `_openai_chat` `or ""` at :55) → a `None` block can surface as a blank "successful" coach reply. Fix: `return block.text or ""`.
+- **Empty Bedrock reply skips OpenAI fallback:** `app/services/ai.py:145-161` — fallback only on exception; an empty `""` is returned as valid. Fix: treat falsy/blank output as failure and fall through.
+- **Staged vs committed coach macros differ:** `app/services/ai_coach.py:435-462` scores from *unclamped* macros; clamp applied only at commit (:506-511). Coach may say "9999 kcal, score 5" but persist ~1200. Stored value safe; user-facing inconsistency. Fix: clamp in the staging tool.
+- **CLI `seed-quests` seeds 4 of 7 types:** `app/cli.py:13-18` omits `water_logged`, `checkin_done`, `supplement_added`. Not live-breaking (boot seeder covers them), but a CLI-only path (`FITX_SKIP_DB_INIT=1`) leaves them unearnable. Fix: align with `db_init`.
+- **A1 gate coverage test / heavy-AI-route registry** (see N2) — prevents future regressions.
+- **`workout/status` vs `workout/complete` idempotency sources differ:** `training.py:266-271` reads `UserQuestProgress`, `complete_workout` (:135-142) gates on today's `PumpCheck`; can diverge if the quest row is unseeded.
+- **boto3 clients / migration CI guard (N5, A-arch):** add a CI check failing on `op.drop_column`/`op.drop_table`/rename in new migrations unless an override label is present (A2 rollback can't undo migrations); keep an RDS auto-snapshot pre-deploy.
+- **`maybe_weekly_rollover` swallows all exceptions** (`app/hooks.py:199-209`) — emit to Sentry so a persistently-failing rollover isn't buried in WARN logs.
+- **`/health` reports `ok`** even with Bedrock misconfigured or login 503'ing on degraded Redis — add non-gating advisory fields; keep DB as the only 503 trigger.
+
+### New security (all latent / low)
+- **S-new-1 MED (latent):** MCP tools take `user_id` with no authorization (`fitx_mcp/server.py:130-910`). Gated by default (`FITX_MCP_ALLOW_HTTP=1`, bound `127.0.0.1:8100`) — but add an auth layer (shared secret/bearer) before the loopback bind so an accidental proxy exposure isn't immediately cross-tenant. (Same surface as Run-1 item 2.1.)
+- **S-new-2 LOW:** pump-check card always returns `sharedFriendIds` (`app/services/pump_checks.py:106-119`, consumed `social.py:430`) — a `friends`-visibility check delivered via chat leaks the poster's recipient list. Fix: include only when `viewer_id == check.user_id`.
+- **S-new-3 LOW:** Cognito ID token not signature-verified (`app/services/cognito_idp.py:183-198`) — safe today (token from Cognito over TLS), but a defense-in-depth gap. Verify against pool JWKS and assert `iss`/`aud`/`token_use`.
+- **S-new-4 LOW:** `FATSECRET_ALLOW_INSECURE=1` (`app/config.py:106-112`) can send the OAuth bearer over plaintext HTTP to a non-loopback host — operator foot-gun. Restrict to private/loopback or refuse outside dev.
+
+### Verified sound this run (don't re-investigate)
+Day-key discipline (all keys via `app/timeutil`; `MealLog.tarih` ISO `YYYY-MM-DD`); no live
+`UserDailyNutrition` refs; concurrency counters (`update_streak`, `award_xp`,
+`_record_counter`) use `with_for_update()`; like/comment counters atomic; weekly rollover
+Istanbul-boundary + `WeeklyResetLog` UNIQUE; all `requests`/OpenAI/Bedrock calls have explicit
+timeouts (boto3 the sole gap, N5); secrets never logged (IAM instance profile, env-only keys);
+IDOR/ownership + two-layer CSRF + per-request-nonce CSP + menu-fetch SSRF guards all solid;
+broad test suite (~60 files) — the visible gap is no test pinning the concurrency gate (N1/N2).
+
+---
+
+# Appendix — Run 1 (historical)
+
+_Preserved from the initial triage. Items marked ✅ were fixed in this branch; the report
+body is kept for context and for the deferred/decision items still relevant._
+
+## Status — resolved in Run 1
 
 - ✅ **1.1** Dead `water_logged` / `checkin_done` quests now claimed in `set_water`, `checkin`, `update_weight`.
 - ✅ **1.2** `new_supplement` activity now committed atomically (no longer dropped).
@@ -22,164 +111,13 @@ _Generated from a 3-agent deep-dive triage (security, backend logic, structure/A
 
 _Deferred (need a product/ops decision): 1.4 quick-add idempotency, 1.6/1.7 INFO consolidations, 2.1/2.5/2.6 (already bounded / doc-only), 3.3/3.4 deploy & TLS config, 3.10 single-worker note._
 
-## Executive summary
+## Run 1 items still open / worth tracking
+- **1.4 LOW/PRODUCT** — `quick_add_meal` has no per-slot/day idempotency (`app/blueprints/nutrition/diary.py:54-131`); tapping "add breakfast from plan" twice double-counts. Needs a product decision on `(user_id, tarih, meal_key)` uniqueness.
+- **1.6 INFO** — activity-calorie math duplicated between PL/pgSQL trigger (`app/db_init.py:62-73`) and `app/services/calculations.py:39-57`; add a test pinning them together.
+- **2.5 LOW** — Google Drive download size caps generous (`app/services/menu_fetch.py:353` 50 MB); pass `max_bytes` into `_safe_requests_get` and lower.
+- **3.3 MED** — deploy CSP cleanup via fragile `sed` (`.github/workflows/deploy.yml`); render nginx config from repo or fail on stray header.
+- **3.4 MED** — HSTS/TLS depends on certbot having mutated nginx config; commit an explicit 443 block + 80→443 redirect or document the dependency.
+- **3.10 INFO** — single-worker coupling (in-memory foodcache + limiter fallback + ai_gate semaphore + boot seeder); guard/doc before raising `--workers`.
 
-The codebase is **well-engineered and unusually security-conscious**. CSRF (two-layer), CSP (per-request nonce, no `unsafe-inline`), session hardening, SSRF defense on the menu scraper, S3/IDOR ownership scoping, and the MCP authorization gate are all carefully implemented with documented rationale. **No Critical or High security vulnerabilities were found.**
-
-The actionable items are mostly **correctness bugs** (user-visible quest gaps, a lost activity-feed write, a duplicate nudge) and **hardening/operational** improvements (decompression-bomb guard, Docker pinning, deploy config). Priorities below.
-
-### Top priorities
-1. **[HIGH · bug]** Dead quests — `water_logged` & `checkin_done` are seeded but never awardable.
-2. **[MED · bug]** `new_supplement` activity-feed entry can be silently dropped.
-3. **[MED · bug]** Weekly-report nudge fires twice a week (Sun + Mon).
-4. **[MED · hardening]** Decompression-bomb guard missing in menu OCR (`Image.open`).
-5. **[MED · infra]** Docker base image not digest-pinned; deploy CSP cleanup uses fragile `sed`.
-
----
-
-## 1. Correctness bugs
-
-### 1.1 HIGH — Dead quests: `water_logged` & `checkin_done` never claimed
-- **Where:** seeded at `app/db_init.py:121-130`; claim sites missing in `set_water` (`app/blueprints/training.py:556-586`) and `checkin`/`update_weight` (`app/blueprints/tracking.py:112`, `:208`).
-- **Symptom:** Users see "Su Hedefi" and "Haftalık Check-in" quests on the quests page that can **never** be completed, never award their 10/20 XP. (`friend_invited` *is* claimed at `app/services/referral.py:72`, so the gap is specific to these two.)
-- **Fix:** Call `complete_quest_for_user(current_user.id, "water_logged")` in `set_water` when the count increases, and `complete_quest_for_user(current_user.id, "checkin_done")` in `checkin`/`update_weight`. Alternatively, mark these quests inactive if intentionally unused.
-
-### 1.2 MED — `new_supplement` activity can be silently dropped
-- **Where:** `app/blueprints/supplements.py:77-78`.
-- **Symptom:** `log_activity(...)` only does `db.session.add(...)` (no commit). The following `complete_quest_for_user(...)` commits **only on the success path**; when the supplement quest is already claimed that day it returns `None` without committing (`app/services/gamification.py:256-264` → `_claim_quest` returns `None`, no commit). On the 2nd+ supplement of a day, the `new_supplement` Activity stays pending and is flushed/rolled back by an unrelated later request — the feed entry can be lost or bound to the wrong transaction.
-- **Fix:** Commit immediately after `log_activity`, or move the activity write into the same committed transaction as the quest update.
-
-### 1.3 MED — Weekly-report nudge fires twice per week
-- **Where:** `analytics_engine.py:139-140` — `if today.weekday() in (0, 6)`.
-- **Symptom:** weekday `0` = Monday, `6` = Sunday, so the "Bugün haftalık rapor günü" nudge triggers on **both** Sunday and Monday. The weekly-reset boundary is conceptually a single day (Sunday 23:59 Istanbul).
-- **Fix:** Pick one weekday (likely Monday, `== 0`), or document that two days is intentional.
-
-### 1.4 LOW/PRODUCT — `quick_add_meal` has no per-slot/day idempotency
-- **Where:** `app/blueprints/nutrition/diary.py:54-131` (`quick_add_meal`), `log_meal`.
-- **Symptom:** Each call writes a fresh `MealLog` row keyed only on `meal_key`; `MealLog` has only a `(user_id, tarih)` index, **no** unique constraint. Tapping "add breakfast from plan" twice double-counts the day's calories/macros. For manual `log_meal` this may be intended, but `quick_add_meal` (one canonical Kahvaltı/Öğle/Akşam/Ara Öğün slot from the active plan) reads like it should be once-per-slot-per-day.
-- **Fix (needs product decision):** If single-slot is intended, enforce a `(user_id, tarih, meal_key)` uniqueness / upsert for plan-sourced quick-adds.
-
-### 1.5 LOW — `score_compatibility` hard-zero rule ignores carb overflow
-- **Where:** `nutrition_pipeline.py:709` (instant-zero rule checks only `cal_ratio > 1.0 or fat_ratio > 1.0`).
-- **Symptom:** A food that blows the **carb** budget past 100% only gets a progressive penalty, not the documented "exceeds budget → 0" treatment (docstring at `:682` says "calories OR fat"). Rarely bites since calories track carbs, but it's an asymmetry vs. the carb ceiling enforced elsewhere.
-- **Fix:** Either add `carb_ratio > 1.0` to the hard-zero rule or update the docstring/contract to clarify carbs are penalty-only.
-
-### 1.6 INFO — Duplicated activity-calorie math (two sources of truth)
-- **Where:** PL/pgSQL trigger `app/db_init.py:62-73` duplicates the MET/stride formula in `app/services/calculations.py:39-57`.
-- **Symptom:** They currently agree, but a future edit to one will silently drift from the other.
-- **Fix:** Consolidate, or add a test that pins the two implementations together.
-
-### 1.7 INFO — PumpCheck "today" uses two notions of day
-- **Where:** pre-check via `utc_day_bounds()` on `PumpCheck.created_at` (`app/blueprints/training.py:420-425`) vs. unique guard `uq_pump_check_day` on `(user_id, date_key)` (`:461`).
-- **Symptom:** Near Istanbul midnight the UTC-window pre-check can be ineffective, but the unique constraint + `IntegrityError` branch (`:486`) is the real guard, so no double XP. Fragile, not a live bug.
-- **Fix (optional):** Make the pre-check use `date_key` for consistency.
-
-**Verified clean during triage:** no leftover `UserDailyNutrition` references in app code (MealLog is cleanly the single ledger); timeutil discipline is clean in live request paths (only `tests/` and a backfill migration use raw date formatting); `db_init.py` seed/upgrade idempotency is sound for the single-worker invariant; zero-macro guards are all in place.
-
----
-
-## 2. Security findings
-
-> No Critical/High issues. The items below are Medium→Low hardening.
-
-### 2.1 MED (operational) — MCP HTTP transport has no authorization (by design, gated)
-- **Where:** `fitx_mcp/server.py:915-928`, `fitx_mcp/__main__.py:7-23`; in-process use guarded by `_assert_principal(user_id)` at `app/services/ai_coach.py:120-129`.
-- **Detail:** MCP tools take `user_id` as a plain parameter with **no** authorization. Correctly gated: HTTP transport requires `FITX_MCP_ALLOW_HTTP=1` and binds only to `127.0.0.1:8100`; in the Flask app the tools are imported in-process and every entry enforces `current_user.id == user_id`. **Risk is purely operational** — if this is ever placed behind a public reverse proxy it becomes a full cross-user data breach.
-- **Action:** No code defect. Document loudly and ensure it is never proxied publicly. (`tests/test_mcp_gate.py` already defends this.)
-
-### 2.2 MED→LOW — `/set-language` writable while unauthenticated, no rate limit
-- **Where:** `app/blueprints/auth.py:33-44`.
-- **Detail:** Not `@login_required` and unthrottled. CSRF-protected and the language value is whitelisted via `set_locale`; DB write only happens when authenticated. Residual risk minor.
-- **Fix:** Add a light rate limit.
-
-### 2.3 LOW — XSS defense-in-depth gap: AI meal names rendered without `esc()`
-- **Where:** `static/nutrition.js:532` — `(ml.yemekler || []).map(y => \`<li>${y}</li>\`)` is the only `yemekler` render site missing the `esc()` helper used at `:178`, `:305`, `:446`.
-- **Detail:** Source is the AI-generated `NutritionPlan` (gpt-4o-mini), not directly attacker-controlled, but AI output is influenced by user prompts. Inconsistent with the rest of the file.
-- **Fix:** Wrap in `esc(y)`.
-
-### 2.4 LOW — `edit_profile` username uniqueness is TOCTOU
-- **Where:** `app/blueprints/profile.py:110-112`, `:128`, `:141`.
-- **Detail:** The "username taken" check and commit aren't atomic and the commit isn't wrapped in try/except. Mitigated by the DB unique constraint (`app/models.py:21`), so worst case is a 500, not duplicate accounts.
-- **Fix:** Catch `IntegrityError` on commit and return the friendly "taken" message.
-
-### 2.5 LOW — Google Drive download size caps are generous
-- **Where:** `app/services/menu_fetch.py:353` (`_DRIVE_MAX_BYTES` = 50 MB), `:455` (10 MB image), `:358-360` (relies on caller-side streamed cap rather than passing `max_bytes` into `_safe_requests_get`).
-- **Detail:** Bounded (≤50 MB/request, 20 req/hr) → mild memory/bandwidth DoS amplification, not SSRF.
-- **Fix:** Pass `max_bytes` into the helper and lower the cap.
-
-### 2.6 INFO — `|safe` injections are developer-controlled
-- `templates/_head.html:15` `window.I18N = {{ i18n_json|safe }}` (built at `app/hooks.py:113`) — `json.dumps(ensure_ascii=False)` doesn't escape `</script>`, but content is the static translation catalog in a nonce'd script. Hardening only (e.g. escape `<`).
-- `templates/friends.html:176` `{{ t('friends.invite_desc')|safe }}` — raw render of a static i18n string with intentional markup. Safe unless translation files ever ingest user data.
-
-**Verified safe during triage:** session fixation handling + `session_protection="strong"`; required `SECRET_KEY` in prod; secure/HttpOnly/SameSite cookies; per-IP + per-username brute-force limits with `LOGIN_FAIL_CLOSED` and constant-time dummy-hash compare; two-layer CSRF wired as global `before_request`; full CSP with per-request nonce; IDOR scoping on every user-owned query and ID-loaded record; S3 key ownership enforcement; thorough SSRF defense (scheme/IP/port allowlists, per-hop redirect re-validation, DNS-rebind pinning); SQLAlchemy ORM + parameterized MCP queries (no SQLi); secrets from env/IAM (none hardcoded, FatSecret TLS enforced); server-side-only quota/premium enforcement.
-
----
-
-## 3. Structure / AI / Frontend / Infra
-
-### 3.1 MED — Decompression-bomb guard missing in menu OCR
-- **Where:** `app/services/menu_ocr.py` `_compress_image_for_vision` — `Image.open` called without `PIL.Image.MAX_IMAGE_PIXELS` or a dimension check.
-- **Detail:** A small-file/huge-canvas image just over the 1.5 MB compress threshold decodes fully into memory and can OOM the single gunicorn worker.
-- **Fix:** Set `Image.MAX_IMAGE_PIXELS`, reject oversized dimensions, and/or catch `DecompressionBombError`. Add a test asserting such an image is rejected.
-
-### 3.2 MED — Docker base image not digest-pinned
-- **Where:** `Dockerfile:3` — `FROM python:3.11-slim` floats.
-- **Detail:** Undermines the otherwise reproducible build (requirements are fully pinned).
-- **Fix:** Pin by `@sha256:`.
-
-### 3.3 MED — Deploy CSP cleanup via fragile `sed`
-- **Where:** `.github/workflows/deploy.yml` strips a stray `add_header Content-Security-Policy` line from a hand-placed nginx file.
-- **Detail:** A double CSP header would intersect policies and break nonces.
-- **Fix:** Render the full nginx site config from the repo, or fail the deploy if a stray header remains.
-
-### 3.4 MED — HSTS/TLS depends on certbot having mutated the config
-- **Where:** `nginx.conf` — HSTS set on the `listen 80` block (no-op over HTTP); no committed 443 block / explicit 80→443 redirect.
-- **Detail:** Correct only after `certbot --nginx` runs; the committed config alone doesn't enforce TLS.
-- **Fix:** Commit an explicit 443 server block + 80→443 redirect, or document the certbot dependency.
-
-### 3.5 LOW — Silent SQLite fallback in production
-- **Where:** `app/config.py:141` — `DATABASE_URL` defaults to `sqlite:///chatbot.db`.
-- **Detail:** A container without `DATABASE_URL` boots against ephemeral SQLite instead of failing fast → data silently lost on redeploy.
-- **Fix:** Require `DATABASE_URL` unless `_is_dev`.
-
-### 3.6 LOW — `_food_id_cache` read without lock
-- **Where:** `app/blueprints/food.py:28`, `:69` — `_food_id_cache.get(...)` outside `_cache_lock`.
-- **Detail:** Races with the eviction `del` in `_cache_food_id`. A plain dict `.get` won't corrupt, but it's inconsistent with the documented locking discipline.
-- **Fix:** Use a locked accessor.
-
-### 3.7 LOW — AI prompt-injection fence not delimiter-escaped
-- **Where:** `app/services/ai_nutrition.py` — scraped content fenced with `<<<MENU_DATA ... MENU_DATA>>>`.
-- **Detail:** Scraped content containing the literal `MENU_DATA>>>` terminator could break out of the fence. The `user_id`-injection design prevents cross-user access, but a crafted page could steer extraction.
-- **Fix:** Strip the delimiter tokens from `menu_input` before interpolation.
-
-### 3.8 LOW — Stale docstrings in `hooks.py`
-- **Where:** `app/hooks.py:90-91`, `:126-127` say the `X-CSRFToken` header is added by `static/actions.js`; it is actually added by `static/csrf.js` (`actions.js` makes no network calls).
-- **Fix:** Correct the comments.
-
-### 3.9 LOW — Orphaned `templates/_chat_widget.html`
-- **Where:** `templates/_chat_widget.html` (469 lines) is never included (live widget is `static/coach_widget.js`). Both define `window.CW` and `#cw-root` — an accidental future include would collide.
-- **Fix:** Delete or mark deprecated.
-
-### 3.10 INFO — Single-worker coupling
-- In-memory `foodcache` and the in-process rate-limit fallback are correct only at one gunicorn worker. The streak/rollover hook is now idempotent (Redis `NX` lock + `WeeklyResetLog` UNIQUE) and safe at >1 worker, but the caches/limiter fallback are not.
-- **Action:** Add a guard or doc note before anyone raises `--workers`.
-
-### 3.11 LOW — Misc infra
-- `docker-compose.yml` `restart:` inconsistency (`web: unless-stopped` vs `redis: always`).
-- `psycopg2-binary` is discouraged for prod by maintainers (acceptable on slim).
-
-**Verified strong during triage:** clean application-factory pattern, lazy LLM clients, layered AI error/fallback handling (empty choices, `finish_reason=length`, rate-limit/timeout, Bedrock→OpenAI fallback, JSON brace-extraction + truncation salvage), tool dispatch injects `user_id` server-side, FatSecret token fetch locked against thundering-herd with bounded caches, thorough SSRF defense, full CSP-nonce + CSRF-fetch coverage on the frontend (zero `XMLHttpRequest`/`sendBeacon`), loopback-only port binding, non-root container, OIDC-based deploy, pinned requirements, hermetic test harness.
-
----
-
-## Suggested fix order
-
-| # | Item | Type | Effort |
-|---|------|------|--------|
-| 1 | 1.1 Dead water/check-in quests | bug (user-visible) | S |
-| 2 | 1.2 Lost `new_supplement` activity | bug | S |
-| 3 | 1.3 Duplicate weekly-report nudge | bug | XS |
-| 4 | 3.1 OCR decompression-bomb guard | hardening | S |
-| 5 | 3.2 / 3.3 / 3.4 Docker pin, deploy CSP, TLS config | infra | M |
-| 6 | 2.3 / 2.4 / 2.2 esc(), profile TOCTOU, set-language limit | security (low) | S |
-| 7 | 3.5–3.11 + 1.4–1.7 cleanups & product decisions | quality | M |
+_(Full Run-1 detail — executive summary, per-finding writeups for sections 1–3, and the
+"verified strong/safe" notes — is retained in git history for commit prior to this rewrite.)_

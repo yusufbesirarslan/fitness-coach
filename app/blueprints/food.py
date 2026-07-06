@@ -2,10 +2,10 @@
 from flask import Blueprint, current_app, jsonify, request
 from flask_login import login_required
 
-from app.config import FATSECRET_API_URL, FOOD_SEARCH_RATELIMIT
+from app.config import FOOD_SEARCH_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter
 from app.services.ai_coach import _coach_search_food
-from app.services.fatsecret import _food_find_by_barcode, _food_get_servings, _fs_get, _get_fatsecret_token
+from app.services.fatsecret import _food_find_by_barcode, _food_get_servings, _fs_relevant_candidates, _get_fatsecret_token
 from app.services.foodcache import _cache_food_id, _get_cached_food_id, _get_cached_macros
 
 
@@ -89,9 +89,7 @@ def food_servings_by_name():
         if servings:
             return jsonify({"servings": servings, "food_id": cached_fid})
 
-    # Try FatSecret search with the original name and common translations
-    search_terms = [name]
-    # Add English translations for common Turkish food names
+    # English translations for common Turkish food names (raw + EN arama terimi).
     _TR_TO_EN = {
         "yumurta": "egg", "tavuk": "chicken", "pirinc": "rice", "pilav": "rice pilaf",
         "ekmek": "bread", "sut": "milk", "süt": "milk", "peynir": "cheese",
@@ -108,36 +106,28 @@ def food_servings_by_name():
         "cilek": "strawberry", "çilek": "strawberry", "karpuz": "watermelon",
     }
     en = _TR_TO_EN.get(name.lower())
-    if en and en.lower() != name.lower():
-        search_terms.append(en)
+    english = en if (en and en.lower() != name.lower()) else ""
 
+    # N3: FatSecret'in `max_results:1` sonucuna KÖRLEMESİNE güvenmek yanlış makro
+    # veriyordu — eşleyemediği Türkçe sorgulara ilgisiz jenerik döndürüp ('mercimek
+    # köftesi' → alakasız kayıt) hem kullanıcıya hem GLOBAL food_id cache'ine yanlış
+    # besini yazıyordu. food_search'teki gibi alaka-kapısından geçir: adayları
+    # _is_specific_match ile ele, en spesifik eşleşmeyi al, YALNIZCA doğrulanmış
+    # eşleşmede _cache_food_id yaz.
     try:
         token = _get_fatsecret_token()
-        for term in search_terms:
-            resp = _fs_get(FATSECRET_API_URL, params={
-                "method": "foods.search",
-                "search_expression": term,
-                "format": "json",
-                "max_results": 1,
-            }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
-            data = resp.json()
-            if "error" in data:
-                current_app.logger.warning("servings-by-name search '%s' error: %s", term, data["error"])
-                continue
-            foods = data.get("foods", {}).get("food", [])
-            if isinstance(foods, dict):
-                foods = [foods]
-            if foods:
-                fid = foods[0].get("food_id", "")
-                current_app.logger.info("servings-by-name: found food_id=%s for search '%s'", fid, term)
-                if fid:
-                    _cache_food_id(name, fid)
-                    servings = _food_get_servings(fid)
-                    if servings:
-                        return jsonify({"servings": servings, "food_id": fid})
-                    current_app.logger.warning("servings-by-name: food.get returned no servings for id=%s", fid)
-            else:
-                current_app.logger.info("servings-by-name: no results for search '%s'", term)
+        candidates = _fs_relevant_candidates(name, english, token)
+        if candidates:
+            fid = candidates[0].get("food_id", "")
+            current_app.logger.info("servings-by-name: relevant food_id=%s for '%s'", fid, name)
+            if fid:
+                servings = _food_get_servings(fid)
+                if servings:
+                    _cache_food_id(name, fid)  # yalnızca porsiyonlar da geldiyse önbelleğe al
+                    return jsonify({"servings": servings, "food_id": fid})
+                current_app.logger.warning("servings-by-name: food.get returned no servings for id=%s", fid)
+        else:
+            current_app.logger.info("servings-by-name: no relevant match for '%s'", name)
     except Exception as e:
         current_app.logger.warning("servings-by-name failed for '%s': %s", name, e)
     return jsonify({"servings": [], "food_id": ""})

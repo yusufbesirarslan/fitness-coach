@@ -325,13 +325,21 @@ def _food_search_llm(q):
         items = json.loads(text)
         results = []
         for item in items:
+            # N4: batch yolundaki (_estimate_macros_llm_batch) korumaları yansıt —
+            # dict olmayan satırı atla, 0-kcal "besini" ele (staged→confirmed olunca
+            # clamp yalnızca ÜST sınırı tutar, MealLog'a 0 kcal sızabilir), ve
+            # JSON-null adı ('name': null) ham sorguya düşür (None cache anahtarı olmasın).
+            if not isinstance(item, dict):
+                continue
             per_100g = {
-                "calories": float(item.get("calories", 0)),
-                "protein": float(item.get("protein", 0)),
-                "carbs": float(item.get("carbs", 0)),
-                "fat": float(item.get("fat", 0)),
+                "calories": float(item.get("calories", 0) or 0),
+                "protein": float(item.get("protein", 0) or 0),
+                "carbs": float(item.get("carbs", 0) or 0),
+                "fat": float(item.get("fat", 0) or 0),
             }
-            name = item.get("name", q)
+            if per_100g["calories"] <= 0:
+                continue
+            name = item.get("name") or q
             _cache_macros({name: per_100g}, basis="per_100g")
             results.append({
                 "name": name,
