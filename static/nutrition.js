@@ -1151,7 +1151,7 @@ function renderSelectedFoods() {
     cal: acc.cal + (f.per_100g.calories || 0), p: acc.p + (f.per_100g.protein || 0),
     k: acc.k + (f.per_100g.carbs || 0), y: acc.y + (f.per_100g.fat || 0)
   }), {cal:0, p:0, k:0, y:0});
-  totals.innerHTML = __t('nutrition.total_label') + ' <strong style="color:var(--volt);">' + Math.round(t.cal) + '</strong> kcal · ' + MA.p + ': ' + Math.round(t.p) + 'g · ' + MA.k + ': ' + Math.round(t.k) + 'g · ' + MA.y + ': ' + Math.round(t.y) + 'g';
+  totals.innerHTML = __t('nutrition.total_label') + ' <strong style="color:var(--color-primary);">' + Math.round(t.cal) + '</strong> kcal · ' + MA.p + ': ' + Math.round(t.p) + 'g · ' + MA.k + ': ' + Math.round(t.k) + 'g · ' + MA.y + ': ' + Math.round(t.y) + 'g';
 }
 
 document.addEventListener('click', e => {
@@ -1253,7 +1253,7 @@ function renderDiary(data) {
             <span style="font-size:20px;">${dm.icon}</span>
             <span style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1.5px;color:var(--text);">${mealLabel(dm.key)}</span>
           </div>
-          <span style="font-family:'Bebas Neue';font-size:16px;color:var(--volt);">${Math.round(totals.calories)} kcal</span>
+          <span style="font-family:'Bebas Neue';font-size:16px;color:var(--color-primary);">${Math.round(totals.calories)} kcal</span>
         </div>
         <div class="diary-items-list">${itemsHtml}</div>
         ${!isLogged ? `

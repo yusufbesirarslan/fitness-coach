@@ -372,6 +372,23 @@
 .water-btn:active:not(:disabled) { transform: scale(0.97); }
 .water-btn:disabled { opacity: var(--opacity-disabled); cursor: default; }
 
+/* ── 13b · MODALS (water / serving / photo) ───────────────────────── */
+/* Eski satır-içi <style> bloğundan taşındı; kanonik token'lar. .modal-title
+   components.css'ten gelir, burada yalnızca boşluk verilir. */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: var(--z-overlay);
+  background: rgba(0, 0, 0, 0.7);          /* modal scrim (intentional) */
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  display: none; align-items: center; justify-content: center; padding: var(--space-4);
+}
+.modal-overlay.open { display: flex; animation: fade-in var(--duration-base) var(--ease-standard); }
+.modal-box {
+  background: var(--color-surface-2); border: var(--border-w-1) solid var(--color-border-1);
+  border-radius: var(--radius-xl); padding: var(--space-6); width: 100%; max-width: 360px;
+  max-height: 90vh; overflow-y: auto;
+}
+.modal-box .modal-title { margin-bottom: var(--space-5); }
+
 /* ── 14 · REDUCED MOTION ──────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .meal-card, .wg.just-filled, .qab-done .qab-check, .water-num { animation: none !important; transition: none !important; }
