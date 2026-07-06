@@ -23,10 +23,12 @@ logger = logging.getLogger(__name__)
 
 try:
     import boto3
+    from botocore.config import Config as _BotoConfig
     from botocore.exceptions import BotoCoreError, ClientError
     _BOTO3_AVAILABLE = True
 except Exception as _imp_err:  # boto3 kurulu değil (örn. lokal geliştirme)
     boto3 = None
+    _BotoConfig = None
     BotoCoreError = ClientError = Exception
     _BOTO3_AVAILABLE = False
     logger.warning("[S3] boto3 import edilemedi, S3 devre dışı: %s: %s", type(_imp_err).__name__, _imp_err)
@@ -81,7 +83,14 @@ def _get_client():
     if not is_enabled():
         raise S3Error("S3 yapılandırılmadı (boto3 yok ya da S3_BUCKET_NAME boş).")
     if _client is None:
-        _client = boto3.client("s3", region_name=AWS_REGION)
+        # N5: açık connect/read timeout. Diğer tüm ağ çağrıları (requests/OpenAI/
+        # Bedrock) timeout taşır; boto3 varsayılanları (~60s + retry → dakikalar)
+        # /workout/complete ve öğün-foto yollarında thread'i uzun süre bloklardı.
+        _client = boto3.client(
+            "s3", region_name=AWS_REGION,
+            config=_BotoConfig(connect_timeout=5, read_timeout=10,
+                               retries={"max_attempts": 2}),
+        )
     return _client
 
 

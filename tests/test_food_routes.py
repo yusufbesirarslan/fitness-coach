@@ -22,14 +22,6 @@ def _clean_caches():
     foodcache._food_id_cache.clear()
 
 
-class _Resp:
-    def __init__(self, payload):
-        self._payload = payload
-
-    def json(self):
-        return self._payload
-
-
 # ---------------------------------------------------------------------------
 # /api/food/search
 # ---------------------------------------------------------------------------
@@ -97,30 +89,35 @@ def test_servings_by_name_cached_food_id(client, auth_user, monkeypatch):
 
 def test_servings_by_name_falls_back_to_english_search(client, auth_user, monkeypatch):
     # Türkçe terim sonuç vermez; İngilizce çeviri ('muz' → 'banana') bulur.
+    # N3: artık ham results[0] yerine alaka-kapılı _fs_relevant_candidates kullanılır;
+    # rota ham/İngilizce terimleri (name, english) o katmana geçirir.
     monkeypatch.setattr(food_bp, "_get_fatsecret_token", lambda: "tok")
 
-    def fake_get(url, **kwargs):
-        term = kwargs["params"]["search_expression"]
-        if term == "banana":
-            return _Resp({"foods": {"food": {"food_id": "42", "food_name": "Banana"}}})
-        return _Resp({"foods": {"food": []}})
+    def fake_relevant(name, english, token):
+        # Ham Türkçe sorgu ('muz') alaka-kapısından geçmez; İngilizce terim eşleşir.
+        if english == "banana":
+            return [{"food_id": "42", "food_name": "Banana"}]
+        return []
 
-    monkeypatch.setattr(food_bp, "_fs_get", fake_get)
+    monkeypatch.setattr(food_bp, "_fs_relevant_candidates", fake_relevant)
     servings = [{"serving_description": "100 g"}]
     monkeypatch.setattr(food_bp, "_food_get_servings",
                         lambda fid: servings if fid == "42" else None)
 
     body = client.get("/api/food/servings-by-name?name=muz").get_json()
     assert body == {"servings": servings, "food_id": "42"}
-    assert foodcache._food_id_cache["muz"] == "42"  # bulunan id önbelleğe yazıldı
+    assert foodcache._food_id_cache["muz"] == "42"  # doğrulanan id önbelleğe yazıldı
 
 
-def test_servings_by_name_api_error_returns_empty(client, auth_user, monkeypatch):
+def test_servings_by_name_no_relevant_match_returns_empty(client, auth_user, monkeypatch):
+    # N3: alaka-kapısı hiçbir spesifik aday bulamazsa (ör. ilgisiz jenerik elenir)
+    # rota boş döner ve GLOBAL food_id önbelleğine yanlış eşleşme YAZILMAZ.
     monkeypatch.setattr(food_bp, "_get_fatsecret_token", lambda: "tok")
-    monkeypatch.setattr(food_bp, "_fs_get",
-                        lambda url, **kw: _Resp({"error": {"message": "rate limit"}}))
+    monkeypatch.setattr(food_bp, "_fs_relevant_candidates",
+                        lambda name, english, token: [])
     body = client.get("/api/food/servings-by-name?name=muz").get_json()
     assert body == {"servings": [], "food_id": ""}
+    assert "muz" not in foodcache._food_id_cache
 
 
 def test_servings_by_name_token_failure_returns_empty(client, auth_user, monkeypatch):
