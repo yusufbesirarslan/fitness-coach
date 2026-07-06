@@ -247,6 +247,57 @@ def _food_get_servings(food_id):
     return _normalize_servings(results)
 
 
+def _food_find_by_barcode(code):
+    """FatSecret barkod → food_id → ad/marka + porsiyonlar.
+
+    ``code`` yalnızca rakamlardan oluşmalı; GTIN-13'e sola-sıfır dolgulanır
+    (FatSecret 13 haneli GTIN bekler; UPC-A/EAN-8 kısa gelir). Bulunamazsa
+    (food_id == '0') None döner. Ağ/parse hatasında da None (fail-soft)."""
+    digits = "".join(ch for ch in (code or "") if ch.isdigit())
+    if not digits:
+        return None
+    gtin = digits[-13:].rjust(13, "0")
+    try:
+        token = _get_fatsecret_token()
+    except Exception as e:  # pragma: no cover - token yolu ayrı test edilir
+        current_app.logger.error("_food_find_by_barcode token failed: %s", e)
+        return None
+
+    try:
+        resp = _fs_get(FATSECRET_API_URL, params={
+            "method": "food.find_id_for_barcode",
+            "barcode": gtin, "format": "json",
+        }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
+        data = resp.json()
+    except Exception as e:
+        current_app.logger.warning("_food_find_by_barcode lookup failed: %s", e)
+        return None
+
+    fid = str((data.get("food_id") or {}).get("value", "0"))
+    if not fid or fid == "0":
+        return None
+
+    name, brand = "", ""
+    try:
+        for method in ("food.get.v4", "food.get.v2", "food.get"):
+            gr = _fs_get(FATSECRET_API_URL, params={
+                "method": method, "food_id": fid, "format": "json",
+            }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
+            gdata = gr.json()
+            if "error" in gdata:
+                continue
+            food = gdata.get("food", {}) or {}
+            name = food.get("food_name", "") or name
+            brand = food.get("brand_name", "") or brand
+            if name:
+                break
+    except Exception as e:
+        current_app.logger.info("_food_find_by_barcode name lookup soft-fail: %s", e)
+
+    servings = _food_get_servings(fid) or []
+    return {"food_id": fid, "name": name, "brand": brand, "servings": servings}
+
+
 def _food_search_fatsecret(q):
     """Try FatSecret API. Returns list of results or None on failure."""
     try:
