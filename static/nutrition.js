@@ -266,6 +266,101 @@ function closeLogSheet() { document.getElementById('log-sheet').classList.remove
 function openManualSheet()  { closeLogSheet(); document.getElementById('manual-sheet').classList.add('open'); }
 function closeManualSheet() { document.getElementById('manual-sheet').classList.remove('open'); }
 
+/* ── VOICE PLACEHOLDER SHEET (mobil uygulamada) ── */
+function logVoice()        { closeLogSheet(); document.getElementById('voice-sheet').classList.add('open'); }
+function closeVoiceSheet() { document.getElementById('voice-sheet').classList.remove('open'); }
+
+/* ── MENU SCANNER (mevcut koç widget'ını yeniden kullan) ── */
+function logMenuScan() {
+  closeLogSheet();
+  if (window.CW && typeof window.CW.startScan === 'function') {
+    window.CW.startScan();               // #cw-scan overlay'ini kendisi açar
+  } else {
+    showToast(__t('nutrition.menu_unavailable'), 'error');
+  }
+}
+
+/* ── MANUAL / TAKE PHOTO FAB OPTIONS ── */
+function logManual()    { openManualSheet(); }
+function logTakePhoto() { closeLogSheet(); document.getElementById('photo-input').click(); }
+
+/* ── TAKE PHOTO FLOW ── */
+var _photoDataUrl = null, _photoMealType = 'Kahvaltı';
+
+function _readFileAsDataURL(file) {
+  return new Promise(function (res, rej) {
+    var r = new FileReader();
+    r.onload = function () { res(r.result); };
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+async function onPhotoPicked(el) {
+  var file = el.files && el.files[0];
+  if (!file) return;
+  try {
+    _photoDataUrl = await _readFileAsDataURL(file);
+  } catch (e) {
+    showToast(__t('nutrition.photo_read_error'), 'error');
+    return;
+  }
+  el.value = '';                         // aynı dosyayı tekrar seçebilmek için sıfırla
+  openPhotoConfirm(_photoDataUrl);
+}
+
+function openPhotoConfirm(dataUrl) {
+  document.getElementById('photo-preview').src = dataUrl;
+  // Öğünü günün saatine göre öner
+  var h = new Date().getHours();
+  var suggested = h < 11 ? 'Kahvaltı' : h < 16 ? 'Öğle' : h < 22 ? 'Akşam' : 'Ara Öğün';
+  selectPhotoMealType(suggested);
+  document.getElementById('photo-note-input').value = '';
+  document.getElementById('photo-modal').classList.add('open');
+}
+function closePhotoConfirm() {
+  document.getElementById('photo-modal').classList.remove('open');
+  _photoDataUrl = null;
+}
+
+function selectPhotoMealType(ogun) {
+  _photoMealType = ogun;
+  document.querySelectorAll('#photo-meal-type-grid .meal-type-opt').forEach(function (o) {
+    o.classList.toggle('selected', o.getAttribute('data-args') === '["' + ogun + '"]');
+  });
+}
+
+async function submitPhotoMeal() {
+  if (!_photoDataUrl) return;
+  var note = document.getElementById('photo-note-input').value.trim();
+  var btn = document.getElementById('photo-confirm-btn');
+  btn.disabled = true;
+  var loading = document.getElementById('loading');
+  loading.classList.add('active');
+  try {
+    var res = await fetch('/meal-log', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ogun: _photoMealType,
+        yemekler: note || mealLabel(_photoMealType),
+        image: _photoDataUrl,
+      })
+    });
+    var d = await res.json();
+    if (d.error) { showToast(d.error, 'error'); return; }
+    showToast(__t('nutrition.meal_saved'), 'success');
+    if (window.fxActivation) fxActivation('meal');
+    if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
+    closePhotoConfirm();
+    loadTodayData();
+  } catch (e) {
+    showToast(__t('nutrition.conn_error_prefix') + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    loading.classList.remove('active');
+  }
+}
+
 /* ── LOG MEAL ── */
 async function logMeal() {
   const input = document.getElementById('meal-input');
@@ -298,6 +393,7 @@ async function logMeal() {
       input.value = '';
       showToast(__t('nutrition.meal_saved'), 'success');
       if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
+      closeManualSheet();
       loadTodayData();
     } catch (e) {
       showToast(__t('nutrition.conn_error_prefix') + e.message, 'error');
@@ -325,6 +421,7 @@ async function logMeal() {
     if (window.fxTrackOnce) fxTrackOnce('first_meal_logged');
     if (window.fxActivation) fxActivation('meal');
     if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
+    closeManualSheet();
     loadTodayData();
   } catch (e) {
     showToast(__t('nutrition.conn_error_prefix') + e.message, 'error');
