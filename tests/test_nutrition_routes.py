@@ -333,6 +333,23 @@ def test_meal_log_override_macros_skips_ai(client, auth_user, monkeypatch):
     assert body["nutrients"] == {"kalori": 495.0, "protein": 62.0, "karb": 0.0, "yag": 10.5}
 
 
+def test_today_meal_includes_created_at(client, auth_user):
+    # Phase 4: öğün kartı "saat" alanı için /meal-log/today her öğüne created_at
+    # (ISO) döndürmeli. Additive alan — mevcut anahtarlar korunur.
+    client.post("/meal-log", json={
+        "ogun": "Kahvaltı", "yemekler": "yumurta",
+        "override_macros": {"kalori": 180, "protein": 14, "karb": 1, "yag": 12},
+    })
+    data = client.get("/meal-log/today").get_json()
+    assert data["meals"], "en az bir öğün olmalı"
+    first = data["meals"][0]
+    assert "created_at" in first
+    assert first["created_at"]  # None/boş değil
+    # Mevcut anahtarlar hâlâ mevcut (regresyon değil)
+    for k in ("ogun", "yemekler", "kalori", "protein", "karb", "yag", "photo_url"):
+        assert k in first
+
+
 def test_meal_log_override_macros_clamped_to_physical_bounds(client, auth_user, monkeypatch):
     # C1: request-kontrollü override değerleri kanonik MealLog'a YAZILMADAN ÖNCE
     # fiziksel-sağlık kapısından (clamp_serving_macros) geçmeli — DB CHECK yalnızca
