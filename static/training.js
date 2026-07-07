@@ -788,6 +788,7 @@ document.addEventListener('click', e => {
                 // localStorage bazı mobil tarayıcılarda hata fırlatabilir; ayrı koru.
                 try { localStorage.setItem(getTodayKey(), 'true'); } catch (e) {}
                 closePumpCheck();
+                showCelebration(res.ok ? data : null, _pendingStats);
             } else {
                 // 422 = doğrulama eşleşmedi, 400 = eksik/biçim hatası → modalda göster, yeniden dene.
                 showPumpError(data.error || __t('training.verify_failed'));
@@ -805,6 +806,44 @@ document.addEventListener('click', e => {
             submit.classList.remove('loading');
             submit.textContent = __t('training.complete_workout');
         }
+    }
+
+    // ── XP CELEBRATION — shown after a successful Pump Check; discards the
+    //    ephemeral session snapshot once the user dismisses it (Task 6). ──
+    function animateXP(el, target) {
+        var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (reduce || !target) { el.textContent = target || 0; return; }
+        var start = null, dur = 900;
+        function frame(ts) {
+            if (start == null) start = ts;
+            var p = Math.min((ts - start) / dur, 1);
+            var eased = 0.5 - Math.cos(p * Math.PI) / 2;         // easeInOutSine
+            el.textContent = Math.round(target * eased);
+            if (p < 1) requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+    }
+
+    function showCelebration(xpResp, stats) {
+        var xp = (xpResp && xpResp.points_awarded) || 0;
+        document.getElementById('cel-level').textContent =
+            xpResp && xpResp.title ? xpResp.title + (xpResp.level ? ' · Lv ' + xpResp.level : '') : '';
+        document.getElementById('cel-summary').innerHTML = stats ? (
+            statCard(stats.totalVolume + ' kg', __t('training.volume')) +
+            statCard(stats.setsDone + '/' + stats.totalSets, __t('training.sets')) +
+            statCard(stats.exercisesDone, __t('training.exercises')) +
+            statCard(stats.elapsedMin + ' ' + __t('training.min'), __t('training.duration'))
+        ) : '';
+        document.getElementById('celebration').classList.add('open');
+        document.body.style.overflow = 'hidden';
+        animateXP(document.getElementById('cel-xp'), xp);
+    }
+
+    function closeCelebration() {
+        document.getElementById('celebration').classList.remove('open');
+        document.body.style.overflow = '';
+        _session = null; _pendingStats = null;      // discard ephemeral state
+        renderHero(activePlan, true);               // repaint hero as completed
     }
 
     function resetPlan() {
