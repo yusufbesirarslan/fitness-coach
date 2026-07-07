@@ -48,3 +48,24 @@ def test_workout_trend_marker_excluded_from_volume(app, client, make_user, login
     assert d["totals"]["volume"] == 3000          # marker excluded
     assert d["totals"]["sessions"] == 1           # today counts once
     assert d["days"][-1]["sessions"] == 1 and d["days"][-1]["volume"] == 3000
+
+
+def test_heatmap_levels_from_activity(app, client, make_user, login):
+    u = _login(make_user, login, "hmuser")
+    today = app_today().isoformat()
+    db.session.add(MealLog(user_id=u.id, ogun="Kahvaltı", yemekler="x",
+                           kalori=100, protein=1, karb=1, yag=1, tarih=today))
+    db.session.add(WorkoutLog(user_id=u.id, exercise_name="Squat",
+                              sets=1, reps=1, weight_kg=1, volume=1))
+    db.session.commit()
+    d = client.get("/api/progress/heatmap?weeks=4").get_json()
+    assert d["weeks"] == 4 and len(d["cells"]) == 28
+    today_cell = [c for c in d["cells"] if c["date"] == today][0]
+    assert today_cell["level"] == 2          # meal + workout = score 2
+    assert d["cells"][0]["level"] == 0       # an empty earlier day
+
+
+def test_heatmap_weeks_clamped(app, client, make_user, login):
+    _login(make_user, login, "hmclamp")
+    d = client.get("/api/progress/heatmap?weeks=999").get_json()
+    assert d["weeks"] == 53 and len(d["cells"]) == 53 * 7

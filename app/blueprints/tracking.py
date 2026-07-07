@@ -590,3 +590,39 @@ def progress_workout():
     return jsonify({"days": days, "totals": {
         "sessions": len(session_days),
         "volume": round(sum(vol_by_day.values()))}})
+
+
+@bp.route("/api/progress/heatmap")
+@login_required
+def progress_heatmap():
+    try:
+        weeks = int(request.args.get("weeks", 26) or 26)
+    except (TypeError, ValueError):
+        weeks = 26
+    weeks = max(1, min(weeks, 53))
+    n = weeks * 7
+    start = app_today() - timedelta(days=n - 1)
+    start_iso, start_utc = start.isoformat(), utc_day_bounds(start)[0]
+    score = {}
+
+    def bump(dkey):
+        score[dkey] = score.get(dkey, 0) + 1
+
+    for (tarih,) in db.session.query(MealLog.tarih).filter(
+            MealLog.user_id == current_user.id, MealLog.tarih >= start_iso).distinct():
+        bump(tarih)
+    for (dk,) in db.session.query(DailyActivity.date_key).filter(
+            DailyActivity.user_id == current_user.id, DailyActivity.date_key >= start_iso).distinct():
+        bump(dk)
+    for (ca,) in db.session.query(WorkoutLog.created_at).filter(
+            WorkoutLog.user_id == current_user.id, WorkoutLog.created_at >= start_utc):
+        bump(app_date_of(ca).isoformat())
+    for (ca,) in db.session.query(WeeklyCheckIn.created_at).filter(
+            WeeklyCheckIn.user_id == current_user.id, WeeklyCheckIn.created_at >= start_utc):
+        bump(app_date_of(ca).isoformat())
+
+    cells = []
+    for i in range(n):
+        dt = (start + timedelta(days=i)).isoformat()
+        cells.append({"date": dt, "level": min(score.get(dt, 0), 4)})
+    return jsonify({"cells": cells, "weeks": weeks})
