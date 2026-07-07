@@ -523,13 +523,79 @@ document.addEventListener('click', e => {
         });
     })();
 
-    // Temporary stubs — PR detection + rest timer land in Task 5. Kept here so the
-    // session player runs green standalone; Task 5 REPLACES these with real bodies.
-    function evaluatePR() { return false; }
-    function refreshPRFlags() {}
-    function parseRestSeconds() { return 60; }
-    function startRestTimer() {}
-    function stopRestTimer() {}
+    // ── REST TIMER ──
+    var _rest = { id: null, remaining: 0 };
+
+    function parseRestSeconds(dinlenme) {
+        var s = String(dinlenme || '').toLowerCase();
+        var nums = s.match(/\d+/g);
+        var n = nums && nums.length ? parseInt(nums[nums.length - 1], 10) : 60;   // "60-90 sn" -> 90
+        if (s.indexOf('dk') >= 0 || s.indexOf('min') >= 0) n *= 60;
+        return Math.max(5, Math.min(n, 600));
+    }
+
+    function _fmtRest(sec) {
+        var m = Math.floor(sec / 60), s = sec % 60;
+        return m + ':' + (s < 10 ? '0' : '') + s;
+    }
+
+    function startRestTimer(sec) {
+        stopRestTimer();
+        _rest.remaining = sec;
+        var el = document.getElementById('rest-timer');
+        document.getElementById('rt-time').textContent = _fmtRest(sec);
+        el.classList.add('open');
+        _rest.id = setInterval(function () {
+            _rest.remaining -= 1;
+            if (_rest.remaining <= 0) { stopRestTimer();
+                if (navigator.vibrate) { try { navigator.vibrate(120); } catch (e) {} }
+                return; }
+            document.getElementById('rt-time').textContent = _fmtRest(_rest.remaining);
+        }, 1000);
+    }
+    function stopRestTimer() {
+        if (_rest.id) { clearInterval(_rest.id); _rest.id = null; }
+        var el = document.getElementById('rest-timer');
+        if (el) el.classList.remove('open');
+    }
+    function addRest(delta) {
+        if (!_rest.id) return;
+        _rest.remaining = Math.max(1, Math.min(_rest.remaining + delta, 600));
+        document.getElementById('rt-time').textContent = _fmtRest(_rest.remaining);
+    }
+    function skipRest() { stopRestTimer(); }
+
+    // ── PR provider seam. No persistence this phase → returns null (no false PRs).
+    //    WORKOUT-PERSIST-HOOK: swap NullPrProvider for a backend-backed provider
+    //    (e.g. GET /workout/history/best?exercise=) when Workout History ships. ──
+    var prProvider = { getBest: function (exerciseName) { return null; } };  // {weightKg}|null
+
+    function evaluatePR(exerciseName, weightKg) {
+        var w = Number(weightKg) || 0;
+        if (w <= 0) return false;
+        var best = prProvider.getBest(exerciseName);
+        return best && typeof best.weightKg === 'number' ? w > best.weightKg : false;
+    }
+
+    // In-session "top set": heaviest done set of this exercise gets a ★.
+    function sessionTopSetIndex(ex) {
+        var best = -1, idx = -1;
+        ex.sets.forEach(function (st, i) {
+            var w = st.done ? (Number(st.weightKg) || 0) : -1;
+            if (w > best) { best = w; idx = (best > 0 ? i : -1); }
+        });
+        return idx;
+    }
+
+    function refreshPRFlags(ex, exIdx) {
+        var top = sessionTopSetIndex(ex);
+        var rows = document.querySelectorAll('#sv-body .set-row[data-ex="' + exIdx + '"][data-set]');
+        ex.sets.forEach(function (st, i) {
+            var row = rows[i]; if (!row) return;
+            row.classList.toggle('is-pr', !!st.isPR);
+            row.classList.toggle('top-set', i === top);
+        });
+    }
 
     // ── DAY PREVIEW (read-only, non-today days) ──
     function openDayPreview(day) {

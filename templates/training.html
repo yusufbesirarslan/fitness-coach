@@ -578,6 +578,14 @@
     </div>
 </div>
 
+<!-- rest-timer widget — floats above the session player; Task 5 -->
+<div class="rest-timer" id="rest-timer" role="status" aria-live="polite">
+  <button class="rt-btn" data-action="addRest" data-args='[-15]'>-15</button>
+  <span class="rt-time" id="rt-time">0:00</span>
+  <button class="rt-btn" data-action="addRest" data-args='[15]'>+15</button>
+  <button class="rt-btn" data-action="skipRest">{{ t('training.skip') }}</button>
+</div>
+
 <!-- read-only day preview (non-today days) -->
 <div class="sheet-backdrop" id="day-preview" data-action-self="closeDayPreview">
     <div class="sheet" role="dialog" aria-modal="true">
