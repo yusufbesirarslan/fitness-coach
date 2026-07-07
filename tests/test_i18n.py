@@ -158,11 +158,17 @@ def test_training_renders_localized(app, client, make_user, login):
     # UI chrome İngilizce
     assert "Training Style" in body and "Equipment" in body and "CREATE MY PROGRAM" in body
     assert "Antrenman Tarzı" not in body
-    # Kuplaj koruması: OPTIONS val kodları + gün adları + pump değerleri TR kalır
-    assert '"spor_salonu"' in body and '"tum_vucut"' in body      # OPTIONS val
-    assert "getTodayTurkish" in body and "'Pazartesi'" in body     # backend gün eşleşmesi
+    # Kuplaj koruması: pump-location HTML değeri şablonda TR kalır
     assert '<option value="Spor Salonu"' in body                   # pump-location değeri
-    assert "fitx_workout_completed_" in body                       # localStorage anahtarı
+    # OPTIONS val kodları + gün adları + localStorage anahtarı artık harici
+    # static/training.js'te (Phase 5: satır-içi script dışa taşındı); kanonik
+    # TR değerlerin orada korunduğunu doğrula.
+    import os
+    js_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "training.js")
+    js = open(js_path, encoding="utf-8").read()
+    assert '"spor_salonu"' in js and '"tum_vucut"' in js           # OPTIONS val
+    assert "getTodayTurkish" in js and "'Pazartesi'" in js         # backend gün eşleşmesi
+    assert "fitx_workout_completed_" in js                         # localStorage anahtarı
 
 
 def test_secondary_pages_render_en(app, client, make_user, login):
@@ -410,15 +416,16 @@ def test_plan_no_session_error_localized(app, client, make_user, login):
     assert r.get_json()["error"] == "First create your plan from the home page."
 
 
-def test_training_html_day_label_coupling():
-    """training.html: gün adı GÖRÜNEN map'i var; eşleşme hâlâ kanonik TR güne dayanır."""
+def test_training_js_day_label_coupling():
+    """static/training.js: gün adı GÖRÜNEN map'i var; eşleşme hâlâ kanonik TR güne
+    dayanır. (Phase 5: satır-içi script static/training.js'e taşındı.)"""
     import os
-    p = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates", "training.html")
-    html = open(p, encoding="utf-8").read()
-    assert "DAY_LABELS_EN" in html and "function dayLabel" in html
-    assert "esc(dayLabel(gun.gun))" in html               # görünen ad çevrilir
-    assert "gun.gun === todayName" in html                # eşleşme kanonik TR kalır
-    assert "'Pazartesi':'Monday'" in html
+    p = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "training.js")
+    js = open(p, encoding="utf-8").read()
+    assert "DAY_LABELS_EN" in js and "function dayLabel" in js
+    assert "esc(dayLabel(gun.gun))" in js                 # görünen ad çevrilir
+    assert "gun.gun === todayName" in js                  # eşleşme kanonik TR kalır
+    assert "'Pazartesi':'Monday'" in js
 
 
 # ── Route mesajları (jsonify error/message) dile göre ──
@@ -588,6 +595,7 @@ def test_workout_already_done_uses_structured_code(app, client, make_user, login
     assert body["code"] == "already_completed"
     assert body["error"] == "You've already completed today's workout!"  # EN
     # Frontend artık ham TR substring'ine ('zaten') değil code'a bakar
+    # (Phase 5: satır-içi script static/training.js'e taşındı).
     import os
-    th = os.path.join(os.path.dirname(os.path.dirname(__file__)), "templates", "training.html")
-    assert "data.code === 'already_completed'" in open(th, encoding="utf-8").read()
+    tj = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "training.js")
+    assert "data.code === 'already_completed'" in open(tj, encoding="utf-8").read()

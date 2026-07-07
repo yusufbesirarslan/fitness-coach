@@ -933,17 +933,22 @@ def test_pump_check_comments_batches_comment_authors(client, auth_user, make_use
 def test_training_pump_modal_has_share_selector_and_friend_picker():
     root = Path(__file__).resolve().parents[1]
     html = (root / "templates" / "training.html").read_text(encoding="utf-8")
+    # Phase 5: satır-içi script static/training.js'e taşındı — modal MARKUP'ı
+    # şablonda kalır, paylaşım DAVRANIŞI ise training.js'te.
+    js = (root / "static" / "training.js").read_text(encoding="utf-8")
 
+    # Markup (şablon)
     assert "pump.share_to" in html
     assert 'data-share="feed"' in html
     assert 'data-share="friends"' in html
     assert 'id="pump-friend-picker"' in html
     assert 'id="pump-friend-search"' in html
     assert 'id="pump-progress"' in html
-    assert "/friends/select-list?q=" in html
-    assert "visibility: pumpVisibility" in html
-    assert "shared_friend_ids: Array.from(pumpSelectedFriends.keys())" in html
-    assert "pump.friend_required" in html
+    # Davranış (harici JS)
+    assert "/friends/select-list?q=" in js
+    assert "visibility: pumpVisibility" in js
+    assert "shared_friend_ids: Array.from(pumpSelectedFriends.keys())" in js
+    assert "pump.friend_required" in js
 
 
 def test_pump_modal_locale_keys_exist_in_both_locales():
