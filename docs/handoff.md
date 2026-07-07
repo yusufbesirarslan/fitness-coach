@@ -1,174 +1,140 @@
-# Phase 5 Handoff — AxisAI V2 Workout Redesign (Surface 1)
+# Phase 5 Handoff — AxisAI V2 Progress Redesign (Surface 2)
 
 Date: 2026-07-07
-Branch: `feat/phase5-workout` (off `origin/main` @ f411836; Phase 4 already merged/deployed)
-Spec: `docs/superpowers/specs/2026-07-06-phase5-workout-redesign-design.md`
-Plan: `docs/superpowers/plans/2026-07-06-phase5-workout-redesign.md`
-Previous phase: `docs/archive/handoff-2026-07-06-phase4-nutrition.md`
+Branch: `feat/phase5-progress` (off `origin/main` @ eca5a98, after the Workout surface merged)
+Spec: `docs/superpowers/specs/2026-07-07-phase5-progress-redesign-design.md`
+Plan: `docs/superpowers/plans/2026-07-07-phase5-progress-redesign.md`
+Previous surface: `docs/archive/handoff-2026-07-07-phase5-workout.md`
 
-Phase 5 (`phase-5.txt`) was decomposed into independent surface cycles — **Workout
-→ Progress → Profile → global polish/QA** — each its own spec → plan → build →
-handoff. **This handoff covers surface 1: Workout (`/training`).** Progress,
-Profile, and the app-wide FINAL QA remain as separate follow-up cycles.
+Phase 5 is decomposed into independent surface cycles — **Workout ✅ →
+Progress (this) → Profile → app-wide FINAL QA.** This handoff covers surface 2:
+Progress (`/progress-page`).
 
 ## Completed Work
 
-`/training` is rebuilt into a premium, mobile-first workout experience on the
-canonical AxisAI design system, replacing the legacy `--volt`/`theme.css`-styled
-page. The old ~1390-line template (inline `<style>` + inline `<script>`) is now a
-286-line template + external `static/training.js` (1064 lines) + `static/training.css`
-(351 lines). **No backend changed** — every route, payload, and the Pump-Check flow
-is byte-for-byte preserved.
+`/progress-page` is rebuilt from a weekly check-in tool into a **premium analytics
+experience** on the canonical AxisAI design system, backed by **five additive
+read-only endpoints** — with **zero writes/schema/migration** and the weekly
+Check-In flow preserved verbatim.
 
-**Active-plan view (active-first):**
-- **Today's Workout Hero** (`.workout-hero`) — today's focus, exercise count, est.
-  duration/calories, an SVG progress ring (reuses `.ring-*`), and a **Start Workout**
-  CTA. Variants: rest-day (calm "active recovery") and already-completed (✓ badge,
-  driven by `GET /workout/status` + the pre-existing `fitx_workout_completed_*` cache).
-- **This-week strip** (`.week-strip`) — compact 7-day overview, today highlighted;
-  tapping a non-today day opens a read-only exercise preview sheet (`#day-preview`).
-- **Weekly stats** (`.wstats`) — reuses `.stat-card` (workout days / weekly kcal /
-  total min).
+**Backend — additive read-only aggregation (`app/blueprints/tracking.py`), all
+`GET`, `@login_required`, scoped to `current_user.id`, no writes:**
+- `GET /api/progress/nutrition?range=week|month` — per-day kcal + P/C/F from
+  `MealLog` (Istanbul `tarih` grouping) + averages + `target_kcal`.
+- `GET /api/progress/workout?range=week|month` — sessions/day + real-exercise
+  volume (EXCLUDES `WORKOUT_COMPLETION_MARKER`, counts it as a session) +
+  `DailyActivity` active minutes.
+- `GET /api/progress/heatmap?weeks=26` — per-day 0–4 activity level (union of
+  meal/activity/workout/check-in signals), clamped 1–53 weeks.
+- `GET /api/progress/achievements` — `rank_points`→`get_level`/`level_title`,
+  `streak_count`, `weekly_xp`, quests-done, `WeeklyWinner` count, 5 milestones.
+- `GET /api/progress/insights` — **deterministic** insights (weight direction,
+  workout consistency, calorie adherence, streak); always ≥1 insight; tones
+  `success|warning|info`. No LLM/heavy AI.
 
-**Session player** (`#session-view`, opened by Start Workout) — a focused full-screen
-overlay:
-- **Exercise cards** (`.exercise-card`) — name + coaching note (`not`), prescribed
-  sets × reps · rest.
-- **Set rows** (`.set-row`) — per set: **weight (kg)** input, **reps** input
-  (pre-filled from `tekrar`), a **done** toggle. Checking a set fires the **rest timer**.
-- **Rest timer** (`.rest-timer`) — countdown parsed from `dinlenme` (e.g. "60-90 sn"
-  → 90s), ±15s / skip, auto-hide at 0, guarded `navigator.vibrate`. Pure `setInterval`,
-  no libraries.
-- **PR indicators** (`.pr-badge` / `.top-set` ★) — wired to a pluggable
-  `prProvider.getBest(name)` that returns `null` this phase (no persistence → **no
-  false PRs**); an in-session "top set" ★ marks the heaviest done set.
-- **Session progress** — completed/total sets + a `.sv-progress` bar.
-- **Finish** → `computeSessionStats()` (in-memory volume Σ w×reps, sets, PRs, elapsed)
-  → the existing **Pump Check** modal.
-
-**Completion + Celebration:**
-- Pump Check flow (photo → AI validate → XP, incl. feed/friends sharing) unchanged.
-- On success → **`.celebration`** screen: **XP count-up animation** (`animateXP`,
-  reduced-motion aware), level/title, and the in-memory session summary
-  (volume/sets/exercises/duration). On close, ephemeral state is discarded and the
-  hero repaints as completed.
-
-**Setup form** — the plan-generation flow (days/style/goal/equipment/focus/cardio/
-injuries → generate → preview → save) migrated onto canonical tokens/components; the
-generated-plan preview now reuses `.stat-card`/`.pbar-*`/`.exercise-card`. The exact
-`selections` payload, injury multi-select logic, and generate/save contract are
-preserved. The dead bottom-left quick-add FAB was removed.
+**Frontend (`templates/progress.html` 1391→~250 lines, new `static/progress.js`
+467 L, new `static/progress.css` 241 L):**
+- **Header + overview** (streak / level / weekly-XP snapshot).
+- **GitHub-style consistency heatmap** — pure CSS grid (`.hm-grid` / `.hm-cell
+  .lvl-0..4`), 26 weeks, horizontal-scroll, legend.
+- **AI Insights** — deterministic cards (icon + tone badge + body).
+- **4 tabs** (Weight & Body / Nutrition / Workout / Achievements):
+  - **Weight & Body** — weight trend (Chart.js) + wellness charts (from the
+    existing `/checkin-history`) + BMI/current-weight/Δ `.stat-card`s + the
+    **Check-In sheet** (`POST /checkin` + coach feedback, preserved with its XSS
+    escaping and `window.CW.receiveCheckinFeedback` hook).
+  - **Nutrition** — kcal bar + macro trend charts with a **week/month toggle**;
+    adherence stat cards.
+  - **Workout** — volume trend chart + sessions/volume/active-minutes stats.
+  - **Achievements** — level/XP/streak/quests/wins stat cards + milestone badges.
 
 ## Files Modified
 
-- **Created:** `static/training.js`, `static/training.css`, `tests/test_training_ui.py`,
-  the spec + plan docs (above).
-- **Rewritten:** `templates/training.html` (1391 → 286 lines; inline `<style>` +
-  `<script>` removed).
-- **i18n:** `locales/tr.json`, `locales/en.json` (+17 new `training.*` keys each).
-- **Tests:** `tests/test_i18n.py` + `tests/test_pump_check_sharing.py` (retargeted
-  the canonical-coupling assertions to `static/training.js` after the JS extraction),
-  `tests/test_training_ui.py` (new render assertions).
-- **Docs:** `docs/handoff.md` (this), Phase 4 handoff archived.
+- **Created:** `static/progress.js`, `static/progress.css`,
+  `tests/test_progress_api.py`, `tests/test_progress_ui.py`, the spec + plan docs.
+- **Rewritten:** `templates/progress.html` (inline `<style>`/`<script>` removed).
+- **Backend:** `app/blueprints/tracking.py` (+`_progress_range` + 5 read-only
+  routes; `progress_page` gains `height`/`goal_weight` render context).
+- **i18n:** `locales/{tr,en}.json` (+38 `progress.*` keys each; 7 hardcoded TR
+  strings in `progress.js` wired to `__t()`).
+- **Docs:** `docs/handoff.md` (this); Phase 5 Workout handoff archived.
 
 ## Components Created or Refactored
 
-- **New page CSS (canonical tokens):** `.workout-hero`/`.wh-*`, `.week-strip`/
-  `.week-chip`/`.wc-*`, `.wstats`, `.apv-meta-row`, `.session-view`/`.sv-*`,
-  `.exercise-card`/`.ec-*`, `.set-row`/`.set-input`/`.set-check`/`.set-col-label`,
-  `.pr-badge`/`.top-set`, `.rest-timer`/`.rt-*`, `.celebration`/`.cel-*`/`.xp-count`,
-  `.tw-chip*`, plus the migrated setup-form + `.pump-*` rules.
-- **Reused (no new copies):** `.ring-*`, `.pbar-*`, `.stat-card`, `.badge-*`, `.chip`,
-  `.card`, `.sheet-*`, `.empty-state`, `.btn-*`, `.sec-label`, `.toast-*`.
-- **New JS:** the ephemeral session module (`_session`, `buildSession`,
-  `computeSessionStats`, `defaultReps`), `startWorkout`/`openSession`/`closeSession`/
-  `renderSession`/`finishSession`, the rest-timer (`parseRestSeconds`/`startRestTimer`/
-  `addRest`/`skipRest`), the PR seam (`prProvider`/`evaluatePR`/`sessionTopSetIndex`/
-  `refreshPRFlags`), `renderHero`/`renderWeekStrip`/`renderWeekStats`, `animateXP`/
-  `showCelebration`/`closeCelebration`, `openDayPreview`, Esc/focus-trap a11y.
-- **Refactored:** the entire page JS extracted from inline into `static/training.js`
-  (top-level globals, so `static/actions.js` `data-action` delegation still resolves
-  them). **Removed (dead):** the bottom-left quick-add FAB and old active-plan render
-  (`renderApvGrid`/`showApvDetail`/`showDetail`).
+- **New page CSS (canonical tokens):** `.heatmap`/`.hm-*`, `.insight-row`/
+  `.insight-card`/`.ic-*`, `.trend-toggle`/`.tt-btn`, `.chart-card` (restyled),
+  `.metric-stats`, `.prog-overview`/`.po-*`, `.ach-title`/`.ach-badges`, plus the
+  migrated check-in slider/overload/feedback/history rules.
+- **Reused:** `.card`, `.stat-card`, `.tab-*`, `.badge-*`, `.sec-label`,
+  `.sheet-*`, `.btn-*`, `.skeleton`, `.empty-state`.
+- **New JS:** `switchTab` (with `aria-selected` sync), `loadOverviewAndExtras`/
+  `renderHeatmap`/`renderInsights`/`renderOverview`, `statCard` (shared),
+  `loadWeightTab`/`renderBodyStats`/`_chartBase`, `loadNutritionTab`/
+  `loadWorkoutTab`/`setTrendRange`, `loadAchievementsTab`, `openCheckin`/
+  `closeCheckin` + Esc/focus. **Preserved verbatim:** `submitCheckin`,
+  `selectOverload`, `showToast`, `escapeHTML`, the coach-feedback escaping.
 
 ## Architectural Decisions
 
-1. **Ephemeral in-memory session, zero persistence** — weight/reps/sets/PR state lives
-   only in the `_session` object; **no `localStorage`, no new endpoints**. On finish
-   the stats are computed in memory, shown, then discarded. (Per the user's explicit
-   direction: build the full UI, defer storage, avoid temporary tech debt.)
-2. **`prProvider` persistence seam** — `WORKOUT-PERSIST-HOOK` marks exactly where a
-   backend-backed provider (`getBest(exercise)` + a session POST) plugs in when Workout
-   History ships. Today it returns `null`, so PR badges never false-fire; the in-session
-   ★ top-set still gives feedback.
-3. **Client-side, offline-safe** — rest timer (`setInterval`), XP count-up
-   (`requestAnimationFrame`), celebration (CSS) — no libraries, CSP-clean, no blocking
-   AI on a hot path (mirrors Phase 3/4 precedent).
-4. **Backend untouched** — no route/payload/schema/migration change; rollback-safe.
-5. **JS extracted to an external module** — improves maintainability, enables
-   `node --check`, and gives the session layer a real boundary. The canonical-coupling
-   tests were retargeted from the rendered HTML to `static/training.js` accordingly.
-6. **Full canonical-token migration** — the inline `<style>` block is gone; the whole
-   surface uses `--color-*`/`--space-*`/`--radius-*`/… with **no `--volt`/raw hex**
-   (the one carried-over exception is the `%23808080` select-arrow SVG data-URI, which
-   can't reference CSS vars).
+1. **Additive read-only backend** — five `GET` aggregation endpoints, no writes,
+   no schema, no migration; grouping done in Python (DB-agnostic: SQLite local /
+   Postgres prod); Istanbul day keys via `app/timeutil`. Rollback-safe (expand-only).
+2. **Deterministic insights** — no LLM/heavy AI on a hot path (CLAUDE.md warns);
+   computed from the user's own trends; always returns ≥1 insight.
+3. **Body merged into Weight & Body** — no body-measurement data exists; shows
+   weight + BMI + Δ. Measurement logging deferred (would need a new model).
+4. **Heatmap = CSS grid, Chart.js for trends** — Chart.js kept from jsdelivr
+   (CSP-allowed, integrity-pinned); no new JS libraries. Chart color literals
+   stay in JS (documented design-system exception).
+5. **Check-In preserved** — `POST /checkin` + `/checkin-history` unchanged;
+   relocated into a sheet with the same element ids so behavior is identical.
 
 ## Verification
 
-- Full `pytest` suite: **1102 passed, 0 failures** (incl. the new `test_training_ui.py`
-  and the retargeted coupling tests). `node --check static/training.js` clean.
-- No `--volt`/raw hex/`rgba()` in `templates/training.html` or `static/training.css`.
-- Every template class resolves in tokens/components/theme/training CSS.
-- **Not yet done — manual browser QA on a running app** (see Known Issues): the
-  interactive flows (session set-entry, rest timer, celebration, EN locale, responsive
-  widths) were verified by `node --check` + render tests only, not driven in a browser.
+- Full `pytest`: **1110 passed, 0 failures** (incl. 9 new `test_progress_api.py`
+  endpoint tests + `test_progress_ui.py` render checks). `node --check
+  static/progress.js` clean.
+- No `--volt`/raw hex/`rgba()` in `progress.css` (Chart.js JS color literals
+  excepted); every `progress.*` key resolves in both locales (parity).
+- Backend read-only: `git diff` shows only `app/blueprints/tracking.py` in `app/`,
+  additive routes only.
+- **Not yet done — manual browser QA:** the interactive flows (each tab's Chart.js
+  render, heatmap, week/month toggle, check-in submit, responsive widths) were
+  verified via `node --check` + render/endpoint tests only, not driven in a browser.
 
 ## Remaining Tasks / Known Issues
 
-- **Manual/live QA recommended** before merge/deploy: drive Start → set-entry → rest
-  timer → top-set → finish → Pump Check → celebration → Done; the rest-day and
-  already-completed hero variants; the setup→generate→save flow; EN locale; and
-  360/768/1024px widths. No agent could exercise the browser.
-- **Pump-cancel strands an in-progress session (minor UX):** `finishSession()` hides
-  the session overlay and opens Pump Check; if the user cancels the pump check, the
-  session overlay stays closed and `_session` lingers (harmless — overwritten on the
-  next Start, GC'd on unload) but the in-progress entries aren't re-shown. A future
-  polish could re-open the session on pump-cancel.
-- **Persistent workout logging is deferred by design** — the `prProvider` /
-  `WORKOUT-PERSIST-HOOK` seam is ready for it (Workout History + cross-device sync as a
-  future additive-backend phase).
-- **Loading skeleton deferred:** the hero lives inside `#active-plan-view` (hidden
-  until `/training-plan/active` resolves), so a skeleton there was awkward; the setup
-  form shows immediately with no blank flash. Revisit if a dedicated loading state is
-  wanted.
-- Score-badge color in `loadActivePlan()` still uses a JS hex literal (`#3D8BFF`…) —
-  a documented JS color-literal exception (as in `nutrition.js`); could be tokenized
-  later.
+- **Manual/live QA recommended** before/after deploy: drive each tab (charts
+  render), the heatmap, week/month toggle, the Check-In sheet → coach feedback,
+  empty-data states, EN locale, and 360/768/1024px widths.
+- **No full focus-trap** in the Check-In sheet (has focus-on-open/return + Esc);
+  a follow-up if needed (same posture as the Workout session player).
+- **Body-measurement logging deferred** — merged into Weight & Body as weight/BMI;
+  a future additive feature (new model + endpoints) if measurements are wanted.
+- Insight/milestone copy was authored to match the existing nudge tone — worth a
+  quick product copy read-through.
 
 ## Next Recommended Steps
 
-1. Live-QA the workout flows on a running app (localhost or the deployed HTTPS site).
-2. Merge `feat/phase5-workout` → `main` (health-gated EC2 deploy).
-3. Start **Phase 5 surface 2: Progress** (`/progress-page`) as its own spec → plan →
-   build cycle, then **surface 3: Profile**, then the app-wide **FINAL QA** pass.
+1. Live-QA the Progress flows on a running app.
+2. Merge `feat/phase5-progress` → `main` (health-gated EC2 deploy).
+3. Start **Phase 5 surface 3: Profile** (`/edit-profile`) as its own spec → plan
+   → build cycle, then the app-wide **FINAL QA** pass.
 
 ## Quality Review
 
-- **Responsiveness:** Strong (mobile-first; hero stacks <560px, week strip 7→4 cols
-  <420px, session set-rows and rest timer clear the action bar). *Widths not visually
-  verified — flagged for manual QA.*
-- **Accessibility:** Strong. All overlays `role="dialog"`/`aria-modal`; Esc closes
-  session/celebration/day-preview/pump; focus-on-open + return-to-trigger; Tab
-  focus-trap on the session player; ≥44px targets; `:focus-visible` rings; `aria-live`
-  rest timer.
+- **Responsiveness:** Strong (heatmap + insight row horizontal-scroll, tabs wrap,
+  charts `maintainAspectRatio:false`). *Widths not visually verified — manual QA.*
+- **Accessibility:** Good. `role="tablist"` + dynamic `aria-selected`; check-in
+  sheet `role="dialog"`/`aria-modal`/Esc/focus-on-open+return; heatmap cell
+  `title=`; chart `aria-label`s; ≥44px targets; `:focus-visible`. *Weak spot:* no
+  full focus-trap in the sheet.
 - **Visual consistency:** Strong. Whole surface on canonical tokens; no `--volt`.
-- **Code maintainability:** Strong. Page JS isolated in `training.js`; single-purpose
-  functions; ephemeral session is one object with pure helpers; dead FAB/old render
-  removed.
-- **Reusability:** Strong. Ring/bar/stat-card/badge/sheet/exercise-card primitives
-  reused across hero, session, preview, and celebration; `statCard`/`esc`/`dayLabel`
-  shared.
-- **Performance:** Strong. O(1) client math; no new blocking/AI calls; timer is a
-  single `setInterval`; celebration is CSS + rAF, reduced-motion aware.
-- **UX clarity:** Strong. One hero → Start → focused player → finish → celebration;
-  weekly overview reads at a glance. *Weak spot:* pump-cancel mid-session UX (above).
+- **Code maintainability:** Strong. Page JS isolated in `progress.js`; single-
+  purpose functions; shared `statCard`/`_chartBase`; endpoints small + tested.
+- **Reusability:** Strong. `.stat-card`/`.badge`/`.tab-*`/`.sheet-*`/`.skeleton`
+  reused; `_progress_range` shared across endpoints.
+- **Performance:** Strong. Bounded ranges (week/month/26-weeks) over indexed
+  columns; Python group-by (no N+1); deterministic O(n) insights; no blocking AI.
+- **UX clarity:** Strong. Heatmap + insights up top, then focused metric tabs;
+  week/month toggle; check-in a tap away. *Minor:* insight copy read-through.
