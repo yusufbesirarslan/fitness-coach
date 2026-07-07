@@ -294,3 +294,58 @@
   }
   .week-chip:active, .rt-btn:active, .tw-chip:active { transform: none; }
 }
+
+/* ── 16 · Hero ring default stroke (Task 7: was a raw-hex SVG attribute) ── */
+#wh-ring-fill { stroke: var(--color-primary); }
+
+/* ── 17 · Setup form chrome (info banner, sections, option grid, injury
+   free-text) — migrated from templates/training.html's deleted inline
+   <style> block onto canonical tokens. Same class names + visual intent;
+   only the token source changed (Task 7). ── */
+.info-banner {
+  background: var(--color-surface-2); border: var(--border-w-1) solid var(--color-border-1);
+  border-radius: var(--radius-lg); padding: var(--space-4) var(--space-5); margin-bottom: var(--space-6);
+  display: flex; gap: var(--space-6); flex-wrap: wrap;
+}
+.info-item { display: flex; flex-direction: column; gap: var(--space-1); }
+.info-label {
+  font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-label);
+  text-transform: uppercase; color: var(--color-text-3);
+}
+.info-val { font-family: var(--font-display); font-size: var(--text-2xl); letter-spacing: 1px; color: var(--color-primary); }
+
+.section { margin-bottom: var(--space-6); }
+.section-title {
+  font-family: var(--font-display); font-size: var(--text-2xl); letter-spacing: 3px;
+  color: var(--color-text-1); margin-bottom: 4px;
+}
+.section-sub { font-size: var(--text-md); color: var(--color-text-2); margin-bottom: var(--space-3); font-weight: var(--weight-light); }
+
+.option-grid { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* Sakatlık serbest-metin girişi */
+.injury-input {
+  width: 100%; margin-top: var(--space-2); box-sizing: border-box;
+  background: var(--color-surface-2); color: var(--color-text-1);
+  border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4); font-size: var(--text-base); font-family: inherit;
+}
+.injury-input::placeholder { color: var(--color-text-4); }
+.injury-input:focus { outline: none; border-color: var(--color-primary); }
+
+@media (max-width: 640px) {
+  .info-banner { gap: var(--space-3); padding: var(--space-3) var(--space-4); }
+  .info-val { font-size: var(--text-xl); }
+  .tw-chip { width: calc(50% - 4px); flex-basis: calc(50% - 4px); }
+}
+
+/* ── 18 · Generated-plan preview (renderResults) ──────────────────────
+   Score card reuses .card + .tw-score (section 12) + .pbar-track/.pbar-fill
+   (components.css); weekly stats reuse .wstats/.stat-card (sections 3 +
+   components.css); per-day breakdown reuses .exercise-card (section 6) —
+   this is the same read-only markup as the day-preview sheet
+   (exerciseCardHTML() in training.js). Only the day-group wrapper below
+   is new. ── */
+.tw-day-group { margin-bottom: var(--space-6); }
+.tw-day-group:last-child { margin-bottom: 0; }
+.tw-day-group .exercise-card + .exercise-card { margin-top: var(--space-3); }

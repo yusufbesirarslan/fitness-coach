@@ -11,30 +11,6 @@ function injuryLabel(v) { return (_EN && INJURY_LABELS_EN[v]) ? INJURY_LABELS_EN
    plan kanonik anahtarıdır; yalnızca GÖRÜNEN ad EN'e çevrilir. */
 var DAY_LABELS_EN = { 'Pazartesi':'Monday','Salı':'Tuesday','Çarşamba':'Wednesday','Perşembe':'Thursday','Cuma':'Friday','Cumartesi':'Saturday','Pazar':'Sunday' };
 function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; }
-let quickAddOpen = false;
-function toggleQuickAdd() {
-    quickAddOpen = !quickAddOpen;
-    document.getElementById('quick-add-btn').classList.toggle('open', quickAddOpen);
-    document.getElementById('quick-add-actions').classList.toggle('open', quickAddOpen);
-}
-// Eski bileşik satır-içi onclick'lerin (toggleQuickAdd();...) data-action karşılığı.
-function fxOpenSetupForm() {
-    toggleQuickAdd();
-    const f = document.getElementById('setup-form');
-    if (f) { f.style.display = 'block'; f.scrollIntoView({ behavior: 'smooth' }); }
-}
-function fxTriggerFinish() {
-    toggleQuickAdd();
-    const b = document.getElementById('finish-workout-btn');
-    if (b) b.click();
-}
-document.addEventListener('click', e => {
-    if (quickAddOpen && !e.target.closest('.quick-add-wrap')) {
-        quickAddOpen = false;
-        document.getElementById('quick-add-btn').classList.remove('open');
-        document.getElementById('quick-add-actions').classList.remove('open');
-    }
-});
     // ── OPTIONS DATA ──
     const OPTIONS = {
         gun: [
@@ -131,16 +107,16 @@ document.addEventListener('click', e => {
     // ── OPTION CHIP BUILDER ──
     function createOptionChip(item, gridId, key, defaultVal) {
         const chip = document.createElement("div");
-        chip.className = "option-chip" + (item.val === defaultVal ? " selected" : "");
+        chip.className = "tw-chip" + (item.val === defaultVal ? " selected" : "");
         chip.innerHTML = `
-            <div class="option-chip-dot"></div>
+            <div class="tw-chip-dot"></div>
             <div>
-                <div class="option-chip-text">${_EN ? (item.en || item.label) : item.label}</div>
-                <div class="option-chip-sub">${_EN ? (item.es || item.sub) : item.sub}</div>
+                <div class="tw-chip-text">${_EN ? (item.en || item.label) : item.label}</div>
+                <div class="tw-chip-sub">${_EN ? (item.es || item.sub) : item.sub}</div>
             </div>
         `;
         chip.addEventListener("click", () => {
-            document.querySelectorAll(`#${gridId} .option-chip`).forEach(c => c.classList.remove("selected"));
+            document.querySelectorAll(`#${gridId} .tw-chip`).forEach(c => c.classList.remove("selected"));
             chip.classList.add("selected");
             selections[key] = item.val;
         });
@@ -186,7 +162,7 @@ document.addEventListener('click', e => {
     function syncInjuryChips() {
         const lc  = injuryTokens().map(t => t.toLowerCase());
         const val = (document.getElementById("injury-other").value || "").trim().toLowerCase();
-        document.querySelectorAll("#injury-grid .option-chip").forEach(chip => {
+        document.querySelectorAll("#injury-grid .tw-chip").forEach(chip => {
             const label = chip.dataset.label;
             const selected = label === NONE_LABEL
                 ? (val === "" || val === NONE_LABEL.toLowerCase())
@@ -202,9 +178,9 @@ document.addEventListener('click', e => {
     }
     function makeInjuryChip(label) {
         const chip = document.createElement("div");
-        chip.className = "option-chip";
+        chip.className = "tw-chip";
         chip.dataset.label = label;
-        chip.innerHTML = `<div class="option-chip-dot"></div><div><div class="option-chip-text">${injuryLabel(label)}</div></div>`;
+        chip.innerHTML = `<div class="tw-chip-dot"></div><div><div class="tw-chip-text">${injuryLabel(label)}</div></div>`;
         chip.addEventListener("click", () => {
             if (label === NONE_LABEL) { setInjuryValue(NONE_LABEL); return; }
             // 'Hiçbiri' token'ını at, tıklanan etiketi aç/kapat.
@@ -597,15 +573,19 @@ document.addEventListener('click', e => {
         });
     }
 
+    // ── EXERCISE CARD (read-only) — shared by the day-preview sheet (below) and
+    //    the generated-plan preview (renderResults, further down). ──
+    function exerciseCardHTML(e) {
+        return '<div class="exercise-card"><div class="ec-head"><span class="ec-name">' +
+            esc(e.isim) + '</span><span class="ec-prescribed">' + esc(e.set) + '×' + esc(e.tekrar) +
+            ' · ' + esc(e.dinlenme) + '</span></div>' +
+            (e.not ? '<div class="ec-note">' + esc(e.not) + '</div>' : '') + '</div>';
+    }
+
     // ── DAY PREVIEW (read-only, non-today days) ──
     function openDayPreview(day) {
         document.getElementById('dp-title').textContent = dayLabel(day.gun) + ' — ' + (day.odak || '');
-        document.getElementById('dp-body').innerHTML = (day.egzersizler || []).map(function (e) {
-            return '<div class="exercise-card"><div class="ec-head"><span class="ec-name">' +
-                esc(e.isim) + '</span><span class="ec-prescribed">' + e.set + '×' + esc(e.tekrar) +
-                ' · ' + esc(e.dinlenme) + '</span></div>' +
-                (e.not ? '<div class="ec-note">' + esc(e.not) + '</div>' : '') + '</div>';
-        }).join('');
+        document.getElementById('dp-body').innerHTML = (day.egzersizler || []).map(exerciseCardHTML).join('');
         document.getElementById('day-preview').classList.add('open');
     }
     function closeDayPreview() { document.getElementById('day-preview').classList.remove('open'); }
@@ -880,112 +860,73 @@ document.addEventListener('click', e => {
         }
     }
 
+    // Score-label → canonical token color var. data.score_label is a backend
+    // canonical TR value ('İyi'/'Orta'/'Kötü'); only used to pick a CSS var, never
+    // rendered raw when _EN (see labelMapEN below) — no hex/rgba needed.
+    function scoreColorVar(label) {
+        if (label === "Orta") return "var(--color-warning)";
+        if (label === "Kötü") return "var(--color-danger)";
+        return "var(--color-primary)";
+    }
+    function scoreClass(label) {
+        if (label === "Orta") return " is-warning";
+        if (label === "Kötü") return " is-danger";
+        return "";
+    }
+    function scoreBarRow(label, val, colorVar) {
+        return '<div style="display:flex;align-items:center;gap:var(--space-3);font-size:var(--text-sm);color:var(--color-text-2);">' +
+            '<span style="min-width:90px;">' + esc(label) + '</span>' +
+            '<div class="pbar-track" style="flex:1;"><div class="pbar-fill" style="width:' + (val * 10) + '%;background:' + colorVar + ';"></div></div>' +
+            '<span style="min-width:32px;text-align:right;">' + esc(val) + '/10</span>' +
+        '</div>';
+    }
+
     function renderResults(data) {
         document.getElementById("results").style.display = "block";
         const saveBtn = document.getElementById("save-btn");
         saveBtn.classList.remove("saved");
         saveBtn.textContent = __t('training.save_program');
 
-        // Score
-        const scoreColors = { "İyi": "#3D8BFF", "Orta": "#FFB020", "Kötü": "#FF4D4D" };
-        const color = scoreColors[data.score_label] || "#9A9A9A";
-        const ozet  = data.haftalik_ozet || {};
+        const ozet = data.haftalik_ozet || {};
+        const labelMapEN = { 'İyi': 'Good', 'Orta': 'Fair', 'Kötü': 'Poor' };
+        const scoreLabelText = _EN ? (labelMapEN[data.score_label] || data.score_label) : data.score_label;
+        const colorVar = scoreColorVar(data.score_label);
+        const cls = scoreClass(data.score_label);
 
+        // Score card: big readout + intensity/balance/fit bars
         document.getElementById("score-banner").innerHTML = `
-            <div class="score-val" style="color:${color}">${data.overall_score}</div>
-            <div class="score-info">
-                <div class="score-label-big" style="color:${color}">${(_EN ? ({'İyi':'Good','Orta':'Fair','Kötü':'Poor'}[data.score_label] || data.score_label) : data.score_label)} ${__t('training.program_word')}</div>
-                <div class="score-desc">${__t('training.score_desc')}</div>
-                <div class="score-bars">
-                    <div class="score-bar-row">
-                        <span class="score-bar-label">${__t('training.bar_intensity')}</span>
-                        <div class="score-bar-track"><div class="score-bar-fill" style="width:${(ozet.yogunluk_skoru||7)*10}%;background:${color}"></div></div>
-                        <span class="score-bar-val">${ozet.yogunluk_skoru||7}/10</span>
-                    </div>
-                    <div class="score-bar-row">
-                        <span class="score-bar-label">${__t('training.bar_balance')}</span>
-                        <div class="score-bar-track"><div class="score-bar-fill" style="width:${(ozet.denge_skoru||7)*10}%;background:${color}"></div></div>
-                        <span class="score-bar-val">${ozet.denge_skoru||7}/10</span>
-                    </div>
-                    <div class="score-bar-row">
-                        <span class="score-bar-label">${__t('training.bar_fit')}</span>
-                        <div class="score-bar-track"><div class="score-bar-fill" style="width:${(ozet.uygunluk_skoru||7)*10}%;background:${color}"></div></div>
-                        <span class="score-bar-val">${ozet.uygunluk_skoru||7}/10</span>
-                    </div>
+            <div style="display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap;">
+                <div class="tw-score${cls}">${esc(data.overall_score)}</div>
+                <div style="flex:1;min-width:180px;">
+                    <div class="tw-score${cls}" style="font-size:var(--text-2xl);letter-spacing:2px;">${esc(scoreLabelText)} ${__t('training.program_word')}</div>
+                    <div style="font-size:var(--text-sm);color:var(--color-text-2);margin-top:var(--space-1);font-weight:var(--weight-light);">${__t('training.score_desc')}</div>
                 </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:var(--space-2);margin-top:var(--space-4);">
+                ${scoreBarRow(__t('training.bar_intensity'), ozet.yogunluk_skoru || 7, colorVar)}
+                ${scoreBarRow(__t('training.bar_balance'), ozet.denge_skoru || 7, colorVar)}
+                ${scoreBarRow(__t('training.bar_fit'), ozet.uygunluk_skoru || 7, colorVar)}
             </div>
         `;
 
-        // Weekly grid
-        const grid = document.getElementById("weekly-grid");
-        grid.innerHTML = "";
-        const todaySetup = getTodayTurkish();
-        data.program.forEach((gun) => {
-            const card    = document.createElement("div");
-            const isRest  = gun.tip === "dinlenme";
-            const isCardio = gun.tip === "kardiyo";
-            const isToday  = gun.gun === todaySetup;
-            card.className = "day-card" + (isRest ? " rest" : "") + (isCardio ? " kardiyo" : "") + (isToday ? " today" : " not-today");
-            const exercises = gun.egzersizler || [];
-            const preview   = exercises.slice(0, 3).map(e => `<div class="day-ex">${esc(e.isim)}</div>`).join("");
-            const more      = exercises.length > 3 ? `<div class="day-more">+${exercises.length - 3} ${__t('training.more')}</div>` : "";
-            const odakText = gun.odak || (exercises[0] && exercises[0].isim) || '';
-            card.innerHTML = `
-                <div class="day-card-header">
-                    ${isToday ? '<div class="today-badge">' + __t('training.today_badge') + '</div>' : ''}
-                    <div class="day-name">${esc(dayLabel(gun.gun))}</div>
-                    <div class="day-odak">${isRest ? 'Off Day' : esc(odakText)}</div>
-                </div>
-                <div class="day-card-body">
-                    ${!isRest ? `
-                        <div class="day-stat"><span>${__t('training.duration')}</span><span>${gun.sure_dk} dk</span></div>
-                        <div class="day-stat"><span>${__t('training.calories')}</span><span>~${gun.tahmini_kalori} kcal</span></div>
-                        <div class="day-exercises">${preview}${more}</div>
-                    ` : `<div style="font-size:13px;color:var(--text-3);margin-top:8px">${__t('training.rest_day')}</div>`}
-                </div>
-            `;
-            if (!isRest) card.addEventListener("click", () => showDetail(gun));
-            grid.appendChild(card);
-        });
+        // Weekly stats (reuse the same statCard() helper as the active-plan hero)
+        const toplamKalori = data.program.reduce((a, g) => a + (g.tahmini_kalori || 0), 0);
+        const workoutDays  = data.program.filter(g => g.tip !== "dinlenme").length;
+        document.getElementById("weekly-summary").innerHTML =
+            statCard(ozet.toplam_antrenman_gun || selections.gun_sayisi, __t('training.workout_day')) +
+            statCard(toplamKalori, __t('training.weekly_cal')) +
+            statCard(workoutDays * selections.sure, __t('training.total_min'));
 
-        // Summary
-        const toplam_kalori = data.program.reduce((a, g) => a + (g.tahmini_kalori || 0), 0);
-        document.getElementById("weekly-summary").innerHTML = `
-            <div class="summary-card">
-                <div class="summary-val">${ozet.toplam_antrenman_gun || selections.gun_sayisi}</div>
-                <div class="summary-label">${__t('training.workout_day')}</div>
-            </div>
-            <div class="summary-card">
-                <div class="summary-val">${toplam_kalori}</div>
-                <div class="summary-label">${__t('training.weekly_cal')}</div>
-            </div>
-            <div class="summary-card">
-                <div class="summary-val">${data.program.filter(g => g.tip !== "dinlenme").length * selections.sure}</div>
-                <div class="summary-label">${__t('training.total_min')}</div>
-            </div>
-        `;
+        // Per-day exercise groups (read-only exercise-card list; rest days skipped)
+        document.getElementById("weekly-grid").innerHTML = data.program
+            .filter(gun => gun.tip !== "dinlenme")
+            .map(gun => {
+                const odakText = gun.odak ? " — " + esc(gun.odak) : "";
+                const cards = (gun.egzersizler || []).map(exerciseCardHTML).join("");
+                return '<div class="tw-day-group"><div class="sec-label">' + esc(dayLabel(gun.gun)) + odakText + '</div>' + cards + '</div>';
+            }).join("");
 
         setTimeout(() => document.getElementById("results").scrollIntoView({ behavior:"smooth", block:"start" }), 200);
-    }
-
-    function showDetail(gun) {
-        document.getElementById("detail-title").textContent = dayLabel(gun.gun) + " — " + gun.odak;
-        document.getElementById("detail-sub").textContent   = `${gun.sure_dk} ${__t('training.minutes')} · ~${gun.tahmini_kalori} kcal`;
-        document.getElementById("detail-exercises").innerHTML = (gun.egzersizler || []).map(e => `
-            <tr>
-                <td>${esc(e.isim)}${e.not ? `<div class="ex-not">${esc(e.not)}</div>` : ""}</td>
-                <td>${e.set}</td>
-                <td>${e.tekrar}</td>
-                <td>${e.dinlenme}</td>
-            </tr>
-        `).join("");
-        const panel = document.getElementById("detail-panel");
-        panel.classList.add("visible");
-        panel.scrollIntoView({ behavior:"smooth", block:"nearest" });
-    }
-
-    function closeDetail() {
-        document.getElementById("detail-panel").classList.remove("visible");
     }
 
     async function savePlan() {
