@@ -84,7 +84,6 @@
   border-top: var(--border-w-1) solid var(--color-border-1); }
 .set-row.is-done { opacity: var(--opacity-faint); }
 .set-idx { color: var(--color-text-3); font-size: var(--text-sm); text-align: center; }
-.set-cell { display: flex; flex-direction: column; gap: 2px; }
 .set-input { width: 100%; min-height: 44px; text-align: center;
   background: var(--color-surface-1); color: var(--color-text-1);
   border: var(--border-w-1) solid var(--color-border-1);

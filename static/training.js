@@ -456,8 +456,10 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
                     (st.isPR ? ' is-pr' : '') + '" data-ex="' + ei + '" data-set="' + si + '">' +
                   '<div class="set-idx">' + (si + 1) + '</div>' +
                   '<input class="set-input" type="number" inputmode="decimal" min="0" step="0.5" ' +
+                    'aria-label="' + __t('training.weight') + ' — ' + __t('training.set_done') + ' ' + (si + 1) + '" ' +
                     'placeholder="kg" data-field="weight" value="' + (st.weightKg == null ? '' : st.weightKg) + '">' +
                   '<input class="set-input" type="number" inputmode="numeric" min="0" step="1" ' +
+                    'aria-label="' + __t('training.reps') + ' — ' + __t('training.set_done') + ' ' + (si + 1) + '" ' +
                     'placeholder="reps" data-field="reps" value="' + (st.reps == null ? '' : st.reps) + '">' +
                   '<button class="set-check" data-field="done" aria-label="' + __t('training.set_done') + '">✓' +
                     '<span class="pr-badge badge badge-warning">PR</span></button>' +
@@ -512,6 +514,7 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
             st.done = !st.done;
             row.classList.toggle('is-done', st.done);
             updateSessionProgress();
+            refreshPRFlags(ex, +row.dataset.ex);   // recompute in-session top-set ★ (only done sets count)
             if (st.done) startRestTimer(parseRestSeconds(ex.dinlenme));   // Task 5
         });
     })();
@@ -618,14 +621,6 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
         return 'fitx_workout_completed_' + d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
     }
 
-    function markWorkoutCompleted() {
-        const btn = document.getElementById('finish-workout-btn');
-        if (!btn) return;
-        btn.disabled = true;
-        btn.textContent = __t('training.workout_done');
-        btn.classList.add('completed');
-    }
-
     async function checkWorkoutCompleted() {
         // hızlı yol: yerel önbellek (anlık boyama)
         try {
@@ -641,11 +636,6 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
                 try { localStorage.setItem(getTodayKey(), 'true'); } catch (e) {}
             }
         } catch (e) {}
-    }
-
-    // "Antrenmanı Tamamla" artık doğrudan tamamlamaz; önce Pump Check modalını açar.
-    function finishWorkout() {
-        openPumpCheck();
     }
 
     // ── PUMP CHECK MODAL ──
@@ -787,7 +777,6 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
             if (res.ok || already) {
                 setPumpProgress(100);
                 if (res.ok) showToast(data.message, 'success');
-                markWorkoutCompleted();
                 // localStorage bazı mobil tarayıcılarda hata fırlatabilir; ayrı koru.
                 try { localStorage.setItem(getTodayKey(), 'true'); } catch (e) {}
                 closePumpCheck();
