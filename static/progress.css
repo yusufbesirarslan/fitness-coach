@@ -86,7 +86,7 @@
 .trend-toggle { display: inline-flex; gap: 2px; background: var(--overlay-3);
   border-radius: var(--radius-md); padding: 3px; }
 .tt-btn {
-  min-height: 34px; padding: 0 var(--space-3); border: none; background: none;
+  min-height: 44px; padding: 0 var(--space-3); border: none; background: none;
   color: var(--color-text-3); border-radius: var(--radius-sm); cursor: pointer;
   font: inherit; font-weight: var(--weight-semibold);
   transition: background var(--duration-fast) var(--ease-standard),
@@ -127,6 +127,7 @@ textarea {
   font-family: var(--font-body); font-size: var(--text-base); color: var(--color-text-1);
   background: var(--overlay-4); border: var(--border-w-1) solid var(--color-border-1);
   border-radius: var(--radius-md); padding: 13px var(--space-4); outline: none;
+  min-height: 44px;
   transition: border-color var(--duration-fast) var(--ease-standard),
               box-shadow var(--duration-fast) var(--ease-standard);
   -webkit-appearance: none;
@@ -160,11 +161,15 @@ input[type="range"]::-moz-range-thumb {
   border: var(--border-w-3) solid var(--color-bg); box-shadow: var(--elevation-1);
 }
 input[type="range"]::-moz-range-thumb:active { cursor: grabbing; transform: scale(1.1); }
+input[type="range"]:focus-visible {
+  outline: var(--focus-ring, 2px solid var(--color-primary));
+  outline-offset: 4px;
+}
 
 /* ── 9 · OVERLOAD CHIPS ──────────────────────────────────────────────── */
 .overload-grid { display: flex; gap: var(--space-2); flex-wrap: wrap; }
 .overload-chip {
-  flex: 1; min-width: 90px; display: flex; align-items: center; justify-content: center; gap: 6px;
+  flex: 1; min-width: 90px; min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 6px;
   background: var(--overlay-3); border: var(--border-w-2) solid var(--color-border-1);
   border-radius: var(--radius-sm); padding: 10px 12px;
   cursor: pointer; transition: all var(--duration-fast) var(--ease-standard);
@@ -212,7 +217,23 @@ input[type="range"]::-moz-range-thumb:active { cursor: grabbing; transform: scal
   .checkin-card { padding: var(--space-4); }
 }
 
-/* ── 14 · REDUCED MOTION ─────────────────────────────────────────────── */
+/* ── 14 · TAB BAR TOUCH TARGET (page-scoped override of components.css'
+   shared `.tab-btn` — 44px minimum, keeps the shared class untouched for
+   other pages) ─────────────────────────────────────────────────────── */
+.tab-bar .tab-btn { min-height: 44px; }
+
+/* ── 15 · CHART LOADING SKELETON (shown while a tab's fetch is in flight;
+   reuses components.css' `.skeleton` shimmer, sized to fill the chart) ── */
+.chart-skeleton { position: absolute; inset: 0; z-index: 1; }
+
+/* ── 16 · ACHIEVEMENTS TAB (title + milestone badges, Task 9 carried over) ── */
+.ach-title {
+  font-family: var(--font-display); font-size: var(--text-2xl); letter-spacing: 2px;
+  color: var(--color-primary); margin: var(--space-5) 0 var(--space-3);
+}
+.ach-badges { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+/* ── 17 · REDUCED MOTION ─────────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .tt-btn, .hm-cell { transition: none; }
   .feedback-card.visible { animation: none; }

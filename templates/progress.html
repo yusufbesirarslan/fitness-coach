@@ -90,13 +90,13 @@
 
         <div class="chart-card">
             <div class="chart-title">{{ t('progress.chart_weight_title') }}</div>
-            <div class="chart-container"><canvas id="weightChart"></canvas></div>
+            <div class="chart-container"><canvas id="weightChart" role="img" aria-label="{{ t('progress.chart_weight_title') }}"></canvas></div>
             <div class="no-data" id="weight-nodata">{{ t('progress.no_data_checkin') }}</div>
         </div>
 
         <div class="chart-card">
             <div class="chart-title">{{ t('progress.chart_wellness_title') }}</div>
-            <div class="chart-container"><canvas id="wellnessChart"></canvas></div>
+            <div class="chart-container"><canvas id="wellnessChart" role="img" aria-label="{{ t('progress.chart_wellness_title') }}"></canvas></div>
             <div class="no-data" id="wellness-nodata">{{ t('progress.no_data') }}</div>
         </div>
     </div>
@@ -112,13 +112,13 @@
 
         <div class="chart-card">
             <div class="chart-title">{{ t('progress.chart_calories_title') }}</div>
-            <div class="chart-container"><canvas id="nutritionChart"></canvas></div>
+            <div class="chart-container"><canvas id="nutritionChart" role="img" aria-label="{{ t('progress.chart_calories_title') }}"></canvas></div>
             <div class="no-data" id="nutrition-nodata">{{ t('progress.no_data') }}</div>
         </div>
 
         <div class="chart-card">
             <div class="chart-title">{{ t('progress.chart_macro_title') }}</div>
-            <div class="chart-container"><canvas id="macroChart"></canvas></div>
+            <div class="chart-container"><canvas id="macroChart" role="img" aria-label="{{ t('progress.chart_macro_title') }}"></canvas></div>
             <div class="no-data" id="macro-nodata">{{ t('progress.no_data') }}</div>
         </div>
     </div>
@@ -134,7 +134,7 @@
 
         <div class="chart-card">
             <div class="chart-title">{{ t('progress.chart_volume_title') }}</div>
-            <div class="chart-container"><canvas id="workoutChart"></canvas></div>
+            <div class="chart-container"><canvas id="workoutChart" role="img" aria-label="{{ t('progress.chart_volume_title') }}"></canvas></div>
             <div class="no-data" id="workout-nodata">{{ t('progress.no_data') }}</div>
         </div>
     </div>
@@ -205,9 +205,12 @@
                 <label class="form-lbl">Progressive Overload</label>
                 <div class="section-sub" style="margin-bottom:10px">{{ t('progress.overload_q') }}</div>
                 <div class="overload-grid">
-                    <div class="overload-chip selected" data-action="selectOverload" data-args='["evet"]'>{{ t('progress.overload_yes') }}</div>
-                    <div class="overload-chip" data-action="selectOverload" data-args='["kismen"]'>{{ t('progress.overload_partial') }}</div>
-                    <div class="overload-chip" data-action="selectOverload" data-args='["hayir"]'>{{ t('progress.overload_no') }}</div>
+                    <div class="overload-chip selected" data-action="selectOverload" data-args='["evet"]'
+                         data-action-keydown="activateOnEnter" tabindex="0" role="button" aria-pressed="true">{{ t('progress.overload_yes') }}</div>
+                    <div class="overload-chip" data-action="selectOverload" data-args='["kismen"]'
+                         data-action-keydown="activateOnEnter" tabindex="0" role="button" aria-pressed="false">{{ t('progress.overload_partial') }}</div>
+                    <div class="overload-chip" data-action="selectOverload" data-args='["hayir"]'
+                         data-action-keydown="activateOnEnter" tabindex="0" role="button" aria-pressed="false">{{ t('progress.overload_no') }}</div>
                 </div>
             </div>
         </div>

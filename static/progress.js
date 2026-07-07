@@ -34,8 +34,12 @@ function escapeHTML(str) {
 let selectedOverload = 'evet';
 function selectOverload(val, el) {
     selectedOverload = val;
-    document.querySelectorAll('.overload-chip').forEach(c => c.classList.remove('selected'));
+    document.querySelectorAll('.overload-chip').forEach(c => {
+        c.classList.remove('selected');
+        c.setAttribute('aria-pressed', 'false');
+    });
     el.classList.add('selected');
+    el.setAttribute('aria-pressed', 'true');
 }
 
 // ── CHECK-IN ── (verbatim: POST /checkin, coach_feedback escape, CW hand-off)
@@ -87,9 +91,12 @@ async function submitCheckin() {
 
 // ── TABS ──
 function switchTab(name, btn) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.remove('active');
+    b.setAttribute('aria-selected', 'false');
+  });
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  if (btn) btn.classList.add('active');
+  if (btn) { btn.classList.add('active'); btn.setAttribute('aria-selected', 'true'); }
   var panel = document.getElementById('tab-' + name);
   if (panel) panel.classList.add('active');
   if (name === 'weight')       loadWeightTab();        // Task 7
@@ -98,9 +105,40 @@ function switchTab(name, btn) {
   if (name === 'achievements') loadAchievementsTab();  // Task 9
 }
 
+// Keyboard activation for non-native "button" elements (overload chips are
+// plain divs with tabindex=0 + role=button): data-action-keydown fires on
+// EVERY keydown while focused, so this only forwards Enter/Space to the
+// element's own click handler (data-action="selectOverload") — anything
+// else (Tab, arrows, ...) is a no-op and keeps its default behavior.
+function activateOnEnter(el, e) {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  e.preventDefault();
+  el.click();
+}
+
 // ── CHECK-IN SHEET ──
-function openCheckin()  { document.getElementById('checkin-sheet').classList.add('open'); }
-function closeCheckin() { document.getElementById('checkin-sheet').classList.remove('open'); }
+// Focus-on-open (first field) / focus-return-on-close (opener button) +
+// Esc-to-close for keyboard/screen-reader users.
+var _checkinOpener = null;
+function openCheckin(btn) {
+  _checkinOpener = (btn && typeof btn.focus === 'function') ? btn : document.activeElement;
+  document.getElementById('checkin-sheet').classList.add('open');
+  var first = document.getElementById('ci-weight');
+  if (first) { try { first.focus({ preventScroll: true }); } catch (e) { first.focus(); } }
+}
+function closeCheckin() {
+  document.getElementById('checkin-sheet').classList.remove('open');
+  var opener = _checkinOpener;
+  _checkinOpener = null;
+  if (opener && typeof opener.focus === 'function') {
+    try { opener.focus({ preventScroll: true }); } catch (e) { opener.focus(); }
+  }
+}
+document.addEventListener('keydown', function (e) {
+  if (e.key !== 'Escape') return;
+  var sheet = document.getElementById('checkin-sheet');
+  if (sheet && sheet.classList.contains('open')) closeCheckin();
+});
 
 // ── INIT ──
 // Task 6/7/8/9 define the loaders + renderHeatmap/renderInsights/overview.
@@ -176,53 +214,79 @@ function _chartBase(yOpts) {
   };
 }
 
+// Loading skeleton shown in a chart's `.chart-container` while its tab's
+// fetch is in flight (reuses components.css' `.skeleton` shimmer via the
+// page-scoped `.chart-skeleton` sizing rule in progress.css).
+function _setChartLoading(canvasIds, loading) {
+  canvasIds.forEach(function (id) {
+    var canvas = document.getElementById(id);
+    var box = canvas && canvas.closest('.chart-container');
+    if (!box) return;
+    var sk = box.querySelector('.chart-skeleton');
+    if (loading) {
+      if (!sk) {
+        sk = document.createElement('div');
+        sk.className = 'skeleton chart-skeleton';
+        box.appendChild(sk);
+      }
+    } else if (sk) {
+      sk.remove();
+    }
+  });
+}
+
 var weightChart, wellnessChart;
 async function loadWeightTab() {
-  var data = await fetch('/checkin-history').then(function (r) { return r.json(); });
-  renderBodyStats(data);
+  _setChartLoading(['weightChart', 'wellnessChart'], true);
+  try {
+    var data = await fetch('/checkin-history').then(function (r) { return r.json(); });
+    renderBodyStats(data);
 
-  var noData = data.length === 0;
-  ['weight', 'wellness'].forEach(function (k) {
-    var nd = document.getElementById(k + '-nodata');
-    if (nd) nd.style.display = noData ? 'block' : 'none';
-  });
-  if (noData) return;
+    var noData = data.length === 0;
+    ['weight', 'wellness'].forEach(function (k) {
+      var nd = document.getElementById(k + '-nodata');
+      if (nd) nd.style.display = noData ? 'block' : 'none';
+    });
+    if (noData) return;
 
-  var labels = data.map(function (d) { return d.tarih; });
+    var labels = data.map(function (d) { return d.tarih; });
 
-  if (weightChart) weightChart.destroy();
-  weightChart = new Chart(document.getElementById('weightChart'), {
-    type: 'line',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: __t('progress.chart_weight'), data: data.map(function (d) { return d.kilo; }),
-        borderColor: '#3D8BFF', backgroundColor: 'rgba(61,139,255,0.08)',
-        fill: true, tension: 0.35, pointRadius: 5, pointHoverRadius: 8,
-        pointBackgroundColor: '#3D8BFF', borderWidth: 2
-      }]
-    },
-    options: _chartBase({ beginAtZero: false })
-  });
+    if (weightChart) weightChart.destroy();
+    weightChart = new Chart(document.getElementById('weightChart'), {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [{
+          label: __t('progress.chart_weight'), data: data.map(function (d) { return d.kilo; }),
+          borderColor: '#3D8BFF', backgroundColor: 'rgba(61,139,255,0.08)',
+          fill: true, tension: 0.35, pointRadius: 5, pointHoverRadius: 8,
+          pointBackgroundColor: '#3D8BFF', borderWidth: 2
+        }]
+      },
+      options: _chartBase({ beginAtZero: false })
+    });
 
-  if (wellnessChart) wellnessChart.destroy();
-  wellnessChart = new Chart(document.getElementById('wellnessChart'), {
-    type: 'line',
-    data: {
-      labels: labels,
-      datasets: [
-        { label: __t('progress.chart_intensity'), data: data.map(function (d) { return d.yogunluk; }),
-          borderColor: '#3D8BFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
-        { label: __t('progress.chart_fatigue'), data: data.map(function (d) { return d.fatigue; }),
-          borderColor: '#FF4D4D', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
-        { label: __t('progress.chart_sleep'), data: data.map(function (d) { return d.uyku; }),
-          borderColor: '#3D9EFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
-        { label: __t('progress.chart_nutrition'), data: data.map(function (d) { return d.beslenme; }),
-          borderColor: '#FFB020', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false }
-      ]
-    },
-    options: _chartBase({ min: 0, max: 5 })
-  });
+    if (wellnessChart) wellnessChart.destroy();
+    wellnessChart = new Chart(document.getElementById('wellnessChart'), {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: __t('progress.chart_intensity'), data: data.map(function (d) { return d.yogunluk; }),
+            borderColor: '#3D8BFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
+          { label: __t('progress.chart_fatigue'), data: data.map(function (d) { return d.fatigue; }),
+            borderColor: '#FF4D4D', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
+          { label: __t('progress.chart_sleep'), data: data.map(function (d) { return d.uyku; }),
+            borderColor: '#3D9EFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
+          { label: __t('progress.chart_nutrition'), data: data.map(function (d) { return d.beslenme; }),
+            borderColor: '#FFB020', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false }
+        ]
+      },
+      options: _chartBase({ min: 0, max: 5 })
+    });
+  } finally {
+    _setChartLoading(['weightChart', 'wellnessChart'], false);
+  }
 }
 
 // current weight / BMI / Δ vs first check-in — writes into #body-stats via
@@ -235,7 +299,9 @@ function renderBodyStats(data) {
   var latest = data.length ? data[data.length - 1].kilo : p.current_weight;
   var first  = data.length ? data[0].kilo : latest;
 
-  var weightVal = (latest != null && latest > 0) ? latest.toFixed(1) + ' kg' : '—';
+  // Label already carries the unit ("Current Weight (kg)") — don't repeat
+  // it in the value, or the stat card doubles up ("72.5 kg" under "… (KG)").
+  var weightVal = (latest != null && latest > 0) ? latest.toFixed(1) : '—';
 
   var bmi = (latest > 0 && p.height_cm > 0)
     ? latest / Math.pow(p.height_cm / 100, 2)
@@ -273,45 +339,50 @@ function setTrendRange(range, btn) {
 
 var nutritionChart, macroChart, workoutChart;
 async function loadNutritionTab() {
-  var d = await fetch('/api/progress/nutrition?range=' + _trendRange).then(function (r) { return r.json(); });
-  var labels = d.days.map(function (x) { return x.date.slice(5); });   // MM-DD
-  renderNutritionStats(d);
+  _setChartLoading(['nutritionChart', 'macroChart'], true);
+  try {
+    var d = await fetch('/api/progress/nutrition?range=' + _trendRange).then(function (r) { return r.json(); });
+    var labels = d.days.map(function (x) { return x.date.slice(5); });   // MM-DD
+    renderNutritionStats(d);
 
-  var noData = d.days.every(function (x) { return !x.kcal; });
-  ['nutrition', 'macro'].forEach(function (k) {
-    var nd = document.getElementById(k + '-nodata');
-    if (nd) nd.style.display = noData ? 'block' : 'none';
-  });
+    var noData = d.days.every(function (x) { return !x.kcal; });
+    ['nutrition', 'macro'].forEach(function (k) {
+      var nd = document.getElementById(k + '-nodata');
+      if (nd) nd.style.display = noData ? 'block' : 'none';
+    });
 
-  if (nutritionChart) { nutritionChart.destroy(); nutritionChart = null; }
-  if (macroChart) { macroChart.destroy(); macroChart = null; }
-  if (noData) return;
+    if (nutritionChart) { nutritionChart.destroy(); nutritionChart = null; }
+    if (macroChart) { macroChart.destroy(); macroChart = null; }
+    if (noData) return;
 
-  nutritionChart = new Chart(document.getElementById('nutritionChart'), {
-    type: 'bar',
-    data: { labels: labels, datasets: [{ label: __t('progress.chart_calories'),
-      data: d.days.map(function (x) { return x.kcal; }), backgroundColor: 'rgba(61,139,255,0.55)' }] },
-    options: _chartBase({ beginAtZero: true })
-  });
+    nutritionChart = new Chart(document.getElementById('nutritionChart'), {
+      type: 'bar',
+      data: { labels: labels, datasets: [{ label: __t('progress.chart_calories'),
+        data: d.days.map(function (x) { return x.kcal; }), backgroundColor: 'rgba(61,139,255,0.55)' }] },
+      options: _chartBase({ beginAtZero: true })
+    });
 
-  var macroOpts = _chartBase({ beginAtZero: true });
-  macroOpts.scales.x.stacked = true;
-  macroOpts.scales.y.stacked = true;
-  macroChart = new Chart(document.getElementById('macroChart'), {
-    type: 'bar',
-    data: {
-      labels: labels,
-      datasets: [
-        { label: __t('nutrition.macro_protein'), data: d.days.map(function (x) { return x.p; }),
-          backgroundColor: 'rgba(61,139,255,0.65)' },
-        { label: __t('nutrition.macro_carb'), data: d.days.map(function (x) { return x.c; }),
-          backgroundColor: 'rgba(255,176,32,0.65)' },
-        { label: __t('nutrition.macro_fat'), data: d.days.map(function (x) { return x.f; }),
-          backgroundColor: 'rgba(255,77,77,0.65)' }
-      ]
-    },
-    options: macroOpts
-  });
+    var macroOpts = _chartBase({ beginAtZero: true });
+    macroOpts.scales.x.stacked = true;
+    macroOpts.scales.y.stacked = true;
+    macroChart = new Chart(document.getElementById('macroChart'), {
+      type: 'bar',
+      data: {
+        labels: labels,
+        datasets: [
+          { label: __t('nutrition.macro_protein'), data: d.days.map(function (x) { return x.p; }),
+            backgroundColor: 'rgba(61,139,255,0.65)' },
+          { label: __t('nutrition.macro_carb'), data: d.days.map(function (x) { return x.c; }),
+            backgroundColor: 'rgba(255,176,32,0.65)' },
+          { label: __t('nutrition.macro_fat'), data: d.days.map(function (x) { return x.f; }),
+            backgroundColor: 'rgba(255,77,77,0.65)' }
+        ]
+      },
+      options: macroOpts
+    });
+  } finally {
+    _setChartLoading(['nutritionChart', 'macroChart'], false);
+  }
 }
 
 // Average vs. target calorie adherence — writes into #nutrition-stats via
@@ -333,24 +404,29 @@ function renderNutritionStats(d) {
 }
 
 async function loadWorkoutTab() {
-  var d = await fetch('/api/progress/workout?range=' + _trendRange).then(function (r) { return r.json(); });
-  var labels = d.days.map(function (x) { return x.date.slice(5); });
-  renderWorkoutStats(d);
+  _setChartLoading(['workoutChart'], true);
+  try {
+    var d = await fetch('/api/progress/workout?range=' + _trendRange).then(function (r) { return r.json(); });
+    var labels = d.days.map(function (x) { return x.date.slice(5); });
+    renderWorkoutStats(d);
 
-  var totals = d.totals || { sessions: 0, volume: 0 };
-  var noData = !totals.sessions && !totals.volume;
-  var nd = document.getElementById('workout-nodata');
-  if (nd) nd.style.display = noData ? 'block' : 'none';
+    var totals = d.totals || { sessions: 0, volume: 0 };
+    var noData = !totals.sessions && !totals.volume;
+    var nd = document.getElementById('workout-nodata');
+    if (nd) nd.style.display = noData ? 'block' : 'none';
 
-  if (workoutChart) { workoutChart.destroy(); workoutChart = null; }
-  if (noData) return;
+    if (workoutChart) { workoutChart.destroy(); workoutChart = null; }
+    if (noData) return;
 
-  workoutChart = new Chart(document.getElementById('workoutChart'), {
-    type: 'bar',
-    data: { labels: labels, datasets: [{ label: __t('progress.chart_volume'),
-      data: d.days.map(function (x) { return x.volume; }), backgroundColor: 'rgba(61,139,255,0.55)' }] },
-    options: _chartBase({ beginAtZero: true })
-  });
+    workoutChart = new Chart(document.getElementById('workoutChart'), {
+      type: 'bar',
+      data: { labels: labels, datasets: [{ label: __t('progress.chart_volume'),
+        data: d.days.map(function (x) { return x.volume; }), backgroundColor: 'rgba(61,139,255,0.55)' }] },
+      options: _chartBase({ beginAtZero: true })
+    });
+  } finally {
+    _setChartLoading(['workoutChart'], false);
+  }
 }
 
 // totals.sessions / totals.volume / summed active minutes — writes into
