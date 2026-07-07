@@ -107,8 +107,56 @@ function closeCheckin() { document.getElementById('checkin-sheet').classList.rem
 function initProgress() { loadOverviewAndExtras(); loadWeightTab(); }
 document.addEventListener('DOMContentLoaded', initProgress);
 
-// ── TEMPORARY STUBS (no-op; replaced in Tasks 6-9 so this page runs standalone) ──
-function loadOverviewAndExtras() {}
+// ── OVERVIEW / HEATMAP / INSIGHTS ── (Task 6)
+async function loadOverviewAndExtras() {
+  try {
+    var [hm, ins, ach] = await Promise.all([
+      fetch('/api/progress/heatmap?weeks=26').then(r => r.json()),
+      fetch('/api/progress/insights').then(r => r.json()),
+      fetch('/api/progress/achievements').then(r => r.json()),
+    ]);
+    renderHeatmap(hm.cells || []);
+    renderInsights(ins.insights || []);
+    renderOverview(ach);
+  } catch (e) {}
+}
+
+function renderHeatmap(cells) {
+  var grid = document.getElementById('heatmap-grid');
+  if (!grid) return;
+  grid.innerHTML = cells.map(function (c) {
+    return '<div class="hm-cell lvl-' + (c.level || 0) + '" title="' +
+      escapeHTML(c.date) + '"></div>';
+  }).join('');
+}
+
+function renderInsights(list) {
+  var row = document.getElementById('insight-row');
+  if (!row) return;
+  if (!list.length) { row.innerHTML = ''; return; }
+  row.innerHTML = list.map(function (n) {
+    return '<div class="insight-card"><div class="ic-head"><span class="ic-icon">' +
+      escapeHTML(n.icon || '💡') + '</span><span class="ic-title badge badge-' +
+      (n.tone || 'info') + '">' + escapeHTML(n.title) + '</span></div>' +
+      '<div class="ic-body">' + escapeHTML(n.body) + '</div></div>';
+  }).join('');
+}
+
+function renderOverview(a) {
+  if (!a) return;
+  var set = function (id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
+  set('po-streak', (a.streak || 0));
+  set('po-level', (a.level || 0));
+  set('po-xp', (a.weekly_xp || 0));
+}
+
+// Shared render helper (used by the Weight/Workout/Achievements tabs, Tasks 7–9).
+function statCard(v, label) {
+  return '<div class="stat-card"><div class="stat-value">' + v +
+    '</div><div class="stat-label">' + escapeHTML(label) + '</div></div>';
+}
+
+// ── TEMPORARY STUBS (no-op; replaced in Tasks 7-9 so this page runs standalone) ──
 function loadWeightTab() {}
 function loadNutritionTab() {}
 function loadWorkoutTab() {}
