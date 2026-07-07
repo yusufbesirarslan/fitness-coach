@@ -1,0 +1,50 @@
+from app.extensions import db
+from app.models import MealLog, WorkoutLog, WORKOUT_COMPLETION_MARKER
+from app.timeutil import app_today
+
+
+def _login(make_user, login, name="prog"):
+    u = make_user(name, profile_complete=True)
+    login(name)
+    return u
+
+
+def test_nutrition_trend_groups_by_day(app, client, make_user, login):
+    u = _login(make_user, login, "nutru")
+    today = app_today().isoformat()
+    db.session.add(MealLog(user_id=u.id, ogun="Kahvaltı", yemekler="x",
+                           kalori=500, protein=30, karb=50, yag=10, tarih=today))
+    db.session.add(MealLog(user_id=u.id, ogun="Öğle", yemekler="y",
+                           kalori=700, protein=40, karb=60, yag=20, tarih=today))
+    db.session.commit()
+    r = client.get("/api/progress/nutrition?range=week")
+    assert r.status_code == 200
+    d = r.get_json()
+    assert len(d["days"]) == 7
+    last = d["days"][-1]
+    assert last["date"] == today and last["kcal"] == 1200 and last["p"] == 70
+    assert d["avg"]["kcal"] == 1200   # one logged day
+
+
+def test_nutrition_scoped_to_user(app, client, make_user, login):
+    other = make_user("nutother", profile_complete=True)
+    db.session.add(MealLog(user_id=other.id, ogun="Kahvaltı", yemekler="z",
+                           kalori=999, protein=1, karb=1, yag=1,
+                           tarih=app_today().isoformat()))
+    db.session.commit()
+    _login(make_user, login, "nutme")
+    d = client.get("/api/progress/nutrition?range=week").get_json()
+    assert all(day["kcal"] == 0 for day in d["days"])   # other user's meal not visible
+
+
+def test_workout_trend_marker_excluded_from_volume(app, client, make_user, login):
+    u = _login(make_user, login, "wktrend")
+    db.session.add(WorkoutLog(user_id=u.id, exercise_name="Squat",
+                              sets=3, reps=10, weight_kg=100, volume=3000))
+    db.session.add(WorkoutLog(user_id=u.id, exercise_name=WORKOUT_COMPLETION_MARKER,
+                              sets=1, reps=1, weight_kg=0, volume=0))
+    db.session.commit()
+    d = client.get("/api/progress/workout?range=week").get_json()
+    assert d["totals"]["volume"] == 3000          # marker excluded
+    assert d["totals"]["sessions"] == 1           # today counts once
+    assert d["days"][-1]["sessions"] == 1 and d["days"][-1]["volume"] == 3000
