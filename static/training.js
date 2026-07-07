@@ -356,16 +356,18 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
             '</div><div class="stat-label">' + label + '</div></div>';
     }
 
-    function previewDay(gunName) {
+    function previewDay(gunName, el) {
         const day = (activePlan || []).find(g => g.gun === gunName);
         if (!day || day.tip === 'dinlenme') return;
-        openDayPreview(day);   // read-only sheet listing exercises (Task 4 reuses .sheet)
+        openDayPreview(day, el);   // read-only sheet listing exercises (Task 4 reuses .sheet)
     }
 
     // ── WORKOUT SESSION — ephemeral, in-memory only. No localStorage, no network.
     //    A future Workout Log backend plugs in at the prProvider seam (Task 5). ──
     var _session = null;        // { startedAt, day, exercises:[{isim,tekrar,dinlenme,not,sets:[{weightKg,reps,done,isPR}]}] }
     var _pendingStats = null;   // stats snapshot handed to the celebration after Pump Check
+    var _sessionTrigger = null;     // element that opened #session-view (focus returns here on close)
+    var _dayPreviewTrigger = null;  // element that opened #day-preview
 
     function defaultReps(tekrar) {
         var m = String(tekrar || '').match(/\d+/g);
@@ -407,13 +409,13 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
                  elapsedMin: Math.max(0, Math.round((Date.now() - session.startedAt) / 60000)) };
     }
 
-    function startWorkout() {
+    function startWorkout(el) {
         var day = todayDay();
         if (!day || day.tip === 'dinlenme') return;
-        openSession(day);
+        openSession(day, el);
     }
 
-    function openSession(day) {
+    function openSession(day, trigger) {
         _session = buildSession(day);
         document.getElementById('sv-title').textContent =
             (day.odak || __t('training.session'));
@@ -421,6 +423,8 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
         var v = document.getElementById('session-view');
         v.classList.add('open');
         document.body.style.overflow = 'hidden';
+        _sessionTrigger = trigger || document.activeElement;
+        setTimeout(function () { _focusFirstIn(v); }, 50);
     }
 
     function closeSession() {
@@ -428,11 +432,24 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
         document.body.style.overflow = '';
         stopRestTimer();            // Task 5 (safe no-op until defined)
         _session = null;            // discard ephemeral state
+        _restoreFocus(_sessionTrigger);
+        _sessionTrigger = null;
     }
 
+    // Session with zero exercises can't happen in practice (the plan validator
+    // guarantees >=1 exercise per non-rest day) — defensive .empty-state guard.
     function renderSession() {
         if (!_session) return;
         var body = document.getElementById('sv-body');
+        if (!_session.exercises.length) {
+            body.innerHTML = '<div class="empty-state"><div class="empty-icon">' +
+                '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9 12h6"/></svg></div>' +
+                '<div class="empty-title">' +
+                (_EN ? 'No exercises in this session.' : 'Bu seansta egzersiz yok.') +
+                '</div></div>';
+            updateSessionProgress();
+            return;
+        }
         body.innerHTML = _session.exercises.map(function (ex, ei) {
             var rows = ex.sets.map(function (st, si) {
                 return '<div class="set-row' + (st.done ? ' is-done' : '') +
@@ -583,12 +600,18 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
     }
 
     // ── DAY PREVIEW (read-only, non-today days) ──
-    function openDayPreview(day) {
+    function openDayPreview(day, trigger) {
         document.getElementById('dp-title').textContent = dayLabel(day.gun) + ' — ' + (day.odak || '');
         document.getElementById('dp-body').innerHTML = (day.egzersizler || []).map(exerciseCardHTML).join('');
         document.getElementById('day-preview').classList.add('open');
+        _dayPreviewTrigger = trigger || document.activeElement;
+        setTimeout(function () { _focusFirstIn(document.querySelector('#day-preview .sheet')); }, 50);
     }
-    function closeDayPreview() { document.getElementById('day-preview').classList.remove('open'); }
+    function closeDayPreview() {
+        document.getElementById('day-preview').classList.remove('open');
+        _restoreFocus(_dayPreviewTrigger);
+        _dayPreviewTrigger = null;
+    }
 
     function getTodayKey() {
         const d = new Date();
@@ -817,6 +840,10 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
         document.getElementById('celebration').classList.add('open');
         document.body.style.overflow = 'hidden';
         animateXP(document.getElementById('cel-xp'), xp);
+        // No single "trigger" opened this overlay (it follows an async Pump Check
+        // success, not a direct click) — focus the Done button; on close, focus
+        // naturally falls back to <body> once the overlay is hidden, which is fine.
+        setTimeout(function () { _focusFirstIn(document.getElementById('celebration')); }, 50);
     }
 
     function closeCelebration() {
@@ -982,8 +1009,52 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
             renderPumpSelectedFriends();
         });
         modal.addEventListener('click', (e) => { if (e.target === modal) closePumpCheck(); });
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && modal.classList.contains('active')) closePumpCheck();
+    })();
+
+    // ── OVERLAY A11Y: Esc-to-close (pump/session/celebration/day-preview) +
+    //    focus-into-overlay on open + return-focus-to-trigger on close.
+    //    Mirrors the pattern already used in static/nutrition.js (Task 9). ──
+    function _focusFirstIn(container) {
+        if (!container) return;
+        var f = container.querySelector(
+            'input, select, textarea, button, [tabindex]:not([tabindex="-1"])');
+        if (f) { try { f.focus({ preventScroll: true }); } catch (e) { f.focus(); } }
+        else if (container.hasAttribute('tabindex')) {
+            try { container.focus({ preventScroll: true }); } catch (e) { container.focus(); }
+        }
+    }
+    function _restoreFocus(trigger) {
+        if (trigger && typeof trigger.focus === 'function' && document.body.contains(trigger)) {
+            try { trigger.focus({ preventScroll: true }); } catch (e) { trigger.focus(); }
+        }
+    }
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        var pump = document.getElementById('pump-check-modal');
+        if (pump && pump.classList.contains('active')) { closePumpCheck(); return; }
+        var session = document.getElementById('session-view');
+        if (session && session.classList.contains('open')) { closeSession(); return; }
+        var cel = document.getElementById('celebration');
+        if (cel && cel.classList.contains('open')) { closeCelebration(); return; }
+        var dp = document.getElementById('day-preview');
+        if (dp && dp.classList.contains('open')) { closeDayPreview(); return; }
+    });
+
+    // Lightweight focus-trap: Tab cycles within #session-view while it's open.
+    (function initSessionFocusTrap() {
+        var container = document.getElementById('session-view');
+        if (!container) return;
+        container.addEventListener('keydown', function (e) {
+            if (e.key !== 'Tab' || !container.classList.contains('open')) return;
+            var focusables = Array.prototype.filter.call(
+                container.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'),
+                function (el) { return el.offsetParent !== null; }
+            );
+            if (!focusables.length) return;
+            var first = focusables[0], last = focusables[focusables.length - 1];
+            if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+            else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
         });
     })();
 

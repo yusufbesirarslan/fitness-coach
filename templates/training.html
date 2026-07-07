@@ -257,7 +257,7 @@
 <!-- XP celebration overlay — shown on Pump Check success; discards _session/_pendingStats on close (Task 6) -->
 <div class="celebration" id="celebration" role="dialog" aria-modal="true" aria-labelledby="cel-title">
   <div class="cel-title" id="cel-title">{{ t('training.workout_complete') }}</div>
-  <div class="cel-xp"><span id="cel-xp">0</span> XP</div>
+  <div class="cel-xp"><span id="cel-xp" class="xp-count">0</span> XP</div>
   <div class="cel-level" id="cel-level"></div>
   <div class="cel-summary" id="cel-summary"></div>
   <button class="btn-volt" data-action="closeCelebration">{{ t('training.done') }}</button>
@@ -265,7 +265,7 @@
 
 <!-- read-only day preview (non-today days) -->
 <div class="sheet-backdrop" id="day-preview" data-action-self="closeDayPreview">
-    <div class="sheet" role="dialog" aria-modal="true">
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="dp-title" tabindex="-1">
         <div class="sheet-handle"></div>
         <div class="sheet-title" id="dp-title"></div>
         <div id="dp-body"></div>
