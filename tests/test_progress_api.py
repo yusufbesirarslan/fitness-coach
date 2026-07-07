@@ -69,3 +69,29 @@ def test_heatmap_weeks_clamped(app, client, make_user, login):
     _login(make_user, login, "hmclamp")
     d = client.get("/api/progress/heatmap?weeks=999").get_json()
     assert d["weeks"] == 53 and len(d["cells"]) == 53 * 7
+
+
+def test_achievements_shape(app, client, make_user, login):
+    u = _login(make_user, login, "achuser")
+    u.rank_points = 1200
+    u.streak_count = 9
+    # update_streak (app/hooks.py before_request) resets streak_count to 1 on the
+    # first authenticated request for a user whose last_login isn't already "today"
+    # (fresh test users have last_login=None). Pin last_login=today so this test
+    # observes our manually-set streak value instead of the unrelated streak hook.
+    u.last_login = app_today()
+    db.session.commit()
+    d = client.get("/api/progress/achievements").get_json()
+    assert d["rank_points"] == 1200 and d["streak"] == 9
+    assert isinstance(d["level"], int) and isinstance(d["title"], str)
+    assert any(m["key"] == "streak7" and m["hit"] for m in d["milestones"])
+    assert any(m["key"] == "streak30" and not m["hit"] for m in d["milestones"])
+
+
+def test_insights_always_nonempty(app, client, make_user, login):
+    _login(make_user, login, "insuser")
+    d = client.get("/api/progress/insights").get_json()
+    assert isinstance(d["insights"], list) and len(d["insights"]) >= 1
+    first = d["insights"][0]
+    assert set(("icon", "title", "body", "tone")).issubset(first)
+    assert first["tone"] in ("success", "warning", "info")

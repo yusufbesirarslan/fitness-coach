@@ -8,11 +8,13 @@ from sqlalchemy.exc import IntegrityError
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
 from app.i18n import t
-from app.models import DailyActivity, MealLog, User, UserSession, WaterLog, WearableActivityLog, WeeklyCheckIn, WeeklyLog, WorkoutLog, WORKOUT_COMPLETION_MARKER
+from app.models import (DailyActivity, MealLog, User, UserQuestProgress, UserSession,
+                        WaterLog, WearableActivityLog, WeeklyCheckIn, WeeklyLog,
+                        WeeklyWinner, WorkoutLog, WORKOUT_COMPLETION_MARKER)
 from app.services.ai_coach import generate_checkin_feedback
 from app.services.ai_gate import ai_concurrency_gate
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
-from app.services.gamification import complete_quest_for_user
+from app.services.gamification import complete_quest_for_user, get_level, level_title
 from app.services.validators import _to_int
 from app.timeutil import app_date_of, app_today, display_dt, utc_day_bounds
 
@@ -626,3 +628,66 @@ def progress_heatmap():
         dt = (start + timedelta(days=i)).isoformat()
         cells.append({"date": dt, "level": min(score.get(dt, 0), 4)})
     return jsonify({"cells": cells, "weeks": weeks})
+
+
+@bp.route("/api/progress/achievements")
+@login_required
+def progress_achievements():
+    xp = current_user.rank_points or 0
+    level = get_level(xp)
+    quests_done = UserQuestProgress.query.filter_by(user_id=current_user.id).count()
+    weekly_wins = WeeklyWinner.query.filter_by(user_id=current_user.id).count()
+    streak = current_user.streak_count or 0
+    milestones = [
+        {"key": "streak7",  "label": t("progress.ms_streak7"),  "hit": streak >= 7},
+        {"key": "streak30", "label": t("progress.ms_streak30"), "hit": streak >= 30},
+        {"key": "level5",   "label": t("progress.ms_level5"),   "hit": level >= 5},
+        {"key": "quests10", "label": t("progress.ms_quests10"), "hit": quests_done >= 10},
+        {"key": "winner",   "label": t("progress.ms_winner"),   "hit": weekly_wins >= 1},
+    ]
+    return jsonify({"level": level, "title": level_title(level), "rank_points": xp,
+                    "weekly_xp": current_user.weekly_xp or 0, "streak": streak,
+                    "quests_done": quests_done, "weekly_wins": weekly_wins,
+                    "milestones": milestones})
+
+
+@bp.route("/api/progress/insights")
+@login_required
+def progress_insights():
+    insights = []
+    # 1) Weight direction over the last two check-ins
+    cis = WeeklyCheckIn.query.filter_by(user_id=current_user.id)\
+        .filter(WeeklyCheckIn.yogunluk.isnot(None))\
+        .order_by(WeeklyCheckIn.created_at.desc()).limit(2).all()
+    if len(cis) == 2 and cis[0].weight and cis[1].weight:
+        delta = round(cis[0].weight - cis[1].weight, 1)
+        if delta != 0:
+            insights.append({"icon": "⚖️", "title": t("progress.ins_weight_title"),
+                             "body": t("progress.ins_weight_body", delta=("%+g" % delta)),
+                             "tone": "info"})
+    # 2) Workout sessions in the last 7 app-days
+    start_utc = utc_day_bounds(app_today() - timedelta(days=6))[0]
+    wdays = {app_date_of(w.created_at).isoformat() for w in WorkoutLog.query.filter(
+        WorkoutLog.user_id == current_user.id, WorkoutLog.created_at >= start_utc).all()}
+    if wdays:
+        insights.append({"icon": "🏋️", "title": t("progress.ins_workout_title"),
+                         "body": t("progress.ins_workout_body", n=len(wdays)),
+                         "tone": "success" if len(wdays) >= 3 else "warning"})
+    # 3) Calorie adherence today vs target
+    last = UserSession.query.filter_by(user_id=current_user.id)\
+        .order_by(UserSession.created_at.desc()).first()
+    target = getattr(last, "target_calories", 0) or 0 if last else 0
+    if target:
+        eaten = sum((m.kalori or 0) for m in MealLog.query.filter_by(
+            user_id=current_user.id, tarih=app_today().isoformat()).all())
+        if eaten:
+            pct = round(eaten / target * 100)
+            insights.append({"icon": "🍽️", "title": t("progress.ins_cal_title"),
+                             "body": t("progress.ins_cal_body", pct=pct),
+                             "tone": "success" if 80 <= pct <= 110 else "warning"})
+    # 4) Streak encouragement (always available)
+    streak = current_user.streak_count or 0
+    insights.append({"icon": "🔥", "title": t("progress.ins_streak_title"),
+                     "body": t("progress.ins_streak_body", n=streak),
+                     "tone": "success" if streak >= 3 else "info"})
+    return jsonify({"insights": insights})
