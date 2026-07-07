@@ -411,54 +411,43 @@
     <!-- ══ AKTİF PLAN GÖRÜNÜMÜ (plan varsa göster) ══ -->
     <div id="active-plan-view" style="display:none">
 
-        <!-- Header: score + meta -->
-        <div class="apv-header">
-            <div>
-                <div class="apv-title">{{ t('training.active_program') }}</div>
-                <div class="apv-meta" id="apv-meta"></div>
-            </div>
-            <div class="apv-score-wrap">
-                <div class="apv-score" id="apv-score">—</div>
-                <div class="apv-score-lbl">{{ t('training.points') }}</div>
+        <!-- Today's Workout Hero -->
+        <div class="card">
+            <div class="workout-hero" id="workout-hero">
+                <div class="wh-ring" id="wh-ring" data-pct="0">
+                    <div class="ring-wrap">
+                        <svg class="ring-svg" width="80" height="80" viewBox="0 0 120 120">
+                            <circle class="ring-track" cx="60" cy="60" r="48" stroke-width="8"/>
+                            <circle class="ring-fill" id="wh-ring-fill" cx="60" cy="60" r="48" stroke-width="8"
+                                    stroke="#3D8BFF" stroke-dasharray="301.6" stroke-dashoffset="301.6"/>
+                        </svg>
+                        <div class="ring-label" id="wh-ring-label">
+                            <div style="font-family:var(--font-display);font-size:20px;color:var(--color-primary);line-height:1;">🏋</div>
+                        </div>
+                    </div>
+                </div>
+                <div>
+                    <div class="wh-focus" id="wh-focus">—</div>
+                    <div class="wh-meta" id="wh-meta"></div>
+                </div>
+                <div class="wh-cta" id="wh-cta">
+                    <button class="btn-volt w-full" data-action="startWorkout">{{ t('training.start_workout') }}</button>
+                </div>
             </div>
         </div>
 
-        <!-- Today banner -->
-        <div class="today-banner" id="today-banner" style="display:none">
-            <span class="today-banner-icon">▶</span>
-            <span id="today-banner-text"></span>
-        </div>
-
-        <!-- Weekly grid -->
-        <div class="apv-section-title">{{ t('training.weekly_program') }}</div>
-        <div class="weekly-grid" id="apv-weekly-grid"></div>
-
-        <!-- Day detail panel -->
-        <div class="detail-panel" id="apv-detail-panel">
-            <span class="detail-close" data-action="closeApvDetail">×</span>
-            <div class="detail-title" id="apv-detail-title"></div>
-            <div class="detail-sub" id="apv-detail-sub"></div>
-            <div class="exercise-table-wrap">
-                <table class="exercise-table">
-                    <thead><tr>
-                        <th>{{ t('training.ex') }}</th><th>{{ t('training.set') }}</th><th>{{ t('training.reps') }}</th><th>{{ t('training.rest') }}</th>
-                    </tr></thead>
-                    <tbody id="apv-detail-exercises"></tbody>
-                </table>
-            </div>
-        </div>
+        <!-- This week -->
+        <div class="sec-label">{{ t('training.this_week') }}</div>
+        <div class="week-strip" id="week-strip"></div>
 
         <!-- Weekly stats -->
-        <div class="weekly-summary" id="apv-summary" style="margin-top:24px"></div>
+        <div class="wstats" id="wstats" style="margin-top:var(--space-4)"></div>
 
-        <!-- Finish Today's Workout -->
-        <div id="finish-workout-wrap" style="text-align:center;margin-top:24px;display:none">
-            <button class="finish-workout-btn" id="finish-workout-btn" data-action="finishWorkout">&#x2714; {{ t('training.finish_today') }}</button>
-        </div>
-
-        <!-- Reset -->
-        <div style="text-align:center;margin-top:36px;padding-bottom:48px">
-            <button class="reset-plan-btn" data-action="resetPlan">↺ &nbsp;{{ t('training.reset_plan') }}</button>
+        <!-- Plan meta + reset -->
+        <div class="apv-meta-row">
+            <span id="apv-meta"></span>
+            <span class="badge badge-primary" id="apv-score">—</span>
+            <button class="btn-ghost" data-action="resetPlan">↺ {{ t('training.reset_plan') }}</button>
         </div>
 
     </div>

@@ -270,47 +270,14 @@ document.addEventListener('click', e => {
             document.getElementById('apv-meta').textContent   =
                 __t('training.created_on', { date: data.created_at, label: scoreLabel });
 
-            // Weekly grid
-            renderApvGrid(activePlan);
-
-            // Today banner
-            const todayName = getTodayTurkish();
-            const todayWorkout = activePlan.find(g => g.gun === todayName);
-            const banner = document.getElementById('today-banner');
-            const bannerText = document.getElementById('today-banner-text');
-            const isRest = !todayWorkout || todayWorkout.tip === 'dinlenme';
-            let focusText = 'OFF DAY';
-            if (!isRest) {
-                const exNames = (todayWorkout.egzersizler || []).map(e => e.isim).filter(Boolean);
-                focusText = (todayWorkout.odak || exNames[0] || todayWorkout.tip || 'ANTRENMAN').toUpperCase();
-            }
-            bannerText.innerHTML = __t('training.today_prefix') + ' <span class="today-focus' + (isRest ? ' off' : '') + '">' + focusText + '</span>';
-            banner.className = 'today-banner' + (isRest ? ' rest-day' : '');
-            banner.style.display = 'flex';
-
-            // Summary stats (computed from saved plan data)
-            const antrenmanGun   = activePlan.filter(g => g.tip !== 'dinlenme').length;
-            const toplamKalori   = activePlan.reduce((a, g) => a + (g.tahmini_kalori || 0), 0);
-            const toplamDakika   = activePlan.reduce((a, g) => a + (g.sure_dk || 0), 0);
-            document.getElementById('apv-summary').innerHTML = `
-                <div class="summary-card">
-                    <div class="summary-val">${antrenmanGun}</div>
-                    <div class="summary-label">${__t('training.workout_day')}</div>
-                </div>
-                <div class="summary-card">
-                    <div class="summary-val">${toplamKalori}</div>
-                    <div class="summary-label">${__t('training.weekly_cal')}</div>
-                </div>
-                <div class="summary-card">
-                    <div class="summary-val">${toplamDakika}</div>
-                    <div class="summary-label">${__t('training.total_min')}</div>
-                </div>
-            `;
+            // Today's Workout Hero + this-week strip + weekly stats
+            renderHero(activePlan, false);
+            renderWeekStrip(activePlan);
+            renderWeekStats(activePlan);
 
             // Switch views
             document.getElementById('active-plan-view').style.display = 'block';
             document.getElementById('setup-form').style.display        = 'none';
-            document.getElementById('finish-workout-wrap').style.display = 'block';
         } catch(e) {}
     }
 
@@ -322,60 +289,101 @@ document.addEventListener('click', e => {
         return d.innerHTML;
     }
 
-    function renderApvGrid(program) {
-        const grid = document.getElementById('apv-weekly-grid');
-        grid.innerHTML = '';
+    function todayDay() {
+        const name = getTodayTurkish();
+        return (activePlan || []).find(g => g.gun === name) || null;
+    }
+
+    // Progress ring: r=48 (matches the shared .ring-* markup in components.css /
+    // static/nutrition.js's updateRing), circumference = 2πr. The session is
+    // ephemeral (no partial state persists across reloads) so pct is only ever
+    // 0 (not done) or 100 (done) — renderHero() decides which to pass.
+    const WH_RING_R = 48;
+    const WH_RING_C = 2 * Math.PI * WH_RING_R;
+    function updateHeroRing(pct) {
+        const el = document.getElementById('wh-ring');
+        if (el) el.setAttribute('data-pct', pct);  // ring-fill stroke set by shared ring helper
+        const fill = document.getElementById('wh-ring-fill');
+        if (fill) {
+            fill.style.strokeDasharray  = WH_RING_C;
+            fill.style.strokeDashoffset = WH_RING_C * (1 - (pct || 0) / 100);
+        }
+    }
+
+    function renderHero(program, completed) {
+        const hero = document.getElementById('workout-hero');
+        const day = todayDay();
+        const isRest = !day || day.tip === 'dinlenme';
+        hero.classList.toggle('is-rest', isRest);
+        hero.classList.toggle('is-done', !!completed);
+        const focusEl   = document.getElementById('wh-focus');
+        const metaEl    = document.getElementById('wh-meta');
+        const cta       = document.getElementById('wh-cta');
+        const ringLabel = document.getElementById('wh-ring-label');
+        if (isRest) {
+            focusEl.textContent = __t('training.rest_day');
+            metaEl.textContent  = __t('training.active_recovery');
+            cta.innerHTML = '';
+            if (ringLabel) ringLabel.innerHTML =
+                '<div style="font-size:22px;line-height:1;">😴</div>';
+        } else {
+            const exs = day.egzersizler || [];
+            focusEl.textContent = (day.odak || exs[0] && exs[0].isim || __t('training.workout')).toUpperCase();
+            metaEl.innerHTML =
+                '<span>' + exs.length + ' ' + __t('training.exercises') + '</span>' +
+                '<span>' + (day.sure_dk || 0) + ' ' + __t('training.min') + '</span>' +
+                '<span>~' + (day.tahmini_kalori || 0) + ' kcal</span>';
+            if (completed) {
+                cta.innerHTML = '<span class="wh-done-badge badge badge-success">✓ ' +
+                    __t('training.workout_done_label') + '</span>';
+            } else {
+                cta.innerHTML = '<button class="btn-volt w-full" data-action="startWorkout">' +
+                    __t('training.start_workout') + '</button>';
+            }
+            if (ringLabel) ringLabel.innerHTML =
+                '<div style="font-family:var(--font-display);font-size:20px;color:var(--color-primary);line-height:1;">' +
+                exs.length + '</div>' +
+                '<div style="font-size:9px;color:var(--color-text-3);font-weight:600;margin-top:2px;">' +
+                __t('training.exercises') + '</div>';
+        }
+        // progress ring: 0% until a session runs (session is ephemeral)
+        updateHeroRing(completed ? 100 : 0);
+    }
+
+    function renderWeekStrip(program) {
+        const strip = document.getElementById('week-strip');
         const todayName = getTodayTurkish();
-        program.forEach(gun => {
-            const card     = document.createElement('div');
-            const isRest   = gun.tip === 'dinlenme';
-            const isCardio = gun.tip === 'kardiyo';
-            const isToday  = gun.gun === todayName;
-            card.className = 'day-card' +
-                (isRest   ? ' rest'    : '') +
-                (isCardio ? ' kardiyo' : '') +
-                (isToday  ? ' today'   : ' not-today');
-            const exs     = gun.egzersizler || [];
-            const preview = exs.slice(0, 3).map(e => `<div class="day-ex">${esc(e.isim)}</div>`).join('');
-            const more    = exs.length > 3 ? `<div class="day-more">+${exs.length - 3} ${__t('training.more')}</div>` : '';
-            const odakText = gun.odak || (exs[0] && exs[0].isim) || '';
-            card.innerHTML = `
-                <div class="day-card-header">
-                    ${isToday ? '<div class="today-badge">' + __t('training.today_badge') + '</div>' : ''}
-                    <div class="day-name">${esc(dayLabel(gun.gun))}</div>
-                    <div class="day-odak">${isRest ? 'Off Day' : esc(odakText)}</div>
-                </div>
-                <div class="day-card-body">
-                    ${!isRest ? `
-                        <div class="day-stat"><span>${__t('training.duration')}</span><span>${gun.sure_dk} dk</span></div>
-                        <div class="day-stat"><span>${__t('training.calories')}</span><span>~${gun.tahmini_kalori} kcal</span></div>
-                        <div class="day-exercises">${preview}${more}</div>
-                    ` : `<div style="font-size:13px;color:var(--text-3);margin-top:8px">${__t('training.rest_day')}</div>`}
-                </div>
-            `;
-            if (!isRest) card.addEventListener('click', () => showApvDetail(gun));
-            grid.appendChild(card);
-        });
+        strip.innerHTML = (program || []).map(gun => {
+            const isRest = gun.tip === 'dinlenme', isCardio = gun.tip === 'kardiyo';
+            const cls = 'week-chip' + (gun.gun === todayName ? ' is-today' : '') +
+                (isRest ? ' is-rest' : '') + (isCardio ? ' is-cardio' : '');
+            const focus = isRest ? __t('training.off') :
+                esc(gun.odak || (gun.egzersizler && gun.egzersizler[0] && gun.egzersizler[0].isim) || '');
+            return '<div class="' + cls + '" data-action="previewDay" data-args=\'["' + esc(gun.gun) + '"]\'>' +
+                '<div class="wc-day">' + esc(dayLabel(gun.gun)).slice(0, 3) + '</div>' +
+                '<div class="wc-focus">' + focus + '</div></div>';
+        }).join('');
     }
 
-    function showApvDetail(gun) {
-        document.getElementById('apv-detail-title').textContent = `${dayLabel(gun.gun)} — ${gun.odak}`;
-        document.getElementById('apv-detail-sub').textContent   = `${gun.sure_dk} ${__t('training.minutes')} · ~${gun.tahmini_kalori} kcal`;
-        document.getElementById('apv-detail-exercises').innerHTML = (gun.egzersizler || []).map(e => `
-            <tr>
-                <td>${esc(e.isim)}${e.not ? `<div class="ex-not">${esc(e.not)}</div>` : ''}</td>
-                <td>${e.set}</td>
-                <td>${e.tekrar}</td>
-                <td>${e.dinlenme}</td>
-            </tr>
-        `).join('');
-        const panel = document.getElementById('apv-detail-panel');
-        panel.classList.add('visible');
-        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    function renderWeekStats(program) {
+        const days = (program || []).filter(g => g.tip !== 'dinlenme').length;
+        const kcal = (program || []).reduce((a, g) => a + (g.tahmini_kalori || 0), 0);
+        const mins = (program || []).reduce((a, g) => a + (g.sure_dk || 0), 0);
+        document.getElementById('wstats').innerHTML =
+            statCard(days, __t('training.workout_day')) +
+            statCard(kcal, __t('training.weekly_cal')) +
+            statCard(mins, __t('training.total_min'));
     }
 
-    function closeApvDetail() {
-        document.getElementById('apv-detail-panel').classList.remove('visible');
+    function statCard(v, label) {
+        return '<div class="stat-card"><div class="stat-value">' + v +
+            '</div><div class="stat-label">' + label + '</div></div>';
+    }
+
+    function previewDay(gunName) {
+        const day = (activePlan || []).find(g => g.gun === gunName);
+        if (!day || day.tip === 'dinlenme') return;
+        openDayPreview(day);   // read-only sheet listing exercises (Task 4 reuses .sheet)
     }
 
     function getTodayKey() {
@@ -394,7 +402,7 @@ document.addEventListener('click', e => {
     async function checkWorkoutCompleted() {
         // hızlı yol: yerel önbellek (anlık boyama)
         try {
-            if (localStorage.getItem(getTodayKey()) === 'true') markWorkoutCompleted();
+            if (localStorage.getItem(getTodayKey()) === 'true') renderHero(activePlan, true);
         } catch (e) {}
         // doğru yol: sunucudan (cihazlar arası senkron)
         try {
@@ -402,7 +410,7 @@ document.addEventListener('click', e => {
             if (!res.ok) return;
             const data = await res.json();
             if (data.completed) {
-                markWorkoutCompleted();
+                renderHero(activePlan, true);
                 try { localStorage.setItem(getTodayKey(), 'true'); } catch (e) {}
             }
         } catch (e) {}
@@ -578,7 +586,6 @@ document.addEventListener('click', e => {
     function resetPlan() {
         document.getElementById('active-plan-view').style.display = 'none';
         document.getElementById('setup-form').style.display        = 'block';
-        document.getElementById('finish-workout-wrap').style.display = 'none';
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
