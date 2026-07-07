@@ -253,7 +253,120 @@ function renderBodyStats(data) {
     statCard(deltaVal, 'Değişim');
 }
 
-// ── TEMPORARY STUBS (no-op; replaced in Tasks 8-9 so this page runs standalone) ──
-function loadNutritionTab() {}
-function loadWorkoutTab() {}
+// ── NUTRITION & WORKOUT TREND TABS (Task 8) ──
+// Shared week/month toggle: `.tt-btn` lives once per panel (Nutrition AND
+// Workout each have their own `.trend-toggle`), so the active-class swap is
+// scoped to the panel that's currently showing — otherwise clearing it
+// document-wide would also wipe the OTHER tab's toggle state, leaving it
+// with no active button the next time the user switches to it.
+var _trendRange = 'week';
+function setTrendRange(range, btn) {
+  _trendRange = range;
+  var active = document.querySelector('.tab-panel.active');
+  if (active) {
+    active.querySelectorAll('.tt-btn').forEach(function (b) { b.classList.remove('active'); });
+  }
+  if (btn) btn.classList.add('active');
+  if (active && active.id === 'tab-nutrition') loadNutritionTab();
+  else if (active && active.id === 'tab-workout') loadWorkoutTab();
+}
+
+var nutritionChart, macroChart, workoutChart;
+async function loadNutritionTab() {
+  var d = await fetch('/api/progress/nutrition?range=' + _trendRange).then(function (r) { return r.json(); });
+  var labels = d.days.map(function (x) { return x.date.slice(5); });   // MM-DD
+  renderNutritionStats(d);
+
+  var noData = d.days.every(function (x) { return !x.kcal; });
+  ['nutrition', 'macro'].forEach(function (k) {
+    var nd = document.getElementById(k + '-nodata');
+    if (nd) nd.style.display = noData ? 'block' : 'none';
+  });
+
+  if (nutritionChart) { nutritionChart.destroy(); nutritionChart = null; }
+  if (macroChart) { macroChart.destroy(); macroChart = null; }
+  if (noData) return;
+
+  nutritionChart = new Chart(document.getElementById('nutritionChart'), {
+    type: 'bar',
+    data: { labels: labels, datasets: [{ label: __t('progress.chart_calories'),
+      data: d.days.map(function (x) { return x.kcal; }), backgroundColor: 'rgba(61,139,255,0.55)' }] },
+    options: _chartBase({ beginAtZero: true })
+  });
+
+  var macroOpts = _chartBase({ beginAtZero: true });
+  macroOpts.scales.x.stacked = true;
+  macroOpts.scales.y.stacked = true;
+  macroChart = new Chart(document.getElementById('macroChart'), {
+    type: 'bar',
+    data: {
+      labels: labels,
+      datasets: [
+        { label: __t('nutrition.macro_protein'), data: d.days.map(function (x) { return x.p; }),
+          backgroundColor: 'rgba(61,139,255,0.65)' },
+        { label: __t('nutrition.macro_carb'), data: d.days.map(function (x) { return x.c; }),
+          backgroundColor: 'rgba(255,176,32,0.65)' },
+        { label: __t('nutrition.macro_fat'), data: d.days.map(function (x) { return x.f; }),
+          backgroundColor: 'rgba(255,77,77,0.65)' }
+      ]
+    },
+    options: macroOpts
+  });
+}
+
+// Average vs. target calorie adherence — writes into #nutrition-stats via
+// the shared statCard() helper (Task 6).
+function renderNutritionStats(d) {
+  var el = document.getElementById('nutrition-stats');
+  if (!el) return;
+  var avg = d.avg || { kcal: 0 };
+  var target = d.target_kcal || 0;
+  var diffVal = '—';
+  if (target > 0) {
+    var diff = avg.kcal - target;
+    diffVal = (diff > 0 ? '+' : '') + diff + ' kcal';
+  }
+  el.innerHTML =
+    statCard(avg.kcal + ' kcal', __t('index.cal_daily')) +
+    statCard(target > 0 ? target + ' kcal' : '—', __t('index.cal_target')) +
+    statCard(diffVal, 'Hedef Farkı');
+}
+
+async function loadWorkoutTab() {
+  var d = await fetch('/api/progress/workout?range=' + _trendRange).then(function (r) { return r.json(); });
+  var labels = d.days.map(function (x) { return x.date.slice(5); });
+  renderWorkoutStats(d);
+
+  var totals = d.totals || { sessions: 0, volume: 0 };
+  var noData = !totals.sessions && !totals.volume;
+  var nd = document.getElementById('workout-nodata');
+  if (nd) nd.style.display = noData ? 'block' : 'none';
+
+  if (workoutChart) { workoutChart.destroy(); workoutChart = null; }
+  if (noData) return;
+
+  workoutChart = new Chart(document.getElementById('workoutChart'), {
+    type: 'bar',
+    data: { labels: labels, datasets: [{ label: __t('progress.chart_volume'),
+      data: d.days.map(function (x) { return x.volume; }), backgroundColor: 'rgba(61,139,255,0.55)' }] },
+    options: _chartBase({ beginAtZero: true })
+  });
+}
+
+// totals.sessions / totals.volume / summed active minutes — writes into
+// #workout-stats via the shared statCard() helper (Task 6). Reuses the same
+// training.volume/training.min/training.duration i18n keys + " kg" unit
+// convention as the Pump Check celebration stats in static/training.js.
+function renderWorkoutStats(d) {
+  var el = document.getElementById('workout-stats');
+  if (!el) return;
+  var totals = d.totals || { sessions: 0, volume: 0 };
+  var activeMin = (d.days || []).reduce(function (sum, x) { return sum + (x.active_min || 0); }, 0);
+  el.innerHTML =
+    statCard(totals.sessions, __t('training.session')) +
+    statCard(totals.volume + ' kg', __t('training.volume')) +
+    statCard(activeMin + ' ' + __t('training.min'), __t('training.duration'));
+}
+
+// ── TEMPORARY STUB (no-op; replaced in Task 9 so this page runs standalone) ──
 function loadAchievementsTab() {}
