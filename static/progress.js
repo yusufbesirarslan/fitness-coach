@@ -368,5 +368,24 @@ function renderWorkoutStats(d) {
     statCard(activeMin + ' ' + __t('training.min'), __t('training.duration'));
 }
 
-// ── TEMPORARY STUB (no-op; replaced in Task 9 so this page runs standalone) ──
-function loadAchievementsTab() {}
+// ── ACHIEVEMENTS TAB (Task 9) ──
+// Level/XP/streak/quests/wins stat row + milestone badges — writes into
+// #achievements-body via the shared statCard() helper (Task 6).
+async function loadAchievementsTab() {
+  var a = await fetch('/api/progress/achievements').then(r => r.json());
+  var box = document.getElementById('achievements-body');
+  if (!box) return;
+  var stats =
+    statCard(a.level, __t('progress.level')) +
+    statCard(a.rank_points, 'XP') +
+    statCard(a.streak, __t('progress.streak')) +
+    statCard(a.quests_done, __t('progress.quests')) +
+    statCard(a.weekly_wins, __t('progress.wins'));
+  var badges = (a.milestones || []).map(function (m) {
+    return '<span class="badge badge-' + (m.hit ? 'success' : 'neutral') + '">' +
+      (m.hit ? '✓ ' : '') + escapeHTML(m.label) + '</span>';
+  }).join(' ');
+  box.innerHTML = '<div class="metric-stats">' + stats + '</div>' +
+    '<div class="ach-title">' + escapeHTML(a.title || '') + '</div>' +
+    '<div class="ach-badges">' + badges + '</div>';
+}
