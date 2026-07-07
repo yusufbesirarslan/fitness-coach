@@ -41,7 +41,7 @@ function selectOverload(val, el) {
 // ── CHECK-IN ── (verbatim: POST /checkin, coach_feedback escape, CW hand-off)
 async function submitCheckin() {
     const weight = document.getElementById('ci-weight').value;
-    if (!weight) { showToast('Kilo zorunludur.', 'error'); return; }
+    if (!weight) { showToast(__t('progress.weight_required'), 'error'); return; }
 
     const btn = document.getElementById('checkin-btn');
     btn.classList.add('loading');
@@ -75,10 +75,10 @@ async function submitCheckin() {
         document.getElementById('feedback-text').innerHTML = safeFeedback;
         fb.classList.add('visible');
         fb.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        showToast('Check-in kaydedildi!', 'success');
+        showToast(__t('progress.checkin_saved'), 'success');
         if (window.CW) window.CW.receiveCheckinFeedback(data.coach_feedback);
     } catch (err) {
-        showToast('Hata: ' + err.message, 'error');
+        showToast(__t('progress.error_prefix') + err.message, 'error');
     } finally {
         btn.classList.remove('loading');
         btn.textContent = __t('progress.submit_checkin');
@@ -248,9 +248,9 @@ function renderBodyStats(data) {
     : '—';
 
   el.innerHTML =
-    statCard(weightVal, 'Güncel Kilo') +
-    statCard(bmiVal, 'BMI') +
-    statCard(deltaVal, 'Değişim');
+    statCard(weightVal, __t('progress.current_weight')) +
+    statCard(bmiVal, __t('progress.bmi')) +
+    statCard(deltaVal, __t('progress.change'));
 }
 
 // ── NUTRITION & WORKOUT TREND TABS (Task 8) ──
@@ -329,7 +329,7 @@ function renderNutritionStats(d) {
   el.innerHTML =
     statCard(avg.kcal + ' kcal', __t('index.cal_daily')) +
     statCard(target > 0 ? target + ' kcal' : '—', __t('index.cal_target')) +
-    statCard(diffVal, 'Hedef Farkı');
+    statCard(diffVal, __t('progress.target_diff'));
 }
 
 async function loadWorkoutTab() {
