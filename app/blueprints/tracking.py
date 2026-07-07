@@ -439,7 +439,8 @@ def progress_page():
         current_weight = last_ci.weight if last_ci else None
     return render_template("progress.html", username=current_user.username,
         profile_picture=current_user.avatar_src,
-        current_weight=current_weight)
+        current_weight=current_weight,
+        height=current_user.height, goal_weight=current_user.target_weight)
 
 
 @bp.route("/history")

@@ -156,8 +156,104 @@ function statCard(v, label) {
     '</div><div class="stat-label">' + escapeHTML(label) + '</div></div>';
 }
 
-// ── TEMPORARY STUBS (no-op; replaced in Tasks 7-9 so this page runs standalone) ──
-function loadWeightTab() {}
+// ── WEIGHT & BODY TAB (Task 7) ──
+// Shared responsive Chart.js base options, extracted from the old inline
+// `baseOpts` (grid/text colors kept as JS literals — documented CSP
+// exception). Tasks 8/9 reuse this for the nutrition/workout charts.
+function _chartBase(yOpts) {
+  var gridColor = 'rgba(255,255,255,0.05)';
+  var textColor = '#606060';
+  var yScale = { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } };
+  Object.assign(yScale, yOpts || {});
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { labels: { color: textColor, font: { family: 'DM Sans', size: 11 } } } },
+    scales: {
+      x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
+      y: yScale
+    }
+  };
+}
+
+var weightChart, wellnessChart;
+async function loadWeightTab() {
+  var data = await fetch('/checkin-history').then(function (r) { return r.json(); });
+  renderBodyStats(data);
+
+  var noData = data.length === 0;
+  ['weight', 'wellness'].forEach(function (k) {
+    var nd = document.getElementById(k + '-nodata');
+    if (nd) nd.style.display = noData ? 'block' : 'none';
+  });
+  if (noData) return;
+
+  var labels = data.map(function (d) { return d.tarih; });
+
+  if (weightChart) weightChart.destroy();
+  weightChart = new Chart(document.getElementById('weightChart'), {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: __t('progress.chart_weight'), data: data.map(function (d) { return d.kilo; }),
+        borderColor: '#3D8BFF', backgroundColor: 'rgba(61,139,255,0.08)',
+        fill: true, tension: 0.35, pointRadius: 5, pointHoverRadius: 8,
+        pointBackgroundColor: '#3D8BFF', borderWidth: 2
+      }]
+    },
+    options: _chartBase({ beginAtZero: false })
+  });
+
+  if (wellnessChart) wellnessChart.destroy();
+  wellnessChart = new Chart(document.getElementById('wellnessChart'), {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        { label: __t('progress.chart_intensity'), data: data.map(function (d) { return d.yogunluk; }),
+          borderColor: '#3D8BFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
+        { label: __t('progress.chart_fatigue'), data: data.map(function (d) { return d.fatigue; }),
+          borderColor: '#FF4D4D', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
+        { label: __t('progress.chart_sleep'), data: data.map(function (d) { return d.uyku; }),
+          borderColor: '#3D9EFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
+        { label: __t('progress.chart_nutrition'), data: data.map(function (d) { return d.beslenme; }),
+          borderColor: '#FFB020', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false }
+      ]
+    },
+    options: _chartBase({ min: 0, max: 5 })
+  });
+}
+
+// current weight / BMI / Δ vs first check-in — writes into #body-stats via
+// the shared statCard() helper (Task 6).
+function renderBodyStats(data) {
+  var el = document.getElementById('body-stats');
+  if (!el) return;
+  var p = window.__PROGRESS || {};
+
+  var latest = data.length ? data[data.length - 1].kilo : p.current_weight;
+  var first  = data.length ? data[0].kilo : latest;
+
+  var weightVal = (latest != null && latest > 0) ? latest.toFixed(1) + ' kg' : '—';
+
+  var bmi = (latest > 0 && p.height_cm > 0)
+    ? latest / Math.pow(p.height_cm / 100, 2)
+    : null;
+  var bmiVal = (bmi != null) ? bmi.toFixed(1) : '—';
+
+  var delta = (latest != null && first != null) ? (latest - first) : null;
+  var deltaVal = (delta != null)
+    ? (delta > 0 ? '+' : '') + delta.toFixed(1) + ' kg'
+    : '—';
+
+  el.innerHTML =
+    statCard(weightVal, 'Güncel Kilo') +
+    statCard(bmiVal, 'BMI') +
+    statCard(deltaVal, 'Değişim');
+}
+
+// ── TEMPORARY STUBS (no-op; replaced in Tasks 8-9 so this page runs standalone) ──
 function loadNutritionTab() {}
 function loadWorkoutTab() {}
 function loadAchievementsTab() {}

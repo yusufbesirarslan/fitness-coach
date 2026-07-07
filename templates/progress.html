@@ -225,6 +225,7 @@
 <!-- ── TOAST ── -->
 <div class="toast-wrap" id="toast-wrap"></div>
 
+<script nonce="{{ csp_nonce }}">window.__PROGRESS = { current_weight: {{ current_weight|tojson }}, height_cm: {{ (height or 0)|tojson }}, goal_weight: {{ (goal_weight or 0)|tojson }} };</script>
 <script src="/static/progress.js?v={{ _v }}"></script>
 <script src="/static/coach_widget.js?v={{ _v }}"></script>
 <script src="/static/actions.js?v={{ _v }}"></script>
