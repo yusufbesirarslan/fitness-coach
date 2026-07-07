@@ -386,6 +386,164 @@ document.addEventListener('click', e => {
         openDayPreview(day);   // read-only sheet listing exercises (Task 4 reuses .sheet)
     }
 
+    // ── WORKOUT SESSION — ephemeral, in-memory only. No localStorage, no network.
+    //    A future Workout Log backend plugs in at the prProvider seam (Task 5). ──
+    var _session = null;        // { startedAt, day, exercises:[{isim,tekrar,dinlenme,not,sets:[{weightKg,reps,done,isPR}]}] }
+    var _pendingStats = null;   // stats snapshot handed to the celebration after Pump Check
+
+    function defaultReps(tekrar) {
+        var m = String(tekrar || '').match(/\d+/g);
+        return m && m.length ? parseInt(m[m.length - 1], 10) : null;   // "8-12" -> 12
+    }
+
+    function buildSession(day) {
+        return {
+            startedAt: Date.now(),
+            day: day,
+            exercises: (day.egzersizler || []).map(function (ex) {
+                var n = Math.max(1, parseInt(ex.set, 10) || 1);
+                var sets = [];
+                for (var i = 0; i < n; i++) {
+                    sets.push({ weightKg: null, reps: defaultReps(ex.tekrar), done: false, isPR: false });
+                }
+                return { isim: ex.isim, tekrar: ex.tekrar, dinlenme: ex.dinlenme,
+                         not: ex.not || '', sets: sets };
+            }),
+        };
+    }
+
+    function computeSessionStats(session) {
+        var vol = 0, done = 0, total = 0, prs = 0, exDone = 0;
+        (session.exercises || []).forEach(function (ex) {
+            var any = false;
+            ex.sets.forEach(function (st) {
+                total++;
+                if (st.done) {
+                    done++; any = true;
+                    vol += (Number(st.weightKg) || 0) * (Number(st.reps) || 0);
+                    if (st.isPR) prs++;
+                }
+            });
+            if (any) exDone++;
+        });
+        return { totalVolume: Math.round(vol), setsDone: done, totalSets: total,
+                 prCount: prs, exercisesDone: exDone,
+                 elapsedMin: Math.max(0, Math.round((Date.now() - session.startedAt) / 60000)) };
+    }
+
+    function startWorkout() {
+        var day = todayDay();
+        if (!day || day.tip === 'dinlenme') return;
+        openSession(day);
+    }
+
+    function openSession(day) {
+        _session = buildSession(day);
+        document.getElementById('sv-title').textContent =
+            (day.odak || __t('training.session'));
+        renderSession();
+        var v = document.getElementById('session-view');
+        v.classList.add('open');
+        document.body.style.overflow = 'hidden';
+    }
+
+    function closeSession() {
+        document.getElementById('session-view').classList.remove('open');
+        document.body.style.overflow = '';
+        stopRestTimer();            // Task 5 (safe no-op until defined)
+        _session = null;            // discard ephemeral state
+    }
+
+    function renderSession() {
+        if (!_session) return;
+        var body = document.getElementById('sv-body');
+        body.innerHTML = _session.exercises.map(function (ex, ei) {
+            var rows = ex.sets.map(function (st, si) {
+                return '<div class="set-row' + (st.done ? ' is-done' : '') +
+                    (st.isPR ? ' is-pr' : '') + '" data-ex="' + ei + '" data-set="' + si + '">' +
+                  '<div class="set-idx">' + (si + 1) + '</div>' +
+                  '<input class="set-input" type="number" inputmode="decimal" min="0" step="0.5" ' +
+                    'placeholder="kg" data-field="weight" value="' + (st.weightKg == null ? '' : st.weightKg) + '">' +
+                  '<input class="set-input" type="number" inputmode="numeric" min="0" step="1" ' +
+                    'placeholder="reps" data-field="reps" value="' + (st.reps == null ? '' : st.reps) + '">' +
+                  '<button class="set-check" data-field="done" aria-label="' + __t('training.set_done') + '">✓' +
+                    '<span class="pr-badge badge badge-warning">PR</span></button>' +
+                '</div>';
+            }).join('');
+            return '<div class="exercise-card"><div class="ec-head">' +
+                '<span class="ec-name">' + esc(ex.isim) + '</span>' +
+                '<span class="ec-prescribed">' + ex.sets.length + '×' + esc(ex.tekrar) +
+                  ' · ' + esc(ex.dinlenme) + '</span></div>' +
+                (ex.not ? '<div class="ec-note">' + esc(ex.not) + '</div>' : '') +
+                '<div class="set-list">' +
+                  '<div class="set-row set-head"><div class="set-idx"></div>' +
+                  '<div class="set-col-label">' + __t('training.weight') + '</div>' +
+                  '<div class="set-col-label">' + __t('training.reps') + '</div><div></div></div>' +
+                  rows + '</div></div>';
+        }).join('');
+        updateSessionProgress();
+    }
+
+    function updateSessionProgress() {
+        var s = computeSessionStats(_session);
+        document.getElementById('sv-count').textContent = s.setsDone + '/' + s.totalSets;
+        var pct = s.totalSets ? (s.setsDone / s.totalSets) * 100 : 0;
+        document.getElementById('sv-progress-bar').style.width = pct + '%';
+    }
+
+    function finishSession() {
+        if (!_session) return;
+        _pendingStats = computeSessionStats(_session);
+        document.getElementById('session-view').classList.remove('open');
+        stopRestTimer();
+        openPumpCheck();            // existing flow; on success → showCelebration (Task 6)
+    }
+
+    // Scoped delegated listener — binds once on #sv-body; updates `_session` in place.
+    (function initSession() {
+        var body = document.getElementById('sv-body');
+        if (!body) return;
+        body.addEventListener('input', function (e) {
+            var row = e.target.closest('.set-row'); if (!row || !_session) return;
+            var ex = _session.exercises[+row.dataset.ex]; var st = ex && ex.sets[+row.dataset.set];
+            if (!st) return;
+            var field = e.target.dataset.field;
+            if (field === 'weight') { st.weightKg = e.target.value === '' ? null : parseFloat(e.target.value);
+                st.isPR = evaluatePR(ex.isim, st.weightKg); refreshPRFlags(ex, +row.dataset.ex); }  // Task 5
+            else if (field === 'reps') { st.reps = e.target.value === '' ? null : parseInt(e.target.value, 10); }
+        });
+        body.addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-field="done"]'); if (!btn || !_session) return;
+            var row = btn.closest('.set-row');
+            var ex = _session.exercises[+row.dataset.ex]; var st = ex.sets[+row.dataset.set];
+            st.done = !st.done;
+            row.classList.toggle('is-done', st.done);
+            updateSessionProgress();
+            if (st.done) startRestTimer(parseRestSeconds(ex.dinlenme));   // Task 5
+        });
+    })();
+
+    // Temporary stubs — PR detection + rest timer land in Task 5. Kept here so the
+    // session player runs green standalone; Task 5 REPLACES these with real bodies.
+    function evaluatePR() { return false; }
+    function refreshPRFlags() {}
+    function parseRestSeconds() { return 60; }
+    function startRestTimer() {}
+    function stopRestTimer() {}
+
+    // ── DAY PREVIEW (read-only, non-today days) ──
+    function openDayPreview(day) {
+        document.getElementById('dp-title').textContent = dayLabel(day.gun) + ' — ' + (day.odak || '');
+        document.getElementById('dp-body').innerHTML = (day.egzersizler || []).map(function (e) {
+            return '<div class="exercise-card"><div class="ec-head"><span class="ec-name">' +
+                esc(e.isim) + '</span><span class="ec-prescribed">' + e.set + '×' + esc(e.tekrar) +
+                ' · ' + esc(e.dinlenme) + '</span></div>' +
+                (e.not ? '<div class="ec-note">' + esc(e.not) + '</div>' : '') + '</div>';
+        }).join('');
+        document.getElementById('day-preview').classList.add('open');
+    }
+    function closeDayPreview() { document.getElementById('day-preview').classList.remove('open'); }
+
     function getTodayKey() {
         const d = new Date();
         return 'fitx_workout_completed_' + d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');

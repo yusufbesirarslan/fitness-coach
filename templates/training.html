@@ -564,6 +564,29 @@
 
 </main>
 
+<!-- ══ WORKOUT SESSION PLAYER (overlay) — ephemeral, in-memory only ══ -->
+<div class="session-view" id="session-view" role="dialog" aria-modal="true" aria-labelledby="sv-title">
+    <div class="sv-head">
+        <button class="btn-ghost" data-action="closeSession" aria-label="{{ t('training.close') }}">×</button>
+        <div class="sv-title" id="sv-title">{{ t('training.session') }}</div>
+        <span class="badge badge-neutral" id="sv-count">0/0</span>
+    </div>
+    <div class="sv-progress"><div id="sv-progress-bar"></div></div>
+    <div class="sv-body" id="sv-body"></div>
+    <div class="sv-foot">
+        <button class="btn-volt w-full" data-action="finishSession">{{ t('training.finish_workout') }}</button>
+    </div>
+</div>
+
+<!-- read-only day preview (non-today days) -->
+<div class="sheet-backdrop" id="day-preview" data-action-self="closeDayPreview">
+    <div class="sheet" role="dialog" aria-modal="true">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title" id="dp-title"></div>
+        <div id="dp-body"></div>
+    </div>
+</div>
+
 {% include "_actionbar.html" %}
 
 <!-- ── QUICK ADD FAB — Bottom Left ── -->
