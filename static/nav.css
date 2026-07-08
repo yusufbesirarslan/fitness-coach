@@ -11,7 +11,7 @@
   display: flex; align-items: center; gap: var(--space-3);
   padding: 0 max(var(--space-4), env(safe-area-inset-right))
            0 max(var(--space-4), env(safe-area-inset-left));
-  background: rgba(18, 18, 18, 0.92); /* yarı saydam yüzey token'ı yok (blur zemini) */
+  background: var(--color-nav-bg);
   -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px);
   border-bottom: var(--border-w-1) solid var(--color-border-1);
   z-index: var(--z-header);
@@ -72,7 +72,7 @@
   position: fixed; bottom: 0; left: 0; right: 0;
   min-height: var(--action-bar-h);
   padding-bottom: env(safe-area-inset-bottom, 0);
-  background: rgba(16, 16, 16, 0.97);
+  background: var(--color-actionbar-bg);
   -webkit-backdrop-filter: blur(24px); backdrop-filter: blur(24px);
   border-top: var(--border-w-1) solid var(--color-border-1);
   display: flex; align-items: stretch;
