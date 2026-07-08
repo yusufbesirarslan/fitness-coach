@@ -44,7 +44,7 @@ body {
 .meal-badge {
   display: inline-flex; align-items: center;
   font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-widest); text-transform: uppercase;
-  color: var(--volt); background: var(--volt-dim);
+  color: var(--color-primary); background: var(--color-primary-soft);
   padding: 3px var(--space-2); border-radius: var(--radius-xs);
 }
 
@@ -60,7 +60,7 @@ body {
 }
 .meal-type-opt:hover    { border-color: rgba(61,139,255,0.3); }
 .meal-type-opt:active   { transform: scale(0.96); }
-.meal-type-opt.selected { background: var(--volt-dim); border-color: rgba(61,139,255,0.5); color: var(--volt); }
+.meal-type-opt.selected { background: var(--color-primary-soft); border-color: rgba(61,139,255,0.5); color: var(--color-primary); }
 .meal-type-opt .emoji   { font-size: 22px; line-height: var(--leading-none); }
 
 /* ── 4. PLAN CARDS ────────────────────────────────── */
@@ -70,41 +70,41 @@ body {
   transition: border-color var(--t-base), transform var(--t-base), box-shadow var(--t-base);
 }
 .plan-card:hover  { border-color: var(--border-2); transform: translateY(-2px); box-shadow: var(--shadow-md); }
-.plan-card.chosen { border-color: var(--volt); }
+.plan-card.chosen { border-color: var(--color-primary); }
 
 .plan-card-hdr   { padding: 18px 20px 14px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
-.plan-card-name  { font-family: var(--font-display); font-size: 18px; letter-spacing: 2px; color: var(--volt); }
+.plan-card-name  { font-family: var(--font-display); font-size: 18px; letter-spacing: 2px; color: var(--color-primary); }
 .plan-card-kcal  { font-size: var(--text-md); color: var(--text-2); }
 .plan-card-body  { padding: var(--space-4) var(--space-5); }
 .plan-meal-sec   { margin-bottom: 14px; }
 .plan-meal-title { font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-widest); text-transform: uppercase; color: var(--text-3); margin-bottom: 6px; }
 .plan-meal-items { list-style: none; display: flex; flex-direction: column; gap: 3px; }
 .plan-meal-items li { font-size: var(--text-md); color: var(--text); font-weight: var(--weight-light); line-height: 1.5; display: flex; align-items: flex-start; gap: 6px; }
-.plan-meal-items li::before { content: '·'; color: var(--volt); flex-shrink: 0; }
+.plan-meal-items li::before { content: '·'; color: var(--color-primary); flex-shrink: 0; }
 
 .plan-macro-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
 .plan-macro-item { text-align: center; }
-.plan-macro-val  { font-family: var(--font-display); font-size: var(--text-2xl); color: var(--volt); letter-spacing: 1px; }
+.plan-macro-val  { font-family: var(--font-display); font-size: var(--text-2xl); color: var(--color-primary); letter-spacing: 1px; }
 .plan-macro-lbl  { font-size: var(--text-2xs); color: var(--text-3); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 1px; }
 
 .btn-select-plan {
   width: 100%; font-family: var(--font-display); font-size: var(--text-base); letter-spacing: 2px;
-  color: var(--color-on-primary); background: var(--volt); border: none;
+  color: var(--color-on-primary); background: var(--color-primary); border: none;
   padding: var(--space-3); cursor: pointer; transition: all var(--t-base);
   margin-top: 14px; border-radius: var(--r-sm);
 }
-.btn-select-plan:hover { background: var(--volt-dark); }
+.btn-select-plan:hover { background: var(--color-primary-strong); }
 .btn-select-plan:active:not(.chosen) { transform: scale(0.98); }
-.btn-select-plan.chosen { background: var(--overlay-4); color: var(--volt); border: 1px solid rgba(61,139,255,0.4); cursor: default; }
+.btn-select-plan.chosen { background: var(--overlay-4); color: var(--color-primary); border: 1px solid rgba(61,139,255,0.4); cursor: default; }
 
 /* ── 5. BANNERS ───────────────────────────────────── */
 .active-banner {
-  background: var(--volt-dim); border: 1px solid rgba(61,139,255,0.20);
+  background: var(--color-primary-soft); border: 1px solid rgba(61,139,255,0.20);
   border-radius: var(--r-md); padding: 14px 18px; margin-bottom: var(--space-6);
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); flex-wrap: wrap;
 }
 .active-banner-text { font-size: var(--text-base); color: var(--text); }
-.active-banner-text strong { color: var(--volt); }
+.active-banner-text strong { color: var(--color-primary); }
 .active-banner-sub { font-size: var(--text-sm); color: var(--text-2); margin-top: 3px; }
 
 /* ── 6. SCORE BANNER ──────────────────────────────── */
@@ -121,21 +121,21 @@ body {
 /* ── 7. PAGE HEADER ───────────────────────────────── */
 .page-hdr   { margin-bottom: var(--space-8); }
 .page-hdr h1 { font-family: var(--font-display); font-size: 52px; letter-spacing: 3px; line-height: 1.1; color: var(--text); }
-.page-hdr h1 span { color: var(--volt); }
+.page-hdr h1 span { color: var(--color-primary); }
 .page-hdr p { margin-top: 6px; color: var(--text-2); font-size: var(--text-base); font-weight: var(--weight-light); }
 
 /* ── 8. REVIEW CARD ───────────────────────────────── */
-.review-card { background: var(--volt-dim); border: 1px solid rgba(61,139,255,0.18); border-radius: var(--r-lg); padding: var(--space-5); margin-top: var(--space-4); display: none; animation: slide-up 0.25s ease; }
+.review-card { background: var(--color-primary-soft); border: 1px solid rgba(61,139,255,0.18); border-radius: var(--r-lg); padding: var(--space-5); margin-top: var(--space-4); display: none; animation: slide-up 0.25s ease; }
 .review-card.visible { display: block; }
 .review-hdr  { display: flex; align-items: center; gap: 10px; margin-bottom: var(--space-3); }
-.review-av   { width: 30px; height: 30px; border-radius: 50%; background: var(--volt); display: flex; align-items: center; justify-content: center; font-size: var(--text-base); }
-.review-lbl  { font-family: var(--font-display); font-size: var(--text-base); letter-spacing: 2px; color: var(--volt); }
+.review-av   { width: 30px; height: 30px; border-radius: 50%; background: var(--color-primary); display: flex; align-items: center; justify-content: center; font-size: var(--text-base); }
+.review-lbl  { font-family: var(--font-display); font-size: var(--text-base); letter-spacing: 2px; color: var(--color-primary); }
 .review-body { font-size: var(--text-base); color: var(--text); line-height: 1.72; font-weight: var(--weight-light); }
 
 /* ── 9. HISTORY ───────────────────────────────────── */
 .history-day { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg); padding: var(--space-5); margin-bottom: var(--space-3); }
 .history-day-hdr { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; flex-wrap: wrap; gap: var(--space-2); }
-.history-date { font-family: var(--font-display); font-size: 18px; letter-spacing: 2px; color: var(--volt); }
+.history-date { font-family: var(--font-display); font-size: 18px; letter-spacing: 2px; color: var(--color-primary); }
 .history-totals { display: flex; gap: var(--space-3); flex-wrap: wrap; }
 .history-total  { font-size: var(--text-sm); color: var(--text-2); }
 .history-total span { color: var(--text); font-weight: var(--weight-semibold); }

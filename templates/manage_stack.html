@@ -10,7 +10,7 @@
 
     /* ── add form ── */
     .add-card { background: var(--surface); border-radius: var(--r-lg); padding: 24px; margin-bottom: 32px; }
-    .add-card-title { font-family: var(--font-display); font-size: 20px; letter-spacing: 2px; color: var(--volt); margin-bottom: 16px; }
+    .add-card-title { font-family: var(--font-display); font-size: 20px; letter-spacing: 2px; color: var(--color-primary); margin-bottom: 16px; }
     .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
     .form-row.full { grid-template-columns: 1fr; }
     @media(max-width:500px) { .form-row { grid-template-columns: 1fr; } }
@@ -19,7 +19,7 @@
         width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: var(--r-sm);
         padding: 10px 14px; color: var(--text); font-size: 14px; font-family: var(--font-body);
     }
-    .form-row input:focus, .form-row select:focus, .form-row textarea:focus { border-color: var(--volt); outline: none; }
+    .form-row input:focus, .form-row select:focus, .form-row textarea:focus { border-color: var(--color-primary); outline: none; }
     .form-row textarea { resize: vertical; min-height: 60px; }
 
     /* ── chips ── */
@@ -29,7 +29,7 @@
         padding: 6px 14px; border-radius: 20px; border: 1px solid var(--border); background: transparent;
         color: var(--text-2); font-size: 13px; cursor: pointer; transition: all 0.15s;
     }
-    .cat-chip.active { background: var(--volt); color: #000; border-color: var(--volt); font-weight: 600; }
+    .cat-chip.active { background: var(--color-primary); color: #000; border-color: var(--color-primary); font-weight: 600; }
 
     /* ── star rating ── */
     .star-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
@@ -40,12 +40,12 @@
         width: 28px; height: 28px; cursor: pointer; font-size: 20px; line-height: 28px; text-align: center;
         color: var(--border); transition: color 0.12s;
     }
-    .stars .star.filled { color: var(--volt); }
+    .stars .star.filled { color: var(--color-primary); }
     .stars .star:hover { color: #e8ff57; }
 
     /* ── submit ── */
     .add-btn {
-        background: var(--volt); color: #000; font-family: var(--font-display); font-size: 16px;
+        background: var(--color-primary); color: #000; font-family: var(--font-display); font-size: 16px;
         letter-spacing: 2px; padding: 12px 32px; border: none; border-radius: var(--r-sm);
         cursor: pointer; width: 100%; margin-top: 8px; transition: opacity 0.2s;
     }
@@ -56,7 +56,7 @@
     .toggle-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
     .toggle-row label { font-size: 13px; color: var(--text-2); }
     .toggle { width: 40px; height: 22px; border-radius: 11px; background: var(--border); position: relative; cursor: pointer; transition: background 0.2s; }
-    .toggle.on { background: var(--volt); }
+    .toggle.on { background: var(--color-primary); }
     .toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform 0.2s; }
     .toggle.on::after { transform: translateX(18px); }
 
@@ -76,8 +76,8 @@
     .supp-brand { font-size: 12px; color: var(--text-3); }
     .supp-ratings { display: flex; gap: 12px; margin-top: 6px; flex-wrap: wrap; }
     .supp-rating-item { font-size: 11px; color: var(--text-2); }
-    .supp-rating-item .mini-stars { color: var(--volt); letter-spacing: 1px; }
-    .supp-review { font-size: 12px; color: var(--text-3); font-style: italic; margin-top: 6px; border-left: 2px solid var(--volt); padding-left: 10px; }
+    .supp-rating-item .mini-stars { color: var(--color-primary); letter-spacing: 1px; }
+    .supp-review { font-size: 12px; color: var(--text-3); font-style: italic; margin-top: 6px; border-left: 2px solid var(--color-primary); padding-left: 10px; }
 
     .status-badge {
         font-size: 10px; padding: 3px 10px; border-radius: 10px; font-weight: 600;
@@ -92,7 +92,7 @@
         font-size: 11px; padding: 4px 12px; border-radius: var(--r-sm); border: 1px solid var(--border);
         background: transparent; color: var(--text-2); cursor: pointer; transition: all 0.15s;
     }
-    .supp-act-btn:hover { border-color: var(--volt); color: var(--volt); }
+    .supp-act-btn:hover { border-color: var(--color-primary); color: var(--color-primary); }
     .supp-act-btn.del:hover { border-color: var(--red); color: var(--red); }
     .supp-top-row { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
     .empty-state { text-align: center; color: var(--text-3); padding: 40px 20px; font-size: 14px; }
