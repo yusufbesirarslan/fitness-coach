@@ -5,101 +5,8 @@
     <title>{{ t('progress.page_title') }}</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
+    <link rel="stylesheet" href="/static/progress.css?v={{ _v }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" integrity="sha384-vsrfeLOOY6KuIYKDlmVH5UiBmgIdB1oEf7p01YgWHuqmOHfZr374+odEv96n9tNC" crossorigin="anonymous"></script>
-    <style nonce="{{ csp_nonce }}">
-        /* ── PAGE-SPECIFIC STYLES ── */
-
-        /* CHART CARD */
-        .chart-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 24px; margin-bottom: 16px; }
-        .chart-title { font-family: var(--font-display); font-size: 16px; letter-spacing: 2px; color: var(--text); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
-        .chart-title::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--volt); flex-shrink: 0; }
-        .chart-container { position: relative; height: 220px; }
-        .no-data { color: var(--text-3); font-size: 14px; font-style: italic; text-align: center; padding: 40px 0; }
-
-        /* CHECK-IN FORM */
-        .checkin-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 24px; margin-bottom: 16px; }
-        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 20px; }
-        .form-group { display: flex; flex-direction: column; gap: 8px; }
-        .form-full  { grid-column: 1 / -1; }
-        .form-lbl { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-3); }
-        input[type="text"],
-        input[type="number"],
-        select,
-        textarea {
-            font-family: var(--font-body); font-size: 14px; color: var(--text);
-            background: var(--overlay-4); border: 1px solid var(--border);
-            border-radius: var(--r-md); padding: 11px 14px; outline: none;
-            transition: border-color var(--t-fast), box-shadow var(--t-fast);
-            -webkit-appearance: none;
-        }
-        input:focus, select:focus, textarea:focus {
-            border-color: rgba(61,139,255,0.45); box-shadow: 0 0 0 3px rgba(61,139,255,0.07);
-        }
-        textarea { resize: vertical; min-height: 60px; }
-
-        /* SLIDER */
-        .slider-group { display: flex; flex-direction: column; gap: 6px; }
-        .slider-row { display: flex; align-items: center; gap: 12px; }
-        .slider-val { font-family: var(--font-display); font-size: 18px; color: var(--volt); min-width: 24px; text-align: center; }
-        .slider-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-3); }
-        input[type="range"] {
-            flex: 1; -webkit-appearance: none; appearance: none;
-            height: 6px; background: var(--overlay-6); border-radius: 3px;
-            border: none; padding: 0; cursor: pointer; outline: none; touch-action: pan-x;
-        }
-        input[type="range"]::-webkit-slider-thumb {
-            -webkit-appearance: none; appearance: none;
-            width: 22px; height: 22px; border-radius: 50%;
-            background: var(--volt); cursor: grab;
-            border: 2px solid var(--bg); box-shadow: 0 1px 4px rgba(0,0,0,0.4);
-        }
-        input[type="range"]::-webkit-slider-thumb:active { cursor: grabbing; transform: scale(1.1); }
-        input[type="range"]::-moz-range-thumb {
-            width: 22px; height: 22px; border-radius: 50%;
-            background: var(--volt); cursor: grab;
-            border: 2px solid var(--bg); box-shadow: 0 1px 4px rgba(0,0,0,0.4);
-        }
-
-        /* OVERLOAD */
-        .overload-grid { display: flex; gap: 8px; flex-wrap: wrap; }
-        .overload-chip {
-            flex: 1; min-width: 90px; display: flex; align-items: center; justify-content: center; gap: 6px;
-            background: var(--overlay-3); border: 1.5px solid var(--border);
-            border-radius: var(--r-sm); padding: 10px 12px;
-            cursor: pointer; transition: all var(--t-fast); font-size: 13px; color: var(--text-2);
-            user-select: none;
-        }
-        .overload-chip:hover { border-color: rgba(61,139,255,0.35); }
-        .overload-chip.selected { background: var(--volt-dim); border-color: rgba(61,139,255,0.5); color: var(--volt); }
-
-        /* FEEDBACK */
-        .feedback-card { background: var(--volt-dim); border: 1px solid rgba(61,139,255,0.2); border-radius: var(--r-lg); padding: 20px; margin-top: 16px; display: none; }
-        .feedback-card.visible { display: block; animation: slide-up 0.25s ease; }
-        .feedback-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-        .feedback-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--volt); display: flex; align-items: center; justify-content: center; font-size: 14px; }
-        .feedback-title { font-family: var(--font-display); font-size: 16px; letter-spacing: 2px; color: var(--volt); }
-        .feedback-text { font-size: 14px; color: var(--text); line-height: 1.72; font-weight: 300; }
-
-        /* HISTORY */
-        .history-card { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 16px; margin-bottom: 8px; }
-        .history-header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 4px; }
-        .history-date-lbl { font-family: var(--font-display); font-size: 16px; letter-spacing: 1px; color: var(--volt); }
-        .history-weight-lbl { font-size: 14px; color: var(--text); font-weight: 500; }
-        .history-stats { display: flex; gap: 16px; margin-bottom: 8px; flex-wrap: wrap; }
-        .history-stat { font-size: 12px; color: var(--text-2); }
-        .history-stat span { color: var(--text); font-weight: 500; }
-        .history-feedback-txt { font-size: 13px; color: var(--text-2); line-height: 1.5; font-weight: 300; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px; }
-
-        .section-title { font-family: var(--font-display); font-size: 20px; letter-spacing: 3px; color: var(--text); margin-bottom: 4px; }
-        .section-sub { font-size: 13px; color: var(--text-2); margin-bottom: 16px; font-weight: 300; }
-
-        @media(max-width:640px) {
-            .form-grid { grid-template-columns: 1fr; }
-            .chart-container { height: 180px; }
-            .history-stats { gap: 8px; }
-            .checkin-card { padding: 16px; }
-        }
-    </style>
 </head>
 <body class="page-body">
 
@@ -114,89 +21,201 @@
         <p>{{ t('progress.page_sub') }}</p>
     </div>
 
+    <!-- OVERVIEW (streak / level / this-week XP — populated from /api/progress/achievements) -->
+    <div class="prog-overview">
+        <div class="po-level">
+            <span class="po-level-num" id="po-level">—</span>
+            <span class="po-level-lbl">{{ t('progress.level') }}</span>
+        </div>
+        <div class="po-stats">
+            <div class="po-stat">
+                <span class="po-val" id="po-streak">—</span>
+                <span class="po-lbl">{{ t('progress.streak') }}</span>
+            </div>
+            <div class="po-stat">
+                <span class="po-val" id="po-xp">—</span>
+                <span class="po-lbl">XP</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- CONSISTENCY HEATMAP -->
+    <div class="card" style="padding:var(--space-5)">
+        <div class="sec-label">{{ t('progress.heatmap_title') }}</div>
+        <div class="heatmap">
+            <div class="hm-grid" id="heatmap-grid"></div>
+        </div>
+        <div class="hm-legend">
+            <span>{{ t('progress.less') }}</span>
+            <div class="hm-cell"></div>
+            <div class="hm-cell lvl-1"></div>
+            <div class="hm-cell lvl-2"></div>
+            <div class="hm-cell lvl-3"></div>
+            <div class="hm-cell lvl-4"></div>
+            <span>{{ t('progress.more') }}</span>
+        </div>
+    </div>
+
+    <!-- AI INSIGHTS -->
+    <div class="sec-label">{{ t('progress.insights_title') }}</div>
+    <div class="insight-row" id="insight-row"></div>
+
     <!-- TABS -->
     <div class="tab-bar" role="tablist">
-        <button class="tab-btn active" data-action="switchTab" data-args='["checkin"]'>
-            <svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-            Check-In
-        </button>
-        <button class="tab-btn" data-action="switchTab" data-args='["charts"]'>
+        <button class="tab-btn active" data-action="switchTab" data-args='["weight"]' role="tab" aria-selected="true">
             <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            {{ t('progress.tab_charts') }}
+            {{ t('progress.tab_weight') }}
         </button>
-        <button class="tab-btn" data-action="switchTab" data-args='["history"]'>
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            {{ t('progress.tab_history') }}
+        <button class="tab-btn" data-action="switchTab" data-args='["nutrition"]' role="tab" aria-selected="false">
+            <svg viewBox="0 0 24 24"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
+            {{ t('progress.tab_nutrition') }}
+        </button>
+        <button class="tab-btn" data-action="switchTab" data-args='["workout"]' role="tab" aria-selected="false">
+            <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            {{ t('progress.tab_workout') }}
+        </button>
+        <button class="tab-btn" data-action="switchTab" data-args='["achievements"]' role="tab" aria-selected="false">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>
+            {{ t('progress.tab_achievements') }}
         </button>
     </div>
 
-    <!-- TAB 1: CHECK-IN -->
-    <div class="tab-panel active" id="tab-checkin">
-        <div class="checkin-card">
-            <div class="section-title">{{ t('progress.checkin_title') }}</div>
-            <div class="section-sub">{{ t('progress.checkin_sub') }}</div>
+    <!-- TAB 1: WEIGHT & BODY -->
+    <div class="tab-panel active" id="tab-weight">
+        <button class="btn-volt w-full" data-action="openCheckin" style="margin-bottom:var(--space-4)">
+            <span aria-hidden="true">＋</span> {{ t('progress.checkin_title') }}
+        </button>
 
-            <div class="form-grid">
-                <div class="form-group">
-                    <label class="form-lbl">{{ t('progress.current_weight') }}</label>
-                    <input type="number" id="ci-weight" step="0.1"
-                           placeholder="{{ '%g'|format(current_weight) if current_weight else t('progress.weight_ph') }}"
-                           value="{{ '%g'|format(current_weight) if current_weight else '' }}">
-                </div>
-                <div class="form-group">
-                    <label class="form-lbl">{{ t('progress.note_label') }}</label>
-                    <input type="text" id="ci-note" placeholder="{{ t('progress.note_ph') }}">
-                </div>
+        <div class="metric-stats" id="body-stats"></div>
 
-                <div class="slider-group form-full">
-                    <label class="form-lbl">{{ t('progress.intensity') }}</label>
-                    <div class="slider-row">
-                        <input type="range" id="ci-yogunluk" min="1" max="5" value="3" data-action-input="fxSetText" data-target="yogunluk-val">
-                        <div class="slider-val" id="yogunluk-val">3</div>
-                    </div>
-                    <div class="slider-labels"><span>{{ t('progress.slider_verylow') }}</span><span>{{ t('progress.slider_veryhigh') }}</span></div>
-                </div>
+        <div class="chart-card">
+            <div class="chart-title">{{ t('progress.chart_weight_title') }}</div>
+            <div class="chart-container"><canvas id="weightChart" role="img" aria-label="{{ t('progress.chart_weight_title') }}"></canvas></div>
+            <div class="no-data" id="weight-nodata">{{ t('progress.no_data_checkin') }}</div>
+        </div>
 
-                <div class="slider-group form-full">
-                    <label class="form-lbl">{{ t('progress.fatigue') }}</label>
-                    <div class="slider-row">
-                        <input type="range" id="ci-fatigue" min="1" max="5" value="3" data-action-input="fxSetText" data-target="fatigue-val">
-                        <div class="slider-val" id="fatigue-val">3</div>
-                    </div>
-                    <div class="slider-labels"><span>{{ t('progress.slider_notired') }}</span><span>{{ t('progress.slider_verytired') }}</span></div>
-                </div>
+        <div class="chart-card">
+            <div class="chart-title">{{ t('progress.chart_wellness_title') }}</div>
+            <div class="chart-container"><canvas id="wellnessChart" role="img" aria-label="{{ t('progress.chart_wellness_title') }}"></canvas></div>
+            <div class="no-data" id="wellness-nodata">{{ t('progress.no_data') }}</div>
+        </div>
+    </div>
 
-                <div class="slider-group form-full">
-                    <label class="form-lbl">{{ t('progress.sleep') }}</label>
-                    <div class="slider-row">
-                        <input type="range" id="ci-uyku" min="1" max="5" value="3" data-action-input="fxSetText" data-target="uyku-val">
-                        <div class="slider-val" id="uyku-val">3</div>
-                    </div>
-                    <div class="slider-labels"><span>{{ t('progress.slider_verybad') }}</span><span>{{ t('progress.slider_verygood') }}</span></div>
-                </div>
+    <!-- TAB 2: NUTRITION -->
+    <div class="tab-panel" id="tab-nutrition">
+        <div class="trend-toggle">
+            <button class="tt-btn active" data-action="setTrendRange" data-args='["week"]'>{{ t('progress.range_week') }}</button>
+            <button class="tt-btn" data-action="setTrendRange" data-args='["month"]'>{{ t('progress.range_month') }}</button>
+        </div>
 
-                <div class="slider-group form-full">
-                    <label class="form-lbl">{{ t('progress.nutrition_adh') }}</label>
-                    <div class="slider-row">
-                        <input type="range" id="ci-beslenme" min="1" max="5" value="3" data-action-input="fxSetText" data-target="beslenme-val">
-                        <div class="slider-val" id="beslenme-val">3</div>
-                    </div>
-                    <div class="slider-labels"><span>{{ t('progress.slider_noadherence') }}</span><span>{{ t('progress.slider_fulladherence') }}</span></div>
-                </div>
+        <div class="metric-stats" id="nutrition-stats"></div>
 
-                <div class="form-group form-full">
-                    <label class="form-lbl">Progressive Overload</label>
-                    <div class="section-sub" style="margin-bottom:10px">{{ t('progress.overload_q') }}</div>
-                    <div class="overload-grid">
-                        <div class="overload-chip selected" data-action="selectOverload" data-args='["evet"]'>{{ t('progress.overload_yes') }}</div>
-                        <div class="overload-chip" data-action="selectOverload" data-args='["kismen"]'>{{ t('progress.overload_partial') }}</div>
-                        <div class="overload-chip" data-action="selectOverload" data-args='["hayir"]'>{{ t('progress.overload_no') }}</div>
-                    </div>
-                </div>
+        <div class="chart-card">
+            <div class="chart-title">{{ t('progress.chart_calories_title') }}</div>
+            <div class="chart-container"><canvas id="nutritionChart" role="img" aria-label="{{ t('progress.chart_calories_title') }}"></canvas></div>
+            <div class="no-data" id="nutrition-nodata">{{ t('progress.no_data') }}</div>
+        </div>
+
+        <div class="chart-card">
+            <div class="chart-title">{{ t('progress.chart_macro_title') }}</div>
+            <div class="chart-container"><canvas id="macroChart" role="img" aria-label="{{ t('progress.chart_macro_title') }}"></canvas></div>
+            <div class="no-data" id="macro-nodata">{{ t('progress.no_data') }}</div>
+        </div>
+    </div>
+
+    <!-- TAB 3: WORKOUT -->
+    <div class="tab-panel" id="tab-workout">
+        <div class="trend-toggle">
+            <button class="tt-btn active" data-action="setTrendRange" data-args='["week"]'>{{ t('progress.range_week') }}</button>
+            <button class="tt-btn" data-action="setTrendRange" data-args='["month"]'>{{ t('progress.range_month') }}</button>
+        </div>
+
+        <div class="metric-stats" id="workout-stats"></div>
+
+        <div class="chart-card">
+            <div class="chart-title">{{ t('progress.chart_volume_title') }}</div>
+            <div class="chart-container"><canvas id="workoutChart" role="img" aria-label="{{ t('progress.chart_volume_title') }}"></canvas></div>
+            <div class="no-data" id="workout-nodata">{{ t('progress.no_data') }}</div>
+        </div>
+    </div>
+
+    <!-- TAB 4: ACHIEVEMENTS -->
+    <div class="tab-panel" id="tab-achievements">
+        <div id="achievements-body"></div>
+    </div>
+
+</main>
+
+<!-- ══ CHECK-IN SHEET — form + fields preserved verbatim from the old progress.html (ids unchanged so submitCheckin/selectOverload keep working) ══ -->
+<div class="sheet-backdrop" id="checkin-sheet" data-action-self="closeCheckin">
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="checkin-sheet-title" tabindex="-1">
+        <div class="sheet-handle"></div>
+        <div class="sheet-title" id="checkin-sheet-title">{{ t('progress.checkin_title') }}</div>
+        <div class="section-sub">{{ t('progress.checkin_sub') }}</div>
+
+        <div class="form-grid">
+            <div class="form-group">
+                <label class="form-lbl" for="ci-weight">{{ t('progress.current_weight') }}</label>
+                <input type="number" id="ci-weight" step="0.1"
+                       placeholder="{{ '%g'|format(current_weight) if current_weight else t('progress.weight_ph') }}"
+                       value="{{ '%g'|format(current_weight) if current_weight else '' }}">
+            </div>
+            <div class="form-group">
+                <label class="form-lbl" for="ci-note">{{ t('progress.note_label') }}</label>
+                <input type="text" id="ci-note" placeholder="{{ t('progress.note_ph') }}">
             </div>
 
-            <button class="btn-volt w-full" id="checkin-btn" data-action="submitCheckin">{{ t('progress.submit_checkin') }}</button>
+            <div class="slider-group form-full">
+                <label class="form-lbl">{{ t('progress.intensity') }}</label>
+                <div class="slider-row">
+                    <input type="range" id="ci-yogunluk" min="1" max="5" value="3" data-action-input="fxSetText" data-target="yogunluk-val">
+                    <div class="slider-val" id="yogunluk-val">3</div>
+                </div>
+                <div class="slider-labels"><span>{{ t('progress.slider_verylow') }}</span><span>{{ t('progress.slider_veryhigh') }}</span></div>
+            </div>
+
+            <div class="slider-group form-full">
+                <label class="form-lbl">{{ t('progress.fatigue') }}</label>
+                <div class="slider-row">
+                    <input type="range" id="ci-fatigue" min="1" max="5" value="3" data-action-input="fxSetText" data-target="fatigue-val">
+                    <div class="slider-val" id="fatigue-val">3</div>
+                </div>
+                <div class="slider-labels"><span>{{ t('progress.slider_notired') }}</span><span>{{ t('progress.slider_verytired') }}</span></div>
+            </div>
+
+            <div class="slider-group form-full">
+                <label class="form-lbl">{{ t('progress.sleep') }}</label>
+                <div class="slider-row">
+                    <input type="range" id="ci-uyku" min="1" max="5" value="3" data-action-input="fxSetText" data-target="uyku-val">
+                    <div class="slider-val" id="uyku-val">3</div>
+                </div>
+                <div class="slider-labels"><span>{{ t('progress.slider_verybad') }}</span><span>{{ t('progress.slider_verygood') }}</span></div>
+            </div>
+
+            <div class="slider-group form-full">
+                <label class="form-lbl">{{ t('progress.nutrition_adh') }}</label>
+                <div class="slider-row">
+                    <input type="range" id="ci-beslenme" min="1" max="5" value="3" data-action-input="fxSetText" data-target="beslenme-val">
+                    <div class="slider-val" id="beslenme-val">3</div>
+                </div>
+                <div class="slider-labels"><span>{{ t('progress.slider_noadherence') }}</span><span>{{ t('progress.slider_fulladherence') }}</span></div>
+            </div>
+
+            <div class="form-group form-full">
+                <label class="form-lbl">Progressive Overload</label>
+                <div class="section-sub" style="margin-bottom:10px">{{ t('progress.overload_q') }}</div>
+                <div class="overload-grid">
+                    <div class="overload-chip selected" data-action="selectOverload" data-args='["evet"]'
+                         data-action-keydown="activateOnEnter" tabindex="0" role="button" aria-pressed="true">{{ t('progress.overload_yes') }}</div>
+                    <div class="overload-chip" data-action="selectOverload" data-args='["kismen"]'
+                         data-action-keydown="activateOnEnter" tabindex="0" role="button" aria-pressed="false">{{ t('progress.overload_partial') }}</div>
+                    <div class="overload-chip" data-action="selectOverload" data-args='["hayir"]'
+                         data-action-keydown="activateOnEnter" tabindex="0" role="button" aria-pressed="false">{{ t('progress.overload_no') }}</div>
+                </div>
+            </div>
         </div>
+
+        <button class="btn-volt w-full" id="checkin-btn" data-action="submitCheckin">{{ t('progress.submit_checkin') }}</button>
 
         <div class="feedback-card" id="feedback-card">
             <div class="feedback-header">
@@ -206,214 +225,16 @@
             <div class="feedback-text" id="feedback-text"></div>
         </div>
     </div>
-
-    <!-- TAB 2: GRAFİKLER -->
-    <div class="tab-panel" id="tab-charts">
-        <div class="chart-card">
-            <div class="chart-title">{{ t('progress.chart_weight_title') }}</div>
-            <div class="chart-container"><canvas id="weightChart"></canvas></div>
-            <div class="no-data" id="weight-nodata">{{ t('progress.no_data_checkin') }}</div>
-        </div>
-        <div class="chart-card">
-            <div class="chart-title">{{ t('progress.chart_metrics_title') }}</div>
-            <div class="chart-container"><canvas id="metricsChart"></canvas></div>
-            <div class="no-data" id="metrics-nodata">{{ t('progress.no_data') }}</div>
-        </div>
-        <div class="chart-card">
-            <div class="chart-title">{{ t('progress.chart_wellness_title') }}</div>
-            <div class="chart-container"><canvas id="wellnessChart"></canvas></div>
-            <div class="no-data" id="wellness-nodata">{{ t('progress.no_data') }}</div>
-        </div>
-    </div>
-
-    <!-- TAB 3: GEÇMİŞ -->
-    <div class="tab-panel" id="tab-history">
-        <div class="section-title">{{ t('progress.checkin_history') }}</div>
-        <div class="section-sub">{{ t('progress.history_sub') }}</div>
-        <div id="history-list"><div class="no-data">{{ t('progress.no_checkin') }}</div></div>
-    </div>
-
-
-</main>
+</div>
 
 {% include "_actionbar.html" %}
 
 <!-- ── TOAST ── -->
 <div class="toast-wrap" id="toast-wrap"></div>
 
-<script nonce="{{ csp_nonce }}">
-    var __t = (window.t) || function (k, v) { return k; };
-    // ── TOAST ──
-    function showToast(msg, type='info') {
-        const icons = { success:'✓', error:'✗', info:'ℹ' };
-        const wrap = document.getElementById('toast-wrap');
-        const t = document.createElement('div');
-        t.className = `toast toast-${type}`;
-        t.innerHTML = `<span class="toast-icon">${icons[type]||'ℹ'}</span><span>${msg}</span>`;
-        wrap.appendChild(t);
-        setTimeout(() => { t.classList.add('hide'); setTimeout(()=>t.remove(),280); }, 3200);
-    }
-
-    // Escape untrusted strings before they touch innerHTML (XSS koruması).
-    function escapeHTML(str) {
-        const d = document.createElement('div');
-        d.textContent = str == null ? '' : String(str);
-        return d.innerHTML;
-    }
-
-    // ── TABS ──
-    function switchTab(name, btn) {
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-        if (btn) btn.classList.add('active');
-        document.getElementById('tab-' + name).classList.add('active');
-        if (name === 'charts')  loadCharts();
-        if (name === 'history') loadHistory();
-    }
-
-    // ── OVERLOAD ──
-    let selectedOverload = 'evet';
-    function selectOverload(val, el) {
-        selectedOverload = val;
-        document.querySelectorAll('.overload-chip').forEach(c => c.classList.remove('selected'));
-        el.classList.add('selected');
-    }
-
-    // ── CHECK-IN ──
-    async function submitCheckin() {
-        const weight = document.getElementById('ci-weight').value;
-        if (!weight) { showToast('Kilo zorunludur.', 'error'); return; }
-
-        const btn = document.getElementById('checkin-btn');
-        btn.classList.add('loading');
-        btn.textContent = __t('progress.sending');
-
-        try {
-            const res = await fetch('/checkin', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    weight: parseFloat(weight),
-                    yogunluk:       parseInt(document.getElementById('ci-yogunluk').value),
-                    fatigue:        parseInt(document.getElementById('ci-fatigue').value),
-                    uyku_kalitesi:  parseInt(document.getElementById('ci-uyku').value),
-                    beslenme_uyumu: parseInt(document.getElementById('ci-beslenme').value),
-                    progressive_overload: selectedOverload,
-                    note: document.getElementById('ci-note').value
-                })
-            });
-            const data = await res.json();
-            if (data.error) { showToast(data.error, 'error'); return; }
-
-            const fb = document.getElementById('feedback-card');
-            // AI çıktısı güvenilmez: HTML entity'lerini escape et, sonra satır
-            // sonlarını <br>'e çevir (XSS koruması).
-            const safeFeedback = (data.coach_feedback || '')
-                .replace(/&/g, '&amp;')
-                .replace(/</g, '&lt;')
-                .replace(/>/g, '&gt;')
-                .replace(/\n/g, '<br>');
-            document.getElementById('feedback-text').innerHTML = safeFeedback;
-            fb.classList.add('visible');
-            fb.scrollIntoView({ behavior:'smooth', block:'nearest' });
-            showToast('Check-in kaydedildi!', 'success');
-            if (window.CW) window.CW.receiveCheckinFeedback(data.coach_feedback);
-        } catch (err) {
-            showToast('Hata: ' + err.message, 'error');
-        } finally {
-            btn.classList.remove('loading');
-            btn.textContent = __t('progress.submit_checkin');
-        }
-    }
-
-    // ── CHARTS ──
-    let weightChart, metricsChart, wellnessChart;
-
-    async function loadCharts() {
-        const res  = await fetch('/checkin-history');
-        const data = await res.json();
-
-        const noData = data.length === 0;
-        ['weight','metrics','wellness'].forEach(k => {
-            document.getElementById(k + '-nodata').style.display = noData ? 'block' : 'none';
-        });
-        if (noData) return;
-
-        const labels    = data.map(d => d.tarih);
-        const gridColor = 'rgba(255,255,255,0.05)';
-        const textColor = '#606060';
-
-        const baseOpts = {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { labels: { color: textColor, font: { family: 'DM Sans', size: 11 } } } },
-            scales: {
-                x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
-                y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } }
-            }
-        };
-
-        if (weightChart) weightChart.destroy();
-        weightChart = new Chart(document.getElementById('weightChart'), {
-            type: 'line',
-            data: { labels, datasets: [{
-                label: __t('progress.chart_weight'), data: data.map(d => d.kilo),
-                borderColor: '#3D8BFF', backgroundColor: 'rgba(61,139,255,0.08)',
-                fill: true, tension: 0.35, pointRadius: 5, pointHoverRadius: 8,
-                pointBackgroundColor: '#3D8BFF', borderWidth: 2
-            }]},
-            options: { ...baseOpts, scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, beginAtZero: false } } }
-        });
-
-        if (metricsChart) metricsChart.destroy();
-        metricsChart = new Chart(document.getElementById('metricsChart'), {
-            type: 'line',
-            data: { labels, datasets: [
-                { label: __t('progress.chart_intensity'), data: data.map(d => d.yogunluk), borderColor: '#3D8BFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
-                { label: __t('progress.chart_fatigue'), data: data.map(d => d.fatigue),  borderColor: '#FF4D4D', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false }
-            ]},
-            options: { ...baseOpts, scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, min: 0, max: 5 } } }
-        });
-
-        if (wellnessChart) wellnessChart.destroy();
-        wellnessChart = new Chart(document.getElementById('wellnessChart'), {
-            type: 'line',
-            data: { labels, datasets: [
-                { label: __t('progress.chart_sleep'),     data: data.map(d => d.uyku),     borderColor: '#3D9EFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
-                { label: __t('progress.chart_nutrition'), data: data.map(d => d.beslenme), borderColor: '#FFB020', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false }
-            ]},
-            options: { ...baseOpts, scales: { ...baseOpts.scales, y: { ...baseOpts.scales.y, min: 0, max: 5 } } }
-        });
-    }
-
-    // ── HISTORY ──
-    async function loadHistory() {
-        const res  = await fetch('/checkin-history');
-        const data = await res.json();
-        const list = document.getElementById('history-list');
-        if (data.length === 0) { list.innerHTML = '<div class="no-data">' + __t('progress.no_checkin') + '</div>'; return; }
-        const overloadLabels = { 'evet': __t('progress.overload_yes_short'), 'hayir': __t('progress.overload_no_short'), 'kismen': __t('progress.overload_partial_short') };
-        list.innerHTML = [...data].reverse().map(c => `
-            <div class="history-card">
-                <div class="history-header-row">
-                    <div class="history-date-lbl">${c.tarih}</div>
-                    <div class="history-weight-lbl">${c.kilo} kg</div>
-                </div>
-                <div class="history-stats">
-                    <div class="history-stat">${__t('progress.hist_intensity')} <span>${c.yogunluk}/5</span></div>
-                    <div class="history-stat">${__t('progress.hist_fatigue')} <span>${c.fatigue}/5</span></div>
-                    <div class="history-stat">Overload: <span>${overloadLabels[c.overload]||escapeHTML(c.overload)}</span></div>
-                    <div class="history-stat">${__t('progress.hist_sleep')} <span>${c.uyku}/5</span></div>
-                    <div class="history-stat">${__t('progress.hist_nutrition')} <span>${c.beslenme}/5</span></div>
-                </div>
-                ${c.feedback ? `<div class="history-feedback-txt">${escapeHTML(c.feedback).replace(/\n/g,'<br>')}</div>` : ''}
-            </div>
-        `).join('');
-    }
-
-
-</script>
-
-<script src="/static/coach_widget.js"></script>
-<script src="/static/actions.js"></script>
+<script nonce="{{ csp_nonce }}">window.__PROGRESS = { current_weight: {{ current_weight|tojson }}, height_cm: {{ (height or 0)|tojson }}, goal_weight: {{ (goal_weight or 0)|tojson }} };</script>
+<script src="/static/progress.js?v={{ _v }}"></script>
+<script src="/static/coach_widget.js?v={{ _v }}"></script>
+<script src="/static/actions.js?v={{ _v }}"></script>
 </body>
 </html>
