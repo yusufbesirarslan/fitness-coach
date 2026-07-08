@@ -65,6 +65,22 @@ def test_heatmap_levels_from_activity(app, client, make_user, login):
     assert d["cells"][0]["level"] == 0       # an empty earlier day
 
 
+def test_heatmap_multi_exercise_workout_counts_once(app, client, make_user, login):
+    # A real workout writes one WorkoutLog per exercise. The heatmap gradient is
+    # "did each of meal/activity/workout/check-in happen" (0-4), so a single
+    # session's many rows must bump the day only once — not once per exercise
+    # (which would collapse every workout day to level 4). Regression guard.
+    u = _login(make_user, login, "hmmulti")
+    today = app_today().isoformat()
+    for name in ("Squat", "Bench", "Deadlift", "Row", "Curl"):
+        db.session.add(WorkoutLog(user_id=u.id, exercise_name=name,
+                                  sets=3, reps=10, weight_kg=50, volume=1500))
+    db.session.commit()
+    d = client.get("/api/progress/heatmap?weeks=4").get_json()
+    today_cell = [c for c in d["cells"] if c["date"] == today][0]
+    assert today_cell["level"] == 1          # one workout signal, not 5 / not maxed
+
+
 def test_heatmap_weeks_clamped(app, client, make_user, login):
     _login(make_user, login, "hmclamp")
     d = client.get("/api/progress/heatmap?weeks=999").get_json()

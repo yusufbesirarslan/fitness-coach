@@ -617,12 +617,17 @@ def progress_heatmap():
     for (dk,) in db.session.query(DailyActivity.date_key).filter(
             DailyActivity.user_id == current_user.id, DailyActivity.date_key >= start_iso).distinct():
         bump(dk)
-    for (ca,) in db.session.query(WorkoutLog.created_at).filter(
-            WorkoutLog.user_id == current_user.id, WorkoutLog.created_at >= start_utc):
-        bump(app_date_of(ca).isoformat())
-    for (ca,) in db.session.query(WeeklyCheckIn.created_at).filter(
-            WeeklyCheckIn.user_id == current_user.id, WeeklyCheckIn.created_at >= start_utc):
-        bump(app_date_of(ca).isoformat())
+    # Dedupe to one bump per active day (a workout writes one WorkoutLog per
+    # exercise; without this a single session would max the day at level 4 and
+    # collapse the 0-4 "did each of meal/activity/workout/check-in happen" gradient).
+    for dkey in {app_date_of(ca).isoformat() for (ca,) in db.session.query(
+            WorkoutLog.created_at).filter(
+            WorkoutLog.user_id == current_user.id, WorkoutLog.created_at >= start_utc)}:
+        bump(dkey)
+    for dkey in {app_date_of(ca).isoformat() for (ca,) in db.session.query(
+            WeeklyCheckIn.created_at).filter(
+            WeeklyCheckIn.user_id == current_user.id, WeeklyCheckIn.created_at >= start_utc)}:
+        bump(dkey)
 
     cells = []
     for i in range(n):

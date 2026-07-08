@@ -692,6 +692,7 @@
   "progress.wins": "Wins",
   "progress.change": "Change",
   "progress.bmi": "BMI",
+  "progress.to_goal": "To Goal",
   "progress.target_diff": "Target Difference",
   "progress.chart_calories": "Calories",
   "progress.chart_calories_title": "Calorie Intake",

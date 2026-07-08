@@ -173,9 +173,13 @@ function renderInsights(list) {
   if (!row) return;
   if (!list.length) { row.innerHTML = ''; return; }
   row.innerHTML = list.map(function (n) {
-    return '<div class="insight-card"><div class="ic-head"><span class="ic-icon">' +
+    // Whitelist tone → drives the .insight-card[data-tone] left accent; map to a
+    // real badge variant (components.css has no .badge-info → use primary).
+    var tone = (n.tone === 'success' || n.tone === 'warning') ? n.tone : 'info';
+    var badge = tone === 'info' ? 'primary' : tone;
+    return '<div class="insight-card" data-tone="' + tone + '"><div class="ic-head"><span class="ic-icon">' +
       escapeHTML(n.icon || '💡') + '</span><span class="ic-title badge badge-' +
-      (n.tone || 'info') + '">' + escapeHTML(n.title) + '</span></div>' +
+      badge + '">' + escapeHTML(n.title) + '</span></div>' +
       '<div class="ic-body">' + escapeHTML(n.body) + '</div></div>';
   }).join('');
 }
@@ -247,7 +251,11 @@ async function loadWeightTab() {
       var nd = document.getElementById(k + '-nodata');
       if (nd) nd.style.display = noData ? 'block' : 'none';
     });
-    if (noData) return;
+    if (noData) {
+      if (weightChart) { weightChart.destroy(); weightChart = null; }
+      if (wellnessChart) { wellnessChart.destroy(); wellnessChart = null; }
+      return;
+    }
 
     var labels = data.map(function (d) { return d.tarih; });
 
@@ -313,10 +321,21 @@ function renderBodyStats(data) {
     ? (delta > 0 ? '+' : '') + delta.toFixed(1) + ' kg'
     : '—';
 
+  // Goal delta (uses the plumbed window.__PROGRESS.goal_weight = User.target_weight).
+  var goalCard = '';
+  if (p.goal_weight > 0 && latest != null && latest > 0) {
+    var toGoal = latest - p.goal_weight;
+    var toGoalVal = (Math.abs(toGoal) < 0.05)
+      ? '✓'
+      : (toGoal > 0 ? '+' : '') + toGoal.toFixed(1) + ' kg';
+    goalCard = statCard(toGoalVal, __t('progress.to_goal'));
+  }
+
   el.innerHTML =
     statCard(weightVal, __t('progress.current_weight')) +
     statCard(bmiVal, __t('progress.bmi')) +
-    statCard(deltaVal, __t('progress.change'));
+    statCard(deltaVal, __t('progress.change')) +
+    goalCard;
 }
 
 // ── NUTRITION & WORKOUT TREND TABS (Task 8) ──
