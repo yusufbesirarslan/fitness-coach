@@ -1,0 +1,44 @@
+/* premium page — extracted from inline <style> (Phase 5 Final QA), canonical tokens. */
+    .prem-wrap { max-width: 720px; margin: 0 auto; }
+    .prem-hero {
+        text-align: center; margin-bottom: 28px;
+    }
+    .prem-hero h1 {
+        font-family: var(--font-display); font-size: 40px; letter-spacing: 2px;
+        color: var(--text); margin: 0 0 8px;
+    }
+    .prem-hero h1 span { color: var(--color-primary); }
+    .prem-hero p { color: var(--text-2); font-weight: 300; }
+
+    .plan-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 600px) { .plan-grid { grid-template-columns: 1fr; } }
+    .plan-card {
+        background: var(--surface-2); border: 1px solid var(--border);
+        border-radius: 16px; padding: 24px; position: relative; overflow: hidden;
+    }
+    .plan-card.pro { border-color: rgba(var(--color-primary-rgb),0.4); }
+    .plan-card.pro::before {
+        content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+        background: linear-gradient(90deg, var(--color-primary), transparent);
+    }
+    .plan-name {
+        font-family: var(--font-display); font-size: 22px; letter-spacing: 2px;
+        color: var(--text); margin-bottom: 4px;
+    }
+    .plan-card.pro .plan-name { color: var(--color-primary); }
+    .plan-tag { font-size: 12px; color: var(--text-3); margin-bottom: 16px; }
+    .plan-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+    .plan-list li { display: flex; gap: 10px; font-size: 14px; color: var(--text-2); align-items: flex-start; }
+    .plan-list li::before { content: '✓'; color: var(--color-primary); font-weight: 700; }
+
+    .prem-cta {
+        width: 100%; margin-top: 20px; padding: 14px;
+        font-family: var(--font-display); font-size: 18px; letter-spacing: 3px;
+        color: var(--color-on-primary); background: var(--color-primary); border: none; border-radius: 10px;
+        cursor: pointer; transition: background 0.2s;
+    }
+    .prem-cta:hover { background: var(--color-primary-strong); }
+    .prem-note { text-align: center; color: var(--text-3); font-size: 12px; margin-top: 14px; }
+    .prem-active { text-align: center; color: var(--color-primary); font-weight: 600; margin-top: 16px; }
+    .toast-wrap { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); z-index: 9999; }
+    .toast { padding: 12px 20px; border-radius: 10px; font-size: 13px; background: var(--color-success-bg-dark); border: 1px solid rgba(var(--color-success-rgb),0.3); color: var(--green); }

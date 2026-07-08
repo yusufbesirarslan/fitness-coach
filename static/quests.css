@@ -1,0 +1,163 @@
+/* quests page — extracted from inline <style> (Phase 5 Final QA), canonical tokens. */
+    .rank-banner {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 28px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      position: relative;
+      overflow: hidden;
+    }
+    .rank-banner::before {
+      content: '';
+      position: absolute;
+      top: -60px; right: -60px;
+      width: 200px; height: 200px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(var(--color-primary-rgb),0.08), transparent 70%);
+      pointer-events: none;
+    }
+    .rank-icon {
+      width: 64px; height: 64px;
+      border-radius: 50%;
+      background: var(--blue-dim);
+      border: 2px solid rgba(var(--color-primary-rgb),0.3);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 28px;
+      flex-shrink: 0;
+    }
+    .rank-info { flex: 1; }
+    .rank-title-text {
+      font-family: var(--font-display);
+      font-size: 28px;
+      letter-spacing: 2px;
+      color: var(--blue-light);
+      line-height: 1;
+    }
+    .rank-points-text {
+      font-size: 13px;
+      color: var(--text-2);
+      margin-top: 4px;
+    }
+    .rank-points-text strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .quest-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 16px;
+    }
+    @media (max-width: 680px) {
+      .quest-grid { grid-template-columns: 1fr; }
+    }
+
+    .quest-card {
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      transition: transform 0.24s ease, box-shadow 0.24s ease, border-color 0.24s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .quest-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 0 16px rgba(var(--color-primary-rgb),0.06), 0 8px 32px rgba(var(--black-rgb),0.4);
+      border-color: var(--border-2);
+    }
+    .quest-card.claimed {
+      opacity: 0.6;
+      border-color: rgba(var(--color-success-rgb),0.25);
+    }
+    .quest-card.claimed:hover { transform: none; box-shadow: none; }
+
+    .quest-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .quest-emoji {
+      width: 42px; height: 42px;
+      border-radius: 12px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px;
+      flex-shrink: 0;
+    }
+    .quest-emoji.login      { background: var(--color-primary-soft); }
+    .quest-emoji.workout    { background: var(--orange-dim); }
+    .quest-emoji.social     { background: var(--blue-dim); }
+    .quest-emoji.supplement { background: var(--green-dim); }
+    .quest-emoji.meal       { background: var(--color-primary-soft); }
+
+    .quest-title {
+      font-family: var(--font-display);
+      font-size: 20px;
+      letter-spacing: 1.5px;
+      color: var(--text);
+    }
+    .quest-desc {
+      font-size: 13px;
+      color: var(--text-2);
+      line-height: 1.5;
+      margin-bottom: 16px;
+    }
+    .quest-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .quest-reward {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--color-primary);
+      background: var(--color-primary-soft);
+      border: 1px solid rgba(var(--color-primary-rgb),0.18);
+      border-radius: 20px;
+      padding: 5px 12px;
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 5px 12px;
+      border-radius: 20px;
+    }
+    .status-badge.pending {
+      color: var(--text-3);
+      background: var(--overlay-4);
+      border: 1px solid var(--border);
+    }
+    .status-badge.done {
+      color: var(--green);
+      background: var(--green-dim);
+      border: 1px solid rgba(var(--color-success-rgb),0.25);
+    }
+
+    .toast-wrap { position: fixed; bottom: 24px; left: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+    @media (max-width: 1024px) { .toast-wrap { bottom: 80px; left: 50%; transform: translateX(-50%); } }
+    .toast {
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px 20px; border-radius: 10px;
+      font-size: 13px; font-weight: 500;
+      animation: slideUp 0.3s ease;
+      box-shadow: 0 8px 24px rgba(var(--black-rgb),0.4);
+    }
+    .toast-success { background: var(--color-success-bg-dark); border: 1px solid rgba(var(--color-success-rgb),0.3); color: var(--green); }
+    .toast-error   { background: var(--color-danger-bg-dark); border: 1px solid rgba(var(--color-danger-rgb),0.3); color: var(--red); }
+    @keyframes slideUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
