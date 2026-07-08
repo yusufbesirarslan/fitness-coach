@@ -509,9 +509,13 @@ def test_feed_page_uses_shared_app_shell(client, auth_user):
 def test_feed_template_preserves_exact_metadata_label_casing():
     root = Path(__file__).resolve().parents[1]
     html = (root / "templates" / "feed.html").read_text(encoding="utf-8")
+    # `.feed-label` styling was extracted from the inline <style> into
+    # static/feed.css (Phase 5 Final QA); the "keep exact casing, no uppercase"
+    # guarantee now lives in that stylesheet.
+    css = (root / "static" / "feed.css").read_text(encoding="utf-8")
 
-    assert ".feed-label" in html
-    assert "text-transform:uppercase" not in html
+    assert ".feed-label" in css
+    assert "text-transform:uppercase" not in css
     assert "__t('feed.environment')" in html
     assert "__t('feed.description')" in html
 
