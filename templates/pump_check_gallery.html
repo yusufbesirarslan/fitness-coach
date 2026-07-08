@@ -5,32 +5,7 @@
     <title>{{ t('gallery.page_title') }}</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
-    <style nonce="{{ csp_nonce }}">
-    .gallery-wrap { max-width: 880px; margin: 0 auto; }
-    .gallery-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
-    .gallery-item { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden; cursor:pointer; text-align:left; padding:0; color:var(--text); }
-    .gallery-item img { width:100%; aspect-ratio:1/1; object-fit:cover; display:block; background:rgba(255,255,255,.03); }
-    .gallery-media-fallback { aspect-ratio:1/1; background:
-      radial-gradient(circle at top right, rgba(61,139,255,.34), transparent 34%),
-      linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015)),
-      linear-gradient(135deg, rgba(14,17,24,.98), rgba(22,27,38,.98)); }
-    .gallery-meta { padding:10px; }
-    .gallery-date { color:var(--text-3); font-size:11px; }
-    .gallery-desc { font-size:13px; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .gallery-empty { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); padding:32px; text-align:center; color:var(--text-3); }
-    .gallery-modal { position:fixed; inset:0; z-index:1000; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.78); padding:20px; }
-    .gallery-modal.show { display:flex; }
-    .gallery-detail { width:min(920px,100%); max-height:92vh; overflow:auto; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--shadow-lg); }
-    .gallery-detail img { width:100%; max-height:70vh; object-fit:contain; background:#050505; display:block; }
-    .gallery-detail-fallback { min-height:320px; background:
-      radial-gradient(circle at top right, rgba(61,139,255,.34), transparent 34%),
-      linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015)),
-      linear-gradient(135deg, rgba(14,17,24,.98), rgba(22,27,38,.98)); }
-    .gallery-detail-body { padding:18px; display:flex; flex-direction:column; gap:12px; }
-    .gallery-label { font-size:10px; font-weight:700; letter-spacing:.14em; color:var(--text-3); margin-bottom:3px; }
-    .gallery-value { font-size:14px; color:var(--text); line-height:1.45; }
-    .gallery-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:4px; }
-    </style>
+    <link rel="stylesheet" href="/static/pump_check_gallery.css">
 </head>
 {% set nav_active = 'profile' %}
 <body class="page-body">

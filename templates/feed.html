@@ -5,64 +5,7 @@
     <title>{{ t('feed.page_title') }}</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
-    <style nonce="{{ csp_nonce }}">
-    .feed-wrap { max-width: 620px; margin: 0 auto; display:flex; flex-direction:column; gap:14px; }
-    .feed-card { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden; }
-    .feed-head { display:flex; align-items:center; gap:10px; padding:14px 16px; }
-    .feed-avatar { width:40px; height:40px; border-radius:50%; background:linear-gradient(135deg,var(--color-primary),var(--color-primary-strong)); color: var(--color-on-primary); display:flex; align-items:center; justify-content:center; font-family:var(--font-display); overflow:hidden; }
-    .feed-avatar img { width:100%; height:100%; object-fit:cover; }
-    .feed-user { font-weight:700; color:var(--text); font-size:14px; }
-    .feed-time { color:var(--text-3); font-size:12px; }
-    .feed-img { width:100%; max-height:520px; object-fit:cover; display:block; background:var(--overlay-3); }
-    .feed-img-fallback { position:relative; min-height:280px; overflow:hidden; background:
-      radial-gradient(circle at top right, rgba(61,139,255,.34), transparent 34%),
-      linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.015)),
-      linear-gradient(135deg, rgba(14,17,24,.98), rgba(22,27,38,.98)); }
-    .feed-img-fallback::before,
-    .feed-img-fallback::after { content:""; position:absolute; inset:auto 18px 18px 18px; border-radius:16px; border:1px solid rgba(255,255,255,.06); }
-    .feed-img-fallback::before { top:18px; background:
-      linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.02)),
-      repeating-linear-gradient(90deg, rgba(255,255,255,.03) 0, rgba(255,255,255,.03) 1px, transparent 1px, transparent 48px),
-      repeating-linear-gradient(180deg, rgba(255,255,255,.02) 0, rgba(255,255,255,.02) 1px, transparent 1px, transparent 48px); }
-    .feed-img-fallback::after { height:56px; inset:auto 18px 18px 18px; background:linear-gradient(90deg, rgba(61,139,255,.22), rgba(255,255,255,.03)); box-shadow:0 10px 32px rgba(0,0,0,.28); }
-    .feed-body { padding:14px 16px 16px; display:flex; flex-direction:column; gap:12px; }
-    .feed-label { font-size:10px; font-weight:700; letter-spacing:.14em; color:var(--text-3); margin-bottom:3px; }
-    .feed-value { font-size:14px; color:var(--text); line-height:1.45; }
-    .feed-actions { display:flex; gap:14px; color:var(--text-2); font-size:13px; align-items:center; }
-    .feed-action { background:none; border:0; color:inherit; cursor:pointer; font:inherit; padding:0; }
-    .feed-action.liked { color:var(--color-primary); }
-    .feed-action.is-busy { opacity:.65; pointer-events:none; }
-    .feed-skeleton { height:360px; border-radius:var(--r-md); background:linear-gradient(90deg,rgba(255,255,255,.03),rgba(255,255,255,.07),rgba(255,255,255,.03)); animation:pulse 1.2s infinite; }
-    .feed-empty { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); padding:32px; text-align:center; color:var(--text-3); }
-    .comments-sheet[hidden] { display:none; }
-    .comments-sheet { position:fixed; inset:0; z-index:60; display:flex; align-items:flex-end; justify-content:center; }
-    .comments-backdrop { position:absolute; inset:0; background:rgba(0,0,0,.62); border:0; padding:0; }
-    .comments-panel { position:relative; width:min(100%,540px); max-height:min(72vh,680px); background:linear-gradient(180deg,rgba(20,24,34,.98),rgba(14,17,24,.98)); border:1px solid rgba(61,139,255,.18); border-radius:14px 14px 0 0; box-shadow:0 -16px 50px rgba(0,0,0,.45); display:flex; flex-direction:column; overflow:hidden; }
-    .comments-head { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:16px 18px; border-bottom:1px solid var(--border); }
-    .comments-title { font-family:var(--font-display); letter-spacing:.08em; font-size:14px; color:var(--text); }
-    .comments-close { border:1px solid var(--border); background:rgba(255,255,255,.03); color:var(--text-2); width:34px; height:34px; border-radius:999px; cursor:pointer; }
-    .comments-list { padding:16px 18px; overflow:auto; display:flex; flex-direction:column; gap:12px; min-height:160px; }
-    .comment-row { display:flex; gap:10px; align-items:flex-start; }
-    .comment-avatar { width:34px; height:34px; border-radius:50%; overflow:hidden; flex:0 0 auto; background:linear-gradient(135deg,var(--color-primary),var(--color-primary-strong)); color: var(--color-on-primary); display:flex; align-items:center; justify-content:center; font-family:var(--font-display); }
-    .comment-avatar img { width:100%; height:100%; object-fit:cover; }
-    .comment-card { flex:1; min-width:0; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06); border-radius:12px; padding:10px 12px; }
-    .comment-meta { display:flex; align-items:baseline; gap:8px; margin-bottom:4px; }
-    .comment-user { color:var(--text); font-size:13px; font-weight:700; }
-    .comment-time { color:var(--text-3); font-size:11px; }
-    .comment-body { color:var(--text-2); font-size:13px; line-height:1.5; white-space:pre-wrap; word-break:break-word; }
-    .comments-state { color:var(--text-3); font-size:13px; text-align:center; padding:20px 12px; }
-    .comments-compose { padding:14px 18px 18px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:10px; }
-    .comments-input { width:100%; min-height:84px; resize:vertical; border-radius:12px; border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.03); color:var(--text); padding:12px 14px; font:inherit; }
-    .comments-input:focus { outline:none; border-color:rgba(61,139,255,.45); box-shadow:0 0 0 3px rgba(61,139,255,.14); }
-    .comments-foot { display:flex; align-items:center; justify-content:space-between; gap:12px; }
-    .comments-hint { color:var(--text-3); font-size:12px; }
-    .comments-submit { border:0; background:var(--color-primary); color:#101318; border-radius:999px; padding:10px 16px; font-weight:700; cursor:pointer; }
-    .comments-submit[disabled] { opacity:.6; cursor:default; }
-    @media (max-width: 640px) {
-      .comments-panel { width:100%; max-height:78vh; }
-    }
-    @keyframes pulse { 0%{opacity:.6} 50%{opacity:1} 100%{opacity:.6} }
-    </style>
+    <link rel="stylesheet" href="/static/feed.css">
 </head>
 {% set nav_active = 'profile' %}
 <body class="page-body">
