@@ -103,6 +103,7 @@ def edit_profile():
             supplements=supps,
             icons=CATEGORY_ICONS,
             wearable_connections=wearable_connections,
+            is_premium=bool(current_user.is_premium),
         )
 
     data = request.get_json(silent=True) or {}

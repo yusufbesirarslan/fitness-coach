@@ -5,513 +5,204 @@
     <title>{{ t('editprofile.page_title') }}</title>
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
-    <style nonce="{{ csp_nonce }}">
-    .profile-wrap { max-width: 600px; margin: 0 auto; }
-
-    /* ── avatar display ── */
-    .avatar-section { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-bottom: 32px; }
-    .avatar-lg {
-        width: 96px; height: 96px; border-radius: 50%; flex-shrink: 0;
-        display: flex; align-items: center; justify-content: center;
-        font-family: var(--font-display); font-size: 40px; letter-spacing: 2px;
-        color: var(--color-on-primary); background: linear-gradient(135deg, var(--volt), var(--volt-dark));
-        overflow: hidden; border: 3px solid var(--volt-glow);
-    }
-    .avatar-lg img { width: 100%; height: 100%; object-fit: cover; }
-    .avatar-lg { position: relative; cursor: pointer; }
-    .avatar-overlay {
-        position: absolute; inset: 0; border-radius: 50%;
-        background: rgba(0,0,0,0.5); display: flex; align-items: center;
-        justify-content: center; opacity: 0; transition: opacity 0.2s;
-    }
-    .avatar-lg:hover .avatar-overlay { opacity: 1; }
-    .avatar-overlay svg { width: 28px; height: 28px; stroke: #fff; fill: none; stroke-width: 1.5; }
-    .avatar-name {
-        font-family: var(--font-display); font-size: 28px;
-        letter-spacing: 2px; color: var(--text); text-align: center;
-    }
-    .avatar-handle { font-size: 13px; color: var(--text-3); }
-
-    /* ── gamified stats ── */
-    .stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 32px; }
-    .stat-badge {
-        background: var(--surface-2); border: 1px solid var(--border);
-        border-radius: 14px; padding: 20px; text-align: center;
-        position: relative; overflow: hidden;
-    }
-    .stat-badge::before {
-        content: ''; position: absolute; top: 0; left: 0; right: 0;
-        height: 2px;
-    }
-    .stat-badge.streak::before { background: linear-gradient(90deg, var(--orange), transparent); }
-    .stat-badge.rank::before { background: linear-gradient(90deg, var(--blue-light), transparent); }
-    .stat-icon { font-size: 32px; line-height: 1; margin-bottom: 6px; }
-    .stat-val {
-        font-family: var(--font-display); font-size: 36px;
-        letter-spacing: 2px; line-height: 1;
-    }
-    .stat-badge.streak .stat-val { color: var(--orange); }
-    .stat-badge.rank .stat-val { color: var(--blue-light); }
-    .stat-lbl {
-        font-size: 10px; font-weight: 700; letter-spacing: 0.14em;
-        text-transform: uppercase; color: var(--text-3); margin-top: 4px;
-    }
-
-    /* ── form section ── */
-    .form-section {
-        background: var(--surface-2); border: 1px solid var(--border);
-        border-radius: 16px; padding: 28px; position: relative; overflow: hidden;
-    }
-    .form-section::before {
-        content: ''; position: absolute; top: 0; left: 0; right: 0;
-        height: 2px; background: linear-gradient(90deg, var(--volt), transparent);
-    }
-    .form-section-title {
-        font-family: var(--font-display); font-size: 20px;
-        letter-spacing: 3px; color: var(--text); margin-bottom: 20px;
-    }
-    .form-grid { display: flex; flex-direction: column; gap: 16px; }
-    .form-field label {
-        display: block; font-size: 11px; font-weight: 700;
-        letter-spacing: 0.12em; text-transform: uppercase;
-        color: var(--text-3); margin-bottom: 6px;
-    }
-    .form-field input {
-        width: 100%; padding: 12px 14px; border-radius: 8px;
-        background: var(--overlay-3); border: 1px solid var(--border);
-        color: var(--text); font-family: var(--font-body); font-size: 14px;
-        outline: none; transition: border-color 0.2s, box-shadow 0.2s;
-        box-sizing: border-box;
-    }
-    .form-field input:focus {
-        border-color: rgba(61,139,255,0.45);
-        box-shadow: 0 0 0 3px rgba(61,139,255,0.06);
-    }
-    .form-field .field-hint { font-size: 12px; color: var(--text-3); margin-top: 4px; }
-
-    /* ── goal cards ── */
-    .goal-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .goal-card {
-        background: var(--overlay-2); border: 1.5px solid var(--border);
-        border-radius: 12px; padding: 16px; cursor: pointer;
-        text-align: center; transition: all 0.2s;
-    }
-    .goal-card:hover { border-color: var(--volt-glow); }
-    .goal-card.selected { border-color: var(--volt); background: rgba(61,139,255,0.06); }
-    .goal-card-icon { font-size: 28px; margin-bottom: 6px; }
-    .goal-card-label {
-        font-size: 13px; font-weight: 600; color: var(--text);
-    }
-    .goal-card.selected .goal-card-label { color: var(--volt); }
-
-    /* ── save button ── */
-    .save-btn {
-        width: 100%; margin-top: 24px; padding: 14px;
-        font-family: var(--font-display); font-size: 18px;
-        letter-spacing: 3px; color: var(--color-on-primary); background: var(--volt);
-        border: none; border-radius: 10px; cursor: pointer;
-        transition: background 0.2s, box-shadow 0.2s;
-    }
-    .save-btn:hover { background: var(--volt-dark); box-shadow: 0 0 20px rgba(61,139,255,0.15); }
-    .save-btn:disabled { opacity: 0.5; cursor: default; }
-
-    @media (max-width: 600px) {
-        .stats-row { grid-template-columns: 1fr 1fr; gap: 8px; }
-        .goal-cards { grid-template-columns: 1fr 1fr; }
-        .form-section { padding: 20px; }
-        .stack-grid { grid-template-columns: 1fr !important; }
-    }
-
-    /* ── supplement stack on profile ── */
-    .stack-section { margin-top: 28px; }
-    .stack-section-title {
-        font-family: var(--font-display); font-size: 18px; letter-spacing: 2px;
-        color: var(--volt); margin-bottom: 14px;
-    }
-    .stack-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .stack-card {
-        background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
-        padding: 14px 16px; display: flex; gap: 12px; align-items: flex-start; transition: border-color 0.2s;
-    }
-    .stack-card:hover { border-color: var(--border-2); }
-    .stack-icon { font-size: 26px; flex-shrink: 0; }
-    .stack-body { flex: 1; min-width: 0; }
-    .stack-name { font-weight: 600; font-size: 14px; color: var(--text); }
-    .stack-brand { font-size: 11px; color: var(--text-3); }
-    .stack-ratings { display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
-    .stack-rating-item { font-size: 10px; color: var(--text-2); }
-    .stack-rating-item .mini-stars { color: var(--volt); letter-spacing: 1px; }
-    .stack-review { font-size: 11px; color: var(--text-3); font-style: italic; margin-top: 5px; border-left: 2px solid var(--volt); padding-left: 8px; }
-    .stack-status {
-        font-size: 9px; padding: 2px 8px; border-radius: 10px; font-weight: 600;
-        text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;
-    }
-    .st-active  { background: rgba(0,196,140,0.15); color: var(--green); }
-    .st-low     { background: rgba(255,176,32,0.15); color: var(--orange); }
-    .stack-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 2px; }
-    .stack-empty { text-align: center; color: var(--text-3); font-size: 13px; padding: 24px; }
-    .stack-link {
-        display: inline-block; margin-top: 12px; font-size: 13px; color: var(--volt);
-        text-decoration: none; font-weight: 600; letter-spacing: 0.5px;
-    }
-    .stack-link:hover { text-decoration: underline; }
-
-    .wearable-section { margin-top: 28px; }
-    .wearable-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-    .wearable-card {
-        background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md);
-        padding: 16px; display: flex; flex-direction: column; gap: 10px;
-    }
-    .wearable-top { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
-    .wearable-name { font-weight: 700; color: var(--text); }
-    .wearable-status { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-3); }
-    .wearable-status.on { color: var(--green); }
-    .wearable-meta { font-size: 12px; color: var(--text-3); min-height: 18px; }
-    .wearable-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-    .wearable-btn {
-        border: 1px solid var(--border); border-radius: 8px; background: var(--overlay-3);
-        color: var(--text); padding: 8px 10px; font-size: 12px; font-weight: 700; cursor: pointer;
-    }
-    .wearable-btn.primary { background: var(--volt); color: var(--color-on-primary); border-color: var(--volt); }
-    .wearable-btn:disabled { opacity: 0.5; cursor: default; }
-
-    /* ── rütbe ünvanı (eski çekmece başlığından taşındı) ── */
-    .avatar-rank {
-        font-size: 11px; font-weight: 600; color: var(--volt);
-        letter-spacing: 0.06em; text-transform: uppercase; margin-top: 6px;
-    }
-
-    @media (max-width: 768px) {
-        .wearable-grid { grid-template-columns: 1fr; }
-    }
-    </style>
+    <link rel="stylesheet" href="/static/profile.css">
 </head>
 {% set nav_active = 'profile' %}
-<body class="page-body">
+<body class="page-body" data-goal="{{ goal }}">
 
-<!-- ── TOAST CONTAINER ── -->
 <div class="toast-wrap" id="toast-wrap"></div>
 
 {% include "_nav.html" %}
 
-<!-- ── MAIN CONTENT ── -->
 <main class="main-content">
+  <div class="page-hdr">
+    <h1>{{ t('editprofile.h1_a') }}<br><span>{{ t('editprofile.h1_b') }}</span></h1>
+    <p>{{ t('editprofile.page_sub') }}</p>
+  </div>
 
-    <div class="page-hdr">
-        <h1>{{ t('editprofile.h1_a') }}<br><span>{{ t('editprofile.h1_b') }}</span></h1>
-        <p>{{ t('editprofile.page_sub') }}</p>
+  <div class="pf-wrap">
+
+    <!-- ── IDENTITY / XP HERO ── -->
+    <div class="pf-card">
+     <div class="pf-hero">
+      <div class="pf-avatar" id="avatar-display" tabindex="0" role="button"
+           aria-label="{{ t('profile.change_photo') }}"
+           data-action="fxClickTarget" data-target="avatar-file-input">
+        {% if profile_picture %}<img src="{{ profile_picture }}" alt="Profil" id="avatar-img">
+        {% else %}<span id="avatar-letter">{{ username[0]|upper if username else 'U' }}</span>{% endif %}
+        <div class="pf-avatar-overlay">
+          <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+        </div>
+      </div>
+      <input type="file" id="avatar-file-input" accept="image/*" hidden>
+      <div class="pf-name">{{ full_name if full_name else username }}</div>
+      <div class="pf-handle">@{{ username }}</div>
+      <div class="pf-rank">{{ user_title }} · {{ t('profile.level') }} {{ user_level }}</div>
+      <div class="pf-xp">
+        <div class="pbar-track"><div class="pbar-fill" style="width: {{ ((xp_in_level / xp_for_next) * 100)|round(0, 'floor')|int if xp_for_next else 0 }}%"></div></div>
+        <div class="pf-xp-label">{{ xp_in_level }} / {{ xp_for_next }} XP · {{ t('profile.xp_to_next') }}</div>
+      </div>
+      <div class="pf-streak">🔥 {{ streak_count }} · {{ t('profile.streak') }}</div>
+     </div>
     </div>
 
-    <div class="profile-wrap">
-
-        <!-- ── AVATAR DISPLAY ── -->
-        <div class="avatar-section">
-            <div class="avatar-lg" id="avatar-display" data-action="fxClickTarget" data-target="avatar-file-input">
-                {% if profile_picture %}
-                    <img src="{{ profile_picture }}" alt="Profil" id="avatar-img">
-                {% else %}
-                    <span id="avatar-letter">{{ username[0]|upper if username else 'U' }}</span>
-                {% endif %}
-                <div class="avatar-overlay">
-                    <svg viewBox="0 0 24 24"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
-                </div>
-            </div>
-            <input type="file" id="avatar-file-input" accept="image/*" hidden>
-            <div class="avatar-name">{{ full_name if full_name else username }}</div>
-            <div class="avatar-handle">@{{ username }}</div>
-            <div class="avatar-rank">{{ user_title }} · Level {{ user_level }}</div>
-        </div>
-
-        <!-- ── GAMIFIED STATS (read-only) ── -->
-        <div class="stats-row">
-            <div class="stat-badge streak">
-                <div class="stat-icon">🔥</div>
-                <div class="stat-val">{{ streak_count }}</div>
-                <div class="stat-lbl">{{ t('editprofile.streak') }}</div>
-            </div>
-            <div class="stat-badge rank">
-                <div class="stat-icon">⭐</div>
-                <div class="stat-val">{{ user_xp }}</div>
-                <div class="stat-lbl">XP · Lvl {{ user_level }}</div>
-            </div>
-        </div>
-
-        <!-- ── HUB: ikincil gezinme (eski çekmecenin yeni evi) ── -->
-        <nav class="hub" aria-label="{{ t('nav.menu_nav') }}">
-            <div class="hub-section-label">{{ t('nav.section_explore') }}</div>
-            <div class="hub-card">
-                <a href="/friends" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>{{ t('nav.friends') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
-                <a href="/feed" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>{{ t('nav.feed') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
-                <a href="/leaderboard" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v18"/><path d="M19 3v18"/><path d="M5 7h14"/><path d="M8 11h8"/><path d="M10 15h4"/></svg>{{ t('nav.club') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
-                <a href="/quests" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>{{ t('nav.quests') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
-                <a href="/supplements" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9"/></svg>{{ t('nav.supplements') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
-                <a href="/premium" class="hub-link hub-link-premium" data-ga-event="premium_nav_click"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>{{ t('nav.premium') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
-            </div>
-            <div class="hub-section-label">{{ t('nav.section_settings') }}</div>
-            <div class="hub-card">
-                <div class="hub-row">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
-                    {{ t('settings.language') }}
-                    <div class="hub-lang" role="group" aria-label="{{ t('lang.aria') }}">
-                        <button type="button" class="hub-lang-opt{% if locale == 'tr' %} on{% endif %}" data-action="setLang" data-args='["tr"]'>TR</button>
-                        <button type="button" class="hub-lang-opt{% if locale == 'en' %} on{% endif %}" data-action="setLang" data-args='["en"]'>EN</button>
-                    </div>
-                </div>
-                <a href="/logout" class="hub-link hub-link-danger"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>{{ t('nav.logout') }}</a>
-            </div>
-        </nav>
-
-        <!-- ── EDITABLE FORM ── -->
-        <div class="form-section" style="margin-bottom:24px;">
-            <div class="form-section-title">{{ t('gallery.profile_link_title') }}</div>
-            <p style="font-size:13px;color:var(--text-2);margin:0 0 14px;font-weight:300;">{{ t('gallery.profile_link_desc') }}</p>
-            <a href="/pump-check-gallery" class="stack-link">{{ t('gallery.open') }}</a>
-        </div>
-
-        <div class="form-section">
-            <div class="form-section-title">{{ t('editprofile.edit_info') }}</div>
-            <div class="form-grid">
-                <div class="form-field">
-                    <label for="full_name">{{ t('editprofile.full_name') }}</label>
-                    <input type="text" id="full_name" placeholder="{{ t('editprofile.full_name_ph') }}" value="{{ full_name }}" maxlength="150">
-                </div>
-                <div class="form-field">
-                    <label for="username">{{ t('editprofile.username') }}</label>
-                    <input type="text" id="username" placeholder="{{ t('editprofile.username_ph') }}" value="{{ username }}" maxlength="80">
-                    <div class="field-hint">{{ t('editprofile.username_hint') }}</div>
-                </div>
-                <div class="form-field">
-                    <label>{{ t('editprofile.fitness_goal') }}</label>
-                    <div class="goal-cards">
-                        <div class="goal-card{% if goal == 'kilo verme' %} selected{% endif %}" data-action="selectGoal" data-args='["kilo verme"]'>
-                            <div class="goal-card-icon">🏃</div>
-                            <div class="goal-card-label">{{ t('editprofile.goal_loss') }}</div>
-                        </div>
-                        <div class="goal-card{% if goal == 'kas kazanma' %} selected{% endif %}" data-action="selectGoal" data-args='["kas kazanma"]'>
-                            <div class="goal-card-icon">💪</div>
-                            <div class="goal-card-label">{{ t('editprofile.goal_gain') }}</div>
-                        </div>
-                    </div>
-                </div>
-                <div class="form-field">
-                    <label for="target_weight">{{ t('editprofile.target_weight') }}</label>
-                    <input type="number" id="target_weight" placeholder="{{ t('editprofile.target_weight_ph') }}" value="{{ target_weight or '' }}" step="0.1" min="30" max="300">
-                    <div class="field-hint">{{ t('editprofile.target_weight_hint') }}</div>
-                </div>
-                <div class="form-field">
-                    <label>{{ t('settings.language') }}</label>
-                    <div class="goal-cards">
-                        <div class="goal-card{% if locale == 'tr' %} selected{% endif %}" data-action="setLang" data-args='["tr"]'>
-                            <div class="goal-card-icon">🇹🇷</div>
-                            <div class="goal-card-label">Türkçe</div>
-                        </div>
-                        <div class="goal-card{% if locale == 'en' %} selected{% endif %}" data-action="setLang" data-args='["en"]'>
-                            <div class="goal-card-icon">🇬🇧</div>
-                            <div class="goal-card-label">English</div>
-                        </div>
-                    </div>
-                    <div class="field-hint">{{ t('settings.language_hint') }}</div>
-                </div>
-            </div>
-
-            <button class="save-btn" id="save-btn" data-action="saveProfile">{{ t('common.save') }}</button>
-        </div>
-
-        <div class="wearable-section">
-            <div class="stack-section-title">{{ t('wearables.title') }}</div>
-            <div class="wearable-grid">
-                {% for provider, label in [('whoop', 'WHOOP'), ('google_health', 'Google Health')] %}
-                {% set conn = wearable_connections.get(provider) if wearable_connections else None %}
-                <div class="wearable-card" data-provider-card="{{ provider }}">
-                    <div class="wearable-top">
-                        <div class="wearable-name">{{ label }}</div>
-                        <div class="wearable-status{% if conn %} on{% endif %}">
-                            {{ t('wearables.connected') if conn else t('wearables.not_connected') }}
-                        </div>
-                    </div>
-                    <div class="wearable-meta">
-                        {% if conn and conn.last_sync_at %}
-                            {{ t('wearables.last_sync') }} {{ conn.last_sync_at.strftime('%d.%m.%Y %H:%M') }}
-                        {% elif conn %}
-                            {{ t('wearables.sync_waiting') }}
-                        {% else %}
-                            {{ t('wearables.connect_hint') }}
-                        {% endif %}
-                    </div>
-                    <div class="wearable-actions">
-                        <button type="button" class="wearable-btn primary wearable-connect" data-provider="{{ provider }}">{{ t('wearables.connect') }}</button>
-                        <button type="button" class="wearable-btn wearable-sync" data-provider="{{ provider }}"{% if not conn %} disabled{% endif %}>{{ t('wearables.sync_today') }}</button>
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-        </div>
-
-        <!-- ── SUPPLEMENT STACK ── -->
-        <div class="stack-section">
-            <div class="stack-section-title">{{ t('editprofile.stack_title') }}</div>
-            {% if supplements %}
-            <div class="stack-grid">
-                {% for s in supplements %}
-                <div class="stack-card">
-                    <div class="stack-icon">{{ icons.get(s.category, '📦') }}</div>
-                    <div class="stack-body">
-                        <div class="stack-top">
-                            <div class="stack-name">{{ s.product_name }}</div>
-                            <span class="stack-status {% if s.status == 'Active' %}st-active{% else %}st-low{% endif %}">{{ s.status }}</span>
-                        </div>
-                        <div class="stack-brand">{{ s.brand }} · {{ s.category }}</div>
-                        <div class="stack-ratings">
-                            {% if s.rating_effect %}
-                            <span class="stack-rating-item">{{ t('manage_stack.effect') }}: <span class="mini-stars">{{ '★' * s.rating_effect }}{{ '☆' * (5 - s.rating_effect) }}</span></span>
-                            {% endif %}
-                            {% if s.rating_taste %}
-                            <span class="stack-rating-item">{{ t('manage_stack.taste') }}: <span class="mini-stars">{{ '★' * s.rating_taste }}{{ '☆' * (5 - s.rating_taste) }}</span></span>
-                            {% endif %}
-                            {% if s.rating_digestion %}
-                            <span class="stack-rating-item">{{ t('manage_stack.digestion') }}: <span class="mini-stars">{{ '★' * s.rating_digestion }}{{ '☆' * (5 - s.rating_digestion) }}</span></span>
-                            {% endif %}
-                            {% if s.rating_price %}
-                            <span class="stack-rating-item">{{ t('manage_stack.price') }}: <span class="mini-stars">{{ '★' * s.rating_price }}{{ '☆' * (5 - s.rating_price) }}</span></span>
-                            {% endif %}
-                        </div>
-                        {% if s.review_text %}
-                        <div class="stack-review">"{{ s.review_text }}"</div>
-                        {% endif %}
-                    </div>
-                </div>
-                {% endfor %}
-            </div>
-            <a href="/supplements" class="stack-link">{{ t('editprofile.edit_stack') }}</a>
-            {% else %}
-            <div class="stack-empty">
-                {{ t('editprofile.no_supps') }}<br>
-                <a href="/supplements" class="stack-link">{{ t('editprofile.add_first_supp') }}</a>
-            </div>
-            {% endif %}
-        </div>
-
+    <!-- ── MEMBERSHIP CARD ── -->
+    <div class="pf-membership pf-card">
+      <div class="pf-plan-head">
+        <div class="pf-plan-name">{{ t('profile.plan_premium') if is_premium else t('profile.plan_free') }}</div>
+        {% if is_premium %}<span class="badge badge-success">{{ t('profile.premium_badge') }}</span>{% endif %}
+      </div>
+      {% if is_premium %}
+        <p class="pf-plan-desc">{{ t('profile.plan_premium_thanks') }}</p>
+      {% else %}
+        <p class="pf-plan-desc">{{ t('profile.plan_free_desc') }}</p>
+        <a href="/premium" class="btn-volt pf-upgrade" data-ga-event="premium_nav_click">{{ t('profile.upgrade_cta') }}</a>
+      {% endif %}
     </div>
+
+    <!-- ── EDIT PROFILE TRIGGER ── -->
+    <button class="btn-ghost pf-edit-btn" data-action="openEditSheet">{{ t('profile.edit_profile') }}</button>
+
+    <!-- ── NAV ROWS (preserved hub — test-pinned hrefs) ── -->
+    <nav class="hub" aria-label="{{ t('nav.menu_nav') }}">
+      <div class="hub-section-label">{{ t('profile.sec_community') }}</div>
+      <div class="hub-card">
+        <a href="/friends" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>{{ t('nav.friends') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
+        <a href="/feed" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>{{ t('nav.feed') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
+        <a href="/leaderboard" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v18"/><path d="M19 3v18"/><path d="M5 7h14"/><path d="M8 11h8"/><path d="M10 15h4"/></svg>{{ t('nav.club') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
+        <a href="/quests" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>{{ t('nav.quests') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
+      </div>
+      <div class="hub-section-label">{{ t('profile.sec_you') }}</div>
+      <div class="hub-card">
+        <a href="/pump-check-gallery" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>{{ t('gallery.profile_link_title') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
+        <a href="/supplements" class="hub-link"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 1.5H8.25A2.25 2.25 0 0 0 6 3.75v16.5a2.25 2.25 0 0 0 2.25 2.25h7.5A2.25 2.25 0 0 0 18 20.25V3.75a2.25 2.25 0 0 0-2.25-2.25H13.5m-3 0V3h3V1.5m-3 0h3m-6 18.75h9"/></svg>{{ t('nav.supplements') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
+        <a href="/premium" class="hub-link hub-link-premium" data-ga-event="premium_nav_click"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>{{ t('nav.premium') }}<svg class="hub-chevron" viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg></a>
+        <!-- SUPPORT-SEAM: a future Support row (Help Center / FAQ / Contact) slots here without restructuring. -->
+      </div>
+      <div class="hub-section-label">{{ t('profile.sec_settings') }}</div>
+      <div class="hub-card">
+        <div class="hub-row">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+          {{ t('settings.language') }}
+          <div class="hub-lang" role="group" aria-label="{{ t('lang.aria') }}">
+            <button type="button" class="hub-lang-opt{% if locale == 'tr' %} on{% endif %}" data-action="setLang" data-args='["tr"]'>TR</button>
+            <button type="button" class="hub-lang-opt{% if locale == 'en' %} on{% endif %}" data-action="setLang" data-args='["en"]'>EN</button>
+          </div>
+        </div>
+        <a href="/logout" class="hub-link hub-link-danger"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>{{ t('nav.logout') }}</a>
+      </div>
+    </nav>
+
+    <!-- ── INTEGRATIONS (wearables) ── -->
+    <div>
+      <div class="pf-section-title">{{ t('profile.integrations') }}</div>
+      <div class="pf-integrations">
+        {% for provider, label in [('whoop', 'WHOOP'), ('google_health', 'Google Health')] %}
+        {% set conn = wearable_connections.get(provider) if wearable_connections else None %}
+        <div class="pf-wear" data-provider-card="{{ provider }}">
+          <div class="pf-wear-top">
+            <div class="pf-wear-name">{{ label }}</div>
+            <div class="pf-wear-status{% if conn %} on{% endif %}">{{ t('wearables.connected') if conn else t('wearables.not_connected') }}</div>
+          </div>
+          <div class="pf-wear-meta">
+            {% if conn and conn.last_sync_at %}{{ t('wearables.last_sync') }} {{ conn.last_sync_at.strftime('%d.%m.%Y %H:%M') }}
+            {% elif conn %}{{ t('wearables.sync_waiting') }}
+            {% else %}{{ t('wearables.connect_hint') }}{% endif %}
+          </div>
+          <div class="pf-wear-actions">
+            <button type="button" class="btn-volt wearable-connect" data-provider="{{ provider }}">{{ t('wearables.connect') }}</button>
+            <button type="button" class="btn-ghost wearable-sync" data-provider="{{ provider }}"{% if not conn %} disabled{% endif %}>{{ t('wearables.sync_today') }}</button>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- ── MY STACK (supplements, read-only) ── -->
+    <div>
+      <div class="pf-section-title">{{ t('editprofile.stack_title') }}</div>
+      {% if supplements %}
+      <div class="pf-stack">
+        {% for s in supplements %}
+        <div class="pf-stack-card">
+          <div class="pf-stack-icon">{{ icons.get(s.category, '📦') }}</div>
+          <div class="pf-stack-body">
+            <div class="pf-stack-top">
+              <div class="pf-stack-name">{{ s.product_name }}</div>
+              <span class="badge {% if s.status == 'Active' %}badge-success{% else %}badge-warning{% endif %}">{{ s.status }}</span>
+            </div>
+            <div class="pf-stack-brand">{{ s.brand }} · {{ s.category }}</div>
+            <div class="pf-stack-ratings">
+              {% if s.rating_effect %}<span class="pf-stack-rating">{{ t('manage_stack.effect') }}: <span class="mini-stars">{{ '★' * s.rating_effect }}{{ '☆' * (5 - s.rating_effect) }}</span></span>{% endif %}
+              {% if s.rating_taste %}<span class="pf-stack-rating">{{ t('manage_stack.taste') }}: <span class="mini-stars">{{ '★' * s.rating_taste }}{{ '☆' * (5 - s.rating_taste) }}</span></span>{% endif %}
+              {% if s.rating_digestion %}<span class="pf-stack-rating">{{ t('manage_stack.digestion') }}: <span class="mini-stars">{{ '★' * s.rating_digestion }}{{ '☆' * (5 - s.rating_digestion) }}</span></span>{% endif %}
+              {% if s.rating_price %}<span class="pf-stack-rating">{{ t('manage_stack.price') }}: <span class="mini-stars">{{ '★' * s.rating_price }}{{ '☆' * (5 - s.rating_price) }}</span></span>{% endif %}
+            </div>
+            {% if s.review_text %}<div class="pf-stack-review">"{{ s.review_text }}"</div>{% endif %}
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <a href="/supplements" class="pf-link">{{ t('editprofile.edit_stack') }}</a>
+      {% else %}
+      <div class="pf-stack-empty">{{ t('editprofile.no_supps') }}<br><a href="/supplements" class="pf-link">{{ t('editprofile.add_first_supp') }}</a></div>
+      {% endif %}
+    </div>
+
+  </div>
 </main>
+
+<!-- ── EDIT PROFILE SHEET ── -->
+<div class="sheet-backdrop" id="edit-sheet" data-action-self="closeEditSheet">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="edit-sheet-title" tabindex="-1">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="edit-sheet-title">{{ t('editprofile.edit_info') }}</div>
+    <div class="pf-sheet-body">
+      <div class="pf-field">
+        <label for="full_name">{{ t('editprofile.full_name') }}</label>
+        <input class="pf-input" type="text" id="full_name" placeholder="{{ t('editprofile.full_name_ph') }}" value="{{ full_name }}" maxlength="150">
+      </div>
+      <div class="pf-field">
+        <label for="username">{{ t('editprofile.username') }}</label>
+        <input class="pf-input" type="text" id="username" placeholder="{{ t('editprofile.username_ph') }}" value="{{ username }}" maxlength="80">
+        <div class="pf-hint">{{ t('editprofile.username_hint') }}</div>
+      </div>
+      <div class="pf-field pf-goal">
+        <label>{{ t('editprofile.fitness_goal') }}</label>
+        <div class="pf-cards">
+          <div class="pf-choice{% if goal == 'kilo verme' %} selected{% endif %}" data-action="selectGoal" data-args='["kilo verme"]'>
+            <div class="pf-choice-icon">🏃</div><div class="pf-choice-label">{{ t('editprofile.goal_loss') }}</div>
+          </div>
+          <div class="pf-choice{% if goal == 'kas kazanma' %} selected{% endif %}" data-action="selectGoal" data-args='["kas kazanma"]'>
+            <div class="pf-choice-icon">💪</div><div class="pf-choice-label">{{ t('editprofile.goal_gain') }}</div>
+          </div>
+        </div>
+      </div>
+      <div class="pf-field">
+        <label for="target_weight">{{ t('editprofile.target_weight') }}</label>
+        <input class="pf-input" type="number" id="target_weight" placeholder="{{ t('editprofile.target_weight_ph') }}" value="{{ target_weight or '' }}" step="0.1" min="30" max="300">
+        <div class="pf-hint">{{ t('editprofile.target_weight_hint') }}</div>
+      </div>
+      <div class="pf-field">
+        <label>{{ t('settings.language') }}</label>
+        <div class="pf-cards">
+          <div class="pf-choice{% if locale == 'tr' %} selected{% endif %}" data-action="setLang" data-args='["tr"]'>
+            <div class="pf-choice-icon">🇹🇷</div><div class="pf-choice-label">Türkçe</div>
+          </div>
+          <div class="pf-choice{% if locale == 'en' %} selected{% endif %}" data-action="setLang" data-args='["en"]'>
+            <div class="pf-choice-icon">🇬🇧</div><div class="pf-choice-label">English</div>
+          </div>
+        </div>
+        <div class="pf-hint">{{ t('settings.language_hint') }}</div>
+      </div>
+      <button class="btn-volt w-full" id="save-btn" data-action="saveProfile">{{ t('common.save') }}</button>
+    </div>
+  </div>
+</div>
 
 {% include "_actionbar.html" %}
 
-<script nonce="{{ csp_nonce }}">
-var __t = (window.t) || function (k) { return k; };
-let selectedGoal = '{{ goal }}';
-
-function selectGoal(goal, el) {
-    document.querySelectorAll('.goal-card').forEach(c => c.classList.remove('selected'));
-    el.classList.add('selected');
-    selectedGoal = goal;
-}
-
-function toast(msg, type) {
-    type = type || 'info';
-    const wrap = document.getElementById('toast-wrap');
-    const t = document.createElement('div');
-    t.className = 'toast toast-' + type;
-    t.textContent = msg;
-    wrap.appendChild(t);
-    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3000);
-}
-
-function updateAvatarLetter() {
-    const display = document.getElementById('avatar-display');
-    if (display.querySelector('img')) return;
-    const letter = (document.getElementById('username').value || 'U')[0].toUpperCase();
-    const span = display.querySelector('span');
-    if (span) span.textContent = letter;
-}
-
-document.getElementById('username').addEventListener('input', updateAvatarLetter);
-
-let pendingAvatar = null;
-
-document.getElementById('avatar-file-input').addEventListener('change', function(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    if (file.size > 2 * 1024 * 1024) { toast(__t('editprofile.avatar_max'), 'error'); return; }
-    const reader = new FileReader();
-    reader.onload = function(ev) {
-        const base64 = ev.target.result;
-        pendingAvatar = base64;
-        const display = document.getElementById('avatar-display');
-        const overlay = display.querySelector('.avatar-overlay');
-        const img = display.querySelector('img') || document.createElement('img');
-        img.src = base64;
-        img.alt = 'Profil';
-        img.style.cssText = 'width:100%;height:100%;object-fit:cover;';
-        const letter = display.querySelector('span');
-        if (letter) letter.remove();
-        if (!display.querySelector('img')) display.insertBefore(img, overlay);
-        toast(__t('editprofile.avatar_updated'), 'success');
-    };
-    reader.readAsDataURL(file);
-});
-
-async function saveProfile() {
-    const btn = document.getElementById('save-btn');
-    btn.disabled = true;
-    btn.textContent = __t('common.saving');
-
-    const payload = {
-        full_name: document.getElementById('full_name').value.trim(),
-        username: document.getElementById('username').value.trim(),
-        goal: selectedGoal,
-        target_weight: document.getElementById('target_weight') ? document.getElementById('target_weight').value.trim() : ''
-    };
-    if (pendingAvatar !== null) {
-        payload.profile_picture = pendingAvatar;
-    }
-
-    try {
-        const res = await fetch('/edit-profile', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        const data = await res.json();
-        if (!res.ok) {
-            toast(data.error || __t('common.error'), 'error');
-        } else {
-            toast(data.message, 'success');
-            setTimeout(() => location.reload(), 800);
-        }
-    } catch (e) {
-        toast(__t('common.conn_error'), 'error');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = __t('common.save');
-    }
-}
-
-document.querySelectorAll('.wearable-connect').forEach(btn => {
-    btn.addEventListener('click', () => {
-        window.location.href = '/api/auth/wearable/' + btn.dataset.provider;
-    });
-});
-
-document.querySelectorAll('.wearable-sync').forEach(btn => {
-    btn.addEventListener('click', async () => {
-        btn.disabled = true;
-        try {
-            const res = await fetch('/api/wearables/' + btn.dataset.provider + '/sync', { method: 'POST' });
-            const data = await res.json();
-            if (!res.ok) {
-                toast(data.error || __t('wearables.sync_failed'), 'error');
-            } else {
-                toast(__t('wearables.sync_done'), 'success');
-                setTimeout(() => location.reload(), 700);
-            }
-        } catch (e) {
-            toast(__t('common.conn_error'), 'error');
-        } finally {
-            btn.disabled = false;
-        }
-    });
-});
-</script>
 <script src="/static/actions.js"></script>
+<script src="/static/profile.js"></script>
 </body>
 </html>
