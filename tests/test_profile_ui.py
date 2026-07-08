@@ -37,9 +37,12 @@ def test_profile_hub_destinations_preserved(client, auth_user):
 
 
 def test_membership_free_shows_upgrade(client, auth_user):
-    # fresh users are not premium
+    # fresh users are not premium: the membership card renders the upgrade CTA
+    # (the exact inverse of the premium test below). We assert on the CTA markup,
+    # not on resolved copy — _head.html dumps the whole i18n catalog into
+    # window.I18N on every page, so every key *name* is present regardless.
     html = _html(client)
-    assert "profile.plan_free" not in html          # key resolved, not raw
+    assert 'class="btn-volt pf-upgrade"' in html     # free-plan upgrade CTA present
     assert 'href="/premium"' in html
     assert 'data-ga-event="premium_nav_click"' in html
 
