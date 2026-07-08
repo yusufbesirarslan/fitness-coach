@@ -22,12 +22,14 @@ def test_tokens_css_defines_canonical_and_legacy_tokens(client):
         "--color-primary:",
         "--space-2:",
         "--radius-md:",
-        "--volt:",
         "--accent:",
         "--font-sans:",
         '[data-theme="light"]',
     ):
         assert token in css, f"tokens.css missing {token}"
+    # --volt* were legacy aliases for --color-primary*; retired app-wide
+    # (Phase 5 Final QA Task 2) — they must no longer be defined.
+    assert "--volt:" not in css
 
 
 def test_components_css_defines_spec_components(client):
