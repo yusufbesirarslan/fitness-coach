@@ -133,7 +133,6 @@
         font-family: var(--font-display); font-size: 22px;
         letter-spacing: 2px; color: var(--text); margin-bottom: 8px;
     }
-    .empty-desc { font-size: 13px; color: var(--text-3); max-width: 300px; margin: 0 auto; }
     .lb-cta {
         display: inline-block; margin-top: 18px;
         background: var(--color-primary); color: var(--color-on-primary);

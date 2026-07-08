@@ -177,7 +177,7 @@ async function loadFriends() {
             '</div>'
         ).join('');
     } else {
-        fList.innerHTML = '<div class="section-empty">' + __t('friends.empty') + '</div>';
+        fList.innerHTML = '<div class="empty-state"><div class="empty-icon">👥</div><div class="empty-desc">' + __t('friends.empty') + '</div></div>';
     }
 }
 

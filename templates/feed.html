@@ -129,7 +129,7 @@ async function loadFeed(){
     const data = await res.json();
     if(feedPage === 1) feedList.innerHTML = '';
     if(!data.posts.length && feedPage === 1){
-      feedList.innerHTML = '<div class="feed-empty">'+__t('feed.empty')+'</div>';
+      feedList.innerHTML = '<div class="empty-state"><div class="empty-icon">📸</div><div class="empty-desc">'+__t('feed.empty')+'</div></div>';
     } else {
       feedList.insertAdjacentHTML('beforeend', data.posts.map(card).join(''));
     }

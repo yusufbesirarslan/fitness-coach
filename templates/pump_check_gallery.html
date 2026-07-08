@@ -62,7 +62,7 @@ async function loadGallery(){
   const res = await fetch('/pump-check-gallery/data');
   const data = await res.json();
   galleryItems = data.items || [];
-  grid.innerHTML = galleryItems.length ? galleryItems.map(itemHTML).join('') : '<div class="gallery-empty">'+__t('gallery.empty')+'</div>';
+  grid.innerHTML = galleryItems.length ? galleryItems.map(itemHTML).join('') : '<div class="empty-state"><div class="empty-icon">📷</div><div class="empty-desc">'+__t('gallery.empty')+'</div></div>';
 }
 function closeModal(){
   modal.classList.remove('show');

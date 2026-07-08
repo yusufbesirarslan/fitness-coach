@@ -26,7 +26,6 @@
     .feed-action.liked { color:var(--color-primary); }
     .feed-action.is-busy { opacity:.65; pointer-events:none; }
     .feed-skeleton { height:360px; border-radius:var(--r-md); background:linear-gradient(90deg,rgba(var(--white-rgb),.03),rgba(var(--white-rgb),.07),rgba(var(--white-rgb),.03)); animation:pulse 1.2s infinite; }
-    .feed-empty { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); padding:32px; text-align:center; color:var(--text-3); }
     .comments-sheet[hidden] { display:none; }
     .comments-sheet { position:fixed; inset:0; z-index:60; display:flex; align-items:flex-end; justify-content:center; }
     .comments-backdrop { position:absolute; inset:0; background:rgba(var(--black-rgb),.62); border:0; padding:0; }

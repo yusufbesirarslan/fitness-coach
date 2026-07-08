@@ -10,7 +10,6 @@
     .gallery-meta { padding:10px; }
     .gallery-date { color:var(--text-3); font-size:11px; }
     .gallery-desc { font-size:13px; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .gallery-empty { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); padding:32px; text-align:center; color:var(--text-3); }
     .gallery-modal { position:fixed; inset:0; z-index:1000; display:none; align-items:center; justify-content:center; background:rgba(var(--black-rgb),.78); padding:20px; }
     .gallery-modal.show { display:flex; }
     .gallery-detail { width:min(920px,100%); max-height:92vh; overflow:auto; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--shadow-lg); }

@@ -76,7 +76,6 @@
         border-radius: 10px; letter-spacing: 0;
         font-family: var(--font-body);
     }
-    .section-empty { font-size: 13px; color: var(--text-3); }
 
     /* ── friend/request row ── */
     .fr-row {
