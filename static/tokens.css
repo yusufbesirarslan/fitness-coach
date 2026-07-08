@@ -45,6 +45,13 @@
   --color-primary-strong: var(--blue-600);
   --color-primary-soft:   rgba(61, 139, 255, 0.09);
   --color-primary-glow:   rgba(61, 139, 255, 0.30);
+  /* İnce ara-adımlar (coach widget hover/focus/border katmanları) —
+     primary-soft(.09)/primary-glow(.30) arasındaki boşlukları doldurur. */
+  --color-primary-a06:    rgba(61, 139, 255, 0.06);
+  --color-primary-a12:    rgba(61, 139, 255, 0.12);
+  --color-primary-a20:    rgba(61, 139, 255, 0.20);
+  --color-primary-a38:    rgba(61, 139, 255, 0.38);
+  --color-primary-a50:    rgba(61, 139, 255, 0.50);
   --color-on-primary:     #121212; /* primary dolgu üstündeki metin/ikon */
 
   --color-bg:        var(--gray-900);
@@ -63,6 +70,7 @@
   --color-warning-soft: rgba(255, 176, 32, 0.12);
   --color-danger:       var(--red-500);
   --color-danger-soft:  rgba(255, 77, 77, 0.12);
+  --color-danger-light: var(--red-400); /* metin üstü daha açık kırmızı (coach widget) */
   --color-info:         var(--blue-vivid);
   --color-info-soft:    rgba(0, 123, 255, 0.10);
 
@@ -75,6 +83,16 @@
   --overlay-4:  rgba(255, 255, 255, 0.04);
   --overlay-6:  rgba(255, 255, 255, 0.06);
   --overlay-10: rgba(255, 255, 255, 0.10);
+
+  /* Coach widget (AI chat) — bileşene özgü, tek-tüketicili paletler.
+     Genel semantik/overlay/primary-a* token'ları karşılamıyorsa buraya
+     eklenir; yalnızca coach_widget.css tüketir, başka sayfa KULLANMAZ. */
+  --color-chat-avatar-accent: #99CC00;
+  --color-chat-send-hover:    #D6FF1A;
+  --color-chat-badge:         #FF3B30;
+  --color-chat-badge-glow:    rgba(255, 59, 48, 0.6);
+  --color-chat-card-grad-1:   rgba(18, 18, 22, 0.95);
+  --color-chat-card-grad-2:   rgba(22, 24, 30, 0.95);
 
   /* ── 3. TYPOGRAPHY ───────────────────────────────────────────
      UI yazı yüzü: Inter (Phase 1'de DM Sans'ın yerini aldı).
@@ -147,6 +165,13 @@
   --elevation-3: 0 12px 32px rgba(0, 0, 0, 0.55);
   --shadow-primary: 0 2px 10px rgba(61, 139, 255, 0.14);
   --focus-ring: 0 0 0 3px rgba(61, 139, 255, 0.07);
+  /* Serbest siyah gölge tonları — --elevation-* tam box-shadow (offset+blur
+     dahil) değerleridir; coach widget'ın kendi offset/blur'lu bileşik
+     gölgelerine yalnızca RENK bileşeni olarak eklenir. */
+  --shadow-color-1: rgba(0, 0, 0, 0.50);
+  --shadow-color-2: rgba(0, 0, 0, 0.55);
+  --shadow-color-3: rgba(0, 0, 0, 0.60);
+  --shadow-color-4: rgba(0, 0, 0, 0.72);
 
   /* ── 8. OPACITY ─────────────────────────────────────────────── */
   --opacity-disabled: 0.65;
