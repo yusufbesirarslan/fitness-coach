@@ -85,6 +85,31 @@
   --color-overlay-scrim: rgba(18, 18, 18, 0.85); /* koyu yarı-saydam katman (ör. sabit overlay) */
   --color-menu-scrim:    rgba(14, 14, 18, 0.96); /* FAB alt-menü zemini */
 
+  /* Ek kanallar (sayfa CSS'lerinden hoist edilen şeffaf tonların tek kaynağı) */
+  --white-rgb:          255, 255, 255; /* beyaz hover/ayraç katmanları */
+  --gray-500-rgb:       100, 100, 100;
+  --color-gold-rgb:     255, 215, 0;
+  --color-warning-rgb:  255, 176, 32;
+
+  /* Sıralama madalyaları (leaderboard podyumu — tema-değişmez) */
+  --color-rank-gold:        #FFD700;
+  --color-rank-silver:      #D0D6DE;
+  --color-rank-bronze:      #CD7F32;
+  --color-rank-silver-rgb:  208, 214, 222;
+  --color-rank-bronze-rgb:  205, 127, 50;
+
+  /* Koyu yüzey/scrim tonları (kart/modal gradyan zeminleri) + durum-koyu tint'leri */
+  --color-scrim-1:       rgba(14, 17, 24, 0.98);
+  --color-scrim-2:       rgba(22, 27, 38, 0.98);
+  --color-scrim-3:       rgba(20, 24, 34, 0.98);
+  --color-scrim-warm:    rgba(20, 24, 8, 0.92);
+  --color-scrim-soft:    rgba(18, 18, 18, 0.50);
+  --color-surface-deep:    #101318;
+  --color-surface-deepest: #050505;
+  --color-success-bg-dark: #1a3a2a;
+  --color-danger-bg-dark:  #3a1a1a;
+  --color-accent-lime:     #e8ff57; /* nadir kullanılan yeşil-sarı aksan */
+
   --color-border-1: rgba(255, 255, 255, 0.07); /* hairline */
   --color-border-2: rgba(255, 255, 255, 0.13); /* hover/emphasis */
 

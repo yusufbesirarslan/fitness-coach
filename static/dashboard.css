@@ -142,7 +142,7 @@
 .reward-overlay {
     position: fixed; inset: 0; z-index: 1000;
     display: none; align-items: center; justify-content: center;
-    padding: 24px; background: rgba(0,0,0,0.55);
+    padding: 24px; background: rgba(var(--black-rgb),0.55);
     backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
 }
 .reward-overlay.open { display: flex; }
@@ -150,18 +150,18 @@
     width: 100%; max-width: 360px; text-align: center;
     background: var(--color-surface-2); border: 1px solid var(--color-border-2);
     border-radius: var(--radius-lg); padding: 32px 28px 26px;
-    box-shadow: 0 24px 60px rgba(0,0,0,0.55);
+    box-shadow: 0 24px 60px rgba(var(--black-rgb),0.55);
     animation: rewardIn 0.2s var(--ease-out-expo);
 }
 @keyframes rewardIn { from { opacity: 0; transform: scale(0.92); } to { opacity: 1; transform: scale(1); } }
 .reward-trophy {
     width: 56px; height: 56px; margin: 0 auto 18px;
     display: flex; align-items: center; justify-content: center;
-    border-radius: 50%; background: rgba(255,215,0,0.10);
-    border: 1px solid rgba(255,215,0,0.35);
-    box-shadow: 0 0 22px rgba(255,215,0,0.12);
+    border-radius: 50%; background: rgba(var(--color-gold-rgb),0.10);
+    border: 1px solid rgba(var(--color-gold-rgb),0.35);
+    box-shadow: 0 0 22px rgba(var(--color-gold-rgb),0.12);
 }
-.reward-trophy svg { width: 30px; height: 30px; stroke: #FFD700; fill: none; stroke-width: 1.8; }
+.reward-trophy svg { width: 30px; height: 30px; stroke: var(--color-rank-gold); fill: none; stroke-width: 1.8; }
 .reward-title {
     font-family: var(--font-display); font-size: 26px; letter-spacing: 1.5px;
     color: var(--color-text-1); margin: 0 0 10px;

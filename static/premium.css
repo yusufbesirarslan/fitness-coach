@@ -16,7 +16,7 @@
         background: var(--surface-2); border: 1px solid var(--border);
         border-radius: 16px; padding: 24px; position: relative; overflow: hidden;
     }
-    .plan-card.pro { border-color: rgba(61,139,255,0.4); }
+    .plan-card.pro { border-color: rgba(var(--color-primary-rgb),0.4); }
     .plan-card.pro::before {
         content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
         background: linear-gradient(90deg, var(--color-primary), transparent);
@@ -41,4 +41,4 @@
     .prem-note { text-align: center; color: var(--text-3); font-size: 12px; margin-top: 14px; }
     .prem-active { text-align: center; color: var(--color-primary); font-weight: 600; margin-top: 16px; }
     .toast-wrap { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%); z-index: 9999; }
-    .toast { padding: 12px 20px; border-radius: 10px; font-size: 13px; background: #1a3a2a; border: 1px solid rgba(0,196,140,0.3); color: var(--green); }
+    .toast { padding: 12px 20px; border-radius: 10px; font-size: 13px; background: var(--color-success-bg-dark); border: 1px solid rgba(var(--color-success-rgb),0.3); color: var(--green); }

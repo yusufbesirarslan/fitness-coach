@@ -13,8 +13,8 @@
         box-sizing: border-box;
     }
     .search-input:focus {
-        border-color: rgba(61,139,255,0.45);
-        box-shadow: 0 0 0 3px rgba(61,139,255,0.06);
+        border-color: rgba(var(--color-primary-rgb),0.45);
+        box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb),0.06);
     }
     .search-icon {
         position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
@@ -51,7 +51,7 @@
     .sr-btn.add { background: var(--color-primary); color: var(--color-on-primary); }
     .sr-btn.add:hover { background: var(--color-primary-strong); }
     .sr-btn.pending { background: var(--overlay-6); color: var(--text-3); cursor: default; }
-    .sr-btn.accepted { background: rgba(61,139,255,0.1); color: var(--color-primary); cursor: default; }
+    .sr-btn.accepted { background: rgba(var(--color-primary-rgb),0.1); color: var(--color-primary); cursor: default; }
 
     /* ── section ── */
     .section-card {
@@ -71,7 +71,7 @@
         display: flex; align-items: center; gap: 8px;
     }
     .section-count {
-        background: rgba(61,139,255,0.12); color: var(--color-primary);
+        background: rgba(var(--color-primary-rgb),0.12); color: var(--color-primary);
         font-size: 11px; font-weight: 700; padding: 2px 8px;
         border-radius: 10px; letter-spacing: 0;
         font-family: var(--font-body);
@@ -104,17 +104,17 @@
     .btn-accept:hover { background: var(--color-primary-strong); }
     .btn-reject {
         padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
-        background: rgba(255,77,77,0.1); color: var(--red); border: 1px solid rgba(255,77,77,0.2);
+        background: rgba(var(--color-danger-rgb),0.1); color: var(--red); border: 1px solid rgba(var(--color-danger-rgb),0.2);
         cursor: pointer; font-family: var(--font-body); transition: all 0.2s;
     }
-    .btn-reject:hover { background: rgba(255,77,77,0.2); }
+    .btn-reject:hover { background: rgba(var(--color-danger-rgb),0.2); }
     .btn-chat {
         padding: 7px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
-        background: rgba(61,158,255,0.1); color: var(--blue-light); border: 1px solid rgba(61,158,255,0.2);
+        background: rgba(var(--color-primary-rgb),0.1); color: var(--blue-light); border: 1px solid rgba(var(--color-primary-rgb),0.2);
         cursor: pointer; font-family: var(--font-body); transition: all 0.2s;
         text-decoration: none; display: inline-flex; align-items: center; gap: 4px;
     }
-    .btn-chat:hover { background: rgba(61,158,255,0.2); }
+    .btn-chat:hover { background: rgba(var(--color-primary-rgb),0.2); }
 
     .loading-text { text-align: center; color: var(--text-3); padding: 20px; font-size: 13px; }
-    .rank-badge { font-size:10px; background:var(--color-primary); color:#000; padding:2px 8px; border-radius:10px; margin-left:6px; font-weight:600; display:inline-block; vertical-align:middle; }
+    .rank-badge { font-size:10px; background:var(--color-primary); color:rgb(var(--black-rgb)); padding:2px 8px; border-radius:10px; margin-left:6px; font-weight:600; display:inline-block; vertical-align:middle; }
