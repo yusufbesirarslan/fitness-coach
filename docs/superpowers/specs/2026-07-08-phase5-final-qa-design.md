@@ -101,13 +101,16 @@ by design-system pytest + a browser spot-check of representative surfaces.
 ## Stage 2 — Per-surface polish (surface-by-surface)
 
 For each of the 13 surfaces, in audit-priority order: apply that surface's
-Stage-0 findings — fix spacing/typography/color-token compliance, responsive
-breakpoints, a11y (focus-visible, touch targets ≥44px, aria, keyboard),
-loading/empty states, and interaction consistency. **Where a surface still has
-an inline `<style>` block, extract it to a per-page CSS file** (identical
-selectors, just relocated + the nonce block removed) when it clearly improves
-maintainability and is production-safe. Browser-verify before/after (mobile +
-desktop); commit per surface.
+**High/Med** Stage-0 findings — fix spacing/typography/color-token compliance,
+responsive breakpoints, a11y (focus-visible, touch targets ≥44px, aria,
+keyboard), loading/empty states, and interaction consistency. **Extract the
+inline `<style>` block from all 9 templates** that still carry one (`index`,
+`friends`, `feed`, `leaderboard`, `quests`, `manage_stack`, `premium`, `chat`,
+`pump_check_gallery`) into per-page CSS files (identical selectors, relocated +
+the `<style nonce>` block removed, linked via `<link>`) — this is mandatory, not
+a judgment call. **Low-severity** findings are logged as "remaining tech debt"
+in the Stage-3 report, not fixed here, so the pass converges. Browser-verify
+before/after (mobile + desktop); commit per surface.
 
 ## Stage 3 — Final report + handoff
 
@@ -136,9 +139,9 @@ desktop); commit per surface.
   swaps; browser before/after diffing catches regressions; extraction keeps
   selectors byte-identical.
 - **Scope creep** (13 surfaces × 8 dimensions) → the audit ranks findings;
-  fix High/Med, log Low as "remaining tech debt" in the report rather than
-  chasing every pixel. Inline-`<style>` extraction is per-surface judgment, not
-  a blanket mandate.
+  fix **High/Med**, log **Low** as "remaining tech debt" in the report rather
+  than chasing every pixel. (Inline-`<style>` extraction is the one blanket
+  mandate — all 9 — since it directly serves the single-source-of-truth goal.)
 - **CSP** → extracted CSS moves to `<link>`; any remaining inline `<style>`
   keeps its `nonce="{{ csp_nonce }}"`; no JS-injected `<style>`.
 
