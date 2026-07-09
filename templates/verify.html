@@ -2,187 +2,59 @@
 <html lang="{{ locale }}" data-theme="dark">
 <head>
     {% include "_head.html" %}
-    <title>{{ t('verify.title') }} — AxisAI</title>
-    <meta name="description" content="AxisAI hesabını doğrula — e-postana gönderilen kodu gir.">
-    <link rel="stylesheet" href="/static/style.css">
-    <style nonce="{{ csp_nonce }}">
-        .auth-wrapper {
-            display:flex; align-items:center; justify-content:center;
-            min-height:100vh; padding:40px 20px;
-        }
-        .auth-card {
-            width:100%; max-width:420px; background:var(--card);
-            border:1px solid var(--border); border-radius:16px;
-            padding:40px 32px; position:relative; overflow:hidden;
-        }
-        .auth-card::before {
-            content:''; position:absolute; top:0; left:0; right:0;
-            height:2px; background:linear-gradient(90deg,var(--accent),transparent);
-        }
-        .auth-logo {
-            display:flex; flex-direction:column; align-items:center; gap:10px;
-            font-family:var(--font-display); font-size:34px;
-            letter-spacing:4px; color:var(--accent); text-align:center;
-            margin-bottom:8px;
-        }
-        .auth-logo-mark {
-            width:64px; height:64px; border-radius:16px;
-            box-shadow:0 6px 20px rgba(0,0,0,0.45);
-        }
-        .auth-subtitle {
-            font-size:14px; color:var(--text2); text-align:center;
-            font-weight:300; margin-bottom:32px;
-        }
-        .auth-card .form-group { margin-bottom:16px; }
-        .auth-card input {
-            width:100%; font-size:15px; padding:14px 16px;
-        }
-        .auth-btn {
-            font-family:var(--font-display); font-size:18px;
-            letter-spacing:3px; color: var(--gray-950); background:var(--accent);
-            border:none; border-radius:8px; padding:14px;
-            cursor:pointer; transition:all 0.2s; width:100%; margin-top:8px;
-        }
-        .auth-btn:hover { background:var(--accent2); transform:translateY(-1px); }
-        .auth-footer {
-            text-align:center; margin-top:20px; font-size:14px;
-            color:var(--text2); font-weight:300;
-        }
-        .auth-footer a {
-            color:var(--accent); text-decoration:none;
-            border-bottom:1px solid var(--accent-glow);
-        }
-        .auth-footer a:hover { border-bottom-color:var(--accent); }
-        .auth-error {
-            background:rgba(255,107,107,0.1); border:1px solid var(--red,#ff6b6b);
-            color:var(--red,#ff6b6b); border-radius:8px; padding:12px 16px;
-            font-size:14px; margin-bottom:16px; display:none;
-        }
-        .auth-success {
-            background:var(--accent-glow); border:1px solid var(--accent);
-            color:var(--accent); border-radius:8px; padding:12px 16px;
-            font-size:14px; margin-bottom:16px; display:none;
-        }
-        .link-btn {
-            background:none; border:none; color:var(--accent); cursor:pointer;
-            font-size:14px; padding:0; border-bottom:1px solid var(--accent-glow);
-        }
-        .theme-corner {
-            position:fixed; top:20px; right:20px;
-            display:flex; align-items:center; gap:10px;
-        }
-        .lang-switch {
-            display:inline-flex; gap:2px; background:var(--bg3);
-            border:1px solid var(--border); border-radius:8px; padding:2px;
-        }
-        .lang-opt {
-            font-family:var(--font-body); font-size:12px; font-weight:600;
-            letter-spacing:0.05em; color:var(--text2); background:none; border:none;
-            border-radius:6px; padding:5px 9px; cursor:pointer; transition:all .2s;
-        }
-        .lang-opt.on { background:var(--accent); color: var(--gray-950); }
-        .lang-opt:not(.on):hover { color:var(--text); }
-    </style>
+    <title>{{ t('verify.title') }} - AxisAI</title>
+    <meta name="description" content="AxisAI hesabini dogrula - e-postana gonderilen kodu gir.">
+    <link rel="stylesheet" href="/static/auth.css">
 </head>
-<body>
-
-    <div class="theme-corner">
-        <div class="lang-switch" role="group" aria-label="{{ t('lang.aria') }}">
-            <button type="button" class="lang-opt{% if locale == 'tr' %} on{% endif %}" data-action="setLang" data-args='["tr"]'>TR</button>
-            <button type="button" class="lang-opt{% if locale == 'en' %} on{% endif %}" data-action="setLang" data-args='["en"]'>EN</button>
+<body class="auth-body">
+<div class="auth-shell">
+    <header class="auth-topbar">
+        <a class="auth-brand" href="/welcome" aria-label="AxisAI">
+            <img src="/static/icon-holo.png" alt="">AxisAI
+        </a>
+        <div class="auth-controls">
+            <div class="lang-switch" role="group" aria-label="{{ t('lang.aria') }}">
+                <button type="button" class="lang-opt{% if locale == 'tr' %} on{% endif %}" data-action="setLang" data-args='["tr"]'>TR</button>
+                <button type="button" class="lang-opt{% if locale == 'en' %} on{% endif %}" data-action="setLang" data-args='["en"]'>EN</button>
+            </div>
+            <button type="button" class="theme-toggle" data-action="toggleTheme" aria-label="{{ t('theme.aria') }}"></button>
         </div>
-        <button class="theme-toggle" data-action="toggleTheme" aria-label="{{ t('theme.aria') }}"></button>
-    </div>
+    </header>
 
-    <div class="auth-wrapper">
-        <div class="auth-card">
-            <div class="auth-logo"><img class="auth-logo-mark" src="/static/icon-holo.png" alt="">AxisAI</div>
-            <div class="auth-subtitle">{{ t('verify.subtitle') }}</div>
+    <main class="auth-main">
+        <section class="auth-card" aria-labelledby="verify-title">
+            <p class="auth-kicker">AxisAI</p>
+            <h1 class="auth-title" id="verify-title">{{ t('verify.title') }}</h1>
+            <p class="auth-subtitle">{{ t('verify.subtitle') }}</p>
 
-            <div class="auth-error" id="error-msg"></div>
-            <div class="auth-success" id="success-msg"></div>
+            <div class="auth-alert auth-alert-error" id="error-msg" role="alert" aria-live="polite"></div>
+            <div class="auth-alert auth-alert-success" id="success-msg" role="status" aria-live="polite"></div>
 
-            <div class="form-group">
-                <label>{{ t('form.username') }}</label>
-                <input type="text" id="username" value="{{ username }}" placeholder="{{ t('verify.username_ph') }}">
+            <div class="auth-form">
+                <div class="auth-field">
+                    <label for="username">{{ t('form.username') }}</label>
+                    <input type="text" id="username" name="username" value="{{ username }}"
+                           placeholder="{{ t('verify.username_ph') }}" autocomplete="username"
+                           autocapitalize="none" spellcheck="false" data-action-keydown="verifyOnEnter">
+                </div>
+                <div class="auth-field">
+                    <label for="code">{{ t('verify.code_label') }}</label>
+                    <input type="text" id="code" name="code" inputmode="numeric" autocomplete="one-time-code"
+                           placeholder="{{ t('verify.code_ph') }}" data-action-keydown="verifyOnEnter">
+                </div>
+
+                <button type="button" class="auth-btn" id="verify-submit" data-action="verifyCode">{{ t('verify.submit') }}</button>
+                <button type="button" class="auth-btn auth-btn-secondary" data-action="resendCode">{{ t('verify.resend') }}</button>
+
+                <div class="auth-row">
+                    <span>{{ t('verify.no_code') }}</span>
+                    <a class="auth-link" href="/login">{{ t('verify.back_login') }}</a>
+                </div>
             </div>
-            <div class="form-group">
-                <label>{{ t('verify.code_label') }}</label>
-                <input type="text" id="code" inputmode="numeric" autocomplete="one-time-code"
-                       placeholder="{{ t('verify.code_ph') }}">
-            </div>
-
-            <button class="auth-btn" data-action="verifyCode">{{ t('verify.submit') }}</button>
-
-            <div class="auth-footer">
-                {{ t('verify.no_code') }} <button class="link-btn" data-action="resendCode">{{ t('verify.resend') }}</button>
-            </div>
-            <div class="auth-footer">
-                <a href="/login">{{ t('verify.back_login') }}</a>
-            </div>
-        </div>
-    </div>
-
-    <script nonce="{{ csp_nonce }}">
-        const savedTheme = localStorage.getItem('theme') || 'dark';
-        document.documentElement.dataset.theme = savedTheme;
-        function toggleTheme() {
-            const html = document.documentElement;
-            html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
-            localStorage.setItem('theme', html.dataset.theme);
-        }
-
-        function showError(msg) {
-            document.getElementById("success-msg").style.display = "none";
-            const el = document.getElementById("error-msg");
-            el.textContent = msg;
-            el.style.display = "block";
-        }
-        function showSuccess(msg) {
-            document.getElementById("error-msg").style.display = "none";
-            const el = document.getElementById("success-msg");
-            el.textContent = msg;
-            el.style.display = "block";
-        }
-
-        async function verifyCode() {
-            const username = document.getElementById("username").value.trim();
-            const code = document.getElementById("code").value.trim();
-            if (!username || !code) { showError(t('verify.username_code_required')); return; }
-
-            const response = await fetch("/verify", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ username, code })
-            });
-            const data = await response.json();
-            if (response.ok) {
-                showSuccess(data.message + " " + t('common.redirecting'));
-                setTimeout(() => window.location.href = "/login", 1500);
-            } else {
-                showError(data.error);
-            }
-        }
-
-        async function resendCode() {
-            const username = document.getElementById("username").value.trim();
-            if (!username) { showError(t('verify.enter_username_first')); return; }
-
-            const response = await fetch("/verify/resend", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ username })
-            });
-            const data = await response.json();
-            if (response.ok) { showSuccess(data.message); }
-            else { showError(data.error); }
-        }
-
-        document.getElementById("code").addEventListener("keydown", e => {
-            if (e.key === "Enter") verifyCode();
-        });
-    </script>
-    <script src="/static/actions.js"></script>
-
+        </section>
+    </main>
+</div>
+<script src="/static/auth.js"></script>
+<script src="/static/actions.js"></script>
 </body>
 </html>

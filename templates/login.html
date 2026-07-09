@@ -2,181 +2,75 @@
 <html lang="{{ locale }}" data-theme="dark">
 <head>
     {% include "_head.html" %}
-    <title>{{ t('login.title') }} — AxisAI</title>
-    <meta name="description" content="AxisAI — yapay zekâ koçunla kişiye özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.">
-    <meta property="og:title" content="AxisAI — Yapay Zekâ Fitness Koçun">
-    <meta property="og:description" content="Sana özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.">
+    <title>{{ t('login.title') }} - AxisAI</title>
+    <meta name="description" content="AxisAI - yapay zeka kocunla kisiye ozel beslenme ve antrenman plani, ilerleme takibi ve arkadaslarinla motivasyon.">
+    <meta property="og:title" content="AxisAI - Yapay Zeka Fitness Kocun">
+    <meta property="og:description" content="Sana ozel beslenme ve antrenman plani, ilerleme takibi ve arkadaslarinla motivasyon.">
     <meta property="og:type" content="website">
     <meta property="og:image" content="/static/icon-holo.png">
     <meta name="twitter:card" content="summary">
-    <meta name="twitter:title" content="AxisAI — Yapay Zekâ Fitness Koçun">
-    <meta name="twitter:description" content="Sana özel beslenme ve antrenman planı, ilerleme takibi ve arkadaşlarınla motivasyon.">
-    <link rel="stylesheet" href="/static/style.css">
-    <style nonce="{{ csp_nonce }}">
-        .auth-wrapper {
-            display:flex; align-items:center; justify-content:center;
-            min-height:100vh; padding:40px 20px;
-        }
-        .auth-card {
-            width:100%; max-width:420px; background:var(--card);
-            border:1px solid var(--border); border-radius:16px;
-            padding:40px 32px; position:relative; overflow:hidden;
-        }
-        .auth-card::before {
-            content:''; position:absolute; top:0; left:0; right:0;
-            height:2px; background:linear-gradient(90deg,var(--accent),transparent);
-        }
-        .auth-logo {
-            display:flex; flex-direction:column; align-items:center; gap:10px;
-            font-family:var(--font-display); font-size:34px;
-            letter-spacing:4px; color:var(--accent); text-align:center;
-            margin-bottom:8px;
-        }
-        .auth-logo-mark {
-            width:64px; height:64px; border-radius:16px;
-            box-shadow:0 6px 20px rgba(0,0,0,0.45);
-        }
-        .auth-subtitle {
-            font-size:14px; color:var(--text2); text-align:center;
-            font-weight:300; margin-bottom:32px;
-        }
-        .auth-card .form-group { margin-bottom:16px; }
-        .auth-card input {
-            width:100%; font-size:15px; padding:14px 16px;
-        }
-        .auth-btn {
-            font-family:var(--font-display); font-size:18px;
-            letter-spacing:3px; color: var(--gray-950); background:var(--accent);
-            border:none; border-radius:8px; padding:14px;
-            cursor:pointer; transition:all 0.2s; width:100%; margin-top:8px;
-        }
-        .auth-btn:hover { background:var(--accent2); transform:translateY(-1px); }
-        .auth-footer {
-            text-align:center; margin-top:20px; font-size:14px;
-            color:var(--text2); font-weight:300;
-        }
-        .auth-footer a {
-            color:var(--accent); text-decoration:none;
-            border-bottom:1px solid var(--accent-glow);
-        }
-        .auth-footer a:hover { border-bottom-color:var(--accent); }
-        .auth-error {
-            background:rgba(255,107,107,0.1); border:1px solid var(--red,#ff6b6b);
-            color:var(--red,#ff6b6b); border-radius:8px; padding:12px 16px;
-            font-size:14px; margin-bottom:16px; display:none;
-        }
-        .auth-divider {
-            display:flex; align-items:center; text-align:center;
-            margin:20px 0 4px; color:var(--text2); font-size:12px;
-            letter-spacing:1px; text-transform:uppercase;
-        }
-        .auth-divider::before, .auth-divider::after {
-            content:''; flex:1; height:1px; background:var(--border);
-        }
-        .auth-divider span { padding:0 12px; }
-        .auth-btn-alt {
-            display:block; text-align:center; text-decoration:none;
-            box-sizing:border-box; background:transparent;
-            color:var(--accent); border:1px solid var(--accent);
-        }
-        .auth-btn-alt:hover { background:var(--accent-glow); transform:translateY(-1px); }
-        .theme-corner {
-            position:fixed; top:20px; right:20px;
-            display:flex; align-items:center; gap:10px;
-        }
-        .lang-switch {
-            display:inline-flex; gap:2px; background:var(--bg3);
-            border:1px solid var(--border); border-radius:8px; padding:2px;
-        }
-        .lang-opt {
-            font-family:var(--font-body); font-size:12px; font-weight:600;
-            letter-spacing:0.05em; color:var(--text2); background:none; border:none;
-            border-radius:6px; padding:5px 9px; cursor:pointer; transition:all .2s;
-        }
-        .lang-opt.on { background:var(--accent); color: var(--gray-950); }
-        .lang-opt:not(.on):hover { color:var(--text); }
-    </style>
+    <link rel="stylesheet" href="/static/auth.css">
 </head>
-<body>
-
-    <div class="theme-corner">
-        <div class="lang-switch" role="group" aria-label="{{ t('lang.aria') }}">
-            <button type="button" class="lang-opt{% if locale == 'tr' %} on{% endif %}" data-action="setLang" data-args='["tr"]'>TR</button>
-            <button type="button" class="lang-opt{% if locale == 'en' %} on{% endif %}" data-action="setLang" data-args='["en"]'>EN</button>
+<body class="auth-body">
+<div class="auth-shell">
+    <header class="auth-topbar">
+        <a class="auth-brand" href="/welcome" aria-label="AxisAI">
+            <img src="/static/icon-holo.png" alt="">AxisAI
+        </a>
+        <div class="auth-controls">
+            <div class="lang-switch" role="group" aria-label="{{ t('lang.aria') }}">
+                <button type="button" class="lang-opt{% if locale == 'tr' %} on{% endif %}" data-action="setLang" data-args='["tr"]'>TR</button>
+                <button type="button" class="lang-opt{% if locale == 'en' %} on{% endif %}" data-action="setLang" data-args='["en"]'>EN</button>
+            </div>
+            <button type="button" class="theme-toggle" data-action="toggleTheme" aria-label="{{ t('theme.aria') }}"></button>
         </div>
-        <button class="theme-toggle" data-action="toggleTheme" aria-label="{{ t('theme.aria') }}"></button>
-    </div>
+    </header>
 
-    <div class="auth-wrapper">
-        <div class="auth-card">
-            <div class="auth-logo"><img class="auth-logo-mark" src="/static/icon-holo.png" alt="">AxisAI</div>
-            <div class="auth-subtitle">{{ t('login.subtitle') }}</div>
+    <main class="auth-main">
+        <section class="auth-card" aria-labelledby="login-title">
+            <p class="auth-kicker">AxisAI</p>
+            <h1 class="auth-title" id="login-title">{{ t('login.title') }}</h1>
+            <p class="auth-subtitle">{{ t('login.subtitle') }}</p>
 
-            <div class="auth-error" id="error-msg"></div>
+            <div class="auth-alert auth-alert-error" id="error-msg" role="alert" aria-live="polite"></div>
+            <div class="auth-alert auth-alert-success" id="success-msg" role="status" aria-live="polite"></div>
             {% if auth_error %}
-            <div class="auth-error" style="display:block">{{ auth_error }}</div>
+            <div class="auth-alert auth-alert-error show" role="alert">{{ auth_error }}</div>
             {% endif %}
 
-            <div class="form-group">
-                <label>{{ t('form.username') }}</label>
-                <input type="text" id="username" placeholder="{{ t('login.username_ph') }}">
+            <div class="auth-form">
+                <div class="auth-field">
+                    <label for="username">{{ t('form.username') }}</label>
+                    <input type="text" id="username" name="username" placeholder="{{ t('login.username_ph') }}"
+                           autocomplete="username" autocapitalize="none" spellcheck="false"
+                           data-action-keydown="loginOnEnter">
+                </div>
+                <div class="auth-field">
+                    <label for="password">{{ t('form.password') }}</label>
+                    <div class="auth-input-wrap">
+                        <input type="password" id="password" name="password" placeholder="{{ t('login.password_ph') }}"
+                               autocomplete="current-password" data-action-keydown="loginOnEnter">
+                        <button type="button" class="password-toggle" data-action="togglePassword"
+                                data-target="password" aria-label="{{ t('form.password') }}" aria-pressed="false">Show</button>
+                    </div>
+                </div>
+
+                <button type="button" class="auth-btn" id="login-submit" data-action="login">{{ t('login.submit') }}</button>
+
+                {% if cognito_enabled %}
+                <div class="auth-divider"><span>{{ t('auth.or') }}</span></div>
+                <a class="auth-btn auth-btn-secondary" href="/login/cognito">{{ t('auth.cognito_login') }}</a>
+                {% endif %}
+
+                <div class="auth-row">
+                    <span>{{ t('login.no_account') }}</span>
+                    <a class="auth-link" href="/register">{{ t('login.register_link') }}</a>
+                </div>
             </div>
-            <div class="form-group">
-                <label>{{ t('form.password') }}</label>
-                <input type="password" id="password" placeholder="{{ t('login.password_ph') }}">
-            </div>
-
-            <button class="auth-btn" data-action="login">{{ t('login.submit') }}</button>
-
-            {% if cognito_enabled %}
-            <div class="auth-divider"><span>{{ t('auth.or') }}</span></div>
-            <a class="auth-btn auth-btn-alt" href="/login/cognito">{{ t('auth.cognito_login') }}</a>
-            {% endif %}
-
-            <div class="auth-footer">
-                {{ t('login.no_account') }} <a href="/register">{{ t('login.register_link') }}</a>
-            </div>
-        </div>
-    </div>
-
-    <script nonce="{{ csp_nonce }}">
-        const savedTheme = localStorage.getItem('theme') || 'dark';
-        document.documentElement.dataset.theme = savedTheme;
-        function toggleTheme() {
-            const html = document.documentElement;
-            html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
-            localStorage.setItem('theme', html.dataset.theme);
-        }
-
-        async function login() {
-            const username = document.getElementById("username").value;
-            const password = document.getElementById("password").value;
-
-            const response = await fetch("/login", {
-                method: "POST",
-                headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({ username, password })
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                window.location.href = "/";
-            } else if (data.needs_verification) {
-                // E-posta henüz doğrulanmamış → doğrulama sayfasına yönlendir.
-                window.location.href = "/verify?u=" + encodeURIComponent(data.username || username);
-            } else {
-                const errorDiv = document.getElementById("error-msg");
-                errorDiv.textContent = data.error;
-                errorDiv.style.display = "block";
-            }
-        }
-
-        document.getElementById("password").addEventListener("keydown", e => {
-            if (e.key === "Enter") login();
-        });
-    </script>
-    <script src="/static/actions.js"></script>
-
+        </section>
+    </main>
+</div>
+<script src="/static/auth.js"></script>
+<script src="/static/actions.js"></script>
 </body>
 </html>
