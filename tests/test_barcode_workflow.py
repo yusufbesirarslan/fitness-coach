@@ -1,0 +1,152 @@
+"""Production barcode workflow: cache, analysis, recommendations, diary add."""
+from datetime import datetime
+
+import pytest
+
+from app.extensions import db
+from app.models import BarcodeFoodCache, MealLog, UserSession, WorkoutLog, WORKOUT_COMPLETION_MARKER
+from app.services import barcode as barcode_svc
+
+
+def _protein_bar_payload():
+    return {
+        "food_id": "77777",
+        "name": "Acme Protein Bar",
+        "brand": "Acme",
+        "servings": [{
+            "serving_id": "bar-1",
+            "serving_description": "1 bar",
+            "metric_serving_amount": 60,
+            "metric_serving_unit": "g",
+            "calories": 210,
+            "protein": 21,
+            "carbs": 23,
+            "fat": 6,
+            "fiber": 7,
+            "sugar": 14,
+            "sodium": 420,
+        }],
+    }
+
+
+def test_analysis_engine_scores_and_labels_packaged_food():
+    food = barcode_svc.normalize_food_model("5000159407236", _protein_bar_payload())
+    analysis = barcode_svc.analyze_food(food)
+
+    assert analysis["protein_density"] == pytest.approx(0.1)
+    assert analysis["macro_distribution"]["protein_pct"] == 40
+    assert analysis["fiber_rating"] == "high"
+    assert analysis["sugar_warning"] is True
+    assert analysis["sodium_warning"] is True
+    assert "High Protein" in analysis["badges"]
+    assert "High Sugar" in analysis["badges"]
+    assert 0 <= analysis["axisai_food_score"] <= 100
+
+
+def test_recommendation_engine_uses_goal_remaining_targets_and_workout():
+    food = barcode_svc.normalize_food_model("5000159407236", _protein_bar_payload())
+    context = {
+        "goal": "cut",
+        "remaining": {"calories": 160, "protein": 42, "carbs": 40, "fat": 12},
+        "workout_completed_today": True,
+        "meal_time": "post_workout",
+        "daily_progress": {},
+    }
+
+    out = barcode_svc.recommend_for_food(food, context)
+
+    assert out["portion"]["servings"] == pytest.approx(0.8)
+    assert out["portion"]["basis"] == "calories"
+    assert "Consider eating a smaller serving." in out["messages"]
+    assert "This food is an excellent choice after today's workout." in out["messages"]
+
+
+def test_barcode_lookup_uses_database_cache_before_fatsecret(app, client, auth_user, monkeypatch):
+    cached_food = barcode_svc.normalize_food_model("5000159407236", _protein_bar_payload())
+    db.session.add(BarcodeFoodCache(
+        barcode="5000159407236",
+        food_id="77777",
+        food_name=cached_food["name"],
+        brand=cached_food["brand"],
+        payload=cached_food,
+    ))
+    db.session.commit()
+
+    monkeypatch.setattr(
+        barcode_svc,
+        "_food_find_by_barcode",
+        lambda code: (_ for _ in ()).throw(AssertionError("FatSecret should not be called")),
+    )
+
+    resp = client.get("/api/food/barcode?code=5000159407236")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["source"] == "cache"
+    assert data["food"]["name"] == "Acme Protein Bar"
+    assert data["analysis"]["axisai_food_score"] >= 1
+    assert data["food_id"] == "77777"  # backwards-compatible legacy key
+
+
+def test_barcode_lookup_fatsecret_result_is_normalized_and_cached(app, client, auth_user, monkeypatch):
+    calls = {"count": 0}
+
+    def fake_lookup(code):
+        calls["count"] += 1
+        return _protein_bar_payload()
+
+    monkeypatch.setattr(barcode_svc, "_food_find_by_barcode", fake_lookup)
+
+    resp = client.get("/api/food/barcode?code=5000159407236")
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["source"] == "fatsecret"
+    assert data["food"]["servings"][0]["macros"]["calories"] == 210
+    assert data["analysis"]["badges"]
+    assert BarcodeFoodCache.query.filter_by(barcode="5000159407236").one().food_id == "77777"
+    assert calls["count"] == 1
+
+
+def test_barcode_not_found_offers_manual_and_future_ocr_actions(client, auth_user, monkeypatch):
+    monkeypatch.setattr(barcode_svc, "get_barcode_product", lambda code: None)
+
+    resp = client.get("/api/food/barcode?code=5000159407236")
+
+    assert resp.status_code == 404
+    assert resp.get_json()["actions"] == ["manual_search", "scan_nutrition_label"]
+
+
+def test_barcode_add_to_diary_writes_canonical_meal_log(app, client, auth_user):
+    db.session.add(UserSession(
+        user_id=auth_user.id,
+        name="Test",
+        goal="kas kazanma",
+        target_calories=2400,
+    ))
+    db.session.add(WorkoutLog(
+        user_id=auth_user.id,
+        exercise_name=WORKOUT_COMPLETION_MARKER,
+        sets=0,
+        reps=0,
+        weight_kg=0,
+        volume=0,
+        created_at=datetime.utcnow(),
+    ))
+    db.session.commit()
+
+    resp = client.post("/api/food/barcode/add", json={
+        "barcode": "5000159407236",
+        "meal": "Ara Öğün",
+        "food": barcode_svc.normalize_food_model("5000159407236", _protein_bar_payload()),
+        "serving_id": "bar-1",
+        "serving_quantity": 2,
+    })
+
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["nutrients"] == {"kalori": 420.0, "protein": 42.0, "karb": 46.0, "yag": 12.0}
+    assert data["goal_impact"]["after"]["protein"] == 42.0
+    row = MealLog.query.filter_by(user_id=auth_user.id, source="barcode").one()
+    assert row.yemekler == "Acme Protein Bar (2x 1 bar)"
+    assert row.kalori == 420.0
