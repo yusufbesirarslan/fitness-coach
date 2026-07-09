@@ -3,7 +3,7 @@
 Hermetik: FatSecret çağrıları monkeypatch'lenir, ağ'a çıkılmaz.
 """
 import app.services.fatsecret as fs
-from app.blueprints import food as food_bp
+from app.services import barcode as barcode_svc
 
 
 class FakeResp:
@@ -81,7 +81,7 @@ def test_route_invalid_barcode_400(client, auth_user):
 
 
 def test_route_not_found_404(client, auth_user, monkeypatch):
-    monkeypatch.setattr(food_bp, "_food_find_by_barcode", lambda c: None)
+    monkeypatch.setattr(barcode_svc, "get_barcode_product", lambda c: None)
     r = client.get("/api/food/barcode?code=5000159407236")
     assert r.status_code == 404
     assert r.get_json()["error"] == "not_found"
@@ -90,10 +90,16 @@ def test_route_not_found_404(client, auth_user, monkeypatch):
 def test_route_success_200(client, auth_user, monkeypatch):
     payload = {"food_id": "77777", "name": "Protein Bar", "brand": "Acme",
                "servings": [{"serving_description": "1 bar"}]}
-    monkeypatch.setattr(food_bp, "_food_find_by_barcode", lambda c: payload)
+    monkeypatch.setattr(barcode_svc, "_food_find_by_barcode", lambda c: payload)
     r = client.get("/api/food/barcode?code=5000159407236")
     assert r.status_code == 200
-    assert r.get_json() == payload
+    data = r.get_json()
+    assert data["food_id"] == payload["food_id"]
+    assert data["name"] == payload["name"]
+    assert data["brand"] == payload["brand"]
+    assert data["servings"][0]["serving_description"] == "1 bar"
+    assert data["food"]["name"] == payload["name"]
+    assert "analysis" in data
 
 
 def test_route_requires_login(raw_client):
