@@ -67,11 +67,10 @@ BEDROCK_ENABLED = os.getenv("BEDROCK_ENABLED", "0") == "1"  # açık opt-in; pro
 # KARANLIK gönder (varsayılan kapalı). Yalnızca tool-use koç döngüsünü etkiler.
 BEDROCK_PROMPT_CACHE = os.getenv("BEDROCK_PROMPT_CACHE", "0") == "1"
 
-# ── Amazon Cognito (e-posta ile giriş — OIDC / Hosted UI) ──
-# Kullanıcı havuzu ve app client .env'den gelir. App client'ın bir "client secret"i
-# VARSA COGNITO_CLIENT_SECRET olarak ekle; YOKSA (public client) boş bırak — PKCE
-# kullanılır. Region pool id'nin önekinden türetilir (örn. "eu-central-1_xxx" →
-# "eu-central-1"); böylece ayrıca tanımlamaya gerek kalmaz.
+# Amazon Cognito native backend API flow. Hosted UI/OIDC redirects are disabled.
+# User Pool and App Client come from .env. If the app client has a secret, set
+# COGNITO_CLIENT_SECRET; otherwise leave it blank. Region is derived from the
+# pool id prefix, e.g. "eu-central-1_xxx" -> "eu-central-1".
 COGNITO_USER_POOL_ID = os.getenv("COGNITO_USER_POOL_ID", "").strip()
 COGNITO_APP_CLIENT_ID = os.getenv("COGNITO_APP_CLIENT_ID", "").strip()
 COGNITO_CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET", "").strip()
@@ -79,13 +78,7 @@ COGNITO_REGION = (
     COGNITO_USER_POOL_ID.split("_", 1)[0] if "_" in COGNITO_USER_POOL_ID else _S3_REGION
 )
 COGNITO_ENABLED = bool(COGNITO_USER_POOL_ID and COGNITO_APP_CLIENT_ID)
-COGNITO_METADATA_URL = (
-    f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/"
-    f"{COGNITO_USER_POOL_ID}/.well-known/openid-configuration"
-) if COGNITO_ENABLED else ""
-# Hosted UI domain'i (opsiyonel, örn. "fitx.auth.eu-central-1.amazoncognito.com").
-# Ayarlıysa /logout Cognito oturumunu da kapatır (aksi halde yalnızca yerel oturum).
-COGNITO_HOSTED_DOMAIN = os.getenv("COGNITO_HOSTED_DOMAIN", "").strip()
+
 
 
 def _enforce_fatsecret_tls(app):

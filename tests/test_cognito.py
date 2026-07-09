@@ -1,17 +1,12 @@
-"""Amazon Cognito Hosted-UI (OIDC redirect) hesap eşleme testleri.
+"""Amazon Cognito local-account mapping and Sprint 1 route tests.
 
-Kapsam: app/services/cognito.py (`get_or_create_user`, `_coerce_bool`,
-`_unique_username`) ve auth blueprint'in /auth/cognito/callback route'u. Bu
-katman güvenlik-kritiktir: DOĞRULANMAMIŞ e-postalı bir Cognito kimliğinin mevcut
-yerel hesaba bağlanması hesap ele geçirmeye kapı açar — bu reddetme yolu
-sabitlenir. Ağ YOK: Authlib/oauth tamamen sahte ile değiştirilir.
+Covers app/services/cognito.py account mapping helpers and verifies Sprint 1 keeps
+Hosted UI/OIDC redirect routes disabled while native backend Cognito registration
+is handled by app/services/cognito_service.py.
 
     python -m pytest tests/test_cognito.py -v
 """
-from types import SimpleNamespace
-
 import pytest
-
 from app.blueprints import auth as auth_bp
 from app.extensions import db
 from app.models import User
@@ -70,6 +65,7 @@ def test_get_or_create_creates_new_account(app):
     assert user.email == "yeni@example.com"
     assert user.referral_code  # ensure_referral_code çağrıldı
     # Yerel parola KULLANILAMAZ (rastgele) olmalı — klasik /login'den giriş yapamaz.
+    assert user.password_hash is None
     assert not user.check_password("")
 
 
@@ -126,50 +122,23 @@ def test_get_or_create_consumes_referral_for_new_user(app, make_user, monkeypatc
 # /auth/cognito/callback route — token alımı, hesap bağlama, hata eşlemesi
 # ---------------------------------------------------------------------------
 
-def _patch_callback(monkeypatch, *, token=None, raises=None):
-    """auth blueprint'teki Cognito kullanılabilirliğini ve oauth.oidc'yi sahtele."""
-    monkeypatch.setattr(auth_bp, "_cognito_available", lambda: True)
-
-    def authorize_access_token():
-        if raises is not None:
-            raise raises
-        return token
-
-    monkeypatch.setattr(
-        auth_bp, "oauth",
-        SimpleNamespace(oidc=SimpleNamespace(
-            authorize_access_token=authorize_access_token)))
-
-
 def test_callback_404_when_cognito_unavailable(client):
-    # Varsayılan: COGNITO_ENABLED False → uç kapalı.
     assert client.get("/auth/cognito/callback").status_code == 404
 
 
-def test_callback_token_exchange_failure_redirects_with_err_cognito(client, monkeypatch):
-    _patch_callback(monkeypatch, raises=RuntimeError("state mismatch"))
-    resp = client.get("/auth/cognito/callback")
-    assert resp.status_code == 302
-    assert "err=cognito" in resp.headers["Location"]
+def test_hosted_ui_login_route_404_even_when_cognito_enabled(client, monkeypatch):
+    monkeypatch.setattr(auth_bp, "COGNITO_ENABLED", True)
+    assert client.get("/login/cognito").status_code == 404
 
 
-def test_callback_link_error_redirects_with_err_link(client, make_user, monkeypatch):
-    # Doğrulanmamış e-posta zaten kayıtlı → get_or_create_user CognitoLinkError atar.
-    make_user(username="mevcut", email="mevcut@example.com")
-    _patch_callback(monkeypatch, token={"userinfo": {
-        "sub": "x", "email": "mevcut@example.com", "email_verified": False}})
-    resp = client.get("/auth/cognito/callback")
-    assert resp.status_code == 302
-    assert "err=link" in resp.headers["Location"]
+def test_callback_404_even_when_cognito_enabled(client, monkeypatch):
+    monkeypatch.setattr(auth_bp, "COGNITO_ENABLED", True)
+    assert client.get("/auth/cognito/callback").status_code == 404
 
 
-def test_callback_success_logs_in_and_creates_user(client, monkeypatch):
-    _patch_callback(monkeypatch, token={"userinfo": {
-        "sub": "cog-ok", "email": "girdi@example.com", "email_verified": True}})
-    resp = client.get("/auth/cognito/callback")
-    assert resp.status_code == 302
-    assert "err=" not in resp.headers["Location"]  # hata yok → home'a yönlendirir
-    user = User.query.filter_by(email="girdi@example.com").one()
-    assert user.cognito_sub == "cog-ok"
-    # Oturum kuruldu: korumalı bir sayfa artık login'e yönlendirmez.
-    assert client.get("/leaderboard").status_code == 200
+def test_login_and_register_do_not_render_hosted_ui_links(client, monkeypatch):
+    monkeypatch.setattr(auth_bp, "COGNITO_ENABLED", True)
+    login_html = client.get("/login").get_data(as_text=True)
+    register_html = client.get("/register").get_data(as_text=True)
+    assert "/login/cognito" not in login_html
+    assert "/login/cognito" not in register_html

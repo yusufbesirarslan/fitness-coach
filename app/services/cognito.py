@@ -10,8 +10,6 @@ import logging
 import re
 import secrets
 
-from werkzeug.security import generate_password_hash
-
 from app.extensions import db
 from app.models import User
 from app.services.referral import consume_referral, ensure_referral_code
@@ -94,7 +92,6 @@ def get_or_create_user(userinfo, ref_code=""):
         email=email,
         cognito_sub=sub or None,
     )
-    user.password_hash = generate_password_hash(secrets.token_urlsafe(32))
     ensure_referral_code(user)
     db.session.add(user)
     db.session.commit()
