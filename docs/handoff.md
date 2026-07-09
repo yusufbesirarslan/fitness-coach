@@ -54,3 +54,31 @@ Scope: Landing, login, register, email verification, onboarding, frontend auth h
 ## Suggested Next Phase
 
 Implement backend-compatible password recovery and add browser-based visual/accessibility regression coverage for the auth and onboarding flows.
+
+## Sprint 1 - AWS Cognito Foundation
+
+Date: 2026-07-09
+Scope: Native Cognito registration, email verification, resend code, and local DB
+compatibility while preserving legacy login.
+
+Completed:
+
+- Added `app/services/cognito_service.py` as the native Cognito boundary for
+  SignUp, ConfirmSignUp, ResendConfirmationCode, auth, client creation, and
+  friendly exception mapping.
+- Updated `/register`, `/verify`, and `/verify/resend` to call the service
+  boundary instead of the older route-level native helper import.
+- Disabled Cognito Hosted UI/Authlib OAuth for this sprint; `/login/cognito`
+  and `/auth/cognito/callback` return 404 and auth templates do not render
+  Cognito redirect links.
+- Changed Cognito-created local users to store `password_hash = NULL`; legacy
+  users keep their existing hashes and old local authentication remains intact.
+- Added Alembic migration `d6e7f8a9b0c1` to drop the PostgreSQL NOT NULL
+  constraint on `user.password_hash`.
+- Updated `.env.example` with the Sprint 1 Cognito User Pool and App Client IDs.
+- Added `docs/cognito.md` with architecture, registration, and verification
+  flow details.
+
+Verification:
+
+- `python -m pytest tests/test_cognito.py tests/test_cognito_idp.py tests/test_auth.py tests/test_auth_phase6_ui.py -v` - 63 passed.

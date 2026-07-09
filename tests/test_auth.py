@@ -197,19 +197,19 @@ def test_logout_address_bar_navigation_signs_out(client, make_user):
 
 # ---------------------------------------------------------------------------
 # Native Amazon Cognito kayıt/doğrulama/giriş akışı (COGNITO_ENABLED True iken).
-# Cognito ağ çağrıları (cognito_idp) tamamen mock'lanır — hermetik kalır.
+# Cognito ağ çağrıları (cognito_service) tamamen mock'lanır — hermetik kalır.
 # ---------------------------------------------------------------------------
 
 import pytest
 
 from app.blueprints import auth as auth_bp
-from app.services import cognito_idp
-from app.services.cognito_idp import CognitoIdpError
+from app.services import cognito_service
+from app.services.cognito_service import CognitoServiceError
 
 
 @pytest.fixture
 def cognito_native(monkeypatch):
-    """COGNITO_ENABLED'ı aç ve cognito_idp çağrılarını yakala. Yakalanan
+    """COGNITO_ENABLED'ı aç ve cognito_service çağrılarını yakala. Yakalanan
     argümanları (özellikle Cognito'ya geçen `name`) sınama için kaydeder."""
     monkeypatch.setattr(auth_bp, "COGNITO_ENABLED", True)
     captured = {"confirmed": set()}
@@ -225,13 +225,13 @@ def cognito_native(monkeypatch):
     def fake_initiate(username, password):
         # Doğrulanmamışsa (henüz confirm edilmedi) Cognito gibi davran.
         if username not in captured["confirmed"]:
-            raise CognitoIdpError("E-postan henüz doğrulanmadı.", "UserNotConfirmedException")
+            raise CognitoServiceError("E-postan henüz doğrulanmadı.", "UserNotConfirmedException")
         return {"sub": f"sub-{username}", "email": f"{username}@example.com",
                 "email_verified": True, "name": username}
 
-    monkeypatch.setattr(cognito_idp, "sign_up", fake_sign_up)
-    monkeypatch.setattr(cognito_idp, "confirm_sign_up", fake_confirm)
-    monkeypatch.setattr(cognito_idp, "initiate_auth", fake_initiate)
+    monkeypatch.setattr(cognito_service, "sign_up", fake_sign_up)
+    monkeypatch.setattr(cognito_service, "confirm_sign_up", fake_confirm)
+    monkeypatch.setattr(cognito_service, "initiate_auth", fake_initiate)
     return captured
 
 
@@ -247,6 +247,7 @@ def test_cognito_register_passes_name_and_requires_verification(client, cognito_
     # Yerel kayıt cognito_sub ile oluşmalı; parola hash'i kullanılamaz olmalı.
     user = User.query.filter_by(username="cognitouser").one()
     assert user.cognito_sub == "sub-cognitouser"
+    assert user.password_hash is None
     assert not user.check_password("Sifre123")
 
 
@@ -274,7 +275,7 @@ def test_cognito_verify_then_login_succeeds(client, cognito_native):
 def test_cognito_verify_resend(client, cognito_native, monkeypatch):
     _register(client, "resendme")
     sent = {}
-    monkeypatch.setattr(cognito_idp, "resend_code", lambda username: sent.update(u=username))
+    monkeypatch.setattr(cognito_service, "resend_code", lambda username: sent.update(u=username))
     response = client.post("/verify/resend", json={"username": "resendme"})
     assert response.status_code == 200
     assert sent["u"] == "resendme"
@@ -311,8 +312,8 @@ def test_register_rate_limit_returns_429_json(client):
 
 def test_cognito_register_idp_error_returns_400(client, cognito_native, monkeypatch):
     def boom(username, password, email, name):
-        raise CognitoIdpError("Bu kullanıcı adı zaten kayıtlı.", "UsernameExistsException")
-    monkeypatch.setattr(cognito_idp, "sign_up", boom)
+        raise CognitoServiceError("Bu kullanıcı adı zaten kayıtlı.", "UsernameExistsException")
+    monkeypatch.setattr(cognito_service, "sign_up", boom)
     response = _register(client, "dupuser")
     assert response.status_code == 400
     assert "zaten kayıtlı" in response.get_json()["error"]
@@ -332,7 +333,7 @@ def test_cognito_register_local_commit_failure_returns_clean_error(client, cogni
         db.session.add(User(username="araya_giren", email=email, password_hash="x"))
         db.session.commit()
         return f"sub-{username}"
-    monkeypatch.setattr(cognito_idp, "sign_up", racing_sign_up)
+    monkeypatch.setattr(cognito_service, "sign_up", racing_sign_up)
 
     resp = _register(client, "yarisan", email="dup@example.com")
     assert resp.status_code != 500
@@ -344,7 +345,7 @@ def test_cognito_login_sub_mismatch_rejected(client, cognito_native, monkeypatch
     _register(client, "verifyme")
     client.post("/verify", json={"username": "verifyme", "code": "123456"})
     # Cognito kimlik bütünlüğü kapısı: dönen sub yerel kayıtla EŞLEŞMEZSE reddet.
-    monkeypatch.setattr(cognito_idp, "initiate_auth",
+    monkeypatch.setattr(cognito_service, "initiate_auth",
                         lambda u, p: {"sub": "BASKA-SUB", "email": f"{u}@example.com"})
     response = client.post("/login", json={"username": "verifyme", "password": "Sifre123"})
     assert response.status_code == 401
@@ -354,8 +355,8 @@ def test_cognito_login_sub_mismatch_rejected(client, cognito_native, monkeypatch
 def test_cognito_login_not_authorized_returns_401(client, cognito_native, monkeypatch):
     _register(client, "verifyme")
     client.post("/verify", json={"username": "verifyme", "code": "123456"})
-    monkeypatch.setattr(cognito_idp, "initiate_auth", lambda u, p: (_ for _ in ()).throw(
-        CognitoIdpError("Kullanıcı adı veya şifre hatalı.", "NotAuthorizedException")))
+    monkeypatch.setattr(cognito_service, "initiate_auth", lambda u, p: (_ for _ in ()).throw(
+        CognitoServiceError("Kullanıcı adı veya şifre hatalı.", "NotAuthorizedException")))
     response = client.post("/login", json={"username": "verifyme", "password": "yanlis"})
     assert response.status_code == 401
     assert response.get_json().get("needs_verification") is None  # doğrulama değil, yetki hatası
