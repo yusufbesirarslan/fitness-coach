@@ -42,7 +42,7 @@
 
 /* ── Menu / dish result block (rendered in chat stream) ── */
 .cw-menu{display:flex;flex-direction:column;gap:8px}
-.cw-menu-rem{display:flex;gap:8px;flex-wrap:wrap;font-family:var(--font-body);font-size:10.5px;color:var(--color-text-4);margin-bottom:2px}
+.cw-menu-rem{display:flex;gap:8px;flex-wrap:wrap;font-family:var(--font-body);font-size:10.5px;color:var(--color-text-3);margin-bottom:2px}
 .cw-menu-rem b{color:var(--color-primary);font-weight:600}
 .cw-menu-coach{background:linear-gradient(145deg,var(--color-chat-card-grad-1),var(--color-chat-card-grad-2));border:1px solid var(--color-primary-a12);border-radius:12px;padding:14px}
 .cw-menu-coach-title{font-family:var(--font-body);font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--color-primary);display:flex;align-items:center;gap:8px;margin-bottom:10px}
@@ -61,10 +61,10 @@
 .cw-dish-score.low{background:var(--color-danger-soft);color:var(--color-danger-light)}
 .cw-dish-reason{font-size:11.5px;color:var(--color-text-3);line-height:1.45;margin-bottom:8px}
 .cw-dish-macros{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px}
-.cw-dish-macro{font-size:11px;color:var(--color-text-4);font-weight:500}
+.cw-dish-macro{font-size:11px;color:var(--color-text-3);font-weight:500}
 .cw-dish-macro span{color:var(--color-text-2);font-weight:600}
 .cw-dish-warns{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
-.cw-dish-warn{font-size:10px;font-weight:600;background:var(--color-danger-soft);border:1px solid var(--color-danger-soft);color:var(--color-danger-light);padding:3px 8px;border-radius:4px}
+.cw-dish-warn{font-size:10px;font-weight:600;background:var(--color-danger-soft);border:1px solid rgba(var(--color-danger-rgb),0.2);color:var(--color-danger-light);padding:3px 8px;border-radius:4px}
 .cw-dish-add{font-size:12px;font-weight:600;color:var(--color-primary);background:var(--color-primary-a06);border:1px solid var(--color-primary-a12);border-radius:6px;padding:7px 12px;cursor:pointer;font-family:var(--font-body);transition:all .2s}
 .cw-dish-add:hover{background:var(--color-primary-a12);border-color:var(--color-primary-glow)}
 .cw-dish-add:disabled{opacity:.4;cursor:default}
