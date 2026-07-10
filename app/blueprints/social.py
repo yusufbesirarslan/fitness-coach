@@ -6,7 +6,12 @@ from flask_login import current_user, login_required
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
 
-from app.config import SEARCH_RATELIMIT
+from app.config import (
+    CHAT_SEND_RATELIMIT,
+    FRIEND_REQUEST_RATELIMIT,
+    SEARCH_RATELIMIT,
+    SUGGESTION_RATELIMIT,
+)
 from app.extensions import _user_or_ip_key, db, limiter
 from app.i18n import t
 from app.models import Friendship, MealLog, Message, PumpCheck, PumpCheckComment, PumpCheckLike, User
@@ -287,6 +292,7 @@ def friends_search():
 
 @bp.route("/friend/request/<username>", methods=["POST"])
 @login_required
+@limiter.limit(FRIEND_REQUEST_RATELIMIT, key_func=_user_or_ip_key)
 def friend_request(username):
     target = User.query.filter_by(username=username).first()
     if not target:
@@ -452,6 +458,7 @@ def chat_mark_read(username):
 
 @bp.route("/chat/<username>/send", methods=["POST"])
 @login_required
+@limiter.limit(CHAT_SEND_RATELIMIT, key_func=_user_or_ip_key)
 def chat_send(username):
     other = User.query.filter_by(username=username).first_or_404()
     if not are_friends(current_user.id, other.id):
@@ -483,6 +490,7 @@ def chat_send(username):
 
 @bp.route("/suggest/<username>", methods=["POST"])
 @login_required
+@limiter.limit(SUGGESTION_RATELIMIT, key_func=_user_or_ip_key)
 def send_suggestion(username):
     other = User.query.filter_by(username=username).first_or_404()
     if not are_friends(current_user.id, other.id):

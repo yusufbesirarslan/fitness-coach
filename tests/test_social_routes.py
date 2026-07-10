@@ -77,6 +77,22 @@ def test_friends_search_rate_limited(client, auth_user):
         limiter.reset()
 
 
+def test_friend_requests_are_rate_limited_per_user(client, auth_user):
+    from app.extensions import limiter
+
+    limiter.reset()
+    limiter.enabled = True
+    try:
+        for _ in range(20):
+            assert client.post("/friend/request/bulunamadi").status_code == 404
+        blocked = client.post("/friend/request/bulunamadi")
+        assert blocked.status_code == 429
+        assert "Çok fazla deneme" in blocked.get_json()["error"]
+    finally:
+        limiter.enabled = False
+        limiter.reset()
+
+
 # ---------------------------------------------------------------------------
 # Arkadaşlık isteği yaşam döngüsü
 # ---------------------------------------------------------------------------
