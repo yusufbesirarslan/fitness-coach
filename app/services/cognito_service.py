@@ -6,7 +6,10 @@ API'sine gider:
   - sign_up               → kullanıcı oluşturur, e-postaya DOĞRULAMA KODU gönderir
   - confirm_sign_up       → kullanıcının girdiği kodu doğrular
   - resend_code           → kodu yeniden gönderir
-  - initiate_auth         → USER_PASSWORD_AUTH ile giriş, ID token claim'leri döner
+  - authenticate          → USER_PASSWORD_AUTH ile giriş; ham token'lar + claim'ler
+  - refresh_tokens        → REFRESH_TOKEN_AUTH ile access token'ı yeniler
+  - global_sign_out       → kullanıcının TÜM refresh token'larını iptal eder (logout)
+  - initiate_auth         → geriye dönük uyum shim'i (yalnızca claim'leri döner)
 
 Bu uç noktalar İMZASIZ (public app client) çağrılır — AWS IAM kimliği GEREKMEZ;
 app client'ın bir secret'i varsa SECRET_HASH ile kimliklenir. Bu yüzden boto3
@@ -236,9 +239,11 @@ CognitoIdpError = CognitoServiceError
 
 
 def _decode_claims(id_token):
-    """ID token payload'ını çöz. İmza DOĞRULANMAZ — token doğrudan bizim
-    initiate_auth çağrımıza Cognito'dan TLS üzerinden geldi (kullanıcıdan gelen
-    bir token DEĞİL), kaynağı zaten güvenilir. Yalnızca kimlik claim'lerini okuruz."""
+    """ID token payload'ını çöz. İmza burada DOĞRULANMAZ — token doğrudan bizim
+    cognito-idp InitiateAuth çağrımıza Cognito'dan TLS üzerinden geldi (kullanıcıdan
+    gelen bir token DEĞİL), kaynağı zaten güvenilir; yalnızca kimlik claim'lerini
+    okuruz. NOT: giriş yolunda (auth.login) id token AYRICA JWKS ile kriptografik
+    olarak doğrulanır (cognito_jwt.validate_token) — bu çözüm o kapının yerine geçmez."""
     try:
         payload_b64 = id_token.split(".")[1]
         payload_b64 += "=" * (-len(payload_b64) % 4)  # base64url padding
