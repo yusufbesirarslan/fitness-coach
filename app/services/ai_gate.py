@@ -15,17 +15,23 @@ worker/queue'ya taşımaktır.
 
 Env ayarları:
 - AI_MAX_CONCURRENCY (vars. 5): aynı anda AI route'u işleyen thread tavanı.
-- AI_GATE_WAIT_SECONDS (vars. 10): slot için en fazla bekleme; dolarsa 503 +
-  Retry-After (kısa bekleme burst'leri yumuşatır, thread'i uzun süre tutmaz).
+- AI_GATE_WAIT_SECONDS (vars. 0): route slotu doluysa beklemeden 503 + Retry-After.
+- AI_MODEL_MAX_CONCURRENCY (vars. AI_MAX_CONCURRENCY): gerçek model çağrılarının
+  ayrı süreç-içi tavanı; route içindeki paralel fan-out'u da sınırlar.
 """
 import os
 import threading
+from contextlib import contextmanager
 from functools import wraps
 
 from flask import current_app, jsonify
 
 AI_MAX_CONCURRENCY = max(1, int(os.getenv("AI_MAX_CONCURRENCY", "5")))
-AI_GATE_WAIT_SECONDS = float(os.getenv("AI_GATE_WAIT_SECONDS", "10"))
+AI_GATE_WAIT_SECONDS = float(os.getenv("AI_GATE_WAIT_SECONDS", "0"))
+AI_MODEL_MAX_CONCURRENCY = max(
+    1,
+    int(os.getenv("AI_MODEL_MAX_CONCURRENCY", str(AI_MAX_CONCURRENCY))),
+)
 
 # INF-5: Menü scrape'i (proxy_scan_menu) AĞ-bağımlıdır; model çağrısı YAPMAZ
 # (çıkarım /api/menu/analyze'da olur) ama onlarca saniyelik fetch + alt-sayfa
@@ -37,7 +43,18 @@ SCRAPE_MAX_CONCURRENCY = max(1, int(os.getenv("SCRAPE_MAX_CONCURRENCY", "3")))
 SCRAPE_GATE_WAIT_SECONDS = float(os.getenv("SCRAPE_GATE_WAIT_SECONDS", "10"))
 
 _ai_slots = threading.BoundedSemaphore(AI_MAX_CONCURRENCY)
+_model_slots = threading.BoundedSemaphore(AI_MODEL_MAX_CONCURRENCY)
 _scrape_slots = threading.BoundedSemaphore(SCRAPE_MAX_CONCURRENCY)
+
+
+@contextmanager
+def model_concurrency_slot():
+    """Bound one complete provider/fallback sequence independently of routes."""
+    _model_slots.acquire()
+    try:
+        yield
+    finally:
+        _model_slots.release()
 
 
 def _concurrency_gate(fn, semaphore, wait_seconds, max_concurrency, label):
