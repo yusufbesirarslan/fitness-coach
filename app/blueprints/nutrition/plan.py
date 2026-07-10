@@ -6,7 +6,8 @@ ve davranış AYNI (aynı `nutrition` blueprint'i, aynı endpoint adları). Orta
 """
 import json
 from flask import current_app, jsonify, render_template, request
-from flask_login import current_user, login_required
+from flask_login import current_user
+from app.auth_middleware import require_auth
 
 from app.blueprints.nutrition import bp
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
@@ -20,7 +21,7 @@ from app.timeutil import display_dt
 
 
 @bp.route("/nutrition-plan/save", methods=["POST"])
-@login_required
+@require_auth
 def save_nutrition_plan():
     data = request.get_json(silent=True) or {}
     plan = data.get("plan")
@@ -44,7 +45,7 @@ def save_nutrition_plan():
 
 
 @bp.route("/nutrition-plan/active")
-@login_required
+@require_auth
 def get_active_nutrition_plan():
     plan = NutritionPlan.query.filter_by(user_id=current_user.id)\
         .order_by(NutritionPlan.created_at.desc())\
@@ -62,13 +63,13 @@ def get_active_nutrition_plan():
 
 
 @bp.route("/nutrition")
-@login_required
+@require_auth
 def nutrition():
     return render_template("nutrition.html", username=current_user.username, profile_picture=current_user.avatar_src)
 
 
 @bp.route("/nutrition-plan", methods=["POST"])
-@login_required
+@require_auth
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 @limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # Sonnet üretimi: daha sıkı tavan
 @premium_ai_plan_gate("nutrition")  # non-premium: haftada 1 üretim

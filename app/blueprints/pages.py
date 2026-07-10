@@ -6,7 +6,8 @@
 - GET /referral   — panodaki davet kartı için JSON (kod + bağlantı + davet sayısı)
 """
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
-from flask_login import current_user, login_required
+from flask_login import current_user
+from app.auth_middleware import require_auth
 
 from app.i18n import t
 from app.models import User
@@ -55,7 +56,7 @@ def invite(code):
 
 
 @bp.route("/premium")
-@login_required
+@require_auth
 def premium():
     return render_template("premium.html", freemium=_freemium(),
         username=current_user.username,
@@ -64,7 +65,7 @@ def premium():
 
 
 @bp.route("/referral")
-@login_required
+@require_auth
 def referral_data():
     # Kod kayıt sırasında veya boot backfill'inde atanır. Bu GET route'u salt-okunur
     # kalmalı; eksik kod varsa deploy/backfill sorunu görünür olsun.
