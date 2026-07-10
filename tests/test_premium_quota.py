@@ -189,7 +189,8 @@ def test_failed_generation_refunds_pre_call_reservation(
     monkeypatch.setattr(training_bp, "_heavy_chat", invalid_plan)
 
     assert client.post("/training-plan", json={}).status_code == 500
-    assert used_during_call == [1]
+    # The initial generation and its one retry share the same reservation.
+    assert used_during_call == [1, 1]
     assert premium.remaining_ai_plans(training_session, "training") == 1
 
 
