@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from cryptography.fernet import InvalidToken
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
@@ -104,8 +105,16 @@ def get_wearable_connection(user_id, provider):
     ).first()
     if row is None:
         return None
+    try:
+        access_token = decrypt_token(row.access_token_encrypted)
+        refresh_token = decrypt_token(row.refresh_token_encrypted)
+    except InvalidToken:
+        row.status = "reauth_required"
+        row.updated_at = datetime.utcnow()
+        db.session.commit()
+        return None
     return WearableConnectionView(
         row=row,
-        access_token=decrypt_token(row.access_token_encrypted),
-        refresh_token=decrypt_token(row.refresh_token_encrypted),
+        access_token=access_token,
+        refresh_token=refresh_token,
     )

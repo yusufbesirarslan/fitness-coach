@@ -6,6 +6,8 @@ dashboard activity fallback.
 """
 from datetime import datetime, timedelta
 
+import pytest
+
 from app.extensions import db
 from app.timeutil import app_today
 
@@ -62,6 +64,42 @@ def test_token_storage_encrypts_and_upserts(app, auth_user):
     loaded = get_wearable_connection(auth_user.id, "whoop")
     assert loaded.access_token == "access-2"
     assert loaded.refresh_token == "refresh-1"
+
+
+@pytest.mark.parametrize("corrupt_field", ["access_token_encrypted", "refresh_token_encrypted"])
+def test_corrupt_wearable_token_requires_reauthentication(app, auth_user, corrupt_field):
+    from app.models import UserWearableConnection
+    from app.services.wearables.tokens import get_wearable_connection, save_wearable_tokens
+
+    conn = save_wearable_tokens(auth_user.id, "whoop", {
+        "access_token": "access-1",
+        "refresh_token": "refresh-1",
+    })
+    setattr(conn, corrupt_field, "not-valid-fernet-ciphertext")
+    db.session.commit()
+
+    assert get_wearable_connection(auth_user.id, "whoop") is None
+
+    db.session.expire_all()
+    row = db.session.get(UserWearableConnection, conn.id)
+    assert row.status == "reauth_required"
+
+
+def test_wearable_status_exposes_reauthentication_state(client, auth_user):
+    from app.services.wearables.tokens import get_wearable_connection, save_wearable_tokens
+
+    conn = save_wearable_tokens(auth_user.id, "whoop", {
+        "access_token": "access-1",
+        "refresh_token": "refresh-1",
+    })
+    conn.access_token_encrypted = "not-valid-fernet-ciphertext"
+    db.session.commit()
+    assert get_wearable_connection(auth_user.id, "whoop") is None
+
+    payload = client.get("/api/wearables/status").get_json()
+
+    assert payload["connections"][0]["status"] == "reauth_required"
+    assert payload["connections"][0]["connected"] is False
 
 
 def test_whoop_refreshes_expiring_token_and_retries_401(app, auth_user, monkeypatch):

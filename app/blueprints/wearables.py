@@ -67,6 +67,7 @@ def wearable_status():
     return jsonify({
         "connections": [{
             "provider": row.provider,
+            "status": row.status,
             "connected": row.status == "connected",
             "token_expiry": row.token_expiry.isoformat() if row.token_expiry else None,
             "last_sync_at": row.last_sync_at.isoformat() if row.last_sync_at else None,
