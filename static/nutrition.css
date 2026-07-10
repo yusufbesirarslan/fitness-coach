@@ -105,8 +105,13 @@
 
 /* ── 3 · LOG FAB + BOTTOM SHEET ───────────────────────────────────── */
 .log-fab {
-  position: fixed; right: var(--space-4);
-  bottom: calc(var(--action-bar-h, 64px) + var(--space-4)); z-index: var(--z-fab);
+  /* Coach sohbet FAB'ı (#cw-fab, coach_widget.css) da alt-sağda durur; ikisi
+     üst üste binmesin diye log FAB'ı onun ÜSTÜNE istifle. Coach FAB: bottom
+     = action-bar-h + 15px, yükseklik 56px, right 20px → log FAB bottom = onun
+     tepesi (action-bar-h + 71px) + 14px boşluk. z-fab (200) < coach penceresi
+     (9998), yani sohbet açılınca pencere log FAB'ı temizce kapatır. */
+  position: fixed; right: 20px;
+  bottom: calc(var(--action-bar-h, 68px) + 85px); z-index: var(--z-fab);
   width: var(--fab-size, 56px); height: var(--fab-size, 56px);
   border-radius: var(--radius-full); border: none; cursor: pointer;
   background: var(--color-primary); color: var(--color-on-primary);
@@ -118,7 +123,8 @@
 .log-fab svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 2.4; stroke-linecap: round; }
 .log-fab:hover  { box-shadow: var(--shadow-primary, var(--elevation-3)); transform: translateY(-1px); }
 .log-fab:active { transform: scale(0.94); }
-@media (min-width: 1024px) { .log-fab { bottom: var(--space-6); } }
+/* ≥1024px: coach FAB bottom 36px, right 36px → log FAB onun üstünde, aynı rayda. */
+@media (min-width: 1024px) { .log-fab { bottom: 106px; right: 36px; } }
 
 .log-sheet-grid { display: flex; flex-direction: column; gap: var(--space-2); }
 .log-sheet-opt {

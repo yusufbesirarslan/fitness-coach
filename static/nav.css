@@ -48,6 +48,58 @@
 .header-avatar:hover,
 .header-avatar:focus-visible { box-shadow: 0 0 0 2px var(--color-primary-glow); }
 
+/* ── HAMBURGER (mobil) + NAV DRAWER ──────────────────── */
+/* ☰ butonu yalnızca <1024px'te görünür (masaüstünde üst nav sekmeleri var).
+   İkincil özellikler (Profil hub'ıyla aynı) her sayfadan erişilebilir. */
+.header-menu-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; flex-shrink: 0;
+  border: none; background: none; color: var(--color-text-1); cursor: pointer;
+  border-radius: var(--radius-sm); -webkit-tap-highlight-color: transparent;
+}
+.header-menu-btn svg { width: 24px; height: 24px; stroke: currentColor; fill: none;
+  stroke-width: 2; stroke-linecap: round; }
+.header-menu-btn:hover { background: var(--overlay-3); }
+
+/* Drawer: soldan açılan tam-ekran katman. z-index coach widget'ının (9998)
+   ÜSTÜNDE olmalı, yoksa float FAB backdrop'tan sızar. */
+.nav-drawer { position: fixed; inset: 0; z-index: 10000; display: flex; }
+.nav-drawer[hidden] { display: none; }
+.nav-drawer-backdrop { position: absolute; inset: 0; border: none;
+  background: rgba(var(--black-rgb), 0.6); cursor: pointer; }
+.nav-drawer-panel {
+  position: relative; z-index: 1; width: min(82vw, 320px); height: 100%;
+  background: var(--color-surface-2); border-right: var(--border-w-1) solid var(--color-border-1);
+  display: flex; flex-direction: column; gap: var(--space-1);
+  padding: var(--space-4); overflow-y: auto;
+  animation: nav-drawer-in var(--duration-base) var(--ease-out-expo);
+}
+@keyframes nav-drawer-in { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+.nav-drawer-head { display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: var(--space-2); }
+.nav-drawer-title { font-size: var(--text-xs); font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--color-text-3); }
+.nav-drawer-close { border: none; background: none; color: var(--color-text-3);
+  font-size: var(--text-2xl); line-height: var(--leading-none); cursor: pointer;
+  width: 40px; height: 40px; border-radius: var(--radius-sm); }
+.nav-drawer-close:hover { color: var(--color-text-1); background: var(--overlay-3); }
+.nav-drawer-link {
+  display: flex; align-items: center; gap: var(--space-3);
+  min-height: 48px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md);
+  color: var(--color-text-1); text-decoration: none; font-weight: var(--weight-semibold);
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-drawer-link:hover { background: var(--overlay-3); }
+.nav-drawer-link svg { width: 20px; height: 20px; stroke: currentColor; fill: none;
+  stroke-width: 1.8; flex-shrink: 0; }
+.nav-drawer-link-premium { color: var(--color-primary); }
+
+/* ≥1024px: hem ☰ hem drawer gizli — üst nav sekmeleri geçerli. */
+@media (min-width: 1024px) {
+  .header-menu-btn { display: none; }
+  .nav-drawer { display: none; }
+}
+
 /* ── 2. DESKTOP HEADER TABS (≥1024px) ────────────────── */
 .header-nav { display: none; align-items: center; gap: var(--space-1); margin-left: var(--space-6); }
 .hn-link {
