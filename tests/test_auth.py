@@ -272,6 +272,55 @@ def test_cognito_verify_then_login_succeeds(client, cognito_native):
     assert client.get("/supplements").status_code == 200  # oturum kuruldu
 
 
+def test_cognito_referral_reward_waits_for_verification(client, cognito_native, make_user):
+    from app.extensions import db
+    from app.services.referral import REFERRAL_REWARD_XP, ensure_referral_code
+
+    referrer = make_user("cognitoref", rank_points=0)
+    ensure_referral_code(referrer)
+    db.session.commit()
+
+    registered = client.post("/register", json={
+        "username": "cognitoinvited",
+        "email": "cognitoinvited@example.com",
+        "password": "Sifre123",
+        "ref": referrer.referral_code.lower(),
+    })
+    assert registered.status_code == 200
+    assert registered.get_json()["referred"] is False
+
+    invited = User.query.filter_by(username="cognitoinvited").one()
+    db.session.refresh(referrer)
+    assert invited.referred_by_id is None
+    assert invited.rank_points == 0
+    assert referrer.rank_points == 0
+    assert invited.user_metadata["pending_referral_code"] == referrer.referral_code.lower()
+
+    confirmed = client.post(
+        "/verify", json={"username": "cognitoinvited", "code": "123456"}
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.get_json()["referred"] is True
+
+    db.session.expire_all()
+    invited = User.query.filter_by(username="cognitoinvited").one()
+    referrer = User.query.filter_by(username="cognitoref").one()
+    assert invited.referred_by_id == referrer.id
+    assert invited.rank_points == REFERRAL_REWARD_XP
+    assert referrer.rank_points == REFERRAL_REWARD_XP
+    assert "pending_referral_code" not in (invited.user_metadata or {})
+
+    # Idempotency: a repeated successful confirmation cannot award XP again.
+    confirmed_again = client.post(
+        "/verify", json={"username": "cognitoinvited", "code": "123456"}
+    )
+    assert confirmed_again.status_code == 200
+    assert confirmed_again.get_json()["referred"] is False
+    db.session.expire_all()
+    assert User.query.filter_by(username="cognitoinvited").one().rank_points == REFERRAL_REWARD_XP
+    assert User.query.filter_by(username="cognitoref").one().rank_points == REFERRAL_REWARD_XP
+
+
 def test_cognito_verify_resend(client, cognito_native, monkeypatch):
     _register(client, "resendme")
     sent = {}
