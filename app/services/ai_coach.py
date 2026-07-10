@@ -15,6 +15,7 @@ from app.models import (WORKOUT_COMPLETION_MARKER, DailyActivity, MealLog,
                         PendingAction, PumpCheck, User, UserSession, WaterLog,
                         WeeklyCheckIn, WeeklyLog, WorkoutLog)
 from app.services.ai import _bedrock_validate_image, _heavy_chat, anthropic as _anthropic
+from app.services.ai_gate import model_concurrency_slot
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
 from app.services.fatsecret import _food_search_fatsecret, _food_search_static
 from app.services.gamification import _claim_quest, award_xp, log_activity
@@ -1231,14 +1232,15 @@ def _run_coach_conversation_openai(user_id, question, context, history, language
     final_text = ""
     for _ in range(_COACH_TOOL_LOOP_CAP):
         try:
-            resp = openai_client.chat.completions.create(
-                model=OPENAI_MODEL,
-                messages=messages,
-                tools=COACH_TOOLS,
-                tool_choice="auto",
-                max_tokens=700,
-                temperature=0.6,
-            )
+            with model_concurrency_slot():
+                resp = openai_client.chat.completions.create(
+                    model=OPENAI_MODEL,
+                    messages=messages,
+                    tools=COACH_TOOLS,
+                    tool_choice="auto",
+                    max_tokens=700,
+                    temperature=0.6,
+                )
         except Exception as e:
             current_app.logger.warning("[COACH] OpenAI çağrısı başarısız: %s", type(e).__name__)
             return _COACH_FALLBACKS[_coach_lang(language)]["error"]
@@ -1334,13 +1336,14 @@ def _run_coach_conversation_bedrock(user_id, question, context, history, languag
         # tools_ran mantığını uygula: hiç araç çalışmadıysa OpenAI'ya düş, çalıştıysa
         # sağlayıcı değiştirme (yan etkiyi tekrarlama) → yumuşak hata.
         try:
-            resp = bedrock_client.messages.create(
-                model=BEDROCK_MODEL,
-                max_tokens=max_tokens,
-                system=system,
-                messages=convo,
-                tools=tools,
-            )
+            with model_concurrency_slot():
+                resp = bedrock_client.messages.create(
+                    model=BEDROCK_MODEL,
+                    max_tokens=max_tokens,
+                    system=system,
+                    messages=convo,
+                    tools=tools,
+                )
 
             if getattr(resp, "stop_reason", None) != "tool_use":
                 text = _first_text_block(resp)
