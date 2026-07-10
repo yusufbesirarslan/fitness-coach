@@ -69,8 +69,7 @@ def rsa_key():
 def signer(rsa_key, monkeypatch):
     """Yerel anahtarın public tarafını sahte JWKS olarak enjekte et; token üretici döndür."""
     pub = JsonWebKey.import_key(
-        rsa_key.public_key().public_numbers().public_key()
-        if False else rsa_key.public_key(),
+        rsa_key.public_key(),
         {"kty": "RSA", "use": "sig", "kid": "test-kid", "alg": "RS256"},
     )
     keyset = JsonWebKey.import_key_set({"keys": [pub.as_dict()]})
