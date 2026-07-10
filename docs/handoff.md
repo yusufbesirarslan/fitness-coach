@@ -82,3 +82,70 @@ Completed:
 Verification:
 
 - `python -m pytest tests/test_cognito.py tests/test_cognito_idp.py tests/test_auth.py tests/test_auth_phase6_ui.py -v` - 63 passed.
+
+## Sprint 2 - Cognito Login & Sessions
+
+Date: 2026-07-10
+Scope: Native Cognito password login, cryptographic JWT validation, server-side
+encrypted session store, refresh-token lifecycle, GlobalSignOut logout, and a
+`@require_auth` middleware across every protected endpoint.
+
+Completed:
+
+- `app/services/cognito_jwt.py` - JWKS-based JWT validator
+  (`validate_token(token, expected_use)`): signature, `iss`, `aud`/`client_id`,
+  `exp`, `token_use`; single JWKS refetch on unknown kid (key rotation).
+- `app/services/cognito_service.py` - added `authenticate` (USER_PASSWORD_AUTH,
+  returns `{"tokens","claims"}`), `refresh_tokens` (REFRESH_TOKEN_AUTH), and
+  `global_sign_out`.
+- `app/models.py` - `CognitoSession` model (opaque `session_id`, Fernet-encrypted
+  access/refresh tokens, `access_token_exp`, unique `session_id` index,
+  FK→user ON DELETE CASCADE).
+- `app/services/session_store.py` - create/get/`current_access_token`/
+  `get_valid_access_token` (refresh-on-expiry within
+  `COGNITO_REFRESH_SKEW_SECONDS`)/touch/delete; `SessionInvalid` on dead refresh.
+- `app/auth_middleware.py` - `require_auth`: anonymous→`/login`, legacy user
+  (no `cognito_sub`) passthrough, Cognito user → validated access token or
+  session invalidation; validated claims on `g.cognito_claims`.
+- `app/blueprints/auth.py` - `/login` cognito branch now authenticates via
+  Cognito, JWKS-validates the id token, enforces `sub` match, and opens a
+  `CognitoSession`; `/logout` does best-effort GlobalSignOut + row delete.
+- Swapped `@login_required` → `@require_auth` on every protected endpoint across
+  14 blueprint files (`/logout` intentionally keeps `@login_required`).
+- Alembic migration `aa11bb22cc33` creates `cognito_session` (chained onto head
+  `d6e7f8a9b0c1`).
+- `.env.example` - documented `COGNITO_TOKEN_ENC_KEY` and
+  `COGNITO_REFRESH_SKEW_SECONDS`.
+- `docs/cognito.md` - added the Sprint 2 login/JWT/session/refresh/logout section.
+- Marked the legacy local-password path with `# TODO(Sprint 3)` in
+  `app/models.py` and `app/blueprints/auth.py`.
+
+Remaining technical debt:
+
+- Legacy local-password auth (`password_hash`, `User.check_password`, the
+  `/login` local branch) still present for users without a `cognito_sub`;
+  remove once all users are Cognito-backed (`# TODO(Sprint 3)` markers).
+- `app/services/cognito_idp.py` and `app/services/cognito.py` overlap with
+  `cognito_service.py` and should be consolidated.
+- Forgot-password / reset-password is still absent (Cognito
+  ForgotPassword/ConfirmForgotPassword not yet wired).
+
+Sprint 3 follow-ups:
+
+- Remove the `# TODO(Sprint 3)` legacy code paths after confirming no active
+  users depend on local-password login.
+
+Coordination note (migrations):
+
+- The `cognito_session` migration `aa11bb22cc33` chains onto the committed head
+  `d6e7f8a9b0c1`. An in-flight barcode migration `e7f8a9b0c1d2` (currently
+  untracked WIP) also chains off `d6e7f8a9b0c1`. If the barcode migration lands
+  on the mainline first, rebase `aa11bb22cc33`'s `down_revision` onto it to keep
+  a single linear Alembic chain (Alembic reports "Multiple heads" until then).
+
+Verification:
+
+- `python -m pytest tests/test_cognito_jwt.py tests/test_cognito_service_tokens.py tests/test_session_store.py tests/test_require_auth.py tests/test_cognito_auth.py tests/test_auth.py -v` - all green.
+- Full suite: 1150 passed; the only non-green items are pre-existing and
+  unrelated to Sprint 2 (a stale CSP-nonce template assertion, and db_init
+  "Multiple heads" errors caused solely by the untracked barcode WIP migration).

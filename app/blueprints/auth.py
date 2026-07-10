@@ -262,6 +262,8 @@ def login():
             response["quest_awarded"] = quest_result
         return jsonify(response)
 
+    # TODO(Sprint 3): remove legacy local-password login. Kept for users without a
+    # cognito_sub until migration completes; Cognito is the auth identity.
     # Always run one password hash comparison, whether or not the username
     # exists, so the response time can't reveal which usernames are registered.
     if user:

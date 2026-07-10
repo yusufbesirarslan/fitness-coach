@@ -20,6 +20,8 @@ class User(UserMixin, db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     username      = db.Column(db.String(80), unique=True, nullable=False)
     email         = db.Column(db.String(120), unique=True, nullable=False)
+    # TODO(Sprint 3): remove legacy local-password auth. Cognito (cognito_sub) is
+    # the auth identity; password_hash is retained only for backward compatibility.
     password_hash = db.Column(db.String(200), nullable=True)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -93,6 +95,7 @@ class User(UserMixin, db.Model):
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
+    # TODO(Sprint 3): remove — legacy local-password verification path.
     def check_password(self, password):
         if not self.password_hash:
             return False
