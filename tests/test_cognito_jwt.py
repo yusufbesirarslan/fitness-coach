@@ -104,3 +104,39 @@ def test_malformed_token_rejected(signer):
     with pytest.raises(TokenValidationError) as e:
         cognito_jwt.validate_token("not-a-jwt", "access")
     assert e.value.reason in ("malformed", "invalid_signature")
+
+
+def test_refetch_jwks_unavailable_reason_preserved(monkeypatch):
+    """İlk keyset imzayı doğrulayamaz (JoseError) → yeniden çekme tetiklenir. Yeniden
+    çekme (force=True) alt yapı hatasıyla başarısız olursa gerçek neden
+    (jwks_unavailable) invalid_signature ile ezilmemeli."""
+    # Token "shared-kid" ile imzalanır; ilk _load_jwks çağrısı (force=False) AYNI kid'i
+    # taşıyan ama FARKLI bir anahtarın public tarafını döner → kid bulunur, imza
+    # doğrulaması authlib.jose.errors.BadSignatureError (bir JoseError alt sınıfı)
+    # fırlatır ve retry dalını tetikler.
+    real_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    priv = JsonWebKey.import_key(real_key, {"kty": "RSA", "kid": "shared-kid", "alg": "RS256"})
+    header = {"alg": "RS256", "kid": "shared-kid"}
+    token = jose_jwt.encode(header, _claims("access"), priv).decode()
+
+    other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    other_pub = JsonWebKey.import_key(
+        other_key.public_key(),
+        {"kty": "RSA", "use": "sig", "kid": "shared-kid", "alg": "RS256"},
+    )
+    stale_keyset = JsonWebKey.import_key_set({"keys": [other_pub.as_dict()]})
+
+    calls = {"n": 0}
+
+    def fake_load_jwks(force=False):
+        calls["n"] += 1
+        if not force:
+            return stale_keyset
+        raise TokenValidationError("jwks_unavailable")
+
+    monkeypatch.setattr(cognito_jwt, "_load_jwks", fake_load_jwks)
+
+    with pytest.raises(TokenValidationError) as e:
+        cognito_jwt.validate_token(token, "access")
+    assert e.value.reason == "jwks_unavailable"
+    assert calls["n"] == 2

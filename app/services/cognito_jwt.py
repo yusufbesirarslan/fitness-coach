@@ -66,6 +66,8 @@ def validate_token(token, expected_use):
         try:
             claims = _JWT.decode(token, _load_jwks(force=True))
             claims.validate()
+        except TokenValidationError:
+            raise
         except ExpiredTokenError:
             raise TokenValidationError("expired")
         except Exception:
