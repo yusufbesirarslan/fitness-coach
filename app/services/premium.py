@@ -7,8 +7,8 @@ tutulur — Redis'ten bağımsız, yeniden başlatmaya dayanıklı ve ekstra tab
 gerektirmez.
 
 Üretim pahalı AI çağrısıdır; bu yüzden kapı ÜRETİM uçlarına (/training-plan,
-/nutrition-plan) konur, kaydetme uçlarına değil. Kota yalnızca BAŞARILI üretimde
-(HTTP 200) artırılır → başarısız denemeler hakkı yakmaz.
+/nutrition-plan) konur, kaydetme uçlarına değil. Kota çağrıdan önce atomik olarak
+rezerve edilir; başarısız denemelerde iade edilir ve hak yakılmaz.
 """
 import os
 from functools import wraps
@@ -29,6 +29,8 @@ FREE_WEEKLY_AI_PLANS = 1
 # veriyordu (M4). Varsayılan cömert (yalnızca aşırı kötüye-kullanımı keser); ops
 # env ile ayarlayabilir. Premium → sınırsız.
 FREE_WEEKLY_AI_CHATS = int(os.getenv("FREE_WEEKLY_AI_CHATS", "200"))
+
+_RESERVATION_WEEKS_ATTR = "_ai_quota_reservation_weeks"
 
 
 def _week_key(d=None):
@@ -55,6 +57,76 @@ def _quota_from_meta(raw_meta):
 
 def _quota(user):
     return _quota_from_meta(getattr(user, "user_metadata", None))
+
+
+def _remember_reservation_week(user, counter_key, week):
+    reservations = dict(getattr(user, _RESERVATION_WEEKS_ATTR, {}) or {})
+    reservations[counter_key] = week
+    setattr(user, _RESERVATION_WEEKS_ATTR, reservations)
+
+
+def _forget_reservation_week(user, counter_key):
+    reservations = dict(getattr(user, _RESERVATION_WEEKS_ATTR, {}) or {})
+    reservations.pop(counter_key, None)
+    setattr(user, _RESERVATION_WEEKS_ATTR, reservations)
+
+
+def reserve_ai_quota(user, counter_key, limit):
+    """Atomically reserve one weekly allowance before an AI provider call."""
+    if getattr(user, "is_premium", False):
+        return True
+
+    fresh_meta = (db.session.query(User.user_metadata)
+                  .filter_by(id=user.id).with_for_update().scalar())
+    target = db.session.get(User, user.id)
+    if target is None:
+        db.session.rollback()
+        return False
+
+    meta, quota, week = _quota_from_meta(fresh_meta)
+    used = int(quota.get(counter_key, 0))
+    if used >= limit:
+        db.session.commit()
+        return False
+
+    quota["week"] = week
+    quota[counter_key] = used + 1
+    meta["ai_plan_quota"] = quota
+    target.user_metadata = meta
+    flag_modified(target, "user_metadata")
+    db.session.commit()
+    _remember_reservation_week(user, counter_key, week)
+    return True
+
+
+def refund_ai_quota(user, counter_key):
+    """Atomically return one reserved allowance, never dropping below zero."""
+    if getattr(user, "is_premium", False):
+        return
+
+    fresh_meta = (db.session.query(User.user_metadata)
+                  .filter_by(id=user.id).with_for_update().scalar())
+    target = db.session.get(User, user.id)
+    if target is None:
+        db.session.rollback()
+        return
+
+    reserved_week = (getattr(user, _RESERVATION_WEEKS_ATTR, {}) or {}).get(
+        counter_key)
+    stored_quota = dict((fresh_meta or {}).get("ai_plan_quota") or {})
+    if reserved_week is not None and stored_quota.get("week") != reserved_week:
+        db.session.commit()
+        _forget_reservation_week(user, counter_key)
+        return
+
+    meta, quota, week = _quota_from_meta(fresh_meta)
+    quota["week"] = week
+    quota[counter_key] = max(int(quota.get(counter_key, 0)) - 1, 0)
+    meta["ai_plan_quota"] = quota
+    target.user_metadata = meta
+    flag_modified(target, "user_metadata")
+    db.session.commit()
+    _forget_reservation_week(user, counter_key)
 
 
 def remaining_ai_plans(user, kind):
@@ -116,8 +188,9 @@ def record_ai_chat(user):
 
 
 def premium_ai_plan_gate(kind):
-    """AI plan üretim route'una sar: kota dolu (non-premium) ise 402 döndür,
-    aksi halde route'u çalıştır ve BAŞARILI (200) sonuçta kotayı artır.
+    """AI plan üretim route'una sar: kota dolu (non-premium) ise 402 döndür.
+
+    Hakkı route'dan önce rezerve et; exception veya 200 dışı yanıtta iade et.
 
     @login_required ve limiter dekoratörlerinin İÇİNDE (en yakın fn'e) konmalı.
     """
@@ -126,7 +199,7 @@ def premium_ai_plan_gate(kind):
         def wrapper(*args, **kwargs):
             if not current_app.config.get("AI_PLAN_QUOTA_ENABLED", True):
                 return fn(*args, **kwargs)  # kota kapalı → davranış değişmez
-            if remaining_ai_plans(current_user, kind) == 0:
+            if not reserve_ai_quota(current_user, kind, FREE_WEEKLY_AI_PLANS):
                 return jsonify({
                     "error": "Ücretsiz planda haftada 1 yapay zekâ planı "
                              "oluşturabilirsin. Sınırsız yeniden planlama için "
@@ -137,9 +210,23 @@ def premium_ai_plan_gate(kind):
             # doğrudan Response nesnesi olabilir. Eski "tuple değilse 200 say"
             # sezgisi, hata statüslü bir Response döndüren route'ta kotayı yanlışça
             # tüketiyordu. Gerçek status_code üzerinden karar ver.
-            resp = current_app.make_response(fn(*args, **kwargs))
-            if resp.status_code == 200:
-                record_ai_plan_generation(current_user, kind)
+            try:
+                resp = current_app.make_response(fn(*args, **kwargs))
+            except Exception:
+                db.session.rollback()
+                try:
+                    refund_ai_quota(current_user, kind)
+                except Exception:
+                    db.session.rollback()
+                    current_app.logger.exception("AI quota refund failed")
+                raise
+            if resp.status_code != 200:
+                db.session.rollback()
+                try:
+                    refund_ai_quota(current_user, kind)
+                except Exception:
+                    db.session.rollback()
+                    current_app.logger.exception("AI quota refund failed")
             return resp
         return wrapper
     return decorator

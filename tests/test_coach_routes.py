@@ -9,7 +9,9 @@ graceful-degrade yolları sabitlenir.
 import pytest
 
 from app.blueprints import coach as coach_bp
-from app.models import UserSession
+from app.extensions import db
+from app.models import User, UserSession
+from app.services import premium
 
 CHAT_PAYLOAD = {
     "weight": 80, "height": 180, "age": 30, "gender": "male",
@@ -112,6 +114,7 @@ def test_ask_conversation_failure_returns_500(client, auth_user, monkeypatch):
     response = client.post("/ask", json={"question": "soru"})
     assert response.status_code == 500
     assert "tekrar dene" in response.get_json()["error"]
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
 
 
 def test_ask_rejects_oversized_question(client, auth_user, monkeypatch):
@@ -133,7 +136,8 @@ def test_ask_quota_exhausted_returns_402(client, auth_user, monkeypatch):
     # M4: haftalık AI sohbet kotası dolduğunda /ask 402 (premium_required) döner
     # ve pahalı koç döngüsü hiç çalışmaz.
     called = {"run": False}
-    monkeypatch.setattr(coach_bp, "remaining_ai_chats", lambda user: 0)
+    monkeypatch.setattr(coach_bp, "reserve_ai_quota",
+                        lambda user, counter_key, limit: False)
     monkeypatch.setattr(coach_bp, "_fetch_coach_context", lambda uid, q, language="tr": "")
 
     def fake_run(*args, **kwargs):
@@ -144,3 +148,43 @@ def test_ask_quota_exhausted_returns_402(client, auth_user, monkeypatch):
     assert response.status_code == 402
     assert response.get_json()["premium_required"] is True
     assert called["run"] is False
+
+
+def test_ask_fallback_refunds_reserved_quota(client, auth_user, monkeypatch):
+    used_during_call = []
+    monkeypatch.setattr(coach_bp, "_fetch_coach_context",
+                        lambda uid, q, language="tr": "")
+
+    def fallback(uid, question, context, history, language="tr"):
+        fresh_meta = db.session.query(User.user_metadata).filter_by(
+            id=auth_user.id).scalar() or {}
+        quota = fresh_meta.get("ai_plan_quota") or {}
+        used_during_call.append(quota.get("chat", 0))
+        return "provider fallback"
+
+    monkeypatch.setattr(coach_bp, "_run_coach_conversation", fallback)
+    monkeypatch.setattr(coach_bp, "is_coach_error_fallback", lambda answer: True)
+
+    response = client.post("/ask", json={"question": "protein?"})
+
+    assert response.status_code == 200
+    assert used_during_call == [1]
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
+
+
+def test_ask_fallback_preserves_200_when_refund_fails(
+        client, auth_user, monkeypatch):
+    monkeypatch.setattr(coach_bp, "_fetch_coach_context",
+                        lambda uid, q, language="tr": "")
+    monkeypatch.setattr(coach_bp, "_run_coach_conversation",
+                        lambda *args, **kwargs: "provider fallback")
+    monkeypatch.setattr(coach_bp, "is_coach_error_fallback", lambda answer: True)
+    monkeypatch.setattr(
+        coach_bp, "refund_ai_quota",
+        lambda user, counter_key: (_ for _ in ()).throw(RuntimeError("db down")),
+    )
+
+    response = client.post("/ask", json={"question": "protein?"})
+
+    assert response.status_code == 200
+    assert response.get_json() == {"answer": "provider fallback"}
