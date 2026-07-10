@@ -205,6 +205,7 @@ import pytest
 from app.blueprints import auth as auth_bp
 from app.services import cognito_service
 from app.services.cognito_service import CognitoServiceError
+from app.services import cognito_jwt, session_store  # noqa: E402
 
 
 @pytest.fixture
@@ -222,16 +223,22 @@ def cognito_native(monkeypatch):
         captured["confirm"] = {"username": username, "code": code}
         captured["confirmed"].add(username)
 
-    def fake_initiate(username, password):
+    def fake_authenticate(username, password):
         # Doğrulanmamışsa (henüz confirm edilmedi) Cognito gibi davran.
         if username not in captured["confirmed"]:
             raise CognitoServiceError("E-postan henüz doğrulanmadı.", "UserNotConfirmedException")
-        return {"sub": f"sub-{username}", "email": f"{username}@example.com",
-                "email_verified": True, "name": username}
+        return {
+            "tokens": {"access_token": f"acc-{username}", "id_token": f"id-{username}",
+                       "refresh_token": f"ref-{username}", "expires_in": 3600},
+            "claims": {"sub": f"sub-{username}", "email": f"{username}@example.com",
+                       "email_verified": True, "name": username},
+        }
 
     monkeypatch.setattr(cognito_service, "sign_up", fake_sign_up)
     monkeypatch.setattr(cognito_service, "confirm_sign_up", fake_confirm)
-    monkeypatch.setattr(cognito_service, "initiate_auth", fake_initiate)
+    monkeypatch.setattr(cognito_service, "authenticate", fake_authenticate)
+    # JWKS doğrulaması testte sahte token'ları geçsin (kripto testi test_cognito_jwt'de).
+    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use: {"sub": tok.replace("id-", "sub-").replace("acc-", "sub-")})
     return captured
 
 
@@ -345,8 +352,10 @@ def test_cognito_login_sub_mismatch_rejected(client, cognito_native, monkeypatch
     _register(client, "verifyme")
     client.post("/verify", json={"username": "verifyme", "code": "123456"})
     # Cognito kimlik bütünlüğü kapısı: dönen sub yerel kayıtla EŞLEŞMEZSE reddet.
-    monkeypatch.setattr(cognito_service, "initiate_auth",
-                        lambda u, p: {"sub": "BASKA-SUB", "email": f"{u}@example.com"})
+    monkeypatch.setattr(cognito_service, "authenticate",
+                        lambda u, p: {"tokens": {"access_token": "a", "id_token": "i",
+                                                 "refresh_token": "r", "expires_in": 3600},
+                                      "claims": {"sub": "BASKA-SUB", "email": f"{u}@example.com"}})
     response = client.post("/login", json={"username": "verifyme", "password": "Sifre123"})
     assert response.status_code == 401
     assert "hatalı" in response.get_json()["error"]
@@ -355,7 +364,7 @@ def test_cognito_login_sub_mismatch_rejected(client, cognito_native, monkeypatch
 def test_cognito_login_not_authorized_returns_401(client, cognito_native, monkeypatch):
     _register(client, "verifyme")
     client.post("/verify", json={"username": "verifyme", "code": "123456"})
-    monkeypatch.setattr(cognito_service, "initiate_auth", lambda u, p: (_ for _ in ()).throw(
+    monkeypatch.setattr(cognito_service, "authenticate", lambda u, p: (_ for _ in ()).throw(
         CognitoServiceError("Kullanıcı adı veya şifre hatalı.", "NotAuthorizedException")))
     response = client.post("/login", json={"username": "verifyme", "password": "yanlis"})
     assert response.status_code == 401
