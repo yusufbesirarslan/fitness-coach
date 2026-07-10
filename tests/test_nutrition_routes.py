@@ -83,6 +83,17 @@ def test_quick_add_meal_empty_meal_dict_rejected(client, auth_user):
     assert MealLog.query.filter_by(user_id=auth_user.id).count() == 0
 
 
+def test_quick_add_meal_floors_negative_macros(client, auth_user):
+    plan = {"ogle": {"yemekler": ["Hatalı plan"], "kalori": -50,
+                     "protein": -5, "karb": -2, "yag": -1}}
+    client.post("/nutrition-plan/save", json={"plan": plan, "score": 8.0})
+    response = client.post("/api/quick-add-meal", json={"meal_key": "ogle"})
+    assert response.status_code == 200
+    assert response.get_json()["nutrients"] == {
+        "kalori": 0, "protein": 0, "karb": 0, "yag": 0,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Günlük (diary) — öğün oluşturma + besin matematiği
 # ---------------------------------------------------------------------------
@@ -372,6 +383,17 @@ def test_meal_log_override_macros_clamped_to_physical_bounds(client, auth_user, 
     # Kalıcı satır da kısılmış olmalı (defter bozulmadı).
     entry = MealLog.query.filter_by(user_id=auth_user.id).one()
     assert entry.kalori <= 3000 and entry.yag <= 150
+
+
+def test_meal_log_override_floors_negative_macros(client, auth_user):
+    response = client.post("/meal-log", json={
+        "ogun": "Akşam", "yemekler": "hatalı giriş",
+        "override_macros": {"kalori": -10, "protein": -2, "karb": -3, "yag": -4},
+    })
+    assert response.status_code == 200
+    assert response.get_json()["nutrients"] == {
+        "kalori": 0, "protein": 0, "karb": 0, "yag": 0,
+    }
 
 
 def test_meal_log_override_macros_awards_meal_logged_quest(client, auth_user, monkeypatch):

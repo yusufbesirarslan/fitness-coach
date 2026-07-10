@@ -811,3 +811,10 @@ class TestIsProteinDishLowProtein:
     def test_zero_protein_not_flagged(self):
         # protein<=0 ayri "veri yok" durumu; kati 0<protein<esik araliginda True.
         assert np.is_protein_dish_low_protein("Izgara Tavuk", _macros(0, 0, 0, 0)) is False
+
+def test_clamp_serving_macros_floors_negative_values():
+    assert np.clamp_serving_macros(-10, -2, 4, -1) == (0, 0, 4, 0)
+
+
+def test_clamp_serving_macros_corrects_atwater_only_violation():
+    assert np.clamp_serving_macros(2000, 0, 0, 0) == (0.0, 0, 0, 0)
