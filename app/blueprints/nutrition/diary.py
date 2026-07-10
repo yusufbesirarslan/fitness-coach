@@ -65,6 +65,15 @@ def _clamp_item_macros(item):
     item.calories, item.protein, item.carbs, item.fat = cal, pro, carb, fat
 
 
+def _claim_diary_meal(meal_id, user_id):
+    """Mark an unlogged meal as logged without committing the transaction."""
+    return CustomMeal.query.filter_by(
+        id=meal_id,
+        user_id=user_id,
+        is_logged=False,
+    ).update({"is_logged": True}, synchronize_session=False)
+
+
 @bp.route("/api/quick-add-meal", methods=["POST"])
 @login_required
 def quick_add_meal():
@@ -371,6 +380,10 @@ def diary_log_meal(meal_id):
     yemekler = ", ".join(_item_label(i) for i in meal.items)
     today = day_key()
 
+    if not _claim_diary_meal(meal_id, current_user.id):
+        db.session.rollback()
+        return jsonify({"error": t("route.meal_already_logged")}), 400
+
     entry = MealLog(
         user_id=current_user.id,
         ogun=meal.meal_name,
@@ -383,7 +396,6 @@ def diary_log_meal(meal_id):
         source="diary"
     )
     db.session.add(entry)
-    meal.is_logged = True
     db.session.commit()
 
     quest_result = complete_quest_for_user(current_user.id, "meal_logged")

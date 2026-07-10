@@ -14,6 +14,7 @@ import json
 import pytest
 
 from app.blueprints import nutrition as nutrition_bp
+from app.blueprints.nutrition.diary import _claim_diary_meal
 from app.blueprints.nutrition import meallog as nutrition_meallog
 from app.blueprints.nutrition import plan as nutrition_plan
 from app.extensions import db
@@ -130,6 +131,11 @@ def test_diary_create_meal_race_returns_existing(client, auth_user, monkeypatch)
 @pytest.fixture
 def meal_id(client, auth_user):
     return client.post("/api/diary/meal", json={"meal_name": "Öğle"}).get_json()["meal_id"]
+
+
+def test_claim_diary_meal_only_succeeds_once(auth_user, meal_id):
+    assert _claim_diary_meal(meal_id, auth_user.id) == 1
+    assert _claim_diary_meal(meal_id, auth_user.id) == 0
 
 
 def test_diary_add_item_requires_name(client, meal_id):
@@ -294,6 +300,7 @@ def test_diary_log_meal_totals_labels_and_lock(client, auth_user, meal_id):
 
     # Kilitlendi: tekrar log/ekleme/düzenleme reddedilir.
     assert client.post(f"/api/diary/meal/{meal_id}/log").status_code == 400
+    assert MealLog.query.filter_by(user_id=auth_user.id, source="diary").count() == 1
     assert client.post(f"/api/diary/meal/{meal_id}/item",
                        json={"food_name": "y"}).status_code == 400
 
