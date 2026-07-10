@@ -153,6 +153,26 @@ class UserSession(db.Model):
         return f"<UserSession {self.name} - {self.created_at}>"
 
 
+class CognitoSession(db.Model):
+    """Bir Flask-Login oturumuna bağlı Cognito token'ları (sunucu tarafı, şifreli).
+    session_id çerezde taşınır; access/refresh token'lar Fernet ile şifreli saklanır.
+    Bir giriş = bir satır → eşzamanlı oturumlar bağımsız yaşar."""
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.String(64), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    cognito_username = db.Column(db.String(80), nullable=False)
+    access_token = db.Column(db.Text, nullable=False)    # Fernet ile şifreli
+    refresh_token = db.Column(db.Text, nullable=False)   # Fernet ile şifreli
+    access_token_exp = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_used_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index("uq_cognito_session_session_id", "session_id", unique=True),
+    )
+
+
 class WeeklyLog(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
     user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)

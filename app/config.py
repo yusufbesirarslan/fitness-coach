@@ -79,6 +79,13 @@ COGNITO_REGION = (
 )
 COGNITO_ENABLED = bool(COGNITO_USER_POOL_ID and COGNITO_APP_CLIENT_ID)
 
+# Sprint 2: oturuma bağlı Cognito token'ları sunucu tarafında Fernet ile şifreli
+# saklanır. Anahtar açıkça verilmezse SECRET_KEY'den türetilir (SECRET_KEY dönerse
+# eski token'lar çözülemez → o kullanıcılar yeniden giriş yapar; kabul edilen maliyet).
+COGNITO_TOKEN_ENC_KEY = os.getenv("COGNITO_TOKEN_ENC_KEY", "").strip()
+# Access token bitmeden bu kadar saniye önce proaktif yenile (edge yarışları için).
+COGNITO_REFRESH_SKEW_SECONDS = int(os.getenv("COGNITO_REFRESH_SKEW_SECONDS", "60"))
+
 
 
 def _enforce_fatsecret_tls(app):
