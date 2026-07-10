@@ -319,6 +319,37 @@ def _redis_users_in_order(ids):
     return [users[i] for i in int_ids if i in users]
 
 
+def _redis_member_id(member):
+    if isinstance(member, bytes):
+        member = member.decode("utf-8")
+    return int(member)
+
+
+def _redis_global_top_ids(key):
+    rows = redis_client.zrevrange(
+        key, 0, LEADERBOARD_TOP_N - 1, withscores=True)
+    if not rows:
+        return []
+    cutoff = rows[-1][1]
+    tied = redis_client.zrangebyscore(key, cutoff, cutoff, withscores=True)
+    combined = {
+        _redis_member_id(member): float(score)
+        for member, score in [*rows, *tied]
+    }
+    ranked = sorted(combined.items(), key=lambda item: (-item[1], item[0]))
+    return [user_id for user_id, _score in ranked[:LEADERBOARD_TOP_N]]
+
+
+def _redis_exact_rank(key, user_id):
+    score = redis_client.zscore(key, str(user_id))
+    if score is None:
+        return redis_client.zcard(key) + 1
+    higher = redis_client.zcount(key, f"({score}", "+inf")
+    tied = redis_client.zrangebyscore(key, score, score)
+    lower_ids = sum(_redis_member_id(member) < user_id for member in tied)
+    return int(higher) + lower_ids + 1
+
+
 def _leaderboard_via_redis(scope, timeframe, key):
     """Sıralamayı Redis sorted set'ten üret; kullanıcı detayları Postgres'ten gelir."""
     if scope == "friends":
@@ -335,7 +366,7 @@ def _leaderboard_via_redis(scope, timeframe, key):
             key=lambda t: (-t[1], t[0]))
         top_ids = [uid for uid, _ in ranked[:LEADERBOARD_TOP_N]]
     else:
-        top_ids = redis_client.zrevrange(key, 0, LEADERBOARD_TOP_N - 1)
+        top_ids = _redis_global_top_ids(key)
         ranked = None  # global'de "me" rütbesi ZREVRANK ile hesaplanır
 
     users = _redis_users_in_order(top_ids)
@@ -348,8 +379,7 @@ def _leaderboard_via_redis(scope, timeframe, key):
             my_rank = next((i + 1 for i, (uid, _) in enumerate(ranked)
                             if uid == current_user.id), len(ranked) + 1)
         else:
-            rank = redis_client.zrevrank(key, str(current_user.id))
-            my_rank = (rank + 1) if rank is not None else (redis_client.zcard(key) + 1)
+            my_rank = _redis_exact_rank(key, current_user.id)
         me = _lb_serialize(current_user, my_rank, timeframe)
 
     return jsonify({"scope": scope, "timeframe": timeframe, "entries": entries,
