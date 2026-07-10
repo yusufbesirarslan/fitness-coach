@@ -57,9 +57,11 @@ def _purge_user(user):
     """
     from app.models import (
         Activity, CustomMeal, CustomMealItem, DailyActivity, Friendship, MealLog,
-        Message, NutritionPlan, PendingAction, PumpCheck, Supplement, TrainingPlan,
-        User, UserQuestProgress, UserSession, WaterLog,
-        WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog,
+        Message, NutritionPlan, PendingAction, PumpCheck, PumpCheckComment,
+        PumpCheckLike, Supplement, TrainingPlan, User, UserQuestProgress,
+        UserSession, UserWearableConnection, WaterLog, WearableActivityLog,
+        WearableSleepLog, WearableWorkoutLog, WeeklyCheckIn, WeeklyLog,
+        WeeklyWinner, WorkoutLog,
     )
     uid = user.id
 
@@ -70,10 +72,22 @@ def _purge_user(user):
             CustomMealItem.custom_meal_id.in_(meal_ids)
         ).delete(synchronize_session=False)
 
+    pump_ids = [p.id for p in PumpCheck.query.filter_by(user_id=uid).all()]
+    pump_child_filter = [PumpCheckLike.user_id == uid]
+    comment_child_filter = [PumpCheckComment.user_id == uid]
+    if pump_ids:
+        pump_child_filter.append(PumpCheckLike.pump_check_id.in_(pump_ids))
+        comment_child_filter.append(PumpCheckComment.pump_check_id.in_(pump_ids))
+    PumpCheckLike.query.filter(db.or_(*pump_child_filter)).delete(
+        synchronize_session=False)
+    PumpCheckComment.query.filter(db.or_(*comment_child_filter)).delete(
+        synchronize_session=False)
+
     for Model in (UserSession, WeeklyLog, WeeklyCheckIn, NutritionPlan, TrainingPlan,
                   MealLog, PendingAction, PumpCheck, Activity, Supplement,
                   UserQuestProgress, WeeklyWinner, WaterLog, WorkoutLog,
-                  DailyActivity, CustomMeal):
+                  DailyActivity, WearableSleepLog, WearableActivityLog,
+                  WearableWorkoutLog, UserWearableConnection, CustomMeal):
         Model.query.filter_by(user_id=uid).delete(synchronize_session=False)
 
     Friendship.query.filter(
