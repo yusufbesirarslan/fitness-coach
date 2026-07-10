@@ -10,6 +10,23 @@
    · section header · toast · loading overlay · divider · a11y
    ═══════════════════════════════════════════════════════════════ */
 
+/* ── GLOBAL OVERFLOW SAFETY (uygulama geneli) ─────────
+   Tek kaynak: her sayfa _head.html üzerinden bu dosyayı yükler
+   (tokens.css'ten SONRA, sayfa CSS'lerinden ÖNCE), yani hem app
+   (theme.css) hem auth (auth.css) sayfalarını kapsar. Amaç iki kök neden:
+   (A) hiçbir tek öğe TÜM sayfayı yatay kaydırmasın;
+   (B) uzun/kırılmaz metin (URL, kullanıcı adı, e-posta, besin adı) kutusundan taşmasın.
+     • overflow-x: clip → yatay taşmayı keser AMA scroll-container YARATMAZ;
+       böylece position: sticky/fixed başlıklar bozulmaz (hidden'dan farkı budur).
+       Kendi iç overflow-x:auto kaydırması olan alanlar (heatmap, tab-bar,
+       insight-row, comments-list…) bundan etkilenmez — içeride kayarlar.
+     • overflow-wrap: break-word → yalnızca sığmayan uzun kelimeyi kırar;
+       normal sarma ve white-space:nowrap/ellipsis öğeleri etkilenmez (miras alınır).
+     • img/video max-width → başıboş görsel kapsayıcısını aşmasın. */
+html { overflow-x: clip; }
+body { overflow-wrap: break-word; }
+img, video { max-width: 100%; }
+
 /* ── KEYFRAMES ────────────────────────────────────── */
 @keyframes spin        { to { transform: rotate(360deg); } }
 @keyframes fade-in     { from { opacity:0; } to { opacity:1; } }
