@@ -38,6 +38,8 @@ _ERROR_MESSAGES = {
     "UserNotConfirmedException": "E-postan henüz doğrulanmadı.",
     "LimitExceededException": "Çok fazla deneme. Lütfen biraz sonra tekrar dene.",
     "TooManyRequestsException": "Çok fazla deneme. Lütfen biraz sonra tekrar dene.",
+    "PasswordResetRequiredException": "Şifreni sıfırlaman gerekiyor. Lütfen şifre sıfırlama akışını kullan.",
+    "InternalErrorException": "Sunucu hatası. Lütfen biraz sonra tekrar dene.",
 }
 
 
@@ -151,11 +153,10 @@ def resend_code(username):
         raise _wrap(e)
 
 
-def initiate_auth(username, password):
-    """USER_PASSWORD_AUTH ile giriş. App client'ta ALLOW_USER_PASSWORD_AUTH açık
-    olmalı. Başarılıysa ID token claim'lerini (sub/email/email_verified/name)
-    döndürür. Doğrulanmamış e-posta → CognitoServiceError(code='UserNotConfirmed...').
-    """
+def authenticate(username, password):
+    """USER_PASSWORD_AUTH ile giriş. Başarılıysa ham token'ları (access/id/refresh/
+    expires_in) VE çözülmüş id-token claim'lerini döndürür. Challenge/boş kimlik
+    reddedilir (auth bypass koruması)."""
     params = _maybe_secret({"USERNAME": username, "PASSWORD": password}, username)
     # _maybe_secret SecretHash anahtarını yazar; AuthParameters SECRET_HASH ister.
     if "SecretHash" in params:
@@ -177,12 +178,58 @@ def initiate_auth(username, password):
             "Ek doğrulama gerekiyor; bu akış desteklenmiyor.",
             "ChallengeRequired",
         )
-    id_token = (resp.get("AuthenticationResult") or {}).get("IdToken", "")
+    auth = resp.get("AuthenticationResult") or {}
+    id_token = auth.get("IdToken", "")
     claims = _decode_claims(id_token)
     # Token çözülemediyse (boş/bozuk) giriş başarılı sayılmamalı.
     if not claims.get("sub"):
         raise CognitoServiceError("Kimlik doğrulanamadı.", "NoIdentity")
-    return claims
+    return {
+        "tokens": {
+            "access_token": auth.get("AccessToken", ""),
+            "id_token": id_token,
+            "refresh_token": auth.get("RefreshToken", ""),
+            "expires_in": auth.get("ExpiresIn", 3600),
+        },
+        "claims": claims,
+    }
+
+
+def initiate_auth(username, password):
+    """Geriye dönük uyum: yalnızca id-token claim'lerini döndürür (Sprint 1
+    çağıranları/testleri için). Yeni giriş yolu authenticate() kullanır."""
+    return authenticate(username, password)["claims"]
+
+
+def refresh_tokens(refresh_token, cognito_username):
+    """REFRESH_TOKEN_AUTH ile yeni access token al. SECRET_HASH (gizli client)
+    kullanıcı ADIYLA üretilir. Başarısızsa CognitoServiceError."""
+    params = {"REFRESH_TOKEN": refresh_token}
+    sh = _secret_hash(cognito_username)
+    if sh:
+        params["SECRET_HASH"] = sh
+    try:
+        resp = _get_client().initiate_auth(
+            ClientId=COGNITO_APP_CLIENT_ID,
+            AuthFlow="REFRESH_TOKEN_AUTH",
+            AuthParameters=params,
+        )
+    except Exception as e:
+        raise _wrap(e)
+    auth = resp.get("AuthenticationResult") or {}
+    new_access = auth.get("AccessToken", "")
+    if not new_access:
+        raise CognitoServiceError("Oturum yenilenemedi.", "RefreshFailed")
+    return {"access_token": new_access, "id_token": auth.get("IdToken", ""),
+            "expires_in": auth.get("ExpiresIn", 3600)}
+
+
+def global_sign_out(access_token):
+    """Cognito GlobalSignOut — kullanıcının TÜM refresh token'larını iptal eder."""
+    try:
+        _get_client().global_sign_out(AccessToken=access_token)
+    except Exception as e:
+        raise _wrap(e)
 
 
 CognitoIdpError = CognitoServiceError
