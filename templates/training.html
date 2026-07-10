@@ -49,6 +49,8 @@
                 <option value="Spor Salonu" selected>{{ t('training.loc_gym') }}</option>
                 <option value="Diğer:">{{ t('training.loc_other') }}</option>
             </select>
+            <input type="text" id="pump-location-other" class="fc-input pump-location-other"
+                   maxlength="50" placeholder="{{ t('training.pump_where_other_ph') }}" hidden>
         </div>
 
         <div class="pump-field">
@@ -76,6 +78,26 @@
         <div class="pump-actions">
             <button type="button" class="btn-ghost" id="pump-cancel">{{ t('training.cancel') }}</button>
             <button type="button" class="btn-volt" id="pump-submit" data-action="submitPumpCheck">{{ t('training.complete_workout') }}</button>
+        </div>
+    </div>
+
+    <!-- Frame Adjustment: fotoğraf seçilince açılır; 4:5 çerçevede kaydır + yakınlaştır -->
+    <div class="pump-crop" id="pump-crop" hidden>
+        <div class="pump-crop-inner">
+            <div class="pump-crop-title">{{ t('training.pump_crop_title') }}</div>
+            <div class="pump-crop-hint">{{ t('training.pump_crop_hint') }}</div>
+            <div class="pump-crop-stage">
+                <canvas class="pump-crop-canvas" id="pump-crop-canvas"></canvas>
+            </div>
+            <div class="pump-crop-controls">
+                <svg class="pump-crop-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+                <input type="range" class="pump-crop-zoom" id="pump-crop-zoom" min="1" max="3" step="0.01" value="1" aria-label="{{ t('training.pump_crop_zoom') }}">
+                <svg class="pump-crop-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="8" y1="11" x2="14" y2="11"/><line x1="11" y1="8" x2="11" y2="14"/></svg>
+            </div>
+            <div class="pump-crop-actions">
+                <button type="button" class="btn-ghost" id="pump-crop-cancel">{{ t('training.cancel') }}</button>
+                <button type="button" class="btn-volt" id="pump-crop-confirm">{{ t('training.pump_crop_confirm') }}</button>
+            </div>
         </div>
     </div>
 </div>

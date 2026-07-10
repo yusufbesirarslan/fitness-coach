@@ -656,10 +656,14 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
         pumpImageData = null;
         document.getElementById('pump-dropzone').classList.remove('has-image');
         document.getElementById('pump-file-input').value = '';
+        cropImg = null;
+        const cropEl = document.getElementById('pump-crop');
+        if (cropEl) cropEl.hidden = true;
         pumpVisibility = 'feed';
         pumpSelectedFriends = new Map();
         setPumpShare('feed');
         renderPumpSelectedFriends();
+        syncPumpLocationOther();  // "Diğer:" seçili değilse özel konum inputunu gizle
         document.getElementById('pump-friend-search').value = '';
         document.getElementById('pump-progress').hidden = true;
         document.getElementById('pump-progress-bar').style.width = '0%';
@@ -729,18 +733,137 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
         document.getElementById('pump-progress-bar').style.width = percent + '%';
     }
 
+    // "Diğer:" seçilince serbest-metin konum inputunu göster; aksi halde gizle+temizle.
+    function syncPumpLocationOther() {
+        const sel = document.getElementById('pump-location');
+        const other = document.getElementById('pump-location-other');
+        if (!sel || !other) return;
+        const isOther = sel.value === 'Diğer:';
+        other.hidden = !isOther;
+        if (!isOther) other.value = '';
+    }
+
     function handlePumpFile(file) {
         if (!file) return;
         if (!file.type || !file.type.startsWith('image/')) { showPumpError(__t('training.pump_pick_image')); return; }
         if (file.size > 5 * 1024 * 1024) { showPumpError(__t('training.photo_too_big')); return; }
         const reader = new FileReader();
         reader.onload = function(ev) {
-            pumpImageData = ev.target.result;
-            document.getElementById('pump-preview-img').src = pumpImageData;
-            document.getElementById('pump-dropzone').classList.add('has-image');
             clearPumpError();
+            openPumpCrop(ev.target.result);  // önce çerçeveyi ayarlat (Frame Adjustment)
         };
         reader.readAsDataURL(file);
+    }
+
+    // ── FRAME ADJUSTMENT (kırpma/kaydırma/yakınlaştırma) ──
+    // 4:5 dikey çerçeve; kaydır + zoom slider. Harici kütüphane YOK (CSP), saf canvas.
+    let cropImg = null;      // yüklenen Image
+    let cropScale = 1;       // zoom (1 = kapsayan/cover ölçek)
+    let cropCoverS = 1;      // görseli çerçeveyi kaplayacak minimum ölçek
+    let cropOx = 0, cropOy = 0;   // görselin çerçeve içindeki sol-üst ofseti (CSS px)
+    let cropCw = 300, cropCh = 375, cropDpr = 1;
+    let cropDragging = false, cropLastX = 0, cropLastY = 0;
+
+    function openPumpCrop(dataUrl) {
+        const img = new Image();
+        img.onload = function() {
+            if (!img.naturalWidth || !img.naturalHeight) { showPumpError(__t('training.pump_pick_image')); return; }
+            cropImg = img;
+            cropCw = Math.min((window.innerWidth || 360) - 96, 300);
+            cropCh = Math.round(cropCw * 1.25);  // 4:5 dikey
+            cropDpr = window.devicePixelRatio || 1;
+            const canvas = document.getElementById('pump-crop-canvas');
+            canvas.style.width = cropCw + 'px';
+            canvas.style.height = cropCh + 'px';
+            canvas.width = Math.round(cropCw * cropDpr);
+            canvas.height = Math.round(cropCh * cropDpr);
+            cropCoverS = Math.max(cropCw / img.naturalWidth, cropCh / img.naturalHeight);
+            cropScale = 1;
+            document.getElementById('pump-crop-zoom').value = '1';
+            const eff = cropCoverS * cropScale;
+            cropOx = (cropCw - img.naturalWidth * eff) / 2;
+            cropOy = (cropCh - img.naturalHeight * eff) / 2;
+            drawPumpCrop();
+            document.getElementById('pump-crop').hidden = false;
+        };
+        img.onerror = function() { showPumpError(__t('training.pump_pick_image')); };
+        img.src = dataUrl;
+    }
+
+    function clampPumpCrop() {
+        const eff = cropCoverS * cropScale;
+        const dw = cropImg.naturalWidth * eff;
+        const dh = cropImg.naturalHeight * eff;
+        cropOx = Math.min(0, Math.max(cropCw - dw, cropOx));
+        cropOy = Math.min(0, Math.max(cropCh - dh, cropOy));
+    }
+
+    function drawPumpCrop() {
+        if (!cropImg) return;
+        const canvas = document.getElementById('pump-crop-canvas');
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(cropDpr, 0, 0, cropDpr, 0, 0);
+        ctx.clearRect(0, 0, cropCw, cropCh);
+        const eff = cropCoverS * cropScale;
+        ctx.drawImage(cropImg, cropOx, cropOy, cropImg.naturalWidth * eff, cropImg.naturalHeight * eff);
+    }
+
+    function cropPointerDown(e) {
+        if (!cropImg) return;
+        cropDragging = true;
+        cropLastX = e.clientX; cropLastY = e.clientY;
+        try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+    }
+    function cropPointerMove(e) {
+        if (!cropDragging) return;
+        cropOx += (e.clientX - cropLastX);
+        cropOy += (e.clientY - cropLastY);
+        cropLastX = e.clientX; cropLastY = e.clientY;
+        clampPumpCrop();
+        drawPumpCrop();
+    }
+    function cropPointerUp() { cropDragging = false; }
+
+    function cropZoomChange(e) {
+        if (!cropImg) return;
+        const z1 = parseFloat(e.target.value) || 1;
+        const eff0 = cropCoverS * cropScale;
+        const eff1 = cropCoverS * z1;
+        // çerçeve MERKEZİNİ sabit tut (yakınlaştırma merkezden olsun)
+        const imgX = (cropCw / 2 - cropOx) / eff0;
+        const imgY = (cropCh / 2 - cropOy) / eff0;
+        cropScale = z1;
+        cropOx = cropCw / 2 - imgX * eff1;
+        cropOy = cropCh / 2 - imgY * eff1;
+        clampPumpCrop();
+        drawPumpCrop();
+    }
+
+    function confirmPumpCrop() {
+        if (!cropImg) return;
+        const OUTW = 1080, OUTH = 1350;  // 4:5, uzun kenar 1350 (≤1440)
+        const sf = OUTW / cropCw;
+        const out = document.createElement('canvas');
+        out.width = OUTW; out.height = OUTH;
+        const octx = out.getContext('2d');
+        octx.fillStyle = '#000';
+        octx.fillRect(0, 0, OUTW, OUTH);
+        const eff = cropCoverS * cropScale;
+        octx.drawImage(cropImg,
+            cropOx * sf, cropOy * sf,
+            cropImg.naturalWidth * eff * sf, cropImg.naturalHeight * eff * sf);
+        pumpImageData = out.toDataURL('image/jpeg', 0.9);
+        document.getElementById('pump-preview-img').src = pumpImageData;
+        document.getElementById('pump-dropzone').classList.add('has-image');
+        document.getElementById('pump-crop').hidden = true;
+        cropImg = null;
+    }
+
+    function cancelPumpCrop() {
+        document.getElementById('pump-crop').hidden = true;
+        cropImg = null;
+        // önizleme yoksa dropzone boş kalır; dosya inputunu sıfırla ki aynı foto tekrar seçilebilsin
+        document.getElementById('pump-file-input').value = '';
     }
 
     async function submitPumpCheck() {
@@ -755,9 +878,15 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
         submit.classList.add('loading');
         submit.innerHTML = '<span class="pump-busy"><span class="pump-spinner"></span>' + __t('training.verifying') + '</span>';
         setPumpProgress(35);
+        const locSel = document.getElementById('pump-location');
+        const locOther = document.getElementById('pump-location-other');
+        let locationType = locSel.value;
+        if (locSel.value === 'Diğer:') {
+            locationType = (locOther && locOther.value.trim()) || 'Diğer';
+        }
         const payload = {
             image: pumpImageData,
-            location_type: document.getElementById('pump-location').value,
+            location_type: locationType,
             description: document.getElementById('pump-desc').value.trim(),
             visibility: pumpVisibility,
             shared_friend_ids: Array.from(pumpSelectedFriends.keys())
@@ -976,6 +1105,16 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
             if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
         });
         fileInput.addEventListener('change', (e) => handlePumpFile(e.target.files[0]));
+        document.getElementById('pump-location').addEventListener('change', syncPumpLocationOther);
+        // Frame Adjustment kontrolleri
+        const cropCanvas = document.getElementById('pump-crop-canvas');
+        cropCanvas.addEventListener('pointerdown', cropPointerDown);
+        cropCanvas.addEventListener('pointermove', cropPointerMove);
+        cropCanvas.addEventListener('pointerup', cropPointerUp);
+        cropCanvas.addEventListener('pointercancel', cropPointerUp);
+        document.getElementById('pump-crop-zoom').addEventListener('input', cropZoomChange);
+        document.getElementById('pump-crop-confirm').addEventListener('click', confirmPumpCrop);
+        document.getElementById('pump-crop-cancel').addEventListener('click', cancelPumpCrop);
         document.getElementById('pump-close').addEventListener('click', closePumpCheck);
         document.getElementById('pump-cancel').addEventListener('click', closePumpCheck);
         document.querySelectorAll('.pump-share-option').forEach(btn => {

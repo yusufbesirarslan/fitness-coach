@@ -294,6 +294,74 @@ def test_workout_complete_sends_pump_check_messages_to_selected_friends(client, 
     assert Message.query.filter_by(receiver_id=other.id, message_type="pump_check").count() == 0
 
 
+def test_workout_complete_persists_image_key_and_renders_in_feed(client, auth_user, monkeypatch):
+    # Task 3 regression: yükleme→feed görsel yolu uçtan uca. Diğer testler image_key'i
+    # ELLE set eder; bu test /workout/complete'in S3'ten GERÇEKTEN bir image_key
+    # kalıcılaştırdığını ve feed'in non-null imageUrl döndürdüğünü sabitler.
+    _ready_for_workout(client, auth_user)
+    monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
+    monkeypatch.setattr(s3_helper, "is_enabled", lambda: True)
+    monkeypatch.setattr(
+        s3_helper, "upload_image",
+        lambda image_bytes, content_type="image/jpeg", prefix="uploads", user_id=None:
+            f"{prefix}/{user_id}/2026/07/e2e.jpg",
+    )
+    monkeypatch.setattr(
+        s3_helper, "generate_presigned_url",
+        lambda key, expires_in=3600, expected_user_id=None: f"https://s3.test/{key}",
+    )
+
+    res = client.post("/workout/complete", json={
+        "image": _image_data_url("JPEG"),
+        "location_type": "Gym",
+        "visibility": "feed",
+    })
+
+    assert res.status_code == 200
+    check = PumpCheck.query.filter_by(user_id=auth_user.id).one()
+    assert check.image_key == f"pump-checks/{auth_user.id}/2026/07/e2e.jpg"
+    feed = client.get("/feed/data").get_json()
+    assert feed["posts"][0]["imageUrl"] == f"https://s3.test/{check.image_key}"
+
+
+def test_workout_complete_friends_upload_persists_image_key_and_dm_renders(client, auth_user, make_user, monkeypatch):
+    # Task 3 regression: friends (DM) paylaşımında da image_key kalıcılaşır ve
+    # ALICI sohbette non-null imageUrl görür (uçtan uca yükleme→DM).
+    sender_username = auth_user.username
+    friend = make_user("dmimgfriend")
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=friend.id, status="accepted"))
+    db.session.commit()
+    _ready_for_workout(client, auth_user)
+    monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
+    monkeypatch.setattr(s3_helper, "is_enabled", lambda: True)
+    monkeypatch.setattr(
+        s3_helper, "upload_image",
+        lambda image_bytes, content_type="image/jpeg", prefix="uploads", user_id=None:
+            f"{prefix}/{user_id}/2026/07/dm.jpg",
+    )
+    monkeypatch.setattr(
+        s3_helper, "generate_presigned_url",
+        lambda key, expires_in=3600, expected_user_id=None: f"https://s3.test/{key}",
+    )
+
+    res = client.post("/workout/complete", json={
+        "image": _image_data_url("JPEG"),
+        "location_type": "Gym",
+        "visibility": "friends",
+        "shared_friend_ids": [friend.id],
+    })
+    assert res.status_code == 200
+    check = PumpCheck.query.filter_by(user_id=auth_user.id).one()
+    assert check.image_key == f"pump-checks/{auth_user.id}/2026/07/dm.jpg"
+
+    client.post("/logout")
+    client.post("/login", json={"username": "dmimgfriend", "password": "Sifre123"})
+    body = client.get(f"/chat/{sender_username}/messages").get_json()
+    pump = body["messages"][0]["pump_check"]
+    assert pump is not None
+    assert pump["imageUrl"] == f"https://s3.test/{check.image_key}"
+
+
 def test_chat_messages_include_authorized_pump_check_payload(client, auth_user, make_user):
     friend = make_user("friend")
     db.session.add(Friendship(sender_id=auth_user.id, receiver_id=friend.id, status="accepted"))
@@ -539,16 +607,20 @@ def test_chat_template_render_pump_check_card_includes_timestamp_and_unavailable
     assert "p.timePosted || p.createdAt || ''" in html
 
 
-def test_shell_partials_have_five_tabs_and_no_drawer():
-    # Nav markup tek kaynakta: _actionbar.html (5 alt sekme) + _nav.html (başlık).
-    # Feed/Club artık Profil hub'ından erişilir (Phase 2).
+def test_shell_partials_have_five_tabs_and_mobile_drawer():
+    # Alt sekme çubuğu (5 sekme) değişmez. İkincil özellikler ayrıca başlıktaki
+    # ☰ mobil drawer'ından (yalnızca <1024px) da erişilir — Profil hub'ıyla aynı set.
     root = Path(__file__).resolve().parents[1]
     bar = (root / "templates" / "_actionbar.html").read_text(encoding="utf-8")
     for href in ('href="/"', 'href="/nutrition"', 'href="/training"',
                  'href="/progress-page"', 'href="/edit-profile"'):
         assert f'{href} class="ab-tab' in bar
     header = (root / "templates" / "_nav.html").read_text(encoding="utf-8")
-    assert "drawer" not in header
+    assert 'id="header-menu-btn"' in header
+    assert 'id="nav-drawer"' in header
+    for href in ("/friends", "/feed", "/leaderboard", "/quests",
+                 "/pump-check-gallery", "/supplements"):
+        assert f'href="{href}" class="nav-drawer-link"' in header
 
 
 def test_like_create_and_delete_updates_count(client, auth_user, make_user):
