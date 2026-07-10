@@ -366,8 +366,7 @@ def clamp_serving_macros(calories, protein, carbs, fat):
     if fat and fat > MAX_SERVING_FAT_G:
         ratios.append(MAX_SERVING_FAT_G / fat)
     scale = min(ratios) if ratios else 1.0
-    was_scaled = scale < 1.0
-    if was_scaled:
+    if scale < 1.0:
         calories = round(calories * scale, 1)
         protein = round(protein * scale, 1)
         carbs = round(carbs * scale, 1)
@@ -376,11 +375,10 @@ def clamp_serving_macros(calories, protein, carbs, fat):
     _valid, _flags, reasons = check_serving({
         "calories": calories, "protein": protein, "carbs": carbs, "fat": fat,
     })
-    # Küçük kalori-only kayıtlar (örn. 130 kcal pirinç; makrolar bilinmiyor)
-    # mevcut kanonik defter akışında meşrudur. Yalnızca mutlak tavanla zaten
-    # ölçeklenmemiş, tek porsiyon için aşırı yüksek Atwater tutarsızlığını düzelt.
-    if (not was_scaled and "calories_exceed_macro_energy" in reasons
-            and calories > MAX_SERVING_KCAL * 0.5):
+    # Mutlak tavan ölçeklemesinden sonra da enerji korunumu ihlali kalabilir.
+    # Kalan her sert Atwater ihlalini makroların desteklediği enerjiye indir;
+    # makroların tamamı sıfırsa güvenli sonuç da sıfır kaloridir.
+    if "calories_exceed_macro_energy" in reasons:
         calories = round(4.0 * protein + 4.0 * carbs + 9.0 * fat, 1)
     return calories, protein, carbs, fat
 

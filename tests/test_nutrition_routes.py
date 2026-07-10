@@ -202,16 +202,17 @@ def test_diary_add_item_clamps_absurd_macros(client, meal_id):
     # H1: diary hattı eskiden YALNIZCA negatifleri 0'a çekiyordu; üst fiziksel-
     # tavan yoktu, istemci serving_calories: 90000 değerini doğrudan CustomMealItem'a
     # ve oradan kanonik MealLog'a sızdırabiliyordu. Artık clamp_serving_macros ile
-    # diğer tüm ingest hatlarıyla aynı tavana (MAX_SERVING_KCAL=3000) kısılır.
+    # diğer tüm ingest hatlarıyla aynı fiziksel sınırlara kısılır. Makrolar sıfır
+    # olduğundan Atwater düzeltmesi desteklenmeyen kaloriyi de sıfıra indirir.
     body = client.post(f"/api/diary/meal/{meal_id}/item", json={
         "food_name": "Hile", "serving_id": "s1", "serving_quantity": 1,
         "metric_serving_amount": 100,
         "serving_calories": 90000, "serving_protein": 0,
         "serving_carbs": 0, "serving_fat": 0,
     }).get_json()
-    assert 0 < body["calories"] <= 3000
+    assert body["calories"] == 0
     item = db.session.get(CustomMealItem, body["item_id"])
-    assert 0 < item.calories <= 3000
+    assert item.calories == 0
 
 
 def test_diary_update_item_clamps_absurd_macros(client, meal_id):
@@ -226,7 +227,7 @@ def test_diary_update_item_clamps_absurd_macros(client, meal_id):
         "serving_calories": 90000, "serving_protein": 0,
         "serving_carbs": 0, "serving_fat": 0,
     }).get_json()
-    assert 0 < body["calories"] <= 3000
+    assert body["calories"] == 0
 
 
 def test_diary_add_item_grams_based_scaling(client, meal_id):
@@ -318,7 +319,8 @@ def test_diary_log_meal_totals_labels_and_lock(client, auth_user, meal_id):
 
 def test_diary_today_aggregates(client, auth_user, meal_id):
     client.post(f"/api/diary/meal/{meal_id}/item", json={
-        "food_name": "pirinç", "grams": 100, "per_100g": {"calories": 130}})
+        "food_name": "pirinç", "grams": 100,
+        "per_100g": {"calories": 130, "protein": 2.5, "carbs": 28, "fat": 0.6}})
     body = client.get("/api/diary/today").get_json()
     assert len(body["meals"]) == 1
     assert body["meals"][0]["totals"]["calories"] == 130.0
@@ -459,8 +461,8 @@ def test_meal_log_non_numeric_ai_values_zeroed(client, auth_user, monkeypatch):
 
 def _log_meal(client, ogun, kalori):
     client.post("/meal-log", json={"ogun": ogun, "yemekler": "x",
-                                   "override_macros": {"kalori": kalori, "protein": 10,
-                                                       "karb": 10, "yag": 5}})
+                                   "override_macros": {"kalori": kalori, "protein": 0,
+                                                       "karb": kalori / 4, "yag": 0}})
 
 
 def test_meal_log_today_totals(client, auth_user):

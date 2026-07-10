@@ -817,4 +817,5 @@ def test_clamp_serving_macros_floors_negative_values():
 
 
 def test_clamp_serving_macros_corrects_atwater_only_violation():
-    assert np.clamp_serving_macros(2000, 0, 0, 0) == (0.0, 0, 0, 0)
+    for calories in (1000, 2000, 99999):
+        assert np.clamp_serving_macros(calories, 0, 0, 0) == (0.0, 0, 0, 0)
