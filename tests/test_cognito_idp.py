@@ -10,8 +10,12 @@ sabitlenir.
 """
 import base64
 import json
+import time
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric import rsa
+from joserfc import jwt
+from joserfc.jwk import RSAKey
 
 from app.services import cognito_service
 from app.services.cognito_service import CognitoServiceError
@@ -53,16 +57,34 @@ class _FakeIdpClient:
         return self._do("initiate_auth", kw)
 
 
+_PRIVATE_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+_SIGNING_KEY = RSAKey.import_key(
+    _PRIVATE_KEY, parameters={"kid": "test-kid", "use": "sig", "alg": "RS256"})
+_PUBLIC_JWKS = {"keys": [_SIGNING_KEY.as_dict(private=False)]}
+
+
 def _use_fake(monkeypatch, fake):
     monkeypatch.setattr(cognito_service, "_get_client", lambda: fake)
     monkeypatch.setattr(cognito_service, "COGNITO_APP_CLIENT_ID", "client-123")
+    monkeypatch.setattr(cognito_service, "COGNITO_REGION", "eu-central-1")
+    monkeypatch.setattr(cognito_service, "COGNITO_USER_POOL_ID", "eu-central-1_test")
+    monkeypatch.setattr(
+        cognito_service, "_get_jwks", lambda force_refresh=False: _PUBLIC_JWKS,
+        raising=False)
     # Varsayılan: public client (secret yok) → SECRET_HASH üretilmez.
     monkeypatch.setattr(cognito_service, "COGNITO_CLIENT_SECRET", "")
 
 
-def _id_token(claims):
-    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
-    return f"hdr.{payload}.sig"
+def _id_token(claims, key=_SIGNING_KEY, kid="test-kid"):
+    payload = {
+        "iss": "https://cognito-idp.eu-central-1.amazonaws.com/eu-central-1_test",
+        "aud": "client-123",
+        "token_use": "id",
+        "exp": int(time.time()) + 300,
+        **claims,
+    }
+    return jwt.encode(
+        {"alg": "RS256", "kid": kid}, payload, key, algorithms=["RS256"])
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +232,36 @@ def test_initiate_auth_maps_not_authorized(monkeypatch):
 def test_decode_claims_garbage_returns_empty():
     assert cognito_service._decode_claims("not-a-jwt") == {}
     assert cognito_service._decode_claims("") == {}
+
+
+def test_decode_claims_verifies_valid_signature(monkeypatch):
+    _use_fake(monkeypatch, _FakeIdpClient())
+    token = _id_token({"sub": "sub-1", "email": "A@EXAMPLE.COM"})
+    assert cognito_service._decode_claims(token) == {
+        "sub": "sub-1", "email": "a@example.com",
+        "email_verified": False, "name": "",
+    }
+
+
+def test_decode_claims_rejects_forged_signature(monkeypatch):
+    _use_fake(monkeypatch, _FakeIdpClient())
+    other = RSAKey.import_key(
+        rsa.generate_private_key(public_exponent=65537, key_size=2048),
+        parameters={"kid": "test-kid", "use": "sig", "alg": "RS256"})
+    assert cognito_service._decode_claims(_id_token({"sub": "forged"}, key=other)) == {}
+
+
+@pytest.mark.parametrize("overrides", [
+    {"iss": "https://attacker.invalid/pool"},
+    {"aud": "wrong-client"},
+    {"token_use": "access"},
+    {"exp": 1},
+    {"sub": ""},
+])
+def test_decode_claims_rejects_invalid_cognito_claims(monkeypatch, overrides):
+    _use_fake(monkeypatch, _FakeIdpClient())
+    claims = {"sub": "sub-1", **overrides}
+    assert cognito_service._decode_claims(_id_token(claims)) == {}
 
 
 def test_initiate_auth_missing_id_token_rejected(monkeypatch):

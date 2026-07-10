@@ -16,14 +16,23 @@ arar ve kimlik yokken gereksiz yere patlar).
 import base64
 import hashlib
 import hmac
-import json
 import logging
+import threading
+import time
+
+import requests
+from joserfc import jwt
+from joserfc.jwk import KeySet
+from joserfc.jwt import JWTClaimsRegistry
 
 from app.config import (COGNITO_APP_CLIENT_ID, COGNITO_CLIENT_SECRET,
-                        COGNITO_REGION)
+                        COGNITO_REGION, COGNITO_USER_POOL_ID)
 
 _logger = logging.getLogger(__name__)
 _client = None
+_JWKS_TTL_SECONDS = 6 * 60 * 60
+_jwks_cache = {"value": None, "expires_at": 0.0}
+_jwks_lock = threading.Lock()
 
 # Ham Cognito hata adı → kullanıcıya gösterilebilir Türkçe mesaj. Listede olmayan
 # hatalar generic mesaja düşer (ham hata sızdırılmaz).
@@ -188,19 +197,64 @@ def initiate_auth(username, password):
 CognitoIdpError = CognitoServiceError
 
 
+def _get_jwks(force_refresh=False):
+    """Return Cognito signing keys with a short in-process rotation cache."""
+    now = time.monotonic()
+    cached = _jwks_cache["value"]
+    if not force_refresh and cached is not None and now < _jwks_cache["expires_at"]:
+        return cached
+    with _jwks_lock:
+        now = time.monotonic()
+        cached = _jwks_cache["value"]
+        if not force_refresh and cached is not None and now < _jwks_cache["expires_at"]:
+            return cached
+        url = (
+            f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/"
+            f"{COGNITO_USER_POOL_ID}/.well-known/jwks.json"
+        )
+        response = requests.get(url, timeout=5)
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("keys"), list):
+            raise ValueError("Cognito JWKS response is invalid")
+        _jwks_cache["value"] = payload
+        _jwks_cache["expires_at"] = now + _JWKS_TTL_SECONDS
+        return payload
+
+
 def _decode_claims(id_token):
-    """ID token payload'ını çöz. İmza DOĞRULANMAZ — token doğrudan bizim
-    initiate_auth çağrımıza Cognito'dan TLS üzerinden geldi (kullanıcıdan gelen
-    bir token DEĞİL), kaynağı zaten güvenilir. Yalnızca kimlik claim'lerini okuruz."""
-    try:
-        payload_b64 = id_token.split(".")[1]
-        payload_b64 += "=" * (-len(payload_b64) % 4)  # base64url padding
-        claims = json.loads(base64.urlsafe_b64decode(payload_b64))
-    except Exception:
+    """Verify a Cognito ID token and return the identity claims used by auth."""
+    if not id_token or not COGNITO_USER_POOL_ID or not COGNITO_APP_CLIENT_ID:
         return {}
-    return {
-        "sub": (claims.get("sub") or "").strip(),
-        "email": (claims.get("email") or "").strip().lower(),
-        "email_verified": claims.get("email_verified", False),
-        "name": claims.get("name") or "",
-    }
+    issuer = (
+        f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/"
+        f"{COGNITO_USER_POOL_ID}"
+    )
+    registry = JWTClaimsRegistry(
+        iss={"essential": True, "value": issuer},
+        aud={"essential": True, "value": COGNITO_APP_CLIENT_ID},
+        exp={"essential": True},
+        token_use={"essential": True, "value": "id"},
+        sub={"essential": True},
+    )
+    for force_refresh in (False, True):
+        try:
+            token = jwt.decode(
+                id_token,
+                KeySet.import_key_set(_get_jwks(force_refresh=force_refresh)),
+                algorithms=["RS256"],
+            )
+            registry.validate(token.claims)
+            claims = token.claims
+            return {
+                "sub": claims["sub"].strip(),
+                "email": (claims.get("email") or "").strip().lower(),
+                "email_verified": claims.get("email_verified", False),
+                "name": claims.get("name") or "",
+            }
+        except Exception as exc:
+            if force_refresh:
+                _logger.warning(
+                    "[COGNITO-IDP] ID token doğrulaması başarısız: %s",
+                    type(exc).__name__)
+    return {}
