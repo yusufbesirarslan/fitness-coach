@@ -27,7 +27,11 @@ def cognito_env(monkeypatch):
         }
 
     monkeypatch.setattr(cognito_service, "authenticate", fake_authenticate)
-    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use: {"sub": "ok"})
+    # S4: login artık DOĞRULANMIŞ claim'lerin sub'ını karşılaştırır — sahte
+    # doğrulayıcı, token'daki kullanıcı adından tutarlı sub üretir
+    # (id-<username> → sub-<username>).
+    monkeypatch.setattr(cognito_jwt, "validate_token",
+                        lambda tok, use: {"sub": "sub-" + tok.removeprefix("id-")})
     return monkeypatch
 
 
@@ -37,6 +41,18 @@ def cog_account(app):
     db.session.add(u)
     db.session.commit()
     return u
+
+
+def test_login_compares_sub_from_verified_claims(client, cognito_env, cog_account):
+    # S4: validate_token'ın DÖNDÜRDÜĞÜ (doğrulanmış) claim'ler kullanılmalı.
+    # Doğrulanmamış decode doğru sub'ı söylese bile, doğrulanmış sub yerel
+    # kayıtla eşleşmiyorsa giriş reddedilmeli — aksi hâlde bir refactor
+    # doğrulamayı sessizce anlamsızlaştırır.
+    cognito_env.setattr(cognito_jwt, "validate_token",
+                        lambda tok, use: {"sub": "baskasi"})
+    resp = client.post("/login", json={"username": "e2e", "password": "x"})
+    assert resp.status_code == 401
+    assert CognitoSession.query.count() == 0
 
 
 def test_logout_calls_global_sign_out_and_deletes_row(client, cognito_env, cog_account):

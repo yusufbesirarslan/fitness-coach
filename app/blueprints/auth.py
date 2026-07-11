@@ -238,19 +238,22 @@ def login():
                 return jsonify({"error": e.message, "needs_verification": True,
                                 "username": username}), 403
             return jsonify({"error": e.message}), 401
-        claims = result["claims"]
         tokens = result["tokens"]
         # Kimlik token'ını KRİPTOGRAFİK olarak doğrula (JWKS) — claim'lere manuel
         # güvenme; imza/issuer/audience/exp Cognito JWKS'e karşı sınanır.
+        # S4: sub karşılaştırması validate_token'ın DÖNDÜRDÜĞÜ (doğrulanmış)
+        # claim'lerden yapılır — authenticate'in doğrulamasız decode'una
+        # (result["claims"]) güvenilmez; bir refactor doğrulamayı sessizce
+        # anlamsızlaştırmasın.
         try:
-            cognito_jwt.validate_token(tokens["id_token"], "id")
+            verified_claims = cognito_jwt.validate_token(tokens["id_token"], "id")
         except TokenValidationError:
             return jsonify({"error": t("auth.bad_credentials")}), 401
         # Kimlik bütünlüğü: giriş POZİTİF bir doğrulamadır — dönen sub DOLU
         # olmalı VE yerel kayıtla eşleşmeli. Boş claim (MFA/challenge/bozuk
         # token) asla başarı sayılmaz. (authenticate bu durumları zaten
         # CognitoServiceError ile reddeder; burası ikinci savunma katmanı.)
-        if not claims.get("sub") or claims["sub"] != user.cognito_sub:
+        if not verified_claims.get("sub") or verified_claims["sub"] != user.cognito_sub:
             return jsonify({"error": t("auth.bad_credentials")}), 401
         _login_fresh(user)
         # _login_fresh session.clear() yapar → cognito_sid'i SONRA yaz. Token'lar
