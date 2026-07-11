@@ -67,6 +67,8 @@ def create_app():
     app.before_request(_csrf_protect)
     limiter.init_app(app)
     warn_if_limiter_degraded(app)
+    from app.services.ai_gate import warn_if_gates_exhaust_threads
+    warn_if_gates_exhaust_threads(app)
     app.before_request(maybe_weekly_rollover)
     app.before_request(update_streak)
     # Dil çözümü (g.locale): current_user/session'a bağlı, şablon render'dan önce.

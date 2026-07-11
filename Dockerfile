@@ -6,9 +6,12 @@
 # `docker buildx imagetools inspect python:3.11-slim` ile al.
 FROM python:3.11-slim@sha256:b27df5841f3355e9473f9a516d38a6783b6c8dfeacaf2d14a240f443b368ddb6
 
+# FITX_WEB_THREADS gunicorn --threads (CMD) ile eş tutulmalı — ai_gate boot
+# denetimi AI+scrape kapılarının thread rezervini bu değere göre doğrular (I1).
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    FITX_WEB_THREADS=8
 
 WORKDIR /app
 

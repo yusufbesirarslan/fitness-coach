@@ -33,9 +33,12 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
       Bilinçli tradeoff (A5): Redis availability == login availability. Redis tek konteynerdir;
       diğer her şey degrade eder (session=cookie, leaderboard→Postgres, foodcache→L1,
       limiter→in-memory), yalnızca login 503 olur. /health `limiter_storage` alanından izle.
-    - `AI_MAX_CONCURRENCY` (vars. 5) + `AI_GATE_WAIT_SECONDS` (vars. 10) — ağır AI route'larında
-      eşzamanlılık tavanı (app/services/ai_gate.py); dolunca 503 + Retry-After. Thread rezervi
-      /health ve ucuz route'ları AI yükünden korur (A1).
+    - `AI_MAX_CONCURRENCY` (vars. 4) + `SCRAPE_MAX_CONCURRENCY` (vars. 2) +
+      `AI_GATE_WAIT_SECONDS` (vars. 10) — ağır AI/scrape route'larında eşzamanlılık
+      tavanı (app/services/ai_gate.py); dolunca 503 + Retry-After. İki kapının toplamı
+      `FITX_WEB_THREADS`'in (vars. 8, gunicorn --threads ile eş) en az 2 altında
+      kalmalı; ihlal boot'ta loglanır. Thread rezervi /health ve ucuz route'ları
+      AI yükünden korur (A1/I1).
     - `SENTRY_DSN` (yoksa kapalı) + opsiyonel `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE` — hata izleme (app/observability.py). DSN yoksa no-op.
   - Operasyon notu: web konteyneri hâlâ tek gunicorn worker + 8 thread çalışır.
     Coach/menu/plan AI çağrıları senkron ve bloklayıcıdır; 8 uzun AI isteği tüm

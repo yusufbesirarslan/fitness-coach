@@ -14,9 +14,12 @@ artarsa sınır worker-başına uygulanır; o noktada asıl çözüm AI uçları
 worker/queue'ya taşımaktır.
 
 Env ayarları:
-- AI_MAX_CONCURRENCY (vars. 5): aynı anda AI route'u işleyen thread tavanı.
+- AI_MAX_CONCURRENCY (vars. 4): aynı anda AI route'u işleyen thread tavanı.
 - AI_GATE_WAIT_SECONDS (vars. 10): slot için en fazla bekleme; dolarsa 503 +
   Retry-After (kısa bekleme burst'leri yumuşatır, thread'i uzun süre tutmaz).
+- FITX_WEB_THREADS (vars. 8): gunicorn --threads değeri (Dockerfile ile eş
+  tutulmalı); iki kapının toplamı bunun en az 2 altında kalmalı ki /health ve
+  ucuz route'lara gerçek bir rezerv kalsın (I1).
 """
 import os
 import threading
@@ -24,8 +27,11 @@ from functools import wraps
 
 from flask import current_app, jsonify
 
-AI_MAX_CONCURRENCY = max(1, int(os.getenv("AI_MAX_CONCURRENCY", "5")))
+AI_MAX_CONCURRENCY = max(1, int(os.getenv("AI_MAX_CONCURRENCY", "4")))
 AI_GATE_WAIT_SECONDS = float(os.getenv("AI_GATE_WAIT_SECONDS", "10"))
+
+WEB_THREADS = max(1, int(os.getenv("FITX_WEB_THREADS", "8")))
+THREAD_RESERVE_MIN = 2
 
 # INF-5: Menü scrape'i (proxy_scan_menu) AĞ-bağımlıdır; model çağrısı YAPMAZ
 # (çıkarım /api/menu/analyze'da olur) ama onlarca saniyelik fetch + alt-sayfa
@@ -33,11 +39,31 @@ AI_GATE_WAIT_SECONDS = float(os.getenv("AI_GATE_WAIT_SECONDS", "10"))
 # slotlarını doldurup koç/plan/analyze isteklerini 503'e sokabiliyordu — oysa
 # hiçbir model çağrısı uçmuyordu. Scrape'e AYRI ve daha küçük bir semafor ver;
 # LLM slotları scrape starvation'ından korunur. (A1 rezerv-thread tasarımını tamamlar.)
-SCRAPE_MAX_CONCURRENCY = max(1, int(os.getenv("SCRAPE_MAX_CONCURRENCY", "3")))
+SCRAPE_MAX_CONCURRENCY = max(1, int(os.getenv("SCRAPE_MAX_CONCURRENCY", "2")))
 SCRAPE_GATE_WAIT_SECONDS = float(os.getenv("SCRAPE_GATE_WAIT_SECONDS", "10"))
 
 _ai_slots = threading.BoundedSemaphore(AI_MAX_CONCURRENCY)
 _scrape_slots = threading.BoundedSemaphore(SCRAPE_MAX_CONCURRENCY)
+
+
+def warn_if_gates_exhaust_threads(app):
+    """I1: iki kapının toplamı thread havuzunu tüketiyorsa boot'ta uyar.
+
+    5(AI) + 3(scrape) = 8 = --threads gibi bir kombinasyon /health rezervini
+    sıfırlar: yük altında HEALTHCHECK zaman aşımına düşüp deploy'u sahte
+    rollback'e sürükleyebilir. Env ile override edilen değerler de bu
+    denetimden geçer.
+    """
+    total = AI_MAX_CONCURRENCY + SCRAPE_MAX_CONCURRENCY
+    reserve = WEB_THREADS - total
+    if reserve < THREAD_RESERVE_MIN:
+        app.logger.warning(
+            "[AI-GATE] AI(%s) + scrape(%s) kapıları %s thread'e karşı yalnız %s "
+            "rezerv bırakıyor (en az %s bekleniyor) — /health yük altında "
+            "kilitlenebilir. AI_MAX_CONCURRENCY/SCRAPE_MAX_CONCURRENCY düşürün "
+            "veya FITX_WEB_THREADS'i gunicorn --threads ile eşitleyin.",
+            AI_MAX_CONCURRENCY, SCRAPE_MAX_CONCURRENCY, WEB_THREADS, reserve,
+            THREAD_RESERVE_MIN)
 
 
 def _concurrency_gate(fn, semaphore, wait_seconds, max_concurrency, label):
