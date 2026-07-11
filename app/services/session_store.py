@@ -115,3 +115,25 @@ def delete(session_id):
     if row:
         db.session.delete(row)
         db.session.commit()
+
+
+# Cognito refresh token'ının varsayılan geçerliliği 30 gündür; bu kadar süre
+# dokunulmamış bir oturum zaten yenilenemez — satırı tutmanın tek etkisi
+# tablonun sınırsız büyümesi ve süresi geçmiş şifreli token saklamaktır (I5).
+PURGE_AFTER_DAYS = 30
+
+
+def purge_expired(older_than_days=PURGE_AFTER_DAYS):
+    """last_used_at'i eşikten eski oturum satırlarını sil; silinen sayıyı döndür.
+
+    Satırlar normalde yalnız logout/refresh-hatasında silinir; sessiz terk
+    edilen oturumlar için periyodik süpürme gerekir (weekly-reset CLI çağırır).
+    """
+    cutoff = datetime.utcnow() - timedelta(days=older_than_days)
+    removed = (CognitoSession.query
+               .filter(CognitoSession.last_used_at < cutoff)
+               .delete(synchronize_session=False))
+    db.session.commit()
+    if removed:
+        _logger.info("[SESSION] %d süresi geçmiş Cognito oturumu silindi", removed)
+    return removed

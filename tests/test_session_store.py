@@ -104,6 +104,23 @@ def test_refresh_failure_invalidates(app, cog_user, monkeypatch):
     assert session_store.get(sid) is None  # satır silindi
 
 
+def test_purge_expired_removes_only_stale_sessions(app, cog_user):
+    # I5: satırlar yalnız logout/refresh-hatasında siliniyordu → tablo sınırsız
+    # büyüyüp süresi geçmiş şifreli token tutuyordu. 30+ gün dokunulmamış
+    # oturumlar (Cognito refresh penceresi de dolmuştur) süpürülmeli.
+    from datetime import datetime, timedelta
+    stale_sid = session_store.create(cog_user, _tokens(), "cg")
+    fresh_sid = session_store.create(cog_user, _tokens(), "cg")
+    stale = session_store.get(stale_sid)
+    stale.last_used_at = datetime.utcnow() - timedelta(days=31)
+    db.session.commit()
+
+    removed = session_store.purge_expired()
+    assert removed == 1
+    assert session_store.get(stale_sid) is None
+    assert session_store.get(fresh_sid) is not None
+
+
 def test_delete_removes_row(app, cog_user):
     sid = session_store.create(cog_user, _tokens(), "cg")
     session_store.delete(sid)

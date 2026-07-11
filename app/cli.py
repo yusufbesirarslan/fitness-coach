@@ -36,6 +36,11 @@ def weekly_reset_cmd():
         flask --app starter weekly-reset
     """
     click.echo(run_weekly_rollover())
+    # I5: haftalık bakım penceresinde 30+ gün dokunulmamış Cognito oturum
+    # satırlarını da süpür (refresh penceresi dolmuştur, yenilenemezler).
+    from app.services import session_store
+    removed = session_store.purge_expired()
+    click.echo(f"cognito-sessions purged: {removed}")
 
 
 
