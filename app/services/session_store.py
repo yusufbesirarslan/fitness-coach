@@ -2,12 +2,15 @@
 """CognitoSession token deposu — Fernet şifreleme + süre-dolumunda yenileme.
 
 Ham access/refresh token'lar ASLA düz metin saklanmaz/loglanmaz. Anahtar
-COGNITO_TOKEN_ENC_KEY (geçerli Fernet anahtarı) verilmişse ondan, yoksa
-SECRET_KEY'den deterministik türetilir.
+COGNITO_TOKEN_ENC_KEY (geçerli Fernet anahtarı) olmalı; yalnız dev/test'te
+SECRET_KEY'den deterministik türetmeye düşülür (S2 — wearable anahtarıyla
+aynı kural: SECRET_KEY oturumları da imzalar, sızarsa DB'deki OAuth
+token'ları da çözmemeli).
 """
 import base64
 import hashlib
 import logging
+import os
 import secrets
 from datetime import datetime, timedelta
 
@@ -33,6 +36,15 @@ def _get_fernet():
             key = COGNITO_TOKEN_ENC_KEY.encode()
         else:
             from flask import current_app
+            is_dev = (current_app.config.get("TESTING") or current_app.debug
+                      or os.environ.get("FLASK_ENV") == "development")
+            if not is_dev:
+                # Asıl kapı boot'tadır (config._enforce_cognito_token_key);
+                # bu, o kapı atlanırsa prod'da sessiz SECRET_KEY türetmesini
+                # kesen ikinci savunma hattı.
+                raise RuntimeError(
+                    "COGNITO_TOKEN_ENC_KEY must be set outside debug/test "
+                    "environments (see wearables/crypto.py precedent)")
             secret = current_app.config["SECRET_KEY"].encode()
             key = base64.urlsafe_b64encode(hashlib.sha256(secret).digest())
         _fernet = Fernet(key)
