@@ -149,3 +149,23 @@ Verification:
 - Full suite: 1150 passed; the only non-green items are pre-existing and
   unrelated to Sprint 2 (a stale CSP-nonce template assertion, and db_init
   "Multiple heads" errors caused solely by the untracked barcode WIP migration).
+
+### Addendum - Sprint 2 compliance re-audit (2026-07-11)
+
+- Re-audited the full sprint spec against the merged implementation; every
+  requirement (Cognito USER_PASSWORD_AUTH login, JWKS JWT validation,
+  `@require_auth` middleware, encrypted sessions, refresh lifecycle,
+  GlobalSignOut, error mapping, TODO(Sprint 3) markers, tests, docs) verified
+  in place.
+- Closed the one residual gap from the spec's security list: registration
+  email is now normalized (trim + lowercase) and the duplicate-email check is
+  case-insensitive (`app/blueprints/auth.py`); regression test added in
+  `tests/test_auth.py`. Existing rows keep their stored casing - the collision
+  check compares case-insensitively, and Cognito claim emails were already
+  lowercased on read.
+- Protected-route coverage re-verified: every authenticated endpoint across
+  all 15 route files (incl. `wearables` and the split `nutrition/*` modules,
+  superseding the "14 blueprint files" count above) uses `@require_auth`;
+  only the intentional public routes (landing, invite, login, register,
+  verify, set-language, health) remain open.
+- Remaining technical debt and Sprint 3 follow-ups above are unchanged.
