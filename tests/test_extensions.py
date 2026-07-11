@@ -98,6 +98,52 @@ def test_health_reports_limiter_storage(app):
     assert body["limiter_storage"] in ("memory", "redis", "degraded")
 
 
+def test_deep_health_reports_login_redis_and_bedrock(app):
+    # I2/I3: deploy gate'in kullandığı derin sağlık görünümü — Redis/login/bedrock
+    # alt sistemlerini raporlar; sağlıklı durumda 200.
+    client = app.test_client()
+    resp = client.get("/health?deep=1")
+    assert resp.status_code == 200
+    body = resp.get_json()
+    assert body["login"] == "ok"
+    assert body["redis"] in ("ok", "unconfigured", "error")
+    assert body["bedrock"] in ("enabled", "disabled")
+
+
+def test_deep_health_reports_fatsecret_proxy(app, monkeypatch):
+    # I4: derin görünüm FatSecret proxy'sini de raporlar — BİLGİLENDİRİCİ alan
+    # (proxy düşükken deploy rollback'i tetiklenmez, yalnızca izleme görür).
+    import app.config as config_mod
+    client = app.test_client()
+
+    monkeypatch.setattr(config_mod, "FATSECRET_BASE_URL", "")
+    assert client.get("/health?deep=1").get_json()["fatsecret_proxy"] == "unconfigured"
+
+    monkeypatch.setattr(config_mod, "FATSECRET_BASE_URL", "https://x.example/fatsecret")
+    import requests as requests_mod
+
+    def dead(*a, **k):
+        raise requests_mod.exceptions.ConnectionError("down")
+    monkeypatch.setattr(requests_mod, "get", dead)
+    resp = client.get("/health?deep=1")
+    assert resp.get_json()["fatsecret_proxy"] == "error"
+    assert resp.status_code == 200                       # bilgilendirici: gate'i düşürmez
+
+
+def test_deep_health_503_when_login_fail_closed(app, monkeypatch):
+    # I2: Redis-down + LOGIN_FAIL_CLOSED=1 → hiç kimse giriş yapamaz; derin
+    # sağlık 503 dönmeli ki deploy gate "yeşilken login kapalı" durumunu yakalasın.
+    import app.extensions as ext
+    monkeypatch.setattr(ext, "login_throttle_available", lambda: False)
+    app.config["LOGIN_FAIL_CLOSED"] = True
+    client = app.test_client()
+    resp = client.get("/health?deep=1")
+    assert resp.status_code == 503
+    assert resp.get_json()["login"] == "offline"
+    # Sığ /health (Docker liveness) etkilenmez — konteyner restart-loop'a girmesin.
+    assert client.get("/health").status_code == 200
+
+
 def test_health_returns_503_when_db_unreachable(app, monkeypatch):
     # DB erişilemezse /health 503 dönmeli ki bozuk deploy rollback tetiklesin.
     from app.extensions import db

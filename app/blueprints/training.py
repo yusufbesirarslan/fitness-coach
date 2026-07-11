@@ -265,13 +265,15 @@ def complete_workout():
 @require_auth
 def workout_status():
     # Bugünkü antrenman tamamlanmış mı? (cihazlar arası senkron için sunucudan)
-    today_key = app_today().isoformat()
-    quest = DailyQuest.query.filter_by(quest_type="workout_logged", is_active=True).first()
-    completed = False
-    if quest:
-        completed = UserQuestProgress.query.filter_by(
-            user_id=current_user.id, quest_id=quest.id, date_key=today_key
-        ).first() is not None
+    # B3: sinyal, complete_workout'un idempotency guard'ıyla AYNI — bugünün
+    # PumpCheck'i. Eski quest-bazlı okuma, görev tohumlanmamış ortamda
+    # tamamlanan antrenmanı 'completed: False' gösteriyordu.
+    start_utc, end_utc = utc_day_bounds()
+    completed = PumpCheck.query.filter(
+        PumpCheck.user_id == current_user.id,
+        PumpCheck.created_at >= start_utc,
+        PumpCheck.created_at < end_utc,
+    ).first() is not None
     return jsonify({"completed": completed})
 
 

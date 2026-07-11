@@ -1,6 +1,6 @@
 from datetime import date
 
-from flask import Blueprint, jsonify, redirect, request, session, url_for
+from flask import Blueprint, current_app, jsonify, redirect, request, session, url_for
 from flask_login import current_user
 from app.auth_middleware import require_auth
 
@@ -82,8 +82,12 @@ def wearable_callback(provider):
     try:
         token_data = adapter.exchange_code(code)
         save_wearable_tokens(current_user.id, adapter.provider, token_data)
-    except Exception as exc:
-        return _json_error(f"{adapter.provider} bağlantısı kurulamadı: {exc}", 502)
+    except Exception:
+        # S3: ham exception metni (iç URL/kütüphane detayı) istemciye sızmasın —
+        # sunucuda logla, istemciye jenerik mesaj dön. (cognito_service._wrap deseni)
+        current_app.logger.warning("[WEARABLE] %s bağlantısı kurulamadı",
+                                   adapter.provider, exc_info=True)
+        return _json_error(f"{adapter.provider} bağlantısı kurulamadı.", 502)
     session.pop(f"_wearable_oauth_state_{adapter.provider}", None)
     return redirect(url_for("profile.edit_profile"))
 
@@ -120,8 +124,10 @@ def wearable_sync(provider):
         return jsonify(sync_provider_day(current_user.id, provider, target))
     except WearableError as exc:
         return _json_error(str(exc), 400)
-    except Exception as exc:
-        return _json_error(f"Senkronizasyon başarısız: {exc}", 502)
+    except Exception:
+        current_app.logger.warning("[WEARABLE] %s senkronizasyonu başarısız",
+                                   provider, exc_info=True)
+        return _json_error("Senkronizasyon başarısız.", 502)
 
 
 @bp.route("/api/wearables/whoop/<resource>")
@@ -135,8 +141,10 @@ def whoop_resource(resource):
     try:
         params = _whoop_query_params(resource)
     except ValueError as exc:
-        return _json_error(str(exc), 400)
+        return _json_error(str(exc), 400)  # uygulama-yazımı mesaj, sızıntı yok
     try:
         return jsonify(adapter.request(endpoint, current_user.id, params=params))
-    except Exception as exc:
-        return _json_error(f"WHOOP isteği başarısız: {exc}", 502)
+    except Exception:
+        current_app.logger.warning("[WEARABLE] WHOOP %s isteği başarısız",
+                                   resource, exc_info=True)
+        return _json_error("WHOOP isteği başarısız.", 502)

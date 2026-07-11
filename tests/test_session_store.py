@@ -24,6 +24,44 @@ def _tokens(exp=3600):
     return {"access_token": "acc-1", "id_token": "id-1", "refresh_token": "ref-1", "expires_in": exp}
 
 
+def test_fernet_requires_dedicated_key_outside_dev(app, monkeypatch):
+    # S2: COGNITO_TOKEN_ENC_KEY yokken SECRET_KEY'den sessiz türetme yalnız
+    # dev/test'te kabul edilir; prod'da wearable anahtarı gibi (crypto.py)
+    # özel anahtar zorunlu — SECRET_KEY sızarsa DB'deki tüm OAuth token'lar
+    # çözülebilir olmamalı.
+    monkeypatch.setattr(session_store, "_fernet", None)
+    monkeypatch.setattr(session_store, "COGNITO_TOKEN_ENC_KEY", "")
+    monkeypatch.setitem(app.config, "TESTING", False)
+    monkeypatch.setattr(app, "debug", False)
+    monkeypatch.delenv("FLASK_ENV", raising=False)
+    with pytest.raises(RuntimeError):
+        session_store._get_fernet()
+
+
+def test_fernet_falls_back_to_secret_key_in_dev(app, monkeypatch):
+    monkeypatch.setattr(session_store, "_fernet", None)
+    monkeypatch.setattr(session_store, "COGNITO_TOKEN_ENC_KEY", "")
+    f = session_store._get_fernet()  # TESTING=True → türetme çalışır
+    assert f.decrypt(f.encrypt(b"x")) == b"x"
+
+
+def test_boot_enforces_dedicated_key_when_cognito_enabled(monkeypatch):
+    # S2 (boot yarısı): _get_fernet tembeldir (ilk login'de çalışır); yalnız
+    # kullanım anında patlasaydı deploy gate yeşil geçip login 500'lenirdi.
+    # Boot'ta fail-fast → health gate yakalar ve rollback eder.
+    import app.config as config
+    monkeypatch.setattr(config, "COGNITO_ENABLED", True)
+    monkeypatch.setattr(config, "COGNITO_TOKEN_ENC_KEY", "")
+    with pytest.raises(RuntimeError):
+        config._enforce_cognito_token_key(is_dev=False)
+    config._enforce_cognito_token_key(is_dev=True)  # dev serbest
+    monkeypatch.setattr(config, "COGNITO_TOKEN_ENC_KEY", "k")
+    config._enforce_cognito_token_key(is_dev=False)  # anahtar varsa geçer
+    monkeypatch.setattr(config, "COGNITO_ENABLED", False)
+    monkeypatch.setattr(config, "COGNITO_TOKEN_ENC_KEY", "")
+    config._enforce_cognito_token_key(is_dev=False)  # Cognito kapalıysa gerek yok
+
+
 def test_create_persists_encrypted_row(app, cog_user):
     sid = session_store.create(cog_user, _tokens(), "cg")
     row = session_store.get(sid)
@@ -64,6 +102,23 @@ def test_refresh_failure_invalidates(app, cog_user, monkeypatch):
     with pytest.raises(SessionInvalid):
         session_store.get_valid_access_token(sid)
     assert session_store.get(sid) is None  # satır silindi
+
+
+def test_purge_expired_removes_only_stale_sessions(app, cog_user):
+    # I5: satırlar yalnız logout/refresh-hatasında siliniyordu → tablo sınırsız
+    # büyüyüp süresi geçmiş şifreli token tutuyordu. 30+ gün dokunulmamış
+    # oturumlar (Cognito refresh penceresi de dolmuştur) süpürülmeli.
+    from datetime import datetime, timedelta
+    stale_sid = session_store.create(cog_user, _tokens(), "cg")
+    fresh_sid = session_store.create(cog_user, _tokens(), "cg")
+    stale = session_store.get(stale_sid)
+    stale.last_used_at = datetime.utcnow() - timedelta(days=31)
+    db.session.commit()
+
+    removed = session_store.purge_expired()
+    assert removed == 1
+    assert session_store.get(stale_sid) is None
+    assert session_store.get(fresh_sid) is not None
 
 
 def test_delete_removes_row(app, cog_user):

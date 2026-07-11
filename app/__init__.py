@@ -39,8 +39,9 @@ def create_app():
         # limiter_storage: "redis"/"memory"/"degraded" — "degraded" iken brute-force
         # login throttle süreç-yerel + geçici olur; DB'nin aksine tek başına
         # unhealthy saymayız (uygulama zarifçe bellek-yedeğine düşer, sadece sinyal).
+        from flask import request
         from sqlalchemy import text
-        from app.extensions import limiter_storage_status
+        import app.extensions as ext
         try:
             db.session.execute(text("SELECT 1"))
             db_ok = True
@@ -50,9 +51,42 @@ def create_app():
         body = {
             "status": "ok" if db_ok else "error",
             "db": "ok" if db_ok else "error",
-            "limiter_storage": limiter_storage_status(),
+            "limiter_storage": ext.limiter_storage_status(),
         }
-        return body, (200 if db_ok else 503)
+        status = 200 if db_ok else 503
+        # I2/I3: ?deep=1 — deploy gate / harici readiness probe'u için derin
+        # görünüm. Redis-down + LOGIN_FAIL_CLOSED=1 iken login %100 kapalıdır;
+        # sığ /health yeşil kalır (liveness: konteyner restart-loop'a girmesin)
+        # ama derin görünüm 503 döner ki gate "yeşilken login kapalı" yakalasın.
+        if request.args.get("deep") == "1":
+            body["redis"] = {"redis": "ok", "memory": "unconfigured"}.get(
+                body["limiter_storage"], "error")
+            login_ok = (not app.config.get("LOGIN_FAIL_CLOSED", True)
+                        or ext.login_throttle_available())
+            body["login"] = "ok" if login_ok else "offline"
+            body["bedrock"] = ("enabled" if app.config.get("BEDROCK_ENABLED")
+                               else "disabled")
+            # I4: FatSecret loopback proxy'si (host, 127.0.0.1:3000) süpervizörsüz
+            # bir SPOF — düşerse makro çözümü sessizce LLM tahminine düşer.
+            # BİLGİLENDİRİCİ alan: hata deploy gate'ini düşürmez (proxy kesintisi
+            # app rollback'i gerektirmez), yalnızca izleme/deploy logunda görünür.
+            import app.config as config_mod
+            if not config_mod.FATSECRET_BASE_URL:
+                body["fatsecret_proxy"] = "unconfigured"
+            else:
+                import requests
+                try:
+                    r = requests.get(
+                        config_mod.FATSECRET_BASE_URL.rstrip("/") + "/rest/server.api",
+                        timeout=3)
+                    # Canlı proxy auth'suz istekte 4xx döner; nginx 502 = proxy ölü.
+                    body["fatsecret_proxy"] = "ok" if r.status_code < 500 else "error"
+                except Exception:
+                    body["fatsecret_proxy"] = "error"
+            if not login_ok:
+                body["status"] = "error"
+                status = 503
+        return body, status
 
     # before_request order must match the original monolith:
     #   _csrf_protect -> (limiter) _check_request_limit -> maybe_weekly_rollover -> update_streak
@@ -67,6 +101,8 @@ def create_app():
     app.before_request(_csrf_protect)
     limiter.init_app(app)
     warn_if_limiter_degraded(app)
+    from app.services.ai_gate import warn_if_gates_exhaust_threads
+    warn_if_gates_exhaust_threads(app)
     app.before_request(maybe_weekly_rollover)
     app.before_request(update_streak)
     # Dil çözümü (g.locale): current_user/session'a bağlı, şablon render'dan önce.

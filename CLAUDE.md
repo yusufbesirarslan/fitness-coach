@@ -23,7 +23,7 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 - migrations/ — Alembic (Flask-Migrate) şema geçmişi
 - templates/ + static/ — Türkçe UI (index, nutrition, training, progress, setup, friends, chat, quests, leaderboard, ...)
 - Dockerfile / docker-compose.yml — web (gunicorn, tek worker/8 thread) + redis; Postgres artık compose içinde değil, prod'da external RDS/DATABASE_URL ile gelir; servisler loopback'e bağlı
-- nginx.conf — host reverse proxy: / → Flask:5000, /fatsecret/rest/server.api → loopback proxy (127.0.0.1:3000, aynı EC2; Bearer token tel üzerinde açıkta kalmasın)
+- nginx.conf — host reverse proxy: / → Flask:5000, /fatsecret/rest/server.api → loopback proxy (127.0.0.1:3000, aynı EC2; Bearer token tel üzerinde açıkta kalmasın; süpervizyon için deploy/fatsecret-proxy.service.example — deploy.yml dinleyiciyi kontrol eder, /health?deep=1 raporlar)
 - tests/ — pytest (menü çıkarımı, makro alaka, nutrition pipeline)
 - .env — SECRET_KEY, DATABASE_URL, FATSECRET_*, OPENAI_API_KEY, OPENAI_MODEL, BEDROCK_*, COGNITO_*, AWS_REGION, S3_BUCKET_NAME, REDIS_URL (commit etme)
   - Örnek için .env.example'a bak. OpenAI anahtarı .env'den okunur, asla hardcode edilmez.
@@ -32,10 +32,15 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
     - `LOGIN_FAIL_CLOSED` (vars. 1) — Redis erişilemezse login 503 (brute-force throttle güvenilir değilken). 0 = eski fail-open.
       Bilinçli tradeoff (A5): Redis availability == login availability. Redis tek konteynerdir;
       diğer her şey degrade eder (session=cookie, leaderboard→Postgres, foodcache→L1,
-      limiter→in-memory), yalnızca login 503 olur. /health `limiter_storage` alanından izle.
-    - `AI_MAX_CONCURRENCY` (vars. 5) + `AI_GATE_WAIT_SECONDS` (vars. 10) — ağır AI route'larında
-      eşzamanlılık tavanı (app/services/ai_gate.py); dolunca 503 + Retry-After. Thread rezervi
-      /health ve ucuz route'ları AI yükünden korur (A1).
+      limiter→in-memory), yalnızca login 503 olur. `/health?deep=1` login offline'ken 503
+      döner ve deploy gate bunu kullanır (I2); sığ /health liveness için yeşil kalır.
+    - `AI_MAX_CONCURRENCY` (vars. 4) + `SCRAPE_MAX_CONCURRENCY` (vars. 2) +
+      `AI_MODEL_MAX_CONCURRENCY` (vars. AI_MAX_CONCURRENCY) +
+      `AI_GATE_WAIT_SECONDS` (vars. 0) — ağır AI/scrape route'larında eşzamanlılık
+      tavanı (app/services/ai_gate.py); dolunca 503 + Retry-After. İki kapının toplamı
+      `FITX_WEB_THREADS`'in (vars. 8, gunicorn --threads ile eş) en az 2 altında
+      kalmalı; ihlal boot'ta loglanır. Thread rezervi /health ve ucuz route'ları
+      AI yükünden korur (A1/I1).
     - `SENTRY_DSN` (yoksa kapalı) + opsiyonel `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE` — hata izleme (app/observability.py). DSN yoksa no-op.
   - Operasyon notu: web konteyneri hâlâ tek gunicorn worker + 8 thread çalışır.
     Coach/menu/plan AI çağrıları senkron ve bloklayıcıdır; 8 uzun AI isteği tüm

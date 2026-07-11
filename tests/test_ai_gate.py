@@ -133,3 +133,34 @@ def test_gate_marker_set_only_on_heavy_ai_routes(app):
     gated = {ep for ep, vf in app.view_functions.items() if _is_gated(vf)}
     unexpected = gated - EXPECTED_GATED_ENDPOINTS
     assert not unexpected, f"Beklenmeyen route kapıyı taşıyor: {sorted(unexpected)}"
+
+
+# ── Thread rezervi (I1 regresyon önlemi) ───────────────────────────────────
+# AI kapısı (5) + scrape kapısı (3) birlikte 8-thread havuzunun TAMAMINI
+# doldurabiliyordu — A1'in /health için ayırdığı rezerv fiilen sıfırlanmıştı.
+# İki kapının toplamı thread sayısının en az 2 altında kalmalı.
+
+def test_default_gate_caps_leave_thread_reserve():
+    reserve = ai_gate.WEB_THREADS - (
+        ai_gate.AI_MAX_CONCURRENCY + ai_gate.SCRAPE_MAX_CONCURRENCY)
+    assert reserve >= 2, (
+        f"AI({ai_gate.AI_MAX_CONCURRENCY}) + scrape({ai_gate.SCRAPE_MAX_CONCURRENCY}) "
+        f"kapıları {ai_gate.WEB_THREADS} thread'e karşı yalnız {reserve} rezerv bırakıyor")
+
+
+def test_warns_when_gates_exhaust_thread_pool(app, monkeypatch, caplog):
+    monkeypatch.setattr(ai_gate, "AI_MAX_CONCURRENCY", 5)
+    monkeypatch.setattr(ai_gate, "SCRAPE_MAX_CONCURRENCY", 3)
+    monkeypatch.setattr(ai_gate, "WEB_THREADS", 8)
+    with caplog.at_level("WARNING"):
+        ai_gate.warn_if_gates_exhaust_threads(app)
+    assert any("rezerv" in r.message for r in caplog.records)
+
+
+def test_no_warning_when_reserve_intact(app, monkeypatch, caplog):
+    monkeypatch.setattr(ai_gate, "AI_MAX_CONCURRENCY", 4)
+    monkeypatch.setattr(ai_gate, "SCRAPE_MAX_CONCURRENCY", 2)
+    monkeypatch.setattr(ai_gate, "WEB_THREADS", 8)
+    with caplog.at_level("WARNING"):
+        ai_gate.warn_if_gates_exhaust_threads(app)
+    assert not any("rezerv" in r.message for r in caplog.records)

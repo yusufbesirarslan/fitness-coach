@@ -94,6 +94,24 @@ COGNITO_REFRESH_SKEW_SECONDS = int(os.getenv("COGNITO_REFRESH_SKEW_SECONDS", "60
 
 
 
+def _enforce_cognito_token_key(is_dev):
+    """S2: Cognito açıkken prod'da COGNITO_TOKEN_ENC_KEY zorunlu.
+
+    session_store, anahtar yokken SECRET_KEY'den türetmeye düşüyordu — SECRET_KEY
+    (oturumları da imzalar) sızarsa DB'deki tüm Cognito access/refresh token'ları
+    çözülebilirdi. Wearable tarafı (crypto.py) özel anahtarı zaten zorunlu kılar;
+    aynı kuralı burada BOOT'ta uygula: _get_fernet tembel olduğundan kullanım-anı
+    hatası deploy gate'ten kaçar, boot hatasıysa health gate'te rollback tetikler.
+    """
+    if is_dev or not COGNITO_ENABLED:
+        return
+    if not COGNITO_TOKEN_ENC_KEY:
+        raise RuntimeError(
+            "COGNITO_TOKEN_ENC_KEY must be set when Cognito is enabled outside "
+            "debug/dev. Generate one with: python -c \"from cryptography.fernet "
+            "import Fernet; print(Fernet.generate_key().decode())\"")
+
+
 def _enforce_fatsecret_tls(app):
     from urllib.parse import urlparse as _urlparse
     if not FATSECRET_BASE_URL:
@@ -172,6 +190,7 @@ def configure_app(app):
     app.config["AI_PLAN_QUOTA_ENABLED"] = AI_PLAN_QUOTA_ENABLED
     app.config["AI_CHAT_QUOTA_ENABLED"] = AI_CHAT_QUOTA_ENABLED
     app.config["LOGIN_FAIL_CLOSED"] = LOGIN_FAIL_CLOSED
+    app.config["BEDROCK_ENABLED"] = BEDROCK_ENABLED
     _secret_key = os.environ.get("SECRET_KEY")
     if not _secret_key:
         # Allow boot without SECRET_KEY only in explicit debug mode, and generate
@@ -188,6 +207,7 @@ def configure_app(app):
             )
     app.config["SECRET_KEY"] = _secret_key
     _enforce_fatsecret_tls(app)
+    _enforce_cognito_token_key(_is_dev)
     # A6: prod'da sessizce yanlış moda düşen bayrakları GÖRÜNÜR yap. Bunlar
     # boot'u durdurmaz (meşru geçici kullanımlar olabilir) ama error seviyesinde
     # loglanır ki "her şey yeşil ama yanlış" durumu deploy çıktısında yakalansın.

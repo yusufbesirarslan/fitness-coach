@@ -36,6 +36,11 @@ def weekly_reset_cmd():
         flask --app starter weekly-reset
     """
     click.echo(run_weekly_rollover())
+    # I5: haftalık bakım penceresinde 30+ gün dokunulmamış Cognito oturum
+    # satırlarını da süpür (refresh penceresi dolmuştur, yenilenemezler).
+    from app.services import session_store
+    removed = session_store.purge_expired()
+    click.echo(f"cognito-sessions purged: {removed}")
 
 
 
@@ -43,6 +48,38 @@ def weekly_reset_cmd():
 # kullanıcı adları. Gerçek kullanıcıları yanlışlıkla yakalamamak için dar tutuldu.
 _DEFAULT_TEST_RE = re.compile(
     r"^(test|tester|testuser|seed|demo|dummy|sample|deneme|bulk|qa)\d*$", re.I)
+
+
+# B4: user_id taşıyan HER model bu listede olmalı (test_cascade_delete
+# introspeksiyonla doğrular) — SQLite'ta FK cascade'e güvenmeden açık silme.
+# Sıra FK-güvenli: PumpCheckLike/Comment, PumpCheck'ten önce gelir.
+def _user_child_models():
+    from app.models import (
+        Activity, CognitoSession, CustomMeal, DailyActivity, MealLog,
+        NutritionPlan, PendingAction, PumpCheck, PumpCheckComment, PumpCheckLike,
+        Supplement, TrainingPlan, UserQuestProgress, UserSession,
+        UserWearableConnection, WaterLog, WearableActivityLog, WearableSleepLog,
+        WearableWorkoutLog, WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog,
+    )
+    return (
+        UserSession, CognitoSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
+        TrainingPlan, MealLog, PendingAction, PumpCheckLike, PumpCheckComment,
+        PumpCheck, Activity, Supplement, UserQuestProgress, WeeklyWinner,
+        WaterLog, WorkoutLog, DailyActivity, CustomMeal, UserWearableConnection,
+        WearableSleepLog, WearableActivityLog, WearableWorkoutLog,
+    )
+
+
+# Modül-yükünde app context/model importu gerekmeden test edilebilsin diye tembel.
+class _LazyChildModels:
+    def __iter__(self):
+        return iter(_user_child_models())
+
+    def __contains__(self, item):
+        return item in _user_child_models()
+
+
+_USER_CHILD_MODELS = _LazyChildModels()
 
 
 def _purge_user(user):
@@ -55,14 +92,8 @@ def _purge_user(user):
     bırakmaz. Bu kullanıcının davet ettiği kişilerin referred_by_id'si NULL'a
     çekilir (FK'de SET NULL olsa da burada da açıkça yapılır).
     """
-    from app.models import (
-        Activity, CustomMeal, CustomMealItem, DailyActivity, Friendship, MealLog,
-        Message, NutritionPlan, PendingAction, PumpCheck, PumpCheckComment,
-        PumpCheckLike, Supplement, TrainingPlan, User, UserQuestProgress,
-        UserSession, UserWearableConnection, WaterLog, WearableActivityLog,
-        WearableSleepLog, WearableWorkoutLog, WeeklyCheckIn, WeeklyLog,
-        WeeklyWinner, WorkoutLog,
-    )
+    from app.models import (CustomMeal, CustomMealItem, Friendship, Message,
+                            PumpCheck, PumpCheckComment, PumpCheckLike, User)
     uid = user.id
 
     # CustomMealItem yalnızca custom_meal üzerinden user'a bağlı.
@@ -72,6 +103,9 @@ def _purge_user(user):
             CustomMealItem.custom_meal_id.in_(meal_ids)
         ).delete(synchronize_session=False)
 
+    # Like/yorumlar iki yönden bağlı: kullanıcının kendi bıraktıkları (user_id)
+    # VE başkalarının bu kullanıcının pump check'lerine bıraktıkları
+    # (pump_check_id) — tek or-filtre ikisini de süpürür.
     pump_ids = [p.id for p in PumpCheck.query.filter_by(user_id=uid).all()]
     pump_child_filter = [PumpCheckLike.user_id == uid]
     comment_child_filter = [PumpCheckComment.user_id == uid]
@@ -83,11 +117,7 @@ def _purge_user(user):
     PumpCheckComment.query.filter(db.or_(*comment_child_filter)).delete(
         synchronize_session=False)
 
-    for Model in (UserSession, WeeklyLog, WeeklyCheckIn, NutritionPlan, TrainingPlan,
-                  MealLog, PendingAction, PumpCheck, Activity, Supplement,
-                  UserQuestProgress, WeeklyWinner, WaterLog, WorkoutLog,
-                  DailyActivity, WearableSleepLog, WearableActivityLog,
-                  WearableWorkoutLog, UserWearableConnection, CustomMeal):
+    for Model in _USER_CHILD_MODELS:
         Model.query.filter_by(user_id=uid).delete(synchronize_session=False)
 
     Friendship.query.filter(
