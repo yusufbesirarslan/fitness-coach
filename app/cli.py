@@ -103,14 +103,19 @@ def _purge_user(user):
             CustomMealItem.custom_meal_id.in_(meal_ids)
         ).delete(synchronize_session=False)
 
-    # Başkalarının bu kullanıcının pump check'lerine bıraktığı like/yorumlar
-    # yalnız pump_check_id üzerinden bağlı — user_id döngüsü onları görmez.
+    # Like/yorumlar iki yönden bağlı: kullanıcının kendi bıraktıkları (user_id)
+    # VE başkalarının bu kullanıcının pump check'lerine bıraktıkları
+    # (pump_check_id) — tek or-filtre ikisini de süpürür.
     pump_ids = [p.id for p in PumpCheck.query.filter_by(user_id=uid).all()]
+    pump_child_filter = [PumpCheckLike.user_id == uid]
+    comment_child_filter = [PumpCheckComment.user_id == uid]
     if pump_ids:
-        for Model in (PumpCheckLike, PumpCheckComment):
-            Model.query.filter(
-                Model.pump_check_id.in_(pump_ids)
-            ).delete(synchronize_session=False)
+        pump_child_filter.append(PumpCheckLike.pump_check_id.in_(pump_ids))
+        comment_child_filter.append(PumpCheckComment.pump_check_id.in_(pump_ids))
+    PumpCheckLike.query.filter(db.or_(*pump_child_filter)).delete(
+        synchronize_session=False)
+    PumpCheckComment.query.filter(db.or_(*comment_child_filter)).delete(
+        synchronize_session=False)
 
     for Model in _USER_CHILD_MODELS:
         Model.query.filter_by(user_id=uid).delete(synchronize_session=False)

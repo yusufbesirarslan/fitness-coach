@@ -4,6 +4,7 @@ from flask import (Blueprint, abort, current_app, jsonify, redirect,
 from flask_login import current_user, login_required, login_user, logout_user
 from flask_limiter.util import get_remote_address
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm.attributes import flag_modified
 from werkzeug.security import check_password_hash
 
 from app.config import COGNITO_ENABLED
@@ -26,6 +27,29 @@ _AUTH_ERROR_KEYS = {
     "cognito": "auth.err_cognito",
     "link": "auth.err_link",
 }
+
+_PENDING_REFERRAL_KEY = "pending_referral_code"
+
+
+def _consume_pending_referral(user):
+    """Consume and clear a referral saved during unverified Cognito signup."""
+    metadata = dict(user.user_metadata or {})
+    code = metadata.get(_PENDING_REFERRAL_KEY)
+    if not code:
+        return False
+
+    referred = bool(consume_referral(user, code))
+
+    # consume_referral may commit or roll back its atomic claim. Reload the row,
+    # then clear the one-time marker for valid and invalid referral codes alike.
+    user = db.session.get(User, user.id)
+    db.session.refresh(user)
+    metadata = dict(user.user_metadata or {})
+    metadata.pop(_PENDING_REFERRAL_KEY, None)
+    user.user_metadata = metadata
+    flag_modified(user, "user_metadata")
+    db.session.commit()
+    return referred
 
 
 @bp.route("/set-language", methods=["POST"])
@@ -149,6 +173,8 @@ def register():
         # yerel parola yolu hiç çalışmaz). app/services/cognito.py ile aynı desen.
         user = User(username=username, email=email, cognito_sub=sub or None,
                     full_name=username, language=chosen_lang)
+        if ref_code:
+            user.user_metadata = {_PENDING_REFERRAL_KEY: ref_code}
         ensure_referral_code(user)
         db.session.add(user)
         try:
@@ -168,11 +194,10 @@ def register():
             if isinstance(e, IntegrityError):
                 return jsonify({"error": t("auth.user_or_email_taken")}), 409
             return jsonify({"error": t("auth.register_failed")}), 503
-        referred = bool(consume_referral(user, ref_code))
         session["lang"] = chosen_lang
         resp = jsonify({"message": t("auth.register_verify_sent"),
                         "needs_verification": True, "username": username,
-                        "referred": referred})
+                        "referred": False})
         if request.cookies.get("fitx_ref"):
             resp.delete_cookie("fitx_ref")
         return resp
@@ -311,7 +336,9 @@ def verify_confirm():
         cognito_service.confirm_sign_up(username, code)
     except CognitoServiceError as e:
         return jsonify({"error": e.message}), 400
-    return jsonify({"message": t("auth.verify_done")})
+    user = User.query.filter_by(username=username).first()
+    referred = _consume_pending_referral(user) if user else False
+    return jsonify({"message": t("auth.verify_done"), "referred": referred})
 
 
 @bp.route("/verify/resend", methods=["POST"])

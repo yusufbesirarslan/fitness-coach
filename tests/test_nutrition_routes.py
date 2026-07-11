@@ -14,6 +14,7 @@ import json
 import pytest
 
 from app.blueprints import nutrition as nutrition_bp
+from app.blueprints.nutrition.diary import _claim_diary_meal
 from app.blueprints.nutrition import meallog as nutrition_meallog
 from app.blueprints.nutrition import plan as nutrition_plan
 from app.extensions import db
@@ -82,6 +83,17 @@ def test_quick_add_meal_empty_meal_dict_rejected(client, auth_user):
     assert MealLog.query.filter_by(user_id=auth_user.id).count() == 0
 
 
+def test_quick_add_meal_floors_negative_macros(client, auth_user):
+    plan = {"ogle": {"yemekler": ["Hatalı plan"], "kalori": -50,
+                     "protein": -5, "karb": -2, "yag": -1}}
+    client.post("/nutrition-plan/save", json={"plan": plan, "score": 8.0})
+    response = client.post("/api/quick-add-meal", json={"meal_key": "ogle"})
+    assert response.status_code == 200
+    assert response.get_json()["nutrients"] == {
+        "kalori": 0, "protein": 0, "karb": 0, "yag": 0,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Günlük (diary) — öğün oluşturma + besin matematiği
 # ---------------------------------------------------------------------------
@@ -130,6 +142,11 @@ def test_diary_create_meal_race_returns_existing(client, auth_user, monkeypatch)
 @pytest.fixture
 def meal_id(client, auth_user):
     return client.post("/api/diary/meal", json={"meal_name": "Öğle"}).get_json()["meal_id"]
+
+
+def test_claim_diary_meal_only_succeeds_once(auth_user, meal_id):
+    assert _claim_diary_meal(meal_id, auth_user.id) == 1
+    assert _claim_diary_meal(meal_id, auth_user.id) == 0
 
 
 def test_diary_add_item_requires_name(client, meal_id):
@@ -185,16 +202,17 @@ def test_diary_add_item_clamps_absurd_macros(client, meal_id):
     # H1: diary hattı eskiden YALNIZCA negatifleri 0'a çekiyordu; üst fiziksel-
     # tavan yoktu, istemci serving_calories: 90000 değerini doğrudan CustomMealItem'a
     # ve oradan kanonik MealLog'a sızdırabiliyordu. Artık clamp_serving_macros ile
-    # diğer tüm ingest hatlarıyla aynı tavana (MAX_SERVING_KCAL=3000) kısılır.
+    # diğer tüm ingest hatlarıyla aynı fiziksel sınırlara kısılır. Makrolar sıfır
+    # olduğundan Atwater düzeltmesi desteklenmeyen kaloriyi de sıfıra indirir.
     body = client.post(f"/api/diary/meal/{meal_id}/item", json={
         "food_name": "Hile", "serving_id": "s1", "serving_quantity": 1,
         "metric_serving_amount": 100,
         "serving_calories": 90000, "serving_protein": 0,
         "serving_carbs": 0, "serving_fat": 0,
     }).get_json()
-    assert 0 < body["calories"] <= 3000
+    assert body["calories"] == 0
     item = db.session.get(CustomMealItem, body["item_id"])
-    assert 0 < item.calories <= 3000
+    assert item.calories == 0
 
 
 def test_diary_update_item_clamps_absurd_macros(client, meal_id):
@@ -209,7 +227,7 @@ def test_diary_update_item_clamps_absurd_macros(client, meal_id):
         "serving_calories": 90000, "serving_protein": 0,
         "serving_carbs": 0, "serving_fat": 0,
     }).get_json()
-    assert 0 < body["calories"] <= 3000
+    assert body["calories"] == 0
 
 
 def test_diary_add_item_grams_based_scaling(client, meal_id):
@@ -294,13 +312,15 @@ def test_diary_log_meal_totals_labels_and_lock(client, auth_user, meal_id):
 
     # Kilitlendi: tekrar log/ekleme/düzenleme reddedilir.
     assert client.post(f"/api/diary/meal/{meal_id}/log").status_code == 400
+    assert MealLog.query.filter_by(user_id=auth_user.id, source="diary").count() == 1
     assert client.post(f"/api/diary/meal/{meal_id}/item",
                        json={"food_name": "y"}).status_code == 400
 
 
 def test_diary_today_aggregates(client, auth_user, meal_id):
     client.post(f"/api/diary/meal/{meal_id}/item", json={
-        "food_name": "pirinç", "grams": 100, "per_100g": {"calories": 130}})
+        "food_name": "pirinç", "grams": 100,
+        "per_100g": {"calories": 130, "protein": 2.5, "carbs": 28, "fat": 0.6}})
     body = client.get("/api/diary/today").get_json()
     assert len(body["meals"]) == 1
     assert body["meals"][0]["totals"]["calories"] == 130.0
@@ -367,6 +387,17 @@ def test_meal_log_override_macros_clamped_to_physical_bounds(client, auth_user, 
     assert entry.kalori <= 3000 and entry.yag <= 150
 
 
+def test_meal_log_override_floors_negative_macros(client, auth_user):
+    response = client.post("/meal-log", json={
+        "ogun": "Akşam", "yemekler": "hatalı giriş",
+        "override_macros": {"kalori": -10, "protein": -2, "karb": -3, "yag": -4},
+    })
+    assert response.status_code == 200
+    assert response.get_json()["nutrients"] == {
+        "kalori": 0, "protein": 0, "karb": 0, "yag": 0,
+    }
+
+
 def test_meal_log_override_macros_awards_meal_logged_quest(client, auth_user, monkeypatch):
     # C5: override yolu AI-hesaplı yolla AYNI 'meal_logged' görevini vermeli —
     # elle makro giren kullanıcı günlük görev/XP'yi sessizce kaçırıyordu.
@@ -430,8 +461,8 @@ def test_meal_log_non_numeric_ai_values_zeroed(client, auth_user, monkeypatch):
 
 def _log_meal(client, ogun, kalori):
     client.post("/meal-log", json={"ogun": ogun, "yemekler": "x",
-                                   "override_macros": {"kalori": kalori, "protein": 10,
-                                                       "karb": 10, "yag": 5}})
+                                   "override_macros": {"kalori": kalori, "protein": 0,
+                                                       "karb": kalori / 4, "yag": 0}})
 
 
 def test_meal_log_today_totals(client, auth_user):

@@ -8,6 +8,8 @@ sınırlar. Slot doluyken 503 + Retry-After döner, slot boşalınca istek geçe
 """
 import threading
 
+import pytest
+
 from app.services import ai_gate
 
 
@@ -21,6 +23,44 @@ def _gated_ok():
 def test_gate_passes_when_slot_available(app):
     with app.test_request_context("/"):
         assert _gated_ok()() == {"ok": True}
+
+
+def test_route_gate_defaults_to_fail_fast():
+    assert ai_gate.AI_GATE_WAIT_SECONDS == 0
+
+
+def test_model_slot_prevents_simultaneous_entry(monkeypatch):
+    sem = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_model_slots", sem)
+    worker_started = threading.Event()
+    worker_entered = threading.Event()
+
+    def enter_model_slot():
+        worker_started.set()
+        with ai_gate.model_concurrency_slot():
+            worker_entered.set()
+
+    with ai_gate.model_concurrency_slot():
+        worker = threading.Thread(target=enter_model_slot)
+        worker.start()
+        assert worker_started.wait(timeout=1)
+        assert not worker_entered.wait(timeout=0.05)
+
+    assert worker_entered.wait(timeout=1)
+    worker.join(timeout=1)
+    assert not worker.is_alive()
+
+
+def test_model_slot_releases_after_error(monkeypatch):
+    sem = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_model_slots", sem)
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with ai_gate.model_concurrency_slot():
+            raise RuntimeError("boom")
+
+    assert sem.acquire(blocking=False)
+    sem.release()
 
 
 def test_gate_returns_503_when_full(app, monkeypatch):

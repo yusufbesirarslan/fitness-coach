@@ -10,6 +10,7 @@ SQLite test DB'si (conftest) kullanılır.
     python -m pytest tests/test_coach_tools.py -v
 """
 import json
+from contextlib import contextmanager
 from datetime import timedelta
 from types import SimpleNamespace
 
@@ -246,6 +247,64 @@ def _fake_bedrock(monkeypatch, responses):
     monkeypatch.setattr(ai_coach, "bedrock_client",
                         SimpleNamespace(messages=SimpleNamespace(create=create)))
     return calls
+
+
+def _install_model_slot_probe(monkeypatch):
+    state = {"active": False, "entries": 0}
+
+    @contextmanager
+    def slot():
+        assert state["active"] is False
+        state["active"] = True
+        state["entries"] += 1
+        try:
+            yield
+        finally:
+            state["active"] = False
+
+    monkeypatch.setattr(ai_coach, "model_concurrency_slot", slot)
+    return state
+
+
+def test_openai_coach_provider_call_uses_model_slot(app, monkeypatch):
+    state = _install_model_slot_probe(monkeypatch)
+
+    def create(**kwargs):
+        assert state["active"] is True
+        message = SimpleNamespace(content="OPENAI", tool_calls=[])
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    monkeypatch.setattr(
+        ai_coach,
+        "openai_client",
+        SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create))),
+    )
+
+    with app.app_context():
+        result = ai_coach._run_coach_conversation_openai(1, "x", "", [])
+
+    assert result == "OPENAI"
+    assert state["entries"] == 1
+
+
+def test_bedrock_coach_provider_call_uses_model_slot(app, monkeypatch):
+    state = _install_model_slot_probe(monkeypatch)
+
+    def create(**kwargs):
+        assert state["active"] is True
+        return _text_resp("BEDROCK")
+
+    monkeypatch.setattr(
+        ai_coach,
+        "bedrock_client",
+        SimpleNamespace(messages=SimpleNamespace(create=create)),
+    )
+
+    with app.app_context():
+        result = ai_coach._run_coach_conversation_bedrock(1, "x", "", [])
+
+    assert result == "BEDROCK"
+    assert state["entries"] == 1
 
 
 def test_router_uses_openai_when_bedrock_disabled(app, monkeypatch):

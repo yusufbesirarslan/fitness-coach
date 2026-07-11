@@ -52,6 +52,11 @@ def test_authenticate_returns_tokens_and_claims(monkeypatch):
         "AccessToken": "acc", "IdToken": _id_token({"sub": "s1", "email": "a@b.co"}),
         "RefreshToken": "ref", "ExpiresIn": 3600}})
     _use_fake(monkeypatch, fake)
+    monkeypatch.setattr(
+        cognito_service,
+        "_decode_claims",
+        lambda token: {"sub": "s1", "email": "a@b.co"},
+    )
     out = cognito_service.authenticate("ali", "Sifre123")
     assert out["tokens"] == {"access_token": "acc", "id_token": _id_token({"sub": "s1", "email": "a@b.co"}),
                              "refresh_token": "ref", "expires_in": 3600}
@@ -62,6 +67,7 @@ def test_initiate_auth_still_returns_claims(monkeypatch):
     fake = _FakeIdp(result={"AuthenticationResult": {
         "AccessToken": "acc", "IdToken": _id_token({"sub": "s2"}), "RefreshToken": "r"}})
     _use_fake(monkeypatch, fake)
+    monkeypatch.setattr(cognito_service, "_decode_claims", lambda token: {"sub": "s2"})
     claims = cognito_service.initiate_auth("ali", "Sifre123")
     assert claims["sub"] == "s2"
 

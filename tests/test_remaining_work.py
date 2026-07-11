@@ -254,6 +254,38 @@ def test_cleanup_yes_purges_user_and_dependents(app, make_user):
     assert Friendship.query.count() == 0
 
 
+def test_cleanup_purges_newer_dependents_without_fk_cascade(app, make_user):
+    from sqlalchemy import text
+    from app.models import (
+        PumpCheck, PumpCheckComment, PumpCheckLike, UserWearableConnection,
+        WearableActivityLog, WearableSleepLog, WearableWorkoutLog,
+    )
+
+    victim = make_user("test")
+    db.session.execute(text("PRAGMA foreign_keys=OFF"))
+    pump = PumpCheck(user_id=victim.id, visibility="private", shared_friend_ids=[])
+    db.session.add(pump)
+    db.session.flush()
+    db.session.add_all([
+        PumpCheckLike(pump_check_id=pump.id, user_id=victim.id),
+        PumpCheckComment(pump_check_id=pump.id, user_id=victim.id, body="x"),
+        UserWearableConnection(user_id=victim.id, provider="whoop",
+                               access_token_encrypted="cipher"),
+        WearableSleepLog(user_id=victim.id, provider="whoop", source_id="sleep",
+                         date_key="2026-07-10"),
+        WearableActivityLog(user_id=victim.id, provider="whoop", date_key="2026-07-10"),
+        WearableWorkoutLog(user_id=victim.id, provider="whoop", source_id="workout",
+                           date_key="2026-07-10"),
+    ])
+    db.session.commit()
+
+    result = app.test_cli_runner().invoke(args=["cleanup-test-users", "--yes"])
+    assert result.exit_code == 0
+    for model in (PumpCheckLike, PumpCheckComment, UserWearableConnection,
+                  WearableSleepLog, WearableActivityLog, WearableWorkoutLog):
+        assert model.query.filter_by(user_id=victim.id).count() == 0
+
+
 def test_cleanup_does_not_match_real_users(app, make_user):
     make_user("ahmet")
     make_user("besir290")

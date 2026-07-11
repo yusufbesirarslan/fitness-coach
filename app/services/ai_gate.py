@@ -15,20 +15,26 @@ worker/queue'ya taşımaktır.
 
 Env ayarları:
 - AI_MAX_CONCURRENCY (vars. 4): aynı anda AI route'u işleyen thread tavanı.
-- AI_GATE_WAIT_SECONDS (vars. 10): slot için en fazla bekleme; dolarsa 503 +
-  Retry-After (kısa bekleme burst'leri yumuşatır, thread'i uzun süre tutmaz).
+- AI_GATE_WAIT_SECONDS (vars. 0): route slotu doluysa beklemeden 503 + Retry-After.
+- AI_MODEL_MAX_CONCURRENCY (vars. AI_MAX_CONCURRENCY): gerçek model çağrılarının
+  ayrı süreç-içi tavanı; route içindeki paralel fan-out'u da sınırlar.
 - FITX_WEB_THREADS (vars. 8): gunicorn --threads değeri (Dockerfile ile eş
   tutulmalı); iki kapının toplamı bunun en az 2 altında kalmalı ki /health ve
   ucuz route'lara gerçek bir rezerv kalsın (I1).
 """
 import os
 import threading
+from contextlib import contextmanager
 from functools import wraps
 
 from flask import current_app, jsonify
 
 AI_MAX_CONCURRENCY = max(1, int(os.getenv("AI_MAX_CONCURRENCY", "4")))
-AI_GATE_WAIT_SECONDS = float(os.getenv("AI_GATE_WAIT_SECONDS", "10"))
+AI_GATE_WAIT_SECONDS = float(os.getenv("AI_GATE_WAIT_SECONDS", "0"))
+AI_MODEL_MAX_CONCURRENCY = max(
+    1,
+    int(os.getenv("AI_MODEL_MAX_CONCURRENCY", str(AI_MAX_CONCURRENCY))),
+)
 
 WEB_THREADS = max(1, int(os.getenv("FITX_WEB_THREADS", "8")))
 THREAD_RESERVE_MIN = 2
@@ -43,7 +49,18 @@ SCRAPE_MAX_CONCURRENCY = max(1, int(os.getenv("SCRAPE_MAX_CONCURRENCY", "2")))
 SCRAPE_GATE_WAIT_SECONDS = float(os.getenv("SCRAPE_GATE_WAIT_SECONDS", "10"))
 
 _ai_slots = threading.BoundedSemaphore(AI_MAX_CONCURRENCY)
+_model_slots = threading.BoundedSemaphore(AI_MODEL_MAX_CONCURRENCY)
 _scrape_slots = threading.BoundedSemaphore(SCRAPE_MAX_CONCURRENCY)
+
+
+@contextmanager
+def model_concurrency_slot():
+    """Bound one complete provider/fallback sequence independently of routes."""
+    _model_slots.acquire()
+    try:
+        yield
+    finally:
+        _model_slots.release()
 
 
 def warn_if_gates_exhaust_threads(app):

@@ -29,16 +29,33 @@ class FakeRedis:
             {str(m): float(s) for m, s in mapping.items()})
 
     def _ordered(self, key):
-        # Skora göre azalan; eşitlikte üye-id'sine göre artan (deterministik).
+        # Gerçek Redis ZREVRANGE: skor azalan, eşitlikte member ters leksikografik.
         return sorted(self.zsets.get(key, {}).items(),
-                      key=lambda kv: (-kv[1], int(kv[0])))
+                      key=lambda kv: (kv[1], kv[0]), reverse=True)
 
-    def zrevrange(self, key, start, end):
+    def zrevrange(self, key, start, end, withscores=False):
         if self.fail_zrevrange:
             raise RuntimeError("redis down")
         items = self._ordered(key)
         sliced = items[start:] if end == -1 else items[start:end + 1]
-        return [m for m, _ in sliced]
+        return sliced if withscores else [m for m, _ in sliced]
+
+    def zrangebyscore(self, key, minimum, maximum, withscores=False):
+        minimum = float(minimum)
+        maximum = float(maximum)
+        rows = [(m, s) for m, s in self.zsets.get(key, {}).items()
+                if minimum <= s <= maximum]
+        rows.sort(key=lambda kv: (kv[1], kv[0]))
+        return rows if withscores else [m for m, _ in rows]
+
+    def zscore(self, key, member):
+        return self.zsets.get(key, {}).get(str(member))
+
+    def zcount(self, key, minimum, maximum):
+        exclusive = isinstance(minimum, str) and minimum.startswith("(")
+        lower = float(minimum[1:] if exclusive else minimum)
+        return sum(s > lower if exclusive else s >= lower
+                   for s in self.zsets.get(key, {}).values())
 
     def zmscore(self, key, members):
         z = self.zsets.get(key, {})
@@ -137,6 +154,33 @@ def test_global_me_outside_top_gets_rank_via_zrevrank(client, auth_user, make_us
     assert [e["username"] for e in body["entries"]] == [a.username, b.username]
     assert body["in_list"] is False
     assert body["me"]["rank"] == 3  # ZREVRANK index 2 → rütbe 3
+
+
+def test_global_redis_ties_use_numeric_id_and_exact_rank(
+        client, auth_user, make_users_bulk, monkeypatch):
+    users = make_users_bulk(11, prefix="tie", rank_points=0)
+    fake = FakeRedis()
+    higher = users[:2]
+    tied = users[2:]
+    auth_user.rank_points = 1
+    auth_user.streak_count = 1
+    for user in tied:
+        user.rank_points = 1
+        user.streak_count = 1
+    db.session.commit()
+    higher_score = gam._lb_score(2, 1)
+    tied_score = gam._lb_score(1, 1)
+    fake.zadd(LB_ALLTIME_KEY, {
+        higher[0].id: higher_score, higher[1].id: higher_score,
+        auth_user.id: tied_score, **{u.id: tied_score for u in tied},
+    })
+    _use_fake_redis(monkeypatch, fake)
+    monkeypatch.setattr(gam, "LEADERBOARD_TOP_N", 2)
+
+    body = client.get("/leaderboard/data").get_json()
+    assert [entry["username"] for entry in body["entries"]] == [
+        u.username for u in sorted(higher, key=lambda u: u.id)]
+    assert body["me"]["rank"] == 3
 
 
 # ---------------------------------------------------------------------------
