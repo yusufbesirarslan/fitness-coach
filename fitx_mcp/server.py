@@ -74,6 +74,12 @@ from nutrition_pipeline import clamp_serving_macros
 
 load_dotenv()
 
+# B1/D4: complete_workout'un yazdığı sentetik tamamlama satırı (volume=0)
+# gerçek egzersiz değildir; tüm workout_log toplulaştırmaları onu dışlar.
+# app/models.py:WORKOUT_COMPLETION_MARKER ile birebir aynı tutulmalı
+# (standalone kalmak için app paketi import edilmez; eşitlik testte sabitlenir).
+WORKOUT_COMPLETION_MARKER = "Antrenman tamamlandı (Pump Check)"
+
 mcp = FastMCP(
     "FitX Coach Tools",
     instructions=(
@@ -647,8 +653,9 @@ def log_workout_entry(user_id: int, exercise_name: str, sets: int, reps: int, we
         day_start, day_end = _utc_day_bounds()
         cur.execute(
             "SELECT COALESCE(SUM(volume), 0) as total_volume, COUNT(*) as entry_count "
-            "FROM workout_log WHERE user_id = %s AND created_at >= %s AND created_at < %s",
-            (user_id, day_start, day_end),
+            "FROM workout_log WHERE user_id = %s AND exercise_name <> %s "
+            "AND created_at >= %s AND created_at < %s",
+            (user_id, WORKOUT_COMPLETION_MARKER, day_start, day_end),
         )
         today = cur.fetchone()
 
@@ -751,16 +758,18 @@ def generate_weekly_report(user_id: int) -> str:
         cur.execute(
             "SELECT exercise_name, SUM(volume) as total_vol, SUM(sets) as total_sets, "
             "COUNT(*) as entries, MAX(weight_kg) as max_weight "
-            "FROM workout_log WHERE user_id = %s AND created_at >= %s "
+            "FROM workout_log WHERE user_id = %s AND exercise_name <> %s "
+            "AND created_at >= %s "
             "GROUP BY exercise_name ORDER BY total_vol DESC",
-            (user_id, this_week_start_utc),
+            (user_id, WORKOUT_COMPLETION_MARKER, this_week_start_utc),
         )
         this_week_workouts = cur.fetchall()
 
         cur.execute(
             "SELECT COALESCE(SUM(volume), 0) as vol FROM workout_log "
-            "WHERE user_id = %s AND created_at >= %s AND created_at < %s",
-            (user_id, last_week_start_utc, this_week_start_utc),
+            "WHERE user_id = %s AND exercise_name <> %s "
+            "AND created_at >= %s AND created_at < %s",
+            (user_id, WORKOUT_COMPLETION_MARKER, last_week_start_utc, this_week_start_utc),
         )
         last_week_vol = cur.fetchone()["vol"]
 

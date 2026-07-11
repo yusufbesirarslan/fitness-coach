@@ -206,6 +206,42 @@ def test_weekly_report_compares_weeks(fake_db):
     assert result["nutrition"]["calorie_change"] == 1000
 
 
+def test_marker_constant_matches_app_models():
+    # fitx_mcp bağımsız çalışır (app import etmez); sabit kopyası D4
+    # sözleşmesinden (app/models.py) sapmamalı.
+    from app.models import WORKOUT_COMPLETION_MARKER
+    assert server.WORKOUT_COMPLETION_MARKER == WORKOUT_COMPLETION_MARKER
+
+
+def test_workout_aggregations_exclude_pump_check_marker(fake_db):
+    # B1: sentetik Pump-Check satırı (volume=0) gerçek egzersiz değildir; UI'dan
+    # yalnız Pump Check ile tamamlayan kullanıcıda koçun egzersiz dökümü tamamen
+    # bu hayalet satırdan oluşuyordu. Uygulama-içi toplulaştırmalar (D4) dışlar,
+    # MCP sorguları da dışlamalı.
+    cursor = fake_db([{"id": 7}], [{"id": 55}],
+                     [{"total_volume": 2500.0, "entry_count": 1}])
+    server.log_workout_entry(7, "Squat", 5, 5, 100)
+    today_sql, today_params = cursor.executed[2]
+    assert "exercise_name <> %s" in today_sql
+    assert server.WORKOUT_COMPLETION_MARKER in today_params
+
+    cursor = fake_db(
+        [{"id": 7, "goal": "kas kazanma"}],
+        [{"exercise_name": "Squat", "total_vol": 5000.0, "total_sets": 15,
+          "entries": 3, "max_weight": 120.0}],
+        [{"vol": 6400.0}],
+        [{"cal": 14000.0, "pro": 980.0, "carb": 1400.0, "fat": 420.0, "entries": 21}],
+        [{"cal": 13000.0, "pro": 900.0}],
+    )
+    server.generate_weekly_report(7)
+    weekly_sql, weekly_params = cursor.executed[1]
+    assert "exercise_name <> %s" in weekly_sql
+    assert server.WORKOUT_COMPLETION_MARKER in weekly_params
+    lastweek_sql, lastweek_params = cursor.executed[2]
+    assert "exercise_name <> %s" in lastweek_sql
+    assert server.WORKOUT_COMPLETION_MARKER in lastweek_params
+
+
 # ---------------------------------------------------------------------------
 # FatSecret araçları
 # ---------------------------------------------------------------------------
