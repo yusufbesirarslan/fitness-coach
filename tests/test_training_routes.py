@@ -309,10 +309,22 @@ def test_pump_check_day_unique_constraint(client, auth_user):
 
 
 def test_workout_status_flips_after_completion(client, workout_ready, monkeypatch):
+    # B3: tamamlanma sinyali PumpCheck'tir (idempotency guard'la aynı, M3) —
+    # görev satırı değil. Görev tohumlanmamış ortamda quest-bazlı durum,
+    # tamamlanan antrenmanı 'completed: False' gösteriyordu.
     assert client.get("/workout/status").get_json() == {"completed": False}
-    quest = DailyQuest.query.filter_by(quest_type="workout_logged").one()
-    db.session.add(UserQuestProgress(user_id=workout_ready.id, quest_id=quest.id,
-                                     date_key=date.today().isoformat(), is_claimed=True))
+    db.session.add(PumpCheck(user_id=workout_ready.id, valid=True,
+                             date_key=date.today().isoformat()))
+    db.session.commit()
+    assert client.get("/workout/status").get_json() == {"completed": True}
+
+
+def test_workout_status_true_even_without_seeded_quest(client, auth_user):
+    # Görevsiz ortam (seed-quests koşmamış): PumpCheck varsa yine True dönmeli.
+    assert DailyQuest.query.filter_by(quest_type="workout_logged").first() is None
+    assert client.get("/workout/status").get_json() == {"completed": False}
+    db.session.add(PumpCheck(user_id=auth_user.id, valid=True,
+                             date_key=date.today().isoformat()))
     db.session.commit()
     assert client.get("/workout/status").get_json() == {"completed": True}
 
