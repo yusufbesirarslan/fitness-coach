@@ -152,12 +152,18 @@ def _check_weekly_report_day(today, nudges, en=False):
 
 
 def _latest_checkin(user, models):
-    """En güncel WeeklyCheckIn (yoksa None). Model dict'te yoksa (eski çağıran)
-    sessizce None — yeni dürtüler bu durumda devre dışı kalır."""
+    """En güncel GERÇEK WeeklyCheckIn (yoksa None). Model dict'te yoksa (eski
+    çağıran) sessizce None — yeni dürtüler bu durumda devre dışı kalır.
+
+    B2: /update-weight yalnız weight taşıyan sparse satır yazar (yogunluk=NULL);
+    filtresiz sorguda bu satır gerçek check-in'i gölgeleyip toparlanma/duraksama
+    sinyallerini NULL'a karşı değerlendirtiyordu. Uygulamanın geri kalanı gibi
+    (tracking.py) yalnız yogunluk taşıyan satırlara bak."""
     WeeklyCheckIn = models.get("WeeklyCheckIn")
     if WeeklyCheckIn is None:
         return None
     return WeeklyCheckIn.query.filter_by(user_id=user.id)\
+        .filter(WeeklyCheckIn.yogunluk.isnot(None))\
         .order_by(WeeklyCheckIn.created_at.desc()).first()
 
 
