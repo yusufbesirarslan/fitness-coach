@@ -34,6 +34,7 @@ if _S3_BUCKET:
     )
 else:
     CSP_IMG_S3_HOSTS = ""
+DEFAULT_RATELIMIT = os.getenv("DEFAULT_RATELIMIT", "600 per hour")
 AI_RATELIMIT = "30 per hour"           # OpenAI text/vision generation
 SCRAPE_RATELIMIT = "20 per hour"       # menu scraper (outbound fetch + AI; also SSRF surface)
 FOOD_SEARCH_RATELIMIT = "60 per hour"  # food search (LLM only fires on a FatSecret miss)
@@ -41,6 +42,11 @@ FOOD_SEARCH_RATELIMIT = "60 per hour"  # food search (LLM only fires on a FatSec
 # throttle. UI 300ms debounce'lu olduğundan meşru typeahead bu tavanı zorlamaz;
 # kullanıcı/IP başına anahtarlanır.
 SEARCH_RATELIMIT = "20 per minute; 200 per hour"
+FRIEND_REQUEST_RATELIMIT = os.getenv("FRIEND_REQUEST_RATELIMIT", "20 per hour")
+CHAT_SEND_RATELIMIT = os.getenv(
+    "CHAT_SEND_RATELIMIT", "60 per minute; 600 per hour"
+)
+SUGGESTION_RATELIMIT = os.getenv("SUGGESTION_RATELIMIT", "30 per hour")
 # Freemium: AI plan üretiminde sunucu-taraflı haftalık kota (app/services/premium).
 # Operasyonel kapatma anahtarı; üretimde varsayılan AÇIK.
 AI_PLAN_QUOTA_ENABLED = os.getenv("AI_PLAN_QUOTA_ENABLED", "1") == "1"

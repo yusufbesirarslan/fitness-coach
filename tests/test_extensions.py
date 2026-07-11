@@ -76,6 +76,16 @@ def test_limiter_storage_status_degraded_when_ping_fails(monkeypatch):
     assert ext.limiter_storage_status() == "degraded"
 
 
+def test_limiter_registers_default_hourly_limit():
+    from app.config import DEFAULT_RATELIMIT
+    from app.extensions import limiter
+
+    registered = [str(limit.limit) for limit in limiter.limit_manager.default_limits]
+
+    assert DEFAULT_RATELIMIT == "600 per hour"
+    assert registered == ["600 per 1 hour"]
+
+
 def test_health_reports_limiter_storage(app):
     # DB erişilebilirken /health 200 döner ve limiter depolama durumunu
     # izleme için raporlar. (Redis kaybı tek başına unhealthy saymaz.)

@@ -10,6 +10,7 @@ except Exception:  # paket yoksa Bedrock zaten BEDROCK_ENABLED ile kapalı kalı
 
 from app.config import BEDROCK_ENABLED, BEDROCK_MAX_TOKENS, BEDROCK_MODEL, OPENAI_MODEL
 from app.extensions import bedrock_client, openai_client
+from app.services.ai_gate import model_concurrency_slot
 
 logger = logging.getLogger(__name__)
 
@@ -123,12 +124,13 @@ def _bedrock_validate_image(image_bytes, media_type, prompt, max_tokens=400, tem
         {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
     ]
     try:
-        resp = bedrock_client.messages.create(
-            model=BEDROCK_MODEL,
-            max_tokens=min(max_tokens, BEDROCK_MAX_TOKENS),
-            messages=[{"role": "user", "content": content}],
-            temperature=temperature,
-        )
+        with model_concurrency_slot():
+            resp = bedrock_client.messages.create(
+                model=BEDROCK_MODEL,
+                max_tokens=min(max_tokens, BEDROCK_MAX_TOKENS),
+                messages=[{"role": "user", "content": content}],
+                temperature=temperature,
+            )
         for block in resp.content:
             if getattr(block, "type", None) == "text":
                 return block.text
@@ -147,15 +149,16 @@ def _heavy_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
     herhangi bir hatada OpenAI'ya şeffafça düşer. İmza `_openai_chat` ile aynıdır, böylece
     çağrı noktaları yalnızca `_openai_chat(` → `_heavy_chat(` rename'iyle taşınır.
     Hangi sağlayıcının cevap verdiğini `[AI]` etiketli INFO satırıyla loglar (gözlemlenebilirlik)."""
-    if BEDROCK_ENABLED and anthropic is not None:
-        try:
-            reply = _claude_chat(messages, system_prompt=system_prompt,
-                                 max_tokens=max_tokens, temperature=temperature)
-            logger.info("[AI] sağlayıcı: Bedrock (Claude Sonnet)")
-            return reply
-        except Exception as e:  # RuntimeError dahil her şey → OpenAI'ya düş (istek bozulmasın)
-            logger.warning("Bedrock/Claude çağrısı başarısız, OpenAI'ya düşülüyor: %s: %s",
-                           type(e).__name__, e)
-    logger.info("[AI] sağlayıcı: OpenAI (%s)", OPENAI_MODEL)
-    return _openai_chat(messages, system_prompt=system_prompt,
-                        max_tokens=max_tokens, temperature=temperature)
+    with model_concurrency_slot():
+        if BEDROCK_ENABLED and anthropic is not None:
+            try:
+                reply = _claude_chat(messages, system_prompt=system_prompt,
+                                     max_tokens=max_tokens, temperature=temperature)
+                logger.info("[AI] sağlayıcı: Bedrock (Claude Sonnet)")
+                return reply
+            except Exception as e:  # RuntimeError dahil her şey → OpenAI'ya düş (istek bozulmasın)
+                logger.warning("Bedrock/Claude çağrısı başarısız, OpenAI'ya düşülüyor: %s: %s",
+                               type(e).__name__, e)
+        logger.info("[AI] sağlayıcı: OpenAI (%s)", OPENAI_MODEL)
+        return _openai_chat(messages, system_prompt=system_prompt,
+                            max_tokens=max_tokens, temperature=temperature)

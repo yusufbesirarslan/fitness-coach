@@ -6,6 +6,8 @@ dashboard activity fallback.
 """
 from datetime import datetime, timedelta
 
+import pytest
+
 from app.extensions import db
 from app.timeutil import app_today
 
@@ -64,6 +66,42 @@ def test_token_storage_encrypts_and_upserts(app, auth_user):
     assert loaded.refresh_token == "refresh-1"
 
 
+@pytest.mark.parametrize("corrupt_field", ["access_token_encrypted", "refresh_token_encrypted"])
+def test_corrupt_wearable_token_requires_reauthentication(app, auth_user, corrupt_field):
+    from app.models import UserWearableConnection
+    from app.services.wearables.tokens import get_wearable_connection, save_wearable_tokens
+
+    conn = save_wearable_tokens(auth_user.id, "whoop", {
+        "access_token": "access-1",
+        "refresh_token": "refresh-1",
+    })
+    setattr(conn, corrupt_field, "not-valid-fernet-ciphertext")
+    db.session.commit()
+
+    assert get_wearable_connection(auth_user.id, "whoop") is None
+
+    db.session.expire_all()
+    row = db.session.get(UserWearableConnection, conn.id)
+    assert row.status == "reauth_required"
+
+
+def test_wearable_status_exposes_reauthentication_state(client, auth_user):
+    from app.services.wearables.tokens import get_wearable_connection, save_wearable_tokens
+
+    conn = save_wearable_tokens(auth_user.id, "whoop", {
+        "access_token": "access-1",
+        "refresh_token": "refresh-1",
+    })
+    conn.access_token_encrypted = "not-valid-fernet-ciphertext"
+    db.session.commit()
+    assert get_wearable_connection(auth_user.id, "whoop") is None
+
+    payload = client.get("/api/wearables/status").get_json()
+
+    assert payload["connections"][0]["status"] == "reauth_required"
+    assert payload["connections"][0]["connected"] is False
+
+
 def test_whoop_refreshes_expiring_token_and_retries_401(app, auth_user, monkeypatch):
     from app.services.wearables import tokens
     from app.services.wearables.adapters import WhoopAdapter
@@ -96,6 +134,64 @@ def test_whoop_refreshes_expiring_token_and_retries_401(app, auth_user, monkeypa
     assert calls["get"] == ["Bearer new-access", "Bearer new-access"]
     loaded = tokens.get_wearable_connection(auth_user.id, "whoop")
     assert loaded.refresh_token == "refresh-2"
+
+
+def test_whoop_proxy_forwards_only_resource_allowlisted_params(client, auth_user, monkeypatch):
+    from app.blueprints import wearables as wearables_bp
+
+    captured = []
+
+    class _Adapter:
+        resource_endpoints = {
+            "profile": "/profile",
+            "recovery": "/recovery",
+        }
+
+        def request(self, endpoint, user_id, params=None):
+            captured.append((endpoint, user_id, params))
+            return {"ok": True}
+
+    monkeypatch.setattr(wearables_bp, "get_adapter", lambda provider: _Adapter())
+
+    profile = client.get(
+        "/api/wearables/whoop/profile?start=accepted-nowhere&limit=25&cursor=injected"
+    )
+    recovery = client.get(
+        "/api/wearables/whoop/recovery?start=2026-07-01&end=2026-07-02"
+        "&limit=25&cursor=injected&user_id=999"
+    )
+
+    assert profile.status_code == recovery.status_code == 200
+    assert captured[0][2] == {}
+    assert captured[1][2] == {
+        "start": "2026-07-01",
+        "end": "2026-07-02",
+        "limit": "25",
+    }
+
+
+@pytest.mark.parametrize("query", [
+    "limit=0",
+    "limit=26",
+    "limit=not-an-integer",
+    f"start={'x' * 65}",
+    f"end={'x' * 65}",
+])
+def test_whoop_proxy_rejects_invalid_allowlisted_params(
+        client, auth_user, monkeypatch, query):
+    from app.blueprints import wearables as wearables_bp
+
+    class _Adapter:
+        resource_endpoints = {"sleep": "/sleep"}
+
+        def request(self, endpoint, user_id, params=None):
+            raise AssertionError("invalid parameters must not reach WHOOP")
+
+    monkeypatch.setattr(wearables_bp, "get_adapter", lambda provider: _Adapter())
+
+    response = client.get(f"/api/wearables/whoop/sleep?{query}")
+
+    assert response.status_code == 400
 
 
 def test_oauth_routes_validate_state_and_store_tokens(client, auth_user, monkeypatch):

@@ -9,7 +9,11 @@ from app.models import UserSession
 from app.services.ai_coach import _fetch_coach_context, _run_coach_conversation, generate_coach_reply, is_coach_error_fallback
 from app.services.ai_gate import ai_concurrency_gate
 from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee, generate_nutrition_plan, generate_training_plan
-from app.services.premium import record_ai_chat, remaining_ai_chats
+from app.services.premium import (
+    FREE_WEEKLY_AI_CHATS,
+    refund_ai_quota,
+    reserve_ai_quota,
+)
 from app.i18n import t
 from app.timeutil import app_date_of, app_today
 
@@ -142,8 +146,9 @@ def ask_coach():
     # batch'leri). Plan üretimi gibi premium-duyarlı HAFTALIK kotaya tabi tut —
     # non-premium için sınır, premium sınırsız. Salt rate-limit (30/saat)
     # freemium niyetini karşılamıyor, sürekli pahalı çağrıya izin veriyordu.
-    if current_app.config.get("AI_CHAT_QUOTA_ENABLED", True) and \
-            remaining_ai_chats(current_user) == 0:
+    quota_enabled = current_app.config.get("AI_CHAT_QUOTA_ENABLED", True)
+    if quota_enabled and not reserve_ai_quota(
+            current_user, "chat", FREE_WEEKLY_AI_CHATS):
         return jsonify({"error": t("coach.chat_quota_reached"),
                         "premium_required": True}), 402
 
@@ -159,14 +164,22 @@ def ask_coach():
     try:
         answer = _run_coach_conversation(current_user.id, question, context,
                                          client_history, language=lang)
-        # Kotayı yalnızca BAŞARILI yanıtta tüket (başarısız deneme hakkı yakmasın —
-        # premium_ai_plan_gate ile aynı felsefe). _run_coach_conversation sağlayıcı
-        # çökmesinde exception yerine dostça bir yedek METİN döndürür; bu durumda da
-        # kredi yakmamalı (INF-4).
-        if current_app.config.get("AI_CHAT_QUOTA_ENABLED", True) and \
-                not is_coach_error_fallback(answer):
-            record_ai_chat(current_user)
+        # Sağlayıcı dostça bir hata metni döndürürse önceden ayrılan hakkı geri ver.
+        if quota_enabled and is_coach_error_fallback(answer):
+            db.session.rollback()
+            try:
+                refund_ai_quota(current_user, "chat")
+            except Exception:
+                db.session.rollback()
+                current_app.logger.exception("AI chat quota refund failed")
         return jsonify({"answer": answer})
     except Exception:
         current_app.logger.exception("Koç yanıtı üretilemedi")
+        db.session.rollback()
+        if quota_enabled:
+            try:
+                refund_ai_quota(current_user, "chat")
+            except Exception:
+                db.session.rollback()
+                current_app.logger.exception("AI chat quota refund failed")
         return jsonify({"error": t("coach.reply_failed")}), 500

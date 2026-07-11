@@ -15,9 +15,37 @@ from app.timeutil import app_today
 
 bp = Blueprint("wearables", __name__)
 
+_WHOOP_QUERY_PARAMS = {
+    "profile": frozenset(),
+    "body": frozenset(),
+    "recovery": frozenset({"start", "end", "limit"}),
+    "sleep": frozenset({"start", "end", "limit"}),
+    "workout": frozenset({"start", "end", "limit"}),
+}
+
 
 def _json_error(message, status=400):
     return jsonify({"error": message}), status
+
+
+def _whoop_query_params(resource):
+    """Return validated, resource-scoped WHOOP query parameters."""
+    params = {
+        key: request.args.get(key)
+        for key in _WHOOP_QUERY_PARAMS.get(resource, ())
+        if key in request.args
+    }
+    for key in ("start", "end"):
+        if key in params and len(params[key]) > 64:
+            raise ValueError(f"{key} parametresi çok uzun.")
+    if "limit" in params:
+        try:
+            limit = int(params["limit"])
+        except (TypeError, ValueError):
+            raise ValueError("limit 1 ile 25 arasında bir tam sayı olmalı.") from None
+        if not 1 <= limit <= 25:
+            raise ValueError("limit 1 ile 25 arasında bir tam sayı olmalı.")
+    return params
 
 
 @bp.route("/api/auth/wearable/<provider>")
@@ -68,6 +96,7 @@ def wearable_status():
     return jsonify({
         "connections": [{
             "provider": row.provider,
+            "status": row.status,
             "connected": row.status == "connected",
             "token_expiry": row.token_expiry.isoformat() if row.token_expiry else None,
             "last_sync_at": row.last_sync_at.isoformat() if row.last_sync_at else None,
@@ -104,6 +133,10 @@ def whoop_resource(resource):
     if endpoint is None:
         return _json_error("Desteklenmeyen WHOOP kaynağı.", 404)
     try:
-        return jsonify(adapter.request(endpoint, current_user.id, params=request.args.to_dict()))
+        params = _whoop_query_params(resource)
+    except ValueError as exc:
+        return _json_error(str(exc), 400)
+    try:
+        return jsonify(adapter.request(endpoint, current_user.id, params=params))
     except Exception as exc:
         return _json_error(f"WHOOP isteği başarısız: {exc}", 502)

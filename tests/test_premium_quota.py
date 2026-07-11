@@ -10,10 +10,12 @@ import json
 from datetime import date
 
 import pytest
+from flask_login import login_user
+from sqlalchemy.exc import IntegrityError
 
 from app.blueprints import training as training_bp
 from app.extensions import db
-from app.models import UserSession
+from app.models import User, UserSession
 from app.services import premium
 
 PLAN_JSON = {
@@ -101,6 +103,43 @@ def test_new_week_resets_quota(make_user):
     assert premium.remaining_ai_plans(u, "training") == 1
 
 
+def test_reserve_ai_quota_rejects_stale_user_after_last_allowance(make_user):
+    user = make_user("reserve")
+    stale_user = User(id=user.id, user_metadata={})
+
+    assert premium.reserve_ai_quota(user, "training", 1) is True
+    assert premium.reserve_ai_quota(stale_user, "training", 1) is False
+    assert premium.remaining_ai_plans(user, "training") == 0
+
+
+def test_refund_ai_quota_has_zero_floor(make_user):
+    user = make_user("refund-floor")
+
+    premium.refund_ai_quota(user, "training")
+
+    fresh_meta = db.session.query(User.user_metadata).filter_by(id=user.id).scalar()
+    assert fresh_meta["ai_plan_quota"]["training"] == 0
+
+
+def test_refund_does_not_decrement_a_new_week_reservation(make_user, monkeypatch):
+    user = make_user("week-boundary")
+    weeks = iter(("2026-W27", "2026-W28"))
+    monkeypatch.setattr(premium, "_week_key", lambda d=None: next(weeks))
+    assert premium.reserve_ai_quota(user, "training", 1) is True
+
+    db.session.query(User).filter_by(id=user.id).update({
+        User.user_metadata: {
+            "ai_plan_quota": {"week": "2026-W28", "training": 1},
+        },
+    })
+    db.session.commit()
+
+    premium.refund_ai_quota(user, "training")
+
+    fresh_meta = db.session.query(User.user_metadata).filter_by(id=user.id).scalar()
+    assert fresh_meta["ai_plan_quota"]["training"] == 1
+
+
 # ---------------------------------------------------------------------------
 # Route entegrasyonu
 # ---------------------------------------------------------------------------
@@ -134,3 +173,72 @@ def test_quota_disabled_allows_repeat(client, training_session, monkeypatch):
     _mock_plan(monkeypatch)
     assert client.post("/training-plan", json={}).status_code == 200
     assert client.post("/training-plan", json={}).status_code == 200
+
+
+def test_failed_generation_refunds_pre_call_reservation(
+        client, quota_on, training_session, monkeypatch):
+    used_during_call = []
+
+    def invalid_plan(**kwargs):
+        fresh_meta = db.session.query(User.user_metadata).filter_by(
+            id=training_session.id).scalar() or {}
+        quota = fresh_meta.get("ai_plan_quota") or {}
+        used_during_call.append(quota.get("training", 0))
+        return "not json"
+
+    monkeypatch.setattr(training_bp, "_heavy_chat", invalid_plan)
+
+    assert client.post("/training-plan", json={}).status_code == 500
+    # The initial generation and its one retry share the same reservation.
+    assert used_during_call == [1, 1]
+    assert premium.remaining_ai_plans(training_session, "training") == 1
+
+
+def test_failed_generation_preserves_response_when_refund_fails(
+        client, quota_on, training_session, monkeypatch):
+    monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: "not json")
+    monkeypatch.setattr(
+        premium, "refund_ai_quota",
+        lambda user, counter_key: (_ for _ in ()).throw(RuntimeError("db down")),
+    )
+
+    response = client.post("/training-plan", json={})
+
+    assert response.status_code == 500
+
+
+def test_plan_gate_refunds_when_wrapped_route_raises(app, make_user):
+    user = make_user("route-exception")
+
+    @premium.premium_ai_plan_gate("training")
+    def raising_route():
+        raise RuntimeError("provider failed")
+
+    app.config["AI_PLAN_QUOTA_ENABLED"] = True
+    with app.test_request_context("/training-plan", method="POST"):
+        login_user(user)
+        with pytest.raises(RuntimeError, match="provider failed"):
+            raising_route()
+
+    assert premium.remaining_ai_plans(user, "training") == 1
+
+
+def test_plan_gate_rolls_back_failed_transaction_before_refund(app, make_user):
+    user = make_user("failed-transaction")
+
+    @premium.premium_ai_plan_gate("training")
+    def route_with_failed_flush():
+        db.session.add(User(
+            username=user.username,
+            email="duplicate@example.com",
+            password_hash="unused",
+        ))
+        db.session.flush()
+
+    app.config["AI_PLAN_QUOTA_ENABLED"] = True
+    with app.test_request_context("/training-plan", method="POST"):
+        login_user(user)
+        with pytest.raises(IntegrityError):
+            route_with_failed_flush()
+
+    assert premium.remaining_ai_plans(user, "training") == 1

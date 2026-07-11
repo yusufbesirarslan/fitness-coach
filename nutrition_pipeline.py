@@ -347,6 +347,10 @@ def clamp_serving_macros(calories, protein, carbs, fat):
     cagirmali — aksi halde bir LLM/FatSecret sacmaligi deftere sizar (DB CHECK
     yalnizca >100000 kcal gibi kaba tasmayi yakalar, "3000 kcal" cöpünü degil).
     """
+    calories = max(_num(calories), 0)
+    protein = max(_num(protein), 0)
+    carbs = max(_num(carbs), 0)
+    fat = max(_num(fat), 0)
     serving = {"calories": calories, "protein": protein, "carbs": carbs, "fat": fat}
     is_valid, _flags, _reasons = check_serving(serving)
     if is_valid:
@@ -357,14 +361,25 @@ def clamp_serving_macros(calories, protein, carbs, fat):
         ratios.append(MAX_SERVING_KCAL / calories)
     if protein and protein > MAX_SERVING_MACRO_G:
         ratios.append(MAX_SERVING_MACRO_G / protein)
-    if carbs and carbs > MAX_SERVING_MACRO_G:
-        ratios.append(MAX_SERVING_MACRO_G / carbs)
+    if carbs and carbs > MAX_SERVING_CARB_G:
+        ratios.append(MAX_SERVING_CARB_G / carbs)
     if fat and fat > MAX_SERVING_FAT_G:
         ratios.append(MAX_SERVING_FAT_G / fat)
     scale = min(ratios) if ratios else 1.0
     if scale < 1.0:
-        return (round((calories or 0) * scale, 1), round((protein or 0) * scale, 1),
-                round((carbs or 0) * scale, 1), round((fat or 0) * scale, 1))
+        calories = round(calories * scale, 1)
+        protein = round(protein * scale, 1)
+        carbs = round(carbs * scale, 1)
+        fat = round(fat * scale, 1)
+
+    _valid, _flags, reasons = check_serving({
+        "calories": calories, "protein": protein, "carbs": carbs, "fat": fat,
+    })
+    # Mutlak tavan ölçeklemesinden sonra da enerji korunumu ihlali kalabilir.
+    # Kalan her sert Atwater ihlalini makroların desteklediği enerjiye indir;
+    # makroların tamamı sıfırsa güvenli sonuç da sıfır kaloridir.
+    if "calories_exceed_macro_energy" in reasons:
+        calories = round(4.0 * protein + 4.0 * carbs + 9.0 * fat, 1)
     return calories, protein, carbs, fat
 
 

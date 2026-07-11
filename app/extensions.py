@@ -11,7 +11,7 @@ from openai import OpenAI
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
-from app.config import _REDIS_URL, BEDROCK_REGION
+from app.config import _REDIS_URL, BEDROCK_REGION, DEFAULT_RATELIMIT
 
 
 db = SQLAlchemy()
@@ -52,6 +52,7 @@ redis_client = redis.from_url(_REDIS_URL, decode_responses=True) if _REDIS_URL e
 _LIMITER_STORAGE = _REDIS_URL or "memory://"
 limiter = Limiter(
     key_func=get_remote_address,
+    default_limits=[DEFAULT_RATELIMIT],
     storage_uri=_LIMITER_STORAGE,
     storage_options={"socket_connect_timeout": 2} if _REDIS_URL else {},
     in_memory_fallback_enabled=True,

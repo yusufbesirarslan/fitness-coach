@@ -325,7 +325,7 @@ def _food_search_fatsecret(q):
     if not foods:
         return None
 
-    results = []
+    parsed_foods = []
     for f in foods:
         desc = f.get("food_description", "")
         parsed = _parse_fatsecret_desc(desc)
@@ -342,6 +342,23 @@ def _food_search_fatsecret(q):
         }
         serving_text = parsed.get("serving", "")
         is_serving = _is_per_serving(serving_text)
+        parsed_foods.append((f, macros, serving_text, is_serving))
+
+    serving_names = []
+    seen_names = set()
+    for f, _macros, _serving_text, is_serving in parsed_foods:
+        food_name = f.get("food_name", q)
+        if is_serving and food_name not in seen_names:
+            seen_names.add(food_name)
+            serving_names.append(food_name)
+    if serving_names:
+        serving_weights, serving_fallbacks = _estimate_serving_weights_llm(
+            serving_names, return_fallbacks=True)
+    else:
+        serving_weights, serving_fallbacks = {}, set()
+
+    results = []
+    for f, macros, serving_text, is_serving in parsed_foods:
 
         # per_100g, macros'tan AYRI bir kopya olmali: ayni nesne hem sonuca hem
         # _macro_cache'e konursa, ileride biri yerinde (in-place) degistirdiginde
@@ -350,14 +367,13 @@ def _food_search_fatsecret(q):
         low_confidence = False
         if is_serving:
             food_name = f.get("food_name", q)
-            est, fb = _estimate_serving_weights_llm([food_name], return_fallbacks=True)
-            weight_g = est.get(food_name, 150.0)
+            weight_g = serving_weights.get(food_name, 150.0)
             # Ağırlık gerçek bir LLM tahmini değil de fallback (örn. 150g varsayılan)
             # ise, per-serving → per-100g ölçekleme sistematik olarak yanlış olur
             # (gerçek porsiyon 350g iken ~2.3× şişer). Bu istek için best-effort
             # ölçeklenir ama aşağıda ÖNBELLEĞE YAZILMAZ (düşük güvenli baseline kalıcı
             # olmasın); check_serving yine de imkânsız sonuçları eler (TRIAGE_FIXES #4).
-            low_confidence = food_name in fb
+            low_confidence = food_name in serving_fallbacks
             if low_confidence:
                 current_app.logger.warning(
                     "[FATSECRET] '%s' per-serving makrosu fallback ağırlık (%.0fg) ile "

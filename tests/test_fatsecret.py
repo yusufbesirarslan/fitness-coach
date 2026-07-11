@@ -469,3 +469,26 @@ def test_food_search_scales_per_serving_to_100g(monkeypatch):
     assert r["macros"]["calories"] == 300.0          # porsiyon başına ham değer
     assert r["per_100g"]["calories"] == 150.0        # 300 * 0.5 → 100g'ye ölçeklendi
     assert r["per_100g"]["carbs"] == 25.0
+
+
+def test_food_search_batches_serving_weight_estimates(monkeypatch):
+    monkeypatch.setattr(fatsecret, "_get_fatsecret_token", lambda: "tok")
+    foods = [{
+        "food_name": name, "food_id": str(index), "food_type": "Generic",
+        "food_description": (
+            "Per 1 serving - Calories: 300kcal | Fat: 6g | "
+            "Carbs: 50g | Protein: 8g"),
+    } for index, name in enumerate(("Pilav", "Çorba", "Pilav"), 1)]
+    monkeypatch.setattr(
+        fatsecret, "_fs_get", lambda url, **kw: _Resp({"foods": {"food": foods}}))
+    calls = []
+
+    def estimate(names, return_fallbacks=False):
+        calls.append(list(names))
+        return ({"Pilav": 200.0, "Çorba": 300.0}, set())
+
+    monkeypatch.setattr(fatsecret, "_estimate_serving_weights_llm", estimate)
+    results = fatsecret._food_search_fatsecret("yemek")
+
+    assert calls == [["Pilav", "Çorba"]]
+    assert [r["per_100g"]["calories"] for r in results] == [150.0, 100.0, 150.0]
