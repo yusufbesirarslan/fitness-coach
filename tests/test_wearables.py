@@ -253,6 +253,40 @@ def test_google_health_adapter_normalizes_daily_activity_and_sleep(app, auth_use
     assert len(requests_seen) == 5
 
 
+def test_wearable_routes_do_not_leak_exception_text(client, auth_user, monkeypatch):
+    # S3: ham exception metni (iç URL, kütüphane detayı, upstream yanıt parçası)
+    # istemciye dönmemeli — sunucuda loglanır, istemci jenerik mesaj görür.
+    sentinel = "http://internal-host:9000 gizli-detay"
+
+    # /api/wearables/<provider>/sync — beklenmeyen hata
+    def boom_sync(*a, **k):
+        raise RuntimeError(sentinel)
+    monkeypatch.setattr("app.blueprints.wearables.sync_provider_day", boom_sync)
+    resp = client.post("/api/wearables/whoop/sync")
+    assert resp.status_code == 502
+    assert sentinel not in resp.get_json()["error"]
+
+    # /api/wearables/whoop/<resource> — adapter isteği patlarsa
+    class _FakeAdapter:
+        provider = "whoop"
+        resource_endpoints = {"sleep": "/v2/sleep"}
+        def request(self, *a, **k):
+            raise RuntimeError(sentinel)
+        def exchange_code(self, code):
+            raise RuntimeError(sentinel)
+    monkeypatch.setattr("app.blueprints.wearables.get_adapter", lambda p: _FakeAdapter())
+    resp = client.get("/api/wearables/whoop/sleep")
+    assert resp.status_code == 502
+    assert sentinel not in resp.get_json()["error"]
+
+    # /api/auth/callback/<provider> — token exchange patlarsa
+    with client.session_transaction() as sess:
+        sess["_wearable_oauth_state_whoop"] = "st"
+    resp = client.get("/api/auth/callback/whoop?code=abc&state=st")
+    assert resp.status_code == 502
+    assert sentinel not in resp.get_json()["error"]
+
+
 def test_today_activity_prefers_wearable_over_manual(client, auth_user):
     from app.models import DailyActivity, WearableActivityLog
 
