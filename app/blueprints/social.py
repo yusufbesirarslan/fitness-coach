@@ -2,7 +2,8 @@
 import json
 from datetime import datetime, timedelta
 from flask import Blueprint, current_app, jsonify, redirect, render_template, request, url_for
-from flask_login import current_user, login_required
+from flask_login import current_user
+from app.auth_middleware import require_auth
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -40,7 +41,7 @@ def are_friends(user_a_id, user_b_id):
 
 
 @bp.route("/friends")
-@login_required
+@require_auth
 def friends_page():
     return render_template("friends.html",
         username=current_user.username,
@@ -48,7 +49,7 @@ def friends_page():
 
 
 @bp.route("/friends/list")
-@login_required
+@require_auth
 def friends_list():
     accepted = Friendship.query.filter(
         Friendship.status == "accepted",
@@ -77,7 +78,7 @@ def friends_list():
 
 
 @bp.route("/friends/select-list")
-@login_required
+@require_auth
 def friends_select_list():
     q = (request.args.get("q") or "").strip().lower()
     accepted = Friendship.query.filter(
@@ -113,13 +114,13 @@ def friends_select_list():
 
 
 @bp.route("/feed")
-@login_required
+@require_auth
 def feed_page():
     return render_template("feed.html", username=current_user.username, profile_picture=current_user.avatar_src)
 
 
 @bp.route("/feed/data")
-@login_required
+@require_auth
 def feed_data():
     try:
         page = max(int(request.args.get("page", 1) or 1), 1)
@@ -174,7 +175,7 @@ def _reload_pump_check(check_id):
 
 
 @bp.route("/pump-check/<int:check_id>/like", methods=["POST"])
-@login_required
+@require_auth
 def pump_check_like(check_id):
     check, error = _visible_pump_check_or_403(check_id)
     if error:
@@ -194,7 +195,7 @@ def pump_check_like(check_id):
 
 
 @bp.route("/pump-check/<int:check_id>/like", methods=["DELETE"])
-@login_required
+@require_auth
 def pump_check_unlike(check_id):
     check, error = _visible_pump_check_or_403(check_id)
     if error:
@@ -213,7 +214,7 @@ def pump_check_unlike(check_id):
 
 
 @bp.route("/pump-check/<int:check_id>/comments")
-@login_required
+@require_auth
 def pump_check_comments(check_id):
     check, error = _visible_pump_check_or_403(check_id)
     if error:
@@ -235,7 +236,7 @@ def pump_check_comments(check_id):
 
 
 @bp.route("/pump-check/<int:check_id>/comments", methods=["POST"])
-@login_required
+@require_auth
 def pump_check_comment_create(check_id):
     check, error = _visible_pump_check_or_403(check_id)
     if error:
@@ -257,7 +258,7 @@ def pump_check_comment_create(check_id):
 
 
 @bp.route("/friends/search")
-@login_required
+@require_auth
 @limiter.limit(SEARCH_RATELIMIT, key_func=_user_or_ip_key)
 def friends_search():
     q = request.args.get("q", "").strip()
@@ -286,7 +287,7 @@ def friends_search():
 
 
 @bp.route("/friend/request/<username>", methods=["POST"])
-@login_required
+@require_auth
 def friend_request(username):
     target = User.query.filter_by(username=username).first()
     if not target:
@@ -334,7 +335,7 @@ def friend_request(username):
 
 
 @bp.route("/friend/accept/<int:request_id>", methods=["POST"])
-@login_required
+@require_auth
 def friend_accept(request_id):
     fr = Friendship.query.filter_by(id=request_id, receiver_id=current_user.id).first_or_404()
     if fr.status != "pending":
@@ -359,7 +360,7 @@ def friend_accept(request_id):
 
 
 @bp.route("/friend/reject/<int:request_id>", methods=["POST"])
-@login_required
+@require_auth
 def friend_reject(request_id):
     fr = Friendship.query.filter_by(id=request_id, receiver_id=current_user.id).first_or_404()
     if fr.status != "pending":
@@ -373,7 +374,7 @@ def friend_reject(request_id):
 
 
 @bp.route("/chat/<username>")
-@login_required
+@require_auth
 def chat_page(username):
     other = User.query.filter_by(username=username).first_or_404()
     if not are_friends(current_user.id, other.id):
@@ -391,7 +392,7 @@ def chat_page(username):
 
 
 @bp.route("/chat/<username>/messages")
-@login_required
+@require_auth
 def chat_messages(username):
     # SALT-OKUNUR (GET): okundu işaretleme buradan KALDIRILDI. CSRF guard yalnızca
     # yazma metodlarında çalıştığından, bir GET'in karşı tarafın mesajlarını
@@ -436,7 +437,7 @@ def chat_messages(username):
 
 
 @bp.route("/chat/<username>/read", methods=["POST"])
-@login_required
+@require_auth
 def chat_mark_read(username):
     """Karşı taraftan gelen okunmamış mesajları okundu işaretle (durum değiştirir →
     CSRF-korumalı POST). chat_messages GET'inden ayrıldı."""
@@ -451,7 +452,7 @@ def chat_mark_read(username):
 
 
 @bp.route("/chat/<username>/send", methods=["POST"])
-@login_required
+@require_auth
 def chat_send(username):
     other = User.query.filter_by(username=username).first_or_404()
     if not are_friends(current_user.id, other.id):
@@ -482,7 +483,7 @@ def chat_send(username):
 
 
 @bp.route("/suggest/<username>", methods=["POST"])
-@login_required
+@require_auth
 def send_suggestion(username):
     other = User.query.filter_by(username=username).first_or_404()
     if not are_friends(current_user.id, other.id):
@@ -508,7 +509,7 @@ def send_suggestion(username):
 
 
 @bp.route("/suggest/respond/<int:msg_id>", methods=["POST"])
-@login_required
+@require_auth
 def respond_suggestion(msg_id):
     msg = Message.query.filter_by(id=msg_id, receiver_id=current_user.id).first_or_404()
     if msg.message_type not in ("suggestion_meal", "suggestion_workout"):

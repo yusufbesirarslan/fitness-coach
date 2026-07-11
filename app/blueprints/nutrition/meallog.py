@@ -7,7 +7,8 @@ ve davranış AYNI (aynı `nutrition` blueprint'i, aynı endpoint adları). Orta
 import json
 import s3_helper
 from flask import Response, current_app, jsonify, request
-from flask_login import current_user, login_required
+from flask_login import current_user
+from app.auth_middleware import require_auth
 
 from app.blueprints.nutrition import bp
 from app.config import AI_RATELIMIT
@@ -21,7 +22,7 @@ from app.timeutil import day_key, display_ddmm
 
 
 @bp.route("/meal-log", methods=["POST"])
-@login_required
+@require_auth
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def log_meal():
     data = request.get_json(silent=True) or {}
@@ -215,7 +216,7 @@ def log_meal():
 
 
 @bp.route("/meal-log/today")
-@login_required
+@require_auth
 def today_meals():
     """KANONİK 'bugün yenenler' defteri ve toplamları (MealLog — tek doğru kaynak).
 
@@ -251,7 +252,7 @@ def today_meals():
 
 
 @bp.route("/meal-log/history")
-@login_required
+@require_auth
 def meal_history():
     # Önce en yeni N GÜN'ün anahtarlarını al, sonra YALNIZCA o günlerin TÜM
     # satırlarını çek. Eski "ilk 50 satır çek → sonra güne göre grupla" yaklaşımı,
@@ -293,7 +294,7 @@ def meal_history():
 
 
 @bp.route("/meal-log/review", methods=["POST"])
-@login_required
+@require_auth
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 def review_meals():
     today = day_key()

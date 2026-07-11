@@ -6,7 +6,8 @@ ve davranış AYNI (aynı `nutrition` blueprint'i, aynı endpoint adları). Orta
 """
 import json
 from flask import current_app, jsonify, request
-from flask_login import current_user, login_required
+from flask_login import current_user
+from app.auth_middleware import require_auth
 from sqlalchemy.exc import IntegrityError
 
 from app.blueprints.nutrition import bp
@@ -66,7 +67,7 @@ def _clamp_item_macros(item):
 
 
 @bp.route("/api/quick-add-meal", methods=["POST"])
-@login_required
+@require_auth
 def quick_add_meal():
     data     = request.get_json(silent=True) or {}
     meal_key = data.get("meal_key", "")
@@ -146,7 +147,7 @@ def quick_add_meal():
 
 
 @bp.route("/api/diary/meal", methods=["POST"])
-@login_required
+@require_auth
 def diary_create_meal():
     data = request.get_json(silent=True) or {}
     meal_name = data.get("meal_name", "").strip()
@@ -181,7 +182,7 @@ def diary_create_meal():
 
 
 @bp.route("/api/diary/meal/<int:meal_id>/item", methods=["POST"])
-@login_required
+@require_auth
 def diary_add_item(meal_id):
     meal = db.session.get(CustomMeal, meal_id)
     if not meal or meal.user_id != current_user.id:
@@ -269,7 +270,7 @@ def diary_add_item(meal_id):
 
 
 @bp.route("/api/diary/item/<int:item_id>", methods=["PATCH"])
-@login_required
+@require_auth
 def diary_update_item(item_id):
     item = db.session.get(CustomMealItem, item_id)
     if not item or item.meal.user_id != current_user.id:
@@ -335,7 +336,7 @@ def diary_update_item(item_id):
 
 
 @bp.route("/api/diary/item/<int:item_id>", methods=["DELETE"])
-@login_required
+@require_auth
 def diary_delete_item(item_id):
     item = db.session.get(CustomMealItem, item_id)
     if not item or item.meal.user_id != current_user.id:
@@ -348,7 +349,7 @@ def diary_delete_item(item_id):
 
 
 @bp.route("/api/diary/meal/<int:meal_id>/log", methods=["POST"])
-@login_required
+@require_auth
 def diary_log_meal(meal_id):
     meal = db.session.get(CustomMeal, meal_id)
     if not meal or meal.user_id != current_user.id:
@@ -402,7 +403,7 @@ def diary_log_meal(meal_id):
 
 
 @bp.route("/api/diary/today")
-@login_required
+@require_auth
 def diary_today():
     """Diary-builder görünümü: bugünün CustomMeal'leri + diary'ye özel grand_total.
 

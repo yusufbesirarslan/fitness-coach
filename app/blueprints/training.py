@@ -2,7 +2,8 @@
 import json
 import s3_helper
 from flask import Blueprint, current_app, jsonify, render_template, request
-from flask_login import current_user, login_required
+from flask_login import current_user
+from app.auth_middleware import require_auth
 from sqlalchemy.exc import IntegrityError
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
@@ -55,7 +56,7 @@ def _parse_pump_visibility(data):
 
 
 @bp.route("/training")
-@login_required
+@require_auth
 def training():
     # Kayıtlı sakatlık verisini forma ön-doldur (yapışkan alan). None-güvenli.
     _meta = getattr(current_user, "user_metadata", None) or {}
@@ -66,7 +67,7 @@ def training():
 
 
 @bp.route("/training-plan", methods=["POST"])
-@login_required
+@require_auth
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 @limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # Sonnet üretimi: daha sıkı tavan
 @premium_ai_plan_gate("training")  # non-premium: haftada 1 üretim
@@ -98,7 +99,7 @@ def training_plan_generate():
 
 
 @bp.route("/training-plan/save", methods=["POST"])
-@login_required
+@require_auth
 def save_training_plan():
     data  = request.get_json(silent=True) or {}
     plan  = data.get("plan")
@@ -121,7 +122,7 @@ def save_training_plan():
 
 
 @bp.route("/workout/complete", methods=["POST"])
-@login_required
+@require_auth
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 @limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # validate_pump_check Sonnet görü: daha sıkı tavan
 @ai_concurrency_gate  # A1: bloklayıcı Bedrock görü çağrısı tüm thread'leri doldurmasın
@@ -261,7 +262,7 @@ def complete_workout():
 
 
 @bp.route("/workout/status")
-@login_required
+@require_auth
 def workout_status():
     # Bugünkü antrenman tamamlanmış mı? (cihazlar arası senkron için sunucudan)
     today_key = app_today().isoformat()
@@ -275,7 +276,7 @@ def workout_status():
 
 
 @bp.route("/training-plan/active")
-@login_required
+@require_auth
 def get_active_training_plan():
     plan = TrainingPlan.query.filter_by(user_id=current_user.id)\
         .order_by(TrainingPlan.created_at.desc())\
@@ -293,7 +294,7 @@ def get_active_training_plan():
 
 
 @bp.route("/water", methods=["GET"])
-@login_required
+@require_auth
 def get_water():
     today_key = app_today().isoformat()
     row = WaterLog.query.filter_by(user_id=current_user.id, date_key=today_key).first()
@@ -301,7 +302,7 @@ def get_water():
 
 
 @bp.route("/water", methods=["POST"])
-@login_required
+@require_auth
 def set_water():
     data = request.get_json(silent=True) or {}
     try:

@@ -1,0 +1,110 @@
+"""@require_auth davranış testleri: anonim reddi, legacy geçişi, cognito geçerli,
+süre-dolumunda yenileme, yenileme başarısızlığında geçersiz kılma.
+
+    python -m pytest tests/test_require_auth.py -v
+"""
+from datetime import datetime, timedelta
+import pytest
+
+from app.extensions import db
+from app.models import User
+from app.services import session_store, cognito_jwt
+from app.auth_middleware import require_auth
+
+
+@pytest.fixture
+def probe_route(app):
+    """require_auth ile korunan geçici bir route ekle."""
+    # Bu testler dekoratörün kendisini sınar; el-yordamıyla kurulan oturum
+    # login_manager'ın "strong" session-protection'ıyla (_id eşleşmesi) çakışır
+    # ve kullanıcıyı düşürür. Session protection ayrı test kapsamı → burada kapat.
+    app.config["SESSION_PROTECTION"] = None
+
+    @app.route("/__probe")
+    @require_auth
+    def _probe():
+        return "ok", 200
+    app.url_map.update()  # route kaydını uygula
+    return "/__probe"
+
+
+@pytest.fixture
+def legacy_user(app):
+    u = User(username="leg", email="leg@example.com")
+    u.set_password("Sifre123")
+    db.session.add(u)
+    db.session.commit()
+    return u
+
+
+@pytest.fixture
+def cognito_user(app):
+    u = User(username="cog", email="cog@example.com", cognito_sub="sub-cog")
+    db.session.add(u)
+    db.session.commit()
+    return u
+
+
+def _login_session(client, user, sid=None):
+    """Flask-Login oturumunu ve (varsa) cognito_sid'i doğrudan kur."""
+    with client.session_transaction() as s:
+        s["_user_id"] = str(user.id)
+        if sid:
+            s["cognito_sid"] = sid
+
+
+def test_anonymous_redirected(client, probe_route):
+    resp = client.get(probe_route)
+    assert resp.status_code == 302
+    assert "/login" in resp.headers["Location"]
+
+
+def test_legacy_user_passes_through(client, probe_route, legacy_user):
+    _login_session(client, legacy_user)
+    assert client.get(probe_route).status_code == 200
+
+
+def test_cognito_valid_token_allowed(client, probe_route, cognito_user, monkeypatch):
+    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use: {"sub": "sub-cog"})
+    sid = session_store.create(cognito_user, {"access_token": "a", "refresh_token": "r",
+                                              "id_token": "i", "expires_in": 3600}, "cog")
+    _login_session(client, cognito_user, sid)
+    assert client.get(probe_route).status_code == 200
+
+
+def test_cognito_missing_session_row_invalidated(client, probe_route, cognito_user, monkeypatch):
+    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use: {"sub": "sub-cog"})
+    _login_session(client, cognito_user, "no-such-sid")
+    resp = client.get(probe_route)
+    assert resp.status_code == 302  # geçersiz → login'e
+
+
+def test_cognito_expired_access_refreshed(client, probe_route, cognito_user, monkeypatch):
+    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use: {"sub": "sub-cog"})
+    from app.services import cognito_service
+    monkeypatch.setattr(cognito_service, "refresh_tokens",
+                        lambda ref, uname: {"access_token": "fresh", "id_token": "", "expires_in": 3600})
+    sid = session_store.create(cognito_user, {"access_token": "old", "refresh_token": "r",
+                                              "id_token": "i", "expires_in": 3600}, "cog")
+    row = session_store.get(sid)
+    row.access_token_exp = datetime.utcnow() - timedelta(minutes=1)
+    db.session.commit()
+    _login_session(client, cognito_user, sid)
+    assert client.get(probe_route).status_code == 200
+
+
+def test_cognito_dead_refresh_invalidated(client, probe_route, cognito_user, monkeypatch):
+    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use: {"sub": "sub-cog"})
+    from app.services import cognito_service
+    def boom(ref, uname):
+        raise cognito_service.CognitoServiceError("x", "NotAuthorizedException")
+    monkeypatch.setattr(cognito_service, "refresh_tokens", boom)
+    sid = session_store.create(cognito_user, {"access_token": "old", "refresh_token": "r",
+                                              "id_token": "i", "expires_in": 3600}, "cog")
+    row = session_store.get(sid)
+    row.access_token_exp = datetime.utcnow() - timedelta(minutes=1)
+    db.session.commit()
+    _login_session(client, cognito_user, sid)
+    resp = client.get(probe_route)
+    assert resp.status_code == 302
+    assert session_store.get(sid) is None  # satır silindi

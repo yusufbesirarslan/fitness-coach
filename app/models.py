@@ -20,6 +20,8 @@ class User(UserMixin, db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     username      = db.Column(db.String(80), unique=True, nullable=False)
     email         = db.Column(db.String(120), unique=True, nullable=False)
+    # TODO(Sprint 3): remove legacy local-password auth. Cognito (cognito_sub) is
+    # the auth identity; password_hash is retained only for backward compatibility.
     password_hash = db.Column(db.String(200), nullable=True)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -93,6 +95,7 @@ class User(UserMixin, db.Model):
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
+    # TODO(Sprint 3): remove — legacy local-password verification path.
     def check_password(self, password):
         if not self.password_hash:
             return False
@@ -151,6 +154,26 @@ class UserSession(db.Model):
 
     def __repr__(self):
         return f"<UserSession {self.name} - {self.created_at}>"
+
+
+class CognitoSession(db.Model):
+    """Bir Flask-Login oturumuna bağlı Cognito token'ları (sunucu tarafı, şifreli).
+    session_id çerezde taşınır; access/refresh token'lar Fernet ile şifreli saklanır.
+    Bir giriş = bir satır → eşzamanlı oturumlar bağımsız yaşar."""
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.String(64), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"),
+                        nullable=False, index=True)
+    cognito_username = db.Column(db.String(80), nullable=False)
+    access_token = db.Column(db.Text, nullable=False)    # Fernet ile şifreli
+    refresh_token = db.Column(db.Text, nullable=False)   # Fernet ile şifreli
+    access_token_exp = db.Column(db.DateTime, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_used_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index("uq_cognito_session_session_id", "session_id", unique=True),
+    )
 
 
 class WeeklyLog(db.Model):

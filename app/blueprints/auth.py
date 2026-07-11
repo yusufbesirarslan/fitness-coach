@@ -9,8 +9,9 @@ from werkzeug.security import check_password_hash
 from app.config import COGNITO_ENABLED
 from app.extensions import db, limiter, login_throttle_available
 from app.models import User
-from app.services import cognito_service
+from app.services import cognito_jwt, cognito_service, session_store
 from app.services.cognito_service import CognitoServiceError
+from app.services.cognito_jwt import TokenValidationError
 from app.services.gamification import complete_quest_for_user
 from app.services.referral import consume_referral, ensure_referral_code
 from app.services.validators import _DUMMY_PW_HASH, validate_email, validate_password, validate_username
@@ -223,7 +224,7 @@ def login():
     # Cognito UserNotConfirmed döner → istemciyi /verify sayfasına yönlendiririz.
     if user and user.cognito_sub and COGNITO_ENABLED:
         try:
-            claims = cognito_service.initiate_auth(username, password or "")
+            result = cognito_service.authenticate(username, password or "")
         except CognitoServiceError as e:
             # M7 (kabul edilen tradeoff): UserNotConfirmedException, "kayıtlı ama
             # doğrulanmamış" bir hesabı diğer hatalardan (generic bad_credentials,
@@ -237,19 +238,32 @@ def login():
                 return jsonify({"error": e.message, "needs_verification": True,
                                 "username": username}), 403
             return jsonify({"error": e.message}), 401
+        claims = result["claims"]
+        tokens = result["tokens"]
+        # Kimlik token'ını KRİPTOGRAFİK olarak doğrula (JWKS) — claim'lere manuel
+        # güvenme; imza/issuer/audience/exp Cognito JWKS'e karşı sınanır.
+        try:
+            cognito_jwt.validate_token(tokens["id_token"], "id")
+        except TokenValidationError:
+            return jsonify({"error": t("auth.bad_credentials")}), 401
         # Kimlik bütünlüğü: giriş POZİTİF bir doğrulamadır — dönen sub DOLU
         # olmalı VE yerel kayıtla eşleşmeli. Boş claim (MFA/challenge/bozuk
-        # token) asla başarı sayılmaz. (initiate_auth bu durumları zaten
-        # CognitoIdpError ile reddeder; burası ikinci savunma katmanı.)
+        # token) asla başarı sayılmaz. (authenticate bu durumları zaten
+        # CognitoServiceError ile reddeder; burası ikinci savunma katmanı.)
         if not claims.get("sub") or claims["sub"] != user.cognito_sub:
             return jsonify({"error": t("auth.bad_credentials")}), 401
         _login_fresh(user)
+        # _login_fresh session.clear() yapar → cognito_sid'i SONRA yaz. Token'lar
+        # sunucu tarafında şifreli saklanır; çerezde yalnızca opak session_id taşınır.
+        session["cognito_sid"] = session_store.create(user, tokens, username)
         quest_result = complete_quest_for_user(user.id, "login")
         response = {"message": t("auth.welcome", username=user.username)}
         if quest_result:
             response["quest_awarded"] = quest_result
         return jsonify(response)
 
+    # TODO(Sprint 3): remove legacy local-password login. Kept for users without a
+    # cognito_sub until migration completes; Cognito is the auth identity.
     # Always run one password hash comparison, whether or not the username
     # exists, so the response time can't reveal which usernames are registered.
     if user:
@@ -350,6 +364,18 @@ def logout():
         from urllib.parse import urlparse
         if urlparse(referer).hostname != request.host.split(":")[0]:
             abort(403, description=t("route.csrf_failed"))
+    # Cognito oturumu: GlobalSignOut (best-effort — süresi dolmuş token hata
+    # verebilir, yut) + sunucu tarafı token satırını sil.
+    sid = session.get("cognito_sid")
+    if sid:
+        access = session_store.current_access_token(sid)
+        if access:
+            try:
+                cognito_service.global_sign_out(access)
+            except CognitoServiceError:
+                pass
+        session_store.delete(sid)
+    session.pop("cognito_sid", None)
     session.pop("via_cognito", None)
     logout_user()
     return redirect(url_for("auth.login"))

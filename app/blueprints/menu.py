@@ -7,7 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 from flask import Blueprint, current_app, jsonify, request
-from flask_login import current_user, login_required
+from flask_login import current_user
+from app.auth_middleware import require_auth
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT, SCRAPE_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter, redis_client
@@ -86,7 +87,7 @@ def _menu_scan_cache_key(clean_url):
 
 
 @bp.route("/api/proxy/scan-menu", methods=["POST"])
-@login_required
+@require_auth
 @limiter.limit(SCRAPE_RATELIMIT, key_func=_user_or_ip_key)
 @scrape_concurrency_gate  # INF-5: ağ-bağımlı scrape AYRI semaforda — LLM slotlarını tutmasın
 def proxy_scan_menu():
@@ -273,7 +274,7 @@ def proxy_scan_menu():
 
 
 @bp.route("/api/menu/analyze", methods=["POST"])
-@login_required
+@require_auth
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 @limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # Sonnet (çoklu çağrı): daha sıkı tavan
 @ai_concurrency_gate  # A1: bloklayıcı AI çağrıları tüm thread'leri doldurmasın

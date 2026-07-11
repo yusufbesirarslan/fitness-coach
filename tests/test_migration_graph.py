@@ -28,4 +28,6 @@ def test_alembic_migrations_have_single_head():
 
     heads = sorted(set(revisions) - down_revisions)
 
-    assert heads == ["f8a9b0c1d2e3"]
+    # Current single head: aa11bb22cc33 (Sprint 2 cognito_session), chained onto
+    # main's barcode/main merge head f8a9b0c1d2e3.
+    assert heads == ["aa11bb22cc33"]

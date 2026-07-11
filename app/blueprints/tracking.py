@@ -2,7 +2,8 @@
 import json
 from datetime import timedelta
 from flask import Blueprint, Response, g, jsonify, redirect, render_template, request, url_for
-from flask_login import current_user, login_required
+from flask_login import current_user
+from app.auth_middleware import require_auth
 from sqlalchemy.exc import IntegrityError
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
@@ -23,7 +24,7 @@ bp = Blueprint("tracking", __name__)
 
 
 @bp.route("/")
-@login_required
+@require_auth
 def home():
     if not current_user.profile_complete:
         return redirect(url_for("profile.setup"))
@@ -41,7 +42,7 @@ def home():
 
 
 @bp.route("/log", methods=["POST"])
-@login_required
+@require_auth
 def log_progress():
     data = request.get_json(silent=True) or {}
     weight = data.get("weight")
@@ -83,7 +84,7 @@ def log_progress():
 
 
 @bp.route("/api/progress")
-@login_required
+@require_auth
 def progress():
     logs = WeeklyLog.query.filter_by(user_id=current_user.id)\
     .order_by(WeeklyLog.created_at.asc())\
@@ -105,7 +106,7 @@ def progress():
 # Eski /progress adresi ham JSON döndürüyordu; kullanıcı (link/yer imi/tahmin)
 # oraya düşerse kod görmesin diye ilerleme sayfasına yönlendir.
 @bp.route("/progress")
-@login_required
+@require_auth
 def progress_redirect():
     return redirect(url_for("tracking.progress_page"))
 
@@ -144,7 +145,7 @@ def _apply_weight_to_profile(weight, last_sess):
 
 
 @bp.route("/checkin", methods=["POST"])
-@login_required
+@require_auth
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
 @limiter.limit(BEDROCK_RATELIMIT, key_func=_user_or_ip_key)  # generate_checkin_feedback Sonnet'te: daha sıkı tavan
 @ai_concurrency_gate  # A1: bloklayıcı Bedrock/OpenAI çağrısı tüm thread'leri doldurmasın
@@ -236,7 +237,7 @@ def checkin():
 
 
 @bp.route("/checkin-history")
-@login_required
+@require_auth
 def checkin_history():
     # /update-weight kaynaklı seyrek satırları (yalnızca weight dolu) geçmişten
     # çıkar; bunlar blank-metrikli satırlar olarak listeyi kirletiyordu (BUG-5).
@@ -265,7 +266,7 @@ def checkin_history():
 
 
 @bp.route("/update-weight", methods=["POST"])
-@login_required
+@require_auth
 def update_weight():
     data = request.get_json(silent=True) or {}
     weight = data.get("weight")
@@ -318,7 +319,7 @@ def update_weight():
 
 
 @bp.route("/api/activity/log", methods=["POST"])
-@login_required
+@require_auth
 def log_daily_activity():
     data = request.get_json(silent=True) or {}
     steps = _to_int(data.get("steps", 0), 0)  # sayısal olmayan/boş → 0 (500 yerine)
@@ -375,7 +376,7 @@ def log_daily_activity():
 
 
 @bp.route("/api/activity/today")
-@login_required
+@require_auth
 def today_activity():
     today_key = app_today().isoformat()
     wearable = WearableActivityLog.query.filter_by(
@@ -427,7 +428,7 @@ def today_activity():
 
 
 @bp.route("/progress-page")
-@login_required
+@require_auth
 def progress_page():
     # Tek kilo kaynağı: current_user.weight (panodaki değerle aynı). Henüz set
     # edilmemişse son check-in'e düş — böylece check-in formu sabit bir sayı
@@ -444,7 +445,7 @@ def progress_page():
 
 
 @bp.route("/history")
-@login_required
+@require_auth
 def history():
     sessions = UserSession.query.filter_by(user_id = current_user.id)\
     .order_by(UserSession.created_at.desc())\
@@ -465,7 +466,7 @@ def history():
 
 
 @bp.route("/last-session")
-@login_required
+@require_auth
 def last_session():
     s = UserSession.query.filter_by(user_id=current_user.id)\
         .order_by(UserSession.created_at.desc())\
@@ -493,7 +494,7 @@ def last_session():
 
 
 @bp.route("/dashboard-nudges")
-@login_required
+@require_auth
 def dashboard_nudges():
     from analytics_engine import get_nudges
     nudge_translations = {
@@ -532,7 +533,7 @@ def _progress_range(range_key):
 
 
 @bp.route("/api/progress/nutrition")
-@login_required
+@require_auth
 def progress_nutrition():
     start, n = _progress_range(request.args.get("range"))
     rows = MealLog.query.filter(
@@ -565,7 +566,7 @@ def progress_nutrition():
 
 
 @bp.route("/api/progress/workout")
-@login_required
+@require_auth
 def progress_workout():
     start, n = _progress_range(request.args.get("range"))
     start_utc = utc_day_bounds(start)[0]
@@ -596,7 +597,7 @@ def progress_workout():
 
 
 @bp.route("/api/progress/heatmap")
-@login_required
+@require_auth
 def progress_heatmap():
     try:
         weeks = int(request.args.get("weeks", 26) or 26)
@@ -637,7 +638,7 @@ def progress_heatmap():
 
 
 @bp.route("/api/progress/achievements")
-@login_required
+@require_auth
 def progress_achievements():
     xp = current_user.rank_points or 0
     level = get_level(xp)
@@ -658,7 +659,7 @@ def progress_achievements():
 
 
 @bp.route("/api/progress/insights")
-@login_required
+@require_auth
 def progress_insights():
     insights = []
     # 1) Weight direction over the last two check-ins

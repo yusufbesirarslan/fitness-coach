@@ -1,7 +1,8 @@
 from datetime import date
 
 from flask import Blueprint, jsonify, redirect, request, session, url_for
-from flask_login import current_user, login_required
+from flask_login import current_user
+from app.auth_middleware import require_auth
 
 from app.config import SCRAPE_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter
@@ -20,7 +21,7 @@ def _json_error(message, status=400):
 
 
 @bp.route("/api/auth/wearable/<provider>")
-@login_required
+@require_auth
 # OAuth başlatma da (authorization_url dış sağlayıcıya yönlendirir) döngüye
 # sokulabilir; callback ise her çağrıda token exchange için dışarı HTTP atar.
 # İkisini de diğer dış-fetch route'larıyla aynı kovaya al (SEC-2).
@@ -36,7 +37,7 @@ def wearable_login(provider):
 
 
 @bp.route("/api/auth/callback/<provider>")
-@login_required
+@require_auth
 @limiter.limit(SCRAPE_RATELIMIT, key_func=_user_or_ip_key)  # exchange_code dış HTTP (SEC-2)
 def wearable_callback(provider):
     try:
@@ -60,7 +61,7 @@ def wearable_callback(provider):
 
 
 @bp.route("/api/wearables/status")
-@login_required
+@require_auth
 def wearable_status():
     rows = UserWearableConnection.query.filter_by(user_id=current_user.id)\
         .order_by(UserWearableConnection.provider.asc()).all()
@@ -75,7 +76,7 @@ def wearable_status():
 
 
 @bp.route("/api/wearables/<provider>/sync", methods=["POST"])
-@login_required
+@require_auth
 # Her çağrı WHOOP/Google'a dışarı HTTP atar; limitsizken kullanıcı üçüncü-taraf
 # rate-limit tüketimi / maliyet amplifikasyonu için döngüye sokabilirdi (S4).
 # Diğer dış-fetch route'larıyla aynı kova (SCRAPE_RATELIMIT).
@@ -95,7 +96,7 @@ def wearable_sync(provider):
 
 
 @bp.route("/api/wearables/whoop/<resource>")
-@login_required
+@require_auth
 @limiter.limit(SCRAPE_RATELIMIT, key_func=_user_or_ip_key)  # dış WHOOP çağrısı (S4)
 def whoop_resource(resource):
     adapter = get_adapter("whoop")
