@@ -35,7 +35,8 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
       limiter→in-memory), yalnızca login 503 olur. `/health?deep=1` login offline'ken 503
       döner ve deploy gate bunu kullanır (I2); sığ /health liveness için yeşil kalır.
     - `AI_MAX_CONCURRENCY` (vars. 4) + `SCRAPE_MAX_CONCURRENCY` (vars. 2) +
-      `AI_GATE_WAIT_SECONDS` (vars. 10) — ağır AI/scrape route'larında eşzamanlılık
+      `AI_MODEL_MAX_CONCURRENCY` (vars. AI_MAX_CONCURRENCY) +
+      `AI_GATE_WAIT_SECONDS` (vars. 0) — ağır AI/scrape route'larında eşzamanlılık
       tavanı (app/services/ai_gate.py); dolunca 503 + Retry-After. İki kapının toplamı
       `FITX_WEB_THREADS`'in (vars. 8, gunicorn --threads ile eş) en az 2 altında
       kalmalı; ihlal boot'ta loglanır. Thread rezervi /health ve ucuz route'ları
