@@ -228,6 +228,84 @@
     submitOnEnter(event, function () { window.verifyCode(qs("verify-submit")); });
   };
 
+  window.forgotPassword = async function (el) {
+    var identifier = normalizedValue("identifier");
+    if (!identifier) {
+      showNotice("error", tr("auth.identifier_required"));
+      return;
+    }
+    setButtonLoading(el, true, tr("forgot.submit"));
+    try {
+      var response = await fetch("/forgot-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ identifier: identifier })
+      });
+      var data = await response.json();
+      if (!response.ok) {
+        showNotice("error", data.error);
+        return;
+      }
+      showNotice("success", data.message);
+      window.setTimeout(function () { window.location.href = data.next; }, 700);
+    } catch (err) {
+      showNotice("error", tr("common.conn_error_retry"));
+    } finally {
+      setButtonLoading(el, false);
+    }
+  };
+
+  window.forgotPasswordOnEnter = function (el, event) {
+    submitOnEnter(event, function () { window.forgotPassword(qs("forgot-submit")); });
+  };
+
+  window.resetPassword = async function (el) {
+    var code = normalizedValue("code");
+    var passwordInput = qs("password");
+    var confirmationInput = qs("confirm-password");
+    var password = passwordInput ? passwordInput.value : "";
+    var confirmation = confirmationInput ? confirmationInput.value : "";
+    if (!code || !password || !confirmation) {
+      showNotice("error", tr("auth.reset_fields_required"));
+      return;
+    }
+    if (password !== confirmation) {
+      showNotice("error", tr("auth.password_mismatch"));
+      return;
+    }
+    if (passwordScore(password) < 2) {
+      showNotice("error", tr("reset.password_ph"));
+      return;
+    }
+    setButtonLoading(el, true, tr("reset.submit"));
+    try {
+      var response = await fetch("/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code: code,
+          password: password,
+          confirm_password: confirmation
+        })
+      });
+      var data = await response.json();
+      if (!response.ok) {
+        showNotice("error", data.error);
+        return;
+      }
+      showNotice("success", data.message);
+      window.setTimeout(function () { window.location.href = data.next; }, 700);
+    } catch (err) {
+      showNotice("error", tr("common.conn_error_retry"));
+    } finally {
+      setButtonLoading(el, false);
+    }
+  };
+
+  window.resetPasswordOnEnter = function (el, event) {
+    submitOnEnter(event, function () { window.resetPassword(qs("reset-submit")); });
+  };
+
   var currentStep = 0;
   var selections = { goal: "", level: "", activity: "" };
 

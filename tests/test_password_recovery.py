@@ -1,4 +1,5 @@
 """Native Cognito password recovery route and session lifecycle tests."""
+import time
 from datetime import datetime, timedelta
 
 import pytest
@@ -12,9 +13,7 @@ from app.services.cognito_service import CognitoServiceError
 def _reset_context(client, username="alice", *, minutes_ago=0):
     with client.session_transaction() as state:
         state["password_reset_username"] = username
-        state["password_reset_started_at"] = (
-            datetime.utcnow() - timedelta(minutes=minutes_ago)
-        ).timestamp()
+        state["password_reset_started_at"] = time.time() - (minutes_ago * 60)
 
 
 def _reset_payload(**overrides):
@@ -78,7 +77,7 @@ def test_reset_success_is_single_use_and_invalidates_all_sessions(client, monkey
     db.session.commit()
     with client.session_transaction() as state:
         state["password_reset_username"] = "alice"
-        state["password_reset_started_at"] = datetime.utcnow().timestamp()
+        state["password_reset_started_at"] = time.time()
         state["_user_id"] = str(user.id)
         state["cognito_sid"] = "one"
 
