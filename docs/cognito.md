@@ -201,3 +201,30 @@ the `CognitoSession.user_id`, and the local user resolved from the cryptographic
 verified access-token `sub`. All three must identify the same row. Missing local
 Cognito identity, missing session state, row/user mismatch, invalid token, or
 verified-sub mismatch invalidates the session; there is no legacy passthrough.
+
+### Intentionally public endpoints
+
+The route-map audit in `tests/test_auth_audit.py` treats every endpoint as
+protected unless it appears in this reviewed allowlist.
+
+| Endpoint | Methods | Why public | Rate limit | CSRF |
+| --- | --- | --- | --- | --- |
+| `/static/<path>` | GET | Browser assets | Flask static handling | Not applicable |
+| `/health` | GET | Liveness/deploy gate | None | Not applicable |
+| `/welcome` | GET | Marketing/entry page | None | Not applicable |
+| `/davet/<code>` | GET | Referral entry and first-party cookie handoff | None | Read/navigation only |
+| `/set-language` | POST | Pre-login language choice | 30/hour | Origin + synchronizer token |
+| `/register` | GET, POST | Account creation | 5/hour on POST | POST protected |
+| `/login` | GET, POST | Session creation | 10/minute, 50/hour; plus 15/15 minutes per account on failed POST | POST protected |
+| `/verify` | GET, POST | Cognito email confirmation | 10/15 minutes on POST | POST protected |
+| `/verify/resend` | POST | Resend confirmation code | 3/15 minutes | Protected |
+| `/forgot-password` | GET, POST | Start password recovery | 5/15 minutes on POST | POST protected |
+| `/reset-password` | GET, POST | Complete password recovery | 10/15 minutes on POST | POST protected |
+| `/login/cognito` | GET | Disabled Hosted UI compatibility route; always 404 | None | No state change |
+| `/auth/cognito/callback` | GET | Disabled Hosted UI compatibility route; always 404 | None | No state change |
+
+`GET /logout` is not a public business endpoint. It is authenticated teardown
+using Flask-Login so an already-invalid Cognito session can still be cleared.
+Because existing clients use navigation links, it retains GET with an explicit
+`Sec-Fetch-Site`/`Referer` same-site guard, performs best-effort Cognito global
+sign-out, deletes the local session row, and clears Flask-Login state.
