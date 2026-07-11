@@ -35,6 +35,18 @@ class _FakeIdp:
             raise self.raises
         return {}
 
+    def forgot_password(self, **kw):
+        self.calls.append(("forgot_password", kw))
+        if self.raises:
+            raise self.raises
+        return {}
+
+    def confirm_forgot_password(self, **kw):
+        self.calls.append(("confirm_forgot_password", kw))
+        if self.raises:
+            raise self.raises
+        return {}
+
 
 def _use_fake(monkeypatch, fake):
     monkeypatch.setattr(cognito_service, "_get_client", lambda: fake)
@@ -100,6 +112,39 @@ def test_global_sign_out_calls_client(monkeypatch):
     cognito_service.global_sign_out("acc-token")
     assert fake.calls[-1][0] == "global_sign_out"
     assert fake.calls[-1][1]["AccessToken"] == "acc-token"
+
+
+def test_forgot_password_calls_cognito(monkeypatch):
+    fake = _FakeIdp()
+    _use_fake(monkeypatch, fake)
+    cognito_service.forgot_password("alice")
+    assert fake.calls[-1] == ("forgot_password", {
+        "ClientId": "client-123", "Username": "alice",
+    })
+
+
+def test_confirm_forgot_password_calls_cognito(monkeypatch):
+    fake = _FakeIdp()
+    _use_fake(monkeypatch, fake)
+    cognito_service.confirm_forgot_password("alice", "123456", "Newpass123")
+    assert fake.calls[-1] == ("confirm_forgot_password", {
+        "ClientId": "client-123", "Username": "alice",
+        "ConfirmationCode": "123456", "Password": "Newpass123",
+    })
+
+
+@pytest.mark.parametrize("code", [
+    "ExpiredCodeException", "CodeMismatchException", "LimitExceededException",
+    "NotAuthorizedException", "TooManyRequestsException", "UserNotFoundException",
+    "InvalidPasswordException",
+])
+def test_recovery_errors_are_wrapped(monkeypatch, code):
+    fake = _FakeIdp(raises=_FakeClientError(code))
+    _use_fake(monkeypatch, fake)
+    with pytest.raises(CognitoServiceError) as exc:
+        cognito_service.forgot_password("alice")
+    assert exc.value.code == code
+    assert code not in exc.value.message
 
 
 def test_password_reset_and_internal_error_mapped():

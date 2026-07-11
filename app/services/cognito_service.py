@@ -165,6 +165,32 @@ def resend_code(username):
         raise _wrap(e)
 
 
+def forgot_password(username):
+    """Cognito forgot-password akışını başlat ve e-postaya kod gönder."""
+    kwargs = _maybe_secret({
+        "ClientId": COGNITO_APP_CLIENT_ID,
+        "Username": username,
+    }, username)
+    try:
+        _get_client().forgot_password(**kwargs)
+    except Exception as e:
+        raise _wrap(e)
+
+
+def confirm_forgot_password(username, code, new_password):
+    """Doğrulama koduyla Cognito parolasını değiştir."""
+    kwargs = _maybe_secret({
+        "ClientId": COGNITO_APP_CLIENT_ID,
+        "Username": username,
+        "ConfirmationCode": code,
+        "Password": new_password,
+    }, username)
+    try:
+        _get_client().confirm_forgot_password(**kwargs)
+    except Exception as e:
+        raise _wrap(e)
+
+
 def authenticate(username, password):
     """USER_PASSWORD_AUTH ile giriş. Başarılıysa ham token'ları (access/id/refresh/
     expires_in) VE çözülmüş id-token claim'lerini döndürür. Challenge/boş kimlik
