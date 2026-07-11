@@ -145,3 +145,27 @@ Cognito session is already invalid, and it does its own CSRF check).
 - `tests/test_cognito_auth.py` — end-to-end: logout GlobalSignOut + row delete,
   concurrent independent sessions, session expiration → re-login, protected
   route after login.
+
+## Sprint 3 — Native Password Recovery
+
+`POST /forgot-password` accepts a username or e-mail address. Known e-mail
+addresses are resolved to their canonical Cognito username, while unknown
+identifiers are still passed to Cognito. Provider errors are deliberately
+masked: known and unknown accounts receive the same generic 200 response, so
+the endpoint does not become an account-enumeration oracle.
+
+The canonical username is handed to `/reset-password` through server-signed
+Flask session state, never through a query string or client-controlled hidden
+field. This local reset context expires after 15 minutes. Missing, malformed,
+or expired context is cleared and rejected before a confirmation call.
+
+`POST /reset-password` validates the code and password fields locally, then
+calls Cognito `ConfirmForgotPassword`. A successful confirmation is single-use:
+all `CognitoSession` rows belonging to the local user are deleted, Flask-Login
+state and browser session state are cleared, and the user must authenticate
+again with the new password. Cognito remains the credential authority; the
+application never writes a local password hash during recovery.
+
+Provider code mismatch/expiry responses are fixed client-safe messages.
+Cognito throttling maps to HTTP 429. Raw provider text, reset codes, passwords,
+identifiers, and tokens are not logged.

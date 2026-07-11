@@ -117,6 +117,15 @@ def delete(session_id):
         db.session.commit()
 
 
+def delete_for_user(user_id):
+    """Delete every application-managed Cognito session for one local user."""
+    removed = (CognitoSession.query
+               .filter_by(user_id=user_id)
+               .delete(synchronize_session=False))
+    db.session.commit()
+    return removed
+
+
 # Cognito refresh token'ının varsayılan geçerliliği 30 gündür; bu kadar süre
 # dokunulmamış bir oturum zaten yenilenemez — satırı tutmanın tek etkisi
 # tablonun sınırsız büyümesi ve süresi geçmiş şifreli token saklamaktır (I5).
