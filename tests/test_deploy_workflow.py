@@ -25,6 +25,15 @@ def test_deploy_health_gate_and_rollback_are_required():
     assert "ROLLBACK" in body
 
 
+def test_deploy_warns_when_fatsecret_proxy_not_listening():
+    # I4: FatSecret loopback proxy'sini (127.0.0.1:3000) kimse süpervize etmiyor;
+    # deploy en azından dinleyici yokluğunu görünür uyarıyla raporlamalı
+    # (başarısızlık DEĞİL — proxy düşükken app deploy'u bloklanmasın).
+    body = _deploy_yaml()
+    assert ":3000" in body
+    assert "fatsecret" in body.lower()
+
+
 def test_deploy_gate_uses_deep_health():
     # I2: birincil gate derin sağlığa bakmalı — Redis-down'da login fail-closed
     # iken deploy "yeşil" geçmesin. (Rollback probe'u sığ kalır: kod geri

@@ -100,6 +100,26 @@ def test_deep_health_reports_login_redis_and_bedrock(app):
     assert body["bedrock"] in ("enabled", "disabled")
 
 
+def test_deep_health_reports_fatsecret_proxy(app, monkeypatch):
+    # I4: derin görünüm FatSecret proxy'sini de raporlar — BİLGİLENDİRİCİ alan
+    # (proxy düşükken deploy rollback'i tetiklenmez, yalnızca izleme görür).
+    import app.config as config_mod
+    client = app.test_client()
+
+    monkeypatch.setattr(config_mod, "FATSECRET_BASE_URL", "")
+    assert client.get("/health?deep=1").get_json()["fatsecret_proxy"] == "unconfigured"
+
+    monkeypatch.setattr(config_mod, "FATSECRET_BASE_URL", "https://x.example/fatsecret")
+    import requests as requests_mod
+
+    def dead(*a, **k):
+        raise requests_mod.exceptions.ConnectionError("down")
+    monkeypatch.setattr(requests_mod, "get", dead)
+    resp = client.get("/health?deep=1")
+    assert resp.get_json()["fatsecret_proxy"] == "error"
+    assert resp.status_code == 200                       # bilgilendirici: gate'i düşürmez
+
+
 def test_deep_health_503_when_login_fail_closed(app, monkeypatch):
     # I2: Redis-down + LOGIN_FAIL_CLOSED=1 → hiç kimse giriş yapamaz; derin
     # sağlık 503 dönmeli ki deploy gate "yeşilken login kapalı" durumunu yakalasın.

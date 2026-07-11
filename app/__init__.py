@@ -66,6 +66,23 @@ def create_app():
             body["login"] = "ok" if login_ok else "offline"
             body["bedrock"] = ("enabled" if app.config.get("BEDROCK_ENABLED")
                                else "disabled")
+            # I4: FatSecret loopback proxy'si (host, 127.0.0.1:3000) süpervizörsüz
+            # bir SPOF — düşerse makro çözümü sessizce LLM tahminine düşer.
+            # BİLGİLENDİRİCİ alan: hata deploy gate'ini düşürmez (proxy kesintisi
+            # app rollback'i gerektirmez), yalnızca izleme/deploy logunda görünür.
+            import app.config as config_mod
+            if not config_mod.FATSECRET_BASE_URL:
+                body["fatsecret_proxy"] = "unconfigured"
+            else:
+                import requests
+                try:
+                    r = requests.get(
+                        config_mod.FATSECRET_BASE_URL.rstrip("/") + "/rest/server.api",
+                        timeout=3)
+                    # Canlı proxy auth'suz istekte 4xx döner; nginx 502 = proxy ölü.
+                    body["fatsecret_proxy"] = "ok" if r.status_code < 500 else "error"
+                except Exception:
+                    body["fatsecret_proxy"] = "error"
             if not login_ok:
                 body["status"] = "error"
                 status = 503
