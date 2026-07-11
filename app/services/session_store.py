@@ -16,7 +16,10 @@ from datetime import datetime, timedelta
 
 from cryptography.fernet import Fernet
 
-from app.config import COGNITO_REFRESH_SKEW_SECONDS, COGNITO_TOKEN_ENC_KEY
+from app.config import (COGNITO_REFRESH_SKEW_SECONDS,
+                        COGNITO_SESSION_ABSOLUTE_DAYS,
+                        COGNITO_SESSION_IDLE_HOURS,
+                        COGNITO_TOKEN_ENC_KEY)
 from app.extensions import db
 from app.models import CognitoSession
 from app.services import cognito_service
@@ -84,12 +87,24 @@ def current_access_token(session_id):
     return _dec(row.access_token) if row else None
 
 
-def get_valid_access_token(session_id):
+def get_valid_access_token(session_id, expected_user_id=None):
     row = get(session_id)
     if not row:
         raise SessionInvalid("no_session")
+    if expected_user_id is not None and row.user_id != expected_user_id:
+        delete(session_id)
+        raise SessionInvalid("user_mismatch")
+    now = datetime.utcnow()
+    absolute_deadline = timedelta(days=COGNITO_SESSION_ABSOLUTE_DAYS)
+    if row.created_at and now - row.created_at > absolute_deadline:
+        delete(session_id)
+        raise SessionInvalid("absolute_timeout")
+    idle_deadline = timedelta(hours=COGNITO_SESSION_IDLE_HOURS)
+    if row.last_used_at and now - row.last_used_at > idle_deadline:
+        delete(session_id)
+        raise SessionInvalid("idle_timeout")
     skew = timedelta(seconds=COGNITO_REFRESH_SKEW_SECONDS)
-    if row.access_token_exp and (row.access_token_exp - datetime.utcnow()) > skew:
+    if row.access_token_exp and (row.access_token_exp - now) > skew:
         return _dec(row.access_token)
     # süresi dolmuş / dolmak üzere → yenile
     try:

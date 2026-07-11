@@ -58,9 +58,9 @@ def test_anonymous_redirected(client, probe_route):
     assert "/login" in resp.headers["Location"]
 
 
-def test_legacy_user_passes_through(client, probe_route, legacy_user):
+def test_user_without_cognito_identity_invalidated(client, probe_route, legacy_user):
     _login_session(client, legacy_user)
-    assert client.get(probe_route).status_code == 200
+    assert client.get(probe_route).status_code == 302
 
 
 def test_cognito_valid_token_allowed(client, probe_route, cognito_user, monkeypatch):
@@ -107,3 +107,35 @@ def test_cognito_dead_refresh_invalidated(client, probe_route, cognito_user, mon
     resp = client.get(probe_route)
     assert resp.status_code == 302
     assert session_store.get(sid) is None  # satır silindi
+
+
+def test_session_user_mismatch_invalidated(
+        client, probe_route, cognito_user, make_user, monkeypatch):
+    monkeypatch.setattr(cognito_jwt, "validate_token", lambda token, use: {"sub": "sub-cog"})
+    other = make_user("other")
+    sid = session_store.create(other, {
+        "access_token": "a", "refresh_token": "r", "id_token": "i", "expires_in": 3600,
+    }, "other")
+    _login_session(client, cognito_user, sid)
+    assert client.get(probe_route).status_code == 302
+    assert session_store.get(sid) is None
+
+
+def test_verified_sub_must_resolve_same_user(
+        client, probe_route, cognito_user, monkeypatch):
+    monkeypatch.setattr(
+        cognito_jwt, "validate_token", lambda token, use: {"sub": "sub-other"})
+    sid = session_store.create(cognito_user, {
+        "access_token": "a", "refresh_token": "r", "id_token": "i", "expires_in": 3600,
+    }, "cog")
+    _login_session(client, cognito_user, sid)
+    assert client.get(probe_route).status_code == 302
+    assert session_store.get(sid) is None
+
+
+def test_require_auth_marks_wrapped_view_for_audit(app):
+    @require_auth
+    def protected():
+        return "ok"
+
+    assert protected._require_auth is True

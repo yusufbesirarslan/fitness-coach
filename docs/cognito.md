@@ -184,3 +184,20 @@ never reads or writes it. The model password helpers, timing dummy hash, and the
 obsolete `app/services/cognito.py` and `app/services/cognito_idp.py` modules have
 been removed. `cognito_service.py` is the single native Cognito API boundary;
 Hosted UI routes remain intentionally disabled.
+
+### Session deadlines and identity binding
+
+Application-managed Cognito sessions have two independent limits:
+
+- `COGNITO_SESSION_IDLE_HOURS` defaults to 24 hours since `last_used_at`.
+- `COGNITO_SESSION_ABSOLUTE_DAYS` defaults to 7 days since `created_at`.
+
+User mismatch, absolute expiry, and idle expiry are checked—in that order—before
+access-token refresh. The invalid row is deleted and the browser is redirected
+to login. The absolute deadline cannot be extended by activity or refresh.
+
+Every `@require_auth` request binds three identities: the Flask-Login user id,
+the `CognitoSession.user_id`, and the local user resolved from the cryptographically
+verified access-token `sub`. All three must identify the same row. Missing local
+Cognito identity, missing session state, row/user mismatch, invalid token, or
+verified-sub mismatch invalidates the session; there is no legacy passthrough.

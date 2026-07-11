@@ -125,3 +125,36 @@ def test_delete_removes_row(app, cog_user):
     sid = session_store.create(cog_user, _tokens(), "cg")
     session_store.delete(sid)
     assert session_store.get(sid) is None
+
+
+def test_idle_timeout_deletes_session(app, cog_user):
+    sid = session_store.create(cog_user, _tokens(), "cg")
+    row = session_store.get(sid)
+    row.last_used_at = datetime.utcnow() - timedelta(hours=25)
+    db.session.commit()
+
+    with pytest.raises(SessionInvalid) as exc:
+        session_store.get_valid_access_token(sid, cog_user.id)
+    assert exc.value.args[0] == "idle_timeout"
+    assert session_store.get(sid) is None
+
+
+def test_absolute_timeout_deletes_session(app, cog_user):
+    sid = session_store.create(cog_user, _tokens(), "cg")
+    row = session_store.get(sid)
+    row.created_at = datetime.utcnow() - timedelta(days=8)
+    db.session.commit()
+
+    with pytest.raises(SessionInvalid) as exc:
+        session_store.get_valid_access_token(sid, cog_user.id)
+    assert exc.value.args[0] == "absolute_timeout"
+    assert session_store.get(sid) is None
+
+
+def test_expected_user_mismatch_deletes_session(app, cog_user):
+    sid = session_store.create(cog_user, _tokens(), "cg")
+
+    with pytest.raises(SessionInvalid) as exc:
+        session_store.get_valid_access_token(sid, cog_user.id + 1)
+    assert exc.value.args[0] == "user_mismatch"
+    assert session_store.get(sid) is None

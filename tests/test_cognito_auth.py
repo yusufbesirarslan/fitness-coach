@@ -31,7 +31,7 @@ def cognito_env(monkeypatch):
     # doğrulayıcı, token'daki kullanıcı adından tutarlı sub üretir
     # (id-<username> → sub-<username>).
     monkeypatch.setattr(cognito_jwt, "validate_token",
-                        lambda tok, use: {"sub": "sub-" + tok.removeprefix("id-")})
+                        lambda tok, use: {"sub": "sub-" + tok.removeprefix("id-").removeprefix("acc-")})
     return monkeypatch
 
 
