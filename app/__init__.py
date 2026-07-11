@@ -39,8 +39,9 @@ def create_app():
         # limiter_storage: "redis"/"memory"/"degraded" — "degraded" iken brute-force
         # login throttle süreç-yerel + geçici olur; DB'nin aksine tek başına
         # unhealthy saymayız (uygulama zarifçe bellek-yedeğine düşer, sadece sinyal).
+        from flask import request
         from sqlalchemy import text
-        from app.extensions import limiter_storage_status
+        import app.extensions as ext
         try:
             db.session.execute(text("SELECT 1"))
             db_ok = True
@@ -50,9 +51,25 @@ def create_app():
         body = {
             "status": "ok" if db_ok else "error",
             "db": "ok" if db_ok else "error",
-            "limiter_storage": limiter_storage_status(),
+            "limiter_storage": ext.limiter_storage_status(),
         }
-        return body, (200 if db_ok else 503)
+        status = 200 if db_ok else 503
+        # I2/I3: ?deep=1 — deploy gate / harici readiness probe'u için derin
+        # görünüm. Redis-down + LOGIN_FAIL_CLOSED=1 iken login %100 kapalıdır;
+        # sığ /health yeşil kalır (liveness: konteyner restart-loop'a girmesin)
+        # ama derin görünüm 503 döner ki gate "yeşilken login kapalı" yakalasın.
+        if request.args.get("deep") == "1":
+            body["redis"] = {"redis": "ok", "memory": "unconfigured"}.get(
+                body["limiter_storage"], "error")
+            login_ok = (not app.config.get("LOGIN_FAIL_CLOSED", True)
+                        or ext.login_throttle_available())
+            body["login"] = "ok" if login_ok else "offline"
+            body["bedrock"] = ("enabled" if app.config.get("BEDROCK_ENABLED")
+                               else "disabled")
+            if not login_ok:
+                body["status"] = "error"
+                status = 503
+        return body, status
 
     # before_request order must match the original monolith:
     #   _csrf_protect -> (limiter) _check_request_limit -> maybe_weekly_rollover -> update_streak

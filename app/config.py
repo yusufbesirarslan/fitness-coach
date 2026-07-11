@@ -166,6 +166,7 @@ def configure_app(app):
     app.config["AI_PLAN_QUOTA_ENABLED"] = AI_PLAN_QUOTA_ENABLED
     app.config["AI_CHAT_QUOTA_ENABLED"] = AI_CHAT_QUOTA_ENABLED
     app.config["LOGIN_FAIL_CLOSED"] = LOGIN_FAIL_CLOSED
+    app.config["BEDROCK_ENABLED"] = BEDROCK_ENABLED
     _secret_key = os.environ.get("SECRET_KEY")
     if not _secret_key:
         # Allow boot without SECRET_KEY only in explicit debug mode, and generate

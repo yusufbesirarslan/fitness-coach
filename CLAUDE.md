@@ -32,7 +32,8 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
     - `LOGIN_FAIL_CLOSED` (vars. 1) — Redis erişilemezse login 503 (brute-force throttle güvenilir değilken). 0 = eski fail-open.
       Bilinçli tradeoff (A5): Redis availability == login availability. Redis tek konteynerdir;
       diğer her şey degrade eder (session=cookie, leaderboard→Postgres, foodcache→L1,
-      limiter→in-memory), yalnızca login 503 olur. /health `limiter_storage` alanından izle.
+      limiter→in-memory), yalnızca login 503 olur. `/health?deep=1` login offline'ken 503
+      döner ve deploy gate bunu kullanır (I2); sığ /health liveness için yeşil kalır.
     - `AI_MAX_CONCURRENCY` (vars. 4) + `SCRAPE_MAX_CONCURRENCY` (vars. 2) +
       `AI_GATE_WAIT_SECONDS` (vars. 10) — ağır AI/scrape route'larında eşzamanlılık
       tavanı (app/services/ai_gate.py); dolunca 503 + Retry-After. İki kapının toplamı
