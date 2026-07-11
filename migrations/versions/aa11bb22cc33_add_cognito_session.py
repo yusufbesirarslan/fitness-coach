@@ -1,17 +1,22 @@
 """add cognito_session
 
 Revision ID: aa11bb22cc33
-Revises: d6e7f8a9b0c1
+Revises: f8a9b0c1d2e3
 Create Date: 2026-07-10
 
 Sprint 2: oturuma bağlı Cognito token'ları için sunucu tarafı tablo. Additive
 (expand-only) — rollback kodu geri alsa da tablo kalır, eski kod onsuz çalışır.
+
+Not: başta d6e7f8a9b0c1'e zincirlenmişti; barcode işi main'e indikten (PR #133)
+sonra main'in birleştirme head'i f8a9b0c1d2e3 (e7f8a9b0c1d2 + d6e7f8a9b0c1) oldu.
+Tek doğrusal zincir için down_revision buna güncellendi (f8a9b0c1d2e3 zaten
+d6e7f8a9b0c1'in torunu, bağımlılık korunuyor).
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "aa11bb22cc33"
-down_revision = "d6e7f8a9b0c1"
+down_revision = "f8a9b0c1d2e3"
 branch_labels = None
 depends_on = None
 

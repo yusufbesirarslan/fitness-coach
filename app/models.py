@@ -266,6 +266,27 @@ class MealLog(db.Model):
         return f"<MealLog {self.user_id} - {self.ogun} - {self.created_at}>"
 
 
+class BarcodeFoodCache(db.Model):
+    """Normalized packaged-food cache keyed by barcode.
+
+    FatSecret remains the source of truth on a miss, but UI/business logic should
+    consume this internal payload shape so FatSecret response quirks do not leak
+    into the rest of the app.
+    """
+    id         = db.Column(db.Integer, primary_key=True)
+    barcode    = db.Column(db.String(32), nullable=False, unique=True, index=True)
+    food_id    = db.Column(db.String(50), nullable=True, index=True)
+    food_name  = db.Column(db.String(200), nullable=False)
+    brand      = db.Column(db.String(120), nullable=True)
+    payload    = db.Column(JSONB().with_variant(db.JSON(), "sqlite"), nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow,
+                           onupdate=datetime.utcnow, nullable=False)
+
+    def __repr__(self):
+        return f"<BarcodeFoodCache {self.barcode} - {self.food_name}>"
+
+
 class PendingAction(db.Model):
     """Onay bekleyen ('staged') koç aksiyonu.
 
