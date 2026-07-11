@@ -59,6 +59,19 @@ def test_register_collision_gives_single_generic_message(client, make_user):
     assert same_username.get_json()["error"] == same_email.get_json()["error"]
 
 
+def test_register_normalizes_email_and_blocks_case_variant_duplicates(client):
+    # E-posta kırpılıp küçük harfe indirilerek saklanmalı; aynı adresin farklı
+    # büyük/küçük yazımıyla ikinci kayıt çakışma (jenerik "taken") almalı.
+    response = _register(client, "epostauser", email="  Yeni.User@EXAMPLE.Com ")
+    assert response.status_code == 200
+
+    user = User.query.filter_by(username="epostauser").one()
+    assert user.email == "yeni.user@example.com"
+
+    duplicate = _register(client, "baskauser", email="YENI.USER@example.COM")
+    assert duplicate.status_code == 400
+
+
 def test_registered_user_can_login(client):
     _register(client, "roundtrip")
     response = client.post("/login", json={"username": "roundtrip", "password": "Sifre123"})
