@@ -152,13 +152,31 @@ def login(client, monkeypatch):
     monkeypatch.setattr(
         cognito_jwt,
         "validate_token",
-        lambda token, use: {"sub": f"sub-{token.removeprefix('id-')}"},
+        lambda token, use: {
+            "sub": f"sub-{token.removeprefix('id-').removeprefix('acc-')}"
+        },
     )
 
     def _login(username="testuser", password="Sifre123"):
         return client.post("/login", json={"username": username, "password": password})
 
     return _login
+
+
+@pytest.fixture
+def cognito_registration(monkeypatch):
+    """Enable hermetic native Cognito registration/confirmation for route tests."""
+    from app.blueprints import auth as auth_bp
+    from app.services import cognito_service
+
+    monkeypatch.setattr(auth_bp, "COGNITO_ENABLED", True)
+    monkeypatch.setattr(
+        cognito_service,
+        "sign_up",
+        lambda username, password, email, name: f"sub-{username}",
+    )
+    monkeypatch.setattr(
+        cognito_service, "confirm_sign_up", lambda username, code: None)
 
 
 @pytest.fixture

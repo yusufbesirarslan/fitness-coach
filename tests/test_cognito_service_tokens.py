@@ -150,3 +150,11 @@ def test_recovery_errors_are_wrapped(monkeypatch, code):
 def test_password_reset_and_internal_error_mapped():
     assert "PasswordResetRequiredException" in cognito_service._ERROR_MESSAGES
     assert "InternalErrorException" in cognito_service._ERROR_MESSAGES
+
+
+def test_unexpected_provider_error_does_not_log_raw_exception(caplog):
+    sensitive = "alice@example.com Password1 reset-code-123456"
+    wrapped = cognito_service._wrap(RuntimeError(sensitive))
+    assert wrapped.code == ""
+    assert sensitive not in caplog.text
+    assert "RuntimeError" in caplog.text

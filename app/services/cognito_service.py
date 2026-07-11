@@ -106,7 +106,7 @@ def _wrap(exc):
     if code:
         _logger.info("[COGNITO-IDP] %s", code)
         return CognitoServiceError(_ERROR_MESSAGES.get(code, "İşlem başarısız. Lütfen tekrar dene."), code)
-    _logger.warning("[COGNITO-IDP] beklenmeyen hata: %s: %s", type(exc).__name__, exc)
+    _logger.warning("[COGNITO-IDP] beklenmeyen hata: %s", type(exc).__name__)
     return CognitoServiceError("İşlem başarısız. Lütfen tekrar dene.")
 
 

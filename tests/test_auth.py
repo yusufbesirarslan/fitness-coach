@@ -396,7 +396,8 @@ def test_cognito_register_idp_error_returns_400(client, cognito_native, monkeypa
     assert User.query.filter_by(username="dupuser").first() is None
 
 
-def test_cognito_register_local_commit_failure_returns_clean_error(client, cognito_native, monkeypatch):
+def test_cognito_register_local_commit_failure_returns_clean_error(
+        client, cognito_native, monkeypatch, caplog):
     # Cognito sign_up başarılı olduktan SONRA yerel commit patlarsa (eşzamanlı bir
     # kayıt aynı e-postayı pre-check ile commit ARASINA sıkıştırdı) → 500 yerine
     # temiz hata; Cognito orphan loglanır (#7).
@@ -414,6 +415,8 @@ def test_cognito_register_local_commit_failure_returns_clean_error(client, cogni
     assert resp.status_code != 500
     assert resp.status_code == 409
     assert User.query.filter_by(username="yarisan").first() is None  # yerel kayıt oluşmadı
+    assert "yarisan" not in caplog.text
+    assert "dup@example.com" not in caplog.text
 
 
 def test_cognito_login_sub_mismatch_rejected(client, cognito_native, monkeypatch):

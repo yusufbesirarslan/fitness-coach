@@ -149,3 +149,109 @@ Verification:
 - Full suite: 1150 passed; the only non-green items are pre-existing and
   unrelated to Sprint 2 (a stale CSP-nonce template assertion, and db_init
   "Multiple heads" errors caused solely by the untracked barcode WIP migration).
+
+## Sprint 3 - Authentication Finalization
+
+Date: 2026-07-11
+Scope: Native password recovery, Cognito-only credentials, verified identity
+binding, session deadlines, executable authorization audits, and production
+handoff.
+
+This section supersedes the Sprint 1-2 authentication debt notes above.
+
+### Completed work
+
+- Added native Cognito `ForgotPassword` and `ConfirmForgotPassword` operations
+  with fixed, user-safe provider error mapping.
+- Added `/forgot-password` and `/reset-password` with enumeration-resistant
+  responses, a 15-minute session-bound handoff, single-use success, bulk local
+  session invalidation, and mandatory fresh login.
+- Added matching Turkish/English recovery pages using the existing auth shell,
+  accessibility conventions, CSP/CSRF integration, password controls, and
+  shared JavaScript behavior.
+- Removed runtime local-password registration/login, `User.set_password`,
+  `User.check_password`, the timing dummy hash, and the duplicate
+  `cognito.py`/`cognito_idp.py` services.
+- Kept the nullable `User.password_hash` column unchanged for schema and
+  migration compatibility; runtime authentication never reads or writes it.
+- Login now authenticates Cognito first, cryptographically validates the ID
+  token, and resolves the local profile only through verified `sub`.
+- Added 24-hour idle and 7-day absolute local session deadlines, both
+  configurable through environment variables.
+- Bound every protected request across Flask-Login user id,
+  `CognitoSession.user_id`, and the local user resolved from verified access
+  token `sub`; removed legacy middleware passthrough.
+- Added an executable route-map audit with an explicit public endpoint
+  allowlist and static guards against reintroducing local or duplicate auth.
+- Redacted usernames and raw unexpected provider exception text from auth logs.
+- No database migration was required for Sprint 3.
+
+### Changed areas
+
+- Cognito services: `app/services/cognito_service.py`,
+  `app/services/session_store.py`, removed duplicate service modules.
+- Auth boundary: `app/blueprints/auth.py`, `app/auth_middleware.py`,
+  `app/models.py`, `app/services/validators.py`, `app/config.py`, `.env.example`.
+- Recovery UI: `templates/forgot_password.html`,
+  `templates/reset_password.html`, `templates/login.html`, `static/auth.js`, and
+  both locale catalogs.
+- Coverage: auth/recovery/JWT/session/middleware/UI/i18n/CSRF/referral tests plus
+  `tests/test_auth_audit.py`.
+- Architecture and operations: `docs/cognito.md` and this handoff.
+
+### Baseline timeout investigation
+
+The original `python -m pytest -v` baseline was killed by a five-minute command
+timeout with no streamed output. It was not hung and did not wait on AWS,
+OpenAI, Redis, or another external service:
+
+- collection completed reliably (1,228 tests at investigation time);
+- an observable verbose run advanced continuously across test files;
+- `tests/conftest.py` explicitly disables real Redis, Bedrock, S3, and Cognito
+  access and uses in-memory SQLite;
+- the function-scoped `app` fixture creates and drops the full schema for every
+  app-backed test, creating cumulative cost across the large suite;
+- representative timing showed a 22.26-second cold app setup, while the final
+  suite's slowest items were subprocess/import checks (14.55s, 8.57s, and two
+  ~6.9s MCP process gates).
+
+Use an observable run or a timeout of at least 15 minutes for the full Windows
+suite. Focused Sprint 3 feedback remains under two minutes.
+
+### Verification evidence
+
+- Focused auth suite:
+  `python -m pytest tests/test_auth.py tests/test_auth_phase6_ui.py tests/test_password_recovery.py tests/test_cognito_service_tokens.py tests/test_cognito_jwt.py tests/test_cognito_auth.py tests/test_session_store.py tests/test_require_auth.py tests/test_auth_audit.py tests/test_hooks.py -q`
+  - 134 passed in 80.17s.
+- Log-redaction regression: 47 auth/service tests passed.
+- Full suite before documentation commit: 1,258 passed, 5,376 warnings in
+  469.57s (7m49s).
+- Static audit: only the compatibility `User.password_hash` column remains;
+  no runtime password helpers, duplicate Cognito implementations, committed AWS
+  credentials, or unreviewed `login_required` business routes were found.
+
+### Known limitations and remaining non-auth debt
+
+- The suite emits many pre-existing `datetime.utcnow()` deprecation warnings on
+  Python 3.14; migrate models/services to timezone-aware UTC incrementally.
+- `cognito_jwt.py` emits the Authlib JOSE deprecation warning; migrate fully to
+  `joserfc` before Authlib 2.0.
+- Native MFA and `NEW_PASSWORD_REQUIRED` challenge UI are not implemented;
+  unsupported challenges fail closed.
+- Logout remains a same-site-guarded GET until navigation links migrate to POST.
+- Setup radio-card arrow-key behavior and browser-level visual/accessibility
+  regression remain non-auth UI follow-ups.
+
+### Production readiness
+
+- Configure `COGNITO_USER_POOL_ID`, `COGNITO_APP_CLIENT_ID`, optional client
+  secret, and a dedicated `COGNITO_TOKEN_ENC_KEY`; production boot fails closed
+  when the token key is missing.
+- Review `COGNITO_SESSION_IDLE_HOURS=24` and
+  `COGNITO_SESSION_ABSOLUTE_DAYS=7` against product policy before deploy.
+- Confirm Cognito `ALLOW_USER_PASSWORD_AUTH`, e-mail verification, forgot
+  password delivery, and password policy in the target User Pool.
+- Run the focused auth suite, `tests/test_auth_audit.py`, and a full suite with a
+  sufficiently long timeout in CI/deploy validation.
+- Monitor Cognito throttling, reset failures, session invalidation reasons, and
+  Redis login-throttle health without logging user identifiers or tokens.

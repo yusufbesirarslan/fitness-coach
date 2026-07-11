@@ -289,8 +289,8 @@ def register():
             db.session.rollback()
             current_app.logger.error(
                 "[REGISTER] Cognito sign_up başarılı ama yerel commit başarısız "
-                "(username=%s) — Cognito orphan olası, manuel temizlik/retry gerekir: %s",
-                username, type(e).__name__)
+                "— Cognito orphan olası, manuel temizlik/retry gerekir: %s",
+                type(e).__name__)
             if isinstance(e, IntegrityError):
                 return jsonify({"error": t("auth.user_or_email_taken")}), 409
             return jsonify({"error": t("auth.register_failed")}), 503

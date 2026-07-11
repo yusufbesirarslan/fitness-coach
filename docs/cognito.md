@@ -228,3 +228,20 @@ using Flask-Login so an already-invalid Cognito session can still be cleared.
 Because existing clients use navigation links, it retains GET with an explicit
 `Sec-Fetch-Site`/`Referer` same-site guard, performs best-effort Cognito global
 sign-out, deletes the local session row, and clears Flask-Login state.
+
+### Known limitations and future enhancements
+
+- Cognito challenge responses such as MFA and `NEW_PASSWORD_REQUIRED` are
+  rejected safely but do not yet have native UI flows.
+- Password-reset handoff state is held in the signed Flask session, so the code
+  must be completed in the same browser context that initiated recovery.
+- `/logout` remains a guarded GET for compatibility with existing navigation
+  links. A future UI migration should make logout a CSRF-protected POST.
+- Cognito IDP and JWKS calls are synchronous. Existing network timeouts bound
+  failures, but higher scale should move identity-provider work behind dedicated
+  capacity and monitoring.
+- `app/services/cognito_jwt.py` still emits Authlib JOSE deprecation warnings;
+  migrate that validator fully to `joserfc` before Authlib 2.0 compatibility is
+  removed.
+- Add browser-level recovery accessibility and visual regression coverage in
+  addition to the current template, route, and JavaScript contract tests.
