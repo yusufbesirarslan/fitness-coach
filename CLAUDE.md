@@ -23,7 +23,7 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 - migrations/ — Alembic (Flask-Migrate) şema geçmişi
 - templates/ + static/ — Türkçe UI (index, nutrition, training, progress, setup, friends, chat, quests, leaderboard, ...)
 - Dockerfile / docker-compose.yml — web (gunicorn, tek worker/8 thread) + redis; Postgres artık compose içinde değil, prod'da external RDS/DATABASE_URL ile gelir; servisler loopback'e bağlı
-- nginx.conf — host reverse proxy: / → Flask:5000, /fatsecret/rest/server.api → loopback proxy (127.0.0.1:3000, aynı EC2; Bearer token tel üzerinde açıkta kalmasın; süpervizyon için deploy/fatsecret-proxy.service.example — deploy.yml dinleyiciyi kontrol eder, /health?deep=1 raporlar)
+- nginx.conf — host reverse proxy: / → Flask:5000, /fatsecret/rest/server.api → loopback proxy (127.0.0.1:3000 — ayrı süreç DEĞİL, host nginx'in kendi server bloğu; süpervizyon = nginx systemd; ayrıntı/geçmiş: deploy/fatsecret-proxy.md — deploy.yml dinleyiciyi kontrol eder, /health?deep=1 raporlar)
 - tests/ — pytest (menü çıkarımı, makro alaka, nutrition pipeline)
 - .env — SECRET_KEY, DATABASE_URL, FATSECRET_*, OPENAI_API_KEY, OPENAI_MODEL, BEDROCK_*, COGNITO_*, AWS_REGION, S3_BUCKET_NAME, REDIS_URL (commit etme)
   - Örnek için .env.example'a bak. OpenAI anahtarı .env'den okunur, asla hardcode edilmez.
