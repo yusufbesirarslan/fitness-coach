@@ -16,7 +16,7 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 - app/cli.py — flask CLI komutları (seed-quests, weekly-reset)
 - app/timeutil.py — TEK gün/saat kaynağı: sabit Europe/Istanbul (app_today/day_key/utc_day_bounds). Tüm gün anahtarları buradan; doğrudan date.today()/utcnow().strftime("%d.%m") KULLANMA
 - app/blueprints/ — auth, profile, nutrition, food, menu, training, tracking, social, gamification, supplements, coach
-- app/services/ — ai, ai_coach, ai_nutrition, calculations, fatsecret, foodcache, gamification, premium, referral, cognito/cognito_idp, avatars, injury_constraints, menu_extract/fetch/ocr, training_generation/, validators
+- app/services/ — ai, ai_coach, ai_nutrition, calculations, fatsecret, foodcache, gamification, premium, referral, cognito/cognito_idp, avatars, injury_constraints, menu_extract/fetch/ocr, training_generation/, validators, email_service (merkezi Resend e-posta altyapısı — SDK'ya yalnızca bu modül dokunur; RESEND_API_KEY yoksa no-op)
 - fitx_mcp/ — MCP sunucusu (AI Coach DB araçları). DİKKAT: araçlar user_id'yi parametre alır, kendi yetkilendirmesi YOKTUR — yalnızca stdio/in-process kullan; HTTP taşıması FITX_MCP_ALLOW_HTTP=1 + loopback arkasındadır, asla public proxy'e koyma
 - nutrition_pipeline.py, analytics_engine.py — deterministik makro değerlendirme / nudge motoru
 - s3_helper.py — S3 görsel yükleme + pre-signed URL (EC2 IAM Instance Profile ile auth; AWS anahtarı hardcode YOK)
@@ -25,7 +25,7 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 - Dockerfile / docker-compose.yml — web (gunicorn, tek worker/8 thread) + redis; Postgres artık compose içinde değil, prod'da external RDS/DATABASE_URL ile gelir; servisler loopback'e bağlı
 - nginx.conf — host reverse proxy: / → Flask:5000, /fatsecret/rest/server.api → loopback proxy (127.0.0.1:3000 — ayrı süreç DEĞİL, host nginx'in kendi server bloğu; süpervizyon = nginx systemd; ayrıntı/geçmiş: deploy/fatsecret-proxy.md — deploy.yml dinleyiciyi kontrol eder, /health?deep=1 raporlar)
 - tests/ — pytest (menü çıkarımı, makro alaka, nutrition pipeline)
-- .env — SECRET_KEY, DATABASE_URL, FATSECRET_*, OPENAI_API_KEY, OPENAI_MODEL, BEDROCK_*, COGNITO_*, AWS_REGION, S3_BUCKET_NAME, REDIS_URL (commit etme)
+- .env — SECRET_KEY, DATABASE_URL, FATSECRET_*, OPENAI_API_KEY, OPENAI_MODEL, BEDROCK_*, COGNITO_*, AWS_REGION, S3_BUCKET_NAME, REDIS_URL, RESEND_API_KEY, EMAIL_FROM_NAME/EMAIL_FROM_ADDRESS/EMAIL_REPLY_TO (commit etme)
   - Örnek için .env.example'a bak. OpenAI anahtarı .env'den okunur, asla hardcode edilmez.
   - Opsiyonel güvenlik/freemium/gözlem anahtarları (hepsinin makul varsayılanı var):
     - `AI_PLAN_QUOTA_ENABLED` (vars. 1) — non-premium'a haftada 1 AI plan üretimi (app/services/premium.py). 0 = kota kapalı.

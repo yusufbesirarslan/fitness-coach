@@ -37,6 +37,9 @@ os.environ["BEDROCK_ENABLED"] = "0"
 os.environ["S3_BUCKET_NAME"] = ""
 os.environ["COGNITO_USER_POOL_ID"] = ""
 os.environ["COGNITO_APP_CLIENT_ID"] = ""
+# Resend (merkezi e-posta altyapısı): testlerde KAPALI — anahtar boş, servis
+# no-op. email_service testleri _get_resend'i kendi içinde monkeypatch'ler.
+os.environ["RESEND_API_KEY"] = ""
 os.environ.pop("FLASK_DEBUG", None)
 os.environ.pop("FLASK_ENV", None)
 
