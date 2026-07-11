@@ -169,3 +169,18 @@ application never writes a local password hash during recovery.
 Provider code mismatch/expiry responses are fixed client-safe messages.
 Cognito throttling maps to HTTP 429. Raw provider text, reset codes, passwords,
 identifiers, and tokens are not logged.
+
+### Cognito-only migration state
+
+Registration and login now fail with a controlled 503 when Cognito is not
+configured; there is no local-password fallback. Login calls Cognito first,
+cryptographically validates the returned ID token, and resolves the local
+profile only through its verified `sub`. No username lookup occurs before
+Cognito authentication.
+
+The `User.password_hash` column remains nullable and unchanged so existing
+schema history and older databases stay compatible, but runtime authentication
+never reads or writes it. The model password helpers, timing dummy hash, and the
+obsolete `app/services/cognito.py` and `app/services/cognito_idp.py` modules have
+been removed. `cognito_service.py` is the single native Cognito API boundary;
+Hosted UI routes remain intentionally disabled.

@@ -31,7 +31,6 @@ def probe_route(app):
 @pytest.fixture
 def legacy_user(app):
     u = User(username="leg", email="leg@example.com")
-    u.set_password("Sifre123")
     db.session.add(u)
     db.session.commit()
     return u

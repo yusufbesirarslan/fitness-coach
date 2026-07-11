@@ -9,7 +9,6 @@ from flask_limiter.util import get_remote_address
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 from sqlalchemy.orm.attributes import flag_modified
-from werkzeug.security import check_password_hash
 
 from app.config import COGNITO_ENABLED
 from app.extensions import db, limiter, login_throttle_available
@@ -19,7 +18,7 @@ from app.services.cognito_service import CognitoServiceError
 from app.services.cognito_jwt import TokenValidationError
 from app.services.gamification import complete_quest_for_user
 from app.services.referral import consume_referral, ensure_referral_code
-from app.services.validators import _DUMMY_PW_HASH, validate_email, validate_password, validate_username
+from app.services.validators import validate_email, validate_password, validate_username
 from app.i18n import AVAILABLE_LOCALES, set_locale, t
 
 
@@ -218,6 +217,8 @@ def reset_password():
 def register():
     if request.method == "GET":
         return render_template("register.html", cognito_enabled=_cognito_available())
+    if not COGNITO_ENABLED:
+        return jsonify({"error": t("auth.login_unavailable")}), 503
     data = request.get_json(silent=True) or {}
     username = data.get("username")
     email = (data.get("email") or "").strip()
@@ -301,22 +302,6 @@ def register():
             resp.delete_cookie("fitx_ref")
         return resp
 
-    # Cognito kapalı → klasik yerel-yalnız kayıt (geriye dönük uyum).
-    user = User(username=username, email=email, language=chosen_lang)
-    user.set_password(password)
-    ensure_referral_code(user)
-    db.session.add(user)
-    db.session.commit()
-    referred = bool(consume_referral(user, ref_code))
-    session["lang"] = chosen_lang
-
-    resp = jsonify({"message": t("auth.register_done", username=username),
-                    "referred": referred})
-    if request.cookies.get("fitx_ref"):
-        resp.delete_cookie("fitx_ref")
-    return resp
-
-
 @bp.route("/login", methods=["GET","POST"])
 @limiter.limit("10 per minute; 50 per hour", methods=["POST"])
 @limiter.limit("15 per 15 minutes", key_func=_login_username_key, methods=["POST"],
@@ -327,6 +312,8 @@ def login():
         auth_error = t(err_key) if err_key else None
         return render_template("login.html", cognito_enabled=_cognito_available(),
                                auth_error=auth_error)
+    if not COGNITO_ENABLED:
+        return jsonify({"error": t("auth.login_unavailable")}), 503
     # Fail-closed: Redis (dağıtık brute-force throttle) erişilemiyorsa login'i
     # reddet. Aksi halde limiter bellek-yedeğine düşer ve dağıtık deneme sayımı
     # zayıflar; saldırgan throttle'ı çok-süreçli ortamda aşabilir. Diğer route'lar
@@ -340,13 +327,9 @@ def login():
     username = data.get("username")
     password = data.get("password")
 
-    user = User.query.filter_by(username = username).first()
-
-    # Cognito kullanıcısı (cognito_sub dolu): kimlik DOĞRULAMASI Cognito'dan yapılır.
-    # Yerel parola hash'i kullanılamaz (rastgele) olduğundan yerel parola yedeği YOK
-    # — böylece doğrulanmamış kullanıcı yerel yoldan sızamaz. E-posta doğrulanmamışsa
-    # Cognito UserNotConfirmed döner → istemciyi /verify sayfasına yönlendiririz.
-    if user and user.cognito_sub and COGNITO_ENABLED:
+    # Cognito is the credential authority. Authenticate first; only a verified
+    # ID-token sub may select the local application profile.
+    if COGNITO_ENABLED:
         try:
             result = cognito_service.authenticate(username, password or "")
         except CognitoServiceError as e:
@@ -373,11 +356,9 @@ def login():
             verified_claims = cognito_jwt.validate_token(tokens["id_token"], "id")
         except TokenValidationError:
             return jsonify({"error": t("auth.bad_credentials")}), 401
-        # Kimlik bütünlüğü: giriş POZİTİF bir doğrulamadır — dönen sub DOLU
-        # olmalı VE yerel kayıtla eşleşmeli. Boş claim (MFA/challenge/bozuk
-        # token) asla başarı sayılmaz. (authenticate bu durumları zaten
-        # CognitoServiceError ile reddeder; burası ikinci savunma katmanı.)
-        if not verified_claims.get("sub") or verified_claims["sub"] != user.cognito_sub:
+        sub = (verified_claims.get("sub") or "").strip()
+        user = User.query.filter_by(cognito_sub=sub).first() if sub else None
+        if user is None:
             return jsonify({"error": t("auth.bad_credentials")}), 401
         _login_fresh(user)
         # _login_fresh session.clear() yapar → cognito_sid'i SONRA yaz. Token'lar
@@ -388,26 +369,6 @@ def login():
         if quest_result:
             response["quest_awarded"] = quest_result
         return jsonify(response)
-
-    # TODO(Sprint 3): remove legacy local-password login. Kept for users without a
-    # cognito_sub until migration completes; Cognito is the auth identity.
-    # Always run one password hash comparison, whether or not the username
-    # exists, so the response time can't reveal which usernames are registered.
-    if user:
-        password_ok = user.check_password(password or "")
-    else:
-        check_password_hash(_DUMMY_PW_HASH, password or "")
-        password_ok = False
-
-    if not password_ok:
-        return jsonify({"error": t("auth.bad_credentials")}), 401
-
-    _login_fresh(user)
-    quest_result = complete_quest_for_user(user.id, "login")
-    response = {"message": t("auth.welcome", username=user.username)}
-    if quest_result:
-        response["quest_awarded"] = quest_result
-    return jsonify(response)
 
 
 @bp.route("/verify", methods=["GET"])
