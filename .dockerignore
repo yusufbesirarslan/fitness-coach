@@ -21,3 +21,10 @@ instance/
 Dockerfile
 docker-compose.yml
 nginx.conf
+
+*.bak
+tests/
+.github/
+*.md
+requirements-dev.txt
+requirements-mcp.txt
