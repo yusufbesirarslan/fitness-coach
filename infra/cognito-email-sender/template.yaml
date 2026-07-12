@@ -16,7 +16,7 @@ Parameters:
       olur (kod e-postalari HIC gitmez — trigger bagliyken bos birakma).
   UserPoolId:
     Type: String
-    Default: eu-central-1_t8wbHpN3z
+    Default: eu-central-1_kaX0SORRK
     Description: Trigger'in baglanacagi mevcut Cognito kullanici havuzu.
   AppBaseUrl:
     Type: String
@@ -82,10 +82,15 @@ Resources:
       # cross-arch derleme derdi yasamamak icin. Temiz kurulum icin README'deki
       # 'sam build --use-container' notuna bak.
       Architectures: [x86_64]
-      # Cognito trigger bekleme butcesi dardir; Resend cagrisinin timeout'u
-      # (email_sender._post_json, 4s) bu tavanin altinda kalir.
-      Timeout: 5
-      MemorySize: 256
+      # Cognito CustomEmailSender'i async cagirir ve sender hatasi API cagrisini
+      # dusurmez — timeout kullanici deneyimini bekletmez. 5s/256MB prod'da
+      # yetersiz cikti: aws-encryption-sdk + native cryptography importu dusuk
+      # CPU'da (256MB) tek basina ~5s suruyor ve timeout sonrasi "suppressed
+      # init" importu her invoke butcesinin icine geri itiyordu (sonsuz timeout
+      # dongusu). 512MB daha fazla CPU verir; 20s de soguk zincire
+      # (import + KMS decrypt + Resend TLS) rahat bir tavan birakir.
+      Timeout: 20
+      MemorySize: 512
       CodeUri: src/
       Environment:
         Variables:

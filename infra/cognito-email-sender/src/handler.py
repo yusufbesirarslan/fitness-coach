@@ -21,6 +21,15 @@ import os
 import email_sender
 import email_templates
 
+# Agir bagimliligi INIT asamasinda yukle: INIT tam CPU boost'uyla calisir ve
+# suresi invoke timeout'una sayilmaz. Flask test venv'inde paket kurulu degil —
+# ImportError yutulur; _decrypt_code icindeki lazy import test seam'i olarak
+# kalir (testler zaten _decrypt_code'u monkeypatch'ler).
+try:
+    import aws_encryption_sdk as _preloaded_aws_encryption_sdk  # noqa: F401
+except ImportError:
+    _preloaded_aws_encryption_sdk = None
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 

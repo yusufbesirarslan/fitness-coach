@@ -49,13 +49,13 @@ vermezsen boş kalır ve KOD E-POSTALARI HİÇ GİTMEZ.)
 
 ## 2) Trigger'ı kullanıcı havuzuna bağla (manuel — havuz IaC'de değil)
 
-Havuz (`eu-central-1_t8wbHpN3z`) konsol-yönetimli olduğundan bu adım stack'te
+Havuz (`eu-central-1_kaX0SORRK`) konsol-yönetimli olduğundan bu adım stack'te
 otomatikleştirilemez.
 
 Önce mevcut konfigürasyonu YEDEKLE (rollback için de gerekir):
 
 ```bash
-aws cognito-idp describe-user-pool --user-pool-id eu-central-1_t8wbHpN3z \
+aws cognito-idp describe-user-pool --user-pool-id eu-central-1_kaX0SORRK \
   --region eu-central-1 > pool-before.json
 ```
 
@@ -74,7 +74,7 @@ trigger'lar. Sonra `--lambda-config`'e CustomEmailSender'ı ekle:
 ```bash
 # Örnek — <...> değerlerini pool-before.json ve stack çıktılarından doldur.
 aws cognito-idp update-user-pool \
-  --user-pool-id eu-central-1_t8wbHpN3z \
+  --user-pool-id eu-central-1_kaX0SORRK \
   --region eu-central-1 \
   --policies "$(jq -c .UserPool.Policies pool-before.json)" \
   --auto-verified-attributes email \
@@ -87,7 +87,7 @@ aws cognito-idp update-user-pool \
 Doğrula — SADECE `LambdaConfig` değişmiş olmalı:
 
 ```bash
-aws cognito-idp describe-user-pool --user-pool-id eu-central-1_t8wbHpN3z \
+aws cognito-idp describe-user-pool --user-pool-id eu-central-1_kaX0SORRK \
   --region eu-central-1 > pool-after.json
 diff <(jq -S .UserPool pool-before.json) <(jq -S .UserPool pool-after.json)
 ```
@@ -115,7 +115,7 @@ gönderimi ANINDA geri gelir:
 
 ```bash
 # Yine pool-before.json'daki alanları taşıyarak; --lambda-config'i boş ver:
-aws cognito-idp update-user-pool --user-pool-id eu-central-1_t8wbHpN3z \
+aws cognito-idp update-user-pool --user-pool-id eu-central-1_kaX0SORRK \
   --region eu-central-1 [...korunan alanlar...] --lambda-config '{}'
 ```
 
