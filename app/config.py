@@ -91,6 +91,8 @@ COGNITO_ENABLED = bool(COGNITO_USER_POOL_ID and COGNITO_APP_CLIENT_ID)
 COGNITO_TOKEN_ENC_KEY = os.getenv("COGNITO_TOKEN_ENC_KEY", "").strip()
 # Access token bitmeden bu kadar saniye önce proaktif yenile (edge yarışları için).
 COGNITO_REFRESH_SKEW_SECONDS = int(os.getenv("COGNITO_REFRESH_SKEW_SECONDS", "60"))
+COGNITO_SESSION_IDLE_HOURS = int(os.getenv("COGNITO_SESSION_IDLE_HOURS", "24"))
+COGNITO_SESSION_ABSOLUTE_DAYS = int(os.getenv("COGNITO_SESSION_ABSOLUTE_DAYS", "7"))
 
 # ── E-posta (Resend) — merkezi e-posta altyapısı (Email Sprint 1) ──
 # TÜM e-posta konfigürasyonu burada yaşar; app/services/email_service.py buradan

@@ -106,7 +106,7 @@ def _wrap(exc):
     if code:
         _logger.info("[COGNITO-IDP] %s", code)
         return CognitoServiceError(_ERROR_MESSAGES.get(code, "İşlem başarısız. Lütfen tekrar dene."), code)
-    _logger.warning("[COGNITO-IDP] beklenmeyen hata: %s: %s", type(exc).__name__, exc)
+    _logger.warning("[COGNITO-IDP] beklenmeyen hata: %s", type(exc).__name__)
     return CognitoServiceError("İşlem başarısız. Lütfen tekrar dene.")
 
 
@@ -161,6 +161,32 @@ def resend_code(username):
     }, username)
     try:
         _get_client().resend_confirmation_code(**kwargs)
+    except Exception as e:
+        raise _wrap(e)
+
+
+def forgot_password(username):
+    """Cognito forgot-password akışını başlat ve e-postaya kod gönder."""
+    kwargs = _maybe_secret({
+        "ClientId": COGNITO_APP_CLIENT_ID,
+        "Username": username,
+    }, username)
+    try:
+        _get_client().forgot_password(**kwargs)
+    except Exception as e:
+        raise _wrap(e)
+
+
+def confirm_forgot_password(username, code, new_password):
+    """Doğrulama koduyla Cognito parolasını değiştir."""
+    kwargs = _maybe_secret({
+        "ClientId": COGNITO_APP_CLIENT_ID,
+        "Username": username,
+        "ConfirmationCode": code,
+        "Password": new_password,
+    }, username)
+    try:
+        _get_client().confirm_forgot_password(**kwargs)
     except Exception as e:
         raise _wrap(e)
 

@@ -23,30 +23,30 @@ def _register(client, username="yeniuser", email=None, password="Sifre123"):
 # Kayıt
 # ---------------------------------------------------------------------------
 
-def test_register_creates_user_with_hashed_password(client):
+def test_register_creates_cognito_user_without_local_password(client, cognito_native):
     response = _register(client, "yeniuser")
     assert response.status_code == 200
-    assert "yeniuser" in response.get_json()["message"]
+    assert response.get_json()["needs_verification"] is True
 
     user = User.query.filter_by(username="yeniuser").one()
     assert user.email == "yeniuser@example.com"
-    assert user.password_hash != "Sifre123"
-    assert user.check_password("Sifre123")
+    assert user.cognito_sub == "sub-yeniuser"
+    assert user.password_hash is None
 
 
-def test_register_missing_fields_rejected(client):
+def test_register_missing_fields_rejected(client, cognito_native):
     response = client.post("/register", json={"username": "x"})
     assert response.status_code == 400
     assert "zorunlu" in response.get_json()["error"]
 
 
-def test_register_validation_errors_rejected(client):
+def test_register_validation_errors_rejected(client, cognito_native):
     assert _register(client, password="kisa1").status_code == 400          # zayıf şifre
     assert _register(client, "ab").status_code == 400                       # kısa kullanıcı adı
     assert _register(client, email="gecersiz-eposta").status_code == 400
 
 
-def test_register_collision_gives_single_generic_message(client, make_user):
+def test_register_collision_gives_single_generic_message(client, make_user, cognito_native):
     # Numaralandırma koruması: kullanıcı adı çakışması ile e-posta çakışması
     # AYNI mesajı döndürmeli; mesaj hangisinin kayıtlı olduğunu ele vermemeli.
     make_user("mevcut", email="mevcut@example.com")
@@ -59,7 +59,8 @@ def test_register_collision_gives_single_generic_message(client, make_user):
     assert same_username.get_json()["error"] == same_email.get_json()["error"]
 
 
-def test_register_normalizes_email_and_blocks_case_variant_duplicates(client):
+def test_register_normalizes_email_and_blocks_case_variant_duplicates(
+        client, cognito_native):
     # E-posta kırpılıp küçük harfe indirilerek saklanmalı; aynı adresin farklı
     # büyük/küçük yazımıyla ikinci kayıt çakışma (jenerik "taken") almalı.
     response = _register(client, "epostauser", email="  Yeni.User@EXAMPLE.Com ")
@@ -72,8 +73,9 @@ def test_register_normalizes_email_and_blocks_case_variant_duplicates(client):
     assert duplicate.status_code == 400
 
 
-def test_registered_user_can_login(client):
+def test_registered_user_can_login(client, cognito_native):
     _register(client, "roundtrip")
+    client.post("/verify", json={"username": "roundtrip", "code": "123456"})
     response = client.post("/login", json={"username": "roundtrip", "password": "Sifre123"})
     assert response.status_code == 200
 
@@ -82,17 +84,20 @@ def test_registered_user_can_login(client):
 # Giriş
 # ---------------------------------------------------------------------------
 
-def test_login_success_establishes_session(client, make_user):
+def test_login_success_establishes_session(client, make_user, login):
     make_user("alice")
-    response = client.post("/login", json={"username": "alice", "password": "Sifre123"})
+    response = login("alice")
     assert response.status_code == 200
     # Oturum kuruldu → login_required sayfa açılır.
     assert client.get("/supplements").status_code == 200
 
 
-def test_login_wrong_password_and_unknown_user_look_identical(client, make_user):
-    # Timing-eşitleme yanında mesaj da aynı olmalı: kayıtlı kullanıcıyı ele verme.
+def test_login_wrong_password_and_unknown_user_look_identical(
+        client, make_user, cognito_native, monkeypatch):
+    # Cognito'nun sabit yetkisiz yanıtı, yerel hesabın varlığını ele vermemeli.
     make_user("bob")
+    monkeypatch.setattr(cognito_service, "authenticate", lambda u, p: (_ for _ in ()).throw(
+        CognitoServiceError("Kullanıcı adı veya şifre hatalı.", "NotAuthorizedException")))
     wrong_pw = client.post("/login", json={"username": "bob", "password": "Yanlis999"})
     no_user = client.post("/login", json={"username": "kimseyok", "password": "Yanlis999"})
     assert wrong_pw.status_code == no_user.status_code == 401
@@ -105,7 +110,7 @@ def test_protected_route_redirects_anonymous_to_login(client):
     assert "/login" in response.headers["Location"]
 
 
-def test_login_fail_closed_when_redis_down(client, make_user, monkeypatch):
+def test_login_fail_closed_when_redis_down(client, make_user, login, monkeypatch):
     """Redis (dağıtık brute-force throttle) erişilemiyorsa login 503 döner."""
     import app.extensions as ext
 
@@ -128,7 +133,7 @@ def test_login_fail_closed_when_redis_down(client, make_user, monkeypatch):
     assert ok.status_code == 200
 
 
-def test_login_fail_closed_disabled_by_config(client, make_user, monkeypatch):
+def test_login_fail_closed_disabled_by_config(client, make_user, login, monkeypatch):
     """LOGIN_FAIL_CLOSED kapalıysa Redis düşse bile eski fail-open davranış sürer."""
     import app.extensions as ext
 
@@ -163,46 +168,46 @@ def test_login_username_rate_key_normalized():
 # Çıkış — GET /logout, cross-site tetiklemeye kapalı olmalı.
 # ---------------------------------------------------------------------------
 
-def _login_as(client, make_user, username):
+def _login_as(client, make_user, login, username):
     make_user(username)
-    client.post("/login", json={"username": username, "password": "Sifre123"})
+    assert login(username).status_code == 200
 
 
-def test_logout_cross_site_rejected_and_session_kept(client, make_user):
-    _login_as(client, make_user, "carol")
+def test_logout_cross_site_rejected_and_session_kept(client, make_user, login):
+    _login_as(client, make_user, login, "carol")
     response = client.get("/logout", headers={"Sec-Fetch-Site": "cross-site"})
     assert response.status_code == 403
     assert client.get("/supplements").status_code == 200  # hâlâ oturumda
 
 
-def test_logout_same_origin_signs_out(client, make_user):
-    _login_as(client, make_user, "dave")
+def test_logout_same_origin_signs_out(client, make_user, login):
+    _login_as(client, make_user, login, "dave")
     response = client.get("/logout", headers={"Sec-Fetch-Site": "same-origin"})
     assert response.status_code == 302
     assert client.get("/supplements").status_code == 302  # oturum kapandı
 
 
-def test_logout_cross_site_referer_fallback_rejected(client, make_user):
+def test_logout_cross_site_referer_fallback_rejected(client, make_user, login):
     # Sec-Fetch-Site göndermeyen eski tarayıcı yolu: Referer kontrolü devrede.
-    _login_as(client, make_user, "eve")
+    _login_as(client, make_user, login, "eve")
     response = client.get("/logout", headers={"Referer": "http://evil.example/"})
     assert response.status_code == 403
 
 
-def test_logout_without_any_headers_rejected(client, make_user):
+def test_logout_without_any_headers_rejected(client, make_user, login):
     # SEC-1: Sec-Fetch-Site VE Referer ikisi de yoksa default-DENY. Eskiden kontrol
     # düşüp logout devam ediyordu (fail-open) → her iki başlığı da göndermeyen
     # istemcilerde CSRF ile sessiz sign-out mümkündü.
-    _login_as(client, make_user, "frank")
+    _login_as(client, make_user, login, "frank")
     assert client.get("/logout").status_code == 403
     assert client.get("/supplements").status_code == 200  # hâlâ oturumda
 
 
-def test_logout_address_bar_navigation_signs_out(client, make_user):
+def test_logout_address_bar_navigation_signs_out(client, make_user, login):
     # Gerçek adres-çubuğu navigasyonu modern tarayıcılarda Sec-Fetch-Site: none
     # gönderir → çıkış çalışmaya devam eder (default-deny yalnızca başlıksız
     # legacy/non-browser istemcileri etkiler).
-    _login_as(client, make_user, "grace")
+    _login_as(client, make_user, login, "grace")
     response = client.get("/logout", headers={"Sec-Fetch-Site": "none"})
     assert response.status_code == 302
     assert client.get("/supplements").status_code == 302  # oturum kapandı
@@ -255,6 +260,22 @@ def cognito_native(monkeypatch):
     return captured
 
 
+def test_login_never_calls_local_password_helper():
+    assert not hasattr(User, "check_password")
+
+
+def test_auth_posts_fail_controlled_when_cognito_disabled(client, monkeypatch):
+    monkeypatch.setattr(auth_bp, "COGNITO_ENABLED", False)
+    assert client.post(
+        "/login", json={"username": "userx", "password": "Password1"}
+    ).status_code == 503
+    assert client.post("/register", json={
+        "username": "userx",
+        "email": "x@example.com",
+        "password": "Password1",
+    }).status_code == 503
+
+
 def test_cognito_register_passes_name_and_requires_verification(client, cognito_native):
     response = _register(client, "cognitouser")
     assert response.status_code == 200
@@ -268,7 +289,6 @@ def test_cognito_register_passes_name_and_requires_verification(client, cognito_
     user = User.query.filter_by(username="cognitouser").one()
     assert user.cognito_sub == "sub-cognitouser"
     assert user.password_hash is None
-    assert not user.check_password("Sifre123")
 
 
 def test_cognito_login_before_verify_redirects_to_verification(client, cognito_native):
@@ -360,7 +380,7 @@ def test_verify_routes_404_when_cognito_disabled(client):
 # Rate limit — 5/saat kayıt limiti ve Türkçe 429 yanıtı.
 # ---------------------------------------------------------------------------
 
-def test_register_rate_limit_returns_429_json(client):
+def test_register_rate_limit_returns_429_json(client, cognito_native):
     limiter.reset()
     limiter.enabled = True
     try:
@@ -390,7 +410,8 @@ def test_cognito_register_idp_error_returns_400(client, cognito_native, monkeypa
     assert User.query.filter_by(username="dupuser").first() is None
 
 
-def test_cognito_register_local_commit_failure_returns_clean_error(client, cognito_native, monkeypatch):
+def test_cognito_register_local_commit_failure_returns_clean_error(
+        client, cognito_native, monkeypatch, caplog):
     # Cognito sign_up başarılı olduktan SONRA yerel commit patlarsa (eşzamanlı bir
     # kayıt aynı e-postayı pre-check ile commit ARASINA sıkıştırdı) → 500 yerine
     # temiz hata; Cognito orphan loglanır (#7).
@@ -408,6 +429,8 @@ def test_cognito_register_local_commit_failure_returns_clean_error(client, cogni
     assert resp.status_code != 500
     assert resp.status_code == 409
     assert User.query.filter_by(username="yarisan").first() is None  # yerel kayıt oluşmadı
+    assert "yarisan" not in caplog.text
+    assert "dup@example.com" not in caplog.text
 
 
 def test_cognito_login_sub_mismatch_rejected(client, cognito_native, monkeypatch):

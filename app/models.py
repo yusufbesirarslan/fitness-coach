@@ -3,7 +3,6 @@ import logging
 from datetime import datetime
 from flask_login import UserMixin
 from sqlalchemy.dialects.postgresql import JSONB
-from werkzeug.security import check_password_hash, generate_password_hash
 
 from app.extensions import db, login_manager
 from app.timeutil import app_today
@@ -20,8 +19,8 @@ class User(UserMixin, db.Model):
     id            = db.Column(db.Integer, primary_key=True)
     username      = db.Column(db.String(80), unique=True, nullable=False)
     email         = db.Column(db.String(120), unique=True, nullable=False)
-    # TODO(Sprint 3): remove legacy local-password auth. Cognito (cognito_sub) is
-    # the auth identity; password_hash is retained only for backward compatibility.
+    # Cognito (cognito_sub) is the sole auth identity. The nullable legacy column
+    # remains for schema/migration compatibility and is never read at runtime.
     password_hash = db.Column(db.String(200), nullable=True)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -91,15 +90,6 @@ class User(UserMixin, db.Model):
         db.Index("uq_user_cognito_sub", "cognito_sub", unique=True),
         db.Index("uq_user_referral_code", "referral_code", unique=True),
     )
-
-    def set_password(self, password):
-        self.password_hash = generate_password_hash(password)
-
-    # TODO(Sprint 3): remove — legacy local-password verification path.
-    def check_password(self, password):
-        if not self.password_hash:
-            return False
-        return check_password_hash(self.password_hash, password)
 
     @property
     def avatar_src(self):

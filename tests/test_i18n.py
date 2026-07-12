@@ -85,7 +85,7 @@ def test_default_locale_is_turkish(client):
     assert "Hesabına giriş yap" in body
 
 
-def test_register_persists_language(app, client):
+def test_register_persists_language(app, client, cognito_registration):
     from app.models import User
     r = client.post("/register", json={
         "username": "enuser", "email": "enuser@example.com",
@@ -97,7 +97,7 @@ def test_register_persists_language(app, client):
     assert user.language == "en"
 
 
-def test_register_defaults_language_to_tr(app, client):
+def test_register_defaults_language_to_tr(app, client, cognito_registration):
     from app.models import User
     client.post("/register", json={
         "username": "truser", "email": "truser@example.com",
@@ -477,7 +477,7 @@ def test_chat_page_renders_en(app, client, make_user, login):
     assert "suggestion_meal" in body                # kanonik öneri tipi kodu
 
 
-def test_login_adopts_explicit_prelogin_language(app, client, make_user):
+def test_login_adopts_explicit_prelogin_language(app, client, make_user, login):
     """Giriş ekranında AÇIKÇA seçilen dil girişte hesabı güncellemeli. Önceki
     davranış: _login_fresh hesabın eski dilini geri yüklüyor, kullanıcının az
     önce yaptığı TR seçimi sessizce EN'e dönüyordu ('Türkçe seçtim ama uygulama
@@ -485,21 +485,22 @@ def test_login_adopts_explicit_prelogin_language(app, client, make_user):
     from app.models import User
     make_user("langswitch", language="en", profile_complete=True)
     client.post("/set-language", json={"lang": "tr"})   # anonim AÇIK seçim
-    client.post("/login", json={"username": "langswitch", "password": "Sifre123"})
+    login("langswitch")
     body = client.get("/").get_data(as_text=True)
     assert "Günlük Kalori" in body
     assert "Daily Calories" not in body
     assert User.query.filter_by(username="langswitch").first().language == "tr"
 
 
-def test_login_keeps_account_language_without_explicit_choice(app, client, make_user):
+def test_login_keeps_account_language_without_explicit_choice(
+        app, client, make_user, login):
     """Bayraksız (açık seçim olmayan) session['lang'] artığı — örn. aynı
     tarayıcıda önceki kullanıcıdan kalan — hesabın dil tercihini EZMEMELİ."""
     from app.models import User
     make_user("langkeep", language="en", profile_complete=True)
     with client.session_transaction() as s:
         s["lang"] = "tr"        # leftover; lang_explicit bayrağı YOK
-    client.post("/login", json={"username": "langkeep", "password": "Sifre123"})
+    login("langkeep")
     body = client.get("/").get_data(as_text=True)
     assert "Daily Calories" in body
     assert User.query.filter_by(username="langkeep").first().language == "en"
