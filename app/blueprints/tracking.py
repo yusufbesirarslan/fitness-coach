@@ -7,7 +7,7 @@ from app.auth_middleware import require_auth
 from sqlalchemy.exc import IntegrityError
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
-from app.extensions import _user_or_ip_key, db, limiter
+from app.extensions import _user_or_ip_key, auth_write_limit, db, limiter
 from app.i18n import t
 from app.models import (DailyActivity, MealLog, User, UserQuestProgress, UserSession,
                         WaterLog, WearableActivityLog, WeeklyCheckIn, WeeklyLog,
@@ -320,6 +320,7 @@ def update_weight():
 
 @bp.route("/api/activity/log", methods=["POST"])
 @require_auth
+@auth_write_limit
 def log_daily_activity():
     data = request.get_json(silent=True) or {}
     steps = _to_int(data.get("steps", 0), 0)  # sayısal olmayan/boş → 0 (500 yerine)

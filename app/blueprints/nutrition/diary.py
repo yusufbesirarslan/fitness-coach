@@ -11,7 +11,7 @@ from app.auth_middleware import require_auth
 from sqlalchemy.exc import IntegrityError
 
 from app.blueprints.nutrition import bp
-from app.extensions import db
+from app.extensions import auth_write_limit, db
 from app.i18n import t
 from app.models import CustomMeal, CustomMealItem, MealLog, NutritionPlan
 from app.services.gamification import complete_quest_for_user
@@ -77,6 +77,7 @@ def _claim_diary_meal(meal_id, user_id):
 
 @bp.route("/api/quick-add-meal", methods=["POST"])
 @require_auth
+@auth_write_limit
 def quick_add_meal():
     data     = request.get_json(silent=True) or {}
     meal_key = data.get("meal_key", "")
@@ -157,6 +158,7 @@ def quick_add_meal():
 
 @bp.route("/api/diary/meal", methods=["POST"])
 @require_auth
+@auth_write_limit
 def diary_create_meal():
     data = request.get_json(silent=True) or {}
     meal_name = data.get("meal_name", "").strip()
@@ -192,6 +194,7 @@ def diary_create_meal():
 
 @bp.route("/api/diary/meal/<int:meal_id>/item", methods=["POST"])
 @require_auth
+@auth_write_limit
 def diary_add_item(meal_id):
     meal = db.session.get(CustomMeal, meal_id)
     if not meal or meal.user_id != current_user.id:
@@ -280,6 +283,7 @@ def diary_add_item(meal_id):
 
 @bp.route("/api/diary/item/<int:item_id>", methods=["PATCH"])
 @require_auth
+@auth_write_limit
 def diary_update_item(item_id):
     item = db.session.get(CustomMealItem, item_id)
     if not item or item.meal.user_id != current_user.id:
@@ -346,6 +350,7 @@ def diary_update_item(item_id):
 
 @bp.route("/api/diary/item/<int:item_id>", methods=["DELETE"])
 @require_auth
+@auth_write_limit
 def diary_delete_item(item_id):
     item = db.session.get(CustomMealItem, item_id)
     if not item or item.meal.user_id != current_user.id:
@@ -359,6 +364,7 @@ def diary_delete_item(item_id):
 
 @bp.route("/api/diary/meal/<int:meal_id>/log", methods=["POST"])
 @require_auth
+@auth_write_limit
 def diary_log_meal(meal_id):
     meal = db.session.get(CustomMeal, meal_id)
     if not meal or meal.user_id != current_user.id:
