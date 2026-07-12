@@ -19,6 +19,40 @@ def test_db_init_contains_no_schema_trigger_ddl():
     assert "CREATE TRIGGER trg_calc_activity" not in source
 
 
+def test_fresh_init_stamps_trigger_predecessor_then_upgrades(monkeypatch):
+    monkeypatch.delenv("FITX_SKIP_DB_INIT", raising=False)
+    calls = []
+
+    import flask_migrate
+    from sqlalchemy import inspect
+
+    from app import create_app
+    from app.extensions import db
+
+    def record_stamp(revision="head", **_kwargs):
+        calls.append(
+            ("stamp", revision, inspect(db.engine).has_table("daily_activity"))
+        )
+
+    def record_upgrade(revision="head", **_kwargs):
+        calls.append(("upgrade", revision))
+
+    monkeypatch.setattr(flask_migrate, "stamp", record_stamp)
+    monkeypatch.setattr(flask_migrate, "upgrade", record_upgrade)
+
+    flask_app = create_app()
+    flask_app.config["TESTING"] = True
+    with flask_app.app_context():
+        try:
+            assert calls == [
+                ("stamp", "aa11bb22cc33", True),
+                ("upgrade", "head"),
+            ]
+        finally:
+            db.session.remove()
+            db.drop_all()
+
+
 @pytest.fixture
 def boot_app(monkeypatch):
     """FITX_SKIP_DB_INIT olmadan kurulan app — init_database gerçekten çalışır."""

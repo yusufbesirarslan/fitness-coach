@@ -109,19 +109,19 @@ def init_database(app):
         except Exception:
             db.session.rollback()
 
-        # Şema az önce create_all + legacy ALTER'larla güncel hâle geldi; DB henüz
-        # Alembic zincirinde değilse baseline'ı çalıştırmadan "head" olarak damgala.
-        # Mevcut prod DB'ler ve taze kurulumlar böylece konsola gerek kalmadan
-        # zincire girer; manuel `flask db stamp head` gerekmez.
+        # Taze şema create_all ile oluştu; model dışı DB nesnelerini kuran migration'ın
+        # gerçekten çalışması için önce trigger revision'ının selefini damgala,
+        # ardından head'e upgrade et.
         if not _has_alembic:
             try:
-                from flask_migrate import stamp
+                from flask_migrate import stamp, upgrade
                 if os.path.isdir(_migrations_dir):
-                    stamp()
-                    app.logger.info("[DB] Mevcut şema Alembic baseline olarak damgalandı.")
+                    stamp(revision="aa11bb22cc33")
+                    upgrade()
+                    app.logger.info("[DB] Taze şema Alembic head'e yükseltildi.")
             except Exception:
                 db.session.rollback()
-                app.logger.exception("[DB] Alembic stamp başarısız — şema migration zinciri dışında kaldı.")
+                app.logger.exception("[DB] Taze şemayı Alembic zincirine alma başarısız.")
 
         # Liderlik sorted set'lerini Postgres'ten doldur (Redis varsa). Redis sonradan
         # ayağa kalkarsa ilk leaderboard isteği zaten Postgres'e düşer; sonraki restart hidratlar.
