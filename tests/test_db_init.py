@@ -5,7 +5,18 @@ SQLite'ta uçtan uca çalıştığını ve idempotent olduğunu doğrular.
 
     python -m pytest tests/test_db_init.py -v
 """
+from pathlib import Path
+
 import pytest
+
+
+def test_db_init_contains_no_schema_trigger_ddl():
+    source = (Path(__file__).resolve().parents[1] / "app" / "db_init.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "CREATE OR REPLACE FUNCTION calc_activity_calories" not in source
+    assert "CREATE TRIGGER trg_calc_activity" not in source
 
 
 @pytest.fixture
