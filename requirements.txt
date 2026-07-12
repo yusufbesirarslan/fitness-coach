@@ -12,7 +12,7 @@ Authlib==1.7.2
 SQLAlchemy==2.0.51
 Werkzeug==3.1.8
 gunicorn==26.0.0
-openai==2.44.0
+openai==2.45.0
 anthropic[bedrock]==0.116.0
 psycopg2-binary==2.9.12
 python-dotenv==1.2.2
@@ -24,11 +24,13 @@ beautifulsoup4==4.15.0
 # yükseltme PR'ları açar; pin'ler tekrarlanabilir build için sabit kalır.
 pdfplumber==0.11.10
 Pillow==12.3.0
-boto3==1.43.40
+boto3==1.43.46
 redis==8.0.1
+# Merkezi e-posta altyapısı (app/services/email_service.py) — Resend resmi SDK.
+resend==2.32.2
 # Hata izleme — yalnızca SENTRY_DSN ayarlıysa etkin (app/observability.py).
 sentry-sdk[flask]==2.64.0
-cryptography==48.0.0
+cryptography==49.0.0
 # dev/test
 pytest==9.1.1
 pytest-cov==7.1.0

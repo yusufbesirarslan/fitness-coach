@@ -94,6 +94,16 @@ COGNITO_REFRESH_SKEW_SECONDS = int(os.getenv("COGNITO_REFRESH_SKEW_SECONDS", "60
 COGNITO_SESSION_IDLE_HOURS = int(os.getenv("COGNITO_SESSION_IDLE_HOURS", "24"))
 COGNITO_SESSION_ABSOLUTE_DAYS = int(os.getenv("COGNITO_SESSION_ABSOLUTE_DAYS", "7"))
 
+# ── E-posta (Resend) — merkezi e-posta altyapısı (Email Sprint 1) ──
+# TÜM e-posta konfigürasyonu burada yaşar; app/services/email_service.py buradan
+# okur, SDK'ya başka hiçbir modül dokunmaz. Doğrulanmış gönderim domaini:
+# mail.axisaiapp.com (Resend). Anahtar yoksa servis kapalıdır (graceful no-op).
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+EMAIL_FROM_NAME = os.getenv("EMAIL_FROM_NAME", "AxisAI").strip()
+EMAIL_FROM_ADDRESS = os.getenv("EMAIL_FROM_ADDRESS", "noreply@mail.axisaiapp.com").strip()
+EMAIL_REPLY_TO = os.getenv("EMAIL_REPLY_TO", "hello@axisaiapp.com").strip()
+EMAIL_ENABLED = bool(RESEND_API_KEY)
+
 
 
 def _enforce_cognito_token_key(is_dev):

@@ -221,7 +221,11 @@ def register():
         return jsonify({"error": t("auth.login_unavailable")}), 503
     data = request.get_json(silent=True) or {}
     username = data.get("username")
-    email = (data.get("email") or "").strip()
+    # E-posta normalizasyonu: kırp + küçük harfe indir. Aynı adresin farklı
+    # büyük/küçük yazımları tek kimliğe iner; Cognito'ya ve yerel kayda hep
+    # normalize edilmiş hali gider (claim e-postaları zaten lowercase işlenir,
+    # bkz. cognito_service._decode_claims).
+    email = (data.get("email") or "").strip().lower()
     password = data.get("password")
     # Kayıt-öncesi seçilen dil: gövdeden gelir; yoksa session'daki seçime, o da
     # yoksa varsayılana düşer. Yeni kullanıcıya kalıcılaştırılır.
@@ -251,7 +255,7 @@ def register():
     # usernames are inherently discoverable via the friend search and there is no
     # e-mail login / reset flow, so the residual exposure is low.
     if (User.query.filter_by(username=username).first()
-            or User.query.filter_by(email=email).first()):
+            or User.query.filter(db.func.lower(User.email) == email).first()):
         return jsonify({"error": t("auth.user_or_email_taken")}), 400
 
     # Davet döngüsü: kayıt davet bağlantısından geldiyse (cookie veya body)

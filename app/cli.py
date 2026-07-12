@@ -44,6 +44,28 @@ def weekly_reset_cmd():
 
 
 
+@click.argument("recipient")
+def send_test_email_cmd(recipient):
+    """E-posta altyapısını (Resend) uçtan uca doğrula — test e-postası gönder.
+
+    Yalnızca geliştirme/doğrulama içindir (Email Sprint 1); iş mantığına
+    dokunmaz. RESEND_API_KEY ayarlı değilse servis kapalıdır ve gönderim
+    yapılmaz.
+
+        flask --app starter send-test-email you@example.com
+    """
+    from app.services import email_service
+
+    if not email_service.is_enabled():
+        click.echo("E-posta servisi kapalı: RESEND_API_KEY ayarlı değil (.env).")
+        return
+    message_id = email_service.send_test_email(recipient)
+    if message_id:
+        click.echo(f"Test e-postası gönderildi: id={message_id} -> {recipient}")
+    else:
+        click.echo("Test e-postası GÖNDERİLEMEDİ — ayrıntı için loglara bakın.")
+
+
 # Varsayılan "test/seed hesabı" kalıbı — sadece açıkça tohum/deneme gibi görünen
 # kullanıcı adları. Gerçek kullanıcıları yanlışlıkla yakalamamak için dar tutuldu.
 _DEFAULT_TEST_RE = re.compile(
@@ -187,3 +209,4 @@ def register_cli(app):
     app.cli.command("seed-quests")(seed_quests)
     app.cli.command("weekly-reset")(weekly_reset_cmd)
     app.cli.command("cleanup-test-users")(cleanup_test_users)
+    app.cli.command("send-test-email")(send_test_email_cmd)

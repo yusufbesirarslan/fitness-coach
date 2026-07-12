@@ -30,7 +30,9 @@ Configuration is read from `.env` through `app/config.py`:
 1. The existing register page posts username, email, password, and optional
    language/referral data to `/register`.
 2. Flask validates the same local username, email, and password rules already
-   used by the frontend.
+   used by the frontend. The email is normalized (trimmed + lowercased) before
+   any further use; the normalized form is what reaches Cognito and the local
+   `User` row, and the duplicate-email check is case-insensitive.
 3. When Cognito is enabled, Flask calls `cognito_service.sign_up(...)`.
 4. On Cognito success, Flask creates the local `User` row with `email`,
    `username`, `cognito_sub`, `created_at`, language/profile defaults, referral
