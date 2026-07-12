@@ -357,6 +357,66 @@ def test_verify_routes_404_when_cognito_disabled(client):
 
 
 # ---------------------------------------------------------------------------
+# Hoş geldin e-postası (Resend Sprint 3) — doğrulama sonrası best-effort.
+# ---------------------------------------------------------------------------
+
+def _capture_emails(monkeypatch):
+    from app.services import email_service
+    calls = []
+
+    def fake_send(to, subject, html, **kwargs):
+        calls.append({"to": to, "subject": subject, "html": html, **kwargs})
+        return "msg-1"
+
+    monkeypatch.setattr(email_service, "send_html_email", fake_send)
+    return calls
+
+
+def test_verify_success_sends_welcome_email(client, cognito_native, monkeypatch):
+    sent = _capture_emails(monkeypatch)
+    _register(client, "hosgeldin")
+    response = client.post("/verify", json={"username": "hosgeldin", "code": "123456"})
+    assert response.status_code == 200
+    assert len(sent) == 1
+    assert sent[0]["to"] == "hosgeldin@example.com"
+    assert "hoş geldin" in sent[0]["subject"]
+    assert sent[0].get("text")  # düz-metin alternatifi
+
+
+def test_verify_succeeds_even_if_welcome_email_raises(client, cognito_native, monkeypatch):
+    from app.services import email_service
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("resend down")
+    monkeypatch.setattr(email_service, "send_html_email", boom)
+
+    _register(client, "direncli")
+    response = client.post("/verify", json={"username": "direncli", "code": "123456"})
+    assert response.status_code == 200  # e-posta hatası doğrulamayı DÜŞÜRMEZ
+
+
+def test_failed_confirm_sends_no_welcome_email(client, cognito_native, monkeypatch):
+    sent = _capture_emails(monkeypatch)
+
+    def boom(username, code):
+        raise CognitoServiceError("Doğrulama kodu hatalı.", "CodeMismatchException")
+    monkeypatch.setattr(cognito_service, "confirm_sign_up", boom)
+
+    _register(client, "yanliskod")
+    response = client.post("/verify", json={"username": "yanliskod", "code": "000000"})
+    assert response.status_code == 400
+    assert sent == []
+
+
+def test_verify_without_local_user_row_no_crash_no_email(client, cognito_native, monkeypatch):
+    # Cognito onayladı ama yerel satır yok (edge) → e-posta atlanır, 200 döner.
+    sent = _capture_emails(monkeypatch)
+    response = client.post("/verify", json={"username": "yerelsiz", "code": "123456"})
+    assert response.status_code == 200
+    assert sent == []
+
+
+# ---------------------------------------------------------------------------
 # Rate limit — 5/saat kayıt limiti ve Türkçe 429 yanıtı.
 # ---------------------------------------------------------------------------
 

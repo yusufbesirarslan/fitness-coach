@@ -55,6 +55,10 @@
                     </div>
                 </div>
 
+                <div class="auth-row">
+                    <a class="auth-link" href="/forgot-password">{{ t('login.forgot_link') }}</a>
+                </div>
+
                 <button type="button" class="auth-btn" id="login-submit" data-action="login">{{ t('login.submit') }}</button>
 
                 {% if cognito_enabled %}

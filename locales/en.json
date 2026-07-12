@@ -26,6 +26,9 @@
   "auth.username_required": "Username is required.",
   "auth.err_cognito": "Email sign-in could not be completed. Please try again.",
   "auth.err_link": "This email is already registered. Sign in with your username/password, or verify your email in Cognito and try again.",
+  "auth.reset_code_sent": "If an account exists for this username, a reset code has been sent to its email address.",
+  "auth.reset_fields_required": "Username, code and a new password are required.",
+  "auth.reset_done": "Your password has been updated! You can now log in.",
 
   "validate.username_min": "Username must be at least 3 characters.",
   "validate.username_max": "Username can be at most 80 characters.",
@@ -51,6 +54,7 @@
   "login.submit": "LOG IN",
   "login.no_account": "Don't have an account?",
   "login.register_link": "Sign up",
+  "login.forgot_link": "Forgot your password?",
 
   "register.title": "Sign Up",
   "register.subtitle": "Create a new account",
@@ -72,6 +76,23 @@
   "verify.back_login": "Back to login",
   "verify.username_code_required": "Username and code are required.",
   "verify.enter_username_first": "Enter your username first.",
+
+  "forgot.title": "Forgot Password",
+  "forgot.subtitle": "Enter your username and we'll email you a reset code",
+  "forgot.username_ph": "Your username",
+  "forgot.submit": "SEND CODE",
+  "forgot.have_code": "Already have a code?",
+  "forgot.reset_link": "Reset your password",
+  "forgot.back_login": "Back to login",
+
+  "reset.title": "Reset Password",
+  "reset.subtitle": "Enter the code sent to your email and your new password",
+  "reset.code_label": "Reset Code",
+  "reset.code_ph": "Code sent to your email",
+  "reset.password_label": "New Password",
+  "reset.submit": "UPDATE PASSWORD",
+  "reset.no_code": "Didn't get a code?",
+  "reset.request_link": "Request a new code",
 
   "nav.menu_open": "Open menu",
   "nav.menu_nav": "Navigation menu",

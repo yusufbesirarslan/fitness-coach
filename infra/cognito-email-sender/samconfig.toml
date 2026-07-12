@@ -1,0 +1,14 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "axisai-cognito-email-sender"
+resolve_s3 = true
+s3_prefix = "axisai-cognito-email-sender"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+# ResendApiKey BILEREK burada yok (NoEcho gizli deger, git'e girmez):
+#   sam deploy --parameter-overrides ResendApiKey=<key>
+image_repositories = []
+
+[default.global.parameters]
+region = "eu-central-1"

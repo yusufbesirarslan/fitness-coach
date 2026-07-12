@@ -6,6 +6,8 @@ API'sine gider:
   - sign_up               → kullanıcı oluşturur, e-postaya DOĞRULAMA KODU gönderir
   - confirm_sign_up       → kullanıcının girdiği kodu doğrular
   - resend_code           → kodu yeniden gönderir
+  - forgot_password       → e-postaya ŞİFRE SIFIRLAMA KODU gönderir
+  - confirm_forgot_password → sıfırlama kodunu doğrular, yeni şifreyi ayarlar
   - authenticate          → USER_PASSWORD_AUTH ile giriş; ham token'lar + claim'ler
   - refresh_tokens        → REFRESH_TOKEN_AUTH ile access token'ı yeniler
   - global_sign_out       → kullanıcının TÜM refresh token'larını iptal eder (logout)
@@ -161,6 +163,40 @@ def resend_code(username):
     }, username)
     try:
         _get_client().resend_confirmation_code(**kwargs)
+    except Exception as e:
+        raise _wrap(e)
+
+
+def forgot_password(username):
+    """Şifre sıfırlama kodunu kullanıcının e-postasına gönder (ForgotPassword).
+
+    Kodu Cognito üretir ve iletir (CustomEmailSender trigger'ı bağlıysa markalı
+    e-posta Lambda→Resend üzerinden gider); uygulama kodu hiç görmez. Kullanıcı
+    yoksa/doğrulanmamışsa Cognito hata döner — route katmanı bunları hesap
+    numaralandırmasına (enumeration) karşı JENERİK yanıtla yutar."""
+    kwargs = _maybe_secret({
+        "ClientId": COGNITO_APP_CLIENT_ID,
+        "Username": username,
+    }, username)
+    try:
+        _get_client().forgot_password(**kwargs)
+    except Exception as e:
+        raise _wrap(e)
+
+
+def confirm_forgot_password(username, code, new_password):
+    """Sıfırlama kodunu doğrula ve yeni şifreyi ayarla (ConfirmForgotPassword).
+
+    Kod süresi/deneme limiti Cognito'nun kendi kurallarıdır; burada yalnızca
+    iletilir. Başarı, kullanıcının şifresinin DEĞİŞTİĞİ anlamına gelir."""
+    kwargs = _maybe_secret({
+        "ClientId": COGNITO_APP_CLIENT_ID,
+        "Username": username,
+        "ConfirmationCode": code,
+        "Password": new_password,
+    }, username)
+    try:
+        _get_client().confirm_forgot_password(**kwargs)
     except Exception as e:
         raise _wrap(e)
 

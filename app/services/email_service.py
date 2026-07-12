@@ -14,15 +14,16 @@ None döner); hataya tepki vermesi gereken çağıran `raise_on_error=True` ile
 tipli `EmailServiceError` alır (S3Error/CognitoServiceError kalıbı). API
 anahtarı hiçbir zaman loglanmaz.
 
-Mevcut/eski e-posta yolu (Sprint 1'de DOKUNULMADI, Sprint 2 karar verir):
-uygulamanın bugüne dek gönderdiği tek e-posta, AWS Cognito'nun KENDİ yönettiği
-kayıt/doğrulama kodu mailidir — app/services/cognito_service.py `sign_up` /
-`resend_code` çağrılarıyla dolaylı tetiklenir (route: app/blueprints/auth.py),
-gövdesini uygulama hiç oluşturmaz. Onun dışında uygulama içi e-posta gönderimi
-yoktur; waitlist/welcome/reset gibi iş e-postaları da henüz YOKTUR (Sprint 2).
+Cognito KOD e-postaları (doğrulama/sıfırlama) bu servisten GEÇMEZ: kodları
+Cognito üretir ve CustomEmailSender trigger'ı (infra/cognito-email-sender —
+Lambda + Resend, Sprint 3) markalı gönderir. Bu servis uygulama-tetikli olay
+e-postalarını taşır: hoş geldin ve şifren-değişti (app/blueprints/auth.py,
+best-effort). Mimari: docs/auth-emails.md.
 
-Yeni bir e-posta türü eklemek: HTML'i oluşturup send_html_email(...) çağırmak
-yeterli — SDK, From/Reply-To ve hata işleme burada kapsüllüdür.
+Yeni bir e-posta türü eklemek: şablonu app/services/email_templates.py'ye ekle
+((subject, html, text) döndür), send_html_email(...) çağır — SDK, From/Reply-To
+ve hata işleme burada kapsüllüdür. Alıcı adresleri loglara MASKELİ yazılır
+(mask_email).
 """
 import logging
 from typing import List, Optional, Sequence, Union
@@ -95,6 +96,24 @@ def _normalize_recipients(to: Recipients) -> List[str]:
     return [addr for addr in to if isinstance(addr, str) and addr.strip()]
 
 
+def mask_email(addr) -> str:
+    """PII maskesi: 'yusuf@example.com' → 'y***@example.com'.
+
+    Loglara alıcı adresi HAM yazılmaz (KVKK/PII); ilk harf + domain teşhis için
+    yeterlidir. E-posta olmayan/boş girdi '***' olur. Auth e-posta loglarında da
+    kullanılır (app/blueprints/auth.py) — public tutulmasının nedeni bu."""
+    if not isinstance(addr, str) or "@" not in addr:
+        return "***"
+    local, _, domain = addr.partition("@")
+    return local[:1] + "***@" + domain
+
+
+def _mask_recipients(recipients) -> List[str]:
+    if isinstance(recipients, str):
+        return [mask_email(recipients)]
+    return [mask_email(addr) for addr in (recipients or [])]
+
+
 def _deliver(params: dict, raise_on_error: bool) -> Optional[str]:
     """Ortak gönderim çekirdeği: enabled kontrolü, SDK çağrısı, hata sözleşmesi.
 
@@ -102,7 +121,7 @@ def _deliver(params: dict, raise_on_error: bool) -> Optional[str]:
     None döner; `raise_on_error=True` ise EmailServiceError yükseltilir."""
     if not is_enabled():
         _logger.info("[EMAIL] gönderim atlandı (servis kapalı, RESEND_API_KEY yok): to=%s",
-                     params.get("to"))
+                     _mask_recipients(params.get("to")))
         if raise_on_error:
             raise EmailServiceError(
                 "E-posta servisi kapalı (RESEND_API_KEY ayarlı değil).", code="disabled")
@@ -123,7 +142,7 @@ def _deliver(params: dict, raise_on_error: bool) -> Optional[str]:
         return None
     message_id = result.get("id") if isinstance(result, dict) else getattr(result, "id", None)
     _logger.info("[EMAIL] gönderildi: id=%s to=%s subject=%r",
-                 message_id, params["to"], params.get("subject"))
+                 message_id, _mask_recipients(params["to"]), params.get("subject"))
     return message_id
 
 

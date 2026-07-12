@@ -170,6 +170,39 @@ def test_empty_recipient_is_graceful(monkeypatch):
     assert exc_info.value.code == "no_recipient"
 
 
+# ── PII maskesi: alıcı adresi loglara ham yazılmaz ──────────────────────────
+
+def test_mask_email_cases():
+    assert email_service.mask_email("yusuf@example.com") == "y***@example.com"
+    assert email_service.mask_email("a@b.co") == "a***@b.co"
+    assert email_service.mask_email("@example.com") == "***@example.com"
+    assert email_service.mask_email("not-an-email") == "***"
+    assert email_service.mask_email("") == "***"
+    assert email_service.mask_email(None) == "***"
+
+
+def test_delivery_log_masks_recipient(monkeypatch, caplog):
+    fake = _FakeResend()
+    _use_fake(monkeypatch, fake)
+
+    with caplog.at_level(logging.INFO, logger="app.services.email_service"):
+        email_service.send_html_email("yusuf@example.com", "Konu", "<p>x</p>")
+
+    assert "y***@example.com" in caplog.text
+    assert "yusuf@example.com" not in caplog.text  # ham adres loglanmaz
+    # SDK parametreleri elbette gerçek adresi taşır (maskeleme yalnızca logda).
+    assert fake.calls[0]["to"] == ["yusuf@example.com"]
+
+
+def test_disabled_skip_log_masks_recipient(monkeypatch, caplog):
+    _forbid_sdk(monkeypatch)  # conftest: anahtar boş → servis kapalı
+
+    with caplog.at_level(logging.INFO, logger="app.services.email_service"):
+        email_service.send_html_email("yusuf@example.com", "Konu", "<p>x</p>")
+
+    assert "yusuf@example.com" not in caplog.text
+
+
 # ── send_test_email (altyapı doğrulama) ─────────────────────────────────────
 
 def test_send_test_email_branding_and_timestamp(monkeypatch):

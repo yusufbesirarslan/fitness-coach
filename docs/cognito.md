@@ -147,3 +147,32 @@ Cognito session is already invalid, and it does its own CSRF check).
 - `tests/test_cognito_auth.py` — end-to-end: logout GlobalSignOut + row delete,
   concurrent independent sessions, session expiration → re-login, protected
   route after login.
+
+
+## Sprint 3 — Şifre Sıfırlama & Markalı Auth E-postaları (Resend)
+
+Cognito'nun varsayılan e-postaları markalı AxisAI e-postalarıyla değiştirildi;
+kod üretimi/doğrulaması Cognito'da kaldı. Ayrıntılı mimari: docs/auth-emails.md.
+
+- Yeni route'lar (app/blueprints/auth.py): `GET/POST /forgot-password`
+  (ForgotPassword — jenerik, enumeration-korumalı yanıt; 3/15dk) ve
+  `GET/POST /reset-password` (ConfirmForgotPassword; 10/15dk; başarıda
+  best-effort "şifren değiştirildi" e-postası).
+- Yeni sarmalayıcılar (app/services/cognito_service.py): `forgot_password`,
+  `confirm_forgot_password` — mevcut `_wrap`/Türkçe hata eşleme desenleriyle.
+- Kod e-postaları (doğrulama + sıfırlama) artık Cognito CustomEmailSender
+  trigger'ı üzerinden gider: infra/cognito-email-sender (Lambda + KMS, SAM).
+  Havuza bağlama runbook'u: infra/cognito-email-sender/README.md.
+- `POST /verify` başarısı hoş geldin e-postası gönderir (best-effort — e-posta
+  hatası doğrulamayı ASLA düşürmez).
+- Şablonlar: app/services/email_templates.py (Lambda kopyasıyla bayt-eş,
+  tests/test_email_templates_sync.py zorlar).
+
+### Testing Coverage (Sprint 3)
+
+- tests/test_password_reset.py — forgot/reset route'ları: jenerik yanıt,
+  throttle 429, bildirim maili, e-posta hatasının auth'u bloklamadığı.
+- tests/test_cognito_idp.py — yeni sarmalayıcıların kwargs/hata eşlemesi.
+- tests/test_cognito_email_sender.py — Lambda: trigger→şablon eşlemesi,
+  asla-yükseltme sözleşmesi, düz kodun loglanmadığı.
+- tests/test_email_templates.py + test_email_templates_sync.py — şablonlar.

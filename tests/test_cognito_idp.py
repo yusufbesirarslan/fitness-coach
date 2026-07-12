@@ -53,6 +53,12 @@ class _FakeIdpClient:
     def resend_confirmation_code(self, **kw):
         return self._do("resend_confirmation_code", kw)
 
+    def forgot_password(self, **kw):
+        return self._do("forgot_password", kw)
+
+    def confirm_forgot_password(self, **kw):
+        return self._do("confirm_forgot_password", kw)
+
     def initiate_auth(self, **kw):
         return self._do("initiate_auth", kw)
 
@@ -188,6 +194,83 @@ def test_resend_code_calls_client(monkeypatch):
     name, kwargs = fake.calls[0]
     assert name == "resend_confirmation_code"
     assert kwargs["Username"] == "ali"
+
+
+# ---------------------------------------------------------------------------
+# forgot_password / confirm_forgot_password — şifre sıfırlama sarmalayıcıları.
+# ---------------------------------------------------------------------------
+
+def test_forgot_password_calls_client(monkeypatch):
+    fake = _FakeIdpClient()
+    _use_fake(monkeypatch, fake)
+    cognito_service.forgot_password("ali")
+    name, kwargs = fake.calls[0]
+    assert name == "forgot_password"
+    assert kwargs == {"ClientId": "client-123", "Username": "ali"}
+
+
+def test_forgot_password_adds_secret_hash_when_secret_set(monkeypatch):
+    fake = _FakeIdpClient()
+    _use_fake(monkeypatch, fake)
+    monkeypatch.setattr(cognito_service, "COGNITO_CLIENT_SECRET", "s3cr3t")
+    cognito_service.forgot_password("ali")
+    _, kwargs = fake.calls[0]
+    assert "SecretHash" in kwargs
+
+
+def test_forgot_password_maps_user_not_found(monkeypatch):
+    fake = _FakeIdpClient(raises=_FakeClientError("UserNotFoundException"))
+    _use_fake(monkeypatch, fake)
+    with pytest.raises(CognitoServiceError) as ei:
+        cognito_service.forgot_password("yok")
+    assert ei.value.code == "UserNotFoundException"
+
+
+def test_forgot_password_maps_limit_exceeded(monkeypatch):
+    fake = _FakeIdpClient(raises=_FakeClientError("LimitExceededException"))
+    _use_fake(monkeypatch, fake)
+    with pytest.raises(CognitoServiceError, match="Çok fazla deneme"):
+        cognito_service.forgot_password("ali")
+
+
+def test_confirm_forgot_password_calls_client(monkeypatch):
+    fake = _FakeIdpClient()
+    _use_fake(monkeypatch, fake)
+    cognito_service.confirm_forgot_password("ali", "123456", "YeniSifre1")
+    name, kwargs = fake.calls[0]
+    assert name == "confirm_forgot_password"
+    assert kwargs == {"ClientId": "client-123", "Username": "ali",
+                      "ConfirmationCode": "123456", "Password": "YeniSifre1"}
+
+
+def test_confirm_forgot_password_adds_secret_hash_when_secret_set(monkeypatch):
+    fake = _FakeIdpClient()
+    _use_fake(monkeypatch, fake)
+    monkeypatch.setattr(cognito_service, "COGNITO_CLIENT_SECRET", "s3cr3t")
+    cognito_service.confirm_forgot_password("ali", "123456", "YeniSifre1")
+    _, kwargs = fake.calls[0]
+    assert "SecretHash" in kwargs
+
+
+def test_confirm_forgot_password_maps_code_mismatch(monkeypatch):
+    fake = _FakeIdpClient(raises=_FakeClientError("CodeMismatchException"))
+    _use_fake(monkeypatch, fake)
+    with pytest.raises(CognitoServiceError, match="kodu hatalı"):
+        cognito_service.confirm_forgot_password("ali", "000000", "YeniSifre1")
+
+
+def test_confirm_forgot_password_maps_expired_code(monkeypatch):
+    fake = _FakeIdpClient(raises=_FakeClientError("ExpiredCodeException"))
+    _use_fake(monkeypatch, fake)
+    with pytest.raises(CognitoServiceError, match="süresi doldu"):
+        cognito_service.confirm_forgot_password("ali", "123456", "YeniSifre1")
+
+
+def test_confirm_forgot_password_maps_invalid_password(monkeypatch):
+    fake = _FakeIdpClient(raises=_FakeClientError("InvalidPasswordException"))
+    _use_fake(monkeypatch, fake)
+    with pytest.raises(CognitoServiceError, match="Şifre politikası"):
+        cognito_service.confirm_forgot_password("ali", "123456", "zayif")
 
 
 # ---------------------------------------------------------------------------

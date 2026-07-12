@@ -23,3 +23,6 @@ venv/
 .coverage.*
 htmlcov/
 coverage.xml
+
+# SAM build artifacts (infra/)
+.aws-sam/

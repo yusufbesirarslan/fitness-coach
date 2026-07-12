@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  AxisAI Cognito CustomEmailSender — Cognito'nun urettigi dogrulama/sifre
+  sifirlama kodlarini markali AxisAI e-postalari olarak Resend uzerinden
+  gonderen Lambda + KMS anahtari. Kullanici havuzuna baglama adimi manueldir
+  (havuz konsol-yonetimli, IaC'de degil) — bkz. README.md runbook.
+
+Parameters:
+  ResendApiKey:
+    Type: String
+    NoEcho: true
+    Default: ''
+    Description: >
+      Resend API key. Bos birakilirsa Lambda calisir ama gonderim sessiz no-op
+      olur (kod e-postalari HIC gitmez — trigger bagliyken bos birakma).
+  UserPoolId:
+    Type: String
+    Default: eu-central-1_t8wbHpN3z
+    Description: Trigger'in baglanacagi mevcut Cognito kullanici havuzu.
+  AppBaseUrl:
+    Type: String
+    Default: 'https://www.axisaiapp.com'
+    Description: E-postalardaki CTA baglantilarinin tabani (/verify, /reset-password, ...).
+  EmailFromName:
+    Type: String
+    Default: AxisAI
+  EmailFromAddress:
+    Type: String
+    Default: noreply@mail.axisaiapp.com
+    Description: Resend'de dogrulanmis gonderim domain'inde bir adres olmali.
+  EmailReplyTo:
+    Type: String
+    Default: hello@axisaiapp.com
+
+Resources:
+  # Cognito, CustomEmailSender koduna giden dogrulama/sifirlama kodunu bu
+  # anahtar altinda (AWS Encryption SDK) sifreler; Lambda cozer.
+  EmailKmsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: AxisAI Cognito CustomEmailSender code-encryption key
+      KeyPolicy:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AccountRootAdmin
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+          - Sid: AllowCognitoEncrypt
+            Effect: Allow
+            Principal:
+              Service: cognito-idp.amazonaws.com
+            Action:
+              - kms:CreateGrant
+              - kms:Encrypt
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: '*'
+            # Confused-deputy korumasi: yalnizca BU hesaptaki BU havuz.
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref 'AWS::AccountId'
+              ArnLike:
+                aws:SourceArn: !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}'
+
+  EmailKmsAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: alias/axisai-cognito-email
+      TargetKeyId: !Ref EmailKmsKey
+
+  EmailSenderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: handler.handler
+      Runtime: python3.12
+      # x86_64 bilincli (landing stack'i arm64): aws-encryption-sdk yerel
+      # 'cryptography' wheel'leri ceker; Windows gelistirme makinesinde
+      # cross-arch derleme derdi yasamamak icin. Temiz kurulum icin README'deki
+      # 'sam build --use-container' notuna bak.
+      Architectures: [x86_64]
+      # Cognito trigger bekleme butcesi dardir; Resend cagrisinin timeout'u
+      # (email_sender._post_json, 4s) bu tavanin altinda kalir.
+      Timeout: 5
+      MemorySize: 256
+      CodeUri: src/
+      Environment:
+        Variables:
+          KMS_KEY_ARN: !GetAtt EmailKmsKey.Arn
+          RESEND_API_KEY: !Ref ResendApiKey
+          APP_BASE_URL: !Ref AppBaseUrl
+          EMAIL_FROM_NAME: !Ref EmailFromName
+          EMAIL_FROM_ADDRESS: !Ref EmailFromAddress
+          EMAIL_REPLY_TO: !Ref EmailReplyTo
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: kms:Decrypt
+              Resource: !GetAtt EmailKmsKey.Arn
+
+  # Cognito'nun fonksiyonu cagirabilmesi icin izin — havuz ARN'ine kilitli.
+  CognitoInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref EmailSenderFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceAccount: !Ref 'AWS::AccountId'
+      SourceArn: !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}'
+
+Outputs:
+  FunctionArn:
+    Description: update-user-pool --lambda-config CustomEmailSender.LambdaArn degeri
+    Value: !GetAtt EmailSenderFunction.Arn
+  KmsKeyArn:
+    Description: update-user-pool --lambda-config KMSKeyID degeri
+    Value: !GetAtt EmailKmsKey.Arn

@@ -1,0 +1,4 @@
+# Yalnızca Lambda paketi için — Flask uygulamasının requirements.txt'ine EKLENMEZ
+# (handler._decrypt_code lazy import eder; Flask test ortamı bu paketi kurmaz).
+# Cognito, CustomEmailSender kodunu AWS Encryption SDK formatında şifreler.
+aws-encryption-sdk>=4.0,<5

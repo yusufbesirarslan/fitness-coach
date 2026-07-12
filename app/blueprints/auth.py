@@ -10,7 +10,8 @@ from werkzeug.security import check_password_hash
 from app.config import COGNITO_ENABLED
 from app.extensions import db, limiter, login_throttle_available
 from app.models import User
-from app.services import cognito_jwt, cognito_service, session_store
+from app.services import (cognito_jwt, cognito_service, email_service,
+                          email_templates, session_store)
 from app.services.cognito_service import CognitoServiceError
 from app.services.cognito_jwt import TokenValidationError
 from app.services.gamification import complete_quest_for_user
@@ -342,6 +343,9 @@ def verify_confirm():
         return jsonify({"error": e.message}), 400
     user = User.query.filter_by(username=username).first()
     referred = _consume_pending_referral(user) if user else False
+    # Hesap doğrulandı → markalı hoş geldin e-postası (best-effort; doğrulama
+    # yanıtı e-posta hatasından ASLA etkilenmez).
+    _send_welcome_email(user)
     return jsonify({"message": t("auth.verify_done"), "referred": referred})
 
 
@@ -360,6 +364,123 @@ def verify_resend():
     except CognitoServiceError as e:
         return jsonify({"error": e.message}), 400
     return jsonify({"message": t("auth.resend_done")})
+
+
+# Numaralandırma (enumeration) koruması: bu Cognito hatalarında bile jenerik
+# "gönderildi" yanıtı döner — hesabın var/yok/doğrulanmamış olduğu sızdırılmaz.
+_FORGOT_ENUM_SAFE_CODES = {"UserNotFoundException", "InvalidParameterException",
+                           "NotAuthorizedException"}
+# Cognito'nun kendi kod-gönderim throttle'ı: bunu jenerik başarıya çevirmek
+# kullanıcıyı sonsuz "gönderildi ama gelmedi" döngüsüne sokar → dürüst 429.
+_FORGOT_THROTTLE_CODES = {"LimitExceededException", "TooManyRequestsException"}
+
+
+def _send_welcome_email(user):
+    """Doğrulama sonrası hoş geldin e-postası — best-effort, ASLA yükseltmez.
+
+    E-posta katmanı bloklamaz: şablon/DB/gönderim hatası yalnızca loglanır,
+    doğrulama yanıtı etkilenmez (email_service zaten graceful; buradaki
+    try/except şablon-render ve beklenmedik hataları da kapsar)."""
+    try:
+        if user is None or not user.email:
+            return
+        subject, html, text = email_templates.welcome_email(user.username)
+        email_service.send_html_email(user.email, subject, html, text=text)
+        current_app.logger.info("[AUTH-EMAIL] welcome kuyruklandı: user=%s to=%s",
+                                user.username, email_service.mask_email(user.email))
+    except Exception:
+        current_app.logger.warning("[AUTH-EMAIL] welcome gönderilemedi (user=%s)",
+                                   getattr(user, "username", "?"), exc_info=True)
+
+
+def _send_password_changed_email(username):
+    """Şifre değişikliği bildirimi — best-effort, ASLA yükseltmez.
+
+    Sıfırlama Cognito'da ÇOKTAN başarılı; e-posta hatası akışı bozamaz."""
+    try:
+        user = User.query.filter_by(username=username).first()
+        if user is None or not user.email:
+            return
+        subject, html, text = email_templates.password_changed_email(user.username)
+        email_service.send_html_email(user.email, subject, html, text=text)
+        current_app.logger.info("[AUTH-EMAIL] password-changed kuyruklandı: user=%s to=%s",
+                                username, email_service.mask_email(user.email))
+    except Exception:
+        current_app.logger.warning("[AUTH-EMAIL] password-changed gönderilemedi (user=%s)",
+                                   username, exc_info=True)
+
+
+@bp.route("/forgot-password", methods=["GET"])
+def forgot_password_page():
+    """Şifre sıfırlama isteği sayfası: kullanıcı adını girer, e-postasına kod gider."""
+    if not COGNITO_ENABLED:
+        abort(404)
+    username = (request.args.get("u") or "").strip()
+    return render_template("forgot_password.html", username=username)
+
+
+@bp.route("/forgot-password", methods=["POST"])
+@limiter.limit("3 per 15 minutes", methods=["POST"])
+def forgot_password_request():
+    """Cognito'dan şifre sıfırlama kodu iste (kod e-postayla kullanıcıya gider).
+
+    Kod üretimi/iletimi tamamen Cognito'nundur (CustomEmailSender trigger'ı
+    markalı Resend e-postasını gönderir). Yanıt hesap-numaralandırmasına karşı
+    JENERİKTİR: kullanıcı bulunamasa da aynı "gönderildi" mesajı döner; yalnızca
+    Cognito'nun throttle'ı dürüstçe 429 olur."""
+    if not COGNITO_ENABLED:
+        abort(404)
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    if not username:
+        return jsonify({"error": t("auth.username_required")}), 400
+    try:
+        cognito_service.forgot_password(username)
+    except CognitoServiceError as e:
+        if e.code in _FORGOT_THROTTLE_CODES:
+            return jsonify({"error": e.message}), 429
+        # Jenerik başarıya düş — kod yalnızca loglanır (PII/enumeration yok).
+        current_app.logger.info("[RESET] forgot_password kod=%s — jenerik yanıt",
+                                e.code or "unknown")
+    return jsonify({"message": t("auth.reset_code_sent"), "username": username})
+
+
+@bp.route("/reset-password", methods=["GET"])
+def reset_password_page():
+    """Kod + yeni şifre sayfası (kod e-postadan gelir)."""
+    if not COGNITO_ENABLED:
+        abort(404)
+    username = (request.args.get("u") or "").strip()
+    return render_template("reset_password.html", username=username)
+
+
+@bp.route("/reset-password", methods=["POST"])
+@limiter.limit("10 per 15 minutes", methods=["POST"])
+def reset_password_confirm():
+    """Sıfırlama kodunu Cognito'da doğrula ve yeni şifreyi ayarla.
+
+    Kod/şifre kuralları Cognito'nundur; yerel validate_password yalnızca
+    kullanıcıya yerelleştirilmiş mesajı erken vermek içindir. Başarıda
+    bilgilendirme e-postası best-effort gider. Mevcut oturumlar/refresh
+    token'ları BİLEREK dokunulmadan kalır (Cognito ConfirmForgotPassword
+    revoke etmez; oturum yönetimi bu sprintin kapsamı dışıdır)."""
+    if not COGNITO_ENABLED:
+        abort(404)
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or "").strip()
+    code = (data.get("code") or "").strip()
+    password = data.get("password")
+    if not username or not code or not password:
+        return jsonify({"error": t("auth.reset_fields_required")}), 400
+    password_error = validate_password(password)
+    if password_error:
+        return jsonify({"error": password_error}), 400
+    try:
+        cognito_service.confirm_forgot_password(username, code, password)
+    except CognitoServiceError as e:
+        return jsonify({"error": e.message}), 400
+    _send_password_changed_email(username)
+    return jsonify({"message": t("auth.reset_done")})
 
 
 @bp.route("/login/cognito")
