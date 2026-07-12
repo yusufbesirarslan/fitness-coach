@@ -2,7 +2,6 @@
 import re
 import s3_helper
 from flask import current_app
-from werkzeug.security import generate_password_hash
 
 from app.i18n import t
 
@@ -209,6 +208,3 @@ def validate_email(email):
     if not email or len(email) > 120 or not EMAIL_RE.match(email):
         return t("validate.email_invalid")
     return None
-
-
-_DUMMY_PW_HASH = generate_password_hash("timing-equalization-placeholder")

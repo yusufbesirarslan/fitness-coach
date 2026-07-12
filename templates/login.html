@@ -34,6 +34,12 @@
 
             <div class="auth-alert auth-alert-error" id="error-msg" role="alert" aria-live="polite"></div>
             <div class="auth-alert auth-alert-success" id="success-msg" role="status" aria-live="polite"></div>
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% for category, message in messages %}
+            <div class="auth-alert auth-alert-{{ 'success' if category == 'success' else 'error' }} show"
+                 role="{{ 'status' if category == 'success' else 'alert' }}">{{ message }}</div>
+                {% endfor %}
+            {% endwith %}
             {% if auth_error %}
             <div class="auth-alert auth-alert-error show" role="alert">{{ auth_error }}</div>
             {% endif %}
@@ -56,7 +62,8 @@
                 </div>
 
                 <div class="auth-row">
-                    <a class="auth-link" href="/forgot-password">{{ t('login.forgot_link') }}</a>
+                    <span></span>
+                    <a class="auth-link" href="/forgot-password">{{ t('login.forgot_password') }}</a>
                 </div>
 
                 <button type="button" class="auth-btn" id="login-submit" data-action="login">{{ t('login.submit') }}</button>

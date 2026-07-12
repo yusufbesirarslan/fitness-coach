@@ -29,7 +29,7 @@ def test_landing_redirects_authed_to_dashboard(client, auth_user):
 # Davet / referral
 # ---------------------------------------------------------------------------
 
-def test_register_assigns_referral_code(client):
+def test_register_assigns_referral_code(client, cognito_registration):
     r = client.post("/register", json={
         "username": "yenikullanici", "email": "yeni@example.com", "password": "Sifre123"})
     assert r.status_code == 200
@@ -37,12 +37,13 @@ def test_register_assigns_referral_code(client):
     assert u.referral_code and len(u.referral_code) >= 6
 
 
-def test_referral_code_is_assigned_before_referral_get(client):
+def test_referral_code_is_assigned_before_referral_get(
+        client, cognito_registration, login):
     from app.blueprints import pages
 
     client.post("/register", json={
         "username": "refgetuser", "email": "refget@example.com", "password": "Sifre123"})
-    client.post("/login", json={"username": "refgetuser", "password": "Sifre123"})
+    login("refgetuser")
     user = User.query.filter_by(username="refgetuser").one()
     assert user.referral_code
     assert not hasattr(pages, "ensure_referral_code")
@@ -70,7 +71,8 @@ def test_invalid_invite_code_no_cookie(client):
     assert not any("fitx_ref=" in c for c in r.headers.getlist("Set-Cookie"))
 
 
-def test_register_with_ref_body_links_and_rewards(client, make_user):
+def test_register_with_ref_body_links_and_rewards(
+        client, make_user, cognito_registration):
     inviter = make_user("davetci2", rank_points=0, weekly_xp=0)
     code = ensure_referral_code(inviter)
     db.session.commit()
@@ -78,7 +80,12 @@ def test_register_with_ref_body_links_and_rewards(client, make_user):
         "username": "davetli", "email": "davetli@example.com",
         "password": "Sifre123", "ref": code})
     assert r.status_code == 200
-    assert r.get_json()["referred"] is True
+    assert r.get_json()["referred"] is False
+
+    confirmed = client.post(
+        "/verify", json={"username": "davetli", "code": "123456"})
+    assert confirmed.status_code == 200
+    assert confirmed.get_json()["referred"] is True
 
     db.session.expire_all()
     invited = User.query.filter_by(username="davetli").first()
@@ -88,7 +95,7 @@ def test_register_with_ref_body_links_and_rewards(client, make_user):
     assert db.session.get(User, inviter.id).rank_points == 75
 
 
-def test_self_referral_is_noop(client, make_user):
+def test_self_referral_is_noop(client, make_user, cognito_registration):
     # Kendi koduyla kayıt olunamaz çünkü yeni kullanıcı henüz yok; kod sahibi
     # mevcut başka kullanıcı olmalı. Geçersiz kod sessizce yoksayılır.
     r = client.post("/register", json={

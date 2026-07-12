@@ -11,6 +11,9 @@ from datetime import date, timedelta
 
 from app.extensions import db
 from app.models import Activity, User
+from app.blueprints import auth as auth_bp
+from app.services import cognito_service
+from app.services.cognito_service import CognitoServiceError
 
 
 def _csp_directives(response):
@@ -46,15 +49,27 @@ def _with_token(raw_client, token="tok-abc"):
     return {"X-CSRFToken": token}
 
 
-def test_csrf_same_origin_post_passes(raw_client):
+def _reject_cognito_login(monkeypatch):
+    monkeypatch.setattr(auth_bp, "COGNITO_ENABLED", True)
+    monkeypatch.setattr(
+        cognito_service,
+        "authenticate",
+        lambda username, password: (_ for _ in ()).throw(
+            CognitoServiceError("bad credentials", "NotAuthorizedException")),
+    )
+
+
+def test_csrf_same_origin_post_passes(raw_client, monkeypatch):
     # Aynı origin + geçerli token → CSRF kapısını geçer; yanlış şifre 401'i view'dan gelir.
+    _reject_cognito_login(monkeypatch)
     headers = {"Origin": "http://localhost", **_with_token(raw_client)}
     response = raw_client.post("/login", json={"username": "x", "password": "y"},
                                headers=headers)
     assert response.status_code == 401
 
 
-def test_csrf_same_origin_referer_passes(raw_client):
+def test_csrf_same_origin_referer_passes(raw_client, monkeypatch):
+    _reject_cognito_login(monkeypatch)
     headers = {"Referer": "http://localhost/login", **_with_token(raw_client)}
     response = raw_client.post("/login", json={"username": "x", "password": "y"},
                                headers=headers)

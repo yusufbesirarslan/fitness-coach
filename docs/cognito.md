@@ -148,31 +148,126 @@ Cognito session is already invalid, and it does its own CSRF check).
   concurrent independent sessions, session expiration → re-login, protected
   route after login.
 
+## Sprint 3 — Native Password Recovery
 
-## Sprint 3 — Şifre Sıfırlama & Markalı Auth E-postaları (Resend)
+`POST /forgot-password` accepts a username or e-mail address. Known e-mail
+addresses are resolved to their canonical Cognito username, while unknown
+identifiers are still passed to Cognito. Provider errors are deliberately
+masked: known and unknown accounts receive the same generic 200 response, so
+the endpoint does not become an account-enumeration oracle.
 
-Cognito'nun varsayılan e-postaları markalı AxisAI e-postalarıyla değiştirildi;
-kod üretimi/doğrulaması Cognito'da kaldı. Ayrıntılı mimari: docs/auth-emails.md.
+The canonical username is handed to `/reset-password` through server-signed
+Flask session state, never through a query string or client-controlled hidden
+field. This local reset context expires after 15 minutes. Missing, malformed,
+or expired context is cleared and rejected before a confirmation call.
 
-- Yeni route'lar (app/blueprints/auth.py): `GET/POST /forgot-password`
-  (ForgotPassword — jenerik, enumeration-korumalı yanıt; 3/15dk) ve
-  `GET/POST /reset-password` (ConfirmForgotPassword; 10/15dk; başarıda
-  best-effort "şifren değiştirildi" e-postası).
-- Yeni sarmalayıcılar (app/services/cognito_service.py): `forgot_password`,
-  `confirm_forgot_password` — mevcut `_wrap`/Türkçe hata eşleme desenleriyle.
-- Kod e-postaları (doğrulama + sıfırlama) artık Cognito CustomEmailSender
-  trigger'ı üzerinden gider: infra/cognito-email-sender (Lambda + KMS, SAM).
-  Havuza bağlama runbook'u: infra/cognito-email-sender/README.md.
-- `POST /verify` başarısı hoş geldin e-postası gönderir (best-effort — e-posta
-  hatası doğrulamayı ASLA düşürmez).
+`POST /reset-password` validates the code and password fields locally, then
+calls Cognito `ConfirmForgotPassword`. A successful confirmation is single-use:
+all `CognitoSession` rows belonging to the local user are deleted, Flask-Login
+state and browser session state are cleared, and the user must authenticate
+again with the new password. Cognito remains the credential authority; the
+application never writes a local password hash during recovery.
+
+Provider code mismatch/expiry responses are fixed client-safe messages.
+Cognito throttling maps to HTTP 429. Raw provider text, reset codes, passwords,
+identifiers, and tokens are not logged.
+
+### Cognito-only migration state
+
+Registration and login now fail with a controlled 503 when Cognito is not
+configured; there is no local-password fallback. Login calls Cognito first,
+cryptographically validates the returned ID token, and resolves the local
+profile only through its verified `sub`. No username lookup occurs before
+Cognito authentication.
+
+The `User.password_hash` column remains nullable and unchanged so existing
+schema history and older databases stay compatible, but runtime authentication
+never reads or writes it. The model password helpers, timing dummy hash, and the
+obsolete `app/services/cognito.py` and `app/services/cognito_idp.py` modules have
+been removed. `cognito_service.py` is the single native Cognito API boundary;
+Hosted UI routes remain intentionally disabled.
+
+### Session deadlines and identity binding
+
+Application-managed Cognito sessions have two independent limits:
+
+- `COGNITO_SESSION_IDLE_HOURS` defaults to 24 hours since `last_used_at`.
+- `COGNITO_SESSION_ABSOLUTE_DAYS` defaults to 7 days since `created_at`.
+
+User mismatch, absolute expiry, and idle expiry are checked—in that order—before
+access-token refresh. The invalid row is deleted and the browser is redirected
+to login. The absolute deadline cannot be extended by activity or refresh.
+
+Every `@require_auth` request binds three identities: the Flask-Login user id,
+the `CognitoSession.user_id`, and the local user resolved from the cryptographically
+verified access-token `sub`. All three must identify the same row. Missing local
+Cognito identity, missing session state, row/user mismatch, invalid token, or
+verified-sub mismatch invalidates the session; there is no legacy passthrough.
+
+### Intentionally public endpoints
+
+The route-map audit in `tests/test_auth_audit.py` treats every endpoint as
+protected unless it appears in this reviewed allowlist.
+
+| Endpoint | Methods | Why public | Rate limit | CSRF |
+| --- | --- | --- | --- | --- |
+| `/static/<path>` | GET | Browser assets | Flask static handling | Not applicable |
+| `/health` | GET | Liveness/deploy gate | None | Not applicable |
+| `/welcome` | GET | Marketing/entry page | None | Not applicable |
+| `/davet/<code>` | GET | Referral entry and first-party cookie handoff | None | Read/navigation only |
+| `/set-language` | POST | Pre-login language choice | 30/hour | Origin + synchronizer token |
+| `/register` | GET, POST | Account creation | 5/hour on POST | POST protected |
+| `/login` | GET, POST | Session creation | 10/minute, 50/hour; plus 15/15 minutes per account on failed POST | POST protected |
+| `/verify` | GET, POST | Cognito email confirmation | 10/15 minutes on POST | POST protected |
+| `/verify/resend` | POST | Resend confirmation code | 3/15 minutes | Protected |
+| `/forgot-password` | GET, POST | Start password recovery | 5/15 minutes on POST | POST protected |
+| `/reset-password` | GET, POST | Complete password recovery | 10/15 minutes on POST | POST protected |
+| `/login/cognito` | GET | Disabled Hosted UI compatibility route; always 404 | None | No state change |
+| `/auth/cognito/callback` | GET | Disabled Hosted UI compatibility route; always 404 | None | No state change |
+
+`GET /logout` is not a public business endpoint. It is authenticated teardown
+using Flask-Login so an already-invalid Cognito session can still be cleared.
+Because existing clients use navigation links, it retains GET with an explicit
+`Sec-Fetch-Site`/`Referer` same-site guard, performs best-effort Cognito global
+sign-out, deletes the local session row, and clears Flask-Login state.
+
+### Known limitations and future enhancements
+
+- Cognito challenge responses such as MFA and `NEW_PASSWORD_REQUIRED` are
+  rejected safely but do not yet have native UI flows.
+- Password-reset handoff state is held in the signed Flask session, so the code
+  must be completed in the same browser context that initiated recovery.
+- `/logout` remains a guarded GET for compatibility with existing navigation
+  links. A future UI migration should make logout a CSRF-protected POST.
+- Cognito IDP and JWKS calls are synchronous. Existing network timeouts bound
+  failures, but higher scale should move identity-provider work behind dedicated
+  capacity and monitoring.
+- `app/services/cognito_jwt.py` still emits Authlib JOSE deprecation warnings;
+  migrate that validator fully to `joserfc` before Authlib 2.0 compatibility is
+  removed.
+- Add browser-level recovery accessibility and visual regression coverage in
+  addition to the current template, route, and JavaScript contract tests.
+
+## Sprint 3 — Markalı Auth E-postaları (Resend)
+
+Cognito'nun varsayılan düz e-postaları markalı AxisAI e-postalarıyla
+değiştirildi; kod üretimi/doğrulaması Cognito'da kaldı. Ayrıntılı mimari:
+docs/auth-emails.md.
+
+- Kod e-postaları (doğrulama + sıfırlama) Cognito CustomEmailSender trigger'ı
+  üzerinden gider: infra/cognito-email-sender (Lambda + KMS, SAM). Havuza
+  bağlama runbook'u: infra/cognito-email-sender/README.md.
+- `POST /verify` başarısı hoş geldin e-postası, `POST /reset-password` başarısı
+  "şifren değiştirildi" e-postası gönderir (ikisi de best-effort — e-posta
+  hatası auth yanıtını ASLA etkilemez; app/blueprints/auth.py `[AUTH-EMAIL]`).
 - Şablonlar: app/services/email_templates.py (Lambda kopyasıyla bayt-eş,
-  tests/test_email_templates_sync.py zorlar).
+  tests/test_email_templates_sync.py zorlar). Alıcı adresleri loglara maskeli
+  yazılır (email_service.mask_email).
 
-### Testing Coverage (Sprint 3)
+### Testing Coverage (Sprint 3 — e-posta katmanı)
 
-- tests/test_password_reset.py — forgot/reset route'ları: jenerik yanıt,
-  throttle 429, bildirim maili, e-posta hatasının auth'u bloklamadığı.
-- tests/test_cognito_idp.py — yeni sarmalayıcıların kwargs/hata eşlemesi.
+- tests/test_password_reset.py — bildirim maili başarıda gider, e-posta hatası
+  reset akışını düşürmez.
 - tests/test_cognito_email_sender.py — Lambda: trigger→şablon eşlemesi,
   asla-yükseltme sözleşmesi, düz kodun loglanmadığı.
 - tests/test_email_templates.py + test_email_templates_sync.py — şablonlar.

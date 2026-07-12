@@ -123,7 +123,7 @@ def make_user(app):
 
     def _make(username="testuser", password="Sifre123", email=None, **fields):
         user = User(username=username, email=email or f"{username}@example.com")
-        user.set_password(password)
+        fields.setdefault("cognito_sub", f"sub-{username}")
         for key, value in fields.items():
             setattr(user, key, value)
         db.session.add(user)
@@ -134,11 +134,52 @@ def make_user(app):
 
 
 @pytest.fixture
-def login(client):
+def login(client, monkeypatch):
+    from app.blueprints import auth as auth_bp
+    from app.services import cognito_jwt, cognito_service
+
+    monkeypatch.setattr(auth_bp, "COGNITO_ENABLED", True)
+
+    def _authenticate(username, _password):
+        return {
+            "tokens": {
+                "access_token": f"acc-{username}",
+                "id_token": f"id-{username}",
+                "refresh_token": f"ref-{username}",
+                "expires_in": 3600,
+            },
+            "claims": {"sub": f"sub-{username}"},
+        }
+
+    monkeypatch.setattr(cognito_service, "authenticate", _authenticate)
+    monkeypatch.setattr(
+        cognito_jwt,
+        "validate_token",
+        lambda token, use: {
+            "sub": f"sub-{token.removeprefix('id-').removeprefix('acc-')}"
+        },
+    )
+
     def _login(username="testuser", password="Sifre123"):
         return client.post("/login", json={"username": username, "password": password})
 
     return _login
+
+
+@pytest.fixture
+def cognito_registration(monkeypatch):
+    """Enable hermetic native Cognito registration/confirmation for route tests."""
+    from app.blueprints import auth as auth_bp
+    from app.services import cognito_service
+
+    monkeypatch.setattr(auth_bp, "COGNITO_ENABLED", True)
+    monkeypatch.setattr(
+        cognito_service,
+        "sign_up",
+        lambda username, password, email, name: f"sub-{username}",
+    )
+    monkeypatch.setattr(
+        cognito_service, "confirm_sign_up", lambda username, code: None)
 
 
 @pytest.fixture
@@ -151,16 +192,18 @@ def auth_user(make_user, login):
 
 @pytest.fixture
 def make_users_bulk(app):
-    """Şifre hash'i olmadan hızlı toplu kullanıcı üretimi (giriş yapamazlar);
-    leaderboard gibi çok-kullanıcılı senaryolar için."""
+    """Stable Cognito identities ile hızlı toplu kullanıcı üretimi."""
     from app.extensions import db
     from app.models import User
 
     def _make(n, prefix="bulk", **fields):
         users = []
         for i in range(n):
-            user = User(username=f"{prefix}{i}", email=f"{prefix}{i}@example.com",
-                        password_hash="not-a-real-hash")
+            user = User(
+                username=f"{prefix}{i}",
+                email=f"{prefix}{i}@example.com",
+                cognito_sub=f"sub-{prefix}{i}",
+            )
             for key, value in fields.items():
                 setattr(user, key, value)
             users.append(user)

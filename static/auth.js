@@ -229,9 +229,9 @@
   };
 
   window.forgotPassword = async function (el) {
-    var username = normalizedValue("username");
-    if (!username) {
-      showNotice("error", tr("verify.enter_username_first"));
+    var identifier = normalizedValue("identifier");
+    if (!identifier) {
+      showNotice("error", tr("auth.identifier_required"));
       return;
     }
     setButtonLoading(el, true, tr("forgot.submit"));
@@ -239,17 +239,15 @@
       var response = await fetch("/forgot-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username })
+        body: JSON.stringify({ identifier: identifier })
       });
       var data = await response.json();
-      if (response.ok) {
-        showNotice("success", data.message + " " + tr("common.redirecting"));
-        window.setTimeout(function () {
-          window.location.href = "/reset-password?u=" + encodeURIComponent(data.username || username);
-        }, 900);
-      } else {
+      if (!response.ok) {
         showNotice("error", data.error);
+        return;
       }
+      showNotice("success", data.message);
+      window.setTimeout(function () { window.location.href = data.next; }, 700);
     } catch (err) {
       showNotice("error", tr("common.conn_error_retry"));
     } finally {
@@ -257,21 +255,26 @@
     }
   };
 
-  window.forgotOnEnter = function (el, event) {
+  window.forgotPasswordOnEnter = function (el, event) {
     submitOnEnter(event, function () { window.forgotPassword(qs("forgot-submit")); });
   };
 
   window.resetPassword = async function (el) {
-    var username = normalizedValue("username");
     var code = normalizedValue("code");
     var passwordInput = qs("password");
+    var confirmationInput = qs("confirm-password");
     var password = passwordInput ? passwordInput.value : "";
-    if (!username || !code || !password) {
-      showNotice("error", tr("auth.all_fields_required"));
+    var confirmation = confirmationInput ? confirmationInput.value : "";
+    if (!code || !password || !confirmation) {
+      showNotice("error", tr("auth.reset_fields_required"));
+      return;
+    }
+    if (password !== confirmation) {
+      showNotice("error", tr("auth.password_mismatch"));
       return;
     }
     if (passwordScore(password) < 2) {
-      showNotice("error", tr("register.password_ph"));
+      showNotice("error", tr("reset.password_ph"));
       return;
     }
     setButtonLoading(el, true, tr("reset.submit"));
@@ -279,15 +282,19 @@
       var response = await fetch("/reset-password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: username, code: code, password: password })
+        body: JSON.stringify({
+          code: code,
+          password: password,
+          confirm_password: confirmation
+        })
       });
       var data = await response.json();
-      if (response.ok) {
-        showNotice("success", data.message + " " + tr("common.redirecting"));
-        window.setTimeout(function () { window.location.href = "/login"; }, 900);
-      } else {
+      if (!response.ok) {
         showNotice("error", data.error);
+        return;
       }
+      showNotice("success", data.message);
+      window.setTimeout(function () { window.location.href = data.next; }, 700);
     } catch (err) {
       showNotice("error", tr("common.conn_error_retry"));
     } finally {
@@ -295,7 +302,7 @@
     }
   };
 
-  window.resetOnEnter = function (el, event) {
+  window.resetPasswordOnEnter = function (el, event) {
     submitOnEnter(event, function () { window.resetPassword(qs("reset-submit")); });
   };
 
