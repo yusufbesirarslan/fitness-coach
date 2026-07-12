@@ -53,6 +53,33 @@ def test_fresh_init_stamps_trigger_predecessor_then_upgrades(monkeypatch):
             db.drop_all()
 
 
+def test_fresh_init_upgrade_failure_is_fatal_by_default(monkeypatch):
+    monkeypatch.delenv("FITX_SKIP_DB_INIT", raising=False)
+    monkeypatch.delenv("FITX_DB_UPGRADE_FAIL_OPEN", raising=False)
+
+    import flask_migrate
+
+    from app import create_app
+    from app.extensions import db
+
+    monkeypatch.setattr(flask_migrate, "stamp", lambda **_kwargs: None)
+
+    def fail_upgrade(**_kwargs):
+        raise RuntimeError("fresh migration failed")
+
+    monkeypatch.setattr(flask_migrate, "upgrade", fail_upgrade)
+
+    flask_app = None
+    try:
+        with pytest.raises(RuntimeError, match="fresh migration failed"):
+            flask_app = create_app()
+    finally:
+        if flask_app is not None:
+            with flask_app.app_context():
+                db.session.remove()
+                db.drop_all()
+
+
 @pytest.fixture
 def boot_app(monkeypatch):
     """FITX_SKIP_DB_INIT olmadan kurulan app — init_database gerçekten çalışır."""

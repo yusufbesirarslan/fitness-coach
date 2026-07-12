@@ -6,6 +6,13 @@ from app.models import DailyQuest
 from app.services.gamification import lb_rebuild
 
 
+def _handle_upgrade_failure(app, message):
+    db.session.rollback()
+    app.logger.exception(message)
+    if os.environ.get("FITX_DB_UPGRADE_FAIL_OPEN") != "1":
+        raise
+
+
 def init_database(app):
     # Alembic/Flask-Migrate komutları (flask db migrate/upgrade/stamp) app
     # factory'yi import eder; bu sırada create_all çalışırsa autogenerate boş
@@ -49,10 +56,10 @@ def init_database(app):
                 # boot ölür → container unhealthy → deploy health gate rollback
                 # yapar. Acil kaçış: FITX_DB_UPGRADE_FAIL_OPEN=1 eski davranışı
                 # (logla + devam et) geri getirir.
-                db.session.rollback()
-                app.logger.exception("[DB] Alembic upgrade başarısız — şema migration zinciri gerisinde kalmış olabilir.")
-                if os.environ.get("FITX_DB_UPGRADE_FAIL_OPEN") != "1":
-                    raise
+                _handle_upgrade_failure(
+                    app,
+                    "[DB] Alembic upgrade başarısız — şema migration zinciri gerisinde kalmış olabilir.",
+                )
 
         db.create_all()
         # I-M1: eski ham idempotent ALTER/UPDATE döngüsü KALDIRILDI. Tüm kolonlar
@@ -120,8 +127,10 @@ def init_database(app):
                     upgrade()
                     app.logger.info("[DB] Taze şema Alembic head'e yükseltildi.")
             except Exception:
-                db.session.rollback()
-                app.logger.exception("[DB] Taze şemayı Alembic zincirine alma başarısız.")
+                _handle_upgrade_failure(
+                    app,
+                    "[DB] Taze şemayı Alembic zincirine alma başarısız.",
+                )
 
         # Liderlik sorted set'lerini Postgres'ten doldur (Redis varsa). Redis sonradan
         # ayağa kalkarsa ilk leaderboard isteği zaten Postgres'e düşer; sonraki restart hidratlar.
