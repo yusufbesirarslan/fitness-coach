@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
       - name: Run tests
         # conftest.py tüm env'i hermetik kurar (in-memory SQLite, sahte anahtarlar,
         # REDIS_URL boş) → ek servise gerek yok.
@@ -68,7 +68,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
       - name: Apply Alembic migration chain
         run: flask --app starter db upgrade
       - name: Check models match migration head
