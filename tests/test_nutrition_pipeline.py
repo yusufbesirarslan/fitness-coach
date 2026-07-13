@@ -9,8 +9,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import nutrition_pipeline as np  # noqa: E402
-from nutrition_pipeline import (  # noqa: E402
+from app.services import nutrition_pipeline as np  # noqa: E402
+from app.services.nutrition_pipeline import (  # noqa: E402
     DISH_SERVING_DEFAULT_G,
     DISH_SERVING_MIN_G,
     MAX_KCAL_PER_100G,

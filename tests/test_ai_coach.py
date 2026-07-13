@@ -162,7 +162,7 @@ def test_commit_meal_clamps_absurd_staged_macros(auth_user):
     # Staged makrolar porsiyon-sanity kapısından geçmeden kanonik deftere
     # yazılıyordu (diyari/menü/UI hepsi kısarken koç yolu atlıyordu). Fiziksel
     # olarak imkânsız bir porsiyon (9999 kcal) makul tavanlara kısılmalı.
-    import nutrition_pipeline as np
+    from app.services import nutrition_pipeline as np
     db.session.add(PendingAction(
         user_id=auth_user.id, action_type="log_meal",
         payload={"food_name": "saçma porsiyon", "calories": 9999,
@@ -598,7 +598,7 @@ def test_fetch_coach_context_collects_sections_and_degrades(auth_user, monkeypat
 
 def test_fetch_coach_context_degrades_summary_supplements_and_nudges(auth_user, monkeypatch):
     import fitx_mcp.server as mcp_server
-    import analytics_engine
+    from app.services import analytics_engine
 
     def fail(*args, **kwargs):
         raise RuntimeError("db down")

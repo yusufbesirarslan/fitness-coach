@@ -2,7 +2,7 @@
 import json
 import re
 import s3_helper
-import nutrition_pipeline
+from app.services import nutrition_pipeline
 from datetime import datetime, timedelta
 from flask import current_app, g, session
 from sqlalchemy.exc import IntegrityError
@@ -279,7 +279,7 @@ def _fetch_coach_context(user_id, question="", language="tr"):
     except Exception:
         current_app.logger.warning("[COACH] arkadaş aktiviteleri alınamadı", exc_info=True)
 
-    from analytics_engine import get_nudges
+    from app.services.analytics_engine import get_nudges
     try:
         models = {
             "WorkoutLog": WorkoutLog,

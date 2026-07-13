@@ -2,7 +2,7 @@
 import hashlib
 import json
 import time
-import nutrition_pipeline
+from app.services import nutrition_pipeline
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode

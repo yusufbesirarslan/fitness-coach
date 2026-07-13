@@ -26,7 +26,7 @@ def _sanitize_meal_macros(kalori, protein, karb, yag):
 
     Oransal kırpma mantığı tek kaynakta (nutrition_pipeline.clamp_serving_macros);
     burada yalnızca kısılma olduysa loglarız."""
-    import nutrition_pipeline as _np
+    from app.services import nutrition_pipeline as _np
     clamped = _np.clamp_serving_macros(kalori, protein, karb, yag)
     if clamped != (kalori, protein, karb, yag):
         current_app.logger.warning("[NUTRITION] Plan makroları makul değil — kısılıyor")
@@ -43,7 +43,7 @@ def _clamp_item_macros(item):
     toplamları, protein nudge'ını ve haftalık raporları bozardı (H1). Per-item
     kıyma, çok-öğeli meşru bir öğün toplamını bozmadan yalnızca aykırı öğeyi düzeltir.
     """
-    import nutrition_pipeline as _np
+    from app.services import nutrition_pipeline as _np
     # clamp_serving_macros yalnızca POZİTİF üst-tavan taşmalarını oransal kırpar;
     # NEGATİF değerleri olduğu gibi geçirir. Bir istemci negatif serving_calories/
     # grams/serving_quantity göndererek MealLog toplamlarını (protein nudge, haftalık

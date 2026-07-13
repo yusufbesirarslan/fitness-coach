@@ -497,7 +497,7 @@ def last_session():
 @bp.route("/dashboard-nudges")
 @require_auth
 def dashboard_nudges():
-    from analytics_engine import get_nudges
+    from app.services.analytics_engine import get_nudges
     nudge_translations = {
         "NUDGE_MISSING_LOGS": "Son 48 saatte antrenman veya beslenme kaydın yok. Bugün hedeflerine bir adım daha yaklaş!",
         "NUDGE_NO_WORKOUT": "Son 48 saatte antrenman kaydı görünmüyor. Kısa bir antrenman bile fark yaratır.",

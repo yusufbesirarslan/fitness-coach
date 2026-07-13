@@ -645,7 +645,7 @@ def _process_meal_suggestion_accept(msg):
     # kapısından geçmeli (meallog.py/diary/ai_coach ile aynı tek kaynak) — aksi
     # halde FatSecret/LLM aykırı değeri ya da büyük fallback porsiyon ölçeği
     # (yukarıdaki 150g varsayılanı) deftere saçma bir makro satırı sızdırır.
-    import nutrition_pipeline as _np
+    from app.services import nutrition_pipeline as _np
     kalori, protein, karb, yag = _np.clamp_serving_macros(
         round(total["calories"], 1), round(total["protein"], 1),
         round(total["carbs"], 1), round(total["fat"], 1))
