@@ -33,6 +33,7 @@ services:
 
   redis:
     image: redis:alpine
+    user: redis
     container_name: fitx-redis
     # web ile tutarlı: manuel stop'a saygı duy (önceden 'always' idi — 3.11).
     restart: unless-stopped
