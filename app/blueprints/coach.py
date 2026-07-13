@@ -152,9 +152,8 @@ def ask_coach():
         return jsonify({"error": t("coach.chat_quota_reached"),
                         "premium_required": True}), 402
 
-    # Bağlam toplama psycopg2-bağımlı fitx_mcp.server'a dokunur; local'de veya
-    # geçici çökmede graceful degrade etsin diye sarmalanır — function-calling
-    # akışı (FatSecret + SQLAlchemy) buna bağlı değil, yine de çalışır.
+    # Bağlam sorgularında geçici DB arızası olsa bile function-calling akışı
+    # (FatSecret + SQLAlchemy) bağımsız olarak çalışmaya devam eder.
     lang = current_user.language
     try:
         context = _fetch_coach_context(current_user.id, question, language=lang)

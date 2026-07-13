@@ -1,3 +1,4 @@
+import ast
 import re
 from pathlib import Path
 
@@ -8,9 +9,27 @@ WEB_REQUIREMENTS = Path("requirements.txt")
 MCP_REQUIREMENTS = Path("requirements-mcp.txt")
 DEV_REQUIREMENTS = Path("requirements-dev.txt")
 CI_WORKFLOW = Path(".github/workflows/ci.yml")
+APP_ROOT = Path("app")
 
 
 FORBIDDEN_WEB_REQUIREMENTS = {'mcp', 'pytest', 'pytest-cov'}
+
+
+def test_app_runtime_does_not_import_fitx_mcp():
+    violations = []
+    for path in APP_ROOT.rglob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                imported = [node.module]
+            else:
+                continue
+            if any(name == "fitx_mcp" or name.startswith("fitx_mcp.") for name in imported):
+                violations.append(f"{path}:{node.lineno}")
+
+    assert not violations, f"production app imports fitx_mcp: {violations}"
 
 
 def _requirement_lines(path):
