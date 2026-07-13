@@ -289,10 +289,10 @@ def register():
         except Exception as e:
             # Cognito kullanıcı OLUŞTU ama yerel kayıt başarısız → Cognito ORPHAN
             # (Cognito'da hesap var, yerelde yok). UNSIGNED public client admin-delete
-            # yapamaz; ops temizliği/retry için AÇIKÇA logla — 500 ile sessizce yutma.
-            # Retry: aynı kullanıcı adıyla yeniden kayıt Cognito'dan UsernameExists
-            # alır; kullanıcı doğrulama+giriş yapınca get_or_create_user yerel kaydı
-            # bağlar (cognito_sub eşleşmesiyle), yani kullanıcı kilitlenmez.
+            # yapamaz; ops temizliği için AÇIKÇA logla — 500 ile sessizce yutma.
+            # Kurtarma (H2): kullanıcı e-postasını doğrulayıp giriş yaptığında
+            # _reconcile_local_user, DOĞRULANMIŞ id-token claim'lerinden yerel kaydı
+            # bağlar/oluşturur — yani orphan kullanıcı kilitlenmez.
             db.session.rollback()
             current_app.logger.error(
                 "[REGISTER] Cognito sign_up başarılı ama yerel commit başarısız "
@@ -308,6 +308,74 @@ def register():
         if request.cookies.get("fitx_ref"):
             resp.delete_cookie("fitx_ref")
         return resp
+
+def _reconcile_local_user(verified_claims, cognito_username):
+    """H2: DOĞRULANMIŞ Cognito kimliğine karşılık gelen yerel kaydı bağla/oluştur.
+
+    Neden var: /register önce Cognito'da kullanıcı yaratır, SONRA yerel satırı
+    commit'ler. Aradaki commit düşerse (örn. aynı e-postayla yarışan iki kayıt →
+    UNIQUE ihlali) Cognito'da hesap KALIR, yerelde satır YOKTUR = "orphan".
+    Böyle bir kullanıcı geri dönüşsüz kilitlenirdi: yeniden kayıt Cognito'dan
+    UsernameExists alır, giriş ise yerel satır bulunamadığı için 401'ler. UNSIGNED
+    (public) app client admin-delete YAPAMAZ, yani uygulama Cognito tarafını
+    temizleyemez de. Çözüm: girişte uzlaştır.
+
+    Girdi, authenticate()'in DOĞRULAMASIZ decode'u değil, cognito_jwt.validate_token
+    ile imzası/issuer/audience'ı sınanmış claim'lerdir — çağıran bunu garantiler.
+    """
+    sub = (verified_claims.get("sub") or "").strip()
+    email = (verified_claims.get("email") or "").strip().lower()
+    if not sub or not email:
+        return None
+
+    # Güvenlik çıpası: e-posta Cognito tarafından DOĞRULANMIŞ olmalı. Cognito
+    # email_verified'i ancak kullanıcı posta kutusuna gelen kodu girdikten sonra
+    # true yapar. Bu kontrol olmadan, başkasının adresiyle kayıt olan biri o
+    # adrese ait yerel hesabı kendine bağlayabilirdi.
+    verified = verified_claims.get("email_verified")
+    if verified is not True and str(verified).lower() != "true":
+        current_app.logger.warning(
+            "[LOGIN] orphan uzlaştırma reddedildi: email_verified değil (user=%s)",
+            cognito_username)
+        return None
+
+    existing = (User.query.filter_by(username=cognito_username).first()
+                or User.query.filter(func.lower(User.email) == email).first())
+    if existing is not None:
+        if existing.cognito_sub and existing.cognito_sub != sub:
+            # Yerel kayıt BAŞKA bir Cognito kimliğine bağlı — ASLA yeniden bağlama.
+            # Bu, aynı e-postayla ikinci kez kayıt olmuş (ve zaten çalışan bir
+            # hesabı bulunan) kullanıcının orphan'ıdır; kendi hesabıyla girmeli.
+            current_app.logger.warning(
+                "[LOGIN] orphan uzlaştırma atlandı: yerel kayıt başka bir sub'a "
+                "bağlı (user=%s)", cognito_username)
+            return None
+        existing.cognito_sub = sub
+        db.session.commit()
+        current_app.logger.info(
+            "[LOGIN] Cognito orphan kurtarıldı: mevcut yerel kayıt bağlandı (user=%s)",
+            cognito_username)
+        return existing
+
+    lang = session.get("lang") if session.get("lang") in AVAILABLE_LOCALES else "tr"
+    user = User(username=cognito_username, email=email, cognito_sub=sub,
+                full_name=(verified_claims.get("name") or cognito_username),
+                language=lang)
+    ensure_referral_code(user)
+    db.session.add(user)
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        current_app.logger.error(
+            "[LOGIN] orphan uzlaştırma başarısız: yerel kayıt oluşturulamadı "
+            "(user=%s)", cognito_username)
+        return None
+    current_app.logger.info(
+        "[LOGIN] Cognito orphan kurtarıldı: yerel kayıt oluşturuldu (user=%s)",
+        cognito_username)
+    return user
+
 
 @bp.route("/login", methods=["GET","POST"])
 @limiter.limit("10 per minute; 50 per hour", methods=["POST"])
@@ -331,14 +399,21 @@ def login():
             "throttle güvenilir değil.")
         return jsonify({"error": t("auth.login_unavailable")}), 503
     data = request.get_json(silent=True) or {}
-    username = data.get("username")
-    password = data.get("password")
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+
+    # L3: boş kimlik bilgisiyle Cognito'ya HİÇ gitme. Gizli app client
+    # yapılandırılmışsa _secret_hash(None) ClientError DEĞİL TypeError yükseltir
+    # → _wrap onu yakalayamaz ve temiz 401 yerine 500 döneriz. Ayrıca boş
+    # kullanıcı adı zaten kimlik doğrulayamaz; erkenden reddet.
+    if not username or not password:
+        return jsonify({"error": t("auth.bad_credentials")}), 401
 
     # Cognito is the credential authority. Authenticate first; only a verified
     # ID-token sub may select the local application profile.
     if COGNITO_ENABLED:
         try:
-            result = cognito_service.authenticate(username, password or "")
+            result = cognito_service.authenticate(username, password)
         except CognitoServiceError as e:
             # M7 (kabul edilen tradeoff): UserNotConfirmedException, "kayıtlı ama
             # doğrulanmamış" bir hesabı diğer hatalardan (generic bad_credentials,
@@ -361,10 +436,25 @@ def login():
         # anlamsızlaştırmasın.
         try:
             verified_claims = cognito_jwt.validate_token(tokens["id_token"], "id")
-        except TokenValidationError:
+        except TokenValidationError as e:
+            # H1: JWKS'e ULAŞILAMADI ≠ imza GEÇERSİZ. Parola doğruydu; token'ı
+            # doğrulayamamamızın nedeni bizim tarafımızdaki geçici bir kesinti.
+            # Bunu "şifren yanlış" (401) diye raporlamak kullanıcıyı yanıltır ve
+            # olayı gizler — geçici hata olarak 503 dön.
+            if e.reason == "jwks_unavailable":
+                resp = jsonify({"error": t("auth.temporarily_unavailable")})
+                resp.status_code = 503
+                resp.headers["Retry-After"] = "15"
+                return resp
             return jsonify({"error": t("auth.bad_credentials")}), 401
         sub = (verified_claims.get("sub") or "").strip()
         user = User.query.filter_by(cognito_sub=sub).first() if sub else None
+        if user is None:
+            # H2: Cognito'da hesap var ama yerelde yok = ORPHAN (kayıt sırasında
+            # sign_up başarılı olup yerel commit düştüğünde oluşur). Doğrulanmış
+            # claim'lerden yerel kaydı bağla/oluştur — aksi halde kullanıcı kalıcı
+            # olarak kilitlenir (yeniden kayıt UsernameExists alır, giriş 401'ler).
+            user = _reconcile_local_user(verified_claims, username)
         if user is None:
             return jsonify({"error": t("auth.bad_credentials")}), 401
         _login_fresh(user)
