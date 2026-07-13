@@ -43,12 +43,15 @@ kopya landing sprint'inin (Resend 2) görünümüyle birebirdir.
 - `GET/POST /forgot-password` — kullanıcı adı alır, `cognito_service.forgot_password`
   çağırır. Yanıt hesap-numaralandırmasına karşı JENERİKTİR: kullanıcı yok /
   doğrulanmamış / bilinmeyen hata → yine "kod gönderildi" (yalnızca Cognito'nun
-  throttle'ı dürüst 429 döner). Rate limit: 3 / 15 dk.
+  throttle'ı dürüst 429 döner). Rate limit: **5 / 15 dk**.
 - `GET/POST /reset-password` — kullanıcı adı + kod + yeni şifre;
   `cognito_service.confirm_forgot_password`. Kod/şifre kuralları Cognito'nundur.
   Rate limit: 10 / 15 dk. Başarıda bilgilendirme e-postası best-effort gider.
-- Bilinçli sınır: `ConfirmForgotPassword` mevcut refresh token'ları/oturumları
-  REVOKE ETMEZ; oturum yönetimi bu sprintin kapsamı dışında bırakıldı.
+- Başarılı sıfırlama **TÜM oturumları KAPATIR**: `reset_password`,
+  `session_store.delete_for_user(user.id)` ile kullanıcının sunucu tarafındaki
+  bütün Cognito oturum satırlarını siler ve Flask-Login durumunu temizler. (Bu,
+  Sprint 3'te eklendi; `ConfirmForgotPassword`'ün kendisi Cognito refresh
+  token'larını revoke etmez, revoke'u uygulama yapar.)
 
 ## Hata sözleşmesi — auth ASLA e-posta yüzünden düşmez
 
@@ -58,8 +61,33 @@ kopya landing sprint'inin (Resend 2) görünümüyle birebirdir.
   graceful'dır (loglar, None döner).
 - Lambda tarafı: `handler.handler` her hatayı yutar ve olayı geri döndürür —
   aksi halde Cognito SignUp/ForgotPassword çağrısı kullanıcıya hata dönerdi.
-  Bedeli: Lambda/Resend kırıksa kod e-postası SESSİZCE gitmez → CloudWatch
-  `[EMAIL-SENDER]` hata loglarına alarm bağlamak sonraki iyileştirmedir.
+
+### Bedeli ve ALARM (H5)
+
+Yutma sözleşmesi doğrudur ama bedeli ağırdır: trigger havuza bağlı olduğu için
+**Cognito artık kendi e-postalarını GÖNDERMEZ**. Lambda kırılırsa (bozuk
+`RESEND_API_KEY`, Resend kesintisi, KMS izin kayması, `aws-encryption-sdk` sürüm
+atlaması) doğrulama ve şifre-sıfırlama kodları **hiçbir kullanıcıya ulaşmaz**,
+ama `/register` ve `/forgot-password` neşe içinde 200 dönmeye devam eder. Yani
+kimse kayıt olamaz, kimse şifresini sıfırlayamaz ve hiçbir gösterge kırmızı
+yanmaz. Bu, sistemdeki en yüksek sonuçlu / en düşük görünürlüklü arıza modudur.
+
+Bu yüzden `infra/cognito-email-sender/template.yaml` şunları tanımlar:
+
+- **`EmailFailureMetricFilter`** — Lambda log grubunda `[ERROR]` / `[WARNING]` /
+  `RESEND_API_KEY` desenlerini sayar (`AxisAI/CognitoEmail EmailSendFailures`).
+  Sonuncusu "anahtar yok → sessiz no-op" vakasını yakalar.
+- **`EmailFailureAlarm`** — 5 dk içinde ≥1 hata → SNS.
+- **`EmailLambdaErrorsAlarm` / `EmailLambdaThrottlesAlarm`** — handler istisnaları
+  yuttuğu için Lambda `Errors` metriğine yalnızca handler'a ULAŞAMAYAN arızalar
+  düşer (INIT timeout / OOM — 256MB+5s ile bir kez yaşandı).
+
+**DLQ neden yok:** handler sözleşme gereği asla yükseltmez, dolayısıyla Lambda
+"başarılı" görünür ve DLQ'ya hiçbir şey düşmez. Yutulan istisna asıl arıza
+modudur; doğru enstrüman bu yüzden log metric filter'dır.
+
+Alarm e-postası `sam deploy --parameter-overrides AlarmEmail=<adres>` ile bağlanır
+ve **SNS onay e-postası tıklanmalıdır**, yoksa abonelik aktifleşmez.
 
 ## Loglama / PII politikası
 

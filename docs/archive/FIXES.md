@@ -1,5 +1,16 @@
 # Fitness Coach — Triage & Needed Fixes
 
+> **ARŞİV — GÜNCEL DEĞİL. BU BELGEYİ AÇIK BULGU LİSTESİ OLARAK KULLANMAYIN.**
+>
+> 2026-07-13'te `docs/STATUS.md` altında birleştirildi (STATUS.md zaten "tek
+> kanonik izleyici" olduğunu söylüyor ve kök dizinde `TRIAGE_*.md` çoğalmasını
+> yasaklıyordu). Buradaki bulguların bir kısmı ÇOKTAN ÇÖZÜLDÜ; örneğin
+> `TRIAGE_FINDINGS.md`, Sprint 2'de kapatılmış olan auth-bypass (S1) ve
+> doğrulanmamış-JWT (S3) bulgularını hâlâ AÇIK HIGH gibi gösteriyordu — bir
+> olay anında bu, insanı yanlış yola sokar.
+>
+> Güncel durum: [`docs/STATUS.md`](../STATUS.md). Tarihsel kayıt olarak saklanır.
+
 _Generated 2026-07-12 from a deep-dive triage of the `app/` package. Three
 independent passes covered (1) backend correctness/logic, (2) security, and
 (3) structure/config/deployment. `starter.py.bak` (stale 288 KB backup) was

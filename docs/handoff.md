@@ -255,10 +255,10 @@ suite. Focused Sprint 3 feedback remains under two minutes.
 
 - The suite emits many pre-existing `datetime.utcnow()` deprecation warnings on
   Python 3.14; migrate models/services to timezone-aware UTC incrementally.
-- `cognito_jwt.py` emits the Authlib JOSE deprecation warning; migrate fully to
-  `joserfc` before Authlib 2.0.
 - Native MFA and `NEW_PASSWORD_REQUIRED` challenge UI are not implemented;
-  unsupported challenges fail closed.
+  unsupported challenges fail closed. **Consequence:** enabling MFA on the pool
+  from the console would break *every* login. `scripts/check_cognito_pool.py`
+  now fails if `MfaConfiguration != OFF`.
 - Logout remains a same-site-guarded GET until navigation links migrate to POST.
 - Setup radio-card arrow-key behavior and browser-level visual/accessibility
   regression remain non-auth UI follow-ups.
