@@ -15,9 +15,9 @@ import time
 import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from joserfc import jwt
-from joserfc.jwk import RSAKey
+from joserfc.jwk import KeySet, RSAKey
 
-from app.services import cognito_service
+from app.services import cognito_jwt, cognito_service
 from app.services.cognito_service import CognitoServiceError
 
 
@@ -69,14 +69,22 @@ _SIGNING_KEY = RSAKey.import_key(
 _PUBLIC_JWKS = {"keys": [_SIGNING_KEY.as_dict(private=False)]}
 
 
+_ISSUER = "https://cognito-idp.eu-central-1.amazonaws.com/eu-central-1_test"
+
+
 def _use_fake(monkeypatch, fake):
     monkeypatch.setattr(cognito_service, "_get_client", lambda: fake)
     monkeypatch.setattr(cognito_service, "COGNITO_APP_CLIENT_ID", "client-123")
     monkeypatch.setattr(cognito_service, "COGNITO_REGION", "eu-central-1")
     monkeypatch.setattr(cognito_service, "COGNITO_USER_POOL_ID", "eu-central-1_test")
+    # L4: _decode_claims artık TEK doğrulayıcıya (cognito_jwt) delege eder —
+    # sahte JWKS'i ve pool kimliğini orada kur. cognito_service'in kendi
+    # joserfc doğrulayıcısı ve ayrı JWKS önbelleği KALDIRILDI.
+    monkeypatch.setattr(cognito_jwt, "COGNITO_APP_CLIENT_ID", "client-123")
+    monkeypatch.setattr(cognito_jwt, "_ISSUER", _ISSUER)
     monkeypatch.setattr(
-        cognito_service, "_get_jwks", lambda force_refresh=False: _PUBLIC_JWKS,
-        raising=False)
+        cognito_jwt, "_load_jwks",
+        lambda force=False: KeySet.import_key_set(_PUBLIC_JWKS))
     # Varsayılan: public client (secret yok) → SECRET_HASH üretilmez.
     monkeypatch.setattr(cognito_service, "COGNITO_CLIENT_SECRET", "")
 

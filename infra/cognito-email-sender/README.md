@@ -40,17 +40,53 @@ cp app/services/email_templates.py infra/cognito-email-sender/src/email_template
 cd infra/cognito-email-sender
 sam validate --lint
 sam build            # Windows'ta wheel sorunu görürsen: sam build --use-container
-sam deploy --parameter-overrides ResendApiKey=<RESEND_API_KEY>
+sam deploy --parameter-overrides \
+    ResendApiKey=<RESEND_API_KEY> \
+    AlarmEmail=<alarm-alacak-adres>
 ```
 
-Çıktılardan `FunctionArn` ve `KmsKeyArn` değerlerini not al. (API anahtarını
-asla commit'leme; her deploy'da `--parameter-overrides` ile ver — parametreyi
-vermezsen boş kalır ve KOD E-POSTALARI HİÇ GİTMEZ.)
+Çıktılardan `FunctionArn`, `KmsKeyArn` ve `AlarmTopicArn` değerlerini not al.
+(API anahtarını asla commit'leme; her deploy'da `--parameter-overrides` ile ver —
+parametreyi vermezsen boş kalır ve KOD E-POSTALARI HİÇ GİTMEZ.)
+
+> ### 🔔 `AlarmEmail` ve SNS ONAYI (H5)
+> Stack, e-posta gönderimi sessizce ölürse çalan alarmları tanımlar
+> (`EmailFailureAlarm`, `EmailLambdaErrorsAlarm`, `EmailLambdaThrottlesAlarm` →
+> SNS). **`AlarmEmail` verildikten sonra AWS'in gönderdiği SNS onay e-postasını
+> TIKLAMAN gerekir**; onaylanmayan abonelik sessizdir — yani alarm çalar, kimse
+> duymaz. Onayı `aws sns list-subscriptions-by-topic --topic-arn <AlarmTopicArn>`
+> ile doğrula (`SubscriptionArn` "PendingConfirmation" OLMAMALI).
+>
+> Neden bu kadar önemli: trigger bağlıyken **Cognito kendi e-postalarını
+> göndermez**. Lambda kırılırsa doğrulama/sıfırlama kodları hiç kimseye ulaşmaz
+> ama `/register` 200 dönmeye devam eder — kimse kayıt olamaz ve hiçbir gösterge
+> kırmızı yanmaz.
 
 ## 2) Trigger'ı kullanıcı havuzuna bağla (manuel — havuz IaC'de değil)
 
 Havuz (`eu-central-1_kaX0SORRK`) konsol-yönetimli olduğundan bu adım stack'te
 otomatikleştirilemez.
+
+> ### ⚠️ HAVUZUN BEKLENEN YAPILANDIRMASI (H4)
+> Havuz IaC'de olmadığı için, uygulamanın kimlik sağlayıcısı hakkındaki
+> VARSAYIMLARI sürümlenmemiş konsol ayarlarında yaşar ve sessizce kayabilir.
+> `scripts/check_cognito_pool.py` bunları HER DEPLOY'DA doğrular (şimdilik
+> bloklamadan; deploy rolüne `cognito-idp:DescribeUserPool` +
+> `DescribeUserPoolClient` eklendikten sonra bloklayıcı yapılabilir):
+>
+> | Ayar | Beklenen | Neden |
+> |---|---|---|
+> | `PreventUserExistenceErrors` | `ENABLED` | `auth.py` hesap-numaralandırma tradeoff'u **buna dayanır**: `UserNotConfirmedException` yalnızca parola DOĞRUYKEN döndüğü için kabul edilmiştir. Bayrak kapanırsa `/login` ve `/verify` GERÇEK bir numaralandırma oracle'ına döner. |
+> | `MfaConfiguration` | `OFF` | `cognito_service.authenticate()` TÜM challenge yanıtlarını reddeder (auth-bypass koruması). MFA açılırsa **hiçbir kullanıcı giriş yapamaz.** |
+> | `ExplicitAuthFlows` | `ALLOW_USER_PASSWORD_AUTH` + `ALLOW_REFRESH_TOKEN_AUTH` | native backend akışının kullandığı iki flow. |
+> | `Policies.PasswordPolicy.MinimumLength` | ≥ 8 | `validate_password` ile uyumlu olmalı. |
+> | `LambdaConfig.CustomEmailSender` | bağlı | yoksa markalı auth e-postaları sessizce Cognito varsayılanlarına döner. |
+>
+> Elle çalıştırmak için:
+> ```bash
+> python scripts/check_cognito_pool.py \
+>   --pool-id eu-central-1_kaX0SORRK --client-id 3rdtrk3vl1dp0m1d19gdc3pqib
+> ```
 
 Önce mevcut konfigürasyonu YEDEKLE (rollback için de gerekir):
 

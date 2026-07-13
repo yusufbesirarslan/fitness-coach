@@ -1,8 +1,8 @@
 # Fitness Coach (FitX)
 
 Flask + SQLAlchemy + Bedrock/Claude Sonnet (primary heavy AI path) + OpenAI
-(fallback/light paths, `gpt-4o-mini`) + FatSecret API proxy + Cognito OIDC +
-S3 avatar/meal image storage + Redis.
+(fallback/light paths, `gpt-4o-mini`) + FatSecret API proxy + Cognito (native
+backend API — Hosted UI/OIDC KAPALI) + S3 avatar/meal image storage + Redis.
 Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 
 ## Yapı
@@ -16,7 +16,7 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 - app/cli.py — flask CLI komutları (seed-quests, weekly-reset)
 - app/timeutil.py — TEK gün/saat kaynağı: sabit Europe/Istanbul (app_today/day_key/utc_day_bounds). Tüm gün anahtarları buradan; doğrudan date.today()/utcnow().strftime("%d.%m") KULLANMA
 - app/blueprints/ — auth, profile, nutrition, food, menu, training, tracking, social, gamification, supplements, coach
-- app/services/ — ai, ai_coach, ai_nutrition, calculations, fatsecret, foodcache, gamification, premium, referral, cognito/cognito_idp, avatars, injury_constraints, menu_extract/fetch/ocr, training_generation/, validators, email_service (merkezi Resend e-posta altyapısı — SDK'ya yalnızca bu modül dokunur; RESEND_API_KEY yoksa no-op), email_templates (markalı auth e-posta şablonları — saf stdlib, Lambda kopyasıyla bayt-eş tutulur: tests/test_email_templates_sync.py)
+- app/services/ — ai, ai_coach, ai_nutrition, calculations, fatsecret, foodcache, gamification, premium, referral, cognito_service (native cognito-idp sarmalayıcı; eski cognito.py/cognito_idp.py Sprint 3'te SİLİNDİ — Hosted UI/OIDC yok), cognito_jwt (uygulamadaki TEK JWT doğrulayıcı; cognito_service ona delege eder), session_store (Fernet ile şifreli sunucu-tarafı Cognito token deposu), avatars, injury_constraints, menu_extract/fetch/ocr, training_generation/, validators, email_service (merkezi Resend e-posta altyapısı — SDK'ya yalnızca bu modül dokunur; RESEND_API_KEY yoksa no-op), email_templates (markalı auth e-posta şablonları — saf stdlib, Lambda kopyasıyla bayt-eş tutulur: tests/test_email_templates_sync.py)
 - infra/cognito-email-sender/ — Cognito CustomEmailSender Lambda + KMS (SAM): doğrulama/sıfırlama kod e-postalarını Resend üzerinden markalı gönderir; havuza bağlama runbook'u README'sinde (mimari: docs/auth-emails.md)
 - fitx_mcp/ — MCP sunucusu (AI Coach DB araçları). DİKKAT: araçlar user_id'yi parametre alır, kendi yetkilendirmesi YOKTUR — yalnızca stdio/in-process kullan; HTTP taşıması FITX_MCP_ALLOW_HTTP=1 + loopback arkasındadır, asla public proxy'e koyma
 - nutrition_pipeline.py, analytics_engine.py — deterministik makro değerlendirme / nudge motoru
@@ -82,8 +82,12 @@ DailyActivity, CustomMeal, CustomMealItem
   (2) durum-değiştiren bir istek fetch DIŞINDA (XHR/sendBeacon) yapılıyorsa X-CSRFToken
   başlığını elle ekle, (3) state-changing route'u GET olarak açma (kapı yalnızca yazma
   metodlarında çalışır).
-- Deploy: push to main → .github/workflows/deploy.yml (AWS SSM) EC2'de compose'u
-  yeniden kurar, /health 200 gate'inden geçirmezse önceki commit'e rollback eder.
+- Deploy: push to main → **ci.yml (pytest + şema-drift) YEŞİL olursa** →
+  .github/workflows/deploy.yml (`workflow_run` ile CI'a kapılı) AWS SSM ile EC2'de
+  compose'u yeniden kurar, /health?deep=1 gate'inden geçirmezse önceki commit'e
+  rollback eder. CI kırmızıysa deploy HİÇ başlamaz (H3).
+  NOT: main branch koruması ayrıca GitHub ayarlarından açılmalıdır — buradaki gate
+  DEPLOY kapısıdır, branch koruması MERGE kapısıdır.
   Host nginx'te eski `add_header Content-Security-Policy` satırı kalırsa deploy
   canlı config'i sed ile değiştirmez; fail-fast yapar.
   DİKKAT (A2): rollback yalnızca KODU geri alır — boot'ta otomatik uygulanan DB

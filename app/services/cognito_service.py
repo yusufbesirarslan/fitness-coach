@@ -22,22 +22,12 @@ import base64
 import hashlib
 import hmac
 import logging
-import threading
-import time
-
-import requests
-from joserfc import jwt
-from joserfc.jwk import KeySet
-from joserfc.jwt import JWTClaimsRegistry
 
 from app.config import (COGNITO_APP_CLIENT_ID, COGNITO_CLIENT_SECRET,
                         COGNITO_REGION, COGNITO_USER_POOL_ID)
 
 _logger = logging.getLogger(__name__)
 _client = None
-_JWKS_TTL_SECONDS = 6 * 60 * 60
-_jwks_cache = {"value": None, "expires_at": 0.0}
-_jwks_lock = threading.Lock()
 
 # Ham Cognito hata adı → kullanıcıya gösterilebilir Türkçe mesaj. Listede olmayan
 # hatalar generic mesaja düşer (ham hata sızdırılmaz).
@@ -90,10 +80,16 @@ def _get_client():
 
 def _secret_hash(username):
     """App client'ın secret'i varsa SECRET_HASH üret; yoksa None (public client).
-    Cognito formülü: base64(HMAC_SHA256(secret, username + client_id))."""
+    Cognito formülü: base64(HMAC_SHA256(secret, username + client_id)).
+
+    L3: username None gelirse (username + ...) TypeError yükseltirdi — bu bir
+    ClientError DEĞİL, dolayısıyla _wrap onu kullanıcı hatasına çeviremez ve
+    çağıran temiz 401 yerine 500 alırdı. Boş dizeye normalize et; kimlik
+    doğrulaması Cognito tarafında zaten başarısız olur.
+    """
     if not COGNITO_CLIENT_SECRET:
         return None
-    msg = (username + COGNITO_APP_CLIENT_ID).encode("utf-8")
+    msg = ((username or "") + COGNITO_APP_CLIENT_ID).encode("utf-8")
     digest = hmac.new(COGNITO_CLIENT_SECRET.encode("utf-8"), msg, hashlib.sha256).digest()
     return base64.b64encode(digest).decode()
 
@@ -283,64 +279,30 @@ def global_sign_out(access_token):
 CognitoIdpError = CognitoServiceError
 
 
-def _get_jwks(force_refresh=False):
-    """Return Cognito signing keys with a short in-process rotation cache."""
-    now = time.monotonic()
-    cached = _jwks_cache["value"]
-    if not force_refresh and cached is not None and now < _jwks_cache["expires_at"]:
-        return cached
-    with _jwks_lock:
-        now = time.monotonic()
-        cached = _jwks_cache["value"]
-        if not force_refresh and cached is not None and now < _jwks_cache["expires_at"]:
-            return cached
-        url = (
-            f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/"
-            f"{COGNITO_USER_POOL_ID}/.well-known/jwks.json"
-        )
-        response = requests.get(url, timeout=5)
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict) or not isinstance(payload.get("keys"), list):
-            raise ValueError("Cognito JWKS response is invalid")
-        _jwks_cache["value"] = payload
-        _jwks_cache["expires_at"] = now + _JWKS_TTL_SECONDS
-        return payload
-
-
 def _decode_claims(id_token):
-    """Verify a Cognito ID token and return the identity claims used by auth."""
+    """Verify a Cognito ID token and return the identity claims used by auth.
+
+    L4: doğrulama cognito_jwt'ye DELEGE edilir. Burada ayrı bir joserfc
+    doğrulayıcısı + ayrı bir JWKS önbelleği vardı; iki uygulama, bir güvenlik
+    düzeltmesinin yalnızca birine inmesi riskini taşıyordu. Tek doğrulayıcı,
+    tek önbellek, tek anahtar-rotasyonu yolu. Sözleşme değişmedi: doğrulama
+    başarısızsa {} döner (yükseltmez) — authenticate() boş sub'ı zaten
+    "NoIdentity" ile reddeder.
+    """
     if not id_token or not COGNITO_USER_POOL_ID or not COGNITO_APP_CLIENT_ID:
         return {}
-    issuer = (
-        f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/"
-        f"{COGNITO_USER_POOL_ID}"
-    )
-    registry = JWTClaimsRegistry(
-        iss={"essential": True, "value": issuer},
-        aud={"essential": True, "value": COGNITO_APP_CLIENT_ID},
-        exp={"essential": True},
-        token_use={"essential": True, "value": "id"},
-        sub={"essential": True},
-    )
-    for force_refresh in (False, True):
-        try:
-            token = jwt.decode(
-                id_token,
-                KeySet.import_key_set(_get_jwks(force_refresh=force_refresh)),
-                algorithms=["RS256"],
-            )
-            registry.validate(token.claims)
-            claims = token.claims
-            return {
-                "sub": claims["sub"].strip(),
-                "email": (claims.get("email") or "").strip().lower(),
-                "email_verified": claims.get("email_verified", False),
-                "name": claims.get("name") or "",
-            }
-        except Exception as exc:
-            if force_refresh:
-                _logger.warning(
-                    "[COGNITO-IDP] ID token doğrulaması başarısız: %s",
-                    type(exc).__name__)
-    return {}
+    from app.services import cognito_jwt
+    try:
+        claims = cognito_jwt.validate_token(id_token, "id")
+    except cognito_jwt.TokenValidationError as exc:
+        _logger.warning("[COGNITO-IDP] ID token doğrulaması başarısız: %s", exc.reason)
+        return {}
+    sub = (claims.get("sub") or "").strip()
+    if not sub:
+        return {}
+    return {
+        "sub": sub,
+        "email": (claims.get("email") or "").strip().lower(),
+        "email_verified": claims.get("email_verified", False),
+        "name": claims.get("name") or "",
+    }

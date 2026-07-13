@@ -32,6 +32,16 @@ Parameters:
   EmailReplyTo:
     Type: String
     Default: hello@axisaiapp.com
+  AlarmEmail:
+    Type: String
+    Default: ''
+    Description: >
+      Alarm bildirimlerinin gidecegi e-posta (H5). Bos birakilirsa SNS konusu yine
+      olusur ama ABONE OLMAZ - alarm calar, kimse duymaz. Deploy sonrasi gelen SNS
+      onay e-postasini TIKLAMAYI unutma, yoksa abonelik aktiflesmez.
+
+Conditions:
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, '']]
 
 Resources:
   # Cognito, CustomEmailSender koduna giden dogrulama/sifirlama kodunu bu
@@ -116,6 +126,122 @@ Resources:
       SourceAccount: !Ref 'AWS::AccountId'
       SourceArn: !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}'
 
+  # ─────────────────────────────────────────────────────────────────────────
+  # H5 — SESSIZ BASARISIZLIK ALARMI.
+  #
+  # Trigger havuza baglandigi anda Cognito KENDI e-postalarini GONDERMEYI BIRAKIR.
+  # Yani bu Lambda kirilirsa (bozuk RESEND_API_KEY, Resend kesintisi, KMS izin
+  # kaymasi, aws-encryption-sdk surum atlamasi) dogrulama ve sifre-sifirlama
+  # kodlari HICBIR kullaniciya ulasmaz — ama /register ve /forgot-password
+  # nese icinde 200 donmeye devam eder. Kimse kayit olamaz, kimse sifresini
+  # sifirlayamaz ve hicbir gosterge kirmizi yanmaz.
+  #
+  # DLQ NEDEN YOK: handler sozlesme geregi ASLA exception yukseltmez (bkz.
+  # src/handler.py docstring) — bu dogru davranis, cunku e-posta hatasi Cognito
+  # SignUp cagrisini dusurmemeli. Ama bunun bedeli: Lambda "basarili" gorunur ve
+  # DLQ'ya hicbir sey dusmez. Yutulan istisna ASIL ariza modudur; dogru enstruman
+  # bu yuzden LOG METRIC FILTER'dir.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  EmailAlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: AxisAI Cognito email-sender alarms
+
+  EmailAlarmSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref EmailAlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+
+  # Log grubunu BILEREK bir AWS::Logs::LogGroup kaynagi olarak TANIMLAMIYORUZ:
+  # fonksiyon prod'da zaten calisti ve Lambda log grubunu OTOMATIK olusturdu;
+  # simdi CFN ile tanimlamak "already exists" hatasiyla stack'i dusururdu.
+  # Metric filter grubu ADIYLA referanslar (DependsOn: fonksiyon).
+  #
+  # Desen ASCII: Turkce karakterli mesaj metinlerine bagimli olmamak icin
+  # Lambda Python runtime'inin seviye etiketlerini ([ERROR]/[WARNING]) ve
+  # sessiz-devre-disi vakasinin tek isaretini (RESEND_API_KEY) yakalariz.
+  #   [ERROR]         → handler._handle icinde yutulan istisna
+  #   [WARNING]       → Resend gonderim hatasi / alici yok / sifreli kod yok
+  #   RESEND_API_KEY  → "servis kapali" (anahtar yok) = kod e-postalari HIC gitmez
+  # Log grubu yalnizca BU fonksiyona ait, dolayisiyla her ERROR/WARNING bizimdir.
+  EmailFailureMetricFilter:
+    Type: AWS::Logs::MetricFilter
+    DependsOn: EmailSenderFunction
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${EmailSenderFunction}'
+      FilterPattern: '?"[ERROR]" ?"[WARNING]" ?"RESEND_API_KEY"'
+      MetricTransformations:
+        - MetricNamespace: AxisAI/CognitoEmail
+          MetricName: EmailSendFailures
+          MetricValue: '1'
+          DefaultValue: 0
+
+  EmailFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: axisai-cognito-email-failures
+      AlarmDescription: >
+        Cognito auth e-postasi (dogrulama/sifirlama) gonderilemedi. Trigger bagli
+        oldugu icin Cognito yedek gondermez: kimse kayit olamiyor / sifre
+        sifirlayamiyor olabilir. Lambda loglarinda [EMAIL-SENDER] satirlarina bak.
+      Namespace: AxisAI/CognitoEmail
+      MetricName: EmailSendFailures
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      # Invoke yoksa metrik yoktur — bu bir ariza DEGILDIR (sessiz saatler).
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref EmailAlarmTopic]
+      OKActions: [!Ref EmailAlarmTopic]
+
+  # Lambda'nin KENDI hata metrikleri: handler yutsa da INIT asamasindaki hatalar
+  # (import timeout / OOM — 256MB+5s ile bir kez yasandi, bkz. yukarisi) buraya
+  # duser ve handler'a hic ulasmaz.
+  EmailLambdaErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: axisai-cognito-email-lambda-errors
+      AlarmDescription: >
+        Lambda invoke hatasi (INIT timeout / OOM / runtime crash). Handler
+        istisnalari yutar, dolayisiyla buradaki her hata handler'a ULASAMAYAN
+        bir arizadir.
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref EmailSenderFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref EmailAlarmTopic]
+
+  EmailLambdaThrottlesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: axisai-cognito-email-lambda-throttles
+      AlarmDescription: Lambda throttle - auth e-postalari kuyruklanmadan DUSER.
+      Namespace: AWS/Lambda
+      MetricName: Throttles
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref EmailSenderFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref EmailAlarmTopic]
+
 Outputs:
   FunctionArn:
     Description: update-user-pool --lambda-config CustomEmailSender.LambdaArn degeri
@@ -123,3 +249,6 @@ Outputs:
   KmsKeyArn:
     Description: update-user-pool --lambda-config KMSKeyID degeri
     Value: !GetAtt EmailKmsKey.Arn
+  AlarmTopicArn:
+    Description: Alarm SNS konusu - ek abone (Slack/PagerDuty) buraya baglanir.
+    Value: !Ref EmailAlarmTopic

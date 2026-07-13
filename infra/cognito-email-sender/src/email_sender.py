@@ -49,8 +49,9 @@ def _post_json(url, payload, headers, timeout=4):
     """Küçük urllib POST shim'i — testlerin monkeypatch'lediği dikiş.
 
     Özel User-Agent ZORUNLU: api.resend.com önündeki Cloudflare, urllib'in
-    varsayılan 'Python-urllib/x.y' agent'ını 403 ile engeller. Timeout, Cognito
-    trigger bütçesinin (Lambda Timeout=5s) altında kalacak şekilde kısadır."""
+    varsayılan 'Python-urllib/x.y' agent'ını 403 ile engeller. Timeout, Lambda'nın
+    invoke bütçesinin (template.yaml Timeout=20s; import + KMS decrypt + Resend
+    TLS bu bütçeyi paylaşır) rahatça altında kalacak şekilde kısadır."""
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),

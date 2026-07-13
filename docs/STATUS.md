@@ -8,7 +8,68 @@ is what this document replaces). The historical point-in-time reports were prune
 Roadmap detail for the in-flight workstream lives in
 [`updates-plan-2026-06-28.md`](updates-plan-2026-06-28.md).
 
-Last updated: 2026-06-28.
+Last updated: 2026-07-13.
+
+> **2026-07-13 — root tracker sprawl consolidated.** Six competing trackers had
+> reappeared at the repo root (`FIXES.md`, `FIXES_NEEDED.md`, `NEEDED_FIXES.md`,
+> `TRIAGE_2026-07-05.md`, `TRIAGE_2026-07-11.md`, `TRIAGE_FINDINGS.md`) — exactly
+> what the paragraph above forbids. They are archived under
+> [`docs/archive/`](archive/) with a "not current" banner. This mattered beyond
+> tidiness: `TRIAGE_FINDINGS.md` still presented the Cognito **auth bypass (S1)**
+> and **unverified JWT signature (S3)** as open HIGH findings even though both
+> were fixed in Sprint 2 — during an incident that sends the reader down the
+> wrong path.
+
+---
+
+## Sprint 1–3 production audit (2026-07-13)
+
+Full pre-Sprint-4 audit. No Critical issues and no exploitable auth bypass were
+found; the gaps were **operational**. Recurring theme: the app handled its own
+failures gracefully but treated *transient infrastructure failures as permanent
+user-facing failures*, and could not tell you when its most critical path had
+silently died.
+
+| # | Finding | Status | Where |
+|---|---------|--------|-------|
+| H1 | Transient Cognito/JWKS failure permanently destroyed sessions (correlated mass logout on one throttle) | ✅ Fixed | `session_store.SessionTransient`, `auth_middleware._service_unavailable` → 503 + `Retry-After`, session preserved |
+| H2 | Register race orphaned the account permanently; the documented recovery path (`get_or_create_user`) had been deleted | ✅ Fixed | `auth._reconcile_local_user` — links/creates from **verified** claims |
+| H3 | `main` unprotected and deploy not gated on CI (deploy raced CI) | ✅ Fixed (deploy gate) / ⚠ manual (branch protection) | `deploy.yml` `workflow_run` on CI success |
+| H4 | Cognito pool not in IaC; `PreventUserExistenceErrors`/MFA/auth-flows unenforced | ✅ Non-blocking drift check | `scripts/check_cognito_pool.py`, run each deploy |
+| H5 | Auth-email delivery failed silently with **zero** alerting; real KMS decrypt path never ran in CI | ✅ Fixed | SNS + metric filter + 3 alarms in `template.yaml`; real `_decrypt_code` now tested |
+| M1 | Session purge depended on an unversioned host cron | ✅ Fixed | daily NX-locked purge in `hooks.maybe_weekly_rollover` |
+| M2 | No Docker log rotation → disk exhaustion takes down everything | ✅ Fixed | `logging:` caps on both compose services |
+| M3 | `/health?deep=1` public: posture disclosure + outbound amplification | ✅ Fixed | loopback/private-only gate |
+| M4 | Plaintext `.env` on host (RDS creds, token key, API keys) | ⚠ Hardened, SSM deferred | deploy enforces `chmod 600`; see below |
+| M5 | Rollback reverts code but not migrations | ✅ Mitigated | non-blocking pre-deploy RDS snapshot |
+| L1 | nginx sent `Connection: upgrade` on every request | ✅ Fixed | `map $http_upgrade $connection_upgrade` |
+| L2 | Repo `nginx.conf` drifted from prod and is never deployed | ✅ Fixed | correct `server_name`; labelled a source template (certbot owns the live file) |
+| L3 | `_secret_hash(None)` → `TypeError` → 500 instead of 401 | ✅ Fixed | empty creds rejected pre-Cognito; `_secret_hash` null-safe |
+| L4 | Two JWT validators, two JWKS caches (Authlib + joserfc) | ✅ Fixed | single joserfc validator; `cognito_service` delegates to `cognito_jwt` |
+| L5 | Stale comments (deleted `get_or_create_user`; Lambda timeout 5s vs 20s) | ✅ Fixed | — |
+| D1–D8 | Docs described previous sprints' behavior as current | ✅ Fixed | `cognito.md`, `auth-emails.md`, `CLAUDE.md`, this file |
+
+### M4 — secrets: accepted state and the next step
+
+`docker-compose.yml` loads `.env` via `env_file`, so `SECRET_KEY`, the RDS
+credentials, `COGNITO_TOKEN_ENC_KEY`, `RESEND_API_KEY` and `OPENAI_API_KEY` live
+in a plaintext file on the host and are visible via `docker inspect` /
+`/proc/<pid>/environ`. Deploy now enforces `chmod 600` on that file, but that is
+hardening, not a fix.
+
+This is inconsistent with the rest of the project, which already uses an **EC2
+instance profile** for S3 and Bedrock precisely so no long-lived keys are stored.
+The identity-provider and database secrets simply never got the same treatment.
+
+**Rotation coupling worth knowing before an incident:** rotating `SECRET_KEY` or
+`COGNITO_TOKEN_ENC_KEY` invalidates *every active session* (the first signs
+session cookies; the second decrypts the stored Cognito tokens). So the incentive
+to rotate after an exposure runs exactly backwards. Plan the rotation during a
+low-traffic window and expect all users to be logged out.
+
+**Next step (not done):** move these to SSM Parameter Store (SecureString) and
+fetch at boot using the existing instance profile. Requires `ssm:GetParameters`
++ `kms:Decrypt` on the EC2 instance role.
 
 ---
 

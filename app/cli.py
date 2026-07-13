@@ -38,6 +38,12 @@ def weekly_reset_cmd():
     click.echo(run_weekly_rollover())
     # I5: haftalık bakım penceresinde 30+ gün dokunulmamış Cognito oturum
     # satırlarını da süpür (refresh penceresi dolmuştur, yenilenemezler).
+    #
+    # M1: süpürme ARTIK yalnızca bu cron'a BAĞLI DEĞİL. app/hooks.py, rollover ile
+    # aynı Redis NX-kilit desenini kullanarak günde bir kez uygulama içinden de
+    # süpürür — çünkü bu komutun varsaydığı host cron'u repo'da hiçbir yerde
+    # kurulmuyordu (bir host yeniden kurulumunda sessizce kaybolabilirdi ve
+    # tablo sınırsız büyümeye devam ederdi). Burada kalması zararsız: idempotent.
     from app.services import session_store
     removed = session_store.purge_expired()
     click.echo(f"cognito-sessions purged: {removed}")

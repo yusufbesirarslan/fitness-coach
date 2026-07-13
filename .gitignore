@@ -26,3 +26,6 @@ coverage.xml
 
 # SAM build artifacts (infra/)
 .aws-sam/
+
+# Local isolated feature worktrees
+.worktrees/

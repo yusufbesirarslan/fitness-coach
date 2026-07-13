@@ -292,7 +292,10 @@ def test_rollover_throttle_redis_error_falls_back_to_in_memory(monkeypatch):
     assert hooks._rollover_throttle_passed(now) is True    # Redis patladı → süreç-içi yedek
 
 
-def test_weekly_rollover_receives_istanbul_now(monkeypatch):
+def test_weekly_rollover_receives_istanbul_now(app, monkeypatch):
+    # `app` fixture: hook artık rollover'dan sonra oturum süpürmesi de yapıyor
+    # (M1) ve bu DB'ye dokunur — before_request olarak zaten HER ZAMAN app
+    # context'inde çalışır, test de öyle koşmalı.
     from datetime import datetime
     from app import hooks
     from app.timeutil import APP_TZ
@@ -307,3 +310,83 @@ def test_weekly_rollover_receives_istanbul_now(monkeypatch):
     hooks.maybe_weekly_rollover()
 
     assert captured == [istanbul_now]
+
+
+# ---------------------------------------------------------------------------
+# M1 — süresi geçmiş Cognito oturumlarının süpürülmesi ZAMANLANMIŞ olmalı.
+#
+# purge_expired'ın tek çağıranı weekly-reset CLI'ıydı ve o da yalnızca bir EC2
+# host cron'unun VAR OLDUĞUNU VARSAYIYORDU; repo'da/compose'da/deploy'da o cron'u
+# kuran hiçbir şey yok. Cron eksikse tablo sınırsız büyür ve süresi geçmiş
+# ŞİFRELİ refresh token'lar saklanmaya devam eder.
+# ---------------------------------------------------------------------------
+
+def test_rollover_hook_also_purges_expired_sessions(app, monkeypatch):
+    from app import hooks
+
+    calls = []
+    monkeypatch.setattr(hooks, "_rollover_throttle_passed", lambda now: True)
+    monkeypatch.setattr(hooks, "_purge_throttle_passed", lambda now: True)
+    monkeypatch.setattr(hooks, "run_weekly_rollover", lambda now: None)
+
+    from app.services import session_store
+    monkeypatch.setattr(session_store, "purge_expired", lambda: calls.append(1))
+
+    hooks.maybe_weekly_rollover()
+    assert calls == [1]
+
+
+def test_purge_skipped_while_throttle_held(app, monkeypatch):
+    from app import hooks
+
+    calls = []
+    monkeypatch.setattr(hooks, "_rollover_throttle_passed", lambda now: True)
+    monkeypatch.setattr(hooks, "_purge_throttle_passed", lambda now: False)
+    monkeypatch.setattr(hooks, "run_weekly_rollover", lambda now: None)
+
+    from app.services import session_store
+    monkeypatch.setattr(session_store, "purge_expired", lambda: calls.append(1))
+
+    hooks.maybe_weekly_rollover()
+    assert calls == []
+
+
+def test_purge_runs_even_when_rollover_raises(app, monkeypatch):
+    """Süpürme rollover'a BAĞLI olmamalı: rollover patlasa da oturum satırları
+    süpürülmeye devam etmeli (ayrı sorumluluk, ayrı throttle)."""
+    from app import hooks
+
+    calls = []
+    monkeypatch.setattr(hooks, "_rollover_throttle_passed", lambda now: True)
+    monkeypatch.setattr(hooks, "_purge_throttle_passed", lambda now: True)
+
+    def boom(now):
+        raise RuntimeError("rollover patladı")
+
+    monkeypatch.setattr(hooks, "run_weekly_rollover", boom)
+
+    from app.services import session_store
+    monkeypatch.setattr(session_store, "purge_expired", lambda: calls.append(1))
+
+    hooks.maybe_weekly_rollover()
+    assert calls == [1]
+
+
+def test_purge_throttle_uses_redis_nx_lock_fleet_wide(app, monkeypatch):
+    """Redis varsa süpürme fleet-genelinde günde bir kez çalışmalı."""
+    from datetime import datetime
+    from app import hooks
+    import app.extensions as ext
+
+    seen = {}
+
+    class _FakeRedis:
+        def set(self, key, value, nx=False, ex=None):
+            seen["key"], seen["nx"], seen["ex"] = key, nx, ex
+            return True if key not in seen.get("held", ()) else None
+
+    monkeypatch.setattr(ext, "redis_client", _FakeRedis())
+    assert hooks._purge_throttle_passed(datetime.utcnow()) is True
+    assert seen["key"] == "fitx:session_purge"
+    assert seen["nx"] is True
+    assert seen["ex"] == 86400

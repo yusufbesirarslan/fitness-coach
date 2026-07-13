@@ -1,5 +1,6 @@
-"""@require_auth davranış testleri: anonim reddi, legacy geçişi, cognito geçerli,
-süre-dolumunda yenileme, yenileme başarısızlığında geçersiz kılma.
+"""@require_auth davranış testleri: anonim reddi, cognito kimliği olmayan
+kullanıcının reddi, süre-dolumunda yenileme, KESİN yenileme hatasında geçersiz
+kılma ve (H1) GEÇİCİ altyapı hatasında oturumun KORUNMASI.
 
     python -m pytest tests/test_require_auth.py -v
 """
@@ -129,6 +130,89 @@ def test_verified_sub_must_resolve_same_user(
         "access_token": "a", "refresh_token": "r", "id_token": "i", "expires_in": 3600,
     }, "cog")
     _login_session(client, cognito_user, sid)
+    assert client.get(probe_route).status_code == 302
+    assert session_store.get(sid) is None
+
+
+# ---------------------------------------------------------------------------
+# H1 — GEÇİCİ altyapı hatası oturumu ÖLDÜRMEZ.
+#
+# Eskiden require_auth her hatayı tek bir yıkıcı dala (_invalidate → satırı SİL)
+# indiriyordu. Cognito throttle'ı ya da bir ağ timeout'u, access token'ın süresi
+# dolduğu anda (kullanıcı başına ~saatte bir) oturumu GERİ DÖNÜŞSÜZ siliyordu.
+# Token süreleri kullanıcı popülasyonunda kabaca eşzamanlı dolduğu için bu,
+# tek bir Cognito olayında KORELE toplu logout üretebiliyordu.
+# ---------------------------------------------------------------------------
+
+def _expired_session(cognito_user):
+    sid = session_store.create(cognito_user, {"access_token": "old", "refresh_token": "r",
+                                              "id_token": "i", "expires_in": 3600}, "cog")
+    row = session_store.get(sid)
+    row.access_token_exp = datetime.utcnow() - timedelta(minutes=1)
+    db.session.commit()
+    return sid
+
+
+@pytest.mark.parametrize("code", [
+    "TooManyRequestsException",   # Cognito throttle
+    "InternalErrorException",     # Cognito iç hatası
+    "LimitExceededException",
+    "ServiceUnavailableException",
+    "",                           # kodsuz = botocore connect/read timeout, ağ kesintisi
+])
+def test_transient_refresh_failure_preserves_session(
+        client, probe_route, cognito_user, monkeypatch, code):
+    """Yenileme GEÇİCİ olarak başarısız → 503 + Retry-After, oturum satırı DURUR."""
+    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use: {"sub": "sub-cog"})
+    from app.services import cognito_service
+
+    def transient(ref, uname):
+        raise cognito_service.CognitoServiceError("gecici", code)
+
+    monkeypatch.setattr(cognito_service, "refresh_tokens", transient)
+    sid = _expired_session(cognito_user)
+    _login_session(client, cognito_user, sid)
+
+    resp = client.get(probe_route)
+    assert resp.status_code == 503
+    assert resp.headers.get("Retry-After")
+    # KRİTİK: oturum satırı korunmalı — kesinti geçince kullanıcı devam etsin.
+    assert session_store.get(sid) is not None
+
+
+def test_jwks_unavailable_preserves_session(
+        client, probe_route, cognito_user, monkeypatch):
+    """JWKS çekilemedi = imza DOĞRULANAMADI, 'imza GEÇERSİZ' DEĞİL.
+
+    cognito_jwt bu nedeni özellikle ayrı tutuyor (test_cognito_jwt.py); burada
+    da 503'e çevrilmeli, oturum silinmemeli. Soğuk JWKS önbelleği her taze
+    konteynerde (yani her deploy'dan sonra) gerçeğe dönüşen bir durumdur.
+    """
+    def unavailable(tok, use):
+        raise cognito_jwt.TokenValidationError("jwks_unavailable")
+
+    monkeypatch.setattr(cognito_jwt, "validate_token", unavailable)
+    sid = session_store.create(cognito_user, {"access_token": "a", "refresh_token": "r",
+                                              "id_token": "i", "expires_in": 3600}, "cog")
+    _login_session(client, cognito_user, sid)
+
+    resp = client.get(probe_route)
+    assert resp.status_code == 503
+    assert session_store.get(sid) is not None
+
+
+def test_invalid_signature_still_invalidates(
+        client, probe_route, cognito_user, monkeypatch):
+    """Karşı-test: KESİN ret hâlâ yıkıcı olmalı — geçici/kesin ayrımı, kesin
+    reddi yumuşatarak yapılmadı."""
+    def bad(tok, use):
+        raise cognito_jwt.TokenValidationError("invalid_signature")
+
+    monkeypatch.setattr(cognito_jwt, "validate_token", bad)
+    sid = session_store.create(cognito_user, {"access_token": "a", "refresh_token": "r",
+                                              "id_token": "i", "expires_in": 3600}, "cog")
+    _login_session(client, cognito_user, sid)
+
     assert client.get(probe_route).status_code == 302
     assert session_store.get(sid) is None
 

@@ -1,5 +1,16 @@
 # FitX — Triage Report & Needed Fixes
 
+> **ARŞİV — GÜNCEL DEĞİL. BU BELGEYİ AÇIK BULGU LİSTESİ OLARAK KULLANMAYIN.**
+>
+> 2026-07-13'te `docs/STATUS.md` altında birleştirildi (STATUS.md zaten "tek
+> kanonik izleyici" olduğunu söylüyor ve kök dizinde `TRIAGE_*.md` çoğalmasını
+> yasaklıyordu). Buradaki bulguların bir kısmı ÇOKTAN ÇÖZÜLDÜ; örneğin
+> `TRIAGE_FINDINGS.md`, Sprint 2'de kapatılmış olan auth-bypass (S1) ve
+> doğrulanmamış-JWT (S3) bulgularını hâlâ AÇIK HIGH gibi gösteriyordu — bir
+> olay anında bu, insanı yanlış yola sokar.
+>
+> Güncel durum: [`docs/STATUS.md`](../STATUS.md). Tarihsel kayıt olarak saklanır.
+
 _Living action list. Each run of the deep-dive triage appends its findings at the top and
 preserves prior history below. No code is changed during triage — this document is the list._
 

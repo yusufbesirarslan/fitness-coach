@@ -92,6 +92,7 @@ def test_expired_token_triggers_refresh(app, cog_user, monkeypatch):
 
 
 def test_refresh_failure_invalidates(app, cog_user, monkeypatch):
+    """KESİN ret (refresh token iptal/süresi dolmuş) → satır SİLİNİR."""
     def boom(ref, uname):
         raise cognito_service.CognitoServiceError("Oturum yenilenemedi.", "NotAuthorizedException")
     monkeypatch.setattr(cognito_service, "refresh_tokens", boom)
@@ -102,6 +103,35 @@ def test_refresh_failure_invalidates(app, cog_user, monkeypatch):
     with pytest.raises(SessionInvalid):
         session_store.get_valid_access_token(sid)
     assert session_store.get(sid) is None  # satır silindi
+
+
+# H1: GEÇİCİ hata ≠ KESİN ret. cognito_service._wrap HER şeyi (throttle, Cognito
+# iç hatası, botocore connect/read timeout) CognitoServiceError'a çevirir; eskiden
+# hepsi satırı SİLİYORDU. Access token'lar ~saatte bir yenilendiği için bu, tek bir
+# Cognito throttle olayında korele bir toplu logout üretebiliyordu.
+@pytest.mark.parametrize("code", [
+    "TooManyRequestsException", "InternalErrorException",
+    "LimitExceededException", "ServiceUnavailableException",
+    "",  # kodsuz = ağ/timeout (_wrap'in "beklenmeyen hata" dalı)
+])
+def test_transient_refresh_failure_preserves_row(app, cog_user, monkeypatch, code):
+    def transient(ref, uname):
+        raise cognito_service.CognitoServiceError("gecici", code)
+    monkeypatch.setattr(cognito_service, "refresh_tokens", transient)
+    sid = session_store.create(cog_user, _tokens(3600), "cg")
+    row = session_store.get(sid)
+    row.access_token_exp = datetime.utcnow() - timedelta(minutes=1)
+    db.session.commit()
+
+    with pytest.raises(session_store.SessionTransient):
+        session_store.get_valid_access_token(sid)
+    assert session_store.get(sid) is not None  # oturum KORUNDU
+
+
+def test_transient_is_not_a_session_invalid_subclass():
+    """Çağıranlar ikisini AYIRT edebilmeli; SessionTransient bir SessionInvalid
+    olsaydı `except SessionInvalid` onu da yakalar ve yıkıcı dala sokardı."""
+    assert not issubclass(session_store.SessionTransient, SessionInvalid)
 
 
 def test_purge_expired_removes_only_stale_sessions(app, cog_user):

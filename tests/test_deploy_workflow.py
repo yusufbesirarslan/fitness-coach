@@ -50,3 +50,42 @@ def test_deploy_gate_uses_deep_health():
     # dönüşünü ölçer, Redis'i değil.)
     body = _deploy_yaml()
     assert "http://127.0.0.1:5000/health?deep=1" in body
+
+
+def test_deploy_is_gated_on_ci_success():
+    """H3: deploy CI'a KAPILI olmalı.
+
+    Eskiden `push: main` ile tetikleniyor ve ci.yml ile PARALEL koşuyordu — ne
+    `needs:` ne `workflow_run:` vardı. main branch koruması da yok (API: 404
+    "Branch not protected"), yani testleri kıran bir commit prod'a gidebiliyordu.
+    """
+    body = _deploy_yaml()
+    assert "workflow_run:" in body
+    assert 'workflows: ["CI"]' in body
+    assert "github.event.workflow_run.conclusion == 'success'" in body
+    # Ham `push:` tetikleyicisi GİTMİŞ olmalı — yoksa gate baypas edilir.
+    assert "\n  push:\n" not in body
+
+
+def test_deploy_checks_cognito_pool_config_drift():
+    # H4: havuz IaC'de değil; uygulamanın kimlik sağlayıcısı hakkındaki
+    # varsayımları (PreventUserExistenceErrors, MFA, auth flows) her deploy'da
+    # doğrulanmalı. Şimdilik bloklamaz (deploy rolünde izin yok).
+    body = _deploy_yaml()
+    assert "scripts/check_cognito_pool.py" in body
+
+
+def test_deploy_takes_pre_deploy_rds_snapshot():
+    # M5: rollback migration'ları geri almaz (A2). Snapshot, kurtarılamaz olayı
+    # kurtarılabilir yapar. RDS_INSTANCE_ID yoksa uyarır, deploy'u bloklamaz.
+    body = _deploy_yaml()
+    assert "aws rds create-db-snapshot" in body
+    assert "RDS_INSTANCE_ID" in body
+
+
+def test_deploy_enforces_env_file_permissions():
+    # M4: .env düz metin SECRET_KEY, RDS kimlik bilgileri, COGNITO_TOKEN_ENC_KEY,
+    # RESEND_API_KEY ve OPENAI_API_KEY taşır — grup/dünya okunabilir OLMAMALI.
+    body = _deploy_yaml()
+    assert "chmod 600" in body
+    assert ".env" in body

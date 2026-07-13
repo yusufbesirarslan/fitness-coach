@@ -154,3 +154,123 @@ def test_sender_disabled_is_silent_noop(monkeypatch, caplog):
     with caplog.at_level(logging.INFO):
         assert handler.handler(event, None) is event
     assert "atlandı" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# H5 — GERÇEK şifre-çözme yolu (_decrypt_code) ARTIK test ediliyor.
+#
+# Bu dosyadaki DİĞER her test _decrypt_code'u monkeypatch'liyor; sonuç olarak
+# gerçek AWS Encryption SDK yolu — ve özellikle Cognito'nun ciphertext'inin
+# ZORUNLU kıldığı FORBID_ENCRYPT_ALLOW_DECRYPT commitment policy'si — CI'da HİÇ
+# çalışmıyordu. SDK'nın varsayılanı REQUIRE_ENCRYPT_REQUIRE_DECRYPT'tir ve
+# Cognito'nun (key commitment OLMADAN şifrelenmiş) kodunu REDDEDER. Yani bir
+# bağımlılık yükseltmesi ya da masum bir refactor bu politikayı düşürseydi 1331
+# testin hepsi yeşil kalır, PROD'DA HESAP OLUŞTURMA KIRILIRDI.
+#
+# Gerçek fonksiyon gövdesini, sys.modules'a enjekte edilen sahte bir SDK ile
+# çalıştırıyoruz: ağ yok, KMS yok, ama sözleşme (politika + key id + base64)
+# gerçekten sınanıyor.
+# ---------------------------------------------------------------------------
+
+import base64  # noqa: E402
+import types  # noqa: E402
+
+_KMS_ARN = "arn:aws:kms:eu-central-1:123456789012:key/abc-123"
+
+
+class _FakeCommitmentPolicy:
+    FORBID_ENCRYPT_ALLOW_DECRYPT = "FORBID_ENCRYPT_ALLOW_DECRYPT"
+    REQUIRE_ENCRYPT_REQUIRE_DECRYPT = "REQUIRE_ENCRYPT_REQUIRE_DECRYPT"  # SDK varsayılanı
+
+
+@pytest.fixture
+def fake_sdk(monkeypatch):
+    """aws_encryption_sdk'yi sys.modules'a enjekte et; GERÇEK _decrypt_code koşsun."""
+    seen = {}
+
+    class _FakeClient:
+        def __init__(self, commitment_policy=None):
+            seen["commitment_policy"] = commitment_policy
+
+        def decrypt(self, source=None, key_provider=None):
+            seen["source"] = source
+            seen["key_provider"] = key_provider
+            return b"424242", {"header": "fake"}
+
+    def _fake_key_provider(key_ids=None):
+        seen["key_ids"] = key_ids
+        return "key-provider"
+
+    module = types.ModuleType("aws_encryption_sdk")
+    module.EncryptionSDKClient = _FakeClient
+    module.CommitmentPolicy = _FakeCommitmentPolicy
+    module.StrictAwsKmsMasterKeyProvider = _fake_key_provider
+
+    monkeypatch.setitem(sys.modules, "aws_encryption_sdk", module)
+    monkeypatch.setenv("KMS_KEY_ARN", _KMS_ARN)
+    return seen
+
+
+def test_real_decrypt_uses_forbid_encrypt_allow_decrypt_policy(fake_sdk):
+    """Cognito, kodu key commitment OLMADAN şifreler. SDK'nın varsayılan
+    REQUIRE_ENCRYPT_REQUIRE_DECRYPT politikası bu ciphertext'i REDDEDER —
+    FORBID_ENCRYPT_ALLOW_DECRYPT zorunludur. Regresyon kapısı."""
+    handler._decrypt_code(base64.b64encode(b"ciphertext").decode())
+
+    assert fake_sdk["commitment_policy"] == \
+        _FakeCommitmentPolicy.FORBID_ENCRYPT_ALLOW_DECRYPT
+    assert fake_sdk["commitment_policy"] != \
+        _FakeCommitmentPolicy.REQUIRE_ENCRYPT_REQUIRE_DECRYPT
+
+
+def test_real_decrypt_scopes_key_provider_to_configured_kms_key(fake_sdk):
+    handler._decrypt_code(base64.b64encode(b"ciphertext").decode())
+    assert fake_sdk["key_ids"] == [_KMS_ARN]
+
+
+def test_real_decrypt_base64_decodes_ciphertext_and_returns_plaintext(fake_sdk):
+    """Cognito kodu base64 taşır; SDK'ya HAM bayt verilmeli."""
+    result = handler._decrypt_code(base64.b64encode(b"ciphertext").decode())
+    assert fake_sdk["source"] == b"ciphertext"
+    assert result == "424242"
+
+
+def test_handler_end_to_end_through_real_decrypt(fake_sdk, monkeypatch):
+    """_decrypt_code monkeypatch'siz TAM akış: olay → gerçek çözme dikişi →
+    şablon → Resend. Şifre çözme yolu artık handler sözleşmesine dahil."""
+    monkeypatch.setattr(email_sender, "RESEND_API_KEY", _KEY)
+    posts = []
+    monkeypatch.setattr(email_sender, "_post_json",
+                        lambda url, payload, headers, timeout=4:
+                        posts.append(payload) or {"id": "msg-real-1"})
+
+    event = _event("CustomEmailSender_SignUp",
+                   code=base64.b64encode(b"ciphertext").decode())
+    assert handler.handler(event, None) is event
+
+    assert len(posts) == 1
+    assert "424242" in posts[0]["html"]  # çözülen kod e-postaya girdi
+
+
+def test_handler_still_never_raises_when_real_decrypt_fails(monkeypatch, caplog):
+    """Sözleşme korunuyor: gerçek SDK yolu patlasa BİLE handler yükseltmez —
+    aksi halde Cognito SignUp cagrisi kullanıcıya hata dönerdi."""
+    broken = types.ModuleType("aws_encryption_sdk")
+
+    class _Boom:
+        def __init__(self, commitment_policy=None):
+            raise RuntimeError("SDK bozuk")
+
+    broken.EncryptionSDKClient = _Boom
+    broken.CommitmentPolicy = _FakeCommitmentPolicy
+    broken.StrictAwsKmsMasterKeyProvider = lambda key_ids=None: None
+    monkeypatch.setitem(sys.modules, "aws_encryption_sdk", broken)
+    monkeypatch.setenv("KMS_KEY_ARN", _KMS_ARN)
+
+    event = _event("CustomEmailSender_SignUp",
+                   code=base64.b64encode(b"ciphertext").decode())
+    with caplog.at_level(logging.ERROR):
+        assert handler.handler(event, None) is event
+    # ...ama SESSİZ de kalmaz: bu satır CloudWatch metric filter'ının ([ERROR])
+    # yakaladığı ve alarma bağlandığı satırdır (H5).
+    assert "[EMAIL-SENDER]" in caplog.text

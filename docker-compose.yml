@@ -21,6 +21,16 @@ services:
       - "127.0.0.1:5000:5000"
     env_file:
       - .env
+    # Log rotasyonu ZORUNLU. Varsayılan json-file sürücüsünün max-size'ı YOKTUR:
+    # gunicorn --access-logfile - + observability.log_request istek BAŞINA satır
+    # yazar, yani log dosyası sınırsız büyür. Tek EC2 host'unda sabit bir EBS
+    # diskiyle bu, eninde sonunda diski doldurur ve web + redis + deploy'u BİRLİKTE
+    # düşürür. mem_limit diskin dolmasına karşı hiçbir şey yapmaz.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     # Veritabanı: AWS RDS PostgreSQL. Bağlantı .env'deki DATABASE_URL'den gelir;
     # compose ARTIK override ETMEZ (önceden bundled "db" servisine yönlendiriyordu).
     # .env'de DATABASE_URL=postgresql://...rds.amazonaws.com:5432/... ZORUNLU;
@@ -55,6 +65,12 @@ services:
     # host eşlemesi yalnızca EC2 üzerinden redis-cli ile bakmak içindir, dışarı kapalı.
     ports:
       - "127.0.0.1:6379:6379"
+    # web ile aynı gerekçe: sınırsız log = dolu disk = tüm servisler birden düşer.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       # Konteyner silinse bile sorted-set verisi kalır (Postgres yine de kaynaktır).
       - redis_data:/data

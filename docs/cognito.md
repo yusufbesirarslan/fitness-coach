@@ -37,8 +37,16 @@ Configuration is read from `.env` through `app/config.py`:
 4. On Cognito success, Flask creates the local `User` row with `email`,
    `username`, `cognito_sub`, `created_at`, language/profile defaults, referral
    code support, and existing metadata behavior.
-5. New Cognito users store `password_hash = NULL`. Legacy local users keep their
-   existing password hashes and old authentication remains available.
+5. New Cognito users store `password_hash = NULL`. **Local password authentication
+   no longer exists** — it was removed in Sprint 3. Cognito is the sole credential
+   authority; `tests/test_auth_audit.py` asserts `password_hash` appears nowhere in
+   the auth path.
+6. If the local commit fails after `sign_up` succeeded (e.g. two concurrent
+   signups race on the same email and the second `INSERT` violates the unique
+   constraint), the Cognito user survives without a local row — a **Cognito
+   orphan**. The user is not locked out: at login,
+   `auth._reconcile_local_user` links or creates the local row from the
+   **cryptographically verified** ID-token claims. See "Orphan Recovery" below.
 
 ## Verification Flow
 
@@ -87,10 +95,22 @@ backward-compatibility fallback (see the `# TODO(Sprint 3)` markers).
 ### JWT Validation (`cognito_jwt.py`)
 
 `validate_token(token, expected_use)` fetches and caches the pool JWKS and
-verifies signature, `iss` (the user-pool URL), `aud`/`client_id`, `exp`, and
-`token_use` (`id` vs `access`). Signature/issuer/audience/expiry/use mismatches
-raise `TokenValidationError`. A key id absent from the cache triggers a single
-JWKS refetch (key rotation) before failing.
+verifies signature (RS256), `iss` (the user-pool URL), `aud`/`client_id`, `exp`,
+and `token_use` (`id` vs `access`). Signature/issuer/audience/expiry/use
+mismatches raise `TokenValidationError`. A key id absent from the cache triggers
+a single JWKS refetch (key rotation) before failing.
+
+**This is the only JWT validator in the application.** `cognito_service._decode_claims`
+delegates to it. Until Sprint 3 there were *two* — an Authlib one here and a
+joserfc one in `cognito_service`, each with its own JWKS cache — which meant a
+security fix could land in one and be silently missed in the other. Both are now
+`joserfc` behind this single entry point (which also removes the Authlib JOSE
+deprecation warnings and the Authlib 2.0 migration deadline).
+
+`TokenValidationError.reason` is load-bearing, not cosmetic: `jwks_unavailable`
+means *"the signature could not be checked"*, which is emphatically **not**
+*"the signature is invalid"*. Callers must not conflate them — see the transient
+vs. definitive table below.
 
 ### Session Lifecycle (server-side, encrypted)
 
@@ -124,12 +144,31 @@ Every protected endpoint uses `@require_auth` (`app/auth_middleware.py`) instead
 of `@login_required`. `require_auth`:
 
 - rejects anonymous requests via `login_manager.unauthorized()` (→ `/login`);
-- for a **legacy** user (no `cognito_sub`) passes straight through — local-login
-  users keep working during migration;
-- for a **Cognito** user, resolves `cognito_sid` → `get_valid_access_token`
-  (refresh-on-expiry) → `validate_token(access, "access")`; any
-  `SessionInvalid`/`TokenValidationError` invalidates the session and redirects
-  to `/login`. Validated claims are stashed on `g.cognito_claims`.
+- **has no legacy passthrough.** A user without a `cognito_sub` (or without a
+  server-side session row) is invalidated, not waved through — see
+  `tests/test_require_auth.py::test_user_without_cognito_identity_invalidated`;
+- for a Cognito user, resolves `cognito_sid` → `get_valid_access_token`
+  (refresh-on-expiry) → `validate_token(access, "access")`. Validated claims are
+  stashed on `g.cognito_claims`.
+
+#### Transient vs. definitive failure (H1)
+
+`require_auth` distinguishes *"this session is dead"* from *"we could not reach
+Cognito right now"*. This matters because invalidation is **destructive** — it
+deletes the server-side session row, and that cannot be undone.
+
+| Failure | Classification | Result |
+|---|---|---|
+| `NotAuthorizedException` (refresh token revoked/expired), invalid signature, wrong issuer/audience/use, expired, idle/absolute timeout, user mismatch | **definitive** | session row deleted → `/login` |
+| `TooManyRequestsException`, `LimitExceededException`, `InternalErrorException`, `ServiceUnavailableException`, botocore connect/read timeout (no error code) | **transient** | `SessionTransient` → **503 + `Retry-After`, session preserved** |
+| `TokenValidationError("jwks_unavailable")` — JWKS could not be *fetched* (≠ signature invalid) | **transient** | 503 + `Retry-After`, session preserved |
+
+Why it matters: access tokens refresh roughly hourly and expire at roughly the
+same time across a user population, and the JWKS cache is **cold on every fresh
+container** (i.e. right after each deploy). Treating a Cognito throttle or a
+brief network fault as "not authenticated" would produce a correlated mass
+logout from a transient blip. The classification lives in
+`session_store._TRANSIENT_COGNITO_CODES`.
 
 `/logout` intentionally keeps `@login_required` (it must run for a user whose
 Cognito session is already invalid, and it does its own CSRF check).
@@ -212,7 +251,7 @@ protected unless it appears in this reviewed allowlist.
 | Endpoint | Methods | Why public | Rate limit | CSRF |
 | --- | --- | --- | --- | --- |
 | `/static/<path>` | GET | Browser assets | Flask static handling | Not applicable |
-| `/health` | GET | Liveness/deploy gate | None | Not applicable |
+| `/health` | GET | Liveness/deploy gate. **`?deep=1` is honored only from loopback/private source addresses** (see below) | None | Not applicable |
 | `/welcome` | GET | Marketing/entry page | None | Not applicable |
 | `/davet/<code>` | GET | Referral entry and first-party cookie handoff | None | Read/navigation only |
 | `/set-language` | POST | Pre-login language choice | 30/hour | Origin + synchronizer token |
@@ -231,6 +270,52 @@ Because existing clients use navigation links, it retains GET with an explicit
 `Sec-Fetch-Site`/`Referer` same-site guard, performs best-effort Cognito global
 sign-out, deletes the local session row, and clears Flask-Login state.
 
+#### `/health?deep=1` is internal-only (M3)
+
+The shallow `/health` stays fully public (liveness). The **deep** view is served
+only to loopback/private source addresses, because it discloses internal posture
+(`login: ok|offline`, `redis`, `bedrock`, `fatsecret_proxy`, `limiter_storage`)
+and triggers an outbound request per call. An anonymous caller watching for
+`login: offline` would learn exactly when Redis is down and login is fail-closed
+— i.e. the best moment to start a campaign. A public caller passing `deep=1`
+receives the **shallow body with 200**, not a 403; a 403 would itself be a signal.
+
+The gate accepts private ranges, not just loopback: compose publishes
+`127.0.0.1:5000:5000`, so the deploy gate's `curl 127.0.0.1:5000` arrives through
+docker-proxy and gunicorn sees the *bridge gateway* (e.g. `172.17.0.1`). Real
+internet traffic arrives via nginx, which appends the true client IP with
+`$proxy_add_x_forwarded_for`, and `ProxyFix(x_for=1)` reads the rightmost entry —
+so a spoofed `X-Forwarded-For: 127.0.0.1` cannot pass this gate.
+
+### Orphan Recovery (`_reconcile_local_user`)
+
+`/register` creates the Cognito user **first**, then commits the local `User` row.
+If that commit fails, the Cognito account survives with no local row — a *Cognito
+orphan*. This is reachable without a database outage: two concurrent signups with
+the **same email but different usernames** both pass the pre-check, both succeed
+at Cognito (which keys on username), and the second local `INSERT` violates the
+unique email constraint.
+
+Such a user was previously **permanently locked out**: re-registering returns
+`UsernameExistsException`, logging in returned 401 forever (no local row), and the
+`UNSIGNED` public app client cannot `admin-delete` the stranded Cognito user, so
+the application could not clean up either side.
+
+At login, when a verified `sub` resolves to no local user, `_reconcile_local_user`
+runs against the claims returned by `validate_token` (**never** `authenticate()`'s
+unverified decode):
+
+1. `email_verified` must be true and an email must be present — Cognito only sets
+   this after the user proves mailbox control. This is the security anchor;
+   without it, someone registering with another person's address could bind
+   themselves to that person's local account.
+2. A local row found by username or verified email **with `cognito_sub IS NULL`**
+   is linked to the `sub`.
+3. A local row bound to a **different** `sub` is never rebound — the request 401s
+   and the existing row is untouched. (That case is the same human signing up
+   twice with one email; they already have a working account to log into.)
+4. Otherwise a local row is created from the verified claims.
+
 ### Known limitations and future enhancements
 
 - Cognito challenge responses such as MFA and `NEW_PASSWORD_REQUIRED` are
@@ -242,9 +327,6 @@ sign-out, deletes the local session row, and clears Flask-Login state.
 - Cognito IDP and JWKS calls are synchronous. Existing network timeouts bound
   failures, but higher scale should move identity-provider work behind dedicated
   capacity and monitoring.
-- `app/services/cognito_jwt.py` still emits Authlib JOSE deprecation warnings;
-  migrate that validator fully to `joserfc` before Authlib 2.0 compatibility is
-  removed.
 - Add browser-level recovery accessibility and visual regression coverage in
   addition to the current template, route, and JavaScript contract tests.
 

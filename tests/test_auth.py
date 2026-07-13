@@ -526,3 +526,165 @@ def test_login_returns_quest_awarded_when_login_quest_exists(client, make_user, 
     response = login("questuser")
     assert response.status_code == 200
     assert response.get_json()["quest_awarded"]  # login quest tamamlandı → ödül döndü
+
+
+# ---------------------------------------------------------------------------
+# H2 — Cognito ORPHAN kurtarma.
+#
+# /register önce Cognito'da kullanıcı yaratır, SONRA yerel satırı commit'ler.
+# Araya çakışan bir kayıt girip UNIQUE kısıtını ihlal ettirirse Cognito'da hesap
+# KALIR ama yerelde satır YOKTUR. Eskiden bu kullanıcı KALICI olarak kilitliydi:
+# yeniden kayıt UsernameExists alır, giriş ise yerel satır bulunamadığı için
+# 401'ler; UNSIGNED public client Cognito tarafını temizleyemez de.
+# Artık giriş, DOĞRULANMIŞ id-token claim'lerinden yerel kaydı bağlar/oluşturur.
+# ---------------------------------------------------------------------------
+
+def _verified_claims(monkeypatch, sub, email, name="", email_verified=True):
+    """cognito_jwt.validate_token'ı TAM (doğrulanmış) claim seti dönecek şekilde kur."""
+    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use: {
+        "sub": sub, "email": email, "email_verified": email_verified,
+        "name": name,
+    })
+
+
+def _make_orphan(client, monkeypatch, username="yarisan", email="orphan@example.com"):
+    """Gerçek orphan üret: sign_up başarılı, yerel commit UNIQUE ihlaliyle düşer."""
+    from app.extensions import db
+
+    def racing_sign_up(username, password, email, name):
+        db.session.add(User(username="araya_giren", email=email, password_hash="x"))
+        db.session.commit()
+        return f"sub-{username}"
+
+    monkeypatch.setattr(cognito_service, "sign_up", racing_sign_up)
+    resp = _register(client, username, email=email)
+    assert resp.status_code == 409
+    assert User.query.filter_by(username=username).first() is None  # orphan doğrulandı
+    # Yarışan satırı temizle ki e-posta serbest kalsın (gerçekte farklı e-posta olurdu).
+    User.query.filter_by(username="araya_giren").delete()
+    db.session.commit()
+    return resp
+
+
+def test_cognito_orphan_recovers_at_login(client, cognito_native, monkeypatch):
+    """Orphan kullanıcı giriş yapabilmeli — yerel kayıt claim'lerden oluşturulur."""
+    _make_orphan(client, monkeypatch)
+    _verified_claims(monkeypatch, "sub-yarisan", "orphan@example.com", name="Yarisan")
+    monkeypatch.setattr(cognito_service, "authenticate", lambda u, p: {
+        "tokens": {"access_token": "acc", "id_token": "id", "refresh_token": "ref",
+                   "expires_in": 3600},
+        "claims": {"sub": "sub-yarisan"},
+    })
+
+    resp = client.post("/login", json={"username": "yarisan", "password": "Sifre123"})
+    assert resp.status_code == 200
+
+    recovered = User.query.filter_by(username="yarisan").one()
+    assert recovered.cognito_sub == "sub-yarisan"
+    assert recovered.email == "orphan@example.com"
+    assert recovered.password_hash is None  # giriş yalnızca Cognito üzerinden
+
+
+def test_orphan_recovery_links_existing_unbound_row(client, cognito_native, monkeypatch):
+    """Yerel satır VAR ama cognito_sub'u yok (sign_up sonrası sub yazımı düşmüş)
+    → yeni satır AÇMA, mevcut satırı bağla."""
+    from app.extensions import db
+    db.session.add(User(username="bagsiz", email="bagsiz@example.com"))
+    db.session.commit()
+
+    _verified_claims(monkeypatch, "sub-bagsiz", "bagsiz@example.com")
+    monkeypatch.setattr(cognito_service, "authenticate", lambda u, p: {
+        "tokens": {"access_token": "acc", "id_token": "id", "refresh_token": "ref",
+                   "expires_in": 3600},
+        "claims": {"sub": "sub-bagsiz"},
+    })
+
+    resp = client.post("/login", json={"username": "bagsiz", "password": "Sifre123"})
+    assert resp.status_code == 200
+    assert User.query.filter_by(email="bagsiz@example.com").count() == 1  # kopya YOK
+    assert User.query.filter_by(username="bagsiz").one().cognito_sub == "sub-bagsiz"
+
+
+def test_orphan_recovery_never_rebinds_row_owned_by_another_sub(
+        client, cognito_native, monkeypatch):
+    """Yerel kayıt BAŞKA bir Cognito kimliğine bağlıysa ASLA yeniden bağlama —
+    aksi halde aynı e-postayla kayıt olan biri mevcut hesabı ele geçirebilirdi."""
+    from app.extensions import db
+    db.session.add(User(username="sahip", email="sahip@example.com",
+                        cognito_sub="sub-GERCEK-SAHIP"))
+    db.session.commit()
+
+    # Saldırgan/ikinci kayıt: farklı sub, AYNI (doğrulanmış) e-posta.
+    _verified_claims(monkeypatch, "sub-DAVETSIZ", "sahip@example.com")
+    monkeypatch.setattr(cognito_service, "authenticate", lambda u, p: {
+        "tokens": {"access_token": "acc", "id_token": "id", "refresh_token": "ref",
+                   "expires_in": 3600},
+        "claims": {"sub": "sub-DAVETSIZ"},
+    })
+
+    resp = client.post("/login", json={"username": "davetsiz", "password": "Sifre123"})
+    assert resp.status_code == 401
+    # Kurbanın kaydı DOKUNULMAMIŞ olmalı.
+    assert User.query.filter_by(username="sahip").one().cognito_sub == "sub-GERCEK-SAHIP"
+    assert User.query.filter_by(username="davetsiz").first() is None
+
+
+def test_orphan_recovery_requires_verified_email(client, cognito_native, monkeypatch):
+    """email_verified false → uzlaştırma YOK. Bu, e-posta sahipliği kanıtının
+    tek çıpası; olmadan başkasının adresiyle hesap bağlanabilirdi."""
+    _verified_claims(monkeypatch, "sub-suphe", "suphe@example.com", email_verified=False)
+    monkeypatch.setattr(cognito_service, "authenticate", lambda u, p: {
+        "tokens": {"access_token": "acc", "id_token": "id", "refresh_token": "ref",
+                   "expires_in": 3600},
+        "claims": {"sub": "sub-suphe"},
+    })
+
+    resp = client.post("/login", json={"username": "suphe", "password": "Sifre123"})
+    assert resp.status_code == 401
+    assert User.query.filter_by(username="suphe").first() is None
+
+
+# ---------------------------------------------------------------------------
+# H1 / L3 — giriş yolunda geçici hata ve boş kimlik bilgisi.
+# ---------------------------------------------------------------------------
+
+def test_login_jwks_unavailable_returns_503_not_401(client, cognito_native, monkeypatch):
+    """JWKS'e ulaşılamadı ≠ şifre yanlış. Parola DOĞRUYDU; 401 demek kullanıcıyı
+    yanıltır ve olayı gizler."""
+    _register(client, "jwksuser")
+    client.post("/verify", json={"username": "jwksuser", "code": "123456"})
+
+    def unavailable(tok, use):
+        raise cognito_jwt.TokenValidationError("jwks_unavailable")
+
+    monkeypatch.setattr(cognito_jwt, "validate_token", unavailable)
+    resp = client.post("/login", json={"username": "jwksuser", "password": "Sifre123"})
+    assert resp.status_code == 503
+    assert resp.headers.get("Retry-After")
+
+
+def test_login_empty_credentials_rejected_before_cognito_call(
+        client, cognito_native, monkeypatch):
+    """L3: boş kullanıcı adı Cognito'ya HİÇ gitmemeli. Gizli app client
+    yapılandırılmışsa _secret_hash(None) TypeError → 500 üretirdi."""
+    called = {"n": 0}
+
+    def spy(username, password):
+        called["n"] += 1
+        raise AssertionError("Cognito boş kimlik bilgisiyle çağrılmamalı")
+
+    monkeypatch.setattr(cognito_service, "authenticate", spy)
+
+    for payload in ({"username": "", "password": "Sifre123"},
+                    {"username": "user", "password": ""},
+                    {}):
+        resp = client.post("/login", json=payload)
+        assert resp.status_code == 401
+    assert called["n"] == 0
+
+
+def test_secret_hash_null_username_does_not_raise(monkeypatch):
+    """L3 (savunma katmanı): gizli client + None username TypeError YÜKSELTMEZ."""
+    monkeypatch.setattr(cognito_service, "COGNITO_CLIENT_SECRET", "s3cr3t")
+    monkeypatch.setattr(cognito_service, "COGNITO_APP_CLIENT_ID", "client-123")
+    assert isinstance(cognito_service._secret_hash(None), str)
