@@ -41,7 +41,15 @@ services:
     # sınırsız büyüyüp host'u OOM'a sürükleyebilir. allkeys-lru: bellek dolunca en az
     # kullanılanı at — leaderboard Postgres'ten yeniden kurulabilir (kaynak Postgres),
     # limiter eviction'ı yalnızca rate-limit sayaçlarını sıfırlar (kabul edilebilir).
-    command: redis-server --maxmemory ${REDIS_MAXMEMORY:-200mb} --maxmemory-policy allkeys-lru --save 60 1
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    command:
+      - sh
+      - -c
+      - >-
+        exec redis-server --maxmemory ${REDIS_MAXMEMORY:-200mb}
+        --maxmemory-policy allkeys-lru --save 60 1
+        --requirepass "$$REDIS_PASSWORD"
     # Sadece loopback'e bağla — uygulama compose ağından "redis:6379" ile erişir;
     # host eşlemesi yalnızca EC2 üzerinden redis-cli ile bakmak içindir, dışarı kapalı.
     ports:
@@ -50,7 +58,7 @@ services:
       # Konteyner silinse bile sorted-set verisi kalır (Postgres yine de kaynaktır).
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 10s
       timeout: 3s
       retries: 5
