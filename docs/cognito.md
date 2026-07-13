@@ -21,8 +21,8 @@ through backend API calls.
 Configuration is read from `.env` through `app/config.py`:
 
 - `AWS_REGION=eu-central-1`
-- `COGNITO_USER_POOL_ID=eu-central-1_t8wbHpN3z`
-- `COGNITO_APP_CLIENT_ID=122df28apoafq08mb02bo23juf`
+- `COGNITO_USER_POOL_ID=eu-central-1_kaX0SORRK`
+- `COGNITO_APP_CLIENT_ID=3rdtrk3vl1dp0m1d19gdc3pqib`
 - `COGNITO_CLIENT_SECRET=` only when the app client has a secret
 
 ## Registration Flow
