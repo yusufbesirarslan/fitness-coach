@@ -196,6 +196,34 @@ def _rollover_throttle_passed(now):
     return True
 
 
+# M1: süresi geçmiş Cognito oturum satırlarının süpürülmesi. purge_expired'ın
+# TEK çağıranı weekly-reset CLI'ıydı ve o da yalnızca bir EC2 host cron'unun VAR
+# OLDUĞUNU VARSAYIYORDU — repo'da, compose'da veya deploy'da bu cron'u kuran
+# hiçbir şey yok. Cron eksikse (ya da bir host yeniden kurulumunda kaybolduysa)
+# tablo sınırsız büyür ve 30 günü geçmiş, artık yenilenemeyen şifreli refresh
+# token'ları saklamaya devam eder. Zamanlamayı repo'ya al: rollover ile aynı
+# NX-kilit desenini kullanan, kendi kendini onaran GÜNLÜK bir süpürme.
+_last_purge_check = [None]
+_PURGE_INTERVAL_SECONDS = 86400
+
+
+def _purge_throttle_passed(now):
+    """Günde bir kez, fleet genelinde tek worker süpürsün."""
+    from app.extensions import redis_client
+    if redis_client is not None:
+        try:
+            return bool(redis_client.set("fitx:session_purge", "1", nx=True,
+                                         ex=_PURGE_INTERVAL_SECONDS))
+        except Exception:
+            pass  # Redis erişilemiyor → süreç-içi yedeğe düş
+
+    last = _last_purge_check[0]
+    if last is not None and (now - last).total_seconds() < _PURGE_INTERVAL_SECONDS:
+        return False
+    _last_purge_check[0] = now
+    return True
+
+
 def maybe_weekly_rollover():
     now = datetime.utcnow()
     if not _rollover_throttle_passed(now):
@@ -207,6 +235,17 @@ def maybe_weekly_rollover():
         # Sessizce yutma: rollover hatası liderlik/ödül tutarlılığını bozabilir,
         # olay tespiti için logla (S6/3.6).
         current_app.logger.warning("[ROLLOVER] Haftalık rollover başarısız", exc_info=True)
+
+    # Bakım penceresini paylaş ama AYRI throttle kullan: rollover haftalık,
+    # süpürme günlüktür ve rollover hata verse bile süpürme çalışmalıdır.
+    if not _purge_throttle_passed(now):
+        return
+    try:
+        from app.services import session_store
+        session_store.purge_expired()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.warning("[SESSION] Oturum süpürme başarısız", exc_info=True)
 
 
 def update_streak():
