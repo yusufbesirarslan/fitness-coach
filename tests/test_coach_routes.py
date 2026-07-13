@@ -43,6 +43,14 @@ def test_chat_non_numeric_rejected(client, auth_user):
     assert response.status_code == 400
 
 
+@pytest.mark.parametrize("field,value", [
+    ("weight", []), ("height", {}), ("age", [30]),
+])
+def test_chat_non_scalar_numeric_rejected(client, auth_user, field, value):
+    response = client.post("/chat", json={**CHAT_PAYLOAD, field: value})
+    assert response.status_code == 400
+
+
 def test_chat_first_session_no_comparison(client, auth_user, fake_reply):
     response = client.post("/chat", json=CHAT_PAYLOAD)
     assert response.status_code == 200

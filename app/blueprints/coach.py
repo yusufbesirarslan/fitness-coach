@@ -39,7 +39,7 @@ def chat():
         weight = float(data["weight"])
         height = float(data["height"])
         age    = int(data["age"])
-    except ValueError:
+    except (ValueError, TypeError):
         return jsonify({"reply": t("coach.numeric_required")}), 400
 
     name             = current_user.username  # formdan değil, oturumdan al
