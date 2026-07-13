@@ -29,7 +29,38 @@ _fernet = None
 
 
 class SessionInvalid(Exception):
+    """Oturum KESİN olarak geçersiz — satır silinir, kullanıcı çıkışa düşer."""
     pass
+
+
+class SessionTransient(Exception):
+    """Cognito GEÇİCİ olarak ulaşılamadı — oturum SAĞLAM, satır KORUNUR.
+
+    H1: refresh yolundaki her hata "bu oturum ölü" demek DEĞİLDİR. Throttle
+    (TooManyRequests), Cognito iç hatası veya bir ağ/timeout kesintisi geçicidir;
+    bunlarda satırı silmek kullanıcıyı geri dönüşsüz olarak dışarı atar. Access
+    token'lar ~1 saatte bir yenilendiği için bu, tek bir Cognito throttle
+    olayında KORELE bir toplu logout üretir. Çağıran (require_auth) bunu 503 +
+    Retry-After'a çevirir; kullanıcı oturumunu KAYBETMEZ.
+    """
+    pass
+
+
+# Cognito hata kodu → GEÇİCİ mi? Boş kod (_wrap'in "beklenmeyen hata" dalı) tam
+# olarak botocore connect/read timeout ve ağ kesintilerinin düştüğü yerdir —
+# geçici sayılır. Listede olmayan her kod (NotAuthorizedException,
+# UserNotFoundException, RefreshFailed, ...) KESİN reddir: satır silinir.
+_TRANSIENT_COGNITO_CODES = frozenset({
+    "",  # kodsuz: ağ/timeout/beklenmeyen — bkz. cognito_service._wrap
+    "InternalErrorException",
+    "LimitExceededException",
+    "ServiceUnavailableException",
+    "TooManyRequestsException",
+})
+
+
+def _is_transient(exc):
+    return (getattr(exc, "code", "") or "") in _TRANSIENT_COGNITO_CODES
 
 
 def _get_fernet():
@@ -109,7 +140,14 @@ def get_valid_access_token(session_id, expected_user_id=None):
     # süresi dolmuş / dolmak üzere → yenile
     try:
         refreshed = cognito_service.refresh_tokens(_dec(row.refresh_token), row.cognito_username)
-    except cognito_service.CognitoServiceError:
+    except cognito_service.CognitoServiceError as e:
+        # H1: geçici Cognito kesintisi oturumu ÖLDÜRMEZ. Yalnızca KESİN ret
+        # (NotAuthorized = refresh token iptal/süresi dolmuş) satırı siler.
+        if _is_transient(e):
+            _logger.warning(
+                "[SESSION] Cognito geçici olarak ulaşılamadı (%s) — oturum korunuyor",
+                e.code or type(e).__name__)
+            raise SessionTransient("cognito_unavailable")
         delete(session_id)
         raise SessionInvalid("refresh_failed")
     row.access_token = _enc(refreshed["access_token"])
