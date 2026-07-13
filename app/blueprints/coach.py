@@ -39,7 +39,7 @@ def chat():
         weight = float(data["weight"])
         height = float(data["height"])
         age    = int(data["age"])
-    except ValueError:
+    except (ValueError, TypeError):
         return jsonify({"reply": t("coach.numeric_required")}), 400
 
     name             = current_user.username  # formdan değil, oturumdan al
@@ -152,9 +152,8 @@ def ask_coach():
         return jsonify({"error": t("coach.chat_quota_reached"),
                         "premium_required": True}), 402
 
-    # Bağlam toplama psycopg2-bağımlı fitx_mcp.server'a dokunur; local'de veya
-    # geçici çökmede graceful degrade etsin diye sarmalanır — function-calling
-    # akışı (FatSecret + SQLAlchemy) buna bağlı değil, yine de çalışır.
+    # Bağlam sorgularında geçici DB arızası olsa bile function-calling akışı
+    # (FatSecret + SQLAlchemy) bağımsız olarak çalışmaya devam eder.
     lang = current_user.language
     try:
         context = _fetch_coach_context(current_user.id, question, language=lang)

@@ -6,6 +6,8 @@ function-calling döngüsü ve koç metin üreticileri. OpenAI mock'lu — ağ y
 
     python -m pytest tests/test_ai_coach.py -v
 """
+import builtins
+import importlib
 import json
 from types import SimpleNamespace
 
@@ -162,7 +164,7 @@ def test_commit_meal_clamps_absurd_staged_macros(auth_user):
     # Staged makrolar porsiyon-sanity kapısından geçmeden kanonik deftere
     # yazılıyordu (diyari/menü/UI hepsi kısarken koç yolu atlıyordu). Fiziksel
     # olarak imkânsız bir porsiyon (9999 kcal) makul tavanlara kısılmalı.
-    import nutrition_pipeline as np
+    from app.services import nutrition_pipeline as np
     db.session.add(PendingAction(
         user_id=auth_user.id, action_type="log_meal",
         payload={"food_name": "saçma porsiyon", "calories": 9999,
@@ -575,19 +577,46 @@ def test_checkin_feedback_all_progress_framings(app, monkeypatch, goal, weight, 
 
 
 # ---------------------------------------------------------------------------
-# Bağlam toplama (fitx_mcp araçları mock'lu)
+# Bağlam toplama (MCP-independent runtime sorguları mock'lu)
 # ---------------------------------------------------------------------------
 
+def test_fetch_coach_context_without_mcp_runtime(auth_user, monkeypatch):
+    queries = importlib.import_module("app.services.coach_context_queries")
+    monkeypatch.setattr(queries, "get_user_fitness_summary", lambda uid: "özet")
+    monkeypatch.setattr(queries, "get_user_workout_history", lambda uid, days: "antrenman")
+    monkeypatch.setattr(queries, "get_user_supplement_stack", lambda uid: "supplement")
+    monkeypatch.setattr(queries, "get_user_nutrition_log", lambda uid, days: "beslenme")
+    monkeypatch.setattr(queries, "get_friend_activities", lambda uid: "arkadaş")
+
+    real_import = builtins.__import__
+
+    def block_mcp_imports(name, *args, **kwargs):
+        if name == "mcp" or name.startswith("mcp."):
+            raise ModuleNotFoundError("production runtime excludes mcp")
+        if name == "fitx_mcp" or name.startswith("fitx_mcp."):
+            raise ModuleNotFoundError("production runtime excludes fitx_mcp")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", block_mcp_imports)
+
+    context = ai_coach._fetch_coach_context(auth_user.id, "soru")
+
+    assert "[FITNESS ÖZETİ]\nözet" in context
+    assert "[ANTRENMAN GEÇMİŞİ (7 gün)]\nantrenman" in context
+    assert "[SUPPLEMENT STACK]\nsupplement" in context
+    assert "[BESLENME LOGU (3 gün)]\nbeslenme" in context
+    assert "[ARKADAŞ AKTİVİTELERİ]" in context
+
 def test_fetch_coach_context_collects_sections_and_degrades(auth_user, monkeypatch):
-    import fitx_mcp.server as mcp_server
+    from app.services import coach_context_queries
 
     def fail(*args):
         raise RuntimeError("db down")
-    monkeypatch.setattr(mcp_server, "get_user_fitness_summary", lambda uid: "özet verisi")
-    monkeypatch.setattr(mcp_server, "get_user_workout_history", fail)
-    monkeypatch.setattr(mcp_server, "get_user_supplement_stack", lambda uid: "kreatin")
-    monkeypatch.setattr(mcp_server, "get_user_nutrition_log", fail)
-    monkeypatch.setattr(mcp_server, "get_friend_activities", fail)
+    monkeypatch.setattr(coach_context_queries, "get_user_fitness_summary", lambda uid: "özet verisi")
+    monkeypatch.setattr(coach_context_queries, "get_user_workout_history", fail)
+    monkeypatch.setattr(coach_context_queries, "get_user_supplement_stack", lambda uid: "kreatin")
+    monkeypatch.setattr(coach_context_queries, "get_user_nutrition_log", fail)
+    monkeypatch.setattr(coach_context_queries, "get_friend_activities", fail)
 
     context = ai_coach._fetch_coach_context(auth_user.id, "soru")
     assert "[FITNESS ÖZETİ]\nözet verisi" in context
@@ -597,17 +626,16 @@ def test_fetch_coach_context_collects_sections_and_degrades(auth_user, monkeypat
 
 
 def test_fetch_coach_context_degrades_summary_supplements_and_nudges(auth_user, monkeypatch):
-    import fitx_mcp.server as mcp_server
-    import analytics_engine
+    from app.services import analytics_engine, coach_context_queries
 
     def fail(*args, **kwargs):
         raise RuntimeError("db down")
     # Özet + supplement + nudge motoru patlar; diğerleri çalışır → kısmi bağlam.
-    monkeypatch.setattr(mcp_server, "get_user_fitness_summary", fail)
-    monkeypatch.setattr(mcp_server, "get_user_workout_history", lambda uid, d: "antrenman")
-    monkeypatch.setattr(mcp_server, "get_user_supplement_stack", fail)
-    monkeypatch.setattr(mcp_server, "get_user_nutrition_log", lambda uid, d: "log")
-    monkeypatch.setattr(mcp_server, "get_friend_activities", lambda uid: "aktivite")
+    monkeypatch.setattr(coach_context_queries, "get_user_fitness_summary", fail)
+    monkeypatch.setattr(coach_context_queries, "get_user_workout_history", lambda uid, d: "antrenman")
+    monkeypatch.setattr(coach_context_queries, "get_user_supplement_stack", fail)
+    monkeypatch.setattr(coach_context_queries, "get_user_nutrition_log", lambda uid, d: "log")
+    monkeypatch.setattr(coach_context_queries, "get_friend_activities", lambda uid: "aktivite")
     monkeypatch.setattr(analytics_engine, "get_nudges", fail)
 
     context = ai_coach._fetch_coach_context(auth_user.id)
@@ -658,13 +686,13 @@ def test_fetch_profile_and_trends_flags_missing_injuries_and_omits_empty(auth_us
 
 
 def test_fetch_coach_context_includes_profile_section(auth_user, monkeypatch):
-    import fitx_mcp.server as mcp_server
+    from app.services import coach_context_queries
     # MCP bölümlerini sabitle; asıl ilgi profil bloğunun bağlama girmesi.
-    monkeypatch.setattr(mcp_server, "get_user_fitness_summary", lambda uid: "özet")
-    monkeypatch.setattr(mcp_server, "get_user_workout_history", lambda uid, d: "antrenman")
-    monkeypatch.setattr(mcp_server, "get_user_supplement_stack", lambda uid: "supp")
-    monkeypatch.setattr(mcp_server, "get_user_nutrition_log", lambda uid, d: "log")
-    monkeypatch.setattr(mcp_server, "get_friend_activities", lambda uid: "arkadaş")
+    monkeypatch.setattr(coach_context_queries, "get_user_fitness_summary", lambda uid: "özet")
+    monkeypatch.setattr(coach_context_queries, "get_user_workout_history", lambda uid, d: "antrenman")
+    monkeypatch.setattr(coach_context_queries, "get_user_supplement_stack", lambda uid: "supp")
+    monkeypatch.setattr(coach_context_queries, "get_user_nutrition_log", lambda uid, d: "log")
+    monkeypatch.setattr(coach_context_queries, "get_friend_activities", lambda uid: "arkadaş")
     auth_user.user_metadata = {"dietary_restrictions": "vegan"}
     db.session.commit()
 

@@ -11,7 +11,9 @@ from openai import OpenAI
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
-from app.config import _REDIS_URL, BEDROCK_REGION, DEFAULT_RATELIMIT
+from app.config import (
+    _REDIS_URL, AUTH_WRITE_RATELIMIT, BEDROCK_REGION, DEFAULT_RATELIMIT,
+)
 
 
 db = SQLAlchemy()
@@ -166,3 +168,9 @@ def _user_or_ip_key():
     except Exception:
         pass
     return get_remote_address()
+
+
+def auth_write_limit(view):
+    limited = limiter.limit(AUTH_WRITE_RATELIMIT, key_func=_user_or_ip_key)(view)
+    limited._auth_write_limited = True
+    return limited

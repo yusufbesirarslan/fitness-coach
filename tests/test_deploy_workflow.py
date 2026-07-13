@@ -1,11 +1,21 @@
 from pathlib import Path
 
 
+DOCKERIGNORE = Path(".dockerignore")
+
+
 WORKFLOW = Path(".github/workflows/deploy.yml")
 
 
 def _deploy_yaml():
     return WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_production_build_context_excludes_development_and_backups():
+    ignored = {line.strip() for line in DOCKERIGNORE.read_text(encoding="utf-8").splitlines()
+               if line.strip() and not line.lstrip().startswith("#")}
+    assert {"*.bak", "tests/", ".github/", "*.md",
+            "requirements-dev.txt", "requirements-mcp.txt"} <= ignored
 
 
 def test_deploy_fails_on_live_nginx_csp_header_instead_of_sed_mutation():

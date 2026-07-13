@@ -6,6 +6,13 @@ from app.models import DailyQuest
 from app.services.gamification import lb_rebuild
 
 
+def _handle_upgrade_failure(app, message):
+    db.session.rollback()
+    app.logger.exception(message)
+    if os.environ.get("FITX_DB_UPGRADE_FAIL_OPEN") != "1":
+        raise
+
+
 def init_database(app):
     # Alembic/Flask-Migrate komutları (flask db migrate/upgrade/stamp) app
     # factory'yi import eder; bu sırada create_all çalışırsa autogenerate boş
@@ -49,10 +56,10 @@ def init_database(app):
                 # boot ölür → container unhealthy → deploy health gate rollback
                 # yapar. Acil kaçış: FITX_DB_UPGRADE_FAIL_OPEN=1 eski davranışı
                 # (logla + devam et) geri getirir.
-                db.session.rollback()
-                app.logger.exception("[DB] Alembic upgrade başarısız — şema migration zinciri gerisinde kalmış olabilir.")
-                if os.environ.get("FITX_DB_UPGRADE_FAIL_OPEN") != "1":
-                    raise
+                _handle_upgrade_failure(
+                    app,
+                    "[DB] Alembic upgrade başarısız — şema migration zinciri gerisinde kalmış olabilir.",
+                )
 
         db.create_all()
         # I-M1: eski ham idempotent ALTER/UPDATE döngüsü KALDIRILDI. Tüm kolonlar
@@ -63,48 +70,6 @@ def init_database(app):
         # UPDATE'i ve şema-drift'i gizleyen ~20 ham ALTER ortadan kalktı; migration
         # zinciri artık şemanın tek doğruluk kaynağı (CI schema-drift guard bloklayıcı).
 
-        # PL/pgSQL trigger for PostgreSQL activity calorie auto-calculation
-        try:
-            db.session.execute(db.text("""
-                CREATE OR REPLACE FUNCTION calc_activity_calories()
-                RETURNS TRIGGER AS $$
-                DECLARE
-                    w FLOAT; h FLOAT; stride FLOAT; dist FLOAT; dur FLOAT;
-                    met_val FLOAT; spd FLOAT;
-                BEGIN
-                    SELECT weight, height INTO w, h FROM "user" WHERE id = NEW.user_id;
-                    w := COALESCE(w, 70); h := COALESCE(h, 170);
-                    met_val := CASE NEW.intensity
-                        WHEN 'light' THEN 2.0 WHEN 'moderate' THEN 3.5
-                        WHEN 'brisk' THEN 4.3 WHEN 'fast' THEN 5.0 ELSE 3.5 END;
-                    spd := CASE NEW.intensity
-                        WHEN 'light' THEN 3.0 WHEN 'moderate' THEN 4.5
-                        WHEN 'brisk' THEN 5.5 WHEN 'fast' THEN 6.5 ELSE 4.5 END;
-                    stride := h * 0.414;
-                    dist := NEW.steps * stride / 100000.0;
-                    dur := dist / spd;
-                    NEW.calories_burned := ROUND((met_val * w * dur)::numeric, 1);
-                    NEW.distance_km := ROUND(dist::numeric, 2);
-                    NEW.duration_min := ROUND((dur * 60)::numeric, 1);
-                    RETURN NEW;
-                END;
-                $$ LANGUAGE plpgsql;
-            """))
-            db.session.execute(db.text("""
-                DROP TRIGGER IF EXISTS trg_calc_activity ON daily_activity;
-                CREATE TRIGGER trg_calc_activity
-                BEFORE INSERT OR UPDATE ON daily_activity
-                FOR EACH ROW EXECUTE FUNCTION calc_activity_calories();
-            """))
-            db.session.commit()
-        except Exception as e:
-            db.session.rollback()
-            # PL/pgSQL trigger yalnızca Postgres'te kurulur; SQLite (lokal/test) bunu
-            # beklenen şekilde reddeder. Postgres'te başarısızlık ise GERÇEK bir sorun
-            # → görünür yap, sessizce yutma (S8: prod'da teşhis edilebilsin).
-            if db.engine.dialect.name == "postgresql":
-                app.logger.warning("[DB] activity-calorie trigger kurulamadı: %s: %s",
-                                   type(e).__name__, e)
         if DailyQuest.query.count() == 0:
             for q in [
                 DailyQuest(title="Günlük Giriş", description="Bugün uygulamaya giriş yap", points_reward=10, quest_type="login"),
@@ -151,19 +116,21 @@ def init_database(app):
         except Exception:
             db.session.rollback()
 
-        # Şema az önce create_all + legacy ALTER'larla güncel hâle geldi; DB henüz
-        # Alembic zincirinde değilse baseline'ı çalıştırmadan "head" olarak damgala.
-        # Mevcut prod DB'ler ve taze kurulumlar böylece konsola gerek kalmadan
-        # zincire girer; manuel `flask db stamp head` gerekmez.
+        # Taze şema create_all ile oluştu; model dışı DB nesnelerini kuran migration'ın
+        # gerçekten çalışması için önce trigger revision'ının selefini damgala,
+        # ardından head'e upgrade et.
         if not _has_alembic:
             try:
-                from flask_migrate import stamp
+                from flask_migrate import stamp, upgrade
                 if os.path.isdir(_migrations_dir):
-                    stamp()
-                    app.logger.info("[DB] Mevcut şema Alembic baseline olarak damgalandı.")
+                    stamp(revision="aa11bb22cc33")
+                    upgrade()
+                    app.logger.info("[DB] Taze şema Alembic head'e yükseltildi.")
             except Exception:
-                db.session.rollback()
-                app.logger.exception("[DB] Alembic stamp başarısız — şema migration zinciri dışında kaldı.")
+                _handle_upgrade_failure(
+                    app,
+                    "[DB] Taze şemayı Alembic zincirine alma başarısız.",
+                )
 
         # Liderlik sorted set'lerini Postgres'ten doldur (Redis varsa). Redis sonradan
         # ayağa kalkarsa ilk leaderboard isteği zaten Postgres'e düşer; sonraki restart hidratlar.

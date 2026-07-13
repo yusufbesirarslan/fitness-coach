@@ -15,6 +15,7 @@ from datetime import datetime
 import pytest
 
 import fitx_mcp.server as server
+from app.services import coach_context_queries
 
 
 class _FakeCursor:
@@ -51,6 +52,7 @@ def fake_db(monkeypatch):
 
         monkeypatch.setattr(server, "get_conn", fake_conn)
         monkeypatch.setattr(server, "get_write_conn", fake_conn)
+        monkeypatch.setattr(coach_context_queries, "get_conn", fake_conn)
         return cursor
 
     return install

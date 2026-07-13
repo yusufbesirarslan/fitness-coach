@@ -4,7 +4,7 @@ import re
 import threading
 import time
 import requests as http_requests_lib
-import nutrition_pipeline
+from app.services import nutrition_pipeline
 from concurrent.futures import ThreadPoolExecutor
 from flask import current_app
 from requests.adapters import HTTPAdapter

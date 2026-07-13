@@ -7,7 +7,7 @@ from app.auth_middleware import require_auth
 from sqlalchemy.exc import IntegrityError
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
-from app.extensions import _user_or_ip_key, db, limiter
+from app.extensions import _user_or_ip_key, auth_write_limit, db, limiter
 from app.i18n import current_locale, t
 from app.models import Message, WORKOUT_COMPLETION_MARKER, DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
 from app.services.ai import _heavy_chat
@@ -305,6 +305,7 @@ def get_water():
 
 @bp.route("/water", methods=["POST"])
 @require_auth
+@auth_write_limit
 def set_water():
     data = request.get_json(silent=True) or {}
     try:

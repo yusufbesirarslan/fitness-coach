@@ -8,7 +8,11 @@ log boşluğu, riskteki seri, haftalık protein hedefi, rapor günü.
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 
-from analytics_engine import _check_streak_at_risk, _check_weekly_report_day, get_nudges
+from app.services.analytics_engine import (
+    _check_streak_at_risk,
+    _check_weekly_report_day,
+    get_nudges,
+)
 from app.extensions import db
 from app.models import (MealLog, User, UserSession, WaterLog, WeeklyCheckIn,
                         WorkoutLog)

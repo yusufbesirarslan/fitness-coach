@@ -3,7 +3,7 @@ from flask import Blueprint, jsonify, render_template, request
 from flask_login import current_user
 from app.auth_middleware import require_auth
 
-from app.extensions import db
+from app.extensions import auth_write_limit, db
 from app.i18n import t
 from app.models import Supplement, User
 from app.services.gamification import award_xp, complete_quest_for_user, log_activity
@@ -29,6 +29,7 @@ def supplements_page():
 
 @bp.route("/supplement/add", methods=["POST"])
 @require_auth
+@auth_write_limit
 def supplement_add():
     data = request.get_json(silent=True) or {}
     name = (data.get("product_name") or "").strip()
@@ -96,6 +97,7 @@ def supplement_add():
 
 @bp.route("/supplement/edit/<int:sid>", methods=["POST"])
 @require_auth
+@auth_write_limit
 def supplement_edit(sid):
     supp = Supplement.query.filter_by(id=sid, user_id=current_user.id).first_or_404()
 
@@ -139,6 +141,7 @@ def supplement_edit(sid):
 
 @bp.route("/supplement/delete/<int:sid>", methods=["POST"])
 @require_auth
+@auth_write_limit
 def supplement_delete(sid):
     supp = Supplement.query.filter_by(id=sid, user_id=current_user.id).first_or_404()
     db.session.delete(supp)

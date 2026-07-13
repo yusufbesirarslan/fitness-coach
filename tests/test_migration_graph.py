@@ -28,6 +28,20 @@ def test_alembic_migrations_have_single_head():
 
     heads = sorted(set(revisions) - down_revisions)
 
-    # Current single head: aa11bb22cc33 (Sprint 2 cognito_session), chained onto
-    # main's barcode/main merge head f8a9b0c1d2e3.
-    assert heads == ["aa11bb22cc33"]
+    assert heads == ["bb22cc33dd44"]
+
+
+def test_activity_trigger_revision_is_postgresql_guarded():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "migrations"
+        / "versions"
+        / "bb22cc33dd44_activity_calorie_trigger.py"
+    )
+    source = migration_path.read_text(encoding="utf-8")
+
+    assert source.count('op.get_bind().dialect.name != "postgresql"') == 2
+    assert "CREATE OR REPLACE FUNCTION calc_activity_calories" in source
+    assert "CREATE TRIGGER trg_calc_activity" in source
+    assert "DROP TRIGGER IF EXISTS trg_calc_activity ON daily_activity" in source
+    assert "DROP FUNCTION IF EXISTS calc_activity_calories()" in source

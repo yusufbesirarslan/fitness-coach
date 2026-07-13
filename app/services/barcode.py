@@ -9,7 +9,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime
 
-import nutrition_pipeline
+from app.services import nutrition_pipeline
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
