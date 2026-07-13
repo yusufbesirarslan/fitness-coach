@@ -1,10 +1,17 @@
 name: Deploy to EC2
 
+# H3: deploy artık CI'a KAPILI. Eskiden `push: main` ile tetikleniyordu ve
+# ci.yml ile PARALEL koşuyordu (ne `needs:` ne `workflow_run:` vardı) — yani
+# testleri kıran bir commit prod'a gidebiliyordu; önündeki tek engel mantık
+# regresyonunu göremeyen /health gate idi. workflow_run ile deploy YALNIZCA CI
+# yeşil bittiğinde başlar. (main branch koruması ayrıca elle açılmalı: bu, merge
+# kapısıdır; buradaki gate ise deploy kapısı.)
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch: # Elle tetiklemek için buton ekler
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch: # Elle tetiklemek için buton ekler (acil çıkış kapısı)
 
 permissions:
   id-token: write
@@ -13,12 +20,52 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    # CI kırmızıysa deploy HİÇ çalışmaz. workflow_dispatch elle tetiklemeyi korur.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
+      - uses: actions/checkout@v7
+
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'eu-central-1' }}
+
+      # H4: havuz IaC'de degil (konsol-yonetimli). Uygulamanin kimlik saglayicisi
+      # hakkindaki VARSAYIMLARINI (PreventUserExistenceErrors ACIK, MFA KAPALI,
+      # dogru auth flow'lar) her deploy'da dogrula. Simdilik BLOKLAMAZ: deploy
+      # rolune cognito-idp:DescribeUserPool* eklendikten sonra continue-on-error
+      # kaldirilip bloklayici yapilmali.
+      - name: Cognito pool config drift check (non-blocking)
+        continue-on-error: true
+        env:
+          COGNITO_USER_POOL_ID: ${{ vars.COGNITO_USER_POOL_ID || 'eu-central-1_kaX0SORRK' }}
+          COGNITO_APP_CLIENT_ID: ${{ vars.COGNITO_APP_CLIENT_ID || '3rdtrk3vl1dp0m1d19gdc3pqib' }}
+        run: |
+          pip install --quiet boto3
+          python scripts/check_cognito_pool.py
+
+      # M5: rollback KODU geri alir ama boot'ta uygulanan DB migration'larini
+      # GERI ALMAZ (bkz. CLAUDE.md A2). Gercek kullanici verisi varken bu,
+      # kurtarilamaz bir olaya donusebilir. Deploy oncesi ucuz bir snapshot,
+      # kurtarilamaz olayi kurtarilabilir hale getirir. vars.RDS_INSTANCE_ID
+      # tanimli degilse ya da rolde rds:CreateDBSnapshot yoksa: uyar, gecme.
+      - name: Pre-deploy RDS snapshot (non-blocking)
+        continue-on-error: true
+        run: |
+          RDS_ID="${{ vars.RDS_INSTANCE_ID }}"
+          if [ -z "$RDS_ID" ]; then
+            echo "UYARI: vars.RDS_INSTANCE_ID tanimli degil - deploy oncesi snapshot ATLANDI."
+            echo "Yikici bir migration geri alinamaz (A2). Degiskeni tanimlayin ve deploy rolune rds:CreateDBSnapshot verin."
+            exit 0
+          fi
+          SNAP_ID="predeploy-${RDS_ID}-$(date -u +%Y%m%d%H%M%S)"
+          echo "RDS snapshot aliniyor: $SNAP_ID"
+          aws rds create-db-snapshot \
+            --db-instance-identifier "$RDS_ID" \
+            --db-snapshot-identifier "$SNAP_ID" \
+            --query "DBSnapshot.DBSnapshotIdentifier" --output text
+          echo "Snapshot baslatildi (arka planda tamamlanir): $SNAP_ID"
 
       - name: Execute Deploy Commands via AWS SSM
         run: |
@@ -29,6 +76,7 @@ jobs:
               "NGINX_SITE=/etc/nginx/sites-available/fitx; if [ -f \"$NGINX_SITE\" ] && grep -q \"add_header Content-Security-Policy\" \"$NGINX_SITE\"; then echo \"ERROR: nginx site config still contains add_header Content-Security-Policy; remove it or render the repo config before deploy\"; exit 1; else echo \"nginx: CSP add_header yok (CSP Flask tarafindan uretiliyor)\"; fi",
               "if nginx -t; then if systemctl is-active --quiet nginx; then systemctl reload nginx && echo \"nginx: reload edildi\"; else echo \"nginx: servis aktif degil, baslatiliyor ve boot icin enable ediliyor\"; systemctl enable --now nginx; echo \"nginx servis durumu: $(systemctl is-active nginx)\"; fi; else echo \"ERROR: nginx -t CONFIG TESTI BASARISIZ - deploy durduruluyor (public site kirik config servis edebilir)\"; exit 1; fi",
               "echo \"80/443 dinleyenler:\"; ss -ltnp 2>/dev/null | grep -E \":(80|443) \" || echo \"UYARI: 80/443 portunu dinleyen yok - site disaridan erisilemez\"",
+              "ENV_FILE=${{ secrets.DEPLOY_DIR }}/.env; if [ -f \"$ENV_FILE\" ]; then PERM=$(stat -c %a \"$ENV_FILE\"); if [ \"$PERM\" != \"600\" ]; then echo \"UYARI: .env izinleri $PERM (grup/dunya okunabilir) - 600 olarak duzeltiliyor. Icerik: SECRET_KEY, RDS kimlik bilgileri, COGNITO_TOKEN_ENC_KEY, RESEND_API_KEY, OPENAI_API_KEY\"; chmod 600 \"$ENV_FILE\"; else echo \".env izinleri: 600 (dogru)\"; fi; else echo \"KRITIK: .env bulunamadi: $ENV_FILE - uygulama yapilandirmasiz baslar\"; fi",
               "if ss -ltn 2>/dev/null | grep -q \"127.0.0.1:3000\"; then echo \"fatsecret proxy: 127.0.0.1:3000 dinliyor\"; else echo \"UYARI: FatSecret proxy (127.0.0.1:3000) DINLEMIYOR - besin aramalari 502 olur, makro cozumu LLM tahminine duser. Proxy nginx site blogudur; sites-enabled/fatsecret-proxy ve nginx durumunu kontrol edin (bkz deploy/fatsecret-proxy.md) - deploy bloklanmadi\"; fi",
               "sudo -u ${{ secrets.DEPLOY_USER }} bash -lc '\''set -euo pipefail; cd ${{ secrets.DEPLOY_DIR }}; PREV_COMMIT=$(git rev-parse HEAD); echo \"PREV_COMMIT=$PREV_COMMIT\"; git fetch --all --prune; git reset --hard origin/main; docker compose build; docker compose up -d; HEALTH_OK=0; for i in $(seq 1 30); do CODE=$(curl -s -o /dev/null -w \"%{http_code}\" \"http://127.0.0.1:5000/health?deep=1\" || true); echo \"deep health attempt $i: $CODE\"; if [ \"$CODE\" = \"200\" ]; then HEALTH_OK=1; break; fi; sleep 5; done; if [ \"$HEALTH_OK\" != \"1\" ]; then echo \"ROLLBACK: health gate failed, returning to $PREV_COMMIT\"; docker compose logs --no-color --tail 80 web || true; git reset --hard \"${PREV_COMMIT:?rollback target missing}\"; docker compose up -d --build; RB_OK=0; for j in $(seq 1 30); do RCODE=$(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:5000/health || true); echo \"rollback health attempt $j: $RCODE\"; if [ \"$RCODE\" = \"200\" ]; then RB_OK=1; break; fi; sleep 5; done; if [ \"$RB_OK\" = \"1\" ]; then echo \"ROLLBACK OK: onceki surum saglikli\"; else echo \"CRITICAL: ROLLBACK DA SAGLIKSIZ - elle mudahale gerekli (muhtemel sema drift, bkz A2)\"; fi; exit 1; fi; PUB_URL=\"${{ vars.PUBLIC_HEALTH_URL }}\"; if [ -n \"$PUB_URL\" ]; then PUB_OK=0; for k in $(seq 1 12); do PCODE=$(curl -s -o /dev/null -w \"%{http_code}\" \"$PUB_URL\" || true); echo \"public health attempt $k: $PCODE\"; if [ \"$PCODE\" = \"200\" ]; then PUB_OK=1; break; fi; sleep 5; done; if [ \"$PUB_OK\" != \"1\" ]; then echo \"ROLLBACK: public health ($PUB_URL) gate failed, returning to $PREV_COMMIT\"; git reset --hard \"${PREV_COMMIT:?rollback target missing}\"; docker compose up -d --build; echo \"CRITICAL: public probe sonrasi rollback yapildi - nginx/DNS/TLS kontrol et\"; exit 1; fi; else echo \"public health probe atlandi (vars.PUBLIC_HEALTH_URL tanimli degil)\"; fi; docker image prune -f; docker compose ps; docker compose logs --no-color --tail 40 web'\''"
             ], "executionTimeout":["900"]}' \
