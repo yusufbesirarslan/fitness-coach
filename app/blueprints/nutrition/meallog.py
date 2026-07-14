@@ -15,7 +15,8 @@ from app.config import AI_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
 from app.i18n import current_locale, t
 from app.models import MealLog, UserSession
-from app.services.ai import PORTION_SANITY_RULE, _openai_chat
+from app.prompts import nutrition as nutrition_prompts
+from app.services.ai import _openai_chat
 from app.services.gamification import complete_quest_for_user
 from app.services.validators import _meal_photo_url, _to_float, validate_meal_photo
 from app.timeutil import day_key, display_ddmm
@@ -110,43 +111,8 @@ def log_meal():
             resp["quest_awarded"] = quest_result
         return jsonify(resp)
 
-    prompt = (
-        f"Sen bir beslenme uzmanısın. Aşağıdaki yemeklerin GERÇEK toplam besin değerlerini hesapla.\n"
-        f"Miktar belirtilmişse kullan, belirtilmemişse standart porsiyon kabul et.\n\n"
-        f"Referans değerler:\n"
-        f"- Tavuk göğsü (100g): 165 kcal, 31g protein, 0g karb, 3.6g yağ\n"
-        f"- Yumurta (1 adet, 60g): 90 kcal, 7g protein, 0.6g karb, 6.3g yağ\n"
-        f"- Pirinç pişmiş (100g): 130 kcal, 2.7g protein, 28g karb, 0.3g yağ\n"
-        f"- Yulaf ezmesi (100g): 389 kcal, 17g protein, 66g karb, 7g yağ\n"
-        f"- Beyaz peynir (100g): 264 kcal, 17g protein, 0.5g karb, 21g yağ\n"
-        f"- Tam buğday ekmeği (1 dilim, 30g): 74 kcal, 4g protein, 12g karb, 1g yağ\n"
-        f"- Ekmek (1 dilim, 30g): 80 kcal, 2.5g protein, 15g karb, 1g yağ\n"
-        f"- Zeytinyağı (1 yemek kaşığı, 14ml): 119 kcal, 0g protein, 0g karb, 14g yağ\n"
-        f"- Muz (1 orta, 120g): 105 kcal, 1.3g protein, 27g karb, 0.4g yağ\n"
-        f"- Fıstık ezmesi (15g): 94 kcal, 4g protein, 3g karb, 8g yağ\n"
-        f"- Makarna pişmiş (100g): 158 kcal, 5.8g protein, 31g karb, 0.9g yağ\n"
-        f"- Patates pişmiş (100g): 87 kcal, 1.9g protein, 20g karb, 0.1g yağ\n"
-        f"- Kırmızı et (100g): 250 kcal, 26g protein, 0g karb, 17g yağ\n"
-        f"- Ton balığı (100g): 132 kcal, 28g protein, 0g karb, 1.3g yağ\n"
-        f"- Süt (1 bardak, 240ml): 150 kcal, 8g protein, 12g karb, 8g yağ\n"
-        f"- Yoğurt (100g): 61 kcal, 10g protein, 3.6g karb, 0.4g yağ\n"
-        f"- Peynir (kaşar, 100g): 350 kcal, 25g protein, 1.5g karb, 27g yağ\n"
-        f"- Salatalık (100g): 16 kcal, 0.7g protein, 3.6g karb, 0.1g yağ\n"
-        f"- Domates (100g): 18 kcal, 0.9g protein, 3.9g karb, 0.2g yağ\n\n"
-        f"Spor takviyeleri ve fitness besinleri:\n"
-        f"- Whey protein tozu (1 ölçek, 30g): 120 kcal, 24g protein, 3g karb, 1.5g yağ\n"
-        f"- Kazein protein (1 ölçek, 33g): 120 kcal, 24g protein, 3g karb, 1g yağ\n"
-        f"- Kreatin monohidrat (1 ölçek, 5g): 0 kcal, 0g protein, 0g karb, 0g yağ\n"
-        f"- BCAA (1 ölçek, 7g): 0 kcal, 0g protein, 0g karb, 0g yağ\n"
-        f"- Protein bar (1 adet, 60g): 220 kcal, 20g protein, 22g karb, 8g yağ\n"
-        f"- Pirinç patlağı (1 adet, 8g): 28 kcal, 0.7g protein, 6g karb, 0.2g yağ\n"
-        f"- Fıstık ezmesi (1 yemek kaşığı, 15g): 94 kcal, 4g protein, 3g karb, 8g yağ\n"
-        f"- Bal (1 yemek kaşığı, 21g): 64 kcal, 0g protein, 17g karb, 0g yağ\n\n"
-        f"Kullanıcının yediği: {yemekler_for_prompt}\n\n"
-        f"Her besini ayrı hesapla ve topla. Sonucu SADECE aşağıdaki JSON formatında döndür.\n"
-        f"Değerler gerçek sayı olmalı (0 değil), ondalık olabilir:\n"
-        f'{{"kalori": 520, "protein": 38, "karb": 45, "yag": 14}}'
-    )
+    # İstem şablonu app/prompts/nutrition.py'de (WS4).
+    prompt = nutrition_prompts.build_meal_totals_prompt(yemekler_for_prompt)
 
     nutrients = {"kalori": 0, "protein": 0, "karb": 0, "yag": 0}
     raw = ""
@@ -155,7 +121,7 @@ def log_meal():
     try:
         raw = _openai_chat(
             messages=[{"role": "user", "content": prompt}],
-            system_prompt="SADECE JSON döndür. Açıklama yapma, markdown kullanma, sadece düz JSON objesi. Tüm değerler sayı olmalı." + PORTION_SANITY_RULE,
+            system_prompt=nutrition_prompts.MEAL_TOTALS_SYSTEM,
             max_tokens=150,
             temperature=0.0,
         ).strip()

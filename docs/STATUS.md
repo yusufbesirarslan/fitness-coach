@@ -8,7 +8,18 @@ is what this document replaces). The historical point-in-time reports were prune
 Roadmap detail for the in-flight workstream lives in
 [`updates-plan-2026-06-28.md`](updates-plan-2026-06-28.md).
 
-Last updated: 2026-07-13.
+Last updated: 2026-07-14.
+
+> **2026-07-14 — Sprint 4 started (AI Coach Platform & Performance).** PR 1
+> lands WS3 (AI Response Pipeline) + WS4 (Prompt Engineering Layer) as a pure
+> refactor — zero behavior change, existing tests pass unchanged. New stage
+> modules: `app/services/{ai_pipeline,context_builder,memory_manager,
+> prompt_builder,response_formatter,moderation}.py`; all LLM prompt templates
+> now live in `app/prompts/` (system/goals/nutrition/workout/progress).
+> `ai_coach.py` keeps the tool ecosystem + provider loops and re-exports moved
+> symbols under their old names. Remaining Sprint 4 workstreams (conversation
+> memory, streaming, caching, error recovery, rate limits, background jobs,
+> observability, docs) land in follow-up PRs.
 
 > **2026-07-13 — root tracker sprawl consolidated.** Six competing trackers had
 > reappeared at the repo root (`FIXES.md`, `FIXES_NEEDED.md`, `NEEDED_FIXES.md`,
