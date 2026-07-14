@@ -7,5 +7,6 @@
 #   goals.py     — hedefe (kas kazanma / kilo verme) duyarlı plan-koçluğu promptu
 #   nutrition.py — beslenme promptları (besin arama, EN normalizasyon, menü
 #                  çıkarımı, porsiyon/makro tahmini, öğün toplamı) + PORTION_SANITY_RULE
+#   memory.py    — konuşma özetleme promptu (WS1 kalıcı hafıza)
 #   workout.py   — antrenman planı promptları (training_generation'a delege)
 #   progress.py  — haftalık check-in / ilerleme geri bildirimi promptu

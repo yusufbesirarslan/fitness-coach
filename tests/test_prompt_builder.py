@@ -71,9 +71,26 @@ def test_build_openai_messages_order():
 def test_build_anthropic_messages_strips_leading_assistant():
     convo = prompt_builder.build_anthropic_messages(
         [{"role": "assistant", "content": "açılış"},
-         {"role": "user", "content": "merhaba"}], "soru?")
+         {"role": "user", "content": "merhaba"},
+         {"role": "assistant", "content": "selam"}], "soru?")
     assert convo[0]["role"] == "user"  # Anthropic ilk mesajın user olmasını ister
     assert convo[-1] == {"role": "user", "content": "soru?"}
+
+
+def test_build_anthropic_messages_merges_trailing_user_turn():
+    # B15: geçmiş CEVAPSIZ bir user mesajıyla bitiyorsa (yarıda kesilen stream)
+    # güncel soru ikinci bir user turu yaratırdı → Bedrock 400 → sessizce
+    # gpt-4o-mini'ye düşerdik. Ardışık aynı-rol turlar birleştirilir.
+    convo = prompt_builder.build_anthropic_messages(
+        [{"role": "user", "content": "cevapsız kalan soru"}], "yeni soru?")
+
+    assert [m["role"] for m in convo] == ["user"]
+    assert convo[0]["content"] == "cevapsız kalan soru\nyeni soru?"
+    # Değişmez: hiçbir iki ardışık tur aynı rolde olamaz.
+    roles = [m["role"] for m in prompt_builder.build_anthropic_messages(
+        [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"},
+         {"role": "assistant", "content": "c"}], "d")]
+    assert all(roles[i] != roles[i + 1] for i in range(len(roles) - 1))
 
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,22 @@ Roadmap detail for the in-flight workstream lives in
 
 Last updated: 2026-07-14.
 
+> **2026-07-14 — Sprint 4 PR 2: WS1 conversation memory.** The coach now has
+> persistent memory: `CoachConversation` + `CoachMessage` (migration
+> `cc33dd44ee55`, expand-only), a rolling context window built newest-first to
+> `AI_CONTEXT_TOKEN_BUDGET` (default 3000), and lazy summarization that folds
+> older turns into `conversation.summary` once the unsummarized backlog exceeds
+> `AI_SUMMARY_TRIGGER_TOKENS` (6000) — messages are never deleted, only pruned
+> out of the window. `GET /coach/history` survives a browser refresh;
+> `POST /coach/conversation/reset` **archives** (never deletes) the active
+> conversation. Every memory step is failure-tolerant: if it raises, the request
+> rolls back and falls through to the legacy client-history path, so a memory
+> outage cannot break chat. Error-fallback replies are not persisted (B16 —
+> consistent with the quota refund). Kill switch: `AI_MEMORY_ENABLED=0`.
+> Note for future migrations: fresh-DB boot runs `create_all()` *then* replays
+> everything after `aa11bb22cc33`, so any new table-creating migration must be
+> re-runnable (`has_table` gate — see `cc33dd44ee55`).
+
 > **2026-07-14 — Sprint 4 started (AI Coach Platform & Performance).** PR 1
 > lands WS3 (AI Response Pipeline) + WS4 (Prompt Engineering Layer) as a pure
 > refactor — zero behavior change, existing tests pass unchanged. New stage

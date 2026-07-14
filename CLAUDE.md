@@ -17,7 +17,8 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 - app/timeutil.py — TEK gün/saat kaynağı: sabit Europe/Istanbul (app_today/day_key/utc_day_bounds). Tüm gün anahtarları buradan; doğrudan date.today()/utcnow().strftime("%d.%m") KULLANMA
 - app/blueprints/ — auth, profile, nutrition, food, menu, training, tracking, social, gamification, supplements, coach
 - app/services/ — ai, ai_coach, ai_nutrition, calculations, fatsecret, foodcache, gamification, premium, referral, cognito_service (native cognito-idp sarmalayıcı; eski cognito.py/cognito_idp.py Sprint 3'te SİLİNDİ — Hosted UI/OIDC yok), cognito_jwt (uygulamadaki TEK JWT doğrulayıcı; cognito_service ona delege eder), session_store (Fernet ile şifreli sunucu-tarafı Cognito token deposu), avatars, injury_constraints, menu_extract/fetch/ocr, training_generation/, validators, email_service (merkezi Resend e-posta altyapısı — SDK'ya yalnızca bu modül dokunur; RESEND_API_KEY yoksa no-op), email_templates (markalı auth e-posta şablonları — saf stdlib, Lambda kopyasıyla bayt-eş tutulur: tests/test_email_templates_sync.py)
-- AI yanıt hattı (Sprint 4 WS3, modüler aşamalar): ai_pipeline (orkestratör; kanonik bileşim) → context_builder (koç bağlam blokları + FRIEND_DATA fence) → memory_manager (kısa-dönem geçmiş sınırlama + estimate_tokens) → prompt_builder (system/messages montajı; BEDROCK_PROMPT_CACHE parametreyle gelir) → sağlayıcı döngüleri (ai_coach'ta kaldı: araçlar, staging→commit, Bedrock/OpenAI) → moderation (girdi kapısı MAX_QUESTION_CHARS + çıktı kancası) → response_formatter (hata-yedeği kararı, COACH_FALLBACKS). ai_coach eski adları (_fetch_coach_context, _sanitize_client_history, _COACH_FALLBACKS...) re-export eder — mevcut import yolları ve test monkeypatch yüzeyi değişmedi
+- AI yanıt hattı (Sprint 4 WS3, modüler aşamalar): ai_pipeline (orkestratör; kanonik bileşim) → context_builder (koç bağlam blokları + FRIEND_DATA fence) → memory_manager (kalıcı konuşma hafızası + kısa-dönem geçmiş sınırlama + estimate_tokens) → prompt_builder (system/messages montajı; BEDROCK_PROMPT_CACHE parametreyle gelir) → sağlayıcı döngüleri (ai_coach'ta kaldı: araçlar, staging→commit, Bedrock/OpenAI) → moderation (girdi kapısı MAX_QUESTION_CHARS + çıktı kancası) → response_formatter (hata-yedeği kararı, COACH_FALLBACKS). ai_coach eski adları (_fetch_coach_context, _sanitize_client_history, _COACH_FALLBACKS...) re-export eder — mevcut import yolları ve test monkeypatch yüzeyi değişmedi
+- Kalıcı koç hafızası (Sprint 4 WS1): CoachConversation + CoachMessage tabloları; /ask her turu DB'ye yazar (hata-yedeği yanıtlar HARİÇ — B16), bağlam penceresi en yeni mesajlardan geriye AI_CONTEXT_TOKEN_BUDGET dolana dek kurulur, özetlenmemiş kuyruk AI_SUMMARY_TRIGGER_TOKENS'ı aşınca eski turlar tek hafif LLM çağrısıyla conversation.summary'ye katlanır (mesajlar SİLİNMEZ, pencere dışı kalır). `GET /coach/history` geçmişi, `POST /coach/conversation/reset` aktif konuşmayı ARŞİVLER. Hafıza katmanının HER adımı arızaya dayanıklıdır: çökerse eski client-history yoluna düşülür, sohbet kırılmaz. Kapatma anahtarı: AI_MEMORY_ENABLED=0
 - app/prompts/ — TÜM LLM istem şablonları (Sprint 4 WS4): system (koç sistem promptu + dil direktifi), goals (plan-koçluğu), nutrition (besin arama/EN normalizasyon/menü çıkarımı/porsiyon-makro/öğün toplamı + PORTION_SANITY_RULE), workout (training_generation'a delege), progress (haftalık check-in). Yeni LLM istemi eklerken şablonu BURAYA koy, servise gömme; modüller saf string üretir (DB/Flask/istemci import etmez)
 - infra/cognito-email-sender/ — Cognito CustomEmailSender Lambda + KMS (SAM): doğrulama/sıfırlama kod e-postalarını Resend üzerinden markalı gönderir; havuza bağlama runbook'u README'sinde (mimari: docs/auth-emails.md)
 - fitx_mcp/ — MCP sunucusu (AI Coach DB araçları). DİKKAT: araçlar user_id'yi parametre alır, kendi yetkilendirmesi YOKTUR — yalnızca stdio/in-process kullan; HTTP taşıması FITX_MCP_ALLOW_HTTP=1 + loopback arkasındadır, asla public proxy'e koyma
@@ -65,9 +66,16 @@ Tablolar boot'ta db.create_all() ile oluşur (app/db_init.py); ayrıca Alembic b
    olmayan eski DB'ler de boot'ta otomatik `stamp` ile zincire alınır.
    Manuel `flask db upgrade` / `stamp head` yalnızca lokal işler için gerekir.
 Modeller: User, UserSession, WeeklyLog, WeeklyCheckIn, NutritionPlan, TrainingPlan, MealLog,
-PendingAction, PumpCheck, Friendship, Message, Activity, Supplement, DailyQuest,
-UserQuestProgress, WeeklyWinner, WeeklyResetLog, WaterLog, WorkoutLog,
+PendingAction, CoachConversation, CoachMessage, PumpCheck, Friendship, Message, Activity,
+Supplement, DailyQuest, UserQuestProgress, WeeklyWinner, WeeklyResetLog, WaterLog, WorkoutLog,
 DailyActivity, CustomMeal, CustomMealItem
+Yeni user-child model eklerken app/cli.py `_user_child_models` listesine de ekle
+(tests/test_cascade_delete.py introspeksiyonla doğrular).
+DİKKAT (taze DB boot yolu): app/db_init.py önce db.create_all() çalıştırır, sonra
+aa11bb22cc33'ü damgalayıp head'e upgrade eder — yani o revision'dan SONRAKİ her
+migration create_all'ın zaten kurduğu şemaya karşı da koşar. Tablo yaratan yeni
+migration'lar bu yüzden TEKRAR-ÇALIŞTIRILABİLİR olmalı (bkz. cc33dd44ee55:
+`sa.inspect(op.get_bind()).has_table(...)` kapısı).
 
 ## Kurallar
 - Kısa commit mesajları yaz
