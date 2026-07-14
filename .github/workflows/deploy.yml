@@ -45,6 +45,19 @@ jobs:
           pip install --quiet boto3
           python scripts/check_cognito_pool.py
 
+      # 2026-07-13: `sam build` atlanarak deploy edilen Lambda bagimliliklari
+      # VENDOR ETMEDI; handler istisnalari yuttugu icin Cognito trigger'i BASARILI
+      # sayildi ve auth e-postalari SESSIZCE hic gitmedi (kimse kayit olamadi).
+      # Artifact'i her deploy'da denetle. Simdilik BLOKLAMAZ: deploy rolune
+      # lambda:GetFunction eklendikten sonra continue-on-error kaldirilmali.
+      - name: CustomEmailSender Lambda package check (non-blocking)
+        continue-on-error: true
+        env:
+          COGNITO_EMAIL_LAMBDA_NAME: ${{ vars.COGNITO_EMAIL_LAMBDA_NAME || 'axisai-cognito-email-sender-EmailSenderFunction-hL04ENGVLu1E' }}
+        run: |
+          pip install --quiet boto3
+          python scripts/check_email_lambda.py
+
       # M5: rollback KODU geri alir ama boot'ta uygulanan DB migration'larini
       # GERI ALMAZ (bkz. CLAUDE.md A2). Gercek kullanici verisi varken bu,
       # kurtarilamaz bir olaya donusebilir. Deploy oncesi ucuz bir snapshot,
