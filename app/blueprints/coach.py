@@ -8,6 +8,7 @@ from app.extensions import _user_or_ip_key, db, limiter
 from app.models import UserSession
 from app.services.ai_coach import _fetch_coach_context, _run_coach_conversation, generate_coach_reply, is_coach_error_fallback
 from app.services.ai_gate import ai_concurrency_gate
+from app.services.moderation import validate_question
 from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee, generate_nutrition_plan, generate_training_plan
 from app.services.premium import (
     FREE_WEEKLY_AI_CHATS,
@@ -130,17 +131,12 @@ def ask_coach():
     if not isinstance(client_history, list):
         client_history = None
 
-    if not question:
-        return jsonify({"error": t("coach.ask_something")}), 400
-
-    # H2: Soru uzunluğunu sınırla. Geçmiş zaten COACH_HISTORY_CHAR_CAP ile kapalı,
-    # ama mevcut SORU sınırsızdı; tool_choice="auto" + 5'e kadar araç döngüsüyle
-    # her istek sistem promptu + bağlam + DEV soruyu modele defalarca yeniden
-    # gönderebiliyordu → token-maliyeti amplifikasyonu (özellikle pahalı Bedrock
-    # yolunda). Aşırı uzun girdiyi sessizce kırpmak yerine 400 ile reddet.
-    MAX_QUESTION_CHARS = 4000
-    if len(question) > MAX_QUESTION_CHARS:
-        return jsonify({"error": t("coach.question_too_long")}), 400
+    # Girdi kapısı (H2 uzunluk sınırı dahil) artık hattın Güvenlik Katmanı'nda:
+    # app/services/moderation.py (WS3). Davranış aynı: boş → ask_something,
+    # aşırı uzun → question_too_long, ikisi de 400.
+    err_key = validate_question(question)
+    if err_key:
+        return jsonify({"error": t(err_key)}), 400
 
     # M4: /ask en pahalı yoldur (Bedrock Sonnet + FatSecret + öğe-başı LLM makro
     # batch'leri). Plan üretimi gibi premium-duyarlı HAFTALIK kotaya tabi tut —

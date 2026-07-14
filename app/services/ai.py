@@ -15,12 +15,9 @@ from app.services.ai_gate import model_concurrency_slot
 logger = logging.getLogger(__name__)
 
 
-PORTION_SANITY_RULE = (
-    " Kalori/makro değerlerini ASLA tüm bir tarifin, tencerenin veya devasa "
-    "porsiyonun toplamı olarak verme. Her zaman makul TEK porsiyon (≈200-350g) "
-    "veya net 100g bazında hesapla; bir insanın tek oturuşta yiyebileceği makul "
-    "sınırların dışına çıkma."
-)
+# WS4: şablon app/prompts/nutrition.py'ye taşındı; eski import yolu
+# (meallog/ai_nutrition `from app.services.ai import PORTION_SANITY_RULE`) korunur.
+from app.prompts.nutrition import PORTION_SANITY_RULE  # noqa: E402,F401 (re-export)
 
 
 def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
