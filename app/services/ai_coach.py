@@ -933,26 +933,35 @@ class _BedrockFallback(Exception):
     çalıştırmaktan kaçınmak için)."""
 
 
-def _run_coach_conversation(user_id, question, context, client_history=None, language="tr"):
+def _run_coach_conversation(user_id, question, context, client_history=None,
+                            language="tr", prepared_history=None):
     """Koç sohbeti yönlendiricisi: ortak mesajları kurar, Bedrock açıksa Bedrock
     araç-kullanım döngüsünü dener (ilk çağrı hatasında OpenAI'ya şeffafça düşer),
     aksi halde mevcut OpenAI döngüsünü çalıştırır; sonra geçmişi kalıcılaştırır.
 
-    Konuşma geçmişi kullanıcının GÖRDÜĞÜ sohbettir: widget her istekte `history`
-    gönderir, biz onu kaynak-doğru kabul ederiz. Asıl 'staged' veri DB'deki
-    PendingAction'da yaşar. Client geçmiş göndermezse eski session-cookie'sine düşülür.
+    Geçmiş üç kaynaktan gelebilir (öncelik sırasıyla):
+    1) prepared_history — WS1 kalıcı hafızadan kurulmuş rolling window
+       (memory_manager.build_context_window). Sanitize/kırpma UYGULANMAZ (bütçe
+       orada yönetildi) ve session'a YAZILMAZ (kalıcılık DB'de, record_turn).
+    2) client_history — widget'ın gönderdiği sohbet (fallback yolu).
+    3) session cookie — en eski davranış.
+    Asıl 'staged' veri DB'deki PendingAction'da yaşar.
     """
     _begin_coach_turn()  # S1: tur-içi stage→confirm kilidini sıfırla
-    use_client = client_history is not None
-    if use_client:
-        history = _sanitize_client_history(client_history)
-        # Widget mevcut soruyu da history'nin sonuna iter; soruyu aşağıda biz
-        # ayrıca eklediğimiz için sondaki user turlarını atıp çift eklemeyi önle.
-        while history and history[-1]["role"] == "user":
-            history.pop()
+    if prepared_history is not None:
+        history = list(prepared_history)
+        use_client = True  # session'a yazma (kalıcılık DB'de)
     else:
-        history = list(session.get("coach_history", []))
-    history = history[-COACH_HISTORY_LIMIT:]
+        use_client = client_history is not None
+        if use_client:
+            history = _sanitize_client_history(client_history)
+            # Widget mevcut soruyu da history'nin sonuna iter; soruyu aşağıda biz
+            # ayrıca eklediğimiz için sondaki user turlarını atıp çift eklemeyi önle.
+            while history and history[-1]["role"] == "user":
+                history.pop()
+        else:
+            history = list(session.get("coach_history", []))
+        history = history[-COACH_HISTORY_LIMIT:]
 
     final_text = None
     if BEDROCK_ENABLED and _anthropic is not None:

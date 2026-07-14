@@ -301,6 +301,52 @@ class PendingAction(db.Model):
         return f"<PendingAction {self.user_id} - {self.action_type} - {self.created_at}>"
 
 
+class CoachConversation(db.Model):
+    """AI koç kalıcı konuşma oturumu (Sprint 4 WS1).
+
+    Kullanıcı başına EN FAZLA bir aktif konuşma (archived_at IS NULL) — kod
+    seviyesinde memory_manager.get_or_create_active_conversation ile korunur
+    (kısmi unique indeks SQLite'a taşınamıyor). Reset arşivler, SİLMEZ: eski
+    mesajlar güvenle saklı kalır. `summary` eski turların LLM özetidir ve
+    bağlam penceresine not olarak girer; `summarized_upto_id` özetin kapsadığı
+    son CoachMessage.id'dir — özetleme tetikleyicisi 'özetlenmemiş kuyruk'
+    boyutunu buradan hesaplar (pruning mesaj silmeden pencere-dışı bırakır)."""
+    id             = db.Column(db.Integer, primary_key=True)
+    user_id        = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    started_at     = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    archived_at    = db.Column(db.DateTime, nullable=True, index=True)
+    summary        = db.Column(db.Text, nullable=True)
+    summary_tokens = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    summarized_upto_id = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+
+    user = db.relationship("User", backref=db.backref("coach_conversations", passive_deletes=True))
+    messages = db.relationship("CoachMessage", backref="conversation",
+                               passive_deletes=True, lazy="dynamic")
+
+    def __repr__(self):
+        return f"<CoachConversation {self.id} user={self.user_id} archived={self.archived_at}>"
+
+
+class CoachMessage(db.Model):
+    """AI koç konuşmasının tek turu (user | assistant).
+
+    token_estimate kaba (len//4) tahmindir; prompt/completion_tokens sağlayıcı
+    yanıtındaki gerçek `usage` değerleridir (varsa — WS6 gözlemlenebilirlik).
+    `interrupted` stream yarıda kesildiğinde işaretlenir (WS2)."""
+    id              = db.Column(db.Integer, primary_key=True)
+    conversation_id = db.Column(db.Integer, db.ForeignKey("coach_conversation.id", ondelete="CASCADE"), nullable=False, index=True)
+    role            = db.Column(db.String(12), nullable=False)  # 'user' | 'assistant'
+    content         = db.Column(db.Text, nullable=False)
+    token_estimate  = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    prompt_tokens     = db.Column(db.Integer, nullable=True)
+    completion_tokens = db.Column(db.Integer, nullable=True)
+    interrupted     = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
+    created_at      = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    def __repr__(self):
+        return f"<CoachMessage {self.id} conv={self.conversation_id} {self.role}>"
+
+
 class PumpCheck(db.Model):
     """Antrenman tamamlama doğrulaması ('Pump Check'). Yüklenen ortam fotoğrafı
     S3'e konur; burada yalnızca nesne anahtarı ve doğrulama sonucu saklanır."""

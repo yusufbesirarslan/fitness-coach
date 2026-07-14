@@ -6,8 +6,10 @@ from app.auth_middleware import require_auth
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
 from app.models import UserSession
-from app.services.ai_coach import _fetch_coach_context, _run_coach_conversation, generate_coach_reply, is_coach_error_fallback
+from app.services import memory_manager
+from app.services.ai_coach import generate_coach_reply
 from app.services.ai_gate import ai_concurrency_gate
+from app.services.ai_pipeline import generate_answer
 from app.services.moderation import validate_question
 from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee, generate_nutrition_plan, generate_training_plan
 from app.services.premium import (
@@ -148,26 +150,23 @@ def ask_coach():
         return jsonify({"error": t("coach.chat_quota_reached"),
                         "premium_required": True}), 402
 
-    # Bağlam sorgularında geçici DB arızası olsa bile function-calling akışı
-    # (FatSecret + SQLAlchemy) bağımsız olarak çalışmaya devam eder.
+    # WS3: yanıt üretimi modüler hatta (ai_pipeline.generate_answer — bağlam +
+    # WS1 kalıcı hafıza + sağlayıcı döngüsü + biçimlendirici). Kota rezervasyon/
+    # iade kararı burada kalır: hat is_error_fallback bayrağını döndürür.
     lang = current_user.language
     try:
-        context = _fetch_coach_context(current_user.id, question, language=lang)
-    except Exception:
-        context = ""
-
-    try:
-        answer = _run_coach_conversation(current_user.id, question, context,
-                                         client_history, language=lang)
+        result = generate_answer(current_user.id, question, client_history,
+                                 language=lang)
         # Sağlayıcı dostça bir hata metni döndürürse önceden ayrılan hakkı geri ver.
-        if quota_enabled and is_coach_error_fallback(answer):
+        if quota_enabled and result["is_error_fallback"]:
             db.session.rollback()
             try:
                 refund_ai_quota(current_user, "chat")
             except Exception:
                 db.session.rollback()
                 current_app.logger.exception("AI chat quota refund failed")
-        return jsonify({"answer": answer})
+        return jsonify({"answer": result["answer"],
+                        "conversation_id": result["conversation_id"]})
     except Exception:
         current_app.logger.exception("Koç yanıtı üretilemedi")
         db.session.rollback()
@@ -178,3 +177,30 @@ def ask_coach():
                 db.session.rollback()
                 current_app.logger.exception("AI chat quota refund failed")
         return jsonify({"error": t("coach.reply_failed")}), 500
+
+
+@bp.route("/coach/history", methods=["GET"])
+@require_auth
+def coach_history():
+    """Aktif konuşmanın son mesajları (eski→yeni) — WS1: hafıza tarayıcı
+    yenilemesini böyle atlatır. Widget hidrasyonu PR 3'te (streaming) bağlanır.
+    Sorgu memory_manager içinde current_user.id'ye scope'ludur."""
+    conv, rows = memory_manager.recent_messages(current_user.id, limit=50)
+    return jsonify({
+        "conversation_id": conv.id if conv else None,
+        "messages": [
+            {"role": m.role, "text": m.content,
+             "created_at": (m.created_at.isoformat() + "Z") if m.created_at else None}
+            for m in rows
+        ],
+    })
+
+
+@bp.route("/coach/conversation/reset", methods=["POST"])
+@require_auth
+def coach_conversation_reset():
+    """Konuşma sıfırlama ucu (WS1): aktif konuşmayı ARŞİVLER — mesajlar
+    silinmez, sonraki soru taze bir konuşma açar. CSRF: yazma metodu olduğu
+    için hooks._csrf_protect kapsar; csrf.js fetch'e başlığı otomatik ekler."""
+    archived = memory_manager.archive_active_conversation(current_user.id)
+    return jsonify({"ok": True, "archived": archived})

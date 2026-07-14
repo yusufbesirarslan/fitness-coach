@@ -75,35 +75,72 @@ def test_finalize_reply_real_answer_untouched():
 # ---------------------------------------------------------------------------
 
 def test_pipeline_stage_order_and_passthrough(app, monkeypatch):
+    # Hafıza aşaması KAPALI: burada sınanan, hattın diğer aşamalarının sırası ve
+    # argüman aktarımı (WS1 kalıcı hafızanın kendisi test_memory_manager.py'de).
+    app.config["AI_MEMORY_ENABLED"] = False
     seen = {}
     monkeypatch.setattr(context_builder, "fetch_coach_context",
                         lambda uid, q, language="tr": "BAĞLAM")
 
-    def fake_run(user_id, question, context, client_history, language="tr"):
+    def fake_run(user_id, question, context, client_history, language="tr",
+                 prepared_history=None):
         seen.update(user_id=user_id, question=question, context=context,
-                    history=client_history, language=language)
+                    history=client_history, language=language,
+                    prepared_history=prepared_history)
         return "cevap"
     monkeypatch.setattr(ai_coach, "_run_coach_conversation", fake_run)
 
     with app.test_request_context("/"):
         out = ai_pipeline.generate_answer(7, "protein?", client_history=[], language="en")
 
-    assert out == {"answer": "cevap", "is_error_fallback": False}
+    assert out == {"answer": "cevap", "is_error_fallback": False,
+                   "conversation_id": None}
+    # Hafıza kapalıyken prepared_history None kalır → ai_coach eski client-history
+    # yolunu kullanır (davranış Sprint 3 ile birebir aynı).
     assert seen == {"user_id": 7, "question": "protein?", "context": "BAĞLAM",
-                    "history": [], "language": "en"}
+                    "history": [], "language": "en", "prepared_history": None}
 
 
 def test_pipeline_context_failure_degrades_to_empty(app, monkeypatch):
+    app.config["AI_MEMORY_ENABLED"] = False
+
     def boom(uid, q, language="tr"):
         raise RuntimeError("db down")
     monkeypatch.setattr(context_builder, "fetch_coach_context", boom)
     monkeypatch.setattr(ai_coach, "_run_coach_conversation",
-                        lambda uid, q, context, h, language="tr": f"context=[{context}]")
+                        lambda uid, q, context, h, language="tr",
+                        prepared_history=None: f"context=[{context}]")
 
     with app.test_request_context("/"):
         out = ai_pipeline.generate_answer(1, "soru")
 
     assert out["answer"] == "context=[]"
+
+
+def test_pipeline_memory_failure_degrades_to_client_history(app, monkeypatch):
+    # WS1 dayanıklılık sözleşmesi: hafıza katmanı çökerse sohbet KIRILMAZ —
+    # conversation_id None döner, eski client-history yolu devreye girer ve
+    # sonraki DB sorguları için session temiz bırakılır (rollback).
+    from app.services import memory_manager
+
+    app.config["AI_MEMORY_ENABLED"] = True
+
+    def boom(user_id):
+        raise RuntimeError("memory down")
+    monkeypatch.setattr(memory_manager, "get_or_create_active_conversation", boom)
+    monkeypatch.setattr(context_builder, "fetch_coach_context",
+                        lambda uid, q, language="tr": "BAĞLAM")
+    seen = {}
+    monkeypatch.setattr(ai_coach, "_run_coach_conversation",
+                        lambda uid, q, c, h, language="tr", prepared_history=None:
+                        seen.update(context=c, prepared_history=prepared_history) or "cevap")
+
+    with app.test_request_context("/"):
+        out = ai_pipeline.generate_answer(1, "soru", client_history=[{"role": "user"}])
+
+    assert out == {"answer": "cevap", "is_error_fallback": False,
+                   "conversation_id": None}
+    assert seen == {"context": "BAĞLAM", "prepared_history": None}
 
 
 def test_pipeline_rejects_invalid_question(app, monkeypatch):

@@ -74,6 +74,18 @@ BEDROCK_ENABLED = os.getenv("BEDROCK_ENABLED", "0") == "1"  # açık opt-in; pro
 # tanımları önbelleğe alınır; deploy bölgesinde (eu-central-1) doğrulanana kadar
 # KARANLIK gönder (varsayılan kapalı). Yalnızca tool-use koç döngüsünü etkiler.
 BEDROCK_PROMPT_CACHE = os.getenv("BEDROCK_PROMPT_CACHE", "0") == "1"
+# ── Sprint 4 WS1: AI koç kalıcı konuşma hafızası ──
+# Operasyonel kapatma anahtarı: 0 → eski davranış (yalnızca widget'ın gönderdiği
+# kısa geçmiş; DB'ye tur yazılmaz). Tablolar expand-only olduğundan geri açmak güvenli.
+AI_MEMORY_ENABLED = os.getenv("AI_MEMORY_ENABLED", "1") == "1"
+# Bağlam penceresine girecek geçmiş (özet + mesajlar) için kaba token bütçesi
+# (memory_manager.estimate_tokens, len//4). Model limitini DEĞİL, maliyet/alaka
+# dengesini sınırlar; pencere en yeni mesajlardan geriye bütçe dolana dek kurulur.
+AI_CONTEXT_TOKEN_BUDGET = int(os.getenv("AI_CONTEXT_TOKEN_BUDGET", "3000"))
+# Özetlenmemiş mesaj kuyruğu bu tahmini token boyutunu aşınca eski turlar tek
+# LLM çağrısıyla conversation.summary'ye katlanır (şimdilik istek başında lazy
+# inline; WS8'de RQ işine taşınacak).
+AI_SUMMARY_TRIGGER_TOKENS = int(os.getenv("AI_SUMMARY_TRIGGER_TOKENS", "6000"))
 
 # Amazon Cognito native backend API flow. Hosted UI/OIDC redirects are disabled.
 # User Pool and App Client come from .env. If the app client has a secret, set
@@ -203,6 +215,7 @@ def configure_app(app):
         }
     app.config["AI_PLAN_QUOTA_ENABLED"] = AI_PLAN_QUOTA_ENABLED
     app.config["AI_CHAT_QUOTA_ENABLED"] = AI_CHAT_QUOTA_ENABLED
+    app.config["AI_MEMORY_ENABLED"] = AI_MEMORY_ENABLED
     app.config["LOGIN_FAIL_CLOSED"] = LOGIN_FAIL_CLOSED
     app.config["BEDROCK_ENABLED"] = BEDROCK_ENABLED
     _secret_key = os.environ.get("SECRET_KEY")

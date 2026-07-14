@@ -83,9 +83,9 @@ _DEFAULT_TEST_RE = re.compile(
 # Sıra FK-güvenli: PumpCheckLike/Comment, PumpCheck'ten önce gelir.
 def _user_child_models():
     from app.models import (
-        Activity, CognitoSession, CustomMeal, DailyActivity, MealLog,
-        NutritionPlan, PendingAction, PumpCheck, PumpCheckComment, PumpCheckLike,
-        Supplement, TrainingPlan, UserQuestProgress, UserSession,
+        Activity, CoachConversation, CognitoSession, CustomMeal, DailyActivity,
+        MealLog, NutritionPlan, PendingAction, PumpCheck, PumpCheckComment,
+        PumpCheckLike, Supplement, TrainingPlan, UserQuestProgress, UserSession,
         UserWearableConnection, WaterLog, WearableActivityLog, WearableSleepLog,
         WearableWorkoutLog, WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog,
     )
@@ -93,8 +93,9 @@ def _user_child_models():
         UserSession, CognitoSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
         TrainingPlan, MealLog, PendingAction, PumpCheckLike, PumpCheckComment,
         PumpCheck, Activity, Supplement, UserQuestProgress, WeeklyWinner,
-        WaterLog, WorkoutLog, DailyActivity, CustomMeal, UserWearableConnection,
-        WearableSleepLog, WearableActivityLog, WearableWorkoutLog,
+        WaterLog, WorkoutLog, DailyActivity, CustomMeal, CoachConversation,
+        UserWearableConnection, WearableSleepLog, WearableActivityLog,
+        WearableWorkoutLog,
     )
 
 
@@ -120,8 +121,9 @@ def _purge_user(user):
     bırakmaz. Bu kullanıcının davet ettiği kişilerin referred_by_id'si NULL'a
     çekilir (FK'de SET NULL olsa da burada da açıkça yapılır).
     """
-    from app.models import (CustomMeal, CustomMealItem, Friendship, Message,
-                            PumpCheck, PumpCheckComment, PumpCheckLike, User)
+    from app.models import (CoachConversation, CoachMessage, CustomMeal,
+                            CustomMealItem, Friendship, Message, PumpCheck,
+                            PumpCheckComment, PumpCheckLike, User)
     uid = user.id
 
     # CustomMealItem yalnızca custom_meal üzerinden user'a bağlı.
@@ -129,6 +131,14 @@ def _purge_user(user):
     if meal_ids:
         CustomMealItem.query.filter(
             CustomMealItem.custom_meal_id.in_(meal_ids)
+        ).delete(synchronize_session=False)
+
+    # CoachMessage de yalnızca coach_conversation üzerinden user'a bağlı
+    # (user_id taşımaz) — konuşmalar aşağıdaki döngüde silinmeden ÖNCE süpürülür.
+    conv_ids = [c.id for c in CoachConversation.query.filter_by(user_id=uid).all()]
+    if conv_ids:
+        CoachMessage.query.filter(
+            CoachMessage.conversation_id.in_(conv_ids)
         ).delete(synchronize_session=False)
 
     # Like/yorumlar iki yönden bağlı: kullanıcının kendi bıraktıkları (user_id)

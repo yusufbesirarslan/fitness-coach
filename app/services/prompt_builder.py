@@ -50,8 +50,19 @@ def build_openai_messages(language, context, history, question):
 def build_anthropic_messages(history, question):
     """Anthropic Messages dizisi: geçmiş + güncel soru. Anthropic ilk mesajın
     'user' rolünde olmasını şart koşar; baştaki assistant turlarını (ör.
-    widget'ın açılış bot mesajı) at — aksi halde ilk çağrı 400 verir."""
+    widget'ın açılış bot mesajı) at — aksi halde ilk çağrı 400 verir.
+
+    B15: ardışık aynı-rol turları da 400 verir. Geçmiş CEVAPSIZ bir user
+    mesajıyla bitiyorsa (yarıda kesilen stream, WS2) güncel soruyu eklediğimizde
+    iki user turu arka arkaya gelirdi → Bedrock 400 → sessizce gpt-4o-mini
+    yedeğine düşerdik. Montaj tek kapı olduğu için birleştirmeyi burada yap."""
     convo = [dict(m) for m in history] + [{"role": "user", "content": question}]
     while convo and convo[0].get("role") != "user":
         convo.pop(0)
-    return convo
+    merged = []
+    for msg in convo:
+        if merged and merged[-1]["role"] == msg["role"]:
+            merged[-1]["content"] = f"{merged[-1]['content']}\n{msg['content']}"
+        else:
+            merged.append(dict(msg))
+    return merged
