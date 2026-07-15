@@ -87,6 +87,47 @@ AI_CONTEXT_TOKEN_BUDGET = int(os.getenv("AI_CONTEXT_TOKEN_BUDGET", "3000"))
 # inline; WS8'de RQ işine taşınacak).
 AI_SUMMARY_TRIGGER_TOKENS = int(os.getenv("AI_SUMMARY_TRIGGER_TOKENS", "6000"))
 
+# ── Sprint 4 WS5: AI sonuç önbelleği (app/services/ai_cache.py) ──
+# Deterministik LLM sonuçlarını (besin adı EN normalizasyonu, makro tahmini,
+# statik öneriler) Redis'te önbelleğe alıp tekrar-hesabı azaltır. Redis 200mb
+# allkeys-lru (girdiler tahliye edilebilir) — yalnızca önbellek, asla kalıcı
+# durum. Redis yoksa/erişilemezse no-op; tüm hatalar yutulur+loglanır.
+# Operasyonel kapatma anahtarı; varsayılan AÇIK.
+AI_CACHE_ENABLED = os.getenv("AI_CACHE_ENABLED", "1") == "1"
+# Özellik-başı TTL (saniye). Besin adı→EN çevirisi kararlıdır → uzun; makrolar
+# günlük; benzer-prompt kısa; statik öneriler orta.
+AI_CACHE_TTL_FOOD = int(os.getenv("AI_CACHE_TTL_FOOD", str(7 * 24 * 3600)))     # 604800
+AI_CACHE_TTL_MACRO = int(os.getenv("AI_CACHE_TTL_MACRO", str(24 * 3600)))       # 86400
+AI_CACHE_TTL_PROMPT = int(os.getenv("AI_CACHE_TTL_PROMPT", str(3600)))          # 3600
+AI_CACHE_TTL_RECS = int(os.getenv("AI_CACHE_TTL_RECS", str(6 * 3600)))          # 21600
+
+# ── Sprint 4 WS9: AI hata kurtarma (app/services/ai_recovery.py) ──
+# Kurtarma merdiveni: geçici hata → sınırlı jitter'lı yeniden deneme → son-iyi
+# (last-good) Redis yanıtı → dostça i18n hata. Sağlayıcı istisnaları asla sızmaz.
+AI_RECOVERY_ENABLED = os.getenv("AI_RECOVERY_ENABLED", "1") == "1"
+# Kendi katmanımızdaki toplam deneme sayısı (ilk çağrı dahil). SDK max_retries=1'e
+# düşürülür (BEDROCK_MAX_RETRIES) ki iki katman çarpılıp tek istekte onlarca
+# sağlayıcı çağrısı olmasın (1 worker × 8 thread; her çağrı bir thread'i tutar).
+AI_RETRY_ATTEMPTS = int(os.getenv("AI_RETRY_ATTEMPTS", "2"))
+AI_RETRY_BASE_DELAY = float(os.getenv("AI_RETRY_BASE_DELAY", "0.5"))   # saniye, üstel taban
+AI_RETRY_MAX_DELAY = float(os.getenv("AI_RETRY_MAX_DELAY", "4.0"))     # saniye tavan
+# Son-iyi yanıt TTL: her başarılı ağır çağrı bu süreyle saklanır, her iki
+# sağlayıcı da düşerse bayat-ama-gerçek yanıt döner.
+AI_LASTGOOD_TTL_SECONDS = int(os.getenv("AI_LASTGOOD_TTL_SECONDS", str(24 * 3600)))
+# AnthropicBedrock SDK'nın kendi yeniden-deneme sayısı. Kurtarma katmanı kendi
+# retry'ını yaptığından 1'e düşürülür (çarpımı önle). OpenAI istemcisi ayrı.
+BEDROCK_MAX_RETRIES = int(os.getenv("BEDROCK_MAX_RETRIES", "1"))
+
+# ── Sprint 4 WS7: AI kötüye-kullanım kısıtları ──
+# AI_RATELIMIT (30/saat) üstüne binen kısa-pencere burst tavanı: /ask* uçlarında
+# kullanıcı-başı ani seri istekleri sınırlar (Flask-Limiter, _user_or_ip_key).
+AI_BURST_RATELIMIT = os.getenv("AI_BURST_RATELIMIT", "5 per minute")
+# Ardışık sağlayıcı arızası eşiği: bir kullanıcıda bu kadar üst üste AI hatası
+# olunca soğuma (cooldown) devreye girer → sonraki /ask* istekleri 429+Retry-After.
+# Sağlayıcı gerçekten düştüğünde pahalı tekrarları keser; ilk başarıda sıfırlanır.
+AI_FAILURE_THRESHOLD = int(os.getenv("AI_FAILURE_THRESHOLD", "3"))
+AI_FAILURE_COOLDOWN_SECONDS = int(os.getenv("AI_FAILURE_COOLDOWN_SECONDS", "60"))
+
 # Amazon Cognito native backend API flow. Hosted UI/OIDC redirects are disabled.
 # User Pool and App Client come from .env. If the app client has a secret, set
 # COGNITO_CLIENT_SECRET; otherwise leave it blank. Region is derived from the

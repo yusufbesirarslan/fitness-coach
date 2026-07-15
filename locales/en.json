@@ -806,6 +806,7 @@
   "coach.question_too_long": "Your question is too long. Please shorten it (max 4000 characters).",
   "coach.chat_quota_reached": "You've used up this week's free AI coach chats. Upgrade to Premium for unlimited chat.",
   "coach.reply_failed": "Couldn't get a response right now, please try again.",
+  "coach.cooldown": "The AI coach is briefly overloaded. Please try again in a little while.",
 
   "quest.login.title": "Daily Login",
   "quest.login.desc": "Log in to the app today",

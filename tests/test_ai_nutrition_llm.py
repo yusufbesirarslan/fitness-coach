@@ -80,6 +80,64 @@ def test_normalize_batch_failures(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# WS5 — TR→EN normalizasyon önbelleği (ai_cache)
+# ---------------------------------------------------------------------------
+
+class _CacheRedis:
+    """get/setex taşıyan minimal sahte Redis (ai_cache round-trip)."""
+    def __init__(self):
+        self.store = {}
+
+    def get(self, key):
+        return self.store.get(key)
+
+    def setex(self, key, ttl, value):
+        self.store[key] = value
+
+
+def test_normalize_single_result_is_cached(monkeypatch):
+    calls = []
+    _fake_chat(monkeypatch, '"chicken breast"', capture=calls)
+    monkeypatch.setattr("app.extensions.redis_client", _CacheRedis())
+    assert _normalize_food_query_en("tavuk göğsü") == "chicken breast"
+    assert len(calls) == 1
+    # 2. çağrı önbellekten gelir → LLM tekrar ÇAĞRILMAZ.
+    assert _normalize_food_query_en("tavuk göğsü") == "chicken breast"
+    assert len(calls) == 1
+
+
+def test_normalize_single_failure_not_cached(monkeypatch):
+    # "" graceful-degrade önbelleğe YAZILMAZ (geçici arıza haftalarca pinlenmesin).
+    _fake_chat(monkeypatch, "x" * 100)  # >80 → reddedilir → ""
+    r = _CacheRedis()
+    monkeypatch.setattr("app.extensions.redis_client", r)
+    assert _normalize_food_query_en("uzun") == ""
+    assert r.store == {}
+
+
+def test_normalize_batch_result_is_cached(monkeypatch):
+    calls = []
+    _fake_chat(monkeypatch, json.dumps({"Margarita": "margherita pizza"}),
+               capture=calls)
+    monkeypatch.setattr("app.extensions.redis_client", _CacheRedis())
+    r1 = _normalize_food_queries_en(["Margarita"], {"Margarita": "Pizzalar"})
+    assert r1 == {"Margarita": "margherita pizza"}
+    assert len(calls) == 1
+    # Aynı menü tekrar → önbellek, LLM çağrısı yok.
+    r2 = _normalize_food_queries_en(["Margarita"], {"Margarita": "Pizzalar"})
+    assert r2 == {"Margarita": "margherita pizza"}
+    assert len(calls) == 1
+
+
+def test_normalize_batch_empty_result_not_cached(monkeypatch):
+    _fake_chat(monkeypatch, "[1, 2, 3]")  # dict değil → {} sonuç
+    r = _CacheRedis()
+    monkeypatch.setattr("app.extensions.redis_client", r)
+    assert _normalize_food_queries_en(["çay"]) == {}
+    assert r.store == {}
+
+
+# ---------------------------------------------------------------------------
 # LLM besin araması (FatSecret tamamen erişilemezken son çare)
 # ---------------------------------------------------------------------------
 

@@ -5,10 +5,10 @@ from flask import Blueprint, Response, current_app, jsonify, request, stream_wit
 from flask_login import current_user
 from app.auth_middleware import require_auth
 
-from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
+from app.config import AI_BURST_RATELIMIT, AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, db, limiter
 from app.models import User, UserSession
-from app.services import memory_manager
+from app.services import ai_recovery, memory_manager
 from app.services.ai_coach import generate_coach_reply
 from app.services.ai_gate import ai_concurrency_gate, ai_stream_concurrency_gate
 from app.services.ai_pipeline import generate_answer, stream_answer
@@ -24,6 +24,19 @@ from app.timeutil import app_date_of, app_today
 
 
 bp = Blueprint("coach", __name__)
+
+
+def _ai_cooldown_response():
+    """WS7: kullanıcı ardışık AI arızası nedeniyle soğumadaysa 429+Retry-After
+    döndür, değilse None. Kota REZERVASYONUNDAN ÖNCE çağrılır — soğuyan kullanıcı
+    boşuna hak harcamasın. Redis yoksa (lokal/test) her zaman None (no-op)."""
+    remaining = ai_recovery.ai_cooldown_remaining(current_user.id)
+    if remaining:
+        resp = jsonify({"error": t("coach.cooldown"), "retry_after": remaining})
+        resp.status_code = 429
+        resp.headers["Retry-After"] = str(remaining)
+        return resp
+    return None
 
 
 @bp.route("/chat", methods=["POST"])
@@ -125,6 +138,7 @@ def chat():
 @bp.route("/ask", methods=["POST"])
 @require_auth
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
+@limiter.limit(AI_BURST_RATELIMIT, key_func=_user_or_ip_key)  # WS7: kısa-pencere burst tavanı
 @ai_concurrency_gate  # A1: bloklayıcı AI çağrıları tüm thread'leri doldurmasın
 def ask_coach():
     data     = request.get_json(silent=True) or {}
@@ -142,6 +156,11 @@ def ask_coach():
     if err_key:
         return jsonify({"error": t(err_key)}), 400
 
+    # WS7: sağlayıcı arıza soğuması — kotadan ÖNCE. Soğuyan kullanıcı hak harcamaz.
+    cooling = _ai_cooldown_response()
+    if cooling is not None:
+        return cooling
+
     # M4: /ask en pahalı yoldur (Bedrock Sonnet + FatSecret + öğe-başı LLM makro
     # batch'leri). Plan üretimi gibi premium-duyarlı HAFTALIK kotaya tabi tut —
     # non-premium için sınır, premium sınırsız. Salt rate-limit (30/saat)
@@ -156,22 +175,28 @@ def ask_coach():
     # WS1 kalıcı hafıza + sağlayıcı döngüsü + biçimlendirici). Kota rezervasyon/
     # iade kararı burada kalır: hat is_error_fallback bayrağını döndürür.
     lang = current_user.language
+    user_id = current_user.id
     try:
-        result = generate_answer(current_user.id, question, client_history,
+        result = generate_answer(user_id, question, client_history,
                                  language=lang)
         # Sağlayıcı dostça bir hata metni döndürürse önceden ayrılan hakkı geri ver.
-        if quota_enabled and result["is_error_fallback"]:
-            db.session.rollback()
-            try:
-                refund_ai_quota(current_user, "chat")
-            except Exception:
+        if result["is_error_fallback"]:
+            ai_recovery.record_ai_failure(user_id)  # WS7: ardışık-arıza sayacı
+            if quota_enabled:
                 db.session.rollback()
-                current_app.logger.exception("AI chat quota refund failed")
+                try:
+                    refund_ai_quota(current_user, "chat")
+                except Exception:
+                    db.session.rollback()
+                    current_app.logger.exception("AI chat quota refund failed")
+        else:
+            ai_recovery.clear_ai_failures(user_id)  # başarı → sayaç sıfırla
         return jsonify({"answer": result["answer"],
                         "conversation_id": result["conversation_id"]})
     except Exception:
         current_app.logger.exception("Koç yanıtı üretilemedi")
         db.session.rollback()
+        ai_recovery.record_ai_failure(user_id)
         if quota_enabled:
             try:
                 refund_ai_quota(current_user, "chat")
@@ -202,6 +227,7 @@ def _refund_chat_quota(user_id):
 @bp.route("/ask/stream", methods=["POST"])
 @require_auth
 @limiter.limit(AI_RATELIMIT, key_func=_user_or_ip_key)
+@limiter.limit(AI_BURST_RATELIMIT, key_func=_user_or_ip_key)  # WS7: kısa-pencere burst tavanı
 @ai_stream_concurrency_gate  # slotu YANIT KAPANANA dek tutar (bkz. ai_gate)
 def ask_coach_stream():
     """/ask'in akışlı ikizi (WS2). Aynı kapılar, aynı hat; fark: yanıt token
@@ -219,6 +245,11 @@ def ask_coach_stream():
     err_key = validate_question(question)
     if err_key:
         return jsonify({"error": t(err_key)}), 400
+
+    # WS7: sağlayıcı arıza soğuması — kotadan ÖNCE (bloklayıcı /ask ile aynı kural).
+    cooling = _ai_cooldown_response()
+    if cooling is not None:
+        return cooling
 
     quota_enabled = current_app.config.get("AI_CHAT_QUOTA_ENABLED", True)
     if quota_enabled and not reserve_ai_quota(
@@ -241,6 +272,7 @@ def ask_coach_stream():
                 elif kind == "delta":
                     yield _sse("delta", {"text": event["text"]})
                 elif kind == "error":
+                    ai_recovery.record_ai_failure(user_id)  # WS7: ardışık-arıza sayacı
                     if quota_enabled:
                         _refund_chat_quota(user_id)
                     yield _sse("error", {"message": t(event["key"])})
@@ -248,8 +280,12 @@ def ask_coach_stream():
                 elif kind == "done":
                     # Sağlayıcı dostça hata metni döndürdüyse hak iade edilir
                     # (bloklayıcı /ask ile birebir aynı kural).
-                    if quota_enabled and event["is_error_fallback"]:
-                        _refund_chat_quota(user_id)
+                    if event["is_error_fallback"]:
+                        ai_recovery.record_ai_failure(user_id)
+                        if quota_enabled:
+                            _refund_chat_quota(user_id)
+                    else:
+                        ai_recovery.clear_ai_failures(user_id)  # başarı → sayaç sıfırla
                     yield _sse("done", {"text": event["text"],
                                         "is_error_fallback": event["is_error_fallback"]})
                     return
@@ -260,6 +296,7 @@ def ask_coach_stream():
         except Exception:
             current_app.logger.exception("Koç yanıtı akıtılamadı")
             db.session.rollback()
+            ai_recovery.record_ai_failure(user_id)
             if quota_enabled:
                 _refund_chat_quota(user_id)
             yield _sse("error", {"message": t("coach.reply_failed")})

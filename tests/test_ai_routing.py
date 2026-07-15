@@ -12,7 +12,25 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services import ai
+from app.services import ai, ai_recovery
+from app.services.ai_recovery import TransientAIError
+
+
+class _LastGoodRedis:
+    """get/setex taşıyan minimal sahte Redis (last-good round-trip testleri)."""
+    def __init__(self):
+        self.store = {}
+
+    def get(self, key):
+        return self.store.get(key)
+
+    def setex(self, key, ttl, value):
+        self.store[key] = value
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    monkeypatch.setattr(ai_recovery, "_sleep", lambda s: None)
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +92,69 @@ def test_heavy_chat_passes_kwargs_through(monkeypatch):
                    system_prompt="S", max_tokens=4000, temperature=0.4)
     assert captured == {"messages": [{"role": "user", "content": "x"}],
                         "system_prompt": "S", "max_tokens": 4000, "temperature": 0.4}
+
+
+# ---------------------------------------------------------------------------
+# _heavy_chat WS9 kurtarma: geçici retry + last-good
+# ---------------------------------------------------------------------------
+
+def test_heavy_chat_retries_transient_bedrock_then_succeeds(monkeypatch, no_sleep):
+    monkeypatch.setattr(ai, "BEDROCK_ENABLED", True)
+    monkeypatch.setattr(ai, "anthropic", object())
+    calls = {"n": 0}
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise TransientAIError("429")  # geçici → retry
+        return "CLAUDE-OK"
+    monkeypatch.setattr(ai, "_claude_chat", flaky)
+    monkeypatch.setattr(ai, "_openai_chat",
+                        lambda *a, **k: pytest.fail("retry başarınca OpenAI'ya düşülmemeli"))
+    assert ai._heavy_chat([{"role": "user", "content": "x"}]) == "CLAUDE-OK"
+    assert calls["n"] == 2  # bir kez daha denendi
+
+
+def test_heavy_chat_non_transient_bedrock_no_retry_falls_back(monkeypatch, no_sleep):
+    # Kalıcı (TransientAIError DEĞİL) Bedrock hatası retry EDİLMEZ; anında OpenAI'ya düşer.
+    monkeypatch.setattr(ai, "BEDROCK_ENABLED", True)
+    monkeypatch.setattr(ai, "anthropic", object())
+    calls = {"n": 0}
+
+    def boom(*a, **k):
+        calls["n"] += 1
+        raise RuntimeError("AI servisi hatası")
+    monkeypatch.setattr(ai, "_claude_chat", boom)
+    monkeypatch.setattr(ai, "_openai_chat", lambda *a, **k: "FALLBACK")
+    assert ai._heavy_chat([{"role": "user", "content": "x"}]) == "FALLBACK"
+    assert calls["n"] == 1  # tek Bedrock denemesi (retry yok)
+
+
+def test_heavy_chat_serves_last_good_when_both_providers_fail(monkeypatch, no_sleep):
+    monkeypatch.setattr("app.extensions.redis_client", _LastGoodRedis())
+    monkeypatch.setattr(ai, "BEDROCK_ENABLED", False)
+    msgs = [{"role": "user", "content": "aynı girdi"}]
+
+    # 1) Başarılı OpenAI çağrısı last-good yazar.
+    monkeypatch.setattr(ai, "_openai_chat", lambda *a, **k: "GOOD")
+    assert ai._heavy_chat(msgs) == "GOOD"
+
+    # 2) Aynı girdi, OpenAI düşer → bayat-ama-gerçek last-good sunulur.
+    def down(*a, **k):
+        raise RuntimeError("AI servisi hatası")
+    monkeypatch.setattr(ai, "_openai_chat", down)
+    assert ai._heavy_chat(msgs) == "GOOD"
+
+
+def test_heavy_chat_raises_when_both_fail_and_no_last_good(monkeypatch, no_sleep):
+    monkeypatch.setattr("app.extensions.redis_client", None)  # last-good yok
+    monkeypatch.setattr(ai, "BEDROCK_ENABLED", False)
+
+    def down(*a, **k):
+        raise RuntimeError("AI servisi hatası")
+    monkeypatch.setattr(ai, "_openai_chat", down)
+    with pytest.raises(RuntimeError):
+        ai._heavy_chat([{"role": "user", "content": "x"}])
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +254,22 @@ def test_claude_chat_maps_api_error(monkeypatch):
     _fake_bedrock(monkeypatch, raises=_FakeAPIError("boom"))
     with pytest.raises(RuntimeError, match="AI servisi hatası"):
         ai._claude_chat([{"role": "user", "content": "x"}])
+
+
+def test_claude_chat_rate_limit_is_transient(monkeypatch):
+    # WS9: rate-limit/timeout artık TransientAIError (retry sinyali) — ama hâlâ
+    # RuntimeError alt sınıfı, dostça metin sözleşmesi korunur.
+    _fake_bedrock(monkeypatch, raises=_FakeRateLimit("429"))
+    with pytest.raises(TransientAIError):
+        ai._claude_chat([{"role": "user", "content": "x"}])
+
+
+def test_claude_chat_api_error_is_not_transient(monkeypatch):
+    # Kalıcı hata retry edilmemeli → TransientAIError DEĞİL.
+    _fake_bedrock(monkeypatch, raises=_FakeAPIError("boom"))
+    with pytest.raises(RuntimeError) as exc:
+        ai._claude_chat([{"role": "user", "content": "x"}])
+    assert not isinstance(exc.value, TransientAIError)
 
 
 # ---------------------------------------------------------------------------

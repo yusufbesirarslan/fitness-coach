@@ -10,6 +10,31 @@ Roadmap detail for the in-flight workstream lives in
 
 Last updated: 2026-07-15.
 
+> **2026-07-15 — Sprint 4 PR 4: WS5 caching + WS9 error recovery + WS7 rate
+> hardening.** Three defensive layers around the AI paths, all default-on and all
+> degrading to no-ops without Redis. **WS5** `app/services/ai_cache.py` — a
+> generic `cache_get`/`cache_set` helper (key `ai:cache:<feature>:v1:<sha256>`,
+> JSON values, per-feature TTLs, foodcache-style swallow+log). Wired into the
+> deterministic TR→EN food-name normalization (`ai_nutrition._normalize_food_
+> query_en` + batch): identical lookups skip the OpenAI call. Only successful
+> (non-empty) results are cached — the `""` graceful-degrade is never pinned.
+> **WS9** `app/services/ai_recovery.py` — the recovery ladder for `_heavy_chat`:
+> transient errors (new `TransientAIError`, a `RuntimeError` subclass raised by
+> `_claude_chat`/`_openai_chat` for rate-limit/timeout/connection) trigger a
+> bounded jittered retry; a permanent error skips retry and (for Bedrock) falls
+> to OpenAI; if *both* providers fail, a stale-but-real **last-good** Redis value
+> is served (keyed by content hash — two users share it only on byte-identical
+> input, so no leak); otherwise the existing friendly `RuntimeError` surfaces. The
+> Bedrock SDK `max_retries` dropped 2→1 (`BEDROCK_MAX_RETRIES`) so our layer's
+> retry doesn't multiply. **WS7** — a burst cap `AI_BURST_RATELIMIT="5 per
+> minute"` on `/ask*` (atop `AI_RATELIMIT`), plus a per-user failure cooldown:
+> `AI_FAILURE_THRESHOLD` consecutive AI failures arm a Redis NX key for
+> `AI_FAILURE_COOLDOWN_SECONDS`, during which `/ask*` returns 429+Retry-After
+> *before* reserving quota (a cooling-down user spends no weekly right); the first
+> success clears the streak. Tests: `test_ai_cache.py`, `test_ai_recovery.py`,
+> recovery+last-good in `test_ai_routing.py`, cooldown/burst/failure-recording in
+> `test_coach_routes.py`, cache-hit in `test_ai_nutrition_llm.py`.
+
 > **2026-07-15 — Sprint 4 PR 3: WS2 streaming + WS10 frontend.** The coach now
 > streams token-by-token. New `POST /ask/stream` (SSE: `meta → delta* →
 > done | error`) sits beside the untouched blocking `/ask`; both share the same

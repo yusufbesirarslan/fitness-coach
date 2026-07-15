@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import current_app
 
 from app.prompts import nutrition as nutrition_prompts
+from app.services import ai_cache
 from app.services.ai import _heavy_chat, _openai_chat
 from app.services.foodcache import _cache_macros
 
@@ -206,6 +207,13 @@ def _normalize_food_query_en(q):
     q = (q or "").strip()
     if not q:
         return ""
+    # WS5: besin adı→EN çevirisi deterministiktir (temperature=0, PII yok) ve
+    # koç/günlük tekil aramalarında sık tekrarlanır → Redis'te önbelleğe al.
+    # Yalnızca BAŞARILI (boş-olmayan) çeviri saklanır; "" graceful-degrade'dir,
+    # onu haftalarca pinlemek gerçek arızayı gizlerdi.
+    cached = ai_cache.cache_get("food_normalize", {"q": q})
+    if isinstance(cached, str) and cached:
+        return cached
     try:
         out = _openai_chat(
             messages=[{"role": "user",
@@ -217,6 +225,7 @@ def _normalize_food_query_en(q):
         # Model bir cümle döndürürse (çeviri yerine açıklama) güvenli reddet.
         if not out or len(out) > 80 or "\n" in out:
             return ""
+        ai_cache.cache_set("food_normalize", {"q": q}, out)
         return out
     except Exception:
         # M5: graceful-degrade ('' → çağıran ham ada düşer) korunur AMA gerçek
@@ -240,6 +249,14 @@ def _normalize_food_queries_en(names, category_map=None):
     if not names:
         return {}
     category_map = category_map or {}
+    # WS5: toplu çeviri de deterministiktir → tüm-batch sonucunu önbelleğe al.
+    # Anahtar (adlar + kategori bağlamı) payload'ı; aynı menü tekrar taranırsa
+    # LLM çağrısı atlanır. Yalnızca boş-olmayan sonuç saklanır (bkz. tekil yol).
+    cache_payload = {"names": sorted(names),
+                     "cats": {k: category_map.get(k) for k in sorted(category_map)}}
+    cached = ai_cache.cache_get("food_normalize_batch", cache_payload)
+    if isinstance(cached, dict) and cached:
+        return cached
     # Menü kategorisi varsa parantez içinde bağlam olarak ekle — ÇEVİRİYE değil,
     # yalnızca DOĞRU yemeği seçmeye yarar: 'Pizzalar' kategorisindeki 'Margarita'
     # kokteyl değil 'margherita pizza' olarak çevrilsin.
@@ -275,6 +292,8 @@ def _normalize_food_queries_en(names, category_map=None):
                 en = en.strip().strip('"').strip(".").strip()
                 if en and len(en) <= 80 and "\n" not in en and en.lower() != name.lower():
                     result[name] = en
+        if result:
+            ai_cache.cache_set("food_normalize_batch", cache_payload, result)
         return result
     except Exception:
         # M5: bkz. _normalize_food_query_en — graceful degrade korunur, arıza loglanır.

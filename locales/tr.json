@@ -806,6 +806,7 @@
   "coach.question_too_long": "Sorun çok uzun. Lütfen daha kısa yaz (en fazla 4000 karakter).",
   "coach.chat_quota_reached": "Bu haftaki ücretsiz AI koç sohbeti hakkın doldu. Sınırsız sohbet için Premium'a geç.",
   "coach.reply_failed": "Yanıt şu an alınamadı, lütfen tekrar dene.",
+  "coach.cooldown": "AI koç şu an geçici olarak yoğun. Lütfen biraz sonra tekrar dene.",
 
   "quest.login.title": "Günlük Giriş",
   "quest.login.desc": "Bugün uygulamaya giriş yap",
