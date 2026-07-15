@@ -10,7 +10,7 @@ Derin görünüm artık yalnızca iç ağdan (loopback / private) verilir.
 """
 import pytest
 
-_DEEP_KEYS = ("redis", "login", "bedrock", "fatsecret_proxy")
+_DEEP_KEYS = ("redis", "login", "bedrock", "fatsecret_proxy", "worker")
 
 
 @pytest.fixture(autouse=True)

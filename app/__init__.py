@@ -96,6 +96,13 @@ def create_app():
             body["login"] = "ok" if login_ok else "offline"
             body["bedrock"] = ("enabled" if app.config.get("BEDROCK_ENABLED")
                                else "disabled")
+            # WS8: worker canlılığı BİLGİLENDİRİCİ (gating DEĞİL). Worker yoksa
+            # arka-plan işleri satır-içine düşer; deploy'u düşürmez. None=bilinmiyor
+            # (Redis yok), True/False=heartbeat penceresinde worker görüldü/görülmedi.
+            from app.jobs import worker_alive
+            alive = worker_alive()
+            body["worker"] = ("unknown" if alive is None
+                              else "alive" if alive else "down")
             # I4: FatSecret loopback proxy'si (host, 127.0.0.1:3000) süpervizörsüz
             # bir SPOF — düşerse makro çözümü sessizce LLM tahminine düşer.
             # BİLGİLENDİRİCİ alan: hata deploy gate'ini düşürmez (proxy kesintisi
@@ -124,9 +131,10 @@ def create_app():
         inject_csrf_token, inject_i18n, maybe_weekly_rollover, set_csp_header, \
         update_streak, inject_rank, ratelimit_exceeded, not_found, server_error
     from app.i18n import resolve_locale
-    from app.observability import log_request, start_request_timer
-    # İstek süresini en baştan ölç (diğer before_request'lerden önce).
+    from app.observability import assign_request_id, log_request, start_request_timer
+    # İstek süresini en baştan ölç + izleme kimliği ata (diğer before_request'lerden önce).
     app.before_request(start_request_timer)
+    app.before_request(assign_request_id)
     app.before_request(generate_csp_nonce)
     app.before_request(_csrf_protect)
     limiter.init_app(app)

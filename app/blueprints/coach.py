@@ -13,6 +13,7 @@ from app.services.ai_coach import generate_coach_reply
 from app.services.ai_gate import ai_concurrency_gate, ai_stream_concurrency_gate
 from app.services.ai_pipeline import generate_answer, stream_answer
 from app.services.moderation import validate_question
+from app.observability import current_request_id
 from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee, generate_nutrition_plan, generate_training_plan
 from app.services.premium import (
     FREE_WEEKLY_AI_CHATS,
@@ -261,6 +262,7 @@ def ask_coach_stream():
     # değil, şimdi çözülmüş düz değerlere bağlan.
     user_id = current_user.id
     lang = current_user.language
+    req_id = current_request_id()  # WS6: izleme kimliği — jeneratörden önce çöz
 
     def generate():
         try:
@@ -268,7 +270,8 @@ def ask_coach_stream():
                                        language=lang):
                 kind = event["type"]
                 if kind == "meta":
-                    yield _sse("meta", {"conversation_id": event["conversation_id"]})
+                    yield _sse("meta", {"conversation_id": event["conversation_id"],
+                                        "request_id": req_id})
                 elif kind == "delta":
                     yield _sse("delta", {"text": event["text"]})
                 elif kind == "error":

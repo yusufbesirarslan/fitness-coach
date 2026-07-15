@@ -128,6 +128,13 @@ AI_BURST_RATELIMIT = os.getenv("AI_BURST_RATELIMIT", "5 per minute")
 AI_FAILURE_THRESHOLD = int(os.getenv("AI_FAILURE_THRESHOLD", "3"))
 AI_FAILURE_COOLDOWN_SECONDS = int(os.getenv("AI_FAILURE_COOLDOWN_SECONDS", "60"))
 
+# ── Sprint 4 WS6: AI gözlemlenebilirlik (CloudWatch metrikleri) ──
+# app/services/ai_metrics.py — namespace FitX/AI. Varsayılan KAPALI: EC2 instance
+# role'üne cloudwatch:PutMetricData izni verildikten SONRA açılır. Kapalıyken ya da
+# boto3/izin yokken tam no-op (asıl AI akışını asla bloklamaz).
+AI_METRICS_ENABLED = os.getenv("AI_METRICS_ENABLED", "0") == "1"
+AI_METRICS_NAMESPACE = os.getenv("AI_METRICS_NAMESPACE", "FitX/AI")
+
 # Amazon Cognito native backend API flow. Hosted UI/OIDC redirects are disabled.
 # User Pool and App Client come from .env. If the app client has a secret, set
 # COGNITO_CLIENT_SECRET; otherwise leave it blank. Region is derived from the

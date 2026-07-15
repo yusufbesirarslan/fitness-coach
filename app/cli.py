@@ -221,8 +221,39 @@ def cleanup_test_users(username, pattern, yes):
     click.echo(f"\n✓ {len(users)} kullanıcı ve ilişkili kayıtları silindi.")
 
 
+def rq_failed_cmd():
+    """WS8: ölü-mektup (dead-letter) kuyruğunu listele — retry'ı tükenmiş işler.
+
+        flask --app starter rq-failed
+    """
+    from app.jobs import failed_jobs
+    ids = failed_jobs()
+    if not ids:
+        click.echo("Başarısız iş yok (ya da rq/Redis yapılandırılmamış).")
+        return
+    click.echo(f"{len(ids)} başarısız iş:")
+    for jid in ids:
+        click.echo(f"  - {jid}")
+    click.echo("\nYeniden kuyruğa almak için: flask --app starter rq-requeue <job_id>")
+
+
+@click.argument("job_id")
+def rq_requeue_cmd(job_id):
+    """WS8: başarısız bir işi yeniden kuyruğa al.
+
+        flask --app starter rq-requeue <job_id>
+    """
+    from app.jobs import requeue_failed
+    if requeue_failed(job_id):
+        click.echo(f"İş yeniden kuyruğa alındı: {job_id}")
+    else:
+        click.echo(f"Yeniden kuyruğa alınamadı: {job_id} (bulunamadı ya da rq/Redis yok).")
+
+
 def register_cli(app):
     app.cli.command("seed-quests")(seed_quests)
     app.cli.command("weekly-reset")(weekly_reset_cmd)
     app.cli.command("cleanup-test-users")(cleanup_test_users)
     app.cli.command("send-test-email")(send_test_email_cmd)
+    app.cli.command("rq-failed")(rq_failed_cmd)
+    app.cli.command("rq-requeue")(rq_requeue_cmd)

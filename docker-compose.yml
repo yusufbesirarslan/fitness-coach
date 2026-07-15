@@ -41,6 +41,27 @@ services:
       redis:
         condition: service_healthy
 
+  # Arka-plan iş worker'ı (Sprint 4 WS8). Aynı imaj, ayrı süreç: AI iş kuyruğunu
+  # (fitx:ai) tüketir — konuşma özetleme gibi işler istek yolunu bloklamaz.
+  # Worker düşse/olmasa da uygulama çalışır: işler satır-içine (inline) düşer
+  # (app/jobs.enqueue_or_run). REDIS_URL .env'de zorunlu (prod'da zaten var).
+  worker:
+    build: .
+    restart: unless-stopped
+    command: python worker.py
+    mem_limit: ${WORKER_MEM_LIMIT:-512m}
+    env_file:
+      - .env
+    # web/redis ile aynı gerekçe: sınırsız log = dolu disk = tüm servisler düşer.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      redis:
+        condition: service_healthy
+
   redis:
     image: redis:alpine
     user: redis
