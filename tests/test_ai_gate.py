@@ -9,6 +9,7 @@ sınırlar. Slot doluyken 503 + Retry-After döner, slot boşalınca istek geçe
 import threading
 
 import pytest
+from flask import Response, jsonify
 
 from app.services import ai_gate
 
@@ -109,6 +110,7 @@ EXPECTED_GATED_ENDPOINTS = {
     "menu.analyze_menu",                  # menü makro analizi (Sonnet)
     "menu.proxy_scan_menu",               # menü scrape (ayrı scrape kapısı)
     "coach.ask_coach",                    # koç (araç döngüsü, Bedrock/OpenAI)
+    "coach.ask_coach_stream",             # koç akışı (WS2 — slot yanıt kapanana dek)
     "coach.chat",                         # koç sohbet
     "training.training_plan_generate",    # antrenman planı (Sonnet)
     "training.complete_workout",          # pump-check görü doğrulama (N1)
@@ -164,3 +166,103 @@ def test_no_warning_when_reserve_intact(app, monkeypatch, caplog):
     with caplog.at_level("WARNING"):
         ai_gate.warn_if_gates_exhaust_threads(app)
     assert not any("rezerv" in r.message for r in caplog.records)
+
+
+# ── Akış (SSE) kapısı: slot YANIT KAPANANA dek tutulur (WS2) ────────────────
+# Normal kapı slotu view döndüğünde bırakır; streaming'de asıl üretim view'dan
+# SONRA (generator tüketilirken) çalışır. Slot erken bırakılsaydı kapı stream'leri
+# HİÇ sınırlamaz, 8 eşzamanlı stream /health'i düşürebilirdi (A1'in engellediği).
+
+def _streamed():
+    return Response((c for c in ["a", "b"]), mimetype="text/event-stream")
+
+
+def test_stream_gate_holds_slot_until_response_close(app, monkeypatch):
+    sem = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_ai_slots", sem)
+    monkeypatch.setattr(ai_gate, "AI_GATE_WAIT_SECONDS", 0)
+
+    @ai_gate.ai_stream_concurrency_gate
+    def route():
+        return _streamed()
+
+    with app.test_request_context("/"):
+        resp = route()
+        # Yanıt daha kapanmadı → slot HÂLÂ tutuluyor.
+        assert not sem.acquire(blocking=False)
+        resp.close()  # call_on_close → _release
+        assert sem.acquire(blocking=False)
+        sem.release()
+
+
+def test_stream_gate_releases_immediately_for_non_stream(app, monkeypatch):
+    sem = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_ai_slots", sem)
+    monkeypatch.setattr(ai_gate, "AI_GATE_WAIT_SECONDS", 0)
+
+    @ai_gate.ai_stream_concurrency_gate
+    def route():
+        return jsonify({"error": "x"}), 400  # erken çıkış — stream DEĞİL
+
+    with app.test_request_context("/"):
+        route()
+        # 400 tuple'ı akış değil → slot hemen bırakıldı (yanıt kapanmasını beklemez).
+        assert sem.acquire(blocking=False)
+        sem.release()
+
+
+def test_stream_gate_returns_503_when_full(app, monkeypatch):
+    sem = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_ai_slots", sem)
+    monkeypatch.setattr(ai_gate, "AI_GATE_WAIT_SECONDS", 0)
+    assert sem.acquire(blocking=False)  # tek slotu doldur
+
+    @ai_gate.ai_stream_concurrency_gate
+    def route():
+        return _streamed()
+
+    try:
+        with app.test_request_context("/"):
+            resp = route()
+            # Stream HİÇ başlamadan 503 döner — SSE içinde hata yollamaktan iyi.
+            assert resp.status_code == 503
+            assert resp.headers["Retry-After"]
+            assert "error" in resp.get_json()
+    finally:
+        sem.release()
+
+
+def test_stream_gate_releases_slot_on_exception(app, monkeypatch):
+    sem = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_ai_slots", sem)
+    monkeypatch.setattr(ai_gate, "AI_GATE_WAIT_SECONDS", 0)
+
+    @ai_gate.ai_stream_concurrency_gate
+    def boom():
+        raise RuntimeError("stream patladı")
+
+    with app.test_request_context("/"):
+        with pytest.raises(RuntimeError):
+            boom()
+        assert sem.acquire(blocking=False)  # hata yolunda da slot geri verildi
+        sem.release()
+
+
+def test_stream_gate_double_close_does_not_over_release(app, monkeypatch):
+    # BoundedSemaphore çift release'te ValueError fırlatır ve sayacı KALICI bozardı;
+    # _release threading.Event ile tam bir kez çalışmalı.
+    sem = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_ai_slots", sem)
+    monkeypatch.setattr(ai_gate, "AI_GATE_WAIT_SECONDS", 0)
+
+    @ai_gate.ai_stream_concurrency_gate
+    def route():
+        return _streamed()
+
+    with app.test_request_context("/"):
+        resp = route()
+        resp.close()
+        resp.close()  # ikinci kapanış sayacı BOZMAMALI
+        assert sem.acquire(blocking=False)      # tam bir slot serbest
+        assert not sem.acquire(blocking=False)  # ikincisi yok (fazla release olmadı)
+        sem.release()

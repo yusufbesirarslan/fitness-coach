@@ -48,6 +48,8 @@ def set_csp_header(response):
         f"script-src 'self' 'nonce-{nonce}' "
         "https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js "
         "https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js "
+        "https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js "
+        "https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js "
         "https://*.googletagmanager.com; "
         "script-src-attr 'none'; "
         # style-src: 'unsafe-inline' fallback yalnızca style-src-elem/-attr'ı

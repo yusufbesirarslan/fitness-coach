@@ -8,7 +8,30 @@ is what this document replaces). The historical point-in-time reports were prune
 Roadmap detail for the in-flight workstream lives in
 [`updates-plan-2026-06-28.md`](updates-plan-2026-06-28.md).
 
-Last updated: 2026-07-14.
+Last updated: 2026-07-15.
+
+> **2026-07-15 — Sprint 4 PR 3: WS2 streaming + WS10 frontend.** The coach now
+> streams token-by-token. New `POST /ask/stream` (SSE: `meta → delta* →
+> done | error`) sits beside the untouched blocking `/ask`; both share the same
+> gates, quota, and pipeline. Backend: `app/services/ai_stream.py` runs a real
+> Bedrock streaming tool loop (`bedrock_client.messages.stream()`), and
+> `ai_pipeline.stream_answer` wraps it — persisting the turn on `done` (B16: not
+> error-fallbacks) and, if the client disconnects mid-stream (`GeneratorExit`),
+> saving the partial answer flagged `interrupted=True`. Provider fallback obeys
+> the B-rule: Bedrock→OpenAI only *before* the first delta reaches the client and
+> *before* any tool side effect; after that a mid-stream failure yields a friendly
+> i18n `error` frame (provider exception text never leaks). A new
+> `ai_stream_concurrency_gate` holds the AI slot until the response *closes*
+> (`call_on_close`) — the normal gate releases on view return, which for a
+> streamed response is before the first token, so it would never limit streams.
+> Frontend (`static/coach_widget.js`): fetch POST + `ReadableStream` SSE reader
+> (EventSource can't send `X-CSRFToken`), `AbortController`-backed Stop button,
+> Regenerate, typing indicator, rAF-throttled incremental append, markdown via
+> marked + DOMPurify (jsdelivr pinned + SRI, CSP updated), and hydration from
+> `GET /coach/history` on open. Kill switch unchanged (`AI_MEMORY_ENABLED=0`
+> degrades streaming to the client-history path). Tests: `test_ai_stream.py`
+> (provider loop + pipeline), streaming route SSE + quota-refund cases in
+> `test_coach_routes.py`, gate hold/release in `test_ai_gate.py`.
 
 > **2026-07-14 — Sprint 4 PR 2: WS1 conversation memory.** The coach now has
 > persistent memory: `CoachConversation` + `CoachMessage` (migration
