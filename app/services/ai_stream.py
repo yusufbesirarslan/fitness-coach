@@ -1,0 +1,172 @@
+# AI koç akış (streaming) katmanı — Sprint 4 WS2.
+#
+# Neden ayrı modül: ai_coach'taki bloklayıcı döngüler AYNEN durur (/ask hâlâ
+# onları kullanır — kanıtlanmış yol bozulmasın). Burada aynı araç ekosistemi
+# (_dispatch_coach_tool, _COACH_TOOL_LOOP_CAP, tool tanımları) akış semantiğiyle
+# yeniden koşulur.
+#
+# Üretilen olaylar (dict) — SSE çerçeveleme route'un işi:
+#   {"type": "delta", "text": "..."}    → istemciye anında yazılacak parça
+#   {"type": "done",  "text": tam metin, "usage": {...}|None, "provider": "..."}
+#   {"type": "error", "key": "coach.reply_failed"}  → i18n ANAHTARI; sağlayıcı
+#                                        istisna metni İSTEMCİYE ASLA sızmaz
+#
+# Sağlayıcı seçimi ve yedek kuralı (B-kuralı: yan etki tekrarlanmaz):
+#   - İlk delta İSTEMCİYE GİTTİKTEN ya da bir araç YAN ETKİ ürettikten sonra
+#     sağlayıcı DEĞİŞTİRİLMEZ. Bedrock akışı daha ilk token'dan önce (ve hiç araç
+#     çalışmadan) patlarsa OpenAI yedeğine şeffafça düşülür; sonrasında patlarsa
+#     dostça hata olayı gönderilir.
+#   - OpenAI yedeği GERÇEK akış değildir: mevcut (araç-döngülü, doğruluğu
+#     kanıtlanmış) bloklayıcı loop koşar, sonucu parçalara bölünüp akıtılır.
+#     İlk-token gecikmesi kazandırmaz; UX'i ve tek bir olay sözleşmesini korur.
+#     Asıl akış yolu Bedrock'tır (prod'da BEDROCK_ENABLED=1).
+import json
+
+from flask import current_app
+
+from app.config import BEDROCK_MAX_TOKENS, BEDROCK_MODEL
+from app.services import prompt_builder
+from app.services.ai_gate import model_concurrency_slot
+
+# Akış yokken metni sahte-akıtırken kullanılan parça boyutu (karakter).
+CHUNK_CHARS = 48
+
+# Bedrock akışında ilk token'dan önce hata olursa OpenAI'ya düşülür.
+_COACH_MAX_TOKENS = 700
+
+
+def _usage_of(message):
+    """Sağlayıcı yanıtındaki gerçek token kullanımı (varsa) — WS6 muhasebesi."""
+    usage = getattr(message, "usage", None)
+    if usage is None:
+        return None
+    prompt_tokens = getattr(usage, "input_tokens", None)
+    completion_tokens = getattr(usage, "output_tokens", None)
+    if prompt_tokens is None and completion_tokens is None:
+        return None
+    return {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}
+
+
+def _chunks(text):
+    for i in range(0, len(text), CHUNK_CHARS):
+        yield text[i:i + CHUNK_CHARS]
+
+
+def stream_coach_answer(user_id, question, context, history, language="tr"):
+    """Koç yanıtını akış olarak üret. Olay üreticisi (generator).
+
+    ai_coach'ın araç ekosistemini kullanır; sağlayıcı yedeği yalnızca HİÇBİR
+    delta gönderilmemişken mümkündür."""
+    from app.services import ai_coach
+
+    ai_coach._begin_coach_turn()  # S1: tur-içi stage→confirm kilidini sıfırla
+
+    if ai_coach.BEDROCK_ENABLED and ai_coach._anthropic is not None:
+        try:
+            yield from _stream_bedrock(user_id, question, context, history, language)
+            return
+        except ai_coach._BedrockFallback as e:
+            # Buraya YALNIZCA hiç delta gitmemişken ve hiç araç çalışmamışken
+            # gelinir (_stream_bedrock garantisi) → sağlayıcı değişimi güvenli.
+            current_app.logger.warning(
+                "[COACH][stream] Bedrock ilk çağrı başarısız, OpenAI'ya düşülüyor: %s", e)
+
+    yield from _stream_openai_fallback(user_id, question, context, history, language)
+
+
+def _stream_bedrock(user_id, question, context, history, language):
+    """Bedrock (Anthropic Messages) akışlı araç-kullanım döngüsü.
+
+    Her tur AKITILIR: model araç çağırmadan önce bir giriş cümlesi yazarsa
+    ("Öğünlerine bakıyorum...") kullanıcı onu anında görür; araç turları
+    çalışır ve final tur cevabı aynı akışta devam eder. Yayınlanan tüm metin
+    parçaları birleşip kalıcılaşan yanıtı oluşturur."""
+    from app.services import ai_coach
+
+    system = ai_coach._build_bedrock_system(context, language)
+    tools = ai_coach._anthropic_tools_for_call()
+    convo = prompt_builder.build_anthropic_messages(history, question)
+    max_tokens = min(_COACH_MAX_TOKENS, BEDROCK_MAX_TOKENS)
+
+    parts = []
+    tools_ran = 0
+    usage = None
+
+    with model_concurrency_slot():
+        for _ in range(ai_coach._COACH_TOOL_LOOP_CAP):
+            try:
+                with ai_coach.bedrock_client.messages.stream(
+                    model=BEDROCK_MODEL,
+                    max_tokens=max_tokens,
+                    system=system,
+                    messages=convo,
+                    tools=tools,
+                ) as stream:
+                    for text in stream.text_stream:
+                        if not text:
+                            continue
+                        parts.append(text)
+                        yield {"type": "delta", "text": text}
+                    final = stream.get_final_message()
+            except Exception as e:
+                # Yedek YALNIZCA hiçbir şey yayınlanmamış VE hiçbir araç yan etki
+                # üretmemişken güvenlidir; aksi halde sağlayıcı değiştirmek
+                # kullanıcının gördüğü metni bozar / yan etkiyi tekrarlar.
+                if not parts and tools_ran == 0:
+                    raise ai_coach._BedrockFallback(f"{type(e).__name__}: {e}")
+                current_app.logger.warning(
+                    "[COACH][stream] Bedrock akışı yarıda hata verdi: %s", e)
+                yield {"type": "error", "key": "coach.reply_failed"}
+                return
+
+            usage = _usage_of(final) or usage
+
+            if getattr(final, "stop_reason", None) != "tool_use":
+                text = "".join(parts)
+                if not text and tools_ran == 0:
+                    # Hiç metin yok ve hiç araç çalışmadı → soru cevaplanabilirdi,
+                    # OpenAI'ya düş (bloklayıcı yoldaki B4 mantığının aynısı).
+                    raise ai_coach._BedrockFallback("boş Bedrock akışı (metin yok)")
+                yield {"type": "done", "text": text, "usage": usage,
+                       "provider": "bedrock"}
+                return
+
+            convo.append({"role": "assistant", "content": final.content})
+            tool_results = []
+            for block in final.content:
+                if getattr(block, "type", None) == "tool_use":
+                    out = ai_coach._dispatch_coach_tool(
+                        user_id, block.name, json.dumps(block.input or {}))
+                    tool_results.append({"type": "tool_result",
+                                         "tool_use_id": block.id, "content": out})
+                    tools_ran += 1
+            convo.append({"role": "user", "content": tool_results})
+
+    # Araç döngüsü tavana dayandı — dostça yedek metni akıt (yanıtsız bırakma).
+    yield from _emit_text(ai_coach._COACH_FALLBACKS[
+        ai_coach._coach_lang(language)]["tool"], provider="bedrock", usage=usage)
+
+
+def _stream_openai_fallback(user_id, question, context, history, language):
+    """OpenAI yedeği: kanıtlanmış BLOKLAYICI araç döngüsünü koşar, sonucu akıtır.
+
+    Gerçek token akışı değildir (ilk-token kazancı yok) — amaç tek olay
+    sözleşmesini ve UX'i korumak. Araç çağrılarının streaming'de birikimli
+    ayrıştırılması ayrı bir doğruluk riski; yedek yolda bu riski almıyoruz."""
+    from app.services import ai_coach
+
+    try:
+        text = ai_coach._run_coach_conversation_openai(
+            user_id, question, context, history, language)
+    except Exception:
+        current_app.logger.exception("[COACH][stream] OpenAI yedeği de başarısız")
+        yield {"type": "error", "key": "coach.reply_failed"}
+        return
+
+    yield from _emit_text(text or "", provider="openai", usage=None)
+
+
+def _emit_text(text, provider, usage=None):
+    for chunk in _chunks(text):
+        yield {"type": "delta", "text": chunk}
+    yield {"type": "done", "text": text, "usage": usage, "provider": provider}

@@ -8,6 +8,8 @@ Karşılaştırma verisi, geçmiş aktarımı ve graceful-degrade yolları sabit
 
     python -m pytest tests/test_coach_routes.py -v
 """
+import json
+
 import pytest
 
 from app.blueprints import coach as coach_bp
@@ -213,3 +215,164 @@ def test_ask_fallback_preserves_200_when_refund_fails(
 
     assert response.status_code == 200
     assert response.get_json()["answer"] == COACH_FALLBACKS["tr"]["error"]
+
+
+# ---------------------------------------------------------------------------
+# /ask/stream (WS2 — SSE akış ikizi; hat mock'lu)
+# ---------------------------------------------------------------------------
+
+def _parse_sse(text):
+    """SSE metnini [(event, data_dict)] listesine ayrıştır."""
+    frames = []
+    for block in text.split("\n\n"):
+        block = block.strip()
+        if not block:
+            continue
+        event = data = None
+        for line in block.split("\n"):
+            if line.startswith("event: "):
+                event = line[len("event: "):]
+            elif line.startswith("data: "):
+                data = json.loads(line[len("data: "):])
+        frames.append((event, data))
+    return frames
+
+
+def _fake_stream(events):
+    """coach_bp.stream_answer yerine geçen sabit olay üreteci."""
+    def _gen(user_id, question, client_history=None, language="tr"):
+        for e in events:
+            yield e
+    return _gen
+
+
+def _post_stream(client, question="selam"):
+    """Akış ucuna POST at, gövdeyi oku ve yanıtı KAPAT.
+
+    Kapatma şart: ai_stream_concurrency_gate slotu response.call_on_close ile
+    bırakır. Test istemcisi get_data()'da close() TETİKLEMEZ (prod'da gunicorn
+    tetikler) → kapatmazsak slot sızar ve sonraki stream testi 503 alır.
+    Yanıt nesnesine ayrıştırılmış çerçeveleri (.frames) ve ham gövdeyi (.raw)
+    iliştirip döndürür."""
+    resp = client.post("/ask/stream", json={"question": question})
+    resp.raw = resp.get_data(as_text=True)
+    resp.frames = _parse_sse(resp.raw)
+    resp.close()
+    return resp
+
+
+def test_ask_stream_requires_question(client, auth_user):
+    resp = client.post("/ask/stream", json={"question": "  "})
+    assert resp.status_code == 400
+    resp.close()
+
+
+def test_ask_stream_emits_meta_delta_done_frames(client, auth_user, monkeypatch):
+    monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
+        {"type": "meta", "conversation_id": 7},
+        {"type": "delta", "text": "mer"},
+        {"type": "delta", "text": "haba"},
+        {"type": "done", "text": "merhaba", "is_error_fallback": False,
+         "usage": None},
+    ]))
+
+    resp = _post_stream(client)
+
+    assert resp.status_code == 200
+    assert resp.headers["Content-Type"].startswith("text/event-stream")
+    assert resp.headers["X-Accel-Buffering"] == "no"
+    assert resp.headers["Cache-Control"] == "no-cache"
+
+    assert resp.frames == [
+        ("meta", {"conversation_id": 7}),
+        ("delta", {"text": "mer"}),
+        ("delta", {"text": "haba"}),
+        ("done", {"text": "merhaba", "is_error_fallback": False}),
+    ]
+
+
+def test_ask_stream_preserves_turkish_chars(client, auth_user, monkeypatch):
+    # _sse ensure_ascii=False: Türkçe karakterler \\uXXXX'e şişmemeli.
+    monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
+        {"type": "meta", "conversation_id": None},
+        {"type": "delta", "text": "günaydın"},
+        {"type": "done", "text": "günaydın", "is_error_fallback": False,
+         "usage": None},
+    ]))
+    resp = _post_stream(client)
+    assert "günaydın" in resp.raw
+    assert "\\u" not in resp.raw
+
+
+def test_ask_stream_quota_exhausted_returns_402(client, auth_user, monkeypatch):
+    called = {"stream": False}
+    monkeypatch.setattr(coach_bp, "reserve_ai_quota",
+                        lambda user, counter_key, limit: False)
+
+    def fake(*a, **k):
+        called["stream"] = True
+        yield {"type": "meta", "conversation_id": None}
+    monkeypatch.setattr(coach_bp, "stream_answer", fake)
+
+    resp = client.post("/ask/stream", json={"question": "protein?"})
+    assert resp.status_code == 402
+    assert resp.get_json()["premium_required"] is True
+    assert called["stream"] is False  # pahalı akışa hiç girilmedi
+    resp.close()
+
+
+def test_ask_stream_error_frame_refunds_quota(client, auth_user, monkeypatch):
+    monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
+        {"type": "meta", "conversation_id": 1},
+        {"type": "error", "key": "coach.reply_failed"},
+    ]))
+
+    resp = _post_stream(client, "protein?")
+
+    assert resp.frames[-1][0] == "error"
+    assert "message" in resp.frames[-1][1]
+    # Sağlayıcı hatasında rezerve edilen haftalık hak iade edilir.
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
+
+
+def test_ask_stream_fallback_done_refunds_quota(client, auth_user, monkeypatch):
+    monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
+        {"type": "meta", "conversation_id": 1},
+        {"type": "done", "text": COACH_FALLBACKS["tr"]["error"],
+         "is_error_fallback": True, "usage": None},
+    ]))
+
+    resp = _post_stream(client, "protein?")
+
+    assert resp.frames[-1] == ("done", {"text": COACH_FALLBACKS["tr"]["error"],
+                                        "is_error_fallback": True})
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
+
+
+def test_ask_stream_success_consumes_quota(client, auth_user, monkeypatch):
+    monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
+        {"type": "meta", "conversation_id": 1},
+        {"type": "delta", "text": "gerçek"},
+        {"type": "done", "text": "gerçek cevap", "is_error_fallback": False,
+         "usage": None},
+    ]))
+
+    _post_stream(client, "protein?")
+    # Gerçek yanıt → hak harcandı (iade YOK).
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS - 1
+
+
+def test_ask_stream_provider_exception_emits_friendly_error(
+        client, auth_user, monkeypatch):
+    # Hat beklenmedik biçimde patlarsa istemciye sağlayıcı metni ASLA sızmaz;
+    # dostça i18n hata çerçevesi gider ve hak iade edilir.
+    def boom(*a, **k):
+        yield {"type": "meta", "conversation_id": 1}
+        raise RuntimeError("bedrock stack trace")
+    monkeypatch.setattr(coach_bp, "stream_answer", boom)
+
+    resp = _post_stream(client, "protein?")
+
+    assert resp.frames[-1][0] == "error"
+    assert "bedrock stack trace" not in resp.raw
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS

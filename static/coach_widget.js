@@ -65,6 +65,9 @@
             '<line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>' +
           '</svg>' +
         '</button>' +
+        '<button id="cw-stop" class="cw-hidden" aria-label="' + t('coach.stop') + '" title="' + t('coach.stop') + '">' +
+          '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2"/></svg>' +
+        '</button>' +
       '</div>' +
 
       '<div id="cw-scan">' +
@@ -101,6 +104,7 @@
   document.getElementById('cw-close').addEventListener('click', function () { CW.toggle(); });
   document.getElementById('cw-fab').addEventListener('click', function () { CW.toggle(); });
   document.getElementById('cw-send').addEventListener('click', function () { CW.send(); });
+  document.getElementById('cw-stop').addEventListener('click', function () { CW.stop(); });
   document.getElementById('cw-input').addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); CW.send(); }
   });
@@ -127,11 +131,27 @@
   /* ── 4. CW object ── */
   var STORAGE_KEY  = 'fc_coach_messages';
   var MAX_MESSAGES = 60;
-  // jsdelivr: CSP script-src bu TAM dosyaya sabitlenmiştir (SEC1 — geniş host
-  // joker'i kaldırıldı; hooks.py CSP'si aynı sabit URL'i listeler). SRI hash'i +
+  // jsdelivr: CSP script-src bu TAM dosyalara sabitlenmiştir (SEC1 — geniş host
+  // joker'i kaldırıldı; hooks.py CSP'si aynı sabit URL'leri listeler). SRI hash'i +
   // crossorigin ile yüklenir; sürüm/hash değişirse hooks.py CSP'si de güncellenmeli.
   var QR_LIB_SRC   = 'https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js';
   var QR_LIB_SRI   = 'sha384-c9d8RFSL+u3exBOJ4Yp3HUJXS4znl9f+z66d1y54ig+ea249SpqR+w1wyvXz/lk+';
+  var MD_SRC       = 'https://cdn.jsdelivr.net/npm/marked@15.0.7/marked.min.js';
+  var MD_SRI       = 'sha384-H+hy9ULve6xfxRkWIh/YOtvDdpXgV2fmAGQkIDTxIgZwNoaoBal14Di2YTMR6MzR';
+  var DP_SRC       = 'https://cdn.jsdelivr.net/npm/dompurify@3.2.4/dist/purify.min.js';
+  var DP_SRI       = 'sha384-eEu5CTj3qGvu9PdJuS+YlkNi7d2XxQROAFYOr59zgObtlcux1ae1Il3u7jvdCSWu';
+
+  function loadScript(src, sri) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement('script');
+      s.src = src;
+      s.integrity = sri;            // tedarik-zinciri bütünlük doğrulaması
+      s.crossOrigin = 'anonymous';  // SRI'nin cross-origin script'te çalışması için şart
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
 
   var CW = window.CW = {
     open:     false,
@@ -139,6 +159,10 @@
     unread:   false,
     messages: [],
     _scanner: null,
+    _abort:   null,   // akan isteği iptal eden AbortController (Durdur)
+    _stream:  '',     // akış sırasında biriken ham metin
+    _raf:     0,
+    _lastQ:   '',     // Yeniden üret için son kullanıcı sorusu
 
     init: function () {
       try {
@@ -151,6 +175,43 @@
       } else {
         this._render();
       }
+
+      // Markdown yığını arka planda yüklenir; gelene kadar _md() düz-metin
+      // yedeğine düşer (sohbet asla boş/bozuk görünmez).
+      var self = this;
+      Promise.all([loadScript(MD_SRC, MD_SRI), loadScript(DP_SRC, DP_SRI)])
+        .then(function () {
+          if (window.marked && window.marked.setOptions) {
+            window.marked.setOptions({ breaks: true, gfm: true });
+          }
+          self._render();  // yüklenmiş kütüphaneyle bir kez yeniden boya
+        })
+        .catch(function () { /* CDN yoksa düz-metin yedeği zaten çalışıyor */ });
+
+      // WS1: sunucu hafızası KAYNAK-DOĞRU olandır — sessionStorage yalnızca
+      // ilk boyama içindi. Tarayıcı yenilense/başka cihazdan girilse de sohbet
+      // aynı yerden devam etsin diye aktif konuşmayı sunucudan hidratla.
+      this._hydrate();
+    },
+
+    _hydrate: function () {
+      var self = this;
+      fetch('/coach/history', { headers: { 'Accept': 'application/json' } })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d || !d.messages || !d.messages.length) return;
+          self.messages = d.messages.map(function (m) {
+            return {
+              role: m.role === 'user' ? 'user' : 'bot',
+              text: m.text || '',
+              time: self._time(m.created_at)
+            };
+          });
+          self._save();
+          self._render();
+          if (self.open) self._scrollBottom();
+        })
+        .catch(function () { /* çevrimdışı: sessionStorage kopyası kalır */ });
     },
 
     toggle: function () {
@@ -182,27 +243,186 @@
       if (!question || this.busy) return;
       input.value = '';
       this._push('user', question);
+      this._ask(question);
+    },
+
+    /* Durdur: akışı iptal et. Sunucu bağlantı kopmasını görür ve o ana dek
+       üretilen kısmi yanıtı `interrupted` işaretiyle hafızaya yazar — ekranda
+       gördüğün metin ile modelin hatırladığı metin AYNI kalır. */
+    stop: function () {
+      if (!this.busy || !this._abort) return;
+      try { this._abort.abort(); } catch (_) {}
+      this._abort = null;
+      this._finishStream(this._stream, true);
+    },
+
+    /* Yeniden üret: son bot yanıtını at, aynı soruyu tekrar sor. */
+    regenerate: function () {
+      if (this.busy || !this._lastQ) return;
+      var last = this.messages[this.messages.length - 1];
+      if (last && last.role === 'bot' && last.type !== 'menu') this.messages.pop();
+      this._save();
+      this._ask(this._lastQ);
+    },
+
+    _ask: function (question) {
+      var self = this;
+      this._lastQ = question;
+      this._stream = '';
       this._setLoading(true);
+
+      // Sunucu hafızası (WS1) kaynak-doğru; `history` yalnızca hafıza kapalı/
+      // arızalı olduğunda kullanılan yedek yol için hâlâ gönderilir.
+      var history = this.messages.slice(-8)
+        .filter(function (m) { return m.type !== 'menu'; })
+        .map(function (m) {
+          return { role: m.role === 'user' ? 'user' : 'bot', text: m.text || '' };
+        });
+
+      var ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+      this._abort = ctrl;
+
+      // EventSource KULLANILMAZ: POST gövdesi ve X-CSRFToken başlığı gönderemez
+      // (csrf.js yalnızca fetch'i sarar). fetch + ReadableStream ile SSE okunur.
+      fetch('/ask/stream', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ question: question, history: history }),
+        signal:  ctrl ? ctrl.signal : undefined
+      })
+      .then(function (r) {
+        if (!r.ok) return self._fallbackAsk(r, question);
+        if (!r.body || !r.body.getReader) return self._fallbackAsk(null, question);
+        self._beginStream();
+        return self._consume(r.body.getReader());
+      })
+      .catch(function (err) {
+        if (err && err.name === 'AbortError') return;  // Durdur: kısmi metin kalır
+        self._finishStream('', false, t('coach.conn_error'));
+      });
+    },
+
+    /* Akış başlamadıysa (503/402/400 veya ReadableStream yok) bloklayıcı /ask'e
+       düş — eski, kanıtlanmış yol. Böylece streaming desteklenmeyen tarayıcıda
+       veya kota/kapı reddinde sohbet çalışmaya devam eder. */
+    _fallbackAsk: function (resp, question) {
+      var self = this;
+      if (resp) {
+        return resp.json().catch(function () { return {}; }).then(function (d) {
+          if (resp.status === 402 || resp.status === 400 || resp.status === 503) {
+            self._finishStream('', false, d.error || t('coach.no_reply'));
+            return;
+          }
+          return self._plainAsk(question);
+        });
+      }
+      return this._plainAsk(question);
+    },
+
+    _plainAsk: function (question) {
       var self = this;
       var history = this.messages.slice(-8)
         .filter(function (m) { return m.type !== 'menu'; })
         .map(function (m) {
           return { role: m.role === 'user' ? 'user' : 'bot', text: m.text || '' };
         });
-      fetch('/ask', {
+      return fetch('/ask', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body:    JSON.stringify({ question: question, history: history })
       })
       .then(function (r) { return r.json(); })
       .then(function (d) {
-        self._setLoading(false);
-        self._push('bot', d.answer || d.error || t('coach.no_reply'));
+        self._finishStream('', false, d.answer || d.error || t('coach.no_reply'));
       })
       .catch(function () {
-        self._setLoading(false);
-        self._push('bot', t('coach.conn_error'));
+        self._finishStream('', false, t('coach.conn_error'));
       });
+    },
+
+    /* ── SSE okuma ── */
+    _consume: function (reader) {
+      var self = this;
+      var dec  = new TextDecoder();
+      var buf  = '';
+      var step = function (res) {
+        if (res.done) { self._finishStream(self._stream, false); return; }
+        buf += dec.decode(res.value, { stream: true });
+        // Çerçeveler boş satırla ayrılır; yarım kalan son parça tamponda bekler.
+        var frames = buf.split('\n\n');
+        buf = frames.pop();
+        for (var i = 0; i < frames.length; i++) self._frame(frames[i]);
+        if (!self.busy) return;  // done/error işlendi — okumayı bitir
+        return reader.read().then(step);
+      };
+      return reader.read().then(step);
+    },
+
+    _frame: function (raw) {
+      var ev = '', data = '';
+      var lines = raw.split('\n');
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+        if (line.indexOf('event:') === 0)      ev    = line.slice(6).trim();
+        else if (line.indexOf('data:') === 0)  data += line.slice(5).trim();
+      }
+      if (!ev) return;
+      var d = {};
+      try { d = data ? JSON.parse(data) : {}; } catch (_) { return; }
+
+      if (ev === 'delta')      this._appendDelta(d.text || '');
+      else if (ev === 'done')  this._finishStream(d.text || this._stream, false);
+      else if (ev === 'error') this._finishStream('', false, d.message || t('coach.no_reply'));
+      /* 'meta' (conversation_id): şimdilik bilgi amaçlı — WS6'da izleme için kullanılacak */
+    },
+
+    _beginStream: function () {
+      this.messages.push({ role: 'bot', text: '', time: this._time(), streaming: true });
+      this._render();
+      this._scrollBottom();
+    },
+
+    _appendDelta: function (text) {
+      if (!text) return;
+      this._stream += text;
+      var self = this;
+      // Token başına yeniden boyama YOK: bir sonraki kareye kadar biriktir
+      // (markdown ayrıştırma + sanitize her token'da koşmasın).
+      if (this._raf) return;
+      this._raf = requestAnimationFrame(function () {
+        self._raf = 0;
+        var el = document.getElementById('cw-stream');
+        if (!el) return;
+        el.innerHTML = self._md(self._stream);
+        self._stickBottom();
+      });
+    },
+
+    /* Akışı sonlandır. finalText: sunucunun kanonik (denetlenmiş) metni.
+       stopped: kullanıcı Durdur'a bastı. errorText: dostça hata mesajı. */
+    _finishStream: function (finalText, stopped, errorText) {
+      if (this._raf) { cancelAnimationFrame(this._raf); this._raf = 0; }
+      this._abort = null;
+
+      var last = this.messages[this.messages.length - 1];
+      var text = errorText || finalText || this._stream || '';
+      if (stopped && text) text += '\n\n_' + t('coach.stopped') + '_';
+
+      if (last && last.streaming) {
+        if (text) {
+          last.text = text;
+          delete last.streaming;
+        } else {
+          this.messages.pop();  // hiç metin gelmedi → boş balon bırakma
+        }
+      } else if (text) {
+        this.messages.push({ role: 'bot', text: text, time: this._time() });
+      }
+
+      this._stream = '';
+      this._save();
+      this._setLoading(false);
+      this._scrollBottom();
     },
 
     receiveCheckinFeedback: function (text) {
@@ -440,21 +660,47 @@
       });
     },
 
+    _time: function (iso) {
+      var d = iso ? new Date(iso) : new Date();
+      if (isNaN(d.getTime())) d = new Date();
+      return d.toLocaleTimeString(window.LOCALE === 'en' ? 'en-US' : 'tr-TR',
+                                  { hour: '2-digit', minute: '2-digit' });
+    },
+
+    _save: function () {
+      try {
+        var keep = this.messages.slice(-MAX_MESSAGES).filter(function (m) { return !m.streaming; });
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(keep));
+      } catch (_) {}
+    },
+
+    /* Markdown → SANITIZE edilmiş HTML. DOMPurify olmadan HTML'e ASLA dokunma:
+       model çıktısı (ve araç sonuçları) güvenilmez girdidir → XSS vektörü.
+       Kütüphaneler henüz yüklenmediyse escape'li düz metne düş. */
+    _md: function (text) {
+      var raw = String(text == null ? '' : text);
+      if (window.marked && window.DOMPurify) {
+        try {
+          return window.DOMPurify.sanitize(window.marked.parse(raw));
+        } catch (_) { /* aşağıdaki yedeğe düş */ }
+      }
+      return this._esc(raw)
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\n/g, '<br>');
+    },
+
     _push: function (role, text) {
-      var now  = new Date();
-      var time = now.toLocaleTimeString(window.LOCALE === 'en' ? 'en-US' : 'tr-TR', { hour: '2-digit', minute: '2-digit' });
-      this.messages.push({ role: role, text: text, time: time });
-      try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(this.messages.slice(-MAX_MESSAGES))); } catch (_) {}
+      this.messages.push({ role: role, text: text, time: this._time() });
+      this._save();
       this._render();
       this._scrollBottom();
     },
 
     _pushMenu: function (result) {
-      var now  = new Date();
-      var time = now.toLocaleTimeString(window.LOCALE === 'en' ? 'en-US' : 'tr-TR', { hour: '2-digit', minute: '2-digit' });
       var picks = (result.coach_picks || []).length;
-      this.messages.push({ role: 'bot', type: 'menu', data: result, text: 'Menü analizi (' + picks + ' öneri)', time: time });
-      try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(this.messages.slice(-MAX_MESSAGES))); } catch (_) {}
+      this.messages.push({ role: 'bot', type: 'menu', data: result,
+                           text: 'Menü analizi (' + picks + ' öneri)', time: this._time() });
+      this._save();
       this._render();
       this._scrollBottom();
     },
@@ -527,7 +773,8 @@
         return;
       }
       var self = this;
-      var html = this.messages.map(function (m) {
+      var lastIdx = this.messages.length - 1;
+      var html = this.messages.map(function (m, i) {
         if (m.type === 'menu' && m.data) {
           return '<div class="cw-row cw-bot cw-menu-row">' +
                    self._menuHtml(m.data) +
@@ -535,19 +782,32 @@
                  '</div>';
         }
         var cls = m.role === 'user' ? 'cw-user' : 'cw-bot';
-        var esc = (m.text || '')
-          .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-          .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-          .replace(/\n/g, '<br>');
-        return '<div class="cw-row ' + cls + '">' +
-                 '<div class="cw-bubble">' + esc + '</div>' +
-                 '<div class="cw-ts">' + m.time + '</div>' +
-               '</div>';
+        // Kullanıcı metni ASLA markdown'dan geçmez (yalnızca escape) — kendi
+        // girdisini HTML'e çeviren bir yol açmanın hiçbir faydası yok.
+        var body = m.role === 'user' ? self._esc(m.text || '') : self._md(m.text || '');
+        // Akan balon: id ile işaretlenir ki delta'lar TÜM listeyi yeniden
+        // boyamadan yalnızca bu düğüme yazsın.
+        var bubbleId = m.streaming ? ' id="cw-stream"' : '';
+        var typing = (m.streaming && !m.text) ? ' cw-typing-live' : '';
+        var row = '<div class="cw-row ' + cls + '">' +
+                    '<div class="cw-bubble cw-md' + typing + '"' + bubbleId + '>' + body + '</div>' +
+                    '<div class="cw-ts">' + m.time + '</div>';
+        // Son bot yanıtının altına "Yeniden üret" (akış bitmişken).
+        if (!self.busy && i === lastIdx && m.role === 'bot' && !m.streaming && self._lastQ) {
+          row += '<button class="cw-regen" data-action="CW.regenerate">↻ ' +
+                 t('coach.regenerate') + '</button>';
+        }
+        return row + '</div>';
       }).join('');
-      if (this.busy) {
+      if (this.busy && !(this.messages[lastIdx] && this.messages[lastIdx].streaming)) {
         html += '<div class="cw-row cw-bot"><div class="cw-bubble cw-typing"><span></span><span></span><span></span></div></div>';
       }
       container.innerHTML = html;
+    },
+
+    _atBottom: function (el) {
+      // 40px tolerans: kullanıcı dibe yakınsa "takip ediyor" say.
+      return (el.scrollHeight - el.scrollTop - el.clientHeight) < 40;
     },
 
     _scrollBottom: function () {
@@ -555,10 +815,19 @@
       if (el) requestAnimationFrame(function () { el.scrollTop = el.scrollHeight; });
     },
 
+    /* Akış sırasında: kullanıcı yukarı kaydırıp eski mesajları okuyorsa onu
+       ZORLA aşağı çekme — yalnızca zaten dipteyse takip et. */
+    _stickBottom: function () {
+      var el = document.getElementById('cw-msgs');
+      if (el && this._atBottom(el)) el.scrollTop = el.scrollHeight;
+    },
+
     _setLoading: function (state) {
       this.busy = state;
-      var btn = document.getElementById('cw-send');
-      if (btn) btn.classList.toggle('cw-busy', state);
+      var send = document.getElementById('cw-send');
+      var stop = document.getElementById('cw-stop');
+      if (send) send.classList.toggle('cw-hidden', state);
+      if (stop) stop.classList.toggle('cw-hidden', !state);
       this._render();
       this._scrollBottom();
     },

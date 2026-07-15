@@ -121,3 +121,37 @@
 #cw-notify{position:fixed;bottom:calc(var(--action-bar-h,68px) + 75px);right:20px;background:var(--surface-2);border:1px solid var(--color-primary-a20);border-radius:10px;padding:10px 15px;font-family:var(--font-body);font-size:13px;color:var(--color-text-1);box-shadow:0 4px 20px var(--shadow-color-2);z-index:9999;opacity:0;transform:translateY(8px);transition:opacity .25s ease,transform .25s ease;pointer-events:none;display:flex;align-items:center;gap:9px;max-width:250px}
 #cw-notify.cw-show{opacity:1;transform:translateY(0)}
 @media(min-width:1024px){#cw-notify{bottom:96px;right:36px}}
+
+/* ── WS2/WS10: akış (streaming) UI ── */
+/* .cw-hidden yalnızca bu iki butona display:none uygular. Genel bir kural
+   yazmak #cw-fab.cw-hidden'ı (opacity ile animasyonlu gizlenir) bozardı. */
+#cw-send.cw-hidden,#cw-stop.cw-hidden{display:none}
+#cw-stop{width:38px;height:38px;border-radius:10px;background:var(--color-surface-3);border:1px solid var(--color-border-solid);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s,transform .15s;flex-shrink:0}
+#cw-stop:hover{transform:scale(1.06)}
+#cw-stop:active{transform:scale(.95)}
+#cw-stop svg{width:14px;height:14px;color:var(--color-text-1)}
+
+/* Yanıt gelmeden önceki canlı balon: yanıp sönen imleç */
+.cw-typing-live::after{content:'';display:inline-block;width:7px;height:14px;background:var(--color-primary);vertical-align:text-bottom;animation:cw-cursor 1s step-end infinite}
+@keyframes cw-cursor{0%,100%{opacity:1}50%{opacity:0}}
+
+.cw-regen{align-self:flex-start;margin-top:4px;background:transparent;border:1px solid var(--color-border-solid);color:var(--color-text-3);border-radius:8px;padding:3px 9px;font-family:var(--font-body);font-size:11.5px;cursor:pointer;transition:color .15s,border-color .15s}
+.cw-regen:hover{color:var(--color-primary);border-color:var(--color-primary)}
+
+/* Markdown gövdesi: kod/tablo GENİŞ olabilir — balonu taşırmasın, kendi
+   içinde yatay kaysın (mobilde sayfayı yana kaydırmak kabul edilemez). */
+.cw-md>*:first-child{margin-top:0}
+.cw-md>*:last-child{margin-bottom:0}
+.cw-md p{margin:0 0 8px}
+.cw-md ul,.cw-md ol{margin:0 0 8px;padding-left:20px}
+.cw-md li{margin:2px 0}
+.cw-md h1,.cw-md h2,.cw-md h3,.cw-md h4{margin:10px 0 6px;font-size:14px;font-weight:600;line-height:1.35}
+.cw-md a{color:var(--color-primary);text-decoration:underline}
+.cw-md code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;background:var(--color-surface-2);border:1px solid var(--color-border-solid);border-radius:4px;padding:1px 4px}
+.cw-md pre{margin:0 0 8px;padding:9px 11px;background:var(--color-surface-2);border:1px solid var(--color-border-solid);border-radius:8px;overflow-x:auto;max-width:100%}
+.cw-md pre code{background:none;border:none;padding:0;white-space:pre}
+.cw-md blockquote{margin:0 0 8px;padding-left:10px;border-left:2px solid var(--color-border-solid);color:var(--color-text-3)}
+.cw-md table{display:block;width:max-content;max-width:100%;overflow-x:auto;border-collapse:collapse;margin:0 0 8px;font-size:12.5px}
+.cw-md th,.cw-md td{border:1px solid var(--color-border-solid);padding:4px 8px;text-align:left;white-space:nowrap}
+.cw-md th{background:var(--color-surface-2);font-weight:600}
+.cw-md img{max-width:100%;height:auto}

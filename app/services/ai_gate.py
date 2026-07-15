@@ -118,6 +118,58 @@ def ai_concurrency_gate(fn):
                              AI_MAX_CONCURRENCY, "AI-GATE")
 
 
+def ai_stream_concurrency_gate(fn):
+    """Streaming (SSE) route'ları için AI kapısı — slotu YANIT KAPANANA dek tutar.
+
+    Normal `ai_concurrency_gate` slotu view DÖNDÜĞÜNDE bırakır. Streaming'de view
+    anında bir Response(generator) döner ve asıl üretim generator tüketilirken
+    (view'dan SONRA) çalışır → slot daha ilk token üretilmeden serbest kalır,
+    yani kapı stream'leri HİÇ sınırlamazdı: 8 eşzamanlı stream tüm thread'leri
+    doldurup /health'i düşürebilirdi (A1'in tam olarak engellediği senaryo).
+
+    Bu yüzden slot burada alınır (dolu ise stream HİÇ başlamadan 503 + Retry-After
+    döner — SSE içinde hata göndermekten iyidir) ve `call_on_close` ile yanıt
+    kapanınca (normal bitiş VEYA istemci bağlantıyı koparınca) bırakılır."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not _ai_slots.acquire(timeout=AI_GATE_WAIT_SECONDS):
+            from app.i18n import t
+            current_app.logger.warning(
+                "[AI-GATE] Eşzamanlı tavan dolu (%s) — stream reddedildi: %s",
+                AI_MAX_CONCURRENCY, getattr(fn, "__name__", "?"))
+            resp = jsonify({"error": t("error.ai_busy")})
+            resp.status_code = 503
+            resp.headers["Retry-After"] = "15"
+            return resp
+
+        released = threading.Event()
+
+        def _release():
+            # Tam olarak bir kez bırak: BoundedSemaphore çift release'te ValueError
+            # fırlatır ve kapının sayacını kalıcı bozardı.
+            if not released.is_set():
+                released.set()
+                _ai_slots.release()
+
+        try:
+            rv = fn(*args, **kwargs)
+        except Exception:
+            _release()
+            raise
+
+        # Erken çıkışlar (400/402 gibi jsonify(...), status tuple'ları) stream
+        # DEĞİLDİR — slotu hemen bırak, yalnızca gerçek akış onu tutsun.
+        response = rv[0] if isinstance(rv, tuple) else rv
+        if hasattr(response, "call_on_close") and getattr(response, "is_streamed", False):
+            response.call_on_close(_release)
+        else:
+            _release()
+        return rv
+
+    wrapper._ai_concurrency_gated = True
+    return wrapper
+
+
 def scrape_concurrency_gate(fn):
     """Menü scrape route'ları için AYRI (LLM'den bağımsız) eşzamanlılık kapısı.
     Ağ-bağımlı taramanın AI slotlarını tutmasını önler (INF-5)."""
