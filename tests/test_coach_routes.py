@@ -376,3 +376,123 @@ def test_ask_stream_provider_exception_emits_friendly_error(
     assert resp.frames[-1][0] == "error"
     assert "bedrock stack trace" not in resp.raw
     assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
+
+
+# ---------------------------------------------------------------------------
+# WS7 — arıza soğuması (cooldown) + burst tavanı + ardışık-arıza sayacı
+# ---------------------------------------------------------------------------
+
+def _ok_answer(*a, **k):
+    return {"answer": "ok", "conversation_id": 1, "is_error_fallback": False}
+
+
+def test_ask_cooldown_returns_429_before_quota(client, auth_user, monkeypatch):
+    # Kullanıcı soğumadayken /ask 429+Retry-After döner; pahalı hat HİÇ çalışmaz
+    # ve haftalık hak HARCANMAZ (soğuma kotadan önce).
+    monkeypatch.setattr(coach_bp.ai_recovery, "ai_cooldown_remaining", lambda uid: 30)
+    monkeypatch.setattr(coach_bp, "generate_answer",
+                        lambda *a, **k: pytest.fail("soğumada pahalı hat çalışmamalı"))
+    resp = client.post("/ask", json={"question": "protein?"})
+    assert resp.status_code == 429
+    assert resp.headers["Retry-After"] == "30"
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
+
+
+def test_ask_stream_cooldown_returns_429_before_quota(client, auth_user, monkeypatch):
+    monkeypatch.setattr(coach_bp.ai_recovery, "ai_cooldown_remaining", lambda uid: 45)
+    called = {"stream": False}
+
+    def fake(*a, **k):
+        called["stream"] = True
+        yield {"type": "meta", "conversation_id": None}
+    monkeypatch.setattr(coach_bp, "stream_answer", fake)
+    resp = client.post("/ask/stream", json={"question": "protein?"})
+    assert resp.status_code == 429
+    assert resp.headers["Retry-After"] == "45"
+    assert called["stream"] is False
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
+    resp.close()
+
+
+def test_ask_success_clears_failure_streak(client, auth_user, monkeypatch):
+    cleared = []
+    monkeypatch.setattr(coach_bp.ai_recovery, "clear_ai_failures",
+                        lambda uid: cleared.append(uid))
+    monkeypatch.setattr(coach_bp.ai_recovery, "record_ai_failure",
+                        lambda uid: pytest.fail("başarıda arıza kaydı olmamalı"))
+    monkeypatch.setattr(coach_bp, "generate_answer", _ok_answer)
+    resp = client.post("/ask", json={"question": "protein?"})
+    assert resp.status_code == 200
+    assert cleared == [auth_user.id]
+
+
+def test_ask_error_fallback_records_failure(client, auth_user, monkeypatch):
+    recorded = []
+    monkeypatch.setattr(coach_bp.ai_recovery, "record_ai_failure",
+                        lambda uid: recorded.append(uid))
+    monkeypatch.setattr(coach_bp, "generate_answer",
+                        lambda *a, **k: {"answer": COACH_FALLBACKS["tr"]["error"],
+                                         "conversation_id": 1, "is_error_fallback": True})
+    resp = client.post("/ask", json={"question": "protein?"})
+    assert resp.status_code == 200
+    assert recorded == [auth_user.id]
+
+
+def test_ask_exception_records_failure(client, auth_user, monkeypatch):
+    recorded = []
+    monkeypatch.setattr(coach_bp.ai_recovery, "record_ai_failure",
+                        lambda uid: recorded.append(uid))
+
+    def boom(*a, **k):
+        raise RuntimeError("pipeline down")
+    monkeypatch.setattr(coach_bp, "generate_answer", boom)
+    resp = client.post("/ask", json={"question": "protein?"})
+    assert resp.status_code == 500
+    assert recorded == [auth_user.id]
+
+
+def test_ask_stream_error_records_failure(client, auth_user, monkeypatch):
+    recorded = []
+    monkeypatch.setattr(coach_bp.ai_recovery, "record_ai_failure",
+                        lambda uid: recorded.append(uid))
+    monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
+        {"type": "meta", "conversation_id": 1},
+        {"type": "error", "key": "coach.reply_failed"},
+    ]))
+    _post_stream(client, "protein?")
+    assert recorded == [auth_user.id]
+
+
+def test_ask_stream_success_clears_failure_streak(client, auth_user, monkeypatch):
+    cleared = []
+    monkeypatch.setattr(coach_bp.ai_recovery, "clear_ai_failures",
+                        lambda uid: cleared.append(uid))
+    monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
+        {"type": "meta", "conversation_id": 1},
+        {"type": "delta", "text": "x"},
+        {"type": "done", "text": "x", "is_error_fallback": False, "usage": None},
+    ]))
+    _post_stream(client, "protein?")
+    assert cleared == [auth_user.id]
+
+
+@pytest.fixture
+def enabled_limiter():
+    from app.extensions import limiter
+    limiter.reset()
+    limiter.enabled = True
+    try:
+        yield
+    finally:
+        limiter.enabled = False
+        limiter.reset()
+
+
+def test_ask_burst_limit_trips_on_sixth(client, auth_user, enabled_limiter, monkeypatch):
+    # AI_BURST_RATELIMIT = "5 per minute" → aynı dakikadaki 6. istek 429.
+    monkeypatch.setattr(coach_bp.ai_recovery, "ai_cooldown_remaining", lambda uid: 0)
+    monkeypatch.setattr(coach_bp, "generate_answer", _ok_answer)
+    codes = [client.post("/ask", json={"question": "q"}).status_code
+             for _ in range(6)]
+    assert codes[:5] == [200, 200, 200, 200, 200]
+    assert codes[5] == 429

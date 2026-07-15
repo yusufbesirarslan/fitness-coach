@@ -10,7 +10,9 @@ except Exception:  # paket yoksa Bedrock zaten BEDROCK_ENABLED ile kapalı kalı
 
 from app.config import BEDROCK_ENABLED, BEDROCK_MAX_TOKENS, BEDROCK_MODEL, OPENAI_MODEL
 from app.extensions import bedrock_client, openai_client
+from app.services import ai_recovery
 from app.services.ai_gate import model_concurrency_slot
+from app.services.ai_recovery import TransientAIError
 
 logger = logging.getLogger(__name__)
 
@@ -52,9 +54,11 @@ def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
             logger.warning("OpenAI yanıtı max_tokens=%s sınırında kesildi (finish_reason=length)", max_tokens)
         return choice.message.content or ""
     except RateLimitError:
-        raise RuntimeError("AI servisi şu an yoğun (rate limit). Lütfen biraz sonra tekrar deneyin.")
+        # Geçici: kurtarma katmanı (call_with_recovery) yeniden dener. Metin
+        # dostça ve RuntimeError alt sınıfı → mevcut çağıran fallback'leri korunur.
+        raise TransientAIError("AI servisi şu an yoğun (rate limit). Lütfen biraz sonra tekrar deneyin.")
     except (APITimeoutError, APIConnectionError):
-        raise RuntimeError("AI servisine ulaşılamadı (zaman aşımı). Lütfen tekrar deneyin.")
+        raise TransientAIError("AI servisine ulaşılamadı (zaman aşımı). Lütfen tekrar deneyin.")
     except APIError as e:
         # Ham sağlayıcı hatası kullanıcıya sızmasın (iç ayrıntı/anahtar metası
         # içerebilir); detayı logla, kullanıcıya jenerik mesaj dön.
@@ -95,9 +99,10 @@ def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
                 return block.text
         return ""
     except anthropic.RateLimitError:
-        raise RuntimeError("AI servisi şu an yoğun (rate limit). Lütfen biraz sonra tekrar deneyin.")
+        # Geçici: kurtarma katmanı yeniden dener (TransientAIError, RuntimeError alt sınıfı).
+        raise TransientAIError("AI servisi şu an yoğun (rate limit). Lütfen biraz sonra tekrar deneyin.")
     except (anthropic.APITimeoutError, anthropic.APIConnectionError):
-        raise RuntimeError("AI servisine ulaşılamadı (zaman aşımı). Lütfen tekrar deneyin.")
+        raise TransientAIError("AI servisine ulaşılamadı (zaman aşımı). Lütfen tekrar deneyin.")
     except anthropic.APIError as e:  # APIStatusError bunun alt sınıfıdır — tek except yeter
         logger.warning("Claude/Bedrock APIError: %s", e)
         raise RuntimeError("AI servisi hatası. Lütfen tekrar deneyin.")
@@ -145,17 +150,40 @@ def _heavy_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
     """Ağır görev yönlendiricisi: Bedrock açıksa Claude Sonnet'e gider, aksi halde veya
     herhangi bir hatada OpenAI'ya şeffafça düşer. İmza `_openai_chat` ile aynıdır, böylece
     çağrı noktaları yalnızca `_openai_chat(` → `_heavy_chat(` rename'iyle taşınır.
-    Hangi sağlayıcının cevap verdiğini `[AI]` etiketli INFO satırıyla loglar (gözlemlenebilirlik)."""
+    Hangi sağlayıcının cevap verdiğini `[AI]` etiketli INFO satırıyla loglar (gözlemlenebilirlik).
+
+    WS9 kurtarma: her sağlayıcı çağrısı geçici hatalarda (TransientAIError)
+    sınırlı jitter'lı yeniden denenir (call_with_recovery); Bedrock kalıcı hatada
+    OpenAI'ya düşer; HER İKİSİ de düşerse son-iyi (last-good) yanıt döner, o da
+    yoksa dostça RuntimeError yükselir (çağıranın mevcut fallback'i)."""
+    # Son-iyi anahtarı içerik-bazlı: iki farklı kullanıcı ancak birebir aynı
+    # girdiyi gönderirse aynı yanıtı paylaşır (saf girdi-fonksiyonu → sızıntı yok).
+    lg_key = ai_recovery.lastgood_key(
+        "heavy_chat", BEDROCK_MODEL, system_prompt or "", messages, max_tokens)
     with model_concurrency_slot():
         if BEDROCK_ENABLED and anthropic is not None:
             try:
-                reply = _claude_chat(messages, system_prompt=system_prompt,
-                                     max_tokens=max_tokens, temperature=temperature)
+                reply = ai_recovery.call_with_recovery(
+                    lambda: _claude_chat(messages, system_prompt=system_prompt,
+                                         max_tokens=max_tokens, temperature=temperature),
+                    feature="heavy_chat.bedrock")
                 logger.info("[AI] sağlayıcı: Bedrock (Claude Sonnet)")
+                ai_recovery.remember_last_good(lg_key, reply)
                 return reply
             except Exception as e:  # RuntimeError dahil her şey → OpenAI'ya düş (istek bozulmasın)
                 logger.warning("Bedrock/Claude çağrısı başarısız, OpenAI'ya düşülüyor: %s: %s",
                                type(e).__name__, e)
-        logger.info("[AI] sağlayıcı: OpenAI (%s)", OPENAI_MODEL)
-        return _openai_chat(messages, system_prompt=system_prompt,
-                            max_tokens=max_tokens, temperature=temperature)
+        try:
+            logger.info("[AI] sağlayıcı: OpenAI (%s)", OPENAI_MODEL)
+            reply = ai_recovery.call_with_recovery(
+                lambda: _openai_chat(messages, system_prompt=system_prompt,
+                                     max_tokens=max_tokens, temperature=temperature),
+                feature="heavy_chat.openai")
+            ai_recovery.remember_last_good(lg_key, reply)
+            return reply
+        except Exception:
+            cached = ai_recovery.recall_last_good(lg_key)
+            if cached is not None:
+                logger.warning("[AI] her iki sağlayıcı da başarısız — son-iyi (last-good) yanıt sunuldu")
+                return cached
+            raise
