@@ -21,6 +21,18 @@ from flask import current_app
 from app.services import context_builder, memory_manager, moderation, response_formatter
 
 
+def _maybe_enqueue_summarize(conversation):
+    """WS8: özetlemeyi arka-plan işine ver — worker varsa kuyruğa (async, istek
+    yolunu bloklamaz), yoksa SATIR-İÇİ (sync, PR2'nin eski davranışı). Kendi
+    hatalarını yutar: özetleme tetiklenemezse bağlam penceresi yine kurulur."""
+    try:
+        from app.jobs import enqueue_or_run
+        from app.jobs.tasks import summarize_conversation
+        enqueue_or_run(summarize_conversation, conversation.id)
+    except Exception:
+        current_app.logger.warning("[PIPELINE] özetleme tetiklenemedi", exc_info=True)
+
+
 def _memory_stage(user_id):
     """WS1 kalıcı hafıza: aktif konuşma + bağlam penceresi.
 
@@ -30,7 +42,7 @@ def _memory_stage(user_id):
         return None, None
     try:
         conversation = memory_manager.get_or_create_active_conversation(user_id)
-        memory_manager.maybe_summarize(conversation)  # lazy; WS8'de RQ'ya taşınacak
+        _maybe_enqueue_summarize(conversation)  # WS8: kuyruğa ya da satır-içi
         return conversation, memory_manager.build_context_window(conversation)
     except Exception:
         # Commit yarıda kaldıysa session kirli kalır; rollback etmezsek sonraki
@@ -50,6 +62,21 @@ def _context_stage(user_id, question, language):
     except Exception:
         current_app.logger.warning("[PIPELINE] koç bağlamı kurulamadı", exc_info=True)
         return ""
+
+
+def _emit_metrics(is_error=False, usage=None):
+    """WS6: bir AI turunun sonunda CloudWatch metriklerini yolla (kapalıysa no-op).
+    Metrik yazımı asla akışı bozmaz — ai_metrics tüm hataları yutar."""
+    try:
+        from app.services import ai_metrics
+        ai_metrics.increment("AIErrors" if is_error else "AITurn",
+                             dimensions={"mode": "stream"})
+        if usage:
+            ai_metrics.record_tokens(usage.get("prompt_tokens"),
+                                     usage.get("completion_tokens"),
+                                     dimensions={"mode": "stream"})
+    except Exception:
+        pass  # gözlemlenebilirlik asla asıl yolu düşürmez
 
 
 def _record(conversation, question, answer, usage=None, interrupted=False):
@@ -144,6 +171,7 @@ def stream_answer(user_id, question, client_history=None, language="tr"):
                 yield event
             elif kind == "error":
                 finished = True
+                _emit_metrics(is_error=True)
                 yield event
                 return
             elif kind == "done":
@@ -154,6 +182,7 @@ def stream_answer(user_id, question, client_history=None, language="tr"):
                 if not is_fallback:
                     _record(conversation, question, answer,
                             usage=event.get("usage"))
+                _emit_metrics(is_error=is_fallback, usage=event.get("usage"))
                 yield {"type": "done", "text": answer,
                        "is_error_fallback": is_fallback,
                        "usage": event.get("usage")}

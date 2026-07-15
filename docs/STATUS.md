@@ -10,6 +10,32 @@ Roadmap detail for the in-flight workstream lives in
 
 Last updated: 2026-07-15.
 
+> **2026-07-15 — Sprint 4 PR 5 (final): WS8 background jobs + WS6 observability +
+> WS12 docs + load tests.** **WS8** — an optional RQ worker. `app/jobs/`:
+> `get_queue()` (None-safe), `enqueue_or_run(func, ...)` (enqueue when a
+> worker/Redis exists, else run inline), a worker heartbeat, and dead-letter
+> helpers (`flask rq-failed` / `rq-requeue`). `worker.py` is the entrypoint
+> (`rq.Worker` on Linux, `SimpleWorker` on Windows/dev) with a heartbeat daemon
+> thread; a `worker` compose service (same image, 512m, log-rotated) runs it.
+> **The worker is optional** — without it (or without `rq`), jobs fall back to
+> inline execution, so nothing breaks. First wired task: `summarize_conversation`
+> (PR2's inline lazy-summarize now enqueues via `ai_pipeline._memory_stage`).
+> `/health?deep=1` reports `worker: alive|down|unknown` as *informational* (not
+> gating). **WS6** — `app/services/ai_metrics.py` emits CloudWatch `FitX/AI`
+> metrics (AITurn, AIErrors, Prompt/Completion/TotalTokens, SummarizeJob), **default
+> off** (`AI_METRICS_ENABLED=0`; needs `cloudwatch:PutMetricData`), total no-op when
+> disabled/no boto3. Request tracing: a server-generated 16-hex `request_id` per
+> request in the logfmt line, the `/ask/stream` SSE `meta` frame, and a Sentry tag.
+> Real token usage was already recorded onto `CoachMessage` (PR2). **WS12** — six
+> docs under `docs/` (AI_ARCHITECTURE, MEMORY, STREAMING, OBSERVABILITY,
+> RATE_LIMITING, DEPLOYMENT). **Load tests** — `tests/load/` behind
+> `@pytest.mark.load`, deselected by default (`pytest.ini addopts = -m "not load"`),
+> run with `-m load`: model-slot concurrency bound, failure injection under
+> concurrency, context-window token-overflow pruning. No migration
+> (`CoachMessage` token columns already exist). `rq==2.10.0` pinned. Tests:
+> `test_jobs.py`, `test_ai_metrics.py`, request-id in `test_observability.py`,
+> worker field in `test_health.py`.
+
 > **2026-07-15 — Sprint 4 PR 4: WS5 caching + WS9 error recovery + WS7 rate
 > hardening.** Three defensive layers around the AI paths, all default-on and all
 > degrading to no-ops without Redis. **WS5** `app/services/ai_cache.py` — a

@@ -25,6 +25,9 @@ pdfplumber==0.11.10
 Pillow==12.3.0
 boto3==1.43.46
 redis==8.0.1
+# Arka-plan iş kuyruğu (Sprint 4 WS8) — app/jobs/, worker.py. Redis yoksa/rq
+# kurulu değilse get_queue() None döner ve işler satır-içi (inline) çalışır.
+rq==2.10.0
 # Merkezi e-posta altyapısı (app/services/email_service.py) — Resend resmi SDK.
 resend==2.32.2
 # Hata izleme — yalnızca SENTRY_DSN ayarlıysa etkin (app/observability.py).

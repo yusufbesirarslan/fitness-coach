@@ -22,10 +22,11 @@ def services():
 
 
 def test_compose_parses_and_has_expected_services(services):
-    assert set(services) == {"web", "redis"}
+    # worker (Sprint 4 WS8): AI iş kuyruğunu tüketen ayrı süreç (aynı imaj).
+    assert set(services) == {"web", "redis", "worker"}
 
 
-@pytest.mark.parametrize("service", ["web", "redis"])
+@pytest.mark.parametrize("service", ["web", "redis", "worker"])
 def test_log_rotation_configured(services, service):
     logging = services[service].get("logging")
     assert logging, f"{service}: logging bloğu YOK → sınırsız log → dolu disk"
@@ -35,14 +36,15 @@ def test_log_rotation_configured(services, service):
     assert options.get("max-file"), f"{service}: max-file YOK"
 
 
-@pytest.mark.parametrize("service", ["web", "redis"])
+@pytest.mark.parametrize("service", ["web", "redis", "worker"])
 def test_ports_bound_to_loopback_only(services, service):
     # Regresyon kapısı: servisler internete AÇILMAMALI (host nginx tek giriş).
+    # worker hiç port yayınlamaz (yalnızca Redis'e giden istemci) → döngü boş, geçer.
     for mapping in services[service].get("ports", []):
         assert str(mapping).startswith("127.0.0.1:"), \
             f"{service}: {mapping} loopback'e bağlı değil"
 
 
-@pytest.mark.parametrize("service", ["web", "redis"])
+@pytest.mark.parametrize("service", ["web", "redis", "worker"])
 def test_memory_limit_set(services, service):
     assert services[service].get("mem_limit")

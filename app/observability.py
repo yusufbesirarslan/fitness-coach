@@ -10,6 +10,7 @@ gunicorn/stdout log'larında grep'lenebilir ve log toplayıcılarca ayrıştır�
 """
 import os
 import time
+import uuid
 
 from flask import current_app, g, request
 from flask_login import current_user
@@ -45,6 +46,24 @@ def start_request_timer():
     g._req_start = time.monotonic()
 
 
+def assign_request_id():
+    """WS6: her isteğe kısa bir izleme kimliği (request_id) ata. logfmt satırında,
+    /ask/stream SSE `meta` çerçevesinde ve (Sentry açıksa) hata etiketinde görünür
+    → bir kullanıcı raporunu/çöküşü sunucu loglarıyla ilişkilendirmeyi sağlar.
+    İstemci sahte bir kimlik enjekte edememeli diye HER ZAMAN sunucuda üretilir."""
+    g.request_id = uuid.uuid4().hex[:16]
+    try:
+        import sentry_sdk
+        sentry_sdk.set_tag("request_id", g.request_id)
+    except Exception:
+        pass  # sentry yok/kapalı → etiket atlanır (izleme yine loglarda)
+
+
+def current_request_id():
+    """Bu isteğin request_id'si (yoksa "-"). SSE meta / servis katmanları için."""
+    return getattr(g, "request_id", "-")
+
+
 def log_request(response):
     """Her isteği logfmt satırı olarak logla. /health (sağlık probe'u) atlanır."""
     if request.path == "/health":
@@ -60,8 +79,8 @@ def log_request(response):
     # tek proxy (host nginx) hop'undan gerçek istemci IP'sini remote_addr'a
     # koyuyor; ham başlık yerine onu logla.
     current_app.logger.info(
-        "request method=%s path=%s status=%s dur_ms=%s user=%s ip=%s",
-        request.method, request.path, response.status_code, dur_ms, uid,
-        request.remote_addr or "-",
+        "request id=%s method=%s path=%s status=%s dur_ms=%s user=%s ip=%s",
+        current_request_id(), request.method, request.path, response.status_code,
+        dur_ms, uid, request.remote_addr or "-",
     )
     return response

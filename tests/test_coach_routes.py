@@ -283,8 +283,12 @@ def test_ask_stream_emits_meta_delta_done_frames(client, auth_user, monkeypatch)
     assert resp.headers["X-Accel-Buffering"] == "no"
     assert resp.headers["Cache-Control"] == "no-cache"
 
-    assert resp.frames == [
-        ("meta", {"conversation_id": 7}),
+    # meta çerçevesi conversation_id + WS6 request_id taşır (request_id dinamik).
+    meta_event, meta_data = resp.frames[0]
+    assert meta_event == "meta"
+    assert meta_data["conversation_id"] == 7
+    assert meta_data.get("request_id") and meta_data["request_id"] != "-"
+    assert resp.frames[1:] == [
         ("delta", {"text": "mer"}),
         ("delta", {"text": "haba"}),
         ("done", {"text": "merhaba", "is_error_fallback": False}),
