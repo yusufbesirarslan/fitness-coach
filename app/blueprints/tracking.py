@@ -28,6 +28,8 @@ def _parse_weight(value):
         return None, "route.weight_required"
     try:
         weight = float(value)
+    except OverflowError:
+        return None, "route.weight_range"
     except (TypeError, ValueError):
         return None, "route.weight_numeric"
     if not math.isfinite(weight) or not 20 <= weight <= 500:

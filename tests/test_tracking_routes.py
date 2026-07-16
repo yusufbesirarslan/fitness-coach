@@ -89,6 +89,28 @@ def test_weight_routes_reject_out_of_range_values(
 
 
 @pytest.mark.parametrize("path", ["/log", "/checkin", "/update-weight"])
+def test_weight_routes_reject_oversized_integer_without_mutation(
+        app, client, auth_user, fake_checkin_feedback, path):
+    # Convert the uncaught OverflowError into the route's real HTTP 500 response
+    # so RED is a behavioral 500-vs-400 failure rather than a propagated error.
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+    profile_weight = auth_user.weight
+    log_count = WeeklyLog.query.filter_by(user_id=auth_user.id).count()
+    checkin_count = WeeklyCheckIn.query.filter_by(user_id=auth_user.id).count()
+
+    response = client.post(path, json={"weight": 10 ** 309})
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "Kilo 20 ile 500 kg aras\u0131nda olmal\u0131d\u0131r"
+    }
+    db.session.expire_all()
+    assert WeeklyLog.query.filter_by(user_id=auth_user.id).count() == log_count
+    assert WeeklyCheckIn.query.filter_by(user_id=auth_user.id).count() == checkin_count
+    assert db.session.get(User, auth_user.id).weight == profile_weight
+
+
+@pytest.mark.parametrize("path", ["/log", "/checkin", "/update-weight"])
 @pytest.mark.parametrize("weight", [20, 500])
 def test_weight_routes_accept_inclusive_boundaries(
         client, auth_user, fake_checkin_feedback, path, weight):
