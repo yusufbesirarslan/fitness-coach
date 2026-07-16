@@ -121,6 +121,17 @@ def test_feed_hides_restricted_and_repost_stub(app, auth_user, make_user, client
     assert stub["engagement"] is None
 
 
+def test_feed_and_gallery_pages_render(app, auth_user, client):
+    # Jinja/tojson (ME, ME_NAME) ve şablon bütünlüğü CI'da tarayıcısız doğrulanır.
+    r = client.get("/feed")
+    assert r.status_code == 200
+    html = r.get_data(as_text=True)
+    assert "renderItem" in html and "/feed/data" in html and "const ME" in html
+    g = client.get("/pump-check-gallery")
+    assert g.status_code == 200
+    assert "data-share-gallery" in g.get_data(as_text=True)
+
+
 def test_gallery_delete_removes_referencing_reposts(app, auth_user, make_user, client):
     from app.models import FeedItemComment, FeedItemLike
     bob = make_user("bob")
