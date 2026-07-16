@@ -168,3 +168,13 @@ def test_weekly_rollover_tiebreak_streak_then_id(make_user):
     result = run_weekly_rollover(force_week="2026-W23")
     # Eşit XP'de yüksek streak önde; o da eşitse küçük id kazanırdı.
     assert [w["user_id"] for w in result["winners"]] == [high_streak.id, low_streak.id]
+
+
+def test_leaderboard_data_includes_reset_at(client, auth_user):
+    # Sprint 5 PR3: geri sayım sunucu resetAt'ından (Istanbul Pazar 23:59 → UTC).
+    r = client.get("/leaderboard/data?timeframe=weekly")
+    assert r.status_code == 200
+    j = r.get_json()
+    assert "resetAt" in j
+    from app.services.challenges import period_end_utc
+    assert j["resetAt"].startswith(period_end_utc().isoformat())

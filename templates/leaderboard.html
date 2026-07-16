@@ -101,19 +101,11 @@ let currentScope = 'friends';
 let currentTimeframe = 'all_time';
 
 // ── Weekly countdown ──────────────────────────────────────────────
-// Targets the weekly reset boundary in UTC. Change LB_RESET to adjust
-// the reset day/time in one place if it ever moves.
-const LB_RESET = { day: 0, hour: 23, minute: 59 };  // 0 = Sunday (UTC)
+// Sıfırlama anını SUNUCU verir (/leaderboard/data → resetAt, ISO UTC). Sunucu
+// bunu Istanbul Pazar 23:59'undan hesaplar; eski hardcode UTC ≠ Istanbul kayması
+// (yaz saati/2-3 saat) böylece giderilir. Veri gelene dek geri sayım gizli kalır.
 const DAY_MS = 24 * 60 * 60 * 1000;
-
-function nextResetUTC(now) {
-    now = now || new Date();
-    const t = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
-        LB_RESET.hour, LB_RESET.minute, 0, 0));
-    t.setUTCDate(t.getUTCDate() + ((LB_RESET.day - now.getUTCDay() + 7) % 7));
-    if (t.getTime() <= now.getTime()) t.setUTCDate(t.getUTCDate() + 7);  // already passed today → next week
-    return t;
-}
+let __lbResetAt = null;  // Date | null
 
 function formatRemaining(ms) {
     if (ms < 0) ms = 0;
@@ -126,8 +118,8 @@ function formatRemaining(ms) {
 
 function updateCountdown() {
     const el = document.getElementById('lb-countdown');
-    if (!el) return;
-    const ms = nextResetUTC() - new Date();
+    if (!el || !__lbResetAt) return;  // sunucu resetAt gelene dek bekle
+    const ms = __lbResetAt.getTime() - Date.now();
     el.textContent = formatRemaining(ms);
     el.classList.toggle('urgent', ms < DAY_MS);  // accent color under 24h
 }
@@ -161,6 +153,8 @@ async function loadBoard(scope) {
         const res = await fetch('/leaderboard/data?scope=' + encodeURIComponent(scope) +
             '&timeframe=' + encodeURIComponent(currentTimeframe));
         const data = await res.json();
+
+        if (data.resetAt) { __lbResetAt = new Date(data.resetAt); if (currentTimeframe === 'weekly') updateCountdown(); }
 
         if (data.no_friends) {
             list.innerHTML = emptyStateHTML();

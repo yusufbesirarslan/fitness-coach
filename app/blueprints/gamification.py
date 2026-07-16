@@ -29,14 +29,22 @@ def leaderboard_data():
 
     # Hızlı yol: Redis sorted set'ten anında sırala. Redis yoksa veya herhangi bir
     # hata olursa Postgres ORDER BY yoluna düş (Postgres her zaman kaynaktır).
+    resp = None
     if redis_client:
         key = LB_WEEKLY_KEY if timeframe == "weekly" else LB_ALLTIME_KEY
         try:
-            return _leaderboard_via_redis(scope, timeframe, key)
+            resp = _leaderboard_via_redis(scope, timeframe, key)
         except Exception:
             current_app.logger.warning("Leaderboard Redis yolu başarısız; Postgres'e düşülüyor",
                                exc_info=True)
-    return _leaderboard_via_postgres(scope, timeframe)
+    if resp is None:
+        resp = _leaderboard_via_postgres(scope, timeframe)
+    # Haftalık sıfırlama anı = yaklaşan Pazar 23:59 Istanbul → ISO UTC. İstemci
+    # geri sayımı bundan hesaplar (eski hardcode UTC ≠ Istanbul kayması giderildi).
+    from app.services.challenges import period_end_utc
+    data = resp.get_json()
+    data["resetAt"] = period_end_utc().isoformat() + "Z"
+    return jsonify(data)
 
 
 @bp.route("/leaderboard/reward-check")
