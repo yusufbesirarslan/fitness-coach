@@ -49,6 +49,10 @@ CHAT_SEND_RATELIMIT = os.getenv(
     "CHAT_SEND_RATELIMIT", "60 per minute; 600 per hour"
 )
 SUGGESTION_RATELIMIT = os.getenv("SUGGESTION_RATELIMIT", "30 per hour")
+# Feed V2 (Sprint 5 PR2): repost/quote yazma, moderasyon şikayeti, yorum yazma.
+FEED_WRITE_RATELIMIT = os.getenv("FEED_WRITE_RATELIMIT", "60 per hour")
+FEED_REPORT_RATELIMIT = os.getenv("FEED_REPORT_RATELIMIT", "20 per day")
+COMMENT_WRITE_RATELIMIT = os.getenv("COMMENT_WRITE_RATELIMIT", "120 per hour")
 # Freemium: AI plan üretiminde sunucu-taraflı haftalık kota (app/services/premium).
 # Operasyonel kapatma anahtarı; üretimde varsayılan AÇIK.
 AI_PLAN_QUOTA_ENABLED = os.getenv("AI_PLAN_QUOTA_ENABLED", "1") == "1"

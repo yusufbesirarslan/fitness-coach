@@ -84,6 +84,7 @@ _DEFAULT_TEST_RE = re.compile(
 def _user_child_models():
     from app.models import (
         Activity, CoachConversation, CognitoSession, CustomMeal, DailyActivity,
+        FeedHide, FeedItem, FeedItemComment, FeedItemLike, FeedReport,
         MealLog, Notification, NutritionPlan, PendingAction, PumpCheck,
         PumpCheckComment, PumpCheckLike, Supplement, TrainingPlan,
         UserQuestProgress, UserSession, UserWearableConnection, WaterLog,
@@ -96,7 +97,8 @@ def _user_child_models():
         PumpCheck, Activity, Supplement, UserQuestProgress, WeeklyWinner,
         WaterLog, WorkoutLog, DailyActivity, CustomMeal, CoachConversation,
         UserWearableConnection, WearableSleepLog, WearableActivityLog,
-        WearableWorkoutLog, Notification,
+        WearableWorkoutLog, FeedItemLike, FeedItemComment, FeedItem,
+        FeedHide, FeedReport, Notification,
     )
 
 
@@ -161,6 +163,28 @@ def _purge_user(user):
         synchronize_session=False)
     PumpCheckComment.query.filter(db.or_(*comment_child_filter)).delete(
         synchronize_session=False)
+
+    # Feed V2 (Sprint 5 PR2): FeedItem like/yorumları iki yönden bağlı —
+    # kullanıcının kendi bıraktıkları (user_id, döngü siler) VE başkalarının bu
+    # kullanıcının feed item'larına bıraktıkları (feed_item_id). Ayrıca
+    # başkalarının bu kullanıcının pump check'lerine yaptığı repost'lar (ref_id,
+    # FK'siz) askıda kalmasın diye açıkça silinir — child-model döngüsünden ÖNCE.
+    from app.models import FeedItem, FeedItemComment, FeedItemLike
+    own_item_ids = [i for (i,) in db.session.query(FeedItem.id).filter(FeedItem.user_id == uid).all()]
+    ref_item_ids = []
+    if pump_ids:
+        ref_item_ids = [i for (i,) in db.session.query(FeedItem.id).filter(
+            FeedItem.ref_type == "pump_check", FeedItem.ref_id.in_(pump_ids)).all()]
+    all_item_ids = set(own_item_ids) | set(ref_item_ids)
+    fi_like_filter = [FeedItemLike.user_id == uid]
+    fi_comment_filter = [FeedItemComment.user_id == uid]
+    if all_item_ids:
+        fi_like_filter.append(FeedItemLike.feed_item_id.in_(all_item_ids))
+        fi_comment_filter.append(FeedItemComment.feed_item_id.in_(all_item_ids))
+    FeedItemLike.query.filter(db.or_(*fi_like_filter)).delete(synchronize_session=False)
+    FeedItemComment.query.filter(db.or_(*fi_comment_filter)).delete(synchronize_session=False)
+    if ref_item_ids:
+        FeedItem.query.filter(FeedItem.id.in_(ref_item_ids)).delete(synchronize_session=False)
 
     for Model in _USER_CHILD_MODELS:
         Model.query.filter_by(user_id=uid).delete(synchronize_session=False)

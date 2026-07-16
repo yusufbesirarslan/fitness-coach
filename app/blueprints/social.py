@@ -9,13 +9,20 @@ from sqlalchemy.orm import joinedload, selectinload
 
 from app.config import (
     CHAT_SEND_RATELIMIT,
+    COMMENT_WRITE_RATELIMIT,
+    FEED_REPORT_RATELIMIT,
+    FEED_WRITE_RATELIMIT,
     FRIEND_REQUEST_RATELIMIT,
     SEARCH_RATELIMIT,
     SUGGESTION_RATELIMIT,
 )
 from app.extensions import _user_or_ip_key, db, limiter
 from app.i18n import t
-from app.models import Friendship, MealLog, Message, Notification, PumpCheck, PumpCheckComment, PumpCheckLike, User
+from app.models import (
+    Activity, FeedHide, FeedItem, FeedItemComment, FeedItemLike, FeedReport,
+    Friendship, MealLog, Message, Notification, PumpCheck, PumpCheckComment,
+    PumpCheckLike, User,
+)
 from app.services.ai_nutrition import _estimate_macros_llm, _estimate_serving_weights_llm, _parse_suggestion_items, _turkish_ablative_suffix
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
 from app.services.foodcache import _cache_macros, _get_cached_macros
@@ -124,43 +131,13 @@ def feed_page():
 @bp.route("/feed/data")
 @require_auth
 def feed_data():
-    try:
-        page = max(int(request.args.get("page", 1) or 1), 1)
-    except (TypeError, ValueError):
-        page = 1
+    cursor = request.args.get("cursor") or None
     try:
         per_page = min(max(int(request.args.get("per_page", 10) or 10), 1), 30)
     except (TypeError, ValueError):
         per_page = 10
-    visible_user_ids = get_friend_ids(current_user.id) | {current_user.id}
-    query = PumpCheck.query.filter(
-        PumpCheck.visibility == "feed",
-        PumpCheck.user_id.in_(visible_user_ids),
-    ).options(
-        joinedload(PumpCheck.user),
-    ).order_by(PumpCheck.created_at.desc(), PumpCheck.id.desc())
-    rows = query.offset((page - 1) * per_page).limit(per_page + 1).all()
-    posts = rows[:per_page]
-    liked_pump_check_ids = set()
-    if posts:
-        liked_rows = db.session.query(PumpCheckLike.pump_check_id).filter(
-            PumpCheckLike.user_id == current_user.id,
-            PumpCheckLike.pump_check_id.in_([post.id for post in posts]),
-        ).all()
-        liked_pump_check_ids = {pump_check_id for pump_check_id, in liked_rows}
-    return jsonify({
-        "posts": [
-            serialize_pump_check_card(
-                row,
-                current_user.id,
-                liked_pump_check_ids=liked_pump_check_ids,
-                image_visibility_preauthorized=True,
-            )
-            for row in posts
-        ],
-        "hasMore": len(rows) > per_page,
-        "nextPage": page + 1 if len(rows) > per_page else None,
-    })
+    from app.services.feed import get_feed_page
+    return jsonify(get_feed_page(current_user.id, cursor=cursor, limit=per_page))
 
 
 def _visible_pump_check_or_403(check_id):
@@ -224,24 +201,13 @@ def pump_check_comments(check_id):
     check, error = _visible_pump_check_or_403(check_id)
     if error:
         return error
-    rows = PumpCheckComment.query.options(
-        selectinload(PumpCheckComment.user),
-    ).filter_by(
-        pump_check_id=check.id,
-    ).order_by(
-        PumpCheckComment.created_at.asc(),
-    ).all()
-    return jsonify({"comments": [{
-        "id": row.id,
-        "username": row.user.username,
-        "userAvatar": row.user.avatar_src,
-        "body": row.body,
-        "createdAt": display_dt(row.created_at, "%d.%m.%Y %H:%M"),
-    } for row in rows]})
+    return _serialize_comment_page(
+        PumpCheckComment, PumpCheckComment.pump_check_id == check.id, check.user_id)
 
 
 @bp.route("/pump-check/<int:check_id>/comments", methods=["POST"])
 @require_auth
+@limiter.limit(COMMENT_WRITE_RATELIMIT, key_func=_user_or_ip_key)
 def pump_check_comment_create(check_id):
     check, error = _visible_pump_check_or_403(check_id)
     if error:
@@ -262,6 +228,327 @@ def pump_check_comment_create(check_id):
     db.session.commit()
     check = _reload_pump_check(check.id)
     return jsonify({"id": comment.id, "commentsCount": check.comments_count or 0})
+
+
+@bp.route("/pump-check/<int:check_id>/comments/<int:comment_id>", methods=["DELETE"])
+@require_auth
+def pump_check_comment_delete(check_id, comment_id):
+    check, error = _visible_pump_check_or_403(check_id)
+    if error:
+        return error
+    comment = PumpCheckComment.query.filter_by(id=comment_id, pump_check_id=check.id).first_or_404()
+    # Yazar VEYA gönderi sahibi silebilir.
+    if comment.user_id != current_user.id and check.user_id != current_user.id:
+        return jsonify({"error": t("route.forbidden")}), 403
+    db.session.delete(comment)
+    PumpCheck.query.filter_by(id=check.id).update({
+        PumpCheck.comments_count: db.case(
+            (PumpCheck.comments_count > 0, PumpCheck.comments_count - 1), else_=0),
+    }, synchronize_session=False)
+    db.session.commit()
+    fresh = _reload_pump_check(check.id)
+    return jsonify({"ok": True, "commentsCount": fresh.comments_count or 0})
+
+
+# ── Feed V2: repost / quote / silme (Sprint 5 PR2) ────────────────────────────
+_REPOST_REF_TYPES = {"pump_check"}
+
+
+@bp.route("/feed/repost", methods=["POST"])
+@require_auth
+@limiter.limit(FEED_WRITE_RATELIMIT, key_func=_user_or_ip_key)
+def feed_repost():
+    data = request.get_json(silent=True) or {}
+    ref_type = (data.get("ref_type") or "pump_check").strip()
+    mode = (data.get("mode") or "repost").strip()
+    if ref_type not in _REPOST_REF_TYPES or mode not in ("repost", "quote"):
+        return jsonify({"error": t("feed.invalid_request")}), 400
+    try:
+        ref_id = int(data.get("ref_id"))
+    except (TypeError, ValueError):
+        return jsonify({"error": t("feed.invalid_request")}), 400
+
+    original = db.session.get(PumpCheck, ref_id)
+    if original is None:
+        return jsonify({"error": t("pump.not_found")}), 404
+    # Yalnızca feed-görünür VE görülebilir içerik repost edilebilir — friends-only/
+    # private repost KİTLE GENİŞLETİR (audience widening), engelle.
+    if original.visibility != "feed" or not can_view_pump_check(current_user.id, original):
+        return jsonify({"error": t("route.not_friends")}), 403
+
+    body = None
+    if mode == "quote":
+        body = (data.get("body") or "").strip()
+        if not body:
+            return jsonify({"error": t("route.message_empty")}), 400
+        if len(body) > 500:
+            return jsonify({"error": t("route.message_too_long")}), 400
+
+    # Deterministik çift-repost'u önce ele al; commit guard yalnızca yarış içindir.
+    if FeedItem.query.filter_by(
+        user_id=current_user.id, item_type=mode, ref_type=ref_type, ref_id=ref_id,
+    ).first():
+        return jsonify({"error": t("feed.already_reposted")}), 400
+
+    # Sayaç güncellemesi add'DEN ÖNCE: aksi halde .update()'in autoflush'ı bekleyen
+    # (yarışta çift) FeedItem INSERT'ini erken flush edip IntegrityError'ı commit
+    # guard'ından ÖNCE fırlatır (pump_check_like ile aynı sıralama).
+    PumpCheck.query.filter_by(id=ref_id).update({
+        PumpCheck.reposts_count: PumpCheck.reposts_count + 1,
+    }, synchronize_session=False)
+    item = FeedItem(user_id=current_user.id, item_type=mode, ref_type=ref_type, ref_id=ref_id, body=body)
+    db.session.add(item)
+    # target_id item.id commit ÖNCESİ bilinmez; bildirim pump check'e payload ile
+    # bağlanır, frontend repost/quote bildirimini /feed'e yönlendirir.
+    notify(original.user_id, "quote_repost" if mode == "quote" else "repost",
+           actor_id=current_user.id, target_type="feed_item", target_id=None,
+           payload={"pumpCheckId": ref_id})
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": t("feed.already_reposted")}), 400
+    fresh = db.session.get(PumpCheck, ref_id)
+    return jsonify({"itemId": item.id, "repostsCount": fresh.reposts_count or 0})
+
+
+@bp.route("/feed/item/<int:item_id>", methods=["DELETE"])
+@require_auth
+def feed_item_delete(item_id):
+    item = FeedItem.query.filter_by(id=item_id, user_id=current_user.id).first_or_404()
+    ref_id = item.ref_id if item.ref_type == "pump_check" else None
+    is_repost = item.item_type == "repost"
+    FeedItemLike.query.filter_by(feed_item_id=item.id).delete(synchronize_session=False)
+    FeedItemComment.query.filter_by(feed_item_id=item.id).delete(synchronize_session=False)
+    if is_repost and ref_id is not None:
+        PumpCheck.query.filter_by(id=ref_id).update({
+            PumpCheck.reposts_count: db.case(
+                (PumpCheck.reposts_count > 0, PumpCheck.reposts_count - 1), else_=0,
+            ),
+        }, synchronize_session=False)
+    db.session.delete(item)
+    db.session.commit()
+    reposts = 0
+    if is_repost and ref_id is not None:
+        fresh = db.session.get(PumpCheck, ref_id)
+        reposts = fresh.reposts_count if fresh else 0
+    return jsonify({"ok": True, "repostsCount": reposts})
+
+
+# ── Feed V2: yorum sayfalama yardımcısı (pump_check + feed_item ortak) ─────────
+def _serialize_comment_page(model, scope_filter, post_owner_id):
+    """Newest-first keyset (before_id) yorum sayfası + canDelete (yazar veya
+    gönderi sahibi). Döndürür: jsonify({comments, hasMore, nextBeforeId})."""
+    try:
+        limit = min(max(int(request.args.get("limit", 20) or 20), 1), 50)
+    except (TypeError, ValueError):
+        limit = 20
+    try:
+        before_id = int(request.args.get("before_id", 0) or 0)
+    except (TypeError, ValueError):
+        before_id = 0
+    q = model.query.options(selectinload(model.user)).filter(scope_filter)
+    if before_id > 0:
+        q = q.filter(model.id < before_id)
+    rows = q.order_by(model.id.desc()).limit(limit + 1).all()
+    page = rows[:limit]
+    has_more = len(rows) > limit
+    return jsonify({
+        "comments": [{
+            "id": r.id,
+            "username": r.user.username,
+            "userAvatar": r.user.avatar_src,
+            "body": r.body,
+            "createdAt": display_dt(r.created_at, "%d.%m.%Y %H:%M"),
+            "canDelete": (r.user_id == current_user.id or post_owner_id == current_user.id),
+        } for r in page],
+        "hasMore": has_more,
+        "nextBeforeId": page[-1].id if has_more and page else None,
+    })
+
+
+# ── Feed V2: feed-item (quote) beğeni / yorum ─────────────────────────────────
+def _visible_feed_item_or_403(item_id):
+    item = db.session.get(FeedItem, item_id)
+    if not item:
+        return None, (jsonify({"error": t("feed.not_found")}), 404)
+    if item.user_id != current_user.id and item.user_id not in get_friend_ids(current_user.id):
+        return None, (jsonify({"error": t("route.not_friends")}), 403)
+    return item, None
+
+
+@bp.route("/feed/item/<int:item_id>/like", methods=["POST"])
+@require_auth
+def feed_item_like(item_id):
+    item, error = _visible_feed_item_or_403(item_id)
+    if error:
+        return error
+    existing = FeedItemLike.query.filter_by(feed_item_id=item.id, user_id=current_user.id).first()
+    if not existing:
+        FeedItem.query.filter_by(id=item.id).update({
+            FeedItem.likes_count: FeedItem.likes_count + 1}, synchronize_session=False)
+        db.session.add(FeedItemLike(feed_item_id=item.id, user_id=current_user.id))
+        notify(item.user_id, "feed_like", actor_id=current_user.id,
+               target_type="feed_item", target_id=item.id)
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+    fresh = db.session.get(FeedItem, item.id)
+    return jsonify({"liked": True, "likesCount": fresh.likes_count or 0})
+
+
+@bp.route("/feed/item/<int:item_id>/like", methods=["DELETE"])
+@require_auth
+def feed_item_unlike(item_id):
+    item, error = _visible_feed_item_or_403(item_id)
+    if error:
+        return error
+    deleted = FeedItemLike.query.filter_by(feed_item_id=item.id, user_id=current_user.id).delete(synchronize_session=False)
+    if deleted:
+        FeedItem.query.filter_by(id=item.id).update({
+            FeedItem.likes_count: db.case(
+                (FeedItem.likes_count > 0, FeedItem.likes_count - 1), else_=0),
+        }, synchronize_session=False)
+        db.session.commit()
+    fresh = db.session.get(FeedItem, item.id)
+    return jsonify({"liked": False, "likesCount": fresh.likes_count or 0})
+
+
+@bp.route("/feed/item/<int:item_id>/comments")
+@require_auth
+def feed_item_comments(item_id):
+    item, error = _visible_feed_item_or_403(item_id)
+    if error:
+        return error
+    return _serialize_comment_page(
+        FeedItemComment, FeedItemComment.feed_item_id == item.id, item.user_id)
+
+
+@bp.route("/feed/item/<int:item_id>/comments", methods=["POST"])
+@require_auth
+@limiter.limit(COMMENT_WRITE_RATELIMIT, key_func=_user_or_ip_key)
+def feed_item_comment_create(item_id):
+    item, error = _visible_feed_item_or_403(item_id)
+    if error:
+        return error
+    data = request.get_json(silent=True) or {}
+    body = (data.get("body") or "").strip()
+    if not body:
+        return jsonify({"error": t("route.message_empty")}), 400
+    if len(body) > 500:
+        return jsonify({"error": t("route.message_too_long")}), 400
+    comment = FeedItemComment(feed_item_id=item.id, user_id=current_user.id, body=body)
+    db.session.add(comment)
+    FeedItem.query.filter_by(id=item.id).update({
+        FeedItem.comments_count: FeedItem.comments_count + 1}, synchronize_session=False)
+    notify(item.user_id, "feed_comment", actor_id=current_user.id,
+           target_type="feed_item", target_id=item.id)
+    db.session.commit()
+    fresh = db.session.get(FeedItem, item.id)
+    return jsonify({"id": comment.id, "commentsCount": fresh.comments_count or 0})
+
+
+@bp.route("/feed/item/<int:item_id>/comments/<int:comment_id>", methods=["DELETE"])
+@require_auth
+def feed_item_comment_delete(item_id, comment_id):
+    item, error = _visible_feed_item_or_403(item_id)
+    if error:
+        return error
+    comment = FeedItemComment.query.filter_by(id=comment_id, feed_item_id=item.id).first_or_404()
+    if comment.user_id != current_user.id and item.user_id != current_user.id:
+        return jsonify({"error": t("route.forbidden")}), 403
+    db.session.delete(comment)
+    FeedItem.query.filter_by(id=item.id).update({
+        FeedItem.comments_count: db.case(
+            (FeedItem.comments_count > 0, FeedItem.comments_count - 1), else_=0),
+    }, synchronize_session=False)
+    db.session.commit()
+    fresh = db.session.get(FeedItem, item.id)
+    return jsonify({"ok": True, "commentsCount": fresh.comments_count or 0})
+
+
+# ── Feed V2: moderasyon (görüntüleyen-başı gizle / şikayet) ───────────────────
+_MOD_TARGET_TYPES = {"pump_check", "feed_item", "activity"}
+_REPORT_REASONS = {"spam", "inappropriate", "other"}
+
+
+def _target_owner_id(target_type, target_id):
+    if target_type == "pump_check":
+        row = db.session.get(PumpCheck, target_id)
+    elif target_type == "feed_item":
+        row = db.session.get(FeedItem, target_id)
+    elif target_type == "activity":
+        row = db.session.get(Activity, target_id)
+    else:
+        row = None
+    return row.user_id if row is not None else None
+
+
+def _parse_mod_target():
+    """(target_type, target_id, data) döndürür; geçersizse (None, None, data)."""
+    data = request.get_json(silent=True) or {}
+    ttype = (data.get("target_type") or "").strip()
+    try:
+        tid = int(data.get("target_id"))
+    except (TypeError, ValueError):
+        return None, None, data
+    if ttype not in _MOD_TARGET_TYPES:
+        return None, None, data
+    return ttype, tid, data
+
+
+@bp.route("/feed/hide", methods=["POST"])
+@require_auth
+def feed_hide():
+    ttype, tid, _ = _parse_mod_target()
+    if ttype is None:
+        return jsonify({"error": t("feed.invalid_request")}), 400
+    if _target_owner_id(ttype, tid) == current_user.id:
+        return jsonify({"error": t("feed.cannot_hide_own")}), 400
+    if not FeedHide.query.filter_by(user_id=current_user.id, target_type=ttype, target_id=tid).first():
+        db.session.add(FeedHide(user_id=current_user.id, target_type=ttype, target_id=tid))
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+    return jsonify({"ok": True})
+
+
+@bp.route("/feed/unhide", methods=["POST"])
+@require_auth
+def feed_unhide():
+    ttype, tid, _ = _parse_mod_target()
+    if ttype is None:
+        return jsonify({"error": t("feed.invalid_request")}), 400
+    FeedHide.query.filter_by(user_id=current_user.id, target_type=ttype, target_id=tid).delete(synchronize_session=False)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+@bp.route("/feed/report", methods=["POST"])
+@require_auth
+@limiter.limit(FEED_REPORT_RATELIMIT, key_func=_user_or_ip_key)
+def feed_report():
+    ttype, tid, data = _parse_mod_target()
+    if ttype is None:
+        return jsonify({"error": t("feed.invalid_request")}), 400
+    reason = (data.get("reason") or "").strip()
+    if reason not in _REPORT_REASONS:
+        return jsonify({"error": t("feed.invalid_request")}), 400
+    note = (data.get("note") or "").strip()[:300] or None
+    if FeedReport.query.filter_by(user_id=current_user.id, target_type=ttype, target_id=tid).first():
+        return jsonify({"error": t("feed.already_reported")}), 400
+    db.session.add(FeedReport(user_id=current_user.id, target_type=ttype, target_id=tid, reason=reason, note=note))
+    # Auto-hide: şikayet edilen içerik şikayetçiden gizlenir.
+    if not FeedHide.query.filter_by(user_id=current_user.id, target_type=ttype, target_id=tid).first():
+        db.session.add(FeedHide(user_id=current_user.id, target_type=ttype, target_id=tid))
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": t("feed.already_reported")}), 400
+    return jsonify({"ok": True})
 
 
 @bp.route("/friends/search")

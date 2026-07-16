@@ -360,6 +360,7 @@ class PumpCheck(db.Model):
     shared_friend_ids = db.Column(JSONB().with_variant(db.JSON(), "sqlite"), nullable=False, default=list)
     likes_count   = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     comments_count = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    reposts_count = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     valid         = db.Column(db.Boolean, default=True)
     fallback      = db.Column(db.Boolean, default=False)  # AI atlandıysa (fail-open)
     # Günlük idempotency anahtarı (Istanbul ISO 'YYYY-MM-DD'). Aşağıdaki UNIQUE
@@ -402,6 +403,84 @@ class PumpCheckComment(db.Model):
 
     pump_check = db.relationship("PumpCheck", backref=db.backref("comments", passive_deletes=True))
     user = db.relationship("User", backref=db.backref("pump_check_comments", passive_deletes=True))
+
+
+class FeedItem(db.Model):
+    # Feed V2 omurgası (Sprint 5 PR2): SADECE yeni içerik türleri (repost/quote).
+    # ref_id polimorfik tohum — FK YOK (ref_type ayırır); askıda kalan ref →
+    # "içerik yok" stub. PumpCheck/Activity feed'e sorgu-zamanında katılır.
+    id            = db.Column(db.Integer, primary_key=True)
+    user_id       = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_type     = db.Column(db.String(20), nullable=False, index=True)   # 'repost' | 'quote'
+    ref_type      = db.Column(db.String(20), nullable=False, default="pump_check", server_default="pump_check")
+    ref_id        = db.Column(db.Integer, nullable=False, index=True)       # FK YOK — polimorfik
+    body          = db.Column(db.String(500), nullable=True)                # quote metni
+    likes_count   = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    comments_count = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "item_type", "ref_type", "ref_id", name="uq_feed_item_user_ref"),
+    )
+
+    user = db.relationship("User", backref=db.backref("feed_items", passive_deletes=True))
+
+
+class FeedItemLike(db.Model):
+    id           = db.Column(db.Integer, primary_key=True)
+    feed_item_id = db.Column(db.Integer, db.ForeignKey("feed_item.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id      = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at   = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("feed_item_id", "user_id", name="uq_feed_item_like_user"),
+    )
+
+    feed_item = db.relationship("FeedItem", backref=db.backref("likes", passive_deletes=True))
+    user = db.relationship("User", backref=db.backref("feed_item_likes", passive_deletes=True))
+
+
+class FeedItemComment(db.Model):
+    id           = db.Column(db.Integer, primary_key=True)
+    feed_item_id = db.Column(db.Integer, db.ForeignKey("feed_item.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id      = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    body         = db.Column(db.String(500), nullable=False)
+    created_at   = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    feed_item = db.relationship("FeedItem", backref=db.backref("comments", passive_deletes=True))
+    user = db.relationship("User", backref=db.backref("feed_item_comments", passive_deletes=True))
+
+
+class FeedHide(db.Model):
+    # Görüntüleyen-başı gizleme (polimorfik): pump_check | feed_item | activity.
+    id          = db.Column(db.Integer, primary_key=True)
+    user_id     = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_type = db.Column(db.String(20), nullable=False)
+    target_id   = db.Column(db.Integer, nullable=False)
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "target_type", "target_id", name="uq_feed_hide_target"),
+    )
+
+    user = db.relationship("User", backref=db.backref("feed_hides", passive_deletes=True))
+
+
+class FeedReport(db.Model):
+    id          = db.Column(db.Integer, primary_key=True)
+    user_id     = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)   # şikayetçi
+    target_type = db.Column(db.String(20), nullable=False)
+    target_id   = db.Column(db.Integer, nullable=False)
+    reason      = db.Column(db.String(30), nullable=False)   # 'spam' | 'inappropriate' | 'other'
+    note        = db.Column(db.String(300), nullable=True)
+    status      = db.Column(db.String(15), nullable=False, default="open", server_default="open")
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "target_type", "target_id", name="uq_feed_report_target"),
+    )
+
+    user = db.relationship("User", backref=db.backref("feed_reports", passive_deletes=True))
 
 
 class Friendship(db.Model):
