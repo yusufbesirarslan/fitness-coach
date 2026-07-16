@@ -54,3 +54,9 @@ def test_leaderboard_route(client, auth_user, app):
 
 def test_challenges_data_requires_auth(raw_client):
     assert raw_client.get("/challenges/data").status_code in (302, 401)
+
+
+def test_challenges_page_renders(client, auth_user):
+    r = client.get("/challenges")
+    assert r.status_code == 200
+    assert b"challenges-root" in r.data

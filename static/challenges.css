@@ -1,0 +1,227 @@
+/* Challenges page (Sprint 5 PR3). Kanonik tokenlar (theme.css); JS-enjekte
+   <style> YOK (CSP). Progress bar genişliği inline style attr ile (izinli). */
+
+.ch-countdown {
+    text-align: center;
+    font-family: var(--font-display);
+    letter-spacing: 1px;
+    color: var(--color-primary);
+    background: var(--color-primary-soft);
+    border: 1px solid rgba(var(--color-primary-rgb), 0.25);
+    border-radius: var(--r-md, 14px);
+    padding: 10px 16px;
+    margin-bottom: 20px;
+}
+
+.ch-section-title {
+    font-family: var(--font-display);
+    font-size: 15px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-2);
+    margin: 22px 0 12px;
+}
+
+/* ── Badges strip ── */
+.ch-badge-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+.ch-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 8px 14px;
+}
+.ch-badge-icon { font-size: 20px; line-height: 1; }
+.ch-badge-name { font-size: 13px; color: var(--text); }
+
+/* ── Card grid ── */
+.ch-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 16px;
+}
+.ch-card {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.ch-card.is-done { border-color: rgba(var(--color-success-rgb), 0.45); }
+.ch-card-head { display: flex; align-items: center; gap: 8px; }
+.ch-card-badge { font-size: 20px; line-height: 1; }
+.ch-card-title {
+    flex: 1;
+    font-weight: 600;
+    font-size: 16px;
+    color: var(--text);
+}
+.ch-card-xp {
+    font-family: var(--font-display);
+    font-size: 13px;
+    color: var(--color-primary);
+    white-space: nowrap;
+}
+.ch-card-desc { font-size: 13px; color: var(--text-3); line-height: 1.4; }
+
+/* ── Progress bar (genişlik inline style attr ile) ── */
+.ch-bar-track {
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(var(--white-rgb), 0.08);
+    overflow: hidden;
+}
+.ch-bar {
+    height: 100%;
+    border-radius: 999px;
+    background: var(--color-primary);
+    transition: width .4s ease;
+}
+.ch-bar.done { background: var(--green, #34d399); }
+.ch-progress-label {
+    font-size: 12px;
+    color: var(--text-3);
+    margin-top: 6px;
+}
+
+/* ── Card footer ── */
+.ch-card-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: auto;
+}
+.ch-status { font-size: 13px; color: var(--text-2); }
+.ch-status.done { color: var(--green, #34d399); font-weight: 600; }
+.ch-status.joined { color: var(--color-primary); }
+.ch-join {
+    background: var(--color-primary);
+    color: var(--color-on-primary, #fff);
+    border: none;
+    border-radius: 10px;
+    padding: 8px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.ch-join:disabled { opacity: .55; cursor: default; }
+.ch-lb-btn {
+    background: transparent;
+    color: var(--text-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 14px;
+    font-size: 13px;
+    cursor: pointer;
+}
+.ch-lb-btn:hover { color: var(--text); border-color: var(--color-primary); }
+
+/* ── Skeleton / empty ── */
+.ch-skeleton {
+    height: 150px;
+    border-radius: 16px;
+    background: linear-gradient(90deg, var(--surface-2), rgba(var(--white-rgb), 0.06), var(--surface-2));
+    background-size: 200% 100%;
+    animation: ch-shimmer 1.3s infinite;
+    margin-bottom: 16px;
+}
+@keyframes ch-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* ── Leaderboard sheet ── */
+.ch-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+}
+.ch-sheet[hidden] { display: none; }
+.ch-sheet-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(var(--black-rgb), 0.6);
+    border: none;
+}
+.ch-sheet-panel {
+    position: relative;
+    width: 100%;
+    max-width: 520px;
+    max-height: 80vh;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 20px 20px 0 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+@media (min-width: 640px) {
+    .ch-sheet { align-items: center; }
+    .ch-sheet-panel { border-radius: 20px; }
+}
+.ch-sheet-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 18px;
+    border-bottom: 1px solid var(--border);
+}
+.ch-sheet-title { font-family: var(--font-display); letter-spacing: 1px; color: var(--text); }
+.ch-sheet-close {
+    background: none;
+    border: none;
+    color: var(--text-2);
+    font-size: 24px;
+    line-height: 1;
+    cursor: pointer;
+}
+.ch-lb-tabs { display: flex; gap: 8px; padding: 12px 18px; }
+.ch-lb-tab {
+    flex: 1;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px;
+    color: var(--text-2);
+    font-size: 13px;
+    cursor: pointer;
+}
+.ch-lb-tab.active {
+    background: var(--color-primary-soft);
+    border-color: var(--color-primary);
+    color: var(--color-primary);
+}
+.ch-lb-list { overflow-y: auto; padding: 0 18px 18px; }
+.ch-lb-state { text-align: center; color: var(--text-3); padding: 24px 0; font-size: 14px; }
+.ch-lb-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+}
+.ch-lb-row.me { background: var(--color-primary-soft); border-radius: 10px; padding: 10px; }
+.ch-lb-rank { width: 34px; font-family: var(--font-display); color: var(--text-2); }
+.ch-lb-avatar { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; }
+.ch-lb-avatar-fb {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--blue-dim);
+    color: var(--text);
+    font-size: 13px;
+}
+.ch-lb-name { flex: 1; color: var(--text); font-size: 14px; }
+.ch-lb-name em { color: var(--color-primary); font-style: normal; font-size: 12px; }
+.ch-lb-prog { color: var(--text-2); font-size: 14px; font-family: var(--font-display); }
+.ch-lb-done { color: var(--green, #34d399); }
+.ch-lb-sticky { margin-top: 8px; }
