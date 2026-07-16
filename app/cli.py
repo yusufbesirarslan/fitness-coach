@@ -87,7 +87,8 @@ def _user_child_models():
         FeedHide, FeedItem, FeedItemComment, FeedItemLike, FeedReport,
         MealLog, Notification, NutritionPlan, PendingAction, PumpCheck,
         PumpCheckComment, PumpCheckLike, Supplement, TrainingPlan,
-        UserQuestProgress, UserSession, UserWearableConnection, WaterLog,
+        UserBadge, UserChallengeProgress, UserQuestProgress, UserSession,
+        UserWearableConnection, WaterLog,
         WearableActivityLog, WearableSleepLog, WearableWorkoutLog,
         WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog,
     )
@@ -99,6 +100,7 @@ def _user_child_models():
         UserWearableConnection, WearableSleepLog, WearableActivityLog,
         WearableWorkoutLog, FeedItemLike, FeedItemComment, FeedItem,
         FeedHide, FeedReport, Notification,
+        UserChallengeProgress, UserBadge,
     )
 
 

@@ -802,3 +802,59 @@ class Notification(db.Model):
     user  = db.relationship("User", foreign_keys=[user_id],
                             backref=db.backref("notifications", passive_deletes=True))
     actor = db.relationship("User", foreign_keys=[actor_id])
+
+
+class Challenge(db.Model):
+    # Meydan okuma katalogu (Sprint 5 PR3). Statik seed (DailyQuest deseni).
+    # code/category/metric/badge_code/challenge_type/period_type kanonik İngilizce
+    # slug; title/description kanonik TR (görünen metin t_or ile çevrilir).
+    # Genişletme tohumu: challenge_type ('global'|'featured'; ileride duel/team/
+    # sponsored), period_type ('weekly'; ileride daily/seasonal).
+    id            = db.Column(db.Integer, primary_key=True)
+    code          = db.Column(db.String(50), nullable=False, unique=True)
+    title         = db.Column(db.String(120), nullable=False)
+    description   = db.Column(db.Text)
+    category      = db.Column(db.String(30))
+    metric        = db.Column(db.String(30), nullable=False, index=True)   # event_type
+    target_value  = db.Column(db.Integer, nullable=False, default=1)
+    xp_reward     = db.Column(db.Integer, nullable=False, default=100)
+    badge_code    = db.Column(db.String(50), nullable=True)
+    challenge_type = db.Column(db.String(20), nullable=False, default="global", server_default="global")
+    period_type   = db.Column(db.String(20), nullable=False, default="weekly", server_default="weekly")
+    is_active     = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class UserChallengeProgress(db.Model):
+    id           = db.Column(db.Integer, primary_key=True)
+    user_id      = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    challenge_id = db.Column(db.Integer, db.ForeignKey("challenge.id", ondelete="CASCADE"), nullable=False, index=True)
+    period_key   = db.Column(db.String(10), nullable=False, index=True)   # 'YYYY-Www'
+    progress     = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    opted_in     = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
+    completed_at = db.Column(db.DateTime, nullable=True)
+    created_at   = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "challenge_id", "period_key", name="uq_user_challenge_period"),
+        db.Index("ix_ucp_challenge_period", "challenge_id", "period_key"),
+    )
+
+    user      = db.relationship("User", backref=db.backref("challenge_progress", passive_deletes=True))
+    challenge = db.relationship("Challenge", backref=db.backref("progress_entries", passive_deletes=True))
+
+
+class UserBadge(db.Model):
+    # Tek-seferlik rozet (UNIQUE user_id+badge_code); tekrar tamamlamada XP verilir,
+    # rozet verilmez. source = izleme kaynağı, ör. "challenge:weekly_pump:2026-W29".
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    badge_code = db.Column(db.String(50), nullable=False)
+    source     = db.Column(db.String(80), nullable=True)
+    earned_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "badge_code", name="uq_user_badge"),
+    )
+
+    user = db.relationship("User", backref=db.backref("badges", passive_deletes=True))
