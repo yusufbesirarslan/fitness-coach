@@ -76,6 +76,7 @@ def serialize_pump_check_card(
     include_viewer_state=True,
     liked_pump_check_ids=None,
     image_visibility_preauthorized=False,
+    reposted_ref_ids=None,
 ):
     user = check.user
     liked = False
@@ -107,5 +108,7 @@ def serialize_pump_check_card(
         "sharedFriendIds": check.shared_friend_ids or [],
         "likesCount": check.likes_count or 0,
         "commentsCount": check.comments_count or 0,
+        "repostsCount": getattr(check, "reposts_count", 0) or 0,
         "likedByMe": liked,
+        "repostedByMe": (reposted_ref_ids is not None and check.id in reposted_ref_ids),
     }
