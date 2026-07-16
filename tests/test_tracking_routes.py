@@ -10,7 +10,7 @@ import pytest
 
 from app.blueprints import tracking as tracking_bp
 from app.extensions import db
-from app.models import DailyActivity, UserSession, WeeklyCheckIn
+from app.models import DailyActivity, User, UserSession, WeeklyCheckIn, WeeklyLog
 from app.timeutil import day_key
 
 
@@ -68,6 +68,57 @@ def test_log_rejects_non_scalar_weight(client, auth_user):
     assert client.post("/log", json={"weight": [80]}).status_code == 400
     assert client.post("/log", json={"weight": {"v": 80}}).status_code == 400
 
+@pytest.mark.parametrize("path", ["/log", "/checkin", "/update-weight"])
+@pytest.mark.parametrize("weight", [-5, 19.9, 500.1, 5000, "NaN", "Infinity"])
+def test_weight_routes_reject_out_of_range_values(
+        client, auth_user, fake_checkin_feedback, path, weight):
+    profile_weight = auth_user.weight
+    log_count = WeeklyLog.query.filter_by(user_id=auth_user.id).count()
+    checkin_count = WeeklyCheckIn.query.filter_by(user_id=auth_user.id).count()
+
+    response = client.post(path, json={"weight": weight})
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "Kilo 20 ile 500 kg aras\u0131nda olmal\u0131d\u0131r"
+    }
+    db.session.expire_all()
+    assert WeeklyLog.query.filter_by(user_id=auth_user.id).count() == log_count
+    assert WeeklyCheckIn.query.filter_by(user_id=auth_user.id).count() == checkin_count
+    assert db.session.get(User, auth_user.id).weight == profile_weight
+
+
+@pytest.mark.parametrize("path", ["/log", "/checkin", "/update-weight"])
+@pytest.mark.parametrize("weight", [20, 500])
+def test_weight_routes_accept_inclusive_boundaries(
+        client, auth_user, fake_checkin_feedback, path, weight):
+    assert client.post(path, json={"weight": weight}).status_code == 200
+
+
+def test_weight_range_error_uses_authenticated_user_language(
+        client, auth_user):
+    auth_user.language = "en"
+    db.session.commit()
+
+    response = client.post("/log", json={"weight": 19.9})
+
+    assert response.status_code == 400
+    assert response.get_json() == {
+        "error": "Weight must be between 20 and 500 kg"
+    }
+
+
+@pytest.mark.parametrize("path", ["/log", "/checkin", "/update-weight"])
+def test_weight_routes_distinguish_missing_and_nonnumeric_values(
+        client, auth_user, path):
+    missing = client.post(path, json={})
+    nonnumeric = client.post(path, json={"weight": "abc"})
+
+    assert missing.status_code == nonnumeric.status_code == 400
+    assert missing.get_json() == {"error": "Kilo zorunludur"}
+    assert nonnumeric.get_json() == {
+        "error": "Kilo say\u0131sal olmal\u0131d\u0131r"
+    }
 
 def test_progress_returns_logs_in_order(client, auth_user):
     client.post("/log", json={"weight": 80, "note": "ilk"})
