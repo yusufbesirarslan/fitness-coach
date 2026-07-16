@@ -454,6 +454,32 @@ def test_meal_log_non_numeric_ai_values_zeroed(client, auth_user, monkeypatch):
     assert body["nutrients"]["kalori"] == 0
     assert body["nutrients"]["protein"] == 30.0
 
+def test_ai_meal_total_sanitized_before_persistence(client, auth_user, monkeypatch):
+    monkeypatch.setattr(
+        nutrition_meallog,
+        "_openai_chat",
+        lambda **kw: '{"kalori": 20000, "protein": -2, "karb": 2000, "yag": 500}',
+    )
+
+    response = client.post(
+        "/meal-log", json={"ogun": "Ogle", "yemekler": "tavuk"})
+
+    assert response.status_code == 200
+    expected = {
+        "kalori": 10000.0,
+        "protein": 0,
+        "karb": 1000.0,
+        "yag": 250.0,
+    }
+    assert response.get_json()["nutrients"] == expected
+    entry = MealLog.query.filter_by(user_id=auth_user.id).one()
+    assert {
+        "kalori": entry.kalori,
+        "protein": entry.protein,
+        "karb": entry.karb,
+        "yag": entry.yag,
+    } == expected
+
 
 # ---------------------------------------------------------------------------
 # Bugün / geçmiş / değerlendirme

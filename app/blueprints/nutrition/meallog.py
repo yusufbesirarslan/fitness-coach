@@ -17,6 +17,7 @@ from app.i18n import current_locale, t
 from app.models import MealLog, UserSession
 from app.prompts import nutrition as nutrition_prompts
 from app.services.ai import _openai_chat
+from app.services.nutrition_pipeline import sanitize_meal_total_macros
 from app.services.gamification import complete_quest_for_user
 from app.services.validators import _meal_photo_url, _to_float, validate_meal_photo
 from app.timeutil import day_key, display_ddmm
@@ -134,15 +135,21 @@ def log_meal():
             raw = raw[start:end]
 
         nutrients = json.loads(raw)
-        for key in ("kalori", "protein", "karb", "yag"):
-            try:
-                nutrients[key] = round(float(nutrients.get(key, 0)), 1)
-            except (TypeError, ValueError):
-                nutrients[key] = 0
+        kalori, protein, karb, yag = sanitize_meal_total_macros(
+            nutrients.get("kalori"),
+            nutrients.get("protein"),
+            nutrients.get("karb"),
+            nutrients.get("yag"),
+        )
+        nutrients = {
+            "kalori": kalori,
+            "protein": protein,
+            "karb": karb,
+            "yag": yag,
+        }
         parsed_ok = True
     except Exception as e:
-        current_app.logger.info(f"MEAL LOG ERROR: {e}")
-        current_app.logger.info(f"RAW: {raw}")
+        current_app.logger.info("MEAL LOG ERROR: %s", type(e).__name__)
 
     # AI çağrısı/JSON parse başarısızsa nutrients tümü 0 kalır; bunu kanonik
     # MealLog defterine YAZMA — kalıcı sıfır-makro satırı günlük toplamları,

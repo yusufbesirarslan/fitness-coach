@@ -17,6 +17,7 @@ projenin geri kalaniyla ayni: ``{"calories", "protein", "carbs", "fat"}``
 
 from __future__ import annotations
 
+import math
 import re
 
 # ---------------------------------------------------------------------------
@@ -33,6 +34,10 @@ MAX_KCAL_PER_100G = 900.0
 # buyuk karisik tabaklar (~1500-2000 kcal) gecsin, sadece imkansizlar elensin.
 MAX_SERVING_KCAL = 3000.0
 MAX_SERVING_MACRO_G = 300.0
+MAX_MEAL_TOTAL_KCAL = 10000.0
+MAX_MEAL_TOTAL_MACRO_G = 2000.0
+MAX_MEAL_TOTAL_FAT_G = 1000.0
+
 
 # Tek bir insan porsiyonundaki YAĞ icin daha siki, ayri bir tavan. Mesru cok yagli
 # tabaklar (buyuk antipasti/karisik izgara ~100-120 g yag) gecsin ama olcekleme
@@ -145,6 +150,36 @@ def _num(value, default=0.0):
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _finite_nonnegative(value):
+    value = _num(value)
+    return value if math.isfinite(value) and value > 0 else 0
+
+
+def sanitize_meal_total_macros(calories, protein, carbs, fat):
+    values = [
+        _finite_nonnegative(value)
+        for value in (calories, protein, carbs, fat)
+    ]
+    calories, protein, carbs, fat = values
+    ratios = [1.0]
+    if calories:
+        ratios.append(MAX_MEAL_TOTAL_KCAL / calories)
+    if protein:
+        ratios.append(MAX_MEAL_TOTAL_MACRO_G / protein)
+    if carbs:
+        ratios.append(MAX_MEAL_TOTAL_MACRO_G / carbs)
+    if fat:
+        ratios.append(MAX_MEAL_TOTAL_FAT_G / fat)
+    scale = min(1.0, *ratios)
+    calories, protein, carbs, fat = [
+        round(value * scale, 1) for value in values
+    ]
+    supported = 4.0 * protein + 4.0 * carbs + 9.0 * fat
+    if calories and supported < calories * (1.0 - ATWATER_HARD_TOLERANCE):
+        calories = round(supported, 1)
+    return calories, protein, carbs, fat
 
 
 def estimate_serving_grams(description):
