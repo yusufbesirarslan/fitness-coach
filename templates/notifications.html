@@ -64,7 +64,8 @@ var ICONS = {
     repost: '🔁',
     quote_repost: '🔁',
     feed_like: '❤️',
-    feed_comment: '💬'
+    feed_comment: '💬',
+    challenge_complete: '🏆'
 };
 function iconFor(type) { return ICONS[type] || '🔔'; }
 
@@ -72,6 +73,7 @@ function iconFor(type) { return ICONS[type] || '🔔'; }
 function targetUrl(n) {
     if (n.targetType === 'pump_check' || n.targetType === 'feed_item') return '/feed';
     if (n.targetType === 'friendship') return '/friends';
+    if (n.targetType === 'challenge') return '/challenges';
     return '#';
 }
 
