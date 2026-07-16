@@ -593,9 +593,10 @@ def test_feed_template_renders_fallback_media_region_without_image_url():
     root = Path(__file__).resolve().parents[1]
     html = (root / "templates" / "feed.html").read_text(encoding="utf-8")
 
+    # Feed V2: cardMedia(post) → media(card); imageUrl yoksa hâlâ fallback bölge.
     assert "feed-img-fallback" in html
-    assert "function cardMedia(post)" in html
-    assert "if(post.imageUrl)" in html
+    assert "function media(card)" in html
+    assert "card.imageUrl" in html
     assert "feed-img feed-img-fallback" in html
 
 
