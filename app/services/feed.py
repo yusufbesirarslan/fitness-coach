@@ -20,8 +20,8 @@ from app.timeutil import display_dt
 log = logging.getLogger(__name__)
 
 # Feed'de gosterilen kilometre tasi activity turleri (allowlist; gurultu haric).
-# PR3'te 'challenge_completed' eklenecek.
-MILESTONE_ACTIVITY_TYPES = ("level_up", "streak_milestone", "new_friend")
+MILESTONE_ACTIVITY_TYPES = ("level_up", "streak_milestone", "new_friend",
+                            "challenge_completed")
 
 # Esit created_at'te kaynak-arasi deterministik kopmak icin sabit sira (DESC).
 SOURCE_RANK = {"pump_check": 3, "feed_item": 2, "activity": 1}
@@ -32,6 +32,7 @@ MILESTONE_ICONS = {
     "level_up": "\U0001f31f",
     "streak_milestone": "\U0001f525",
     "new_friend": "\U0001f91d",
+    "challenge_completed": "\U0001f3c6",
 }
 
 

@@ -159,6 +159,7 @@ ACTIVITY_ICONS = {
     "new_friend": "\U0001f91d",
     "level_up": "\U0001f31f",
     "quest_completed": "\U0001f3af",
+    "challenge_completed": "\U0001f3c6",
 }
 
 

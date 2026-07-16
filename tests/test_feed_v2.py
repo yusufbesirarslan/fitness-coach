@@ -40,6 +40,16 @@ def _dt(minute):
     return datetime(2026, 7, 16, 10, minute, 0)
 
 
+def test_challenge_completed_milestone_in_feed(app, make_user):
+    # Sprint 5 PR3: challenge_completed feed kilometre taşı allowlist'ine eklendi.
+    user = make_user("champ")
+    _milestone(user.id, _dt(5), activity_type="challenge_completed",
+               content="'Haftalık Antrenman' meydan okumasını tamamladı!")
+    kinds = [(i["kind"], i.get("activityType"))
+             for i in feed_svc.get_feed_page(user.id)["items"]]
+    assert ("milestone", "challenge_completed") in kinds
+
+
 def test_feed_item_and_reposts_count_persist(app, make_user):
     user = make_user("owner")
     pc = _feed_check(user.id)
