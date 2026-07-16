@@ -15,11 +15,12 @@ from app.config import (
 )
 from app.extensions import _user_or_ip_key, db, limiter
 from app.i18n import t
-from app.models import Friendship, MealLog, Message, PumpCheck, PumpCheckComment, PumpCheckLike, User
+from app.models import Friendship, MealLog, Message, Notification, PumpCheck, PumpCheckComment, PumpCheckLike, User
 from app.services.ai_nutrition import _estimate_macros_llm, _estimate_serving_weights_llm, _parse_suggestion_items, _turkish_ablative_suffix
 from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecret
 from app.services.foodcache import _cache_macros, _get_cached_macros
 from app.services.gamification import award_xp, complete_quest_for_user, get_level, level_title, log_activity
+from app.services.notifications import notify
 from app.services.pump_checks import can_view_pump_check, get_friend_ids, serialize_pump_check_card
 from app.timeutil import day_key, display_dt
 
@@ -34,15 +35,9 @@ bp = Blueprint("social", __name__)
 # bekleme sonrası hâlâ mümkün.
 _REJECTED_REQUEST_COOLDOWN = timedelta(hours=24)
 
-
-def are_friends(user_a_id, user_b_id):
-    return Friendship.query.filter(
-        Friendship.status == "accepted",
-        db.or_(
-            db.and_(Friendship.sender_id == user_a_id, Friendship.receiver_id == user_b_id),
-            db.and_(Friendship.sender_id == user_b_id, Friendship.receiver_id == user_a_id),
-        )
-    ).first() is not None
+# are_friends artık services/friends.py'de yaşıyor (Sprint 5 PR1 konsolidasyonu);
+# modül-seviyesi ad korunur ki mevcut import/monkeypatch yüzeyi değişmesin.
+from app.services.friends import are_friends  # noqa: E402,F401
 
 
 @bp.route("/friends")
@@ -77,7 +72,9 @@ def friends_list():
                  "profile_picture": p.sender.avatar_src} for p in pending_in]
 
     pending_out = Friendship.query.filter_by(sender_id=current_user.id, status="pending").all()
-    outgoing = [{"request_id": p.id, "username": p.receiver.username} for p in pending_out]
+    outgoing = [{"request_id": p.id, "username": p.receiver.username,
+                 "full_name": p.receiver.full_name or p.receiver.username,
+                 "profile_picture": p.receiver.avatar_src} for p in pending_out]
 
     return jsonify({"friends": friends, "incoming": incoming, "outgoing": outgoing})
 
@@ -191,6 +188,9 @@ def pump_check_like(check_id):
             PumpCheck.likes_count: PumpCheck.likes_count + 1,
         }, synchronize_session=False)
         db.session.add(PumpCheckLike(pump_check_id=check.id, user_id=current_user.id))
+        # Beğeniyle AYNI transaction'da: rollback olursa bildirim de gitmez.
+        notify(check.user_id, "pump_check_like", actor_id=current_user.id,
+               target_type="pump_check", target_id=check.id)
         try:
             db.session.commit()
         except IntegrityError:
@@ -257,6 +257,8 @@ def pump_check_comment_create(check_id):
     PumpCheck.query.filter_by(id=check.id).update({
         PumpCheck.comments_count: PumpCheck.comments_count + 1,
     }, synchronize_session=False)
+    notify(check.user_id, "pump_check_comment", actor_id=current_user.id,
+           target_type="pump_check", target_id=check.id)
     db.session.commit()
     check = _reload_pump_check(check.id)
     return jsonify({"id": comment.id, "commentsCount": check.comments_count or 0})
@@ -325,18 +327,25 @@ def friend_request(username):
             existing.sender_id = current_user.id
             existing.receiver_id = target.id
             existing.created_at = datetime.utcnow()
+            notify(target.id, "friend_request", actor_id=current_user.id,
+                   target_type="friendship", target_id=existing.id)
             db.session.commit()
             return jsonify({"message": t("route.request_sent", username=username)})
 
     friendship = Friendship(sender_id=current_user.id, receiver_id=target.id)
     db.session.add(friendship)
     try:
-        db.session.commit()
+        # flush: uq_friendship yarışını erken yakala + friendship.id'yi ata
+        # (bildirim target_id'si için gerekli).
+        db.session.flush()
     except IntegrityError:
         # Yarış: iki eşzamanlı istek de "existing is None" gördü; uq_friendship
         # ikinciyi reddetti. 500 yerine "zaten bekleyen istek" davranışına düş.
         db.session.rollback()
         return jsonify({"error": t("route.request_pending")}), 400
+    notify(target.id, "friend_request", actor_id=current_user.id,
+           target_type="friendship", target_id=friendship.id)
+    db.session.commit()
     return jsonify({"message": t("route.request_sent", username=username)})
 
 
@@ -361,6 +370,8 @@ def friend_accept(request_id):
     award_xp(fr.receiver_id, 50)
     log_activity(fr.sender_id, "new_friend", f"{fr.receiver.username} ile arkadaş oldu")
     log_activity(fr.receiver_id, "new_friend", f"{fr.sender.username} ile arkadaş oldu")
+    notify(fr.sender_id, "friend_accept", actor_id=fr.receiver_id,
+           target_type="friendship", target_id=fr.id)
     db.session.commit()
     return jsonify({"message": t("route.now_friends", username=fr.sender.username), "points_awarded": 50})
 
@@ -377,6 +388,57 @@ def friend_reject(request_id):
     fr.created_at = datetime.utcnow()
     db.session.commit()
     return jsonify({"message": t("route.request_declined")})
+
+
+@bp.route("/friend/<username>", methods=["DELETE"])
+@require_auth
+@limiter.limit(FRIEND_REQUEST_RATELIMIT, key_func=_user_or_ip_key)
+def friend_remove(username):
+    """Arkadaşlıktan çıkar (Sprint 5 PR1). Kabul edilmiş satırı iki yönden siler.
+
+    Yan etkiler otomatiktir: get_friend_ids artık bu kişiyi döndürmez → feed
+    görünürlüğü ve chat erişimi anında düşer (bayat-yetki koruması S2 ile aynı
+    mantık). Sonrasında yeniden istek atmak serbesttir (satır silindiği için
+    rejected-cooldown uygulanmaz — bilinçli).
+    """
+    target = User.query.filter_by(username=username).first()
+    if not target:
+        return jsonify({"error": t("route.user_not_found")}), 404
+    deleted = Friendship.query.filter(
+        Friendship.status == "accepted",
+        db.or_(
+            db.and_(Friendship.sender_id == current_user.id, Friendship.receiver_id == target.id),
+            db.and_(Friendship.sender_id == target.id, Friendship.receiver_id == current_user.id),
+        )
+    ).delete(synchronize_session=False)
+    if not deleted:
+        db.session.rollback()
+        return jsonify({"error": t("route.not_friends")}), 404
+    db.session.commit()
+    return jsonify({"message": t("route.unfriended", username=username)})
+
+
+@bp.route("/friend/request/<int:request_id>", methods=["DELETE"])
+@require_auth
+@limiter.limit(FRIEND_REQUEST_RATELIMIT, key_func=_user_or_ip_key)
+def friend_request_cancel(request_id):
+    """Giden bekleyen isteği iptal et (Sprint 5 PR1) — yalnızca GÖNDEREN,
+    yalnızca 'pending' durumunda. Satır silinir; hedef istediği zaman yeni
+    istek alabilir (cooldown yok — reddetme değil, geri çekmedir)."""
+    deleted = Friendship.query.filter_by(
+        id=request_id, sender_id=current_user.id, status="pending",
+    ).delete(synchronize_session=False)
+    if not deleted:
+        db.session.rollback()
+        return jsonify({"error": t("route.request_not_found")}), 404
+    # Alıcıdaki okunmamış "friend_request" bildirimi artık hayalet olur
+    # (istek yok) — aynı transaction'da süpür.
+    Notification.query.filter_by(
+        ntype="friend_request", target_type="friendship",
+        target_id=request_id, is_read=False,
+    ).delete(synchronize_session=False)
+    db.session.commit()
+    return jsonify({"message": t("route.request_cancelled")})
 
 
 @bp.route("/chat/<username>")

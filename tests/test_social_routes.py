@@ -12,7 +12,10 @@ import pytest
 
 from app.blueprints import social as social_bp
 from app.extensions import db
-from app.models import Friendship, MealLog, Message, User
+from app.models import (
+    Friendship, MealLog, Message, Notification, PumpCheck, User,
+)
+from app.services.pump_checks import can_view_pump_check
 
 
 @pytest.fixture
@@ -388,3 +391,142 @@ def test_accept_meal_suggestion_all_zero_macros_skips_meallog(client, auth_user,
 
 def test_friends_page_renders(client, auth_user):
     assert client.get("/friends").status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Bildirim tetikleyicileri (Sprint 5 PR1)
+# ---------------------------------------------------------------------------
+
+def _feed_check(owner_id):
+    """Sahibinin arkadaşlarına görünür bir pump check ekle."""
+    check = PumpCheck(user_id=owner_id, visibility="feed")
+    db.session.add(check)
+    db.session.commit()
+    return check.id
+
+
+def test_like_creates_notification_for_owner(client, auth_user, make_user, login):
+    bob = make_user("bob")
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=bob.id,
+                              status="accepted"))
+    owner_id = auth_user.id
+    check_id = _feed_check(owner_id)
+
+    login("bob")                                      # oturumu bob'a geçir
+    assert client.post(f"/pump-check/{check_id}/like").status_code == 200
+
+    n = Notification.query.filter_by(user_id=owner_id, ntype="pump_check_like").one()
+    assert n.actor_id == bob.id
+    assert n.target_type == "pump_check" and n.target_id == check_id
+
+
+def test_self_like_creates_no_notification(client, auth_user):
+    check_id = _feed_check(auth_user.id)
+    assert client.post(f"/pump-check/{check_id}/like").status_code == 200
+    assert Notification.query.filter_by(ntype="pump_check_like").count() == 0
+
+
+def test_comment_creates_notification_for_owner(client, auth_user, make_user, login):
+    bob = make_user("bob")
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=bob.id,
+                              status="accepted"))
+    owner_id = auth_user.id
+    check_id = _feed_check(owner_id)
+
+    login("bob")
+    assert client.post(f"/pump-check/{check_id}/comments",
+                       json={"body": "harika"}).status_code == 200
+
+    n = Notification.query.filter_by(user_id=owner_id, ntype="pump_check_comment").one()
+    assert n.actor_id == bob.id
+
+
+def test_friend_request_creates_notification(client, auth_user, make_user):
+    target = make_user("hedef")
+    assert client.post("/friend/request/hedef").status_code == 200
+    fr = Friendship.query.one()
+    n = Notification.query.filter_by(user_id=target.id, ntype="friend_request").one()
+    assert n.actor_id == auth_user.id and n.target_id == fr.id
+
+
+def test_friend_request_reuse_after_rejection_notifies(client, auth_user, make_user):
+    other = make_user("once_red")
+    db.session.add(Friendship(sender_id=other.id, receiver_id=auth_user.id,
+                              status="rejected",
+                              created_at=datetime.utcnow() - timedelta(hours=25)))
+    db.session.commit()
+
+    assert client.post("/friend/request/once_red").status_code == 200
+    n = Notification.query.filter_by(user_id=other.id, ntype="friend_request").one()
+    assert n.actor_id == auth_user.id
+
+
+def test_friend_accept_creates_notification_for_sender(client, auth_user, make_user):
+    sender = make_user("istekci")
+    fr = Friendship(sender_id=sender.id, receiver_id=auth_user.id, status="pending")
+    db.session.add(fr)
+    db.session.commit()
+
+    assert client.post(f"/friend/accept/{fr.id}").status_code == 200
+    n = Notification.query.filter_by(user_id=sender.id, ntype="friend_accept").one()
+    assert n.actor_id == auth_user.id
+
+
+# ---------------------------------------------------------------------------
+# Arkadaşlıktan çıkarma + giden istek iptali (Sprint 5 PR1)
+# ---------------------------------------------------------------------------
+
+def test_unfriend_revokes_visibility_and_allows_rerequest(client, auth_user, make_user):
+    other = make_user("eski_dost")
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=other.id,
+                              status="accepted"))
+    check = PumpCheck(user_id=other.id, visibility="feed")
+    db.session.add(check)
+    db.session.commit()
+    check_id = check.id
+    assert can_view_pump_check(auth_user.id, check) is True   # önce görünür
+
+    assert client.delete("/friend/eski_dost").status_code == 200
+    assert client.delete("/friend/eski_dost").status_code == 404   # artık arkadaş değil
+
+    db.session.expire_all()
+    check = db.session.get(PumpCheck, check_id)
+    assert can_view_pump_check(auth_user.id, check) is False  # sızıntı regresyonu: erişim düştü
+
+    # Satır silindiği için yeniden istek serbest (rejected-cooldown uygulanmaz).
+    assert client.post("/friend/request/eski_dost").status_code == 200
+
+
+def test_unfriend_unknown_user_404(client, auth_user):
+    assert client.delete("/friend/yokboyle").status_code == 404
+
+
+def test_cancel_outgoing_request_sweeps_ghost_notification(client, auth_user, make_user):
+    target = make_user("giden_hedef")
+    assert client.post("/friend/request/giden_hedef").status_code == 200
+    fr_id = Friendship.query.one().id   # silme sonrası erişmemek için önden yakala
+    assert Notification.query.filter_by(user_id=target.id,
+                                        ntype="friend_request").count() == 1
+
+    assert client.delete(f"/friend/request/{fr_id}").status_code == 200
+    assert Friendship.query.count() == 0
+    # Hayalet "friend_request" bildirimi aynı transaction'da süpürülür.
+    assert Notification.query.filter_by(ntype="friend_request",
+                                        target_id=fr_id).count() == 0
+
+
+def test_cancel_outgoing_only_sender_and_pending(client, auth_user, make_user):
+    # Başkasının gönderdiği istek iptal edilemez (yalnızca gönderen) → 404.
+    other = make_user("baskasi")
+    third = make_user("ucuncu")
+    foreign = Friendship(sender_id=other.id, receiver_id=third.id, status="pending")
+    db.session.add(foreign)
+    db.session.commit()
+    assert client.delete(f"/friend/request/{foreign.id}").status_code == 404
+
+    # Kabul edilmiş satır iptal edilemez (yalnızca pending) → 404.
+    acc = make_user("kabuledilen")
+    accepted = Friendship(sender_id=auth_user.id, receiver_id=acc.id, status="accepted")
+    db.session.add(accepted)
+    db.session.commit()
+    assert client.delete(f"/friend/request/{accepted.id}").status_code == 404

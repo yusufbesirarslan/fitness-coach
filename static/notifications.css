@@ -1,0 +1,54 @@
+/* notifications page (Sprint 5 PR1) — friends.css token/desen kuralları. */
+.notif-wrap { max-width: 600px; margin: 0 auto; }
+
+.notif-toolbar {
+    display: flex; justify-content: flex-end; margin-bottom: 12px;
+}
+.notif-markall {
+    padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 700;
+    letter-spacing: 0.04em; cursor: pointer; font-family: var(--font-body);
+    background: rgba(var(--color-primary-rgb), 0.1); color: var(--color-primary);
+    border: 1px solid rgba(var(--color-primary-rgb), 0.2); transition: background 0.2s;
+}
+.notif-markall:hover { background: rgba(var(--color-primary-rgb), 0.2); }
+
+.notif-list {
+    background: var(--surface-2); border: 1px solid var(--border);
+    border-radius: 16px; overflow: hidden;
+}
+
+.notif-row {
+    display: flex; align-items: center; gap: 12px; padding: 14px 16px;
+    border-bottom: 1px solid var(--overlay-4); cursor: pointer;
+    text-decoration: none; color: inherit; transition: background 0.15s;
+    position: relative;
+}
+.notif-row:last-child { border-bottom: none; }
+.notif-row:hover { background: var(--overlay-3); }
+.notif-row.unread { background: rgba(var(--color-primary-rgb), 0.06); }
+
+.notif-icon {
+    width: 24px; flex-shrink: 0; text-align: center;
+    font-size: 16px; line-height: 1;
+}
+
+.notif-avatar {
+    width: 40px; height: 40px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--font-display); font-size: 18px;
+    color: var(--color-on-primary);
+    background: linear-gradient(135deg, var(--color-primary), var(--color-primary-strong));
+    overflow: hidden;
+}
+.notif-avatar img { width: 100%; height: 100%; object-fit: cover; }
+
+.notif-body { flex: 1; min-width: 0; }
+.notif-text { font-size: 14px; color: var(--text); line-height: 1.35; }
+.notif-time { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+
+.notif-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    background: var(--color-primary);
+}
+
+.loading-text { text-align: center; color: var(--text-3); padding: 20px; font-size: 13px; }

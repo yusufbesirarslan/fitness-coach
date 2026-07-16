@@ -1,7 +1,9 @@
 import s3_helper
 
-from app.extensions import db
-from app.models import Friendship, PumpCheckLike, TrainingPlan
+from app.models import PumpCheckLike, TrainingPlan
+# Geriye uyumluluk: get_friend_ids artık friends servisinde yaşıyor; buradan
+# import eden mevcut modüller (social, training, ...) kırılmasın diye re-export.
+from app.services.friends import get_friend_ids  # noqa: F401
 from app.timeutil import display_dt
 
 _SHARING_STATUS_KEYS = {
@@ -9,17 +11,6 @@ _SHARING_STATUS_KEYS = {
     "friends": "pump_check.sharing.friends",
     "private": "pump_check.sharing.private",
 }
-
-
-def get_friend_ids(user_id):
-    rows = Friendship.query.filter(
-        Friendship.status == "accepted",
-        db.or_(Friendship.sender_id == user_id, Friendship.receiver_id == user_id),
-    ).all()
-    ids = set()
-    for row in rows:
-        ids.add(row.receiver_id if row.sender_id == user_id else row.sender_id)
-    return ids
 
 
 def can_view_pump_check(user_id, check):
