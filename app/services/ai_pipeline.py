@@ -171,8 +171,18 @@ def stream_answer(user_id, question, client_history=None, language="tr"):
                 yield event
             elif kind == "error":
                 finished = True
+                partial_text = event.get("partial_text")
+                if partial_text is None:
+                    partial_text = "".join(parts)
+                partial_text = partial_text.strip()
+                work_performed = bool(event.get("work_performed") or parts)
+                if partial_text:
+                    _record(conversation, question, partial_text,
+                            interrupted=True)
                 _emit_metrics(is_error=True)
-                yield event
+                yield {"type": "error", "key": event["key"],
+                       "work_performed": work_performed,
+                       "partial_text": partial_text}
                 return
             elif kind == "done":
                 finished = True

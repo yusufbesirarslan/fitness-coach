@@ -265,6 +265,7 @@ def ask_coach_stream():
     req_id = current_request_id()  # WS6: izleme kimliği — jeneratörden önce çöz
 
     def generate():
+        work_performed = False
         try:
             for event in stream_answer(user_id, question, client_history,
                                        language=lang):
@@ -274,7 +275,14 @@ def ask_coach_stream():
                                         "request_id": req_id})
                 elif kind == "delta":
                     yield _sse("delta", {"text": event["text"]})
+                    work_performed = True
                 elif kind == "error":
+                    work_performed = (work_performed or
+                                      bool(event.get("work_performed")))
+                    if work_performed:
+                        yield _sse("error", {"message": t(event["key"])})
+                        return
+
                     ai_recovery.record_ai_failure(user_id)  # WS7: ardışık-arıza sayacı
                     if quota_enabled:
                         _refund_chat_quota(user_id)
@@ -297,8 +305,12 @@ def ask_coach_stream():
             # EDİLMEZ: model üretti, kullanıcı gördü — hak harcanmıştır.
             raise
         except Exception:
-            current_app.logger.exception("Koç yanıtı akıtılamadı")
+            current_app.logger.error("Coach stream failed unexpectedly")
             db.session.rollback()
+            if work_performed:
+                yield _sse("error", {"message": t("coach.reply_failed")})
+                return
+
             ai_recovery.record_ai_failure(user_id)
             if quota_enabled:
                 _refund_chat_quota(user_id)

@@ -90,11 +90,11 @@ def stream_coach_answer(user_id, question, context, history, language="tr"):
         try:
             yield from _stream_bedrock(user_id, question, context, history, language)
             return
-        except ai_coach._BedrockFallback as e:
+        except ai_coach._BedrockFallback:
             # Buraya YALNIZCA hiç delta gitmemişken ve hiç araç çalışmamışken
             # gelinir (_stream_bedrock garantisi) → sağlayıcı değişimi güvenli.
             current_app.logger.warning(
-                "[COACH][stream] Bedrock ilk çağrı başarısız, OpenAI'ya düşülüyor: %s", e)
+                "[COACH][stream] Bedrock failed before work; trying OpenAI fallback")
 
     yield from _stream_openai_fallback(user_id, question, context, history, language)
 
@@ -143,8 +143,13 @@ def _stream_bedrock(user_id, question, context, history, language):
             if not parts and tools_ran == 0:
                 raise ai_coach._BedrockFallback(f"{type(e).__name__}: {e}")
             current_app.logger.warning(
-                "[COACH][stream] Bedrock akışı yarıda hata verdi: %s", e)
-            yield {"type": "error", "key": "coach.reply_failed"}
+                "[COACH][stream] Bedrock stream failed after work")
+            yield {
+                "type": "error",
+                "key": "coach.reply_failed",
+                "work_performed": bool(parts or tools_ran),
+                "partial_text": "".join(parts).strip(),
+            }
             return
 
         usage = _usage_of(final) or usage
@@ -187,8 +192,13 @@ def _stream_openai_fallback(user_id, question, context, history, language):
         text = ai_coach._run_coach_conversation_openai(
             user_id, question, context, history, language)
     except Exception:
-        current_app.logger.exception("[COACH][stream] OpenAI yedeği de başarısız")
-        yield {"type": "error", "key": "coach.reply_failed"}
+        current_app.logger.warning("[COACH][stream] OpenAI fallback failed before work")
+        yield {
+            "type": "error",
+            "key": "coach.reply_failed",
+            "work_performed": False,
+            "partial_text": "",
+        }
         return
 
     yield from _emit_text(text or "", provider="openai", usage=None)

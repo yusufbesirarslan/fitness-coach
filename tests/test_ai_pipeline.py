@@ -6,9 +6,11 @@ test_coach_routes.py'de ayrıca korunur.
 
     python -m pytest tests/test_ai_pipeline.py -v
 """
+from types import SimpleNamespace
+
 import pytest
 
-from app.services import ai_coach, ai_pipeline, context_builder, moderation
+from app.services import ai_coach, ai_pipeline, ai_stream, context_builder, moderation
 from app.services.response_formatter import (COACH_FALLBACKS, finalize_reply,
                                              is_coach_error_fallback)
 
@@ -167,3 +169,38 @@ def test_pipeline_marks_provider_fallback(app, monkeypatch):
 
     assert out["is_error_fallback"] is True
     assert out["answer"] == COACH_FALLBACKS["tr"]["error"]
+
+
+def test_partial_stream_error_is_recorded_as_interruption(app, monkeypatch):
+    conversation = SimpleNamespace(id=17)
+    recorded = []
+    monkeypatch.setattr(ai_pipeline, "_memory_stage",
+                        lambda user_id: (conversation, []))
+    monkeypatch.setattr(ai_pipeline, "_context_stage",
+                        lambda user_id, question, language: "")
+
+    def fake_delta_then_error(*args, **kwargs):
+        yield {"type": "delta", "text": "K\u0131smi "}
+        yield {"type": "delta", "text": "yan\u0131t"}
+        yield {"type": "error", "key": "coach.reply_failed",
+               "work_performed": True, "partial_text": "K\u0131smi yan\u0131t"}
+
+    monkeypatch.setattr(ai_stream, "stream_coach_answer", fake_delta_then_error)
+    monkeypatch.setattr(
+        ai_pipeline,
+        "_record",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+
+    with app.test_request_context("/"):
+        events = list(ai_pipeline.stream_answer(7, "soru"))
+
+    assert events[-1] == {
+        "type": "error",
+        "key": "coach.reply_failed",
+        "work_performed": True,
+        "partial_text": "K\u0131smi yan\u0131t",
+    }
+    assert recorded == [
+        ((conversation, "soru", "K\u0131smi yan\u0131t"), {"interrupted": True})
+    ]

@@ -324,7 +324,12 @@ def test_bedrock_error_after_first_delta_emits_error_no_fallback(
         events = _collect(1, "soru")
 
     assert [e["text"] for e in events if e["type"] == "delta"] == ["yarım cümle"]
-    assert events[-1] == {"type": "error", "key": "coach.reply_failed"}
+    assert events[-1] == {
+        "type": "error",
+        "key": "coach.reply_failed",
+        "work_performed": True,
+        "partial_text": "yar\u0131m c\u00fcmle",
+    }
     assert called["openai"] is False  # yan etki tekrarı YOK
 
 
@@ -344,7 +349,12 @@ def test_bedrock_error_after_tool_side_effect_no_fallback(
     with app.app_context():
         events = _collect(1, "soru")
 
-    assert events[-1] == {"type": "error", "key": "coach.reply_failed"}
+    assert events[-1] == {
+        "type": "error",
+        "key": "coach.reply_failed",
+        "work_performed": True,
+        "partial_text": "",
+    }
     assert called["openai"] is False
 
 
@@ -402,7 +412,12 @@ def test_openai_fallback_error_emits_error_event(app, monkeypatch):
     with app.app_context():
         events = _collect(1, "soru")
 
-    assert events == [{"type": "error", "key": "coach.reply_failed"}]
+    assert events == [{
+        "type": "error",
+        "key": "coach.reply_failed",
+        "work_performed": False,
+        "partial_text": "",
+    }]
 
 
 # ── ai_pipeline.stream_answer (orkestrasyon) ─────────────────────────────────
@@ -472,7 +487,12 @@ def test_stream_answer_error_event_passthrough_no_record(stream_env, app, monkey
     with app.test_request_context("/"):
         events = _drive(stream_env.id, "selam")
         conv_id = events[0]["conversation_id"]
-        assert events[-1] == {"type": "error", "key": "coach.reply_failed"}
+        assert events[-1] == {
+            "type": "error",
+            "key": "coach.reply_failed",
+            "work_performed": False,
+            "partial_text": "",
+        }
         # Hata çerçevesi hafızaya YAZILMAZ.
         assert CoachMessage.query.filter_by(conversation_id=conv_id).count() == 0
 

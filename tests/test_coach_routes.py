@@ -339,6 +339,87 @@ def test_ask_stream_error_frame_refunds_quota(client, auth_user, monkeypatch):
     assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
 
 
+
+def test_ask_stream_partial_stream_error_keeps_quota_and_hides_internal_fields(
+        client, auth_user, monkeypatch):
+    recorded = []
+    monkeypatch.setattr(coach_bp.ai_recovery, "record_ai_failure",
+                        lambda user_id: recorded.append(user_id))
+    monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
+        {"type": "meta", "conversation_id": 1},
+        {"type": "delta", "text": "K\u0131smi yan\u0131t"},
+        {"type": "error", "key": "coach.reply_failed",
+         "work_performed": True, "partial_text": "K\u0131smi yan\u0131t"},
+    ]))
+
+    resp = _post_stream(client, "protein?")
+
+    assert resp.frames[-1][0] == "error"
+    assert set(resp.frames[-1][1]) == {"message"}
+    assert "partial_text" not in resp.raw
+    assert "work_performed" not in resp.raw
+    assert recorded == []
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS - 1
+
+
+def test_ask_stream_tool_work_error_keeps_quota_without_failure(
+        client, auth_user, monkeypatch):
+    recorded = []
+    monkeypatch.setattr(coach_bp.ai_recovery, "record_ai_failure",
+                        lambda user_id: recorded.append(user_id))
+    monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
+        {"type": "meta", "conversation_id": 1},
+        {"type": "error", "key": "coach.reply_failed",
+         "work_performed": True, "partial_text": ""},
+    ]))
+
+    resp = _post_stream(client, "protein?")
+
+    assert resp.frames[-1][0] == "error"
+    assert set(resp.frames[-1][1]) == {"message"}
+    assert recorded == []
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS - 1
+
+
+
+def test_ask_stream_partial_exception_keeps_quota_without_failure(
+        client, auth_user, monkeypatch):
+    recorded = []
+    monkeypatch.setattr(coach_bp.ai_recovery, "record_ai_failure",
+                        lambda user_id: recorded.append(user_id))
+
+    def delta_then_boom(*args, **kwargs):
+        yield {"type": "meta", "conversation_id": 1}
+        yield {"type": "delta", "text": "K\u0131smi yan\u0131t"}
+        raise RuntimeError("sensitive provider detail")
+
+    monkeypatch.setattr(coach_bp, "stream_answer", delta_then_boom)
+
+    resp = _post_stream(client, "protein?")
+
+    assert resp.frames[-1][0] == "error"
+    assert set(resp.frames[-1][1]) == {"message"}
+    assert "sensitive provider detail" not in resp.raw
+    assert recorded == []
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS - 1
+def test_ask_stream_pre_work_error_refunds_instead_of_keeps_quota(
+        client, auth_user, monkeypatch):
+    recorded = []
+    monkeypatch.setattr(coach_bp.ai_recovery, "record_ai_failure",
+                        lambda user_id: recorded.append(user_id))
+    monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
+        {"type": "meta", "conversation_id": 1},
+        {"type": "error", "key": "coach.reply_failed",
+         "work_performed": False, "partial_text": ""},
+    ]))
+
+    resp = _post_stream(client, "protein?")
+
+    assert resp.frames[-1][0] == "error"
+    assert set(resp.frames[-1][1]) == {"message"}
+    assert recorded == [auth_user.id]
+    assert premium.remaining_ai_chats(auth_user) == premium.FREE_WEEKLY_AI_CHATS
+
 def test_ask_stream_fallback_done_refunds_quota(client, auth_user, monkeypatch):
     monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
         {"type": "meta", "conversation_id": 1},
