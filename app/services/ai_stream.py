@@ -54,6 +54,16 @@ def _chunks(text):
         yield text[i:i + CHUNK_CHARS]
 
 
+def _bedrock_work_error(parts, tools_ran):
+    return {
+        "type": "error",
+        "key": "coach.reply_failed",
+        "work_performed": bool(parts or tools_ran),
+        "partial_text": "".join(parts).strip(),
+    }
+
+
+
 def _stream_bedrock_turn(messages_client, call_kwargs):
     messages = queue.SimpleQueue()
 
@@ -144,36 +154,39 @@ def _stream_bedrock(user_id, question, context, history, language):
                 raise ai_coach._BedrockFallback(f"{type(e).__name__}: {e}")
             current_app.logger.warning(
                 "[COACH][stream] Bedrock stream failed after work")
-            yield {
-                "type": "error",
-                "key": "coach.reply_failed",
-                "work_performed": bool(parts or tools_ran),
-                "partial_text": "".join(parts).strip(),
-            }
+            yield _bedrock_work_error(parts, tools_ran)
             return
 
-        usage = _usage_of(final) or usage
+        try:
+            usage = _usage_of(final) or usage
 
-        if getattr(final, "stop_reason", None) != "tool_use":
-            text = "".join(parts)
-            if not text and tools_ran == 0:
-                # Hiç metin yok ve hiç araç çalışmadı → soru cevaplanabilirdi,
-                # OpenAI'ya düş (bloklayıcı yoldaki B4 mantığının aynısı).
-                raise ai_coach._BedrockFallback("boş Bedrock akışı (metin yok)")
-            yield {"type": "done", "text": text, "usage": usage,
-                   "provider": "bedrock"}
+            if getattr(final, "stop_reason", None) != "tool_use":
+                text = "".join(parts)
+                if not text and tools_ran == 0:
+                    # Hiç metin yok ve hiç araç çalışmadı → soru cevaplanabilirdi,
+                    # OpenAI'ya düş (bloklayıcı yoldaki B4 mantığının aynısı).
+                    raise ai_coach._BedrockFallback("boş Bedrock akışı (metin yok)")
+                yield {"type": "done", "text": text, "usage": usage,
+                       "provider": "bedrock"}
+                return
+
+            convo.append({"role": "assistant", "content": final.content})
+            tool_results = []
+            for block in final.content:
+                if getattr(block, "type", None) == "tool_use":
+                    out = ai_coach._dispatch_coach_tool(
+                        user_id, block.name, json.dumps(block.input or {}))
+                    tools_ran += 1
+                    tool_results.append({"type": "tool_result",
+                                         "tool_use_id": block.id, "content": out})
+            convo.append({"role": "user", "content": tool_results})
+        except Exception as e:
+            if not parts and tools_ran == 0:
+                raise ai_coach._BedrockFallback(f"{type(e).__name__}: {e}")
+            current_app.logger.warning(
+                "[COACH][stream] Bedrock response processing failed after work")
+            yield _bedrock_work_error(parts, tools_ran)
             return
-
-        convo.append({"role": "assistant", "content": final.content})
-        tool_results = []
-        for block in final.content:
-            if getattr(block, "type", None) == "tool_use":
-                out = ai_coach._dispatch_coach_tool(
-                    user_id, block.name, json.dumps(block.input or {}))
-                tool_results.append({"type": "tool_result",
-                                     "tool_use_id": block.id, "content": out})
-                tools_ran += 1
-        convo.append({"role": "user", "content": tool_results})
 
     # Araç döngüsü tavana dayandı — dostça yedek metni akıt (yanıtsız bırakma).
     yield from _emit_text(ai_coach._COACH_FALLBACKS[

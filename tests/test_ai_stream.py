@@ -358,6 +358,40 @@ def test_bedrock_error_after_tool_side_effect_no_fallback(
     assert called["openai"] is False
 
 
+def test_bedrock_processing_error_after_tool_work_emits_work_aware_error(
+        app, bedrock_on, monkeypatch, caplog):
+    monkeypatch.setattr(ai_coach, "_dispatch_coach_tool", lambda *a, **k: "ok")
+    tool_turn = _FakeStream([], _final(
+        stop_reason="tool_use",
+        content=[_tool_use_block("confirm_and_commit_meal_log", "t", {})]))
+
+    class BrokenFinal:
+        stop_reason = "end_turn"
+        content = []
+
+        @property
+        def usage(self):
+            raise RuntimeError("sensitive parsing detail")
+
+    bedrock_on(tool_turn, _FakeStream([], BrokenFinal()))
+    monkeypatch.setattr(
+        ai_coach,
+        "_run_coach_conversation_openai",
+        lambda *a, **k: pytest.fail("tool work must prevent provider fallback"),
+    )
+
+    with app.app_context():
+        events = _collect(1, "soru")
+
+    assert events[-1] == {
+        "type": "error",
+        "key": "coach.reply_failed",
+        "work_performed": True,
+        "partial_text": "",
+    }
+    assert "sensitive parsing detail" not in caplog.text
+
+
 def test_bedrock_empty_answer_no_tools_falls_back(app, bedrock_on, monkeypatch):
     # Metin bloğu yok + hiç araç çalışmadı → soru cevaplanabilirdi, OpenAI'ya düş
     # (bloklayıcı yoldaki B4 mantığının akış eşdeğeri).
@@ -495,6 +529,41 @@ def test_stream_answer_error_event_passthrough_no_record(stream_env, app, monkey
         }
         # Hata çerçevesi hafızaya YAZILMAZ.
         assert CoachMessage.query.filter_by(conversation_id=conv_id).count() == 0
+
+def test_stream_answer_processing_error_after_delta_persists_interruption(
+        stream_env, app, bedrock_on, monkeypatch, caplog):
+    def dispatch_boom(*args, **kwargs):
+        raise RuntimeError("sensitive dispatch detail")
+
+    monkeypatch.setattr(ai_coach, "_dispatch_coach_tool", dispatch_boom)
+    bedrock_on(_FakeStream(
+        ["K\u0131smi yan\u0131t"],
+        _final(
+            stop_reason="tool_use",
+            content=[_tool_use_block("confirm_and_commit_meal_log", "t", {})],
+        ),
+    ))
+
+    with app.test_request_context("/"):
+        events = _drive(stream_env.id, "soru")
+        conv_id = events[0]["conversation_id"]
+
+        assert events[-1] == {
+            "type": "error",
+            "key": "coach.reply_failed",
+            "work_performed": True,
+            "partial_text": "K\u0131smi yan\u0131t",
+        }
+        rows = (CoachMessage.query.filter_by(conversation_id=conv_id)
+                .order_by(CoachMessage.id.asc()).all())
+        assert [(row.role, row.content) for row in rows] == [
+            ("user", "soru"),
+            ("assistant", "K\u0131smi yan\u0131t"),
+        ]
+        assert rows[1].interrupted is True
+
+    assert "sensitive dispatch detail" not in caplog.text
+
 
 
 def test_stream_answer_fallback_text_not_recorded(stream_env, app, monkeypatch):
