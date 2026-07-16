@@ -468,6 +468,89 @@ def feed_item_comment_delete(item_id, comment_id):
     return jsonify({"ok": True, "commentsCount": fresh.comments_count or 0})
 
 
+# ── Feed V2: moderasyon (görüntüleyen-başı gizle / şikayet) ───────────────────
+_MOD_TARGET_TYPES = {"pump_check", "feed_item", "activity"}
+_REPORT_REASONS = {"spam", "inappropriate", "other"}
+
+
+def _target_owner_id(target_type, target_id):
+    if target_type == "pump_check":
+        row = db.session.get(PumpCheck, target_id)
+    elif target_type == "feed_item":
+        row = db.session.get(FeedItem, target_id)
+    elif target_type == "activity":
+        row = db.session.get(Activity, target_id)
+    else:
+        row = None
+    return row.user_id if row is not None else None
+
+
+def _parse_mod_target():
+    """(target_type, target_id, data) döndürür; geçersizse (None, None, data)."""
+    data = request.get_json(silent=True) or {}
+    ttype = (data.get("target_type") or "").strip()
+    try:
+        tid = int(data.get("target_id"))
+    except (TypeError, ValueError):
+        return None, None, data
+    if ttype not in _MOD_TARGET_TYPES:
+        return None, None, data
+    return ttype, tid, data
+
+
+@bp.route("/feed/hide", methods=["POST"])
+@require_auth
+def feed_hide():
+    ttype, tid, _ = _parse_mod_target()
+    if ttype is None:
+        return jsonify({"error": t("feed.invalid_request")}), 400
+    if _target_owner_id(ttype, tid) == current_user.id:
+        return jsonify({"error": t("feed.cannot_hide_own")}), 400
+    if not FeedHide.query.filter_by(user_id=current_user.id, target_type=ttype, target_id=tid).first():
+        db.session.add(FeedHide(user_id=current_user.id, target_type=ttype, target_id=tid))
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
+    return jsonify({"ok": True})
+
+
+@bp.route("/feed/unhide", methods=["POST"])
+@require_auth
+def feed_unhide():
+    ttype, tid, _ = _parse_mod_target()
+    if ttype is None:
+        return jsonify({"error": t("feed.invalid_request")}), 400
+    FeedHide.query.filter_by(user_id=current_user.id, target_type=ttype, target_id=tid).delete(synchronize_session=False)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+@bp.route("/feed/report", methods=["POST"])
+@require_auth
+@limiter.limit(FEED_REPORT_RATELIMIT, key_func=_user_or_ip_key)
+def feed_report():
+    ttype, tid, data = _parse_mod_target()
+    if ttype is None:
+        return jsonify({"error": t("feed.invalid_request")}), 400
+    reason = (data.get("reason") or "").strip()
+    if reason not in _REPORT_REASONS:
+        return jsonify({"error": t("feed.invalid_request")}), 400
+    note = (data.get("note") or "").strip()[:300] or None
+    if FeedReport.query.filter_by(user_id=current_user.id, target_type=ttype, target_id=tid).first():
+        return jsonify({"error": t("feed.already_reported")}), 400
+    db.session.add(FeedReport(user_id=current_user.id, target_type=ttype, target_id=tid, reason=reason, note=note))
+    # Auto-hide: şikayet edilen içerik şikayetçiden gizlenir.
+    if not FeedHide.query.filter_by(user_id=current_user.id, target_type=ttype, target_id=tid).first():
+        db.session.add(FeedHide(user_id=current_user.id, target_type=ttype, target_id=tid))
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({"error": t("feed.already_reported")}), 400
+    return jsonify({"ok": True})
+
+
 @bp.route("/friends/search")
 @require_auth
 @limiter.limit(SEARCH_RATELIMIT, key_func=_user_or_ip_key)
