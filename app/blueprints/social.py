@@ -124,43 +124,13 @@ def feed_page():
 @bp.route("/feed/data")
 @require_auth
 def feed_data():
-    try:
-        page = max(int(request.args.get("page", 1) or 1), 1)
-    except (TypeError, ValueError):
-        page = 1
+    cursor = request.args.get("cursor") or None
     try:
         per_page = min(max(int(request.args.get("per_page", 10) or 10), 1), 30)
     except (TypeError, ValueError):
         per_page = 10
-    visible_user_ids = get_friend_ids(current_user.id) | {current_user.id}
-    query = PumpCheck.query.filter(
-        PumpCheck.visibility == "feed",
-        PumpCheck.user_id.in_(visible_user_ids),
-    ).options(
-        joinedload(PumpCheck.user),
-    ).order_by(PumpCheck.created_at.desc(), PumpCheck.id.desc())
-    rows = query.offset((page - 1) * per_page).limit(per_page + 1).all()
-    posts = rows[:per_page]
-    liked_pump_check_ids = set()
-    if posts:
-        liked_rows = db.session.query(PumpCheckLike.pump_check_id).filter(
-            PumpCheckLike.user_id == current_user.id,
-            PumpCheckLike.pump_check_id.in_([post.id for post in posts]),
-        ).all()
-        liked_pump_check_ids = {pump_check_id for pump_check_id, in liked_rows}
-    return jsonify({
-        "posts": [
-            serialize_pump_check_card(
-                row,
-                current_user.id,
-                liked_pump_check_ids=liked_pump_check_ids,
-                image_visibility_preauthorized=True,
-            )
-            for row in posts
-        ],
-        "hasMore": len(rows) > per_page,
-        "nextPage": page + 1 if len(rows) > per_page else None,
-    })
+    from app.services.feed import get_feed_page
+    return jsonify(get_feed_page(current_user.id, cursor=cursor, limit=per_page))
 
 
 def _visible_pump_check_or_403(check_id):
