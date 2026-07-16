@@ -60,13 +60,17 @@ var ICONS = {
     pump_check_like: '❤️',
     pump_check_comment: '💬',
     friend_request: '👋',
-    friend_accept: '🤝'
+    friend_accept: '🤝',
+    repost: '🔁',
+    quote_repost: '🔁',
+    feed_like: '❤️',
+    feed_comment: '💬'
 };
 function iconFor(type) { return ICONS[type] || '🔔'; }
 
-// Hedef yüzey: pump check beğeni/yorumu → feed, arkadaşlık → arkadaşlar.
+// Hedef yüzey: pump check / feed-item etkileşimleri → feed, arkadaşlık → arkadaşlar.
 function targetUrl(n) {
-    if (n.targetType === 'pump_check') return '/feed';
+    if (n.targetType === 'pump_check' || n.targetType === 'feed_item') return '/feed';
     if (n.targetType === 'friendship') return '/friends';
     return '#';
 }
