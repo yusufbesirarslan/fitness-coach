@@ -119,3 +119,24 @@ def test_feed_hides_restricted_and_repost_stub(app, auth_user, make_user, client
     assert stub["unavailable"] is True
     assert stub["original"] is None
     assert stub["engagement"] is None
+
+
+def test_gallery_delete_removes_referencing_reposts(app, auth_user, make_user, client):
+    from app.models import FeedItemComment, FeedItemLike
+    bob = make_user("bob")
+    _befriend(auth_user.id, bob.id)
+    pc = _feed_check(auth_user.id, created_at=_dt(1))
+    # bob reposts + quotes auth_user's check, with a like and a comment on the quote
+    rp = _repost(bob.id, pc.id, _dt(2), item_type="repost")
+    qt = _repost(bob.id, pc.id, _dt(3), item_type="quote", body="süper")
+    db.session.add(FeedItemLike(feed_item_id=qt.id, user_id=auth_user.id))
+    db.session.add(FeedItemComment(feed_item_id=qt.id, user_id=auth_user.id, body="teşekkür"))
+    db.session.commit()
+    rp_id, qt_id, pc_id = rp.id, qt.id, pc.id  # silinmeden ÖNCE int'e al
+
+    # auth_user deletes their own pump check via the gallery
+    assert client.delete("/pump-check-gallery/%s" % pc_id).status_code == 200
+    assert db.session.get(FeedItem, rp_id) is None
+    assert db.session.get(FeedItem, qt_id) is None
+    assert FeedItemLike.query.filter_by(feed_item_id=qt_id).count() == 0
+    assert FeedItemComment.query.filter_by(feed_item_id=qt_id).count() == 0
