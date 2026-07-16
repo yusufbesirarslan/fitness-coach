@@ -84,10 +84,11 @@ _DEFAULT_TEST_RE = re.compile(
 def _user_child_models():
     from app.models import (
         Activity, CoachConversation, CognitoSession, CustomMeal, DailyActivity,
-        MealLog, NutritionPlan, PendingAction, PumpCheck, PumpCheckComment,
-        PumpCheckLike, Supplement, TrainingPlan, UserQuestProgress, UserSession,
-        UserWearableConnection, WaterLog, WearableActivityLog, WearableSleepLog,
-        WearableWorkoutLog, WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog,
+        MealLog, Notification, NutritionPlan, PendingAction, PumpCheck,
+        PumpCheckComment, PumpCheckLike, Supplement, TrainingPlan,
+        UserQuestProgress, UserSession, UserWearableConnection, WaterLog,
+        WearableActivityLog, WearableSleepLog, WearableWorkoutLog,
+        WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog,
     )
     return (
         UserSession, CognitoSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
@@ -95,7 +96,7 @@ def _user_child_models():
         PumpCheck, Activity, Supplement, UserQuestProgress, WeeklyWinner,
         WaterLog, WorkoutLog, DailyActivity, CustomMeal, CoachConversation,
         UserWearableConnection, WearableSleepLog, WearableActivityLog,
-        WearableWorkoutLog,
+        WearableWorkoutLog, Notification,
     )
 
 
@@ -122,9 +123,15 @@ def _purge_user(user):
     çekilir (FK'de SET NULL olsa da burada da açıkça yapılır).
     """
     from app.models import (CoachConversation, CoachMessage, CustomMeal,
-                            CustomMealItem, Friendship, Message, PumpCheck,
-                            PumpCheckComment, PumpCheckLike, User)
+                            CustomMealItem, Friendship, Message, Notification,
+                            PumpCheck, PumpCheckComment, PumpCheckLike, User)
     uid = user.id
+
+    # Bildirimler iki yönden bağlı: kullanıcının ALDIKLARI (user_id — aşağıdaki
+    # child-model döngüsü siler) VE tetiklediği (actor_id) — actor tarafı burada
+    # açıkça süpürülür (SQLite FK cascade zorlamaz).
+    Notification.query.filter(Notification.actor_id == uid).delete(
+        synchronize_session=False)
 
     # CustomMealItem yalnızca custom_meal üzerinden user'a bağlı.
     meal_ids = [m.id for m in CustomMeal.query.filter_by(user_id=uid).all()]

@@ -248,6 +248,14 @@ def maybe_weekly_rollover():
     except Exception:
         db.session.rollback()
         current_app.logger.warning("[SESSION] Oturum süpürme başarısız", exc_info=True)
+    # Aynı günlük pencerede eski bildirimler de süpürülür (Sprint 5 PR1) —
+    # ayrı throttle anahtarı yok; oturum süpürmesi hata verse bile denenir.
+    try:
+        from app.services import notifications
+        notifications.purge_old(now)
+    except Exception:
+        db.session.rollback()
+        current_app.logger.warning("[NOTIF] Bildirim süpürme başarısız", exc_info=True)
 
 
 def update_streak():

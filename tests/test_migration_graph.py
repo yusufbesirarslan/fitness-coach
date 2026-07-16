@@ -28,7 +28,7 @@ def test_alembic_migrations_have_single_head():
 
     heads = sorted(set(revisions) - down_revisions)
 
-    assert heads == ["cc33dd44ee55"]
+    assert heads == ["dd44ee55ff66"]
 
 
 def test_activity_trigger_revision_is_postgresql_guarded():

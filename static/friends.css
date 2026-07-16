@@ -64,6 +64,7 @@
         height: 2px;
     }
     .section-card.incoming::before { background: linear-gradient(90deg, var(--orange), transparent); }
+    .section-card.outgoing::before { background: linear-gradient(90deg, var(--blue-light), transparent); }
     .section-card.friends-list::before { background: linear-gradient(90deg, var(--color-primary), transparent); }
     .section-title {
         font-family: var(--font-display); font-size: 18px;

@@ -699,3 +699,27 @@ class CustomMealItem(db.Model):
     serving_id          = db.Column(db.String(50), nullable=True)
     serving_description = db.Column(db.String(200), nullable=True)
     serving_quantity    = db.Column(db.Float, nullable=True)
+
+
+class Notification(db.Model):
+    # Sosyal bildirimler (Sprint 5 PR1). Satırlar tetikleyen eylemle AYNI
+    # transaction'da yazılır (services/notifications.notify — commit etmez).
+    # ntype kanonik İngilizce slug kalır; görünen metin istemcide i18n
+    # "notif.<ntype>" anahtarından kurulur (i18n display-map kuralı).
+    id          = db.Column(db.Integer, primary_key=True)
+    user_id     = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)   # alıcı
+    actor_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=True, index=True)    # tetikleyen; NULL = sistem
+    ntype       = db.Column(db.String(30), nullable=False)   # 'pump_check_like','pump_check_comment','friend_request','friend_accept',...
+    target_type = db.Column(db.String(20), nullable=True)    # 'pump_check','friendship' (PR2: 'feed_item', PR3: 'challenge')
+    target_id   = db.Column(db.Integer, nullable=True)
+    payload     = db.Column(JSONB().with_variant(db.JSON(), "sqlite"), nullable=True)
+    is_read     = db.Column(db.Boolean, nullable=False, default=False, server_default="false")
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        db.Index("ix_notification_user_read", "user_id", "is_read"),
+    )
+
+    user  = db.relationship("User", foreign_keys=[user_id],
+                            backref=db.backref("notifications", passive_deletes=True))
+    actor = db.relationship("User", foreign_keys=[actor_id])

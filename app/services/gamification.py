@@ -6,7 +6,7 @@ from sqlalchemy import event
 
 from app.config import LB_ALLTIME_KEY, LB_WEEKLY_KEY
 from app.extensions import db, redis_client
-from app.models import Activity, DailyQuest, Friendship, User, UserQuestProgress, WeeklyResetLog, WeeklyWinner
+from app.models import Activity, DailyQuest, User, UserQuestProgress, WeeklyResetLog, WeeklyWinner
 from app.timeutil import app_now, app_today
 
 
@@ -286,12 +286,10 @@ LEADERBOARD_TOP_N = 100  # size of the visible top list
 
 
 def _accepted_friend_ids():
-    rows = Friendship.query.filter(
-        Friendship.status == "accepted",
-        db.or_(Friendship.sender_id == current_user.id,
-               Friendship.receiver_id == current_user.id)).all()
-    return {r.receiver_id if r.sender_id == current_user.id else r.sender_id
-            for r in rows}
+    # Sprint 5 PR1: tek kaynak services/friends.get_friend_ids'e delege.
+    # Tembel import — gamification'ı import eden modül sayısı yüksek, döngü riski.
+    from app.services.friends import get_friend_ids
+    return get_friend_ids(current_user.id)
 
 
 def _lb_serialize(u, rank, timeframe="all_time"):

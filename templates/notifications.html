@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}" data-theme="dark">
+<head>
+    {% include "_head.html" %}
+    <title>{{ t('notif.page_title') }}</title>
+    <link rel="stylesheet" href="/static/theme.css">
+    <link rel="stylesheet" href="/static/nav.css">
+    <link rel="stylesheet" href="/static/notifications.css">
+</head>
+<body class="page-body">
+
+<div class="toast-wrap" id="toast-wrap"></div>
+
+{% set nav_active = 'profile' %}
+{% include "_nav.html" %}
+
+<main class="main-content">
+
+    <div class="page-hdr">
+        <h1>{{ t('notif.page_title') }}</h1>
+    </div>
+
+    <div class="notif-wrap">
+        <div class="notif-toolbar">
+            <button type="button" class="notif-markall" id="notif-markall">{{ t('notif.mark_all') }}</button>
+        </div>
+        <div class="notif-list" id="notif-list">
+            <div class="loading-text">{{ t('friends.loading') }}</div>
+        </div>
+    </div>
+
+</main>
+
+{% include "_actionbar.html" %}
+
+<script nonce="{{ csp_nonce }}">
+var __t = window.t || function (k, v) { return k; };
+
+function toast(msg, type) {
+    type = type || 'info';
+    var wrap = document.getElementById('toast-wrap');
+    var el = document.createElement('div');
+    el.className = 'toast toast-' + type;
+    el.textContent = msg;
+    wrap.appendChild(el);
+    setTimeout(function () { el.style.opacity = '0'; setTimeout(function () { el.remove(); }, 300); }, 3000);
+}
+
+function esc(v) { var d = document.createElement('div'); d.textContent = v == null ? '' : String(v); return d.innerHTML; }
+
+var listEl = document.getElementById('notif-list');
+var markAllBtn = document.getElementById('notif-markall');
+var beforeId = 0;
+var hasMore = true;
+var loading = false;
+var firstLoad = true;
+
+// Kanonik ntype → görsel ikon (görünen metin i18n'den; ikon sabit).
+var ICONS = {
+    pump_check_like: '❤️',
+    pump_check_comment: '💬',
+    friend_request: '👋',
+    friend_accept: '🤝'
+};
+function iconFor(type) { return ICONS[type] || '🔔'; }
+
+// Hedef yüzey: pump check beğeni/yorumu → feed, arkadaşlık → arkadaşlar.
+function targetUrl(n) {
+    if (n.targetType === 'pump_check') return '/feed';
+    if (n.targetType === 'friendship') return '/friends';
+    return '#';
+}
+
+function avatarHTML(actor) {
+    if (actor && actor.avatar) {
+        return '<div class="notif-avatar"><img src="' + esc(actor.avatar).replace(/"/g, '&quot;') + '" loading="lazy" decoding="async" alt=""></div>';
+    }
+    var letter = ((actor && actor.username) ? actor.username : 'A')[0].toUpperCase();
+    return '<div class="notif-avatar">' + esc(letter) + '</div>';
+}
+
+function messageFor(n) {
+    var username = (n.actor && n.actor.username) ? n.actor.username : '';
+    return __t('notif.' + n.type, { username: username });
+}
+
+function rowHTML(n) {
+    var cls = 'notif-row' + (n.isRead ? '' : ' unread');
+    return '<a class="' + cls + '" data-id="' + n.id + '" href="' + targetUrl(n) + '">' +
+        '<div class="notif-icon">' + iconFor(n.type) + '</div>' +
+        avatarHTML(n.actor) +
+        '<div class="notif-body"><div class="notif-text">' + esc(messageFor(n)) + '</div>' +
+        '<div class="notif-time">' + esc(n.createdAt) + '</div></div>' +
+        (n.isRead ? '' : '<span class="notif-dot" aria-hidden="true"></span>') +
+        '</a>';
+}
+
+function updateBadge(count) {
+    var badge = document.getElementById('notif-badge');
+    if (!badge) return;
+    if (count > 0) { badge.textContent = count > 99 ? '99+' : count; badge.hidden = false; }
+    else { badge.hidden = true; }
+}
+
+async function loadNotifications() {
+    if (loading || !hasMore) return;
+    loading = true;
+    try {
+        var res = await fetch('/notifications/data?before_id=' + beforeId + '&limit=20');
+        var data = await res.json();
+        if (firstLoad) { listEl.innerHTML = ''; firstLoad = false; }
+        if (!data.notifications.length && beforeId === 0) {
+            listEl.innerHTML = '<div class="empty-state"><div class="empty-icon">🔔</div><div class="empty-desc">' + __t('notif.empty') + '</div></div>';
+            markAllBtn.style.display = 'none';
+            hasMore = false;
+            return;
+        }
+        listEl.insertAdjacentHTML('beforeend', data.notifications.map(rowHTML).join(''));
+        hasMore = !!data.hasMore;
+        if (data.nextBeforeId) beforeId = data.nextBeforeId;
+        updateBadge(data.unreadCount);
+    } catch (err) {
+        firstLoad = false;
+    } finally {
+        loading = false;
+    }
+}
+
+async function markRead(ids, all) {
+    var body = all ? { all: true } : { ids: ids };
+    try {
+        var res = await fetch('/notifications/read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        var data = await res.json();
+        if (res.ok) updateBadge(data.unreadCount);
+        return res.ok;
+    } catch (err) { return false; }
+}
+
+// Satıra tıkla: okundu işaretle (bekle → kayıt garantili), sonra hedefe git.
+listEl.addEventListener('click', async function (e) {
+    var row = e.target.closest('.notif-row');
+    if (!row) return;
+    e.preventDefault();
+    var id = parseInt(row.dataset.id, 10);
+    if (row.classList.contains('unread')) {
+        row.classList.remove('unread');
+        var dot = row.querySelector('.notif-dot');
+        if (dot) dot.remove();
+        await markRead([id], false);
+    }
+    var url = row.getAttribute('href');
+    if (url && url !== '#') window.location.href = url;
+});
+
+markAllBtn.addEventListener('click', async function () {
+    var ok = await markRead(null, true);
+    if (ok) {
+        listEl.querySelectorAll('.notif-row.unread').forEach(function (r) {
+            r.classList.remove('unread');
+            var dot = r.querySelector('.notif-dot');
+            if (dot) dot.remove();
+        });
+    }
+});
+
+// Sonsuz kaydırma (feed.html deseni).
+window.addEventListener('scroll', function () {
+    if (window.innerHeight + window.scrollY > document.body.offsetHeight - 500) loadNotifications();
+});
+
+loadNotifications();
+</script>
+<script src="/static/actions.js"></script>
+</body>
+</html>

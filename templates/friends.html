@@ -60,6 +60,12 @@
             <div id="incoming-list"></div>
         </div>
 
+        <!-- ── SENT REQUESTS ── -->
+        <div class="section-card outgoing" id="outgoing-section" style="display:none;">
+            <div class="section-title">{{ t('friends.outgoing') }} <span class="section-count" id="outgoing-count">0</span></div>
+            <div id="outgoing-list"></div>
+        </div>
+
         <!-- ── FRIENDS LIST ── -->
         <div class="section-card friends-list">
             <div class="section-title">{{ t('friends.my_friends') }} <span class="section-count" id="friends-count">0</span></div>
@@ -166,6 +172,24 @@ async function loadFriends() {
         inSection.style.display = 'none';
     }
 
+    // Outgoing (sent) requests
+    const outSection = document.getElementById('outgoing-section');
+    const outList = document.getElementById('outgoing-list');
+    const outgoing = data.outgoing || [];
+    document.getElementById('outgoing-count').textContent = outgoing.length;
+    if (outgoing.length) {
+        outSection.style.display = '';
+        outList.innerHTML = outgoing.map(r =>
+            '<div class="fr-row">' + avatarHTML(r.profile_picture, r.username) +
+            '<div class="fr-info"><div class="fr-name">'+escapeHTML(r.full_name || r.username)+'</div><div class="fr-handle">@'+escapeHTML(r.username)+'</div></div>' +
+            '<div class="fr-actions">' +
+            '<button class="btn-reject" data-action="cancelReq" data-args="['+r.request_id+']">' + __t('friends.cancel') + '</button>' +
+            '</div></div>'
+        ).join('');
+    } else {
+        outSection.style.display = 'none';
+    }
+
     // Friends
     const fList = document.getElementById('friends-list');
     document.getElementById('friends-count').textContent = data.friends.length;
@@ -173,12 +197,29 @@ async function loadFriends() {
         fList.innerHTML = data.friends.map(f =>
             '<div class="fr-row">' + avatarHTML(f.profile_picture, f.username) +
             '<div class="fr-info"><div class="fr-name">'+escapeHTML(f.full_name)+'</div><div class="fr-handle">@'+escapeHTML(f.username)+' <span class="rank-badge">'+escapeHTML(f.rank_title)+'</span></div></div>' +
+            '<div class="fr-actions">' +
             '<a href="/chat/'+encodeURIComponent(f.username)+'" class="btn-chat">' + __t('friends.chat') + '</a>' +
-            '</div>'
+            '<button class="btn-reject" data-action="unfriendUser" data-args="'+JSON.stringify([f.username]).replace(/"/g,'&quot;')+'">' + __t('friends.unfriend') + '</button>' +
+            '</div></div>'
         ).join('');
     } else {
         fList.innerHTML = '<div class="empty-state"><div class="empty-icon">👥</div><div class="empty-desc">' + __t('friends.empty') + '</div></div>';
     }
+}
+
+async function cancelReq(id) {
+    const res = await fetch('/friend/request/' + id, { method: 'DELETE' });
+    const data = await res.json();
+    if (res.ok) { toast(data.message, 'success'); loadFriends(); }
+    else toast(data.error, 'error');
+}
+
+async function unfriendUser(username) {
+    if (!confirm(__t('friends.unfriend_confirm', { username: username }))) return;
+    const res = await fetch('/friend/' + encodeURIComponent(username), { method: 'DELETE' });
+    const data = await res.json();
+    if (res.ok) { toast(data.message, 'success'); loadFriends(); }
+    else toast(data.error, 'error');
 }
 
 async function acceptReq(id) {
