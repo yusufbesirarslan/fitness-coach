@@ -312,7 +312,8 @@ reportSheet.querySelectorAll('.report-reason').forEach(function(rb){
     const res = await fetch('/feed/report', {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({target_type: reportTarget.ttype, target_id: reportTarget.tid, reason: rb.dataset.reason})});
     if(res.ok){
-      const card = feedList.querySelector('[data-id="'+reportTarget.tid+'"],[data-id="r'+reportTarget.tid+'"],[data-id="q'+reportTarget.tid+'"]');
+      const t = reportTarget.tid;
+      const card = feedList.querySelector('[data-id="'+t+'"],[data-id="r'+t+'"],[data-id="q'+t+'"],[data-id="m'+t+'"]');
       if(card) card.remove();
       toast(__t('feed.report_sent'));
     }
