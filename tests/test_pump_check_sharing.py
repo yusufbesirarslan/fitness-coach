@@ -1004,7 +1004,8 @@ def test_pump_check_comments_batches_comment_authors(client, auth_user, make_use
         event.remove(db.engine, "before_cursor_execute", before_cursor_execute)
 
     assert response.status_code == 200
-    assert [row["body"] for row in response.get_json()["comments"]] == ["First", "Second"]
+    # Feed V2: yorumlar artık newest-first keyset (before_id) sayfalanır.
+    assert [row["body"] for row in response.get_json()["comments"]] == ["Second", "First"]
     assert any(
         re.search(r'FROM\s+"?user"?\b', statement, re.IGNORECASE) and " IN (" in statement
         for statement in user_selects
