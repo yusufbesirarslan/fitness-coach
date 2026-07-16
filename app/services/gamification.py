@@ -74,7 +74,7 @@ def _drop_lb_dirty(session, *args):
     session.info.pop("lb_dirty", None)
 
 
-def award_xp(user_id, amount):
+def award_xp(user_id, amount, count_challenge_xp=True):
     # Aynı kullanıcı için eşzamanlı XP verilişleri (8 thread'lik gunicorn'da paralel
     # istekler) düz oku-değiştir-yaz ile kayıp güncellemeye → leaderboard eksik
     # sayımına yol açardı. Satırı kilitle; SQLite'ta no-op ama Postgres'te
@@ -100,6 +100,14 @@ def award_xp(user_id, amount):
         if new_level > get_level(old_points):
             log_activity(user_id, "level_up",
                          f"{new_level}. seviyeye ulaştı! ({get_title(new_level)})")
+        # Challenge huni: kazanılan XP 'xp_earned' metriğini besler. Ödül XP'si
+        # (challenge/rollover) count_challenge_xp=False ile GELMEZ → sonsuz döngü yok.
+        if count_challenge_xp and amount:
+            try:
+                from app.services.challenges import record_event
+                record_event(user_id, "xp_earned", amount)
+            except Exception:
+                pass
         return new_points
     return None
 
@@ -205,8 +213,9 @@ def run_weekly_rollover(now=None, force_week=None):
         # Doğrudan rank_points += xp yazınca (eski hal) büyük XP sıçraması olsa bile
         # "N. seviyeye ulaştı" aktivitesi hiç üretilmiyordu. award_xp weekly_xp'yi de
         # artırır ama aşağıdaki toplu reset onu sıfırladığından ödül yine YALNIZCA
-        # all-time'a işler.
-        award_xp(u.id, xp)
+        # all-time'a işler. count_challenge_xp=False: ödül XP'si xp_earned
+        # challenge'ını beslemesin (rollover haftalık, döngü riski).
+        award_xp(u.id, xp, count_challenge_xp=False)
         db.session.add(WeeklyWinner(user_id=u.id, week_key=week_key,
                                     rank=rank, xp_awarded=xp, notified=False))
         winners.append({"user_id": u.id, "rank": rank, "xp": xp})
@@ -247,6 +256,14 @@ def _claim_quest(user_id, quest_type):
     """Görev ilerlemesini + XP'yi + activity'yi session'a EKLER ama COMMIT ETMEZ.
     Çağıran kendi transaction'ında commit eder (atomiklik için — C1). Görev yoksa
     veya bugün zaten alındıysa None döner (session'a hiçbir şey eklemeden)."""
+    # Challenge huni: her quest olayı (login, workout_logged, meal_logged, ...) buradan
+    # geçer; dedup record_event içindedir. COMMIT ETMEZ (çağıranın transaction'ı).
+    # DailyQuest satırı olmasa bile challenge ilerlemesi kaydedilsin diye EN BAŞTA.
+    try:
+        from app.services.challenges import record_event
+        record_event(user_id, quest_type)
+    except Exception:
+        pass
     quest = DailyQuest.query.filter_by(quest_type=quest_type, is_active=True).first()
     if not quest:
         return None

@@ -115,13 +115,19 @@ def test_featured_requires_opt_in(app):
     assert UserChallengeProgress.query.filter_by(user_id=u.id).count() == 0  # no auto-create for featured
 
 
-def test_record_event_never_commits(app):
+def test_record_event_never_commits(app, monkeypatch):
+    # record_event çağıranla aynı transaction'da çalışmalı → HİÇ commit etmemeli
+    # (atomiklik sözleşmesi). commit'i casusla: prod-Postgres savepoint semantiği
+    # SQLite'ta birebir taklit edilemediği için rollback yerine doğrudan "commit
+    # çağrıldı mı?" kontrol edilir (dialect-bağımsız + record_event'in geniş
+    # except'i AssertionError'ı yutar, bu yüzden istisna değil sayaç kullanılır).
     from app.services import challenges
     u = _mkuser(app)
     _seed_challenge(app, code="weekly_workouts", metric="workout_logged", target_value=3)
+    commits = []
+    monkeypatch.setattr(db.session, "commit", lambda *a, **k: commits.append(1))
     challenges.record_event(u.id, "workout_logged")
-    db.session.rollback()   # if record_event committed, the row would survive
-    assert UserChallengeProgress.query.filter_by(user_id=u.id).count() == 0
+    assert commits == []
 
 
 # ── Task 5: join + board + seed ───────────────────────────────────────────
