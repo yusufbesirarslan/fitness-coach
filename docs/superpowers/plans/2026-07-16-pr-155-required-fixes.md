@@ -166,6 +166,10 @@ Run: `python -m pytest tests/test_ai_stream.py tests/test_ai_pipeline.py tests/t
         assert np.sanitize_meal_total_macros(
             20000, 1000, 2000, 500) == (10000.0, 500.0, 1000.0, 250.0)
 
+    def test_meal_total_sanitizer_caps_macro_without_high_calories():
+        assert np.sanitize_meal_total_macros(
+            1000, 5000, 0, 0) == (400.0, 2000.0, 0, 0)
+
 Add a route test returning negative and excessive parseable AI JSON and assert the saved row equals the sanitized payload.
 
 - [ ] **Step 2: Verify red**
@@ -174,7 +178,7 @@ Run: `python -m pytest tests/test_nutrition_pipeline.py tests/test_nutrition_rou
 
 - [ ] **Step 3: Implement and call the helper**
 
-Add `MAX_MEAL_TOTAL_KCAL = 10000.0`, import `math`, define finite coercion, apply proportional scaling, and reuse the existing hard Atwater correction:
+Add `MAX_MEAL_TOTAL_KCAL = 10000.0`, `MAX_MEAL_TOTAL_MACRO_G = 2000.0`, and `MAX_MEAL_TOTAL_FAT_G = 1000.0`. Import `math`, define finite coercion, apply the strictest proportional ceiling, and reuse the existing hard Atwater correction:
 
     def _finite_nonnegative(value):
         value = _num(value)
@@ -186,7 +190,16 @@ Add `MAX_MEAL_TOTAL_KCAL = 10000.0`, import `math`, define finite coercion, appl
             for value in (calories, protein, carbs, fat)
         ]
         calories, protein, carbs, fat = values
-        scale = min(1.0, MAX_MEAL_TOTAL_KCAL / calories) if calories else 1.0
+        ratios = [1.0]
+        if calories:
+            ratios.append(MAX_MEAL_TOTAL_KCAL / calories)
+        if protein:
+            ratios.append(MAX_MEAL_TOTAL_MACRO_G / protein)
+        if carbs:
+            ratios.append(MAX_MEAL_TOTAL_MACRO_G / carbs)
+        if fat:
+            ratios.append(MAX_MEAL_TOTAL_FAT_G / fat)
+        scale = min(1.0, *ratios)
         calories, protein, carbs, fat = [
             round(value * scale, 1) for value in values
         ]
