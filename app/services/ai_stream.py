@@ -21,6 +21,8 @@
 #     İlk-token gecikmesi kazandırmaz; UX'i ve tek bir olay sözleşmesini korur.
 #     Asıl akış yolu Bedrock'tır (prod'da BEDROCK_ENABLED=1).
 import json
+import queue
+import threading
 
 from flask import current_app
 
@@ -50,6 +52,29 @@ def _usage_of(message):
 def _chunks(text):
     for i in range(0, len(text), CHUNK_CHARS):
         yield text[i:i + CHUNK_CHARS]
+
+
+def _stream_bedrock_turn(messages_client, call_kwargs):
+    messages = queue.SimpleQueue()
+
+    def produce():
+        try:
+            with model_concurrency_slot():
+                with messages_client.stream(**call_kwargs) as stream:
+                    for text in stream.text_stream:
+                        if text:
+                            messages.put({"kind": "delta", "text": text})
+                    final = stream.get_final_message()
+            messages.put({"kind": "final", "message": final})
+        except Exception as exc:
+            messages.put({"kind": "exception", "exception": exc})
+
+    threading.Thread(target=produce, daemon=True).start()
+    while True:
+        message = messages.get()
+        yield message
+        if message["kind"] in {"final", "exception"}:
+            return
 
 
 def stream_coach_answer(user_id, question, context, history, language="tr"):
@@ -92,55 +117,58 @@ def _stream_bedrock(user_id, question, context, history, language):
     tools_ran = 0
     usage = None
 
-    with model_concurrency_slot():
-        for _ in range(ai_coach._COACH_TOOL_LOOP_CAP):
-            try:
-                with ai_coach.bedrock_client.messages.stream(
-                    model=BEDROCK_MODEL,
-                    max_tokens=max_tokens,
-                    system=system,
-                    messages=convo,
-                    tools=tools,
-                ) as stream:
-                    for text in stream.text_stream:
-                        if not text:
-                            continue
-                        parts.append(text)
-                        yield {"type": "delta", "text": text}
-                    final = stream.get_final_message()
-            except Exception as e:
-                # Yedek YALNIZCA hiçbir şey yayınlanmamış VE hiçbir araç yan etki
-                # üretmemişken güvenlidir; aksi halde sağlayıcı değiştirmek
-                # kullanıcının gördüğü metni bozar / yan etkiyi tekrarlar.
-                if not parts and tools_ran == 0:
-                    raise ai_coach._BedrockFallback(f"{type(e).__name__}: {e}")
-                current_app.logger.warning(
-                    "[COACH][stream] Bedrock akışı yarıda hata verdi: %s", e)
-                yield {"type": "error", "key": "coach.reply_failed"}
-                return
+    for _ in range(ai_coach._COACH_TOOL_LOOP_CAP):
+        call_kwargs = {
+            "model": BEDROCK_MODEL,
+            "max_tokens": max_tokens,
+            "system": system,
+            "messages": convo,
+            "tools": tools,
+        }
+        try:
+            for message in _stream_bedrock_turn(
+                    ai_coach.bedrock_client.messages, call_kwargs):
+                if message["kind"] == "delta":
+                    text = message["text"]
+                    parts.append(text)
+                    yield {"type": "delta", "text": text}
+                elif message["kind"] == "final":
+                    final = message["message"]
+                else:
+                    raise message["exception"]
+        except Exception as e:
+            # Yedek YALNIZCA hiçbir şey yayınlanmamış VE hiçbir araç yan etki
+            # üretmemişken güvenlidir; aksi halde sağlayıcı değiştirmek
+            # kullanıcının gördüğü metni bozar / yan etkiyi tekrarlar.
+            if not parts and tools_ran == 0:
+                raise ai_coach._BedrockFallback(f"{type(e).__name__}: {e}")
+            current_app.logger.warning(
+                "[COACH][stream] Bedrock akışı yarıda hata verdi: %s", e)
+            yield {"type": "error", "key": "coach.reply_failed"}
+            return
 
-            usage = _usage_of(final) or usage
+        usage = _usage_of(final) or usage
 
-            if getattr(final, "stop_reason", None) != "tool_use":
-                text = "".join(parts)
-                if not text and tools_ran == 0:
-                    # Hiç metin yok ve hiç araç çalışmadı → soru cevaplanabilirdi,
-                    # OpenAI'ya düş (bloklayıcı yoldaki B4 mantığının aynısı).
-                    raise ai_coach._BedrockFallback("boş Bedrock akışı (metin yok)")
-                yield {"type": "done", "text": text, "usage": usage,
-                       "provider": "bedrock"}
-                return
+        if getattr(final, "stop_reason", None) != "tool_use":
+            text = "".join(parts)
+            if not text and tools_ran == 0:
+                # Hiç metin yok ve hiç araç çalışmadı → soru cevaplanabilirdi,
+                # OpenAI'ya düş (bloklayıcı yoldaki B4 mantığının aynısı).
+                raise ai_coach._BedrockFallback("boş Bedrock akışı (metin yok)")
+            yield {"type": "done", "text": text, "usage": usage,
+                   "provider": "bedrock"}
+            return
 
-            convo.append({"role": "assistant", "content": final.content})
-            tool_results = []
-            for block in final.content:
-                if getattr(block, "type", None) == "tool_use":
-                    out = ai_coach._dispatch_coach_tool(
-                        user_id, block.name, json.dumps(block.input or {}))
-                    tool_results.append({"type": "tool_result",
-                                         "tool_use_id": block.id, "content": out})
-                    tools_ran += 1
-            convo.append({"role": "user", "content": tool_results})
+        convo.append({"role": "assistant", "content": final.content})
+        tool_results = []
+        for block in final.content:
+            if getattr(block, "type", None) == "tool_use":
+                out = ai_coach._dispatch_coach_tool(
+                    user_id, block.name, json.dumps(block.input or {}))
+                tool_results.append({"type": "tool_result",
+                                     "tool_use_id": block.id, "content": out})
+                tools_ran += 1
+        convo.append({"role": "user", "content": tool_results})
 
     # Araç döngüsü tavana dayandı — dostça yedek metni akıt (yanıtsız bırakma).
     yield from _emit_text(ai_coach._COACH_FALLBACKS[

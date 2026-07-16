@@ -14,13 +14,14 @@ get_final_message), gerçek AWS/OpenAI yok.
 
     python -m pytest tests/test_ai_stream.py -v
 """
+import threading
 from types import SimpleNamespace
 
 import pytest
 
 from app.extensions import db
 from app.models import CoachConversation, CoachMessage
-from app.services import ai_coach, ai_pipeline, ai_stream, context_builder
+from app.services import ai_coach, ai_gate, ai_pipeline, ai_stream, context_builder
 
 
 # ── Sahte Bedrock akış altyapısı ────────────────────────────────────────────
@@ -126,6 +127,26 @@ def _collect(user_id, question, context="", history=None, language="tr"):
         user_id, question, context, history or [], language=language))
 
 
+def _run_generator_in_thread(generator, timeout=1):
+    '''Consume a generator without letting a deadlock hang the test suite.'''
+    result = []
+    errors = []
+
+    def consume():
+        try:
+            result.extend(generator)
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=consume, daemon=True)
+    worker.start()
+    worker.join(timeout=timeout)
+    assert not worker.is_alive(), 'stream generator did not finish'
+    if errors:
+        raise errors[0]
+    return result
+
+
 # ── _usage_of yardımcı ──────────────────────────────────────────────────────
 
 def test_usage_of_reads_provider_tokens():
@@ -202,6 +223,50 @@ def test_bedrock_tool_loop_runs_tool_then_streams_final(app, bedrock_on, monkeyp
     assert any(m["role"] == "user" and isinstance(m["content"], list)
                and m["content"] and m["content"][0].get("type") == "tool_result"
                for m in second_convo)
+
+
+def test_stream_bedrock_releases_model_slot_before_tool_dispatch(
+        bedrock_on, monkeypatch):
+    monkeypatch.setattr(ai_gate, '_model_slots', threading.BoundedSemaphore(1))
+
+    def nested_slot_tool(*args, **kwargs):
+        with ai_gate.model_concurrency_slot():
+            return 'araç sonucu'
+
+    monkeypatch.setattr(ai_coach, '_dispatch_coach_tool', nested_slot_tool)
+    tool_turn = _FakeStream([], _final(
+        stop_reason='tool_use',
+        content=[_tool_use_block('query_fitx_metrics', 't1', {})]))
+    final_turn = _FakeStream(
+        ['Tamam'], _final(content=[_text_block('Tamam')]))
+    bedrock_on(tool_turn, final_turn)
+
+    result = _run_generator_in_thread(
+        ai_stream._stream_bedrock(7, 'foto', '', [], 'tr'), timeout=1)
+
+    assert result[-1]['type'] == 'done'
+
+
+def test_slow_consumer_does_not_retain_model_slot(bedrock_on, monkeypatch):
+    provider_finished = threading.Event()
+
+    class NotifyingBoundedSemaphore(threading.BoundedSemaphore):
+        def release(self, n=1):
+            super().release(n)
+            provider_finished.set()
+
+    monkeypatch.setattr(ai_gate, '_model_slots', NotifyingBoundedSemaphore(1))
+    bedrock_on(_FakeStream(
+        ['Merhaba'], _final(content=[_text_block('Merhaba')])))
+
+    gen = ai_stream._stream_bedrock(7, 'merhaba', '', [], 'tr')
+    try:
+        assert next(gen) == {'type': 'delta', 'text': 'Merhaba'}
+        assert provider_finished.wait(timeout=1)
+        assert ai_gate._model_slots.acquire(blocking=False)
+        ai_gate._model_slots.release()
+    finally:
+        gen.close()
 
 
 def test_bedrock_tool_loop_cap_emits_friendly_fallback(app, bedrock_on, monkeypatch):
