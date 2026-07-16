@@ -82,6 +82,31 @@ def test_purge_user_removes_social_and_wearable_children(app, make_user):
     assert PumpCheckComment.query.filter_by(pump_check_id=pc_id).count() == 0
 
 
+def test_user_delete_cascades_challenge_rows(app, make_user):
+    # Sprint 5 PR3: UserChallengeProgress + UserBadge user CASCADE ile temizlenir;
+    # Challenge (user_id yok, katalog) korunur.
+    from app.models import Challenge, UserBadge, UserChallengeProgress
+    user = make_user("ch_cascade")
+    uid = user.id
+    c = Challenge(code="weekly_workouts", title="X", metric="workout_logged",
+                  target_value=3, xp_reward=100, challenge_type="global", period_type="weekly")
+    db.session.add(c)
+    db.session.flush()
+    db.session.add_all([
+        UserChallengeProgress(user_id=uid, challenge_id=c.id, period_key="2026-W29", progress=1),
+        UserBadge(user_id=uid, badge_code="pump_week"),
+    ])
+    db.session.commit()
+
+    db.session.delete(user)
+    db.session.commit()
+
+    assert db.session.get(User, uid) is None
+    assert UserChallengeProgress.query.filter_by(user_id=uid).count() == 0
+    assert UserBadge.query.filter_by(user_id=uid).count() == 0
+    assert db.session.get(Challenge, c.id) is not None  # katalog parent korunur
+
+
 def test_purge_user_removes_feed_v2_rows_both_directions(app, make_user):
     from app.cli import _purge_user
     from app.models import (FeedHide, FeedItem, FeedItemComment, FeedItemLike,
