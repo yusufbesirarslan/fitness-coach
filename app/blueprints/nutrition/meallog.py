@@ -76,7 +76,7 @@ def log_meal():
             replacement, _ = handler(match)
             normalized_yemekler = _re.sub(pattern, replacement, normalized_yemekler, count=1)
     if normalized_yemekler != yemekler:
-        current_app.logger.info(f"[MEAL] Normalized: '{yemekler}' → '{normalized_yemekler}'")
+        current_app.logger.info("[MEAL] Fitness shorthand normalized")
     yemekler_for_prompt = normalized_yemekler
 
     override = data.get("override_macros")

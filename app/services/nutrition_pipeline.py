@@ -148,7 +148,7 @@ def _num(value, default=0.0):
         if value is None:
             return float(default)
         return float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return float(default)
 
 

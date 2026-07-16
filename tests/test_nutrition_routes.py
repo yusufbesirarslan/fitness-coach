@@ -481,6 +481,61 @@ def test_ai_meal_total_sanitized_before_persistence(client, auth_user, monkeypat
     } == expected
 
 
+def test_ai_meal_total_oversized_numeric_zeroed_before_persistence(
+        client, auth_user, monkeypatch):
+    monkeypatch.setattr(
+        nutrition_meallog,
+        "_openai_chat",
+        lambda **kw: json.dumps({
+            "kalori": 10 ** 400,
+            "protein": 30,
+            "karb": 10,
+            "yag": 5,
+        }),
+    )
+
+    response = client.post(
+        "/meal-log", json={"ogun": "Ogle", "yemekler": "tavuk"})
+
+    assert response.status_code == 200
+    expected = {"kalori": 0, "protein": 30.0, "karb": 10.0, "yag": 5.0}
+    assert response.get_json()["nutrients"] == expected
+    entry = MealLog.query.filter_by(user_id=auth_user.id).one()
+    assert {
+        "kalori": entry.kalori,
+        "protein": entry.protein,
+        "karb": entry.karb,
+        "yag": entry.yag,
+    } == expected
+
+
+def test_ai_meal_total_normalization_logging_omits_meal_content(
+        client, auth_user, monkeypatch, caplog):
+    captured = {}
+
+    def fake_chat(**kwargs):
+        captured["prompt"] = kwargs["messages"][0]["content"]
+        return '{"kalori": 240, "protein": 48, "karb": 6, "yag": 3}'
+
+    monkeypatch.setattr(nutrition_meallog, "_openai_chat", fake_chat)
+    sensitive_meal = "2 scoop whey private-diet-token-7f1a"
+    normalized_fragment = "2 \u00f6l\u00e7ek whey protein tozu (60g)"
+    caplog.clear()
+
+    with caplog.at_level("INFO"):
+        response = client.post(
+            "/meal-log",
+            json={"ogun": "Ara Ogun", "yemekler": sensitive_meal},
+        )
+
+    assert response.status_code == 200
+    assert normalized_fragment in captured["prompt"]
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "[MEAL] Fitness shorthand normalized" in messages
+    assert sensitive_meal not in messages
+    assert normalized_fragment not in messages
+    assert "private-diet-token-7f1a" not in messages
+
 # ---------------------------------------------------------------------------
 # Bugün / geçmiş / değerlendirme
 # ---------------------------------------------------------------------------
