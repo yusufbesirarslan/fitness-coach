@@ -10,11 +10,17 @@ from app.services.gamification import run_weekly_rollover
 
 def seed_quests():
     """Insert default daily quests into the database."""
+    # NOT: bu liste app/db_init.py'nin tohumladığı 8 quest_type ile eş tutulmalı
+    # (drift → görev ekonomisi CLI'dan seed edilen ortamlarda eksik kalırdı).
     defaults = [
         {"title": "Günlük Giriş", "description": "Bugün uygulamaya giriş yap", "points_reward": 10, "quest_type": "login"},
         {"title": "Antrenman Kaydet", "description": "Bir antrenman planı oluştur veya kaydet", "points_reward": 50, "quest_type": "workout_logged"},
         {"title": "Bir Arkadaşına Yardım Et", "description": "Bir arkadaşına mesaj gönder", "points_reward": 30, "quest_type": "suggestion_sent"},
+        {"title": "Dolabını Güncelle", "description": "Supplement dolabına yeni bir ürün ekle", "points_reward": 25, "quest_type": "supplement_added"},
         {"title": "Öğün Kaydet", "description": "Bugün bir öğün kaydet", "points_reward": 20, "quest_type": "meal_logged"},
+        {"title": "Su Hedefi", "description": "Bugün su takibini güncelle", "points_reward": 10, "quest_type": "water_logged"},
+        {"title": "Haftalık Check-in", "description": "Kilonu güncelle veya check-in yap", "points_reward": 20, "quest_type": "checkin_done"},
+        {"title": "Bir Arkadaşını Davet Et", "description": "Davet bağlantını bir arkadaşınla paylaş", "points_reward": 40, "quest_type": "friend_invited"},
     ]
     for q in defaults:
         existing = DailyQuest.query.filter_by(quest_type=q["quest_type"]).first()
@@ -87,7 +93,8 @@ def _user_child_models():
         FeedHide, FeedItem, FeedItemComment, FeedItemLike, FeedReport,
         MealLog, Notification, NutritionPlan, PendingAction, PumpCheck,
         PumpCheckComment, PumpCheckLike, Supplement, TrainingPlan,
-        UserQuestProgress, UserSession, UserWearableConnection, WaterLog,
+        UserBadge, UserChallengeProgress, UserQuestProgress, UserSession,
+        UserWearableConnection, WaterLog,
         WearableActivityLog, WearableSleepLog, WearableWorkoutLog,
         WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog,
     )
@@ -99,6 +106,7 @@ def _user_child_models():
         UserWearableConnection, WearableSleepLog, WearableActivityLog,
         WearableWorkoutLog, FeedItemLike, FeedItemComment, FeedItem,
         FeedHide, FeedReport, Notification,
+        UserChallengeProgress, UserBadge,
     )
 
 

@@ -290,6 +290,10 @@ def update_streak():
     # (aksi halde aşağıdaki güncelleme yüzünden asla tetiklenmez).
     g.prev_last_login = prev_last_login
     user.last_login = today
+    # Challenge huni: bu kilitli dal Istanbul-günü başına TAM BİR KEZ çalışır →
+    # 'active_day' metriği günde bir kez artar (aynı transaction, commit aşağıda).
+    from app.services.challenges import record_event
+    record_event(user.id, "active_day")
     streak = user.streak_count
     if streak in (7, 14, 30, 60, 100):
         log_activity(user.id, "streak_milestone",
