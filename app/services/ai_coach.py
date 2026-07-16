@@ -711,6 +711,9 @@ def _tool_analyze_gym_photo(user_id, s3_key):
         description=result["reason"][:200], valid=True, fallback=False,
         workout_score=latest_training_plan_score(user_id),
         date_key=app_today().isoformat()))
+    # Challenge huni: AI koç Pump Check'i de 'pump_check_created' sayılır (aynı tx).
+    from app.services.challenges import record_event
+    record_event(user_id, "pump_check_created")
     db.session.add(WorkoutLog(
         user_id=user_id, exercise_name=WORKOUT_COMPLETION_MARKER,
         sets=1, reps=1, weight_kg=0, volume=0))

@@ -114,6 +114,14 @@ def test_init_database_seeds_quests_and_stamps_alembic(boot_app):
     assert inspect(db.engine).has_table("alembic_version")
 
 
+def test_init_database_seeds_challenges(boot_app):
+    # Boot yolu meydan okuma kataloğunu da tohumlar (Sprint 5 PR3, idempotent).
+    from app.models import Challenge
+
+    assert Challenge.query.count() >= 8
+    assert Challenge.query.filter_by(code="weekly_workouts").first() is not None
+
+
 def test_init_database_is_idempotent(boot_app):
     from app.db_init import init_database
     from app.models import DailyQuest

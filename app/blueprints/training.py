@@ -190,6 +190,10 @@ def complete_workout():
     )
     db.session.add(pump_check)
     db.session.flush()
+    # Challenge huni: Pump Check paylaşımı 'pump_check_created' metriğini besler
+    # (aynı transaction — commit aşağıda). record_event kendi hatasını yutar.
+    from app.services.challenges import record_event
+    record_event(current_user.id, "pump_check_created")
     if visibility == "friends":
         payload = json.dumps({
             "pump_check_id": pump_check.id,

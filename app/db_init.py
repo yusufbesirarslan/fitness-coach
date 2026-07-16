@@ -109,6 +109,14 @@ def init_database(app):
                                           points_reward=pts, quest_type=qtype))
         db.session.commit()
 
+        # Meydan okuma kataloğunu tohumla (idempotent — code'a göre). Hatası boot'u
+        # kırmasın; eski kod 3 yeni tabloyu yok sayabilir (additive deploy).
+        try:
+            from app.services.challenges import seed_challenges
+            seed_challenges()
+        except Exception:
+            db.session.rollback()
+
         # Davet kodu olmayan mevcut kullanıcılara tek seferlik backfill.
         try:
             from app.services.referral import backfill_referral_codes
