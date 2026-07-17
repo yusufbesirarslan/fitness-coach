@@ -206,7 +206,16 @@ def build_context_window(conversation, budget=None):
         # Özet, geçmişin başına kullanıcı-turu notu olarak girer (system'e değil:
         # Bedrock prompt-cache'lenen system bloğu değişken içerik istemez).
         if merged and merged[0]["role"] == "user":
-            merged[0]["content"] = f"{note['content']}\n\n{merged[0]['content']}"
+            user_content = merged[0]["content"]
+            rendered = f"{note['content']}\n\n{user_content}"
+            other_used = sum(estimate_tokens(msg["content"]) for msg in merged[1:])
+            if estimate_tokens(rendered) + other_used > budget:
+                available_chars = max(
+                    (budget - other_used) * CHARS_PER_TOKEN
+                    - len(note["content"]) - len("\n\n"), 0)
+                rendered = (f"{note['content']}\n\n{user_content[:available_chars]}"
+                            if available_chars else note["content"])
+            merged[0]["content"] = rendered
         else:
             merged.insert(0, note)
     return merged
