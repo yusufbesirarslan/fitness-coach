@@ -230,6 +230,7 @@ class MealLog(db.Model):
     # zaten tarih veriyor; default yalnızca güvenlik ağı (app/timeutil tek kaynak).
     tarih      = db.Column(db.String(10), nullable=False, default=lambda: app_today().isoformat())
     source     = db.Column(db.String(20), default="manual")
+    idempotency_key = db.Column(db.String(64), nullable=True)
     photo_key  = db.Column(db.String(300), nullable=True)  # S3 nesne anahtarı (opsiyonel)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -250,6 +251,8 @@ class MealLog(db.Model):
         # yazılan defter; (user_id, tarih) kompozit indeksi user_id-only sorguları da
         # (leftmost prefix) karşılar.
         db.Index("ix_meal_log_user_id_tarih", "user_id", "tarih"),
+        db.UniqueConstraint("user_id", "idempotency_key",
+                            name="uq_meal_log_user_idempotency"),
     )
 
     def __repr__(self):

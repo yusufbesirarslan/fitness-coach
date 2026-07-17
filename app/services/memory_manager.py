@@ -148,6 +148,10 @@ def record_turn(conversation, question, answer, usage=None, interrupted=False):
     db.session.commit()
 
 
+def _normalize_context_budget(budget):
+    return max(budget, 0)
+
+
 def build_context_window(conversation, budget=None):
     """Rolling context window: [KONUŞMA ÖZETİ notu] + en yeni mesajlardan
     geriye, token bütçesi dolana kadar (pruning: daha eskiler pencere DIŞI
@@ -161,14 +165,22 @@ def build_context_window(conversation, budget=None):
 
     if budget is None:
         budget = AI_CONTEXT_TOKEN_BUDGET
+    budget = _normalize_context_budget(budget)
 
+    note = None
+    used = 0
+    if conversation.summary:
+        # Construct and cap the rendered note before allocating any row budget.
+        note = {"role": "user",
+                "content": f"[KONU\u015eMA \u00d6ZET\u0130 \u2014 \u00f6nceki turlar\u0131n \u00f6zeti]\n{conversation.summary}"}
+        note["content"] = note["content"][:max(budget, 0) * CHARS_PER_TOKEN]
+        used = estimate_tokens(note["content"])
     rows = (CoachMessage.query
             .filter(CoachMessage.conversation_id == conversation.id,
                     CoachMessage.id > (conversation.summarized_upto_id or 0))
             .order_by(CoachMessage.id.desc())
             .limit(HISTORY_FETCH_LIMIT).all())
 
-    used = estimate_tokens(conversation.summary or "")
     window = []
     for m in rows:  # yeniden eskiye
         cost = m.token_estimate or estimate_tokens(m.content)
@@ -177,8 +189,10 @@ def build_context_window(conversation, budget=None):
                 break  # bütçe doldu — kalan eski turlar pencere dışı
             # Pencerede hiçbir şey yokken ilk (en yeni) mesaj bile sığmıyorsa
             # kırpıp al: bağlamsız kalmaktansa kesilmiş son tur daha iyi.
-            content = m.content[: max(budget - used, 1) * CHARS_PER_TOKEN]
-            window.append({"role": m.role, "content": content})
+            remaining = budget - used
+            if remaining > 0:
+                content = m.content[:remaining * CHARS_PER_TOKEN]
+                window.append({"role": m.role, "content": content})
             break
         window.append({"role": m.role, "content": m.content})
         used += cost
@@ -193,15 +207,43 @@ def build_context_window(conversation, budget=None):
         else:
             merged.append(dict(msg))
 
-    if conversation.summary:
+    if note is not None:
         # Özet, geçmişin başına kullanıcı-turu notu olarak girer (system'e değil:
         # Bedrock prompt-cache'lenen system bloğu değişken içerik istemez).
-        note = {"role": "user",
-                "content": f"[KONUŞMA ÖZETİ — önceki turların özeti]\n{conversation.summary}"}
         if merged and merged[0]["role"] == "user":
-            merged[0]["content"] = f"{note['content']}\n\n{merged[0]['content']}"
+            user_content = merged[0]["content"]
+            rendered = f"{note['content']}\n\n{user_content}"
+            other_used = sum(estimate_tokens(msg["content"]) for msg in merged[1:])
+            if estimate_tokens(rendered) + other_used > budget:
+                available_chars = max(
+                    (budget - other_used) * CHARS_PER_TOKEN
+                    - len(note["content"]) - len("\n\n"), 0)
+                rendered = (f"{note['content']}\n\n{user_content[:available_chars]}"
+                            if available_chars else note["content"])
+            merged[0]["content"] = rendered
         else:
             merged.insert(0, note)
+    # Consecutive-role merging adds newline separators after the source rows
+    # were charged. Recheck the rendered output so every merge path honors the
+    # context budget. Trim oldest mutable history text first, preserving a
+    # rendered summary prefix when it shares the first user message.
+    total = sum(estimate_tokens(msg["content"]) for msg in merged)
+    summary_prefix = note["content"] if note is not None else ""
+    for index, msg in enumerate(merged):
+        if total <= budget:
+            break
+        content = msg["content"]
+        protected = 0
+        if index == 0 and summary_prefix and content.startswith(summary_prefix):
+            protected = len(summary_prefix)
+            if len(content) > protected and content[protected:].startswith("\n\n"):
+                protected += 2
+        removable = len(content) - protected
+        if removable <= 0:
+            continue
+        trim_chars = min(removable, (total - budget) * CHARS_PER_TOKEN)
+        msg["content"] = content[:protected] + content[protected + trim_chars:]
+        total = sum(estimate_tokens(item["content"]) for item in merged)
     return merged
 
 

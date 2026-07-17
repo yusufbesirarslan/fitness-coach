@@ -150,3 +150,21 @@ def test_barcode_add_to_diary_writes_canonical_meal_log(app, client, auth_user):
     row = MealLog.query.filter_by(user_id=auth_user.id, source="barcode").one()
     assert row.yemekler == "Acme Protein Bar (2x 1 bar)"
     assert row.kalori == 420.0
+
+
+def test_barcode_add_idempotency_writes_one_row(client, auth_user):
+    headers = {"Idempotency-Key": "018f47d2-a2c7-7f52-a5b0-123456789abc"}
+    payload = {
+        "barcode": "5000159407236",
+        "meal": "\u0041ra \u00d6\u011f\u00fcn",
+        "food": barcode_svc.normalize_food_model("5000159407236", _protein_bar_payload()),
+        "serving_id": "bar-1",
+        "serving_quantity": 1,
+    }
+
+    first = client.post("/api/food/barcode/add", json=payload, headers=headers)
+    second = client.post("/api/food/barcode/add", json=payload, headers=headers)
+
+    assert first.status_code == second.status_code == 200
+    assert second.get_json()["meal_log_id"] == first.get_json()["meal_log_id"]
+    assert MealLog.query.filter_by(user_id=auth_user.id, source="barcode").count() == 1

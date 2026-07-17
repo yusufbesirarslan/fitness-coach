@@ -158,6 +158,54 @@ def test_window_prepends_summary_note_and_skips_summarized_messages(app, make_us
     assert "eski cevap" not in window[0]["content"]
 
 
+def test_summary_header_counts_toward_context_budget(app, make_user):
+    user = make_user("mem_user")
+    conv = mm.get_or_create_active_conversation(user.id)
+    conv.summary = "x" * 80
+    _add_msgs(conv, [("assistant", "recent message")])
+
+    window = mm.build_context_window(conv, budget=25)
+
+    assert sum(mm.estimate_tokens(message["content"]) for message in window) <= 25
+    assert all(message["content"] != "recent message" for message in window)
+
+def test_summary_merge_stays_within_context_budget(app, make_user):
+    user = make_user("mem_user")
+    conv = mm.get_or_create_active_conversation(user.id)
+    conv.summary = "abc"
+    _add_msgs(conv, [("user", "hey")])
+
+    window = mm.build_context_window(conv, budget=11)
+
+    assert sum(mm.estimate_tokens(message["content"]) for message in window) <= 11
+
+
+def test_summary_and_consecutive_history_merge_stay_within_context_budget(app, make_user):
+    user = make_user("mem_user")
+    conv = mm.get_or_create_active_conversation(user.id)
+    conv.summary = "abc"
+    _add_msgs(conv, [("assistant", "one"), ("assistant", "two"),
+                     ("assistant", "tri"), ("assistant", "four")])
+
+    window = mm.build_context_window(conv, budget=12)
+
+    assert sum(mm.estimate_tokens(message["content"]) for message in window) <= 12
+
+
+def test_negative_context_budget_normalizes_to_zero(app, make_user):
+    user = make_user("mem_user")
+    conv = mm.get_or_create_active_conversation(user.id)
+    conv.summary = "abc"
+    _add_msgs(conv, [("assistant", "recent")])
+
+    negative_window = mm.build_context_window(conv, budget=-1)
+    zero_window = mm.build_context_window(conv, budget=0)
+
+    assert mm._normalize_context_budget(-1) == 0
+    assert negative_window == zero_window
+    assert sum(mm.estimate_tokens(message["content"]) for message in negative_window) <= 0
+
+
 def test_window_merges_consecutive_same_role_messages(app, make_user):
     # B15: Anthropic ardışık aynı-rol turlarında 400 verir (yarıda kesilen
     # stream'ler ardışık user turu bırakabilir) → birleştirilmeli.

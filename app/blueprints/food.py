@@ -10,6 +10,7 @@ from app.services import barcode as barcode_svc
 from app.services.fatsecret import _food_get_servings, _fs_relevant_candidates, _get_fatsecret_token
 from app.services.foodcache import _cache_food_id, _get_cached_food_id, _get_cached_macros
 from app.services.gamification import complete_quest_for_user
+from app.services import meal_idempotency
 
 
 bp = Blueprint("food", __name__)
@@ -74,6 +75,24 @@ def barcode_add_to_diary():
     if meal not in ("Kahvaltı", "Öğle", "Akşam", "Ara Öğün"):
         return jsonify({"error": "invalid_meal"}), 400
 
+    idempotency_key = meal_idempotency.read_idempotency_key()
+    existing = meal_idempotency.find_existing(current_user.id, idempotency_key)
+    if existing:
+        goal_impact = barcode_svc.goal_impact_for_add(current_user.id, {
+            "calories": 0, "protein": 0, "carbs": 0, "fat": 0,
+        })
+        return jsonify({
+            "message": "logged", "meal_log_id": existing.id,
+            "nutrients": {
+                "kalori": round(existing.kalori or 0, 1),
+                "protein": round(existing.protein or 0, 1),
+                "karb": round(existing.karb or 0, 1),
+                "yag": round(existing.yag or 0, 1),
+            },
+            "goal_impact": goal_impact,
+            "analytics_events": ["Added To Diary"],
+        })
+
     food = data.get("food")
     if not isinstance(food, dict):
         product = barcode_svc.get_barcode_product(data.get("barcode", ""))
@@ -90,17 +109,19 @@ def barcode_add_to_diary():
         return jsonify({"error": "invalid_serving"}), 400
     goal_impact = barcode_svc.goal_impact_for_add(current_user.id, added_preview)
 
-    entry = barcode_svc.add_food_to_diary(
+    result = barcode_svc.add_food_to_diary(
         current_user.id,
         food,
         meal,
         serving_id=data.get("serving_id"),
         quantity=data.get("serving_quantity", 1),
+        idempotency_key=idempotency_key,
     )
-    if not entry:
+    if not result:
         return jsonify({"error": "invalid_serving"}), 400
+    entry, created = result
 
-    quest_result = complete_quest_for_user(current_user.id, "meal_logged")
+    quest_result = complete_quest_for_user(current_user.id, "meal_logged") if created else None
     response = {
         "message": "logged",
         "meal_log_id": entry.id,

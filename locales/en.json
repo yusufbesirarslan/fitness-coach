@@ -866,6 +866,7 @@
   "pump_check.sharing.private": "Private",
 
   "route.weight_numeric": "Weight must be numeric",
+  "route.weight_range": "Weight must be between 20 and 500 kg",
   "route.body_numeric": "Weight, height and age must be numeric",
   "route.invalid_goal": "Invalid goal selection.",
   "route.username_taken": "This username is already taken.",

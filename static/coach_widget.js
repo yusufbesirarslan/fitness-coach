@@ -3,6 +3,14 @@
 (function () {
   'use strict';
 
+
+  function mealWriteHeaders() {
+    var key = (window.crypto && window.crypto.randomUUID)
+      ? window.crypto.randomUUID()
+      : ('meal-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
+    return { 'Content-Type': 'application/json', 'Idempotency-Key': key };
+  }
+
   /* ── 1. Inject CSS ──
      Harici stylesheet olarak yüklenir: <link rel="stylesheet" href="/static/coach_widget.css">.
      CSP style-src-elem 'self' same-origin <link>'lere izin verir; nonce gerekmez.
@@ -631,9 +639,10 @@
       btn.textContent = '...';
       var h    = new Date().getHours();
       var ogun = h < 11 ? 'kahvalti' : h < 15 ? 'ogle' : h < 20 ? 'aksam' : 'ara';
+      var idempotencyHeaders = mealWriteHeaders();
       fetch('/meal-log', {
         method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: idempotencyHeaders,
         body:    JSON.stringify({
           ogun: ogun,
           yemekler: d.name,

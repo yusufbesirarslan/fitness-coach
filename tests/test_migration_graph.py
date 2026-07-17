@@ -1,3 +1,8 @@
+import importlib.util
+
+import sqlalchemy as sa
+from alembic.operations import Operations
+from alembic.runtime.migration import MigrationContext
 import ast
 from pathlib import Path
 
@@ -28,7 +33,7 @@ def test_alembic_migrations_have_single_head():
 
     heads = sorted(set(revisions) - down_revisions)
 
-    assert heads == ["aa77bb88cc99"]
+    assert heads == ["bb88cc99dd00"]
 
 
 def test_activity_trigger_revision_is_postgresql_guarded():
@@ -45,3 +50,37 @@ def test_activity_trigger_revision_is_postgresql_guarded():
     assert "CREATE TRIGGER trg_calc_activity" in source
     assert "DROP TRIGGER IF EXISTS trg_calc_activity ON daily_activity" in source
     assert "DROP FUNCTION IF EXISTS calc_activity_calories()" in source
+
+
+def test_meal_idempotency_migration_upgrades_deployed_pre_column_schema(tmp_path):
+    """The additive migration must work when a deployed ledger lacks the column."""
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "migrations"
+        / "versions"
+        / "bb88cc99dd00_add_meal_log_idempotency.py"
+    )
+    spec = importlib.util.spec_from_file_location("meal_idempotency_migration", migration_path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'pre_column.db'}")
+    with engine.begin() as connection:
+        connection.execute(sa.text("""
+            CREATE TABLE meal_log (
+                id INTEGER PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                ogun VARCHAR(100) NOT NULL,
+                yemekler TEXT NOT NULL
+            )
+        """))
+        context = MigrationContext.configure(connection)
+        with Operations.context(context):
+            migration.upgrade()
+
+        inspector = sa.inspect(connection)
+        assert "idempotency_key" in {c["name"] for c in inspector.get_columns("meal_log")}
+        assert any(
+            constraint["name"] == "uq_meal_log_user_idempotency"
+            for constraint in inspector.get_unique_constraints("meal_log")
+        )

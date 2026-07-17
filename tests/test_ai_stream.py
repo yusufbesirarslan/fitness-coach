@@ -14,13 +14,14 @@ get_final_message), gerçek AWS/OpenAI yok.
 
     python -m pytest tests/test_ai_stream.py -v
 """
+import threading
 from types import SimpleNamespace
 
 import pytest
 
 from app.extensions import db
 from app.models import CoachConversation, CoachMessage
-from app.services import ai_coach, ai_pipeline, ai_stream, context_builder
+from app.services import ai_coach, ai_gate, ai_pipeline, ai_stream, context_builder
 
 
 # ── Sahte Bedrock akış altyapısı ────────────────────────────────────────────
@@ -126,6 +127,26 @@ def _collect(user_id, question, context="", history=None, language="tr"):
         user_id, question, context, history or [], language=language))
 
 
+def _run_generator_in_thread(generator, timeout=1):
+    '''Consume a generator without letting a deadlock hang the test suite.'''
+    result = []
+    errors = []
+
+    def consume():
+        try:
+            result.extend(generator)
+        except BaseException as exc:
+            errors.append(exc)
+
+    worker = threading.Thread(target=consume, daemon=True)
+    worker.start()
+    worker.join(timeout=timeout)
+    assert not worker.is_alive(), 'stream generator did not finish'
+    if errors:
+        raise errors[0]
+    return result
+
+
 # ── _usage_of yardımcı ──────────────────────────────────────────────────────
 
 def test_usage_of_reads_provider_tokens():
@@ -204,6 +225,50 @@ def test_bedrock_tool_loop_runs_tool_then_streams_final(app, bedrock_on, monkeyp
                for m in second_convo)
 
 
+def test_stream_bedrock_releases_model_slot_before_tool_dispatch(
+        bedrock_on, monkeypatch):
+    monkeypatch.setattr(ai_gate, '_model_slots', threading.BoundedSemaphore(1))
+
+    def nested_slot_tool(*args, **kwargs):
+        with ai_gate.model_concurrency_slot():
+            return 'araç sonucu'
+
+    monkeypatch.setattr(ai_coach, '_dispatch_coach_tool', nested_slot_tool)
+    tool_turn = _FakeStream([], _final(
+        stop_reason='tool_use',
+        content=[_tool_use_block('query_fitx_metrics', 't1', {})]))
+    final_turn = _FakeStream(
+        ['Tamam'], _final(content=[_text_block('Tamam')]))
+    bedrock_on(tool_turn, final_turn)
+
+    result = _run_generator_in_thread(
+        ai_stream._stream_bedrock(7, 'foto', '', [], 'tr'), timeout=1)
+
+    assert result[-1]['type'] == 'done'
+
+
+def test_slow_consumer_does_not_retain_model_slot(bedrock_on, monkeypatch):
+    provider_finished = threading.Event()
+
+    class NotifyingBoundedSemaphore(threading.BoundedSemaphore):
+        def release(self, n=1):
+            super().release(n)
+            provider_finished.set()
+
+    monkeypatch.setattr(ai_gate, '_model_slots', NotifyingBoundedSemaphore(1))
+    bedrock_on(_FakeStream(
+        ['Merhaba'], _final(content=[_text_block('Merhaba')])))
+
+    gen = ai_stream._stream_bedrock(7, 'merhaba', '', [], 'tr')
+    try:
+        assert next(gen) == {'type': 'delta', 'text': 'Merhaba'}
+        assert provider_finished.wait(timeout=1)
+        assert ai_gate._model_slots.acquire(blocking=False)
+        ai_gate._model_slots.release()
+    finally:
+        gen.close()
+
+
 def test_bedrock_tool_loop_cap_emits_friendly_fallback(app, bedrock_on, monkeypatch):
     # Model sürekli araç isteyip final metne hiç varmazsa döngü tavana dayanır;
     # kullanıcı yanıtsız kalmamalı — dostça yedek metin akıtılır.
@@ -259,7 +324,12 @@ def test_bedrock_error_after_first_delta_emits_error_no_fallback(
         events = _collect(1, "soru")
 
     assert [e["text"] for e in events if e["type"] == "delta"] == ["yarım cümle"]
-    assert events[-1] == {"type": "error", "key": "coach.reply_failed"}
+    assert events[-1] == {
+        "type": "error",
+        "key": "coach.reply_failed",
+        "work_performed": True,
+        "partial_text": "yar\u0131m c\u00fcmle",
+    }
     assert called["openai"] is False  # yan etki tekrarı YOK
 
 
@@ -279,8 +349,47 @@ def test_bedrock_error_after_tool_side_effect_no_fallback(
     with app.app_context():
         events = _collect(1, "soru")
 
-    assert events[-1] == {"type": "error", "key": "coach.reply_failed"}
+    assert events[-1] == {
+        "type": "error",
+        "key": "coach.reply_failed",
+        "work_performed": True,
+        "partial_text": "",
+    }
     assert called["openai"] is False
+
+
+def test_bedrock_processing_error_after_tool_work_emits_work_aware_error(
+        app, bedrock_on, monkeypatch, caplog):
+    monkeypatch.setattr(ai_coach, "_dispatch_coach_tool", lambda *a, **k: "ok")
+    tool_turn = _FakeStream([], _final(
+        stop_reason="tool_use",
+        content=[_tool_use_block("confirm_and_commit_meal_log", "t", {})]))
+
+    class BrokenFinal:
+        stop_reason = "end_turn"
+        content = []
+
+        @property
+        def usage(self):
+            raise RuntimeError("sensitive parsing detail")
+
+    bedrock_on(tool_turn, _FakeStream([], BrokenFinal()))
+    monkeypatch.setattr(
+        ai_coach,
+        "_run_coach_conversation_openai",
+        lambda *a, **k: pytest.fail("tool work must prevent provider fallback"),
+    )
+
+    with app.app_context():
+        events = _collect(1, "soru")
+
+    assert events[-1] == {
+        "type": "error",
+        "key": "coach.reply_failed",
+        "work_performed": True,
+        "partial_text": "",
+    }
+    assert "sensitive parsing detail" not in caplog.text
 
 
 def test_bedrock_empty_answer_no_tools_falls_back(app, bedrock_on, monkeypatch):
@@ -337,7 +446,12 @@ def test_openai_fallback_error_emits_error_event(app, monkeypatch):
     with app.app_context():
         events = _collect(1, "soru")
 
-    assert events == [{"type": "error", "key": "coach.reply_failed"}]
+    assert events == [{
+        "type": "error",
+        "key": "coach.reply_failed",
+        "work_performed": False,
+        "partial_text": "",
+    }]
 
 
 # ── ai_pipeline.stream_answer (orkestrasyon) ─────────────────────────────────
@@ -407,9 +521,49 @@ def test_stream_answer_error_event_passthrough_no_record(stream_env, app, monkey
     with app.test_request_context("/"):
         events = _drive(stream_env.id, "selam")
         conv_id = events[0]["conversation_id"]
-        assert events[-1] == {"type": "error", "key": "coach.reply_failed"}
+        assert events[-1] == {
+            "type": "error",
+            "key": "coach.reply_failed",
+            "work_performed": False,
+            "partial_text": "",
+        }
         # Hata çerçevesi hafızaya YAZILMAZ.
         assert CoachMessage.query.filter_by(conversation_id=conv_id).count() == 0
+
+def test_stream_answer_processing_error_after_delta_persists_interruption(
+        stream_env, app, bedrock_on, monkeypatch, caplog):
+    def dispatch_boom(*args, **kwargs):
+        raise RuntimeError("sensitive dispatch detail")
+
+    monkeypatch.setattr(ai_coach, "_dispatch_coach_tool", dispatch_boom)
+    bedrock_on(_FakeStream(
+        ["K\u0131smi yan\u0131t"],
+        _final(
+            stop_reason="tool_use",
+            content=[_tool_use_block("confirm_and_commit_meal_log", "t", {})],
+        ),
+    ))
+
+    with app.test_request_context("/"):
+        events = _drive(stream_env.id, "soru")
+        conv_id = events[0]["conversation_id"]
+
+        assert events[-1] == {
+            "type": "error",
+            "key": "coach.reply_failed",
+            "work_performed": True,
+            "partial_text": "K\u0131smi yan\u0131t",
+        }
+        rows = (CoachMessage.query.filter_by(conversation_id=conv_id)
+                .order_by(CoachMessage.id.asc()).all())
+        assert [(row.role, row.content) for row in rows] == [
+            ("user", "soru"),
+            ("assistant", "K\u0131smi yan\u0131t"),
+        ]
+        assert rows[1].interrupted is True
+
+    assert "sensitive dispatch detail" not in caplog.text
+
 
 
 def test_stream_answer_fallback_text_not_recorded(stream_env, app, monkeypatch):

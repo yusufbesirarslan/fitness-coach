@@ -28,19 +28,36 @@ def lb_sync_user(user):
         pass  # Postgres kaynak; boot/rollover'daki lb_rebuild sürüklenmeyi düzeltir
 
 
-def lb_rebuild():
+def _iter_leaderboard_users(batch_size=500):
+    """Yield User rows in keyset batches to bound leaderboard rebuild memory use."""
+    last_id = 0
+    while True:
+        batch = (
+            User.query.filter(User.id > last_id)
+            .order_by(User.id)
+            .limit(batch_size)
+            .all()
+        )
+        if not batch:
+            return
+        yield batch
+        last_id = batch[-1].id
+
+
+def lb_rebuild(batch_size=500):
     """Her iki sorted set'i Postgres'ten sıfırdan kur (boot + haftalık rollover sonrası)."""
     if not redis_client:
         return
     try:
-        pipe = redis_client.pipeline()
-        pipe.delete(LB_ALLTIME_KEY, LB_WEEKLY_KEY)
-        for u in User.query.all():
-            s = u.streak_count or 0
-            uid = str(u.id)
-            pipe.zadd(LB_ALLTIME_KEY, {uid: _lb_score(u.rank_points, s)})
-            pipe.zadd(LB_WEEKLY_KEY,  {uid: _lb_score(u.weekly_xp, s)})
-        pipe.execute()
+        redis_client.delete(LB_ALLTIME_KEY, LB_WEEKLY_KEY)
+        for users in _iter_leaderboard_users(batch_size):
+            pipe = redis_client.pipeline()
+            for u in users:
+                s = u.streak_count or 0
+                uid = str(u.id)
+                pipe.zadd(LB_ALLTIME_KEY, {uid: _lb_score(u.rank_points, s)})
+                pipe.zadd(LB_WEEKLY_KEY,  {uid: _lb_score(u.weekly_xp, s)})
+            pipe.execute()
     except Exception:
         pass
 

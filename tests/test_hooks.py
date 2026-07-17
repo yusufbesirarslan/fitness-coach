@@ -82,6 +82,53 @@ def test_csrf_valid_origin_but_missing_token_rejected(raw_client):
                                headers={"Origin": "http://localhost"})
     assert response.status_code == 403
 
+def test_csrf_origin_null_rejected_with_valid_token(raw_client):
+    headers = {"Origin": "null", **_with_token(raw_client)}
+    response = raw_client.post("/login", json={"username": "x", "password": "y"},
+                               headers=headers)
+    assert response.status_code == 403
+
+
+def test_csrf_malformed_origin_rejected_with_valid_token(raw_client):
+    headers = {"Origin": "http://[", **_with_token(raw_client)}
+    response = raw_client.post("/login", json={"username": "x", "password": "y"},
+                               headers=headers)
+    assert response.status_code == 403
+
+
+def test_csrf_scheme_mismatch_rejected_with_valid_token(raw_client, monkeypatch):
+    _reject_cognito_login(monkeypatch)
+    headers = {"Origin": "https://localhost", **_with_token(raw_client)}
+    response = raw_client.post("/login", json={"username": "x", "password": "y"},
+                               headers=headers)
+    assert response.status_code == 403
+
+
+def test_csrf_port_mismatch_rejected_with_valid_token(raw_client, monkeypatch):
+    _reject_cognito_login(monkeypatch)
+    headers = {"Origin": "http://localhost:8080", **_with_token(raw_client)}
+    response = raw_client.post("/login", json={"username": "x", "password": "y"},
+                               headers=headers)
+    assert response.status_code == 403
+
+
+def test_csrf_default_port_origin_reaches_route(raw_client, monkeypatch):
+    _reject_cognito_login(monkeypatch)
+    headers = {"Origin": "http://localhost:80", **_with_token(raw_client)}
+    response = raw_client.post("/login", json={"username": "x", "password": "y"},
+                               headers=headers)
+    assert response.status_code == 401
+
+
+def test_csrf_valid_same_origin_with_token_reaches_route(raw_client, monkeypatch):
+    _reject_cognito_login(monkeypatch)
+    headers = {"Origin": "http://localhost", **_with_token(raw_client)}
+    response = raw_client.post("/login", json={"username": "x", "password": "y"},
+                               headers=headers)
+    assert response.status_code == 401
+
+
+
 
 def test_csrf_valid_origin_but_wrong_token_rejected(raw_client):
     _with_token(raw_client, token="gercek-token")

@@ -18,6 +18,7 @@ from app.blueprints.nutrition.diary import _claim_diary_meal
 from app.blueprints.nutrition import meallog as nutrition_meallog
 from app.blueprints.nutrition import plan as nutrition_plan
 from app.extensions import db
+from app.timeutil import day_key
 from app.models import CustomMeal, CustomMealItem, MealLog, NutritionPlan, UserSession
 
 
@@ -105,6 +106,16 @@ def test_diary_create_meal_upserts(client, auth_user):
     assert first["exists"] is False
     again = client.post("/api/diary/meal", json={"meal_name": "Kahvaltı"}).get_json()
     assert again == {"meal_id": first["meal_id"], "exists": True}
+
+
+def test_diary_create_meal_ignores_client_date(client, auth_user):
+    body = client.post("/api/diary/meal", json={
+        "meal_name": "Kahvalt\u0131",
+        "date_key": "2099-01-01",
+    }).get_json()
+
+    meal = db.session.get(CustomMeal, body["meal_id"])
+    assert meal.date_key == day_key()
 
 
 def test_diary_create_meal_race_returns_existing(client, auth_user, monkeypatch):
@@ -454,6 +465,87 @@ def test_meal_log_non_numeric_ai_values_zeroed(client, auth_user, monkeypatch):
     assert body["nutrients"]["kalori"] == 0
     assert body["nutrients"]["protein"] == 30.0
 
+def test_ai_meal_total_sanitized_before_persistence(client, auth_user, monkeypatch):
+    monkeypatch.setattr(
+        nutrition_meallog,
+        "_openai_chat",
+        lambda **kw: '{"kalori": 20000, "protein": -2, "karb": 2000, "yag": 500}',
+    )
+
+    response = client.post(
+        "/meal-log", json={"ogun": "Ogle", "yemekler": "tavuk"})
+
+    assert response.status_code == 200
+    expected = {
+        "kalori": 10000.0,
+        "protein": 0,
+        "karb": 1000.0,
+        "yag": 250.0,
+    }
+    assert response.get_json()["nutrients"] == expected
+    entry = MealLog.query.filter_by(user_id=auth_user.id).one()
+    assert {
+        "kalori": entry.kalori,
+        "protein": entry.protein,
+        "karb": entry.karb,
+        "yag": entry.yag,
+    } == expected
+
+
+def test_ai_meal_total_oversized_numeric_zeroed_before_persistence(
+        client, auth_user, monkeypatch):
+    monkeypatch.setattr(
+        nutrition_meallog,
+        "_openai_chat",
+        lambda **kw: json.dumps({
+            "kalori": 10 ** 400,
+            "protein": 30,
+            "karb": 10,
+            "yag": 5,
+        }),
+    )
+
+    response = client.post(
+        "/meal-log", json={"ogun": "Ogle", "yemekler": "tavuk"})
+
+    assert response.status_code == 200
+    expected = {"kalori": 0, "protein": 30.0, "karb": 10.0, "yag": 5.0}
+    assert response.get_json()["nutrients"] == expected
+    entry = MealLog.query.filter_by(user_id=auth_user.id).one()
+    assert {
+        "kalori": entry.kalori,
+        "protein": entry.protein,
+        "karb": entry.karb,
+        "yag": entry.yag,
+    } == expected
+
+
+def test_ai_meal_total_normalization_logging_omits_meal_content(
+        client, auth_user, monkeypatch, caplog):
+    captured = {}
+
+    def fake_chat(**kwargs):
+        captured["prompt"] = kwargs["messages"][0]["content"]
+        return '{"kalori": 240, "protein": 48, "karb": 6, "yag": 3}'
+
+    monkeypatch.setattr(nutrition_meallog, "_openai_chat", fake_chat)
+    sensitive_meal = "2 scoop whey private-diet-token-7f1a"
+    normalized_fragment = "2 \u00f6l\u00e7ek whey protein tozu (60g)"
+    caplog.clear()
+
+    with caplog.at_level("INFO"):
+        response = client.post(
+            "/meal-log",
+            json={"ogun": "Ara Ogun", "yemekler": sensitive_meal},
+        )
+
+    assert response.status_code == 200
+    assert normalized_fragment in captured["prompt"]
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "[MEAL] Fitness shorthand normalized" in messages
+    assert sensitive_meal not in messages
+    assert normalized_fragment not in messages
+    assert "private-diet-token-7f1a" not in messages
 
 # ---------------------------------------------------------------------------
 # Bugün / geçmiş / değerlendirme
@@ -560,5 +652,94 @@ def test_nutrition_plan_bad_llm_json_returns_500(client, auth_user, monkeypatch)
     assert client.post("/nutrition-plan", json=PLAN_REQUEST).status_code == 500
 
 
+# ---------------------------------------------------------------------------
+# Meal-write idempotency
+# ---------------------------------------------------------------------------
+
+_IDEMPOTENCY_HEADERS = {
+    "Idempotency-Key": "018f47d2-a2c7-7f52-a5b0-123456789abc",
+}
+
+
+def test_meal_log_idempotency_replays_before_second_ai_call(client, auth_user, monkeypatch):
+    calls = {"count": 0}
+
+    def fake_chat(**kwargs):
+        calls["count"] += 1
+        return '{"kalori": 240, "protein": 48, "karb": 6, "yag": 3}'
+
+    monkeypatch.setattr(nutrition_meallog, "_openai_chat", fake_chat)
+    payload = {"ogun": "Ogle", "yemekler": "tavuk"}
+
+    first = client.post("/meal-log", json=payload, headers=_IDEMPOTENCY_HEADERS)
+    second = client.post("/meal-log", json=payload, headers=_IDEMPOTENCY_HEADERS)
+
+    assert first.status_code == second.status_code == 200
+    assert second.get_json()["nutrients"] == first.get_json()["nutrients"]
+    assert MealLog.query.filter_by(user_id=auth_user.id).count() == 1
+    assert calls["count"] == 1
+
+
+def test_quick_add_meal_idempotency_writes_one_row(client, auth_user):
+    plan = {"ogle": {"yemekler": ["Tavuk"], "kalori": 380,
+                     "protein": 48, "karb": 28, "yag": 5}}
+    client.post("/nutrition-plan/save", json={"plan": plan, "score": 8.0})
+
+    first = client.post("/api/quick-add-meal", json={"meal_key": "ogle"},
+                        headers=_IDEMPOTENCY_HEADERS)
+    second = client.post("/api/quick-add-meal", json={"meal_key": "ogle"},
+                         headers=_IDEMPOTENCY_HEADERS)
+
+    assert first.status_code == second.status_code == 200
+    assert second.get_json()["nutrients"] == first.get_json()["nutrients"]
+    assert MealLog.query.filter_by(user_id=auth_user.id, source="ai_plan").count() == 1
+
+
+def test_meal_log_idempotency_is_scoped_to_authenticated_user(
+        client, auth_user, make_user, login):
+    payload = {
+        "ogun": "Aksam", "yemekler": "tavuk",
+        "override_macros": {"kalori": 495, "protein": 62, "karb": 0, "yag": 10.5},
+    }
+    assert client.post("/meal-log", json=payload,
+                       headers=_IDEMPOTENCY_HEADERS).status_code == 200
+
+    other = make_user("second-user")
+    assert login("second-user").status_code == 200
+    assert client.post("/meal-log", json=payload,
+                       headers=_IDEMPOTENCY_HEADERS).status_code == 200
+
+    assert MealLog.query.filter_by(user_id=auth_user.id).count() == 1
+    assert MealLog.query.filter_by(user_id=other.id).count() == 1
+
 def test_nutrition_page_renders(client, auth_user):
     assert client.get("/nutrition").status_code == 200
+
+
+def test_meal_idempotency_integrity_race_returns_existing_winner(
+        app, auth_user, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+    from app.services import meal_idempotency
+
+    key = "018f47d2-a2c7-7f52-a5b0-123456789abc"
+    winner = MealLog(
+        user_id=auth_user.id, ogun="Ogle", yemekler="winner",
+        kalori=1, protein=1, karb=1, yag=1, tarih="2026-07-17",
+        idempotency_key=key,
+    )
+    db.session.add(winner)
+    db.session.commit()
+
+    candidate = MealLog(
+        user_id=auth_user.id, ogun="Ogle", yemekler="candidate",
+        kalori=2, protein=2, karb=2, yag=2, tarih="2026-07-17",
+    )
+
+    def lose_race():
+        raise IntegrityError("insert", {}, Exception("unique"))
+
+    monkeypatch.setattr(db.session, "commit", lose_race)
+    returned, created = meal_idempotency.commit_once(candidate, key)
+
+    assert returned.id == winner.id
+    assert created is False

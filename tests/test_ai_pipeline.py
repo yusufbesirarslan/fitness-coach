@@ -6,9 +6,12 @@ test_coach_routes.py'de ayrıca korunur.
 
     python -m pytest tests/test_ai_pipeline.py -v
 """
+from types import SimpleNamespace
+
 import pytest
 
-from app.services import ai_coach, ai_pipeline, context_builder, moderation
+from app.services import (ai_coach, ai_metrics, ai_pipeline, ai_stream, context_builder,
+                          moderation, response_formatter)
 from app.services.response_formatter import (COACH_FALLBACKS, finalize_reply,
                                              is_coach_error_fallback)
 
@@ -101,6 +104,30 @@ def test_pipeline_stage_order_and_passthrough(app, monkeypatch):
                     "history": [], "language": "en", "prepared_history": None}
 
 
+def test_generate_answer_finalize_once(app, monkeypatch):
+    """The pipeline owns finalization; the provider router returns raw text."""
+    app.config["AI_MEMORY_ENABLED"] = False
+    monkeypatch.setattr(context_builder, "fetch_coach_context",
+                        lambda uid, q, language="tr": "")
+    monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
+    monkeypatch.setattr(ai_coach, "_run_coach_conversation_openai",
+                        lambda *args, **kwargs: "ham cevap")
+    calls = []
+
+    def counted_finalize(text, language="tr"):
+        calls.append((text, language))
+        return text, False
+
+    monkeypatch.setattr(response_formatter, "finalize_reply", counted_finalize)
+    # Catch a future direct import/call in the legacy router too.
+    monkeypatch.setattr(ai_coach, "finalize_reply", counted_finalize, raising=False)
+
+    with app.test_request_context("/"):
+        out = ai_pipeline.generate_answer(1, "soru")
+
+    assert out["answer"] == "ham cevap"
+    assert calls == [("ham cevap", "tr")]
+
 def test_pipeline_context_failure_degrades_to_empty(app, monkeypatch):
     app.config["AI_MEMORY_ENABLED"] = False
 
@@ -167,3 +194,99 @@ def test_pipeline_marks_provider_fallback(app, monkeypatch):
 
     assert out["is_error_fallback"] is True
     assert out["answer"] == COACH_FALLBACKS["tr"]["error"]
+
+
+def test_blocking_answer_emits_turn_metric(app, monkeypatch):
+    app.config["AI_MEMORY_ENABLED"] = False
+    monkeypatch.setattr(context_builder, "fetch_coach_context",
+                        lambda uid, q, language="tr": "")
+    monkeypatch.setattr(ai_coach, "_run_coach_conversation",
+                        lambda *args, **kwargs: "cevap")
+    increments = []
+    monkeypatch.setattr(
+        ai_metrics,
+        "increment",
+        lambda name, dimensions=None: increments.append((name, dimensions)),
+    )
+
+    with app.test_request_context("/"):
+        ai_pipeline.generate_answer(1, "soru")
+
+    assert increments == [("AITurn", {"mode": "blocking"})]
+
+
+def test_blocking_fallback_emits_error_metric(app, monkeypatch):
+    app.config["AI_MEMORY_ENABLED"] = False
+    monkeypatch.setattr(context_builder, "fetch_coach_context",
+                        lambda uid, q, language="tr": "")
+    monkeypatch.setattr(ai_coach, "_run_coach_conversation",
+                        lambda *args, **kwargs: COACH_FALLBACKS["tr"]["error"])
+    increments = []
+    monkeypatch.setattr(
+        ai_metrics,
+        "increment",
+        lambda name, dimensions=None: increments.append((name, dimensions)),
+    )
+
+    with app.test_request_context("/"):
+        ai_pipeline.generate_answer(1, "soru")
+
+    assert increments == [("AIErrors", {"mode": "blocking"})]
+
+
+def test_blocking_exception_emits_error_metric_before_reraise(app, monkeypatch):
+    app.config["AI_MEMORY_ENABLED"] = False
+    monkeypatch.setattr(context_builder, "fetch_coach_context",
+                        lambda uid, q, language="tr": "")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(ai_coach, "_run_coach_conversation", boom)
+    increments = []
+    monkeypatch.setattr(
+        ai_metrics,
+        "increment",
+        lambda name, dimensions=None: increments.append((name, dimensions)),
+    )
+
+    with app.test_request_context("/"):
+        with pytest.raises(RuntimeError, match="provider down"):
+            ai_pipeline.generate_answer(1, "soru")
+
+    assert increments == [("AIErrors", {"mode": "blocking"})]
+
+
+def test_partial_stream_error_is_recorded_as_interruption(app, monkeypatch):
+    conversation = SimpleNamespace(id=17)
+    recorded = []
+    monkeypatch.setattr(ai_pipeline, "_memory_stage",
+                        lambda user_id: (conversation, []))
+    monkeypatch.setattr(ai_pipeline, "_context_stage",
+                        lambda user_id, question, language: "")
+
+    def fake_delta_then_error(*args, **kwargs):
+        yield {"type": "delta", "text": "K\u0131smi "}
+        yield {"type": "delta", "text": "yan\u0131t"}
+        yield {"type": "error", "key": "coach.reply_failed",
+               "work_performed": True, "partial_text": "K\u0131smi yan\u0131t"}
+
+    monkeypatch.setattr(ai_stream, "stream_coach_answer", fake_delta_then_error)
+    monkeypatch.setattr(
+        ai_pipeline,
+        "_record",
+        lambda *args, **kwargs: recorded.append((args, kwargs)),
+    )
+
+    with app.test_request_context("/"):
+        events = list(ai_pipeline.stream_answer(7, "soru"))
+
+    assert events[-1] == {
+        "type": "error",
+        "key": "coach.reply_failed",
+        "work_performed": True,
+        "partial_text": "K\u0131smi yan\u0131t",
+    }
+    assert recorded == [
+        ((conversation, "soru", "K\u0131smi yan\u0131t"), {"interrupted": True})
+    ]

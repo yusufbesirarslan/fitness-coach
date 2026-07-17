@@ -65,6 +65,11 @@ def _remember_reservation_week(user, counter_key, week):
     setattr(user, _RESERVATION_WEEKS_ATTR, reservations)
 
 
+def reservation_week(user, counter_key):
+    """Return the week captured by this request's successful reservation."""
+    return (getattr(user, _RESERVATION_WEEKS_ATTR, {}) or {}).get(counter_key)
+
+
 def _forget_reservation_week(user, counter_key):
     reservations = dict(getattr(user, _RESERVATION_WEEKS_ATTR, {}) or {})
     reservations.pop(counter_key, None)
@@ -99,7 +104,7 @@ def reserve_ai_quota(user, counter_key, limit):
     return True
 
 
-def refund_ai_quota(user, counter_key):
+def refund_ai_quota(user, counter_key, reserved_week=None):
     """Atomically return one reserved allowance, never dropping below zero."""
     if getattr(user, "is_premium", False):
         return
@@ -111,8 +116,8 @@ def refund_ai_quota(user, counter_key):
         db.session.rollback()
         return
 
-    reserved_week = (getattr(user, _RESERVATION_WEEKS_ATTR, {}) or {}).get(
-        counter_key)
+    if reserved_week is None:
+        reserved_week = reservation_week(user, counter_key)
     stored_quota = dict((fresh_meta or {}).get("ai_plan_quota") or {})
     if reserved_week is not None and stored_quota.get("week") != reserved_week:
         db.session.commit()

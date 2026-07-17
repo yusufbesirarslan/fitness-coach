@@ -529,6 +529,25 @@ def test_constants_sane():
     assert np.ATWATER_TOLERANCE > 0
 
 
+def test_meal_total_sanitizer_floors_non_finite_and_negative_values():
+    assert np.sanitize_meal_total_macros(
+        float("nan"), -2, 4, -1) == (0, 0, 4, 0)
+
+
+def test_meal_total_sanitizer_caps_and_preserves_ratios():
+    assert np.sanitize_meal_total_macros(
+        20000, 1000, 2000, 500) == (10000.0, 500.0, 1000.0, 250.0)
+
+
+def test_meal_total_sanitizer_caps_macro_without_high_calories():
+    assert np.sanitize_meal_total_macros(
+        1000, 5000, 0, 0) == (400.0, 2000.0, 0, 0)
+
+
+def test_meal_total_sanitizer_floors_oversized_numeric_value():
+    assert np.sanitize_meal_total_macros(
+        10 ** 400, 10, 20, 3) == (0, 10, 20, 3)
+
 # ---------------------------------------------------------------------------
 # Porsiyon makullugu (docs/menu-porsiyon-eslesme-hatasi.md): dogru KIMLIKLI ama
 # yanlis MIKTARLI eslesmeler — FatSecret per-serving kucuk ABD referans miktari

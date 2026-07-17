@@ -866,6 +866,7 @@
   "pump_check.sharing.private": "Gizli",
 
   "route.weight_numeric": "Kilo sayısal olmalıdır",
+  "route.weight_range": "Kilo 20 ile 500 kg aras\u0131nda olmal\u0131d\u0131r",
   "route.body_numeric": "Kilo, boy ve yaş sayısal olmalıdır",
   "route.invalid_goal": "Geçersiz hedef seçimi.",
   "route.username_taken": "Bu kullanıcı adı zaten alınmış.",

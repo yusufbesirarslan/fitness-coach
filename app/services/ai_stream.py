@@ -21,6 +21,8 @@
 #     İlk-token gecikmesi kazandırmaz; UX'i ve tek bir olay sözleşmesini korur.
 #     Asıl akış yolu Bedrock'tır (prod'da BEDROCK_ENABLED=1).
 import json
+import queue
+import threading
 
 from flask import current_app
 
@@ -52,6 +54,39 @@ def _chunks(text):
         yield text[i:i + CHUNK_CHARS]
 
 
+def _bedrock_work_error(parts, tools_ran):
+    return {
+        "type": "error",
+        "key": "coach.reply_failed",
+        "work_performed": bool(parts or tools_ran),
+        "partial_text": "".join(parts).strip(),
+    }
+
+
+
+def _stream_bedrock_turn(messages_client, call_kwargs):
+    messages = queue.SimpleQueue()
+
+    def produce():
+        try:
+            with model_concurrency_slot():
+                with messages_client.stream(**call_kwargs) as stream:
+                    for text in stream.text_stream:
+                        if text:
+                            messages.put({"kind": "delta", "text": text})
+                    final = stream.get_final_message()
+            messages.put({"kind": "final", "message": final})
+        except Exception as exc:
+            messages.put({"kind": "exception", "exception": exc})
+
+    threading.Thread(target=produce, daemon=True).start()
+    while True:
+        message = messages.get()
+        yield message
+        if message["kind"] in {"final", "exception"}:
+            return
+
+
 def stream_coach_answer(user_id, question, context, history, language="tr"):
     """Koç yanıtını akış olarak üret. Olay üreticisi (generator).
 
@@ -65,11 +100,11 @@ def stream_coach_answer(user_id, question, context, history, language="tr"):
         try:
             yield from _stream_bedrock(user_id, question, context, history, language)
             return
-        except ai_coach._BedrockFallback as e:
+        except ai_coach._BedrockFallback:
             # Buraya YALNIZCA hiç delta gitmemişken ve hiç araç çalışmamışken
             # gelinir (_stream_bedrock garantisi) → sağlayıcı değişimi güvenli.
             current_app.logger.warning(
-                "[COACH][stream] Bedrock ilk çağrı başarısız, OpenAI'ya düşülüyor: %s", e)
+                "[COACH][stream] Bedrock failed before work; trying OpenAI fallback")
 
     yield from _stream_openai_fallback(user_id, question, context, history, language)
 
@@ -92,33 +127,37 @@ def _stream_bedrock(user_id, question, context, history, language):
     tools_ran = 0
     usage = None
 
-    with model_concurrency_slot():
-        for _ in range(ai_coach._COACH_TOOL_LOOP_CAP):
-            try:
-                with ai_coach.bedrock_client.messages.stream(
-                    model=BEDROCK_MODEL,
-                    max_tokens=max_tokens,
-                    system=system,
-                    messages=convo,
-                    tools=tools,
-                ) as stream:
-                    for text in stream.text_stream:
-                        if not text:
-                            continue
-                        parts.append(text)
-                        yield {"type": "delta", "text": text}
-                    final = stream.get_final_message()
-            except Exception as e:
-                # Yedek YALNIZCA hiçbir şey yayınlanmamış VE hiçbir araç yan etki
-                # üretmemişken güvenlidir; aksi halde sağlayıcı değiştirmek
-                # kullanıcının gördüğü metni bozar / yan etkiyi tekrarlar.
-                if not parts and tools_ran == 0:
-                    raise ai_coach._BedrockFallback(f"{type(e).__name__}: {e}")
-                current_app.logger.warning(
-                    "[COACH][stream] Bedrock akışı yarıda hata verdi: %s", e)
-                yield {"type": "error", "key": "coach.reply_failed"}
-                return
+    for _ in range(ai_coach._COACH_TOOL_LOOP_CAP):
+        call_kwargs = {
+            "model": BEDROCK_MODEL,
+            "max_tokens": max_tokens,
+            "system": system,
+            "messages": convo,
+            "tools": tools,
+        }
+        try:
+            for message in _stream_bedrock_turn(
+                    ai_coach.bedrock_client.messages, call_kwargs):
+                if message["kind"] == "delta":
+                    text = message["text"]
+                    parts.append(text)
+                    yield {"type": "delta", "text": text}
+                elif message["kind"] == "final":
+                    final = message["message"]
+                else:
+                    raise message["exception"]
+        except Exception as e:
+            # Yedek YALNIZCA hiçbir şey yayınlanmamış VE hiçbir araç yan etki
+            # üretmemişken güvenlidir; aksi halde sağlayıcı değiştirmek
+            # kullanıcının gördüğü metni bozar / yan etkiyi tekrarlar.
+            if not parts and tools_ran == 0:
+                raise ai_coach._BedrockFallback(f"{type(e).__name__}: {e}")
+            current_app.logger.warning(
+                "[COACH][stream] Bedrock stream failed after work")
+            yield _bedrock_work_error(parts, tools_ran)
+            return
 
+        try:
             usage = _usage_of(final) or usage
 
             if getattr(final, "stop_reason", None) != "tool_use":
@@ -137,10 +176,17 @@ def _stream_bedrock(user_id, question, context, history, language):
                 if getattr(block, "type", None) == "tool_use":
                     out = ai_coach._dispatch_coach_tool(
                         user_id, block.name, json.dumps(block.input or {}))
+                    tools_ran += 1
                     tool_results.append({"type": "tool_result",
                                          "tool_use_id": block.id, "content": out})
-                    tools_ran += 1
             convo.append({"role": "user", "content": tool_results})
+        except Exception as e:
+            if not parts and tools_ran == 0:
+                raise ai_coach._BedrockFallback(f"{type(e).__name__}: {e}")
+            current_app.logger.warning(
+                "[COACH][stream] Bedrock response processing failed after work")
+            yield _bedrock_work_error(parts, tools_ran)
+            return
 
     # Araç döngüsü tavana dayandı — dostça yedek metni akıt (yanıtsız bırakma).
     yield from _emit_text(ai_coach._COACH_FALLBACKS[
@@ -159,8 +205,13 @@ def _stream_openai_fallback(user_id, question, context, history, language):
         text = ai_coach._run_coach_conversation_openai(
             user_id, question, context, history, language)
     except Exception:
-        current_app.logger.exception("[COACH][stream] OpenAI yedeği de başarısız")
-        yield {"type": "error", "key": "coach.reply_failed"}
+        current_app.logger.warning("[COACH][stream] OpenAI fallback failed before work")
+        yield {
+            "type": "error",
+            "key": "coach.reply_failed",
+            "work_performed": False,
+            "partial_text": "",
+        }
         return
 
     yield from _emit_text(text or "", provider="openai", usage=None)
