@@ -23,6 +23,7 @@ class FakeRedis:
     def __init__(self):
         self.zsets = {}        # key -> {member(str): score(float)}
         self.fail_zrevrange = False
+        self.pipeline_executions = 0
 
     def zadd(self, key, mapping):
         self.zsets.setdefault(key, {}).update(
@@ -94,6 +95,7 @@ class FakePipeline:
         return self
 
     def execute(self):
+        self.r.pipeline_executions += 1
         for name, args in self.ops:
             getattr(self.r, name)(*args)
         self.ops = []
@@ -259,6 +261,26 @@ def test_lb_rebuild_loads_all_users_from_postgres(app, make_users_bulk, monkeypa
     gam.lb_rebuild()
     score = float(gam._lb_score(300, 0))
     assert fake.zmscore(LB_ALLTIME_KEY, [u1.id, u2.id]) == [score, score]
+
+
+def test_lb_rebuild_batches_every_user_into_fresh_pipelines(
+        app, auth_user, make_users_bulk, monkeypatch):
+    users = make_users_bulk(5, prefix="batch", rank_points=0, weekly_xp=0)
+    for index, user in enumerate(users, start=1):
+        user.rank_points = index * 100
+        user.weekly_xp = index * 10
+    db.session.commit()
+    fake = FakeRedis()
+    monkeypatch.setattr(gam, "redis_client", fake)
+
+    gam.lb_rebuild(batch_size=2)
+
+    expected_users = [auth_user, *users]
+    assert fake.zmscore(LB_ALLTIME_KEY, [user.id for user in expected_users]) == [
+        float(gam._lb_score(user.rank_points, user.streak_count)) for user in expected_users]
+    assert fake.zmscore(LB_WEEKLY_KEY, [user.id for user in expected_users]) == [
+        float(gam._lb_score(user.weekly_xp, user.streak_count)) for user in expected_users]
+    assert fake.pipeline_executions >= 3
 
 
 def test_award_xp_syncs_redis_after_commit(app, make_user, monkeypatch):
