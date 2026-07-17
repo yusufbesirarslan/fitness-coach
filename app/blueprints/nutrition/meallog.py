@@ -19,6 +19,7 @@ from app.prompts import nutrition as nutrition_prompts
 from app.services.ai import _openai_chat
 from app.services.nutrition_pipeline import sanitize_meal_total_macros
 from app.services.gamification import complete_quest_for_user
+from app.services import meal_idempotency
 from app.services.validators import _meal_photo_url, _to_float, validate_meal_photo
 from app.timeutil import day_key, display_ddmm
 
@@ -33,6 +34,22 @@ def log_meal():
 
     if not ogun or not yemekler:
         return jsonify({"error": t("route.meal_foods_required")}), 400
+
+    idempotency_key = meal_idempotency.read_idempotency_key()
+    existing = meal_idempotency.find_existing(current_user.id, idempotency_key)
+    if existing:
+        response = {
+            "message": t("route.x_logged", name=existing.ogun),
+            "nutrients": {
+                "kalori": existing.kalori,
+                "protein": existing.protein,
+                "karb": existing.karb,
+                "yag": existing.yag,
+            },
+        }
+        if existing.photo_key:
+            response["photo_url"] = _meal_photo_url(existing)
+        return jsonify(response)
 
     # Opsiyonel öğün fotoğrafı: doğrula ve (varsa) S3'e yükle. S3 hatası öğün
     # kaydını bloklamaz (fail-open) — yalnızca foto atlanır.
@@ -100,11 +117,10 @@ def log_meal():
             karb=nutrients["karb"], yag=nutrients["yag"], tarih=today,
             photo_key=meal_photo_key
         )
-        db.session.add(entry)
-        db.session.commit()
+        entry, created = meal_idempotency.commit_once(entry, idempotency_key)
         # C5: override yolu da AI-hesaplı yolla aynı 'meal_logged' görevini
         # vermeli — kullanıcı makroyu elle girdi diye günlük görev/XP atlanmasın.
-        quest_result = complete_quest_for_user(current_user.id, "meal_logged")
+        quest_result = complete_quest_for_user(current_user.id, "meal_logged") if created else None
         resp = {"message": t("route.x_logged", name=ogun), "nutrients": nutrients}
         if meal_photo_key:
             resp["photo_url"] = _meal_photo_url(entry)
@@ -173,10 +189,9 @@ def log_meal():
         tarih    = today,
         photo_key = meal_photo_key
     )
-    db.session.add(entry)
-    db.session.commit()
+    entry, created = meal_idempotency.commit_once(entry, idempotency_key)
 
-    quest_result = complete_quest_for_user(current_user.id, "meal_logged")
+    quest_result = complete_quest_for_user(current_user.id, "meal_logged") if created else None
     response = {
         "message": t("route.x_logged", name=ogun),
         "nutrients": nutrients,

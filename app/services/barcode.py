@@ -449,7 +449,8 @@ def goal_impact_for_add(user_id, added_macros):
     return {"before": before, "after": after, "targets": targets}
 
 
-def add_food_to_diary(user_id, food, meal, serving_id=None, quantity=1):
+def add_food_to_diary(user_id, food, meal, serving_id=None, quantity=1,
+                      idempotency_key=None):
     serving, macros = scale_serving_macros(food, serving_id, quantity)
     if not serving or not macros or macros["calories"] <= 0:
         return None
@@ -467,6 +468,5 @@ def add_food_to_diary(user_id, food, meal, serving_id=None, quantity=1):
         source="barcode",
         created_at=datetime.utcnow(),
     )
-    db.session.add(entry)
-    db.session.commit()
-    return entry
+    from app.services.meal_idempotency import commit_once
+    return commit_once(entry, idempotency_key)

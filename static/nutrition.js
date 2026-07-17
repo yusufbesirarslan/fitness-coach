@@ -2,6 +2,14 @@
 /* ── CONSTANTS ── */
 const RING_CIRC = 301.6; // 2π × 48
 let targetCalories = 2000;
+
+function mealWriteHeaders() {
+  var key = (window.crypto && window.crypto.randomUUID)
+    ? window.crypto.randomUUID()
+    : ('meal-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
+  return { 'Content-Type': 'application/json', 'Idempotency-Key': key };
+}
+
 let selectedMealType = 'Kahvaltı';
 
 /* ── i18n (PR5) ──
@@ -368,8 +376,9 @@ async function submitPhotoMeal() {
   var loading = document.getElementById('loading');
   loading.classList.add('active');
   try {
+    var idempotencyHeaders = mealWriteHeaders();
     var res = await fetch('/meal-log', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: idempotencyHeaders,
       body: JSON.stringify({
         ogun: _photoMealType,
         yemekler: note || mealLabel(_photoMealType),
@@ -510,9 +519,10 @@ async function logMeal() {
 
     loading.classList.add('active');
     try {
+      const idempotencyHeaders = mealWriteHeaders();
       const res = await fetch('/meal-log', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: idempotencyHeaders,
         body: JSON.stringify({
           ogun: selectedMealType,
           yemekler: names,
@@ -541,9 +551,10 @@ async function logMeal() {
 
   loading.classList.add('active');
   try {
+    const idempotencyHeaders = mealWriteHeaders();
     const res = await fetch('/meal-log', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: idempotencyHeaders,
       body: JSON.stringify({ ogun: selectedMealType, yemekler })
     });
     const d = await res.json();
@@ -943,9 +954,10 @@ async function quickAddMeal(mealKey, mealLabel, btn) {
   btn.style.opacity = '0.65';
 
   try {
+    const idempotencyHeaders = mealWriteHeaders();
     const res = await fetch('/api/quick-add-meal', {
       method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: idempotencyHeaders,
       body:    JSON.stringify({ meal_key: mealKey })
     });
     const d = await res.json();
@@ -1474,8 +1486,9 @@ async function confirmServingModal() {
   if (_smMode === 'meallog') {
     const macros = _smCurrentMacros();
     try {
+      const idempotencyHeaders = mealWriteHeaders();
       const res = await fetch('/meal-log', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: idempotencyHeaders,
         body: JSON.stringify({
           ogun: _smLogOgun,
           yemekler: _smFood.name || __t('nutrition.log_barcode'),

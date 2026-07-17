@@ -641,5 +641,94 @@ def test_nutrition_plan_bad_llm_json_returns_500(client, auth_user, monkeypatch)
     assert client.post("/nutrition-plan", json=PLAN_REQUEST).status_code == 500
 
 
+# ---------------------------------------------------------------------------
+# Meal-write idempotency
+# ---------------------------------------------------------------------------
+
+_IDEMPOTENCY_HEADERS = {
+    "Idempotency-Key": "018f47d2-a2c7-7f52-a5b0-123456789abc",
+}
+
+
+def test_meal_log_idempotency_replays_before_second_ai_call(client, auth_user, monkeypatch):
+    calls = {"count": 0}
+
+    def fake_chat(**kwargs):
+        calls["count"] += 1
+        return '{"kalori": 240, "protein": 48, "karb": 6, "yag": 3}'
+
+    monkeypatch.setattr(nutrition_meallog, "_openai_chat", fake_chat)
+    payload = {"ogun": "Ogle", "yemekler": "tavuk"}
+
+    first = client.post("/meal-log", json=payload, headers=_IDEMPOTENCY_HEADERS)
+    second = client.post("/meal-log", json=payload, headers=_IDEMPOTENCY_HEADERS)
+
+    assert first.status_code == second.status_code == 200
+    assert second.get_json()["nutrients"] == first.get_json()["nutrients"]
+    assert MealLog.query.filter_by(user_id=auth_user.id).count() == 1
+    assert calls["count"] == 1
+
+
+def test_quick_add_meal_idempotency_writes_one_row(client, auth_user):
+    plan = {"ogle": {"yemekler": ["Tavuk"], "kalori": 380,
+                     "protein": 48, "karb": 28, "yag": 5}}
+    client.post("/nutrition-plan/save", json={"plan": plan, "score": 8.0})
+
+    first = client.post("/api/quick-add-meal", json={"meal_key": "ogle"},
+                        headers=_IDEMPOTENCY_HEADERS)
+    second = client.post("/api/quick-add-meal", json={"meal_key": "ogle"},
+                         headers=_IDEMPOTENCY_HEADERS)
+
+    assert first.status_code == second.status_code == 200
+    assert second.get_json()["nutrients"] == first.get_json()["nutrients"]
+    assert MealLog.query.filter_by(user_id=auth_user.id, source="ai_plan").count() == 1
+
+
+def test_meal_log_idempotency_is_scoped_to_authenticated_user(
+        client, auth_user, make_user, login):
+    payload = {
+        "ogun": "Aksam", "yemekler": "tavuk",
+        "override_macros": {"kalori": 495, "protein": 62, "karb": 0, "yag": 10.5},
+    }
+    assert client.post("/meal-log", json=payload,
+                       headers=_IDEMPOTENCY_HEADERS).status_code == 200
+
+    other = make_user("second-user")
+    assert login("second-user").status_code == 200
+    assert client.post("/meal-log", json=payload,
+                       headers=_IDEMPOTENCY_HEADERS).status_code == 200
+
+    assert MealLog.query.filter_by(user_id=auth_user.id).count() == 1
+    assert MealLog.query.filter_by(user_id=other.id).count() == 1
+
 def test_nutrition_page_renders(client, auth_user):
     assert client.get("/nutrition").status_code == 200
+
+
+def test_meal_idempotency_integrity_race_returns_existing_winner(
+        app, auth_user, monkeypatch):
+    from sqlalchemy.exc import IntegrityError
+    from app.services import meal_idempotency
+
+    key = "018f47d2-a2c7-7f52-a5b0-123456789abc"
+    winner = MealLog(
+        user_id=auth_user.id, ogun="Ogle", yemekler="winner",
+        kalori=1, protein=1, karb=1, yag=1, tarih="2026-07-17",
+        idempotency_key=key,
+    )
+    db.session.add(winner)
+    db.session.commit()
+
+    candidate = MealLog(
+        user_id=auth_user.id, ogun="Ogle", yemekler="candidate",
+        kalori=2, protein=2, karb=2, yag=2, tarih="2026-07-17",
+    )
+
+    def lose_race():
+        raise IntegrityError("insert", {}, Exception("unique"))
+
+    monkeypatch.setattr(db.session, "commit", lose_race)
+    returned, created = meal_idempotency.commit_once(candidate, key)
+
+    assert returned.id == winner.id
+    assert created is False

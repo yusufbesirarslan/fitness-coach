@@ -15,6 +15,7 @@ from app.extensions import auth_write_limit, db
 from app.i18n import t
 from app.models import CustomMeal, CustomMealItem, MealLog, NutritionPlan
 from app.services.gamification import complete_quest_for_user
+from app.services import meal_idempotency
 from app.services.validators import _to_float
 from app.timeutil import app_today, day_key
 
@@ -91,6 +92,19 @@ def quick_add_meal():
     if meal_key not in MEAL_LABELS:
         return jsonify({"error": t("route.invalid_meal_key")}), 400
 
+    idempotency_key = meal_idempotency.read_idempotency_key()
+    existing = meal_idempotency.find_existing(current_user.id, idempotency_key)
+    if existing:
+        return jsonify({
+            "message": t("route.added_from_plan", meal=existing.ogun),
+            "nutrients": {
+                "kalori": existing.kalori,
+                "protein": existing.protein,
+                "karb": existing.karb,
+                "yag": existing.yag,
+            },
+        })
+
     plan_record = NutritionPlan.query.filter_by(user_id=current_user.id)\
         .order_by(NutritionPlan.created_at.desc()).first()
 
@@ -138,10 +152,9 @@ def quick_add_meal():
         tarih    = today
     )
     entry.source = "ai_plan"
-    db.session.add(entry)
-    db.session.commit()
+    entry, created = meal_idempotency.commit_once(entry, idempotency_key)
 
-    quest_result = complete_quest_for_user(current_user.id, "meal_logged")
+    quest_result = complete_quest_for_user(current_user.id, "meal_logged") if created else None
     response = {
         "message": t("route.added_from_plan", meal=MEAL_LABELS[meal_key]),
         "nutrients": {
