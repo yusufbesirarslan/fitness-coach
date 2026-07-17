@@ -140,7 +140,7 @@ silently died.
 | H5 | Auth-email delivery failed silently with **zero** alerting; real KMS decrypt path never ran in CI | ✅ Fixed | SNS + metric filter + 3 alarms in `template.yaml`; real `_decrypt_code` now tested |
 | M1 | Session purge depended on an unversioned host cron | ✅ Fixed | daily NX-locked purge in `hooks.maybe_weekly_rollover` |
 | M2 | No Docker log rotation → disk exhaustion takes down everything | ✅ Fixed | `logging:` caps on both compose services |
-| M3 | `/health?deep=1` public: posture disclosure + outbound amplification | ✅ Fixed | loopback/private-only gate |
+| M3 | `/health?deep=1` public: posture disclosure + outbound amplification | ✅ Fixed | loopback + explicit CIDR gate (default Docker gateway `172.17.0.1/32`) |
 | M4 | Plaintext `.env` on host (RDS creds, token key, API keys) | ⚠ Hardened, SSM deferred | deploy enforces `chmod 600`; see below |
 | M5 | Rollback reverts code but not migrations | ✅ Mitigated | non-blocking pre-deploy RDS snapshot |
 | L1 | nginx sent `Connection: upgrade` on every request | ✅ Fixed | `map $http_upgrade $connection_upgrade` |

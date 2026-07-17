@@ -251,7 +251,7 @@ protected unless it appears in this reviewed allowlist.
 | Endpoint | Methods | Why public | Rate limit | CSRF |
 | --- | --- | --- | --- | --- |
 | `/static/<path>` | GET | Browser assets | Flask static handling | Not applicable |
-| `/health` | GET | Liveness/deploy gate. **`?deep=1` is honored only from loopback/private source addresses** (see below) | None | Not applicable |
+| `/health` | GET | Liveness/deploy gate. **`?deep=1` is honored only from loopback or explicitly trusted CIDRs** (see below) | None | Not applicable |
 | `/welcome` | GET | Marketing/entry page | None | Not applicable |
 | `/davet/<code>` | GET | Referral entry and first-party cookie handoff | None | Read/navigation only |
 | `/set-language` | POST | Pre-login language choice | 30/hour | Origin + synchronizer token |
@@ -273,17 +273,18 @@ sign-out, deletes the local session row, and clears Flask-Login state.
 #### `/health?deep=1` is internal-only (M3)
 
 The shallow `/health` stays fully public (liveness). The **deep** view is served
-only to loopback/private source addresses, because it discloses internal posture
+only to loopback or `DEEP_HEALTH_TRUSTED_CIDRS` source addresses, because it discloses internal posture
 (`login: ok|offline`, `redis`, `bedrock`, `fatsecret_proxy`, `limiter_storage`)
 and triggers an outbound request per call. An anonymous caller watching for
 `login: offline` would learn exactly when Redis is down and login is fail-closed
 — i.e. the best moment to start a campaign. A public caller passing `deep=1`
 receives the **shallow body with 200**, not a 403; a 403 would itself be a signal.
 
-The gate accepts private ranges, not just loopback: compose publishes
-`127.0.0.1:5000:5000`, so the deploy gate's `curl 127.0.0.1:5000` arrives through
-docker-proxy and gunicorn sees the *bridge gateway* (e.g. `172.17.0.1`). Real
-internet traffic arrives via nginx, which appends the true client IP with
+The default `DEEP_HEALTH_TRUSTED_CIDRS=172.17.0.1/32` admits the Docker bridge
+gateway, because compose publishes `127.0.0.1:5000:5000` and the deploy gate's
+`curl 127.0.0.1:5000` arrives through docker-proxy. Configure additional
+comma-separated CIDRs only for trusted networks; do not allow all private ranges.
+Real internet traffic arrives via nginx, which appends the true client IP with
 `$proxy_add_x_forwarded_for`, and `ProxyFix(x_for=1)` reads the rightmost entry —
 so a spoofed `X-Forwarded-For: 127.0.0.1` cannot pass this gate.
 
