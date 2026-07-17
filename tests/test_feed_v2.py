@@ -109,6 +109,36 @@ def test_feed_cursor_no_dup_no_skip(app, auth_user, make_user, client):
     assert len(seen) == len(set(seen))            # no duplicates
 
 
+def test_feed_hidden_items_do_not_underfill_or_end_pagination_early(app, auth_user, make_user):
+    # audit LOW-1 regression: gizlenen (hidden) ögeler bir sayfayı eksik doldurup
+    # daha eski görünür içerik varken sayfalamayı erken bitirmemeli. Gizleme artık
+    # kaynak SQL sorgusunda uygulanıyor → her kaynak limit+1 GÖRÜNÜR aday döndürür.
+    from app.models import FeedHide
+    bob = make_user("bob")
+    _befriend(auth_user.id, bob.id)
+    checks = [_feed_check(bob.id, created_at=_dt(m)) for m in range(1, 7)]  # p1..p6, p6 en yeni
+    hidden = [checks[5].id, checks[4].id]                                    # p6, p5 gizlenir
+    for pc_id in hidden:
+        db.session.add(FeedHide(user_id=auth_user.id, target_type="pump_check", target_id=pc_id))
+    db.session.commit()
+
+    # İlk sayfa (limit=2) TAM dolmalı (eksik değil): en yeni iki GÖRÜNÜR = p4, p3.
+    first = feed_svc.get_feed_page(auth_user.id, limit=2)
+    assert [it["id"] for it in first["items"]] == [checks[3].id, checks[2].id]
+    assert first["hasMore"] is True
+
+    # Cursor'la sonuna kadar yürü: TÜM görünür ögeler tam bir kez, gizliler hiç.
+    seen, cursor = [], None
+    for _ in range(10):
+        page = feed_svc.get_feed_page(auth_user.id, cursor=cursor, limit=2)
+        seen.extend(it["id"] for it in page["items"])
+        cursor = page["nextCursor"]
+        if not page["hasMore"]:
+            break
+    assert seen == [checks[3].id, checks[2].id, checks[1].id, checks[0].id]   # p4,p3,p2,p1
+    assert not (set(hidden) & set(seen))                                      # gizliler asla görünmedi
+
+
 def test_feed_hides_restricted_and_repost_stub(app, auth_user, make_user, client):
     bob = make_user("bob")
     carol = make_user("carol")  # stranger

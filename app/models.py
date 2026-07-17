@@ -372,6 +372,9 @@ class PumpCheck(db.Model):
 
     __table_args__ = (
         db.UniqueConstraint("user_id", "date_key", name="uq_pump_check_day"),
+        # Feed V2 birincil kaynak sorgusu: user_id IN (arkadaslar) + ORDER BY
+        # created_at DESC. Tek-kolon user_id indeksi siralamayi karsilamiyordu.
+        db.Index("ix_pump_check_user_created", "user_id", "created_at"),
     )
 
     user = db.relationship("User", backref=db.backref("pump_checks", passive_deletes=True))
@@ -517,6 +520,13 @@ class Activity(db.Model):
     activity_type = db.Column(db.String(30), nullable=False)
     content       = db.Column(db.String(300), nullable=False)
     timestamp     = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    # Feed V2 kilometre-tasi kaynagi: user_id IN (arkadaslar) + ORDER BY
+    # timestamp DESC. Activity en yuksek-hacimli tablo; ayri user_id/timestamp
+    # indeksleri IN + siralamayi karsilamiyordu (audit HIGH-1).
+    __table_args__ = (
+        db.Index("ix_activity_user_ts", "user_id", "timestamp"),
+    )
 
     user = db.relationship("User", backref=db.backref("activities", passive_deletes=True))
 
