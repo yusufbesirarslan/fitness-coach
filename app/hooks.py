@@ -85,11 +85,12 @@ def inject_csp_nonce():
 
 _CSRF_SESSION_KEY = "_csrf_token"
 
+
 def _origin_tuple(value):
-    parsed = urlparse(value)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        return None
     try:
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            return None
         port = parsed.port or (443 if parsed.scheme == "https" else 80)
     except ValueError:
         return None
