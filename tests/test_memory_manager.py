@@ -179,6 +179,19 @@ def test_summary_merge_stays_within_context_budget(app, make_user):
 
     assert sum(mm.estimate_tokens(message["content"]) for message in window) <= 11
 
+
+def test_summary_and_consecutive_history_merge_stay_within_context_budget(app, make_user):
+    user = make_user("mem_user")
+    conv = mm.get_or_create_active_conversation(user.id)
+    conv.summary = "abc"
+    _add_msgs(conv, [("assistant", "one"), ("assistant", "two"),
+                     ("assistant", "tri"), ("assistant", "four")])
+
+    window = mm.build_context_window(conv, budget=12)
+
+    assert sum(mm.estimate_tokens(message["content"]) for message in window) <= 12
+
+
 def test_window_merges_consecutive_same_role_messages(app, make_user):
     # B15: Anthropic ardışık aynı-rol turlarında 400 verir (yarıda kesilen
     # stream'ler ardışık user turu bırakabilir) → birleştirilmeli.

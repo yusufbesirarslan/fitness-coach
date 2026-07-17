@@ -218,6 +218,27 @@ def build_context_window(conversation, budget=None):
             merged[0]["content"] = rendered
         else:
             merged.insert(0, note)
+    # Consecutive-role merging adds newline separators after the source rows
+    # were charged. Recheck the rendered output so every merge path honors the
+    # context budget. Trim oldest mutable history text first, preserving a
+    # rendered summary prefix when it shares the first user message.
+    total = sum(estimate_tokens(msg["content"]) for msg in merged)
+    summary_prefix = note["content"] if note is not None else ""
+    for index, msg in enumerate(merged):
+        if total <= budget:
+            break
+        content = msg["content"]
+        protected = 0
+        if index == 0 and summary_prefix and content.startswith(summary_prefix):
+            protected = len(summary_prefix)
+            if len(content) > protected and content[protected:].startswith("\n\n"):
+                protected += 2
+        removable = len(content) - protected
+        if removable <= 0:
+            continue
+        trim_chars = min(removable, (total - budget) * CHARS_PER_TOKEN)
+        msg["content"] = content[:protected] + content[protected + trim_chars:]
+        total = sum(estimate_tokens(item["content"]) for item in merged)
     return merged
 
 
