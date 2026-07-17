@@ -121,11 +121,20 @@ def test_refund_ai_quota_has_zero_floor(make_user):
     assert fresh_meta["ai_plan_quota"]["training"] == 0
 
 
-def test_refund_does_not_decrement_a_new_week_reservation(make_user, monkeypatch):
-    user = make_user("week-boundary")
-    weeks = iter(("2026-W27", "2026-W28"))
-    monkeypatch.setattr(premium, "_week_key", lambda d=None: next(weeks))
+def test_reservation_week_returns_week_captured_by_reserve(make_user, monkeypatch):
+    user = make_user("reservation-week")
+    monkeypatch.setattr(premium, "_week_key", lambda d=None: "2026-W27")
+
     assert premium.reserve_ai_quota(user, "training", 1) is True
+
+    assert premium.reservation_week(user, "training") == "2026-W27"
+
+
+def test_refund_does_not_decrement_rollover_reservation(make_user, monkeypatch):
+    user = make_user("week-boundary")
+    monkeypatch.setattr(premium, "_week_key", lambda d=None: "2026-W27")
+    assert premium.reserve_ai_quota(user, "training", 1) is True
+    reserved_week = premium.reservation_week(user, "training")
 
     db.session.query(User).filter_by(id=user.id).update({
         User.user_metadata: {
@@ -134,7 +143,7 @@ def test_refund_does_not_decrement_a_new_week_reservation(make_user, monkeypatch
     })
     db.session.commit()
 
-    premium.refund_ai_quota(user, "training")
+    premium.refund_ai_quota(user, "training", reserved_week=reserved_week)
 
     fresh_meta = db.session.query(User.user_metadata).filter_by(id=user.id).scalar()
     assert fresh_meta["ai_plan_quota"]["training"] == 1

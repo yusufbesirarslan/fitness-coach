@@ -18,6 +18,7 @@ from app.services.calculations import calculate_bmr, calculate_target, calculate
 from app.services.premium import (
     FREE_WEEKLY_AI_CHATS,
     refund_ai_quota,
+    reservation_week,
     reserve_ai_quota,
 )
 from app.i18n import t
@@ -213,13 +214,13 @@ def _sse(event, data):
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _refund_chat_quota(user_id):
+def _refund_chat_quota(user_id, reserved_week=None):
     """Akış içinde kota iadesi: current_user yerine ID ile taze kullanıcı çek —
     generator view döndükten SONRA çalışır, proxy'ye güvenme."""
     try:
         user = db.session.get(User, user_id)
         if user is not None:
-            refund_ai_quota(user, "chat")
+            refund_ai_quota(user, "chat", reserved_week=reserved_week)
     except Exception:
         db.session.rollback()
         current_app.logger.exception("AI chat quota refund failed (stream)")
@@ -257,6 +258,7 @@ def ask_coach_stream():
             current_user, "chat", FREE_WEEKLY_AI_CHATS):
         return jsonify({"error": t("coach.chat_quota_reached"),
                         "premium_required": True}), 402
+    reserved_week = reservation_week(current_user, "chat") if quota_enabled else None
 
     # Generator view DÖNDÜKTEN sonra çalışır: request proxy'lerine (current_user)
     # değil, şimdi çözülmüş düz değerlere bağlan.
@@ -285,7 +287,7 @@ def ask_coach_stream():
 
                     ai_recovery.record_ai_failure(user_id)  # WS7: ardışık-arıza sayacı
                     if quota_enabled:
-                        _refund_chat_quota(user_id)
+                        _refund_chat_quota(user_id, reserved_week)
                     yield _sse("error", {"message": t(event["key"])})
                     return
                 elif kind == "done":
@@ -294,7 +296,7 @@ def ask_coach_stream():
                     if event["is_error_fallback"]:
                         ai_recovery.record_ai_failure(user_id)
                         if quota_enabled:
-                            _refund_chat_quota(user_id)
+                            _refund_chat_quota(user_id, reserved_week)
                     else:
                         ai_recovery.clear_ai_failures(user_id)  # başarı → sayaç sıfırla
                     yield _sse("done", {"text": event["text"],
@@ -313,7 +315,7 @@ def ask_coach_stream():
 
             ai_recovery.record_ai_failure(user_id)
             if quota_enabled:
-                _refund_chat_quota(user_id)
+                _refund_chat_quota(user_id, reserved_week)
             yield _sse("error", {"message": t("coach.reply_failed")})
 
     response = Response(stream_with_context(generate()),

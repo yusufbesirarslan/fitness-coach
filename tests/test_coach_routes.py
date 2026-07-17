@@ -340,6 +340,23 @@ def test_ask_stream_error_frame_refunds_quota(client, auth_user, monkeypatch):
 
 
 
+def test_ask_stream_refund_passes_reservation_week(client, auth_user, monkeypatch):
+    refunded = []
+    monkeypatch.setattr(coach_bp, "reservation_week",
+                        lambda user, counter_key: "2026-W27")
+    monkeypatch.setattr(coach_bp, "_refund_chat_quota",
+                        lambda user_id, reserved_week: refunded.append(
+                            (user_id, reserved_week)))
+    monkeypatch.setattr(coach_bp, "stream_answer", _fake_stream([
+        {"type": "meta", "conversation_id": 1},
+        {"type": "error", "key": "coach.reply_failed"},
+    ]))
+
+    _post_stream(client, "protein?")
+
+    assert refunded == [(auth_user.id, "2026-W27")]
+
+
 def test_ask_stream_partial_stream_error_keeps_quota_and_hides_internal_fields(
         client, auth_user, monkeypatch):
     recorded = []
