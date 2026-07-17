@@ -109,12 +109,25 @@ def init_database(app):
                                           points_reward=pts, quest_type=qtype))
         db.session.commit()
 
+        # Meydan okuma kataloğunu tohumla (idempotent — code'a göre). Hatası boot'u
+        # kırmasın; eski kod 3 yeni tabloyu yok sayabilir (additive deploy).
+        try:
+            from app.services.challenges import seed_challenges
+            seed_challenges()
+        except Exception:
+            db.session.rollback()
+            # Sessiz yutma DEĞİL (triage #5): kırık bir seed sinyalsiz kaybolmasın.
+            app.logger.warning("[DB_INIT] seed_challenges başarısız (boot devam ediyor)",
+                               exc_info=True)
+
         # Davet kodu olmayan mevcut kullanıcılara tek seferlik backfill.
         try:
             from app.services.referral import backfill_referral_codes
             backfill_referral_codes()
         except Exception:
             db.session.rollback()
+            app.logger.warning("[DB_INIT] backfill_referral_codes başarısız (boot devam ediyor)",
+                               exc_info=True)
 
         # Taze şema create_all ile oluştu; model dışı DB nesnelerini kuran migration'ın
         # gerçekten çalışması için önce trigger revision'ının selefini damgala,

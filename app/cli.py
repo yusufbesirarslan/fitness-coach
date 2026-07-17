@@ -10,11 +10,17 @@ from app.services.gamification import run_weekly_rollover
 
 def seed_quests():
     """Insert default daily quests into the database."""
+    # NOT: bu liste app/db_init.py'nin tohumladığı 8 quest_type ile eş tutulmalı
+    # (drift → görev ekonomisi CLI'dan seed edilen ortamlarda eksik kalırdı).
     defaults = [
         {"title": "Günlük Giriş", "description": "Bugün uygulamaya giriş yap", "points_reward": 10, "quest_type": "login"},
         {"title": "Antrenman Kaydet", "description": "Bir antrenman planı oluştur veya kaydet", "points_reward": 50, "quest_type": "workout_logged"},
         {"title": "Bir Arkadaşına Yardım Et", "description": "Bir arkadaşına mesaj gönder", "points_reward": 30, "quest_type": "suggestion_sent"},
+        {"title": "Dolabını Güncelle", "description": "Supplement dolabına yeni bir ürün ekle", "points_reward": 25, "quest_type": "supplement_added"},
         {"title": "Öğün Kaydet", "description": "Bugün bir öğün kaydet", "points_reward": 20, "quest_type": "meal_logged"},
+        {"title": "Su Hedefi", "description": "Bugün su takibini güncelle", "points_reward": 10, "quest_type": "water_logged"},
+        {"title": "Haftalık Check-in", "description": "Kilonu güncelle veya check-in yap", "points_reward": 20, "quest_type": "checkin_done"},
+        {"title": "Bir Arkadaşını Davet Et", "description": "Davet bağlantını bir arkadaşınla paylaş", "points_reward": 40, "quest_type": "friend_invited"},
     ]
     for q in defaults:
         existing = DailyQuest.query.filter_by(quest_type=q["quest_type"]).first()
@@ -84,9 +90,11 @@ _DEFAULT_TEST_RE = re.compile(
 def _user_child_models():
     from app.models import (
         Activity, CoachConversation, CognitoSession, CustomMeal, DailyActivity,
+        FeedHide, FeedItem, FeedItemComment, FeedItemLike, FeedReport,
         MealLog, Notification, NutritionPlan, PendingAction, PumpCheck,
         PumpCheckComment, PumpCheckLike, Supplement, TrainingPlan,
-        UserQuestProgress, UserSession, UserWearableConnection, WaterLog,
+        UserBadge, UserChallengeProgress, UserQuestProgress, UserSession,
+        UserWearableConnection, WaterLog,
         WearableActivityLog, WearableSleepLog, WearableWorkoutLog,
         WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog,
     )
@@ -96,7 +104,9 @@ def _user_child_models():
         PumpCheck, Activity, Supplement, UserQuestProgress, WeeklyWinner,
         WaterLog, WorkoutLog, DailyActivity, CustomMeal, CoachConversation,
         UserWearableConnection, WearableSleepLog, WearableActivityLog,
-        WearableWorkoutLog, Notification,
+        WearableWorkoutLog, FeedItemLike, FeedItemComment, FeedItem,
+        FeedHide, FeedReport, Notification,
+        UserChallengeProgress, UserBadge,
     )
 
 
@@ -161,6 +171,28 @@ def _purge_user(user):
         synchronize_session=False)
     PumpCheckComment.query.filter(db.or_(*comment_child_filter)).delete(
         synchronize_session=False)
+
+    # Feed V2 (Sprint 5 PR2): FeedItem like/yorumları iki yönden bağlı —
+    # kullanıcının kendi bıraktıkları (user_id, döngü siler) VE başkalarının bu
+    # kullanıcının feed item'larına bıraktıkları (feed_item_id). Ayrıca
+    # başkalarının bu kullanıcının pump check'lerine yaptığı repost'lar (ref_id,
+    # FK'siz) askıda kalmasın diye açıkça silinir — child-model döngüsünden ÖNCE.
+    from app.models import FeedItem, FeedItemComment, FeedItemLike
+    own_item_ids = [i for (i,) in db.session.query(FeedItem.id).filter(FeedItem.user_id == uid).all()]
+    ref_item_ids = []
+    if pump_ids:
+        ref_item_ids = [i for (i,) in db.session.query(FeedItem.id).filter(
+            FeedItem.ref_type == "pump_check", FeedItem.ref_id.in_(pump_ids)).all()]
+    all_item_ids = set(own_item_ids) | set(ref_item_ids)
+    fi_like_filter = [FeedItemLike.user_id == uid]
+    fi_comment_filter = [FeedItemComment.user_id == uid]
+    if all_item_ids:
+        fi_like_filter.append(FeedItemLike.feed_item_id.in_(all_item_ids))
+        fi_comment_filter.append(FeedItemComment.feed_item_id.in_(all_item_ids))
+    FeedItemLike.query.filter(db.or_(*fi_like_filter)).delete(synchronize_session=False)
+    FeedItemComment.query.filter(db.or_(*fi_comment_filter)).delete(synchronize_session=False)
+    if ref_item_ids:
+        FeedItem.query.filter(FeedItem.id.in_(ref_item_ids)).delete(synchronize_session=False)
 
     for Model in _USER_CHILD_MODELS:
         Model.query.filter_by(user_id=uid).delete(synchronize_session=False)

@@ -209,6 +209,15 @@ def pump_check_gallery_data():
 @require_auth
 def pump_check_gallery_delete(check_id):
     check = PumpCheck.query.filter_by(id=check_id, user_id=current_user.id).first_or_404()
+    # Feed V2 (Sprint 5 PR2): bu pump check'e ATIFTA BULUNAN repost/quote'lar
+    # (ref_id FK'siz) askıda kalmasın diye önce çocuklarıyla birlikte silinir.
+    from app.models import FeedItem, FeedItemComment, FeedItemLike
+    ref_items = [i for (i,) in db.session.query(FeedItem.id).filter(
+        FeedItem.ref_type == "pump_check", FeedItem.ref_id == check.id).all()]
+    if ref_items:
+        FeedItemLike.query.filter(FeedItemLike.feed_item_id.in_(ref_items)).delete(synchronize_session=False)
+        FeedItemComment.query.filter(FeedItemComment.feed_item_id.in_(ref_items)).delete(synchronize_session=False)
+        FeedItem.query.filter(FeedItem.id.in_(ref_items)).delete(synchronize_session=False)
     db.session.delete(check)
     db.session.commit()
     return jsonify({"ok": True})

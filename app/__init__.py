@@ -195,7 +195,8 @@ def register_blueprints(app):
     from app.blueprints.pages import bp as pages_bp
     from app.blueprints.wearables import bp as wearables_bp
     from app.blueprints.notifications import bp as notifications_bp
+    from app.blueprints.challenges import bp as challenges_bp
     for bp in (auth_bp, profile_bp, nutrition_bp, food_bp, menu_bp, training_bp,
                tracking_bp, social_bp, gamification_bp, supplements_bp, coach_bp,
-               pages_bp, wearables_bp, notifications_bp):
+               pages_bp, wearables_bp, notifications_bp, challenges_bp):
         app.register_blueprint(bp)

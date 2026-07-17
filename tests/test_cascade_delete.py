@@ -80,3 +80,64 @@ def test_purge_user_removes_social_and_wearable_children(app, make_user):
     # Kullanıcının pump check'i silinince ona bağlı like/comment de kalmamalı.
     assert PumpCheckLike.query.filter_by(pump_check_id=pc_id).count() == 0
     assert PumpCheckComment.query.filter_by(pump_check_id=pc_id).count() == 0
+
+
+def test_user_delete_cascades_challenge_rows(app, make_user):
+    # Sprint 5 PR3: UserChallengeProgress + UserBadge user CASCADE ile temizlenir;
+    # Challenge (user_id yok, katalog) korunur.
+    from app.models import Challenge, UserBadge, UserChallengeProgress
+    user = make_user("ch_cascade")
+    uid = user.id
+    c = Challenge(code="weekly_workouts", title="X", metric="workout_logged",
+                  target_value=3, xp_reward=100, challenge_type="global", period_type="weekly")
+    db.session.add(c)
+    db.session.flush()
+    db.session.add_all([
+        UserChallengeProgress(user_id=uid, challenge_id=c.id, period_key="2026-W29", progress=1),
+        UserBadge(user_id=uid, badge_code="pump_week"),
+    ])
+    db.session.commit()
+
+    db.session.delete(user)
+    db.session.commit()
+
+    assert db.session.get(User, uid) is None
+    assert UserChallengeProgress.query.filter_by(user_id=uid).count() == 0
+    assert UserBadge.query.filter_by(user_id=uid).count() == 0
+    assert db.session.get(Challenge, c.id) is not None  # katalog parent korunur
+
+
+def test_purge_user_removes_feed_v2_rows_both_directions(app, make_user):
+    from app.cli import _purge_user
+    from app.models import (FeedHide, FeedItem, FeedItemComment, FeedItemLike,
+                            FeedReport)
+    user, friend = make_user("feed_purge"), make_user("feed_friend")
+    uid, fid = user.id, friend.id
+    my_check = PumpCheck(user_id=uid, valid=True, date_key=day_key())
+    friend_check = PumpCheck(user_id=fid, valid=True, date_key=day_key())
+    db.session.add_all([my_check, friend_check])
+    db.session.flush()
+    my_check_id, friend_check_id = my_check.id, friend_check.id
+    # user's OWN repost of friend's check + friend's repost of user's check
+    own_item = FeedItem(user_id=uid, item_type="repost", ref_type="pump_check", ref_id=friend_check_id)
+    cross_item = FeedItem(user_id=fid, item_type="quote", ref_type="pump_check", ref_id=my_check_id, body="x")
+    db.session.add_all([own_item, cross_item])
+    db.session.flush()
+    own_id, cross_id = own_item.id, cross_item.id
+    db.session.add_all([
+        FeedItemLike(feed_item_id=cross_id, user_id=uid),        # user liked friend's quote of user's check
+        FeedItemComment(feed_item_id=cross_id, user_id=uid, body="c"),
+        FeedHide(user_id=uid, target_type="pump_check", target_id=friend_check_id),
+        FeedReport(user_id=uid, target_type="feed_item", target_id=own_id, reason="spam"),
+    ])
+    db.session.commit()
+
+    _purge_user(user)
+    db.session.commit()
+
+    assert db.session.get(FeedItem, own_id) is None            # user's own repost gone
+    assert db.session.get(FeedItem, cross_id) is None          # cross-user repost of user's check gone
+    assert FeedItemLike.query.filter_by(user_id=uid).count() == 0
+    assert FeedItemComment.query.filter_by(user_id=uid).count() == 0
+    assert FeedHide.query.filter_by(user_id=uid).count() == 0
+    assert FeedReport.query.filter_by(user_id=uid).count() == 0

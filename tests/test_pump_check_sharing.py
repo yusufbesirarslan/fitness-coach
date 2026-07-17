@@ -11,6 +11,7 @@ from app.extensions import db
 from app.blueprints import training as training_bp
 from app.i18n import t
 from app.models import Friendship, Message, PumpCheck, PumpCheckComment, PumpCheckLike
+from app.services import feed as feed_service
 from app.services import pump_checks as pump_check_service
 from app.services.pump_checks import (
     can_view_pump_check,
@@ -156,7 +157,7 @@ def test_workout_complete_persists_score_after_later_training_plan_replacement(c
 
     assert replace.status_code == 200
     body = client.get("/feed/data").get_json()
-    assert body["posts"][0]["workoutScore"] == 8.0
+    assert body["items"][0]["workoutScore"] == 8.0
 
 
 def _ready_for_workout(client, user):
@@ -321,7 +322,7 @@ def test_workout_complete_persists_image_key_and_renders_in_feed(client, auth_us
     check = PumpCheck.query.filter_by(user_id=auth_user.id).one()
     assert check.image_key == f"pump-checks/{auth_user.id}/2026/07/e2e.jpg"
     feed = client.get("/feed/data").get_json()
-    assert feed["posts"][0]["imageUrl"] == f"https://s3.test/{check.image_key}"
+    assert feed["items"][0]["imageUrl"] == f"https://s3.test/{check.image_key}"
 
 
 def test_workout_complete_friends_upload_persists_image_key_and_dm_renders(client, auth_user, make_user, monkeypatch):
@@ -505,7 +506,7 @@ def test_feed_data_shows_current_user_and_friend_feed_posts(client, auth_user, m
 
     body = client.get("/feed/data").get_json()
 
-    descriptions = [post["description"] for post in body["posts"]]
+    descriptions = [post["description"] for post in body["items"]]
     assert descriptions == ["Friend", "Mine"]
     assert "Nope" not in descriptions
 
@@ -525,7 +526,7 @@ def test_feed_data_excludes_friends_and_private_visibility_posts(client, auth_us
 
     body = client.get("/feed/data").get_json()
 
-    descriptions = [post["description"] for post in body["posts"]]
+    descriptions = [post["description"] for post in body["items"]]
     assert descriptions == ["friend-feed", "mine-feed"]
     assert "mine-friends" not in descriptions
     assert "mine-private" not in descriptions
@@ -592,9 +593,10 @@ def test_feed_template_renders_fallback_media_region_without_image_url():
     root = Path(__file__).resolve().parents[1]
     html = (root / "templates" / "feed.html").read_text(encoding="utf-8")
 
+    # Feed V2: cardMedia(post) → media(card); imageUrl yoksa hâlâ fallback bölge.
     assert "feed-img-fallback" in html
-    assert "function cardMedia(post)" in html
-    assert "if(post.imageUrl)" in html
+    assert "function media(card)" in html
+    assert "card.imageUrl" in html
     assert "feed-img feed-img-fallback" in html
 
 
@@ -853,7 +855,7 @@ def test_feed_data_exposes_workout_score_when_present(client, auth_user):
 
     body = client.get("/feed/data").get_json()
 
-    assert body["posts"][0]["workoutScore"] == 8.0
+    assert body["items"][0]["workoutScore"] == 8.0
 
 
 def test_feed_data_batches_liked_state_and_preloads_card_users(client, auth_user, make_user, monkeypatch):
@@ -869,7 +871,7 @@ def test_feed_data_batches_liked_state_and_preloads_card_users(client, auth_user
     db.session.commit()
 
     seen = []
-    real_serialize = social_bp.serialize_pump_check_card
+    real_serialize = feed_service.serialize_pump_check_card
 
     def wrapped_serialize(
         check,
@@ -877,6 +879,7 @@ def test_feed_data_batches_liked_state_and_preloads_card_users(client, auth_user
         include_viewer_state=True,
         liked_pump_check_ids=None,
         image_visibility_preauthorized=False,
+        reposted_ref_ids=None,
     ):
         seen.append((check.id, liked_pump_check_ids))
         assert "user" in check.__dict__
@@ -886,19 +889,21 @@ def test_feed_data_batches_liked_state_and_preloads_card_users(client, auth_user
             include_viewer_state=include_viewer_state,
             liked_pump_check_ids=liked_pump_check_ids,
             image_visibility_preauthorized=image_visibility_preauthorized,
+            reposted_ref_ids=reposted_ref_ids,
         )
 
     class _NoPerCardLikeLookup:
         def filter_by(self, **kw):
             raise AssertionError(f"unexpected per-card like lookup: {kw}")
 
-    monkeypatch.setattr(social_bp, "serialize_pump_check_card", wrapped_serialize)
+    # Feed serilestirme app/services/feed.py'de: serializer'i ORADA yakala.
+    monkeypatch.setattr(feed_service, "serialize_pump_check_card", wrapped_serialize)
     monkeypatch.setattr(pump_check_service.PumpCheckLike, "query", _NoPerCardLikeLookup())
 
     body = client.get("/feed/data").get_json()
 
-    assert [post["description"] for post in body["posts"]] == ["other-post", "friend-post"]
-    assert [post["likedByMe"] for post in body["posts"]] == [True, False]
+    assert [post["description"] for post in body["items"]] == ["other-post", "friend-post"]
+    assert [post["likedByMe"] for post in body["items"]] == [True, False]
     assert seen == [
         (second.id, {second.id}),
         (first.id, {second.id}),
@@ -936,8 +941,9 @@ def test_feed_data_uses_preauthorized_feed_visibility_for_image_urls(client, aut
     def fail_can_view(viewer_id, check):
         raise AssertionError(f"feed serializer should not re-check visibility for post {check.id}")
 
-    monkeypatch.setattr(social_bp, "get_friend_ids", fake_feed_friend_ids)
-    monkeypatch.setattr(pump_check_service, "can_view_pump_check", fail_can_view)
+    # Feed pipeline app/services/feed.py'de: friend-id ve visibility oradan cozulur.
+    monkeypatch.setattr(feed_service, "get_friend_ids", fake_feed_friend_ids)
+    monkeypatch.setattr(feed_service, "can_view_pump_check", fail_can_view)
     monkeypatch.setattr(
         s3_helper,
         "generate_presigned_url",
@@ -949,9 +955,9 @@ def test_feed_data_uses_preauthorized_feed_visibility_for_image_urls(client, aut
     assert response.status_code == 200
     body = response.get_json()
     assert calls["feed_friend_ids"] == 1
-    assert [post["description"] for post in body["posts"]] == ["friend", "mine"]
-    assert body["posts"][0]["imageUrl"] == f"https://example.test/pump-checks/{friend.id}/2026/07/friend.jpg"
-    assert body["posts"][1]["imageUrl"] == "https://example.test/pump-checks/1/2026/07/mine.jpg"
+    assert [post["description"] for post in body["items"]] == ["friend", "mine"]
+    assert body["items"][0]["imageUrl"] == f"https://example.test/pump-checks/{friend.id}/2026/07/friend.jpg"
+    assert body["items"][1]["imageUrl"] == "https://example.test/pump-checks/1/2026/07/mine.jpg"
 
 
 def test_feed_data_ignores_malformed_pagination_and_uses_defaults(client, auth_user):
@@ -964,14 +970,14 @@ def test_feed_data_ignores_malformed_pagination_and_uses_defaults(client, auth_u
     ))
     db.session.commit()
 
-    response = client.get("/feed/data?page=abc&per_page=xyz")
+    response = client.get("/feed/data?cursor=&per_page=xyz")
 
     assert response.status_code == 200
     body = response.get_json()
-    assert len(body["posts"]) == 1
-    assert body["posts"][0]["description"] == "Fallback page"
+    assert len(body["items"]) == 1
+    assert body["items"][0]["description"] == "Fallback page"
     assert body["hasMore"] is False
-    assert body["nextPage"] is None
+    assert body["nextCursor"] is None
 
 
 def test_pump_check_comments_batches_comment_authors(client, auth_user, make_user):
@@ -999,7 +1005,8 @@ def test_pump_check_comments_batches_comment_authors(client, auth_user, make_use
         event.remove(db.engine, "before_cursor_execute", before_cursor_execute)
 
     assert response.status_code == 200
-    assert [row["body"] for row in response.get_json()["comments"]] == ["First", "Second"]
+    # Feed V2: yorumlar artık newest-first keyset (before_id) sayfalanır.
+    assert [row["body"] for row in response.get_json()["comments"]] == ["Second", "First"]
     assert any(
         re.search(r'FROM\s+"?user"?\b', statement, re.IGNORECASE) and " IN (" in statement
         for statement in user_selects

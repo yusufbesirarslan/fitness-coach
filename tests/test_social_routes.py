@@ -13,7 +13,8 @@ import pytest
 from app.blueprints import social as social_bp
 from app.extensions import db
 from app.models import (
-    Friendship, MealLog, Message, Notification, PumpCheck, User,
+    Friendship, MealLog, Message, Notification, PumpCheck, PumpCheckComment,
+    User,
 )
 from app.services.pump_checks import can_view_pump_check
 
@@ -530,3 +531,80 @@ def test_cancel_outgoing_only_sender_and_pending(client, auth_user, make_user):
     db.session.add(accepted)
     db.session.commit()
     assert client.delete(f"/friend/request/{accepted.id}").status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Feed V2 (Sprint 5 PR2): pump-check yorum silme matrisi + sayfalama
+# ---------------------------------------------------------------------------
+
+def _add_comment(check_id, user_id, body="yorum"):
+    c = PumpCheckComment(pump_check_id=check_id, user_id=user_id, body=body)
+    db.session.add(c)
+    PumpCheck.query.filter_by(id=check_id).update(
+        {PumpCheck.comments_count: PumpCheck.comments_count + 1}, synchronize_session=False)
+    db.session.commit()
+    return c
+
+
+def test_comment_delete_by_author(client, auth_user, friend, login):
+    check_id = _feed_check(auth_user.id)
+    login("arkadas")
+    cid = client.post(f"/pump-check/{check_id}/comments", json={"body": "selam"}).get_json()["id"]
+    dele = client.delete(f"/pump-check/{check_id}/comments/{cid}")
+    assert dele.status_code == 200
+    assert dele.get_json()["commentsCount"] == 0
+    assert db.session.get(PumpCheckComment, cid) is None
+
+
+def test_comment_delete_by_post_owner(client, auth_user, friend, login):
+    check_id = _feed_check(auth_user.id)
+    login("arkadas")
+    cid = client.post(f"/pump-check/{check_id}/comments", json={"body": "selam"}).get_json()["id"]
+    login("testuser")  # post owner
+    assert client.delete(f"/pump-check/{check_id}/comments/{cid}").status_code == 200
+    assert db.session.get(PumpCheckComment, cid) is None
+
+
+def test_comment_delete_by_third_party_is_403(client, auth_user, friend, make_user, login):
+    third = make_user("ucuncu")
+    db.session.add(Friendship(sender_id=auth_user.id, receiver_id=third.id, status="accepted"))
+    db.session.commit()
+    check_id = _feed_check(auth_user.id)
+    comment = _add_comment(check_id, friend.id)  # authored by friend
+    login("ucuncu")  # neither author nor post owner (but can view feed post)
+    assert client.delete(f"/pump-check/{check_id}/comments/{comment.id}").status_code == 403
+    assert db.session.get(PumpCheckComment, comment.id) is not None
+
+
+def test_comment_delete_on_invisible_check_is_403(client, auth_user, make_user, login):
+    owner = make_user("sahip")
+    check_id = _feed_check(owner.id)  # owner is NOT a friend of auth_user → not visible
+    comment = _add_comment(check_id, owner.id)
+    # auth_user (testuser) is logged in via fixture; cannot view owner's feed post.
+    assert client.delete(f"/pump-check/{check_id}/comments/{comment.id}").status_code == 403
+
+
+def test_comment_double_delete_is_404(client, auth_user):
+    check_id = _feed_check(auth_user.id)
+    cid = client.post(f"/pump-check/{check_id}/comments", json={"body": "x"}).get_json()["id"]
+    assert client.delete(f"/pump-check/{check_id}/comments/{cid}").status_code == 200
+    assert client.delete(f"/pump-check/{check_id}/comments/{cid}").status_code == 404
+    # floor-0: sayaç negatife düşmez
+    assert db.session.get(PumpCheck, check_id).comments_count == 0
+
+
+def test_comment_pagination_newest_first_no_dup(client, auth_user):
+    check_id = _feed_check(auth_user.id)
+    ids = [_add_comment(check_id, auth_user.id, body="c%d" % i).id for i in range(5)]
+    seen = []
+    before = 0
+    for _ in range(10):
+        url = f"/pump-check/{check_id}/comments?limit=2" + (f"&before_id={before}" if before else "")
+        data = client.get(url).get_json()
+        seen.extend(row["id"] for row in data["comments"])
+        assert all(row["canDelete"] for row in data["comments"])  # owner sees delete
+        if not data["hasMore"]:
+            break
+        before = data["nextBeforeId"]
+    assert sorted(seen) == sorted(ids)
+    assert seen == sorted(ids, reverse=True)  # newest-first global order

@@ -33,7 +33,7 @@ def test_alembic_migrations_have_single_head():
 
     heads = sorted(set(revisions) - down_revisions)
 
-    assert heads == ["ee55ff66aa77"]
+    assert heads == ["bb88cc99dd00"]
 
 
 def test_activity_trigger_revision_is_postgresql_guarded():
@@ -58,7 +58,7 @@ def test_meal_idempotency_migration_upgrades_deployed_pre_column_schema(tmp_path
         Path(__file__).resolve().parents[1]
         / "migrations"
         / "versions"
-        / "ee55ff66aa77_add_meal_log_idempotency.py"
+        / "bb88cc99dd00_add_meal_log_idempotency.py"
     )
     spec = importlib.util.spec_from_file_location("meal_idempotency_migration", migration_path)
     migration = importlib.util.module_from_spec(spec)

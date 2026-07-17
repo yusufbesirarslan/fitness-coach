@@ -26,6 +26,7 @@
 </div>
 <script nonce="{{ csp_nonce }}">
 var __t = window.t || function(k){ return k; };
+const ME_NAME = {{ current_user.username|tojson }};
 const grid = document.getElementById('gallery-grid');
 const modal = document.getElementById('gallery-modal');
 const detail = document.getElementById('gallery-detail');
@@ -53,7 +54,8 @@ function openDetail(item){
     '<div><div class="gallery-label">'+__t('feed.environment')+'</div><div class="gallery-value">'+esc(envLabel(item.environment))+'</div></div>' +
     '<div><div class="gallery-label">'+__t('feed.description')+'</div><div class="gallery-value">'+esc(item.description)+'</div></div>' +
     '<div><div class="gallery-label">'+__t('gallery.sharing_status')+'</div><div class="gallery-value">'+esc(__t(item.sharingStatus && item.sharingStatus.key ? item.sharingStatus.key : ""))+'</div></div>' +
-    '<div class="gallery-actions"><button type="button" class="btn-ghost" data-close-gallery>'+__t('common.cancel')+'</button><button type="button" class="btn-ghost" data-delete-gallery="'+item.id+'">'+__t('gallery.delete')+'</button></div>' +
+    '<div><div class="gallery-label">'+__t('feed.repost')+'</div><div class="gallery-value">'+__t('feed.reposts_count', {n: item.repostsCount || 0})+'</div></div>' +
+    '<div class="gallery-actions"><button type="button" class="btn-ghost" data-close-gallery>'+__t('common.cancel')+'</button><button type="button" class="btn-ghost" data-share-gallery>'+__t('feed.share')+'</button><button type="button" class="btn-ghost" data-delete-gallery="'+item.id+'">'+__t('gallery.delete')+'</button></div>' +
     '</div>';
   modal.classList.add('show');
   document.body.style.overflow = 'hidden';
@@ -74,9 +76,22 @@ grid.addEventListener('click', (e) => {
   const item = galleryItems.find((row) => String(row.id) === btn.dataset.id);
   if(item) openDetail(item);
 });
+async function shareCheck(username){
+  const text = __t('feed.share_text', {username: username});
+  const url = window.location.origin + '/feed';
+  if(navigator.share){ try { await navigator.share({text: text, url: url}); return; } catch(err){ if(err && err.name === 'AbortError') return; } }
+  try {
+    await navigator.clipboard.writeText(text + ' ' + url);
+    if(window.toast) window.toast(__t('feed.copied'));
+  } catch(err){}
+}
 modal.addEventListener('click', async (e) => {
   if(e.target === modal || e.target.closest('[data-close-gallery]')){
     closeModal();
+    return;
+  }
+  if(e.target.closest('[data-share-gallery]')){
+    shareCheck(ME_NAME);
     return;
   }
   const del = e.target.closest('[data-delete-gallery]');

@@ -21,6 +21,7 @@
         <div class="feed-skeleton"></div>
     </div>
 </main>
+
 <section class="comments-sheet" id="comments-sheet" hidden>
     <button class="comments-backdrop" type="button" id="comments-backdrop" aria-label="{{ t('feed.comments_close') }}"></button>
     <div class="comments-panel" role="dialog" aria-modal="true" aria-labelledby="comments-title">
@@ -28,6 +29,7 @@
             <div class="comments-title" id="comments-title">{{ t('feed.comments_title') }}</div>
             <button class="comments-close" type="button" id="comments-close" aria-label="{{ t('feed.comments_close') }}">×</button>
         </div>
+        <button class="comments-older" type="button" id="comments-older" hidden>{{ t('feed.comments_load_older') }}</button>
         <div class="comments-list" id="comments-list"></div>
         <form class="comments-compose" id="comments-form">
             <textarea class="comments-input" id="comments-input" maxlength="500" placeholder="{{ t('feed.comment_placeholder') }}"></textarea>
@@ -38,167 +40,400 @@
         </form>
     </div>
 </section>
+
+<section class="comments-sheet" id="quote-sheet" hidden>
+    <button class="comments-backdrop" type="button" id="quote-backdrop" aria-label="{{ t('feed.comments_close') }}"></button>
+    <div class="comments-panel" role="dialog" aria-modal="true">
+        <div class="comments-head">
+            <div class="comments-title">{{ t('feed.quote') }}</div>
+            <button class="comments-close" type="button" id="quote-close" aria-label="{{ t('feed.comments_close') }}">×</button>
+        </div>
+        <form class="comments-compose" id="quote-form">
+            <textarea class="comments-input" id="quote-input" maxlength="500" placeholder="{{ t('feed.quote_placeholder') }}"></textarea>
+            <div class="comments-foot">
+                <div class="comments-hint" id="quote-hint"></div>
+                <button class="comments-submit" id="quote-submit" type="submit">{{ t('feed.quote_post') }}</button>
+            </div>
+        </form>
+    </div>
+</section>
+
+<section class="comments-sheet" id="report-sheet" hidden>
+    <button class="comments-backdrop" type="button" id="report-backdrop" aria-label="{{ t('feed.comments_close') }}"></button>
+    <div class="comments-panel report-panel" role="dialog" aria-modal="true">
+        <div class="comments-head">
+            <div class="comments-title">{{ t('feed.report_title') }}</div>
+            <button class="comments-close" type="button" id="report-close" aria-label="{{ t('feed.comments_close') }}">×</button>
+        </div>
+        <div class="report-reasons">
+            <button class="report-reason" type="button" data-reason="spam">{{ t('feed.report_spam') }}</button>
+            <button class="report-reason" type="button" data-reason="inappropriate">{{ t('feed.report_inappropriate') }}</button>
+            <button class="report-reason" type="button" data-reason="other">{{ t('feed.report_other') }}</button>
+        </div>
+    </div>
+</section>
+
 {% include "_actionbar.html" %}
 <script nonce="{{ csp_nonce }}">
+const ME = {{ current_user.id|tojson }};
 var __t = window.t || function(k){ return k; };
-let feedPage = 1;
-let feedLoading = false;
-let feedHasMore = true;
+let feedCursor = null, feedLoading = false, feedHasMore = true;
 const feedList = document.getElementById('feed-list');
+
+function esc(v){ const d=document.createElement('div'); d.textContent=v == null ? '' : String(v); return d.innerHTML; }
+function q(v){ return esc(v).replace(/"/g,'&quot;'); }
+function envLabel(v){ const m = {'Ev': __t('training.loc_home'), 'Spor Salonu': __t('training.loc_gym')}; return m[v] || v; }
+
+function avatarHtml(username, url){
+  if(url) return '<div class="feed-avatar"><img src="'+q(url)+'" alt=""></div>';
+  return '<div class="feed-avatar">'+esc((username||'U')[0].toUpperCase())+'</div>';
+}
+function media(card){
+  if(card && card.imageUrl) return '<img class="feed-img" src="'+q(card.imageUrl)+'" loading="lazy" decoding="async" alt="">';
+  return '<div class="feed-img feed-img-fallback" aria-hidden="true"></div>';
+}
+function commentCountLabel(n){ return __t('feed.comments_count', {n: n}); }
+
+// Aksiyon çubuğu: like/comment engagement hedefine göre; repost/quote yalnızca
+// pump-check tabanlı kartlarda (canRepost).
+function actionsBar(target, likesCount, commentsCount, likedByMe, opts){
+  opts = opts || {};
+  let h = '<div class="feed-actions">';
+  h += '<button class="feed-action like-btn '+(likedByMe?'liked':'')+'" data-act="like" data-etype="'+target.type+'" data-eid="'+target.id+'"><span class="like-count">'+likesCount+'</span> '+__t('feed.likes')+'</button>';
+  h += '<button class="feed-action" data-act="comments" data-etype="'+target.type+'" data-eid="'+target.id+'">'+commentCountLabel(commentsCount)+'</button>';
+  if(opts.canRepost){
+    h += '<button class="feed-action repost-btn '+(opts.repostedByMe?'reposted':'')+'" data-act="repost" data-pcid="'+opts.pcId+'"><span class="repost-count">'+(opts.repostsCount||0)+'</span> '+__t('feed.repost')+'</button>';
+    h += '<button class="feed-action" data-act="quote" data-pcid="'+opts.pcId+'">'+__t('feed.quote')+'</button>';
+  }
+  h += '</div>';
+  return h;
+}
+
+// ⋯ menü: gizle/şikayet (başkasının içeriği) veya sil (kendi feed-item'ın).
+function menuHtml(actions){
+  if(!actions.length) return '';
+  let items = actions.map(function(a){
+    return '<button class="feed-menu-item" type="button" data-act="'+a.act+'"'+
+      (a.ttype?(' data-ttype="'+a.ttype+'"'):'')+(a.tid!=null?(' data-tid="'+a.tid+'"'):'')+
+      (a.iid!=null?(' data-iid="'+a.iid+'"'):'')+'>'+esc(a.label)+'</button>';
+  }).join('');
+  return '<div class="feed-menu"><button class="feed-menu-btn" type="button" data-act="menu" aria-label="'+q(__t('feed.menu'))+'">⋯</button>'+
+    '<div class="feed-menu-pop" hidden>'+items+'</div></div>';
+}
+function modActions(ttype, tid, ownerId){
+  if(ownerId === ME) return [];
+  return [
+    {act:'hide', label:__t('feed.hide'), ttype:ttype, tid:tid},
+    {act:'report', label:__t('feed.report'), ttype:ttype, tid:tid},
+  ];
+}
+
+function pumpBody(card){
+  let h = '<div class="feed-body">';
+  if(card.workoutScore != null) h += '<div><div class="feed-label">'+__t('feed.workout_score')+'</div><div class="feed-value">'+esc(card.workoutScore)+'</div></div>';
+  h += '<div><div class="feed-label">'+__t('feed.environment')+'</div><div class="feed-value">'+esc(envLabel(card.environment))+'</div></div>';
+  h += '<div><div class="feed-label">'+__t('feed.description')+'</div><div class="feed-value">'+esc(card.description)+'</div></div>';
+  return h;
+}
+
+// Bir pump-check kartının gövdesi (pump_check kind ve repost içinde ortak).
+function pumpCardInner(card, engagementTarget){
+  const canRepost = card.visibility === 'feed';
+  let h = pumpBody(card);
+  h += actionsBar(engagementTarget, card.likesCount, card.commentsCount, card.likedByMe, {
+    canRepost: canRepost, pcId: card.id, repostsCount: card.repostsCount, repostedByMe: card.repostedByMe,
+  });
+  if(card.userId === ME) h += '<button class="feed-action feed-share" data-act="share" data-user="'+q(card.username)+'">'+__t('feed.share')+'</button>';
+  h += '</div>';
+  return h;
+}
+
+function pumpCard(item){
+  const menu = menuHtml(modActions('pump_check', item.id, item.userId));
+  return '<article class="feed-card" data-id="'+item.id+'"><div class="feed-head">'+avatarHtml(item.username, item.userAvatar)+
+    '<div><div class="feed-user">'+esc(item.username)+'</div><div class="feed-time">'+esc(item.timePosted)+'</div></div>'+menu+'</div>'+
+    media(item)+pumpCardInner(item, item.engagement.target)+'</article>';
+}
+
+function repostCard(item){
+  const banner = '<div class="repost-banner">🔁 '+__t('feed.reposted_by', {username: esc(item.reposter.username)})+'</div>';
+  let actions = [];
+  if(item.reposter.userId === ME) actions = [{act:'delitem', label:__t('feed.delete_repost'), iid:item.id}];
+  else actions = modActions('feed_item', item.id, item.reposter.userId);
+  const menu = menuHtml(actions);
+  if(item.unavailable || !item.original){
+    return '<article class="feed-card" data-id="r'+item.id+'">'+banner+'<div class="feed-head"><div></div>'+menu+'</div>'+
+      '<div class="feed-unavailable">'+__t('feed.unavailable')+'</div></article>';
+  }
+  const o = item.original;
+  return '<article class="feed-card" data-id="r'+item.id+'">'+banner+'<div class="feed-head">'+avatarHtml(o.username, o.userAvatar)+
+    '<div><div class="feed-user">'+esc(o.username)+'</div><div class="feed-time">'+esc(o.timePosted)+'</div></div>'+menu+'</div>'+
+    media(o)+pumpCardInner(o, item.engagement.target)+'</article>';
+}
+
+function quoteCard(item){
+  let actions = [];
+  if(item.author.userId === ME) actions = [{act:'delitem', label:__t('feed.delete_repost'), iid:item.id}];
+  else actions = modActions('feed_item', item.id, item.author.userId);
+  const menu = menuHtml(actions);
+  let inner = '<div class="quote-body">'+esc(item.body)+'</div>';
+  if(item.original){
+    inner += '<div class="quote-original">'+avatarHtml(item.original.username, item.original.userAvatar)+
+      '<div class="quote-original-user">'+esc(item.original.username)+'</div></div>'+media(item.original);
+  } else {
+    inner += '<div class="feed-unavailable">'+__t('feed.unavailable')+'</div>';
+  }
+  inner += actionsBar(item.engagement.target, item.likesCount, item.commentsCount, item.likedByMe, {});
+  return '<article class="feed-card quote-card" data-id="q'+item.id+'"><div class="feed-head">'+avatarHtml(item.author.username, item.author.userAvatar)+
+    '<div><div class="feed-user">'+esc(item.author.username)+'</div><div class="feed-time">'+esc(item.timePosted)+'</div></div>'+menu+'</div>'+inner+'</article>';
+}
+
+function milestoneCard(item){
+  const menu = menuHtml(modActions('activity', item.id, item.userId));
+  return '<article class="feed-card milestone-card" data-id="m'+item.id+'"><div class="feed-head"><div class="milestone-icon">'+esc(item.icon)+'</div>'+
+    '<div><div class="feed-value">'+esc(item.content)+'</div><div class="feed-time">'+esc(item.timePosted)+'</div></div>'+menu+'</div></article>';
+}
+
+function renderItem(item){
+  if(item.kind === 'pump_check') return pumpCard(item);
+  if(item.kind === 'repost') return repostCard(item);
+  if(item.kind === 'quote') return quoteCard(item);
+  if(item.kind === 'milestone') return milestoneCard(item);
+  return '';
+}
+
+async function loadFeed(){
+  if(feedLoading || !feedHasMore) return;
+  feedLoading = true;
+  try {
+    const url = '/feed/data' + (feedCursor ? ('?cursor=' + encodeURIComponent(feedCursor)) : '');
+    const res = await fetch(url);
+    const data = await res.json();
+    if(feedCursor === null) feedList.innerHTML = '';
+    if(!data.items.length && feedCursor === null){
+      feedList.innerHTML = '<div class="empty-state"><div class="empty-icon">📸</div><div class="empty-desc">'+__t('feed.empty')+'</div></div>';
+    } else {
+      feedList.insertAdjacentHTML('beforeend', data.items.map(renderItem).join(''));
+    }
+    feedHasMore = data.hasMore;
+    feedCursor = data.nextCursor;
+  } finally {
+    feedLoading = false;
+  }
+}
+
+function toast(msg){
+  const wrap = document.getElementById('toast-wrap');
+  if(!wrap) return;
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(function(){ el.remove(); }, 2600);
+}
+
+// ── Etkileşim: tek delege click handler ───────────────────────────────────────
+feedList.addEventListener('click', async function(e){
+  const btn = e.target.closest('[data-act]');
+  if(!btn) return;
+  const act = btn.dataset.act;
+  if(act === 'like') return toggleLike(btn);
+  if(act === 'comments') return openComments(btn.dataset.etype, btn.dataset.eid);
+  if(act === 'repost') return toggleRepost(btn);
+  if(act === 'quote') return openQuote(btn.dataset.pcid);
+  if(act === 'share') return shareCheck(btn.dataset.user);
+  if(act === 'menu') return toggleMenu(btn);
+  if(act === 'hide') return hideTarget(btn);
+  if(act === 'report') return openReport(btn.dataset.ttype, btn.dataset.tid);
+  if(act === 'delitem') return deleteItem(btn.dataset.iid);
+});
+document.addEventListener('click', function(e){
+  if(!e.target.closest('.feed-menu')){
+    document.querySelectorAll('.feed-menu-pop').forEach(function(p){ p.hidden = true; });
+  }
+});
+
+function toggleMenu(btn){
+  const pop = btn.parentElement.querySelector('.feed-menu-pop');
+  const open = pop.hidden;
+  document.querySelectorAll('.feed-menu-pop').forEach(function(p){ p.hidden = true; });
+  pop.hidden = !open;
+}
+
+async function toggleLike(btn){
+  const type = btn.dataset.etype, id = btn.dataset.eid;
+  const base = type === 'feed_item' ? ('/feed/item/'+id+'/like') : ('/pump-check/'+id+'/like');
+  const liked = btn.classList.contains('liked');
+  btn.classList.toggle('liked', !liked);  // optimistic
+  try {
+    const res = await fetch(base, {method: liked ? 'DELETE' : 'POST'});
+    const data = await res.json();
+    if(res.ok){ btn.classList.toggle('liked', data.liked); btn.querySelector('.like-count').textContent = data.likesCount; }
+    else { btn.classList.toggle('liked', liked); }
+  } catch(err){ btn.classList.toggle('liked', liked); }
+}
+
+async function toggleRepost(btn){
+  const pcId = btn.dataset.pcid;
+  const reposted = btn.classList.contains('reposted');
+  if(reposted){ toast(__t('feed.hidden')); return; }  // un-repost feed listesinden yönetilir; V1'de no-op uyarısı
+  btn.classList.add('is-busy');
+  try {
+    const res = await fetch('/feed/repost', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ref_id: Number(pcId), mode: 'repost'})});
+    const data = await res.json();
+    if(res.ok){
+      btn.classList.add('reposted');
+      const c = btn.querySelector('.repost-count'); if(c) c.textContent = data.repostsCount;
+      toast(__t('feed.repost'));
+    } else { toast(data.error || __t('feed.invalid_request')); }
+  } finally { btn.classList.remove('is-busy'); }
+}
+
+async function deleteItem(iid){
+  const res = await fetch('/feed/item/'+iid, {method:'DELETE'});
+  if(res.ok){ const card = feedList.querySelector('[data-id="r'+iid+'"],[data-id="q'+iid+'"]'); if(card) card.remove(); }
+}
+
+async function hideTarget(btn){
+  const res = await fetch('/feed/hide', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({target_type: btn.dataset.ttype, target_id: Number(btn.dataset.tid)})});
+  if(res.ok){ const card = btn.closest('.feed-card'); if(card) card.remove(); toast(__t('feed.hidden')); }
+}
+
+// ── Şikayet sheet ─────────────────────────────────────────────────────────────
+const reportSheet = document.getElementById('report-sheet');
+let reportTarget = null;
+function openReport(ttype, tid){ reportTarget = {ttype: ttype, tid: Number(tid)}; reportSheet.hidden = false; }
+function closeReport(){ reportSheet.hidden = true; reportTarget = null; }
+document.getElementById('report-backdrop').addEventListener('click', closeReport);
+document.getElementById('report-close').addEventListener('click', closeReport);
+reportSheet.querySelectorAll('.report-reason').forEach(function(rb){
+  rb.addEventListener('click', async function(){
+    if(!reportTarget) return;
+    const res = await fetch('/feed/report', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({target_type: reportTarget.ttype, target_id: reportTarget.tid, reason: rb.dataset.reason})});
+    if(res.ok){
+      const t = reportTarget.tid;
+      const card = feedList.querySelector('[data-id="'+t+'"],[data-id="r'+t+'"],[data-id="q'+t+'"],[data-id="m'+t+'"]');
+      if(card) card.remove();
+      toast(__t('feed.report_sent'));
+    }
+    closeReport();
+  });
+});
+
+// ── Alıntı (quote) sheet ──────────────────────────────────────────────────────
+const quoteSheet = document.getElementById('quote-sheet');
+const quoteInput = document.getElementById('quote-input');
+const quoteHint = document.getElementById('quote-hint');
+const quoteSubmit = document.getElementById('quote-submit');
+let quotePcId = null;
+function openQuote(pcId){ quotePcId = Number(pcId); quoteInput.value=''; quoteHint.textContent=''; quoteSheet.hidden = false; quoteInput.focus(); }
+function closeQuote(){ quoteSheet.hidden = true; quotePcId = null; }
+document.getElementById('quote-backdrop').addEventListener('click', closeQuote);
+document.getElementById('quote-close').addEventListener('click', closeQuote);
+document.getElementById('quote-form').addEventListener('submit', async function(e){
+  e.preventDefault();
+  const body = quoteInput.value.trim();
+  if(!body){ quoteHint.textContent = __t('feed.comment_empty'); return; }
+  quoteSubmit.disabled = true;
+  try {
+    const res = await fetch('/feed/repost', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ref_id: quotePcId, mode: 'quote', body: body})});
+    const data = await res.json();
+    if(res.ok){ closeQuote(); feedCursor = null; feedHasMore = true; loadFeed(); }
+    else { quoteHint.textContent = data.error || __t('feed.invalid_request'); }
+  } finally { quoteSubmit.disabled = false; }
+});
+
+// ── Yorum sheet (hedef-duyarlı: pump_check | feed_item) ───────────────────────
 const commentsSheet = document.getElementById('comments-sheet');
-const commentsBackdrop = document.getElementById('comments-backdrop');
-const commentsClose = document.getElementById('comments-close');
 const commentsList = document.getElementById('comments-list');
 const commentsForm = document.getElementById('comments-form');
 const commentsInput = document.getElementById('comments-input');
 const commentsSubmit = document.getElementById('comments-submit');
 const commentsHint = document.getElementById('comments-hint');
-let activeCommentsId = null;
-function esc(v){ const d=document.createElement('div'); d.textContent=v == null ? '' : String(v); return d.innerHTML; }
-// location_type kanonik TR ('Ev'/'Spor Salonu') gelir; görünen etiket display-map ile çevrilir.
-function envLabel(v){ const m = {'Ev': __t('training.loc_home'), 'Spor Salonu': __t('training.loc_gym')}; return m[v] || v; }
-function avatar(post){ return post.userAvatar ? '<div class="feed-avatar"><img src="'+esc(post.userAvatar).replace(/"/g,'&quot;')+'" alt=""></div>' : '<div class="feed-avatar">'+esc((post.username||'U')[0].toUpperCase())+'</div>'; }
-function commentAvatar(comment){ return comment.userAvatar ? '<div class="comment-avatar"><img src="'+esc(comment.userAvatar).replace(/"/g,'&quot;')+'" alt=""></div>' : '<div class="comment-avatar">'+esc((comment.username||'U')[0].toUpperCase())+'</div>'; }
-function cardMedia(post){
-  if(post.imageUrl){
-    return '<img class="feed-img" src="'+esc(post.imageUrl).replace(/"/g,'&quot;')+'" loading="lazy" decoding="async" alt="">';
-  }
-  return '<div class="feed-img feed-img-fallback" aria-hidden="true"></div>';
+const commentsOlder = document.getElementById('comments-older');
+let activeType = null, activeId = null, commentsBefore = null;
+
+function commentBase(){ return activeType === 'feed_item' ? ('/feed/item/'+activeId+'/comments') : ('/pump-check/'+activeId+'/comments'); }
+function commentAvatar(c){ return c.userAvatar ? '<div class="comment-avatar"><img src="'+q(c.userAvatar)+'" alt=""></div>' : '<div class="comment-avatar">'+esc((c.username||'U')[0].toUpperCase())+'</div>'; }
+function renderComment(c){
+  const del = c.canDelete ? '<button class="comment-del" type="button" data-del="'+c.id+'">'+__t('feed.comment_delete')+'</button>' : '';
+  return '<div class="comment-row" data-cid="'+c.id+'">'+commentAvatar(c)+'<div class="comment-card"><div class="comment-meta"><span class="comment-user">'+esc(c.username)+'</span><span class="comment-time">'+esc(c.createdAt || '')+'</span>'+del+'</div><div class="comment-body">'+esc(c.body)+'</div></div></div>';
 }
-function card(post){
-  return '<article class="feed-card" data-id="'+post.id+'"><div class="feed-head">'+avatar(post)+'<div><div class="feed-user">'+esc(post.username)+'</div><div class="feed-time">'+esc(post.timePosted)+'</div></div></div>'+
-    cardMedia(post)+
-    '<div class="feed-body">'+
-    (post.workoutScore != null ? '<div><div class="feed-label">'+__t('feed.workout_score')+'</div><div class="feed-value">'+esc(post.workoutScore)+'</div></div>' : '')+
-    '<div><div class="feed-label">'+__t('feed.environment')+'</div><div class="feed-value">'+esc(envLabel(post.environment))+'</div></div>'+
-    '<div><div class="feed-label">'+__t('feed.description')+'</div><div class="feed-value">'+esc(post.description)+'</div></div>'+
-    '<div class="feed-actions"><button class="feed-action '+(post.likedByMe?'liked':'')+'" data-like="'+post.id+'">'+post.likesCount+' '+__t('feed.likes')+'</button><button class="feed-action" data-comments="'+post.id+'">'+commentCountLabel(post.commentsCount)+'</button></div></div></article>';
-}
-function commentCountLabel(count){
-  return __t('feed.comments_count', {n: count});
-}
-function setCommentCount(id, count){
-  const button = feedList.querySelector('[data-comments="'+id+'"]');
-  if(button) button.textContent = commentCountLabel(count);
-}
-function renderComment(comment){
-  return '<div class="comment-row">'+commentAvatar(comment)+'<div class="comment-card"><div class="comment-meta"><span class="comment-user">'+esc(comment.username)+'</span><span class="comment-time">'+esc(comment.createdAt || '')+'</span></div><div class="comment-body">'+esc(comment.body)+'</div></div></div>';
-}
-function setCommentsState(key){
-  commentsList.innerHTML = '<div class="comments-state">'+esc(__t(key))+'</div>';
-}
-function openComments(id){
-  activeCommentsId = id;
-  commentsSheet.hidden = false;
-  document.body.style.overflow = 'hidden';
-  commentsInput.value = '';
-  commentsHint.textContent = __t('feed.comment_hint');
+function setCommentsState(key){ commentsList.innerHTML = '<div class="comments-state">'+esc(__t(key))+'</div>'; }
+
+function openComments(type, id){
+  activeType = type; activeId = id; commentsBefore = null;
+  commentsSheet.hidden = false; document.body.style.overflow = 'hidden';
+  commentsInput.value = ''; commentsHint.textContent = __t('feed.comment_hint');
+  commentsList.innerHTML = ''; commentsOlder.hidden = true;
+  loadComments();
   commentsInput.focus();
-  loadComments(id);
 }
-function closeComments(){
-  activeCommentsId = null;
-  commentsSheet.hidden = true;
-  document.body.style.overflow = '';
-}
-async function loadComments(id){
-  setCommentsState('feed.comments_loading');
+function closeComments(){ activeType = null; activeId = null; commentsSheet.hidden = true; document.body.style.overflow = ''; }
+
+async function loadComments(){
+  if(commentsBefore === null) setCommentsState('feed.comments_loading');
   try {
-    const res = await fetch('/pump-check/' + id + '/comments');
+    const url = commentBase() + '?limit=20' + (commentsBefore ? ('&before_id='+commentsBefore) : '');
+    const res = await fetch(url);
     const data = await res.json();
-    if(!res.ok){
-      setCommentsState('feed.comments_error');
-      return;
-    }
-    if(activeCommentsId !== id) return;
-    if(!data.comments.length){
-      setCommentsState('feed.comments_empty');
-      return;
-    }
-    commentsList.innerHTML = data.comments.map(renderComment).join('');
-    commentsList.scrollTop = commentsList.scrollHeight;
-  } catch (err) {
-    setCommentsState('feed.comments_error');
-  }
-}
-async function loadFeed(){
-  if(feedLoading || !feedHasMore) return;
-  feedLoading = true;
-  try {
-    const res = await fetch('/feed/data?page=' + feedPage);
-    const data = await res.json();
-    if(feedPage === 1) feedList.innerHTML = '';
-    if(!data.posts.length && feedPage === 1){
-      feedList.innerHTML = '<div class="empty-state"><div class="empty-icon">📸</div><div class="empty-desc">'+__t('feed.empty')+'</div></div>';
+    if(!res.ok){ setCommentsState('feed.comments_error'); return; }
+    if(commentsBefore === null){
+      if(!data.comments.length){ setCommentsState('feed.comments_empty'); commentsOlder.hidden = true; return; }
+      commentsList.innerHTML = data.comments.map(renderComment).join('');
     } else {
-      feedList.insertAdjacentHTML('beforeend', data.posts.map(card).join(''));
+      commentsList.insertAdjacentHTML('beforeend', data.comments.map(renderComment).join(''));
     }
-    feedHasMore = data.hasMore;
-    feedPage = data.nextPage || feedPage;
-  } finally {
-    feedLoading = false;
-  }
+    commentsBefore = data.nextBeforeId;
+    commentsOlder.hidden = !data.hasMore;
+  } catch(err){ if(commentsBefore === null) setCommentsState('feed.comments_error'); }
 }
-feedList.addEventListener('click', async (e) => {
-  const like = e.target.closest('[data-like]');
-  if(like){
-    const id = like.dataset.like;
-    const liked = like.classList.contains('liked');
-    like.classList.add('is-busy');
-    try {
-      const res = await fetch('/pump-check/' + id + '/like', { method: liked ? 'DELETE' : 'POST' });
-      const data = await res.json();
-      if(res.ok){
-        like.classList.toggle('liked', data.liked);
-        like.textContent = data.likesCount + ' ' + __t('feed.likes');
-      }
-    } finally {
-      like.classList.remove('is-busy');
-    }
-    return;
-  }
-  const comments = e.target.closest('[data-comments]');
-  if(comments){
-    openComments(comments.dataset.comments);
+
+commentsOlder.addEventListener('click', loadComments);
+commentsList.addEventListener('click', async function(e){
+  const del = e.target.closest('[data-del]');
+  if(!del) return;
+  const res = await fetch(commentBase() + '/' + del.dataset.del, {method:'DELETE'});
+  if(res.ok){ const row = del.closest('.comment-row'); if(row) row.remove(); }
+});
+document.getElementById('comments-backdrop').addEventListener('click', closeComments);
+document.getElementById('comments-close').addEventListener('click', closeComments);
+document.addEventListener('keydown', function(e){
+  if(e.key === 'Escape'){
+    if(!commentsSheet.hidden) closeComments();
+    else if(!quoteSheet.hidden) closeQuote();
+    else if(!reportSheet.hidden) closeReport();
   }
 });
-commentsBackdrop.addEventListener('click', closeComments);
-commentsClose.addEventListener('click', closeComments);
-document.addEventListener('keydown', (e) => {
-  if(e.key === 'Escape' && !commentsSheet.hidden) closeComments();
-});
-commentsForm.addEventListener('submit', async (e) => {
+commentsForm.addEventListener('submit', async function(e){
   e.preventDefault();
-  if(!activeCommentsId) return;
+  if(!activeId) return;
   const body = commentsInput.value.trim();
-  if(!body){
-    commentsHint.textContent = __t('feed.comment_empty');
-    return;
-  }
+  if(!body){ commentsHint.textContent = __t('feed.comment_empty'); return; }
   commentsSubmit.disabled = true;
   commentsHint.textContent = __t('feed.comment_posting');
   try {
-    const res = await fetch('/pump-check/' + activeCommentsId + '/comments', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({body: body})
-    });
+    const res = await fetch(commentBase(), {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({body: body})});
     const data = await res.json();
-    if(!res.ok){
-      commentsHint.textContent = data.error || __t('feed.comments_error');
-      return;
-    }
-    commentsInput.value = '';
-    commentsHint.textContent = __t('feed.comment_hint');
-    setCommentCount(activeCommentsId, data.commentsCount || 0);
-    await loadComments(activeCommentsId);
-  } catch (err) {
-    commentsHint.textContent = __t('feed.comments_error');
-  } finally {
-    commentsSubmit.disabled = false;
-  }
+    if(!res.ok){ commentsHint.textContent = data.error || __t('feed.comments_error'); return; }
+    commentsInput.value = ''; commentsHint.textContent = __t('feed.comment_hint');
+    commentsBefore = null; commentsList.innerHTML = ''; commentsOlder.hidden = true;
+    await loadComments();
+  } catch(err){ commentsHint.textContent = __t('feed.comments_error'); }
+  finally { commentsSubmit.disabled = false; }
 });
-window.addEventListener('scroll', () => { if(window.innerHeight + window.scrollY > document.body.offsetHeight - 500) loadFeed(); });
+
+// ── Harici paylaşım (Web Share + pano yedeği) ─────────────────────────────────
+async function shareCheck(username){
+  const text = __t('feed.share_text', {username: username});
+  const url = window.location.origin + '/feed';
+  if(navigator.share){ try { await navigator.share({text: text, url: url}); return; } catch(err){ if(err && err.name === 'AbortError') return; } }
+  try { await navigator.clipboard.writeText(text + ' ' + url); toast(__t('feed.copied')); } catch(err){}
+}
+
+window.addEventListener('scroll', function(){ if(window.innerHeight + window.scrollY > document.body.offsetHeight - 500) loadFeed(); });
 loadFeed();
 </script>
 <script src="/static/actions.js"></script>

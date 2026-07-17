@@ -363,6 +363,7 @@ class PumpCheck(db.Model):
     shared_friend_ids = db.Column(JSONB().with_variant(db.JSON(), "sqlite"), nullable=False, default=list)
     likes_count   = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     comments_count = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    reposts_count = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     valid         = db.Column(db.Boolean, default=True)
     fallback      = db.Column(db.Boolean, default=False)  # AI atlandıysa (fail-open)
     # Günlük idempotency anahtarı (Istanbul ISO 'YYYY-MM-DD'). Aşağıdaki UNIQUE
@@ -374,6 +375,9 @@ class PumpCheck(db.Model):
 
     __table_args__ = (
         db.UniqueConstraint("user_id", "date_key", name="uq_pump_check_day"),
+        # Feed V2 birincil kaynak sorgusu: user_id IN (arkadaslar) + ORDER BY
+        # created_at DESC. Tek-kolon user_id indeksi siralamayi karsilamiyordu.
+        db.Index("ix_pump_check_user_created", "user_id", "created_at"),
     )
 
     user = db.relationship("User", backref=db.backref("pump_checks", passive_deletes=True))
@@ -405,6 +409,84 @@ class PumpCheckComment(db.Model):
 
     pump_check = db.relationship("PumpCheck", backref=db.backref("comments", passive_deletes=True))
     user = db.relationship("User", backref=db.backref("pump_check_comments", passive_deletes=True))
+
+
+class FeedItem(db.Model):
+    # Feed V2 omurgası (Sprint 5 PR2): SADECE yeni içerik türleri (repost/quote).
+    # ref_id polimorfik tohum — FK YOK (ref_type ayırır); askıda kalan ref →
+    # "içerik yok" stub. PumpCheck/Activity feed'e sorgu-zamanında katılır.
+    id            = db.Column(db.Integer, primary_key=True)
+    user_id       = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_type     = db.Column(db.String(20), nullable=False, index=True)   # 'repost' | 'quote'
+    ref_type      = db.Column(db.String(20), nullable=False, default="pump_check", server_default="pump_check")
+    ref_id        = db.Column(db.Integer, nullable=False, index=True)       # FK YOK — polimorfik
+    body          = db.Column(db.String(500), nullable=True)                # quote metni
+    likes_count   = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    comments_count = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "item_type", "ref_type", "ref_id", name="uq_feed_item_user_ref"),
+    )
+
+    user = db.relationship("User", backref=db.backref("feed_items", passive_deletes=True))
+
+
+class FeedItemLike(db.Model):
+    id           = db.Column(db.Integer, primary_key=True)
+    feed_item_id = db.Column(db.Integer, db.ForeignKey("feed_item.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id      = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at   = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("feed_item_id", "user_id", name="uq_feed_item_like_user"),
+    )
+
+    feed_item = db.relationship("FeedItem", backref=db.backref("likes", passive_deletes=True))
+    user = db.relationship("User", backref=db.backref("feed_item_likes", passive_deletes=True))
+
+
+class FeedItemComment(db.Model):
+    id           = db.Column(db.Integer, primary_key=True)
+    feed_item_id = db.Column(db.Integer, db.ForeignKey("feed_item.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id      = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    body         = db.Column(db.String(500), nullable=False)
+    created_at   = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    feed_item = db.relationship("FeedItem", backref=db.backref("comments", passive_deletes=True))
+    user = db.relationship("User", backref=db.backref("feed_item_comments", passive_deletes=True))
+
+
+class FeedHide(db.Model):
+    # Görüntüleyen-başı gizleme (polimorfik): pump_check | feed_item | activity.
+    id          = db.Column(db.Integer, primary_key=True)
+    user_id     = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    target_type = db.Column(db.String(20), nullable=False)
+    target_id   = db.Column(db.Integer, nullable=False)
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "target_type", "target_id", name="uq_feed_hide_target"),
+    )
+
+    user = db.relationship("User", backref=db.backref("feed_hides", passive_deletes=True))
+
+
+class FeedReport(db.Model):
+    id          = db.Column(db.Integer, primary_key=True)
+    user_id     = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)   # şikayetçi
+    target_type = db.Column(db.String(20), nullable=False)
+    target_id   = db.Column(db.Integer, nullable=False)
+    reason      = db.Column(db.String(30), nullable=False)   # 'spam' | 'inappropriate' | 'other'
+    note        = db.Column(db.String(300), nullable=True)
+    status      = db.Column(db.String(15), nullable=False, default="open", server_default="open")
+    created_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "target_type", "target_id", name="uq_feed_report_target"),
+    )
+
+    user = db.relationship("User", backref=db.backref("feed_reports", passive_deletes=True))
 
 
 class Friendship(db.Model):
@@ -441,6 +523,13 @@ class Activity(db.Model):
     activity_type = db.Column(db.String(30), nullable=False)
     content       = db.Column(db.String(300), nullable=False)
     timestamp     = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    # Feed V2 kilometre-tasi kaynagi: user_id IN (arkadaslar) + ORDER BY
+    # timestamp DESC. Activity en yuksek-hacimli tablo; ayri user_id/timestamp
+    # indeksleri IN + siralamayi karsilamiyordu (audit HIGH-1).
+    __table_args__ = (
+        db.Index("ix_activity_user_ts", "user_id", "timestamp"),
+    )
 
     user = db.relationship("User", backref=db.backref("activities", passive_deletes=True))
 
@@ -726,3 +815,59 @@ class Notification(db.Model):
     user  = db.relationship("User", foreign_keys=[user_id],
                             backref=db.backref("notifications", passive_deletes=True))
     actor = db.relationship("User", foreign_keys=[actor_id])
+
+
+class Challenge(db.Model):
+    # Meydan okuma katalogu (Sprint 5 PR3). Statik seed (DailyQuest deseni).
+    # code/category/metric/badge_code/challenge_type/period_type kanonik İngilizce
+    # slug; title/description kanonik TR (görünen metin t_or ile çevrilir).
+    # Genişletme tohumu: challenge_type ('global'|'featured'; ileride duel/team/
+    # sponsored), period_type ('weekly'; ileride daily/seasonal).
+    id            = db.Column(db.Integer, primary_key=True)
+    code          = db.Column(db.String(50), nullable=False, unique=True)
+    title         = db.Column(db.String(120), nullable=False)
+    description   = db.Column(db.Text)
+    category      = db.Column(db.String(30))
+    metric        = db.Column(db.String(30), nullable=False, index=True)   # event_type
+    target_value  = db.Column(db.Integer, nullable=False, default=1)
+    xp_reward     = db.Column(db.Integer, nullable=False, default=100)
+    badge_code    = db.Column(db.String(50), nullable=True)
+    challenge_type = db.Column(db.String(20), nullable=False, default="global", server_default="global")
+    period_type   = db.Column(db.String(20), nullable=False, default="weekly", server_default="weekly")
+    is_active     = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class UserChallengeProgress(db.Model):
+    id           = db.Column(db.Integer, primary_key=True)
+    user_id      = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    challenge_id = db.Column(db.Integer, db.ForeignKey("challenge.id", ondelete="CASCADE"), nullable=False, index=True)
+    period_key   = db.Column(db.String(10), nullable=False, index=True)   # 'YYYY-Www'
+    progress     = db.Column(db.Integer, nullable=False, default=0, server_default="0")
+    opted_in     = db.Column(db.Boolean, nullable=False, default=True, server_default="true")
+    completed_at = db.Column(db.DateTime, nullable=True)
+    created_at   = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "challenge_id", "period_key", name="uq_user_challenge_period"),
+        db.Index("ix_ucp_challenge_period", "challenge_id", "period_key"),
+    )
+
+    user      = db.relationship("User", backref=db.backref("challenge_progress", passive_deletes=True))
+    challenge = db.relationship("Challenge", backref=db.backref("progress_entries", passive_deletes=True))
+
+
+class UserBadge(db.Model):
+    # Tek-seferlik rozet (UNIQUE user_id+badge_code); tekrar tamamlamada XP verilir,
+    # rozet verilmez. source = izleme kaynağı, ör. "challenge:weekly_pump:2026-W29".
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    badge_code = db.Column(db.String(50), nullable=False)
+    source     = db.Column(db.String(80), nullable=True)
+    earned_at  = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint("user_id", "badge_code", name="uq_user_badge"),
+    )
+
+    user = db.relationship("User", backref=db.backref("badges", passive_deletes=True))

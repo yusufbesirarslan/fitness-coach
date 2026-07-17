@@ -1,14 +1,14 @@
 """Add optional replay keys for canonical meal ledger writes.
 
-Revision ID: ee55ff66aa77
-Revises: dd44ee55ff66
+Revision ID: bb88cc99dd00
+Revises: aa77bb88cc99
 """
 from alembic import op
 import sqlalchemy as sa
 
 
-revision = "ee55ff66aa77"
-down_revision = "dd44ee55ff66"
+revision = "bb88cc99dd00"
+down_revision = "aa77bb88cc99"
 branch_labels = None
 depends_on = None
 
