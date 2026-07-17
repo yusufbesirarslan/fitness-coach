@@ -64,36 +64,55 @@ def _get_or_create_global_row(user_id, challenge_id, period_key):
 def record_event(user_id, event_type, amount=1):
     """Bir gamification olayını tüm eşleşen aktif challenge'lara işle. COMMIT ETMEZ.
     Global → get-or-create + ilerlet; featured → yalnızca mevcut opted_in satır.
-    Tamamlanınca (guarded UPDATE, tam-bir-kez) XP + rozet + bildirim + feed aktivitesi."""
+    Tamamlanınca (guarded UPDATE, tam-bir-kez) XP + rozet + bildirim + feed aktivitesi.
+
+    Her challenge KENDİ savepoint'inde işlenir: geçici bir DB hatası (deadlock /
+    kilit zaman aşımı — 8 thread User/challenge satırlarında FOR UPDATE alırken
+    gerçekçi) yalnızca o savepoint'i geri alır, çağıranın DIŞ transaction'ını
+    KULLANILABİLİR bırakır. Böylece "challenge ilerlemesi ana eylemi ASLA kırmaz"
+    sözü gerçekten tutulur; aksi halde yutulan hata (rollback'siz) oturumu
+    poison'lar ve çağıranın (ör. update_streak) çıplak commit'i
+    PendingRollbackError → normal gezinmede 500 verirdi (triage 2026-07-17 #2)."""
     try:
         matched = Challenge.query.filter_by(metric=event_type, is_active=True).all()
         if not matched:
             return
         period_key = current_challenge_week()
-        for ch in matched:
-            if ch.challenge_type == "featured":
-                row = UserChallengeProgress.query.filter_by(
-                    user_id=user_id, challenge_id=ch.id, period_key=period_key,
-                    opted_in=True).first()
-                if row is None:
-                    continue
-            else:
-                row = _get_or_create_global_row(user_id, ch.id, period_key)
-                if row is None:
-                    continue
-            if row.completed_at is not None:
-                continue
-            # Atomik ilerleme (kayıp güncelleme yok — kolon UPDATE).
-            UserChallengeProgress.query.filter_by(id=row.id).update(
-                {UserChallengeProgress.progress: UserChallengeProgress.progress + amount},
-                synchronize_session=False)
-            db.session.refresh(row)
-            if row.progress >= ch.target_value:
-                _try_complete(user_id, ch, row, period_key)
     except Exception:
-        # Challenge ilerlemesi ana eylemi (antrenman/öğün) ASLA kırmaz.
-        log.warning("record_event başarısız (yutuldu): user=%s event=%s",
+        # Katalog/periyot okuması patlarsa: yut ve çık. Burada ROLLBACK ETME —
+        # çağıranın bekleyen yazısını (streak / WorkoutLog vb.) geri almak ana
+        # eylemi kırardı; oturum poison olduysa çağıranın korumalı commit'i
+        # (bkz. update_streak) 500'ü önler.
+        log.warning("record_event katalog okuması başarısız (yutuldu): user=%s event=%s",
                     user_id, event_type, exc_info=True)
+        return
+    for ch in matched:
+        # Dış değişiklikler (streak/last_login/WorkoutLog...) yukarıdaki katalog
+        # sorgusunun autoflush'ı ile savepoint AÇILMADAN ÖNCE dış transaction'a
+        # yazıldı → savepoint rollback'i onları GERİ ALMAZ, yalnızca bu challenge'ın
+        # yazısını alır.
+        try:
+            with db.session.begin_nested():
+                if ch.challenge_type == "featured":
+                    row = UserChallengeProgress.query.filter_by(
+                        user_id=user_id, challenge_id=ch.id, period_key=period_key,
+                        opted_in=True).first()
+                else:
+                    row = _get_or_create_global_row(user_id, ch.id, period_key)
+                if row is None or row.completed_at is not None:
+                    continue
+                # Atomik ilerleme (kayıp güncelleme yok — kolon UPDATE).
+                UserChallengeProgress.query.filter_by(id=row.id).update(
+                    {UserChallengeProgress.progress: UserChallengeProgress.progress + amount},
+                    synchronize_session=False)
+                db.session.refresh(row)
+                if row.progress >= ch.target_value:
+                    _try_complete(user_id, ch, row, period_key)
+        except Exception:
+            # Savepoint geri alındı → oturum kullanılabilir kalır; bu challenge
+            # atlanır, kalan challenge'lar işlenmeye devam eder.
+            log.warning("record_event başarısız (yutuldu): user=%s event=%s challenge=%s",
+                        user_id, event_type, getattr(ch, "code", "?"), exc_info=True)
 
 
 def _try_complete(user_id, ch, row, period_key):

@@ -116,6 +116,9 @@ def init_database(app):
             seed_challenges()
         except Exception:
             db.session.rollback()
+            # Sessiz yutma DEĞİL (triage #5): kırık bir seed sinyalsiz kaybolmasın.
+            app.logger.warning("[DB_INIT] seed_challenges başarısız (boot devam ediyor)",
+                               exc_info=True)
 
         # Davet kodu olmayan mevcut kullanıcılara tek seferlik backfill.
         try:
@@ -123,6 +126,8 @@ def init_database(app):
             backfill_referral_codes()
         except Exception:
             db.session.rollback()
+            app.logger.warning("[DB_INIT] backfill_referral_codes başarısız (boot devam ediyor)",
+                               exc_info=True)
 
         # Taze şema create_all ile oluştu; model dışı DB nesnelerini kuran migration'ın
         # gerçekten çalışması için önce trigger revision'ının selefini damgala,
