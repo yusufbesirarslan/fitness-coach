@@ -76,12 +76,29 @@ def get_feed_page(viewer_id, cursor=None, limit=10):
     decoded = decode_cursor(cursor)
     visible_ids = get_friend_ids(viewer_id) | {viewer_id}
 
-    # 1) COLLECT — her kaynaktan limit+1, keyset filtreli.
+    # 1) hidden — goruntuleyen-basi gizli hedefler (FeedReport auto-hide de FeedHide
+    # yazar). Gizlemeyi kaynak SQL sorgularina ITIYORUZ, sonradan Python'da DEGIL:
+    # aksi halde limit+1 aday toplayip gizlileri sonradan dusmek sayfayi eksik
+    # doldurur ve daha eski gorunur icerik varken sayfalamayi erken bitirirdi
+    # (audit LOW-1). Kaynak-ici dislama her kaynagin limit+1 GORUNUR aday
+    # dondurmesini garanti eder → has_more dogru hesaplanir, cursor bozulmaz.
+    hidden_pc, hidden_fi, hidden_act = set(), set(), set()
+    for h in FeedHide.query.filter(FeedHide.user_id == viewer_id).all():
+        if h.target_type == "pump_check":
+            hidden_pc.add(h.target_id)
+        elif h.target_type == "feed_item":
+            hidden_fi.add(h.target_id)
+        elif h.target_type == "activity":
+            hidden_act.add(h.target_id)
+
+    # 2) COLLECT — her kaynaktan limit+1, keyset filtreli, gizliler HARIC.
     candidates = []  # (created_at, source, id, obj)
 
     pc_q = PumpCheck.query.options(joinedload(PumpCheck.user)).filter(
         PumpCheck.visibility == "feed", PumpCheck.user_id.in_(visible_ids),
     )
+    if hidden_pc:
+        pc_q = pc_q.filter(PumpCheck.id.notin_(hidden_pc))
     f = _keyset_filter(PumpCheck.created_at, PumpCheck.id, decoded, "pump_check")
     if f is not None:
         pc_q = pc_q.filter(f)
@@ -89,6 +106,8 @@ def get_feed_page(viewer_id, cursor=None, limit=10):
         candidates.append((pc.created_at, "pump_check", pc.id, pc))
 
     fi_q = FeedItem.query.options(joinedload(FeedItem.user)).filter(FeedItem.user_id.in_(visible_ids))
+    if hidden_fi:
+        fi_q = fi_q.filter(FeedItem.id.notin_(hidden_fi))
     f = _keyset_filter(FeedItem.created_at, FeedItem.id, decoded, "feed_item")
     if f is not None:
         fi_q = fi_q.filter(f)
@@ -99,19 +118,13 @@ def get_feed_page(viewer_id, cursor=None, limit=10):
         Activity.user_id.in_(visible_ids),
         Activity.activity_type.in_(MILESTONE_ACTIVITY_TYPES),
     )
+    if hidden_act:
+        act_q = act_q.filter(Activity.id.notin_(hidden_act))
     f = _keyset_filter(Activity.timestamp, Activity.id, decoded, "activity")
     if f is not None:
         act_q = act_q.filter(f)
     for act in act_q.order_by(Activity.timestamp.desc(), Activity.id.desc()).limit(limit + 1).all():
         candidates.append((act.timestamp, "activity", act.id, act))
-
-    # 2) hidden dus (goruntuleyen-basi; FeedReport auto-hide de burada kapsanir).
-    hidden = {
-        (h.target_type, h.target_id)
-        for h in FeedHide.query.filter(FeedHide.user_id == viewer_id).all()
-    }
-    if hidden:
-        candidates = [c for c in candidates if (c[1], c[2]) not in hidden]
 
     # 3) RANK — kronolojik (algoritmik dikis). En yeni once.
     candidates.sort(key=_sort_key, reverse=True)
