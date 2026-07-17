@@ -15,8 +15,11 @@ push to main
   → curl /health?deep=1 gate; on failure → rollback to previous commit
 ```
 
-If CI is red, deploy never starts. The `/health?deep=1` gate is loopback/private
-only (docker-bridge source IP allowed for the gate's own curl).
+If CI is red, deploy never starts. The `/health?deep=1` gate is available to
+loopback and explicitly trusted source CIDRs only. Its default
+`DEEP_HEALTH_TRUSTED_CIDRS=172.17.0.1/32` admits the Docker bridge gateway used
+by the gate's own curl. Set comma-separated CIDRs only when another trusted
+network needs the deep status; do not widen this to an entire RFC1918 range.
 
 ## Services (`docker-compose.yml`)
 

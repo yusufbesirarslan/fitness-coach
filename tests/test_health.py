@@ -43,13 +43,33 @@ def test_deep_health_allowed_from_loopback(client):
         assert key in body
 
 
-def test_deep_health_allowed_from_docker_bridge(client):
+def test_deep_health_allowed_from_configured_gateway(client, monkeypatch):
     """Deploy gate `curl 127.0.0.1:5000` yapar ama compose portu docker-proxy
     üzerinden yayınlar → konteyner kaynak adresi olarak KÖPRÜ GEÇİDİNİ görür.
     Katı loopback kontrolü deploy gate'ini bozardı."""
+    monkeypatch.setenv("DEEP_HEALTH_TRUSTED_CIDRS", "172.17.0.1/32")
     resp = client.get("/health?deep=1", environ_base={"REMOTE_ADDR": "172.17.0.1"})
     assert resp.status_code == 200
     assert "login" in resp.get_json()
+
+
+@pytest.mark.parametrize("private_ip", ["10.0.0.8", "192.168.1.20", "172.17.0.2"])
+def test_deep_health_ignored_from_other_private_address(client, monkeypatch, private_ip):
+    """Only the configured Docker gateway, not all RFC1918 sources, gets details."""
+    monkeypatch.setenv("DEEP_HEALTH_TRUSTED_CIDRS", "172.17.0.1/32")
+    resp = client.get("/health?deep=1", environ_base={"REMOTE_ADDR": private_ip})
+    assert resp.status_code == 200
+    for key in _DEEP_KEYS:
+        assert key not in resp.get_json()
+
+
+
+def test_deep_health_ignores_invalid_configured_cidrs(client, monkeypatch):
+    monkeypatch.setenv("DEEP_HEALTH_TRUSTED_CIDRS", "not-a-network, 300.1.1.1/24")
+    resp = client.get("/health?deep=1", environ_base={"REMOTE_ADDR": "172.17.0.1"})
+    assert resp.status_code == 200
+    for key in _DEEP_KEYS:
+        assert key not in resp.get_json()
 
 
 # NOT: gerçekten GLOBAL yönlendirilebilir adresler kullan. Python'un

@@ -14,27 +14,38 @@ from app.db_init import init_database
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _deep_health_networks():
+    """Return the explicitly trusted deep-health source networks."""
+    raw = os.getenv(
+        "DEEP_HEALTH_TRUSTED_CIDRS",
+        "172.17.0.1/32",
+    )
+    networks = []
+    for value in raw.split(","):
+        value = value.strip()
+        if not value:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(value, strict=False))
+        except ValueError:
+            continue
+    return tuple(networks)
+
+
 def _deep_health_allowed():
-    """/health?deep=1 yalnızca İÇ ağdan mı geliyor? (M3)
+    """Allow deep details for loopback and explicit trusted networks only.
 
-    Neden `is_private` de sayılıyor, sadece `is_loopback` değil: compose portu
-    "127.0.0.1:5000:5000" ile yayınlar, yani deploy gate'in `curl 127.0.0.1:5000`
-    isteği docker-proxy üzerinden gelir ve gunicorn kaynak adresi olarak KÖPRÜ
-    GEÇİDİNİ (örn. 172.17.0.1) görür — 127.0.0.1'i değil. Katı bir loopback
-    kontrolü deploy gate'ini bozardı.
-
-    Gerçek internet trafiği nginx'ten gelir; nginx X-Forwarded-For'u
-    $proxy_add_x_forwarded_for ile yazar (gerçek istemci IP'sini SONA ekler) ve
-    ProxyFix(x_for=1) en SAĞDAKİ girdiyi okur → remote_addr her zaman gerçek
-    public IP'dir. Bu yüzden istemcinin gönderdiği sahte bir
-    "X-Forwarded-For: 127.0.0.1" bu kapıyı geçemez.
+    The request address is resolved by trusted-proxy configuration, preventing
+    spoofed forwarded addresses from entering the explicit CIDR allowlist.
     """
     from flask import request
     try:
         addr = ipaddress.ip_address(request.remote_addr or "")
     except ValueError:
         return False
-    return addr.is_loopback or addr.is_private
+    return addr.is_loopback or any(
+        addr in network for network in _deep_health_networks()
+    )
 
 
 def create_app():
