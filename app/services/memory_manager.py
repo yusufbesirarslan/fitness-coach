@@ -148,6 +148,10 @@ def record_turn(conversation, question, answer, usage=None, interrupted=False):
     db.session.commit()
 
 
+def _normalize_context_budget(budget):
+    return max(budget, 0)
+
+
 def build_context_window(conversation, budget=None):
     """Rolling context window: [KONUŞMA ÖZETİ notu] + en yeni mesajlardan
     geriye, token bütçesi dolana kadar (pruning: daha eskiler pencere DIŞI
@@ -161,6 +165,7 @@ def build_context_window(conversation, budget=None):
 
     if budget is None:
         budget = AI_CONTEXT_TOKEN_BUDGET
+    budget = _normalize_context_budget(budget)
 
     note = None
     used = 0
