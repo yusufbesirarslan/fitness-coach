@@ -64,17 +64,17 @@ def _context_stage(user_id, question, language):
         return ""
 
 
-def _emit_metrics(is_error=False, usage=None):
+def _emit_metrics(mode, is_error=False, usage=None):
     """WS6: bir AI turunun sonunda CloudWatch metriklerini yolla (kapalıysa no-op).
     Metrik yazımı asla akışı bozmaz — ai_metrics tüm hataları yutar."""
     try:
         from app.services import ai_metrics
         ai_metrics.increment("AIErrors" if is_error else "AITurn",
-                             dimensions={"mode": "stream"})
+                             dimensions={"mode": mode})
         if usage:
             ai_metrics.record_tokens(usage.get("prompt_tokens"),
                                      usage.get("completion_tokens"),
-                                     dimensions={"mode": "stream"})
+                                     dimensions={"mode": mode})
     except Exception:
         pass  # gözlemlenebilirlik asla asıl yolu düşürmez
 
@@ -108,17 +108,22 @@ def generate_answer(user_id, question, client_history=None, language="tr"):
     # Çağrı-anı çözümleme (modül attribute'u üzerinden): testler ve gelecekteki
     # sağlayıcı değişimleri ai_coach._run_coach_conversation'ı patch'leyebilsin.
     from app.services import ai_coach
-    answer = ai_coach._run_coach_conversation(
-        user_id, question, context, client_history,
-        language=language, prepared_history=prepared_history)
+    try:
+        answer = ai_coach._run_coach_conversation(
+            user_id, question, context, client_history,
+            language=language, prepared_history=prepared_history)
 
-    answer, is_fallback = response_formatter.finalize_reply(answer, language)
-    answer = moderation.moderate_reply(answer)
+        answer, is_fallback = response_formatter.finalize_reply(answer, language)
+        answer = moderation.moderate_reply(answer)
+    except Exception:
+        _emit_metrics("blocking", is_error=True)
+        raise
 
     # B16 disiplini hafızada da geçerli: hata-yedeği turları kalıcılaşmaz
     # (sonraki pencereye girip modeli kirletmesin, kota iadesiyle tutarlı).
     if not is_fallback:
         _record(conversation, question, answer)
+    _emit_metrics("blocking", is_error=is_fallback)
 
     return {"answer": answer,
             "is_error_fallback": is_fallback,
@@ -179,7 +184,7 @@ def stream_answer(user_id, question, client_history=None, language="tr"):
                 if partial_text:
                     _record(conversation, question, partial_text,
                             interrupted=True)
-                _emit_metrics(is_error=True)
+                _emit_metrics("stream", is_error=True)
                 yield {"type": "error", "key": event["key"],
                        "work_performed": work_performed,
                        "partial_text": partial_text}
@@ -192,7 +197,8 @@ def stream_answer(user_id, question, client_history=None, language="tr"):
                 if not is_fallback:
                     _record(conversation, question, answer,
                             usage=event.get("usage"))
-                _emit_metrics(is_error=is_fallback, usage=event.get("usage"))
+                _emit_metrics("stream", is_error=is_fallback,
+                              usage=event.get("usage"))
                 yield {"type": "done", "text": answer,
                        "is_error_fallback": is_fallback,
                        "usage": event.get("usage")}

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services import (ai_coach, ai_pipeline, ai_stream, context_builder,
+from app.services import (ai_coach, ai_metrics, ai_pipeline, ai_stream, context_builder,
                           moderation, response_formatter)
 from app.services.response_formatter import (COACH_FALLBACKS, finalize_reply,
                                              is_coach_error_fallback)
@@ -194,6 +194,67 @@ def test_pipeline_marks_provider_fallback(app, monkeypatch):
 
     assert out["is_error_fallback"] is True
     assert out["answer"] == COACH_FALLBACKS["tr"]["error"]
+
+
+def test_blocking_answer_emits_turn_metric(app, monkeypatch):
+    app.config["AI_MEMORY_ENABLED"] = False
+    monkeypatch.setattr(context_builder, "fetch_coach_context",
+                        lambda uid, q, language="tr": "")
+    monkeypatch.setattr(ai_coach, "_run_coach_conversation",
+                        lambda *args, **kwargs: "cevap")
+    increments = []
+    monkeypatch.setattr(
+        ai_metrics,
+        "increment",
+        lambda name, dimensions=None: increments.append((name, dimensions)),
+    )
+
+    with app.test_request_context("/"):
+        ai_pipeline.generate_answer(1, "soru")
+
+    assert increments == [("AITurn", {"mode": "blocking"})]
+
+
+def test_blocking_fallback_emits_error_metric(app, monkeypatch):
+    app.config["AI_MEMORY_ENABLED"] = False
+    monkeypatch.setattr(context_builder, "fetch_coach_context",
+                        lambda uid, q, language="tr": "")
+    monkeypatch.setattr(ai_coach, "_run_coach_conversation",
+                        lambda *args, **kwargs: COACH_FALLBACKS["tr"]["error"])
+    increments = []
+    monkeypatch.setattr(
+        ai_metrics,
+        "increment",
+        lambda name, dimensions=None: increments.append((name, dimensions)),
+    )
+
+    with app.test_request_context("/"):
+        ai_pipeline.generate_answer(1, "soru")
+
+    assert increments == [("AIErrors", {"mode": "blocking"})]
+
+
+def test_blocking_exception_emits_error_metric_before_reraise(app, monkeypatch):
+    app.config["AI_MEMORY_ENABLED"] = False
+    monkeypatch.setattr(context_builder, "fetch_coach_context",
+                        lambda uid, q, language="tr": "")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("provider down")
+
+    monkeypatch.setattr(ai_coach, "_run_coach_conversation", boom)
+    increments = []
+    monkeypatch.setattr(
+        ai_metrics,
+        "increment",
+        lambda name, dimensions=None: increments.append((name, dimensions)),
+    )
+
+    with app.test_request_context("/"):
+        with pytest.raises(RuntimeError, match="provider down"):
+            ai_pipeline.generate_answer(1, "soru")
+
+    assert increments == [("AIErrors", {"mode": "blocking"})]
 
 
 def test_partial_stream_error_is_recorded_as_interruption(app, monkeypatch):
