@@ -187,3 +187,33 @@ def test_quest_event_funnels_to_challenge(app):
     row = (UserChallengeProgress.query.join(Challenge)
            .filter(Challenge.code == "weekly_meals").one())
     assert row.progress == 1
+
+
+# ── Regression: transaction poisoning (#2, triage 2026-07-17) ──────────────
+def test_record_event_db_error_does_not_poison_caller_transaction(app, monkeypatch):
+    """Bir challenge işlenirken geçici DB hatası çıksa bile record_event çağıranın
+    transaction'ını POISON'lamaz: hata yalnızca o challenge'ın savepoint'ini geri
+    alır, çağıranın bekleyen yazısı ve sonraki commit sağ kalır. Regresyon olursa
+    update_streak'in çıplak commit'i PendingRollbackError → normal gezinmede 500."""
+    from app.services import challenges
+    u = _mkuser(app)
+    _seed_challenge(app, code="weekly_workouts", metric="workout_logged",
+                    target_value=1, xp_reward=150)
+
+    # Tamamlama yolunda gerçekçi bir DB arızasını taklit et: flush'ta IntegrityError
+    # (deadlock / kilit-zaman-aşımı gibi oturumu "rollback gerekli" durumuna sokar).
+    def _poison(*a, **k):
+        db.session.add(UserBadge(user_id=None, badge_code=None))  # NOT NULL ihlali
+        db.session.flush()
+    monkeypatch.setattr(challenges, "_try_complete", _poison)
+
+    # update_streak'in record_event'ten ÖNCE sahneye koyduğu yazıyı taklit et.
+    u.streak_count = 5
+    challenges.record_event(u.id, "workout_logged")   # iç hata yutulur, patlamaz
+
+    # Fix ile oturum kullanılabilir kalır → çıplak commit patlamaz, streak kalıcı olur.
+    db.session.commit()
+    assert db.session.get(User, u.id).streak_count == 5
+    # Başarısız challenge'ın ilerlemesi savepoint ile geri alındı (tamamlanmadı).
+    row = UserChallengeProgress.query.filter_by(user_id=u.id).first()
+    assert row is None or row.completed_at is None

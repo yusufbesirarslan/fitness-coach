@@ -427,6 +427,12 @@ def _tool_confirm_and_commit_workout_log(user_id):
         weight_kg=float(d.get("weight_kg", 0)), volume=float(d.get("volume", 0)),
     ))
     award_xp(user_id, 15)
+    # BİLİNÇLİ: 'workout_logged' quest/challenge hunisi (_claim_quest/record_event)
+    # burada KASITLI çağrılmaz (triage 2026-07-17 #6). Diğer iki WorkoutLog yazıcısı
+    # (/workout/complete, pump-check tool'u) SEANS başına bir kez ateşlerken bu tool
+    # tek EGZERSİZ kaydeder; her egzersizde ateşlemek seans-tabanlı weekly_workouts
+    # challenge'ını ve workout_logged günlük quest'ini şişirirdi. XP (xp_earned) yine
+    # akar. Seans-başı dedup ile huniyi bağlamak istenirse ürün kararı gerekir.
     log_activity(user_id, "workout_completed",
                  f"{d.get('exercise_name')} — {d.get('sets')}x{d.get('reps')} @ {d.get('weight_kg')}kg")
     db.session.commit()

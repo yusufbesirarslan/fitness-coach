@@ -302,7 +302,17 @@ def update_streak():
     # streak tiebreak'i değişti → commit sonrası Redis sync (after_commit).
     # Milestone yoksa award_xp dirty işaretlemez; burada elle işaretliyoruz.
     _mark_lb_dirty(user.id)
-    db.session.commit()
+    # Savunma derinliği (triage #2): çıplak commit'i koru. record_event savepoint
+    # ile poison'ı önler ama başka bir nadir DB arızası (kilit çakışması) burada
+    # PendingRollbackError verirse, çıplak commit istek için 500 üretirdi. Her
+    # diğer yazı yolu zaten böyle korunur. Rollback FOR UPDATE kilidini de bırakır;
+    # streak güncellemesi bu istekte kaybolur (bir sonraki istekte tekrar denenir).
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        current_app.logger.warning("[STREAK] güncelleme commit başarısız (geri alındı)",
+                                   exc_info=True)
 
 
 def inject_rank():
