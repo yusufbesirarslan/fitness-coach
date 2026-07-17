@@ -18,6 +18,7 @@ from app.blueprints.nutrition.diary import _claim_diary_meal
 from app.blueprints.nutrition import meallog as nutrition_meallog
 from app.blueprints.nutrition import plan as nutrition_plan
 from app.extensions import db
+from app.timeutil import day_key
 from app.models import CustomMeal, CustomMealItem, MealLog, NutritionPlan, UserSession
 
 
@@ -105,6 +106,16 @@ def test_diary_create_meal_upserts(client, auth_user):
     assert first["exists"] is False
     again = client.post("/api/diary/meal", json={"meal_name": "Kahvaltı"}).get_json()
     assert again == {"meal_id": first["meal_id"], "exists": True}
+
+
+def test_diary_create_meal_ignores_client_date(client, auth_user):
+    body = client.post("/api/diary/meal", json={
+        "meal_name": "Kahvalt\u0131",
+        "date_key": "2099-01-01",
+    }).get_json()
+
+    meal = db.session.get(CustomMeal, body["meal_id"])
+    assert meal.date_key == day_key()
 
 
 def test_diary_create_meal_race_returns_existing(client, auth_user, monkeypatch):

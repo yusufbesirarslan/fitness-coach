@@ -175,7 +175,7 @@ def quick_add_meal():
 def diary_create_meal():
     data = request.get_json(silent=True) or {}
     meal_name = data.get("meal_name", "").strip()
-    date_key = data.get("date_key", app_today().isoformat())
+    date_key = day_key()
 
     valid_meals = ("Kahvaltı", "Öğle", "Akşam", "Ara Öğün")
     if meal_name not in valid_meals:
