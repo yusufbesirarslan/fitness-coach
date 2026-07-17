@@ -10,7 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from app.services import ai_coach, ai_pipeline, ai_stream, context_builder, moderation
+from app.services import (ai_coach, ai_pipeline, ai_stream, context_builder,
+                          moderation, response_formatter)
 from app.services.response_formatter import (COACH_FALLBACKS, finalize_reply,
                                              is_coach_error_fallback)
 
@@ -102,6 +103,30 @@ def test_pipeline_stage_order_and_passthrough(app, monkeypatch):
     assert seen == {"user_id": 7, "question": "protein?", "context": "BAĞLAM",
                     "history": [], "language": "en", "prepared_history": None}
 
+
+def test_generate_answer_finalize_once(app, monkeypatch):
+    """The pipeline owns finalization; the provider router returns raw text."""
+    app.config["AI_MEMORY_ENABLED"] = False
+    monkeypatch.setattr(context_builder, "fetch_coach_context",
+                        lambda uid, q, language="tr": "")
+    monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
+    monkeypatch.setattr(ai_coach, "_run_coach_conversation_openai",
+                        lambda *args, **kwargs: "ham cevap")
+    calls = []
+
+    def counted_finalize(text, language="tr"):
+        calls.append((text, language))
+        return text, False
+
+    monkeypatch.setattr(response_formatter, "finalize_reply", counted_finalize)
+    # Catch a future direct import/call in the legacy router too.
+    monkeypatch.setattr(ai_coach, "finalize_reply", counted_finalize, raising=False)
+
+    with app.test_request_context("/"):
+        out = ai_pipeline.generate_answer(1, "soru")
+
+    assert out["answer"] == "ham cevap"
+    assert calls == [("ham cevap", "tr")]
 
 def test_pipeline_context_failure_degrades_to_empty(app, monkeypatch):
     app.config["AI_MEMORY_ENABLED"] = False

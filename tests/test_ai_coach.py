@@ -473,6 +473,28 @@ def test_fallback_text_not_persisted_to_session_history(app, auth_user, monkeypa
         assert "coach_history" not in session
 
 
+def test_provider_fallback_history_is_unchanged(app, auth_user, monkeypatch):
+    """A Bedrock-to-OpenAI failure must not alter legacy cookie history."""
+    monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", True)
+    monkeypatch.setattr(ai_coach, "_anthropic", object())
+
+    def bedrock_unavailable(*args, **kwargs):
+        raise ai_coach._BedrockFallback("provider unavailable")
+
+    fallback = ai_coach._COACH_FALLBACKS["tr"]["error"]
+    monkeypatch.setattr(ai_coach, "_run_coach_conversation_bedrock", bedrock_unavailable)
+    monkeypatch.setattr(ai_coach, "_run_coach_conversation_openai",
+                        lambda *args, **kwargs: fallback)
+
+    with app.test_request_context("/"):
+        from flask import session
+        original = [{"role": "assistant", "content": "previous answer"}]
+        session["coach_history"] = original
+        answer = _run_coach_conversation(auth_user.id, "soru", "", client_history=None)
+
+        assert answer == fallback
+        assert session["coach_history"] == original
+
 def test_conversation_drops_trailing_user_turns_from_history(auth_user, monkeypatch):
     llm = _ScriptedLLM([_llm_msg("tamam")])
     monkeypatch.setattr(ai_coach, "openai_client", llm)

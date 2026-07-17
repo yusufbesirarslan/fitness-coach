@@ -47,7 +47,6 @@ from app.services.memory_manager import (  # noqa: F401 (re-export)
 from app.services.pump_checks import latest_training_plan_score
 from app.services.response_formatter import (  # noqa: F401 (re-export)
     COACH_FALLBACKS as _COACH_FALLBACKS,
-    finalize_reply,
     is_coach_error_fallback,
 )
 from app.timeutil import app_today, day_key, utc_day_bounds
@@ -976,7 +975,7 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
 
     # C3/B16 kararı response_formatter.finalize_reply'de: yedek/boş yanıt
     # dostça hata metnine çevrilir ve geçmişe yazılMAZ.
-    final_text, is_error_fallback = finalize_reply(final_text, language)
+    is_error_fallback = is_coach_error_fallback(final_text)
 
     # Geçmiş client'ta (widget sessionStorage) tutuluyor; client modunda session'a
     # YAZMA. Yalnızca client history göndermezse eski cookie geçmişini güncelle.
