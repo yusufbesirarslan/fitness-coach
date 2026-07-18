@@ -44,6 +44,10 @@ Görünen metin sunucuda ÜRETİLMEZ — istemci i18n `notif.<ntype>` anahtarın
 - `serialize_notification(n)` — camelCase dict (`{id, type, actor{username,avatar}|None,
   targetType, targetId, payload, isRead, createdAt}`).
 - `purge_old(now=None)` — saklama süpürmesi (aşağıda); commit eder.
+- `purge_content_notifications(pump_check_ids=None, feed_item_ids=None)` — silinen
+  içeriğe (pump check / feed item) İŞARET EDEN bildirimleri süpürür (öksüz-hedef
+  temizliği; aşağıda). Session'a uygular, **COMMIT ETMEZ** (çağıranın silme
+  transaction'ında atomik). Asla exception sızdırmaz; silinen sayısını döner.
 
 ### Okunmamış-dedup (spam kalkanı)
 `notify`, aynı `(user_id, actor_id, ntype, target_type, target_id)` beşlisi için
@@ -85,6 +89,26 @@ Hepsi ilgili eylemle aynı transaction'da, **commit'ten önce**.
 
 Giden istek iptal edilince (`DELETE /friend/request/<id>`) alıcıdaki artık
 hayalet olan okunmamış `friend_request` bildirimi aynı transaction'da süpürülür.
+
+### İçerik silme → öksüz-hedef temizliği
+Bir pump check kalıcı silinince (`DELETE /pump-check-gallery/<id>`,
+`app/blueprints/profile.py`) onu ve ona atıfta bulunan repost/quote FeedItem'larını
+HEDEF ALAN bildirimler ölü hedefe düşerdi (tıklanınca "içerik yok" stub'ı). Rota,
+FeedItem repost'larını (+ like/yorumlarını) sildikten sonra aynı transaction'da
+`purge_content_notifications(pump_check_ids=[check.id], feed_item_ids=ref_items)`
+çağırır. Hedef kimliği bildirim TÜRÜNE göre farklı tabloya işaret ettiğinden
+(`pump_check.id` ile `feed_item.id` sayısal ÇAKIŞABİLİR) süpürme ntype ile
+HASSAS eşlenir:
+- `pump_check_like` / `pump_check_comment` (`target_type='pump_check'`) → `pump_check_ids`.
+- `repost` / `quote_repost` (`target_type='feed_item'` ama `target_id`=KAYNAK pump
+  check id — dedup kimliği) → `pump_check_ids`.
+- `feed_like` / `feed_comment` (`target_type='feed_item'`, `target_id`=FeedItem.id)
+  → `feed_item_ids`.
+
+Not: Feed V2 yalnızca `pump_check` repost eder (`_REPOST_REF_TYPES`), FeedItem'ı
+DEĞİL — çok-seviyeli repost zinciri oluşamaz, dolayısıyla tek seviye temizlik
+öksüz zincir bırakmaz. Kullanıcı silme (`cli.py _purge_user`) ayrı yoldur:
+bildirimleri alıcı (child-model döngüsü) + `actor_id` filtresiyle süpürür.
 
 ## Uçlar (`app/blueprints/notifications.py`, prefix yok, hepsi `@require_auth`)
 - `GET /notifications` — sayfa kabuğu (`notifications.html`).

@@ -67,6 +67,48 @@ def notify(user_id, ntype, actor_id=None, target_type=None, target_id=None, payl
         return None
 
 
+def purge_content_notifications(pump_check_ids=None, feed_item_ids=None):
+    """Silinen içeriğe İŞARET EDEN bildirimleri sil (öksüz-hedef temizliği).
+
+    Bir pump check kalıcı silinince (ör. `POST` yerine `DELETE /pump-check-gallery`)
+    onu ve ona atıfta bulunan repost/quote FeedItem'larını hedef alan bildirimler
+    ÖLÜ HEDEFE düşer — tıklanınca "içerik yok" stub'ı açılırdı. Bunları session'a
+    uygulanan tek DELETE ile süpürür. **COMMIT ETMEZ** (çağıranın silme
+    transaction'ında atomik — `notify` sözleşmesiyle aynı). Asla exception sızdırmaz.
+    Döndürür: silinen satır sayısı.
+
+    Hedef kimliği bildirim TÜRÜNE göre farklı tabloya işaret eder (pump_check.id ve
+    feed_item.id ÇAKIŞABİLİR — ayrı diziler), bu yüzden ntype ile HASSAS filtrelenir:
+    - `pump_check_like` / `pump_check_comment` → target_type='pump_check',
+      target_id = pump check id.
+    - `repost` / `quote_repost` → target_type='feed_item' AMA target_id = KAYNAK
+      pump check id (PR2 dedup kimliği; FeedItem.id commit öncesi bilinmiyordu —
+      bkz. dedup notu). Bu yüzden bu iki tür `pump_check_ids` ile eşlenir.
+    - `feed_like` / `feed_comment` → target_type='feed_item', target_id = FeedItem.id
+      → `feed_item_ids` ile eşlenir.
+    """
+    try:
+        clauses = []
+        if pump_check_ids:
+            clauses.append(db.and_(
+                Notification.target_type == "pump_check",
+                Notification.target_id.in_(pump_check_ids)))
+            clauses.append(db.and_(
+                Notification.ntype.in_(("repost", "quote_repost")),
+                Notification.target_id.in_(pump_check_ids)))
+        if feed_item_ids:
+            clauses.append(db.and_(
+                Notification.ntype.in_(("feed_like", "feed_comment")),
+                Notification.target_id.in_(feed_item_ids)))
+        if not clauses:
+            return 0
+        return Notification.query.filter(db.or_(*clauses)).delete(
+            synchronize_session=False)
+    except Exception:
+        log.warning("purge_content_notifications başarısız (yutuldu)", exc_info=True)
+        return 0
+
+
 def unread_count(user_id):
     return Notification.query.filter_by(user_id=user_id, is_read=False).count()
 

@@ -156,6 +156,51 @@ def test_serialize_shape(app, two_users):
     assert serialize_notification(sys_n)["actor"] is None
 
 
+def test_purge_content_notifications(app, two_users):
+    """Sprint 5 PR3: silinen içeriğe işaret eden bildirimler süpürülür — pump_check_like/
+    comment + repost/quote (target_id=KAYNAK pump check id) + feed_like/comment
+    (target_id=FeedItem.id). ntype ile HASSAS filtreleme çakışan id'leri korur
+    (pump_check.id ile feed_item.id ayrı diziler → sayısal çakışabilir)."""
+    from app.services.notifications import purge_content_notifications
+    alice, bob = two_users
+    # Silinen içerik: pump check P=10, repost FeedItem'ları F=[20, 21]. Öksüz olacaklar:
+    notify(alice.id, "pump_check_like", actor_id=bob.id, target_type="pump_check", target_id=10)
+    notify(alice.id, "pump_check_comment", actor_id=bob.id, target_type="pump_check", target_id=10)
+    notify(alice.id, "repost", actor_id=bob.id, target_type="feed_item", target_id=10)        # =KAYNAK pump check id
+    notify(alice.id, "quote_repost", actor_id=bob.id, target_type="feed_item", target_id=10)
+    notify(alice.id, "feed_like", actor_id=bob.id, target_type="feed_item", target_id=20)      # =FeedItem.id
+    notify(alice.id, "feed_comment", actor_id=bob.id, target_type="feed_item", target_id=21)
+    # KORUNMASI GEREKENLER:
+    notify(alice.id, "pump_check_like", actor_id=bob.id, target_type="pump_check", target_id=99)  # başka pump check
+    notify(alice.id, "feed_like", actor_id=bob.id, target_type="feed_item", target_id=10)      # ÇAKIŞMA: FeedItem 10 SİLİNMİYOR
+    notify(alice.id, "challenge_complete", target_type="challenge", target_id=10)              # farklı target_type
+    db.session.commit()
+    assert Notification.query.count() == 9
+
+    deleted = purge_content_notifications(pump_check_ids=[10], feed_item_ids=[20, 21])
+    db.session.commit()
+    assert deleted == 6
+    kinds = {(n.ntype, n.target_type, n.target_id) for n in Notification.query.all()}
+    assert kinds == {
+        ("pump_check_like", "pump_check", 99),    # başka pump check korunur
+        ("feed_like", "feed_item", 10),           # silinmeyen FeedItem 10 korunur (ntype+id hassasiyeti)
+        ("challenge_complete", "challenge", 10),  # farklı target_type korunur
+    }
+
+
+def test_purge_content_notifications_noop_and_safe(app, two_users):
+    # Argümansız çağrı hiçbir şey yapmaz; helper commit ETMEZ (çağıranın tx'i).
+    from app.services.notifications import purge_content_notifications
+    alice, bob = two_users
+    notify(alice.id, "pump_check_like", actor_id=bob.id, target_type="pump_check", target_id=5)
+    db.session.commit()
+    assert purge_content_notifications() == 0
+    # Süpürme session'a uygulanır ama commit etmez → rollback geri alır.
+    assert purge_content_notifications(pump_check_ids=[5]) == 1
+    db.session.rollback()
+    assert Notification.query.filter_by(target_id=5).count() == 1
+
+
 def test_purge_user_removes_actor_side_notifications(app, two_users):
     # _purge_user: kullanıcının ALDIKLARI child-model döngüsüyle, TETİKLEDİKLERİ
     # (actor_id) açık filtreyle silinmeli — SQLite FK cascade zorlamaz.

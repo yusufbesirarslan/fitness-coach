@@ -2,9 +2,12 @@
 # app-context aktif. Gerçek User satırları oluşturulur (FK zorunlu).
 from datetime import datetime
 
+import pytest
+
 from app.extensions import db
 from app.models import (
-    Challenge, DailyQuest, Notification, User, UserBadge, UserChallengeProgress,
+    Activity, Challenge, DailyQuest, Notification, User, UserBadge,
+    UserChallengeProgress,
 )
 
 
@@ -236,3 +239,77 @@ def test_record_event_db_error_does_not_poison_caller_transaction(app, monkeypat
     # Başarısız challenge'ın ilerlemesi savepoint ile geri alındı (tamamlanmadı).
     row = UserChallengeProgress.query.filter_by(user_id=u.id).first()
     assert row is None or row.completed_at is None
+
+
+# ── PR3 remediation: no_autoflush + tamamlama atomikliği (2026-07-18) ──────
+def test_record_event_no_match_does_not_flush_caller_writes(app):
+    """Item 1 (no_autoflush): eşleşen challenge YOKKEN record_event çağıranın
+    bekleyen INSERT'ini FLUSH ETMEZ (salt-katalog okuması no_autoflush + no-match
+    erken çıkış). Gelecekteki bir çağıran, kendi commit'inde ele alacağı bekleyen
+    bir yazı tutuyorsa record_event onu erken flush edip session'ı poison'lamaz.
+    (Taze pending nesne → session.new üyeliği kesin bir oracle'dır.)"""
+    from app.services import challenges
+    u = _mkuser(app)
+    act = Activity(user_id=u.id, activity_type="pending_probe", content="x")
+    db.session.add(act)                      # çağıranın bekleyen (flush'lanmamış) INSERT'i
+    assert act in db.session.new
+    # 'workout_logged' metriğine seed'li challenge yok → eşleşme yok, erken çıkış.
+    challenges.record_event(u.id, "workout_logged")
+    assert act in db.session.new             # record_event flush ETMEDİ → hâlâ bekliyor
+    db.session.commit()                      # çağıran kendi işini yazar; poison yok → commit patlamaz
+    assert Activity.query.filter_by(activity_type="pending_probe").count() == 1
+
+
+def test_challenge_completion_atomic_on_reward_failure(app, monkeypatch):
+    """Item 2: ödül adımlarından biri (feed aktivitesi) patlarsa tamamlama TÜMÜYLE
+    geri alınır — XP verilip rozet/bildirim bırakılmış "kısmi başarı" YOK. Gerçek
+    record_event yolu üzerinden (iç hata yutulur, ana eylem kırılmaz)."""
+    from app.services import challenges, gamification
+    u = _mkuser(app)
+    c = _seed_challenge(app, code="weekly_pump", metric="pump_check_created",
+                        target_value=1, xp_reward=100, badge_code="pump_week")
+    before_xp = User.query.get(u.id).rank_points or 0
+
+    def _boom(*a, **k):
+        raise RuntimeError("feed aktivite servisi düştü")
+    monkeypatch.setattr(gamification, "log_activity", _boom)   # tamamlamanın son ödül adımı
+
+    challenges.record_event(u.id, "pump_check_created")        # iç hata yutulur, patlamaz
+    db.session.commit()
+
+    row = UserChallengeProgress.query.filter_by(user_id=u.id, challenge_id=c.id).first()
+    assert row is None or row.completed_at is None                              # tamamlanmadı
+    assert (User.query.get(u.id).rank_points or 0) == before_xp                 # XP geri alındı
+    assert UserBadge.query.filter_by(user_id=u.id, badge_code="pump_week").count() == 0
+    assert Notification.query.filter_by(user_id=u.id, ntype="challenge_complete").count() == 0
+    assert Activity.query.filter_by(user_id=u.id, activity_type="challenge_completed").count() == 0
+
+
+def test_try_complete_atomic_without_outer_savepoint(app, monkeypatch):
+    """Item 2: _try_complete KENDİ begin_nested'iyle atomik — record_event'in
+    sarmalayan savepoint'i OLMASA da (gelecekteki doğrudan çağıranlar) bir ödül
+    adımı patlarsa completed_at dahil her şey geri alınır ve session KULLANILABİLİR
+    kalır. Inner savepoint kaldırılırsa bu test kırılır (completed_at set kalır)."""
+    from app.services import challenges, gamification
+    u = _mkuser(app)
+    c = _seed_challenge(app, code="weekly_pump", metric="pump_check_created",
+                        target_value=1, xp_reward=100, badge_code="pump_week")
+    pk = challenges.current_challenge_week()
+    row = UserChallengeProgress(user_id=u.id, challenge_id=c.id, period_key=pk, progress=1)
+    db.session.add(row)
+    db.session.commit()
+    before_xp = User.query.get(u.id).rank_points or 0
+
+    def _boom(*a, **k):
+        raise RuntimeError("feed down")
+    monkeypatch.setattr(gamification, "log_activity", _boom)
+
+    with pytest.raises(RuntimeError):
+        challenges._try_complete(u.id, c, row, pk)   # sarmalayan savepoint YOK — doğrudan çağrı
+
+    # begin_nested geri alındı → session kullanılabilir; tamamlama/ödül YOK.
+    fresh = db.session.get(UserChallengeProgress, row.id)
+    assert fresh.completed_at is None
+    assert (User.query.get(u.id).rank_points or 0) == before_xp
+    assert UserBadge.query.filter_by(user_id=u.id, badge_code="pump_week").count() == 0
+    assert Notification.query.filter_by(user_id=u.id, ntype="challenge_complete").count() == 0
