@@ -132,8 +132,13 @@ def _try_complete(user_id, ch, row, period_key):
     if ch.badge_code:
         award_badge(user_id, ch.badge_code,
                     source="challenge:%s:%s" % (ch.code, period_key))
+    # Hedef = bu tamamlamanın progress satırı (row.id): (user, challenge, period_key)
+    # başına tekil (uq_user_challenge_period). Böylece AYNI challenge'ın farklı
+    # haftalardaki tamamlamaları okunmamış-dedup'ta ÇAKIŞMAZ. Aynı hafta/aynı
+    # challenge zaten korumalı UPDATE ile tam-bir-kez tamamlanır (gerçek tekrar yok).
+    # payload week/code'u taşımaya devam eder (istemci metni).
     notify(user_id, "challenge_complete", actor_id=None,
-           target_type="challenge", target_id=ch.id,
+           target_type="challenge", target_id=row.id,
            payload={"code": ch.code, "xp": ch.xp_reward,
                     "badge": ch.badge_code, "week": period_key})
     log_activity(user_id, "challenge_completed",

@@ -82,6 +82,36 @@ def test_quote_requires_body_within_limit(app, auth_user, make_user, client):
     assert Notification.query.filter_by(user_id=bob.id, ntype="quote_repost").first() is not None
 
 
+def test_multiple_reposts_of_distinct_posts_each_notify(app, auth_user, make_user, client):
+    # Aynı aktör, aynı sahibin İKİ FARKLI gönderisini repost'larsa — ilk bildirim
+    # OKUNMAMIŞ kalsa bile — ikisi de bildirilmeli (target_id=ref_id ile ayrık kimlik).
+    bob = make_user("bob")
+    _befriend(auth_user.id, bob.id)
+    pc1 = _check(bob.id, date_key="d1")
+    pc2 = _check(bob.id, date_key="d2")
+    assert client.post("/feed/repost", json={"ref_id": pc1.id, "mode": "repost"}).status_code == 200
+    assert client.post("/feed/repost", json={"ref_id": pc2.id, "mode": "repost"}).status_code == 200
+    notifs = Notification.query.filter_by(
+        user_id=bob.id, ntype="repost", actor_id=auth_user.id).all()
+    assert len(notifs) == 2                                    # farklı gönderiler çakışmaz
+    assert {n.target_id for n in notifs} == {pc1.id, pc2.id}
+
+
+def test_multiple_quotes_of_distinct_posts_each_notify(app, auth_user, make_user, client):
+    # quote_repost yolu da aynı: iki farklı gönderinin quote'u ayrı bildirim üretir.
+    bob = make_user("bob")
+    _befriend(auth_user.id, bob.id)
+    pc1 = _check(bob.id, date_key="q1")
+    pc2 = _check(bob.id, date_key="q2")
+    assert client.post("/feed/repost", json={"ref_id": pc1.id, "mode": "quote", "body": "Bir"}).status_code == 200
+    assert client.post("/feed/repost", json={"ref_id": pc2.id, "mode": "quote", "body": "İki"}).status_code == 200
+    notifs = Notification.query.filter_by(
+        user_id=bob.id, ntype="quote_repost", actor_id=auth_user.id).all()
+    assert len(notifs) == 2
+    assert {n.target_id for n in notifs} == {pc1.id, pc2.id}
+    assert {n.payload["pumpCheckId"] for n in notifs} == {pc1.id, pc2.id}
+
+
 def test_owner_deletes_repost_decrements_and_removes_children(app, auth_user, make_user, client):
     bob = make_user("bob")
     _befriend(auth_user.id, bob.id)

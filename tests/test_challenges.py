@@ -4,7 +4,7 @@ from datetime import datetime
 
 from app.extensions import db
 from app.models import (
-    Challenge, DailyQuest, User, UserBadge, UserChallengeProgress,
+    Challenge, DailyQuest, Notification, User, UserBadge, UserChallengeProgress,
 )
 
 
@@ -104,6 +104,25 @@ def test_record_event_completes_exactly_once(app):
     assert row.completed_at is not None
     assert (User.query.get(u.id).rank_points or 0) == before + 100      # XP once
     assert UserBadge.query.filter_by(user_id=u.id, badge_code="pump_week").count() == 1
+
+
+def test_challenge_complete_notifies_each_week(app, monkeypatch):
+    # Aynı challenge FARKLI haftalarda tamamlanınca ayrı bildirim üretmeli — ilk
+    # bildirim OKUNMAMIŞ kalsa bile. Kimlik target_id=row.id (haftaya özgü progress
+    # satırı) olduğundan hafta tekrarları dedup'lanmaz.
+    from app.services import challenges
+    u = _mkuser(app)
+    _seed_challenge(app, code="weekly_pump", metric="pump_check_created",
+                    target_value=1, xp_reward=100)
+    monkeypatch.setattr(challenges, "current_challenge_week", lambda now=None: "2026-W01")
+    challenges.record_event(u.id, "pump_check_created"); db.session.commit()
+    monkeypatch.setattr(challenges, "current_challenge_week", lambda now=None: "2026-W02")
+    challenges.record_event(u.id, "pump_check_created"); db.session.commit()
+
+    notifs = Notification.query.filter_by(user_id=u.id, ntype="challenge_complete").all()
+    assert len(notifs) == 2                                    # haftalar arası dedup YOK
+    assert {n.payload["week"] for n in notifs} == {"2026-W01", "2026-W02"}
+    assert len({n.target_id for n in notifs}) == 2             # haftaya özgü tekil kimlik
 
 
 def test_featured_requires_opt_in(app):

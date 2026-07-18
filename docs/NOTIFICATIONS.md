@@ -12,8 +12,8 @@ bildirimini göremez.
 | `user_id` | FK→user, CASCADE, index | **alıcı** |
 | `actor_id` | FK→user, CASCADE, nullable, index | tetikleyen; `NULL` = sistem |
 | `ntype` | String(30) | kanonik İngilizce slug (aşağıda) |
-| `target_type` | String(20), nullable | `pump_check` \| `friendship` |
-| `target_id` | Integer, nullable | hedef kaydın id'si |
+| `target_type` | String(20), nullable | `pump_check` \| `friendship` \| `feed_item` \| `challenge` |
+| `target_id` | Integer, nullable | hedef/ayırt-edici kayıt id'si (bkz. dedup) |
 | `payload` | JSONB/JSON, nullable | serbest ek veri |
 | `is_read` | Boolean, default false | |
 | `created_at` | DateTime, index | |
@@ -21,10 +21,16 @@ bildirimini göremez.
 İndeksler: `user_id`, `actor_id`, `created_at` tekil + bileşik
 `ix_notification_user_read (user_id, is_read)` (okunmamış sayacı/liste için).
 
-Geçerli `ntype` değerleri (PR1): `pump_check_like`, `pump_check_comment`,
-`friend_request`, `friend_accept`. Görünen metin sunucuda ÜRETİLMEZ — istemci
-i18n `notif.<ntype>` anahtarından `{username}` ile kurar (display-map kuralı;
-kanonik slug İngilizce kalır).
+Geçerli `ntype` değerleri:
+- PR1 (sosyal): `pump_check_like`, `pump_check_comment`, `friend_request`,
+  `friend_accept`.
+- PR2 (Feed V2): `feed_like`, `feed_comment`, `repost`, `quote_repost`
+  (`target_type='feed_item'`).
+- PR3 (Challenges): `challenge_complete` (`target_type='challenge'`, sistem
+  bildirimi → `actor_id=NULL`).
+
+Görünen metin sunucuda ÜRETİLMEZ — istemci i18n `notif.<ntype>` anahtarından
+`{username}` ile kurar (display-map kuralı; kanonik slug İngilizce kalır).
 
 ## Servis — `app/services/notifications.py`
 
@@ -46,13 +52,36 @@ bildirim yağmuruna dönmesini engeller. Alıcı bildirimi okuduktan sonra aynı
 tekrar meydana gelirse yeniden bildirilir. Ayrıca `actor_id == user_id` ise
 (kendi eylemi) hiç yazılmaz.
 
-## Tetikleme noktaları (`app/blueprints/social.py`)
-Hepsi ilgili eylemle aynı transaction'da, **commit'ten önce**:
+**Kimlik `target_id`'de taşınır — `payload` dedup'a girmez.** Tekrar eden ya da
+çok-hedefli olaylarda ayırt edici değer `target_id`'ye konur, aksi halde farklı
+gerçek olaylar tek bildirime çöker:
+- `repost` / `quote_repost` → `target_id = repost edilen pump check id` (ref_id).
+  Yeni FeedItem.id commit öncesi bilinmediğinden kaynak gönderi id'si kimlik
+  olarak kullanılır; böylece farklı gönderilerin repost'ları çakışmaz.
+- `challenge_complete` → `target_id = UserChallengeProgress.row.id` (haftalık
+  tamamlama satırı; `(user, challenge, period_key)` başına tekil). Aynı
+  challenge'ın farklı haftalardaki tamamlamaları böylece ayrı bildirilir.
+
+Bu iki türde de gerçek tekrar (aynı gönderi / aynı challenge-aynı hafta) yine
+dedup edilir — çünkü aynı `target_id`'yi üretir.
+
+## Tetikleme noktaları
+Hepsi ilgili eylemle aynı transaction'da, **commit'ten önce**.
+
+`app/blueprints/social.py`:
 - `pump_check_like` → sahibe `pump_check_like` (yalnızca yeni beğenide).
 - `pump_check_comment_create` → sahibe `pump_check_comment`.
 - `friend_request` → hedefe `friend_request` (hem taze-insert hem
   rejected-reuse yolu).
 - `friend_accept` → gönderene `friend_accept` (guarded UPDATE'i kazanan tarafta).
+- `feed_item like/comment` → sahibe `feed_like` / `feed_comment` (`target_id =
+  feed item id`).
+- `feed_repost` → orijinal sahibine `repost` / `quote_repost` (`target_id =
+  ref_id`; kendi gönderisini repost edende no-self-notify ile yazılmaz).
+
+`app/services/challenges.py` (`_try_complete`, sistem bildirimi):
+- Bir challenge tamamlanınca alıcıya `challenge_complete` (`actor_id=NULL`,
+  `target_id = progress row id`).
 
 Giden istek iptal edilince (`DELETE /friend/request/<id>`) alıcıdaki artık
 hayalet olan okunmamış `friend_request` bildirimi aynı transaction'da süpürülür.
