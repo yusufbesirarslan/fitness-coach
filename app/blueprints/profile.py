@@ -218,6 +218,11 @@ def pump_check_gallery_delete(check_id):
         FeedItemLike.query.filter(FeedItemLike.feed_item_id.in_(ref_items)).delete(synchronize_session=False)
         FeedItemComment.query.filter(FeedItemComment.feed_item_id.in_(ref_items)).delete(synchronize_session=False)
         FeedItem.query.filter(FeedItem.id.in_(ref_items)).delete(synchronize_session=False)
+    # Sprint 5 PR3: silinen pump check'i ve reposts'larını HEDEF ALAN bildirimler
+    # ölü kalmasın (tıklanınca "içerik yok") diye aynı transaction'da süpürülür —
+    # pump_check_like/comment + repost/quote + feed_like/feed_comment. (COMMIT ETMEZ.)
+    from app.services.notifications import purge_content_notifications
+    purge_content_notifications(pump_check_ids=[check.id], feed_item_ids=ref_items)
     db.session.delete(check)
     db.session.commit()
     return jsonify({"ok": True})

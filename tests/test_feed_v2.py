@@ -191,3 +191,31 @@ def test_gallery_delete_removes_referencing_reposts(app, auth_user, make_user, c
     assert db.session.get(FeedItem, qt_id) is None
     assert FeedItemLike.query.filter_by(feed_item_id=qt_id).count() == 0
     assert FeedItemComment.query.filter_by(feed_item_id=qt_id).count() == 0
+
+
+def test_gallery_delete_purges_orphan_notifications(app, auth_user, make_user, client):
+    # Sprint 5 PR3: pump check silinince onu/reposts'larını HEDEF ALAN bildirimler
+    # de gitmeli (aksi halde tıklanınca ölü "içerik yok" stub'ı). İlgisiz bildirim korunur.
+    from app.models import Notification
+    from app.services.notifications import notify
+    bob = make_user("bob")
+    _befriend(auth_user.id, bob.id)
+    pc = _feed_check(auth_user.id, created_at=_dt(1))
+    rp = _repost(bob.id, pc.id, _dt(2), item_type="repost")
+    # Rotaların ürettiği bildirim şekilleri (like/comment=pump_check, repost=feed_item
+    # ama target_id=KAYNAK pump check id, feed_like=feed_item target_id=FeedItem.id):
+    notify(auth_user.id, "pump_check_like", actor_id=bob.id, target_type="pump_check", target_id=pc.id)
+    notify(auth_user.id, "repost", actor_id=bob.id, target_type="feed_item", target_id=pc.id)
+    notify(bob.id, "feed_like", actor_id=auth_user.id, target_type="feed_item", target_id=rp.id)
+    other = _feed_check(auth_user.id, created_at=_dt(3), date_key="keep")
+    notify(auth_user.id, "pump_check_like", actor_id=bob.id, target_type="pump_check", target_id=other.id)
+    db.session.commit()
+    pc_id, rp_id, other_id = pc.id, rp.id, other.id
+
+    assert client.delete("/pump-check-gallery/%s" % pc_id).status_code == 200
+    # Öksüz bildirimler süpürüldü:
+    assert Notification.query.filter_by(target_type="pump_check", target_id=pc_id).count() == 0
+    assert Notification.query.filter_by(ntype="repost", target_id=pc_id).count() == 0
+    assert Notification.query.filter_by(ntype="feed_like", target_id=rp_id).count() == 0
+    # İlgisiz bildirim korundu:
+    assert Notification.query.filter_by(target_type="pump_check", target_id=other_id).count() == 1

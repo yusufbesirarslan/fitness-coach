@@ -74,10 +74,18 @@ def record_event(user_id, event_type, amount=1):
     poison'lar ve çağıranın (ör. update_streak) çıplak commit'i
     PendingRollbackError → normal gezinmede 500 verirdi (triage 2026-07-17 #2)."""
     try:
-        matched = Challenge.query.filter_by(metric=event_type, is_active=True).all()
-        if not matched:
-            return
-        period_key = current_challenge_week()
+        # Katalog/periyot okuması no_autoflush altında (notify/award_badge deseni):
+        # record_event, ÇAĞIRANIN henüz commit'lenmemiş bekleyen yazılarını kendi
+        # SELECT'iyle erken FLUSH etmemeli. Aksi halde çağıranın bekleyen bir UNIQUE
+        # ihlali (kendi commit'inde `except IntegrityError` ile ele alacağı) bu
+        # okumanın autoflush'ında patlar; record_event onu yutar ama session
+        # PendingRollbackError'a düşüp çağıranın commit'ini beklenmedik şekilde kırar.
+        # Bu okumalar salt-katalog/periyottur, yazı üretmez → no_autoflush güvenli.
+        with db.session.no_autoflush:
+            matched = Challenge.query.filter_by(metric=event_type, is_active=True).all()
+            if not matched:
+                return
+            period_key = current_challenge_week()
     except Exception:
         # Katalog/periyot okuması patlarsa: yut ve çık. Burada ROLLBACK ETME —
         # çağıranın bekleyen yazısını (streak / WorkoutLog vb.) geri almak ana
@@ -86,11 +94,20 @@ def record_event(user_id, event_type, amount=1):
         log.warning("record_event katalog okuması başarısız (yutuldu): user=%s event=%s",
                     user_id, event_type, exc_info=True)
         return
+    # Poison-protection: çağıranın bekleyen yazılarını (streak/last_login/WorkoutLog…)
+    # savepoint AÇILMADAN ÖNCE dış transaction'a it. Böylece aşağıdaki her begin_nested
+    # rollback'i (deadlock/kilit zaman aşımı) YALNIZCA o challenge'ın yazısını geri
+    # alır, çağıranın işini DEĞİL (triage 2026-07-17 #2). Eskiden bunu katalog
+    # SELECT'inin autoflush'ı örtük yapıyordu; okumalar artık no_autoflush altında
+    # olduğundan AÇIKÇA yapıyoruz. Flush çağıranın KENDİ yazısıdır; ele alınmamış bir
+    # UNIQUE ihlali içerirse eskisi gibi yutulur (record_event ana eylemi kırmaz).
+    try:
+        db.session.flush()
+    except Exception:
+        log.warning("record_event çağıran-flush başarısız (yutuldu): user=%s event=%s",
+                    user_id, event_type, exc_info=True)
+        return
     for ch in matched:
-        # Dış değişiklikler (streak/last_login/WorkoutLog...) yukarıdaki katalog
-        # sorgusunun autoflush'ı ile savepoint AÇILMADAN ÖNCE dış transaction'a
-        # yazıldı → savepoint rollback'i onları GERİ ALMAZ, yalnızca bu challenge'ın
-        # yazısını alır.
         try:
             with db.session.begin_nested():
                 if ch.challenge_type == "featured":
@@ -116,33 +133,43 @@ def record_event(user_id, event_type, amount=1):
 
 
 def _try_complete(user_id, ch, row, period_key):
-    """Guarded completion — WHERE completed_at IS NULL kazanan tek satır ödülü verir."""
+    """Guarded completion — WHERE completed_at IS NULL kazanan tek satır ödülü verir.
+
+    Kazanma + tüm ödül yan etkileri (XP + rozet + bildirim + feed aktivitesi) TEK
+    savepoint (begin_nested) içinde ATOMİKTİR: herhangi bir ödül adımı patlarsa
+    completed_at dahil hepsi geri alınır → "kısmi tamamlama" (ör. XP verilip rozet
+    verilmemesi) YOK. Bu atomiklik çağırandan BAĞIMSIZDIR — record_event'in
+    sarmalayan savepoint'i olmasa da (gelecekteki doğrudan çağıranlar) korunur.
+    Başarısızlıkta savepoint geri alınır ve istisna PROPAGE edilir (record_event
+    döngüsü yutar; challenge tamamlanmamış kalır, sonraki olayda yeniden denenir).
+    Tam-bir-kez semantiği korunur: kapı hâlâ WHERE completed_at IS NULL guarded UPDATE."""
     from app.services.badges import award_badge
     from app.services.gamification import award_xp, log_activity
     from app.services.notifications import notify
 
     now = datetime.utcnow()
-    won = UserChallengeProgress.query.filter(
-        UserChallengeProgress.id == row.id,
-        UserChallengeProgress.completed_at.is_(None),
-    ).update({UserChallengeProgress.completed_at: now}, synchronize_session=False)
-    if not won:
-        return
-    award_xp(user_id, ch.xp_reward, count_challenge_xp=False)
-    if ch.badge_code:
-        award_badge(user_id, ch.badge_code,
-                    source="challenge:%s:%s" % (ch.code, period_key))
-    # Hedef = bu tamamlamanın progress satırı (row.id): (user, challenge, period_key)
-    # başına tekil (uq_user_challenge_period). Böylece AYNI challenge'ın farklı
-    # haftalardaki tamamlamaları okunmamış-dedup'ta ÇAKIŞMAZ. Aynı hafta/aynı
-    # challenge zaten korumalı UPDATE ile tam-bir-kez tamamlanır (gerçek tekrar yok).
-    # payload week/code'u taşımaya devam eder (istemci metni).
-    notify(user_id, "challenge_complete", actor_id=None,
-           target_type="challenge", target_id=row.id,
-           payload={"code": ch.code, "xp": ch.xp_reward,
-                    "badge": ch.badge_code, "week": period_key})
-    log_activity(user_id, "challenge_completed",
-                 "'%s' meydan okumasını tamamladı!" % ch.title)
+    with db.session.begin_nested():
+        won = UserChallengeProgress.query.filter(
+            UserChallengeProgress.id == row.id,
+            UserChallengeProgress.completed_at.is_(None),
+        ).update({UserChallengeProgress.completed_at: now}, synchronize_session=False)
+        if not won:
+            return
+        award_xp(user_id, ch.xp_reward, count_challenge_xp=False)
+        if ch.badge_code:
+            award_badge(user_id, ch.badge_code,
+                        source="challenge:%s:%s" % (ch.code, period_key))
+        # Hedef = bu tamamlamanın progress satırı (row.id): (user, challenge, period_key)
+        # başına tekil (uq_user_challenge_period). Böylece AYNI challenge'ın farklı
+        # haftalardaki tamamlamaları okunmamış-dedup'ta ÇAKIŞMAZ. Aynı hafta/aynı
+        # challenge zaten korumalı UPDATE ile tam-bir-kez tamamlanır (gerçek tekrar yok).
+        # payload week/code'u taşımaya devam eder (istemci metni).
+        notify(user_id, "challenge_complete", actor_id=None,
+               target_type="challenge", target_id=row.id,
+               payload={"code": ch.code, "xp": ch.xp_reward,
+                        "badge": ch.badge_code, "week": period_key})
+        log_activity(user_id, "challenge_completed",
+                     "'%s' meydan okumasını tamamladı!" % ch.title)
 
 
 # ── Katıl + katalog seed + leaderboard ────────────────────────────────────

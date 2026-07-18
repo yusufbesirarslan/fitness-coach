@@ -112,6 +112,17 @@ def test_multiple_quotes_of_distinct_posts_each_notify(app, auth_user, make_user
     assert {n.payload["pumpCheckId"] for n in notifs} == {pc1.id, pc2.id}
 
 
+def test_repost_of_feed_item_rejected_no_chains(app, auth_user, make_user, client):
+    # "Öksüz repost zinciri yok" (Sprint 5 PR3): repost edilebilir tek tür pump_check.
+    # Bir repost'u (feed_item) repost etmek ref_type ile 400 döner → çok-seviyeli
+    # zincir OLUŞAMAZ; dolayısıyla pump check silinince askıda repost zinciri kalmaz.
+    bob = make_user("bob")
+    _befriend(auth_user.id, bob.id)
+    pc = _check(bob.id)
+    res = client.post("/feed/repost", json={"ref_type": "feed_item", "ref_id": pc.id, "mode": "repost"})
+    assert res.status_code == 400
+
+
 def test_owner_deletes_repost_decrements_and_removes_children(app, auth_user, make_user, client):
     bob = make_user("bob")
     _befriend(auth_user.id, bob.id)

@@ -14,6 +14,16 @@ challenge'ları ilerletir. **COMMIT ETMEZ** — çağıranın transaction'ında 
 (`_claim_quest` sözleşmesi; ana eylemle atomik). Kendi hatasını yutar → antrenman/
 öğün akışını asla kırmaz.
 
+**Çağıran-güvenliği (no_autoflush + poison-protection).** Katalog/periyot okuması
+`db.session.no_autoflush` altındadır (`notify`/`award_badge` deseni): record_event
+çağıranın henüz commit'lenmemiş bekleyen yazılarını kendi SELECT'iyle erken FLUSH
+ETMEZ — eşleşme yoksa çağıranın işine hiç dokunmaz. Eşleşme varsa, her challenge'ın
+`begin_nested()` savepoint'i AÇILMADAN ÖNCE tek bir açık `db.session.flush()` ile
+çağıranın yazıları dış transaction'a itilir; böylece bir challenge'ın savepoint
+rollback'i (deadlock/kilit zaman aşımı) çağıranın işini GERİ ALMAZ (triage
+2026-07-17 #2). Bu flush çağıranın KENDİ yazısıdır; ele alınmamış bir UNIQUE ihlali
+içerse bile yutulur — record_event ana eylemi kırmaz.
+
 İki tablo veri, bir tablo katalog:
 
 - **`Challenge`** — statik seed'li katalog (DailyQuest deseni). `code`/`category`/
@@ -76,6 +86,14 @@ satırlar tarihçe olarak kalır; sıfırlama/silme yok.
 `UPDATE … SET completed_at=now WHERE id=? AND completed_at IS NULL`. rowcount==1
 kazanan tek istek ödülü verir → XP + rozet + bildirim + `challenge_completed` feed
 aktivitesi TAM BİR KEZ. İkinci olay `completed_at` dolu olduğu için atlanır.
+
+**Atomiklik (kısmi tamamlama yok).** Kazanma + tüm ödül yan etkileri `_try_complete`
+içinde TEK `begin_nested()` savepoint'indedir: bir ödül adımı patlarsa (XP/rozet/
+bildirim/feed) `completed_at` dahil hepsi geri alınır → "XP verilip rozet
+verilmemiş" gibi kısmi başarı olamaz. Challenge tamamlanmamış kalır ve sonraki
+olayda yeniden denenir. Bu atomiklik çağırandan BAĞIMSIZDIR — record_event'in
+sarmalayan savepoint'i olmasa (gelecekteki doğrudan çağıranlar) da korunur.
+Tam-bir-kez semantiği bozulmaz: kapı hâlâ guarded UPDATE'tir.
 
 ## XP özyineleme kuralı
 
