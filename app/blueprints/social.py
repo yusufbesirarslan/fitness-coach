@@ -298,10 +298,13 @@ def feed_repost():
     }, synchronize_session=False)
     item = FeedItem(user_id=current_user.id, item_type=mode, ref_type=ref_type, ref_id=ref_id, body=body)
     db.session.add(item)
-    # target_id item.id commit ÖNCESİ bilinmez; bildirim pump check'e payload ile
-    # bağlanır, frontend repost/quote bildirimini /feed'e yönlendirir.
+    # Yeni FeedItem.id commit ÖNCESİ bilinmez; bildirim kimliği için hedef olarak
+    # KAYNAK pump check id'sini (ref_id) kullan — böylece farklı gönderilerin
+    # repost'ları okunmamış-dedup'ta ÇAKIŞMAZ (aynı gönderinin gerçek tekrarı yine
+    # dedup'lanır; zaten yukarıdaki deterministik çift-repost guard'ı 400 döner).
+    # payload["pumpCheckId"] korunur; frontend repost/quote bildirimini /feed'e yönlendirir.
     notify(original.user_id, "quote_repost" if mode == "quote" else "repost",
-           actor_id=current_user.id, target_type="feed_item", target_id=None,
+           actor_id=current_user.id, target_type="feed_item", target_id=ref_id,
            payload={"pumpCheckId": ref_id})
     try:
         db.session.commit()
