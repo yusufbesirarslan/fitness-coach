@@ -39,6 +39,7 @@ from app.services.context_builder import (  # noqa: F401 (re-export)
 )
 from app.services.fatsecret import _food_search_fatsecret, _food_search_static
 from app.services.gamification import _claim_quest, award_xp, log_activity
+from app.services.training_history import fetch_workout_entries, total_volume
 from app.services.memory_manager import (  # noqa: F401 (re-export)
     COACH_HISTORY_CHAR_CAP,
     COACH_HISTORY_LIMIT,
@@ -147,23 +148,14 @@ def _remaining_macros_for_user(user_id):
 
 
 def _today_workout_totals(user_id):
-    """Bugünün antrenman toplam volümü (Istanbul günü; created_at UTC olduğu için
-    UTC sınırlarıyla karşılaştırılır)."""
-    start, end = utc_day_bounds()
-    row = db.session.query(
-        db.func.coalesce(db.func.sum(WorkoutLog.volume), 0),
-        db.func.count(WorkoutLog.id),
-    ).filter(
-        WorkoutLog.user_id == user_id,
-        WorkoutLog.created_at >= start,
-        WorkoutLog.created_at < end,
-        # D4: UI tamamlama-işaretçisi (volume=0) gerçek egzersiz değil; koç
-        # bağlamındaki "bugünkü hacim/egzersiz sayısı"nı şişirmesin (entry_count'ı
-        # kabartıyordu). "Antrenman yapıldı mı" sinyali ayrı yollardan (nudge/
-        # PumpCheck) hâlâ işaretçiyi görür.
-        WorkoutLog.exercise_name != WORKOUT_COMPLETION_MARKER,
-    ).first()
-    return {"total_volume": round(row[0], 1), "entry_count": row[1]}
+    """Bugünün antrenman toplam volümü (Istanbul günü). WorkoutLog erişimi ve
+    tamamlama-işaretçisini (D4) hariç tutma, paylaşılan training-history temelinden
+    gelir (Sprint 6 PR1): koç bağlamındaki "bugünkü hacim/egzersiz sayısı"nı
+    işaretçi rowları şişirmez; "antrenman yapıldı mı" sinyali ayrı yollardan
+    (nudge/PumpCheck) hâlâ işaretçiyi görür."""
+    today = app_today()
+    entries = fetch_workout_entries(user_id, today, today)
+    return {"total_volume": round(total_volume(entries), 1), "entry_count": len(entries)}
 
 
 # ── S1: tur-içi stage→confirm kilidi ────────────────────────────────────────
