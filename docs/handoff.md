@@ -384,3 +384,120 @@ section before implementing anything.
 Yes — purely additive service + hermetic tests + docs; the two converged readers
 produce byte-identical results (regression-verified); no schema/migration, no route
 or coach-prompt changes, no behavior change.
+
+## Sprint 6 PR2 - Progressive Overload Engine (Progression-Analysis Layer)
+
+Date: 2026-07-19
+Scope: A canonical, deterministic progression-analysis layer built on top of the
+Sprint 6 PR1 training-history foundation, turning raw workout history into normalized
+progression signals (volume/strength trend, plateau, deload, load consistency, and a
+single "next signal" for the coach). Purely additive — no runtime convergence, no
+schema, no route/coach-prompt/UI change. **The next Sprint 6 PR must read this section
+(and the PR1 section above) before implementing anything.**
+
+### What this PR changed
+
+- Added `app/services/training_progression/` — the single source of truth for
+  interpreting training history into progression signals. Layered pure/impure and
+  strictly one-way dependent on the foundation (`training_progression` →
+  `training_history`; the foundation never imports this layer):
+  - `models.py` — frozen value objects `WeeklyStrength` and `ProgressionReport`
+    (the normalized output; every field has a safe neutral default).
+  - `analysis.py` — pure deterministic signal functions: `series_trend` (reuses the
+    foundation's ±5% `TREND_BAND`), `weekly_best_estimated_1rm` (per-week peak Epley
+    estimate — finally *consumes* PR1's previously-unused `estimated_1rm`),
+    `is_progressing`, `detect_plateau`, `detect_deload_due`, `assess_consistency`,
+    `derive_next_signal`. All thresholds are explicit module constants.
+  - `__init__.py` — public API + `build_progression_report(user_id, weeks=4, *,
+    end_day=None)` orchestrator; reads history once via `fetch_workout_entries(...,
+    include_markers=True)` then derives every signal purely.
+- Docs: added `docs/TRAINING_PROGRESSION.md`; added the service-index line in `CLAUDE.md`.
+- Tests: `tests/test_training_progression.py` (21 tests — fixture-free pure signal tests
+  plus DB-backed roll-up via `make_user`).
+
+### Code paths inspected
+
+`docs/handoff.md` (PR1 section), `app/services/training_history/*`
+(`__init__`/`models`/`queries`/`analysis`), `app/timeutil.py`, `app/models.py`
+(`WorkoutLog` 615-633, `WORKOUT_COMPLETION_MARKER`),
+`app/services/training_generation/time_series_model.py` (the PR1-converged reader and
+its `PerformanceHistory` LLM-context shape — deliberately *not* duplicated),
+`app/services/ai_coach.py` (`_today_workout_totals`, `_tool_get_progress_metric`
+`volume_lifted`), `app/blueprints/tracking.py` (progress endpoints — a future
+convergence target, left untouched), `tests/test_training_history.py`,
+`tests/conftest.py` (`make_user`), `pytest.ini`.
+
+### Progression decisions made (thresholds & definitions)
+
+- **Trend band:** reused the foundation's `TREND_BAND = 0.05` (promoted from the former
+  private `_TREND_BAND` in the PR2 follow-up); volume and strength are
+  judged on one scale so the band lives in a single place (no drift, no duplicated
+  magic number).
+- **Strength trend:** per-week *peak* estimated 1RM (Epley), earliest→latest active-week
+  direction via `series_trend`. Bodyweight / zero-load entries count as entries but
+  contribute `0.0`.
+- **Plateau** (`MIN_PLATEAU_WEEKS = 3`): last 3 active volume weeks form a flat run
+  (whole run within the band); negated if estimated strength is still trending up
+  (progress via intensity).
+- **Deload** (`MIN_DELOAD_WEEKS = 4`): fires **only** on a sustained unbroken block
+  (last 4 windows all active, no rest week) that has *also plateaued*. Because true
+  deload readiness needs fatigue/recovery data the foundation does not carry, this is
+  intentionally the most conservative volume-only inference — a healthy rising block is
+  never flagged (neutral `False`).
+- **Consistency** (`CONSISTENCY_MIN_ACTIVE_WEEKS = 3`, `MIN_DATA_WEEKS = 2`):
+  `insufficient_data` (<2 trained windows) / `consistent` (≥3 of last 4) / `inconsistent`.
+- **Next signal precedence** (exactly one wins): `insufficient_data` →
+  `build_consistency` → `deload` → `plateau` → `progressing` → `keep_pushing`.
+- **Neutral-value contract:** empty history / `weeks <= 0` / thin data all return
+  explicit neutral values, never a speculative heuristic (per the PR spec).
+
+### What the canonical progression service now provides
+
+`build_progression_report(user_id, weeks=4, *, end_day=None) -> ProgressionReport`
+answers, deterministically and user-scoped, the PR's deliverable questions: is the user
+progressing? is volume/strength trending up/flat/down? plateauing? due for a deload?
+consistent enough to support overload? what signal should the coach surface next? Plus
+the per-week `weekly_volume` / `weekly_strength` series for transparency.
+
+### Intentionally left for later PRs (deliberate debt)
+
+- **No runtime convergence** in this PR (user-chosen scope: purely additive). The three
+  inline history readers PR1 flagged (`blueprints/tracking.py`, `fitx_mcp/server.py`,
+  `analytics_engine.py`) remain unconverged, and nothing consumes `ProgressionReport` in
+  runtime yet.
+- **No coach wiring:** `next_signal` is not surfaced in the coach prompt/context (would
+  change AI behavior; the spec forbids user-facing signals this PR).
+- **No adaptive program generator** (explicitly out of scope).
+- **Deload has no fatigue input:** it is volume-only by design; a later PR can fold in
+  `WeeklyCheckIn.fatigue` / recovery data (already used by
+  `training_generation/time_series_model` + `recovery_model`) for a richer signal.
+- Pre-existing `datetime.utcnow()` deprecation warnings remain (Python 3.14).
+
+### Exact next steps for the following PR
+
+1. Read this section first (and the PR1 section above).
+2. Build on `build_progression_report` / `fetch_workout_entries` — do **not** add a new
+   inline windowing / marker-exclusion / trend implementation.
+3. Highest-value next work (unchanged from PR1's recommendation): converge
+   `blueprints/tracking.py` progress endpoints onto the foundation (ORM, SQLite+Postgres
+   safe), with characterization coverage proving byte-identical `/api/progress/workout`,
+   heatmap, and insights output.
+4. Then consider the first *consumer* of `ProgressionReport`: surface `next_signal` in
+   the coach context block (additive, behind a flag, with prompt tests) and/or enrich
+   `detect_deload_due` with `WeeklyCheckIn` fatigue.
+5. Leave `fitx_mcp/server.py` last (raw SQL, standalone process, Postgres-only).
+
+### Verification evidence
+
+- `python -m pytest tests/test_training_progression.py -v` — 21 passed.
+- Regression (behavior preserved): `python -m pytest tests/test_training_history.py
+  tests/test_training_generation.py tests/test_ai_coach.py tests/test_progress_api.py -q`
+  — 92 passed.
+- Import direction confirmed one-way: `training_history` contains no reference to
+  `training_progression` (no circular import).
+
+### Independently safe to merge
+
+Yes — a purely additive service package + hermetic tests + docs. No schema/migration, no
+route, no coach-prompt, no UI, and no change to any existing runtime caller (all four
+foundation consumers regression-green). The layer is dormant until a later PR consumes it.
