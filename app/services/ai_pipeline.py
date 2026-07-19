@@ -22,28 +22,58 @@ from app.services import context_builder, memory_manager, moderation, response_f
 
 
 def _maybe_enqueue_summarize(conversation):
-    """WS8: özetlemeyi arka-plan işine ver — worker varsa kuyruğa (async, istek
-    yolunu bloklamaz), yoksa SATIR-İÇİ (sync, PR2'nin eski davranışı). Kendi
-    hatalarını yutar: özetleme tetiklenemezse bağlam penceresi yine kurulur."""
+    """WS8: özetlemeyi arka-plan işine ver — worker/kuyruk varsa kuyruğa (async,
+    istek yolunu bloklamaz) ve None döner. Kuyruk YOKSA satır-içi ÇALIŞTIRMAZ:
+    bloklayıcı LLM özet çağrısı koç turunun önüne geçip /ask gecikmesini ikiye
+    katlıyordu (triage 2026-07-19 #4). Bunun yerine yanıt üretildikten SONRA
+    koşulacak ertelenmiş bir callable döner (bloklayıcıda response.call_on_close,
+    akışta done aşaması). Kendi hatalarını yutar: özetleme tetiklenemezse bağlam
+    penceresi yine kurulur."""
     try:
-        from app.jobs import enqueue_or_run
+        from app.jobs import enqueue_or_run, get_queue
         from app.jobs.tasks import summarize_conversation
-        enqueue_or_run(summarize_conversation, conversation.id)
+        if get_queue() is not None:
+            enqueue_or_run(summarize_conversation, conversation.id)
+            return None
+        return _deferred_summarize(conversation.id)
     except Exception:
         current_app.logger.warning("[PIPELINE] özetleme tetiklenemedi", exc_info=True)
+        return None
+
+
+def _deferred_summarize(conversation_id):
+    """Worker'sız kurulumda yanıt-sonrası satır-içi özetleme callable'ı üretir.
+
+    Çağrı anında (yanıt kapanışı) app/request context kalmamış olabilir — app'i
+    ŞİMDİ yakala, koşarken kendi context'ini kur. Hata asla yükselmez: arka-plan
+    işi asıl akışı da yanıt kapanışını da bozamaz."""
+    app = current_app._get_current_object()
+
+    def run():
+        with app.app_context():
+            try:
+                from app.jobs.tasks import summarize_conversation
+                summarize_conversation(conversation_id)
+            except Exception:
+                app.logger.warning("[PIPELINE] ertelenmiş özetleme başarısız",
+                                   exc_info=True)
+    return run
 
 
 def _memory_stage(user_id):
-    """WS1 kalıcı hafıza: aktif konuşma + bağlam penceresi.
+    """WS1 kalıcı hafıza: aktif konuşma + bağlam penceresi (+ ertelenmiş özetleme).
 
-    Arızaya dayanıklı: hafıza katmanı çökerse (conversation=None,
-    prepared_history=None) eski client-history davranışına düşülür."""
+    Dönüş: (conversation, prepared_history, deferred_summarize). Üçüncü öğe
+    yalnızca kuyruk yokken bir callable'dır — çağıran, yanıt üretildikten sonra
+    koşturur (triage 2026-07-19 #4). Arızaya dayanıklı: hafıza katmanı çökerse
+    (None, None, None) ile eski client-history davranışına düşülür."""
     if not current_app.config.get("AI_MEMORY_ENABLED", True):
-        return None, None
+        return None, None, None
     try:
         conversation = memory_manager.get_or_create_active_conversation(user_id)
-        _maybe_enqueue_summarize(conversation)  # WS8: kuyruğa ya da satır-içi
-        return conversation, memory_manager.build_context_window(conversation)
+        deferred_summarize = _maybe_enqueue_summarize(conversation)
+        return (conversation, memory_manager.build_context_window(conversation),
+                deferred_summarize)
     except Exception:
         # Commit yarıda kaldıysa session kirli kalır; rollback etmezsek sonraki
         # bağlam sorguları da patlar (hafıza arızası TÜM yanıtı düşürürdü).
@@ -51,7 +81,7 @@ def _memory_stage(user_id):
         db.session.rollback()
         current_app.logger.warning("[PIPELINE] kalıcı hafıza kurulamadı — "
                                    "client history'ye düşülüyor", exc_info=True)
-        return None, None
+        return None, None, None
 
 
 def _context_stage(user_id, question, language):
@@ -95,14 +125,16 @@ def _record(conversation, question, answer, usage=None, interrupted=False):
 def generate_answer(user_id, question, client_history=None, language="tr"):
     """Koç sorusu için uçtan uca modüler hat (bloklayıcı — /ask).
 
-    Dönüş: {"answer": str, "is_error_fallback": bool, "conversation_id": int|None}.
-    Geçersiz girdi için ValueError(i18n-anahtarı) fırlatır — HTTP durum/çeviri
-    kararı route'undur."""
+    Dönüş: {"answer": str, "is_error_fallback": bool, "conversation_id": int|None,
+    "deferred_summarize": callable|None}. Son alan, worker'sız kurulumda yanıt
+    istemciye gönderildikten SONRA koşulacak özetlemedir — route bunu
+    response.call_on_close'a bağlar (triage 2026-07-19 #4). Geçersiz girdi için
+    ValueError(i18n-anahtarı) fırlatır — HTTP durum/çeviri kararı route'undur."""
     err_key = moderation.validate_question(question)
     if err_key:
         raise ValueError(err_key)
 
-    conversation, prepared_history = _memory_stage(user_id)
+    conversation, prepared_history, deferred_summarize = _memory_stage(user_id)
     context = _context_stage(user_id, question, language)
 
     # Çağrı-anı çözümleme (modül attribute'u üzerinden): testler ve gelecekteki
@@ -127,7 +159,8 @@ def generate_answer(user_id, question, client_history=None, language="tr"):
 
     return {"answer": answer,
             "is_error_fallback": is_fallback,
-            "conversation_id": conversation.id if conversation is not None else None}
+            "conversation_id": conversation.id if conversation is not None else None,
+            "deferred_summarize": deferred_summarize}
 
 
 def stream_answer(user_id, question, client_history=None, language="tr"):
@@ -149,7 +182,7 @@ def stream_answer(user_id, question, client_history=None, language="tr"):
     if err_key:
         raise ValueError(err_key)
 
-    conversation, prepared_history = _memory_stage(user_id)
+    conversation, prepared_history, deferred_summarize = _memory_stage(user_id)
     context = _context_stage(user_id, question, language)
 
     # Kalıcı hafıza penceresi varsa onu kullan; yoksa (hafıza kapalı/arızalı)
@@ -199,6 +232,12 @@ def stream_answer(user_id, question, client_history=None, language="tr"):
                             usage=event.get("usage"))
                 _emit_metrics("stream", is_error=is_fallback,
                               usage=event.get("usage"))
+                if deferred_summarize is not None:
+                    # Worker'sız erteleme (triage #4): tüm delta'lar istemciye
+                    # aktı, özet artık ilk-token gecikmesine binmez. done yield'ının
+                    # SONRASINA konamaz — route done'da döner, generator close
+                    # (GeneratorExit) yield sonrası kodu hiç çalıştırmazdı.
+                    deferred_summarize()
                 yield {"type": "done", "text": answer,
                        "is_error_fallback": is_fallback,
                        "usage": event.get("usage")}

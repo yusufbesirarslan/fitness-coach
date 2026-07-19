@@ -66,25 +66,37 @@ def _bedrock_work_error(parts, tools_ran):
 
 def _stream_bedrock_turn(messages_client, call_kwargs):
     messages = queue.SimpleQueue()
+    # Triage 2026-07-19 #6: tüketici (istemci) kopunca üretici thread Bedrock
+    # akışını doğal bitimine dek sürüyordu — giden kullanıcı için faturalanan
+    # token üretimi + rehin model slotu. Bayrak text_stream döngüsünde görülür
+    # görülmez üretici çıkar; stream context'i ve slot hemen kapanır.
+    cancelled = threading.Event()
 
     def produce():
         try:
             with model_concurrency_slot():
                 with messages_client.stream(**call_kwargs) as stream:
                     for text in stream.text_stream:
+                        if cancelled.is_set():
+                            return
                         if text:
                             messages.put({"kind": "delta", "text": text})
+                    if cancelled.is_set():
+                        return
                     final = stream.get_final_message()
             messages.put({"kind": "final", "message": final})
         except Exception as exc:
             messages.put({"kind": "exception", "exception": exc})
 
     threading.Thread(target=produce, daemon=True).start()
-    while True:
-        message = messages.get()
-        yield message
-        if message["kind"] in {"final", "exception"}:
-            return
+    try:
+        while True:
+            message = messages.get()
+            yield message
+            if message["kind"] in {"final", "exception"}:
+                return
+    finally:
+        cancelled.set()
 
 
 def stream_coach_answer(user_id, question, context, history, language="tr"):

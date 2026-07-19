@@ -682,3 +682,52 @@ def test_stream_answer_drops_trailing_user_from_client_history(app, monkeypatch)
         _drive(1, "yeni soru", client_history=client_history)
 
     assert seen["history"] == [{"role": "assistant", "content": "önceki yanıt"}]
+
+
+# ── Triage 2026-07-19 #6: istemci kopunca üretici thread durmalı ────────────
+
+def test_stream_bedrock_turn_cancels_producer_on_consumer_close():
+    """Tüketici generator kapanınca (istemci koptu → GeneratorExit) üretici
+    thread Bedrock akışını sürmeye devam ETMEMELİ: faturalanan token üretimi
+    ve tutulan model slotu, giden kullanıcı için sürüp gidiyordu. İptal bayrağı
+    text_stream döngüsünde görülür görülmez üretici çıkar ve stream context'i
+    (dolayısıyla slot) kapanır."""
+    produced = []
+    consumer_closed = threading.Event()
+    stream_exited = threading.Event()
+
+    class _EndlessStream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            stream_exited.set()
+            return False
+
+        @property
+        def text_stream(self):
+            def gen():
+                produced.append(1)
+                yield "ilk"
+                # Tüketici kapatana dek bekle — yarışsız, deterministik senaryo.
+                consumer_closed.wait(5.0)
+                for i in range(2, 1000):
+                    produced.append(i)
+                    yield f"parça{i}"
+            return gen()
+
+        def get_final_message(self):
+            return SimpleNamespace(stop_reason="end_turn", content=[], usage=None)
+
+    client = SimpleNamespace(stream=lambda **kw: _EndlessStream())
+
+    gen = ai_stream._stream_bedrock_turn(client, {})
+    assert next(gen) == {"kind": "delta", "text": "ilk"}
+    gen.close()                # istemci koptu (GeneratorExit)
+    consumer_closed.set()      # üretici devam etmeyi DENER — iptali görmeli
+
+    assert stream_exited.wait(2.0), \
+        "üretici thread iptali görmedi — Bedrock akışı açık kaldı"
+    # İptal sonrası en fazla BİR parça daha çekilmiş olabilir (bayrak döngü
+    # başında kontrol edilir); 999'a kadar tüketim = iptal yok demektir.
+    assert len(produced) <= 2, f"üretici {len(produced)} parça tüketti (iptal yok)"

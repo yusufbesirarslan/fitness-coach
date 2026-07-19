@@ -120,11 +120,31 @@ def test_memory_stage_enqueues_summarize(app, make_user, monkeypatch):
     user = make_user("jobsu")
     seen = []
     # enqueue_or_run lazy import'la çözülür → modül attribute'unu patch'le.
+    monkeypatch.setattr(jobs, "get_queue", lambda: object())  # worker/kuyruk VAR
     monkeypatch.setattr(jobs, "enqueue_or_run",
                         lambda func, *a, **k: seen.append((func.__name__, a)))
-    conv, window = ai_pipeline._memory_stage(user.id)
+    conv, window, deferred = ai_pipeline._memory_stage(user.id)
     assert conv is not None
     assert seen == [("summarize_conversation", (conv.id,))]
+    assert deferred is None  # kuyruk varken erteleme gerekmez (iş zaten async)
+
+
+def test_memory_stage_defers_summarize_without_queue(app, make_user, monkeypatch):
+    # Triage 2026-07-19 #4: kuyruk YOKKEN özetleme istek yolunda satır-içi
+    # KOŞMAZ — yanıt sonrasında çağrılacak ertelenmiş bir callable döner.
+    from app.jobs import tasks as jobs_tasks
+    from app.services import ai_pipeline
+    user = make_user("jobsd")
+    calls = []
+    monkeypatch.setattr(jobs, "get_queue", lambda: None)  # worker YOK
+    monkeypatch.setattr(jobs_tasks, "summarize_conversation",
+                        lambda conv_id: calls.append(conv_id) or False)
+    conv, window, deferred = ai_pipeline._memory_stage(user.id)
+    assert conv is not None
+    assert calls == []            # kritik yolda LLM özet çağrısı YOK
+    assert deferred is not None
+    deferred()                    # yanıt-sonrası tetikleme görev gövdesine delege eder
+    assert calls == [conv.id]
 
 
 def test_summarize_task_inline_runs_without_queue(app, make_user, monkeypatch):

@@ -192,6 +192,28 @@ def test_friend_reject(client, auth_user, make_user):
     assert client.post(f"/friend/reject/{fr.id}").status_code == 400
 
 
+def test_friend_reject_sweeps_ghost_notification(client, auth_user, make_user):
+    """Triage 2026-07-19 #8: reddeden zaten alıcı olsa da okunmamış
+    'friend_request' bildirimi bayat kalıyordu (tıklayınca işlenmiş isteğe
+    çıkar) — friend_request_cancel'daki süpürmenin aynası."""
+    from app.services.notifications import notify
+
+    sender = make_user("reddedilen")
+    fr = Friendship(sender_id=sender.id, receiver_id=auth_user.id, status="pending")
+    db.session.add(fr)
+    db.session.commit()
+    notify(auth_user.id, "friend_request", actor_id=sender.id,
+           target_type="friendship", target_id=fr.id)
+    db.session.commit()
+    fr_id = fr.id
+    assert Notification.query.filter_by(ntype="friend_request",
+                                        target_id=fr_id, is_read=False).count() == 1
+
+    assert client.post(f"/friend/reject/{fr_id}").status_code == 200
+    assert Notification.query.filter_by(ntype="friend_request",
+                                        target_id=fr_id, is_read=False).count() == 0
+
+
 def test_friend_reject_foreign_request_returns_404(client, auth_user, make_user):
     sender = make_user("red_sender_foreign")
     other_receiver = make_user("red_receiver_foreign")
@@ -304,6 +326,44 @@ def test_accept_workout_suggestion_sends_reply(client, auth_user, friend):
     assert body["new_type"] == "suggestion_workout_accepted"
     reply = Message.query.filter_by(sender_id=auth_user.id, receiver_id=friend.id).one()
     assert "kabul ettim" in reply.body
+
+
+def test_respond_suggestion_concurrent_accept_writes_single_meal(
+        client, auth_user, friend, monkeypatch):
+    """Eşzamanlı çift accept (double-tap) yarışı: iki istek de message_type ==
+    'suggestion_meal' okur → ikisi de MealLog yazardı (triage 2026-07-19 #2).
+    Yarış, isteğin ilk okuması ile durum geçişi ARASINDA satırı flip'leyerek
+    (rakip isteğin kazanması) deterministik taklit edilir — korumalı UPDATE
+    kaybedeni 400 ile çevirmeli, İKİNCİ MealLog/yanıt yazılmamalı."""
+    import flask
+    import sqlalchemy as sa
+
+    msg = _send_suggestion(client, friend, auth_user, stype="suggestion_meal",
+                           body="- 100 g tavuk")
+    msg_id = msg.id
+
+    real_get_json = flask.Request.get_json
+
+    def racing_get_json(self, *args, **kwargs):
+        # İlk okumadan (first_or_404 + tip kontrolü) SONRA, geçişten ÖNCE koşar:
+        # rakip istek satırı çoktan kabul etmiş gibi flip'le. Core/connection
+        # düzeyinde çalıştırılır — session.execute(update(Message)) ORM bulk
+        # update olur ve kimlik haritasındaki msg'yi de senkronlar; gerçek yarışta
+        # kaybedenin ORM nesnesi BAYAT kalır, onu taklit ediyoruz.
+        db.session.connection().execute(
+            sa.update(Message.__table__)
+            .where(Message.__table__.c.id == msg_id)
+            .values(message_type="suggestion_meal_accepted"))
+        return real_get_json(self, *args, **kwargs)
+
+    monkeypatch.setattr(flask.Request, "get_json", racing_get_json)
+    resp = client.post(f"/suggest/respond/{msg_id}", json={"action": "accept"})
+    monkeypatch.undo()
+
+    assert resp.status_code == 400
+    assert MealLog.query.filter_by(user_id=auth_user.id).count() == 0
+    assert Message.query.filter_by(sender_id=auth_user.id,
+                                   receiver_id=friend.id).count() == 0  # yanıt da yok
 
 
 def test_accept_meal_suggestion_logs_meal_with_macros(client, auth_user, friend, monkeypatch):

@@ -193,8 +193,14 @@ def ask_coach():
                     current_app.logger.exception("AI chat quota refund failed")
         else:
             ai_recovery.clear_ai_failures(user_id)  # başarı → sayaç sıfırla
-        return jsonify({"answer": result["answer"],
+        resp = jsonify({"answer": result["answer"],
                         "conversation_id": result["conversation_id"]})
+        deferred_summarize = result.get("deferred_summarize")
+        if deferred_summarize is not None:
+            # Triage 2026-07-19 #4: worker'sız kurulumda özetleme yanıt istemciye
+            # GÖNDERİLDİKTEN sonra koşar — /ask kritik yolunu bloklamaz.
+            resp.call_on_close(deferred_summarize)
+        return resp
     except Exception:
         current_app.logger.exception("Koç yanıtı üretilemedi")
         db.session.rollback()

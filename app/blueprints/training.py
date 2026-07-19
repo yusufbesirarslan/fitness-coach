@@ -320,6 +320,7 @@ def set_water():
 
     today_key = app_today().isoformat()
     row = WaterLog.query.filter_by(user_id=current_user.id, date_key=today_key).first()
+    prev_count = row.count if row else 0
     if row:
         row.count = count
         db.session.commit()
@@ -336,14 +337,18 @@ def set_water():
             row = WaterLog.query.filter_by(user_id=current_user.id, date_key=today_key).first()
             if row is None:
                 raise
+            prev_count = row.count  # yarışı kazanan isteğin huni ateşi sayılır
             row.count = count
             db.session.commit()
 
     # Su takibi güncellenince "Su Hedefi" görevini ver (günde bir kez claim edilir;
     # complete_quest_for_user zaten claimliyse None döner). Önceden seed'leniyordu
     # ama hiç claim edilmiyordu (ölü görev — 1.1).
+    # Huni yalnız günün 0→pozitif geçişinde ateşlenir: weekly_water challenge'ı
+    # "5 gün" der; her bardak POST'unda ateşlemek olayları gün sayardı
+    # (triage 2026-07-19 #1). active_day deseni: dedup çağıranda.
     resp = {"count": row.count, "goal": WATER_GOAL}
-    if count > 0:
+    if count > 0 and prev_count == 0:
         quest_result = complete_quest_for_user(current_user.id, "water_logged")
         if quest_result:
             resp["quest_awarded"] = quest_result

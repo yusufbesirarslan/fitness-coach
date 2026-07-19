@@ -17,19 +17,34 @@ def test_compose_requires_a_redis_password():
 
 
 def test_redis_server_requires_the_configured_password():
+    # Triage 2026-07-19 #7: parola redis-server argv'sine KONMAZ (host ps /
+    # /proc/<pid>/cmdline / docker inspect sızıntısı). Başlangıçta 0600'lük
+    # geçici conf'a yazılır ve dosyadan okunur; sır olmayan ayarlar argv'de kalır.
     assert REDIS_SERVICE["command"] == [
         "sh",
         "-c",
-        "exec redis-server --maxmemory ${REDIS_MAXMEMORY:-200mb} "
-        "--maxmemory-policy allkeys-lru --save 60 1 "
-        '--requirepass "$$REDIS_PASSWORD"',
+        "umask 077 && "
+        "printf 'requirepass \"%s\"\\n' \"$$REDIS_PASSWORD\" > /tmp/requirepass.conf && "
+        "exec redis-server /tmp/requirepass.conf "
+        "--maxmemory ${REDIS_MAXMEMORY:-200mb} "
+        "--maxmemory-policy allkeys-lru --save 60 1",
     ]
 
 
+def test_redis_server_argv_carries_no_secret():
+    # exec sonrası redis-server'ın kendi argümanlarında parola referansı geçmez.
+    script = REDIS_SERVICE["command"][2]
+    server_argv = script.split("exec redis-server ", 1)[1]
+    assert "REDIS_PASSWORD" not in server_argv
+    assert "--requirepass" not in script
+
+
 def test_redis_healthcheck_authenticates():
+    # Aynı sızıntı sınıfı: redis-cli -a <parola> da argv'de görünürdü —
+    # REDISCLI_AUTH ortam değişkeniyle kimlik doğrula.
     assert REDIS_SERVICE["healthcheck"]["test"] == [
         "CMD-SHELL",
-        'redis-cli --no-auth-warning -a "$$REDIS_PASSWORD" ping | grep -q PONG',
+        'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -q PONG',
     ]
 
 

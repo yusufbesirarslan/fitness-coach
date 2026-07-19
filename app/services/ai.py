@@ -34,12 +34,15 @@ def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
         full_messages.append({"role": "system", "content": system_prompt})
     full_messages.extend(messages)
     try:
-        resp = openai_client.chat.completions.create(
-            model=OPENAI_MODEL,
-            messages=full_messages,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
+        # Slot yalnızca gerçek ağ çağrısını sarar — retry/backoff uykular ve
+        # sağlayıcı geçişi slotsuz kalır (triage 2026-07-19 #3, ai_coach deseni).
+        with model_concurrency_slot():
+            resp = openai_client.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=full_messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
         # `choices` içerik filtresinde boş, `message.content` ise refuse/length
         # durumlarında None olabilir. Çağıranların çoğu dönüşe doğrudan .strip()
         # uyguluyor; ham IndexError/None'ı buraya hapsedip her zaman str döndür.
@@ -91,7 +94,8 @@ def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
                       messages=convo, temperature=temperature)
         if system:
             kwargs["system"] = system
-        resp = bedrock_client.messages.create(**kwargs)
+        with model_concurrency_slot():
+            resp = bedrock_client.messages.create(**kwargs)
         if getattr(resp, "stop_reason", None) == "max_tokens":
             logger.warning("Claude yanıtı max_tokens=%s sınırında kesildi (stop_reason=max_tokens)", capped)
         for block in resp.content:
@@ -160,30 +164,32 @@ def _heavy_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7):
     # girdiyi gönderirse aynı yanıtı paylaşır (saf girdi-fonksiyonu → sızıntı yok).
     lg_key = ai_recovery.lastgood_key(
         "heavy_chat", BEDROCK_MODEL, system_prompt or "", messages, max_tokens)
-    with model_concurrency_slot():
-        if BEDROCK_ENABLED and anthropic is not None:
-            try:
-                reply = ai_recovery.call_with_recovery(
-                    lambda: _claude_chat(messages, system_prompt=system_prompt,
-                                         max_tokens=max_tokens, temperature=temperature),
-                    feature="heavy_chat.bedrock")
-                logger.info("[AI] sağlayıcı: Bedrock (Claude Sonnet)")
-                ai_recovery.remember_last_good(lg_key, reply)
-                return reply
-            except Exception as e:  # RuntimeError dahil her şey → OpenAI'ya düş (istek bozulmasın)
-                logger.warning("Bedrock/Claude çağrısı başarısız, OpenAI'ya düşülüyor: %s: %s",
-                               type(e).__name__, e)
+    # Model slotu BURADA alınmaz: retry uykuları + Bedrock→OpenAI geçişi boyunca
+    # slot rehin kalıp ilgisiz AI işini serileştirirdi (triage 2026-07-19 #3).
+    # Slot, her sağlayıcının kendi create() çağrısını sarar (_claude_chat/_openai_chat).
+    if BEDROCK_ENABLED and anthropic is not None:
         try:
-            logger.info("[AI] sağlayıcı: OpenAI (%s)", OPENAI_MODEL)
             reply = ai_recovery.call_with_recovery(
-                lambda: _openai_chat(messages, system_prompt=system_prompt,
+                lambda: _claude_chat(messages, system_prompt=system_prompt,
                                      max_tokens=max_tokens, temperature=temperature),
-                feature="heavy_chat.openai")
+                feature="heavy_chat.bedrock")
+            logger.info("[AI] sağlayıcı: Bedrock (Claude Sonnet)")
             ai_recovery.remember_last_good(lg_key, reply)
             return reply
-        except Exception:
-            cached = ai_recovery.recall_last_good(lg_key)
-            if cached is not None:
-                logger.warning("[AI] her iki sağlayıcı da başarısız — son-iyi (last-good) yanıt sunuldu")
-                return cached
-            raise
+        except Exception as e:  # RuntimeError dahil her şey → OpenAI'ya düş (istek bozulmasın)
+            logger.warning("Bedrock/Claude çağrısı başarısız, OpenAI'ya düşülüyor: %s: %s",
+                           type(e).__name__, e)
+    try:
+        logger.info("[AI] sağlayıcı: OpenAI (%s)", OPENAI_MODEL)
+        reply = ai_recovery.call_with_recovery(
+            lambda: _openai_chat(messages, system_prompt=system_prompt,
+                                 max_tokens=max_tokens, temperature=temperature),
+            feature="heavy_chat.openai")
+        ai_recovery.remember_last_good(lg_key, reply)
+        return reply
+    except Exception:
+        cached = ai_recovery.recall_last_good(lg_key)
+        if cached is not None:
+            logger.warning("[AI] her iki sağlayıcı da başarısız — son-iyi (last-good) yanıt sunuldu")
+            return cached
+        raise
