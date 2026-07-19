@@ -1,9 +1,8 @@
 from datetime import timedelta
 
-from sqlalchemy import func
-
-from app.models import WORKOUT_COMPLETION_MARKER, PumpCheck, WeeklyCheckIn, WorkoutLog
+from app.models import PumpCheck, WeeklyCheckIn
 from app.services.training_generation.models import PerformanceHistory
+from app.services.training_history import fetch_workout_entries, total_volume
 from app.timeutil import app_today, utc_day_bounds
 
 
@@ -13,19 +12,15 @@ def build_performance_history(user_id: int) -> PerformanceHistory:
     volume_trend: list[float] = []
     for offset in (21, 14, 7, 0):
         start_day = today - timedelta(days=offset)
+        window_end = start_day + timedelta(days=6)
+        # WorkoutLog windowing/marker handling comes from the shared training-history
+        # foundation (Sprint 6 PR1). Markers are included so the session count keeps
+        # the prior COUNT(*) semantics; volume excludes them.
+        entries = fetch_workout_entries(user_id, start_day, window_end, include_markers=True)
+        sessions = len(entries)
+        volume = total_volume(entries)
         start, _ = utc_day_bounds(start_day)
-        _, end = utc_day_bounds(start_day + timedelta(days=6))
-        sessions = WorkoutLog.query.filter(
-            WorkoutLog.user_id == user_id,
-            WorkoutLog.created_at >= start,
-            WorkoutLog.created_at < end,
-        ).count()
-        volume = WorkoutLog.query.with_entities(func.coalesce(func.sum(WorkoutLog.volume), 0)).filter(
-            WorkoutLog.user_id == user_id,
-            WorkoutLog.created_at >= start,
-            WorkoutLog.created_at < end,
-            WorkoutLog.exercise_name != WORKOUT_COMPLETION_MARKER,
-        ).scalar() or 0
+        _, end = utc_day_bounds(window_end)
         pump_sessions = PumpCheck.query.filter(
             PumpCheck.user_id == user_id,
             PumpCheck.created_at >= start,
@@ -58,4 +53,3 @@ def build_performance_history(user_id: int) -> PerformanceHistory:
         stable_score_weeks=stable_weeks,
         dropout_risk=weekly_sessions[-1] == 0 and any(s > 0 for s in weekly_sessions[:-1]),
     )
-

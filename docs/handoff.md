@@ -276,3 +276,111 @@ suite. Focused Sprint 3 feedback remains under two minutes.
   sufficiently long timeout in CI/deploy validation.
 - Monitor Cognito throttling, reset failures, session invalidation reasons, and
   Redis login-throttle health without logging user identifiers or tokens.
+
+## Sprint 6 PR1 - Adaptive Training Engine Foundation
+
+Date: 2026-07-18
+Scope: A canonical, deterministic, ORM-based training-history foundation and
+limited convergence of the two highest-value duplicated runtime readers onto it.
+This is the FIRST PR in the Sprint 6 chain — the next Sprint 6 PR must read this
+section before implementing anything.
+
+### What this PR changed
+
+- Added `app/services/training_history/` — the single source of truth for reading
+  workout history and computing progression baselines. Layered pure/impure:
+  - `models.py` — frozen value objects `WorkoutEntry`, `WeeklyVolume`,
+    `TrainingHistorySummary`.
+  - `queries.py` — `fetch_workout_entries(user_id, start_day, end_day, *,
+    include_markers=False)` (the one `WorkoutLog` read) + `is_completion_marker`.
+  - `analysis.py` — pure deterministic calcs: `total_volume`, `total_sets`,
+    `session_days`/`count_sessions`, `weekly_windows`, `bucket_by_week`,
+    `volume_trend`, and a minimal Epley `estimated_1rm` building block.
+  - `__init__.py` — public API + `build_training_history_summary(user_id,
+    weeks=4, *, end_day=None)`.
+- Converged two readers (behavior byte-identical, verified by regression):
+  - `app/services/training_generation/time_series_model.py` —
+    `build_performance_history` now sources each 7-day window's WorkoutLog rows via
+    `fetch_workout_entries(..., include_markers=True)`; `sessions = len(entries)`
+    (preserves prior COUNT(*)-incl-markers semantics) and `volume =
+    total_volume(entries)` (excludes markers). PumpCheck / WeeklyCheckIn /
+    adherence / stable-weeks / dropout logic untouched.
+  - `app/services/ai_coach.py` — `_today_workout_totals` delegates to the
+    foundation; same `{total_volume, entry_count}` shape and values (empty-day
+    volume is now `0.0` float vs the prior int `0` — numerically equal).
+- Docs: added `docs/TRAINING_HISTORY.md`; added the service-index line in
+  `CLAUDE.md`.
+- Tests: `tests/test_training_history.py` (13 tests — pure analysis, fixture-free,
+  plus DB-backed reads via `make_user`).
+
+### Code paths inspected
+
+`app/models.py` (`WorkoutLog` 615-633, `WORKOUT_COMPLETION_MARKER` 633, related
+`TrainingPlan`/`WeeklyLog`/`WeeklyCheckIn`/`DailyActivity`), `app/timeutil.py`,
+`app/services/training_generation/*` (esp. `time_series_model.py`, `models.py`,
+`scoring_engine.py`), `app/services/ai_coach.py`, `app/blueprints/training.py`,
+`app/blueprints/tracking.py` (progress API), `app/services/analytics_engine.py`,
+`app/services/context_builder.py`, `app/services/coach_context_queries.py`,
+`fitx_mcp/server.py`, `app/cli.py` (`_user_child_models`), `tests/conftest.py`,
+`tests/test_calculations.py`, `tests/test_analytics_engine.py`,
+`tests/test_cascade_delete.py`.
+
+### Architectural decisions
+
+- **Additive foundation, limited convergence** (user-chosen scope): establish the
+  single source of truth AND migrate only the top-value runtime readers now; keep
+  the diff focused and low-risk.
+- **No schema change / no migration.** `WorkoutLog` already carries the needed data
+  and indexes (`user_id`, `created_at`). No new model → no `_user_child_models`
+  change, cascade contract unaffected.
+- **Pure/impure split** (mirrors `training_generation/`) so deterministic logic is
+  fixture-free unit-testable and DB access is isolated.
+- **Canonical definitions:** "session count" = distinct trained days (marker or
+  real); "volume"/"sets" exclude markers; volume trend uses a ±5% dead-band.
+
+### Assumptions discovered (next PR must respect)
+
+- `WorkoutLog.created_at` is **naive UTC with no day-key column**; all day windows
+  must go through `app.timeutil.utc_day_bounds`/`app_date_of`.
+- `WORKOUT_COMPLETION_MARKER` rows are synthetic (`volume=0`) and are a genuine
+  signal ("a session happened") — exclude from volume/exercise counts, but they DO
+  count as trained days.
+- The same history/window logic still lives inline in **three not-yet-converged
+  readers** (intentional debt): `blueprints/tracking.py` (`/api/progress/workout`,
+  heatmap, insights), `fitx_mcp/server.py` (`generate_weekly_report`, raw SQL /
+  Postgres-only / standalone), and `analytics_engine.py` (`_check_missing_logs`).
+  Also `ai_coach._tool_get_progress_metric` `volume_lifted` (range sum) and
+  `context_builder`/`coach_context_queries.get_user_workout_history` (which reads
+  `TrainingPlan` + quest completions, NOT raw `WorkoutLog`).
+- `WorkoutLog` has no per-set granularity and no exercise catalog — sets/reps/load
+  are flat scalar columns on one row per exercise.
+
+### Known technical debt left intentionally
+
+- The three inline readers above are not converged in this PR (limited scope).
+- `estimated_1rm` exists but is not yet consumed by any intensity-trend feature.
+- Pre-existing `datetime.utcnow()` deprecation warnings remain (Python 3.14).
+
+### Exact next steps for the following PR
+
+1. Read this section first.
+2. Build on `build_training_history_summary` / `fetch_workout_entries` — do not add
+   a new inline windowing/marker-exclusion implementation.
+3. Highest-value next work: converge `blueprints/tracking.py` progress endpoints
+   onto the foundation (ORM, SQLite+Postgres safe), then decide whether to add
+   progression-analysis helpers (per-exercise best set, est-1RM trend, plateau
+   signal) in `analysis.py` — still deterministic, still additive.
+4. Leave `fitx_mcp/server.py` last (raw SQL, standalone process, Postgres-only) —
+   converging it needs an ORM/session strategy for the MCP boundary.
+
+### Verification evidence
+
+- `python -m pytest tests/test_training_history.py -v` — 13 passed.
+- `python -m pytest tests/test_training_generation.py tests/test_ai_coach.py tests/test_coach_tools.py tests/test_analytics_engine.py tests/test_progress_api.py tests/test_cascade_delete.py -q` — 128 passed (behavior preserved; incl. `test_workout_trend_marker_excluded_from_volume`).
+- Module import chain (`training_history` → `time_series_model` / `ai_coach`) clean — no circular import.
+
+### Independently safe to merge
+
+Yes — purely additive service + hermetic tests + docs; the two converged readers
+produce byte-identical results (regression-verified); no schema/migration, no route
+or coach-prompt changes, no behavior change.
