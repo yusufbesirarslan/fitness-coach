@@ -343,6 +343,28 @@ def test_water_defaults_and_roundtrip(client, auth_user):
     assert WaterLog.query.filter_by(user_id=auth_user.id).count() == 1          # upsert
 
 
+def test_water_challenge_counts_days_not_posts(client, auth_user):
+    """weekly_water 'bu hafta 5 GÜN' der — aynı gün bardak bardak 5 POST tek gün
+    sayılmalı (triage 2026-07-19 #1). Huni yalnız günün 0→pozitif geçişinde ateşlenir."""
+    from app.models import Challenge, UserChallengeProgress
+    ch = Challenge(code="weekly_water", title="Su Kahramanı",
+                   description="Bu hafta 5 gün su takibini gir", category="hydration",
+                   metric="water_logged", target_value=5, xp_reward=75,
+                   badge_code=None, challenge_type="global", period_type="weekly",
+                   is_active=True)
+    db.session.add(ch)
+    db.session.commit()
+
+    for n in (1, 2, 3, 4, 5):                       # bardak bardak, aynı gün
+        assert client.post("/water", json={"count": n}).status_code == 200
+
+    row = UserChallengeProgress.query.filter_by(
+        user_id=auth_user.id, challenge_id=ch.id).first()
+    assert row is not None
+    assert row.progress == 1                        # 5 POST ≠ 5 gün
+    assert row.completed_at is None
+
+
 def test_training_page_renders(client, auth_user):
     assert client.get("/training").status_code == 200
 

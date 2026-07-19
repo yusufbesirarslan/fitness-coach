@@ -146,6 +146,66 @@ def test_heavy_chat_serves_last_good_when_both_providers_fail(monkeypatch, no_sl
     assert ai._heavy_chat(msgs) == "GOOD"
 
 
+def test_heavy_chat_scopes_model_slot_to_each_provider_call(monkeypatch):
+    """Triage 2026-07-19 #3: model slotu TÜM rutini (retry sleep'leri + Bedrock→
+    OpenAI geçişi) sarmamalı — her sağlayıcı create() çağrısı kendi slotunu alıp
+    çağrı biter bitmez bırakmalı (ai_coach döngülerindeki desen). Aksi halde bir
+    sağlayıcı arızasında 4 çağıran slotları uyku boyunca rehin tutup ilgisiz AI
+    işini serileştirir."""
+    from app.services import ai_gate
+
+    class _SlotRecorder:
+        def __init__(self):
+            self.held = 0
+            self.acquires = 0
+            self.events = []  # (etiket, çağrı anında tutulan slot sayısı)
+
+        def acquire(self, *a, **k):
+            self.held += 1
+            self.acquires += 1
+            return True
+
+        def release(self):
+            self.held -= 1
+
+    rec = _SlotRecorder()
+    monkeypatch.setattr(ai_gate, "_model_slots", rec)
+    monkeypatch.setattr(ai_recovery, "_sleep",
+                        lambda s: rec.events.append(("sleep", rec.held)))
+    monkeypatch.setattr(ai_recovery, "AI_RECOVERY_ENABLED", True)
+    monkeypatch.setattr(ai_recovery, "AI_RETRY_ATTEMPTS", 2)
+    monkeypatch.setattr("app.extensions.redis_client", None)  # last-good no-op
+
+    def bedrock_create(**kwargs):
+        rec.events.append(("bedrock", rec.held))
+        raise _FakeRateLimit("429")  # → TransientAIError → retry → OpenAI'ya düşüş
+    monkeypatch.setattr(ai, "anthropic", _FAKE_ANTHROPIC)
+    monkeypatch.setattr(ai, "bedrock_client",
+                        SimpleNamespace(messages=SimpleNamespace(create=bedrock_create)))
+    monkeypatch.setattr(ai, "BEDROCK_ENABLED", True)
+
+    def openai_create(**kwargs):
+        rec.events.append(("openai", rec.held))
+        return SimpleNamespace(choices=[SimpleNamespace(
+            finish_reason="stop", message=SimpleNamespace(content="OK"))])
+    monkeypatch.setattr(ai, "openai_client", SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=openai_create))))
+
+    assert ai._heavy_chat([{"role": "user", "content": "x"}]) == "OK"
+
+    provider_events = [e for e in rec.events if e[0] != "sleep"]
+    sleep_events = [e for e in rec.events if e[0] == "sleep"]
+    # 2 Bedrock denemesi (retry) + 1 OpenAI fallback, arada 1 retry uykusu:
+    assert [e[0] for e in rec.events] == ["bedrock", "sleep", "bedrock", "openai"]
+    # Gerçek ağ çağrısı sırasında slot TUTULUR:
+    assert all(held == 1 for _, held in provider_events), rec.events
+    # Retry uykusunda slot TUTULMAZ (serbest bırakılmış olmalı):
+    assert all(held == 0 for _, held in sleep_events), rec.events
+    # Her sağlayıcı çağrısı KENDİ slotunu alır (tek dev kapsam değil):
+    assert rec.acquires == len(provider_events)
+    assert rec.held == 0  # çıkışta sızıntı yok
+
+
 def test_heavy_chat_raises_when_both_fail_and_no_last_good(monkeypatch, no_sleep):
     monkeypatch.setattr("app.extensions.redis_client", None)  # last-good yok
     monkeypatch.setattr(ai, "BEDROCK_ENABLED", False)

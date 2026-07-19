@@ -97,7 +97,7 @@ def test_pipeline_stage_order_and_passthrough(app, monkeypatch):
         out = ai_pipeline.generate_answer(7, "protein?", client_history=[], language="en")
 
     assert out == {"answer": "cevap", "is_error_fallback": False,
-                   "conversation_id": None}
+                   "conversation_id": None, "deferred_summarize": None}
     # Hafıza kapalıyken prepared_history None kalır → ai_coach eski client-history
     # yolunu kullanır (davranış Sprint 3 ile birebir aynı).
     assert seen == {"user_id": 7, "question": "protein?", "context": "BAĞLAM",
@@ -166,7 +166,7 @@ def test_pipeline_memory_failure_degrades_to_client_history(app, monkeypatch):
         out = ai_pipeline.generate_answer(1, "soru", client_history=[{"role": "user"}])
 
     assert out == {"answer": "cevap", "is_error_fallback": False,
-                   "conversation_id": None}
+                   "conversation_id": None, "deferred_summarize": None}
     assert seen == {"context": "BAĞLAM", "prepared_history": None}
 
 
@@ -257,11 +257,38 @@ def test_blocking_exception_emits_error_metric_before_reraise(app, monkeypatch):
     assert increments == [("AIErrors", {"mode": "blocking"})]
 
 
+def test_stream_defers_inline_summarize_after_answer(app, make_user, monkeypatch):
+    """Triage 2026-07-19 #4 (akış ikizi): worker yokken satır-içi özetleme akışın
+    İLK token'ından önce koşuyordu. Artık tüm yanıt üretildikten sonra (done
+    çerçevesi hazırlanırken) koşar — ilk-token gecikmesine binmez."""
+    import app.jobs.tasks as jobs_tasks
+
+    user = make_user("streamsum")
+    events = []
+    monkeypatch.setattr(jobs_tasks, "summarize_conversation",
+                        lambda conv_id: events.append(("summarize", conv_id)) or False)
+    monkeypatch.setattr(ai_pipeline, "_context_stage",
+                        lambda user_id, question, language: "")
+
+    def fake_stream(*a, **k):
+        events.append("stream")
+        yield {"type": "done", "text": "cevap", "usage": None}
+    monkeypatch.setattr(ai_stream, "stream_coach_answer", fake_stream)
+
+    with app.test_request_context("/"):
+        out = list(ai_pipeline.stream_answer(user.id, "soru"))
+
+    assert out[-1]["type"] == "done"
+    conv_id = out[0]["conversation_id"]
+    assert conv_id is not None
+    assert events == ["stream", ("summarize", conv_id)]
+
+
 def test_partial_stream_error_is_recorded_as_interruption(app, monkeypatch):
     conversation = SimpleNamespace(id=17)
     recorded = []
     monkeypatch.setattr(ai_pipeline, "_memory_stage",
-                        lambda user_id: (conversation, []))
+                        lambda user_id: (conversation, [], None))
     monkeypatch.setattr(ai_pipeline, "_context_stage",
                         lambda user_id, question, language: "")
 

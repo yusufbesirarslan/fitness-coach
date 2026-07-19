@@ -118,6 +118,33 @@ def test_ask_non_list_history_dropped(client, auth_user, monkeypatch):
     assert seen["history"] is None
 
 
+def test_ask_defers_inline_summarize_until_after_response(client, auth_user, monkeypatch):
+    """Triage 2026-07-19 #4: worker YOKKEN (kuyruk None) satır-içi özetleme /ask
+    kritik yolunda ana koç turundan ÖNCE bloklayıcı LLM çağrısı yapıyordu. Artık
+    yanıt istemciye gönderildikten SONRA (response.call_on_close) tam bir kez koşar."""
+    import app.jobs.tasks as jobs_tasks
+
+    events = []
+    monkeypatch.setattr(context_builder, "fetch_coach_context",
+                        lambda uid, q, language="tr": "")
+    monkeypatch.setattr(ai_coach, "_run_coach_conversation",
+                        lambda *a, **k: events.append("turn") or "cevap")
+    monkeypatch.setattr(jobs_tasks, "summarize_conversation",
+                        lambda conv_id: events.append(("summarize", conv_id)) or False)
+
+    response = client.post("/ask", json={"question": "protein?"})
+    assert response.status_code == 200
+    body = response.get_json()
+    assert body["answer"] == "cevap"
+
+    # Yanıt gövdesi üretilip okundu, kapanış HENÜZ yok → özetleme koşmadı.
+    assert events == ["turn"], events
+    # WSGI sunucusu gövdeyi gönderince app_iter'i kapatır (PEP 3333); test
+    # istemcisinde bu kapanış elle tetiklenir. Özetleme ancak ŞİMDİ koşar.
+    response.close()
+    assert events == ["turn", ("summarize", body["conversation_id"])]
+
+
 def test_ask_context_failure_degrades_gracefully(client, auth_user, monkeypatch):
     def boom(uid, q, language="tr"):
         raise RuntimeError("psycopg2 yok")

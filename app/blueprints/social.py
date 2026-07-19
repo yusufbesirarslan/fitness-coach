@@ -676,6 +676,13 @@ def friend_reject(request_id):
     # created_at'i reddedilme anına güncelle: friend_request rejected-branch'i bu
     # damgayı yeniden-istek cooldown'u (_REJECTED_REQUEST_COOLDOWN) için kullanır.
     fr.created_at = datetime.utcnow()
+    # Reddedenin okunmamış "friend_request" bildirimi artık bayat (istek işlendi;
+    # tıklayınca ölü uca çıkar) — friend_request_cancel'daki süpürmenin aynası,
+    # aynı transaction'da (triage 2026-07-19 #8).
+    Notification.query.filter_by(
+        ntype="friend_request", target_type="friendship",
+        target_id=fr.id, is_read=False,
+    ).delete(synchronize_session=False)
     db.session.commit()
     return jsonify({"message": t("route.request_declined")})
 
@@ -883,10 +890,22 @@ def respond_suggestion(msg_id):
     # Öğün mü antrenman mı kararını ORİJİNAL tipten ver — aşağıda message_type'a
     # "_accepted"/"_declined" eklendikten sonra substring kontrolü mantığı mutasyona
     # bağlardı (B7).
-    is_meal = msg.message_type == "suggestion_meal"
+    original_type = msg.message_type
+    is_meal = original_type == "suggestion_meal"
+    new_type = original_type + ("_accepted" if action == "accept" else "_declined")
+
+    # Atomik sahiplen: eşzamanlı iki POST da orijinal tipi okuyup İKİ MealLog +
+    # iki yanıt yazabilirdi (check-then-act yarışı — triage 2026-07-19 #2).
+    # Koşullu UPDATE geçişi yalnızca BİR isteğe verir (friend_accept deseni).
+    updated = Message.query.filter_by(id=msg.id, message_type=original_type)\
+        .update({"message_type": new_type}, synchronize_session=False)
+    if not updated:
+        db.session.rollback()
+        return jsonify({"error": t("route.request_handled")}), 400
+    msg.message_type = new_type  # ORM nesnesini SQL ile hizala (resp bunu okur)
+
     nutrients = None
     if action == "accept":
-        msg.message_type = msg.message_type + "_accepted"
         reply = Message(sender_id=current_user.id, receiver_id=msg.sender_id,
                         body=f"✅ Önerini kabul ettim: {msg.body[:100]}",
                         message_type="text")
@@ -894,8 +913,6 @@ def respond_suggestion(msg_id):
 
         if is_meal:
             nutrients = _process_meal_suggestion_accept(msg)
-    else:
-        msg.message_type = msg.message_type + "_declined"
 
     db.session.commit()
 

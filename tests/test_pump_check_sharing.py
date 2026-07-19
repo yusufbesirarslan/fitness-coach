@@ -567,6 +567,32 @@ def test_gallery_delete_is_owner_only(client, auth_user, make_user):
     assert db.session.get(PumpCheck, mine.id) is None
 
 
+def test_gallery_delete_removes_like_and_comment_children(client, auth_user, make_user):
+    """Triage 2026-07-19 #5 (regresyon korkuluğu): galeri silme like/yorum
+    çocuklarını da temizlemeli. Bugün bunu extensions._enforce_sqlite_foreign_keys
+    (her SQLite bağlantısında PRAGMA foreign_keys=ON) + FK ON DELETE CASCADE
+    sağlıyor — triage'ın 'pragma kapalı, öksüz kalır' önermesi bu kod tabanında
+    geçersiz (yanlış pozitif). Pragma ya da FK tanımı gevşetilirse bu test yakalar."""
+    from app.models import PumpCheckComment, PumpCheckLike
+
+    other = make_user("begenen")
+    check = PumpCheck(user_id=auth_user.id, visibility="feed", valid=True)
+    db.session.add(check)
+    db.session.commit()
+    db.session.add_all([
+        PumpCheckLike(pump_check_id=check.id, user_id=other.id),
+        PumpCheckComment(pump_check_id=check.id, user_id=other.id, body="süper"),
+    ])
+    db.session.commit()
+    check_id = check.id
+
+    assert client.delete(f"/pump-check-gallery/{check_id}").status_code == 200
+
+    assert db.session.get(PumpCheck, check_id) is None
+    assert PumpCheckLike.query.filter_by(pump_check_id=check_id).count() == 0
+    assert PumpCheckComment.query.filter_by(pump_check_id=check_id).count() == 0
+
+
 def test_feed_page_uses_shared_app_shell(client, auth_user):
     html = client.get("/feed").get_data(as_text=True)
 
