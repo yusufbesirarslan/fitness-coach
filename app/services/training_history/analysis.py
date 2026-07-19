@@ -12,7 +12,10 @@ from .models import WeeklyVolume, WorkoutEntry
 
 WEEK_DAYS = 7
 # Volume must move more than ±5% week-over-week to count as a trend, not noise.
-_TREND_BAND = 0.05
+# Public constant (Sprint 6 PR2 follow-up): the progression layer reuses this so volume
+# and strength trends are judged on one scale — single source of truth, no drift, no
+# reaching into a private name across the package boundary.
+TREND_BAND = 0.05
 
 
 def total_volume(entries: Iterable[WorkoutEntry]) -> float:
@@ -83,9 +86,9 @@ def volume_trend(weekly: list[WeeklyVolume]) -> str:
     if len(active) < 2:
         return "flat"
     first, last = active[0].total_volume, active[-1].total_volume
-    if last > first * (1 + _TREND_BAND):
+    if last > first * (1 + TREND_BAND):
         return "up"
-    if last < first * (1 - _TREND_BAND):
+    if last < first * (1 - TREND_BAND):
         return "down"
     return "flat"
 
