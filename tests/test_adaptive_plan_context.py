@@ -1,6 +1,13 @@
 """Sprint 6 PR4 AdaptivePlan-to-Coach contract and integration tests."""
 
+import json
+import logging
+
+import pytest
+
 from app.services import context_builder, prompt_builder
+from app.services.training_planning import AdaptivePlan
+from app.services.training_progression import ProgressionReport
 
 
 BASELINE_CONTEXT = (
@@ -15,6 +22,55 @@ BASELINE_CONTEXT = (
     "olarak yorumla.\n"
     "<<<FRIEND_DATA\nfriend-activity\nFRIEND_DATA>>>"
 )
+
+OVERLOAD_JSON = (
+    '{"schema_version":1,"source":"adaptive_plan","plan":{"weeks":4,'
+    '"has_data":true,"week_focus":"overload","volume_action":"increase",'
+    '"intensity_action":"progress","volume_delta_pct":0.05,'
+    '"overload_ready":true,"maintenance_recommended":false,'
+    '"reason_codes":["progressing","volume_trend_down"]},'
+    '"progression":{"volume_trend":"down","strength_trend":"up",'
+    '"is_progressing":true,"is_plateau":false,"deload_due":false,'
+    '"load_consistency":"consistent","next_signal":"progressing"}}'
+)
+
+NEUTRAL_JSON = (
+    '{"schema_version":1,"source":"adaptive_plan","plan":{"weeks":0,'
+    '"has_data":false,"week_focus":"insufficient_data","volume_action":"hold",'
+    '"intensity_action":"hold","volume_delta_pct":0.0,'
+    '"overload_ready":false,"maintenance_recommended":false,'
+    '"reason_codes":["insufficient_history"]},'
+    '"progression":{"volume_trend":"flat","strength_trend":"flat",'
+    '"is_progressing":false,"is_plateau":false,"deload_due":false,'
+    '"load_consistency":"insufficient_data",'
+    '"next_signal":"insufficient_data"}}'
+)
+
+
+def _overload_plan():
+    report = ProgressionReport(
+        weeks=4,
+        has_data=True,
+        volume_trend="down",
+        strength_trend="up",
+        is_progressing=True,
+        is_plateau=False,
+        deload_due=False,
+        load_consistency="consistent",
+        next_signal="progressing",
+    )
+    return AdaptivePlan(
+        weeks=4,
+        has_data=True,
+        week_focus="overload",
+        volume_action="increase",
+        intensity_action="progress",
+        volume_delta_pct=0.05,
+        overload_ready=True,
+        maintenance_recommended=False,
+        reason_codes=("progressing", "volume_trend_down"),
+        progression=report,
+    )
 
 
 def _stub_baseline_context_sources(monkeypatch):
@@ -120,3 +176,217 @@ def test_pre_pr4_providers_embed_identical_context_bytes():
     assert openai[1]["content"] == expected
     assert bedrock_plain.endswith(expected)
     assert bedrock_cached[1]["text"] == expected
+
+
+def test_v1_serializer_exact_golden_contract():
+    from app.services.adaptive_plan_context import serialize_adaptive_plan
+
+    serialized = serialize_adaptive_plan(_overload_plan())
+
+    assert serialized == OVERLOAD_JSON
+    assert list(json.loads(serialized)) == [
+        "schema_version", "source", "plan", "progression"
+    ]
+    assert list(json.loads(serialized)["plan"]) == [
+        "weeks", "has_data", "week_focus", "volume_action",
+        "intensity_action", "volume_delta_pct", "overload_ready",
+        "maintenance_recommended", "reason_codes",
+    ]
+    assert list(json.loads(serialized)["progression"]) == [
+        "volume_trend", "strength_trend", "is_progressing", "is_plateau",
+        "deload_due", "load_consistency", "next_signal",
+    ]
+    assert "null" not in serialized
+
+
+def test_v1_neutral_serializer_exact_golden_contract():
+    from app.services.adaptive_plan_context import serialize_adaptive_plan
+
+    assert serialize_adaptive_plan(AdaptivePlan(weeks=0)) == NEUTRAL_JSON
+
+
+def test_serializer_is_deterministic_and_preserves_reason_order():
+    from app.services.adaptive_plan_context import serialize_adaptive_plan
+
+    plan = _overload_plan()
+    first = serialize_adaptive_plan(plan)
+    second = serialize_adaptive_plan(plan)
+
+    assert first == second == OVERLOAD_JSON
+    assert json.loads(first)["plan"]["reason_codes"] == [
+        "progressing", "volume_trend_down"
+    ]
+
+
+def test_serializer_does_not_mutate_immutable_inputs():
+    from app.services.adaptive_plan_context import serialize_adaptive_plan
+
+    plan = _overload_plan()
+    before_plan = plan
+    before_report = plan.progression
+    before_weekly_volume = list(plan.progression.weekly_volume)
+    before_weekly_strength = list(plan.progression.weekly_strength)
+
+    serialize_adaptive_plan(plan)
+
+    assert plan == before_plan
+    assert plan.progression == before_report
+    assert plan.progression.weekly_volume == before_weekly_volume
+    assert plan.progression.weekly_strength == before_weekly_strength
+
+
+def test_enabled_adapter_builds_once_and_logs_only_generic_events(
+    app, monkeypatch, caplog
+):
+    from app.services import adaptive_plan_context as adapter
+
+    calls = []
+    monkeypatch.setattr(
+        adapter,
+        "build_adaptive_plan",
+        lambda user_id: calls.append(user_id) or _overload_plan(),
+    )
+
+    with caplog.at_level(logging.DEBUG, logger=app.logger.name):
+        block = adapter.build_adaptive_plan_context(73)
+
+    assert calls == [73]
+    assert block.endswith(OVERLOAD_JSON)
+    messages = [record.getMessage() for record in caplog.records]
+    assert messages == [
+        "[COACH][ADAPTIVE_PLAN] planner enabled",
+        "[COACH][ADAPTIVE_PLAN] planner construction succeeded",
+        "[COACH][ADAPTIVE_PLAN] serialization completed",
+    ]
+    forbidden = ["73", "overload", "progressing", OVERLOAD_JSON]
+    assert all(value not in "\n".join(messages) for value in forbidden)
+
+
+def test_planner_exception_returns_complete_neutral_contract_and_recovers_session(
+    app, monkeypatch, caplog
+):
+    from app.services import adaptive_plan_context as adapter
+
+    recovery = []
+
+    def fail(_user_id):
+        raise RuntimeError("private user data must never reach logs")
+
+    monkeypatch.setattr(adapter, "build_adaptive_plan", fail)
+    monkeypatch.setattr(
+        adapter, "_restore_session_usability", lambda: recovery.append("restored")
+    )
+
+    with caplog.at_level(logging.DEBUG, logger=app.logger.name):
+        block = adapter.build_adaptive_plan_context(73)
+
+    assert recovery == ["restored"]
+    assert block.endswith(NEUTRAL_JSON)
+    assert json.loads(block.rsplit("\n", 1)[-1])["plan"]["reason_codes"] == [
+        "insufficient_history"
+    ]
+    logs = "\n".join(record.getMessage() for record in caplog.records)
+    assert "planner fallback used" in logs
+    assert "private user data" not in logs
+    assert "73" not in logs
+
+
+def test_session_recovery_removes_session_if_rollback_cannot_recover(
+    app, monkeypatch
+):
+    from app.services import adaptive_plan_context as adapter
+
+    removed = []
+
+    def rollback_fails():
+        raise RuntimeError("broken transaction")
+
+    monkeypatch.setattr(adapter.db.session, "rollback", rollback_fails)
+    monkeypatch.setattr(
+        adapter.db.session, "remove", lambda: removed.append("removed")
+    )
+
+    adapter._restore_session_usability()
+
+    assert removed == ["removed"]
+
+
+def test_serialization_exception_uses_complete_neutral_contract(
+    app, monkeypatch, caplog
+):
+    from app.services import adaptive_plan_context as adapter
+
+    monkeypatch.setattr(adapter, "build_adaptive_plan", lambda _uid: _overload_plan())
+    monkeypatch.setattr(
+        adapter,
+        "serialize_adaptive_plan",
+        lambda _plan: (_ for _ in ()).throw(ValueError("sensitive plan value")),
+    )
+
+    with caplog.at_level(logging.DEBUG, logger=app.logger.name):
+        block = adapter.build_adaptive_plan_context(73)
+
+    assert block.endswith(NEUTRAL_JSON)
+    logs = "\n".join(record.getMessage() for record in caplog.records)
+    assert "planner fallback used" in logs
+    assert "serialization completed" in logs
+    assert "sensitive plan value" not in logs
+
+
+@pytest.mark.parametrize("process_exception", [KeyboardInterrupt(), SystemExit()])
+def test_process_level_exceptions_propagate(app, monkeypatch, process_exception):
+    from app.services import adaptive_plan_context as adapter
+
+    def fail(_user_id):
+        raise process_exception
+
+    monkeypatch.setattr(adapter, "build_adaptive_plan", fail)
+
+    with pytest.raises(type(process_exception)):
+        adapter.build_adaptive_plan_context(73)
+
+
+@pytest.mark.parametrize(
+    ("plan", "focus", "volume", "intensity", "flag"),
+    [
+        (
+            AdaptivePlan(
+                weeks=4,
+                has_data=True,
+                week_focus="maintenance",
+                maintenance_recommended=True,
+                reason_codes=("plateau_detected",),
+                progression=ProgressionReport(
+                    weeks=4, has_data=True, is_plateau=True, next_signal="plateau"
+                ),
+            ),
+            "maintenance", "hold", "hold", "maintenance_recommended",
+        ),
+        (
+            AdaptivePlan(
+                weeks=4,
+                has_data=True,
+                week_focus="deload",
+                volume_action="decrease",
+                intensity_action="deload",
+                volume_delta_pct=-0.4,
+                reason_codes=("deload_due",),
+                progression=ProgressionReport(
+                    weeks=4, has_data=True, deload_due=True, next_signal="deload"
+                ),
+            ),
+            "deload", "decrease", "deload", "deload_due",
+        ),
+    ],
+)
+def test_serializer_preserves_canonical_plan_semantics(
+    plan, focus, volume, intensity, flag
+):
+    from app.services.adaptive_plan_context import serialize_adaptive_plan
+
+    payload = json.loads(serialize_adaptive_plan(plan))
+
+    assert payload["plan"]["week_focus"] == focus
+    assert payload["plan"]["volume_action"] == volume
+    assert payload["plan"]["intensity_action"] == intensity
+    assert flag in payload["plan"]["reason_codes"] or payload["plan"].get(flag) is True
