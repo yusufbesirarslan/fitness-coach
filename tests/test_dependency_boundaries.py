@@ -43,28 +43,67 @@ FORBIDDEN_TRAINING_IMPORTS = {
 FORBIDDEN_WEB_REQUIREMENTS = {'mcp', 'pytest', 'pytest-cov'}
 
 
+def _module_matches(module, prefix):
+    return module == prefix or module.startswith(prefix + ".")
+
+
+def _python_package(path):
+    parts = path.parts
+    app_indexes = [index for index, part in enumerate(parts) if part == "app"]
+    if not app_indexes:
+        return ""
+    return ".".join(parts[app_indexes[-1]:-1])
+
+
+def _resolved_import_from_module(path, node):
+    if not node.level:
+        return node.module or ""
+
+    package = _python_package(path).split(".")
+    parents_to_remove = node.level - 1
+    if parents_to_remove:
+        package = package[:-parents_to_remove]
+    if node.module:
+        package.extend(node.module.split("."))
+    return ".".join(package)
+
+
 def _python_imports(path):
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     imports = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             imports.extend((alias.name, node.lineno) for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imports.append((node.module, node.lineno))
+        elif isinstance(node, ast.ImportFrom):
+            module = _resolved_import_from_module(path, node)
+            if module:
+                imports.append((module, node.lineno))
+            imports.extend(
+                (
+                    ".".join(part for part in (module, alias.name) if part),
+                    node.lineno,
+                )
+                for alias in node.names
+                if alias.name != "*"
+            )
     return imports
 
 
 def _training_import_violations(training_layers):
     violations = []
+    reported = set()
     for layer, root in training_layers.items():
         forbidden = FORBIDDEN_TRAINING_IMPORTS[layer]
         for path in root.rglob("*.py"):
             for imported, lineno in _python_imports(path):
-                if any(
-                    imported == prefix or imported.startswith(prefix + ".")
-                    for prefix in forbidden
-                ):
+                matched = next(
+                    (prefix for prefix in forbidden if _module_matches(imported, prefix)),
+                    None,
+                )
+                report_key = (path, lineno, matched)
+                if matched and report_key not in reported:
                     violations.append(f"{path}:{lineno} -> {imported}")
+                    reported.add(report_key)
     return violations
 
 
@@ -76,11 +115,29 @@ def _adaptive_plan_serializer_ownership(app_root, adapter):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         imports_adaptive_plan = any(
             isinstance(node, ast.ImportFrom)
-            and node.module
-            and node.module.startswith("app.services.training_planning")
+            and _module_matches(
+                _resolved_import_from_module(path, node),
+                "app.services.training_planning",
+            )
             and any(alias.name == "AdaptivePlan" for alias in node.names)
             for node in ast.walk(tree)
         )
+        json_modules = {
+            alias.asname or "json"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+            if alias.name == "json"
+        }
+        json_functions = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            and not node.level
+            and node.module == "json"
+            for alias in node.names
+            if alias.name in {"dump", "dumps"}
+        }
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and (
                 node.name == "serialize_adaptive_plan"
@@ -91,8 +148,11 @@ def _adaptive_plan_serializer_ownership(app_root, adapter):
                 if (
                     isinstance(func, ast.Attribute)
                     and isinstance(func.value, ast.Name)
-                    and func.value.id == "json"
+                    and func.value.id in json_modules
                     and func.attr in {"dump", "dumps"}
+                ) or (
+                    isinstance(func, ast.Name)
+                    and func.id in json_functions
                 ):
                     competing_json_serializers.append(f"{path}:{node.lineno}")
 
@@ -303,7 +363,9 @@ def test_adaptive_plan_prompt_serializer_has_one_owner():
         _adaptive_plan_serializer_ownership(APP_ROOT, adapter)
     )
 
-    assert len(definitions) == 1
+    assert len(definitions) == 1, (
+        f"AdaptivePlan serializer definitions: {definitions}"
+    )
     assert definitions[0].replace("\\", "/").startswith(
         "app/services/adaptive_plan_context.py:"
     )
@@ -353,3 +415,83 @@ def test_serializer_guard_reports_competing_owner(tmp_path):
 
     assert definitions == [f"{adapter}:1", f"{competitor}:4"]
     assert serializers == [f"{competitor}:5"]
+
+
+def test_training_import_guard_normalizes_parent_and_relative_imports(tmp_path):
+    history = tmp_path / "app" / "services" / "training_history"
+    history.mkdir(parents=True)
+    parent_import = history / "parent_import.py"
+    parent_import.write_text(
+        "from app.services import training_planning\n",
+        encoding="utf-8",
+    )
+    relative_parent = history / "relative_parent.py"
+    relative_parent.write_text(
+        "from .. import training_planning\n",
+        encoding="utf-8",
+    )
+    relative_module = history / "relative_module.py"
+    relative_module.write_text(
+        "from ..training_planning import AdaptivePlan\n",
+        encoding="utf-8",
+    )
+
+    violations = set(_training_import_violations({"history": history}))
+
+    assert violations == {
+        f"{parent_import}:1 -> app.services.training_planning",
+        f"{relative_parent}:1 -> app.services.training_planning",
+        f"{relative_module}:1 -> app.services.training_planning",
+    }
+
+
+def test_serializer_guard_tracks_relative_plan_and_json_aliases(tmp_path):
+    app_root = tmp_path / "app"
+    services = app_root / "services"
+    services.mkdir(parents=True)
+    adapter = services / "adaptive_plan_context.py"
+    adapter.write_text(
+        "def serialize_adaptive_plan(plan):\n    return '{}'\n",
+        encoding="utf-8",
+    )
+    competitor = services / "competitor.py"
+    competitor.write_text(
+        "import json as encoder\n"
+        "from json import dumps\n"
+        "from .training_planning import AdaptivePlan\n\n"
+        "encoded_with_module = encoder.dumps(AdaptivePlan)\n"
+        "encoded_directly = dumps(AdaptivePlan)\n",
+        encoding="utf-8",
+    )
+
+    definitions, serializers = _adaptive_plan_serializer_ownership(
+        app_root, adapter
+    )
+
+    assert definitions == [f"{adapter}:1"]
+    assert serializers == [f"{competitor}:5", f"{competitor}:6"]
+
+
+def test_serializer_guard_uses_exact_training_planning_prefix(tmp_path):
+    app_root = tmp_path / "app"
+    services = app_root / "services"
+    services.mkdir(parents=True)
+    adapter = services / "adaptive_plan_context.py"
+    adapter.write_text(
+        "def serialize_adaptive_plan(plan):\n    return '{}'\n",
+        encoding="utf-8",
+    )
+    sibling = services / "sibling.py"
+    sibling.write_text(
+        "import json\n"
+        "from app.services.training_planning_extra import AdaptivePlan\n"
+        "encoded = json.dumps(AdaptivePlan)\n",
+        encoding="utf-8",
+    )
+
+    definitions, serializers = _adaptive_plan_serializer_ownership(
+        app_root, adapter
+    )
+
+    assert definitions == [f"{adapter}:1"]
+    assert serializers == []
