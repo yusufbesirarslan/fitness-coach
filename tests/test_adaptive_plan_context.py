@@ -2,6 +2,10 @@
 
 import json
 import logging
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -390,6 +394,38 @@ def test_serializer_preserves_canonical_plan_semantics(
     assert payload["plan"]["volume_action"] == volume
     assert payload["plan"]["intensity_action"] == intensity
     assert flag in payload["plan"]["reason_codes"] or payload["plan"].get(flag) is True
+
+
+@pytest.mark.parametrize("env_value", [None, "0"])
+def test_adaptive_context_config_is_off_when_unset_or_zero(
+    tmp_path, env_value
+):
+    config_path = Path(__file__).parents[1] / "app" / "config.py"
+    env = os.environ.copy()
+    env.pop("AI_ADAPTIVE_PLAN_CONTEXT", None)
+    env.pop("PYTHONPATH", None)
+    if env_value is not None:
+        env["AI_ADAPTIVE_PLAN_CONTEXT"] = env_value
+
+    probe = (
+        "import runpy, sys, types\n"
+        "dotenv = types.ModuleType('dotenv')\n"
+        "dotenv.load_dotenv = lambda *args, **kwargs: None\n"
+        "sys.modules['dotenv'] = dotenv\n"
+        "namespace = runpy.run_path(sys.argv[1])\n"
+        "assert namespace['AI_ADAPTIVE_PLAN_CONTEXT'] is False, "
+        "namespace['AI_ADAPTIVE_PLAN_CONTEXT']\n"
+    )
+    completed = subprocess.run(
+        [sys.executable, "-I", "-c", probe, str(config_path)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_flag_off_is_exact_baseline_and_has_zero_adaptive_activity(
