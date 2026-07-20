@@ -10,6 +10,9 @@ MCP_REQUIREMENTS = Path("requirements-mcp.txt")
 DEV_REQUIREMENTS = Path("requirements-dev.txt")
 CI_WORKFLOW = Path(".github/workflows/ci.yml")
 APP_ROOT = Path("app")
+ADAPTIVE_PLAN_IMPORT_ALLOWLIST = {
+    Path("app/services/adaptive_plan_context.py"),
+}
 TRAINING_LAYERS = {
     "history": Path("app/services/training_history"),
     "progression": Path("app/services/training_progression"),
@@ -19,11 +22,13 @@ TRAINING_LAYERS = {
 UPPER_OR_PROVIDER_PREFIXES = (
     "app.services.adaptive_plan_context",
     "app.services.context_builder",
+    "app.services.ai",
     "app.services.ai_coach",
     "app.services.ai_pipeline",
     "app.services.ai_stream",
     "app.services.prompt_builder",
     "app.prompts",
+    "app.extensions",
     "openai",
     "anthropic",
 )
@@ -104,6 +109,26 @@ def _training_import_violations(training_layers):
                 if matched and report_key not in reported:
                     violations.append(f"{path}:{lineno} -> {imported}")
                     reported.add(report_key)
+    return violations
+
+
+def _training_planning_import_violations(app_root, allowed_importers):
+    planning_root = app_root / "services" / "training_planning"
+    violations = []
+    reported = set()
+
+    for path in app_root.rglob("*.py"):
+        if path in allowed_importers or planning_root in path.parents:
+            continue
+        for imported, lineno in _python_imports(path):
+            report_key = (path, lineno)
+            if (
+                _module_matches(imported, "app.services.training_planning")
+                and report_key not in reported
+            ):
+                violations.append(f"{path}:{lineno} -> {imported}")
+                reported.add(report_key)
+
     return violations
 
 
@@ -374,6 +399,14 @@ def test_adaptive_plan_prompt_serializer_has_one_owner():
     )
 
 
+def test_training_planning_imports_have_one_explicit_outside_owner():
+    violations = _training_planning_import_violations(
+        APP_ROOT, ADAPTIVE_PLAN_IMPORT_ALLOWLIST
+    )
+
+    assert not violations, f"unapproved training_planning imports: {violations}"
+
+
 def test_training_import_guard_reports_reverse_and_provider_imports(tmp_path):
     history = tmp_path / "history"
     history.mkdir()
@@ -495,3 +528,59 @@ def test_serializer_guard_uses_exact_training_planning_prefix(tmp_path):
 
     assert definitions == [f"{adapter}:1"]
     assert serializers == []
+
+
+def test_training_import_guard_rejects_internal_provider_entry_points(tmp_path):
+    history = tmp_path / "app" / "services" / "training_history"
+    history.mkdir(parents=True)
+    ai_import = history / "ai_import.py"
+    ai_import.write_text(
+        "from app.services.ai import _heavy_chat\n",
+        encoding="utf-8",
+    )
+    extensions_import = history / "extensions_import.py"
+    extensions_import.write_text(
+        "from app.extensions import openai_client, bedrock_client\n",
+        encoding="utf-8",
+    )
+
+    violations = set(_training_import_violations({"history": history}))
+
+    assert violations == {
+        f"{ai_import}:1 -> app.services.ai",
+        f"{extensions_import}:1 -> app.extensions",
+    }
+
+
+def test_training_planning_import_allowlist_blocks_encoder_bypasses(tmp_path):
+    app_root = tmp_path / "app"
+    services = app_root / "services"
+    planning_root = services / "training_planning"
+    planning_root.mkdir(parents=True)
+    adapter = services / "adaptive_plan_context.py"
+    adapter.write_text(
+        "from app.services.training_planning import AdaptivePlan\n",
+        encoding="utf-8",
+    )
+    alternate_encoder = services / "alternate_encoder.py"
+    alternate_encoder.write_text(
+        "import app.services.training_planning as planning\n"
+        "import orjson\n"
+        "payload = orjson.dumps(planning.build_adaptive_plan)\n",
+        encoding="utf-8",
+    )
+    manual_formatter = services / "manual_formatter.py"
+    manual_formatter.write_text(
+        "from app.services.training_planning import build_adaptive_plan\n"
+        "payload = f'{build_adaptive_plan}'\n",
+        encoding="utf-8",
+    )
+
+    violations = set(
+        _training_planning_import_violations(app_root, {adapter})
+    )
+
+    assert violations == {
+        f"{alternate_encoder}:1 -> app.services.training_planning",
+        f"{manual_formatter}:1 -> app.services.training_planning",
+    }
