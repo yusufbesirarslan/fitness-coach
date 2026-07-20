@@ -136,7 +136,7 @@ def _adaptive_plan_serializer_ownership(app_root, adapter):
     definitions = []
     competing_json_serializers = []
 
-    for path in app_root.rglob("*.py"):
+    for path in sorted(app_root.rglob("*.py"), key=lambda item: item.as_posix()):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         imports_adaptive_plan = any(
             isinstance(node, ast.ImportFrom)
@@ -444,6 +444,37 @@ def test_serializer_guard_reports_competing_owner(tmp_path):
 
     definitions, serializers = _adaptive_plan_serializer_ownership(
         app_root, adapter
+    )
+
+    assert definitions == [f"{adapter}:1", f"{competitor}:4"]
+    assert serializers == [f"{competitor}:5"]
+
+
+def test_serializer_guard_order_is_independent_of_filesystem_traversal(tmp_path):
+    app_root = tmp_path / "app"
+    services = app_root / "services"
+    services.mkdir(parents=True)
+    adapter = services / "adaptive_plan_context.py"
+    adapter.write_text(
+        "def serialize_adaptive_plan(plan):\n    return '{}'\n",
+        encoding="utf-8",
+    )
+    competitor = services / "competitor.py"
+    competitor.write_text(
+        "import json\n"
+        "from app.services.training_planning import AdaptivePlan\n\n"
+        "def serialize_adaptive_plan(plan):\n"
+        "    return json.dumps(plan)\n",
+        encoding="utf-8",
+    )
+
+    class ReverseTraversalRoot:
+        def rglob(self, pattern):
+            assert pattern == "*.py"
+            return [competitor, adapter]
+
+    definitions, serializers = _adaptive_plan_serializer_ownership(
+        ReverseTraversalRoot(), adapter
     )
 
     assert definitions == [f"{adapter}:1", f"{competitor}:4"]
