@@ -673,6 +673,20 @@ The Coach receives normalized plan and progression summary fields only. It is a
 read-only presenter and never re-derives or overrides decisions. The serializer is
 additive-only Version 1; future consumers use AdaptivePlan directly or this adapter.
 
+### Changed paths
+
+- `app/services/adaptive_plan_context.py` (created)
+- `app/config.py`
+- `app/services/context_builder.py`
+- `tests/conftest.py`
+- `tests/test_adaptive_plan_context.py` (created)
+- `tests/test_dependency_boundaries.py`
+- `.env.example`
+- `tests/test_env_example.py`
+- `docs/TRAINING_PLANNING.md`
+- `CLAUDE.md`
+- `docs/handoff.md`
+
 ### Inspected paths
 
 - `docs/handoff.md` (Sprint 6 PR1-PR3 sections)
