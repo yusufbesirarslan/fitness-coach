@@ -1,5 +1,7 @@
+from datetime import datetime, timedelta
+
 from app.extensions import db
-from app.models import MealLog, WorkoutLog, WORKOUT_COMPLETION_MARKER
+from app.models import DailyActivity, MealLog, WorkoutLog, WORKOUT_COMPLETION_MARKER
 from app.timeutil import app_today
 
 
@@ -48,6 +50,69 @@ def test_workout_trend_marker_excluded_from_volume(app, client, make_user, login
     assert d["totals"]["volume"] == 3000          # marker excluded
     assert d["totals"]["sessions"] == 1           # today counts once
     assert d["days"][-1]["sessions"] == 1 and d["days"][-1]["volume"] == 3000
+
+
+# --- /api/progress/workout characterization (Sprint 6 PR3) ---------------
+# Pin the endpoint's exact behavior BEFORE converging its inline WorkoutLog
+# reader onto the training_history foundation; the same tests prove the
+# converged code byte-identical afterwards.
+
+def test_workout_month_range_thirty_days(app, client, make_user, login):
+    u = _login(make_user, login, "wkmonth")
+    old_day = app_today() - timedelta(days=20)      # inside month, outside week
+    db.session.add(WorkoutLog(
+        user_id=u.id, exercise_name="Squat", sets=3, reps=10, weight_kg=100,
+        volume=3000,
+        created_at=datetime(old_day.year, old_day.month, old_day.day, 12)))
+    db.session.add(WorkoutLog(user_id=u.id, exercise_name="Bench",
+                              sets=3, reps=10, weight_kg=50, volume=1500))
+    db.session.commit()
+    d = client.get("/api/progress/workout?range=month").get_json()
+    assert len(d["days"]) == 30
+    assert d["days"][0]["date"] == (app_today() - timedelta(days=29)).isoformat()
+    assert d["totals"]["sessions"] == 2
+    assert d["totals"]["volume"] == 4500
+    old_cell = [c for c in d["days"] if c["date"] == old_day.isoformat()][0]
+    assert old_cell["sessions"] == 1 and old_cell["volume"] == 3000
+
+
+def test_workout_multi_exercise_day_sums_volume(app, client, make_user, login):
+    u = _login(make_user, login, "wkmulti")
+    for name, vol in (("Squat", 3000), ("Bench", 1500), ("Row", 1200)):
+        db.session.add(WorkoutLog(user_id=u.id, exercise_name=name,
+                                  sets=3, reps=10, weight_kg=50, volume=vol))
+    db.session.commit()
+    d = client.get("/api/progress/workout?range=week").get_json()
+    today_cell = d["days"][-1]
+    assert today_cell["sessions"] == 1              # one trained day, not 3
+    assert today_cell["volume"] == 5700             # volumes summed per day
+    assert d["totals"]["sessions"] == 1
+    assert d["totals"]["volume"] == 5700
+
+
+def test_workout_merges_daily_activity_minutes(app, client, make_user, login):
+    u = _login(make_user, login, "wkact")
+    db.session.add(WorkoutLog(user_id=u.id, exercise_name="Squat",
+                              sets=3, reps=10, weight_kg=100, volume=3000))
+    db.session.add(DailyActivity(user_id=u.id, steps=8000, duration_min=42.4,
+                                 date_key=app_today().isoformat()))
+    db.session.commit()
+    d = client.get("/api/progress/workout?range=week").get_json()
+    today_cell = d["days"][-1]
+    assert today_cell["active_min"] == 42            # rounded activity minutes
+    assert today_cell["volume"] == 3000              # activity not mixed into volume
+    assert d["totals"]["volume"] == 3000             # totals unaffected by activity
+
+
+def test_workout_scoped_to_user(app, client, make_user, login):
+    other = make_user("wkother", profile_complete=True)
+    db.session.add(WorkoutLog(user_id=other.id, exercise_name="Squat",
+                              sets=3, reps=10, weight_kg=200, volume=9999))
+    db.session.commit()
+    _login(make_user, login, "wkme")
+    d = client.get("/api/progress/workout?range=week").get_json()
+    assert d["totals"]["sessions"] == 0 and d["totals"]["volume"] == 0
+    assert all(c["sessions"] == 0 and c["volume"] == 0 for c in d["days"])
 
 
 def test_heatmap_levels_from_activity(app, client, make_user, login):

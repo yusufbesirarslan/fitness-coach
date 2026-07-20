@@ -12,8 +12,9 @@ from app.extensions import _user_or_ip_key, auth_write_limit, db, limiter
 from app.i18n import t
 from app.models import (DailyActivity, MealLog, User, UserQuestProgress, UserSession,
                         WaterLog, WearableActivityLog, WeeklyCheckIn, WeeklyLog,
-                        WeeklyWinner, WorkoutLog, WORKOUT_COMPLETION_MARKER)
+                        WeeklyWinner, WorkoutLog)
 from app.services.ai_coach import generate_checkin_feedback
+from app.services.training_history import fetch_workout_entries
 from app.services.ai_gate import ai_concurrency_gate
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
 from app.services.gamification import complete_quest_for_user, get_level, level_title
@@ -573,17 +574,14 @@ def progress_nutrition():
 @require_auth
 def progress_workout():
     start, n = _progress_range(request.args.get("range"))
-    start_utc = utc_day_bounds(start)[0]
-    logs = WorkoutLog.query.filter(
-        WorkoutLog.user_id == current_user.id,
-        WorkoutLog.created_at >= start_utc,
-    ).all()
+    entries = fetch_workout_entries(current_user.id, start, app_today(),
+                                    include_markers=True)
     vol_by_day, session_days = {}, set()
-    for w in logs:
-        d = app_date_of(w.created_at).isoformat()
+    for e in entries:
+        d = e.performed_on.isoformat()
         session_days.add(d)
-        if w.exercise_name != WORKOUT_COMPLETION_MARKER:
-            vol_by_day[d] = vol_by_day.get(d, 0.0) + (w.volume or 0)
+        if not e.is_marker:
+            vol_by_day[d] = vol_by_day.get(d, 0.0) + (e.volume or 0)
     acts = DailyActivity.query.filter(
         DailyActivity.user_id == current_user.id,
         DailyActivity.date_key >= start.isoformat(),
