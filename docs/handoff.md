@@ -725,3 +725,12 @@ additive-only Version 1; future consumers use AdaptivePlan directly or this adap
 Yes: default-OFF byte identity is golden-pinned; enabled failures return the complete
 neutral contract; no schema, heuristic, UI, or unrelated reader changed; flag OFF is
 the immediate rollback.
+
+### Verification evidence
+
+- `python -m pytest tests/test_adaptive_plan_context.py tests/test_dependency_boundaries.py tests/test_env_example.py tests/test_prompt_builder.py tests/test_ai_pipeline.py tests/test_ai_coach.py tests/test_ai_stream.py tests/test_coach_tools.py -q`
+  - 196 passed in 21.36s.
+- `python -m pytest tests/test_training_history.py tests/test_training_progression.py tests/test_training_planning.py tests/test_training_generation.py tests/test_training_routes.py tests/test_progress_api.py tests/test_tracking_routes.py -q`
+  - 163 passed in 21.50s.
+- `python -m pytest -q`
+  - 1927 passed, 3 deselected in 181.81s (0:03:01).
