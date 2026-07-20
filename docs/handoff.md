@@ -501,3 +501,154 @@ the per-week `weekly_volume` / `weekly_strength` series for transparency.
 Yes — a purely additive service package + hermetic tests + docs. No schema/migration, no
 route, no coach-prompt, no UI, and no change to any existing runtime caller (all four
 foundation consumers regression-green). The layer is dormant until a later PR consumes it.
+
+## Sprint 6 PR3 - Adaptive Planning Engine
+
+Date: 2026-07-20
+Scope: A canonical, deterministic adaptive-planning layer built on top of the Sprint 6
+PR2 progression engine, turning the single `next_signal` into a normalized weekly plan
+recommendation (`AdaptivePlan`), plus the one runtime convergence both prior handoffs
+nominated: `GET /api/progress/workout` now reads WorkoutLog through the training-history
+foundation (byte-identical, characterization-tested). No schema, no new route, no
+coach-prompt/UI change. **The next Sprint 6 PR must read this section (and the PR1/PR2
+sections above) before implementing anything.**
+
+### What this PR changed
+
+- Added `app/services/training_planning/` — the single source of truth for turning
+  progression signals into a weekly plan recommendation. Layered pure/impure and
+  strictly one-way dependent (`training_planning` → `training_progression` →
+  `training_history`; neither lower layer imports it):
+  - `models.py` — frozen value object `AdaptivePlan` (week_focus, volume_action,
+    intensity_action, volume_delta_pct, overload_ready, maintenance_recommended,
+    ordered `reason_codes` tuple, embedded `ProgressionReport`). Every field has a safe
+    neutral default; `AdaptivePlan(weeks=0)` IS the neutral plan (its `reason_codes`
+    default is `("insufficient_history",)` so even the neutral object explains itself).
+    The embedded report default REQUIRES `field(default_factory=lambda:
+    ProgressionReport(weeks=0))` — a bare default raises `ValueError` (report holds
+    lists). Like its siblings the object is unhashable; compare with `==`.
+  - `analysis.py` — pure decision rules: `derive_week_focus`, `derive_volume_action`,
+    `derive_intensity_action`, `volume_delta_for`, `derive_reason_codes`,
+    `derive_adaptive_plan` (the pure composer — the WHOLE decision engine tests
+    fixture-free). Constants: `VOLUME_INCREASE_STEP = 0.05`, `DELOAD_VOLUME_CUT = 0.40`.
+  - `__init__.py` — public API + `build_adaptive_plan(user_id, weeks=4, *,
+    end_day=None)`: one `build_progression_report` call, then pure derivation.
+- Converged `progress_workout()` (`app/blueprints/tracking.py`) onto
+  `fetch_workout_entries(..., include_markers=True)`; dropped the now-unused
+  `WORKOUT_COMPLETION_MARKER` import from tracking.py. DailyActivity merge, day loop,
+  and response shape untouched.
+- Docs: added `docs/TRAINING_PLANNING.md`; CLAUDE.md service-index line added and the
+  PR1 line's convergence status corrected.
+- Tests: `tests/test_training_planning.py` (19 tests) + 4 characterization tests in
+  `tests/test_progress_api.py` (added and green BEFORE the convergence, unchanged after).
+
+### Code paths inspected
+
+`docs/handoff.md` (PR1+PR2 sections), `app/services/training_history/*`,
+`app/services/training_progression/*` (models/analysis/`__init__` in full),
+`docs/TRAINING_HISTORY.md`, `docs/TRAINING_PROGRESSION.md`, `app/timeutil.py`,
+`app/services/training_generation/*` (confirmed: LLM one-shot generation, level
+classification + static style-rule text — NO adaptive adjustment logic to collide
+with), `app/models.py` (`TrainingPlan`, `WorkoutLog`, `WeeklyCheckIn.fatigue`),
+`app/blueprints/training.py`, `app/blueprints/tracking.py` (all three inline readers),
+`app/services/ai_coach.py` (`_today_workout_totals`, `_tool_get_progress_metric`
+volume_lifted), `app/services/context_builder.py` (no progression block yet),
+`tests/test_training_progression.py` (incl. the golden section PR2 left for this PR),
+`tests/test_progress_api.py`, `tests/conftest.py`, `pytest.ini`.
+
+### Adaptive planning decisions made
+
+- **One precedence, not two.** `next_signal` is already the canonical single winner of
+  PR2's precedence; the planner maps it 1:1 (`insufficient_data`→insufficient_data,
+  `build_consistency`→build_consistency, `deload`→deload, `plateau`→**maintenance**,
+  `progressing`→**overload**, `keep_pushing`→steady) and NEVER derives decisions from
+  the raw report booleans. Safety invariants ("never recommend an increase to an
+  inconsistent user"; overload_ready requires consistent+progressing) hold by
+  construction and are pinned by `test_never_increase_without_consistent_progression`.
+- Only `overload` moves volume up (`+VOLUME_INCREASE_STEP` = +5%, well under the ≤10%
+  guideline); only `deload` moves it down (`-DELOAD_VOLUME_CUT` = -40%, i.e. train at
+  ~60%, the conservative middle of the 50-60% band).
+- **plateau → maintenance week (hold/hold), not an intensity push:** a plateau without
+  deload means short history or a recent rest week; without fatigue data we cannot
+  distinguish under-recovered from under-stimulated, and pushing the fatigued case is
+  the harmful branch.
+- **keep_pushing → steady even when volume trends down:** an "increase back to
+  baseline" on ambiguous signals is speculative; `reason_codes` carry the down-trend
+  nuance (`volume_trend_down`/`strength_trend_down` appended in fixed order).
+- **Intensity magnitude deliberately not modelled** — meaningless without per-exercise
+  data (WorkoutLog has no per-set granularity); volume is the one measured knob.
+- Unknown/future `next_signal` strings fall back to the neutral focus (safe `dict.get`).
+- Marker-only history stays `steady` — attendance never justifies overload (pinned).
+
+### What the canonical planner now provides
+
+`build_adaptive_plan(user_id, weeks=4, *, end_day=None) -> AdaptivePlan` answers,
+deterministically and user-scoped: what should the user do next week (`week_focus`);
+volume up/flat/down (`volume_action` + `volume_delta_pct`); intensity progress/hold/
+deload (`intensity_action`); overload-ready? (`overload_ready`); plateauing?
+(`plan.progression.is_plateau`); maintenance week? (`maintenance_recommended`); and
+the safest next adjustment (the focus/action/delta tuple, plus ordered machine-readable
+`reason_codes` for future AI/UI presentation — locale-neutral by design).
+
+### Convergence performed (and its byte-identity argument)
+
+`progress_workout()` before/after produces identical JSON: same window start
+(`utc_day_bounds(start)[0]` inside `fetch_workout_entries`), same Istanbul day keys
+(`performed_on` == `app_date_of(created_at)`), same marker rule (markers count as
+session days, excluded from volume). The only semantic delta: the old query had NO
+upper time bound while the foundation bounds at end-of-today-Istanbul — they differ
+only for rows with future timestamps (impossible at runtime; the old code counted such
+phantom rows in `totals` without ever rendering them in `days`). Float-sum ordering
+differs (unordered vs `created_at ASC`) but is masked by `round()`. Verified by 4 new
+characterization tests written and green against the OLD code first, then unchanged
+against the new code, plus the pre-existing marker test.
+
+### Intentionally left for later PRs (deliberate debt)
+
+- **No runtime consumer of `AdaptivePlan` yet** — coach context/prompt wiring (behind a
+  flag, with prompt tests) is the natural first consumer; nothing surfaces
+  `next_signal` or the plan to users yet.
+- Remaining inline readers: `tracking.py` heatmap + insights WorkoutLog sub-blocks,
+  `fitx_mcp/server.py` (raw SQL, standalone process — leave last),
+  `analytics_engine.py` `_check_missing_logs`, and `ai_coach._tool_get_progress_metric`
+  `volume_lifted` (raw SUM; markers are volume=0 so unaffected).
+- **Deload/plateau still have no fatigue input** — `WeeklyCheckIn.fatigue` /
+  `uyku_kalitesi` (already consumed by `training_generation`'s time_series/recovery
+  models) could enrich `detect_deload_due` and let plateau→maintenance become smarter.
+- Intensity magnitudes (per-lift guidance) and Turkish UI copy for `reason_codes`.
+- Pre-existing `datetime.utcnow()` deprecation warnings remain (Python 3.14).
+
+### Exact next steps for the following PR
+
+1. Read this section first (and PR1+PR2 above).
+2. Build on `build_adaptive_plan` / `build_progression_report` — do NOT add new inline
+   windowing/marker/trend/decision logic anywhere.
+3. Highest-value next work: the first runtime CONSUMER — surface the plan (or at least
+   `next_signal`) in the coach context block (`context_builder.py`), additive and behind
+   a flag (e.g. `AI_ADAPTIVE_PLAN_CONTEXT`), with prompt tests proving the block renders
+   and the flag-off path is byte-identical.
+4. Optionally enrich `detect_deload_due` with `WeeklyCheckIn.fatigue` (keep the neutral
+   contract: missing check-ins → current volume-only behavior).
+5. Then converge tracking.py heatmap/insights WorkoutLog sub-blocks (small); leave
+   `fitx_mcp/server.py` last.
+
+### Verification evidence
+
+- `python -m pytest tests/test_training_planning.py -v` — 19 passed.
+- Characterization: `python -m pytest tests/test_progress_api.py -v` — 12 passed
+  BEFORE the tracking.py change and 12 passed (identical list) AFTER.
+- Regression: `python -m pytest tests/test_training_progression.py
+  tests/test_training_history.py tests/test_training_generation.py tests/test_ai_coach.py
+  tests/test_progress_api.py -q` — 117 passed. `tests/test_tracking_routes.py` +
+  `tests/test_progress_api.py` — 64 passed.
+- Dependency direction: no reference to `training_planning` inside `training_history/`
+  or `training_progression/` (verified by grep; no circular import).
+- Full suite: `python -m pytest -q` — 1893 passed, 3 deselected (load tests,
+  per pytest.ini), in 159s.
+
+### Independently safe to merge
+
+Yes — an additive service package + hermetic tests + docs, plus one behavior-preserving
+convergence proven by characterization tests written against the old code. No
+schema/migration, no new route, no coach-prompt/UI change; the planner is dormant until
+a later PR consumes it.

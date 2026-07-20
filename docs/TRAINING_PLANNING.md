@@ -1,0 +1,162 @@
+# Adaptive Planning Layer
+
+`app/services/training_planning/` — the canonical, deterministic
+**adaptive-planning** layer of the Adaptive Training Engine (Sprint 6 PR3). It turns
+the progression engine's normalized signals (`docs/TRAINING_PROGRESSION.md`, Sprint 6
+PR2) into a single weekly **plan recommendation** — what kind of week comes next,
+whether volume/intensity should move, and whether the user is ready for overload or
+due a maintenance/deload week. It is pure composition on top of the progression
+layer — it never re-derives windowing, marker exclusion, trends, or signal
+precedence; it composes `training_progression`.
+
+**Not the plan generator.** `training_generation/` + the `TrainingPlan` model produce
+LLM-authored workout *content* at `POST /training-plan` (level classification + style
+guidelines feeding a prompt). This layer emits a deterministic *adjustment
+recommendation* object (`AdaptivePlan`) for future AI-coach/UI wiring. The two share
+no vocabulary and neither imports the other.
+
+## Scope
+
+Additive service + one behavior-preserving convergence. **No** schema, **no** new
+route, **no** coach-prompt/UI change — the layer is a consumable service; wiring it
+into runtime is future-PR work. The one runtime change in this PR is
+`GET /api/progress/workout` (`app/blueprints/tracking.py`) now reading `WorkoutLog`
+through the foundation's `fetch_workout_entries` (byte-identical output,
+characterization-tested).
+
+## Layering
+
+| Module | Purity | Responsibility |
+|--------|--------|----------------|
+| `models.py`   | pure  | Frozen value object (`AdaptivePlan`). No logic. |
+| `analysis.py` | pure  | Deterministic decision rules over a `ProgressionReport`. Fixture-free tests. |
+| `__init__.py` | impure (reads signals via `build_progression_report` only) | Public API + `build_adaptive_plan` orchestrator. |
+
+Dependency is strictly one-way: `training_planning` → `training_progression` →
+`training_history`. Neither lower layer imports this one (no cycle).
+
+## Public API
+
+- `build_adaptive_plan(user_id, weeks=4, *, end_day=None) -> AdaptivePlan` — the
+  entry point. Builds one `ProgressionReport` (which reads history once through the
+  foundation), then derives the plan purely. `end_day` defaults to today (Istanbul);
+  pass explicitly for hermetic tests. Empty history (or `weeks <= 0`) → the fully
+  neutral plan.
+- `derive_adaptive_plan(report) -> AdaptivePlan` — the pure core; the whole decision
+  engine is testable without a DB.
+- `derive_week_focus`, `derive_volume_action`, `derive_intensity_action`,
+  `volume_delta_for`, `derive_reason_codes` — the individual pure rules (see below).
+
+## The plan model — `AdaptivePlan`
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `weeks` | int | Window count analysed (echoed from the report). |
+| `has_data` | bool | Any workout history in the window (echoed). |
+| `week_focus` | enum | The kind of week to run next: `overload` / `steady` / `maintenance` / `deload` / `build_consistency` / `insufficient_data`. |
+| `volume_action` | enum | `increase` / `hold` / `decrease`. |
+| `intensity_action` | enum | `progress` / `hold` / `deload`. |
+| `volume_delta_pct` | float | Signed fraction; `0.0` whenever `volume_action == "hold"`. |
+| `overload_ready` | bool | True exactly when `week_focus == "overload"`. |
+| `maintenance_recommended` | bool | True exactly when `week_focus == "maintenance"`. |
+| `reason_codes` | tuple[str] | Ordered locale-neutral machine codes; position 0 is always the primary cause. |
+| `progression` | `ProgressionReport` | The full underlying report, embedded — trends and weekly series without a second history read. |
+
+The "safest next adjustment" is the (`week_focus`, `volume_action`,
+`intensity_action`, `volume_delta_pct`) tuple — there is deliberately no second
+summary enum that could drift against `week_focus`.
+
+## Decision rules & constants
+
+All constants are explicit in `analysis.py`:
+
+- `VOLUME_INCREASE_STEP = 0.05` — conservative weekly volume increase when
+  overload-ready (deliberately well under the common ≤10% progressive-overload
+  guideline).
+- `DELOAD_VOLUME_CUT = 0.40` — a deload week trains at ~60% of recent weekly volume
+  (the conservative middle of the standard 50–60% band).
+
+The mapping is 1:1 from `next_signal`:
+
+| `next_signal` | `week_focus` | volume | intensity | `volume_delta_pct` | `overload_ready` | `maintenance_recommended` | primary reason code |
+|---|---|---|---|---|---|---|---|
+| `insufficient_data` | `insufficient_data` | hold | hold | 0.0 | no | no | `insufficient_history` |
+| `build_consistency` | `build_consistency` | hold | hold | 0.0 | no | no | `inconsistent_training` |
+| `deload` | `deload` | decrease | deload | `-DELOAD_VOLUME_CUT` | no | no | `deload_due` |
+| `plateau` | `maintenance` | hold | hold | 0.0 | no | **yes** | `plateau_detected` |
+| `progressing` | `overload` | increase | progress | `+VOLUME_INCREASE_STEP` | **yes** | no | `progressing` |
+| `keep_pushing` | `steady` | hold | hold | 0.0 | no | no | `steady_state` |
+
+Unknown/future signal strings fall back to the fully neutral
+`insufficient_data` focus rather than guessing.
+
+Two deliberate, conservative judgment calls:
+
+- **`plateau` → maintenance (hold/hold), not an intensity push.** A plateau that did
+  *not* trigger deload means short history or a recent rest week. Without
+  fatigue/recovery data (which the foundation does not carry) we cannot distinguish
+  "stalled because under-recovered" from "stalled because under-stimulated" — and
+  pushing intensity in the fatigued case is the harmful branch. The safe explicit
+  answer is a consolidation week: `maintenance_recommended=True`, everything held.
+- **`keep_pushing` → steady (hold/hold), even when `volume_trend == "down"`.**
+  Recommending an increase "back to baseline" on ambiguous signals is speculative;
+  the down-trend nuance is carried by reason codes instead.
+
+## One precedence, not two
+
+`next_signal` is already the single canonical winner of the progression layer's
+documented precedence (`insufficient_data → build_consistency → deload → plateau →
+progressing → keep_pushing`). This layer maps that signal 1:1 and **never**
+re-derives decisions from the raw report booleans — a second precedence ladder would
+be a second source of truth that could drift. The safety invariants come for free
+from upstream: `next_signal == "progressing"` implies consistent training with no
+deload/plateau pending, so "never recommend an increase to an inconsistent user"
+holds by construction (and is pinned by
+`test_never_increase_without_consistent_progression`).
+
+## Reason codes
+
+`derive_reason_codes(report)` returns an ordered tuple: the focus's primary code
+first, then `volume_trend_down` and `strength_trend_down` appended in that fixed
+order whenever the report shows them — uniformly for every focus. Codes are
+locale-neutral machine strings; Turkish UI copy is a later PR's concern. The neutral
+default plan carries `("insufficient_history",)` so even a default-constructed
+`AdaptivePlan` explains itself.
+
+## Magnitude guidance: volume only
+
+`volume_delta_pct` is the single quantified magnitude. Intensity magnitude is
+deliberately **not** modelled: a single global intensity percentage is meaningless
+without per-exercise data (rep ranges and plate increments live in the generation
+layer's domain), and `WorkoutLog` has no per-set granularity. Volume is the one knob
+the history actually measures, so it is the one magnitude quantified. Per-lift
+intensity guidance is an intentional limitation left for a later PR.
+
+## Boundary & neutral-value contract
+
+When a decision cannot be computed reliably the plan returns a safe, explicit
+**neutral** value rather than a speculative guess:
+
+- Empty history / `weeks <= 0` → `AdaptivePlan(weeks=…)` defaults: focus
+  `insufficient_data`, both actions `hold`, delta `0.0`, no flags,
+  `reason_codes == ("insufficient_history",)`.
+- Marker-only history (attendance without measurable load) reads `keep_pushing`
+  upstream → `steady`, hold everything — markers prove attendance, never justify
+  overload.
+- `weeks > 4`: consistency is still judged over the last four windows (inherited
+  from the progression layer); the plan adds no new window handling.
+
+## Determinism
+
+Every `analysis` function is a total function of its inputs; the roll-up is
+deterministic for a fixed `end_day` (no hidden clock or side effects). User-scoped
+via the foundation's `user_id` filter.
+
+## Tests
+
+`tests/test_training_planning.py` — pure decision-rule tests (fixture-free: mapping,
+actions, deltas, flag exclusivity, the keys-off-`next_signal`-only invariant, reason
+codes, neutrality) + DB-backed roll-up via the `make_user` fixture (overload, deload,
+maintenance, build-consistency, marker-only, empty history, `weeks=0`, user scoping,
+determinism). Convergence characterization for `/api/progress/workout` lives in
+`tests/test_progress_api.py`.
