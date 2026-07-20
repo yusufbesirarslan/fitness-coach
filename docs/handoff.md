@@ -733,4 +733,4 @@ the immediate rollback.
 - `python -m pytest tests/test_training_history.py tests/test_training_progression.py tests/test_training_planning.py tests/test_training_generation.py tests/test_training_routes.py tests/test_progress_api.py tests/test_tracking_routes.py -q`
   - 163 passed in 21.50s.
 - `python -m pytest -q`
-  - 1927 passed, 3 deselected in 181.81s (0:03:01).
+  - 1930 passed, 3 deselected, 7982 warnings in 165.55s (0:02:45).
