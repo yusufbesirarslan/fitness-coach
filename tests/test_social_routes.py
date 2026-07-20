@@ -64,6 +64,18 @@ def test_friends_search_excludes_self_and_reports_status(client, auth_user, make
     assert users["testbekleyen"] == "pending"
 
 
+def test_friends_search_treats_like_wildcards_literally(
+        client, auth_user, make_user):
+    make_user("fit_100%")
+    make_user("fitX100abc")
+
+    users = client.get(
+        "/friends/search", query_string={"q": "fit_100%"}
+    ).get_json()["users"]
+
+    assert [user["username"] for user in users] == ["fit_100%"]
+
+
 def test_friends_search_rate_limited(client, auth_user):
     """Kullanıcı-adı sayımına karşı /friends/search 429 ile sınırlanır."""
     from app.extensions import limiter

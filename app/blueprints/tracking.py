@@ -623,9 +623,9 @@ def progress_heatmap():
     # Dedupe to one bump per active day (a workout writes one WorkoutLog per
     # exercise; without this a single session would max the day at level 4 and
     # collapse the 0-4 "did each of meal/activity/workout/check-in happen" gradient).
-    for dkey in {app_date_of(ca).isoformat() for (ca,) in db.session.query(
-            WorkoutLog.created_at).filter(
-            WorkoutLog.user_id == current_user.id, WorkoutLog.created_at >= start_utc)}:
+    workout_entries = fetch_workout_entries(
+        current_user.id, start, app_today(), include_markers=True)
+    for dkey in {entry.performed_on.isoformat() for entry in workout_entries}:
         bump(dkey)
     for dkey in {app_date_of(ca).isoformat() for (ca,) in db.session.query(
             WeeklyCheckIn.created_at).filter(
@@ -675,9 +675,10 @@ def progress_insights():
                              "body": t("progress.ins_weight_body", delta=("%+g" % delta)),
                              "tone": "info"})
     # 2) Workout sessions in the last 7 app-days
-    start_utc = utc_day_bounds(app_today() - timedelta(days=6))[0]
-    wdays = {app_date_of(w.created_at).isoformat() for w in WorkoutLog.query.filter(
-        WorkoutLog.user_id == current_user.id, WorkoutLog.created_at >= start_utc).all()}
+    start = app_today() - timedelta(days=6)
+    workout_entries = fetch_workout_entries(
+        current_user.id, start, app_today(), include_markers=True)
+    wdays = {entry.performed_on.isoformat() for entry in workout_entries}
     if wdays:
         insights.append({"icon": "🏋️", "title": t("progress.ins_workout_title"),
                          "body": t("progress.ins_workout_body", n=len(wdays)),

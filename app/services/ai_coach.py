@@ -7,6 +7,7 @@
 # yüzeyini (monkeypatch parite) korur.
 import json
 import re
+import time
 import s3_helper
 from app.services import nutrition_pipeline, prompt_builder
 from datetime import datetime, timedelta
@@ -14,7 +15,9 @@ from flask import current_app, g, session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import flag_modified
 
-from app.config import (BEDROCK_ENABLED, BEDROCK_MAX_TOKENS, BEDROCK_MODEL,
+from app.config import (AI_COACH_TURN_TIMEOUT_SECONDS, BEDROCK_ENABLED,
+                        BEDROCK_CALL_TIMEOUT_SECONDS, BEDROCK_MAX_TOKENS,
+                        BEDROCK_MODEL,
                         BEDROCK_PROMPT_CACHE, OPENAI_MODEL)
 from app.extensions import bedrock_client, db, openai_client
 from app.models import (WORKOUT_COMPLETION_MARKER, MealLog, PendingAction,
@@ -926,6 +929,14 @@ def _dispatch_coach_tool(user_id, name, arguments_json):
 _COACH_TOOL_LOOP_CAP = 5  # araç çağrısı zincirine güvenli üst sınır (iki sağlayıcı)
 
 
+def _coach_turn_deadline():
+    return time.monotonic() + AI_COACH_TURN_TIMEOUT_SECONDS
+
+
+def _remaining_coach_turn_seconds(deadline):
+    return max(0.0, deadline - time.monotonic())
+
+
 class _BedrockFallback(Exception):
     """Bedrock döngüsü İLK çağrıda (henüz hiçbir araç çalışmadan) hata verdiğinde
     fırlatılır → OpenAI'ya güvenle düşülebilir. Bir araç YAN ETKİ ürettikten sonra
@@ -1079,7 +1090,12 @@ def _run_coach_conversation_bedrock(user_id, question, context, history, languag
     max_tokens = min(700, BEDROCK_MAX_TOKENS)
 
     tools_ran = 0
+    deadline = _coach_turn_deadline()
     for _ in range(_COACH_TOOL_LOOP_CAP):
+        remaining = _remaining_coach_turn_seconds(deadline)
+        if remaining <= 0:
+            current_app.logger.warning("[COACH][Bedrock] turn budget exhausted")
+            return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
         # B4: create() YANINDA yanıt ayrıştırma da korunmalı — `resp.content` None
         # (→ TypeError) gibi create sonrası hatalar önceden _BedrockFallback DIŞINDA
         # kaçıp yönlendiricinin OpenAI yedeğini atlayarak koçu 500'lüyordu. Aynı
@@ -1093,6 +1109,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history, languag
                     system=system,
                     messages=convo,
                     tools=tools,
+                    timeout=min(BEDROCK_CALL_TIMEOUT_SECONDS, remaining),
                 )
 
             if getattr(resp, "stop_reason", None) != "tool_use":
@@ -1119,6 +1136,10 @@ def _run_coach_conversation_bedrock(user_id, question, context, history, languag
         except _BedrockFallback:
             raise
         except Exception as e:
+            if _remaining_coach_turn_seconds(deadline) <= 0:
+                current_app.logger.warning(
+                    "[COACH][Bedrock] turn budget exhausted during provider call")
+                return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
             if tools_ran == 0:
                 raise _BedrockFallback(f"{type(e).__name__}: {e}")
             current_app.logger.warning("[COACH][Bedrock] araç sonrası çağrı/ayrıştırma hatası: %s", e)

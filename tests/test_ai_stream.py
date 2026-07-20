@@ -294,6 +294,56 @@ def test_bedrock_tool_loop_cap_emits_friendly_fallback(app, bedrock_on, monkeypa
 
 # ── B-kuralı: sağlayıcı geçişi yalnızca ilk delta/araç ÖNCESİ ────────────────
 
+def test_stream_bedrock_stops_when_turn_budget_expires(
+        app, bedrock_on, monkeypatch):
+    monkeypatch.setattr(ai_coach, "_COACH_TOOL_LOOP_CAP", 5)
+    monkeypatch.setattr(ai_coach, "_dispatch_coach_tool", lambda *args: "result")
+    monkeypatch.setattr(
+        ai_coach, "AI_COACH_TURN_TIMEOUT_SECONDS", 90.0, raising=False
+    )
+    clock = iter([0.0, 0.0, 91.0])
+    monkeypatch.setattr(
+        ai_coach,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(clock)),
+        raising=False,
+    )
+
+    def tool_turn():
+        return _FakeStream([], _final(
+            stop_reason="tool_use",
+            content=[_tool_use_block("query_fitx_metrics", "t", {})],
+        ))
+
+    fake = bedrock_on(*(tool_turn() for _ in range(5)))
+
+    with app.app_context():
+        events = _collect(1, "question", language="en")
+
+    assert len(fake.calls) == 1
+    assert fake.calls[0]["timeout"] == pytest.approx(60.0)
+    assert events[-1]["type"] == "done"
+    assert events[-1]["text"] == ai_coach._COACH_FALLBACKS["en"]["tool"]
+
+
+def test_stream_timeout_at_turn_deadline_does_not_start_fallback(
+        app, bedrock_on, monkeypatch):
+    clock = iter([0.0, 0.0, 91.0])
+    monkeypatch.setattr(
+        ai_coach,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(clock)),
+    )
+    monkeypatch.setattr(ai_coach, "AI_COACH_TURN_TIMEOUT_SECONDS", 90.0)
+    bedrock_on(_RaisingStream(exc=TimeoutError("provider deadline")))
+
+    with app.app_context():
+        events = list(ai_stream._stream_bedrock(1, "question", "", [], "en"))
+
+    assert events[-1]["type"] == "done"
+    assert events[-1]["text"] == ai_coach._COACH_FALLBACKS["en"]["tool"]
+
+
 def test_bedrock_error_before_first_delta_falls_back_to_openai(
         app, bedrock_on, monkeypatch):
     # İlk token'dan ÖNCE ve hiç araç çalışmadan patlarsa OpenAI yedeğine düşülür;

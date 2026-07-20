@@ -12,7 +12,8 @@ nudge metinleri de dile (language='tr'|'en') göre verilir.
 
 from datetime import datetime, timedelta
 
-from app.timeutil import app_today
+from app.services.training_history import fetch_workout_entries
+from app.timeutil import app_date_of, app_today
 
 
 def get_nudges(user, db, models, prev_last_login=None, language="tr"):
@@ -46,13 +47,18 @@ def get_nudges(user, db, models, prev_last_login=None, language="tr"):
 
 def _check_missing_logs(user, db, models, now, nudges, en=False):
     cutoff = now - timedelta(hours=48)
-    WorkoutLog = models["WorkoutLog"]
     MealLog = models["MealLog"]
 
-    recent_workout = WorkoutLog.query.filter(
-        WorkoutLog.user_id == user.id,
-        WorkoutLog.created_at >= cutoff,
-    ).first()
+    workout_entries = fetch_workout_entries(
+        user.id,
+        app_date_of(cutoff),
+        app_today(),
+        include_markers=True,
+    )
+    recent_workout = next(
+        (entry for entry in workout_entries if entry.created_at >= cutoff),
+        None,
+    )
 
     recent_nutrition = MealLog.query.filter(
         MealLog.user_id == user.id,
@@ -216,8 +222,8 @@ def _check_hydration(user, db, models, today, nudges, en=False):
         WaterLog.date_key >= lo, WaterLog.date_key <= hi).all()
     if not rows:
         return
-    days = len({r.date_key for r in rows})
-    avg_cups = sum(r.count or 0 for r in rows) / days if days else 0
+    days = 7
+    avg_cups = sum(r.count or 0 for r in rows) / days
     if avg_cups < 6:
         nudges.append(
             f"NUDGE_LOW_HYDRATION: Over the last {days} days average daily water is ~{round(avg_cups, 1)} "

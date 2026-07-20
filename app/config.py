@@ -73,6 +73,10 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 BEDROCK_REGION = os.getenv("BEDROCK_REGION") or os.getenv("AWS_REGION", "eu-central-1")
 BEDROCK_MODEL = os.getenv("BEDROCK_MODEL", "global.anthropic.claude-sonnet-4-5-20250929-v1:0")
 BEDROCK_MAX_TOKENS = int(os.getenv("BEDROCK_MAX_TOKENS", "8000"))
+BEDROCK_CALL_TIMEOUT_SECONDS = 60.0
+AI_COACH_TURN_TIMEOUT_SECONDS = max(
+    1.0, float(os.getenv("AI_COACH_TURN_TIMEOUT_SECONDS", "90"))
+)
 BEDROCK_ENABLED = os.getenv("BEDROCK_ENABLED", "0") == "1"  # açık opt-in; prod .env'de =1
 # Bedrock prompt caching (cache_control: ephemeral). Statik sistem promptu + araç
 # tanımları önbelleğe alınır; deploy bölgesinde (eu-central-1) doğrulanana kadar
@@ -232,6 +236,7 @@ def configure_app(app):
     # aşan bir kurulumda Secure cookie'leri de sessizce kapatabilirdi.
     _is_dev = (os.environ.get("FLASK_DEBUG") == "1"
                or os.environ.get("FLASK_ENV") == "development")
+    app.config["FITX_IS_DEV"] = _is_dev
     _LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
     _gunicorn_logger = logging.getLogger("gunicorn.error")
     if _gunicorn_logger.handlers:

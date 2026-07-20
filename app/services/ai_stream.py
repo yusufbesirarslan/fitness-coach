@@ -138,14 +138,24 @@ def _stream_bedrock(user_id, question, context, history, language):
     parts = []
     tools_ran = 0
     usage = None
+    deadline = ai_coach._coach_turn_deadline()
 
     for _ in range(ai_coach._COACH_TOOL_LOOP_CAP):
+        remaining = ai_coach._remaining_coach_turn_seconds(deadline)
+        if remaining <= 0:
+            current_app.logger.warning(
+                "[COACH][stream] Bedrock turn budget exhausted")
+            yield from _emit_text(ai_coach._COACH_FALLBACKS[
+                ai_coach._coach_lang(language)]["tool"],
+                provider="bedrock", usage=usage)
+            return
         call_kwargs = {
             "model": BEDROCK_MODEL,
             "max_tokens": max_tokens,
             "system": system,
             "messages": convo,
             "tools": tools,
+            "timeout": min(ai_coach.BEDROCK_CALL_TIMEOUT_SECONDS, remaining),
         }
         try:
             for message in _stream_bedrock_turn(
@@ -159,6 +169,13 @@ def _stream_bedrock(user_id, question, context, history, language):
                 else:
                     raise message["exception"]
         except Exception as e:
+            if ai_coach._remaining_coach_turn_seconds(deadline) <= 0:
+                current_app.logger.warning(
+                    "[COACH][stream] Bedrock turn budget exhausted during provider call")
+                yield from _emit_text(ai_coach._COACH_FALLBACKS[
+                    ai_coach._coach_lang(language)]["tool"],
+                    provider="bedrock", usage=usage)
+                return
             # Yedek YALNIZCA hiçbir şey yayınlanmamış VE hiçbir araç yan etki
             # üretmemişken güvenlidir; aksi halde sağlayıcı değiştirmek
             # kullanıcının gördüğü metni bozar / yan etkiyi tekrarlar.

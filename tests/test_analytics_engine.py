@@ -13,6 +13,7 @@ from app.services.analytics_engine import (
     _check_weekly_report_day,
     get_nudges,
 )
+from app.services import analytics_engine
 from app.extensions import db
 from app.models import (MealLog, User, UserSession, WaterLog, WeeklyCheckIn,
                         WorkoutLog)
@@ -56,6 +57,27 @@ def test_only_nutrition_logged_nudges_workout(make_user):
     types = _nudge_types(user)
     assert "NUDGE_NO_WORKOUT" in types
     assert "NUDGE_MISSING_LOGS" not in types
+
+
+def test_missing_log_check_uses_training_history_reader(make_user, monkeypatch):
+    user = make_user("historyreader", last_login=date.today())
+    db.session.add(MealLog(
+        user_id=user.id, ogun="meal", yemekler="banana", kalori=100
+    ))
+    db.session.commit()
+    calls = []
+
+    def fake_fetch(user_id, start_day, end_day, *, include_markers=False):
+        calls.append((user_id, start_day, end_day, include_markers))
+        return [SimpleNamespace(created_at=datetime.utcnow(), is_marker=True)]
+
+    monkeypatch.setattr(
+        analytics_engine, "fetch_workout_entries", fake_fetch, raising=False
+    )
+
+    types = _nudge_types(user)
+    assert "NUDGE_NO_WORKOUT" not in types
+    assert calls and calls[0][0] == user.id and calls[0][3] is True
 
 
 def test_recent_logs_silence_missing_log_nudges(make_user):
@@ -249,10 +271,24 @@ def test_low_hydration_nudge_below_threshold(make_user):
     assert "NUDGE_LOW_HYDRATION" in _nudge_types(user)
 
 
+def test_sparse_hydration_uses_full_seven_day_window(make_user):
+    user = make_user("sparsewater", last_login=date.today())
+    today = app_today()
+    for days_ago in (0, 6):
+        db.session.add(WaterLog(
+            user_id=user.id,
+            count=8,
+            date_key=(today - timedelta(days=days_ago)).isoformat(),
+        ))
+    db.session.commit()
+
+    assert "NUDGE_LOW_HYDRATION" in _nudge_types(user)
+
+
 def test_hydration_silent_when_adequate(make_user):
     user = make_user("peggy", last_login=date.today())
     today = app_today()
-    for i in range(3):
+    for i in range(7):
         db.session.add(WaterLog(user_id=user.id, count=8,
                                 date_key=(today - timedelta(days=i)).isoformat()))
     db.session.commit()

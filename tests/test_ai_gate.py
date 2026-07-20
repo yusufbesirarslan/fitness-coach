@@ -150,22 +150,50 @@ def test_default_gate_caps_leave_thread_reserve():
         f"kapıları {ai_gate.WEB_THREADS} thread'e karşı yalnız {reserve} rezerv bırakıyor")
 
 
-def test_warns_when_gates_exhaust_thread_pool(app, monkeypatch, caplog):
+def test_invalid_thread_reserve_is_fatal_in_production(app, monkeypatch):
+    app.config["FITX_IS_DEV"] = False
     monkeypatch.setattr(ai_gate, "AI_MAX_CONCURRENCY", 5)
     monkeypatch.setattr(ai_gate, "SCRAPE_MAX_CONCURRENCY", 3)
     monkeypatch.setattr(ai_gate, "WEB_THREADS", 8)
+
+    with pytest.raises(RuntimeError, match="thread reserve"):
+        ai_gate.enforce_gate_invariants(app)
+
+
+def test_multiple_workers_are_fatal_in_production(app, monkeypatch):
+    app.config["FITX_IS_DEV"] = False
+    monkeypatch.setattr(ai_gate, "WEB_WORKERS", 2)
+
+    with pytest.raises(RuntimeError, match="single worker"):
+        ai_gate.enforce_gate_invariants(app)
+
+
+def test_invalid_gate_configuration_only_warns_in_development(
+        app, monkeypatch, caplog):
+    app.config["FITX_IS_DEV"] = True
+    monkeypatch.setattr(ai_gate, "WEB_WORKERS", 2)
+    monkeypatch.setattr(ai_gate, "AI_MAX_CONCURRENCY", 5)
+    monkeypatch.setattr(ai_gate, "SCRAPE_MAX_CONCURRENCY", 3)
+    monkeypatch.setattr(ai_gate, "WEB_THREADS", 8)
+
     with caplog.at_level("WARNING"):
-        ai_gate.warn_if_gates_exhaust_threads(app)
-    assert any("rezerv" in r.message for r in caplog.records)
+        ai_gate.enforce_gate_invariants(app)
+
+    assert "single worker" in caplog.text
+    assert "thread reserve" in caplog.text
 
 
-def test_no_warning_when_reserve_intact(app, monkeypatch, caplog):
+def test_valid_gate_configuration_is_silent(app, monkeypatch, caplog):
+    app.config["FITX_IS_DEV"] = False
+    monkeypatch.setattr(ai_gate, "WEB_WORKERS", 1)
     monkeypatch.setattr(ai_gate, "AI_MAX_CONCURRENCY", 4)
     monkeypatch.setattr(ai_gate, "SCRAPE_MAX_CONCURRENCY", 2)
     monkeypatch.setattr(ai_gate, "WEB_THREADS", 8)
+
     with caplog.at_level("WARNING"):
-        ai_gate.warn_if_gates_exhaust_threads(app)
-    assert not any("rezerv" in r.message for r in caplog.records)
+        ai_gate.enforce_gate_invariants(app)
+
+    assert "AI-GATE" not in caplog.text
 
 
 # ── Akış (SSE) kapısı: slot YANIT KAPANANA dek tutulur (WS2) ────────────────

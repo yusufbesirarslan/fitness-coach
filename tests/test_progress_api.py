@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
+from app.blueprints import tracking
 from app.extensions import db
 from app.models import DailyActivity, MealLog, WorkoutLog, WORKOUT_COMPLETION_MARKER
 from app.timeutil import app_today
@@ -144,6 +146,33 @@ def test_heatmap_multi_exercise_workout_counts_once(app, client, make_user, logi
     d = client.get("/api/progress/heatmap?weeks=4").get_json()
     today_cell = [c for c in d["cells"] if c["date"] == today][0]
     assert today_cell["level"] == 1          # one workout signal, not 5 / not maxed
+
+
+def test_heatmap_and_insights_use_training_history_reader(
+        app, client, make_user, login, monkeypatch):
+    user = _login(make_user, login, "historyapi")
+    today = app_today()
+    calls = []
+
+    def fake_fetch(user_id, start_day, end_day, *, include_markers=False):
+        calls.append((user_id, start_day, end_day, include_markers))
+        return [SimpleNamespace(
+            performed_on=today,
+            created_at=datetime.utcnow(),
+            is_marker=True,
+        )]
+
+    monkeypatch.setattr(tracking, "fetch_workout_entries", fake_fetch)
+
+    heatmap = client.get("/api/progress/heatmap?weeks=1").get_json()
+    today_cell = [cell for cell in heatmap["cells"]
+                  if cell["date"] == today.isoformat()][0]
+    assert today_cell["level"] == 1
+
+    insights = client.get("/api/progress/insights").get_json()["insights"]
+    assert len(insights) == 2  # workout + always-present streak
+    assert len(calls) == 2
+    assert all(call[0] == user.id and call[3] is True for call in calls)
 
 
 def test_heatmap_weeks_clamped(app, client, make_user, login):

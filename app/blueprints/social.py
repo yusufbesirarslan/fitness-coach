@@ -561,8 +561,9 @@ def friends_search():
     q = request.args.get("q", "").strip()
     if len(q) < 2:
         return jsonify({"users": []})
+    escaped_q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     users = User.query.filter(
-        User.username.ilike(f"%{q}%"),
+        User.username.ilike(f"%{escaped_q}%", escape="\\"),
         User.id != current_user.id
     ).limit(10).all()
     results = []

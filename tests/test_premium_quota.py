@@ -79,10 +79,10 @@ def test_week_key_format():
     assert premium._week_key(date(2026, 1, 1)) == "2026-W01"
 
 
-def test_remaining_and_record_per_kind(make_user):
+def test_remaining_and_reserve_per_kind(make_user):
     u = make_user("kotauser")
     assert premium.remaining_ai_plans(u, "training") == 1
-    premium.record_ai_plan_generation(u, "training")
+    assert premium.reserve_ai_quota(u, "training", 1) is True
     assert premium.remaining_ai_plans(u, "training") == 0
     # Beslenme türü bağımsız sayılır.
     assert premium.remaining_ai_plans(u, "nutrition") == 1
@@ -91,7 +91,7 @@ def test_remaining_and_record_per_kind(make_user):
 def test_premium_user_is_unlimited(make_user):
     u = make_user("vip", is_premium=True)
     assert premium.remaining_ai_plans(u, "training") is None
-    premium.record_ai_plan_generation(u, "training")     # no-op
+    assert premium.reserve_ai_quota(u, "training", 1) is True
     assert premium.remaining_ai_plans(u, "training") is None
 
 
