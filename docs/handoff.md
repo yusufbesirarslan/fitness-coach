@@ -412,8 +412,9 @@ schema, no route/coach-prompt/UI change. **The next Sprint 6 PR must read this s
     end_day=None)` orchestrator; reads history once via `fetch_workout_entries(...,
     include_markers=True)` then derives every signal purely.
 - Docs: added `docs/TRAINING_PROGRESSION.md`; added the service-index line in `CLAUDE.md`.
-- Tests: `tests/test_training_progression.py` (21 tests — fixture-free pure signal tests
-  plus DB-backed roll-up via `make_user`).
+- Tests: `tests/test_training_progression.py` (25 tests — fixture-free pure signal tests
+  plus DB-backed roll-up via `make_user`; the last four are golden characterization
+  tests added before PR3 to strengthen coverage).
 
 ### Code paths inspected
 
@@ -489,7 +490,7 @@ the per-week `weekly_volume` / `weekly_strength` series for transparency.
 
 ### Verification evidence
 
-- `python -m pytest tests/test_training_progression.py -v` — 21 passed.
+- `python -m pytest tests/test_training_progression.py -v` — 25 passed.
 - Regression (behavior preserved): `python -m pytest tests/test_training_history.py
   tests/test_training_generation.py tests/test_ai_coach.py tests/test_progress_api.py -q`
   — 92 passed.

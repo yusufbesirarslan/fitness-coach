@@ -14,10 +14,10 @@ from app.models import (DailyActivity, MealLog, User, UserQuestProgress, UserSes
                         WaterLog, WearableActivityLog, WeeklyCheckIn, WeeklyLog,
                         WeeklyWinner, WorkoutLog)
 from app.services.ai_coach import generate_checkin_feedback
-from app.services.training_history import fetch_workout_entries
 from app.services.ai_gate import ai_concurrency_gate
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
 from app.services.gamification import complete_quest_for_user, get_level, level_title
+from app.services.training_history import fetch_workout_entries
 from app.services.validators import _to_int
 from app.timeutil import app_date_of, app_today, display_dt, utc_day_bounds
 
