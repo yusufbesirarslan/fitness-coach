@@ -131,6 +131,10 @@ def fetch_coach_context(user_id, question="", language="tr"):
             f"{coach_context_queries.get_user_workout_history(user_id, 7)}")
     except Exception:
         current_app.logger.warning("[COACH] antrenman geçmişi alınamadı", exc_info=True)
+    if current_app.config.get("AI_ADAPTIVE_PLAN_CONTEXT", False):
+        from app.services.adaptive_plan_context import build_adaptive_plan_context
+
+        parts.append(build_adaptive_plan_context(user_id))
     try:
         parts.append(
             f"[SUPPLEMENT STACK]\n"

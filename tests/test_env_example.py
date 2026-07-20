@@ -87,3 +87,9 @@ def test_runtime_settings_are_grouped_after_local_development_settings():
 
 def test_multiple_worker_warning_documents_redis_and_ai_budget_scaling():
     assert WORKER_WARNING in ENV_EXAMPLE_SOURCE.splitlines()
+
+
+def test_adaptive_plan_context_flag_is_documented_default_off():
+    example = Path(".env.example").read_text(encoding="utf-8")
+    assert "# AI_ADAPTIVE_PLAN_CONTEXT=0" in example
+    assert "AI_ADAPTIVE_PLAN_CONTEXT=1" not in example

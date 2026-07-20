@@ -160,3 +160,46 @@ codes, neutrality) + DB-backed roll-up via the `make_user` fixture (overload, de
 maintenance, build-consistency, marker-only, empty history, `weeks=0`, user scoping,
 determinism). Convergence characterization for `/api/progress/workout` lives in
 `tests/test_progress_api.py`.
+
+## Sprint 6 PR4 — AI Coach contract
+
+### Serializer ownership and Version 1 evolution
+
+`app/services/adaptive_plan_context.py` is the only component allowed to transform
+`AdaptivePlan` into prompt-ready data. The Version 1 contract is compact canonical
+JSON with fixed field names/order, complete non-null fields, ordered reason codes,
+and additive-only evolution. Consumers ignore unknown/appended fields and never infer
+meaning from absence. Breaking semantics require a new `schema_version`.
+
+### Read-only consumer policy
+
+The Coach is read-only: it explains, personalizes, motivates, educates, and presents
+the deterministic plan. It never reconstructs progression, overload, plateau,
+deload, volume, or intensity decisions. Future runtime consumers either consume
+`AdaptivePlan` directly or use this sole serialized contract.
+
+### Rollout and rollback contract
+
+`AI_ADAPTIVE_PLAN_CONTEXT` defaults OFF and is the only rollout gate. OFF performs no
+plan construction/execution, serialization, adaptive logging, or prompt modification.
+Setting it back to `0` restores the pre-PR4 runtime behavior without a code revert.
+
+### Enabled fallback, logging, and payload budget
+
+Enabled failures catch `Exception` (not process-level `BaseException`), restore
+session usability when necessary, and emit the complete neutral
+`AdaptivePlan(weeks=0)` contract. Logs are generic debug lifecycle events and contain
+no user or training data. The normalized payload excludes rows and weekly/history
+series; its prompt-footprint target is approximately 100-160 tokens.
+
+### Exact Version 1 key order
+
+| Object | Keys in canonical order |
+| --- | --- |
+| Top level | `schema_version`, `source`, `plan`, `progression` |
+| `plan` | `weeks`, `has_data`, `week_focus`, `volume_action`, `intensity_action`, `volume_delta_pct`, `overload_ready`, `maintenance_recommended`, `reason_codes` |
+| `progression` | `volume_trend`, `strength_trend`, `is_progressing`, `is_plateau`, `deload_due`, `load_consistency`, `next_signal` |
+
+The dependency direction is strictly one-way:
+`training_history -> training_progression -> training_planning ->
+adaptive_plan_context/context_builder -> coach`.
