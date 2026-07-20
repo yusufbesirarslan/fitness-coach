@@ -87,3 +87,9 @@ def test_runtime_settings_are_grouped_after_local_development_settings():
 
 def test_multiple_worker_warning_documents_redis_and_ai_budget_scaling():
     assert WORKER_WARNING in ENV_EXAMPLE_SOURCE.splitlines()
+
+
+def test_coach_turn_timeout_is_documented():
+    assert _has_exact_commented_setting(
+        ENV_EXAMPLE_SOURCE, "AI_COACH_TURN_TIMEOUT_SECONDS=90"
+    )

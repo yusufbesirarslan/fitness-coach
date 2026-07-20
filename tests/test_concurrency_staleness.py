@@ -74,8 +74,8 @@ def test_update_streak_sees_concurrent_daily_update(app, make_user):
     assert fresh.weekly_xp == 14
 
 
-def test_record_counter_reads_fresh_metadata_under_lock(app, make_user):
-    from app.services.premium import _record_counter, _week_key
+def test_reserve_ai_quota_reads_fresh_metadata_under_lock(app, make_user):
+    from app.services.premium import reserve_ai_quota, _week_key
 
     user = make_user("quotafresh")
     assert user.user_metadata is None  # identity map'te yüklü (boş)
@@ -85,7 +85,7 @@ def test_record_counter_reads_fresh_metadata_under_lock(app, make_user):
     _concurrent_commit_simulation(
         user.id, user_metadata={"ai_plan_quota": {"week": wk, "nutrition": 1}})
 
-    _record_counter(user, "nutrition")  # kendi commit'ini yapar
+    assert reserve_ai_quota(user, "nutrition", 3) is True
 
     db.session.expire_all()
     fresh = db.session.get(User, user.id)

@@ -12,8 +12,8 @@ from sqlalchemy import event
 from sqlalchemy.engine import Engine
 
 from app.config import (
-    _REDIS_URL, AUTH_WRITE_RATELIMIT, BEDROCK_MAX_RETRIES, BEDROCK_REGION,
-    DEFAULT_RATELIMIT,
+    _REDIS_URL, AUTH_WRITE_RATELIMIT, BEDROCK_CALL_TIMEOUT_SECONDS,
+    BEDROCK_MAX_RETRIES, BEDROCK_REGION, DEFAULT_RATELIMIT,
 )
 
 
@@ -95,8 +95,11 @@ class _LazyAnthropicBedrock:
             # max_retries=1 (WS9): kurtarma katmanı (ai_recovery) kendi jitter'lı
             # retry'ını yapar; SDK retry'ı da 2 kalırsa iki katman çarpılır ve tek
             # ağır istek onlarca Bedrock çağrısı doğurabilir (1 worker × 8 thread).
-            self._client = AnthropicBedrock(aws_region=BEDROCK_REGION,
-                                            timeout=60.0, max_retries=BEDROCK_MAX_RETRIES)
+            self._client = AnthropicBedrock(
+                aws_region=BEDROCK_REGION,
+                timeout=BEDROCK_CALL_TIMEOUT_SECONDS,
+                max_retries=BEDROCK_MAX_RETRIES,
+            )
         return getattr(self._client, name)
 
 

@@ -460,6 +460,67 @@ def test_bedrock_post_tool_fallback_is_localized(auth_user, monkeypatch):
     assert "İşlemi" not in answer
 
 
+def test_bedrock_tool_loop_stops_when_turn_budget_expires(
+        auth_user, monkeypatch):
+    tool_block = SimpleNamespace(
+        type="tool_use", name="cancel_pending_log", input={}, id="t1"
+    )
+    tool_turn = SimpleNamespace(stop_reason="tool_use", content=[tool_block])
+    calls = []
+
+    class _Msgs:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return tool_turn
+
+    clock = iter([0.0, 0.0, 91.0])
+    monkeypatch.setattr(
+        ai_coach,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(clock)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        ai_coach, "AI_COACH_TURN_TIMEOUT_SECONDS", 90.0, raising=False
+    )
+    monkeypatch.setattr(
+        ai_coach, "bedrock_client", SimpleNamespace(messages=_Msgs())
+    )
+    monkeypatch.setattr(ai_coach, "_dispatch_coach_tool", lambda *args: "{}")
+
+    answer = ai_coach._run_coach_conversation_bedrock(
+        auth_user.id, "x", "", [], language="en"
+    )
+
+    assert answer == ai_coach._COACH_FALLBACKS["en"]["tool"]
+    assert len(calls) == 1
+    assert calls[0]["timeout"] == pytest.approx(60.0)
+
+
+def test_bedrock_timeout_at_turn_deadline_does_not_start_fallback(
+        auth_user, monkeypatch):
+    class _Msgs:
+        def create(self, **kwargs):
+            raise TimeoutError("provider deadline")
+
+    clock = iter([0.0, 0.0, 91.0])
+    monkeypatch.setattr(
+        ai_coach,
+        "time",
+        SimpleNamespace(monotonic=lambda: next(clock)),
+    )
+    monkeypatch.setattr(ai_coach, "AI_COACH_TURN_TIMEOUT_SECONDS", 90.0)
+    monkeypatch.setattr(
+        ai_coach, "bedrock_client", SimpleNamespace(messages=_Msgs())
+    )
+
+    answer = ai_coach._run_coach_conversation_bedrock(
+        auth_user.id, "x", "", [], language="en"
+    )
+
+    assert answer == ai_coach._COACH_FALLBACKS["en"]["tool"]
+
+
 def test_fallback_text_not_persisted_to_session_history(app, auth_user, monkeypatch):
     # C3: sağlayıcı yedek metni (boş olmayan) cookie-geçmişine yazılıp sonraki
     # turda bağlam olarak modele geri besleniyordu — hata-yedeği gibi bastırılmalı.

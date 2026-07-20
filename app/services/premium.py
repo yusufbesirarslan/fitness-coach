@@ -143,37 +143,6 @@ def remaining_ai_plans(user, kind):
     return max(FREE_WEEKLY_AI_PLANS - used, 0)
 
 
-def _record_counter(user, counter_key):
-    """Haftalık kota sayacını (`counter_key`) atomik olarak +1 işle.
-
-    Sayaç bütün user_metadata JSON'ının okunup yeniden yazılmasıyla tutulur; iki
-    eşzamanlı üretim düz oku-değiştir-yaz ile kayıp güncellemeye (her ikisi de
-    used=0 görüp used=1 yazması → tek artış) yol açardı. Satırı kilitleyip
-    metadata'yı KİLİT ALTINDA yeniden okuyarak artışları serileştir (D-M2).
-    SQLite'ta with_for_update no-op'tur; Postgres'te grant'leri serileştirir.
-
-    DİKKAT (C1): kilitli okuma KOLON sorgusuyla yapılır. Entity sorgusu identity
-    map'teki (istek başında yüklenmiş) current_user'ı döndürür ve kilit altında
-    SELECT'lenen taze metadata'yı ATAR — iki eşzamanlı üretim yine ikisi de
-    used=0 okur, kota fiilen ×2 olurdu. Kolon sorgusu identity map'i atlar."""
-    if getattr(user, "is_premium", False):
-        return
-    fresh_meta = (db.session.query(User.user_metadata)
-                  .filter_by(id=user.id).with_for_update().scalar())
-    target = db.session.get(User, user.id) or user  # kilit bizde
-    meta, q, wk = _quota_from_meta(fresh_meta)
-    q["week"] = wk
-    q[counter_key] = int(q.get(counter_key, 0)) + 1
-    meta["ai_plan_quota"] = q
-    target.user_metadata = meta
-    flag_modified(target, "user_metadata")  # JSON in-place değişimini garantiye al
-    db.session.commit()
-
-
-def record_ai_plan_generation(user, kind):
-    """Başarılı bir `kind` üretimini bu haftaya işle (premium'da no-op)."""
-    _record_counter(user, kind)
-
 
 def remaining_ai_chats(user):
     """Bu hafta `user` için kalan AI koç sohbeti (/ask) hakkı (premium → None).
@@ -186,10 +155,6 @@ def remaining_ai_chats(user):
     used = int(q.get("chat", 0))
     return max(FREE_WEEKLY_AI_CHATS - used, 0)
 
-
-def record_ai_chat(user):
-    """Başarılı bir /ask çağrısını bu haftaya işle (premium'da no-op)."""
-    _record_counter(user, "chat")
 
 
 def premium_ai_plan_gate(kind):

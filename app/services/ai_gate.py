@@ -36,6 +36,7 @@ AI_MODEL_MAX_CONCURRENCY = max(
     int(os.getenv("AI_MODEL_MAX_CONCURRENCY", str(AI_MAX_CONCURRENCY))),
 )
 
+WEB_WORKERS = max(1, int(os.getenv("FITX_WEB_WORKERS", "1")))
 WEB_THREADS = max(1, int(os.getenv("FITX_WEB_THREADS", "8")))
 THREAD_RESERVE_MIN = 2
 
@@ -63,24 +64,31 @@ def model_concurrency_slot():
         _model_slots.release()
 
 
-def warn_if_gates_exhaust_threads(app):
-    """I1: iki kapının toplamı thread havuzunu tüketiyorsa boot'ta uyar.
 
-    5(AI) + 3(scrape) = 8 = --threads gibi bir kombinasyon /health rezervini
-    sıfırlar: yük altında HEALTHCHECK zaman aşımına düşüp deploy'u sahte
-    rollback'e sürükleyebilir. Env ile override edilen değerler de bu
-    denetimden geçer.
-    """
-    total = AI_MAX_CONCURRENCY + SCRAPE_MAX_CONCURRENCY
-    reserve = WEB_THREADS - total
+def enforce_gate_invariants(app):
+    """Fail unsafe process-local gate configuration outside development."""
+    reserve = WEB_THREADS - (AI_MAX_CONCURRENCY + SCRAPE_MAX_CONCURRENCY)
+    problems = []
     if reserve < THREAD_RESERVE_MIN:
-        app.logger.warning(
-            "[AI-GATE] AI(%s) + scrape(%s) kapıları %s thread'e karşı yalnız %s "
-            "rezerv bırakıyor (en az %s bekleniyor) — /health yük altında "
-            "kilitlenebilir. AI_MAX_CONCURRENCY/SCRAPE_MAX_CONCURRENCY düşürün "
-            "veya FITX_WEB_THREADS'i gunicorn --threads ile eşitleyin.",
-            AI_MAX_CONCURRENCY, SCRAPE_MAX_CONCURRENCY, WEB_THREADS, reserve,
-            THREAD_RESERVE_MIN)
+        problems.append(
+            "thread reserve invariant failed: "
+            f"AI({AI_MAX_CONCURRENCY}) + scrape({SCRAPE_MAX_CONCURRENCY}) "
+            f"against {WEB_THREADS} threads leaves {reserve}; "
+            f"at least {THREAD_RESERVE_MIN} required"
+        )
+    if WEB_WORKERS != 1:
+        problems.append(
+            "single worker invariant failed: process-local gates require "
+            f"FITX_WEB_WORKERS=1, got {WEB_WORKERS}"
+        )
+    if not problems:
+        return
+
+    message = "; ".join(problems)
+    if app.config.get("FITX_IS_DEV", False):
+        app.logger.warning("[AI-GATE] %s", message)
+        return
+    raise RuntimeError(f"[AI-GATE] {message}")
 
 
 def _concurrency_gate(fn, semaphore, wait_seconds, max_concurrency, label):
