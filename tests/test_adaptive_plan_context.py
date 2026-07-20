@@ -390,3 +390,153 @@ def test_serializer_preserves_canonical_plan_semantics(
     assert payload["plan"]["volume_action"] == volume
     assert payload["plan"]["intensity_action"] == intensity
     assert flag in payload["plan"]["reason_codes"] or payload["plan"].get(flag) is True
+
+
+def test_flag_off_is_exact_baseline_and_has_zero_adaptive_activity(
+    app, auth_user, monkeypatch, caplog
+):
+    import builtins
+
+    _stub_baseline_context_sources(monkeypatch)
+    app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = False
+    real_import = builtins.__import__
+
+    def guarded_import(name, *args, **kwargs):
+        if name == "app.services.adaptive_plan_context":
+            raise AssertionError("disabled path imported adaptive adapter")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+    with caplog.at_level(logging.DEBUG):
+        context = context_builder.fetch_coach_context(auth_user.id, "question", "tr")
+
+    assert context == BASELINE_CONTEXT
+    assert "ADAPTIVE PLAN" not in context
+    assert not [
+        record for record in caplog.records if "ADAPTIVE_PLAN" in record.getMessage()
+    ]
+
+
+def test_switching_flag_off_restores_exact_baseline(
+    app, auth_user, monkeypatch
+):
+    from app.services import adaptive_plan_context as adapter
+
+    _stub_baseline_context_sources(monkeypatch)
+    monkeypatch.setattr(
+        adapter, "build_adaptive_plan_context", lambda _uid: "[ADAPTIVE TEST BLOCK]"
+    )
+
+    app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = True
+    enabled = context_builder.fetch_coach_context(auth_user.id, "question", "tr")
+    app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = False
+    rolled_back = context_builder.fetch_coach_context(auth_user.id, "question", "tr")
+
+    assert "[ADAPTIVE TEST BLOCK]" in enabled
+    assert rolled_back == BASELINE_CONTEXT
+
+
+def test_flag_on_injects_once_after_workout_history(
+    app, auth_user, monkeypatch
+):
+    from app.services import adaptive_plan_context as adapter
+
+    _stub_baseline_context_sources(monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        adapter,
+        "build_adaptive_plan_context",
+        lambda user_id: calls.append(user_id) or "[ADAPTIVE TEST BLOCK]",
+    )
+    app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = True
+
+    context = context_builder.fetch_coach_context(auth_user.id, "question", "tr")
+
+    assert calls == [auth_user.id]
+    assert context.count("[ADAPTIVE TEST BLOCK]") == 1
+    assert context.index("[ANTRENMAN GE\u00c7M\u0130\u015e\u0130") < context.index("[ADAPTIVE TEST BLOCK]")
+    assert context.index("[ADAPTIVE TEST BLOCK]") < context.index("[SUPPLEMENT STACK]")
+
+
+def test_enabled_context_has_openai_bedrock_provider_parity(
+    app, auth_user, monkeypatch
+):
+    from app.services import adaptive_plan_context as adapter
+
+    _stub_baseline_context_sources(monkeypatch)
+    monkeypatch.setattr(
+        adapter, "build_adaptive_plan_context", lambda _uid: "[ADAPTIVE TEST BLOCK]"
+    )
+    app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = True
+    context = context_builder.fetch_coach_context(auth_user.id, "question", "tr")
+
+    assert context.count("[ADAPTIVE TEST BLOCK]") == 1
+    openai = prompt_builder.build_openai_messages("tr", context, [], "question")
+    bedrock_plain = prompt_builder.build_bedrock_system(
+        context, "tr", prompt_cache=False
+    )
+    bedrock_cached = prompt_builder.build_bedrock_system(
+        context, "tr", prompt_cache=True
+    )
+    expected = f"[KULLANICI VER\u0130S\u0130]\n{context}"
+
+    assert openai[1]["content"] == expected
+    assert bedrock_plain.endswith(expected)
+    assert bedrock_cached[1]["text"] == expected
+
+
+def test_empty_history_enabled_returns_complete_neutral_contract(
+    app, auth_user, monkeypatch
+):
+    _stub_baseline_context_sources(monkeypatch)
+    app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = True
+
+    context = context_builder.fetch_coach_context(auth_user.id, "question", "tr")
+    adaptive_block = context.split(
+        "\n\n[ADAPTIVE PLAN CONTRACT v1 - READ ONLY]\n", 1
+    )[1].split("\n\n[SUPPLEMENT STACK]", 1)[0]
+    serialized = adaptive_block.rsplit("\n", 1)[-1]
+    payload = json.loads(serialized)
+
+    assert payload["plan"]["has_data"] is False
+    assert payload["plan"]["week_focus"] == "insufficient_data"
+    assert payload["plan"]["reason_codes"] == ["insufficient_history"]
+
+
+def test_enabled_planner_is_user_scoped(app, make_user, monkeypatch):
+    from app.services import adaptive_plan_context as adapter
+
+    first = make_user("adaptive-first")
+    second = make_user("adaptive-second")
+    seen = []
+    monkeypatch.setattr(
+        adapter,
+        "build_adaptive_plan",
+        lambda user_id: seen.append(user_id) or AdaptivePlan(weeks=0),
+    )
+
+    adapter.build_adaptive_plan_context(first.id)
+
+    assert seen == [first.id]
+    assert second.id not in seen
+
+
+def test_planner_failure_keeps_later_context_sections_available(
+    app, auth_user, monkeypatch
+):
+    from app.services import adaptive_plan_context as adapter
+
+    _stub_baseline_context_sources(monkeypatch)
+
+    def fail(_user_id):
+        raise RuntimeError("planner unavailable")
+
+    monkeypatch.setattr(adapter, "build_adaptive_plan", fail)
+    app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = True
+
+    context = context_builder.fetch_coach_context(auth_user.id, "question", "tr")
+
+    assert NEUTRAL_JSON in context
+    assert "[SUPPLEMENT STACK]\nsupplement-stack" in context
+    assert "[BESLENME LOGU (3 g\u00fcn)]\nnutrition-log" in context
+    assert "[ARKADA\u015e AKT\u0130V\u0130TELER\u0130]" in context
