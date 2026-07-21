@@ -1,140 +1,117 @@
-# Task 2 Report: Workout Completion Sharing and Friend Selector API
+# Task 2 Report: Build and Golden-Pin the Sole Versioned Serializer
 
-## Implementation summary
+## Implementation
 
-- Added TDD coverage for `/workout/complete` sharing behavior in `tests/test_pump_check_sharing.py`.
-- Extended `tests/test_training_routes.py` to assert default Pump Check sharing state on normal workout completion.
-- Updated `app/blueprints/training.py` to:
-  - parse `visibility` and `shared_friend_ids`
-  - validate allowed visibility values
-  - require recipients for `"friends"` visibility
-  - verify selected friend ids against `get_friend_ids(current_user.id)`
-  - persist `visibility` and `shared_friend_ids` on `PumpCheck`
-  - create `Message(message_type="pump_check")` rows for selected friends
-  - return `pump_check_id`, `visibility`, and `shared_friend_ids` in the response
-- Added `GET /friends/select-list` to `app/blueprints/social.py` with:
-  - accepted-friends filtering
-  - optional `q` filtering on username/full name
-  - recent-contact-first ordering based on existing messages
-  - response fields: `id`, `username`, `full_name`, `profile_picture`, `recent`
-- Added backend locale keys for new sharing validation errors in `locales/en.json` and `locales/tr.json`.
+- Added `app/services/adaptive_plan_context.py` as the sole Version 1 `AdaptivePlan` prompt serializer and enabled-path context envelope.
+- `serialize_adaptive_plan` copies the canonical planning and embedded progression fields in a fixed order, preserves `reason_codes` order, emits compact deterministic JSON, and does not re-derive any plan decision.
+- `build_adaptive_plan_context` builds the canonical plan once, emits only generic DEBUG lifecycle events through Flask's existing `current_app.logger`, and falls back to the complete neutral contract on planner or serialization application failures.
+- Planner failures attempt `db.session.rollback()` and fall back to `db.session.remove()` if rollback itself fails.
+- Failure boundaries catch `Exception` only; `KeyboardInterrupt` and `SystemExit` propagate.
+- No `context_builder` or configuration wiring was added; that remains Task 3.
 
-## Tests run / results
+## TDD Evidence
 
-### RED
+### Serializer RED
 
 Command:
 
-```bash
-python -m pytest tests/test_pump_check_sharing.py tests/test_training_routes.py::test_complete_awards_xp_and_records_pump_check -v
+`python -m pytest tests/test_adaptive_plan_context.py -k "serializer" -v`
+
+Relevant output before production code existed:
+
+```text
+collected 9 items / 5 deselected / 4 selected
+FAILED test_v1_serializer_exact_golden_contract
+FAILED test_v1_neutral_serializer_exact_golden_contract
+FAILED test_serializer_is_deterministic_and_preserves_reason_order
+FAILED test_serializer_does_not_mutate_immutable_inputs
+ModuleNotFoundError: No module named 'app.services.adaptive_plan_context'
+4 failed, 5 deselected in 4.32s
 ```
 
-Result:
+The failure reason was exactly the missing feature module, not a test typo or unrelated error.
 
-- Exit code: `1`
-- `5 failed, 4 passed`
-- Expected failures observed:
-  - `/workout/complete` defaulted to `private` instead of `feed`
-  - `/workout/complete` accepted `"friends"` visibility without recipients
-  - `/workout/complete` did not persist `"friends"` visibility or create `pump_check` messages
-  - `/friends/select-list` returned `404`
-
-### GREEN
+### Serializer GREEN
 
 Command:
 
-```bash
-python -m pytest tests/test_pump_check_sharing.py tests/test_training_routes.py -v
+`python -m pytest tests/test_adaptive_plan_context.py -k "serializer" -v`
+
+Relevant output after the minimal canonical implementation:
+
+```text
+4 passed, 5 deselected in 3.49s
 ```
+
+### Failure-Boundary RED and Correction
+
+Command:
+
+`python -m pytest tests/test_adaptive_plan_context.py -k "serializer or adapter or exception or process_level" -v`
+
+First boundary result:
+
+```text
+3 failed, 8 passed, 6 deselected, 5 warnings in 7.20s
+```
+
+The three failures were the logging assertions in:
+
+- `test_enabled_adapter_builds_once_and_logs_only_generic_events`
+- `test_planner_exception_returns_complete_neutral_contract_and_recovers_session`
+- `test_serialization_exception_uses_complete_neutral_contract`
+
+Root cause: repository configuration explicitly fixes `app.logger` at INFO, while bare `caplog.at_level(logging.DEBUG)` changes only the root logger level. A diagnostic run with process-local `LOG_LEVEL=DEBUG` made all three tests pass, confirming the level-filter boundary. Self-review retained the approved production contract (`current_app.logger.debug`) and corrected the tests to target `app.logger.name` explicitly.
+
+Final focused command and output:
+
+```text
+python -m pytest tests/test_adaptive_plan_context.py -k "serializer or adapter or exception or process_level" -v
+11 passed, 6 deselected, 5 warnings in 7.45s
+```
+
+The selected tests verify that neither injected private exception messages nor user id `73` appear in captured lifecycle logs.
+
+## Final Full-File Verification
+
+Fresh post-commit command:
+
+`python -m pytest tests/test_adaptive_plan_context.py -v`
 
 Result:
 
-- Exit code: `0`
-- `29 passed`
-- Warnings present were pre-existing deprecation warnings around `datetime.utcnow()` usage in test/support code and hooks; no new failures.
+```text
+collected 17 items
+17 passed, 12 warnings in 6.73s
+```
 
-## TDD RED/GREEN evidence
+This includes all five Task 1 baseline/provider golden tests, all serializer and adapter tests, and `test_session_recovery_removes_session_if_rollback_cannot_recover` (which the focused `-k` expression does not select).
 
-- Wrote the new sharing and selector tests first.
-- Ran the focused RED command before any production edits and captured the expected failures.
-- Implemented the minimum route and locale changes required to satisfy the failing tests.
-- Ran the broader Task 2 suite from the brief and confirmed all targeted tests passed.
+## Files Changed
 
-## Files changed
+- `app/services/adaptive_plan_context.py` — new 84-line canonical serializer/context adapter.
+- `tests/test_adaptive_plan_context.py` — extended with exact JSON goldens, immutability/determinism tests, failure boundaries, generic logging assertions, process-exception propagation, session recovery, and semantic-preservation cases.
+- `.superpowers/sdd/task-2-report.md` — this handoff report; intentionally not part of the production/test commit, matching the Task 1 report convention.
 
-- `app/blueprints/training.py`
-- `app/blueprints/social.py`
-- `locales/en.json`
-- `locales/tr.json`
-- `tests/test_pump_check_sharing.py`
-- `tests/test_training_routes.py`
-- `.superpowers/sdd/task-2-report.md`
+## Commit
 
-## Self-review
+- `6d24339 feat: add adaptive plan context contract`
+- Commit scope: 2 files changed, 354 insertions; only the adapter and its test file.
 
-- Scope matches the Task 2 brief and does not add feed routes/pages, gallery, chat rendering changes, modal UI, or navigation changes.
-- Write scope for implementation changes stayed within the files named by the brief, plus this required report file.
-- The friend selector route reuses existing friendship and messaging models rather than introducing new helpers or schema changes.
-- Workout completion sharing keeps all DB side effects in the existing transaction path.
+## Self-Review
+
+- Compared the adapter field-by-field against the brief: top-level key order, plan key order, progression key order, schema/source values, compact separators, neutral contract, header, policy, lifecycle events, recovery ordering, and `Exception`-only boundaries match.
+- Confirmed the serializer copies canonical `AdaptivePlan`/`ProgressionReport` values and never calls planning analysis or reconstructs decisions.
+- Confirmed serialization is deterministic, preserves reason order, omits weekly arrays and `null`, and leaves frozen inputs unchanged.
+- Confirmed planner construction occurs exactly once on success and neutral fallback remains a complete Version 1 contract on both planner and serializer failures.
+- Corrected an intermediate module-logger experiment during self-review so production uses the approved Flask logger; only the tests explicitly target its name for DEBUG capture.
+- Caught and corrected a fallback patch-transport artifact that had temporarily doubled `\n` into literal backslash characters. Fresh verification ran only after restoring real newline separators in the context block and tests.
+- Ran `git diff --cached --check` before commit; it reported no whitespace errors.
+- Confirmed the pre-existing modification to `.superpowers/sdd/task-1-report.md` was not staged, changed, or committed by this task.
 
 ## Concerns
 
-- The new `"pump_check"` messages serialize JSON into `Message.body`, which matches the brief and existing schema, but any future chat rendering work will need to treat this message type as structured payload rather than plain text.
-
-## Review follow-up fixes
-
-- Hardened `app/blueprints/training.py::_parse_pump_visibility` so non-string `visibility` values return `400` with `pump.visibility_invalid` instead of raising on `.strip()`.
-- Tightened `shared_friend_ids` validation so only JSON list inputs are accepted; non-list values now return `400` with `pump.friend_ids_invalid` instead of being coerced as generic iterables.
-- Added focused route coverage in `tests/test_pump_check_sharing.py` for:
-  - string `shared_friend_ids` payloads such as `"12"`
-  - non-string `visibility` payloads such as `7`
-
-### Review follow-up verification
-
-Command:
-
-```bash
-python -m pytest tests/test_pump_check_sharing.py tests/test_training_routes.py -v
-```
-
-Result:
-
-- Exit code: `0`
-- `31 passed`
-- Existing deprecation warnings remained; no new failures.
-
-## Remaining review finding fix
-
-- Tightened `app/blueprints/training.py::_parse_pump_visibility` so `shared_friend_ids` accepts only a JSON list of strict integer IDs.
-- Rejected coercible non-integer entries before friend lookup:
-  - booleans such as `true`
-  - floats such as `1.5`
-  - strings such as `"123"`
-- Kept the failure contract unchanged for invalid recipient payloads: `400` with `pump.friend_ids_invalid`.
-- Added focused regression coverage in `tests/test_pump_check_sharing.py` proving the route rejects those entries even when `get_friend_ids(...)` would otherwise accept the coerced integer values.
-
-### Remaining finding verification
-
-RED command:
-
-```bash
-python -m pytest tests/test_pump_check_sharing.py -k "boolean_shared_friend_ids_entries or float_shared_friend_ids_entries or string_shared_friend_ids_entries" -v
-```
-
-Result:
-
-- Exit code: `1`
-- `3 failed`
-- Failures confirmed the pre-fix coercion bug: `[True]`, `[1.5]`, and `["123"]` were accepted through `_parse_pump_visibility`.
-
-GREEN / covering command:
-
-```bash
-python -m pytest tests/test_pump_check_sharing.py tests/test_training_routes.py -v
-```
-
-Result:
-
-- Exit code: `0`
-- `34 passed`
-- Existing deprecation warnings remained; no new failures.
+- No blocking implementation concerns.
+- Pytest reports 12 pre-existing `datetime.datetime.utcnow()` deprecation warnings from shared test/application infrastructure outside this task.
+- The Windows sandbox helper (`codex-windows-sandbox-setup.exe`) was unavailable. Commands and the Codex patch engine were run through approved host-shell escalation; this also motivated the explicit newline transport audit above.
+- Git warns that LF may be converted to CRLF if it later rewrites the two source files; current committed content and tests are correct.

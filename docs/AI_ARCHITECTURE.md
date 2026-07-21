@@ -33,7 +33,7 @@ route (driven by the `is_error_fallback` flag).
 | `ai_pipeline` | Orchestrator; `generate_answer` / `stream_answer`. |
 | `context_builder` | Per-turn coach context (ORM reads, FRIEND_DATA fence). |
 | `memory_manager` | Persistent memory: conversation window, `estimate_tokens`, summarize, `record_turn`. See [MEMORY.md](MEMORY.md). |
-| `prompt_builder` | System prompt + language directive + Bedrock prompt-cache block. |
+| `prompt_builder` | System prompt + language directive + Bedrock prompt-cache block; `adaptive_plan_context=` selects the AdaptivePlan-authority prompt (flag-driven, from `ai_coach`). See [TRAINING_PLANNING.md](TRAINING_PLANNING.md). |
 | `ai_coach` | Provider tool loops (Bedrock/OpenAI), staging→commit, tools. Re-exports legacy names. |
 | `ai_stream` | Real Bedrock streaming tool loop (`messages.stream()`). See [STREAMING.md](STREAMING.md). |
 | `ai` | `_heavy_chat` router (Bedrock→OpenAI) + recovery ladder. |

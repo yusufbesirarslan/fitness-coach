@@ -11,7 +11,7 @@ import time
 import s3_helper
 from app.services import nutrition_pipeline, prompt_builder
 from datetime import datetime, timedelta
-from flask import current_app, g, session
+from flask import current_app, g, has_app_context, session
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -1005,7 +1005,9 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
 def _run_coach_conversation_openai(user_id, question, context, history, language="tr"):
     """OpenAI function-calling döngüsü: system → (gerekirse araç çağrıları) → final metin.
     Geçmişi session'a YAZMAZ (çağıran yönlendirici halleder)."""
-    messages = prompt_builder.build_openai_messages(language, context, history, question)
+    messages = prompt_builder.build_openai_messages(
+        language, context, history, question,
+        adaptive_plan_context=_adaptive_plan_context_enabled())
 
     final_text = ""
     for _ in range(_COACH_TOOL_LOOP_CAP):
@@ -1054,11 +1056,21 @@ def _run_coach_conversation_openai(user_id, question, context, history, language
     return final_text
 
 
+def _adaptive_plan_context_enabled():
+    """Koç promptunun planlama yetkisini AI_ADAPTIVE_PLAN_CONTEXT bayrağı belirler
+    — bağlam metni DEĞİL. Bağlamda kullanıcı yazdığı alanlar (hafıza değerleri,
+    arkadaş aktivitesi) var; kanonik başlığı taklit eden bir metin sistem promptunu
+    çevirememeli. App context yoksa (birim testi) KAPALI kabul edilir."""
+    return bool(has_app_context()
+                and current_app.config.get("AI_ADAPTIVE_PLAN_CONTEXT", False))
+
+
 def _build_bedrock_system(context, language="tr"):
     """Bedrock `system` parametresi (mantık: prompt_builder.build_bedrock_system).
     Modül-global BEDROCK_PROMPT_CACHE çağrı anında okunur — testler patch'ler."""
     return prompt_builder.build_bedrock_system(
-        context, language, prompt_cache=BEDROCK_PROMPT_CACHE)
+        context, language, prompt_cache=BEDROCK_PROMPT_CACHE,
+        adaptive_plan_context=_adaptive_plan_context_enabled())
 
 
 def _anthropic_tools_for_call():
