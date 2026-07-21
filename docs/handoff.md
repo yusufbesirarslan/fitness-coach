@@ -752,15 +752,17 @@ immediate rollback.
 
 ### Verification evidence
 
-Re-measured on 2026-07-21 against the final tree (these supersede the pre-remediation
-counts; the older numbers predated the boundary-guard and prompt-authority tests).
+Re-measured on 2026-07-21 against this branch, which replays the PR4 delta on top of
+current `main` (PR #173 was merged into `sprint6-pr3-adaptive-planning`, not `main`,
+so PR4 reaches `main` through PR #175). These supersede the pre-remediation counts,
+which predated the boundary-guard and prompt-authority tests.
 
 - `python -m pytest tests/test_adaptive_plan_context.py tests/test_dependency_boundaries.py tests/test_env_example.py tests/test_prompt_builder.py tests/test_ai_pipeline.py tests/test_ai_coach.py tests/test_ai_stream.py tests/test_coach_tools.py -q`
-  - 204 passed in 120.44s.
+  - 209 passed in 120.62s.
 - `python -m pytest tests/test_training_history.py tests/test_training_progression.py tests/test_training_planning.py tests/test_training_generation.py tests/test_training_routes.py tests/test_progress_api.py tests/test_tracking_routes.py -q`
-  - 163 passed in 143.36s.
-- `python -m pytest -q`
-  - 1935 passed, 3 deselected, 7983 warnings in 1090.15s (0:18:10).
+  - 164 passed in 128.91s.
+- Full suite on CI (`ci.yml` run 29826743288, PR #175)
+  - 1946 passed, 3 deselected in 120.81s; schema-drift guard green.
 - OFF-path prompt identity checked outside pytest as well: `build_coach_system()` for
   `tr`, `en`, and the invalid-language fallback is byte-identical to the same function
   loaded from `git show HEAD:app/prompts/system.py`.
