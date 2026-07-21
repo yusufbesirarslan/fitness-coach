@@ -1,84 +1,55 @@
-# Task 1 Report
+# Task 1 Report: Pin the Pre-PR4 Coach Context and Provider Payloads
 
-## Implementation Summary
+## Implementation
 
-- Updated `app/models.py` to extend `PumpCheck` with sharing and interaction fields:
-  - `visibility`
-  - `shared_friend_ids`
-  - `likes_count`
-  - `comments_count`
-- Added `PumpCheck.user` so the service layer can serialize owner information directly from the model instance.
-- Added new interaction models in `app/models.py`:
-  - `PumpCheckLike`
-  - `PumpCheckComment`
-- Created `app/services/pump_checks.py` with the Task 1 helper layer:
-  - `get_friend_ids`
-  - `can_view_pump_check`
-  - `pump_check_image_url`
-  - `serialize_pump_check_card`
-  - internal `sharing_status`
-- Added migration `migrations/versions/f2a3b4c5d6e7_pump_check_sharing.py` per the brief.
-- Added `tests/test_pump_check_sharing.py` covering defaults, friend resolution, visibility enforcement, and card serialization.
+- Added `tests/test_adaptive_plan_context.py` as a characterization-only test module.
+- Defined the exact UTF-8 `BASELINE_CONTEXT` produced by the current coach context builder when profile/trend and nudge inputs are empty and the remaining context sources return fixed sentinel values.
+- Added `_stub_baseline_context_sources` to isolate the existing context assembly from database-backed source functions without changing runtime code.
+- Characterized the current OpenAI message list, Bedrock plain system string, Bedrock cached content blocks, and identical provider context bytes.
+- No production code was modified.
 
-## Tests Run / Results
+## Test Commands and Results
 
-1. RED:
-   - Command: `python -m pytest tests/test_pump_check_sharing.py -v`
-   - Result: failed during collection
-   - Expected failure observed:
-     - `ImportError: cannot import name 'PumpCheckComment' from 'app.models'`
-   - Why this is the correct RED:
-     - The new models and helper module required by Task 1 did not exist yet.
+1. `python -m pytest tests/test_adaptive_plan_context.py::test_pre_pr4_context_bytes_are_characterized -v`
+   - Result: `1 passed, 6 warnings in 7.40s`.
+   - The planned golden context matched current runtime bytes; no fixture adjustment was needed.
+2. `python -m pytest tests/test_adaptive_plan_context.py -v`
+   - First provider run: `4 failed, 1 passed` because the fallback PowerShell patch transport had converted the newly appended `VERİSİ` literals to `VER?S?`. This was a test-file transport issue, not a runtime mismatch.
+   - Second provider run after the first encoding correction: `4 failed, 1 passed` because the transport had double-decoded those same literals to `VERÄ°SÄ°`.
+   - Final pre-commit run after forcing UTF-8 stdin for the patch engine: `5 passed, 6 warnings in 6.04s`.
+3. Fresh post-commit `python -m pytest tests/test_adaptive_plan_context.py -v`
+   - Result: `5 passed, 6 warnings in 6.36s`.
 
-2. GREEN:
-   - Command: `python -m pytest tests/test_pump_check_sharing.py -v`
-   - Result: `4 passed`
+All warnings are existing `datetime.datetime.utcnow()` deprecation warnings from test/application infrastructure outside this task.
 
-## TDD RED/GREEN Evidence
+## Characterization Evidence
 
-### RED
-
-- Test file was written before production changes.
-- The first test run failed before collection could complete because Task 1 types were missing from `app.models`.
-- This confirmed the test exercised new behavior that was not already implemented.
-
-### GREEN
-
-- After implementing the requested model, migration, and helper changes, the same test command passed:
-  - `tests/test_pump_check_sharing.py::test_pump_check_defaults_are_private_safe PASSED`
-  - `tests/test_pump_check_sharing.py::test_get_friend_ids_returns_accepted_friend_ids PASSED`
-  - `tests/test_pump_check_sharing.py::test_can_view_pump_check_enforces_visibility PASSED`
-  - `tests/test_pump_check_sharing.py::test_serialize_pump_check_card_exposes_requested_fields PASSED`
+- `fetch_coach_context(auth_user.id, "question", "tr")` equals `BASELINE_CONTEXT` both as a Python string and as UTF-8 encoded bytes.
+- OpenAI currently assembles two system messages followed by history and the current user question; its second system message is exactly `[KULLANICI VERİSİ]\n{BASELINE_CONTEXT}`.
+- Bedrock without prompt caching currently concatenates the coach system prompt, two newlines, and exactly the same user-data context string.
+- Bedrock with prompt caching currently returns two text blocks: the cached coach system prompt and the uncached user-data context string.
+- The OpenAI, Bedrock plain, and Bedrock cached payloads embed identical context bytes.
 
 ## Files Changed
 
-- `app/models.py`
-- `app/services/pump_checks.py`
-- `migrations/versions/f2a3b4c5d6e7_pump_check_sharing.py`
-- `tests/test_pump_check_sharing.py`
-- `.superpowers/sdd/task-1-report.md`
+- `tests/test_adaptive_plan_context.py` — created, 122 lines.
+- `.superpowers/sdd/task-1-report.md` — task handoff report; not part of the production/test commit.
+
+## Commit
+
+- `a6b9975 test: pin pre-PR4 coach context`
 
 ## Self-Review
 
-- Stayed within the Task 1 brief scope for implementation files.
-- Did not touch feed routes, workout route behavior, templates, or navigation.
-- Matched the requested helper interfaces and migration revision identifiers from the brief.
-- Added `PumpCheck.user` relationship because the requested serializer shape depends on `check.user`, and the existing model did not expose that relationship.
-- Kept tests focused on the new service/model surface rather than adjacent route behavior.
+- Compared the complete test file with the exact task brief; names, sentinel values, Turkish literals, payload shapes, and assertions match.
+- Confirmed the staged commit contained only `tests/test_adaptive_plan_context.py`.
+- Confirmed `git diff --name-only -- app` was empty before commit, so no production file changed.
+- Ran `git diff --cached --check` before committing; it reported no whitespace errors.
+- Tests assert real prompt/context assembly behavior. Monkeypatching is limited to deterministic source isolation and does not assert mock calls.
 
 ## Concerns
 
-- The GREEN test run passed with existing suite warnings about `datetime.utcnow()` deprecations from current repo code and from the new test timestamp setup. These warnings did not fail the test run.
-- The migration intentionally no-ops outside PostgreSQL, matching the task brief. SQLite test coverage therefore validates model/service behavior, not migration DDL execution.
-
-## Review Fixes
-
-- Updated `app/services/pump_checks.py` so `sharing_status()` returns a stable localization payload instead of hard-coded English UI copy:
-  - `{"key": "pump_check.sharing.<status>", "value": "<status>"}`
-- Updated `tests/test_pump_check_sharing.py` to assert the serializer now exposes localization-safe `sharingStatus` data.
-- Updated `migrations/versions/f2a3b4c5d6e7_pump_check_sharing.py` to create and drop `ix_pump_check_like_created_at`, matching `PumpCheckLike.created_at index=True`.
-
-### Review Fix Verification
-
-- Command: `python -m pytest tests/test_pump_check_sharing.py -v`
-- Result: `4 passed, 25 warnings`
+- No blocking implementation concerns.
+- The Windows sandbox helper (`codex-windows-sandbox-setup.exe`) was unavailable during the task. The parent-provided direct `apply_patch` engine workaround was used, with explicit UTF-8 stdin after detecting and correcting transport corruption.
+- Pytest emits six pre-existing `datetime.utcnow()` deprecation warnings.
+- Git reports that LF may be converted to CRLF if it later rewrites the new test file; the committed content and runtime UTF-8 assertions are correct.

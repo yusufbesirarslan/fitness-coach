@@ -653,3 +653,114 @@ Yes — an additive service package + hermetic tests + docs, plus one behavior-p
 convergence proven by characterization tests written against the old code. No
 schema/migration, no new route, no coach-prompt/UI change; the planner is dormant until
 a later PR consumes it.
+
+## Sprint 6 PR4 - AI Coach AdaptivePlan Integration
+
+Date: 2026-07-20 (prompt-authority remediation closed out 2026-07-21)
+Scope: First production runtime consumer of AdaptivePlan, behind one default-OFF flag.
+
+### What changed
+
+- Added the sole Version 1 AdaptivePlan prompt contract adapter.
+- Added strict `AI_ADAPTIVE_PLAN_CONTEXT` rollout/rollback gating.
+- Wired the shared context builder once for blocking/streaming and OpenAI/Bedrock.
+- Added complete neutral fallback and non-sensitive enabled-only debug lifecycle logs.
+- Added baseline/provider goldens and automated dependency/serializer ownership guards.
+- Made AdaptivePlan the sole planning authority of the enabled-path system prompt:
+  the two legacy rules that let the Coach set volume/intensity itself (injury item 4,
+  the weekly check-in bullet) are rewritten and an explicit authority block is
+  appended. OFF still returns the untouched legacy prompt.
+- Threaded that prompt switch as an explicit flag-driven argument from `ai_coach` into
+  `prompt_builder` (`ai_stream` inherits it), so user-written context text cannot
+  select the adaptive prompt or pass a forged plan block off as canonical.
+
+### Canonical consumer contract
+
+The Coach receives normalized plan and progression summary fields only. It is a
+read-only presenter and never re-derives or overrides decisions. The serializer is
+additive-only Version 1; future consumers use AdaptivePlan directly or this adapter.
+The presenter role is enforced in the prompt as well as in the block: enabled-path
+`build_coach_system(..., adaptive_plan_context=True)` forbids recomputing overload,
+deload, volume, intensity, and progression, so no second planning authority survives
+in the system prompt (docs/TRAINING_PLANNING.md, "Prompt authority").
+
+### Changed paths
+
+- `app/services/adaptive_plan_context.py` (created)
+- `app/config.py`
+- `app/services/context_builder.py`
+- `app/prompts/system.py`
+- `app/services/prompt_builder.py`
+- `app/services/ai_coach.py`
+- `tests/test_prompt_builder.py`
+- `tests/conftest.py`
+- `tests/test_adaptive_plan_context.py` (created)
+- `tests/test_dependency_boundaries.py`
+- `.env.example`
+- `tests/test_env_example.py`
+- `docs/TRAINING_PLANNING.md`
+- `docs/AI_ARCHITECTURE.md`
+- `CLAUDE.md`
+- `docs/handoff.md`
+
+### Inspected paths
+
+- `docs/handoff.md` (Sprint 6 PR1-PR3 sections)
+- `app/services/training_history/*`
+- `app/services/training_progression/*`
+- `app/services/training_planning/*`
+- `app/services/context_builder.py`
+- `app/services/ai_pipeline.py`
+- `app/services/ai_coach.py`
+- `app/services/prompt_builder.py`
+- `app/config.py` and `.env.example`
+- `tests/test_ai_coach.py`, `tests/test_ai_pipeline.py`, `tests/test_ai_stream.py`
+- `tests/test_prompt_builder.py`, `tests/test_dependency_boundaries.py`
+- `tests/test_training_history.py`, `tests/test_training_progression.py`,
+  `tests/test_training_planning.py`, and `tests/test_progress_api.py`
+- `docs/TRAINING_HISTORY.md`, `docs/TRAINING_PROGRESSION.md`, and
+  `docs/TRAINING_PLANNING.md`
+
+### Deliberately deferred
+
+- Tracking heatmap/insights raw readers, MCP raw SQL, analytics missing-log reader,
+  and ai_coach volume_lifted remain intentional debt.
+- No fatigue/recovery enrichment, per-lift intensity, UI, schema, or heuristic work.
+- The enabled path still shares one system prompt for every turn; a per-turn "is this
+  question about training?" gate is deliberately not modelled.
+- Forged context text can no longer select the adaptive prompt (the switch is
+  flag-driven), but an enabled-path context could still *contain* a second, forged
+  contract block. That is the pre-existing untrusted-context class the base prompt's
+  SECURITY rule and the FRIEND_DATA fence cover; no new mitigation was added here.
+
+### Exact next steps
+
+1. Read the Sprint 6 PR1-PR4 handoff sections before any next change.
+2. Keep AdaptivePlan as the single planning truth; use it directly or the canonical
+   Version 1 adapter—never add a competing serializer or decision ladder.
+3. Choose one explicitly scoped next consumer or one deferred reader convergence;
+   do not combine broad debt cleanup with a new adaptive feature.
+4. Preserve the default-OFF rollback until enabled-path rollout evidence is reviewed.
+
+### Independently safe to merge
+
+Yes: default-OFF byte identity is golden-pinned (context bytes and all three provider
+payload shapes, including the system prompt); the prompt switch is flag-driven, so no
+user-writable field can reach it; enabled failures return the complete neutral
+contract; no schema, heuristic, UI, or unrelated reader changed; flag OFF is the
+immediate rollback.
+
+### Verification evidence
+
+Re-measured on 2026-07-21 against the final tree (these supersede the pre-remediation
+counts; the older numbers predated the boundary-guard and prompt-authority tests).
+
+- `python -m pytest tests/test_adaptive_plan_context.py tests/test_dependency_boundaries.py tests/test_env_example.py tests/test_prompt_builder.py tests/test_ai_pipeline.py tests/test_ai_coach.py tests/test_ai_stream.py tests/test_coach_tools.py -q`
+  - 204 passed in 120.44s.
+- `python -m pytest tests/test_training_history.py tests/test_training_progression.py tests/test_training_planning.py tests/test_training_generation.py tests/test_training_routes.py tests/test_progress_api.py tests/test_tracking_routes.py -q`
+  - 163 passed in 143.36s.
+- `python -m pytest -q`
+  - 1935 passed, 3 deselected, 7983 warnings in 1090.15s (0:18:10).
+- OFF-path prompt identity checked outside pytest as well: `build_coach_system()` for
+  `tr`, `en`, and the invalid-language fallback is byte-identical to the same function
+  loaded from `git show HEAD:app/prompts/system.py`.

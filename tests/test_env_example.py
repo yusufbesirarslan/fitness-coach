@@ -93,3 +93,9 @@ def test_coach_turn_timeout_is_documented():
     assert _has_exact_commented_setting(
         ENV_EXAMPLE_SOURCE, "AI_COACH_TURN_TIMEOUT_SECONDS=90"
     )
+
+
+def test_adaptive_plan_context_flag_is_documented_default_off():
+    example = Path(".env.example").read_text(encoding="utf-8")
+    assert "# AI_ADAPTIVE_PLAN_CONTEXT=0" in example
+    assert "AI_ADAPTIVE_PLAN_CONTEXT=1" not in example

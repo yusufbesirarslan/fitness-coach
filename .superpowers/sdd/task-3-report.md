@@ -1,111 +1,187 @@
-# Task 3 Report: Feed Page, Feed API, Likes, and Comments
+# Task 3 Report: True Default-OFF Runtime Gate
 
-## Implementation summary
+## Status
 
-- Added `/feed` and `/feed/data` in `app/blueprints/social.py`.
-- Added like and unlike handlers at `/pump-check/<id>/like`.
-- Added comment list and create handlers at `/pump-check/<id>/comments`.
-- Reused existing Pump Check sharing helpers:
-  - `can_view_pump_check`
-  - `serialize_pump_check_card`
-  - `get_friend_ids`
-- Created `templates/feed.html` with the existing app shell, feed card rendering, pagination fetch, and like interaction.
-- Extended `tests/test_pump_check_sharing.py` with feed, like, and comment coverage.
-- Added feed locale keys in `locales/en.json` and `locales/tr.json`.
-- Added missing `pump.not_found` locale key in both locale files because the route implementation uses it and it was not present.
+Implementation, independent review, focused verification, and the scoped commit are complete.
 
-## TDD RED/GREEN evidence
+## Commit
+
+- `a10095c feat: gate adaptive coach context`
+
+## Scope Implemented
+
+- Added the sole `AI_ADAPTIVE_PLAN_CONTEXT` environment/config gate.
+- The gate is strict opt-in and defaults to false (`"0"`).
+- Added the sole enabled-only adapter call in `fetch_coach_context`.
+- Injection occurs once after workout history and before supplements.
+- The disabled branch has no adapter import, call, log, placeholder, or prompt block.
+- Prompt-builder and provider code were not modified.
+- The Task 2 adapter contract was not modified.
+
+## TDD Evidence
 
 ### RED
 
-After adding the new tests first, I ran:
+Command:
 
-```bash
-python -m pytest tests/test_pump_check_sharing.py -v
+```powershell
+python -m pytest tests/test_adaptive_plan_context.py -k "flag or provider_parity or empty_history or user_scoped" -v
 ```
 
-Result:
+Result: **3 failed, 3 passed, 17 deselected**.
 
-- 4 failed, 13 passed
-- Failing tests:
-  - `test_feed_data_shows_current_user_and_friend_feed_posts`
-  - `test_feed_page_renders`
-  - `test_like_create_and_delete_updates_count`
-  - `test_comment_requires_visibility_and_updates_count`
-- Expected failure reason:
-  - `/feed` returned 404
-  - `/feed/data` returned 404
-  - `/pump-check/<id>/like` returned 404
-  - `/pump-check/<id>/comments` returned 404
+Expected failures:
 
-### GREEN
+1. `test_switching_flag_off_restores_exact_baseline`: enabled context did not contain the adaptive test block.
+2. `test_flag_on_injects_once_after_workout_history`: adapter call list remained empty.
+3. `test_empty_history_enabled_returns_complete_neutral_contract`: adaptive contract block was absent.
 
-After implementing the routes, template, and locale updates, I ran:
+Expected existing/characterization passes:
 
-```bash
-python -m pytest tests/test_pump_check_sharing.py -v
+- OFF exact-baseline/zero-activity test already passed because the pre-change path had no adaptive integration.
+- User-scoping adapter coverage already passed from Task 2.
+- The initial provider-parity assertion passed vacuously because it compared providers around the same baseline context without first proving adaptive content was present. Review caught this test weakness; the test was strengthened with `assert context.count("[ADAPTIVE TEST BLOCK]") == 1` and rerun successfully.
+
+### First GREEN
+
+After the minimal config, test-env, and shared context-builder integration changes:
+
+```powershell
+python -m pytest tests/test_adaptive_plan_context.py -v
 ```
 
-Final result:
+Result: **23 passed, 45 warnings**.
 
-- 17 passed
-- 0 failed
-- Existing warnings remained, but there were no test failures
+This included all five original pre-PR4 baseline characterizations unchanged and byte-identical.
 
-## Tests run and results
+### Strengthened parity and fallback continuation GREEN
 
-1. `python -m pytest tests/test_pump_check_sharing.py -v`
-   - Initial run timed out in the harness before completion
-2. `python -m pytest tests/test_pump_check_sharing.py -v`
-   - RED confirmed: 4 failed, 13 passed
-3. `python -m pytest tests/test_pump_check_sharing.py -v`
-   - GREEN confirmed: 17 passed
-4. `python -m pytest tests/test_pump_check_sharing.py -v`
-   - Re-run after adding `pump.not_found` locale keys: 17 passed
+Added the explicit adaptive-presence parity assertion and the planner-failure continuation regression, then ran:
 
-## Files changed
+```powershell
+python -m pytest tests/test_adaptive_plan_context.py -v
+```
 
-- `app/blueprints/social.py`
-- `templates/feed.html`
-- `tests/test_pump_check_sharing.py`
-- `locales/en.json`
-- `locales/tr.json`
+Result: **24 passed, 51 warnings**.
 
-## Self-review
+The fallback regression proves that planner failure yields the complete neutral JSON contract and preserves later supplement, nutrition, and friend-activity sections.
 
-- Scope stayed within the Task 3 files plus the task report.
-- Feed data is limited to accepted friends plus the current user.
-- Feed ordering matches the brief: newest first using `created_at desc, id desc`.
-- Like creation is idempotent for repeated POSTs from the same user.
-- Unlike clamps the counter at zero.
-- Comment creation enforces visibility, empty-body rejection, and 500-character max length.
-- The feed template intentionally does not implement chat card rendering, gallery, training modal UI, or navigation replacement.
+## Final Focused Regression Evidence
+
+Command:
+
+```powershell
+python -m pytest tests/test_adaptive_plan_context.py tests/test_prompt_builder.py tests/test_ai_pipeline.py tests/test_ai_coach.py tests/test_ai_stream.py -q
+```
+
+Initial result: **134 passed, 352 warnings in 16.78s**; exit code 0.
+
+Fresh pre-commit result after final file normalization: **134 passed, 352 warnings in 22.59s**; exit code 0.
+
+No external service calls were observed.
+
+## Files Changed
+
+- `app/config.py`
+  - Added strict default-OFF env constant.
+  - Published the constant through `configure_app`.
+- `app/services/context_builder.py`
+  - Added one enabled-only local adapter import/call after workout history and before supplements.
+- `tests/conftest.py`
+  - Forced the gate to `0` before importing the app package for hermetic default-OFF tests.
+- `tests/test_adaptive_plan_context.py`
+  - Added OFF zero-cost/byte rollback tests.
+  - Added enabled ordering, call-once, provider parity, neutral history, and user isolation coverage.
+  - Added planner-fallback continuation coverage.
+  - Strengthened provider parity to prove the adaptive block is present exactly once.
+
+The pre-existing dirty changes in `.superpowers/sdd/task-1-report.md` and `.superpowers/sdd/task-2-report.md` were left untouched and will not be staged in the Task 3 commit.
+
+## Self-Review
+
+- Gate name is exactly `AI_ADAPTIVE_PLAN_CONTEXT`; no alternate gate exists.
+- Env parsing is strict (`== "1"`) and defaults false.
+- `current_app.config.get(..., False)` also remains safe if configuration is absent.
+- OFF path performs no adaptive module import, adapter work, log, or prompt mutation.
+- Enabled adapter call is shared in `context_builder`, so provider-specific branches were unnecessary and remain untouched.
+- Adapter result is appended exactly once in the required order.
+- Task 2 public adapter interface remains unchanged.
+- No `else`, disabled log, placeholder, alternate serializer, or provider-specific logic was added.
+- `git diff --check` passed after adding the final newline.
+- Only the four required implementation/test files are intended for staging.
+
+## Independent Review
+
+A read-only reviewer inspected the four-file scoped diff against `6d24339` and the Task 3 brief.
+
+- Critical issues: none.
+- Important issues: none.
+- Minor issues: none.
+- Verdict: ready.
+- Optional, non-blocking suggestion: add an isolated config parser test for absent/`"1"` values. This was not added because the exact implementation is already specified by the brief and exercised through the default-OFF and enabled integration suite.
 
 ## Concerns
 
-- The new feed template includes a comments button label but no comments UI flow beyond the required route wiring. That matches the brief’s stated exclusions.
-- The targeted test file passes, but I did not run the full repository test suite.
+- The focused suite emits pre-existing Python 3.14 `datetime.utcnow()` and SQLAlchemy-related deprecation warnings (352 total); there were no failures and these warnings are outside Task 3 scope.
+- The dedicated filesystem patch helper could not launch because `codex-windows-sandbox-setup.exe` was unavailable. Guarded, exact text edits were therefore applied outside that broken helper and validated through syntax checks, scoped diffs, `git diff --check`, and the requested test suites.
+## Review Fix: Prove the Absent-Environment Default
 
-## Review follow-up fixes
+Review-fix commit: `4a1f1cf test: prove adaptive context defaults off`
+The controller review identified that the original tests forced `AI_ADAPTIVE_PLAN_CONTEXT="0"` in `tests/conftest.py` or set Flask config directly, so they did not catch a regression in the `os.getenv` fallback itself.
 
-- Updated the shared partials only:
-  - `templates/_actionbar.html` now points the fourth tab at `/feed` and labels it with `nav.feed`.
-  - `templates/_nav.html` now exposes both `/feed` and `/leaderboard` from the shared drawer.
-- Added a usable comments panel in `templates/feed.html`:
-  - clicking the comments action opens a dark modal sheet
-  - loads `GET /pump-check/<id>/comments`
-  - posts with `POST /pump-check/<id>/comments`
-  - refreshes the list and updates the visible comment count on the card
-- Hardened `POST /pump-check/<id>/like` in `app/blueprints/social.py`:
-  - catches `IntegrityError`
-  - rolls back the session
-  - reloads the `PumpCheck`
-  - returns `{"liked": true, "likesCount": ...}` instead of surfacing a 500 on duplicate-like races
-- Added focused regression coverage in `tests/test_pump_check_sharing.py`:
-  - `/feed` HTML now proves shared partial output includes `/feed` and `/leaderboard`
-  - duplicate-like integrity handling is exercised by forcing the existence check to miss while a unique like row already exists
+### Test Added
 
-## Review follow-up test result
+`test_adaptive_context_config_is_off_when_unset_or_zero` runs `app/config.py` in an isolated subprocess for two cases: the variable is absent, and it is explicitly `"0"`. The subprocess:
 
-- `python -m pytest tests/test_pump_check_sharing.py -v`
-  - PASS: 19 passed
+- uses Python `-I` isolated mode;
+- removes `PYTHONPATH` and `AI_ADAPTIVE_PLAN_CONTEXT` from its inherited environment;
+- runs from a pytest temporary directory;
+- replaces `dotenv.load_dotenv` with a no-op module before `runpy.run_path`, preventing any developer `.env` from influencing the probe;
+- leaves the already-imported shared `app.config` module untouched.
+
+No runtime code was changed by this fix.
+
+### Mutation RED Evidence
+
+The runtime fallback was temporarily changed from `"0"` to `"1"` inside a guarded try/finally, the narrow test was run, and the original file was restored byte-for-byte before the command returned.
+
+```powershell
+python -m pytest tests/test_adaptive_plan_context.py -k "adaptive_context_config_is_off_when_unset_or_zero" -v
+```
+
+Result against the temporary mutant: **1 failed, 1 passed, 24 deselected in 5.34s**.
+
+- Absent environment: failed because the loaded constant was `True`.
+- Explicit `"0"`: passed.
+
+This demonstrates that the new test detects the exact reviewed regression.
+
+### Restored GREEN Evidence
+
+After confirming `app/config.py` was restored to `os.getenv("AI_ADAPTIVE_PLAN_CONTEXT", "0") == "1"`, the same command produced:
+
+**2 passed, 24 deselected in 6.45s**.
+
+Full adaptive test file:
+
+```powershell
+python -m pytest tests/test_adaptive_plan_context.py -v
+```
+
+Result: **26 passed, 51 warnings in 10.52s**.
+
+Focused Coach/pipeline regression:
+
+```powershell
+python -m pytest tests/test_adaptive_plan_context.py tests/test_prompt_builder.py tests/test_ai_pipeline.py tests/test_ai_coach.py tests/test_ai_stream.py -q
+```
+
+Result: **136 passed, 352 warnings in 22.37s**.
+
+### Review-Fix Self-Review
+
+- The test exercises the real `app/config.py` source in a new interpreter.
+- It proves both absent-env default OFF and explicit `"0"` OFF.
+- It does not mutate the parent process environment or shared imported config module.
+- It cannot load the repository/developer `.env` through `python-dotenv`.
+- The temporary mutation was restored, and `git diff -- app/config.py` is empty.

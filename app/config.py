@@ -82,6 +82,9 @@ BEDROCK_ENABLED = os.getenv("BEDROCK_ENABLED", "0") == "1"  # açık opt-in; pro
 # tanımları önbelleğe alınır; deploy bölgesinde (eu-central-1) doğrulanana kadar
 # KARANLIK gönder (varsayılan kapalı). Yalnızca tool-use koç döngüsünü etkiler.
 BEDROCK_PROMPT_CACHE = os.getenv("BEDROCK_PROMPT_CACHE", "0") == "1"
+# Sprint 6 PR4: deterministic AdaptivePlan context for AI Coach. Strict opt-in:
+# OFF preserves the pre-PR4 prompt/context path exactly.
+AI_ADAPTIVE_PLAN_CONTEXT = os.getenv("AI_ADAPTIVE_PLAN_CONTEXT", "0") == "1"
 # ── Sprint 4 WS1: AI koç kalıcı konuşma hafızası ──
 # Operasyonel kapatma anahtarı: 0 → eski davranış (yalnızca widget'ın gönderdiği
 # kısa geçmiş; DB'ye tur yazılmaz). Tablolar expand-only olduğundan geri açmak güvenli.
@@ -272,6 +275,7 @@ def configure_app(app):
         }
     app.config["AI_PLAN_QUOTA_ENABLED"] = AI_PLAN_QUOTA_ENABLED
     app.config["AI_CHAT_QUOTA_ENABLED"] = AI_CHAT_QUOTA_ENABLED
+    app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = AI_ADAPTIVE_PLAN_CONTEXT
     app.config["AI_MEMORY_ENABLED"] = AI_MEMORY_ENABLED
     app.config["LOGIN_FAIL_CLOSED"] = LOGIN_FAIL_CLOSED
     app.config["BEDROCK_ENABLED"] = BEDROCK_ENABLED
