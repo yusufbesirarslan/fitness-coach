@@ -20,6 +20,7 @@ key. See tests/test_training_page_characterization.py.
     python -m pytest tests/test_weekly_program_ui.py -v
 """
 import ast
+import json
 import re
 from pathlib import Path
 
@@ -108,7 +109,9 @@ def test_on_shell_is_empty_and_semantic(app, render_training):
     match = re.search(r"<section[^>]*\bdata-weekly-program-mount\b[^>]*>(.*?)</section>",
                       html, re.DOTALL)
     assert match, "mount shell not found"
-    assert match.group(1) == ""
+    assert match.group(1).count("data-weekly-program-copy") == 1
+    assert '<script type="application/json"' in match.group(1)
+    assert not re.search(r"<(?:button|a|input)\b", match.group(1))
     assert 'aria-hidden="true"' in match.group(0)
     assert "aria-live" not in match.group(0)
     assert "role=" not in match.group(0)
@@ -126,7 +129,11 @@ def test_on_shell_sits_inside_the_active_plan_view(app, render_training):
 
 @pytest.mark.parametrize("field", RECOMMENDATION_FIELDS)
 def test_on_embeds_no_recommendation_data(app, render_training, field):
-    assert field not in render_training(app, enabled=True)
+    html = render_training(app, enabled=True)
+    without_copy = re.sub(
+        r'<script type="application/json" data-weekly-program-copy>.*?</script>',
+        "", html, flags=re.DOTALL)
+    assert field not in without_copy
 
 
 def test_on_embeds_no_payload_endpoint_or_identifiers(app, render_training):
@@ -192,10 +199,14 @@ def test_on_is_the_off_document_plus_the_shell_and_script_only(app, render_train
     off = strip_v(render_training(app, enabled=False)).splitlines()
     on = strip_v(render_training(app, enabled=True)).splitlines()
     added = [line for line in on if line not in off]
-    assert added == [
-        '        <section id="weekly-program" data-weekly-program-mount aria-hidden="true"></section>',
-        '<script src="/static/weekly_program.js?v=<B>"></script>',
-    ]
+    assert len(added) == 4
+    assert added[0] == (
+        '        <section id="weekly-program" data-weekly-program-mount aria-hidden="true">')
+    assert re.fullmatch(
+        r'\s*<script type="application/json" data-weekly-program-copy>.+</script>',
+        added[1])
+    assert added[2:] == ['        </section>',
+                         '<script src="/static/weekly_program.js?v=<B>"></script>']
     assert [line for line in off if line not in on] == []
 
 
@@ -287,3 +298,54 @@ def test_page_view_issues_no_extra_query(app, client, make_user, login):
     assert len(on_statements) == len(off_statements)
     assert not [s for s in on_statements if "workout_log" in s.lower()]
     assert not [s for s in on_statements if "training_plan" in s.lower()]
+
+
+def _copy_payload(html):
+    match = re.search(
+        r'<script type="application/json" data-weekly-program-copy>(.*?)</script>',
+        html, re.DOTALL)
+    assert match, "feature copy bundle not found"
+    return json.loads(match.group(1))
+
+
+def test_off_emits_no_feature_copy_namespace(app, render_training):
+    html = render_training(app, enabled=False)
+    assert "data-weekly-program-copy" not in html
+    assert '"weekly_program.' not in html
+
+
+def test_on_copy_bundle_is_complete_localized_and_not_visible_markup(
+        app, render_training):
+    html = render_training(app, enabled=True)
+    payload = _copy_payload(html)
+    from app.i18n import catalog
+
+    expected = {
+        key for key in catalog("tr")
+        if key.startswith("weekly_program.")
+    } | {"training.weekly_program"}
+    assert set(payload) == expected
+    assert all(isinstance(value, str) and value.strip() for value in payload.values())
+    assert all(value != key for key, value in payload.items())
+
+    visible = re.sub(
+        r'<script type="application/json" data-weekly-program-copy>.*?</script>',
+        "", html, flags=re.DOTALL)
+    assert '"weekly_program.' not in visible
+
+
+def test_copy_bundle_tojson_escapes_hostile_plain_text(
+        app, render_training, monkeypatch):
+    import app.i18n as i18n
+
+    hostile = 'T\u00fcrk\u00e7e "quote" <tag> & </script><script>alert(1)</script>'
+    monkeypatch.setitem(i18n._CATALOG["tr"], "weekly_program.loading", hostile)
+    html = render_training(app, enabled=True)
+    section = re.search(
+        r"<section[^>]*\bdata-weekly-program-mount\b[^>]*>.*?</section>",
+        html, re.DOTALL).group(0)
+
+    assert hostile not in section
+    assert section.count("</script>") == 1
+    assert "\\u003c" in section and "\\u003e" in section and "\\u0026" in section
+    assert _copy_payload(html)["weekly_program.loading"] == hostile

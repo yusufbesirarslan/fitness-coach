@@ -129,7 +129,7 @@ def inject_i18n():
         # HAM dict döndür; şablonda `|tojson` kullanılır (json.dumps+|safe DEĞİL).
         # `|tojson` `<`, `>`, `&`, U+2028/2029'u kaçırır → inline <script> içine
         # güvenli gömülür; ham json.dumps `</script>` dizisini kaçırmıyordu (S2).
-        "i18n_catalog": catalog(loc),
+        "i18n_catalog": catalog(loc, exclude_prefixes=("weekly_program.",)),
     }
 
 

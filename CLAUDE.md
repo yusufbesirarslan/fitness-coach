@@ -1,5 +1,8 @@
 # Fitness Coach (FitX)
 
+- Weekly-program istemci entegrasyonu (Sprint 6 PR6.2) ? varsay?lan KAPALI `WEEKLY_PROGRAM_UI_ENABLED` a??ld???nda mevcut `window.FitXWeeklyProgram.init(root)->boolean` s?n?r? tek `GET /api/training/weekly-program` ?a?r?s?yla salt-okunur kart? y?kler. Durumlar: idle/loading/populated/insufficient_data/missing_baseline/error/malformed; retry e?zamanl? iste?i engeller, eski i?eri?i loading ile temizler ve request-generation korumas? bayat tamamlanmay? engeller. Payload kanonik planner enumlar?/booleanlar/s?ral? reason+explanation anahtarlar?/?ift null veya pozitif hacimler/ger?ek ISO tarih i?in do?rulan?r; bilinmeyen top-level alanlar ve string `unsupported` de?erleri eklemeli evrim olarak kabul edilir. ?stemci HEDEF/PENCERE/DELTA hesaplamaz; tarih ve delta g?stermez. DOM yaln?zca createElement/textContent/replaceChildren ile kurulur. `weekly_program.*` TR/EN copy global `window.I18N`'den ??kar?l?r, yaln?zca ON mount i?inde g?venli application/json + tojson blokla verilir; OFF yol feature copy/markup/script/request/bo?luk almaz. CSS yaln?zca `.weekly-program-*`, 640 px breakpoint + ortak card/btn/skeleton/token kullan?r. PR6.3 canl? browser/mobile a11y, cache/privacy, observability, SQL/perf, d?rt-y?nl? runtime flag matrisi ve production-readiness denetimini tutar.
+
+
 Flask + SQLAlchemy + Bedrock/Claude Sonnet (primary heavy AI path) + OpenAI
 (fallback/light paths, `gpt-4o-mini`) + FatSecret API proxy + Cognito (native
 backend API — Hosted UI/OIDC KAPALI) + S3 avatar/meal image storage + Redis.

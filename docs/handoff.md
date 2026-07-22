@@ -1,5 +1,47 @@
 # Phase 6 - Authentication, Onboarding & Security Handoff
 
+
+## Sprint 6 PR6.2 ? Adaptive Weekly Program client integration
+
+1. **Baseline.** Branch `sprint6-pr6.2-weekly-program-client` was created in the isolated worktree `C:\Users\yusuf\.worktrees\sprint6-pr6.2-weekly-program-client` from `origin/main` at `195fd40`; the unrelated primary checkout was not modified.
+2. **Scope.** This PR is a read-only browser consumer. No route, service, schema, migration, prompt, provider, logging, workout-plan control, or navigation behavior changed.
+3. **Flag-OFF contract.** OFF still emits no mount, feature copy, feature script, request, or feature-specific namespace. The normalized whole-document delta and the exact `#wstats` to `.apv-meta-row` seam remain characterized.
+4. **Data source.** The sole source is `GET /api/training/weekly-program`; there are no parameters, alternate endpoints, writes, user identifiers, or tokens.
+5. **Copy transport.** ON emits one non-executable `script[type=application/json][data-weekly-program-copy]` inside the existing mount, encoded with Jinja `tojson`.
+6. **Shared catalog API.** `catalog(locale=None, *, exclude_prefixes=())` preserves default output order/content, returns fresh dictionaries, does not mutate locale storage, and supports isolated multiple-prefix exclusion.
+7. **Global locale isolation.** `window.I18N` excludes `weekly_program.*`; `training.weekly_program` and all unrelated existing keys remain available.
+8. **Locale coverage.** TR/EN catalogs carry matching non-empty plain-text keys for loading, six focuses, three volume actions, three intensity actions, metrics, eight reasons, neutral/missing/error/malformed states, and retry.
+9. **Escaping coverage.** Unicode, quotes, angle brackets, ampersands, and `</script>`-like hostile content round-trip through the inert JSON block without creating executable markup.
+10. **Initialization API.** `window.FitXWeeklyProgram.init(root) -> boolean` remains stable, uses the DOM initialization marker, and repeated calls are inert.
+11. **Initial transition.** First initialization removes `aria-hidden`, adds the card classes, enters `idle`, then synchronously replaces the inert copy node with `loading`.
+12. **Request contract.** Loading issues exactly one `fetch(ENDPOINT, {method: 'GET', headers: {'Accept': 'application/json'}})`.
+13. **States.** `data-weekly-program-state` records `idle`, `loading`, `populated`, `insufficient_data`, `missing_baseline`, `error`, or `malformed`.
+14. **Concurrency.** One in-memory `activeRequest` guard prevents overlapping loads and duplicate retry requests.
+15. **Stale completion.** A monotonically increasing request generation is captured per load; generation checks prevent an older completion from replacing a newer state. The retained retry-button double-click scenario proves only one newer request starts.
+16. **Retry.** Error and malformed states render one native retry button. Retry immediately clears prior content, removes the button from the live DOM, re-enters loading, and makes exactly one additional request.
+17. **Transport failures.** Network rejection, redirect/login navigation, non-2xx status, and non-JSON bodies enter the localized `error` state without backend detail or payload logging.
+18. **Malformed failures.** A successful JSON response that violates the client contract enters the distinct localized `malformed` state.
+19. **Object contract.** The response must be a plain object with a nonnegative integer `weeks`, boolean `has_data`, canonical decision enums, finite delta, boolean readiness fields, and string arrays.
+20. **Canonical enums.** The allowlists were verified directly against `training_planning`: focuses `insufficient_data/build_consistency/deload/maintenance/overload/steady`; volume `increase/hold/decrease`; intensity `progress/hold/deload`.
+21. **Reason contract.** Only the eight published reason codes are accepted, in received order. Explanation keys must be the matching focus key followed one-to-one by matching reason keys.
+22. **Volume/date contract.** Baseline and target are both null or both finite positive numbers. Null metrics require a null date; populated metrics require a real canonical `YYYY-MM-DD` date.
+23. **Additive evolution.** Unknown top-level fields and unknown string values in `unsupported` are accepted; unknown advice-driving enum/reason/explanation values remain malformed.
+24. **Insufficient data.** `has_data=false` renders localized guidance only, with no metrics or action advice.
+25. **Missing baseline.** Data with paired null metrics renders distinct missing-baseline guidance plus canonical focus/actions, without zero, percentage, or target reconstruction.
+26. **Populated state.** Valid populated data renders focus, both server-supplied volumes, both actions, and reasons in backend order.
+27. **Formatting.** `Intl.NumberFormat` uses `tr-TR` or `en-US`, at most two decimals, followed by the localized kg unit.
+28. **Intentional omissions.** The client validates but does not display `baseline_week_start` or `volume_delta_pct`; it performs no target or seven-day arithmetic and does not sort explanations.
+29. **Safe DOM.** Rendering uses `createElement`, `textContent`, attributes, `append`, and `replaceChildren`; unsafe HTML APIs, eval/Function, storage, timers, polling, and cancellation are absent.
+30. **Accessibility.** There is one section heading, loading uses `role=status`, error/malformed use `role=alert`, hidden content is not focusable, and retry has a visible focus style plus 44 px minimum height.
+31. **Responsive CSS.** Only `.weekly-program-*` rules were added to `training.css`; metrics/actions use two columns where possible and one column at the existing 640 px breakpoint, with `min-width:0`, wrapping, and shared skeleton/reduced-motion behavior.
+32. **Focused client evidence.** `tests/test_weekly_program_ui_js.py` passes 103 source and Node behavior tests, including all focus/action mappings, TR/EN formatting, ordered reasons, neutral/missing separation, failures, malformed cases, additive fields, retry, request counts, and CSS guards.
+33. **Prescribed regression.** The exact targeted command from the PR6.2 plan completed with **423 passed, 0 failed**.
+34. **Full suite.** Fresh `python -m pytest -q` completed with **2,244 passed, 3 deselected, 0 failed** in 217.39 seconds.
+35. **Asset impact.** `weekly_program.js` changed from 2,248 to 12,144 bytes (+9,896); `training.css` changed from 24,398 to 26,741 bytes (+2,343). OFF requests neither feature JavaScript nor feature copy.
+36. **Static/self-review.** `node --check`, locale JSON parsing/parity, security source guards, dependency boundaries, and `git diff --check` are clean. Review classifications: High none; Medium none; Low none in scope; Technical Debt is the pre-existing datetime deprecation warning set; Nice-to-have live visual validation is deferred.
+37. **PR6.3 and delivery.** PR6.3 retains live browser/mobile accessibility validation, cache/privacy headers, observability decisions, SQL/performance audit, the four-way runtime flag matrix, and production-readiness audit. No push or pull request was performed.
+
+
 Date: 2026-07-09
 Scope: Landing, login, register, email verification, onboarding, frontend auth hardening.
 
