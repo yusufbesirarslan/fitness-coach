@@ -34,7 +34,9 @@ future intelligence work has a single, stable contract.
   "session completed" marker row. Callers must not re-hardcode the constant.
 - `total_volume(entries)` / `total_sets(entries)` — sums over **real** entries (markers excluded).
 - `session_days(entries)` / `count_sessions(entries)` — distinct trained days (marker or real).
-- `weekly_windows(end_day, weeks)` — week-start dates, oldest first.
+- `weekly_windows(end_day, weeks)` — week-start dates for the last `weeks` **trailing**
+  7-day windows, oldest first. The newest window *ends* on `end_day`
+  (`[end_day - 6, end_day]`); windows are contiguous and none reaches past `end_day`.
 - `bucket_by_week(entries, end_day, weeks) -> list[WeeklyVolume]` — non-overlapping 7-day buckets.
 - `volume_trend(weekly) -> "up" | "flat" | "down"` — earliest→latest active-week volume, ±5% band.
 - `estimated_1rm(weight_kg, reps) -> float` — Epley `w*(1 + reps/30)`; a minimal building
@@ -45,6 +47,20 @@ future intelligence work has a single, stable contract.
 
 ## Rules & assumptions
 
+- **Windows are trailing observations.** A "week" is a complete 7-day period that has
+  actually been lived, so the newest window ends on `end_day` rather than starting on
+  it. `weekly_windows` is the **single owner** of this geometry — every layer above
+  (`training_progression`, `training_planning`, `weekly_program`) composes it and none
+  re-derives or locally adjusts a window.
+
+  Until 2026-07-22 the newest window *started* on `end_day` (`[today, today + 6]`).
+  History can never contain future entries, so that bucket only ever held `end_day`'s
+  own entries while presenting itself as a week: one day of training read as a whole
+  week's volume, and a rest day read as a zero week. That produced two live defects —
+  `detect_deload_due` could only fire on days the user had already trained
+  (`NEEDED_FIXES.md` #5), and `GET /api/training/weekly-program` published a single
+  session as `baseline_weekly_volume`. Both were fixed by making the geometry trailing;
+  no threshold or heuristic changed.
 - **Time:** `WorkoutLog.created_at` is naive UTC with no day-key column. Istanbul-day
   boundaries are always derived via `app.timeutil.utc_day_bounds` / `app_date_of` — never
   compare `created_at` raw.

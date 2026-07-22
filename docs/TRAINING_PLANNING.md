@@ -253,6 +253,13 @@ The two consumers do not compete:
 | Output | Serialized v1 JSON block | Frozen `WeeklyProgramRecommendation`, projected to a dict at the edge |
 | Audience | Coach system prompt | HTTP clients (`GET /api/training/weekly-program`) |
 | Gate | `AI_ADAPTIVE_PLAN_CONTEXT` (default OFF) | none — `@require_auth` only; no flag needed for a read-only surface |
+| Versioning | `schema_version: 1`, additive-only | none — additive-only by rule; see `docs/WEEKLY_PROGRAM.md` (F5) |
+| On planner failure | Neutral contract + session rollback, so the coach still answers | Structured JSON 500 — a neutral recommendation is a valid user state and must not stand in for an outage |
+
+The failure difference is deliberate, and it follows from the audience. The coach
+degrades usefully with a neutral block; an API client cannot tell a neutral
+recommendation caused by an outage apart from one caused by an empty history, so the
+endpoint reports the failure instead of disguising it.
 
 `adaptive_plan_context` remains the **sole** owner of any `AdaptivePlan` → JSON
 serialization; PR5's `payload.py` serializes the *recommendation*, never the plan, and

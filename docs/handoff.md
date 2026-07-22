@@ -906,13 +906,13 @@ cannot yet support.
   PR3) — `locales/*.json` work for a UI PR.
 - **`session_frequency` / `intensity_magnitude`** stay unsupported until
   `AdaptivePlan` models them; `WorkoutLog` has no per-set granularity.
-- **Inherited: `NEEDED_FIXES.md` finding #5** — `detect_deload_due` is effectively
-  gated on "trained today" because `weekly_windows` makes the newest window
-  forward-looking (`[today, today+6]`). Consequence here: `week_focus == "deload"`
-  will rarely appear against a live clock. PR5 is forbidden from touching progression
-  heuristics, so the deload path is covered with an explicit `end_day` instead. Note
-  the same forward window also empties the newest volume bucket on untrained days —
-  the skip-zero-volume baseline rule absorbs that gracefully.
+- ~~**Inherited: `NEEDED_FIXES.md` finding #5**~~ — *superseded by the post-audit
+  remediation below.* This was recorded as inherited debt on the grounds that PR5 must
+  not touch progression heuristics. The production-readiness audit then showed the same
+  forward-looking window was also corrupting **this layer's own published contract**
+  (a single day's session republished as `baseline_weekly_volume`), which made it PR5's
+  concern. It is now fixed upstream in `weekly_windows`, with no heuristic change — see
+  *Post-audit remediation* below.
 - Unconverged raw readers from PR1-PR4 are unchanged: `tracking.py` heatmap/insights
   sub-blocks, `fitx_mcp/server.py` (raw SQL, standalone — leave last),
   `analytics_engine._check_missing_logs`, `ai_coach._tool_get_progress_metric`
@@ -1111,3 +1111,181 @@ UI, no provider change, and no edit to any existing route, heuristic, or runtime
 endpoint, so the blast radius is the endpoint itself; the rollback is deleting the route
 and the package. `AdaptivePlan` remains the sole planning authority: the endpoint
 decides nothing, and the AST guards fail if it ever starts to.
+
+### Part 3 — post-audit remediation (window geometry, fixtures, F4-F6)
+
+Date: 2026-07-22. Same branch. The combined PR5 production-readiness audit (parts 1 + 2)
+returned one **High** finding and several minor ones; this subsection records the
+remediation. It **supersedes the Part 1 statement that `NEEDED_FIXES.md` #5 is inherited
+debt** — it is now fixed — and the Part 2 statement that the route propagates failures
+to the global handler.
+
+#### F1 (High) — the root cause, and why it became PR5's problem
+
+`weekly_windows(end_day, weeks)` made the newest window *start* on `end_day`, so it
+covered `[today, today + 6]`. History can never contain future entries, so that bucket
+only ever held **today's** entries while presenting itself as a week. Because
+`select_volume_baseline` scans newest-first for positive volume, it preferred that
+partial bucket whenever the user had already trained that day:
+
+- A Mon/Wed/Fri user at ~5000 kg a session has a 15000 kg week. Asked on a day they had
+  trained, the endpoint published `baseline_weekly_volume: 5000.0` — understated by the
+  user's training frequency — and `target_weekly_volume` derived from it.
+- `baseline_week_start` named a window running six days into the future.
+- The published target *fell* the moment the user logged the day's first set (before:
+  the empty newest bucket was skipped and last week's real total was used; after: the
+  single session won). Worse than being consistently wrong.
+
+This geometry was already recorded as `NEEDED_FIXES.md` #5, rated *Low / Suspected*
+**explicitly because the layer was "not yet wired into runtime"**. PR5 part 2 removed
+that basis. Part 2 is also what turned the geometry into a user-facing absolute number,
+which is why the fix belongs with PR5 even though the defective line is upstream.
+
+**Fix — at the ownership boundary, not in the consumer.** `weekly_windows` now returns
+trailing windows: the newest one *ends* on `end_day` (`[end_day - 6, end_day]`), each
+earlier one 7 days before the next. It remains the single owner of window geometry —
+`bucket_by_week`, `weekly_best_estimated_1rm`, `build_training_history_summary` and
+`build_progression_report` all compose it and needed no change (the report builders
+fetch `[starts[0], end_day]`, which simply widens from 22 to 28 days for `weeks=4`).
+
+`weekly_program` deliberately gained **no** windowing logic. Teaching it to "skip the
+current partial window" would have created a second windowing rule inside the one layer
+whose entire contract is that it has none.
+
+**One cause, both symptoms.** The same change also fixes `NEEDED_FIXES.md` #5:
+`detect_deload_due` rejects a block containing a rest week, and the phantom empty newest
+bucket made every rest day look like one — so deload could only fire on days the user
+had already trained. The newest bucket is now a real week and the *unchanged* heuristic
+evaluates the block it was written for. No threshold, precedence, or heuristic was
+touched anywhere: `detect_deload_due`, `detect_plateau`, `assess_consistency`,
+`series_trend`, `VOLUME_INCREASE_STEP`, `DELOAD_VOLUME_CUT`, `TREND_BAND` are all
+byte-identical. This was a windowing-correctness fix, not a planning-policy change.
+
+#### F3 — fixtures that could not see the bug
+
+Every DB-backed fixture in the adaptive stack seeded exactly **one workout per window**,
+which makes a single day and a full week numerically indistinguishable — the reason a
+52-test PR shipped a wrong published number, and why
+`test_baseline_is_observed_and_target_is_plan_arithmetic` had encoded the partial-window
+value (400.0, one session logged today) as its expected weekly baseline.
+
+- `_seed_multi_session_block` (`tests/test_weekly_program.py`) seeds a Mon/Wed/Fri-style
+  block — three sessions per trailing window, counted back from `end_day`, with the
+  offsets choosing whether `end_day` itself is a training or a rest day.
+- Five cases cover it: trained-today (baseline must be the 15000 kg week, not the
+  5000 kg session, and `baseline_week_start` must not run into the future), the same
+  block on a rest day (identical result — the flip-flop is gone), one-session versus
+  three-session weeks reading differently, a stable multi-week block, and a fixture
+  self-check that each window really holds three sessions.
+- **All five fail against the pre-fix geometry** (`assert 5000.0 == 15000.0`, and
+  `[3, 3, 3, 1] != [3, 3, 3, 3]` for the self-check) — verified by temporarily
+  reverting `weekly_windows`. That is what makes them load-bearing rather than
+  decorative.
+- The route fixture `_seed_progressing_block` now seeds three sessions per window too,
+  so the HTTP-level assertion is about a weekly total; the test named above was
+  corrected to the fixed contract (1200.0 / 1260.0) rather than left pinning the defect.
+- The stack's other fixtures now seed against the derived `W0..W3` window constants
+  instead of literal dates, so they state "a session in this window" and cannot silently
+  re-anchor if the geometry is ever revisited.
+
+#### F4 / F5 / F6 — dispositions
+
+- **F4 failure semantics → option A (structured JSON 500).** The route catches planner
+  and DB failures and returns `{"error": ...}` with `application/json`, matching the
+  other JSON routes in this blueprint (`training.py` already does exactly this at three
+  sites). It deliberately does **not** adopt PR4's neutral fallback: for the coach a
+  degraded answer beats none, but here the neutral recommendation is a *legitimate user
+  state*, so returning it on an outage would make a broken database indistinguishable
+  from a new user — a UI would render a confident "not enough data yet" card over an
+  incident. Without the catch, `errorhandler(500)` would have rendered `500.html`, i.e.
+  an HTML body from a JSON endpoint. No `db.session.rollback()` is needed: unlike PR4
+  the request ends immediately, and Flask-SQLAlchemy's teardown removes the session per
+  request. Two tests pin it (JSON 500 + content type; and that the body carries none of
+  `week_focus` / `has_data` / `baseline_weekly_volume`).
+- **F5 `schema_version` → deliberately not added.** PR4 versions a *prompt* contract
+  consumed by a model, where drift is invisible. No HTTP endpoint in this repository
+  carries a version field, frontend and backend ship in one deploy, and adding it would
+  weaken the bidirectional payload↔model test that currently proves the API exposes
+  exactly the model's fields. **Evolution rule, recorded here so it is not re-litigated:
+  this contract is additive-only** — fields may be appended, never renamed, retyped, or
+  given new meaning. A breaking change introduces `schema_version` (or a new path) at
+  that moment, not speculatively.
+- **F6 observability → minimally added.** One `[TRAINING][WEEKLY_PROGRAM]` debug line
+  (`has_data`, `week_focus`, whether a baseline exists) plus a warning on failure —
+  following PR4's `[COACH][ADAPTIVE_PLAN]` precedent. Enough to separate "neutral
+  because the user has no history" from "populated recommendation" from "upstream
+  failure" before a UI depends on it. No history, volumes, payloads, or PII are logged.
+- **Feature flags — unchanged and re-verified.** `AI_ADAPTIVE_PLAN_CONTEXT` remains the
+  sole coach gate, default OFF, and PR5 reads no config at all. A new test requests the
+  endpoint under both flag states and asserts the responses are **byte-identical**, so
+  the read-only surface cannot quietly become coupled to a coach rollout. No PR5 flag
+  was added: there is no live behaviour to roll back, and deleting the route remains a
+  cleaner rollback than a flag.
+
+#### Live-clock validation (exact observed values)
+
+Mon/Wed/Fri block, 5000 kg per session, four trailing weeks, real clock
+(`app_today() == 2026-07-22`), in-memory SQLite, called through the real entry point:
+
+| | before (forward window) | after (trailing window) |
+|---|---|---|
+| `baseline_week_start` | `2026-07-22` (window ran to 07-28, i.e. into the future) | `2026-07-16` (ends on today) |
+| `baseline_weekly_volume` | `5000.0` (one session) | `15000.0` (the real week) |
+| `target_weekly_volume` | derived from 5000.0 | `9000.0` (= 15000 × 0.60) |
+| rest-day result | `15000.0` — *different from the trained-day result* | `15000.0` — identical, no switching |
+| newest window `session_count` | `1` | `3` |
+
+`week_focus == "deload"` now appears against a live clock on a rest day, which finding
+#5 said was impossible — the second symptom, visible at runtime.
+
+**SQL cost:** one `SELECT` on `workout_log` per `build_weekly_program()` call, measured
+with a `before_cursor_execute` listener. Unchanged by the fix; no N+1 introduced (the
+fetch range widens from 22 to 28 days within the same single indexed query).
+
+#### Verification evidence (current HEAD — supersedes the Part 2 counts)
+
+- `python -m pytest tests/test_training_history.py -q` — 14 passed in 26.63s (was 13;
+  +1 trailing-window contract test).
+- `python -m pytest tests/test_training_progression.py -q` — 26 passed (was 25; +1
+  deload-on-a-rest-day regression).
+- `python -m pytest tests/test_training_planning.py tests/test_weekly_program.py -q` —
+  59 passed (weekly_program 40, was 35; +5 multi-session cases).
+- `python -m pytest tests/test_weekly_program_route.py -q` — 21 passed in 39.81s (was
+  17; +1 live-clock multi-session baseline, +2 failure-path, +1 flag parity).
+- `python -m pytest tests/test_dependency_boundaries.py tests/test_adaptive_plan_context.py
+  tests/test_prompt_builder.py tests/test_training_routes.py tests/test_progress_api.py
+  tests/test_tracking_routes.py tests/test_sprint6_migration_golden.py -q` — 165 passed
+  in 152.43s.
+- Pre-fix regression proof: with `weekly_windows` temporarily reverted, the five new
+  multi-session tests fail with `assert 5000.0 == 15000.0` and `[3, 3, 3, 1] !=
+  [3, 3, 3, 3]`.
+- `git diff --check` — clean.
+- Live-clock + SQL-count verification (hermetic in-memory SQLite, real clock): values in
+  the table above; one `SELECT` per `build_weekly_program()` call.
+- Full suite: `python -m pytest -q` — **2009 passed, 3 deselected, 8238 warnings in
+  844.19s (14m04s)**. Zero failures. Exactly Part 2's 1998 plus the 11 new tests
+  (1 history + 1 progression + 5 weekly-program + 4 route), so the remediation added
+  coverage without disturbing a single existing test. Warnings remain the pre-existing
+  `datetime.utcnow()` deprecation noise (Python 3.14).
+
+#### Still out of scope (unchanged)
+
+Coach wiring, UI/templates, Turkish copy for `explanation_keys`/`reason_codes`, the
+`session_frequency` / `intensity_magnitude` / `exercise_selection` capabilities, the
+unconverged raw readers (`tracking.py` heatmap/insights, `fitx_mcp/server.py`,
+`analytics_engine._check_missing_logs`, `ai_coach._tool_get_progress_metric`), and every
+other `NEEDED_FIXES.md` item (#1-#4, #6, #7) — untouched.
+
+#### Exact next steps for the following PR
+
+1. Read Parts 1, 2 **and** this subsection. PR6 is the front-end consumption of
+   `GET /api/training/weekly-program` (`locales/*.json` copy for the
+   `explanation_keys` / `reason_codes` vocabulary, plus the training-page card).
+2. `baseline_weekly_volume` is now safe to render as a weekly total. Treat the contract
+   as additive-only; if a field must change meaning, add a new one.
+3. Before the UI ships, decide whether the F6 debug line should be promoted to a metric
+   — it is currently the only signal distinguishing a neutral response from a degraded
+   one.
+4. Do not open `weeks`/`end_day` as query parameters, and do not add a second window
+   rule anywhere above `training_history.weekly_windows`.
+5. Leave `fitx_mcp/server.py` last.

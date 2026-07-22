@@ -136,8 +136,8 @@ Three kinds of field, and the distinction is the point of the layer.
 | `overload_ready` | echoed | bool | |
 | `maintenance_recommended` | echoed | bool | |
 | `reason_codes` | echoed | tuple[str] | The plan's ordered codes, unchanged; position 0 is the primary cause. |
-| `baseline_week_start` | observed | date \| None | Start of the window the baseline was measured in. |
-| `baseline_weekly_volume` | observed | float \| None | Most recent **positive** weekly volume in the plan's embedded series. |
+| `baseline_week_start` | observed | date \| None | Start of the trailing 7-day window the baseline was measured in; always in the past (`baseline_week_start + 6 <= today`). |
+| `baseline_weekly_volume` | observed | float \| None | Most recent **positive** weekly volume in the plan's embedded series — the total across a complete trailing 7-day window, not a single session. |
 | `target_weekly_volume` | derived | float \| None | `baseline * (1 + volume_delta_pct)`, rounded to 2 dp. |
 | `explanation_keys` | derived | tuple[str] | Locale-neutral message keys for coach/UI copy. |
 | `unsupported` | constant | tuple[str] | Capabilities `AdaptivePlan` does not model. |
@@ -180,10 +180,33 @@ Worked examples: overload on a 400 kg week → `420.0`; deload on a 302 kg week 
 `181.2` (~60 %, the plan's `DELOAD_VOLUME_CUT`); any `hold` focus → target equals
 baseline.
 
-A useful consequence of rule 1: at runtime the newest window is forward-looking
-(`[today, today+6]`, see *Inherited debt*), so it holds only today's entries. On a day
-the user has not trained yet that window is `0.0` — and the baseline simply falls back
-to the last real training week instead of collapsing.
+### What "weekly" means here
+
+A baseline is a **complete trailing 7-day observation**. `weekly_windows` anchors the
+newest window so that it *ends* on the analysis day (`[today - 6, today]`), so every
+window the baseline can be drawn from is a full week that has actually been lived.
+`baseline_week_start` therefore always names a past window, and rule 1 above compares
+like with like.
+
+This was not always true. Until the Sprint 6 PR5 post-audit fix the newest window
+*started* on the analysis day (`[today, today + 6]`). History can never contain future
+entries, so that bucket only ever held **today's** entries while presenting itself as a
+week — and because rule 1 scans newest-first for positive volume, it won:
+
+- A Mon/Wed/Fri user training ~5000 kg a session has a 15000 kg week, but on any day
+  they had already trained, the API published `baseline_weekly_volume: 5000.0` — the
+  headline number understated roughly threefold, and scaling with training frequency.
+- `baseline_week_start` named a window running six days into the future.
+- The number *fell* the moment the user logged the day's first set: before training,
+  the empty newest bucket was skipped and the baseline was last week's real total;
+  after training, it switched to that one session.
+
+The fix is upstream, in `training_history.weekly_windows` — the single owner of window
+geometry — not here. **This layer implements no windowing of its own and must not**;
+skipping "the current partial window" locally would be a second windowing rule in a
+layer whose entire contract is that it does not have one. The rest-day fallback in rule
+1 still exists, but it now means what it says: a genuine rest week is skipped in favour
+of the last week that carried load.
 
 ## Explanation hooks
 
@@ -234,14 +257,56 @@ Every `analysis` function is a total function of its inputs; the roll-up is
 deterministic for a fixed `end_day` (no hidden clock, no side effects). User-scoped
 through the planner's own `user_id` filter — this layer performs no query.
 
-## Inherited debt (not fixed here — upstream heuristics are out of PR5's scope)
+## Resolved: the forward-looking window (`NEEDED_FIXES.md` #5)
 
-`NEEDED_FIXES.md` (triage 2026-07-21) finding #5: `detect_deload_due` is effectively
-gated on "trained today", because `weekly_windows` makes the newest window
-forward-looking. Consequence for this layer: `week_focus == "deload"` will rarely
-appear against a live clock. PR5 is forbidden from touching progression heuristics, so
-the behavior is inherited as-is; the deload path is covered here with an explicit
-`end_day` so it is tested regardless of that gate.
+`NEEDED_FIXES.md` (triage 2026-07-21) finding #5 recorded that `detect_deload_due` was
+effectively gated on "trained today" because `weekly_windows` made the newest window
+forward-looking. It was rated *Low / Suspected* explicitly on the grounds that the
+layer was **not yet wired into runtime** — a basis PR5 part 2 removed by exposing
+`GET /api/training/weekly-program`.
+
+The post-audit fix corrects the window geometry upstream (see *What "weekly" means
+here*), and **one change resolves both symptoms**, because both had the same cause:
+
+- **This layer's volume contract** — the newest window is a real trailing week, so a
+  single day's session can no longer be published as `baseline_weekly_volume`.
+- **`detect_deload_due`** — the newest window no longer reads as a phantom rest week on
+  days the user has not yet trained, so the existing heuristic evaluates the block it
+  was written for. `week_focus == "deload"` is now reachable against a live clock.
+
+No progression, planning, or volume threshold changed: `detect_deload_due`,
+`detect_plateau`, `assess_consistency`, `VOLUME_INCREASE_STEP` and `DELOAD_VOLUME_CUT`
+are untouched. This was a windowing-correctness fix, not a policy change.
+`tests/test_training_progression.py::test_deload_is_not_gated_on_having_trained_today`
+pins the deload half; the multi-session cases in `tests/test_weekly_program.py` pin
+this half.
+
+## Failure semantics, contract versioning, observability
+
+Recorded decisions from the PR5 production-readiness audit (findings F4–F6):
+
+- **Failure (F4) — propagate as JSON, never as a neutral recommendation.** A planner or
+  DB failure returns `{"error": ...}` with status 500 and `application/json`, matching
+  the other JSON routes in `app/blueprints/training.py`. It deliberately does *not*
+  follow the PR4 coach consumer's neutral-fallback: for the coach a degraded answer
+  beats no answer, but here the neutral recommendation is a legitimate user state, so
+  substituting it on failure would make an outage indistinguishable from a new user.
+  Without this the global `errorhandler(500)` would render `500.html` — an HTML body
+  from a JSON endpoint.
+- **Versioning (F5) — no `schema_version`, deliberately.** PR4's block carries one
+  because it is consumed by a model whose drift is invisible and it is versioned as a
+  prompt contract; no HTTP endpoint in this repository carries a version field, and
+  frontend and backend ship in the same deploy, so there is no skew to negotiate.
+  Adding one would also weaken the bidirectional payload↔model test, which currently
+  proves the API exposes exactly the model's fields. **Evolution rule:** this contract
+  is additive-only — new fields may be appended, existing fields may not be renamed,
+  retyped, or given new meaning. A breaking change introduces `schema_version` (or a
+  new path) at that point, not speculatively.
+- **Observability (F6) — minimal, non-sensitive.** The route emits one
+  `[TRAINING][WEEKLY_PROGRAM]` debug line carrying `has_data`, `week_focus` and whether
+  a baseline exists, plus a warning on failure. That is enough to tell "neutral because
+  the user has no history" from "populated recommendation" from "upstream failure"
+  before a UI depends on it. No history, volumes, payloads, or PII are logged.
 
 ## Tests
 
@@ -251,8 +316,23 @@ including skipped zero-volume weeks, exact target arithmetic for positive/zero/n
 deltas, the `None`-not-`0.0` contract, explanation-key ordering, neutrality,
 determinism, immutability, declared unsupported capabilities) + DB-backed roll-up via
 the `make_user` fixture (overload, deload, maintenance, build-consistency, marker-only,
-empty history, `weeks=0`, user scoping, determinism). Boundary/ownership guards live in
+empty history, `weeks=0`, user scoping, determinism) + the multi-session regression
+block described below. Boundary/ownership guards live in
 `tests/test_dependency_boundaries.py`.
+
+**Multi-session fixtures (post-audit finding F3).** The original DB-backed fixtures
+seeded exactly one workout per window, which makes a single day and a full week
+numerically identical — the reason the forward-window defect was invisible to a green
+suite, and why one test had encoded the partial-window value as its expected baseline.
+`_seed_multi_session_block` now seeds a Mon/Wed/Fri-style block (three sessions per
+trailing window, counted back from `end_day`), so the suite can distinguish one-day
+partial data from a complete week. It covers: a day the user has already trained (the
+baseline must be the 15000 kg week, not the 5000 kg session, and `baseline_week_start`
+must not run into the future), the same block on a rest day (identical result — no
+switching between a completed week and a one-session bucket), one-session versus
+three-session weeks reading differently, a stable multi-week block, and a fixture
+self-check that every window really does hold three sessions. All five fail against
+the pre-fix geometry.
 
 `tests/test_weekly_program_route.py` — the runtime surface: auth required, user
 scoping, GET-only, response equal to `weekly_program_payload(build_weekly_program(...))`,
@@ -260,5 +340,8 @@ payload keys exactly the model's fields (neither withheld nor invented), neutral
 on empty history, baseline/target correctness including the skipped zero-volume week and
 the `null`-not-`0` contract, repeated calls identical, no mutation of the plan or its
 embedded `ProgressionReport`, no writes, exactly one service call with pinned arguments,
-query-string tampering ignored, and two AST guards proving the view reads no history and
-does exactly one build + one projection.
+query-string tampering ignored, the live-clock multi-session baseline case, a structured
+JSON 500 on upstream failure that is *not* disguised as an empty recommendation,
+byte-identical responses under both `AI_ADAPTIVE_PLAN_CONTEXT` states, and two AST
+guards proving the view reads no history and performs exactly one build + one
+projection.
