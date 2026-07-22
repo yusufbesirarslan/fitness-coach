@@ -16,7 +16,7 @@ The codebase remains **mature and defense-in-depth**. **No Critical or High-seve
 | 2 | Low–Medium | `weekly_water` challenge counts toggle-events, not days | Correctness / integrity | Confirmed |
 | 3 | Low | `ProxyFix` trusts `X-Forwarded-Host`/`-Port` that nginx never sets | Security | Confirmed |
 | 4 | Low | OpenAI non-stream coach loop has no per-turn wall-clock budget | Reliability | Confirmed |
-| 5 | Low | `detect_deload_due` effectively gated on "trained today" | Correctness | Suspected (not yet runtime-wired) |
+| 5 | ~~Low~~ → **Resolved** | `detect_deload_due` effectively gated on "trained today" | Correctness | Confirmed → **fixed 2026-07-22** (re-rated High once PR5 exposed it) |
 | 6 | Low | `ai_coach.py` (1199 lines) god-module — still open | Structure | Confirmed |
 | 7 | Low | `social.py` (1033 lines, 3 domains) — still open | Structure | Confirmed |
 
@@ -73,8 +73,31 @@ PR #172 added per-turn deadlines (`_coach_turn_deadline` / `_remaining_coach_tur
 
 ---
 
-## 5. [Low, Suspected] `detect_deload_due` is effectively gated on "trained *today*" via the forward-looking current-week window
+## 5. [RESOLVED 2026-07-22] `detect_deload_due` was effectively gated on "trained *today*" via the forward-looking current-week window
+
+> **Status: fixed.** `weekly_windows` now returns **trailing** windows — the newest one
+> *ends* on `end_day` (`[today - 6, today]`) instead of starting on it. The newest
+> bucket is a complete lived week, so it no longer reads as a phantom rest week and
+> `detect_deload_due` evaluates the block it was written for. No progression, planning,
+> or volume threshold changed; this was a windowing-correctness fix.
+>
+> **Re-rated on discovery, before the fix:** the *Low / Suspected* rating below rested
+> explicitly on this layer being "not yet wired into runtime". Sprint 6 PR5 part 2
+> removed that basis by exposing `GET /api/training/weekly-program`, which published
+> the same partial window as `baseline_weekly_volume` — a user-facing weekly total
+> understated by roughly the user's training frequency (a 15000 kg week reported as the
+> 5000 kg session logged that day). The combined PR5 production-readiness audit raised
+> it to **High** on those grounds; both symptoms shared this one cause and were fixed
+> together.
+>
+> **Regression cover:** `tests/test_training_progression.py::test_deload_is_not_gated_on_having_trained_today`,
+> `tests/test_training_history.py::test_weekly_windows_are_trailing_and_never_reach_past_end_day`,
+> and the multi-session block in `tests/test_weekly_program.py` (all five fail against
+> the pre-fix geometry). See `docs/TRAINING_HISTORY.md` and `docs/WEEKLY_PROGRAM.md`.
+
 **Files:** `app/services/training_progression/analysis.py:137-142` + windowing `training_history/analysis.py:41-49` (`weekly_windows`).
+
+*Original finding, retained for the record:*
 
 `weekly_windows(end_day, weeks)` makes the newest window **start** on `end_day`, covering `[today, today+6]`; since data only exists up to today, that bucket only ever contains **today's** entries. `volume_trend` / `series_trend` / `detect_plateau` tolerate this because they filter to active (`v > 0`) windows — but `detect_deload_due` does **not**:
 

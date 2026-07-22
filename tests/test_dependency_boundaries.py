@@ -12,11 +12,17 @@ CI_WORKFLOW = Path(".github/workflows/ci.yml")
 APP_ROOT = Path("app")
 ADAPTIVE_PLAN_IMPORT_ALLOWLIST = {
     Path("app/services/adaptive_plan_context.py"),
+    # Sprint 6 PR5 — the weekly-program consumer. An explicit, reviewable second
+    # owner: it consumes AdaptivePlan read-only and emits a frozen value object, so
+    # the serializer-ownership guard below still leaves exactly one prompt contract.
+    Path("app/services/weekly_program/__init__.py"),
+    Path("app/services/weekly_program/analysis.py"),
 }
 TRAINING_LAYERS = {
     "history": Path("app/services/training_history"),
     "progression": Path("app/services/training_progression"),
     "planning": Path("app/services/training_planning"),
+    "weekly_program": Path("app/services/weekly_program"),
 }
 
 UPPER_OR_PROVIDER_PREFIXES = (
@@ -42,6 +48,9 @@ FORBIDDEN_TRAINING_IMPORTS = {
         "app.services.training_planning",
     ),
     "planning": UPPER_OR_PROVIDER_PREFIXES,
+    # The consumer may read the planner (that is its whole job) but must stay free of
+    # AI/prompt/provider and Flask-extension imports like every layer beneath it.
+    "weekly_program": UPPER_OR_PROVIDER_PREFIXES,
 }
 
 

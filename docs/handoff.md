@@ -766,3 +766,526 @@ which predated the boundary-guard and prompt-authority tests.
 - OFF-path prompt identity checked outside pytest as well: `build_coach_system()` for
   `tr`, `en`, and the invalid-language fallback is byte-identical to the same function
   loaded from `git show HEAD:app/prompts/system.py`.
+
+## Sprint 6 PR5 - Adaptive Weekly Program Consumer
+
+Date: 2026-07-22
+Scope: The second consumer of the canonical `AdaptivePlan`, after PR4's coach-prompt
+contract — a deterministic translation of the plan into a structured weekly-program
+recommendation for future UI/runtime presentation. Purely additive and dormant: no
+schema, no migration, no route, no coach-prompt, no flag, no UI, and no change to any
+existing runtime caller. **The next Sprint 6 PR must read this section (and PR1-PR4
+above) before implementing anything.**
+
+### Internal summary of the foundation this PR builds on
+
+- **`training_history` (PR1)** — the one `WorkoutLog` reader.
+  `fetch_workout_entries` + pure `analysis.py` calcs (`weekly_windows`,
+  `bucket_by_week`, `volume_trend`, `estimated_1rm`). Istanbul-day windows via
+  `app.timeutil`; `WORKOUT_COMPLETION_MARKER` rows count as trained days but carry
+  `volume=0` and are excluded from volume/sets.
+- **`training_progression` (PR2)** — pure interpretation into signals
+  (`ProgressionReport`: volume/strength trend, `is_plateau`, `deload_due`,
+  `load_consistency`, and the single `next_signal` that wins one documented
+  precedence). Neutral values where a concept cannot be computed reliably.
+- **`training_planning` (PR3)** — `AdaptivePlan`, the sole planning authority.
+  Maps `next_signal` 1:1 to `week_focus` and derives `volume_action` /
+  `intensity_action` / `volume_delta_pct` (`VOLUME_INCREASE_STEP = 0.05`,
+  `DELOAD_VOLUME_CUT = 0.40`) / `overload_ready` / `maintenance_recommended` /
+  ordered `reason_codes`, embedding the `ProgressionReport`. No second precedence
+  ladder; nothing is derived from the report's raw booleans.
+- **PR4 contract** — `app/services/adaptive_plan_context.py`: the sole
+  `AdaptivePlan` -> prompt JSON serializer (v1, additive-only), behind the default-OFF
+  `AI_ADAPTIVE_PLAN_CONTEXT` flag, plus the flag-driven `ADAPTIVE_COACH_SYSTEM_PROMPT`
+  that strips the legacy volume/intensity authorities from the enabled-path prompt.
+  The Coach is a read-only presenter.
+- **Existing weekly-program / workout-prescription helpers: none.** Verified by search
+  (`weekly_program|prescription` — no hits). `training_generation/program_generator.py`
+  is the unrelated LLM workout-*content* path; it shares no vocabulary and neither
+  imports the other.
+- **Scope boundary for PR5** — translate, never decide. All planning decisions echo
+  `AdaptivePlan`; anything it does not model is reported unsupported.
+
+### Two discrepancies between the PR spec and the repository (documented, not silently resolved)
+
+1. **The spec asked for "the Sprint 6 PR4 section of `docs/handoff.md`", which did not
+   exist in the working checkout.** The local branch `agent/pr-171-triage-fixes`
+   (`f8369ce`) was behind `origin/main`; PR4 landed upstream as `b8b1b67` (#175), with
+   verification counts re-measured in `0c26ebf` (#176). The PR4 handoff section,
+   `adaptive_plan_context.py`, and `tests/test_dependency_boundaries.py` existed only
+   on `origin/main`. Resolved by branching this PR from `origin/main`
+   (`sprint6-pr5-weekly-program`), not from the stale local branch.
+2. **The "Sprint 6 PR1-PR4 audit results" are not in `docs/handoff.md`** — they are
+   `NEEDED_FIXES.md` (triage 2026-07-21, `0c81619`). Its finding #5 bears directly on
+   this PR and is recorded as inherited debt below.
+
+### What this PR changed
+
+- Added `app/services/weekly_program/` — the canonical weekly-program consumer.
+  Layered pure/impure and strictly one-way dependent
+  (`weekly_program` -> `training_planning` -> `training_progression` ->
+  `training_history`; no lower layer imports it, and this layer reads no history):
+  - `models.py` — frozen `WeeklyProgramRecommendation` + `UNSUPPORTED_CAPABILITIES`.
+    Every field has a safe neutral default; `WeeklyProgramRecommendation(weeks=0)` IS
+    the neutral recommendation.
+  - `analysis.py` — pure rules: `select_volume_baseline`, `target_volume_for`,
+    `derive_explanation_keys`, and the composer `derive_weekly_program` (the whole
+    consumer tests fixture-free).
+  - `__init__.py` — public API + `build_weekly_program(user_id, weeks=4, *,
+    end_day=None)`: one `build_adaptive_plan` call, then pure translation.
+- Extended the governance guards in `tests/test_dependency_boundaries.py`:
+  `ADAPTIVE_PLAN_IMPORT_ALLOWLIST` gains the two importing modules, and
+  `weekly_program` is registered in `TRAINING_LAYERS` /
+  `FORBIDDEN_TRAINING_IMPORTS` so it is held to the same no-AI/no-prompt/no-provider/
+  no-`app.extensions` rule as the layers beneath it.
+- Docs: added `docs/WEEKLY_PROGRAM.md`; added a "Sprint 6 PR5 - weekly-program
+  consumer" section to `docs/TRAINING_PLANNING.md` (including the two-consumer
+  comparison table); added the `CLAUDE.md` service-index line.
+- Tests: `tests/test_weekly_program.py` (35 tests).
+
+### Code paths inspected
+
+`docs/handoff.md` (PR1-PR4 sections), `NEEDED_FIXES.md`, `AGENTS.md`, `CLAUDE.md`,
+`app/services/training_history/*` (`models`/`queries`/`analysis`/`__init__`),
+`app/services/training_progression/*`, `app/services/training_planning/*` (all three
+modules in full), `app/services/adaptive_plan_context.py`,
+`app/services/training_generation/` (`program_generator.py`, `models.py`,
+`time_series_model.py` — confirmed no weekly-program or prescription helper to reuse
+or collide with), `app/blueprints/training.py` (route surface),
+`docs/TRAINING_HISTORY.md`, `docs/TRAINING_PROGRESSION.md`, `docs/TRAINING_PLANNING.md`
+(incl. the PR4 sections), `tests/test_training_planning.py`,
+`tests/test_dependency_boundaries.py`, `tests/test_adaptive_plan_context.py`,
+`tests/conftest.py` (`make_user`), `pytest.ini`.
+
+### Consumer decisions made
+
+- **Verbatim echo, no re-derivation.** All nine decision fields are copied from
+  `AdaptivePlan` unchanged. Pinned from both directions: field-by-field equality across
+  all six signals, and `test_decisions_ignore_observed_volume` — two plans with the
+  same signal but wildly different volume series must yield identical decisions. If a
+  decision ever starts tracking observed volume, that test fails.
+- **Baseline is observational, and skips zero-volume weeks.** The newest window with
+  `total_volume > 0` from the plan's embedded series. A rest week (or a marker-only
+  week) is missing data, not a measurement of zero; anchoring to it would scale every
+  recommendation to nothing. No raw `WorkoutLog` query is performed anywhere.
+- **Target is arithmetic, not authority.** `round(baseline * (1 + volume_delta_pct),
+  2)`. Two decimals matches `estimated_1rm` / `/api/progress/workout` and keeps binary
+  float noise (`400 * 1.05 == 420.00000000000006`) out of a displayed number.
+- **`None`, never `0.0`.** No positive volume — `baseline_weekly_volume` and
+  `target_weekly_volume` are both `None`. `0.0` would read as "train nothing this
+  week" instead of "not enough data to say".
+- **No embedded plan; flat object.** So a future route/UI depends on this layer alone
+  and never needs its own `training_planning` import — keeping the planner's approved
+  outside owners to the recorded allowlist.
+- **No serialization.** PR5 emits a frozen value object and never touches `json`, so
+  `adaptive_plan_context` remains the single owner of the prompt contract and
+  `test_adaptive_plan_prompt_serializer_has_one_owner` still finds exactly one.
+- **Unsupported over invented.** `session_frequency`, `intensity_magnitude`, and
+  `exercise_selection` are declared unsupported because `AdaptivePlan` models none of
+  them. Filling them in requires new capability upstream, never a heuristic here.
+- **Explanation hooks, not copy.** `explanation_keys` are the existing canonical codes
+  behind a `weekly_program.` prefix — no second taxonomy, no Turkish text.
+
+### What the canonical weekly-program consumer now provides
+
+`build_weekly_program(user_id, weeks=4, *, end_day=None) -> WeeklyProgramRecommendation`
+answers, deterministically and user-scoped: what kind of week to run and whether
+volume/intensity move (echoed); what the user's most recent real weekly volume was
+(observed); what weekly volume the plan's own delta implies (derived); which ordered,
+locale-neutral keys explain it; and which program capabilities the adaptive stack
+cannot yet support.
+
+### Intentionally left for later PRs (deliberate debt)
+
+- **Nothing consumes it yet** — no route, no template, no coach wiring. A read-only
+  endpoint (or a UI card) is the natural next step and was deliberately excluded to
+  keep this PR independently safe. *(Superseded by Part 2 below: the read-only endpoint
+  `GET /api/training/weekly-program` now exists on this same branch. Template and coach
+  wiring are still deliberately absent.)*
+- **Turkish UI copy** for `explanation_keys` (and for `reason_codes`, still open from
+  PR3) — `locales/*.json` work for a UI PR.
+- **`session_frequency` / `intensity_magnitude`** stay unsupported until
+  `AdaptivePlan` models them; `WorkoutLog` has no per-set granularity.
+- ~~**Inherited: `NEEDED_FIXES.md` finding #5**~~ — *superseded by the post-audit
+  remediation below.* This was recorded as inherited debt on the grounds that PR5 must
+  not touch progression heuristics. The production-readiness audit then showed the same
+  forward-looking window was also corrupting **this layer's own published contract**
+  (a single day's session republished as `baseline_weekly_volume`), which made it PR5's
+  concern. It is now fixed upstream in `weekly_windows`, with no heuristic change — see
+  *Post-audit remediation* below.
+- Unconverged raw readers from PR1-PR4 are unchanged: `tracking.py` heatmap/insights
+  sub-blocks, `fitx_mcp/server.py` (raw SQL, standalone — leave last),
+  `analytics_engine._check_missing_logs`, `ai_coach._tool_get_progress_metric`
+  `volume_lifted`.
+- Pre-existing `datetime.utcnow()` deprecation warnings remain (Python 3.14).
+
+### Exact next steps for the following PR
+
+1. Read this section first (and PR1-PR4 above). Confirm the branch is based on current
+   `origin/main` before starting — PR5 hit exactly this trap.
+2. Keep `AdaptivePlan` the single planning truth. Consume it directly, through the
+   PR4 v1 serializer, or through `weekly_program` — never add a competing serializer,
+   decision ladder, or threshold.
+3. Highest-value next work: the first *presentation* of
+   `WeeklyProgramRecommendation` — a read-only `GET` endpoint under `@require_auth`
+   (user-scoped, no new query) and/or a training-page card, plus `locales/*.json` copy
+   for `explanation_keys`. Consuming `weekly_program` itself needs no allowlist
+   change; only reaching past it to the planner does.
+4. Consider fixing `NEEDED_FIXES.md` finding #5 as its own PR (a progression-layer
+   change with golden coverage) — do not fold it into a consumer PR.
+5. Leave `fitx_mcp/server.py` last.
+
+### Verification evidence
+
+- `python -m pytest tests/test_weekly_program.py -q` — 35 passed in 45.16s.
+- `python -m pytest tests/test_dependency_boundaries.py -q` — 26 passed in 14.74s.
+- Regression (adaptive stack + PR4 consumer):
+  `python -m pytest tests/test_training_planning.py tests/test_training_progression.py
+  tests/test_training_history.py tests/test_adaptive_plan_context.py
+  tests/test_prompt_builder.py -q` — 101 passed in 67.46s.
+- Regression (coach/training runtime): `python -m pytest tests/test_ai_coach.py
+  tests/test_ai_pipeline.py tests/test_progress_api.py tests/test_training_routes.py
+  tests/test_sprint6_migration_golden.py -q` — 115 passed in 118.63s.
+- Static boundary proof: `app/services/weekly_program/` contains no `WorkoutLog`,
+  `app.models`, `app.extensions`, Flask, or `json` import — only
+  `app.services.training_planning`, stdlib, and relative imports.
+- Full suite: `python -m pytest -q` — 1981 passed, 3 deselected, 8051 warnings in
+  1001.82s (16m41s). Zero failures; the warning count is the pre-existing
+  `datetime.utcnow()` deprecation noise (Python 3.14), unchanged by this PR.
+
+### Independently safe to merge
+
+Yes — a purely additive service package + hermetic tests + docs, plus an additive
+strengthening of the dependency guards. No schema/migration, no route, no
+coach-prompt, no flag, no UI, and no change to any existing runtime caller or
+heuristic. Nothing calls the layer yet, so the runtime behavior of this branch is
+identical to `main`; the rollback is deleting a dormant package.
+
+*(Part 2 below adds one read-only `GET` route on this branch. Everything else in this
+paragraph still holds; see Part 2's own merge-safety note for the current state.)*
+
+### Part 2 - runtime exposure (`GET /api/training/weekly-program`)
+
+Date: 2026-07-22. Same branch, same PR — the dormant layer above is now readable over
+HTTP. Everything in Part 1 still holds; this subsection records only what changed and
+**supersedes the Part 1 statements that "nothing consumes the layer yet" and that the
+PR adds no route.** The PR remains additive, read-only and independently mergeable.
+
+#### What changed
+
+- **`app/services/weekly_program/payload.py` (new, pure).**
+  `weekly_program_payload(recommendation) -> dict` — the JSON-safe projection of the
+  frozen value object. Two mechanical conversions (`date` -> ISO string, tuples ->
+  lists) and nothing else; `None` is preserved, never coerced to `0`. The field list is
+  written out explicitly rather than generated from `dataclasses.asdict`, because a
+  published API surface should grow by decision, not by leak — and the route test pins
+  both directions (every model field exposed, nothing extra).
+  Imports only `.models`, so it never touches `AdaptivePlan` and the PR4 serializer
+  guard is unaffected.
+- **`app/services/weekly_program/__init__.py`** — exports `weekly_program_payload`;
+  docstring/layering note updated (the layer is no longer dormant).
+- **`app/blueprints/training.py`** — one route, `get_weekly_program`:
+
+      @bp.route("/api/training/weekly-program")
+      @require_auth
+      def get_weekly_program():
+          recommendation = build_weekly_program(current_user.id, weeks=4, end_day=None)
+          return jsonify(weekly_program_payload(recommendation))
+
+  Placed beside the other read-only training JSON routes (`/workout/status`,
+  `/training-plan/active`). No limiter (matching its read-only siblings), no flag, no
+  template, no coach call.
+- **`tests/test_weekly_program_route.py` (new)** — 17 tests.
+- Docs: `docs/WEEKLY_PROGRAM.md` (runtime-surface section + contract table + example
+  body + payload API + test inventory), `docs/TRAINING_PLANNING.md` (two-consumer table
+  now names the endpoint), `CLAUDE.md` (service-index line records the route and the
+  pinned window).
+
+No schema, no migration, no coach-prompt, no flag, no UI/template, no provider change,
+and no edit to any planning/progression/history heuristic.
+
+#### Runtime-surface decisions (and why)
+
+- **Blueprint choice.** `app/blueprints/training.py` already owns the training runtime
+  surface and the read-only JSON routes next to it. The alternative
+  (`tracking.py`, home of `/api/progress/*`) is the *history* reporting surface — the
+  weekly program is a forward-looking recommendation, not a progress read-out.
+- **`weeks`/`end_day` are pinned, not query parameters.** The analysis window is a
+  planning knob. Reading it from the query string would hand a caller partial planning
+  authority and make the response non-deterministic for a given user and day.
+  `?weeks=1&end_day=...` is ignored, and `test_query_string_cannot_retune_the_window`
+  pins that. It also keeps the route free of input validation entirely.
+- **Projection owned by the layer, not the route.** Had the route built the dict
+  inline, a second shape could drift in next to the value object. `payload.py` keeps
+  one owner for the HTTP contract, and the route stays two statements.
+- **No feature flag.** PR4 needed `AI_ADAPTIVE_PLAN_CONTEXT` because it *changed coach
+  behavior* on an existing path. This adds a new read-only endpoint that nothing calls
+  yet; there is no behavior to roll back, and a flag would be ceremony. The spec
+  allowed one only "if one already exists and is clearly needed" — neither holds.
+- **Empty history returns 200 with the neutral payload,** not 404 and not an error. "No
+  data yet" is a legitimate recommendation state the layer already models.
+- **Structural guard over a behavioural one.** "The route does not read `WorkoutLog`"
+  cannot be asserted by calling it — `training.py` legitimately imports `WorkoutLog`
+  and `db` for other routes. Two tests parse the view's own AST instead: no
+  history/planner/ORM names appear inside it, and its body is exactly
+  `build_weekly_program` + `weekly_program_payload` + `jsonify`. That is the test that
+  fails the day someone starts computing in the route.
+
+#### The JSON contract
+
+Field-for-field with `WeeklyProgramRecommendation` — same names, no extra decision
+fields, no renames, no raw history, no `WorkoutLog` rows, no weekly series:
+
+    weeks, has_data, week_focus, volume_action, intensity_action, volume_delta_pct,
+    overload_ready, maintenance_recommended, baseline_week_start (ISO date | null),
+    baseline_weekly_volume (float | null), target_weekly_volume (float | null),
+    reason_codes [], explanation_keys [], unsupported []
+
+Volume semantics are unchanged from Part 1 and the route does not reinterpret them:
+baseline is the newest **positive** weekly volume observed in the plan's embedded
+series (zero-volume weeks skipped), target is `round(baseline * (1 + volume_delta_pct),
+2)`, and both are `null` together when no positive volume exists.
+
+Auth: `@require_auth`, unauthenticated -> 302 to login. Methods: `GET` only (405
+otherwise). Scoping: `current_user.id`, through the planner's own filter — the route
+runs no query.
+
+#### Still intentionally out of scope
+
+- **Coach wiring** — the coach still consumes only the PR4 v1 prompt contract. This
+  endpoint is not referenced from any prompt, tool, or `context_builder` path.
+- **UI** — no template, no fetch call, no card. The endpoint has no in-app caller yet;
+  it exists so a UI PR can be pure front-end work.
+- **Turkish copy** for `explanation_keys`/`reason_codes` (`locales/*.json`) — the API
+  deliberately emits keys, never user-facing text.
+- **`session_frequency` / `intensity_magnitude` / `exercise_selection`** — still
+  published as `unsupported`; filling them in needs new capability in `AdaptivePlan`
+  first.
+- **`NEEDED_FIXES.md` finding #5** (deload effectively gated on "trained today") —
+  still inherited, still a progression-layer fix, still deserves its own PR.
+
+#### Exact next steps for the following PR
+
+1. Read Part 1 **and** this subsection before starting; confirm the branch is based on
+   current `origin/main`.
+2. The natural next work is now purely front-end: render
+   `GET /api/training/weekly-program` on the training page (`_head.html` include for
+   CSRF/CSP, `static/csrf.js` already wraps `fetch`) plus `locales/*.json` copy for the
+   `explanation_keys` / `reason_codes` vocabulary. No new service work is required.
+3. If a consumer needs a different analysis window, add capability upstream in
+   `AdaptivePlan` — do **not** open `weeks`/`end_day` as query parameters.
+4. Keep `AdaptivePlan` the single planning truth: consume it directly, through the PR4
+   serializer, or through `weekly_program`; never add a competing serializer, decision
+   ladder, or threshold.
+5. Leave `fitx_mcp/server.py` last.
+
+#### Verification evidence (current HEAD — supersedes the Part 1 counts)
+
+- `python -m pytest tests/test_weekly_program_route.py -q` — 17 passed in 43.45s.
+- `python -m pytest tests/test_weekly_program.py tests/test_dependency_boundaries.py -q`
+  — 61 passed in 48.73s (35 layer + 26 guard; the guards still pass unchanged, since
+  the route imports `weekly_program`, not `training_planning`).
+- Adaptive stack + PR4 consumer: `python -m pytest tests/test_training_planning.py
+  tests/test_training_progression.py tests/test_training_history.py
+  tests/test_adaptive_plan_context.py tests/test_prompt_builder.py -q` — 101 passed in
+  65.20s.
+- Route/coach runtime: `python -m pytest tests/test_training_routes.py
+  tests/test_progress_api.py tests/test_ai_coach.py tests/test_coach_routes.py
+  tests/test_tracking_routes.py tests/test_sprint6_migration_golden.py -q` — 187 passed
+  in 189.22s.
+- `git diff --check` — clean (no whitespace errors).
+- Route inventory / auth audit (would catch an unprotected new endpoint):
+  `python -m pytest tests/test_auth_audit.py tests/test_require_auth.py -q` — 19 passed
+  in 51.53s.
+- Full suite: `python -m pytest -q` — 1998 passed, 3 deselected, 8185 warnings in
+  1002.47s (16m42s). Zero failures. Exactly Part 1's 1981 plus the 17 new route tests,
+  so the endpoint added coverage without disturbing a single existing test. The warnings
+  remain the pre-existing `datetime.utcnow()` deprecation noise (Python 3.14).
+
+#### Independently safe to merge
+
+Yes. The change is one additive `GET` route behind `@require_auth`, one pure projection
+module, hermetic tests, and docs. No schema, no migration, no coach-prompt, no flag, no
+UI, no provider change, and no edit to any existing route, heuristic, or runtime caller
+— every pre-existing path behaves exactly as on `main`. Nothing in the app calls the new
+endpoint, so the blast radius is the endpoint itself; the rollback is deleting the route
+and the package. `AdaptivePlan` remains the sole planning authority: the endpoint
+decides nothing, and the AST guards fail if it ever starts to.
+
+### Part 3 — post-audit remediation (window geometry, fixtures, F4-F6)
+
+Date: 2026-07-22. Same branch. The combined PR5 production-readiness audit (parts 1 + 2)
+returned one **High** finding and several minor ones; this subsection records the
+remediation. It **supersedes the Part 1 statement that `NEEDED_FIXES.md` #5 is inherited
+debt** — it is now fixed — and the Part 2 statement that the route propagates failures
+to the global handler.
+
+#### F1 (High) — the root cause, and why it became PR5's problem
+
+`weekly_windows(end_day, weeks)` made the newest window *start* on `end_day`, so it
+covered `[today, today + 6]`. History can never contain future entries, so that bucket
+only ever held **today's** entries while presenting itself as a week. Because
+`select_volume_baseline` scans newest-first for positive volume, it preferred that
+partial bucket whenever the user had already trained that day:
+
+- A Mon/Wed/Fri user at ~5000 kg a session has a 15000 kg week. Asked on a day they had
+  trained, the endpoint published `baseline_weekly_volume: 5000.0` — understated by the
+  user's training frequency — and `target_weekly_volume` derived from it.
+- `baseline_week_start` named a window running six days into the future.
+- The published target *fell* the moment the user logged the day's first set (before:
+  the empty newest bucket was skipped and last week's real total was used; after: the
+  single session won). Worse than being consistently wrong.
+
+This geometry was already recorded as `NEEDED_FIXES.md` #5, rated *Low / Suspected*
+**explicitly because the layer was "not yet wired into runtime"**. PR5 part 2 removed
+that basis. Part 2 is also what turned the geometry into a user-facing absolute number,
+which is why the fix belongs with PR5 even though the defective line is upstream.
+
+**Fix — at the ownership boundary, not in the consumer.** `weekly_windows` now returns
+trailing windows: the newest one *ends* on `end_day` (`[end_day - 6, end_day]`), each
+earlier one 7 days before the next. It remains the single owner of window geometry —
+`bucket_by_week`, `weekly_best_estimated_1rm`, `build_training_history_summary` and
+`build_progression_report` all compose it and needed no change (the report builders
+fetch `[starts[0], end_day]`, which simply widens from 22 to 28 days for `weeks=4`).
+
+`weekly_program` deliberately gained **no** windowing logic. Teaching it to "skip the
+current partial window" would have created a second windowing rule inside the one layer
+whose entire contract is that it has none.
+
+**One cause, both symptoms.** The same change also fixes `NEEDED_FIXES.md` #5:
+`detect_deload_due` rejects a block containing a rest week, and the phantom empty newest
+bucket made every rest day look like one — so deload could only fire on days the user
+had already trained. The newest bucket is now a real week and the *unchanged* heuristic
+evaluates the block it was written for. No threshold, precedence, or heuristic was
+touched anywhere: `detect_deload_due`, `detect_plateau`, `assess_consistency`,
+`series_trend`, `VOLUME_INCREASE_STEP`, `DELOAD_VOLUME_CUT`, `TREND_BAND` are all
+byte-identical. This was a windowing-correctness fix, not a planning-policy change.
+
+#### F3 — fixtures that could not see the bug
+
+Every DB-backed fixture in the adaptive stack seeded exactly **one workout per window**,
+which makes a single day and a full week numerically indistinguishable — the reason a
+52-test PR shipped a wrong published number, and why
+`test_baseline_is_observed_and_target_is_plan_arithmetic` had encoded the partial-window
+value (400.0, one session logged today) as its expected weekly baseline.
+
+- `_seed_multi_session_block` (`tests/test_weekly_program.py`) seeds a Mon/Wed/Fri-style
+  block — three sessions per trailing window, counted back from `end_day`, with the
+  offsets choosing whether `end_day` itself is a training or a rest day.
+- Five cases cover it: trained-today (baseline must be the 15000 kg week, not the
+  5000 kg session, and `baseline_week_start` must not run into the future), the same
+  block on a rest day (identical result — the flip-flop is gone), one-session versus
+  three-session weeks reading differently, a stable multi-week block, and a fixture
+  self-check that each window really holds three sessions.
+- **All five fail against the pre-fix geometry** (`assert 5000.0 == 15000.0`, and
+  `[3, 3, 3, 1] != [3, 3, 3, 3]` for the self-check) — verified by temporarily
+  reverting `weekly_windows`. That is what makes them load-bearing rather than
+  decorative.
+- The route fixture `_seed_progressing_block` now seeds three sessions per window too,
+  so the HTTP-level assertion is about a weekly total; the test named above was
+  corrected to the fixed contract (1200.0 / 1260.0) rather than left pinning the defect.
+- The stack's other fixtures now seed against the derived `W0..W3` window constants
+  instead of literal dates, so they state "a session in this window" and cannot silently
+  re-anchor if the geometry is ever revisited.
+
+#### F4 / F5 / F6 — dispositions
+
+- **F4 failure semantics → option A (structured JSON 500).** The route catches planner
+  and DB failures and returns `{"error": ...}` with `application/json`, matching the
+  other JSON routes in this blueprint (`training.py` already does exactly this at three
+  sites). It deliberately does **not** adopt PR4's neutral fallback: for the coach a
+  degraded answer beats none, but here the neutral recommendation is a *legitimate user
+  state*, so returning it on an outage would make a broken database indistinguishable
+  from a new user — a UI would render a confident "not enough data yet" card over an
+  incident. Without the catch, `errorhandler(500)` would have rendered `500.html`, i.e.
+  an HTML body from a JSON endpoint. No `db.session.rollback()` is needed: unlike PR4
+  the request ends immediately, and Flask-SQLAlchemy's teardown removes the session per
+  request. Two tests pin it (JSON 500 + content type; and that the body carries none of
+  `week_focus` / `has_data` / `baseline_weekly_volume`).
+- **F5 `schema_version` → deliberately not added.** PR4 versions a *prompt* contract
+  consumed by a model, where drift is invisible. No HTTP endpoint in this repository
+  carries a version field, frontend and backend ship in one deploy, and adding it would
+  weaken the bidirectional payload↔model test that currently proves the API exposes
+  exactly the model's fields. **Evolution rule, recorded here so it is not re-litigated:
+  this contract is additive-only** — fields may be appended, never renamed, retyped, or
+  given new meaning. A breaking change introduces `schema_version` (or a new path) at
+  that moment, not speculatively.
+- **F6 observability → minimally added.** One `[TRAINING][WEEKLY_PROGRAM]` debug line
+  (`has_data`, `week_focus`, whether a baseline exists) plus a warning on failure —
+  following PR4's `[COACH][ADAPTIVE_PLAN]` precedent. Enough to separate "neutral
+  because the user has no history" from "populated recommendation" from "upstream
+  failure" before a UI depends on it. No history, volumes, payloads, or PII are logged.
+- **Feature flags — unchanged and re-verified.** `AI_ADAPTIVE_PLAN_CONTEXT` remains the
+  sole coach gate, default OFF, and PR5 reads no config at all. A new test requests the
+  endpoint under both flag states and asserts the responses are **byte-identical**, so
+  the read-only surface cannot quietly become coupled to a coach rollout. No PR5 flag
+  was added: there is no live behaviour to roll back, and deleting the route remains a
+  cleaner rollback than a flag.
+
+#### Live-clock validation (exact observed values)
+
+Mon/Wed/Fri block, 5000 kg per session, four trailing weeks, real clock
+(`app_today() == 2026-07-22`), in-memory SQLite, called through the real entry point:
+
+| | before (forward window) | after (trailing window) |
+|---|---|---|
+| `baseline_week_start` | `2026-07-22` (window ran to 07-28, i.e. into the future) | `2026-07-16` (ends on today) |
+| `baseline_weekly_volume` | `5000.0` (one session) | `15000.0` (the real week) |
+| `target_weekly_volume` | derived from 5000.0 | `9000.0` (= 15000 × 0.60) |
+| rest-day result | `15000.0` — *different from the trained-day result* | `15000.0` — identical, no switching |
+| newest window `session_count` | `1` | `3` |
+
+`week_focus == "deload"` now appears against a live clock on a rest day, which finding
+#5 said was impossible — the second symptom, visible at runtime.
+
+**SQL cost:** one `SELECT` on `workout_log` per `build_weekly_program()` call, measured
+with a `before_cursor_execute` listener. Unchanged by the fix; no N+1 introduced (the
+fetch range widens from 22 to 28 days within the same single indexed query).
+
+#### Verification evidence (current HEAD — supersedes the Part 2 counts)
+
+- `python -m pytest tests/test_training_history.py -q` — 14 passed in 26.63s (was 13;
+  +1 trailing-window contract test).
+- `python -m pytest tests/test_training_progression.py -q` — 26 passed (was 25; +1
+  deload-on-a-rest-day regression).
+- `python -m pytest tests/test_training_planning.py tests/test_weekly_program.py -q` —
+  59 passed (weekly_program 40, was 35; +5 multi-session cases).
+- `python -m pytest tests/test_weekly_program_route.py -q` — 21 passed in 39.81s (was
+  17; +1 live-clock multi-session baseline, +2 failure-path, +1 flag parity).
+- `python -m pytest tests/test_dependency_boundaries.py tests/test_adaptive_plan_context.py
+  tests/test_prompt_builder.py tests/test_training_routes.py tests/test_progress_api.py
+  tests/test_tracking_routes.py tests/test_sprint6_migration_golden.py -q` — 165 passed
+  in 152.43s.
+- Pre-fix regression proof: with `weekly_windows` temporarily reverted, the five new
+  multi-session tests fail with `assert 5000.0 == 15000.0` and `[3, 3, 3, 1] !=
+  [3, 3, 3, 3]`.
+- `git diff --check` — clean.
+- Live-clock + SQL-count verification (hermetic in-memory SQLite, real clock): values in
+  the table above; one `SELECT` per `build_weekly_program()` call.
+- Full suite: `python -m pytest -q` — **2009 passed, 3 deselected, 8238 warnings in
+  844.19s (14m04s)**. Zero failures. Exactly Part 2's 1998 plus the 11 new tests
+  (1 history + 1 progression + 5 weekly-program + 4 route), so the remediation added
+  coverage without disturbing a single existing test. Warnings remain the pre-existing
+  `datetime.utcnow()` deprecation noise (Python 3.14).
+
+#### Still out of scope (unchanged)
+
+Coach wiring, UI/templates, Turkish copy for `explanation_keys`/`reason_codes`, the
+`session_frequency` / `intensity_magnitude` / `exercise_selection` capabilities, the
+unconverged raw readers (`tracking.py` heatmap/insights, `fitx_mcp/server.py`,
+`analytics_engine._check_missing_logs`, `ai_coach._tool_get_progress_metric`), and every
+other `NEEDED_FIXES.md` item (#1-#4, #6, #7) — untouched.
+
+#### Exact next steps for the following PR
+
+1. Read Parts 1, 2 **and** this subsection. PR6 is the front-end consumption of
+   `GET /api/training/weekly-program` (`locales/*.json` copy for the
+   `explanation_keys` / `reason_codes` vocabulary, plus the training-page card).
+2. `baseline_weekly_volume` is now safe to render as a weekly total. Treat the contract
+   as additive-only; if a field must change meaning, add a new one.
+3. Before the UI ships, decide whether the F6 debug line should be promoted to a metric
+   — it is currently the only signal distinguishing a neutral response from a degraded
+   one.
+4. Do not open `weeks`/`end_day` as query parameters, and do not add a second window
+   rule anywhere above `training_history.weekly_windows`.
+5. Leave `fitx_mcp/server.py` last.
