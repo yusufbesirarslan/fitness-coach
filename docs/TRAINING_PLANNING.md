@@ -238,3 +238,31 @@ series; its prompt-footprint target is approximately 100-160 tokens.
 The dependency direction is strictly one-way:
 `training_history -> training_progression -> training_planning ->
 adaptive_plan_context/context_builder -> coach`.
+
+## Sprint 6 PR5 — weekly-program consumer
+
+`app/services/weekly_program/` is the planner's **second** approved consumer, after
+the PR4 prompt contract. It translates `AdaptivePlan` into a structured weekly
+recommendation and publishes it over one read-only endpoint,
+`GET /api/training/weekly-program` — see `docs/WEEKLY_PROGRAM.md`.
+
+The two consumers do not compete:
+
+| | `adaptive_plan_context` (PR4) | `weekly_program` (PR5) |
+|---|---|---|
+| Output | Serialized v1 JSON block | Frozen `WeeklyProgramRecommendation`, projected to a dict at the edge |
+| Audience | Coach system prompt | HTTP clients (`GET /api/training/weekly-program`) |
+| Gate | `AI_ADAPTIVE_PLAN_CONTEXT` (default OFF) | none — `@require_auth` only; no flag needed for a read-only surface |
+
+`adaptive_plan_context` remains the **sole** owner of any `AdaptivePlan` → JSON
+serialization; PR5's `payload.py` serializes the *recommendation*, never the plan, and
+does not import `AdaptivePlan` — so `test_adaptive_plan_prompt_serializer_has_one_owner`
+still finds exactly one prompt contract. Both are read-only presenters: neither
+recomputes overload, deload, volume, intensity, or progression. The endpoint likewise
+pins `weeks`/`end_day` to the service defaults rather than reading them from the query
+string; the analysis window is a planning knob, not an HTTP parameter.
+
+`ADAPTIVE_PLAN_IMPORT_ALLOWLIST` (`tests/test_dependency_boundaries.py`) therefore now
+names three files — `adaptive_plan_context.py` plus `weekly_program/__init__.py` and
+`weekly_program/analysis.py`. Any further importer is an explicit, reviewable decision,
+not a default.
