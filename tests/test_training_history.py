@@ -7,7 +7,7 @@ Two layers, matching repo convention:
 
     python -m pytest tests/test_training_history.py -v
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from app.extensions import db
 from app.models import WORKOUT_COMPLETION_MARKER, WorkoutLog
@@ -27,7 +27,9 @@ from app.services.training_history import (
     weekly_windows,
 )
 
-END_DAY = date(2026, 7, 15)  # weeks 4 → starts 06-24, 07-01, 07-08, 07-15
+# Trailing windows: weeks 4 → starts 06-18, 06-25, 07-02, 07-09; the newest window
+# ends *on* END_DAY, so no window covers days that have not happened yet.
+END_DAY = date(2026, 7, 15)
 
 
 def _entry(day, volume=100.0, sets=3, reps=10, weight=50.0, marker=False):
@@ -76,8 +78,26 @@ def test_session_days_and_count_include_markers():
 
 def test_weekly_windows_oldest_first():
     assert weekly_windows(END_DAY, 4) == [
-        date(2026, 6, 24), date(2026, 7, 1), date(2026, 7, 8), date(2026, 7, 15)]
+        date(2026, 6, 18), date(2026, 6, 25), date(2026, 7, 2), date(2026, 7, 9)]
     assert weekly_windows(END_DAY, 0) == []
+
+
+def test_weekly_windows_are_trailing_and_never_reach_past_end_day():
+    """The newest window must end *on* end_day, never extend into the future.
+
+    A window is an observation period: `[end_day, end_day + 6]` could only ever hold
+    end_day's own entries while presenting itself as a week, so a single day of
+    training read as a full week's volume (NEEDED_FIXES.md #5).
+    """
+    for weeks in (1, 2, 4, 8):
+        starts = weekly_windows(END_DAY, weeks)
+        newest_end = starts[-1] + timedelta(days=6)
+
+        assert newest_end == END_DAY                       # trailing, not forward
+        assert all(s + timedelta(days=6) <= END_DAY for s in starts)
+        # Contiguous and non-overlapping: each window starts the day after the last ends.
+        assert all(b - a == timedelta(days=7) for a, b in zip(starts, starts[1:]))
+        assert starts[0] == END_DAY - timedelta(days=7 * weeks - 1)
 
 
 def test_bucket_by_week_buckets_and_excludes_out_of_range():
@@ -89,12 +109,13 @@ def test_bucket_by_week_buckets_and_excludes_out_of_range():
     ]
     weekly = bucket_by_week(entries, END_DAY, 4)
     assert [w.week_start for w in weekly] == weekly_windows(END_DAY, 4)
-    assert weekly[0].total_volume == 0.0                 # 06-24 week empty
-    assert weekly[1].total_volume == 150.0               # 07-01 week: 100 + 50
-    assert weekly[1].session_count == 2                  # two distinct days
-    assert weekly[1].entry_count == 2
-    assert weekly[1].total_sets == 5
-    assert weekly[3].total_volume == 500.0               # 07-15 week
+    assert weekly[0].total_volume == 0.0                 # 06-18 week empty
+    assert weekly[1].total_volume == 0.0                 # 06-25 week empty
+    assert weekly[2].total_volume == 150.0               # 07-02 week: 100 + 50
+    assert weekly[2].session_count == 2                  # two distinct days
+    assert weekly[2].entry_count == 2
+    assert weekly[2].total_sets == 5
+    assert weekly[3].total_volume == 500.0               # 07-09 week (ends on END_DAY)
 
 
 def test_volume_trend_directions():
@@ -144,14 +165,14 @@ def test_fetch_workout_entries_marker_flag_and_filter(make_user):
 
 def test_summary_windows_volumes_and_sessions(make_user):
     user = make_user("hist2")
-    # Week 07-01: two real on 07-02 + marker on 07-02, one real on 07-05
+    # Week 06-25: marker only (no real exercise) → counts as a trained day
+    _add_workout(user.id, date(2026, 6, 29), volume=0, marker=True)
+    # Week 07-02: two real on 07-02 + marker on 07-02, one real on 07-05
     _add_workout(user.id, date(2026, 7, 2), volume=100, sets=3)
     _add_workout(user.id, date(2026, 7, 2), volume=200, sets=4)
     _add_workout(user.id, date(2026, 7, 2), volume=0, marker=True)
     _add_workout(user.id, date(2026, 7, 5), volume=50, sets=2)
-    # Week 07-08: marker only (no real exercise) → counts as a trained day
-    _add_workout(user.id, date(2026, 7, 9), volume=0, marker=True)
-    # Week 07-15: one real
+    # Week 07-09 (ends on END_DAY): one real
     _add_workout(user.id, date(2026, 7, 15), volume=500, sets=5)
     # Another user's row must not leak in
     other = make_user("hist2_other")
@@ -161,13 +182,13 @@ def test_summary_windows_volumes_and_sessions(make_user):
     s = build_training_history_summary(user.id, weeks=4, end_day=END_DAY)
     assert s.weeks == 4 and s.has_data is True
     assert [w.week_start for w in s.weekly] == weekly_windows(END_DAY, 4)
-    assert s.weekly[0].total_volume == 0.0                       # 06-24 empty
-    assert s.weekly[1].session_count == 2                        # 07-02 + 07-05
-    assert s.weekly[1].entry_count == 3                          # marker excluded
-    assert s.weekly[1].total_volume == 350.0
-    assert s.weekly[1].total_sets == 9
-    assert s.weekly[2].session_count == 1                        # marker-only day
-    assert s.weekly[2].entry_count == 0
+    assert s.weekly[0].total_volume == 0.0                       # 06-18 empty
+    assert s.weekly[1].session_count == 1                        # marker-only day
+    assert s.weekly[1].entry_count == 0
+    assert s.weekly[2].session_count == 2                        # 07-02 + 07-05
+    assert s.weekly[2].entry_count == 3                          # marker excluded
+    assert s.weekly[2].total_volume == 350.0
+    assert s.weekly[2].total_sets == 9
     assert s.weekly[3].total_volume == 500.0
     assert s.total_sessions == 4
     assert s.total_volume == 850.0

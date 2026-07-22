@@ -27,7 +27,8 @@ from app.services.training_planning.analysis import (
 )
 from app.services.training_progression import ProgressionReport
 
-END_DAY = date(2026, 7, 15)          # weeks 4 → starts 06-24, 07-01, 07-08, 07-15
+# Trailing windows: weeks 4 → starts 06-18, 06-25, 07-02, 07-09; W3 ends *on* END_DAY.
+END_DAY = date(2026, 7, 15)
 W0, W1, W2, W3 = weekly_windows(END_DAY, 4)
 
 SIGNALS = ("insufficient_data", "build_consistency", "deload",
@@ -154,10 +155,10 @@ def _add_workout(user_id, day, volume=100.0, sets=3, reps=5, weight=50.0, marker
 
 def test_plan_overload_when_progressing(make_user):
     user = make_user("plan1")
-    _add_workout(user.id, date(2026, 6, 25), volume=100, weight=50, reps=5)
-    _add_workout(user.id, date(2026, 7, 2), volume=200, weight=60, reps=5)
-    _add_workout(user.id, date(2026, 7, 9), volume=300, weight=70, reps=5)
-    _add_workout(user.id, date(2026, 7, 15), volume=400, weight=80, reps=5)
+    _add_workout(user.id, W0, volume=100, weight=50, reps=5)
+    _add_workout(user.id, W1, volume=200, weight=60, reps=5)
+    _add_workout(user.id, W2, volume=300, weight=70, reps=5)
+    _add_workout(user.id, W3, volume=400, weight=80, reps=5)
     db.session.commit()
 
     plan = build_adaptive_plan(user.id, weeks=4, end_day=END_DAY)
@@ -173,8 +174,8 @@ def test_plan_overload_when_progressing(make_user):
 
 def test_plan_deload_when_block_stalls(make_user):
     user = make_user("plan2")
-    for day, vol in ((date(2026, 6, 25), 300), (date(2026, 7, 2), 305),
-                     (date(2026, 7, 9), 298), (date(2026, 7, 15), 302)):
+    for day, vol in ((W0, 300), (W1, 305),
+                     (W2, 298), (W3, 302)):
         _add_workout(user.id, day, volume=vol, weight=80, reps=5)  # flat strength too
     db.session.commit()
 
@@ -192,8 +193,8 @@ def test_plan_maintenance_on_plateau_without_deload(make_user):
     # Rest week at W0 + a flat active W1-W3 block: plateau fires but deload does
     # not (the rest week already deloaded) → deliberate consolidation week.
     user = make_user("plan3")
-    for day, vol in ((date(2026, 7, 2), 305), (date(2026, 7, 9), 298),
-                     (date(2026, 7, 15), 302)):
+    for day, vol in ((W1, 305), (W2, 298),
+                     (W3, 302)):
         _add_workout(user.id, day, volume=vol, weight=80, reps=5)
     db.session.commit()
 
@@ -210,8 +211,8 @@ def test_plan_maintenance_on_plateau_without_deload(make_user):
 
 def test_plan_build_consistency_when_sparse(make_user):
     user = make_user("plan4")
-    _add_workout(user.id, date(2026, 7, 2), volume=100)
-    _add_workout(user.id, date(2026, 7, 15), volume=120)
+    _add_workout(user.id, W1, volume=100)
+    _add_workout(user.id, W3, volume=120)
     db.session.commit()
 
     plan = build_adaptive_plan(user.id, weeks=4, end_day=END_DAY)
@@ -227,7 +228,7 @@ def test_plan_steady_for_marker_only_history(make_user):
     # Markers prove attendance, never justify overload: consistent-but-loadless
     # history reads "keep_pushing" upstream and must stay a hold-everything week.
     user = make_user("plan5")
-    for day in (date(2026, 6, 25), date(2026, 7, 2), date(2026, 7, 9), date(2026, 7, 15)):
+    for day in (W0, W1, W2, W3):
         _add_workout(user.id, day, volume=0, marker=True)
     db.session.commit()
 
@@ -261,10 +262,10 @@ def test_plan_weeks_non_positive_is_neutral(make_user):
 
 def test_plan_is_user_scoped(make_user):
     user = make_user("plan8")
-    _add_workout(user.id, date(2026, 7, 2), volume=100, weight=50, reps=5)
-    _add_workout(user.id, date(2026, 7, 9), volume=110, weight=52, reps=5)
+    _add_workout(user.id, W1, volume=100, weight=50, reps=5)
+    _add_workout(user.id, W2, volume=110, weight=52, reps=5)
     other = make_user("plan8_other")
-    _add_workout(other.id, date(2026, 7, 2), volume=99999, weight=300, reps=5)
+    _add_workout(other.id, W1, volume=99999, weight=300, reps=5)
     db.session.commit()
 
     plan = build_adaptive_plan(user.id, weeks=4, end_day=END_DAY)
@@ -273,8 +274,8 @@ def test_plan_is_user_scoped(make_user):
 
 def test_plan_is_deterministic(make_user):
     user = make_user("plan9")
-    _add_workout(user.id, date(2026, 7, 2), volume=100, weight=50, reps=5)
-    _add_workout(user.id, date(2026, 7, 15), volume=200, weight=60, reps=5)
+    _add_workout(user.id, W1, volume=100, weight=50, reps=5)
+    _add_workout(user.id, W3, volume=200, weight=60, reps=5)
     db.session.commit()
     a = build_adaptive_plan(user.id, weeks=4, end_day=END_DAY)
     b = build_adaptive_plan(user.id, weeks=4, end_day=END_DAY)

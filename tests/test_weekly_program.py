@@ -12,14 +12,18 @@ can be changed arbitrarily without moving a single decision
     python -m pytest tests/test_weekly_program.py -v
 """
 import dataclasses
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
 from app.extensions import db
 from app.models import WORKOUT_COMPLETION_MARKER, WorkoutLog
 from app.services.training_history import WeeklyVolume, weekly_windows
-from app.services.training_planning import AdaptivePlan, derive_adaptive_plan
+from app.services.training_planning import (
+    AdaptivePlan,
+    build_adaptive_plan,
+    derive_adaptive_plan,
+)
 from app.services.training_planning.analysis import (
     DELOAD_VOLUME_CUT,
     VOLUME_INCREASE_STEP,
@@ -35,7 +39,8 @@ from app.services.weekly_program import (
     target_volume_for,
 )
 
-END_DAY = date(2026, 7, 15)          # weeks 4 → starts 06-24, 07-01, 07-08, 07-15
+# Trailing windows: weeks 4 → starts 06-18, 06-25, 07-02, 07-09; W3 ends *on* END_DAY.
+END_DAY = date(2026, 7, 15)
 W0, W1, W2, W3 = weekly_windows(END_DAY, 4)
 
 SIGNALS = ("insufficient_data", "build_consistency", "deload",
@@ -256,10 +261,10 @@ def _add_workout(user_id, day, volume=100.0, sets=3, reps=5, weight=50.0, marker
 
 def test_program_overload_when_progressing(make_user):
     user = make_user("wp1")
-    _add_workout(user.id, date(2026, 6, 25), volume=100, weight=50, reps=5)
-    _add_workout(user.id, date(2026, 7, 2), volume=200, weight=60, reps=5)
-    _add_workout(user.id, date(2026, 7, 9), volume=300, weight=70, reps=5)
-    _add_workout(user.id, date(2026, 7, 15), volume=400, weight=80, reps=5)
+    _add_workout(user.id, W0, volume=100, weight=50, reps=5)
+    _add_workout(user.id, W1, volume=200, weight=60, reps=5)
+    _add_workout(user.id, W2, volume=300, weight=70, reps=5)
+    _add_workout(user.id, W3, volume=400, weight=80, reps=5)
     db.session.commit()
 
     program = build_weekly_program(user.id, weeks=4, end_day=END_DAY)
@@ -272,11 +277,9 @@ def test_program_overload_when_progressing(make_user):
 
 
 def test_program_deload_when_block_stalls(make_user):
-    # end_day is explicit, so the recommendation is exercised even though audit
-    # finding #5 makes `deload` rare against a live clock (docs/WEEKLY_PROGRAM.md).
     user = make_user("wp2")
-    for day, vol in ((date(2026, 6, 25), 300), (date(2026, 7, 2), 305),
-                     (date(2026, 7, 9), 298), (date(2026, 7, 15), 302)):
+    for day, vol in ((W0, 300), (W1, 305),
+                     (W2, 298), (W3, 302)):
         _add_workout(user.id, day, volume=vol, weight=80, reps=5)
     db.session.commit()
 
@@ -290,8 +293,8 @@ def test_program_deload_when_block_stalls(make_user):
 
 def test_program_maintenance_holds_the_baseline(make_user):
     user = make_user("wp3")
-    for day, vol in ((date(2026, 7, 2), 305), (date(2026, 7, 9), 298),
-                     (date(2026, 7, 15), 302)):
+    for day, vol in ((W1, 305), (W2, 298),
+                     (W3, 302)):
         _add_workout(user.id, day, volume=vol, weight=80, reps=5)
     db.session.commit()
 
@@ -304,8 +307,8 @@ def test_program_maintenance_holds_the_baseline(make_user):
 
 def test_program_build_consistency_when_sparse(make_user):
     user = make_user("wp4")
-    _add_workout(user.id, date(2026, 7, 2), volume=100)
-    _add_workout(user.id, date(2026, 7, 15), volume=120)
+    _add_workout(user.id, W1, volume=100)
+    _add_workout(user.id, W3, volume=120)
     db.session.commit()
 
     program = build_weekly_program(user.id, weeks=4, end_day=END_DAY)
@@ -321,7 +324,7 @@ def test_program_marker_only_history_has_no_volume_baseline(make_user):
     # Markers prove attendance and carry volume=0, so they are a trained day but never
     # a volume baseline — the program holds and reports no numbers.
     user = make_user("wp5")
-    for day in (date(2026, 6, 25), date(2026, 7, 2), date(2026, 7, 9), date(2026, 7, 15)):
+    for day in (W0, W1, W2, W3):
         _add_workout(user.id, day, volume=0, marker=True)
     db.session.commit()
 
@@ -353,10 +356,10 @@ def test_program_weeks_non_positive_is_neutral(make_user):
 
 def test_program_is_user_scoped(make_user):
     user = make_user("wp8")
-    _add_workout(user.id, date(2026, 7, 2), volume=100, weight=50, reps=5)
-    _add_workout(user.id, date(2026, 7, 9), volume=110, weight=52, reps=5)
+    _add_workout(user.id, W1, volume=100, weight=50, reps=5)
+    _add_workout(user.id, W2, volume=110, weight=52, reps=5)
     other = make_user("wp8_other")
-    _add_workout(other.id, date(2026, 7, 2), volume=99999, weight=300, reps=5)
+    _add_workout(other.id, W1, volume=99999, weight=300, reps=5)
     db.session.commit()
 
     program = build_weekly_program(user.id, weeks=4, end_day=END_DAY)
@@ -365,8 +368,132 @@ def test_program_is_user_scoped(make_user):
 
 def test_program_is_deterministic(make_user):
     user = make_user("wp9")
-    _add_workout(user.id, date(2026, 7, 2), volume=100, weight=50, reps=5)
-    _add_workout(user.id, date(2026, 7, 15), volume=200, weight=60, reps=5)
+    _add_workout(user.id, W1, volume=100, weight=50, reps=5)
+    _add_workout(user.id, W3, volume=200, weight=60, reps=5)
     db.session.commit()
     assert (build_weekly_program(user.id, weeks=4, end_day=END_DAY)
             == build_weekly_program(user.id, weeks=4, end_day=END_DAY))
+
+
+# ---------------------------------------------------------------------------
+# Multi-session regression coverage (Sprint 6 PR5 post-audit — finding F1)
+#
+# Every fixture above seeds exactly one workout per window, which makes a single
+# day and a whole training week numerically identical. That is precisely the shape
+# that hid the partial-window defect: while the newest window was forward-looking
+# (`[today, today + 6]`) it could only ever hold *today's* entries, so one session
+# was published as `baseline_weekly_volume`. These fixtures seed a realistic
+# multi-session week instead, so a one-day bucket can never impersonate a week.
+# ---------------------------------------------------------------------------
+
+SESSION_VOLUME = 5000.0                      # one session
+SESSIONS_PER_WEEK = (0, 2, 4)                # Mon/Wed/Fri-style cadence
+WEEK_VOLUME = SESSION_VOLUME * len(SESSIONS_PER_WEEK)   # 15000 kg per full week
+
+
+def _seed_multi_session_block(user_id, *, end_day=END_DAY, weeks=4,
+                              offsets=SESSIONS_PER_WEEK,
+                              session_volume=SESSION_VOLUME, weight=100.0, reps=5):
+    """Seed `weeks` trailing weeks of `len(offsets)` sessions, counted back from `end_day`.
+
+    `offsets` are days-before-`end_day` *within* each 7-day window, so every trailing
+    window holds a complete, realistic training week. `(0, 2, 4)` trains on `end_day`
+    itself — the "user has already trained today" case; `(1, 3, 5)` leaves `end_day` a
+    rest day. Returns the training days, newest first.
+    """
+    days = [end_day - timedelta(days=7 * week + offset)
+            for week in range(weeks) for offset in offsets]
+    for day in days:
+        _add_workout(user_id, day, volume=session_volume, weight=weight, reps=reps)
+    db.session.commit()
+    return days
+
+
+def test_current_day_session_is_not_mistaken_for_a_weekly_baseline(make_user):
+    """CASE 1 — multi-session completed weeks, evaluated on a day already trained.
+
+    The regression that finding F1 describes: with the old forward-looking newest
+    window this published 5000.0 (one session) as the *weekly* volume, understating
+    the user's real 15000 kg week threefold, and named a `baseline_week_start` that
+    ran six days into the future.
+    """
+    user = make_user("wp_f1_trained")
+    days = _seed_multi_session_block(user.id)
+    assert END_DAY in days                       # the user has trained today
+
+    program = build_weekly_program(user.id, weeks=4, end_day=END_DAY)
+
+    assert program.baseline_weekly_volume == WEEK_VOLUME      # 15000, a real week
+    assert program.baseline_weekly_volume != SESSION_VOLUME   # not today's 5000
+    # A valid *observed* window: it ends on END_DAY and never reaches past it.
+    assert program.baseline_week_start == END_DAY - timedelta(days=6)
+    assert program.baseline_week_start + timedelta(days=6) == END_DAY
+    # Target stays pure arithmetic on the corrected baseline.
+    assert program.target_weekly_volume == round(
+        WEEK_VOLUME * (1 + program.volume_delta_pct), 2)
+
+
+def test_rest_day_baseline_matches_the_trained_day_baseline(make_user):
+    """CASE 2 — the same block evaluated on a rest day reads the same.
+
+    The old geometry flip-flopped: on a rest day the newest bucket was empty and the
+    baseline fell back to a complete week, but logging the day's first set switched it
+    to that single session — so the published weekly target *dropped* the moment the
+    user trained. Trailing windows remove the switching entirely.
+    """
+    trained = make_user("wp_f1_trained2")
+    resting = make_user("wp_f1_rest")
+    _seed_multi_session_block(trained.id, offsets=(0, 2, 4))     # trained today
+    rest_days = _seed_multi_session_block(resting.id, offsets=(1, 3, 5))
+    assert END_DAY not in rest_days                              # rest day today
+
+    trained_program = build_weekly_program(trained.id, weeks=4, end_day=END_DAY)
+    rest_program = build_weekly_program(resting.id, weeks=4, end_day=END_DAY)
+
+    assert rest_program.baseline_weekly_volume == WEEK_VOLUME
+    assert rest_program.baseline_weekly_volume == trained_program.baseline_weekly_volume
+    assert rest_program.target_weekly_volume == trained_program.target_weekly_volume
+
+
+def test_one_session_week_is_not_equivalent_to_a_three_session_week(make_user):
+    """CASE 3 — the distinction the old one-workout-per-window fixtures could not make."""
+    sparse = make_user("wp_f1_sparse")
+    full = make_user("wp_f1_full")
+    _seed_multi_session_block(sparse.id, offsets=(0,))           # 1 session / week
+    _seed_multi_session_block(full.id, offsets=SESSIONS_PER_WEEK)  # 3 sessions / week
+
+    sparse_program = build_weekly_program(sparse.id, weeks=4, end_day=END_DAY)
+    full_program = build_weekly_program(full.id, weeks=4, end_day=END_DAY)
+
+    assert sparse_program.baseline_weekly_volume == SESSION_VOLUME
+    assert full_program.baseline_weekly_volume == WEEK_VOLUME
+    assert full_program.baseline_weekly_volume != sparse_program.baseline_weekly_volume
+
+
+def test_stable_weekly_volume_is_reported_as_the_weekly_total(make_user):
+    """CASE 4 — three identical 15000 kg weeks, checked on a training day."""
+    user = make_user("wp_f1_stable")
+    _seed_multi_session_block(user.id, weeks=3)
+
+    program = build_weekly_program(user.id, weeks=3, end_day=END_DAY)
+
+    assert program.baseline_weekly_volume == 15000.0
+    assert program.baseline_weekly_volume != SESSION_VOLUME
+    assert program.target_weekly_volume == round(
+        15000.0 * (1 + program.volume_delta_pct), 2)
+
+
+def test_every_window_holds_a_full_week_of_sessions(make_user):
+    """The fixture's own guarantee — each trailing window really does hold a week.
+
+    Without this the cases above could pass for the wrong reason (e.g. a fixture that
+    silently drops sessions outside the fetch range).
+    """
+    user = make_user("wp_f1_windows")
+    _seed_multi_session_block(user.id)
+
+    plan = build_adaptive_plan(user.id, 4, end_day=END_DAY)
+
+    assert [w.session_count for w in plan.progression.weekly_volume] == [3, 3, 3, 3]
+    assert [w.total_volume for w in plan.progression.weekly_volume] == [WEEK_VOLUME] * 4
+    assert plan.progression.weekly_volume[-1].week_start == END_DAY - timedelta(days=6)

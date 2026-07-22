@@ -39,14 +39,26 @@ def count_sessions(entries: Iterable[WorkoutEntry]) -> int:
 
 
 def weekly_windows(end_day: date, weeks: int) -> list[date]:
-    """Week-start dates for the last ``weeks`` 7-day windows, oldest first.
+    """Week-start dates for the last ``weeks`` **trailing** 7-day windows, oldest first.
 
-    The newest window starts on ``end_day``; each earlier window starts 7 days
-    before the next (matching the 21/14/7/0 offsets used elsewhere).
+    The newest window *ends* on ``end_day`` — i.e. it starts ``WEEK_DAYS - 1`` days
+    earlier and covers ``[end_day - 6, end_day]``. Each earlier window starts 7 days
+    before the next, so the windows are contiguous, non-overlapping, and none of them
+    extends past ``end_day``.
+
+    A window is an *observation* period, so it must be one that has actually been
+    lived. The newest window used to start on ``end_day`` (``[today, today + 6]``);
+    since history can never contain future entries, that bucket only ever held
+    ``end_day``'s own entries while presenting itself as a week. One day of training
+    then read as a whole week's volume, and a rest day read as a zero week — see
+    ``docs/TRAINING_HISTORY.md`` and ``NEEDED_FIXES.md`` #5.
     """
     if weeks <= 0:
         return []
-    return [end_day - timedelta(days=WEEK_DAYS * (weeks - 1 - i)) for i in range(weeks)]
+    newest_start = end_day - timedelta(days=WEEK_DAYS - 1)
+    return [
+        newest_start - timedelta(days=WEEK_DAYS * (weeks - 1 - i)) for i in range(weeks)
+    ]
 
 
 def bucket_by_week(
@@ -54,10 +66,11 @@ def bucket_by_week(
 ) -> list[WeeklyVolume]:
     """Aggregate ``entries`` into ``weeks`` consecutive 7-day windows, oldest first.
 
-    Each window covers ``[week_start, week_start + 6 days]`` inclusive. Windows do
-    not overlap, so every entry lands in at most one bucket; entries outside all
-    windows are ignored. ``session_count`` counts distinct trained days (marker or
-    real); the other totals count real exercise entries only.
+    Each window covers ``[week_start, week_start + 6 days]`` inclusive, and the
+    newest window ends on ``end_day`` (see ``weekly_windows``). Windows do not
+    overlap, so every entry lands in at most one bucket; entries outside all windows
+    are ignored. ``session_count`` counts distinct trained days (marker or real); the
+    other totals count real exercise entries only.
     """
     entries = list(entries)
     buckets: list[WeeklyVolume] = []

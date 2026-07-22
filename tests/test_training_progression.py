@@ -6,7 +6,7 @@ Two layers, matching repo convention (see tests/test_training_history.py):
 
     python -m pytest tests/test_training_progression.py -v
 """
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from app.extensions import db
 from app.models import WORKOUT_COMPLETION_MARKER, WorkoutLog
@@ -29,7 +29,10 @@ from app.services.training_progression import (
     weekly_best_estimated_1rm,
 )
 
-END_DAY = date(2026, 7, 15)          # weeks 4 → starts 06-24, 07-01, 07-08, 07-15
+# Trailing windows: weeks 4 → starts 06-18, 06-25, 07-02, 07-09; W3 ends *on* END_DAY.
+# Fixtures seed against W0..W3 rather than literal dates so they state "one session in
+# this window" and stay correct if the window geometry is ever revisited again.
+END_DAY = date(2026, 7, 15)
 W0, W1, W2, W3 = weekly_windows(END_DAY, 4)
 
 
@@ -66,9 +69,9 @@ def test_series_trend_directions():
 
 def test_weekly_best_estimated_1rm_peak_and_marker_exclusion():
     entries = [
-        _entry(date(2026, 7, 2), weight=100, reps=5),   # 1RM 116.67 (peak)
-        _entry(date(2026, 7, 2), weight=80, reps=10),   # 1RM 106.67
-        _entry(date(2026, 7, 2), volume=0, marker=True),  # excluded
+        _entry(W1, weight=100, reps=5),   # 1RM 116.67 (peak)
+        _entry(W1, weight=80, reps=10),   # 1RM 106.67
+        _entry(W1, volume=0, marker=True),  # excluded
     ]
     weekly = weekly_best_estimated_1rm(entries, END_DAY, 4)
     assert [w.week_start for w in weekly] == [W0, W1, W2, W3]
@@ -79,7 +82,7 @@ def test_weekly_best_estimated_1rm_peak_and_marker_exclusion():
 
 def test_weekly_best_estimated_1rm_bodyweight_zero_load():
     # A real bodyweight entry (weight 0) counts as an entry but contributes no 1RM.
-    weekly = weekly_best_estimated_1rm([_entry(date(2026, 7, 2), weight=0, reps=10)], END_DAY, 4)
+    weekly = weekly_best_estimated_1rm([_entry(W1, weight=0, reps=10)], END_DAY, 4)
     assert weekly[1].best_estimated_1rm == 0.0
     assert weekly[1].entry_count == 1
 
@@ -187,10 +190,10 @@ def _add_workout(user_id, day, volume=100.0, sets=3, reps=5, weight=50.0, marker
 
 def test_report_progressing_when_volume_and_strength_rise(make_user):
     user = make_user("prog1")
-    _add_workout(user.id, date(2026, 6, 25), volume=100, weight=50, reps=5)
-    _add_workout(user.id, date(2026, 7, 2), volume=200, weight=60, reps=5)
-    _add_workout(user.id, date(2026, 7, 9), volume=300, weight=70, reps=5)
-    _add_workout(user.id, date(2026, 7, 15), volume=400, weight=80, reps=5)
+    _add_workout(user.id, W0, volume=100, weight=50, reps=5)
+    _add_workout(user.id, W1, volume=200, weight=60, reps=5)
+    _add_workout(user.id, W2, volume=300, weight=70, reps=5)
+    _add_workout(user.id, W3, volume=400, weight=80, reps=5)
     db.session.commit()
 
     r = build_progression_report(user.id, weeks=4, end_day=END_DAY)
@@ -209,8 +212,8 @@ def test_report_progressing_when_volume_and_strength_rise(make_user):
 
 def test_report_plateau_and_deload_when_block_stalls(make_user):
     user = make_user("prog2")
-    for day, vol in ((date(2026, 6, 25), 300), (date(2026, 7, 2), 305),
-                     (date(2026, 7, 9), 298), (date(2026, 7, 15), 302)):
+    for day, vol in ((W0, 300), (W1, 305),
+                     (W2, 298), (W3, 302)):
         _add_workout(user.id, day, volume=vol, weight=80, reps=5)  # flat strength too
     db.session.commit()
 
@@ -226,8 +229,8 @@ def test_report_plateau_and_deload_when_block_stalls(make_user):
 
 def test_report_build_consistency_when_training_sparse(make_user):
     user = make_user("prog3")
-    _add_workout(user.id, date(2026, 7, 2), volume=100)
-    _add_workout(user.id, date(2026, 7, 15), volume=120)
+    _add_workout(user.id, W1, volume=100)
+    _add_workout(user.id, W3, volume=120)
     db.session.commit()
 
     r = build_progression_report(user.id, weeks=4, end_day=END_DAY)
@@ -251,10 +254,10 @@ def test_report_empty_history_is_neutral(make_user):
 
 def test_report_is_user_scoped(make_user):
     user = make_user("prog5")
-    _add_workout(user.id, date(2026, 7, 2), volume=100, weight=50, reps=5)
-    _add_workout(user.id, date(2026, 7, 9), volume=110, weight=52, reps=5)
+    _add_workout(user.id, W1, volume=100, weight=50, reps=5)
+    _add_workout(user.id, W2, volume=110, weight=52, reps=5)
     other = make_user("prog5_other")
-    _add_workout(other.id, date(2026, 7, 2), volume=99999, weight=300, reps=5)
+    _add_workout(other.id, W1, volume=99999, weight=300, reps=5)
     db.session.commit()
 
     r = build_progression_report(user.id, weeks=4, end_day=END_DAY)
@@ -264,8 +267,8 @@ def test_report_is_user_scoped(make_user):
 
 def test_report_is_deterministic(make_user):
     user = make_user("prog6")
-    _add_workout(user.id, date(2026, 7, 2), volume=100, weight=50, reps=5)
-    _add_workout(user.id, date(2026, 7, 15), volume=200, weight=60, reps=5)
+    _add_workout(user.id, W1, volume=100, weight=50, reps=5)
+    _add_workout(user.id, W3, volume=200, weight=60, reps=5)
     db.session.commit()
     a = build_progression_report(user.id, weeks=4, end_day=END_DAY)
     b = build_progression_report(user.id, weeks=4, end_day=END_DAY)
@@ -281,7 +284,7 @@ def test_report_is_deterministic(make_user):
 def test_report_single_workout_is_neutral(make_user):
     # One workout is not enough to judge any trend or consistency → all-neutral.
     user = make_user("golden_single")
-    _add_workout(user.id, date(2026, 7, 9), volume=100, weight=50, reps=5)
+    _add_workout(user.id, W2, volume=100, weight=50, reps=5)
     db.session.commit()
 
     r = build_progression_report(user.id, weeks=4, end_day=END_DAY)
@@ -299,7 +302,7 @@ def test_report_marker_only_history(make_user):
     # window counts as a trained day, but there is no volume/strength to judge — so
     # the trends and progression booleans stay neutral while consistency still reads.
     user = make_user("golden_marker")
-    for day in (date(2026, 6, 25), date(2026, 7, 2), date(2026, 7, 9), date(2026, 7, 15)):
+    for day in (W0, W1, W2, W3):
         _add_workout(user.id, day, volume=0, marker=True)
     db.session.commit()
 
@@ -323,8 +326,8 @@ def test_report_progressing_and_plateau_coexist(make_user):
     # canonical output. The only way this state arises is a sustained active block that
     # stalled, which also satisfies deload_due, so next_signal resolves to "deload".
     user = make_user("golden_coexist")
-    for day, vol in ((date(2026, 6, 25), 100), (date(2026, 7, 2), 300),
-                     (date(2026, 7, 9), 305), (date(2026, 7, 15), 298)):
+    for day, vol in ((W0, 100), (W1, 300),
+                     (W2, 305), (W3, 298)):
         _add_workout(user.id, day, volume=vol, weight=80, reps=5)   # flat strength too
     db.session.commit()
 
@@ -336,12 +339,41 @@ def test_report_progressing_and_plateau_coexist(make_user):
     assert r.next_signal == "deload"       # canonical: precedence resolves the overlap
 
 
+def test_deload_is_not_gated_on_having_trained_today(make_user):
+    """NEEDED_FIXES.md #5 — deload used to be unreachable on a rest day.
+
+    While the newest window was forward-looking (`[today, today + 6]`) it held only
+    today's entries, so on any day the user had not yet trained it read as a rest
+    week. `detect_deload_due` rejects a block containing a rest week, so a genuine
+    stalled accumulation block could never flag a deload unless the user happened to
+    have already trained that day. With trailing windows the newest bucket is a real
+    week and the existing heuristic — unchanged — evaluates the block it was written
+    for.
+    """
+    user = make_user("deload_rest_day")
+    # A flat, sustained block: three sessions a week for four weeks, none on END_DAY.
+    for week in range(4):
+        for offset in (1, 3, 5):
+            _add_workout(user.id, END_DAY - timedelta(days=7 * week + offset),
+                         volume=100, weight=80, reps=5)
+    db.session.commit()
+
+    r = build_progression_report(user.id, weeks=4, end_day=END_DAY)
+
+    # No phantom rest week: every trailing window holds real training.
+    assert [w.session_count for w in r.weekly_volume] == [3, 3, 3, 3]
+    assert all(w.total_volume == 300.0 for w in r.weekly_volume)
+    assert r.is_plateau is True
+    assert r.deload_due is True
+    assert r.next_signal == "deload"
+
+
 def test_report_non_consecutive_weeks(make_user):
     # Trained in W0 and W2 only (gaps at W1 and W3): windows still bucket correctly, the
     # active-only trend ignores the empty weeks, and the gaps read as inconsistent.
     user = make_user("golden_gaps")
-    _add_workout(user.id, date(2026, 6, 25), volume=100, weight=50, reps=5)  # W0
-    _add_workout(user.id, date(2026, 7, 9), volume=200, weight=60, reps=5)   # W2
+    _add_workout(user.id, W0, volume=100, weight=50, reps=5)  # W0
+    _add_workout(user.id, W2, volume=200, weight=60, reps=5)   # W2
     db.session.commit()
 
     r = build_progression_report(user.id, weeks=4, end_day=END_DAY)
