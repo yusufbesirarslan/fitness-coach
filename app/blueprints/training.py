@@ -314,8 +314,31 @@ def get_weekly_program():
     query string: the response must be deterministic for a given user and day, and a
     caller-tunable window would be a planning knob this layer has no authority to
     offer. Empty history yields the neutral recommendation, never an error.
+
+    Failure semantics differ from the PR4 coach consumer *on purpose*. PR4 catches a
+    planner failure and substitutes its neutral contract because the coach must keep
+    answering; here the neutral recommendation is a legitimate user state ("not enough
+    history"), so returning it on a DB/planner failure would report infrastructure
+    breakage as valid data. The failure propagates as a structured JSON 500 instead,
+    matching the other JSON routes in this blueprint rather than the HTML error page.
+    No `db.session.rollback()` is needed: unlike PR4 the request ends here, and
+    Flask-SQLAlchemy's teardown removes the session per request.
     """
-    recommendation = build_weekly_program(current_user.id, weeks=4, end_day=None)
+    try:
+        recommendation = build_weekly_program(current_user.id, weeks=4, end_day=None)
+    except Exception as e:
+        current_app.logger.warning(
+            "[TRAINING][WEEKLY_PROGRAM] build başarısız user=%s: %s: %s",
+            current_user.id, type(e).__name__, e)
+        return jsonify({"error": t("route.generic_error_retry")}), 500
+
+    # Minimum useful observability: tells "neutral because no history" apart from
+    # "populated recommendation" apart from "upstream failure" (logged above) without
+    # emitting history, volumes, or the payload itself.
+    current_app.logger.debug(
+        "[TRAINING][WEEKLY_PROGRAM] user=%s has_data=%s focus=%s has_baseline=%s",
+        current_user.id, recommendation.has_data, recommendation.week_focus,
+        recommendation.baseline_weekly_volume is not None)
     return jsonify(weekly_program_payload(recommendation))
 
 

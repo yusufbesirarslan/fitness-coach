@@ -15,8 +15,10 @@ assertions stay exact.
 """
 import ast
 import dataclasses
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
+
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.blueprints import training as training_bp
 from app.extensions import db
@@ -52,11 +54,21 @@ def _add_workout(user_id, day, volume=100.0, weight=50.0, reps=5, marker=False):
     ))
 
 
+SESSION_DAYS = (0, 2, 4)   # three sessions inside each 7-day window
+
+
 def _seed_progressing_block(user_id):
-    """Four windows of rising load ending today → overload, 400 kg baseline."""
+    """Four trailing windows of rising load → overload, 1200 kg weekly baseline.
+
+    Three sessions per window, not one: a single workout per window makes a day and a
+    week numerically identical, which is exactly what hid finding F1 from this suite.
+    Per-session volumes 100/200/300/400 → weekly totals 300/600/900/1200.
+    """
     windows = weekly_windows(app_today(), 4)
     for day, volume, weight in zip(windows, (100, 200, 300, 400), (50, 60, 70, 80)):
-        _add_workout(user_id, day, volume=volume, weight=weight)
+        for offset in SESSION_DAYS:
+            _add_workout(user_id, day + timedelta(days=offset),
+                         volume=volume, weight=weight)
     db.session.commit()
     return windows
 
@@ -178,6 +190,13 @@ def test_unsupported_capabilities_are_published_not_invented(app, client,
 
 def test_baseline_is_observed_and_target_is_plan_arithmetic(app, client,
                                                             make_user, login):
+    """Rising load across four *multi-session* weeks → overload on a real weekly total.
+
+    This previously seeded one workout per window, so the number it pinned (400.0) was
+    a single session standing in for a week — the shape that let finding F1 through.
+    Each window now holds a full three-session week, so the assertion is about a
+    weekly volume in the sense the field name claims.
+    """
     user = _signin(make_user, login, "wprv")
     windows = _seed_progressing_block(user.id)
 
@@ -188,9 +207,35 @@ def test_baseline_is_observed_and_target_is_plan_arithmetic(app, client,
     assert payload["volume_delta_pct"] == 0.05
     # Newest positive window, observed — not recomputed from WorkoutLog by the route.
     assert payload["baseline_week_start"] == windows[-1].isoformat()
-    assert payload["baseline_weekly_volume"] == 400.0
-    # Pure arithmetic on the plan's own delta: 400 * 1.05, rounded to 2 dp.
-    assert payload["target_weekly_volume"] == 420.0
+    assert payload["baseline_weekly_volume"] == 1200.0      # 3 sessions × 400
+    # Pure arithmetic on the plan's own delta: 1200 * 1.05, rounded to 2 dp.
+    assert payload["target_weekly_volume"] == 1260.0
+
+
+def test_current_day_training_does_not_shrink_the_published_baseline(app, client,
+                                                                    make_user, login):
+    """Finding F1 at the HTTP layer, against the live clock the route actually uses.
+
+    A Mon/Wed/Fri-style block of 5000 kg sessions is a 15000 kg week. Before the
+    upstream window fix, requesting this on a day the user had already trained
+    published today's single session as `baseline_weekly_volume`, and pointed
+    `baseline_week_start` at a window running six days into the future.
+    """
+    user = _signin(make_user, login, "wprf1")
+    today = app_today()
+    for week in range(4):
+        for offset in (0, 2, 4):          # includes today → "already trained"
+            _add_workout(user.id, today - timedelta(days=7 * week + offset),
+                         volume=5000.0, weight=100)
+    db.session.commit()
+
+    payload = client.get(ROUTE).get_json()
+
+    assert payload["baseline_weekly_volume"] == 15000.0     # the real week
+    assert payload["baseline_weekly_volume"] != 5000.0      # not today's session
+    # The published window is one that has actually been lived.
+    assert payload["baseline_week_start"] == (today - timedelta(days=6)).isoformat()
+    assert payload["baseline_week_start"] <= today.isoformat()
 
 
 def test_zero_volume_week_is_not_used_as_a_baseline(app, client, make_user, login):
@@ -294,6 +339,76 @@ def test_query_string_cannot_retune_the_window(app, client, make_user, login):
 
 
 # ---------------------------------------------------------------------------
+# Failure semantics (Sprint 6 PR5 post-audit — finding F4)
+# ---------------------------------------------------------------------------
+
+def test_upstream_failure_returns_structured_json_not_html(app, client, make_user,
+                                                            login, monkeypatch):
+    """A planner/DB failure must surface as a JSON 500, never the HTML error page.
+
+    The global `errorhandler(500)` renders `500.html`, so an uncaught exception would
+    hand a JSON client a page to parse. The other JSON routes in this blueprint catch
+    and return `{"error": ...}`; this one follows them.
+    """
+    _signin(make_user, login, "wprfail")
+
+    def _boom(*args, **kwargs):
+        raise SQLAlchemyError("planner unavailable")
+
+    monkeypatch.setattr(training_bp, "build_weekly_program", _boom)
+
+    response = client.get(ROUTE)
+
+    assert response.status_code == 500
+    assert response.mimetype == "application/json"
+    assert "error" in response.get_json()
+
+
+def test_failure_is_not_disguised_as_an_empty_recommendation(app, client, make_user,
+                                                              login, monkeypatch):
+    """Infrastructure failure must not be reported as valid "no history yet" data.
+
+    The neutral recommendation is a legitimate user state, so returning it here (as the
+    PR4 coach consumer deliberately does for its own contract) would make a broken
+    database indistinguishable from a new user — and a UI would render a confident
+    "not enough data" card over an outage.
+    """
+    _signin(make_user, login, "wprfail2")
+    monkeypatch.setattr(training_bp, "build_weekly_program",
+                        lambda *a, **k: (_ for _ in ()).throw(SQLAlchemyError("down")))
+
+    body = client.get(ROUTE).get_json()
+
+    assert "week_focus" not in body
+    assert "has_data" not in body
+    assert "baseline_weekly_volume" not in body
+
+
+# ---------------------------------------------------------------------------
+# Feature-flag isolation — PR5 is independent of the PR4 coach gate
+# ---------------------------------------------------------------------------
+
+def test_response_is_identical_under_both_coach_flag_states(app, client, make_user,
+                                                             login, monkeypatch):
+    """`AI_ADAPTIVE_PLAN_CONTEXT` gates the coach prompt only — never this endpoint.
+
+    PR5 reads no config at all, so this is guaranteed by construction; the test pins it
+    so a future change cannot quietly couple the read-only surface to a coach rollout.
+    """
+    user = _signin(make_user, login, "wprflag")
+    _seed_progressing_block(user.id)
+
+    monkeypatch.setitem(app.config, "AI_ADAPTIVE_PLAN_CONTEXT", False)
+    off = client.get(ROUTE)
+    monkeypatch.setitem(app.config, "AI_ADAPTIVE_PLAN_CONTEXT", True)
+    on = client.get(ROUTE)
+
+    assert off.status_code == on.status_code == 200
+    assert off.get_json() == on.get_json()
+    assert off.get_data() == on.get_data()      # byte-identical, not just equal
+
+
+# ---------------------------------------------------------------------------
 # Structural guard — the route stays a consumer, not a planner
 # ---------------------------------------------------------------------------
 
@@ -316,7 +431,14 @@ def test_view_body_is_one_service_call_and_one_projection():
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     ]
 
-    # Thin by construction: build once, project once, hand it to jsonify. Any extra
-    # call is where a second planning authority would start.
-    assert sorted(called) == ["build_weekly_program", "jsonify",
-                             "weekly_program_payload"]
+    # Thin by construction: build once, project once. Error handling and logging are
+    # allowed to add infrastructure calls, but a *second* planning pass or projection
+    # is where a competing authority would start.
+    assert called.count("build_weekly_program") == 1
+    assert called.count("weekly_program_payload") == 1
+    # Nothing that would make the route compute a recommendation rather than consume one.
+    assert not set(called) & {
+        "build_adaptive_plan", "build_progression_report", "derive_weekly_program",
+        "build_training_history_summary", "fetch_workout_entries", "weekly_windows",
+        "bucket_by_week", "select_volume_baseline", "target_volume_for",
+    }
