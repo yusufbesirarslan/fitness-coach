@@ -1,5 +1,23 @@
 # Adaptive Planning Layer
 
+
+## Sprint 6 PR6.2 ? browser presentation consumer
+
+The training page is now the planner's read-only browser presentation consumer, but it
+does not import this package. It consumes only the already authenticated
+`GET /api/training/weekly-program` projection. Decision fields are validated and
+displayed verbatim; no focus mapping, threshold, target calculation, reason sorting,
+or weekly-window arithmetic exists in the browser. Additive top-level API evolution
+and new string-valued `unsupported` capabilities remain compatible, while unknown
+decision vocabulary is rejected as malformed rather than interpreted.
+
+The UI rollout flag remains independent from `AI_ADAPTIVE_PLAN_CONTEXT`. Turning the
+UI flag off removes the mount, feature copy, script request, and API request without
+changing the endpoint, planner, coach prompt, or database behavior. See
+`docs/WEEKLY_PROGRAM.md` for the state, localization, retry, and accessibility
+contracts.
+
+
 `app/services/training_planning/` — the canonical, deterministic
 **adaptive-planning** layer of the Adaptive Training Engine (Sprint 6 PR3). It turns
 the progression engine's normalized signals (`docs/TRAINING_PROGRESSION.md`, Sprint 6

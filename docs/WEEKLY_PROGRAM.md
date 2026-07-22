@@ -1,5 +1,54 @@
 # Weekly Program Consumer
 
+
+## Sprint 6 PR6.2 ? read-only adaptive program card
+
+The default-OFF rollout boundary now has a read-only client consumer. When
+`WEEKLY_PROGRAM_UI_ENABLED=1`, `/training` emits one inert
+`script[type=application/json][data-weekly-program-copy]` inside the existing mount
+and loads the existing `static/weekly_program.js`. The client removes
+`aria-hidden`, renders loading synchronously, then performs exactly one
+`GET /api/training/weekly-program` request with `Accept: application/json`.
+
+The client state marker is `data-weekly-program-state` with
+`idle | loading | populated | insufficient_data | missing_baseline | error |
+malformed`. Initialization remains idempotent. Error and malformed states expose a
+native retry button; retry immediately replaces old content with loading and the
+in-memory active-request plus request-generation guards prevent concurrent or stale
+completion. There is no polling, timer, cancellation layer, storage, or automatic
+retry.
+
+Payload validation follows the published backend contract. Known decision enums,
+booleans, finite values, paired positive volume metrics, real ISO baseline dates,
+ordered reason codes, and one-to-one explanation keys are validated. Unknown additive
+top-level fields and unknown string entries in `unsupported` are accepted. The
+browser does not calculate a target, a weekly window, a delta, or another planning
+decision.
+
+Rendering uses DOM construction and `textContent` only. `has_data=false` shows
+guidance without advice; a missing positive baseline shows focus/actions without
+inventing a zero or target; populated recommendations show the server-supplied
+observed/target volumes and reasons in received order. Volumes use
+`Intl.NumberFormat` for `tr-TR` / `en-US`, at most two decimals, followed by the
+localized kg unit. The date and `volume_delta_pct` are validated but not displayed.
+
+Feature copy lives under `weekly_program.*` in both locale catalogs. Shared
+`catalog(locale=None, *, exclude_prefixes=())` remains compatible for default
+callers and returns fresh dictionaries. The global `window.I18N` excludes this
+feature namespace; only the flag-ON training block receives its safely
+`tojson`-encoded copy map. The OFF page receives no mount, copy block, asset, request,
+or feature namespace.
+
+Presentation is scoped to `.weekly-program-*` rules in `training.css`, reuses the
+shared card, button, skeleton and token primitives, uses the existing 640 px
+breakpoint, and provides status/alert semantics, one section heading, two-column
+metrics where space permits, overflow-safe text, and a 44 px retry target.
+
+PR6.3 still owns live browser/mobile accessibility validation, cache/privacy headers,
+observability decisions, SQL/performance audit, the four-way runtime flag matrix, and
+production-readiness review.
+
+
 `app/services/weekly_program/` — the canonical, deterministic **weekly-program
 consumer** of the Adaptive Training Engine (Sprint 6 PR5). It translates the
 `AdaptivePlan` produced by the planning layer (`docs/TRAINING_PLANNING.md`, Sprint 6
@@ -355,7 +404,7 @@ data handling exists:
 | PR | Scope | State |
 |----|-------|-------|
 | **PR6.1** | Integration-surface discovery, characterization coverage, default-OFF UI flag, server-rendered mount shell, frontend initialization boundary | **Done** (this section) |
-| PR6.2 | Fetch `GET /api/training/weekly-program`; loading / populated / insufficient-data / missing-baseline / structured-failure states; malformed-payload safety; localization; accessibility and responsive presentation | Not started |
+| PR6.2 | Fetch `GET /api/training/weekly-program`; loading / populated / insufficient-data / missing-baseline / structured-failure states; malformed-payload safety; localization; accessibility and responsive presentation | Complete |
 | PR6.3 | Observability finalization, cache/privacy hardening, architecture guards, full four-way flag matrix, performance and SQL verification, mobile/a11y validation, production-readiness re-audit | Not started |
 
 ### PR6.1 — what exists today
