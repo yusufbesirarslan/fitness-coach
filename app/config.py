@@ -85,6 +85,13 @@ BEDROCK_PROMPT_CACHE = os.getenv("BEDROCK_PROMPT_CACHE", "0") == "1"
 # Sprint 6 PR4: deterministic AdaptivePlan context for AI Coach. Strict opt-in:
 # OFF preserves the pre-PR4 prompt/context path exactly.
 AI_ADAPTIVE_PLAN_CONTEXT = os.getenv("AI_ADAPTIVE_PLAN_CONTEXT", "0") == "1"
+# Sprint 6 PR6.1: server-controlled rollout gate for the Adaptive Weekly Program UI.
+# Deliberately a SEPARATE env name and config key from AI_ADAPTIVE_PLAN_CONTEXT above:
+# one governs what the AI coach may read, the other only whether a UI mount point is
+# rendered. Coupling them would make a prompt rollout drag a UI rollout with it.
+# PRESENTATION ONLY — never an authorization boundary. GET /api/training/weekly-program
+# stays @require_auth regardless of this flag. Setting it back to 0 is the full rollback.
+WEEKLY_PROGRAM_UI_ENABLED = os.getenv("WEEKLY_PROGRAM_UI_ENABLED", "0") == "1"
 # ── Sprint 4 WS1: AI koç kalıcı konuşma hafızası ──
 # Operasyonel kapatma anahtarı: 0 → eski davranış (yalnızca widget'ın gönderdiği
 # kısa geçmiş; DB'ye tur yazılmaz). Tablolar expand-only olduğundan geri açmak güvenli.
@@ -276,6 +283,7 @@ def configure_app(app):
     app.config["AI_PLAN_QUOTA_ENABLED"] = AI_PLAN_QUOTA_ENABLED
     app.config["AI_CHAT_QUOTA_ENABLED"] = AI_CHAT_QUOTA_ENABLED
     app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = AI_ADAPTIVE_PLAN_CONTEXT
+    app.config["WEEKLY_PROGRAM_UI_ENABLED"] = WEEKLY_PROGRAM_UI_ENABLED
     app.config["AI_MEMORY_ENABLED"] = AI_MEMORY_ENABLED
     app.config["LOGIN_FAIL_CLOSED"] = LOGIN_FAIL_CLOSED
     app.config["BEDROCK_ENABLED"] = BEDROCK_ENABLED

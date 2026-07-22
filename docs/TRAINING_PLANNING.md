@@ -273,3 +273,19 @@ string; the analysis window is a planning knob, not an HTTP parameter.
 names three files — `adaptive_plan_context.py` plus `weekly_program/__init__.py` and
 `weekly_program/analysis.py`. Any further importer is an explicit, reviewable decision,
 not a default.
+
+## Sprint 6 PR6.1 — UI rollout boundary (no third consumer yet)
+
+PR6.1 adds a **presentation** boundary on `/training`, not a third planner consumer.
+Behind the default-OFF `WEEKLY_PROGRAM_UI_ENABLED` flag it renders one inert mount
+shell plus a no-op initializer; it fetches nothing, embeds no recommendation data, and
+imports neither `weekly_program` nor `training_planning` from the page route (pinned by
+an AST guard in `tests/test_weekly_program_ui.py`). The allowlist above is therefore
+unchanged. When PR6.2 wires the card up it will consume the existing
+`GET /api/training/weekly-program` response over HTTP — which needs no allowlist entry
+either, because reaching the planner is exactly what that endpoint already does on the
+client's behalf. Details: `docs/WEEKLY_PROGRAM.md` → *UI rollout (Sprint 6 PR6)*.
+
+`WEEKLY_PROGRAM_UI_ENABLED` and `AI_ADAPTIVE_PLAN_CONTEXT` are independent by
+construction: separate env names, separate config keys, separate read paths. Enabling
+the UI cannot change a prompt, and enabling the coach context cannot render a shell.

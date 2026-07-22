@@ -1289,3 +1289,437 @@ other `NEEDED_FIXES.md` item (#1-#4, #6, #7) — untouched.
 4. Do not open `weeks`/`end_day` as query parameters, and do not add a second window
    rule anywhere above `training_history.weekly_windows`.
 5. Leave `fitx_mcp/server.py` last.
+
+## Sprint 6 PR6.1 - Weekly Program UI Foundation and Rollout Boundary
+
+Date: 2026-07-22
+Scope: the **first of three** PRs that introduce the Adaptive Weekly Program UI. This
+one builds only the activation boundary — integration-surface selection,
+characterization coverage, a default-OFF UI flag, a server-rendered mount shell and a
+no-op frontend initializer. It deliberately **fetches no data and renders no
+recommendation**; those are PR6.2. **The PR6.2 agent must read this section (and PR5
+above) before implementing anything.**
+
+### 1-2. Branch, HEAD, base
+
+- Branch: `sprint6-pr6.1-weekly-program-ui`
+- Base / HEAD at start: `origin/main` = `07ef1ff` ("feat(training): haftalık program
+  tüketicisi + salt-okunur route + pencere düzeltmesi (Sprint 6 PR5) (#177)")
+- PR5's own warning was heeded: the pre-existing local branch
+  `sprint6-pr5-weekly-program` was 1 behind / 4 ahead of `origin/main`, but
+  `git diff HEAD origin/main` was **empty** — PR5 had been squash-merged upstream. This
+  branch was cut from `origin/main`, not from the stale local branch.
+- Working tree at start: clean apart from an untracked `AGENTS.md` (pre-existing, not
+  part of this PR).
+
+### 3. Files created
+
+| File | Purpose |
+|---|---|
+| `static/weekly_program.js` | Frontend initialization boundary (2,207 bytes) |
+| `tests/test_training_page_characterization.py` | 69 characterization tests, written green **before** any source edit |
+| `tests/test_weekly_program_ui.py` | 33 tests — OFF/ON template contract, flag isolation, route AST guards, SQL parity |
+| `tests/test_weekly_program_ui_flag.py` | 21 tests — config default/parsing/independence/request-immunity |
+| `tests/test_weekly_program_ui_js.py` | 45 tests — JS source guards + node-executed behavior + CSS/layout guard |
+
+### 4. Files modified
+
+| File | Change |
+|---|---|
+| `app/config.py` | `WEEKLY_PROGRAM_UI_ENABLED` constant + `app.config` mirror |
+| `app/blueprints/training.py` | `training()` view passes one boolean to the template |
+| `templates/training.html` | Flag-gated mount `<section>` + flag-gated `<script>` |
+| `.env.example` | Commented `# WEEKLY_PROGRAM_UI_ENABLED=0` block |
+| `tests/test_env_example.py` | Guard: documented and default-OFF |
+| `docs/WEEKLY_PROGRAM.md` | New "UI rollout (Sprint 6 PR6)" section |
+| `docs/TRAINING_PLANNING.md` | "Sprint 6 PR6.1 — UI rollout boundary (no third consumer yet)" |
+| `CLAUDE.md` | UI-flag boundary appended to the `weekly_program` service line |
+
+No schema, no migration, no dependency, no CSS file, no locale key.
+
+### 5. Training surfaces inspected
+
+- `/training` — `app/blueprints/training.py:training` -> `templates/training.html`:
+  plan-creation form (`#setup-form`) **and** the active-plan view (`#active-plan-view`)
+  containing the workout hero, the "Bu hafta" week strip (`#week-strip`), weekly stats
+  (`#wstats`) and the plan-meta/reset row.
+- Workout-status surfaces — `GET /workout/status`, `GET /training-plan/active` (JSON
+  only, consumed by `static/training.js`).
+- `/progress-page` (`templates/progress.html`) — a workout tab with volume charts
+  (`#workoutChart`, `#workout-stats`), fed by `/api/progress/workout`.
+- Dashboard `/` (`templates/index.html`) — a `qa-tile` quick-action linking to
+  `/training` and a "next action" nudge; no training data region.
+- Navigation — `templates/_nav.html` header links + drawer; there is no bottom
+  navigation bar in this app (the drawer is the mobile pattern).
+- Coach chat (`templates/chat.html` / `static/coach_widget.js`) — already the PR4
+  consumer of `AdaptivePlan`.
+- Gamification surfaces (`/quests`, `/challenges`, `/leaderboard`) — unrelated domain.
+- Reusable primitives: `.card`, `.sec-label`, `.section`, `.wstats`, `.info-banner`,
+  `templates/_head.html`, `_nav.html`, `_actionbar.html`.
+
+### 6. Surface selected
+
+**`/training`, inside `#active-plan-view`, between `#wstats` and `.apv-meta-row`.**
+
+Why this is the correct information-architecture location:
+
+- It is an existing authenticated training destination — no new route, no new
+  navigation entry, no second training dashboard.
+- That block already *is* the weekly overview ("Bu hafta" -> week strip -> weekly
+  stats). The weekly program comments on exactly that horizon, so it reads as an
+  intelligence card around the existing experience rather than a competing panel.
+- `static/training.js:255` already shows `#active-plan-view` only when the user has an
+  active plan, so the future card inherits the page's own view logic instead of
+  inventing visibility rules, and can never land on the plan-creation form.
+- It touches neither plan generation, plan controls, workout logging, nor Pump Check.
+
+### 7. Alternatives rejected
+
+| Alternative | Why rejected |
+|---|---|
+| New top-level page/nav entry ("Haftalık Program") | Explicitly out of scope; would create a second training destination for one card. |
+| Top of `<main>`, outside both views | Would render over `#setup-form` too — a recommendation shown to a user who has not created a plan yet, and a layout the plan-creation flow was not designed around. |
+| `/progress-page` workout tab | Retrospective analytics (charts of what happened). The weekly program is prescriptive (what to do next); mixing them muddies both. |
+| Dashboard `/` card | The dashboard routes users to features; it holds no training data region, so this would be a new one. |
+| Coach chat | PR4 already owns the coach's `AdaptivePlan` integration; adding a second surface there would duplicate it. |
+| Replacing the workout hero / week strip | Forbidden: existing plan presentation must not be replaced. |
+
+**Why no new navigation destination was needed:** `/training` is already reachable from
+the header nav, the drawer and a dashboard quick-action tile, and it is where a user
+goes to act on training. The recommendation is an annotation on that page, not a
+destination.
+
+### 8-10. Feature flag
+
+- **Name:** `WEEKLY_PROGRAM_UI_ENABLED` (the spec's preferred name; no existing
+  convention required otherwise).
+- **Default:** OFF.
+- **Parsing:** `os.getenv("WEEKLY_PROGRAM_UI_ENABLED", "0") == "1"` in `app/config.py`,
+  mirrored to `app.config["WEEKLY_PROGRAM_UI_ENABLED"]` in the same apply block as
+  `AI_ADAPTIVE_PLAN_CONTEXT`. Strict: only the exact string `"1"` enables it —
+  `""`, `"0"`, `"true"`, `"yes"`, `"on"`, `"2"` and an absent variable are all OFF
+  (each pinned by a subprocess test with a scrubbed environment, because
+  `tests/conftest.py` sets flag values at import time and an in-process assertion would
+  only re-measure conftest).
+- **Server-controlled:** read once at boot. Not from query string, header, cookie,
+  endpoint availability, content sniffing, prompt text or DOM text. `app/config.py`
+  contains no `request.*` access, and requests carrying
+  `?WEEKLY_PROGRAM_UI_ENABLED=1`, an `X-Weekly-Program-Ui-Enabled: 1` header, or a
+  same-named cookie all still render no shell.
+- **Not an authorization boundary.** It gates presentation only;
+  `GET /api/training/weekly-program` remains `@require_auth` in every flag state.
+
+### 11. Exact OFF-path behavior
+
+With the flag absent/false, `/training` is **byte-identical to the pre-PR6.1 page**.
+Verified once with a normalized before/after dump (`_v` cache-buster, CSP nonce and
+CSRF token normalized): **82,664 bytes before, 82,664 bytes after, empty `diff`.**
+
+Concretely, OFF renders: no `<section>`, no `id="weekly-program"`, no
+`data-weekly-program-mount`, no `/static/weekly_program.js` tag, no CSS, no whitespace
+change, no hidden placeholder, no loading skeleton, no listener, no feature log, no
+metric, no navigation change, no endpoint request, and no extra SQL. The template omits
+the block **server-side** rather than rendering hidden markup, and whitespace-control
+markers (`{%- if %}` / `{%- endif %}`) absorb the tags' own newlines — that last detail
+is what turns "visually unchanged" into "byte-identical", and
+`test_off_adds_no_markup_between_weekly_stats_and_the_plan_meta_row` pins the exact seam
+so a later edit cannot quietly reintroduce a blank line.
+
+### 12. Exact ON-path shell behavior
+
+The whole rendered delta, whole-document diffed, is two lines (+153 bytes): the
+`<section id="weekly-program" data-weekly-program-mount aria-hidden="true"></section>`
+and the `<script src="/static/weekly_program.js?v=...">` tag. Nothing else changes —
+`test_on_is_the_off_document_plus_the_shell_and_script_only` compares the normalized
+documents line by line and allows exactly those two additions and zero removals.
+
+The shell is empty: no title, no locale key, no `week_focus` / `volume_action` /
+`intensity_action` / `volume_delta_pct` / `overload_ready` / `maintenance_recommended` /
+`baseline_weekly_volume` / `target_weekly_volume` / `reason_codes` / `explanation_keys`
+/ `unsupported_capabilities` / `has_data`, no raw payload, no user id, no
+`WeeklyProgramRecommendation`, no `AdaptivePlan`, no endpoint string, no flag name, and
+no fake loading/neutral/error copy. `id` is the stable anchor;
+`data-weekly-program-mount` is the JS hook.
+
+### 13. Template integration boundary
+
+`app/blueprints/training.py:training` passes **one** boolean,
+`weekly_program_ui_enabled=current_app.config.get("WEEKLY_PROGRAM_UI_ENABLED", False)`.
+
+Route-level context, not a global context processor and not a client feature-flag
+framework — the narrowest ownership available, and no other config can ride along.
+`test_page_view_exposes_only_the_boolean_flag` pins exactly one `current_app.config`
+read in that view and no whole-config dump;
+`test_page_view_reads_no_history_planner_or_weekly_program_service` is an AST guard
+(mirroring the PR5 endpoint guard) proving the view names none of
+`build_weekly_program`, `weekly_program_payload`, `build_adaptive_plan`,
+`build_progression_report`, `build_training_history_summary`, `WorkoutLog`,
+`TrainingPlan`, `PumpCheck`.
+
+### 14. JavaScript initialization boundary
+
+`static/weekly_program.js` — a plain IIFE in the style of `static/training.js`; no
+framework, no dependency, no build step. It queries `[data-weekly-program-mount]`, sets
+`data-weekly-program-initialized="1"`, returns `true` on the first run and `false`
+afterwards, and no-ops when the shell is absent. `window.FitXWeeklyProgram.init` is
+exposed as PR6.2's extension point (and is what makes "initializes once" testable).
+
+**Idempotency by DOM marker, not a module-local flag** — deliberate: the script can be
+evaluated more than once (cached asset, bfcache restore), and the DOM node is the only
+state shared across evaluations.
+
+The file is loaded **only** when the flag is on, so OFF does not even request it.
+
+### 15. Confirmation that no endpoint request exists
+
+Three independent proofs:
+
+1. **The code does not exist.** `tests/test_weekly_program_ui_js.py` strips comments and
+   asserts the executable source contains no `fetch(`, `XMLHttpRequest`, `sendBeacon`,
+   `EventSource`, `WebSocket`, `/api/training`, or the weekly-program path.
+2. **Executed behavior.** The file is run under `node` with a DOM stub whose `fetch`,
+   `XMLHttpRequest`, `document.addEventListener` and `window.addEventListener` all
+   increment counters and throw. After load plus two extra `init()` calls, every counter
+   is `0`.
+3. **Server-side.** The ON-path HTML contains no weekly-program endpoint string, and no
+   other template or asset references `weekly_program.js`.
+
+Also absent: retries, polling, `setTimeout`/`setInterval`/`requestAnimationFrame`,
+`MutationObserver`/`IntersectionObserver`, and any event listener.
+
+### 16. Confirmation that no recommendation data is rendered
+
+No recommendation value is embedded server-side (every model field asserted absent from
+the ON-path HTML) and none is computed client-side. The initializer contains no planning
+vocabulary (`week_focus`, `volume_action`, `deload`, `plateau`, `overload`, `1RM`, ...),
+no `JSON.parse`/`stringify`, no placeholder payload, no commented-out future logic, and
+**no numeric literal other than the `1` initialization marker** — a guard that fails on
+any threshold, `0.05` volume step, 7-day window or `* (1 + delta)` target arithmetic, so
+the browser cannot quietly become a second planning authority. `Date(`/`getDay` are
+banned for the same reason.
+
+### 17. AI coach flag independence
+
+- Separate env names, separate `app.config` keys, separate read paths. The
+  `WEEKLY_PROGRAM_UI_ENABLED` definition line does not mention
+  `AI_ADAPTIVE_PLAN_CONTEXT`.
+- `WEEKLY_PROGRAM_UI_ENABLED` appears in none of `ai_coach.py`, `context_builder.py`,
+  `prompt_builder.py`, `adaptive_plan_context.py`; `AI_ADAPTIVE_PLAN_CONTEXT` appears
+  in neither the page view nor `weekly_program.js`.
+- Runtime: coach flag ON + UI flag OFF renders no shell; UI flag ON produces an
+  identical shell under both coach-flag states; enabling the UI leaves
+  `app.config["AI_ADAPTIVE_PLAN_CONTEXT"]` untouched.
+- Subprocess config probes confirm setting either variable alone leaves the other False.
+
+The full four-way **runtime** matrix remains PR6.3 as specified; PR6.1 establishes
+structural independence.
+
+### 18. Characterization tests added
+
+`tests/test_training_page_characterization.py` — 69 tests, written and green **before**
+the first source edit. It pins route status and the unauthenticated redirect, the
+selected template (`training.html` via the `template_rendered` signal), 17 major DOM
+regions, 8 setup-form option grids, 10 declarative `data-action` controls, 9 form
+control ids, the Pump Check share selector, 6 navigation entries plus the active-state
+markup, 6 assets, the nonced `window.__TRAINING` bootstrap, the CSRF meta tag, the
+absence of legacy `--volt` tokens, and the default absence of every weekly-program
+marker.
+
+**Byte-identity approach — documented as required.** A committed golden snapshot is not
+practical here: `_v` is a boot timestamp and the CSP nonce and CSRF token vary per
+request, and the repository has no stable-snapshot convention to reuse. So the committed
+tests pin the meaningful DOM contract, and byte identity was proven **once** during
+implementation by a normalized before/after dump (result in section 11). One test,
+`test_bare_weekly_program_substring_is_pre_existing_catalog_noise`, exists purely to
+record a trap for later readers: the literal `weekly_program` is already on every page,
+because `_head.html` injects the whole locale catalog into `window.I18N` and
+`locales/{tr,en}.json` carry an **unused** `training.weekly_program` key. Presence and
+absence must therefore always be asserted with precise markers.
+
+### 19. New tests added
+
+169 new tests: 69 characterization + 33 template/server + 21 config + 45 JS + 1
+`.env.example` guard. Highlights beyond the obvious:
+
+- `test_off_adds_no_markup_between_weekly_stats_and_the_plan_meta_row` — pins the exact
+  seam text so no layout spacing can appear on the OFF path.
+- `test_on_is_the_off_document_plus_the_shell_and_script_only` — whole-document delta.
+- `test_page_view_issues_no_extra_query` — SQL statement counting via a SQLAlchemy
+  `before_cursor_execute` listener, after a warm-up request (the first `/training` of a
+  session runs one-off streak/session work that later requests skip; without the warm-up
+  the test would only be measuring that).
+- `test_no_css_rule_targets_the_shell_so_it_adds_no_layout` — no stylesheet mentions
+  `weekly-program`, no `static/weekly_program.css` exists, and no bare `section` rule
+  exists in any sheet, so the empty section is a zero-height block by construction.
+- `test_comment_stripper_keeps_code_and_drops_prose` and
+  `test_source_guards_are_running_against_real_code` — the source guards' own sanity, so
+  they cannot pass vacuously if the file is emptied or the stripper breaks.
+
+### 20-22. Verification results
+
+- Targeted + regression, one run:
+  `python -m pytest tests/test_training_page_characterization.py
+  tests/test_weekly_program_ui.py tests/test_weekly_program_ui_flag.py
+  tests/test_weekly_program_ui_js.py tests/test_env_example.py tests/test_training_ui.py
+  tests/test_training_routes.py tests/test_weekly_program_route.py
+  tests/test_weekly_program.py tests/test_adaptive_plan_context.py
+  tests/test_dependency_boundaries.py tests/test_i18n.py tests/test_hooks.py
+  tests/test_app_shell.py tests/test_pump_check_sharing.py tests/test_design_system.py
+  tests/test_prompt_builder.py tests/test_ai_coach.py -q`
+  -> **524 passed in 875.15s (14m35s)**.
+- Characterization before implementation:
+  `python -m pytest tests/test_training_page_characterization.py -q`
+  -> **69 passed in 139.36s**, on the unmodified tree.
+- Full suite -> **2,178 passed, 0 failed** (662 + 745 + 771), ~17m36s total.
+  Run as three file-partitioned chunks rather than one `python -m pytest -q`, because
+  two whole-suite background runs were killed by this environment's background-task
+  time limit before emitting a summary. The partition is provably complete rather than
+  a sample: `pytest --collect-only -q` on this tree reports **2,178 tests collected
+  (2,181 minus the 3 load-marked deselections)** — exactly the sum of the three chunk
+  results, so no file was skipped or counted twice. The 118 `tests/test_*.py` files were
+  split 40 / 40 / 38 alphabetically; `tests/load/` is marker-deselected either way
+  (`pytest.ini`: `addopts = -m "not load"`).
+- Test-count reconciliation: collecting with this PR's four new modules ignored yields
+  **2,010**, i.e. this PR adds **169** tests (168 in the four new modules + 1 in
+  `tests/test_env_example.py`) and the pre-PR6.1 baseline on this tree is **2,009**.
+  Note the PR5 section above records `1981 passed` — that figure does not match this
+  tree's baseline of 2,009. The gap predates PR6.1 (it is between PR5's branch
+  measurement and the squash-merged `07ef1ff`), was not investigated here, and is not
+  caused by this PR; the arithmetic above accounts for every test this PR adds.
+- JavaScript: there is no JS test runner in this repository (no `package.json`; CI runs
+  pytest only). Per the spec's "smallest consistent mechanism", the JS contract is
+  covered from pytest — source guards in the repository's existing style
+  (`tests/test_i18n.py`, `tests/test_pump_check_sharing.py` read shipped assets as text)
+  plus behavioral execution under `node` via `subprocess` (the mechanism
+  `tests/test_adaptive_plan_context.py` already uses). `python -m pytest
+  tests/test_weekly_program_ui_js.py -q` -> **45 passed in 10.39s**, `node v24.14.1`,
+  including `node --check` on the asset. The node tests skip cleanly where `node` is
+  absent; GitHub's `ubuntu-latest` image ships Node, so CI executes them.
+- Static/lint: the repository has no linter configured (`requirements-dev.txt` is
+  pytest-only; CI runs `pytest` + a schema-drift job). `node --check` covers the new
+  asset; `ast.parse` covers the changed Python via the AST guards.
+- `git diff --check` -> clean (only the usual `core.autocrlf` LF/CRLF advisory; all
+  touched files are consistently CRLF in the working copy, no mixed endings).
+
+### 23. Asset-size impact
+
+| Path | OFF | ON |
+|---|---|---|
+| `/training` HTML | 0 bytes (byte-identical) | +153 bytes |
+| `static/weekly_program.js` | not requested | 2,207 bytes (one cached request) |
+
+No existing asset changed. `test_asset_stays_small` caps the new file at 4 KB so the
+boundary cannot quietly grow into a feature before PR6.2 reviews the client contract.
+
+### 24. Security review
+
+- Page access unchanged: `/training` is still `@require_auth`; unauthenticated requests
+  still 302 to `/login` (characterized).
+- No new route, no new public surface, no change to any endpoint.
+- The flag is server-controlled and never user-controlled; it is **presentation only**
+  and explicitly not an authorization boundary. `GET /api/training/weekly-program`
+  stays authenticated in every flag state.
+- No config leakage: only a boolean crosses into the template, and the flag *name* is
+  never rendered. No whole-config dump (AST-pinned).
+- No user id, no `cognito_sub`, no session token, no backend exception, and no planning
+  data in the markup.
+- No `innerHTML`/`outerHTML`/`insertAdjacentHTML`/`document.write`/`eval` in the new JS;
+  no unsafe HTML anywhere. No inline `<script>` added, so the CSP nonce contract
+  (`app/hooks.py`) is untouched — the new asset is a same-origin `src`.
+- No API call in this PR.
+
+### 25. Accessibility shell review
+
+Valid semantic container (`<section>`), empty. No heading (so no empty heading), no
+`aria-live` region, no focusable control, no `role`, and `aria-hidden="true"` so an
+empty container announces nothing while it has no data. No duplicate ids
+(`id="weekly-program"` occurs exactly once and nowhere else in the codebase). No
+inaccessible hidden *content* — there is no content. **PR6.2 must remove `aria-hidden`
+when it renders real content**, and owns loading/error/retry/recommendation
+accessibility.
+
+### 26. Responsive shell review
+
+Structural, as scoped. The shell has no CSS: `static/` contains no rule mentioning
+`weekly-program`, no `weekly_program.css`, and no bare `section` selector in any sheet
+(pinned by `test_no_css_rule_targets_the_shell_so_it_adds_no_layout`). An unstyled empty
+`<section>` is a zero-height block with no intrinsic width, so at every supported width
+it can produce no horizontal overflow, no oversized empty card and no spacing — and OFF
+is byte-identical, so it cannot shift layout at all. This app has no bottom navigation
+(the mobile pattern is the drawer in `_nav.html`), so there is no bottom-nav conflict;
+the shell is inside `<main class="main-content">` and cannot overlap the fixed header.
+
+**Not performed:** a live browser render. The Chrome extension was not connected in this
+session, so the visual/DevTools pass (zero network requests observed live, measured
+element height, mobile-width overflow) was **not** run. The claims above rest on the
+structural evidence just listed, not on observation. Worth doing once before PR6.2
+ships pixels.
+
+### 27. Rollback procedure
+
+Set `WEEKLY_PROGRAM_UI_ENABLED=0` (or remove it from `.env`) and restart the container.
+The shell, the script tag and any future request disappear; the page returns to the
+byte-identical OFF document. No schema, no migration, no data to unwind. Reverting the
+commit is equally safe and equivalent, since OFF is already the default.
+
+### 28. Known debt
+
+- `aria-hidden="true"` on the shell must be removed by PR6.2 when content lands.
+- `locales/{tr,en}.json` carry an **unused** `training.weekly_program` key that predates
+  this PR. PR6.1 deliberately did not touch it (no visible copy). PR6.2 should adopt it
+  rather than adding a near-duplicate.
+- Turkish/English copy for `explanation_keys` (and `reason_codes`, open since PR3) is
+  still unwritten — PR6.2.
+- The shell lives inside `#active-plan-view`, so it is invisible to a user with no saved
+  `TrainingPlan` even if that user has workout history. That is the intended IA for
+  PR6.1/PR6.2; if product wants the recommendation for plan-less users, it is a
+  deliberate follow-up, not a bug.
+- No live-browser verification was performed (see section 26).
+- The PR5 debt list is unchanged: unconverged raw readers (`tracking.py`
+  heatmap/insights, `fitx_mcp/server.py`, `analytics_engine._check_missing_logs`,
+  `ai_coach._tool_get_progress_metric`), and the pre-existing `datetime.utcnow()`
+  deprecation warnings.
+
+### 29. Exact PR6.2 entry conditions
+
+1. Read this section and PR5 (Parts 1, 2 and the post-audit remediation) first. Confirm
+   the branch is based on current `origin/main`.
+2. The rollout architecture is settled — **do not revisit it**. Surface, flag name, flag
+   default, template boundary, mount identifiers and the initializer's extension point
+   are all decided and characterized.
+3. Extend `window.FitXWeeklyProgram.init` in `static/weekly_program.js`. Do not add a
+   second script, a second flag, or a second mount point.
+4. `GET /api/training/weekly-program` is the **sole** data source. Do not import
+   `weekly_program` or `training_planning` into the page route, do not server-render the
+   recommendation, and do not add query parameters — `weeks`/`end_day` are pinned
+   service defaults on purpose (PR5).
+5. Tests that will (correctly) fail as soon as PR6.2 starts, and must be **updated with
+   intent**, not deleted: the no-fetch / no-XHR / no-endpoint-string guards in
+   `tests/test_weekly_program_ui_js.py`, the "shell is empty" and "no recommendation
+   data" assertions in `tests/test_weekly_program_ui.py`, the numeric-literal guard, and
+   the 4 KB asset cap. Keep the **planning-logic** guards (thresholds, target and
+   weekly-window arithmetic, `AI_ADAPTIVE_PLAN_CONTEXT`) — those must survive PR6.2 and
+   PR6.3 unchanged.
+6. Keep the OFF path byte-identical, and keep the characterization suite green.
+
+### 30. Explicit PR6.2 scope
+
+Fetch `GET /api/training/weekly-program`; loading state; populated state;
+insufficient-data state; missing-baseline state; structured failure state;
+malformed-payload safety; localization of `explanation_keys` / `reason_codes`; core
+accessibility (announcement of loaded content, error/retry semantics) and responsive
+card presentation.
+
+### 31. Explicit PR6.3 deferred scope
+
+Observability finalization; cache/privacy hardening; architecture guards; the full
+four-way flag matrix at runtime; performance and SQL verification; mobile/accessibility
+validation; final documentation; production-readiness re-audit.
+
+### Independently safe to merge
+
+Yes. The flag defaults OFF, and with it OFF the rendered page is byte-identical to
+`origin/main` — so merging changes the running application not at all. The ON path adds
+one empty element and one inert script that make no request and render nothing. There is
+no schema, migration, dependency, prompt, provider, endpoint or navigation change, and
+every existing training flow is characterized and unchanged.

@@ -99,3 +99,12 @@ def test_adaptive_plan_context_flag_is_documented_default_off():
     example = Path(".env.example").read_text(encoding="utf-8")
     assert "# AI_ADAPTIVE_PLAN_CONTEXT=0" in example
     assert "AI_ADAPTIVE_PLAN_CONTEXT=1" not in example
+
+
+def test_weekly_program_ui_flag_is_documented_default_off():
+    """Sprint 6 PR6.1 rollout gate. Documented as a commented-out `=0` like its
+    sibling above, so copying `.env.example` can never enable the UI by accident."""
+    assert _has_exact_commented_setting(
+        ENV_EXAMPLE_SOURCE, "WEEKLY_PROGRAM_UI_ENABLED=0"
+    )
+    assert "WEEKLY_PROGRAM_UI_ENABLED=1" not in ENV_EXAMPLE_SOURCE
