@@ -62,9 +62,17 @@ def training():
     # Kayıtlı sakatlık verisini forma ön-doldur (yapışkan alan). None-güvenli.
     _meta = getattr(current_user, "user_metadata", None) or {}
     injuries = _meta.get("injuries") or ""
+    # Sprint 6 PR6.1: the ONLY thing this route knows about the weekly program is
+    # whether its UI mount point should exist. Deliberately the narrowest possible
+    # boundary — a single server-owned boolean, not a context processor and not a
+    # client-side flag framework, so no other config can leak into the page. The
+    # route stays free of build_weekly_program / WorkoutLog / the planner: PR6.1
+    # renders a shell, it does not consume data (docs/WEEKLY_PROGRAM.md).
     return render_template("training.html", username=current_user.username,
                            profile_picture=current_user.avatar_src,
-                           injuries=injuries)
+                           injuries=injuries,
+                           weekly_program_ui_enabled=current_app.config.get(
+                               "WEEKLY_PROGRAM_UI_ENABLED", False))
 
 
 @bp.route("/training-plan", methods=["POST"])

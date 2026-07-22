@@ -144,6 +144,19 @@
 
         <!-- Weekly stats -->
         <div class="wstats" id="wstats" style="margin-top:var(--space-4)"></div>
+{#- ── ADAPTIVE WEEKLY PROGRAM MOUNT (Sprint 6 PR6.1) ──
+    Inert architectural mount point, NOT a finished feature. Rendered only when
+    WEEKLY_PROGRAM_UI_ENABLED is on; omitted server-side otherwise, so the OFF path
+    ships zero markup rather than hidden markup — and the whitespace-control markers
+    below keep the OFF document byte-identical to the pre-PR6.1 page.
+    Deliberately empty: PR6.1 fetches nothing and renders no recommendation. PR6.2
+    fills it from the weekly-program endpoint and MUST drop the aria-hidden then.
+    A Jinja comment, not an HTML one: developer context must not ship to the browser.
+    docs/WEEKLY_PROGRAM.md -#}
+{%- if weekly_program_ui_enabled %}
+
+        <section id="weekly-program" data-weekly-program-mount aria-hidden="true"></section>
+{%- endif %}
 
         <!-- Plan meta + reset -->
         <div class="apv-meta-row">
@@ -301,6 +314,9 @@
 
 <script nonce="{{ csp_nonce }}">window.__TRAINING = { injuries: {{ injuries|tojson }} };</script>
 <script src="/static/training.js?v={{ _v }}"></script>
+{%- if weekly_program_ui_enabled %}
+<script src="/static/weekly_program.js?v={{ _v }}"></script>
+{%- endif %}
 
 <script src="/static/coach_widget.js?v={{ _v }}"></script>
 <script src="/static/actions.js?v={{ _v }}"></script>
