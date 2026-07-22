@@ -154,8 +154,47 @@
     A Jinja comment, not an HTML one: developer context must not ship to the browser.
     docs/WEEKLY_PROGRAM.md -#}
 {%- if weekly_program_ui_enabled %}
-
-        <section id="weekly-program" data-weekly-program-mount aria-hidden="true"></section>
+{%- set weekly_program_copy = {
+    "training.weekly_program": t("training.weekly_program"),
+    "weekly_program.loading": t("weekly_program.loading"),
+    "weekly_program.focus.insufficient_data.title": t("weekly_program.focus.insufficient_data.title"),
+    "weekly_program.focus.insufficient_data.description": t("weekly_program.focus.insufficient_data.description"),
+    "weekly_program.focus.build_consistency.title": t("weekly_program.focus.build_consistency.title"),
+    "weekly_program.focus.build_consistency.description": t("weekly_program.focus.build_consistency.description"),
+    "weekly_program.focus.deload.title": t("weekly_program.focus.deload.title"),
+    "weekly_program.focus.deload.description": t("weekly_program.focus.deload.description"),
+    "weekly_program.focus.maintenance.title": t("weekly_program.focus.maintenance.title"),
+    "weekly_program.focus.maintenance.description": t("weekly_program.focus.maintenance.description"),
+    "weekly_program.focus.overload.title": t("weekly_program.focus.overload.title"),
+    "weekly_program.focus.overload.description": t("weekly_program.focus.overload.description"),
+    "weekly_program.focus.steady.title": t("weekly_program.focus.steady.title"),
+    "weekly_program.focus.steady.description": t("weekly_program.focus.steady.description"),
+    "weekly_program.volume_action.decrease": t("weekly_program.volume_action.decrease"),
+    "weekly_program.volume_action.hold": t("weekly_program.volume_action.hold"),
+    "weekly_program.volume_action.increase": t("weekly_program.volume_action.increase"),
+    "weekly_program.intensity_action.deload": t("weekly_program.intensity_action.deload"),
+    "weekly_program.intensity_action.hold": t("weekly_program.intensity_action.hold"),
+    "weekly_program.intensity_action.progress": t("weekly_program.intensity_action.progress"),
+    "weekly_program.metric.observed": t("weekly_program.metric.observed"),
+    "weekly_program.metric.target": t("weekly_program.metric.target"),
+    "weekly_program.metric.kg": t("weekly_program.metric.kg"),
+    "weekly_program.reason.insufficient_history": t("weekly_program.reason.insufficient_history"),
+    "weekly_program.reason.inconsistent_training": t("weekly_program.reason.inconsistent_training"),
+    "weekly_program.reason.deload_due": t("weekly_program.reason.deload_due"),
+    "weekly_program.reason.plateau_detected": t("weekly_program.reason.plateau_detected"),
+    "weekly_program.reason.progressing": t("weekly_program.reason.progressing"),
+    "weekly_program.reason.steady_state": t("weekly_program.reason.steady_state"),
+    "weekly_program.reason.volume_trend_down": t("weekly_program.reason.volume_trend_down"),
+    "weekly_program.reason.strength_trend_down": t("weekly_program.reason.strength_trend_down"),
+    "weekly_program.state.insufficient_data": t("weekly_program.state.insufficient_data"),
+    "weekly_program.state.missing_baseline": t("weekly_program.state.missing_baseline"),
+    "weekly_program.state.error": t("weekly_program.state.error"),
+    "weekly_program.state.malformed_response": t("weekly_program.state.malformed_response"),
+    "weekly_program.state.retry": t("weekly_program.state.retry")
+} %}
+        <section id="weekly-program" data-weekly-program-mount aria-hidden="true">
+            <script type="application/json" data-weekly-program-copy>{{ weekly_program_copy|tojson }}</script>
+        </section>
 {%- endif %}
 
         <!-- Plan meta + reset -->

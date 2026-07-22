@@ -83,13 +83,19 @@ def t_or(key, fallback, locale=None, **kwargs):
     return fallback if val == key else val
 
 
-def catalog(locale=None):
+def catalog(locale=None, *, exclude_prefixes=()):
     """Bir dilin TAM sözlüğü (tr tabanı üzerine seçili dil) — window.I18N'e
     enjekte etmek için. Böylece JS'te de eksik anahtar Türkçeye düşer."""
     loc = _norm(locale) or current_locale()
     merged = dict(_CATALOG.get(DEFAULT_LOCALE, {}))
     if loc != DEFAULT_LOCALE:
         merged.update(_CATALOG.get(loc, {}))
+    prefixes = tuple(exclude_prefixes)
+    if prefixes:
+        merged = {
+            key: value for key, value in merged.items()
+            if not key.startswith(prefixes)
+        }
     return merged
 
 

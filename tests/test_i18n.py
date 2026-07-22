@@ -6,6 +6,44 @@ import os
 import re
 
 
+WEEKLY_PROGRAM_COPY_KEYS = {
+    "weekly_program.loading",
+    "weekly_program.focus.insufficient_data.title",
+    "weekly_program.focus.insufficient_data.description",
+    "weekly_program.focus.build_consistency.title",
+    "weekly_program.focus.build_consistency.description",
+    "weekly_program.focus.deload.title",
+    "weekly_program.focus.deload.description",
+    "weekly_program.focus.maintenance.title",
+    "weekly_program.focus.maintenance.description",
+    "weekly_program.focus.overload.title",
+    "weekly_program.focus.overload.description",
+    "weekly_program.focus.steady.title",
+    "weekly_program.focus.steady.description",
+    "weekly_program.volume_action.decrease",
+    "weekly_program.volume_action.hold",
+    "weekly_program.volume_action.increase",
+    "weekly_program.intensity_action.deload",
+    "weekly_program.intensity_action.hold",
+    "weekly_program.intensity_action.progress",
+    "weekly_program.metric.observed",
+    "weekly_program.metric.target",
+    "weekly_program.metric.kg",
+    "weekly_program.reason.insufficient_history",
+    "weekly_program.reason.inconsistent_training",
+    "weekly_program.reason.deload_due",
+    "weekly_program.reason.plateau_detected",
+    "weekly_program.reason.progressing",
+    "weekly_program.reason.steady_state",
+    "weekly_program.reason.volume_trend_down",
+    "weekly_program.reason.strength_trend_down",
+    "weekly_program.state.insufficient_data",
+    "weekly_program.state.missing_baseline",
+    "weekly_program.state.error",
+    "weekly_program.state.malformed_response",
+    "weekly_program.state.retry",
+}
+
 def _load_locale(name):
     root = os.path.dirname(os.path.dirname(__file__))
     with open(os.path.join(root, "locales", f"{name}.json"), encoding="utf-8") as f:
@@ -32,6 +70,66 @@ def test_locale_key_parity_tr_en():
     mismatch = sorted(k for k in tr if _ph(tr[k]) != _ph(en.get(k, "")))
     assert not mismatch, f"placeholder uyuşmazlığı (TR vs EN): {mismatch}"
 
+
+def test_weekly_program_copy_is_matched_nonempty_and_plain_text():
+    """The client contract is a complete, mirrored copy map with no HTML payloads."""
+    tr = _load_locale("tr")
+    en = _load_locale("en")
+    actual = {key for key in tr if key.startswith("weekly_program.")}
+    assert actual == WEEKLY_PROGRAM_COPY_KEYS
+    assert {key for key in en if key.startswith("weekly_program.")} == actual
+    for locale in (tr, en):
+        for key in WEEKLY_PROGRAM_COPY_KEYS:
+            assert locale[key].strip()
+            assert "<" not in locale[key] and ">" not in locale[key]
+
+
+def test_catalog_default_output_is_fresh_and_unmutated():
+    """The new optional filtering must not change normal catalog callers."""
+    import app.i18n as i18n
+
+    expected_tr = dict(i18n._CATALOG["tr"])
+    expected_en = dict(expected_tr)
+    expected_en.update(i18n._CATALOG["en"])
+    assert i18n.catalog("tr") == expected_tr
+    assert i18n.catalog("en") == expected_en
+
+    result = i18n.catalog("en")
+    result["login.submit"] = "mutated"
+    assert i18n.catalog("en")["login.submit"] == expected_en["login.submit"]
+    assert i18n._CATALOG["en"]["login.submit"] == expected_en["login.submit"]
+
+
+def test_catalog_excludes_only_requested_prefixes_and_keeps_turkish_fallback(monkeypatch):
+    import app.i18n as i18n
+
+    monkeypatch.delitem(i18n._CATALOG["en"], "weekly_program.loading", raising=False)
+    filtered = i18n.catalog("en", exclude_prefixes=("weekly_program.", "login."))
+    assert not any(key.startswith("weekly_program.") for key in filtered)
+    assert not any(key.startswith("login.") for key in filtered)
+    assert filtered["training.weekly_program"] == i18n._CATALOG["en"].get(
+        "training.weekly_program", i18n._CATALOG["tr"]["training.weekly_program"])
+    assert "weekly_program.loading" in i18n.catalog("en")  # Turkish fallback remains.
+
+
+def test_weekly_program_keys_resolve_to_copy_not_raw_keys():
+    from app.i18n import t
+
+    for locale in ("tr", "en"):
+        for key in WEEKLY_PROGRAM_COPY_KEYS:
+            assert t(key, locale=locale) != key
+
+
+def test_inject_i18n_excludes_only_weekly_program_namespace(app):
+    from flask import g
+    from app.hooks import inject_i18n
+
+    with app.test_request_context("/training"):
+        g.locale = "en"
+        context = inject_i18n()
+    global_catalog = context["i18n_catalog"]
+    assert not any(key.startswith("weekly_program.") for key in global_catalog)
+    assert "training.weekly_program" in global_catalog
 
 def test_t_explicit_locale_and_fallback():
     from app.i18n import t
