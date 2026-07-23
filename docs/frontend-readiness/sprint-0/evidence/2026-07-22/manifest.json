@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0.0",
+  "run_id": "2026-07-22-supported-runtime-blocked",
+  "environment": {
+    "browser": "chromium",
+    "supported": false,
+    "status": "hard-runtime-blocker",
+    "reason": "Windows 10 native execution is diagnostic-only; Docker Desktop could not start; WSL2 has no installed Linux distribution."
+  },
+  "captures": []
+}

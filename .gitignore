@@ -29,3 +29,8 @@ coverage.xml
 
 # Local isolated feature worktrees
 .worktrees/
+
+# Sprint 0 local browser-audit outputs
+.audit-venv/
+artifacts/ui-audit/
+instance/axis_frontend_audit.db

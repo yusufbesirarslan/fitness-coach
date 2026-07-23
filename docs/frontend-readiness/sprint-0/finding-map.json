@@ -1,0 +1,74 @@
+{
+  "schema_version": "1.0.0",
+  "extraction_rules_version": "1.0.0",
+  "findings": [
+    {"id":"EXT-001","claim":"Landing can horizontally overflow at narrow mobile widths.","source_refs":["3.1 findings row 1","5 beta-blocking patterns","7 must-fix 1","9 beta-critical: fix or disprove landing overflow"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-002","claim":"The mobile cookie banner obscures too much of the first viewport.","source_refs":["3.1 findings row 2","7 should-fix 1"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-003","claim":"Landing integration and AI claims lack availability and provenance qualification.","source_refs":["3.1 findings row 3","7 must-fix 10"],"status":"PRODUCT_DECISION_REQUIRED"},
+    {"id":"EXT-004","claim":"The mobile landing page repeats positioning and is excessively long before signup.","source_refs":["3.1 findings row 4","7 should-fix 1"],"status":"PRODUCT_DECISION_REQUIRED"},
+    {"id":"EXT-005","claim":"Founder copy is presented as social proof without external validation.","source_refs":["3.1 findings row 5"],"status":"PRODUCT_DECISION_REQUIRED"},
+    {"id":"EXT-006","claim":"Marketing and application visual systems are inconsistent.","source_refs":["3.1 findings row 6","6 design-system maturity","7 must-fix 8"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+
+    {"id":"EXT-007","claim":"Floating plus/chat controls can overlap content and fixed bottom navigation.","source_refs":["3.2 findings row 1","3.8 findings row 1","5 beta-blocking patterns","7 must-fix 1","9 beta-critical: remove collisions"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-008","claim":"Mobile exposes competing hamburger, bottom, avatar, and floating-action navigation layers.","source_refs":["3.2 findings row 2","4 current architecture problem","9 navigation: remove hamburger duplication"],"status":"CONFIRMED_ARCHITECTURE_ISSUE"},
+    {"id":"EXT-009","claim":"Primary navigation emphasizes Club while Coach is a floating overlay.","source_refs":["3.2 findings row 3","4 current architecture problem","7 must-fix 2","9 navigation: adopt Today/Plan/Coach/Progress"],"status":"PRODUCT_DECISION_REQUIRED"},
+    {"id":"EXT-010","claim":"Desktop application layouts leave undersized content islands in large canvases.","source_refs":["3.2 findings row 4","9 layout: responsive desktop grid"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-011","claim":"Product vocabulary is inconsistent across top-level destinations.","source_refs":["3.2 findings row 5","3.4 findings row 2"],"status":"CONFIRMED_ARCHITECTURE_ISSUE"},
+
+    {"id":"EXT-012","claim":"Dashboard lacks one visually dominant next action.","source_refs":["3.3 findings row 1","7 must-fix 5","9 layout: redesign Today"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-013","claim":"Missing nutrition data is presented as zero and can imply successful adherence.","source_refs":["3.3 findings row 2","9 UX: differentiate missing data from zero"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-014","claim":"Manual activity inputs can conflict with wearable data and double count activity.","source_refs":["3.3 findings row 3","7 should-fix 8"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-015","claim":"Permanent weight entry consumes high-value dashboard space.","source_refs":["3.3 findings row 4","9 layout: demote weight entry"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-016","claim":"Generic Tip of the Day content displaces adaptive plan rationale.","source_refs":["3.3 findings row 5","4 feature decisions: Tip of the Day"],"status":"PRODUCT_DECISION_REQUIRED"},
+    {"id":"EXT-017","claim":"BMR, TDEE, XP, rank, multiplier, and streak create unexplained dashboard load.","source_refs":["3.3 findings row 6","7 should-fix 2"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+
+    {"id":"EXT-018","claim":"The primary social destination is empty and lacks an immediate action.","source_refs":["3.4 findings row 1","7 can-wait: public Community","9 navigation: demote Club/Feed"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-019","claim":"Friends Feed, Club, and Pump Check create conflicting social mental models.","source_refs":["3.4 findings row 2","4 feature decisions: Community and Pump Check"],"status":"PRODUCT_DECISION_REQUIRED"},
+    {"id":"EXT-020","claim":"The social empty state names prerequisites but does not link to them or explain privacy.","source_refs":["3.4 findings row 3","9 UX: state-based empty screens"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-021","claim":"Social posting scope is premature relative to incomplete core tracking.","source_refs":["3.4 findings row 4","4 feature decisions: Community"],"status":"PRODUCT_DECISION_REQUIRED"},
+
+    {"id":"EXT-022","claim":"Food search overlays other content and lacks a complete quantity/unit/confirmation flow.","source_refs":["3.5 findings row 1","5 beta-blocking patterns","7 must-fix 3","9 beta-critical: rebuild food add flow"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-023","claim":"Nutrition history tabs can clip and be obscured on mobile.","source_refs":["3.5 findings row 2","5 beta-blocking patterns","9 navigation: consolidate Nutrition tabs"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-024","claim":"The core manual food-log action is buried below summaries and quick-add rows.","source_refs":["3.5 findings row 3"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-025","claim":"Nutrition empty-state guidance forces users to search elsewhere for the action.","source_refs":["3.5 findings row 4","9 UX: state-based empty screens"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-026","claim":"Emoji are used as structural meal icons.","source_refs":["3.5 findings row 5","6 icons rule","9 visual polish: replace emoji icons"],"status":"CONFIRMED_ARCHITECTURE_ISSUE"},
+    {"id":"EXT-027","claim":"Water appears in duplicate navigation and quick-add architectures.","source_refs":["3.5 findings row 6","4 feature decisions: Water"],"status":"CONFIRMED_ARCHITECTURE_ISSUE"},
+    {"id":"EXT-028","claim":"Nutrition mixes English interface labels with Turkish content and formats.","source_refs":["3.5 findings row 7","9 UX: localize labels and units"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-029","claim":"Zero-value macro visualizations dominate the nutrition first-use state.","source_refs":["3.5 findings row 8","7 should-fix 7"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-030","claim":"Quick-add meal plans omit portion, ingredients, duplicate protection, and confirmation.","source_refs":["3.5 findings row 9"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+
+    {"id":"EXT-031","claim":"Workout day state can render contradictory copy and unresolved placeholders.","source_refs":["3.6 findings row 1","7 must-fix 4","9 beta-critical: workout day-state model"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-032","claim":"The seven-column weekly workout grid is not mobile-safe.","source_refs":["3.6 findings row 2","5 beta-blocking patterns","9 beta-critical: make weekly plan responsive"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-033","claim":"Workout days lack a dominant state-dependent action.","source_refs":["3.6 findings row 3"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-034","claim":"The program score appears authoritative without explaining its basis.","source_refs":["3.6 findings row 4"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-035","claim":"Reset Program and Create New Plan combine destructive and constructive actions.","source_refs":["3.6 findings row 5","4 contextual actions: Reset plan"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-036","claim":"Workout program labels mix Turkish and English.","source_refs":["3.6 findings row 6","9 UX: localize labels and units"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-037","claim":"Workout calorie estimates imply false precision relative to progression data.","source_refs":["3.6 findings row 7"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+
+    {"id":"EXT-038","claim":"Coach output may expose raw Markdown instead of rendered structured content.","source_refs":["3.7 findings row 1","7 must-fix 12","9 beta-critical: render AI responses safely"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-039","claim":"Coach overlay competes with the underlying page and global navigation.","source_refs":["3.7 findings row 2","5 beta-blocking patterns","9 layout: Coach destination"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-040","claim":"The Coach scan action is icon-only and insufficiently labeled.","source_refs":["3.7 findings row 3","9 accessibility: labels/roles/states"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-041","claim":"Coach nutrition advice lacks visible provenance, uncertainty, and safety boundaries.","source_refs":["3.7 findings row 4","6 trust details","7 must-fix 10"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-042","claim":"Long Coach prose is difficult to scan and crowds the input.","source_refs":["3.7 findings row 5","7 should-fix 5"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-043","claim":"Coach timestamps and secondary text may be too small and low contrast.","source_refs":["3.7 findings row 6","9 visual polish: increase legibility"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-044","claim":"Coach lacks designed retry, stop, regeneration, and failed-message states.","source_refs":["3.7 findings row 7","7 must-fix 6","7 should-fix 5"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+
+    {"id":"EXT-045","claim":"Progress history entries can be obscured by fixed mobile controls.","source_refs":["3.8 findings row 1","9 beta-critical: remove collisions"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-046","claim":"Charts rely on small labels and primarily visual color encoding.","source_refs":["3.8 findings row 2","7 should-fix 4","9 accessibility: chart alternatives"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-047","claim":"Progress charts report values without a plain-language insight or action.","source_refs":["3.8 findings row 3","7 should-fix 3"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-048","claim":"Progress dates, units, and locale presentation are inconsistent.","source_refs":["3.8 findings row 4","9 UX: localize labels and units"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+
+    {"id":"EXT-049","claim":"Menu Scan risks becoming a separate destination instead of a Nutrition input method.","source_refs":["3.9 findings row 1","4 feature decisions: Menu Scan","9 navigation: move Menu Scan"],"status":"PRODUCT_DECISION_REQUIRED"},
+    {"id":"EXT-050","claim":"Wearable management is positioned as a destination rather than a connection setting whose results surface on Today.","source_refs":["3.9 findings row 2","4 feature decisions: Wearables"],"status":"PRODUCT_DECISION_REQUIRED"},
+    {"id":"EXT-051","claim":"Menu recommendation mockups show precise values without source, confidence, or assumptions.","source_refs":["3.9 findings row 3"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+
+    {"id":"EXT-052","claim":"Authentication and recovery flows must provide clear errors, password visibility, autofill, and rate-limit feedback.","source_refs":["3.10 beta-readiness requirement 1","7 must-fix 9"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-053","claim":"Onboarding must explain why each requested health datum is needed.","source_refs":["3.10 beta-readiness requirement 2"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-054","claim":"Users must be able to review and edit goals, units, restrictions, injuries, equipment, schedule, experience, and consent.","source_refs":["3.10 beta-readiness requirement 3"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-055","claim":"Wearable connection must be optional and skippable during onboarding.","source_refs":["3.10 beta-readiness requirement 4"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-056","claim":"Onboarding must show a plan preview before completion.","source_refs":["3.10 beta-readiness requirement 5"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-057","claim":"Onboarding must preserve progress and input across back navigation.","source_refs":["3.10 beta-readiness requirement 6","5 responsive standards: preserve state"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-058","claim":"Health permissions, privacy, AI limits, export, and account deletion must be findable.","source_refs":["3.10 beta-readiness requirement 7"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"},
+    {"id":"EXT-059","claim":"Destructive actions must require confirmation and explain consequences.","source_refs":["3.10 beta-readiness requirement 8","9 UX: Undo and recovery"],"status":"BLOCKED_BY_MISSING_ENVIRONMENT"}
+  ]
+}

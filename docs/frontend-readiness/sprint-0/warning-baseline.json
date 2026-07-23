@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0.0",
+  "captured_at": "2026-07-22T00:00:00+03:00",
+  "python_version": "3.14.3",
+  "platform": "Windows-10-10.0.19045-SP0",
+  "pytest": {
+    "working_directory_suffix": "fitness-coach",
+    "arguments": ["python", "-m", "pytest", "tests/test_design_system.py", "tests/test_app_shell.py", "tests/test_auth_phase6_ui.py", "tests/test_remaining_work.py", "tests/test_progress_ui.py", "tests/test_training_ui.py", "tests/test_profile_ui.py", "-q"],
+    "addopts": "-m \"not load\"",
+    "warning_filters": []
+  },
+  "environment": {
+    "OPENAI_API_KEY": "test-key-not-used", "SECRET_KEY": "test-secret-key",
+    "DATABASE_URL": "sqlite://", "FATSECRET_BASE_URL": "https://fatsecret.invalid",
+    "FITX_SKIP_DB_INIT": "1", "AUTH_WRITE_RATELIMIT": "2 per minute",
+    "REDIS_URL": "", "BEDROCK_ENABLED": "0", "S3_BUCKET_NAME": "",
+    "COGNITO_USER_POOL_ID": "", "COGNITO_APP_CLIENT_ID": "", "RESEND_API_KEY": "",
+    "FLASK_DEBUG": null, "FLASK_ENV": null
+  },
+  "result": {"passed": 48, "warnings": 343},
+  "warning_categories": {"DeprecationWarning": 343},
+  "warning_sources": [
+    {"source": "tests/conftest.py:100", "count": 44},
+    {"source": "app/hooks.py:245", "count": 90},
+    {"source": "sqlalchemy/sql/schema.py:3623", "count": 99},
+    {"source": "app/services/session_store.py:98", "count": 24},
+    {"source": "app/services/session_store.py:128", "count": 43},
+    {"source": "app/services/session_store.py:162", "count": 43}
+  ],
+  "last_comparison": {
+    "captured_at": "2026-07-22T19:00:00+03:00",
+    "same_command_and_environment": true,
+    "passed": 48,
+    "warnings": 343,
+    "new_categories": [],
+    "material_count_increase": 0
+  },
+  "policy": {"existing_warnings_block_sprint": false, "new_unexplained_categories_allowed": false, "compare_only_with_identical_command_and_environment": true}
+}

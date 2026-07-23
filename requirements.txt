@@ -33,3 +33,4 @@ resend==2.34.0
 # Hata izleme — yalnızca SENTRY_DSN ayarlıysa etkin (app/observability.py).
 sentry-sdk[flask]==2.66.0
 cryptography==49.0.0
+tzdata==2026.3

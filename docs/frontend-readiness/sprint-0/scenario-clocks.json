@@ -1,0 +1,61 @@
+{
+  "schema_version": "1.0.0",
+  "default_timezone": "Europe/Istanbul",
+  "scenarios": [
+    {
+      "id": "anonymous", "fixed_current_datetime": "2026-07-20T09:30:00+03:00", "timezone": "Europe/Istanbul", "expected_local_date": "2026-07-20",
+      "workout_day_state": "not-applicable", "history_boundaries": {"start": "2026-07-14", "end": "2026-07-20"}, "wearable_last_sync": null,
+      "date_sensitive_expected_output": {"day_key": "2026-07-20", "streak": null}
+    },
+    {
+      "id": "new-empty", "fixed_current_datetime": "2026-07-20T09:30:00+03:00", "timezone": "Europe/Istanbul", "expected_local_date": "2026-07-20",
+      "workout_day_state": "no-plan", "history_boundaries": {"start": "2026-07-14", "end": "2026-07-20"}, "wearable_last_sync": null,
+      "date_sensitive_expected_output": {"day_key": "2026-07-20", "streak": 0}
+    },
+    {
+      "id": "partial", "fixed_current_datetime": "2026-07-20T09:30:00+03:00", "timezone": "Europe/Istanbul", "expected_local_date": "2026-07-20",
+      "workout_day_state": "no-plan", "history_boundaries": {"start": "2026-07-14", "end": "2026-07-20"}, "wearable_last_sync": null,
+      "date_sensitive_expected_output": {"day_key": "2026-07-20", "streak": 0}
+    },
+    {
+      "id": "active-rest-day", "fixed_current_datetime": "2026-07-20T09:30:00+03:00", "timezone": "Europe/Istanbul", "expected_local_date": "2026-07-20",
+      "workout_day_state": "rest-day", "history_boundaries": {"start": "2026-07-14", "end": "2026-07-20"}, "wearable_last_sync": "2026-07-20T08:45:00+03:00",
+      "date_sensitive_expected_output": {"day_key": "2026-07-20", "streak": 3, "wearable_sync_age_minutes": 45}
+    },
+    {
+      "id": "active-workout", "fixed_current_datetime": "2026-07-20T09:30:00+03:00", "timezone": "Europe/Istanbul", "expected_local_date": "2026-07-20",
+      "workout_day_state": "scheduled-active", "history_boundaries": {"start": "2026-07-14", "end": "2026-07-20"}, "wearable_last_sync": "2026-07-20T08:45:00+03:00",
+      "date_sensitive_expected_output": {"day_key": "2026-07-20", "streak": 4, "wearable_sync_age_minutes": 45}
+    },
+    {
+      "id": "completed-workout", "fixed_current_datetime": "2026-07-20T19:00:00+03:00", "timezone": "Europe/Istanbul", "expected_local_date": "2026-07-20",
+      "workout_day_state": "completed", "history_boundaries": {"start": "2026-07-14", "end": "2026-07-20"}, "wearable_last_sync": "2026-07-20T18:30:00+03:00",
+      "date_sensitive_expected_output": {"day_key": "2026-07-20", "streak": 5, "wearable_sync_age_minutes": 30}
+    },
+    {
+      "id": "progress-history", "fixed_current_datetime": "2026-07-20T09:30:00+03:00", "timezone": "Europe/Istanbul", "expected_local_date": "2026-07-20",
+      "workout_day_state": "scheduled-active", "history_boundaries": {"start": "2026-06-22", "end": "2026-07-20"}, "wearable_last_sync": "2026-07-20T08:45:00+03:00",
+      "date_sensitive_expected_output": {"day_key": "2026-07-20", "history_days": 29, "streak": 7}
+    },
+    {
+      "id": "coach-history", "fixed_current_datetime": "2026-07-20T09:30:00+03:00", "timezone": "Europe/Istanbul", "expected_local_date": "2026-07-20",
+      "workout_day_state": "scheduled-active", "history_boundaries": {"start": "2026-07-14", "end": "2026-07-20"}, "wearable_last_sync": null,
+      "date_sensitive_expected_output": {"day_key": "2026-07-20", "conversation_turns": 2}
+    },
+    {
+      "id": "wearable-connected", "fixed_current_datetime": "2026-07-20T09:30:00+03:00", "timezone": "Europe/Istanbul", "expected_local_date": "2026-07-20",
+      "workout_day_state": "scheduled-active", "history_boundaries": {"start": "2026-07-14", "end": "2026-07-20"}, "wearable_last_sync": "2026-07-20T08:45:00+03:00",
+      "date_sensitive_expected_output": {"day_key": "2026-07-20", "wearable_sync_age_minutes": 45}
+    },
+    {
+      "id": "wearable-disconnected", "fixed_current_datetime": "2026-07-20T09:30:00+03:00", "timezone": "Europe/Istanbul", "expected_local_date": "2026-07-20",
+      "workout_day_state": "scheduled-active", "history_boundaries": {"start": "2026-07-14", "end": "2026-07-20"}, "wearable_last_sync": null,
+      "date_sensitive_expected_output": {"day_key": "2026-07-20", "wearable_status": "disconnected"}
+    },
+    {
+      "id": "social-empty", "fixed_current_datetime": "2026-07-20T09:30:00+03:00", "timezone": "Europe/Istanbul", "expected_local_date": "2026-07-20",
+      "workout_day_state": "rest-day", "history_boundaries": {"start": "2026-07-14", "end": "2026-07-20"}, "wearable_last_sync": null,
+      "date_sensitive_expected_output": {"day_key": "2026-07-20", "feed_items": 0}
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "schema_version": "1.0.0",
+  "capture_id": "setup--partial--step-1--wide-1024--chromium",
+  "url": "http://127.0.0.1:33911/setup",
+  "status": "captured",
+  "status_code": 200,
+  "screenshot": "screenshots/setup--partial--step-1--wide-1024--chromium.png",
+  "checks": {
+    "console_errors": [],
+    "page_errors": [],
+    "failed_requests": [
+      {
+        "url": "https://www.googletagmanager.com/gtag/js?id=G-YXSGLN7C7Y",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "url": "https://fonts.gstatic.com/s/bebasneue/v16/JTUSjIg69CK48gW7PXoo9Wlhyw.woff2",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "url": "https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7SUc.woff2",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "url": "https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2",
+        "error": "net::ERR_ABORTED"
+      },
+      {
+        "url": "https://fonts.gstatic.com/s/bebasneue/v16/JTUSjIg69CK48gW7PXoo9Wdhyzbi.woff2",
+        "error": "net::ERR_ABORTED"
+      }
+    ],
+    "overflow": [],
+    "placeholders": [],
+    "occlusion": [],
+    "active_navigation": [
+      {
+        "tag": "DIV",
+        "text": "",
+        "ariaCurrent": null
+      },
+      {
+        "tag": "SECTION",
+        "text": "Fiziksel Bilgilerin\n                Koçun sana doğru plan verebilmesi için bunla",
+        "ariaCurrent": null
+      }
+    ],
+    "viewport_width": 1024,
+    "scroll_width": 1024
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0.0",
+  "capture_id": "error-404--anonymous--default--mobile-390--chromium",
+  "url": "http://127.0.0.1:33911/__audit__/404",
+  "status": "captured",
+  "status_code": 404,
+  "screenshot": "screenshots/error-404--anonymous--default--mobile-390--chromium.png",
+  "checks": {
+    "console_errors": [
+      "Failed to load resource: the server responded with a status of 404 (NOT FOUND)"
+    ],
+    "page_errors": [],
+    "failed_requests": [],
+    "overflow": [],
+    "placeholders": [],
+    "occlusion": [],
+    "active_navigation": [],
+    "viewport_width": 390,
+    "scroll_width": 390
+  }
+}

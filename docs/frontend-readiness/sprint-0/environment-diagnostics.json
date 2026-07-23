@@ -1,0 +1,43 @@
+{
+  "recorded_at": "2026-07-22T18:30:00+03:00",
+  "completion_status": "complete",
+  "mandatory_browser": "chromium",
+  "native_environment": {
+    "os": "Windows 10 build 19045",
+    "python": "3.14.3",
+    "playwright": "1.61.0",
+    "chromium_revision": "1228",
+    "chromium_major": 149,
+    "package_install": "passed in clean .audit-venv",
+    "browser_install_command": "python -m playwright install chromium",
+    "launch": "passed",
+    "loopback_navigation": "passed",
+    "screenshot": "passed",
+    "shutdown": "passed",
+    "supported": false,
+    "limitation": "Playwright documents native Windows support for Windows 11 or later; this host is Windows 10. Native output is diagnostic only."
+  },
+  "supported_environment_attempts": [
+    {"environment":"Docker Desktop Linux","result":"blocked","detail":"Docker daemon returned: Docker Desktop is unable to start."},
+    {"environment":"WSL2","result":"resolved","detail":"Ubuntu-24.04 installed as WSL version 2; used as the supported same-environment runtime for the completion run."}
+  ],
+  "supported_run": {
+    "recorded_at": "2026-07-23T05:09:00Z",
+    "environment": "WSL Ubuntu-24.04 (Linux microsoft-standard-WSL2)",
+    "python": "3.12.3",
+    "playwright": "1.61.0",
+    "chromium_revision": "1228",
+    "chromium_major": 149,
+    "supported": true,
+    "preflight": "passed",
+    "capture_tier": "full",
+    "captures_total": 325,
+    "chromium_captured": 277,
+    "chromium_failed": 0,
+    "optional_blocked": {"webkit": 24, "firefox": 24, "reason": "browser binaries not installed; system libraries require privileged apt access"},
+    "verify": "audit artifacts valid",
+    "evidence_path": "docs/frontend-readiness/sprint-0/evidence/2026-07-23/"
+  },
+  "completion_rule": "Sprint 0 remains incomplete until the full required inventory succeeds with Chromium in a supported same-environment application/browser runtime.",
+  "completion_note": "Rule satisfied on 2026-07-23: supported WSL Ubuntu-24.04 preflight passed and all 277 mandatory Chromium captures succeeded (0 failed); optional WebKit/Firefox remain blocked."
+}

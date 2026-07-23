@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://axisai.local/schemas/report-xref-1.0.0.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "records"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "records": {"type": "array", "items": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "report", "finding_ids", "evidence_ids"],
+      "properties": {"id": {"type": "string"}, "report": {"type": "string"}, "finding_ids": {"type": "array", "items": {"type": "string"}}, "evidence_ids": {"type": "array", "items": {"type": "string"}}}
+    }}
+  }
+}

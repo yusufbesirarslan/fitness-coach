@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://axisai.local/schemas/inventory-1.0.0.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "generated_at", "viewports", "scenarios", "routes"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "viewports": {
+      "type": "object", "minProperties": 2,
+      "additionalProperties": {
+        "type": "object", "additionalProperties": false,
+        "required": ["width", "height"],
+        "properties": {"width": {"type": "integer", "minimum": 1}, "height": {"type": "integer", "minimum": 1}}
+      }
+    },
+    "scenarios": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": true,
+        "required": ["id", "clock"],
+        "properties": {"id": {"type": "string", "pattern": "^[a-z0-9-]+$"}, "clock": {"type": "string"}}
+      }
+    },
+    "routes": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": true,
+        "required": ["id", "route", "template", "auth_required", "beta_critical", "coverage"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+          "route": {"type": "string", "pattern": "^/"},
+          "template": {"type": ["string", "null"]},
+          "auth_required": {"type": "boolean"},
+          "beta_critical": {"type": "boolean"},
+          "coverage": {
+            "type": "object", "additionalProperties": false,
+            "required": ["tier", "scenarios", "viewports", "browsers", "stress_profiles"],
+            "properties": {
+              "tier": {"enum": ["representative", "full", "excluded"]},
+              "scenarios": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+              "viewports": {"type": "array", "items": {"type": "string"}},
+              "browsers": {"type": "array", "items": {"enum": ["chromium", "webkit", "firefox"]}},
+              "stress_profiles": {"type": "array", "items": {"enum": ["landscape", "keyboard", "text-200", "reduced-motion", "dark-mode"]}},
+              "exclusion_reason": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    }
+  }
+}

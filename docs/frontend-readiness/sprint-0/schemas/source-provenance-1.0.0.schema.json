@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://axisai.local/schemas/source-provenance-1.0.0.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "original_filename", "import_date", "source_size_bytes", "source_encoding", "sha256", "preserved_path", "extraction_rules_version", "canonical_finding_map_version", "importer", "immutability_policy"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"}, "original_filename": {"type": "string"},
+    "import_date": {"type": "string"}, "source_size_bytes": {"type": "integer", "minimum": 1},
+    "source_encoding": {"type": "string"}, "source_last_modified_utc": {"type": "string"},
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "preserved_path": {"type": "string"},
+    "extraction_rules_version": {"const": "1.0.0"}, "canonical_finding_map_version": {"const": "1.0.0"},
+    "importer": {"type": "string"}, "immutability_policy": {"type": "string"}
+  }
+}
