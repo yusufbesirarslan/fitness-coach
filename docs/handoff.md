@@ -2235,3 +2235,205 @@ Stage-1 dev enablement (nice-to-have, non-blocking).
 
 No push, PR, merge, deploy, or production-flag change was performed. Work remains uncommitted in
 the worktree pending explicit instruction.
+
+## Sprint 0 - Frontend Readiness Audit Foundation
+
+Date: 2026-07-22
+Branch: feat/sprint0-frontend-readiness
+Status: implementation and static reporting complete; mandatory supported-
+environment Chromium execution is blocked, so Sprint 0 is not complete.
+
+### Exact commands
+
+From the repository root:
+
+    python -m venv .audit-venv
+    .audit-venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-dev.txt
+    .audit-venv\Scripts\python.exe -m playwright install chromium
+    .audit-venv\Scripts\python.exe -m scripts.frontend_audit preflight --output artifacts\ui-audit\preflight
+    .audit-venv\Scripts\python.exe -m scripts.frontend_audit seed
+    .audit-venv\Scripts\python.exe -m scripts.frontend_audit capture --tier full --dry-run
+    .audit-venv\Scripts\python.exe -m scripts.frontend_audit capture --tier full --output artifacts\ui-audit\full
+    .audit-venv\Scripts\python.exe -m scripts.frontend_audit verify --manifest artifacts\ui-audit\full\manifest.json
+
+The browser command is version-coupled. After changing the Playwright package,
+run python -m playwright install chromium again.
+
+### Audit environment and isolation
+
+- Clean venv: Python 3.14.3, Playwright 1.61.0, Chromium revision 1228
+  (Chromium major 149).
+- The audit factory requires loopback plus an isolated SQLite path, disables
+  external services, and adds audit-only authentication/error routes only to
+  that factory. It never reuses a production database.
+- Seed data is idempotent and uses example.invalid identities. Run seed
+  explicitly or use capture, which reseeds before the run.
+- Every scenario has a fixed timezone-aware clock in
+  docs/frontend-readiness/sprint-0/scenario-clocks.json.
+- The Flask server, database, browser runner, and reports must execute inside
+  the same supported Linux/WSL/container environment. Do not assume host and
+  container loopback are shared.
+
+### Coverage and evidence
+
+- CLI tiers: smoke, responsive, stress, cross-browser, and full. Only full is
+  a completion run.
+- Coverage is inventory-driven: every HTML route gets representative
+  390x844 and 1440x900 Chromium coverage; beta-critical and responsive-risk
+  routes receive the declared eight-width matrix; stress and optional browsers
+  run only where declared.
+- The resolved route/scenario/state/viewport/browser/stress plan prints before
+  capture.
+- Canonical artifacts and all nine reports are under
+  docs/frontend-readiness/sprint-0/.
+- Raw runtime artifacts are written under artifacts/ui-audit/ and are ignored.
+  Curated evidence belongs under
+  docs/frontend-readiness/sprint-0/evidence/<run-date>/ with a validated
+  manifest. No supported captures are currently curated.
+
+### Known limitations
+
+- Windows 10 build 19045 passed the diagnostic launch, loopback, screenshot,
+  and shutdown checks, but it is outside the documented native support target
+  and cannot supply final evidence.
+- Docker Desktop returned: Docker Desktop is unable to start.
+- WSL2 is enabled but no Linux distribution is installed. Installing one is a
+  privileged system change and may require a restart.
+- Runtime-dependent external findings remain BLOCKED_BY_MISSING_ENVIRONMENT;
+  unsupported-host diagnostics did not confirm them.
+- The warning baseline is frozen to the exact command/environment in
+  warning-baseline.json: 48 passed and 343 existing datetime.utcnow()
+  deprecation warnings. Do not compare other test selections as a warning
+  regression, and do not broaden this sprint into a datetime migration.
+
+### Unresolved product decisions
+
+- Whether to adopt Today / Plan / Coach / Progress and demote Community.
+- Whether Menu Scan is only a food-log input and wearables live under
+  Connections.
+- Public qualification language for AI and integration claims.
+- Landing-page compression/social-proof direction.
+- Which secondary capabilities should receive centralized UI flags.
+
+### Recommended Sprint 1 entry point
+
+First establish a supported Linux/WSL environment and complete the full
+Chromium inventory. Then use the resulting evidence to fix shared mobile
+overlap/overflow and safe-area ownership before workout state, food logging,
+and Coach rendering. See implementation-backlog.md; do not start a broad
+visual redesign from the external hypothesis alone.
+
+## Sprint 0 - Takeover continuation (2026-07-23)
+
+Date: 2026-07-23
+Branch: feat/sprint0-frontend-readiness
+Status: mandatory gate COMPLETE. The previous agent's three harness fixes are
+verified and green, and the supported-environment Chromium preflight plus the
+full 325-capture run both succeeded in WSL Ubuntu-24.04 on 2026-07-23 (277/277
+mandatory Chromium captures, 0 failed; `verify` reports "audit artifacts valid").
+
+### Takeover assessment (git treated as source of truth)
+
+- Working tree carried exactly two uncommitted, unstaged modifications on top of
+  the eight sprint-0 commits: `scripts/frontend_audit/runner.py` and
+  `tests/test_frontend_audit_runner.py`. No other staged, untracked, or unrelated
+  changes exist. This matches the inherited progress note.
+- `wsl -l -v` confirms `Ubuntu-24.04` at version 2 (currently Stopped). This
+  retires the prior blocker recorded above ("WSL2 is enabled but no Linux
+  distribution is installed").
+
+### Previous agent's three fixes - reviewed and confirmed correct
+
+1. Text-200 zoom now injects a CSP-nonce-carrying `<style>` via `page.evaluate`
+   (reads the page's own nonce from `style[nonce], script[nonce]`) instead of an
+   un-nonced `page.add_style_tag`. Aligns with this app's per-request CSP nonce
+   model (`app/hooks.py`); the old path would have been blocked by CSP, so the
+   200%-zoom stress screenshots were silently un-zoomed (false evidence).
+2. Only the audit-only `/__audit__/500` route returning HTTP 500 is treated as
+   `captured`; every other 5xx stays `failed`. Keeps the deliberate error-page
+   audit valid without masking genuine server errors.
+3. New `_manifest_capture_record` omits `screenshot`/`reason` when absent. This
+   fixes a real latent defect: the evidence-manifest schema types both fields as
+   non-nullable `string`, so the old builder's `reason: null` (captured rows) and
+   `screenshot: null` (blocked rows) produced schema-INVALID manifests that
+   `validate_manifest` would reject.
+
+### Tests executed and results (Windows host, Python 3.14.3, pytest 9.1.1)
+
+- `tests/test_frontend_audit_runner.py` - 9 passed (includes the 3 RED/GREEN
+  tests the previous agent added).
+- Full audit suite (`test_auth_audit`, `test_frontend_audit_app`,
+  `test_frontend_audit_cli`, `test_frontend_audit_clock`,
+  `test_frontend_audit_foundation`, `test_frontend_audit_inventory`,
+  `test_frontend_audit_runner`, `test_frontend_audit_schemas`) - 41 passed, 0
+  failed, 58 warnings.
+- Diff review: only the two intended files changed; no secrets, no unrelated
+  edits, no reset/overwrite of prior work.
+
+### Known limitation introduced by fix 1
+
+If an audited text-200 route renders no nonce-bearing `<style>`/`<script>`, the
+zoom injection throws "page CSP nonce not found" and that single capture is
+marked `failed` rather than silently un-zoomed. This is a truthful failure
+signal (strictly better than the old silent CSP block). In the 2026-07-23 run
+this concern did not materialize: every Chromium capture, including the text-200
+stress captures, succeeded (0 failures), so no audited route lacked a nonce-bearing
+asset. Keep watching it on future runs.
+
+### Supported run - completed (2026-07-23)
+
+Environment: WSL Ubuntu-24.04 (Linux, `operating_system.supported: true`),
+Python 3.12.3, Playwright 1.61.0, Chromium revision 1228 (major 149). The run
+reused the previous agent's WSL venv (`~/axisai-sprint0-audit-venv`) and browser
+cache (`PLAYWRIGHT_BROWSERS_PATH=~/.cache/axisai-sprint0-playwright`).
+
+- Preflight (`preflight.json`): `success: true` - launch, loopback navigation,
+  screenshot, and clean shutdown all passed on a supported OS.
+- `capture --tier full`: 325 resolved captures - 277 Chromium `captured` (0
+  failed), 24 WebKit + 24 Firefox `blocked` (optional browsers not installed;
+  their system libraries need privileged apt access, which is not available in
+  this WSL user context). `mandatory_blocked` is false, so the run exits 0.
+- `verify --manifest`: `audit artifacts valid` (inventory, warning-baseline,
+  source-provenance, findings, all nine reports, manifest, and report-xrefs).
+- Frozen frontend baseline reproduced on the Windows host under the exact
+  command/environment in `warning-baseline.json`: 48 passed, 343 warnings (the
+  baseline is environment-frozen to Windows Python 3.14.3; policy forbids
+  cross-environment warning comparison, so it is intentionally not re-measured
+  under WSL Python 3.12).
+- Automated per-capture signal over the 277 Chromium captures: 0 template
+  placeholders, 0 page errors; overflow on 22 captures / 5 routes; fixed-bottom
+  occlusion on 152 captures / 15 routes; console errors on 22 captures / 4
+  routes; 268 `failed_requests` captures that largely reflect the isolated
+  factory blocking external CDN/analytics requests (triage against the allowlist
+  before treating as defects).
+
+Files changed in this continuation:
+
+- `scripts/frontend_audit/runner.py`, `tests/test_frontend_audit_runner.py`
+  (inherited uncommitted fixes, now verified).
+- `docs/handoff.md`, `docs/frontend-readiness/sprint-0/visual-qa-harness.md`,
+  `docs/frontend-readiness/sprint-0/verified-audit.md`,
+  `docs/frontend-readiness/sprint-0/environment-diagnostics.json` (status
+  updates).
+- `docs/frontend-readiness/sprint-0/evidence/2026-07-23/` (new curated,
+  schema-validated evidence: manifest + 277 screenshots + 277 result JSONs,
+  ~17 MB).
+
+Raw run artifacts (WSL-native `~/axisai-audit-run/`, and `artifacts/ui-audit/`)
+are outside git by design (`.gitignore`).
+
+### Remaining follow-up work (Sprint 1 entry)
+
+- Adjudicate each render-/interaction-/state-dependent external finding to a
+  confirmed or non-reproduction result against the curated screenshots and
+  result JSONs; the evidence is now available but per-finding adjudication is not
+  asserted here.
+- Triage the 268 `failed_requests` captures against the external-request
+  allowlist to separate isolation artifacts from genuine broken references.
+- Optionally install WebKit/Firefox with their system libraries in a
+  privileged-capable environment to convert the 48 optional captures from
+  `blocked` to `captured`.
+- Address the confirmed narrow-width overflow and fixed-bottom occlusion before
+  broad UI work, per `implementation-backlog.md`.
+
+Constraint honored: nothing was pushed, merged, or deployed.

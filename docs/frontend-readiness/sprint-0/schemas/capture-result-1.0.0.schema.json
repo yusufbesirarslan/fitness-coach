@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://axisai.local/schemas/capture-result-1.0.0.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "capture_id", "url", "status", "checks"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"}, "capture_id": {"type": "string"},
+    "url": {"type": "string"}, "status": {"enum": ["captured", "blocked", "failed"]},
+    "checks": {"type": "object", "required": ["console_errors", "page_errors", "failed_requests", "overflow", "placeholders", "occlusion"], "additionalProperties": true}
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "original_filename": "AxisAI-frontend-readiness-audit.md",
+  "import_date": "2026-07-22",
+  "source_size_bytes": 43884,
+  "source_encoding": "UTF-8",
+  "sha256": "302aeaf22f9d834f41216ee420b5d1201b987f26b77715b4b67da124b5118b92",
+  "source_last_modified_utc": "2026-07-22T13:05:55.1771540Z",
+  "preserved_path": "docs/frontend-readiness/sprint-0/source/AxisAI-frontend-readiness-audit.md",
+  "extraction_rules_version": "1.0.0",
+  "canonical_finding_map_version": "1.0.0",
+  "importer": "AxisAI Sprint 0 audit workflow 1.0.0",
+  "immutability_policy": "The preserved source bytes and checksum are never rewritten during verification."
+}

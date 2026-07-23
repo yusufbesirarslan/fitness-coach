@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://axisai.local/schemas/evidence-manifest-1.0.0.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema_version", "run_id", "environment", "captures"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "run_id": {"type": "string", "minLength": 1},
+    "environment": {
+      "type": "object", "additionalProperties": true,
+      "required": ["browser", "supported"],
+      "properties": {"browser": {"type": "string"}, "supported": {"type": "boolean"}}
+    },
+    "captures": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": true,
+        "required": ["id", "route_id", "scenario_id", "state", "viewport", "browser", "status"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "route_id": {"type": "string"}, "scenario_id": {"type": "string"},
+          "state": {"type": "string"}, "viewport": {"type": "string"},
+          "browser": {"enum": ["chromium", "webkit", "firefox"]},
+          "status": {"enum": ["captured", "blocked", "skipped"]},
+          "screenshot": {"type": "string"}, "reason": {"type": "string"}
+        }
+      }
+    }
+  }
+}

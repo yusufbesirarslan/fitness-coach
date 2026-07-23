@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://axisai.local/schemas/warning-baseline-1.0.0.schema.json",
+  "type": "object", "additionalProperties": true,
+  "required": ["schema_version", "python_version", "pytest", "environment", "result", "warning_categories", "warning_sources", "policy"],
+  "properties": {
+    "schema_version": {"const": "1.0.0"}, "python_version": {"type": "string"},
+    "pytest": {"type": "object", "required": ["arguments", "addopts", "warning_filters"]},
+    "environment": {"type": "object"},
+    "result": {"type": "object", "required": ["passed", "warnings"], "properties": {"passed": {"type": "integer"}, "warnings": {"type": "integer"}}},
+    "warning_categories": {"type": "object", "additionalProperties": {"type": "integer"}},
+    "warning_sources": {"type": "array"}, "policy": {"type": "object"}
+  }
+}

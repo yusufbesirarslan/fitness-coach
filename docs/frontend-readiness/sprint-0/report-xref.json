@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0.0",
+  "records": [
+    {"id":"XREF-001","report":"verified-audit.md","finding_ids":["EXT-001","EXT-008","EXT-011","EXT-026","EXT-059"],"evidence_ids":[]},
+    {"id":"XREF-002","report":"route-inventory.md","finding_ids":["EXT-001","EXT-007","EXT-022","EXT-031","EXT-038","EXT-045","EXT-052"],"evidence_ids":[]},
+    {"id":"XREF-003","report":"template-and-js-map.md","finding_ids":["EXT-008","EXT-011","EXT-027","EXT-039","EXT-044"],"evidence_ids":[]},
+    {"id":"XREF-004","report":"design-system-inventory.md","finding_ids":["EXT-006","EXT-007","EXT-026","EXT-043","EXT-046"],"evidence_ids":[]},
+    {"id":"XREF-005","report":"user-flow-map.md","finding_ids":["EXT-013","EXT-014","EXT-022","EXT-031","EXT-038","EXT-052","EXT-059"],"evidence_ids":[]},
+    {"id":"XREF-006","report":"feature-flag-feasibility.md","finding_ids":["EXT-009","EXT-018","EXT-021","EXT-049","EXT-050"],"evidence_ids":[]},
+    {"id":"XREF-007","report":"visual-qa-harness.md","finding_ids":["EXT-001","EXT-007","EXT-022","EXT-031","EXT-038","EXT-045"],"evidence_ids":[]},
+    {"id":"XREF-008","report":"beta-risk-register.md","finding_ids":["EXT-001","EXT-003","EXT-007","EXT-008","EXT-022","EXT-031","EXT-038","EXT-041","EXT-046","EXT-052"],"evidence_ids":[]},
+    {"id":"XREF-009","report":"implementation-backlog.md","finding_ids":["EXT-001","EXT-003","EXT-007","EXT-009","EXT-019","EXT-022","EXT-031","EXT-038","EXT-045","EXT-049","EXT-050"],"evidence_ids":[]}
+  ]
+}
