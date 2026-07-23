@@ -4,16 +4,37 @@ FitX kullanıcıları Türkiye'de; "gün" sınırı (öğün günü, seri, göre
 yüzden sabit Europe/Istanbul saatine göre hesaplanır. UTC ve sunucu-yerel
 date.today() karışımı, gün dönümünde tutarsızlıklara yol açıyordu.
 """
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 APP_TZ = ZoneInfo("Europe/Istanbul")
 UTC = ZoneInfo("UTC")
 
+# Request/task-local test hook. The default remains real Istanbul time; only
+# tests and the local frontend-audit wrapper enter ``audit_clock``.
+_AUDIT_NOW = ContextVar("axisai_audit_now", default=None)
+
 
 def app_now():
     """Şu anki zaman, uygulama saat diliminde (tz-aware)."""
+    fixed = _AUDIT_NOW.get()
+    if fixed is not None:
+        return fixed
     return datetime.now(APP_TZ)
+
+
+@contextmanager
+def audit_clock(fixed_now):
+    """Temporarily freeze canonical application time for tests/local audit."""
+    if fixed_now.tzinfo is None:
+        raise ValueError("audit clock requires a timezone-aware datetime")
+    token = _AUDIT_NOW.set(fixed_now.astimezone(APP_TZ))
+    try:
+        yield
+    finally:
+        _AUDIT_NOW.reset(token)
 
 
 def app_today():
