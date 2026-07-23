@@ -44,9 +44,12 @@ shared card, button, skeleton and token primitives, uses the existing 640 px
 breakpoint, and provides status/alert semantics, one section heading, two-column
 metrics where space permits, overflow-safe text, and a 44 px retry target.
 
-PR6.3 still owns live browser/mobile accessibility validation, cache/privacy headers,
-observability decisions, SQL/performance audit, the four-way runtime flag matrix, and
-production-readiness review.
+PR6.3 completed real-browser/mobile accessibility validation (headless Chromium/Blink across
+320/390/768/1366 px in tr/en — every state, focus, keyboard, reduced-motion, stale-response,
+44 px tap target, heading contrast 6.85:1, one request per mount), cache/privacy headers,
+observability decisions, SQL/performance audit, the four-way runtime flag matrix, the
+full-suite regression run (2268 passed / 0 failed, reconciled to 2271 collected), and the
+production-readiness review. See `docs/handoff.md` §25 and §30–34.
 
 
 `app/services/weekly_program/` — the canonical, deterministic **weekly-program
@@ -351,11 +354,51 @@ Recorded decisions from the PR5 production-readiness audit (findings F4–F6):
   is additive-only — new fields may be appended, existing fields may not be renamed,
   retyped, or given new meaning. A breaking change introduces `schema_version` (or a
   new path) at that point, not speculatively.
-- **Observability (F6) — minimal, non-sensitive.** The route emits one
-  `[TRAINING][WEEKLY_PROGRAM]` debug line carrying `has_data`, `week_focus` and whether
-  a baseline exists, plus a warning on failure. That is enough to tell "neutral because
-  the user has no history" from "populated recommendation" from "upstream failure"
-  before a UI depends on it. No history, volumes, payloads, or PII are logged.
+- **Observability (F6) — minimal, non-sensitive. Finalized in PR6.3.** The route emits
+  exactly one `[TRAINING][WEEKLY_PROGRAM]` line per request. PR5 logged
+  `user=<id> has_data=… week_focus=… has_baseline=…` at `debug`; **PR6.3 replaced that
+  with a classified, id-free `state=` line** so the same signal survives production log
+  levels and carries no PII:
+  - success → `logger.info("[TRAINING][WEEKLY_PROGRAM] request_id=%s state=%s", …)`
+    where `state ∈ {neutral, missing_baseline, populated}`
+    (`_weekly_program_state()` in `app/blueprints/training.py`);
+  - failure → `logger.warning("… request_id=%s state=error error_class=%s", …)`
+    where `error_class ∈ {upstream_error, unexpected_error}`
+    (`_weekly_program_error_class()` — `SQLAlchemyError` → upstream, else unexpected).
+
+  The `request_id` is the existing server-generated 16-hex id from `app.observability`
+  (already on every logfmt line and Sentry tag), not a user identifier. **Prohibited from
+  the line:** `current_user.id`, raw volumes (baseline/target), `week_focus` value,
+  reason/explanation keys, the payload, the raw exception string, and email/token/PII.
+  Tests assert both the presence of `state=`/`request_id=` and the *absence* of those
+  forbidden tokens (`tests/test_weekly_program_route.py`:
+  `test_success_logging_classifies_state_without_sensitive_data`,
+  `test_failure_logging_uses_normalized_error_class_only`).
+
+  **Metric promotion is deferred, deliberately.** The only metric abstraction in the repo
+  (`app/services/ai_metrics.py`, CloudWatch, `AI_METRICS_ENABLED` default 0) is AI-turn
+  scoped and off by default; wiring a new dimension into it is out of PR6.3's hardening
+  scope. The `state=` log line is the rollout signal instead. Operators reconstruct the
+  neutral/populated/error distribution with a CloudWatch Logs Insights filter:
+
+  ```
+  fields @timestamp, @message
+  | filter @message like /\[TRAINING\]\[WEEKLY_PROGRAM\]/
+  | parse @message "state=*" as state
+  | stats count(*) by state
+  ```
+
+- **Cache/privacy (PR6.3) — `Cache-Control: private, no-store`.** The endpoint returns
+  authenticated per-user recommendations, so a route-scoped `@bp.after_request`
+  (`_weekly_program_private_no_store`, gated on `request.path == /api/training/weekly-program`)
+  stamps `Cache-Control: private, no-store` on **every** response for that path —
+  populated 200, neutral 200, structured 500, transient 503, and the unauthenticated 302
+  login redirect — so no shared cache stores one user's data and account-switching cannot
+  replay it from bfcache. It is deliberately *not* a global `after_request`: the sibling
+  `/training` page and `/login` keep their existing cache behavior (asserted). No
+  `Pragma`/`Expires` legacy headers were added — nothing else in the API sets them, and
+  `no-store` already forbids storage. The client adds no `localStorage`/`sessionStorage`/
+  service-worker persistence, so there is no client cache to invalidate on logout.
 
 ## Tests
 
@@ -405,7 +448,7 @@ data handling exists:
 |----|-------|-------|
 | **PR6.1** | Integration-surface discovery, characterization coverage, default-OFF UI flag, server-rendered mount shell, frontend initialization boundary | **Done** (this section) |
 | PR6.2 | Fetch `GET /api/training/weekly-program`; loading / populated / insufficient-data / missing-baseline / structured-failure states; malformed-payload safety; localization; accessibility and responsive presentation | Complete |
-| PR6.3 | Observability finalization, cache/privacy hardening, architecture guards, full four-way flag matrix, performance and SQL verification, mobile/a11y validation, production-readiness re-audit | Not started |
+| **PR6.3** | Observability finalization (`state=` log line), cache/privacy hardening (`private, no-store`), architecture guards, full four-way flag matrix, per-mount request/race safety, SQL-count verification, accessibility focus management, contrast fix, production-readiness re-audit | **Done** (see `docs/handoff.md` → Sprint 6 PR6.3) |
 
 ### PR6.1 — what exists today
 

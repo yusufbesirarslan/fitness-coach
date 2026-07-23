@@ -17,6 +17,14 @@ changing the endpoint, planner, coach prompt, or database behavior. See
 `docs/WEEKLY_PROGRAM.md` for the state, localization, retry, and accessibility
 contracts.
 
+**PR6.3 hardening (production-ready).** The two consumers were re-verified independent
+at *runtime* across the full four-way flag matrix: neither flag alters the other's
+output, and `AdaptivePlan` stays the single planning authority — no target or
+weekly-window arithmetic entered the browser, structural AST/source guards enforce it,
+and the endpoint still issues one history `SELECT` with no writes. See
+`docs/handoff.md` → *Sprint 6 PR6.3* for the audit, cache/observability policy, and
+rollout/rollback procedure.
+
 
 `app/services/training_planning/` — the canonical, deterministic
 **adaptive-planning** layer of the Adaptive Training Engine (Sprint 6 PR3). It turns

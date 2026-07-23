@@ -278,6 +278,16 @@ def test_client_uses_the_single_read_only_endpoint_with_json_accept():
     assert "?" not in re.search(r"var ENDPOINT = ([^;]+)", CODE).group(1)
 
 
+def test_client_has_one_endpoint_and_no_backend_planning_dependencies():
+    assert CODE.count("/api/training/weekly-program") == 1
+    for forbidden in (
+        "WorkoutLog", "training_history", "training_progression",
+        "training_planning", "build_weekly_program", "weekly_windows",
+        "weeks=", "end_day=", ".sort(",
+    ):
+        assert forbidden not in CODE
+
+
 @pytest.mark.parametrize("state", [
     "idle", "loading", "populated", "insufficient_data",
     "missing_baseline", "error", "malformed",
@@ -298,9 +308,10 @@ def test_client_uses_only_backend_contract_vocabulary(value):
 
 
 def test_client_has_retry_concurrency_and_stale_response_guards():
-    assert "activeRequest" in CODE
-    assert "requestGeneration" in CODE
-    assert "generation !== requestGeneration" in CODE
+    assert "context.activeRequest" in CODE
+    assert "context.requestGeneration" in CODE
+    assert "generation === context.requestGeneration" in CODE
+    assert "context.mount.isConnected !== false" in CODE
     assert "replaceChildren" in CODE
     assert "addEventListener('click'" in CODE
 
@@ -312,6 +323,7 @@ class Element {
   constructor(tag) {
     this.tagName = tag.toUpperCase(); this.children = []; this.attributes = {};
     this.dataset = {}; this.className = ""; this._text = ""; this.handlers = {};
+    this.isConnected = true;
     this.classList = {add: (...names) => {
       this.className = [this.className, ...names].filter(Boolean).join(" ");
     }};
@@ -325,6 +337,7 @@ class Element {
   append(...nodes) { this.children.push(...nodes); }
   replaceChildren(...nodes) { this._text = ""; this.children = nodes; }
   addEventListener(name, fn) { this.handlers[name] = fn; }
+  focus() { global.document.activeElement = this; }
   click() { if (this.handlers.click) this.handlers.click(); }
   querySelector(selector) {
     if (selector === "[data-weekly-program-copy]") return this.copyNode || null;
@@ -369,7 +382,7 @@ mount.attributes["aria-hidden"] = "true";
 mount.copyNode = {textContent: JSON.stringify(copy)};
 global.document = {
   querySelector: (selector) => selector === "[data-weekly-program-mount]" ? mount : null,
-  createElement: (tag) => new Element(tag)
+  createElement: (tag) => new Element(tag), activeElement: null
 };
 global.window = {LOCALE: config.locale || "en"};
 global.fetch = (path, options) => {
@@ -395,7 +408,8 @@ function settle() {
     state: mount.dataset.weeklyProgramState,
     text: mount.textContent,
     role: (mount.children[1] && mount.children[1].attributes.role) || null,
-    fetches: calls.fetch
+    fetches: calls.fetch,
+    focusClass: document.activeElement ? document.activeElement.className : null
   };
   let retry = null;
   if (config.retry) {
@@ -407,6 +421,10 @@ function settle() {
     await settle();
     retry.finalState = mount.dataset.weeklyProgramState;
     retry.finalText = mount.textContent;
+    retry.focusTag = document.activeElement ? document.activeElement.tagName : null;
+    retry.focusClass = document.activeElement ? document.activeElement.className : null;
+    retry.focusTabindex = document.activeElement
+      ? document.activeElement.attributes.tabindex || null : null;
   }
   console.log(JSON.stringify({first, retry, fetches: calls.fetch, request: calls.last}));
 })().catch((error) => { console.error(error); process.exit(1); });
@@ -448,6 +466,96 @@ def _run_case(responses, *, locale="en", retry=False):
         [NODE, "-e", harness], capture_output=True, text=True, check=False)
     assert completed.returncode == 0, completed.stderr
     return json.loads(completed.stdout.strip().splitlines()[-1])
+
+
+_REPLACEMENT_HARNESS = r"""
+const payload = %(payload)s;
+const calls = []; const pending = [];
+class Element {
+  constructor(tag) {
+    this.tagName = tag.toUpperCase(); this.children = []; this.attributes = {};
+    this.dataset = {}; this.className = ""; this._text = ""; this.handlers = {};
+    this.isConnected = true;
+    this.classList = {add: (...names) => { this.className = names.join(" "); }};
+  }
+  set textContent(value) { this._text = String(value); this.children = []; }
+  get textContent() { return this._text + this.children.map((c) => c.textContent || "").join(""); }
+  setAttribute(key, value) { this.attributes[key] = String(value); }
+  removeAttribute(key) { delete this.attributes[key]; }
+  append(...nodes) { this.children.push(...nodes); }
+  replaceChildren(...nodes) { this._text = ""; this.children = nodes; }
+  addEventListener(name, fn) { this.handlers[name] = fn; }
+  focus() { global.document.activeElement = this; }
+  querySelector(selector) {
+    if (selector === "[data-weekly-program-copy]") return this.copyNode || null;
+    return null;
+  }
+}
+const copy = {
+  "training.weekly_program": "Weekly Program", "weekly_program.loading": "Loading",
+  "weekly_program.focus.overload.title": "Overload",
+  "weekly_program.focus.overload.description": "Build",
+  "weekly_program.volume_action.increase": "Increase",
+  "weekly_program.intensity_action.progress": "Progress",
+  "weekly_program.metric.observed": "Observed", "weekly_program.metric.target": "Target",
+  "weekly_program.metric.kg": "kg", "weekly_program.reason.progressing": "Progressing"
+};
+function makeMount() {
+  const mount = new Element("section");
+  mount.copyNode = {textContent: JSON.stringify(copy)};
+  return mount;
+}
+const first = makeMount(); let current = first;
+global.document = {
+  activeElement: null, createElement: (tag) => new Element(tag),
+  querySelector: (selector) => selector === "[data-weekly-program-mount]" ? current : null
+};
+global.window = {LOCALE: "en"};
+global.fetch = () => new Promise((resolve) => { calls.push(current); pending.push(resolve); });
+require(%(script)s);
+const api = global.window.FitXWeeklyProgram;
+first.isConnected = false;
+const second = makeMount(); current = second;
+const secondInit = api.init(global.document);
+const response = {ok: true, redirected: false, json: () => Promise.resolve(payload)};
+function settle() { return new Promise((resolve) => setImmediate(resolve)); }
+(async () => {
+  if (pending[1]) pending[1](response);
+  await settle(); await settle();
+  const afterSecond = {state: second.dataset.weeklyProgramState,
+    focus: document.activeElement ? document.activeElement.className : null};
+  pending[0](response);
+  await settle(); await settle();
+  console.log(JSON.stringify({secondInit, fetches: calls.length, afterSecond,
+    finalSecond: second.dataset.weeklyProgramState,
+    detachedFirst: first.dataset.weeklyProgramState,
+    focus: document.activeElement ? document.activeElement.className : null}));
+})().catch((error) => { console.error(error); process.exit(1); });
+"""
+
+
+@requires_node
+def test_replacement_mount_owns_its_request_and_ignores_disconnected_completion():
+    payload = _payload(
+        reason_codes=["progressing"],
+        explanation_keys=["weekly_program.focus.overload",
+                          "weekly_program.reason.progressing"],
+    )
+    harness = _REPLACEMENT_HARNESS % {
+        "payload": json.dumps(payload),
+        "script": json.dumps(str(SCRIPT_PATH)),
+    }
+    completed = subprocess.run(
+        [NODE, "-e", harness], capture_output=True, text=True, check=False)
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    assert result["secondInit"] is True
+    assert result["fetches"] == 2
+    assert result["afterSecond"] == {"state": "populated", "focus": None}
+    assert result["finalSecond"] == "populated"
+    assert result["detachedFirst"] == "loading"
+    assert result["focus"] is None
 
 
 @pytest.mark.parametrize(("focus", "volume", "intensity"), [
@@ -523,6 +631,17 @@ def test_transport_auth_and_non_json_failures_use_error_state(kind):
     {"overload_ready": 1},
     {"reason_codes": ["unknown"]},
     {"explanation_keys": ["weekly_program.focus.overload"]},
+    {"explanation_keys": [
+        "weekly_program.focus.overload",
+        "weekly_program.reason.volume_trend_down",
+        "weekly_program.reason.progressing",
+    ]},
+    {"explanation_keys": [
+        "weekly_program.focus.overload",
+        "weekly_program.reason.progressing",
+        "weekly_program.reason.volume_trend_down",
+        "weekly_program.reason.future_reason",
+    ]},
     {"baseline_week_start": "2026-02-30"},
     {"baseline_weekly_volume": None},
     {"target_weekly_volume": 0},
@@ -557,6 +676,40 @@ def test_retry_clears_content_and_double_click_cannot_start_concurrent_request()
     assert "Load error" not in result["retry"]["text"]
 
 
+@requires_node
+def test_initial_completion_never_moves_focus():
+    success = _run_case([{"kind": "json", "payload": _payload()}])["first"]
+    failure = _run_case([{"kind": "status"}])["first"]
+
+    assert success["focusClass"] is None
+    assert failure["focusClass"] is None
+
+
+@requires_node
+def test_failed_retry_focuses_the_replacement_retry_button():
+    result = _run_case([
+        {"kind": "status"},
+        {"kind": "status"},
+    ], retry=True)
+
+    assert result["retry"]["finalState"] == "error"
+    assert result["retry"]["focusTag"] == "BUTTON"
+    assert "weekly-program-retry" in result["retry"]["focusClass"]
+
+
+@requires_node
+def test_successful_retry_focuses_the_rendered_section_heading():
+    result = _run_case([
+        {"kind": "status"},
+        {"kind": "json", "payload": _payload()},
+    ], retry=True)
+
+    assert result["retry"]["finalState"] == "populated"
+    assert result["retry"]["focusTag"] == "H2"
+    assert "weekly-program-heading" in result["retry"]["focusClass"]
+    assert result["retry"]["focusTabindex"] == "-1"
+
+
 TRAINING_CSS = (
     Path(__file__).resolve().parents[1] / "static" / "training.css"
 ).read_text(encoding="utf-8")
@@ -583,6 +736,13 @@ def test_weekly_program_styles_pin_overflow_tap_and_shared_skeleton():
     assert re.search(r"\.weekly-program-retry\s*\{[^}]*min-height:\s*44px",
                      TRAINING_CSS, re.DOTALL)
     assert "skeleton skeleton-text weekly-program-skeleton" in CODE
+
+
+def test_weekly_program_heading_uses_contrast_safe_text_token():
+    """Chrome PR6.3 audit measured the inherited accent at 4.22:1 on the card."""
+    assert re.search(
+        r"\.weekly-program-heading\s*\{[^}]*color:\s*var\(--color-text-2\)",
+        TRAINING_CSS, re.DOTALL)
 
 
 
