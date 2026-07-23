@@ -312,21 +312,26 @@ def test_workout_status_flips_after_completion(client, workout_ready, monkeypatc
     # B3: tamamlanma sinyali PumpCheck'tir (idempotency guard'la aynı, M3) —
     # görev satırı değil. Görev tohumlanmamış ortamda quest-bazlı durum,
     # tamamlanan antrenmanı 'completed: False' gösteriyordu.
-    assert client.get("/workout/status").get_json() == {"completed": False}
+    # Sprint 7 PR1: /workout/status now also returns an additive `state` snapshot.
+    # `completed` is preserved (byte-identical value); assert on it directly rather
+    # than exact-dict equality.
+    before = client.get("/workout/status").get_json()
+    assert before["completed"] is False and "state" in before
     db.session.add(PumpCheck(user_id=workout_ready.id, valid=True,
                              date_key=date.today().isoformat()))
     db.session.commit()
-    assert client.get("/workout/status").get_json() == {"completed": True}
+    after = client.get("/workout/status").get_json()
+    assert after["completed"] is True and after["state"]["completed_today"] is True
 
 
 def test_workout_status_true_even_without_seeded_quest(client, auth_user):
     # Görevsiz ortam (seed-quests koşmamış): PumpCheck varsa yine True dönmeli.
     assert DailyQuest.query.filter_by(quest_type="workout_logged").first() is None
-    assert client.get("/workout/status").get_json() == {"completed": False}
+    assert client.get("/workout/status").get_json()["completed"] is False
     db.session.add(PumpCheck(user_id=auth_user.id, valid=True,
                              date_key=date.today().isoformat()))
     db.session.commit()
-    assert client.get("/workout/status").get_json() == {"completed": True}
+    assert client.get("/workout/status").get_json()["completed"] is True
 
 
 # ---------------------------------------------------------------------------

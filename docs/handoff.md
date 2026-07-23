@@ -2437,3 +2437,189 @@ are outside git by design (`.gitignore`).
   broad UI work, per `implementation-backlog.md`.
 
 Constraint honored: nothing was pushed, merged, or deployed.
+
+---
+
+## Sprint 7 PR1 — Canonical Workout State Contract and Read Model
+
+- **Track:** Core Feature (Workout State Reliability)
+- **Sprint / PR:** Sprint 7 · PR1 (first of four)
+- **Branch:** `sprint7-pr1-canonical-workout-state`
+- **Worktree:** `.worktrees/sprint7-pr1-canonical-workout-state`
+- **Base commit:** `d68186a` (`origin/main`, "Sprint 0: frontend visual-audit harness", #181)
+- **Final commit:** the single commit adding this section (`feat(training): add canonical workout state read model`) — see `git log -1`.
+- **Merged prerequisites / Sprint 6.3 confirmation:** the spec's "Sprint 6.3" maps
+  to this repo's **Sprint 6 PR3 — Adaptive Planning Engine** (`bad1bef`, #170),
+  confirmed an ancestor of the base (`git merge-base --is-ancestor bad1bef
+  origin/main` → true), together with PR1 `688e250`, PR2 `022d821`, PR4 `b8b1b67`,
+  PR5 `07ef1ff`. `app/services/{training_history,training_progression,training_planning}`
+  all present. No stacked dependency on unmerged work.
+
+### Discovery — previous workout-state authorities & contradictions
+
+State was inferred piecemeal by three authorities that could disagree:
+- **Completion** ⇐ today's `PumpCheck` (`GET /workout/status`
+  `app/blueprints/training.py:277`; `complete_workout` idempotency guard `:147`).
+- **Schedule** (workout vs rest) ⇐ decided **client-side** in `static/training.js`
+  (`renderHero` ~289, `todayDay` ~268) by parsing `TrainingPlan.plan_data.program[]`.
+- **History / "session happened"** ⇐ `WorkoutLog` incl. `WORKOUT_COMPLETION_MARKER`
+  via `app/services/training_history` (`GET /api/progress/workout`
+  `tracking.py:573`).
+
+Confirmed contradictions: the AI-coach `commit_workout_log` tool
+(`app/services/ai_coach.py:417`) writes **real, non-marker `WorkoutLog` rows with
+no `PumpCheck` and no marker** → a user can have execution today while
+`/workout/status` reports `completed:false`. No persisted "started/in-progress"
+state exists (the session in `training.js:365` is *ephemeral, in-memory only*). No
+plan↔log identifier linkage exists (`WorkoutLog` has no scheduled-workout id;
+association is date-only).
+
+### Canonical design
+
+- **Owner:** `app/services/workout_state/` (`models`/`queries`/`resolver`/`__init__`),
+  pure/impure split mirroring `training_history`/`training_planning`. Read-only;
+  consumes existing contracts; copies no heuristics. Public entry:
+  `resolve_workout_state(user_id, *, today=None) -> WorkoutStateSnapshot`.
+- **Dimensions:** A `schedule_state` {scheduled, rest_day, no_plan,
+  schedule_unavailable} · B `execution_state` {no_execution, in_progress,
+  completed} · C `plan_relationship` {matches_scheduled, unscheduled,
+  unrelated_date, indeterminate} · D `action` {start, resume, none, blocked} · E
+  dominant `primary_state` {rest_day, scheduled_not_started, in_progress,
+  completed, unscheduled_in_progress, unscheduled_completed, no_plan,
+  needs_attention}. Diagnostics: `completed_today`, `is_rest_day`,
+  `stale_previous_workout`, `anomaly`, `today`, `contract_version=1`.
+- **Source precedence:** completion = today's PumpCheck (marker corroborates only);
+  execution = today's non-marker WorkoutLog (never proves completion); schedule =
+  newest plan's program matched to Istanbul weekday, parse failure →
+  schedule_unavailable (never a silent rest day); association = local-date + tip
+  (no identifier linkage). Conflicts resolve to a deterministic safe result;
+  malformed → blocked; today evaluated independently of prior days.
+- **Timezone:** `app.timeutil` only (`app_today`/`app_date_of`/`utc_day_bounds`) —
+  no second helper; UTC-boundary completion counts for the Istanbul day (tested).
+- **Anomaly handling:** unexpected read failure fails safe to
+  needs_attention/blocked; only safe metadata logged (`[WORKOUT_STATE] anomaly
+  rid=… user_id=… category=… detail=…`) — no stack/SQL/health/payload data.
+
+### Implementation completed
+
+- Created `app/services/workout_state/{__init__,models,resolver,queries}.py`.
+- Converged the **minimum** read path: `GET /workout/status` now returns one
+  snapshot. Change is **additive** — `completed` preserved (derived from
+  `snapshot.completed_today`, byte-identical to the old inline PumpCheck query) and
+  a new `state` object added. Route stays thin (one resolver call, no state logic).
+- Updated two over-strict existing assertions in `tests/test_training_routes.py`
+  (exact-dict `== {"completed": …}`) to assert the `completed` field + presence of
+  `state`. **No behavior change** — the `completed` value is identical.
+
+### API & compatibility impact
+
+- **Integrated read path:** `GET /workout/status`.
+- **Fields added:** `state{...}` (11 keys). **Preserved:** `completed` (same value/meaning).
+  **Changed/removed:** none.
+- **Remaining consumers not yet converged (documented):** `static/training.js`
+  client inference (`renderHero`/`todayDay`); `GET /api/progress/workout` history
+  aggregation. Plan↔log identifier linkage remains absent (deferred).
+
+### State matrix & anomaly behavior
+
+`tests/test_workout_state.py` encodes the §10 matrix as a pure resolver
+parametrization + invariants. Covered scenarios 1–14, 16, 20 with deterministic
+outcomes; **scenario 15** (completed but scheduled-workout identifier mismatch)
+documented as **not derivable** (no identifier linkage); "started"/"partial"
+(2/3) both surface as `in_progress` because no started-session is persisted.
+Invariants asserted: single dominant state; execution=completed iff PumpCheck;
+malformed→blocked/needs_attention; historical record ≠ today; rest day preserves
+unscheduled workout; in-progress never completed; **no DB writes**; no
+AI/provider imports (structural guard); repeated resolution identical; flags do
+not alter execution truth.
+
+### Query & performance evidence
+
+Per resolution: 1 query newest `TrainingPlan`; 1 windowed `WorkoutLog` read for
+today+yesterday (reuses `fetch_workout_entries`); 1 `PumpCheck` read for the same
+2-day window. Bounded windows, no N+1, no unbounded scan, no serializer/model
+hidden queries. `test_service_performs_no_writes` asserts row counts unchanged and
+an empty session `new/dirty/deleted`.
+
+### Migration / feature flag / rollout / rollback
+
+- **Migration:** not required (all facts derived from existing canonical data).
+- **Feature flag:** not required/added (additive read-only; no competing authority;
+  no safety boundary gained). Independent of `WEEKLY_PROGRAM_UI_ENABLED` /
+  `AI_ADAPTIVE_PLAN_CONTEXT`.
+- **Rollout boundary:** additive field coexists with all current consumers; old
+  read path (`completed`) remains fully functional.
+- **Rollback:** code revert only — no DB change.
+
+### Documentation updated
+
+- New `docs/WORKOUT_STATE.md` (owner, precedence, dimensions, timezone, API,
+  anomaly, compatibility, non-converged consumers, scope exclusions).
+- `CLAUDE.md` — one bullet for `app/services/workout_state/`.
+- `docs/handoff.md` — this section (master handoff; no competing authority created).
+
+### Files changed
+
+- **Created:** `app/services/workout_state/__init__.py`,
+  `app/services/workout_state/models.py`,
+  `app/services/workout_state/resolver.py`,
+  `app/services/workout_state/queries.py`,
+  `tests/test_workout_state.py`, `docs/WORKOUT_STATE.md`.
+- **Modified:** `app/blueprints/training.py` (additive `state` on
+  `/workout/status` + import), `tests/test_training_routes.py` (2 assertions),
+  `CLAUDE.md`, `docs/handoff.md`.
+- **Deleted:** none.
+
+### Tests & exact results
+
+Environment: Python 3.14.3, Flask 3.1.3, pytest 9.1.1, SQLite; `pytest.ini` runs
+`-m "not load"` by default. Warnings are pre-existing `datetime.utcnow()`
+deprecations across the codebase (not introduced here).
+
+- **Focused baseline (base `d68186a`, before implementation):**
+  `pytest tests/test_training_routes.py tests/test_tracking_routes.py
+  tests/test_training_history.py tests/test_training_progression.py
+  tests/test_training_planning.py tests/test_adaptive_plan_context.py
+  tests/test_progress_api.py` → **175 passed, 0 failed, 0 skipped** (119.57s).
+- **New contract tests:** `pytest tests/test_workout_state.py` → **59 passed**
+  (39.43s).
+- **Focused final (with implementation):** `pytest <focused set above> +
+  tests/test_workout_state.py` → **234 passed, 0 failed, 0 skipped** (146.96s) —
+  i.e. 175 + 59, with the two updated `test_training_routes.py` assertions passing.
+- **Full-suite final (after, with implementation):** `pytest -q -p no:cacheprovider`
+  → **2365 passed, 0 failed, 0 errors, 3 deselected** (the 3 `@pytest.mark.load`
+  tests, excluded by `pytest.ini`'s `-m "not load"`) in **3891.12s (1:04:51)**.
+  No FAILED/ERROR lines.
+- **Full-suite baseline (pre-change, pre-existing tests):** **2306 passed, 0 failed,
+  3 deselected** — derived as full-final (2365) − 59 new `test_workout_state.py`
+  tests. The change is purely additive (one new test module; the only modified
+  pre-existing test file, `test_training_routes.py`, keeps the same test count and
+  passes), so the pre-existing suite is unchanged. A live baseline run on the base
+  commit was observed all-passing through 62% (dots, zero F/E) before being
+  manually interrupted to conserve the ~65-minute wall time; the derived count is
+  therefore exact for the pre-existing set.
+- **Environment limitations:** the full suite is slow (~65 min; AI/concurrency/
+  Cognito tests dominate the wall time). The 3 `load` tests are excluded by the
+  repo's default `-m "not load"`. Warnings are pre-existing `datetime.utcnow()`
+  deprecations across the codebase — none introduced by this PR.
+
+### Parallel-work / cross-track
+
+No other active branch/worktree touches `app/services/workout_state/` (new) or the
+`/workout/status` handler. Cross-track: Training/UIUX own converging
+`static/training.js` onto this snapshot in a later PR (recorded here, not
+implemented).
+
+### Deferred Sprint 7 work / production-readiness limits
+
+- Persisting a real "started/in-progress" workout session (enables true
+  resume/recovery across devices) — later PR.
+- Plan↔log identifier linkage (would require a migration) so scenario-15
+  identifier mismatch becomes detectable — later PR.
+- Stale-session recovery/repair for `stale_previous_workout` — later PR.
+- Converging `renderHero` and `/api/progress/workout` consumers.
+
+### Production authorization
+
+Local implementation and validation only. Nothing pushed, no PR created, no merge,
+no deploy, no production DB/flag change.
