@@ -15,9 +15,11 @@ assertions stay exact.
 """
 import ast
 import dataclasses
-from datetime import datetime, timedelta
+import logging
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.blueprints import training as training_bp
@@ -36,6 +38,7 @@ from app.timeutil import app_today
 ROUTE = "/api/training/weekly-program"
 VIEW_NAME = "get_weekly_program"
 TRAINING_BLUEPRINT = Path("app/blueprints/training.py")
+CACHE_POLICY = "private, no-store"
 
 
 def _signin(make_user, login, name="wpr"):
@@ -83,6 +86,13 @@ def _view_function_ast():
     return view
 
 
+def _weekly_program_events(caplog):
+    return [
+        record.getMessage() for record in caplog.records
+        if "[TRAINING][WEEKLY_PROGRAM]" in record.getMessage()
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Access control
 # ---------------------------------------------------------------------------
@@ -94,6 +104,62 @@ def test_route_requires_authentication(app, client):
 
     assert response.status_code == 302
     assert "/login" in response.headers["Location"]
+
+
+def test_original_endpoint_path_gets_private_no_store_on_auth_redirect(app, client):
+    response = client.get(ROUTE)
+
+    assert response.status_code == 302
+    assert response.headers["Cache-Control"] == CACHE_POLICY
+
+    # The policy belongs to the original weekly-program request, not the redirect
+    # destination. A direct login-page request keeps its existing cache behavior.
+    login_page = client.get("/login")
+    assert login_page.status_code == 200
+    assert login_page.headers.get("Cache-Control") != CACHE_POLICY
+
+
+def test_private_no_store_covers_success_and_unrelated_routes_are_unchanged(
+        app, client, make_user, login):
+    _signin(make_user, login, "wprcache")
+
+    response = client.get(ROUTE)
+    unrelated = client.get("/training")
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == CACHE_POLICY
+    assert unrelated.headers.get("Cache-Control") != CACHE_POLICY
+
+
+def test_private_no_store_covers_structured_failure(app, client, make_user, login,
+                                                     monkeypatch):
+    _signin(make_user, login, "wprcachefail")
+    monkeypatch.setattr(
+        training_bp, "build_weekly_program",
+        lambda *args, **kwargs: (_ for _ in ()).throw(SQLAlchemyError("down")),
+    )
+
+    response = client.get(ROUTE)
+
+    assert response.status_code == 500
+    assert response.headers["Cache-Control"] == CACHE_POLICY
+
+
+def test_private_no_store_covers_transient_session_failure(app, client, make_user,
+                                                            login, monkeypatch):
+    from app.services import session_store
+
+    _signin(make_user, login, "wprcache503")
+
+    def _transient(*args, **kwargs):
+        raise session_store.SessionTransient()
+
+    monkeypatch.setattr(session_store, "get_valid_access_token", _transient)
+
+    response = client.get(ROUTE)
+
+    assert response.status_code == 503
+    assert response.headers["Cache-Control"] == CACHE_POLICY
 
 
 def test_route_is_scoped_to_the_signed_in_user(app, client, make_user, login):
@@ -114,8 +180,8 @@ def test_route_is_read_only(app, client, make_user, login):
     _signin(make_user, login, "wprro")
 
     # Registered for GET only; a write attempt never reaches the view.
-    assert client.post(ROUTE, json={}).status_code == 405
-    assert client.delete(ROUTE).status_code == 405
+    for method in ("post", "put", "patch", "delete"):
+        assert getattr(client, method)(ROUTE, json={}).status_code == 405
 
 
 # ---------------------------------------------------------------------------
@@ -385,8 +451,93 @@ def test_failure_is_not_disguised_as_an_empty_recommendation(app, client, make_u
 
 
 # ---------------------------------------------------------------------------
+# Privacy-safe rollout observability
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(("recommendation", "expected_state"), [
+    (WeeklyProgramRecommendation(weeks=4), "neutral"),
+    (WeeklyProgramRecommendation(
+        weeks=4,
+        has_data=True,
+        week_focus="steady",
+        reason_codes=("steady_state",),
+        explanation_keys=("weekly_program.focus.steady",
+                          "weekly_program.reason.steady_state"),
+    ), "missing_baseline"),
+    (WeeklyProgramRecommendation(
+        weeks=4,
+        has_data=True,
+        week_focus="steady",
+        baseline_week_start=date(2026, 7, 13),
+        baseline_weekly_volume=1200.0,
+        target_weekly_volume=1200.0,
+        reason_codes=("steady_state",),
+        explanation_keys=("weekly_program.focus.steady",
+                          "weekly_program.reason.steady_state"),
+    ), "populated"),
+])
+def test_success_logging_classifies_state_without_sensitive_data(
+        app, client, make_user, login, monkeypatch, caplog,
+        recommendation, expected_state):
+    _signin(make_user, login, "wprlog" + expected_state)
+    monkeypatch.setattr(training_bp, "build_weekly_program",
+                        lambda *args, **kwargs: recommendation)
+    caplog.set_level(logging.INFO)
+
+    response = client.get(ROUTE)
+
+    assert response.status_code == 200
+    events = _weekly_program_events(caplog)
+    assert len(events) == 1
+    assert f"state={expected_state}" in events[0]
+    assert "request_id=" in events[0]
+    for forbidden in ("user=", "1200", "steady_state",
+                      "weekly_program.reason", "payload"):
+        assert forbidden not in events[0]
+
+
+@pytest.mark.parametrize(("error", "expected_class"), [
+    (SQLAlchemyError("SELECT secret_token FROM workout_log"), "upstream_error"),
+    (RuntimeError("module.path leaked@example.com 999kg"), "unexpected_error"),
+])
+def test_failure_logging_uses_normalized_error_class_only(
+        app, client, make_user, login, monkeypatch, caplog, error, expected_class):
+    _signin(make_user, login, "wprlogerror" + expected_class)
+
+    def _boom(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(training_bp, "build_weekly_program", _boom)
+    caplog.set_level(logging.INFO)
+
+    response = client.get(ROUTE)
+
+    assert response.status_code == 500
+    events = _weekly_program_events(caplog)
+    assert len(events) == 1
+    assert "state=error" in events[0]
+    assert f"error_class={expected_class}" in events[0]
+    assert "request_id=" in events[0]
+    for forbidden in ("user=", str(error), "SELECT", "workout_log",
+                      "module.path", "leaked@example.com", "999kg"):
+        assert forbidden not in events[0]
+
+
+# ---------------------------------------------------------------------------
 # Feature-flag isolation — PR5 is independent of the PR4 coach gate
 # ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("ui_flag", [False, True])
+def test_endpoint_auth_and_payload_do_not_depend_on_ui_flag(
+        app, client, make_user, login, monkeypatch, ui_flag):
+    app.config["WEEKLY_PROGRAM_UI_ENABLED"] = ui_flag
+    assert client.get(ROUTE).status_code == 302
+
+    _signin(make_user, login, "wpruiflag" + str(int(ui_flag)))
+    response = client.get(ROUTE)
+
+    assert response.status_code == 200
+    assert response.get_json()["week_focus"] == "insufficient_data"
 
 def test_response_is_identical_under_both_coach_flag_states(app, client, make_user,
                                                              login, monkeypatch):
@@ -406,6 +557,32 @@ def test_response_is_identical_under_both_coach_flag_states(app, client, make_us
     assert off.status_code == on.status_code == 200
     assert off.get_json() == on.get_json()
     assert off.get_data() == on.get_data()      # byte-identical, not just equal
+
+
+def test_service_build_uses_one_history_select_and_no_writes(
+        app, make_user):
+    from sqlalchemy import event
+
+    user = make_user("wprsql", profile_complete=True)
+    user_id = user.id
+    statements = []
+
+    def before_cursor(conn, cursor, statement, *args):
+        statements.append(statement.strip())
+
+    event.listen(db.engine, "before_cursor_execute", before_cursor)
+    try:
+        build_weekly_program(user_id)
+    finally:
+        event.remove(db.engine, "before_cursor_execute", before_cursor)
+
+    selects = [statement for statement in statements
+               if statement.lower().startswith("select")]
+    writes = [statement for statement in statements
+              if statement.lower().startswith(("insert", "update", "delete"))]
+    assert len(selects) == 1
+    assert "workout_log" in selects[0].lower()
+    assert writes == []
 
 
 # ---------------------------------------------------------------------------

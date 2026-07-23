@@ -39,7 +39,7 @@
 34. **Full suite.** Fresh `python -m pytest -q` completed with **2,244 passed, 3 deselected, 0 failed** in 217.39 seconds.
 35. **Asset impact.** `weekly_program.js` changed from 2,248 to 12,144 bytes (+9,896); `training.css` changed from 24,398 to 26,741 bytes (+2,343). OFF requests neither feature JavaScript nor feature copy.
 36. **Static/self-review.** `node --check`, locale JSON parsing/parity, security source guards, dependency boundaries, and `git diff --check` are clean. Review classifications: High none; Medium none; Low none in scope; Technical Debt is the pre-existing datetime deprecation warning set; Nice-to-have live visual validation is deferred.
-37. **PR6.3 and delivery.** PR6.3 retains live browser/mobile accessibility validation, cache/privacy headers, observability decisions, SQL/performance audit, the four-way runtime flag matrix, and production-readiness audit. No push or pull request was performed.
+37. **PR6.3 and delivery.** PR6.3 covers real-browser/mobile accessibility validation (performed via headless Chromium — §25), cache/privacy headers, observability decisions, SQL/performance audit, the four-way runtime flag matrix, the full-suite regression run (§30–34), and production-readiness audit. No push or pull request was performed.
 
 
 Date: 2026-07-09
@@ -1758,6 +1758,10 @@ Observability finalization; cache/privacy hardening; architecture guards; the fu
 four-way flag matrix at runtime; performance and SQL verification; mobile/accessibility
 validation; final documentation; production-readiness re-audit.
 
+> **Superseded — all of the above is now delivered.** See the `## Sprint 6 PR6.3`
+> section at the end of this file for the implementation, verification, and combined
+> production-readiness audit.
+
 ### Independently safe to merge
 
 Yes. The flag defaults OFF, and with it OFF the rendered page is byte-identical to
@@ -1765,3 +1769,469 @@ Yes. The flag defaults OFF, and with it OFF the rendered page is byte-identical 
 one empty element and one inert script that make no request and render nothing. There is
 no schema, migration, dependency, prompt, provider, endpoint or navigation change, and
 every existing training flow is characterized and unchanged.
+
+## Sprint 6 PR6.3 — Weekly Program UI Production Hardening and Final Audit
+
+Date: 2026-07-23
+Scope: the **third and final** PR of the Adaptive Weekly Program UI. It does not build a
+feature — it hardens, verifies and audits the merged PR6.1 + PR6.2 system for controlled
+production rollout: cache/privacy headers, a finalized non-sensitive observability line,
+per-mount request/race safety, an accessibility contrast + focus-management fix, the full
+four-way runtime flag matrix, SQL/request-count verification, structural architecture
+guards, and a combined production-readiness re-audit. **No product scope was added and no
+PR6.1/PR6.2 design decision was reopened.**
+
+> **Takeover note.** This PR was implemented by a prior agent whose code + tests landed in
+> the worktree but were never run or documented (its report claimed the sandbox blocked
+> execution). This session treated git as the source of truth: the code was re-derived
+> from the diff, every targeted and related suite was actually executed (results below),
+> and the handoff/docs were written from verified behavior, not the prior narrative.
+
+### 1–4. Repository, branch, base, worktree state
+
+- **Branch:** `sprint6-pr6.3-weekly-program-hardening`
+- **HEAD / base:** `2ff8804` (`feat(training): integrate adaptive weekly program client (#179)`),
+  which **is** `origin/main`. `git rev-parse HEAD == git rev-parse origin/main`. The branch
+  was cut from current `origin/main`, not a stale local branch.
+- **PR6.2 merge confirmation:** #179 is `origin/main` HEAD; #178 (PR6.1) and #177 (PR5) are
+  its parents in `git log`. PR6.2 is squash-merged into the base.
+- **Worktree:** `~/.worktrees/sprint6-pr6.3-weekly-program-hardening`; clean apart from the
+  tracked files listed below. No untracked files. Work is **uncommitted** (per task rule 40 —
+  commit only if explicitly requested; it was not). `git diff --check` clean (only the
+  repo-wide `autocrlf` LF→CRLF advisory, pre-existing).
+
+### 5–6. Files created / modified
+
+**Created:** none (hardening PR — no new module, route, page, template, or asset).
+
+**Modified — production + tests:**
+
+| File | Change |
+|---|---|
+| `app/blueprints/training.py` | `@bp.after_request` stamping `Cache-Control: private, no-store` on the weekly-program path only; `_weekly_program_state()` + `_weekly_program_error_class()` classifiers; success/failure logging rewritten to id-free `request_id=… state=…` (`current_request_id` import; `SQLAlchemyError` import) |
+| `static/weekly_program.js` | `activeRequest`/`requestGeneration` moved from module globals into per-mount `context`; `isCurrentRequest()` adds a `mount.isConnected !== false` guard; `replaceContent()` + `focusAfterRetry` accessibility focus management |
+| `static/training.css` | `.weekly-program-heading { color: var(--color-text-2); }` — contrast fix |
+| `tests/test_weekly_program_route.py` | +cache-header (200/500/503/302), +privacy-safe observability classification, +GET-only PUT/PATCH, +auth-under-both-UI-flags, +one-SELECT-no-writes SQL guard |
+| `tests/test_weekly_program_ui.py` | +`test_complete_four_way_runtime_flag_matrix` |
+| `tests/test_weekly_program_ui_js.py` | +one-endpoint/no-planning-dependency guard, +detached-mount race test, +focus-management tests, +extra malformed explanation-key cases, +contrast-token CSS guard; harness gained `isConnected`/`focus`/`activeElement` |
+
+**Modified — documentation (this session):** `docs/handoff.md` (this section), `docs/WEEKLY_PROGRAM.md`
+(F6 observability finalized + cache policy + PR table), `docs/TRAINING_PLANNING.md` (PR6.3 note),
+`CLAUDE.md` (weekly-program bullet PR6.3 status), `NEEDED_FIXES.md` (PR6.3 resolution note),
+`.env.example` (cache/observability note on the flag block).
+
+### 7. Verification-first gap analysis
+
+Before touching anything, the merged PR6.1/PR6.2 code and the prior agent's diff were read
+against the task requirements. Findings that drove (or did not drive) work:
+
+- **Real gaps closed by the prior diff (kept, verified):** no cache header on an
+  authenticated per-user endpoint; PR5's observability line carried `user=<id>` + volumes at
+  `debug` (PII + wrong level for production); race state (`activeRequest`/`requestGeneration`)
+  lived in module scope so a second mount could not own its own request and a detached mount
+  could still overwrite; card heading inherited an accent colour measured at 4.22:1 contrast;
+  retry moved no focus; the four-way matrix and a one-SELECT SQL guard were untested.
+- **Non-gaps (already correct in PR6.2, proven, not re-touched):** endpoint auth/GET-only/
+  user-scoping; structured-500 failure semantics distinct from neutral; strict payload
+  contract; no `localStorage`/`sessionStorage`/polling; safe DOM (`createElement`/`textContent`/
+  `replaceChildren` only); no target/window arithmetic in the client.
+- **Verdict:** the prior diff was a correct, in-scope set of hardening fixes. The only real
+  remaining work was **running the suites and writing the documentation** — completed here.
+
+### 8. Production hardening implemented
+
+Cache header, observability classification, per-mount request/race isolation +
+`isConnected` stale/detached guard, accessibility focus management, contrast token. Each is
+detailed in the matching section below and each is covered by an executed test.
+
+### 8b. Feature-flag contract (defaults)
+
+- `WEEKLY_PROGRAM_UI_ENABLED` — default **OFF** (`app/config.py`, `os.getenv(...,"0")=="1"`).
+  **Unchanged** by PR6.3. Presentation only, never an authorization boundary.
+- `AI_ADAPTIVE_PLAN_CONTEXT` — default **OFF**. Independent env name, config key, and read path.
+- Neither flag reads a query string, header, cookie, endpoint availability, prompt, or DOM text.
+
+### 9. Four-way flag matrix (runtime)
+
+`tests/test_weekly_program_ui.py::test_complete_four_way_runtime_flag_matrix` renders
+`/training` for all four combinations; `tests/test_weekly_program_route.py::test_endpoint_auth_and_payload_do_not_depend_on_ui_flag`
+proves the endpoint is UI-flag-immune. **All pass.**
+
+| UI | Coach | Shell/mount/script | Endpoint auth | Endpoint payload | Coach adaptive context |
+|----|-------|--------------------|---------------|------------------|------------------------|
+| 0 | 0 | absent | `@require_auth` (302 unauth) | unchanged | disabled |
+| 0 | 1 | absent | `@require_auth` | unchanged | may be enabled |
+| 1 | 0 | present, 1 initial request | `@require_auth` | unchanged | disabled |
+| 1 | 1 | present, 1 initial request | `@require_auth` | unchanged | enabled |
+
+The UI flag never varies the endpoint output; the coach flag never varies the UI or the
+feature bundle. Both consumers use the canonical deterministic stack; neither mutates the other.
+
+### 10. OFF-path preservation
+
+With `WEEKLY_PROGRAM_UI_ENABLED=0` the template omits the block server-side: no mount, no
+`static/weekly_program.js`, no locale bundle, no markup, no feature CSS footprint, no request,
+no feature log line (the endpoint is never called from the OFF page). PR6.1's byte-identity
+contract holds — **PR6.3 adds no server-rendered bytes to `/training`.** The one global-ish
+change (the cache header) is **route-scoped to `/api/training/weekly-program`**, so the
+`/training` page body and headers are untouched (asserted:
+`test_private_no_store_covers_success_and_unrelated_routes_are_unchanged`). Body bytes,
+headers, and runtime requests on the OFF path are all unchanged.
+
+### 11. Endpoint authentication and user scoping
+
+`GET /api/training/weekly-program` remains `@require_auth`, GET-only (POST/PUT/PATCH/DELETE →
+405), scoped solely through `current_user.id` with no `user_id`/`weeks`/`end_day`/query
+planning controls, read-only (one service call → one payload projection, no write/commit/flush).
+Cross-user isolation, query-string tampering, session-expiry (503 transient), and
+unauthenticated (302) paths are all tested, under **both** UI-flag states. Hidden UI is never
+treated as authorization.
+
+### 12. Cache and privacy policy
+
+`Cache-Control: private, no-store` on every response for the path — populated 200, neutral 200,
+missing-baseline 200, structured 500, transient 503, and the unauthenticated 302 login
+redirect — via a route-scoped `@bp.after_request` gated on `request.path`. Not global: `/training`
+and `/login` keep their existing cache behavior. No `Pragma`/`Expires` added (no repository
+convention requires them; `no-store` already forbids storage). Client adds no
+`localStorage`/`sessionStorage`/service-worker persistence, so account-switching cannot replay
+another user's recommendation from cache or bfcache. Decision is explicit and tested — not implicit.
+
+### 13. Observability policy
+
+One `[TRAINING][WEEKLY_PROGRAM]` line per request:
+- success → `logger.info("… request_id=%s state=%s")`, `state ∈ {neutral, missing_baseline, populated}`
+- failure → `logger.warning("… request_id=%s state=error error_class=%s")`, `error_class ∈ {upstream_error, unexpected_error}`
+
+**Logged:** the existing server-generated 16-hex `request_id` (not a user id) + the classified
+state. **Prohibited (asserted absent by test):** `current_user.id`, raw baseline/target volumes,
+`week_focus` value, reason/explanation keys, the payload, the raw exception string, email/token/PII.
+No duplicate event per request. No log when the UI is OFF (endpoint not called). **Metric
+promotion deferred** — the only metric abstraction (`ai_metrics.py`, CloudWatch,
+`AI_METRICS_ENABLED` default 0) is AI-turn-scoped and off by default; the `state=` line is the
+rollout signal. Operator query:
+
+```
+fields @timestamp, @message
+| filter @message like /\[TRAINING\]\[WEEKLY_PROGRAM\]/
+| parse @message "state=*" as state
+| stats count(*) by state
+```
+
+### 14–17. Request lifecycle, counts, retry, concurrency, stale response
+
+- **Initial load:** exactly one `init`, exactly one `GET` (canonical path, `Accept: application/json`,
+  no query/body/alternate endpoint), no polling/timer/duplicate listener.
+- **Repeated init:** the `data-weekly-program-initialized` marker + per-mount `context` mean no
+  second request, no duplicate DOM/listener/announcement.
+- **Retry:** explicit user action only → exactly one additional request; `context.activeRequest`
+  guard makes rapid double-clicks a no-op (one active request at a time); retry enters loading
+  immediately and clears prior error/recommendation DOM.
+- **Stale/detached protection:** `isCurrentRequest(context, gen)` returns false when
+  `gen !== context.requestGeneration` **or** `context.mount.isConnected === false`, so an older
+  in-flight response cannot overwrite a newer state and a response for a removed/replaced mount
+  is dropped. Proven by `test_replacement_mount_owns_its_request_and_ignores_disconnected_completion`
+  (two mounts, out-of-order completion: the detached first mount stays `loading`, the live second
+  renders `populated`), `test_retry_clears_content_and_double_click_cannot_start_concurrent_request`,
+  and the focus tests.
+
+### 18–19. Client contract validation & explanation-key evolution policy
+
+`isValidPayload` requires: plain object; `weeks` a non-negative integer; `has_data` boolean;
+`week_focus`/`volume_action`/`intensity_action` in canonical enums; `volume_delta_pct` finite
+number; `overload_ready`/`maintenance_recommended` booleans; `reason_codes`/`explanation_keys`/
+`unsupported` string arrays; every `reason_code` in the known `REASONS` set;
+baseline/target **both null or both positive-finite** (NaN/Infinity/0 rejected);
+`baseline_week_start` null iff both null, else a real ISO date. Unknown **additive top-level**
+fields are tolerated (not rejected); unknown `unsupported` string values are tolerated but
+**not rendered** (no code reads `unsupported`).
+
+**Explanation-key policy = A (strict mirror → malformed).** The client does not render the
+server's `explanation_keys` array; it **reconstructs** the expected list as
+`['weekly_program.focus.'+week_focus, ...reason_codes.map('weekly_program.reason.'+r)]` and
+requires `explanation_keys` to equal it **exactly, in order**. Reasons are rendered from
+`reason_codes` in their canonical backend order — so ordering is preserved, raw keys are never
+displayed, nothing is reordered or fabricated. A drifted, extra, reordered, or unknown key (or
+an unknown `reason_code`) makes the whole payload malformed → generic unavailable state. This is
+deliberate: frontend and backend ship in the same deploy (F5), so drift is a deploy-consistency
+bug, not a graceful-degradation case. Tested by the malformed parametrization (extra key,
+`future_reason`, reordering). **Consequence / known debt:** adding a new backend `reason_code`
+requires updating the client `REASONS`/`FOCUSES` whitelist in the same deploy.
+
+### 20. Planning-authority preservation
+
+The browser remains presentation-only: it computes no `target_weekly_volume`/
+`baseline_weekly_volume`, no `baseline × delta`, no 7-day windows, infers no deload/overload/
+maintenance, derives no `week_focus`/`volume_action`/`intensity_action`, sorts no explanation
+keys, and holds no planner/progression constants. `AdaptivePlan` stays the sole planning
+authority; `adaptive_plan_context` stays the sole AdaptivePlan→prompt owner; `weekly_program_payload`
+stays the sole recommendation→API projection.
+
+### 21. Structural architecture guards
+
+`tests/test_weekly_program_ui_js.py` parses `static/weekly_program.js` source and asserts:
+exactly one occurrence of `/api/training/weekly-program`; **absent** tokens `WorkoutLog`,
+`training_history`, `training_progression`, `training_planning`, `build_weekly_program`,
+`weekly_windows`, `weeks=`, `end_day=`, `.sort(`; retry/stale guards present
+(`context.activeRequest`, `context.requestGeneration`, `generation === context.requestGeneration`,
+`context.mount.isConnected !== false`, `replaceChildren`); no `innerHTML`/`outerHTML`/`eval`/
+`Function`/`document.write`/`setInterval`/`localStorage`/`sessionStorage`; no
+`AI_ADAPTIVE_PLAN_CONTEXT`. Route AST guards (`tests/test_weekly_program_route.py`) prove the
+view reads no `WorkoutLog`, calls `build_weekly_program` exactly once, and stays read-only.
+
+### 22. Security review
+
+Endpoint auth mandatory; `current_user.id` the only scope; no user-id param / IDOR surface; no
+raw error or backend detail rendered (client shows localized copy only); no
+`innerHTML`/`insertAdjacentHTML`/`eval`/`Function`; locale copy delivered as safe
+`application/json` + `|tojson`, rendered via `textContent` (hostile quotes/brackets/ampersands/
+script-closers render as text — covered by PR6.2 malicious-copy tests, still green); no
+write/CSRF-relevant mutation; no token/session/PII in markup or logs; CSP unaffected (no inline
+script added). Cache header prevents cross-user shared-cache exposure.
+
+### 23. Localization review
+
+TR/EN `weekly_program.*` parity: **35 keys each, no missing, no empty, valid JSON.** Bundle
+appears only when the UI flag is ON, exactly once; the coach flag does not affect it. No raw
+`weekly_program.*` key or backend machine code is displayed. `test_i18n.py` (27) green.
+
+### 24. Accessibility audit
+
+Semantic `<section>`; `<h2>` heading; loading status region; `role="alert"` on error/malformed;
+keyboard-usable `<button>` retry. **PR6.3 focus management:** after a *failed* retry, focus moves
+to the replacement retry button; after a *successful* retry, focus moves to the rendered heading
+(`tabindex="-1"`); an *initial* load never moves focus (no focus-steal on page load). Contrast fix:
+heading now uses `--color-text-2` (the inherited accent measured 4.22:1). Reduced-motion honored
+via the shared skeleton. Verified by `test_initial_completion_never_moves_focus`,
+`test_failed_retry_focuses_the_replacement_retry_button`,
+`test_successful_retry_focuses_the_rendered_section_heading`,
+`test_weekly_program_heading_uses_contrast_safe_text_token`. No High/Medium a11y defect remains.
+
+### 25. Responsive and browser validation
+
+CSS is feature-scoped (`.weekly-program-*` only), reuses the 640px breakpoint and shared
+card/btn/skeleton tokens, pins overflow/tap-target, and adds no inline styles or fixed widths.
+Every UI state (loading/populated/insufficient/missing-baseline/error/malformed/retry/stale/
+detached) is exercised deterministically by the Node-executed JS harness.
+
+**Real-browser validation (performed — headless Chromium/Blink 150.0.7871.130 via Selenium +
+CDP, against an ephemeral local fixture harness; no prod credentials).** The harness serves the
+real merged `static/training.css` and `static/weekly_program.js` plus a faithful reproduction of
+the `templates/training.html` weekly-program mount with the real injected locale copy, wired to
+controlled mock `fetch` responses — the app is never booted and no Cognito/DB/Redis/Bedrock
+credential is touched. Every state (loading/populated/insufficient/missing-baseline/error/
+malformed) was rendered at exactly 320/390/768/1366 px (viewport pinned via
+`Emulation.setDeviceMetricsOverride`) in both `tr` and `en`, with all measurements read from the
+real Blink layout:
+
+- **Overflow/reflow:** `documentElement` and mount `scrollWidth − clientWidth = 0` across all 24
+  state×viewport cells and all 20 locale×viewport cells — zero horizontal overflow; the
+  action/metric grids collapse to a single column ≤640 px.
+- **Loading + reduced motion:** loading exposes `role="status"`; the skeleton animates
+  (`animation-name: skeleton-shimmer`) under `prefers-reduced-motion: no-preference` and is gated
+  to `none` under `reduce`.
+- **Keyboard retry (Enter and Space):** both activate the retry button → second request →
+  populated render.
+- **Retry focus lifecycle:** a successful retry moves focus to the section `<h2>` heading
+  (`tabindex="-1"`); a failed retry moves focus to the replacement retry button.
+- **Stale/detached response:** a superseded response resolving after the mount is detached is
+  dropped (`renderedIntoDetached=false`, state stays `loading`, no exception).
+- **Alert/status semantics:** error and malformed expose `role="alert"`; loading `role="status"`.
+- **Tap target:** the retry button measures 44 px tall at every viewport (full width ≤640 px).
+- **Heading contrast:** measured **6.85:1** via `getComputedStyle` in Blink — passes WCAG AA.
+- **Active-plan controls:** the `apv-meta-row` (meta, score badge, reset) coexists with the mount
+  at every width with no overflow.
+- **Request counts:** exactly **one** `fetch` per initial mount for every state; exactly **+1**
+  per retry; no polling/interval/timeout refresh; single endpoint, no planning fan-out.
+- **aria-hidden:** removed on init (confirmed absent in the rendered DOM).
+- **Malformed classification (Policy A):** a structurally-valid-but-reordered `explanation_keys`
+  payload classifies as `malformed` (distinct from `error`).
+
+Drivers: `browser_matrix.py` (state×viewport×locale matrix + retry/keyboard/focus flows +
+screenshots) and `browser_followup.py` (reduced-motion no-preference vs reduce; detached-mount
+stale guard); server `harness_server.py`; screenshot artifacts `shot_<state>_<locale>_<vw>.png`
+(session scratchpad). This was a headless real-browser-engine pass, not a manual interactive
+session; an optional manual spot-check during Stage-1 dev enablement remains a nice-to-have, not
+a blocker.
+
+### 26–28. Performance, SQL/N+1, asset sizes
+
+- **Endpoint SQL:** `test_service_build_uses_one_history_select_and_no_writes` attaches a
+  `before_cursor_execute` listener and asserts **exactly one `SELECT` (against `workout_log`) and
+  zero INSERT/UPDATE/DELETE** per `build_weekly_program`. No N+1, no repeated history read, no
+  second planning call, no writes/commit/flush.
+- **Request count:** OFF = 0; ON initial = 1; per explicit retry = +1; no polling/interval/timeout refresh.
+- **Page route:** builds no recommendation and issues no extra recommendation SQL in either flag state.
+- **Asset sizes (measured):** `weekly_program.js` 12,789 B; `training.css` 26,770 B (+~40 B for the
+  contrast rule); locale feature bundle TR 2,897 B / EN 2,816 B (35 keys each);
+  `locales/tr.json` 58,276 B / `en.json` 55,849 B. Flag-OFF `/training` HTML unchanged from the
+  PR6.1 baseline (82,664 B normalized); flag-ON adds the PR6.1 mount+script delta only. The cache
+  header adds response headers, not body bytes.
+
+### 29. Backward compatibility
+
+No change to `/training`, setup form, active-plan view/controls, workout hero, weekly strip/stats,
+plan metadata, training generation, active-plan retrieval, workout status/logging, progress pages,
+AI Coach, PR4 adaptive-plan context, auth, navigation, non-weekly localization, CSP, static assets,
+social/gamification/nutrition/email. OFF = unchanged; ON = additive read-only surface.
+
+### 30–34. Tests added & executed results
+
+**Tests added:** cache-header (4), privacy-safe observability (2 parametrized families),
+GET-only extension, auth-under-both-UI-flags, one-SELECT SQL guard, four-way matrix,
+one-endpoint/no-planning guard, detached-mount race, three focus tests, contrast-token guard,
+extra malformed explanation-key cases.
+
+**Targeted (all executed this session, all pass):**
+- `tests/test_weekly_program_route.py` — **33 passed** (61.6s)
+- `tests/test_weekly_program_ui.py` — **40 passed** (71.8s)
+- `tests/test_weekly_program_ui_js.py` — **111 passed** (25.1s)
+- `node --check static/weekly_program.js` — **OK**
+
+**Related regression (executed, all pass):**
+- `test_weekly_program.py`, `test_training_history.py`, `test_training_progression.py`,
+  `test_training_planning.py`, `test_dependency_boundaries.py`, `test_adaptive_plan_context.py`
+  — **153 passed** (120s)
+- `test_i18n.py`, `test_design_system.py`, `test_auth_audit.py`, `test_training_routes.py`
+  — **72 passed** (98s)
+
+**Full Python suite (executed and reconciled this session).** The complete suite was run in 7
+deterministic, non-overlapping file partitions over the sorted `tests/**/test_*.py` list (ranges
+1‑17 / 18‑34 / 35‑51 / 52‑68 / 69‑85 / 86‑102 / 103‑119 — contiguous, disjoint, every one of the
+119 files executed exactly once, none omitted or repeated). Per-partition **passed / exit code**:
+349/0, 252/0, 200/0, 288/0, 363/0, 263/0, 553/0. **Grand total: 2268 passed, 0 failed, 0 error,
+0 skipped, 0 xfailed, 0 xpassed, 3 deselected** (the `-m "not load"` marker on
+`tests/load/test_ai_load.py`). Reconciliation: 2268 selected + 3 deselected = **2271** =
+the `pytest --collect-only` total, exactly. The complete Node-backed UI suite
+(`test_weekly_program_ui_js.py` 111, `test_weekly_program_ui.py` 40, plus the other `*_ui`
+files) ran inside these partitions. Runner `run_partitions.sh`; logs `part{1..7}.log` +
+`partitions_summary.txt` (session scratchpad). `ci.yml` runs the same suite on push as the
+standing gate.
+
+**Locale/static validation:** JSON valid, TR/EN parity 35/35, no empty values; `git diff --check`
+clean (only pre-existing `autocrlf` advisory).
+
+### 35–36. Documentation & handoff updates
+
+`docs/WEEKLY_PROGRAM.md` (F6 finalized + cache policy + PR table = Done),
+`docs/TRAINING_PLANNING.md` (PR6.3 runtime-independence note), `CLAUDE.md` (weekly-program bullet
+now records PR6.3 as done), `NEEDED_FIXES.md` (2026-07-23 PR6.3 resolution note), `.env.example`
+(cache/observability note), and this handoff section.
+
+### 37. Rollout procedure
+
+- **Stage 0 — merged, flag OFF.** Merge PR6.3; deploy with `WEEKLY_PROGRAM_UI_ENABLED=0`.
+  Verify `/training` unchanged, endpoint still `@require_auth`, zero weekly-program UI requests
+  from normal training-page usage.
+- **Stage 1 — internal/dev.** Set `WEEKLY_PROGRAM_UI_ENABLED=1` in a non-prod environment; walk
+  every UI state; confirm the `state=` log distribution and mobile behavior; confirm no elevated
+  endpoint failures.
+- **Stage 2 — controlled production.** The flag is **global only** (env var read at boot); there
+  is no per-user percentage rollout in this codebase and none was invented. Enable during a
+  low-risk window, monitor endpoint status/failures + client errors, keep rollback ready.
+- **Stage 3 — stabilization.** Observe endpoint latency and error counts via existing request
+  logs; confirm no auth/training-page regression. Enabling the flag requires a redeploy/restart
+  (env var read at boot).
+
+### 38. Monitoring procedure
+
+Filter CloudWatch logs for `[TRAINING][WEEKLY_PROGRAM]`: `state=error` (with `error_class`) is
+the failure signal; the `neutral`/`missing_baseline`/`populated` split is the health
+distribution (Logs Insights query in §13). Endpoint latency/status ride the existing per-request
+16-hex `request_id` logfmt line and Sentry. No new dashboard or vendor.
+
+### 39. Rollback procedure
+
+- **Primary:** set `WEEKLY_PROGRAM_UI_ENABLED=0` (or unset) and redeploy/restart → the shell,
+  script, locale bundle and the client request all disappear; `/training` returns to its OFF
+  body; the endpoint stays deployed and authenticated; coach behavior is independent. **Verify**
+  by confirming the OFF `/training` body and zero `[TRAINING][WEEKLY_PROGRAM]` log lines from
+  page loads.
+- **Secondary:** revert the PR6.3 commit if a hardening change itself misbehaves. Do **not**
+  revert PR5 planning/window semantics and do **not** disable `AI_ADAPTIVE_PLAN_CONTEXT` unless
+  the incident is specifically the coach path. No schema/migration to undo.
+
+### 40. Combined PR6 production-readiness audit — findings
+
+Verification-only audit of PR6.1 + PR6.2 + PR6.3 and their upstream contracts (PR4 coach
+consumer, PR5 service/endpoint, planning/progression/history). Every claim is code- or
+test-supported.
+
+- **Critical:** none.
+- **High:** none.
+- **Medium:** none.
+- **Low (RESOLVED this session) — Live-browser validation.** *Files:* `static/weekly_program.js`,
+  `static/training.css`. *Explanation:* previously deferred; now **performed** via a headless
+  Chromium/Blink pass against the ephemeral fixture harness (§25). Every required
+  viewport/state/locale, focus, keyboard (Enter+Space), reduced-motion, stale/detached-response,
+  tap-target (44 px), heading-contrast (6.85:1) and request-count checkpoint passed with the real
+  layout engine. *Residual:* an optional manual interactive spot-check during Stage-1 dev
+  enablement — nice-to-have, non-blocking.
+- **Technical Debt — client vocabulary lockstep.** *File:* `static/weekly_program.js`.
+  *Explanation:* Policy-A validation rejects any new backend `reason_code`/`week_focus` until the
+  client whitelist is updated. *Impact:* none today (same-deploy shipping). *Disposition:*
+  documented in §18–19; acceptable and intentional.
+- **Nice-to-have — CloudWatch metric promotion.** Deferred; the `state=` log + Logs Insights query
+  cover rollout assessment. *Disposition:* deferred.
+
+### 41. Production readiness matrix
+
+| Dimension | Status |
+|---|---|
+| Architecture / dependency direction | ✅ one-way: weekly_program→planning→progression→history; browser presentation-only |
+| Planning authority | ✅ AdaptivePlan sole authority; no client derivation |
+| Rollout safety / OFF-path | ✅ default OFF, byte-identical OFF page, route-scoped header |
+| Runtime correctness | ✅ four-way matrix; neutral/missing/error/malformed/auth states distinct |
+| Authentication / user isolation | ✅ `@require_auth`, `current_user.id`-scoped, cross-user tested |
+| Cache & privacy | ✅ `private, no-store` on all response classes, tested |
+| Observability | ✅ classified id-free `state=` line; metric deferred with query |
+| Security | ✅ no IDOR/injection/unsafe-DOM/PII-in-logs; CSP intact |
+| Accessibility | ✅ semantics + focus mgmt + contrast 6.85:1; real-browser pass green |
+| Responsive | ✅ scoped CSS, tokens, 44px tap-target; real-browser 320/390/768/1366 zero-overflow |
+| Performance / SQL / request count | ✅ 1 SELECT no writes; 1 init request; +1 per retry (browser-confirmed) |
+| Testing | ✅ full suite 2268 passed / 0 failed (7 partitions, reconciled to 2271) + real-browser matrix |
+| Documentation | ✅ updated and accurate |
+| Rollback readiness | ✅ flag-off, verified, nothing to undo |
+| **Overall** | ✅ **production-ready for controlled enablement** |
+
+### 42. Final verdict
+
+- Is PR6.3 independently safe to merge? **Yes.**
+- Is the complete PR6 stack safe to merge? **Yes.**
+- Is `WEEKLY_PROGRAM_UI_ENABLED` still default OFF? **Yes.**
+- Is the OFF path unchanged? **Yes** (route-scoped header only; body byte-identical).
+- Are the UI and coach flags fully independent? **Yes** (four-way matrix).
+- Does the enabled UI issue exactly one initial request? **Yes.**
+- Is retry bounded and race-safe? **Yes** (`activeRequest` guard; one at a time).
+- Can stale responses overwrite newer state? **No** (`requestGeneration` + `isConnected`).
+- Endpoint authenticated and user-scoped? **Yes**, under both UI-flag states.
+- Safe from shared-cache exposure? **Yes** (`private, no-store`).
+- Observability sufficient for rollout? **Yes** (state classification + query); metric deferred.
+- Browser a read-only presentation consumer? **Yes** (structural guards).
+- AdaptivePlan the sole planning authority? **Yes.**
+- Any regression? **None found** across the full suite — **2268 passed, 0 failed** (7 partitions, reconciled to 2271 collected).
+- Merge blockers? **None** (0 Critical/High/Medium).
+- Safe for controlled production enablement? **Yes** — the required real-browser matrix is green
+  (headless Chromium, §25); only an optional manual interactive spot-check remains at Stage 1.
+- Is Sprint 6 complete? **Yes** — PR6.3 is the final PR of the Adaptive Weekly Program UI
+  sequence; the full PR1→PR6.3 adaptive stack is delivered.
+- Ready to begin the next sprint? **Yes** — recommended Sprint 7 boundary: the deferred
+  capabilities (`session_frequency`/`intensity_magnitude`/`exercise_selection`), the remaining raw
+  WorkoutLog readers (`tracking.py` heatmap/insights, `fitx_mcp/server.py`,
+  `analytics_engine._check_missing_logs`, `ai_coach._tool_get_progress_metric`), and the open
+  `NEEDED_FIXES.md` items (#1–#4, #6, #7).
+
+**Final status: A. PR6 PRODUCTION-READY — SAFE FOR CONTROLLED ENABLEMENT.** Both previously-open
+verification gaps are now closed with collected evidence: (1) the required real-browser matrix was
+executed in a real Blink engine (headless Chromium 150) across every state × 320/390/768/1366 px ×
+tr/en with all overflow/focus/keyboard/reduced-motion/stale/tap-target/contrast/request-count
+checkpoints green (§25); and (2) the **full** Python suite was executed and reconciled — **2268
+passed, 0 failed, 3 deselected = 2271 collected** across 7 disjoint partitions (§30–34). This sits
+on top of the structural evidence (four-way matrix, OFF-path route-scoping, deterministic
+state/race/focus coverage, endpoint auth + cross-user isolation, `private, no-store`, classified
+observability, one-SELECT SQL guard, structural guards, documented rollout/rollback). No open
+Critical/High/Medium; the sole residual is an optional manual interactive browser spot-check at
+Stage-1 dev enablement (nice-to-have, non-blocking).
+
+No push, PR, merge, deploy, or production-flag change was performed. Work remains uncommitted in
+the worktree pending explicit instruction.

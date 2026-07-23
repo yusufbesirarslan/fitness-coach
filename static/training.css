@@ -379,7 +379,9 @@
   min-width: 0; margin-top: var(--space-6); padding: var(--space-5);
   overflow: hidden;
 }
-.weekly-program-heading { margin: 0 0 var(--space-4); }
+.weekly-program-heading {
+  margin: 0 0 var(--space-4); color: var(--color-text-2);
+}
 .weekly-program-content,
 .weekly-program-loading,
 .weekly-program-alert {

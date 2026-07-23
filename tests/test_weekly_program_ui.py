@@ -212,6 +212,23 @@ def test_on_is_the_off_document_plus_the_shell_and_script_only(app, render_train
 
 # ── flag isolation ──────────────────────────────────────────────────────────────
 
+@pytest.mark.parametrize(("ui_flag", "coach_flag", "shell_expected"), [
+    (False, False, False),
+    (False, True, False),
+    (True, False, True),
+    (True, True, True),
+])
+def test_complete_four_way_runtime_flag_matrix(
+        app, render_training, ui_flag, coach_flag, shell_expected):
+    html = render_training(app, enabled=ui_flag, coach_flag=coach_flag)
+
+    assert (SHELL_ID in html) is shell_expected
+    assert (MOUNT_ATTR in html) is shell_expected
+    assert (SCRIPT_PATH in html) is shell_expected
+    assert app.config["WEEKLY_PROGRAM_UI_ENABLED"] is ui_flag
+    assert app.config["AI_ADAPTIVE_PLAN_CONTEXT"] is coach_flag
+
+
 def test_coach_flag_alone_does_not_render_the_shell(app, render_training):
     html = render_training(app, enabled=False, coach_flag=True)
     assert SHELL_ID not in html

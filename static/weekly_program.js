@@ -20,9 +20,6 @@
     var REASONS = ['insufficient_history', 'inconsistent_training', 'deload_due',
         'plateau_detected', 'progressing', 'steady_state', 'volume_trend_down',
         'strength_trend_down'];
-    var activeRequest = false;
-    var requestGeneration = 0;
-
     function makeElement(tag, className, text) {
         var node = document.createElement(tag);
         if (className) node.className = className;
@@ -43,6 +40,20 @@
             copyText(copy, 'training.weekly_program'));
     }
 
+    function isCurrentRequest(context, generation) {
+        return context.mount.isConnected !== false
+            && generation === context.requestGeneration;
+    }
+
+    function replaceContent(context, content, focusAfterRetry) {
+        var title = heading(context.copy);
+        context.mount.replaceChildren(title, content);
+        if (focusAfterRetry) {
+            title.setAttribute('tabindex', '-1');
+            title.focus();
+        }
+    }
+
     function renderLoading(context) {
         setState(context.mount, STATES.loading);
         var status = makeElement('div', 'weekly-program-loading');
@@ -56,7 +67,7 @@
         context.mount.replaceChildren(heading(context.copy), status);
     }
 
-    function renderFailure(context, malformed) {
+    function renderFailure(context, malformed, focusAfterRetry) {
         setState(context.mount, malformed ? STATES.malformed : STATES.error);
         var alert = makeElement('div', 'weekly-program-alert');
         alert.setAttribute('role', 'alert');
@@ -72,10 +83,11 @@
         );
         retry.setAttribute('type', 'button');
         retry.addEventListener('click', function () {
-            loadRecommendation(context);
+            loadRecommendation(context, true);
         });
         alert.append(retry);
         context.mount.replaceChildren(heading(context.copy), alert);
+        if (focusAfterRetry) retry.focus();
     }
 
     function appendFocus(container, copy, payload) {
@@ -136,7 +148,7 @@
         container.append(list);
     }
 
-    function renderRecommendation(context, payload) {
+    function renderRecommendation(context, payload, focusAfterRetry) {
         var content = makeElement('div', 'weekly-program-content');
         if (!payload.has_data) {
             setState(context.mount, STATES.insufficient);
@@ -144,7 +156,7 @@
                 'p', 'weekly-program-message',
                 copyText(context.copy, 'weekly_program.state.insufficient_data')
             ));
-            context.mount.replaceChildren(heading(context.copy), content);
+            replaceContent(context, content, focusAfterRetry);
             return;
         }
 
@@ -161,7 +173,7 @@
             appendMetrics(content, context, payload);
             appendReasons(content, context.copy, payload);
         }
-        context.mount.replaceChildren(heading(context.copy), content);
+        replaceContent(context, content, focusAfterRetry);
     }
 
     function isPlainObject(value) {
@@ -230,33 +242,35 @@
         return true;
     }
 
-    function loadRecommendation(context) {
-        if (activeRequest) return false;
-        activeRequest = true;
-        requestGeneration += 1;
-        var generation = requestGeneration;
+    function loadRecommendation(context, focusAfterRetry) {
+        if (context.activeRequest) return false;
+        context.activeRequest = true;
+        context.requestGeneration += 1;
+        var generation = context.requestGeneration;
         renderLoading(context);
 
         fetch(ENDPOINT, {
             method: 'GET',
             headers: {'Accept': 'application/json'}
         }).then(function (response) {
-            if (generation !== requestGeneration) return null;
+            if (!isCurrentRequest(context, generation)) return null;
             if (response.redirected || !response.ok) throw new Error('request failed');
             return response.json().catch(function () {
                 throw new Error('invalid json');
             });
         }).then(function (payload) {
-            if (generation !== requestGeneration || payload === null) return;
+            if (!isCurrentRequest(context, generation) || payload === null) return;
             if (!isValidPayload(payload)) {
-                renderFailure(context, true);
+                renderFailure(context, true, focusAfterRetry);
                 return;
             }
-            renderRecommendation(context, payload);
+            renderRecommendation(context, payload, focusAfterRetry);
         }).catch(function () {
-            if (generation === requestGeneration) renderFailure(context, false);
+            if (isCurrentRequest(context, generation)) {
+                renderFailure(context, false, focusAfterRetry);
+            }
         }).then(function () {
-            if (generation === requestGeneration) activeRequest = false;
+            if (generation === context.requestGeneration) context.activeRequest = false;
         });
         return true;
     }
@@ -283,9 +297,11 @@
         var context = {
             mount: mount,
             copy: copy,
-            locale: window.LOCALE === 'en' ? 'en' : 'tr'
+            locale: window.LOCALE === 'en' ? 'en' : 'tr',
+            activeRequest: false,
+            requestGeneration: 0
         };
-        loadRecommendation(context);
+        loadRecommendation(context, false);
         return true;
     }
 

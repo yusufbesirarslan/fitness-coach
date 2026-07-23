@@ -20,6 +20,25 @@ The codebase remains **mature and defense-in-depth**. **No Critical or High-seve
 | 6 | Low | `ai_coach.py` (1199 lines) god-module — still open | Structure | Confirmed |
 | 7 | Low | `social.py` (1033 lines, 3 domains) — still open | Structure | Confirmed |
 
+> **Sprint 6 PR6.3 update (2026-07-23).** The combined PR6.1–PR6.3 Weekly Program UI
+> production-readiness re-audit surfaced **no new Critical, High, or Medium findings**.
+> It closed two nice-to-haves deferred from the PR5 audit (see `docs/WEEKLY_PROGRAM.md`
+> F6 and the PR5 handoff "next steps"): the endpoint now sends
+> `Cache-Control: private, no-store`, and the observability line was promoted from a
+> PII-bearing `debug` line to a classified, id-free `state=` line at `info`/`warning`
+> (CloudWatch metric promotion explicitly deferred, with a Logs Insights query recorded
+> in the handoff). The one Low finding raised earlier — live-browser responsive/a11y
+> validation — was subsequently **resolved**: a headless Chromium/Blink pass against an
+> ephemeral local fixture harness (real `training.css` + `weekly_program.js` + faithful
+> mount, mock responses, no prod credentials) rendered every state at 320/390/768/1366 px in
+> tr/en with zero overflow, correct status/alert semantics, Enter+Space retry, retry focus
+> lifecycle, stale/detached-response drop, 44 px tap target, heading contrast 6.85:1, and
+> one request per mount (+1 per retry). The one browser-sourced defect on record (card-heading
+> contrast 4.22:1) was fixed to `--color-text-2` and re-measured green. The full Python suite
+> also ran clean (2268 passed / 0 failed, reconciled to 2271 collected). Only an optional
+> manual interactive spot-check at Stage-1 remains. Items #1–#4, #6, #7 above are untouched
+> by PR6.3.
+
 ---
 
 ## 1. [Medium] Thread-reserve invariant is breachable by ungated routes blocking on `_model_slots`

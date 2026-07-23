@@ -4,11 +4,12 @@ import s3_helper
 from flask import Blueprint, current_app, jsonify, render_template, request
 from flask_login import current_user
 from app.auth_middleware import require_auth
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, auth_write_limit, db, limiter
 from app.i18n import current_locale, t
+from app.observability import current_request_id
 from app.models import Message, WORKOUT_COMPLETION_MARKER, DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
 from app.services.ai import _heavy_chat
 from app.services.ai_gate import ai_concurrency_gate
@@ -24,6 +25,29 @@ from app.timeutil import app_today, display_dt, utc_day_bounds
 
 
 bp = Blueprint("training", __name__)
+_WEEKLY_PROGRAM_PATH = "/api/training/weekly-program"
+
+
+@bp.after_request
+def _weekly_program_private_no_store(response):
+    """Prevent storage of per-user recommendations for the original API request."""
+    if request.path == _WEEKLY_PROGRAM_PATH:
+        response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+def _weekly_program_state(recommendation):
+    if not recommendation.has_data:
+        return "neutral"
+    if recommendation.baseline_weekly_volume is None:
+        return "missing_baseline"
+    return "populated"
+
+
+def _weekly_program_error_class(error):
+    if isinstance(error, SQLAlchemyError):
+        return "upstream_error"
+    return "unexpected_error"
 
 
 def _parse_pump_visibility(data):
@@ -336,17 +360,16 @@ def get_weekly_program():
         recommendation = build_weekly_program(current_user.id, weeks=4, end_day=None)
     except Exception as e:
         current_app.logger.warning(
-            "[TRAINING][WEEKLY_PROGRAM] build başarısız user=%s: %s: %s",
-            current_user.id, type(e).__name__, e)
+            "[TRAINING][WEEKLY_PROGRAM] request_id=%s state=error error_class=%s",
+            current_request_id(), _weekly_program_error_class(e))
         return jsonify({"error": t("route.generic_error_retry")}), 500
 
     # Minimum useful observability: tells "neutral because no history" apart from
     # "populated recommendation" apart from "upstream failure" (logged above) without
     # emitting history, volumes, or the payload itself.
-    current_app.logger.debug(
-        "[TRAINING][WEEKLY_PROGRAM] user=%s has_data=%s focus=%s has_baseline=%s",
-        current_user.id, recommendation.has_data, recommendation.week_focus,
-        recommendation.baseline_weekly_volume is not None)
+    current_app.logger.info(
+        "[TRAINING][WEEKLY_PROGRAM] request_id=%s state=%s",
+        current_request_id(), _weekly_program_state(recommendation))
     return jsonify(weekly_program_payload(recommendation))
 
 
