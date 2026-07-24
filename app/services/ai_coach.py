@@ -660,6 +660,15 @@ def _tool_analyze_gym_photo(user_id, s3_key):
         return json.dumps({"status": "error", "message": "Görsel alınamadı veya sana ait değil."},
                           ensure_ascii=False)
 
+    # Sprint 7 PR2 (correction #2): idempotency preflight, Bedrock görü çağrısından
+    # ÖNCE. Bugün zaten tamamlandıysa pahalı görsel analiz ATLANIR (replay'de gereksiz
+    # sağlayıcı işi yok). Yarış-güvenli asıl iddia uq_pump_check_day.
+    from app.services.workout_completion import already_completed_today
+    if already_completed_today(user_id, app_today()):
+        return json.dumps({"status": "already_done", "awarded": False,
+                           "message": "Bugünkü antrenmanını zaten tamamladın."},
+                          ensure_ascii=False)
+
     media_type = s3_helper.media_type_for_key(s3_key)
     try:
         if image_bytes and len(image_bytes) > 1_500_000:
@@ -693,53 +702,44 @@ def _tool_analyze_gym_photo(user_id, s3_key):
         return json.dumps({"status": "ok", "is_gym": False, "form_rating": result["form_rating"],
                            "reason": result["reason"], "awarded": False}, ensure_ascii=False)
 
-    # İdempotent ödül: bugün zaten bir Pump Check varsa tekrar ödül YOK (XP farming'i önle).
-    # /workout/complete ile aynı günlük-tamamlama defterini paylaşır.
-    start_utc, end_utc = utc_day_bounds()
-    if PumpCheck.query.filter(
-        PumpCheck.user_id == user_id,
-        PumpCheck.created_at >= start_utc,
-        PumpCheck.created_at < end_utc,
-    ).first():
-        return json.dumps({"status": "already_done", "is_gym": True,
-                           "form_rating": result["form_rating"], "reason": result["reason"],
-                           "awarded": False, "message": "Bugünkü antrenmanını zaten tamamladın."},
+    # Kanonik tamamlanma mutasyonu (Sprint 7 PR2): UI /workout/complete ile AYNI
+    # sınır (app/services/workout_completion) — PumpCheck + marker + XP + görev +
+    # challenge TEK atomik transaction. Bu araç yalnızca görsel analiz + yanıttan
+    # sorumlu; rakip tamamlanma semantiği TUTMAZ. Kanıt-yalnızca kayıtçılar
+    # (commit_workout_log, fitx_mcp) bu yolu ASLA çağırmaz.
+    from app.services.workout_completion import CompleteWorkoutCommand, complete_workout
+    try:
+        outcome = complete_workout(CompleteWorkoutCommand(
+            user_id=user_id,
+            today=app_today(),
+            image_key=s3_key,
+            location_type="ai_tool",
+            description=result["reason"][:200],
+            workout_score=latest_training_plan_score(user_id),
+            visibility="private",
+            shared_friend_ids=(),
+            valid=True,
+            fallback=False,
+            base_xp=10,
+            photo_bonus=25,
+            activity_text="Pump Check doğrulandı (AI koç)",
+            entry_path="ai_tool",
+        ))
+    except Exception as e:
+        current_app.logger.warning("[ANALYZE PHOTO] tamamlanma başarısız: %s: %s", type(e).__name__, e)
+        return json.dumps({"status": "error", "message": "Ödül kaydedilemedi, tekrar dene."},
                           ensure_ascii=False)
 
-    db.session.add(PumpCheck(
-        user_id=user_id, image_key=s3_key, location_type="ai_tool",
-        description=result["reason"][:200], valid=True, fallback=False,
-        workout_score=latest_training_plan_score(user_id),
-        date_key=app_today().isoformat()))
-    # Challenge huni: AI koç Pump Check'i de 'pump_check_created' sayılır (aynı tx).
-    from app.services.challenges import record_event
-    record_event(user_id, "pump_check_created")
-    db.session.add(WorkoutLog(
-        user_id=user_id, exercise_name=WORKOUT_COMPLETION_MARKER,
-        sets=1, reps=1, weight_kg=0, volume=0))
-    xp = 35  # /workout/complete ile aynı: 10 base + 25 foto bonusu
-    quest = _claim_quest(user_id, "workout_logged")
-    award_xp(user_id, xp)
-    log_activity(user_id, "workout_completed", "Pump Check doğrulandı (AI koç)")
-    try:
-        db.session.commit()
-    except IntegrityError:
-        # TOCTOU yarışı: başka bir istek (UI veya AI tool) bugünün PumpCheck'ini
-        # araya yazdı; uq_pump_check_day ikinciyi reddetti → çift XP yok.
-        db.session.rollback()
+    if outcome.already_completed:
+        # Bedrock görüsünden SONRA yarış kaybeden (form_rating/reason zaten hesaplandı).
         return json.dumps({"status": "already_done", "is_gym": True,
                            "form_rating": result["form_rating"], "reason": result["reason"],
                            "awarded": False, "message": "Bugünkü antrenmanını zaten tamamladın."},
-                          ensure_ascii=False)
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.warning("[ANALYZE PHOTO] commit başarısız: %s: %s", type(e).__name__, e)
-        return json.dumps({"status": "error", "message": "Ödül kaydedilemedi, tekrar dene."},
                           ensure_ascii=False)
 
     return json.dumps({"status": "committed", "is_gym": True,
                        "form_rating": result["form_rating"], "reason": result["reason"],
-                       "awarded": True, "xp_awarded": xp + (quest["xp"] if quest else 0)},
+                       "awarded": True, "xp_awarded": outcome.xp_awarded},
                       ensure_ascii=False)
 
 

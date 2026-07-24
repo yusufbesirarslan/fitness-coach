@@ -2884,3 +2884,123 @@ without redefining navigation, and can enrich the Coach page beyond the thin hos
 
 Nothing was pushed, no pull request was opened, nothing was merged, nothing was deployed, and no
 production feature flag was changed.
+
+## Sprint 7 PR2 — Canonical Workout Mutation Integrity, Idempotency, and Completion Convergence
+
+- **Track:** Core Feature. **Sprint:** 7. **PR:** 2. **Production authorization:** local implementation + validation only.
+- **Verdict:** **READY FOR REVIEW.** The one prior condition — execute the committed postgres:16 concurrency test — is **discharged: executed 2026-07-24 against real postgres:16, PASSED 4/4** (single winner on `uq_pump_check_day`). A test-harness defect surfaced during that run (detached-thread invocation trip­ping the pre-existing `_flush_lb_dirty` after_commit hook) was root-caused, proven **not** to affect the production request path, and fixed in the test only (one remediation commit). See "Postgres concurrency test — execution".
+- **Branch:** `sprint7-pr2-workout-mutation-integrity`. **Worktree:** `.worktrees/sprint7-pr2-workout-mutation-integrity`.
+- **origin/main:** `3d9c582` (Sprint 7 PR1 "Canonical Workout State Contract" #183 — merged squash — plus UIUX nav #182). **Base commit:** `3d9c582`. **Merged PR1:** #183, contained in `3d9c582`. **PR2-only diff range:** `3d9c582..HEAD`.
+- **Base note:** an earlier plan pinned the unmerged PR1 dev branch `4f5fd75`; a `git fetch` showed PR1 had since merged into `origin/main`, so PR2 was re-based onto merged main (byte-identical PR1 contract) — a normal, non-stacked branch, no future rebase needed.
+
+### Discovery — writer inventory (verified on `3d9c582`)
+
+Confirmed-completion writers (write today's `PumpCheck` + `WORKOUT_COMPLETION_MARKER`) — **converged**:
+- `POST /workout/complete` → `complete_workout` (`app/blueprints/training.py`).
+- AI-coach `_tool_analyze_gym_photo` (`app/services/ai_coach.py`) — the prompt's `_tool_analyze_workout_photo` name is stale; the real tool is `_tool_analyze_gym_photo`.
+
+Evidence-only writers (must never create completion artifacts) — **preserved + guarded**:
+- AI-coach `_tool_confirm_and_commit_workout_log` — non-marker `WorkoutLog` + XP 15 only.
+- `fitx_mcp/server.py` — separate process, raw-SQL `INSERT INTO workout_log` (single exercise); marker refs there are read filters.
+- `app/services/wearables/adapters.py` — writes `WearableWorkoutLog` (different table), not the completion path.
+
+Transaction ownership before PR2: each writer owned its own inline transaction with near-duplicate logic (PumpCheck + marker + `record_event` + `_claim_quest` + `award_xp` + `log_activity` + commit). The real risk was **duplication/divergence**, not an open race — the `uq_pump_check_day` unique constraint + `IntegrityError→already_completed` rollback already existed in both.
+
+### Canonical mutation design
+
+- **Owner:** `app/services/workout_completion/` (`models.py`, `queries.py`, `service.py`, `__init__.py`) — layered like `workout_state`/`training_history`.
+- **Command/result contract:** `complete_workout(CompleteWorkoutCommand) -> CompletionResult`; `CompletionOutcome ∈ {CREATED, ALREADY_COMPLETED}`.
+- **Completion identity:** user + Istanbul day (`date_key = app_today()`), enforced by existing `uq_pump_check_day (user_id, date_key)`.
+- **Transaction boundary:** the service owns the single commit/rollback; entry paths never commit completion state. No network (Bedrock/S3) inside the transaction.
+- **Result contract:** `CREATED` (pump_check_id, new_total, level, title, quest_result, xp_awarded) / `ALREADY_COMPLETED` (idempotent replay + concurrency race-loser). Only a **verified** `uq_pump_check_day` violation maps to `ALREADY_COMPLETED`; any other `IntegrityError` rolls back and re-raises → internal error.
+- **Side-effect ownership:** required-atomic = PumpCheck + marker + quest + XP + Activity + friend Messages; best-effort in-tx savepoint = challenge/badge/notification/feed via `record_event`; response enrichment = presigned URL + Redis LB after_commit (not the completion authority). No deferred post-commit DB side effect exists → no synthetic post-commit test.
+
+### Writer convergence
+
+| Writer | Before | After |
+|---|---|---|
+| `POST /workout/complete` | inline PumpCheck+marker+XP+quest+challenge+commit | delegates to `complete_workout`; keeps transport/validation/S3/Bedrock/response; **preserved** response shape (`points_awarded/pump_bonus/pump_check_id/new_total/level/title/visibility/shared_friend_ids/quest_awarded/pump_image_url`, `already_completed` 400, friendly 500) |
+| AI-coach `_tool_analyze_gym_photo` | inline duplicate + guard **after** Bedrock | delegates to `complete_workout` (private/ai_tool); idempotency preflight moved **before** Bedrock (correction #2); tool JSON (`committed`/`already_done`/`xp_awarded`) preserved |
+| `_tool_confirm_and_commit_workout_log`, `fitx_mcp`, wearables | evidence-only | **unchanged**; guarded to stay `execution_recorded` |
+
+### Idempotency / concurrency evidence
+
+- **Persistence mechanism:** existing `uq_pump_check_day` UNIQUE — the sole concurrency-safe atomic claim. Read-only preflight `already_completed_today` is a cost optimization only (skips Bedrock/S3 on replays), never the claim.
+- **Sequential replay:** second attempt → `ALREADY_COMPLETED`, no duplicate rows/XP (`test_sequential_replay_is_idempotent`).
+- **Constraint > preflight:** with an injected past date the preflight misses but the constraint still yields `ALREADY_COMPLETED` (`test_replay_caught_by_constraint_even_when_preflight_misses`).
+- **Race-loser:** deterministic non-500 replay; only `uq_pump_check_day` maps that way (`test_unrelated_integrity_error_is_reraised_not_already_completed`, `test_is_pump_check_day_violation_identity`).
+- **Concurrency proof:** deterministic SQLite (constraint + simulated race + rollback) is the default. A real two-thread, separate-session Postgres race lives in `tests/test_workout_completion_pg.py`, gated by `@pytest.mark.pg_concurrency` + `FITX_PG_CONCURRENCY_TEST=1` + `PG_TEST_DATABASE_URL` (targets `postgres:16`, matching CI). **EXECUTED 2026-07-24 against a real disposable postgres:16 (16.14) — PASSED 4/4** (see "Postgres concurrency test — execution" below). Outcome: exactly one `CREATED`, one `ALREADY_COMPLETED` (loser via the `uq_pump_check_day` constraint), one PumpCheck, one marker, XP credited once (35). Genuine multi-connection race, not SQLite-simulated.
+
+### Atomicity / rollback evidence
+
+- Required atomic writes: PumpCheck, marker, quest, XP, Activity, friend Messages. Injecting a failure at each required helper rolls back **everything** — no partial rows (`test_required_helper_failure_rolls_back_everything`, parametrized over `_claim_quest`/`award_xp`/`log_activity`).
+- Session not poisoned after rollback; a subsequent legitimate completion succeeds (`test_session_not_poisoned_after_rollback`).
+- Post-commit: none (no async completion job). Presigned URL is response enrichment.
+- Helper transaction-neutrality **verified in-repo**: `award_xp`/`_claim_quest`/`log_activity` (gamification) and `record_event`/`notify` (challenges/notifications) do not commit; the service avoids `complete_quest_for_user`/`run_weekly_rollover`/`seed_challenges` (which do).
+
+### PR1 state compatibility
+
+- Confirmed completion → resolver `completed_today=True`, `execution_state=completed` (`test_pr1_resolver_reports_completed_after_canonical_completion`).
+- Failed completion → state unchanged, not completed (`test_pr1_resolver_unchanged_after_failed_completion`).
+- Evidence-only write → `execution_recorded`, not completed (`test_ai_coach_exercise_logging_stays_evidence_only`).
+- No mutation produces `in_progress`/`resume`; PR1 public vocabulary unchanged.
+
+### API / client compatibility
+
+- `POST /workout/complete`: response shape and status codes preserved (200 success incl. `points_awarded=base+photo+quest`, 400 `already_completed`, 422 invalid Pump Check, friendly 500). Verified by unchanged `test_training_routes.py` + `test_route_replay_skips_pump_check_validation`.
+- AI tool: `committed`/`already_done`/error JSON preserved (`test_coach_tools.py` unchanged; `test_tool_replay_skips_bedrock`). One intentional change: the *preflight* replay returns `already_done` without `form_rating`/`reason` (Bedrock skipped); the post-Bedrock race-loser still includes them.
+
+### Migration / database
+
+- **Migration: none.** `uq_pump_check_day` already provides the atomic claim across all Postgres processes that insert PumpCheck. Single migration head unchanged.
+
+### Tests and exact results
+
+**Command:** `python -m pytest -q -p no:cacheprovider` (canonical; `pytest.ini` applies `-m "not load"`).
+
+**Method note:** the full suite (130 files) exceeds this environment's background-job wall-clock cap (a single serial run was killed at 69%), so full baseline and full final were each run as **three parallel file-partition chunks** (`NR%3`) and totaled. The two new test files shift the partition between baseline and final, so **per-chunk counts are not directly comparable — totals are.**
+
+- **Focused baseline** (at `3d9c582`): **264 passed, 0 failed** (`test_training_routes test_ai_coach test_coach_tools test_mcp_tools test_pump_check_sharing test_workout_state test_analytics_engine test_barcode_workflow test_cascade_delete`).
+- **Full baseline** (pristine `3d9c582`, via `git stash`, 3 chunks): 973 + 668 + 755 = **2396 passed, 0 failed, 0 skipped**.
+- **Full final** (PR2, 3 chunks): 940 + 657 + 818 = **2415 passed, 1 failed, 1 skipped**.
+
+**Test-by-test comparison:**
+- **+19 passed** = the 19 new `tests/test_workout_completion.py` cases (2396 + 19 = 2415). Every baseline-passing test still passes.
+- **+1 skipped** = `tests/test_workout_completion_pg.py` (opt-in `pg_concurrency`; skips in the default no-env run by design). It was **executed separately against real postgres:16 and PASSED 4/4** — see "Postgres concurrency test — execution" below.
+- **The single final "failure"** = `tests/test_mcp_gate.py::test_http_transport_refused_without_optin[entrypoint1]` — `subprocess.TimeoutExpired` after 60 s spawning `python fitx_mcp/server.py --http`. A **non-deterministic CPU-contention artifact** of 3 parallel pytest processes (that subprocess needs ~54 s uncontended): **re-run in isolation it passes 3/3 (53.76 s)** and it **did not fail in the baseline run**. PR2 does not touch `fitx_mcp`. **Not a regression.**
+- **Pre-existing failures: none. Newly-introduced real failures: none.**
+
+**Supplementary isolated runs (PR2 code):** 253 passed (completion suites + new tests) and 134 passed (dependency-boundaries / remaining-work / migration-graph / ownership / training-page-characterization) — 0 failures. `test_mcp_gate.py` isolated: 3 passed.
+
+**Static/type/lint:** repo has no flake8/ruff config and no CI lint gate; `py_compile` passes on all created/modified modules; `training.py` unused-import cleanup verified. **Migration head:** single head, unchanged (no new migration). Import/startup: app imports and all `app`-fixture tests initialize cleanly.
+
+### Query, locking, performance
+
+- No new historical scans/N+1. The mutation is a bounded insert set guarded by one unique index; the preflight is a single indexed `PumpCheck` existence read (removes redundant provider work on replays). No new locks/table locks; no network in-transaction.
+
+### Files changed
+
+- **Created:** `app/services/workout_completion/{__init__,models,queries,service}.py`; `tests/test_workout_completion.py`; `tests/test_workout_completion_pg.py`.
+- **Modified:** `app/blueprints/training.py` (converge + import cleanup); `app/services/ai_coach.py` (converge + preflight-before-Bedrock); `pytest.ini` (`pg_concurrency` marker); `docs/WORKOUT_STATE.md`; `CLAUDE.md`; `docs/handoff.md`.
+- **Deleted:** none.
+
+### Rollout / rollback
+
+- Additive, code-revert-compatible: no schema/flag change. Rollout = deploy code; monitor duplicate/conflict rate (expect ~0 duplicate PumpCheck/day) and completion 5xx. Rollback = revert the PR2 commit (no DB action). Old clients/workers unaffected (response contract preserved; no new columns).
+
+### Deferred (record only — not implemented)
+
+- Persisted/active sessions, resume/recovery, plan-to-log linkage, `/api/progress/workout` + `renderHero` convergence, workout UI/nav redesign, XP/challenge redesign — later Sprint 7 PRs.
+- Opt-in Postgres concurrency test now runs in CI too (CI has `postgres:16`); wire the `pg_concurrency` marker + env into a CI job if a standing gate is wanted (currently opt-in/manual).
+- **Latent fragility (record only — NOT a PR2 defect, do not fix in PR2):** `gamification._flush_lb_dirty` (an `after_commit` listener, pre-existing) calls `db.session.get(User, id)`. If the completing session no longer holds the `User` (e.g. a **detached** caller that awarded XP + committed without keeping a strong reference — no Flask-Login `current_user`), the object is weak-ref-collected from the identity map and that `get()` emits SQL on a committed session → `InvalidRequestError`. Every current production caller (`POST /workout/complete`, AI-coach tool) runs inside an authenticated request that holds `current_user`, so this is **unreachable today**. A future detached/background XP writer would hit it. Defensive hardening (make `_flush_lb_dirty` never emit SQL post-commit — snapshot the ids/values pre-commit, or guard for absent identity) is out of PR2 scope (shared gamification infra, affects all XP paths).
+
+### Postgres concurrency test — execution (2026-07-24)
+
+- **Environment:** Docker Desktop 29.6.2 (overlayfs) started locally; disposable, loopback-only container `postgres:16` (digest `sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20`, server **PostgreSQL 16.14**), bound to `127.0.0.1:55432`, ephemeral throwaway credential (redacted, destroyed at teardown). **No production or shared-dev DB touched.**
+- **Command (creds redacted):** `FITX_PG_CONCURRENCY_TEST=1 PG_TEST_DATABASE_URL=postgresql://fitx_race:<REDACTED>@localhost:55432/fitx_test python -m pytest -m pg_concurrency tests/test_workout_completion_pg.py -q`.
+- **Result:** **PASSED, run 4×** (≈40–49 s each; single-completion + two-thread race). Separate connections + separate SQLAlchemy sessions per contender (own app context). Asserted on persisted rows: winner `CREATED`, loser `ALREADY_COMPLETED` via `uq_pump_check_day`, PumpCheck=1, marker=1, XP=35 once; no poisoned transaction, no partial rows; disposable DB dropped afterward.
+- **Harness defect found & fixed (PR2-scoped, test-only):** the committed test initially FAILED — the winner raised `InvalidRequestError` from the `_flush_lb_dirty` `after_commit` hook (see "Latent fragility" above). Root-caused to the test invoking `complete_workout` from a **detached** worker thread that discarded the loaded `User`, so it was weak-ref-collected — a calling convention production never uses. **Verified production is unaffected**: the real HTTP `/workout/complete` path (`test_complete_awards_xp_and_records_pump_check`, `test_pump_check_day_unique_constraint`, `test_workout_status_flips_after_completion`, 6 tests) **passes against this same postgres:16**. Fix: each contender now holds a **strong reference** to its `User` for the whole completion (mirroring Flask-Login `current_user`) and teardown disposes the pool before `drop_all`. Only `tests/test_workout_completion_pg.py` changed — no source, no shared test infra (`conftest.py` unchanged) — so no full-suite rerun was triggered; the focused SQLite suite (completion + both writer entry points + pump-check sharing) re-ran green (**112 passed, 1 skipped**).
+
+### Authorization boundary
+
+Nothing was pushed, no PR opened, nothing merged, deployed, or production-flag-changed. Sprint 7 PR3 not started. Docker Desktop + a disposable local Postgres container were started for the concurrency test only, and the container/credential are torn down afterward.

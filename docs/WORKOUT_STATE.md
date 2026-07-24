@@ -314,3 +314,57 @@ The four review conditions and where each is addressed:
    (`assert_valid_state_contract`), instead of loose field checks. This section,
    *Timezone*, *All 11 `state` keys…* and *Why the one broad `except`…* answer the
    four report clarifications.
+
+## Sprint 7 PR2 — canonical completion mutation (write side)
+
+PR1 above is the read model. **PR2 makes the *write* side canonical.** The single
+owner of confirmed-workout-completion writes is `app/services/workout_completion/`
+(`complete_workout(CompleteWorkoutCommand) -> CompletionResult`). Both production
+completion writers delegate to it and keep only their own transport/validation/
+media/response concerns — neither implements completion semantics itself:
+
+- `POST /workout/complete` (`training.py`) — UI completion.
+- AI-coach `_tool_analyze_gym_photo` (`ai_coach.py`) — photo-verified completion.
+
+**Completion identity / product invariant.** One confirmed completion per
+user-local (Istanbul) day, enforced at the persistence boundary by the existing
+`uq_pump_check_day` UNIQUE `(user_id, date_key)`. `date_key = app_today()`
+(`app.timeutil`, the one timezone source). This matches PR1's `completed_today`
+(today's `PumpCheck` bucketed by `created_at` into the Istanbul day), so the read
+model and the mutation never disagree.
+
+**Idempotency & concurrency.** A read-only preflight (`already_completed_today`)
+short-circuits obvious replays *before* any expensive provider work (Bedrock
+vision / S3 upload) — a cost optimization only. The **unique constraint is the
+sole concurrency-safe atomic claim**: the sequential replay and the concurrent
+race-loser both return `ALREADY_COMPLETED` (a normal outcome — never HTTP 500,
+never duplicate artifacts). Only a *verified* `uq_pump_check_day` violation is
+classified as the replay outcome; any other `IntegrityError` rolls back and
+surfaces as an internal error.
+
+**Atomicity — side-effect classification.**
+
+- *Required & atomic* (failure ⇒ whole completion rolls back): `PumpCheck`, the
+  paired `WORKOUT_COMPLETION_MARKER` `WorkoutLog`, quest progress, XP, the
+  `Activity` row, and friend share-`Message`s. A marker is therefore never
+  produced without its `PumpCheck` (the exact inconsistency PR1's
+  `completion_marker_mismatch` guards against on the read side).
+- *Best-effort, in-transaction, savepoint-isolated* (failure never blocks
+  completion): challenge progress + challenge-completion badge/notification/feed
+  via `record_event` (its existing self-swallowing contract).
+- *Response enrichment / external* (not a DB completion mutation): presigned
+  pump-image URL and the Redis leaderboard `after_commit` sync. No completion
+  state lives in an async job.
+
+No remote (Bedrock/S3/network) call runs inside the mutation transaction — entry
+paths validate and upload first, then invoke the mutation.
+
+**Evidence-only writers stay separate.** AI-coach exercise logging
+(`_tool_confirm_and_commit_workout_log`), `fitx_mcp` logging (a separate process
+writing raw-SQL non-marker rows), manual/imported and wearable logs never call
+the completion mutation and never create a `PumpCheck`/marker/completion-XP/
+challenge/notification. They remain `execution_recorded` on the read side.
+
+**Migration:** none — `uq_pump_check_day` already provides the atomic claim.
+**Feature flag:** none — a single mutation authority; a flag would create a
+competing one. **Rollback:** code revert only (no schema change).
