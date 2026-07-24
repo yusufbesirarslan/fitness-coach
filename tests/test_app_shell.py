@@ -7,7 +7,7 @@ APP_TEMPLATES = [
     "index.html", "nutrition.html", "training.html", "progress.html",
     "quests.html", "friends.html", "leaderboard.html", "manage_stack.html",
     "chat.html", "edit_profile.html", "feed.html", "premium.html",
-    "pump_check_gallery.html",
+    "pump_check_gallery.html", "coach.html",
 ]
 
 
@@ -55,7 +55,7 @@ def test_viewport_fit_cover_for_safe_areas():
 SHELL_ROUTES = [
     "/", "/nutrition", "/training", "/progress-page", "/quests", "/friends",
     "/feed", "/leaderboard", "/supplements", "/premium", "/edit-profile",
-    "/pump-check-gallery",
+    "/pump-check-gallery", "/coach",
 ]
 
 

@@ -139,8 +139,9 @@ def create_app():
     # before_request order must match the original monolith:
     #   _csrf_protect -> (limiter) _check_request_limit -> maybe_weekly_rollover -> update_streak
     from app.hooks import _csrf_protect, generate_csp_nonce, inject_csp_nonce, \
-        inject_csrf_token, inject_i18n, maybe_weekly_rollover, set_csp_header, \
-        update_streak, inject_rank, ratelimit_exceeded, not_found, server_error
+        inject_csrf_token, inject_i18n, inject_nav, maybe_weekly_rollover, \
+        set_csp_header, update_streak, inject_rank, ratelimit_exceeded, \
+        not_found, server_error
     from app.i18n import resolve_locale
     from app.observability import assign_request_id, log_request, start_request_timer
     # İstek süresini en baştan ölç + izleme kimliği ata (diğer before_request'lerden önce).
@@ -159,6 +160,7 @@ def create_app():
     app.context_processor(inject_csp_nonce)
     app.context_processor(inject_csrf_token)
     app.context_processor(inject_i18n)
+    app.context_processor(inject_nav)
     app.context_processor(inject_rank)
     app.after_request(set_csp_header)
     app.after_request(log_request)

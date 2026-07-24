@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}" data-theme="dark">
+<head>
+    {% include "_head.html" %}
+    <title>{{ t('coach.page_title') }}</title>
+    <link rel="stylesheet" href="/static/theme.css">
+    <link rel="stylesheet" href="/static/nav.css">
+</head>
+{% set nav_active = 'coach' %}
+<body class="page-body">
+
+{% include "_nav.html" %}
+
+<main class="main-content" id="main-content">
+    <div class="coach-page">
+        <h1 class="coach-page-title">{{ t('nav.coach') }}</h1>
+        <p class="coach-page-intro">{{ t('coach.page_intro') }}</p>
+    </div>
+</main>
+
+{% include "_actionbar.html" %}
+
+{# Mevcut yüzen koç widget'ı (kendi CSS'ini enjekte eder, şablon markup'ı gerekmez).
+   Coach hedefinin yeniden tasarımı YOK — yalnızca widget'a kanonik bir sayfa verir. #}
+<script src="/static/coach_widget.js"></script>
+<script src="/static/actions.js"></script>
+<script nonce="{{ csp_nonce }}">
+(function(){
+    // Coach sayfasına gelindiğinde mevcut widget'ı açılışta aç. Widget DOM'u
+    // CW.init() ile (DOMContentLoaded'da) kurulur; #cw-fab belirene dek bekle,
+    // sonra TEK kez aç. Diyalog/alert tetiklenmez.
+    function tryOpen(){
+        if(window.CW && window.CW.open) return true;            // zaten açık → dur
+        var fab = document.getElementById('cw-fab');
+        if(fab && window.CW && typeof window.CW.toggle === 'function'){
+            window.CW.toggle();
+            return true;
+        }
+        return false;
+    }
+    if(tryOpen()) return;
+    var tries = 0;
+    var iv = setInterval(function(){ if(tryOpen() || ++tries > 40) clearInterval(iv); }, 50);
+})();
+</script>
+</body>
+</html>

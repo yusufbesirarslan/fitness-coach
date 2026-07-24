@@ -2688,3 +2688,199 @@ implemented).
 
 Local implementation and validation only. Nothing pushed, no PR created, no merge,
 no deploy, no production DB/flag change.
+
+---
+
+## UIUX Sprint 1 PR1 - Application Shell & Primary Navigation Foundation
+
+Date: 2026-07-23
+Sprint/PR: AxisAI UIUX Track — Sprint 1, PR1 (independent of Core/Training sprint numbering)
+Branch: `uiux/sprint1-pr1-navigation-shell`
+Worktree: `.worktrees/uiux-sprint1-pr1-navigation-shell`
+Verified base commit: `origin/main` @ `d68186a` (Sprint 0 visual-audit harness, #181)
+Final commit: committed locally on `uiux/sprint1-pr1-navigation-shell` after all validation gates passed (hash in `git log`; not pushed, no PR, not merged, not deployed, production flag unchanged — per authorization boundary)
+Working tree: clean after the local commit (implementation + real-browser validation evidence committed in the isolated worktree only)
+
+### Objective
+
+Create a reversible, accessible, responsive, centrally-governed application-shell +
+primary-navigation foundation that presents **Today · Plan · Coach · Progress** as the
+beta-critical primary journey, while keeping Nutrition + Community + utility reachable as a
+secondary tier. No page/content redesign; no backend business rule moved into the client.
+
+### Current-state findings (before)
+
+- Primary navigation was **hardcoded twice** — `templates/_nav.html` (desktop header
+  `.header-nav` ≥1024px + mobile `.nav-drawer`) and `templates/_actionbar.html` (mobile bottom
+  bar `.action-bar` <1024px) — both rendering the same **5 tabs**: Home `/`, Nutrition
+  `/nutrition`, Training `/training`, Progress `/progress-page`, Profile `/edit-profile`.
+- Active state set per-page via `{% set nav_active %}` (`home|nutrition|training|progress|
+  profile`) — explicit id (not brittle prefix matching), reused.
+- Coach was a floating widget (`static/coach_widget.js`) on the 4 core pages, with **no page
+  route**. Community-type features already lived in the drawer/profile hub (secondary).
+- Duplication risk: two manually-maintained nav lists, two inline drawer scripts.
+
+### Files changed
+
+| File | Purpose |
+|---|---|
+| `app/config.py` | New flag `UIUX_NAV_V2_ENABLED` (default OFF) + `configure_app` mapping into `app.config` |
+| `app/nav.py` (new) | Canonical navigation contract — read-only presentational metadata + `resolve_active` |
+| `app/hooks.py` | New `inject_nav` context processor (flag + contract to every template) |
+| `app/__init__.py` | Register `inject_nav` context processor |
+| `app/blueprints/coach.py` | New thin `GET /coach` page route (`@require_auth`); import `render_template` |
+| `templates/_nav_icons.html` (new) | Shared decorative icon macro (reuses existing SVG paths) |
+| `templates/coach.html` (new) | Thin Coach page hosting the existing widget (auto-opens) |
+| `templates/_nav.html` | Flag branch: v2 header/drawer from contract; legacy branch unchanged |
+| `templates/_actionbar.html` | Flag branch: v2 4-tab bottom bar; legacy branch unchanged |
+| `locales/en.json`, `locales/tr.json` | `nav.today/plan/coach`, `coach.page_title/page_intro` |
+| `static/nav.css` | v2-scoped block (desktop drawer access, `.nav-drawer-link-danger`, coach page) |
+| `tests/test_app_shell.py` | Add `coach.html`/`/coach` to legacy characterization |
+| `tests/test_nav_contract.py` (new) | Contract unit tests |
+| `tests/test_nav_shell_v2.py` (new) | Flag + route-state + a11y render tests |
+| `docs/frontend-readiness/sprint-0/inventory.json` | Register the new `/coach` route (Sprint 0 audit inventory; required by `test_frontend_audit_inventory`) |
+
+### Navigation architecture (after)
+
+Primary (beta-critical), order fixed by contract:
+
+| id | label key | canonical route | active_when (nav_active ids) |
+|---|---|---|---|
+| today | nav.today | `/` | today, home |
+| plan | nav.plan | `/training` | plan, training |
+| coach | nav.coach | `/coach` | coach |
+| progress | nav.progress | `/progress-page` | progress |
+
+Secondary tier (drawer + avatar/account hub, all `active_when` mapped but never activating a
+primary tab): nutrition (`/nutrition`, demoted from primary), notifications, friends, feed,
+leaderboard, quests, challenges, gallery, supplements, premium, profile (`/edit-profile`),
+logout. **No route removed; no deep link broken** — only surfacing location changed.
+
+Child-route active-state rule: a page sets its existing `nav_active` id; `app/nav.resolve_active`
+maps it to a primary destination (e.g. `training` → Plan, `home` → Today). Secondary/utility/
+unknown ids → `None` (no false primary active state, incl. `/nutrition`).
+
+### Feature flag
+
+- Name `UIUX_NAV_V2_ENABLED` (documents spec identity `uiux_sprint1_navigation_v2`).
+- Default **OFF**. OFF = byte-compatible legacy 5-tab shell (existing production behavior).
+- ON = four-destination v2 shell. Presentation-only — never an authorization boundary; every
+  route keeps its own `@require_auth`. Independent of every other flag (own env/config key).
+- Server-side `{% if nav_v2 %}` branch renders exactly one shell → no hidden-but-focusable
+  legacy nav, no duplicate listeners, no duplicate interactive navigation.
+
+### Ownership confirmation
+
+UIUX-owned: shell presentation, primary IA + ordering, desktop/mobile presentation, drawer,
+active/focus states, navigation metadata (presentational), tokens/CSS, the thin `/coach` page
+shell. Backend authority preserved: no route semantics/auth/subscription/plan/nutrition/coach/
+progress logic changed; `app/nav.py` contains no business rules; the client renders only
+server-provided `nav_active` and static contract metadata.
+
+### Tests
+
+- Targeted: `python -m pytest tests/test_nav_contract.py tests/test_nav_shell_v2.py
+  tests/test_app_shell.py tests/test_design_system.py -q` → **36 passed**.
+- Regression slice: `... tests/test_coach_routes.py tests/test_dependency_boundaries.py
+  tests/test_hooks.py tests/test_i18n.py tests/test_auth_phase6_ui.py -q` → **151 passed**.
+- Full reconciled suite: `python -m pytest -q` → **2332 passed, 3 deselected** (load tests,
+  `-m "not load"`), 0 failed, exit 0. The only failure during development —
+  `test_frontend_audit_inventory::test_inventory_covers_every_rendered_template` — was caused by
+  this PR adding `render_template("coach.html")`; fixed by registering `/coach` in
+  `docs/frontend-readiness/sprint-0/inventory.json`. No pre-existing failures.
+
+### Real-browser acceptance validation (WSL Playwright / Chromium)
+
+Date: 2026-07-24. Harness: the hermetic Sprint-0 audit app (`scripts/frontend_audit` —
+loopback SQLite, Cognito-free `/__audit__/login`, no outbound network; FatSecret pinned to
+`https://fatsecret.invalid`) booted on an ephemeral loopback port and driven by Playwright
+**Chromium** under WSL. Scenario: `active-workout` (authenticated, `profile_complete=True`).
+Nothing touched production. Environment: WSL Ubuntu-24.04, Playwright 1.61.0, Chromium.
+(WebKit/Firefox are unavailable in this WSL — no non-interactive sudo for
+`playwright install-deps`; Chromium is sufficient for exact-viewport layout evidence.) EN is
+exercised by setting the seeded user's `language` column to `en`, because authenticated locale
+resolution ignores `session['lang']`.
+
+**Exact matrix — 5 viewports × 2 locales × 2 flag states = 20 cells on route `/`: 20/20 PASS.**
+Each cell records exact viewport width (measured `clientWidth` == requested), document
+horizontal overflow, application-shell overflow (`.global-header` / `.header-nav` /
+`.action-bar`), label clipping/wrapping, active navigation state, visible shell variant,
+content obstruction, duplicate-interactive-nav, and result.
+
+| Viewport | EN·OFF | EN·ON | TR·OFF | TR·ON |
+|---|---|---|---|---|
+| 320  | pass | pass | pass | pass |
+| 390  | pass | pass | pass | pass |
+| 768  | pass | pass | pass | pass |
+| 1024 | pass | pass | pass | pass |
+| 1366 | pass | pass | pass | pass |
+
+Across all 20 cells: no document horizontal overflow, no shell overflow, no label
+clipping/wrapping, correct variant (OFF→legacy, ON→v2), and exactly one primary nav container
+visible per breakpoint (`.action-bar` <1024px, `.header-nav` ≥1024px) — never both
+(`duplicate_interactive_nav=false` in every cell). Localized labels rendered correctly at ON
+(TR: Bugün/Plan/Koç/İlerleme; EN: Today/Plan/Coach/Progress) with no raw i18n key leakage.
+
+**Single active state / a11y de-duplication (verified, not assumed).** The primary nav is
+rendered in BOTH the desktop `.header-nav` and the mobile `.action-bar`; at every breakpoint
+CSS sets exactly one of them to `display:none`, which removes it (and its `aria-current`) from
+the accessibility tree. So on `/` the DOM carries two `aria-current="page"` instances of the
+*same* id (`aria_current_dom_instances=2`) while exactly one is exposed
+(`aria_current_exposed=1`, `distinct_active_primary=["today"]`). This matches the unit contract
+`tests/test_nav_shell_v2.py::_active_ids` (which OR's the active state across both instances)
+and the legacy shell's own structure. `nav_landmarks=3` in the DOM (header-nav, action-bar,
+drawer-panel), but only one primary `<nav>` is exposed per breakpoint (the other is
+`display:none`; the drawer carries the `hidden` attribute).
+
+**Representative interaction checks — 7/7 PASS:**
+
+- `/coach` direct load (200) auto-opens the Coach widget (`#cw-window.cw-open`), `coach`
+  active; **refresh** re-loads (200), re-opens the widget, `coach` still active.
+- Route→active: `/training`→Plan, `/progress-page`→Progress, `/nutrition`→no primary active
+  (each with exactly one exposed instance, and none for nutrition).
+- Secondary drawer: opens via keyboard (focus `#header-menu-btn` → Enter), focus moves into
+  the drawer; **Escape** closes it and focus is **restored** to the trigger.
+- Browser **back / forward**: back→Today, forward→Plan (active state tracks history).
+- **Breakpoint transitions** across 1024 (1366→390→1024→1023px): exactly one primary nav
+  visible at each width, never both.
+- **200% zoom** (1366, `zoom:2`): no document horizontal overflow, no nav label clipping.
+- **reduced-motion** preference: `prefers-reduced-motion` matches and the drawer still opens.
+
+**Evidence (committed):**
+
+- Machine-readable manifest: `docs/frontend-readiness/sprint-1-pr1/validation-manifest.json`
+  (schema 1.0 — every cell + interaction with full measurements).
+- 13 curated screenshots: `docs/frontend-readiness/sprint-1-pr1/screenshots/` (both flag states
+  at 320 and 1366, EN+TR at ON, 768/1024 at ON, coach-open, drawer-open, 200% zoom,
+  reduced-motion).
+- The full raw screenshot set (all 20 cells + interactions) is written to
+  `artifacts/ui-audit/sprint1-pr1/screenshots/` — **gitignored** (kept local; path documented
+  here).
+
+### Rollout / rollback (operational)
+
+- Rollout: set `UIUX_NAV_V2_ENABLED=1` in the target environment and restart. Verify primary
+  order Today/Plan/Coach/Progress, child-route active state, Community secondary placement.
+- Rollback: set `UIUX_NAV_V2_ENABLED=0` and restart → server renders the legacy 5-tab shell.
+  No cached-asset/session dependency (server-side branch; nav labels non-cacheable HTML). After
+  rollback, smoke-test: `/`, `/nutrition`, `/training`, `/coach` (still routable), `/progress-page`,
+  `/edit-profile`, Community deep links (`/feed`,`/friends`,`/leaderboard`,`/quests`,`/challenges`),
+  `/logout`. `/coach` remains a valid route in both flag states (harmless when OFF).
+
+### Known limitations
+
+- `/coach` renders the existing widget expanded; the Coach page itself is intentionally a thin
+  host (no Coach redesign — deferred to a later Coach UX PR).
+- Nutrition demoted to secondary per the locked decision; on desktop it is reached via the ☰
+  menu/drawer (v2 shows the drawer at all breakpoints) or the avatar/account hub.
+
+### Follow-up for Sprint 1 PR2 (do not implement here)
+
+Page-level Today/Plan/Coach/Progress UX can now build on a stable, centrally-governed shell and
+the `app/nav.py` contract. PR2 can consume `nav_primary`/`nav_secondary`/`resolve_active`
+without redefining navigation, and can enrich the Coach page beyond the thin host.
+
+### Authorization boundary
+
+Nothing was pushed, no pull request was opened, nothing was merged, nothing was deployed, and no
+production feature flag was changed.

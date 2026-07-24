@@ -1,0 +1,1014 @@
+{
+  "schema_version": "1.0",
+  "sprint": "uiux-sprint1-pr1",
+  "generated_by": "scripts/frontend_audit hermetic app + Playwright chromium (WSL)",
+  "environment": {
+    "os": "WSL Ubuntu-24.04 (Linux)",
+    "browser": "chromium",
+    "playwright": "1.61.0",
+    "note": "webkit/firefox blocked (no non-interactive sudo for install-deps); chromium is sufficient for exact-viewport layout evidence"
+  },
+  "route_under_matrix": "/",
+  "scenario": "active-workout (authenticated, profile_complete=True)",
+  "flag_name": "UIUX_NAV_V2_ENABLED",
+  "matrix": [
+    {
+      "id": "320_tr_off",
+      "viewport": {
+        "w": 320,
+        "h": 720
+      },
+      "measured_client_width": 320,
+      "locale": "tr",
+      "flag": "off",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 320,
+      "client_width": 320,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "home",
+      "distinct_active_primary": [
+        "home"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "legacy",
+      "visible_primary_nav": "action-bar",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "cleared",
+      "primary_labels": [
+        "Ana Sayfa",
+        "Beslenme",
+        "Antrenman",
+        "İlerleme",
+        "Profil",
+        "Ana Sayfa",
+        "Beslenme",
+        "Antrenman",
+        "İlerleme",
+        "Profil"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_320_tr_off.png",
+      "committed_screenshot": "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_320_tr_off.png"
+    },
+    {
+      "id": "390_tr_off",
+      "viewport": {
+        "w": 390,
+        "h": 844
+      },
+      "measured_client_width": 390,
+      "locale": "tr",
+      "flag": "off",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 390,
+      "client_width": 390,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "home",
+      "distinct_active_primary": [
+        "home"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "legacy",
+      "visible_primary_nav": "action-bar",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "cleared",
+      "primary_labels": [
+        "Ana Sayfa",
+        "Beslenme",
+        "Antrenman",
+        "İlerleme",
+        "Profil",
+        "Ana Sayfa",
+        "Beslenme",
+        "Antrenman",
+        "İlerleme",
+        "Profil"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_390_tr_off.png",
+      "committed_screenshot": null
+    },
+    {
+      "id": "768_tr_off",
+      "viewport": {
+        "w": 768,
+        "h": 1024
+      },
+      "measured_client_width": 768,
+      "locale": "tr",
+      "flag": "off",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 768,
+      "client_width": 768,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "home",
+      "distinct_active_primary": [
+        "home"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "legacy",
+      "visible_primary_nav": "action-bar",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "cleared",
+      "primary_labels": [
+        "Ana Sayfa",
+        "Beslenme",
+        "Antrenman",
+        "İlerleme",
+        "Profil",
+        "Ana Sayfa",
+        "Beslenme",
+        "Antrenman",
+        "İlerleme",
+        "Profil"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_768_tr_off.png",
+      "committed_screenshot": null
+    },
+    {
+      "id": "1024_tr_off",
+      "viewport": {
+        "w": 1024,
+        "h": 800
+      },
+      "measured_client_width": 1024,
+      "locale": "tr",
+      "flag": "off",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 1024,
+      "client_width": 1024,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "home",
+      "distinct_active_primary": [
+        "home"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "legacy",
+      "visible_primary_nav": "header-nav",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "n/a",
+      "primary_labels": [
+        "Ana Sayfa",
+        "Beslenme",
+        "Antrenman",
+        "İlerleme",
+        "Profil",
+        "Ana Sayfa",
+        "Beslenme",
+        "Antrenman",
+        "İlerleme",
+        "Profil"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_1024_tr_off.png",
+      "committed_screenshot": null
+    },
+    {
+      "id": "1366_tr_off",
+      "viewport": {
+        "w": 1366,
+        "h": 900
+      },
+      "measured_client_width": 1366,
+      "locale": "tr",
+      "flag": "off",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 1366,
+      "client_width": 1366,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "home",
+      "distinct_active_primary": [
+        "home"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "legacy",
+      "visible_primary_nav": "header-nav",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "n/a",
+      "primary_labels": [
+        "Ana Sayfa",
+        "Beslenme",
+        "Antrenman",
+        "İlerleme",
+        "Profil",
+        "Ana Sayfa",
+        "Beslenme",
+        "Antrenman",
+        "İlerleme",
+        "Profil"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_1366_tr_off.png",
+      "committed_screenshot": "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_1366_tr_off.png"
+    },
+    {
+      "id": "320_tr_on",
+      "viewport": {
+        "w": 320,
+        "h": 720
+      },
+      "measured_client_width": 320,
+      "locale": "tr",
+      "flag": "on",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 320,
+      "client_width": 320,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "today",
+      "distinct_active_primary": [
+        "today"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "v2",
+      "visible_primary_nav": "action-bar",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "cleared",
+      "primary_labels": [
+        "Bugün",
+        "Plan",
+        "Koç",
+        "İlerleme"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_320_tr_on.png",
+      "committed_screenshot": "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_320_tr_on.png"
+    },
+    {
+      "id": "390_tr_on",
+      "viewport": {
+        "w": 390,
+        "h": 844
+      },
+      "measured_client_width": 390,
+      "locale": "tr",
+      "flag": "on",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 390,
+      "client_width": 390,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "today",
+      "distinct_active_primary": [
+        "today"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "v2",
+      "visible_primary_nav": "action-bar",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "cleared",
+      "primary_labels": [
+        "Bugün",
+        "Plan",
+        "Koç",
+        "İlerleme"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_390_tr_on.png",
+      "committed_screenshot": "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_390_tr_on.png"
+    },
+    {
+      "id": "768_tr_on",
+      "viewport": {
+        "w": 768,
+        "h": 1024
+      },
+      "measured_client_width": 768,
+      "locale": "tr",
+      "flag": "on",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 768,
+      "client_width": 768,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "today",
+      "distinct_active_primary": [
+        "today"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "v2",
+      "visible_primary_nav": "action-bar",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "cleared",
+      "primary_labels": [
+        "Bugün",
+        "Plan",
+        "Koç",
+        "İlerleme"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_768_tr_on.png",
+      "committed_screenshot": "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_768_tr_on.png"
+    },
+    {
+      "id": "1024_tr_on",
+      "viewport": {
+        "w": 1024,
+        "h": 800
+      },
+      "measured_client_width": 1024,
+      "locale": "tr",
+      "flag": "on",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 1024,
+      "client_width": 1024,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "today",
+      "distinct_active_primary": [
+        "today"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "v2",
+      "visible_primary_nav": "header-nav",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "n/a",
+      "primary_labels": [
+        "Bugün",
+        "Plan",
+        "Koç",
+        "İlerleme"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_1024_tr_on.png",
+      "committed_screenshot": "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_1024_tr_on.png"
+    },
+    {
+      "id": "1366_tr_on",
+      "viewport": {
+        "w": 1366,
+        "h": 900
+      },
+      "measured_client_width": 1366,
+      "locale": "tr",
+      "flag": "on",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 1366,
+      "client_width": 1366,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "today",
+      "distinct_active_primary": [
+        "today"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "v2",
+      "visible_primary_nav": "header-nav",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "n/a",
+      "primary_labels": [
+        "Bugün",
+        "Plan",
+        "Koç",
+        "İlerleme"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_1366_tr_on.png",
+      "committed_screenshot": "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_1366_tr_on.png"
+    },
+    {
+      "id": "320_en_off",
+      "viewport": {
+        "w": 320,
+        "h": 720
+      },
+      "measured_client_width": 320,
+      "locale": "en",
+      "flag": "off",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 320,
+      "client_width": 320,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "home",
+      "distinct_active_primary": [
+        "home"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "legacy",
+      "visible_primary_nav": "action-bar",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "cleared",
+      "primary_labels": [
+        "Home",
+        "Nutrition",
+        "Training",
+        "Progress",
+        "Profile",
+        "Home",
+        "Nutrition",
+        "Training",
+        "Progress",
+        "Profile"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_320_en_off.png",
+      "committed_screenshot": null
+    },
+    {
+      "id": "390_en_off",
+      "viewport": {
+        "w": 390,
+        "h": 844
+      },
+      "measured_client_width": 390,
+      "locale": "en",
+      "flag": "off",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 390,
+      "client_width": 390,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "home",
+      "distinct_active_primary": [
+        "home"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "legacy",
+      "visible_primary_nav": "action-bar",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "cleared",
+      "primary_labels": [
+        "Home",
+        "Nutrition",
+        "Training",
+        "Progress",
+        "Profile",
+        "Home",
+        "Nutrition",
+        "Training",
+        "Progress",
+        "Profile"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_390_en_off.png",
+      "committed_screenshot": null
+    },
+    {
+      "id": "768_en_off",
+      "viewport": {
+        "w": 768,
+        "h": 1024
+      },
+      "measured_client_width": 768,
+      "locale": "en",
+      "flag": "off",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 768,
+      "client_width": 768,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "home",
+      "distinct_active_primary": [
+        "home"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "legacy",
+      "visible_primary_nav": "action-bar",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "cleared",
+      "primary_labels": [
+        "Home",
+        "Nutrition",
+        "Training",
+        "Progress",
+        "Profile",
+        "Home",
+        "Nutrition",
+        "Training",
+        "Progress",
+        "Profile"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_768_en_off.png",
+      "committed_screenshot": null
+    },
+    {
+      "id": "1024_en_off",
+      "viewport": {
+        "w": 1024,
+        "h": 800
+      },
+      "measured_client_width": 1024,
+      "locale": "en",
+      "flag": "off",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 1024,
+      "client_width": 1024,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "home",
+      "distinct_active_primary": [
+        "home"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "legacy",
+      "visible_primary_nav": "header-nav",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "n/a",
+      "primary_labels": [
+        "Home",
+        "Nutrition",
+        "Training",
+        "Progress",
+        "Profile",
+        "Home",
+        "Nutrition",
+        "Training",
+        "Progress",
+        "Profile"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_1024_en_off.png",
+      "committed_screenshot": null
+    },
+    {
+      "id": "1366_en_off",
+      "viewport": {
+        "w": 1366,
+        "h": 900
+      },
+      "measured_client_width": 1366,
+      "locale": "en",
+      "flag": "off",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 1366,
+      "client_width": 1366,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "home",
+      "distinct_active_primary": [
+        "home"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "legacy",
+      "visible_primary_nav": "header-nav",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "n/a",
+      "primary_labels": [
+        "Home",
+        "Nutrition",
+        "Training",
+        "Progress",
+        "Profile",
+        "Home",
+        "Nutrition",
+        "Training",
+        "Progress",
+        "Profile"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_1366_en_off.png",
+      "committed_screenshot": null
+    },
+    {
+      "id": "320_en_on",
+      "viewport": {
+        "w": 320,
+        "h": 720
+      },
+      "measured_client_width": 320,
+      "locale": "en",
+      "flag": "on",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 320,
+      "client_width": 320,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "today",
+      "distinct_active_primary": [
+        "today"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "v2",
+      "visible_primary_nav": "action-bar",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "cleared",
+      "primary_labels": [
+        "Today",
+        "Plan",
+        "Coach",
+        "Progress"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_320_en_on.png",
+      "committed_screenshot": "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_320_en_on.png"
+    },
+    {
+      "id": "390_en_on",
+      "viewport": {
+        "w": 390,
+        "h": 844
+      },
+      "measured_client_width": 390,
+      "locale": "en",
+      "flag": "on",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 390,
+      "client_width": 390,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "today",
+      "distinct_active_primary": [
+        "today"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "v2",
+      "visible_primary_nav": "action-bar",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "cleared",
+      "primary_labels": [
+        "Today",
+        "Plan",
+        "Coach",
+        "Progress"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_390_en_on.png",
+      "committed_screenshot": null
+    },
+    {
+      "id": "768_en_on",
+      "viewport": {
+        "w": 768,
+        "h": 1024
+      },
+      "measured_client_width": 768,
+      "locale": "en",
+      "flag": "on",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 768,
+      "client_width": 768,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "today",
+      "distinct_active_primary": [
+        "today"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "v2",
+      "visible_primary_nav": "action-bar",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "cleared",
+      "primary_labels": [
+        "Today",
+        "Plan",
+        "Coach",
+        "Progress"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_768_en_on.png",
+      "committed_screenshot": null
+    },
+    {
+      "id": "1024_en_on",
+      "viewport": {
+        "w": 1024,
+        "h": 800
+      },
+      "measured_client_width": 1024,
+      "locale": "en",
+      "flag": "on",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 1024,
+      "client_width": 1024,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "today",
+      "distinct_active_primary": [
+        "today"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "v2",
+      "visible_primary_nav": "header-nav",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "n/a",
+      "primary_labels": [
+        "Today",
+        "Plan",
+        "Coach",
+        "Progress"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_1024_en_on.png",
+      "committed_screenshot": null
+    },
+    {
+      "id": "1366_en_on",
+      "viewport": {
+        "w": 1366,
+        "h": 900
+      },
+      "measured_client_width": 1366,
+      "locale": "en",
+      "flag": "on",
+      "route": "/",
+      "status_code": 200,
+      "document_horizontal_overflow": false,
+      "scroll_width": 1366,
+      "client_width": 1366,
+      "shell_overflow": "none",
+      "label_clipping": "none",
+      "label_wrapping": "none",
+      "active_navigation": "today",
+      "distinct_active_primary": [
+        "today"
+      ],
+      "aria_current_dom_instances": 2,
+      "aria_current_exposed": 1,
+      "visible_shell_variant": "v2",
+      "visible_primary_nav": "header-nav",
+      "duplicate_interactive_nav": false,
+      "content_obstruction": "n/a",
+      "primary_labels": [
+        "Today",
+        "Plan",
+        "Coach",
+        "Progress"
+      ],
+      "raw_key_leak": false,
+      "nav_landmarks": 3,
+      "result": "pass",
+      "issues": [],
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/matrix_1366_en_on.png",
+      "committed_screenshot": "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_1366_en_on.png"
+    }
+  ],
+  "interactions": [
+    {
+      "id": "coach_load_refresh_widget",
+      "viewport": "390x844",
+      "load_status": 200,
+      "widget_opened_on_load": true,
+      "active_on_load": "coach",
+      "refresh_status": 200,
+      "widget_opened_on_refresh": true,
+      "active_on_refresh": "coach",
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/ix_coach_open_390.png",
+      "result": "pass"
+    },
+    {
+      "id": "route_to_active",
+      "viewport": "390x844",
+      "checks": [
+        {
+          "route": "/training",
+          "expected_active": "plan",
+          "actual_active": "plan",
+          "distinct_active": [
+            "plan"
+          ],
+          "aria_current_exposed": 1,
+          "result": "pass"
+        },
+        {
+          "route": "/progress-page",
+          "expected_active": "progress",
+          "actual_active": "progress",
+          "distinct_active": [
+            "progress"
+          ],
+          "aria_current_exposed": 1,
+          "result": "pass"
+        },
+        {
+          "route": "/nutrition",
+          "expected_active": null,
+          "actual_active": null,
+          "distinct_active": [],
+          "aria_current_exposed": 0,
+          "result": "pass"
+        }
+      ],
+      "result": "pass"
+    },
+    {
+      "id": "drawer_keyboard_focus_escape",
+      "viewport": "1366x900",
+      "opened_via_enter": true,
+      "focus_moved_into_drawer": true,
+      "focus_on_open": "nav-drawer-close",
+      "closed_via_escape": true,
+      "focus_restored_to_trigger": true,
+      "logout_reachable_in_drawer": true,
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/ix_drawer_open_1366.png",
+      "result": "pass"
+    },
+    {
+      "id": "back_forward",
+      "viewport": "1366x900",
+      "after_back_active": "today",
+      "after_forward_active": "plan",
+      "result": "pass"
+    },
+    {
+      "id": "breakpoint_transitions",
+      "transitions": [
+        {
+          "width": 1366,
+          "header_nav_shown": true,
+          "action_bar_shown": false,
+          "result": "pass"
+        },
+        {
+          "width": 390,
+          "header_nav_shown": false,
+          "action_bar_shown": true,
+          "result": "pass"
+        },
+        {
+          "width": 1024,
+          "header_nav_shown": true,
+          "action_bar_shown": false,
+          "result": "pass"
+        },
+        {
+          "width": 1023,
+          "header_nav_shown": false,
+          "action_bar_shown": true,
+          "result": "pass"
+        }
+      ],
+      "result": "pass"
+    },
+    {
+      "id": "zoom_200pct",
+      "viewport": "1366x900",
+      "method": "CSS zoom:2 on <html> (Chromium browser-zoom emulation)",
+      "document_horizontal_overflow": false,
+      "nav_label_clipping": false,
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/ix_zoom200_1366.png",
+      "result": "pass"
+    },
+    {
+      "id": "reduced_motion",
+      "viewport": "390x844",
+      "prefers_reduced_motion_matches": true,
+      "drawer_opens": true,
+      "screenshot": "artifacts/ui-audit/sprint1-pr1/screenshots/ix_reduced_motion_390.png",
+      "result": "pass"
+    }
+  ],
+  "summary": {
+    "matrix_total": 20,
+    "matrix_passed": 20,
+    "interactions_total": 7,
+    "interactions_passed": 7,
+    "all_passed": true
+  },
+  "committed_screenshots": [
+    "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_320_tr_off.png",
+    "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_320_tr_on.png",
+    "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_390_tr_on.png",
+    "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_768_tr_on.png",
+    "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_1024_tr_on.png",
+    "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_1366_tr_on.png",
+    "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_1366_tr_off.png",
+    "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_320_en_on.png",
+    "docs/frontend-readiness/sprint-1-pr1/screenshots/matrix_1366_en_on.png",
+    "docs/frontend-readiness/sprint-1-pr1/screenshots/ix_coach_open_390.png",
+    "docs/frontend-readiness/sprint-1-pr1/screenshots/ix_drawer_open_1366.png",
+    "docs/frontend-readiness/sprint-1-pr1/screenshots/ix_zoom200_1366.png",
+    "docs/frontend-readiness/sprint-1-pr1/screenshots/ix_reduced_motion_390.png"
+  ],
+  "full_screenshot_run_dir": "artifacts/ui-audit/sprint1-pr1/screenshots (gitignored)"
+}

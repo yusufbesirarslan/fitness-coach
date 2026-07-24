@@ -260,3 +260,25 @@
 }
 .hub-lang-opt.on { background: var(--color-primary); color: var(--color-on-primary); }
 .hub-lang-opt:not(.on):hover { color: var(--color-text-1); }
+
+/* ── 6. NAV v2 (UIUX Sprint 1 PR1) — bayrak-kapılı kabuk katkıları ─────────
+   Yalnızca UIUX_NAV_V2_ENABLED açıkken .nav-v2 kapsamında uygulanır; bayrak
+   KAPALIYKEN sunucu bu markup'ı hiç çizmez → aşağıdaki kurallar ölü kalır.
+   Birincil tier 4 hedeftir (Today/Plan/Coach/Progress); ikincil tier (Nutrition
+   + Community + araçlar) ☰ menü/çekmecede yaşar ve HER kırılımda erişilmelidir —
+   legacy'de çekmece ≥1024px'te gizliydi (tüm sekmeler üstteydi), v2'de Nutrition
+   birincilden indiği için masaüstünde de menü gerekir. Yalnızca kanonik token. */
+@media (min-width: 1024px) {
+  .global-header.nav-v2 .header-menu-btn { display: inline-flex; }
+  .nav-drawer.nav-v2:not([hidden]) { display: flex; }
+}
+.nav-drawer-link-danger { color: var(--color-danger); }
+.nav-drawer-link-danger:hover { color: var(--color-danger); background: var(--color-danger-soft); }
+
+/* Coach hedefi ince sayfası — yüzen widget açılışta açılır, ana içerik minimal
+   kalır (Coach yeniden tasarımı YOK). Paylaşılan token'lar + basit hero. */
+.coach-page { max-width: 720px; margin: 0 auto; padding: var(--space-8) var(--space-4); }
+.coach-page-title { font-family: var(--font-display); font-size: var(--text-3xl);
+  letter-spacing: var(--tracking-wide); color: var(--color-text-1); margin-bottom: var(--space-3); }
+.coach-page-intro { color: var(--color-text-3); font-size: var(--text-base);
+  line-height: var(--leading-relaxed); }
