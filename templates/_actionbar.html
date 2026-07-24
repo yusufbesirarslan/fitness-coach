@@ -1,6 +1,21 @@
-{# Alt sekme çubuğu (mobil birincil gezinme, <1024px'te görünür). Sayfa,
-   include'dan ÖNCE {% set nav_active = '...' %} ile aktif sekmeyi işaretler:
-   home | nutrition | training | progress | profile. #}
+{# Alt sekme çubuğu (mobil birincil gezinme, <1024px'te görünür). `nav_v2`
+   bayrağı hangi tier düzeninin çizileceğini seçer; aynı anda yalnızca biri
+   render edilir. Sayfa include'dan ÖNCE {% set nav_active = '...' %} işaretler;
+   v2 aktifliği app/nav.resolve_active ile türetilir. #}
+{% if nav_v2 %}
+{# ── v2 (Sprint 1): 4 birincil hedef — Today · Plan · Coach · Progress. #}
+{% import "_nav_icons.html" as navicons %}
+{% set _pa = nav_resolve_active(nav_active) %}
+<nav class="action-bar" aria-label="{{ t('nav.primary') }}">
+    {%- for d in nav_primary %}
+    <a href="{{ d.path }}" data-nav-id="{{ d.id }}" class="ab-tab{% if _pa == d.id %} active{% endif %}"{% if _pa == d.id %} aria-current="page"{% endif %}>
+        {{ navicons.icon(d.icon) }}
+        <span>{{ t(d.label_key) }}</span>
+    </a>
+    {%- endfor %}
+</nav>
+{% else %}
+{# ── Legacy (bayrak KAPALI, üretim varsayılanı): mevcut 5 sekme, DEĞİŞMEDEN. #}
 <nav class="action-bar" aria-label="{{ t('nav.primary') }}">
     <a href="/" class="ab-tab{% if nav_active == 'home' %} active" aria-current="page{% endif %}">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
@@ -23,3 +38,4 @@
         <span>{{ t('nav.profile') }}</span>
     </a>
 </nav>
+{% endif %}

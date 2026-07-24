@@ -92,6 +92,15 @@ AI_ADAPTIVE_PLAN_CONTEXT = os.getenv("AI_ADAPTIVE_PLAN_CONTEXT", "0") == "1"
 # PRESENTATION ONLY — never an authorization boundary. GET /api/training/weekly-program
 # stays @require_auth regardless of this flag. Setting it back to 0 is the full rollback.
 WEEKLY_PROGRAM_UI_ENABLED = os.getenv("WEEKLY_PROGRAM_UI_ENABLED", "0") == "1"
+# ── AxisAI UIUX Sprint 1 PR1: primary-navigation shell v2 rollout gate ──
+# Spec identity: uiux_sprint1_navigation_v2. Default OFF preserves the legacy
+# 5-tab shell exactly (Home/Nutrition/Training/Progress/Profile). ON renders the
+# beta-critical four-destination information architecture (Today/Plan/Coach/
+# Progress) and moves Nutrition + Community + utility into the secondary drawer
+# tier. PRESENTATION ONLY — never an authorization boundary: every route keeps
+# its own @require_auth regardless of this flag. Independent of every other flag
+# (own env name, own config key). Full rollback: set UIUX_NAV_V2_ENABLED=0.
+UIUX_NAV_V2_ENABLED = os.getenv("UIUX_NAV_V2_ENABLED", "0") == "1"
 # ── Sprint 4 WS1: AI koç kalıcı konuşma hafızası ──
 # Operasyonel kapatma anahtarı: 0 → eski davranış (yalnızca widget'ın gönderdiği
 # kısa geçmiş; DB'ye tur yazılmaz). Tablolar expand-only olduğundan geri açmak güvenli.
@@ -284,6 +293,7 @@ def configure_app(app):
     app.config["AI_CHAT_QUOTA_ENABLED"] = AI_CHAT_QUOTA_ENABLED
     app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = AI_ADAPTIVE_PLAN_CONTEXT
     app.config["WEEKLY_PROGRAM_UI_ENABLED"] = WEEKLY_PROGRAM_UI_ENABLED
+    app.config["UIUX_NAV_V2_ENABLED"] = UIUX_NAV_V2_ENABLED
     app.config["AI_MEMORY_ENABLED"] = AI_MEMORY_ENABLED
     app.config["LOGIN_FAIL_CLOSED"] = LOGIN_FAIL_CLOSED
     app.config["BEDROCK_ENABLED"] = BEDROCK_ENABLED

@@ -133,6 +133,21 @@ def inject_i18n():
     }
 
 
+def inject_nav():
+    """Şablonlara kanonik gezinme sözleşmesini + v2 kabuk bayrağını sun
+    (AxisAI UIUX Sprint 1 PR1). Yalnızca SUNUM: `nav_v2` hiçbir rotanın yetkisini
+    değiştirmez, iş kuralı taşımaz — kabuğun hangi tier düzenini çizeceğini seçer.
+    Bayrak `current_app.config`'ten OKUNUR (import-zamanı sabiti değil) → testler
+    ve rollout tek anahtarla açıp kapatabilir."""
+    from app import nav
+    return {
+        "nav_v2": bool(current_app.config.get("UIUX_NAV_V2_ENABLED", False)),
+        "nav_primary": nav.primary_destinations(),
+        "nav_secondary": nav.secondary_destinations(),
+        "nav_resolve_active": nav.resolve_active,
+    }
+
+
 def _csrf_protect():
     """Reject state-changing requests that fail our two CSRF layers.
 
