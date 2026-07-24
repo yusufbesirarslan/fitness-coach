@@ -21,6 +21,7 @@ from app.services.training_generation.response_validator import PlanValidationEr
 from app.services.training_generation.service import generate_training_plan_payload
 from app.services.validators import validate_pump_check_image
 from app.services.weekly_program import build_weekly_program, weekly_program_payload
+from app.services.workout_state import resolve_workout_state
 from app.timeutil import app_today, display_dt, utc_day_bounds
 
 
@@ -301,17 +302,21 @@ def complete_workout():
 @bp.route("/workout/status")
 @require_auth
 def workout_status():
-    # Bugünkü antrenman tamamlanmış mı? (cihazlar arası senkron için sunucudan)
-    # B3: sinyal, complete_workout'un idempotency guard'ıyla AYNI — bugünün
-    # PumpCheck'i. Eski quest-bazlı okuma, görev tohumlanmamış ortamda
-    # tamamlanan antrenmanı 'completed: False' gösteriyordu.
-    start_utc, end_utc = utc_day_bounds()
-    completed = PumpCheck.query.filter(
-        PumpCheck.user_id == current_user.id,
-        PumpCheck.created_at >= start_utc,
-        PumpCheck.created_at < end_utc,
-    ).first() is not None
-    return jsonify({"completed": completed})
+    # Sprint 7 PR1: the canonical workout-state resolver is the single owner of
+    # current workout-state. This route no longer infers state inline — it reads
+    # one deterministic snapshot (docs/WORKOUT_STATE.md).
+    #
+    # `completed` is preserved for back-compat and DERIVED from the snapshot:
+    # snapshot.completed_today is today's PumpCheck (Istanbul day) — byte-identical
+    # to the previous inline query, which mirrored complete_workout's idempotency
+    # guard. The additive `state` object exposes the full contract; existing
+    # consumers that only read `completed` are unaffected. The resolver performs
+    # NO writes and no external calls.
+    snapshot = resolve_workout_state(current_user.id)
+    return jsonify({
+        "completed": snapshot.completed_today,
+        "state": snapshot.to_dict(),
+    })
 
 
 @bp.route("/training-plan/active")
