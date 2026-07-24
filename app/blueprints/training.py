@@ -10,10 +10,10 @@ from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, auth_write_limit, db, limiter
 from app.i18n import current_locale, t
 from app.observability import current_request_id
-from app.models import Message, WORKOUT_COMPLETION_MARKER, DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
+from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
 from app.services.ai import _heavy_chat
 from app.services.ai_gate import ai_concurrency_gate
-from app.services.gamification import _claim_quest, award_xp, complete_quest_for_user, get_level, level_title, log_activity
+from app.services.gamification import complete_quest_for_user
 from app.services.menu_extract import validate_pump_check
 from app.services.pump_checks import get_friend_ids, normalize_workout_score
 from app.services.premium import premium_ai_plan_gate
@@ -21,8 +21,13 @@ from app.services.training_generation.response_validator import PlanValidationEr
 from app.services.training_generation.service import generate_training_plan_payload
 from app.services.validators import validate_pump_check_image
 from app.services.weekly_program import build_weekly_program, weekly_program_payload
+from app.services.workout_completion import (
+    CompleteWorkoutCommand,
+    already_completed_today,
+    complete_workout as run_completion,
+)
 from app.services.workout_state import resolve_workout_state
-from app.timeutil import app_today, display_dt, utc_day_bounds
+from app.timeutil import app_today, display_dt
 
 
 bp = Blueprint("training", __name__)
@@ -166,15 +171,12 @@ def complete_workout():
     if not plan:
         return jsonify({"error": t("route.no_active_training_plan")}), 400
 
-    # M3: görev satırından BAĞIMSIZ günlük idempotency. "workout_logged" görevi
-    # tohumlanmamışsa eski guard hiç çalışmıyordu → tekrar XP. Bugün zaten bir Pump
-    # Check varsa antrenman tamamlanmış sayılır (PumpCheck yalnızca başarıda yazılır).
-    start_utc, end_utc = utc_day_bounds()
-    if PumpCheck.query.filter(
-        PumpCheck.user_id == current_user.id,
-        PumpCheck.created_at >= start_utc,
-        PumpCheck.created_at < end_utc,
-    ).first():
+    # M3 + Sprint 7 PR2: günlük idempotency artık kanonik tamamlanma sınırının
+    # salt-okunur preflight'ıdır (app/services/workout_completion). Bugün zaten bir
+    # Pump Check varsa antrenman tamamlanmış sayılır → pahalı Bedrock görü + S3
+    # yüklemesi AŞAĞIDAKİ bloklardan ÖNCE atlanır. Yarış-güvenli asıl iddia
+    # uq_pump_check_day; bu preflight yalnızca maliyet/gecikme optimizasyonudur.
+    if already_completed_today(current_user.id, app_today()):
         return jsonify({"error": t("route.workout_already_done"),
                         "code": "already_completed"}), 400
 
@@ -213,86 +215,51 @@ def complete_workout():
     except Exception as e:
         current_app.logger.info(f"[S3] Pump Check yüklemesi başarısız: {type(e).__name__}: {e}")
 
-    pump_check = PumpCheck(
-        user_id=current_user.id, image_key=pump_image_key,
-        location_type=location_type, description=description,
-        workout_score=normalize_workout_score(plan.score),
-        valid=True, fallback=check.get("fallback", False),
-        date_key=app_today().isoformat(),
-        visibility=visibility,
-        shared_friend_ids=selected_friend_ids,
-    )
-    db.session.add(pump_check)
-    db.session.flush()
-    # Challenge huni: Pump Check paylaşımı 'pump_check_created' metriğini besler
-    # (aynı transaction — commit aşağıda). record_event kendi hatasını yutar.
-    from app.services.challenges import record_event
-    record_event(current_user.id, "pump_check_created")
-    if visibility == "friends":
-        payload = json.dumps({
-            "pump_check_id": pump_check.id,
-            "image_key": pump_image_key,
-            "environment": location_type,
-            "description": description,
-            "created_at": pump_check.created_at.isoformat() if pump_check.created_at else None,
-        }, ensure_ascii=False)
-        for friend_id in selected_friend_ids:
-            db.session.add(Message(
-                sender_id=current_user.id,
-                receiver_id=friend_id,
-                body=payload,
-                message_type="pump_check",
-            ))
-    # UI antrenman tamamlama artık kanonik WorkoutLog satırı da yazar. Aksi halde
-    # haftalık rapor, "bugünkü hacim" ve "48 saattir antrenman yok" dürtüsü gerçek
-    # antrenmanları GÖRMÜYORDU — WorkoutLog'u yalnızca AI koç yazıyordu (F6).
-    # UI egzersiz kırılımı vermiyor; tamamlanan seansı işaretleyen tek satır yazılır.
-    db.session.add(WorkoutLog(
-        user_id=current_user.id,
-        exercise_name=WORKOUT_COMPLETION_MARKER,
-        sets=1, reps=1, weight_kg=0, volume=0,
-    ))
-    # ─────────────────────────────────────────────────────────────────────────
-
-    # F7: "Pump Check ✓/doğrulandı" iddiası kaldırıldı — otomatik görsel doğrulama
-    # henüz mock. Bonus, doğrulama değil "foto ekledin" ödülü olarak dürüstçe sunulur.
-    base_xp = 10
+    # Kanonik tamamlanma mutasyonu (Sprint 7 PR2): PumpCheck + marker + XP + görev +
+    # challenge + activity'nin TEK atomik transaction'ının sahibi
+    # app/services/workout_completion. Bu route yalnızca transport + doğrulama +
+    # medya + yanıt biçimlendirmesinden sorumlu; rakip tamamlanma semantiği TUTMAZ
+    # (AI koç gym-photo aracı da aynı sınırı paylaşır → tek kaynak).
     photo_bonus = 25
-    # C1: tüm yan etkiler (PumpCheck, WorkoutLog, görev, XP, activity) TEK transaction.
-    # Görev/XP rollback olursa base+photo XP de geri alınır — orphan XP yok.
-    quest_result = _claim_quest(current_user.id, "workout_logged")
-    new_total = award_xp(current_user.id, base_xp + photo_bonus)
-    log_activity(current_user.id, "workout_completed",
-                 "Bugünkü antrenmanını tamamladı (foto eklendi)")
     try:
-        db.session.commit()
-    except IntegrityError:
-        # TOCTOU yarışı: başka bir eşzamanlı istek bugünün PumpCheck'ini araya
-        # yazdı; uq_pump_check_day ikinci commit'i reddetti. TÜM yan etkiler
-        # (XP/quest/WorkoutLog dahil) rollback olur → çift XP yok.
-        db.session.rollback()
+        result = run_completion(CompleteWorkoutCommand(
+            user_id=current_user.id,
+            today=app_today(),
+            image_key=pump_image_key,
+            location_type=location_type,
+            description=description,
+            workout_score=normalize_workout_score(plan.score),
+            visibility=visibility,
+            shared_friend_ids=tuple(selected_friend_ids),
+            valid=True,
+            fallback=check.get("fallback", False),
+            base_xp=10,
+            photo_bonus=photo_bonus,
+            activity_text="Bugünkü antrenmanını tamamladı (foto eklendi)",
+            entry_path="route",
+        ))
+    except Exception as e:
+        # Servis beklenmeyen hatada rollback edip yeniden fırlatır (uq_pump_check_day
+        # DIŞINDAKİ IntegrityError dahil). Kanonik dostça 500; iç hata istemciye sızmaz.
+        current_app.logger.warning("[WORKOUT] tamamlanma başarısız: %s: %s", type(e).__name__, e)
+        return jsonify({"error": t("route.generic_error_retry")}), 500
+    if result.already_completed:
         return jsonify({"error": t("route.workout_already_done"),
                         "code": "already_completed"}), 400
-    except Exception as e:
-        db.session.rollback()
-        current_app.logger.warning("[WORKOUT] commit başarısız: %s: %s", type(e).__name__, e)
-        return jsonify({"error": t("route.generic_error_retry")}), 500
 
-    total_xp = base_xp + photo_bonus + (quest_result["xp"] if quest_result else 0)
-    level = get_level(new_total)
     response = {
-        "message": t("training.workout_done", xp=total_xp, bonus=photo_bonus),
-        "points_awarded": total_xp,
+        "message": t("training.workout_done", xp=result.xp_awarded, bonus=photo_bonus),
+        "points_awarded": result.xp_awarded,
         "pump_bonus": photo_bonus,
-        "pump_check_id": pump_check.id,
-        "new_total": new_total,
-        "level": level,
-        "title": level_title(level),
+        "pump_check_id": result.pump_check_id,
+        "new_total": result.new_total,
+        "level": result.level,
+        "title": result.title,
         "visibility": visibility,
         "shared_friend_ids": selected_friend_ids,
     }
-    if quest_result:
-        response["quest_awarded"] = quest_result
+    if result.quest_result:
+        response["quest_awarded"] = result.quest_result
     if pump_image_key:
         response["pump_image_url"] = s3_helper.generate_presigned_url(
             pump_image_key, expires_in=3600, expected_user_id=current_user.id)
