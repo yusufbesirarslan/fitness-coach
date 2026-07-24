@@ -1,0 +1,2330 @@
+{
+  "schema_version": "1.0.0",
+  "pr": "uiux-sprint1-pr2-today-next-action",
+  "engine": "chromium",
+  "hermetic": true,
+  "seed_summary": {
+    "users": 12,
+    "training_plans": 7,
+    "meal_logs": 6,
+    "workout_logs": 1,
+    "coach_messages": 2,
+    "wearable_connections": 1
+  },
+  "totals": {
+    "cells": 48,
+    "passed": 48,
+    "failed": 0,
+    "blocked": 0
+  },
+  "matrices": {
+    "A_today_20": 20,
+    "B_crossflag_16": 16,
+    "C_states_12": 12
+  },
+  "failed_ids": [],
+  "blocked_ids": [],
+  "cells": [
+    {
+      "id": "A-today-20__plan_ready__320__en__nav-on_today-off",
+      "matrix": "A-today-20",
+      "viewport": "320",
+      "viewport_px": {
+        "width": 320,
+        "height": 720
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=2043036510.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=18&sr=320x720&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938466~115938468~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3988&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=2043036510.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=18&sr=320x720&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938466~115938468~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3988&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 320,
+        "doc_client_width": 320,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "A-today-20__plan_ready__320__en__nav-on_today-on",
+      "matrix": "A-today-20",
+      "viewport": "320",
+      "viewport_px": {
+        "width": 320,
+        "height": 720
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=435968449.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=6&sr=320x720&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938468~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Today&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2308&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=435968449.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=6&sr=320x720&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938468~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Today&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2308&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 320,
+        "doc_client_width": 320,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 320,
+        "today_mount_client_width": 320,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "View your plan",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "A-today-20__plan_ready__320__tr__nav-on_today-off",
+      "matrix": "A-today-20",
+      "viewport": "320",
+      "viewport_px": {
+        "width": 320,
+        "height": 720
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=416469447.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=8&sr=320x720&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938469~118395335~118897920~118897930~119724320~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2272&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=416469447.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=8&sr=320x720&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938469~118395335~118897920~118897930~119724320~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2272&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 320,
+        "doc_client_width": 320,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "A-today-20__plan_ready__320__tr__nav-on_today-on",
+      "matrix": "A-today-20",
+      "viewport": "320",
+      "viewport_px": {
+        "width": 320,
+        "height": 720
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 320,
+        "doc_client_width": 320,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 320,
+        "today_mount_client_width": 320,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "Planını görüntüle",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "A-today-20__plan_ready__390__en__nav-on_today-off",
+      "matrix": "A-today-20",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": "screenshots/A-today-20__plan_ready__390__en__nav-on_today-off.png"
+    },
+    {
+      "id": "A-today-20__plan_ready__390__en__nav-on_today-on",
+      "matrix": "A-today-20",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 390,
+        "today_mount_client_width": 390,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "View your plan",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": "screenshots/A-today-20__plan_ready__390__en__nav-on_today-on.png"
+    },
+    {
+      "id": "A-today-20__plan_ready__390__tr__nav-on_today-off",
+      "matrix": "A-today-20",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m1h2v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=272026293.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=19&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938465~115938468~118897920~118897930~119724321~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=&en=scroll&epn.percent_scrolled=90&tfd=4241&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m1h2v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=272026293.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=19&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938465~115938468~118897920~118897930~119724321~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=&en=scroll&epn.percent_scrolled=90&tfd=4241&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "A-today-20__plan_ready__390__tr__nav-on_today-on",
+      "matrix": "A-today-20",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 390,
+        "today_mount_client_width": 390,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "Planını görüntüle",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/A-today-20__plan_ready__390__tr__nav-on_today-on.png"
+    },
+    {
+      "id": "A-today-20__plan_ready__768__en__nav-on_today-off",
+      "matrix": "A-today-20",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1762441705.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=0&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938468~118897920~118897930~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2454&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1762441705.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=0&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938468~118897920~118897930~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2454&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "A-today-20__plan_ready__768__en__nav-on_today-on",
+      "matrix": "A-today-20",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1928850116.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=11&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115616986~115938466~115938468~118897920~118897930~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Today&en=scroll&epn.percent_scrolled=90&tfd=2381&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1928850116.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=11&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115616986~115938466~115938468~118897920~118897930~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Today&en=scroll&epn.percent_scrolled=90&tfd=2381&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 768,
+        "today_mount_client_width": 768,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "View your plan",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "A-today-20__plan_ready__768__tr__nav-on_today-off",
+      "matrix": "A-today-20",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=317069220.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=3&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938466~115938468~118897920~118897930~119724320~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=2688&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=317069220.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=3&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938466~115938468~118897920~118897930~119724320~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=2688&gaf=1. Refused to connect because it violates the document's Content Security Policy.",
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=317069220.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=3&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938468~118897920~118897930~119724320~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2379&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=317069220.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=3&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938468~118897920~118897930~119724320~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2379&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "A-today-20__plan_ready__768__tr__nav-on_today-on",
+      "matrix": "A-today-20",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=48311756.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118395334~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2211&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=48311756.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118395334~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2211&gaf=1. Refused to connect because it violates the document's Content Security Policy.",
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=48311756.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938466~115938469~118395334~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=scroll&epn.percent_scrolled=90&tfd=2546&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=48311756.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938466~115938469~118395334~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=scroll&epn.percent_scrolled=90&tfd=2546&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 768,
+        "today_mount_client_width": 768,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "Planını görüntüle",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "A-today-20__plan_ready__1024__en__nav-on_today-off",
+      "matrix": "A-today-20",
+      "viewport": "1024",
+      "viewport_px": {
+        "width": 1024,
+        "height": 768
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 1024,
+        "doc_client_width": 1024,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "A-today-20__plan_ready__1024__en__nav-on_today-on",
+      "matrix": "A-today-20",
+      "viewport": "1024",
+      "viewport_px": {
+        "width": 1024,
+        "height": 768
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 1024,
+        "doc_client_width": 1024,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 1024,
+        "today_mount_client_width": 1024,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "View your plan",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "A-today-20__plan_ready__1024__tr__nav-on_today-off",
+      "matrix": "A-today-20",
+      "viewport": "1024",
+      "viewport_px": {
+        "width": 1024,
+        "height": 768
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1189427740.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=1024x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938466~115938469~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2357&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1189427740.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=1024x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938466~115938469~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2357&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 1024,
+        "doc_client_width": 1024,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "A-today-20__plan_ready__1024__tr__nav-on_today-on",
+      "matrix": "A-today-20",
+      "viewport": "1024",
+      "viewport_px": {
+        "width": 1024,
+        "height": 768
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1812878028.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=9&sr=1024x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2279&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1812878028.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=9&sr=1024x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2279&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 1024,
+        "doc_client_width": 1024,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 1024,
+        "today_mount_client_width": 1024,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "Planını görüntüle",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "A-today-20__plan_ready__1366__en__nav-on_today-off",
+      "matrix": "A-today-20",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": "screenshots/A-today-20__plan_ready__1366__en__nav-on_today-off.png"
+    },
+    {
+      "id": "A-today-20__plan_ready__1366__en__nav-on_today-on",
+      "matrix": "A-today-20",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 1280,
+        "today_mount_client_width": 1280,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "View your plan",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": "screenshots/A-today-20__plan_ready__1366__en__nav-on_today-on.png"
+    },
+    {
+      "id": "A-today-20__plan_ready__1366__tr__nav-on_today-off",
+      "matrix": "A-today-20",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=675111712.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=12&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938465~115938469~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2854&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=675111712.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=12&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938465~115938469~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2854&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:32947/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:32947/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:32947/workout/status",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:32947/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:32947/last-session",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "A-today-20__plan_ready__1366__tr__nav-on_today-on",
+      "matrix": "A-today-20",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 1280,
+        "today_mount_client_width": 1280,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "Planını görüntüle",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/A-today-20__plan_ready__1366__tr__nav-on_today-on.png"
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__390__en__nav-off_today-off",
+      "matrix": "B-crossflag-16",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "en",
+      "nav_v2": false,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1158913233.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=0&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118395334~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2278&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1158913233.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=0&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118395334~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2278&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": "screenshots/B-crossflag-16__plan_ready__390__en__nav-off_today-off.png"
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__390__en__nav-off_today-on",
+      "matrix": "B-crossflag-16",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "en",
+      "nav_v2": false,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=862996490.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=12&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938466~115938468~118897920~118897930~119527020~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Today&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=1881&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=862996490.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=12&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938466~115938468~118897920~118897930~119527020~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Today&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=1881&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 390,
+        "today_mount_client_width": 390,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "View your plan",
+        "primary_action_clipped": false,
+        "active_nav_destination": [],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": "screenshots/B-crossflag-16__plan_ready__390__en__nav-off_today-on.png"
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__390__en__nav-on_today-off",
+      "matrix": "B-crossflag-16",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1763542278.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938465~115938469~118897920~118897930~119527019~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2177&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1763542278.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938465~115938469~118897920~118897930~119527019~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2177&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": "screenshots/B-crossflag-16__plan_ready__390__en__nav-on_today-off.png"
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__390__en__nav-on_today-on",
+      "matrix": "B-crossflag-16",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 390,
+        "today_mount_client_width": 390,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "View your plan",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": "screenshots/B-crossflag-16__plan_ready__390__en__nav-on_today-on.png"
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__390__tr__nav-off_today-off",
+      "matrix": "B-crossflag-16",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "tr",
+      "nav_v2": false,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m1h2v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=533804193.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=8&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938469~118897920~118897930~119527019~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2319&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m1h2v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=533804193.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=8&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938469~118897920~118897930~119527019~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2319&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__390__tr__nav-off_today-on",
+      "matrix": "B-crossflag-16",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "tr",
+      "nav_v2": false,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m1h2v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1128615912.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=10&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2091&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m1h2v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1128615912.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=10&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2091&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 390,
+        "today_mount_client_width": 390,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "Planını görüntüle",
+        "primary_action_clipped": false,
+        "active_nav_destination": [],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__390__tr__nav-on_today-off",
+      "matrix": "B-crossflag-16",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1032642478.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=3&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938469~118395335~118897920~118897930~119404703~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2270&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1032642478.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=3&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938469~118395335~118897920~118897930~119404703~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2270&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__390__tr__nav-on_today-on",
+      "matrix": "B-crossflag-16",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 390,
+        "today_mount_client_width": 390,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "Planını görüntüle",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__1366__en__nav-off_today-off",
+      "matrix": "B-crossflag-16",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "en",
+      "nav_v2": false,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1902063281.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=18&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938469~118897920~118897930~119527020~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2423&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1902063281.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=18&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938469~118897920~118897930~119527020~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2423&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__1366__en__nav-off_today-on",
+      "matrix": "B-crossflag-16",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "en",
+      "nav_v2": false,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=459255734.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=18&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938468~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Today&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2206&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=459255734.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=18&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938468~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Today&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2206&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 1280,
+        "today_mount_client_width": 1280,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "View your plan",
+        "primary_action_clipped": false,
+        "active_nav_destination": [],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__1366__en__nav-on_today-off",
+      "matrix": "B-crossflag-16",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__1366__en__nav-on_today-on",
+      "matrix": "B-crossflag-16",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=529015206.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=6&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119527019~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Today&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2095&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=529015206.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=6&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119527019~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Today&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2095&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 1280,
+        "today_mount_client_width": 1280,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "View your plan",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__1366__tr__nav-off_today-off",
+      "matrix": "B-crossflag-16",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "tr",
+      "nav_v2": false,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1823769799.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=8&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118395333~118897920~118897930~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2334&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1823769799.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=8&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118395333~118897920~118897930~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2334&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__1366__tr__nav-off_today-on",
+      "matrix": "B-crossflag-16",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "tr",
+      "nav_v2": false,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 1280,
+        "today_mount_client_width": 1280,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "Planını görüntüle",
+        "primary_action_clipped": false,
+        "active_nav_destination": [],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__1366__tr__nav-on_today-off",
+      "matrix": "B-crossflag-16",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": false,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1045936836.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=13&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118395333~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2268&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1045936836.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=13&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118395333~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2268&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": false,
+        "today_state": null,
+        "today_mount_scroll_width": null,
+        "today_mount_client_width": null,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": true,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "B-crossflag-16__plan_ready__1366__tr__nav-on_today-on",
+      "matrix": "B-crossflag-16",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=372075410.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=3&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2569&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=372075410.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=3&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2569&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/coach/history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 1280,
+        "today_mount_client_width": 1280,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "Planını görüntüle",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "C-states-12__no_plan__390__en__nav-on_today-on",
+      "matrix": "C-states-12",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "social-empty",
+      "expected_state": "no_plan",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=811143658.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=11&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938468~118897920~118897930~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Today&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2109&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=811143658.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=11&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938468~118897920~118897930~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Today&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2109&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "no_plan",
+        "today_mount_scroll_width": 390,
+        "today_mount_client_width": 390,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "Create your plan",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": "screenshots/C-states-12__no_plan__390__en__nav-on_today-on.png"
+    },
+    {
+      "id": "C-states-12__no_plan__390__tr__nav-on_today-on",
+      "matrix": "C-states-12",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "social-empty",
+      "expected_state": "no_plan",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1245123002.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=19&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938466~115938469~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2258&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1245123002.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=19&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938466~115938469~118897920~118897930~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2258&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "no_plan",
+        "today_mount_scroll_width": 390,
+        "today_mount_client_width": 390,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "Planını oluştur",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/C-states-12__no_plan__390__tr__nav-on_today-on.png"
+    },
+    {
+      "id": "C-states-12__no_plan__1366__en__nav-on_today-on",
+      "matrix": "C-states-12",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "social-empty",
+      "expected_state": "no_plan",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "no_plan",
+        "today_mount_scroll_width": 1280,
+        "today_mount_client_width": 1280,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "Create your plan",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": "screenshots/C-states-12__no_plan__1366__en__nav-on_today-on.png"
+    },
+    {
+      "id": "C-states-12__no_plan__1366__tr__nav-on_today-on",
+      "matrix": "C-states-12",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "social-empty",
+      "expected_state": "no_plan",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=383090924.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=17&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938465~115938469~118897920~118897930~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2343&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=383090924.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=17&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938465~115938469~118897920~118897930~119896803&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2343&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "no_plan",
+        "today_mount_scroll_width": 1280,
+        "today_mount_client_width": 1280,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "Planını oluştur",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/C-states-12__no_plan__1366__tr__nav-on_today-on.png"
+    },
+    {
+      "id": "C-states-12__plan_ready__390__en__nav-on_today-on",
+      "matrix": "C-states-12",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 390,
+        "today_mount_client_width": 390,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "View your plan",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": "screenshots/C-states-12__plan_ready__390__en__nav-on_today-on.png"
+    },
+    {
+      "id": "C-states-12__plan_ready__390__tr__nav-on_today-on",
+      "matrix": "C-states-12",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1817445029.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=15&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938466~115938469~118897920~118897930~119527019~119724322~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2211&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1817445029.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=15&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938466~115938469~118897920~118897930~119527019~119724322~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2211&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 390,
+        "today_mount_client_width": 390,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "Planını görüntüle",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/C-states-12__plan_ready__390__tr__nav-on_today-on.png"
+    },
+    {
+      "id": "C-states-12__plan_ready__1366__en__nav-on_today-on",
+      "matrix": "C-states-12",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1674281370.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=18&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119724320~119793974~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Today&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2536&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m0v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1674281370.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=18&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119724320~119793974~119896802&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Today&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2536&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 1280,
+        "today_mount_client_width": 1280,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "View your plan",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": "screenshots/C-states-12__plan_ready__1366__en__nav-on_today-on.png"
+    },
+    {
+      "id": "C-states-12__plan_ready__1366__tr__nav-on_today-on",
+      "matrix": "C-states-12",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "active-workout",
+      "expected_state": "plan_ready",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "plan_ready",
+        "today_mount_scroll_width": 1280,
+        "today_mount_client_width": 1280,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 1,
+        "primary_action_label": "Planını görüntüle",
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/C-states-12__plan_ready__1366__tr__nav-on_today-on.png"
+    },
+    {
+      "id": "C-states-12__workout_done__390__en__nav-on_today-on",
+      "matrix": "C-states-12",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "completed-workout",
+      "expected_state": "workout_done",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "workout_done",
+        "today_mount_scroll_width": 390,
+        "today_mount_client_width": 390,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": "screenshots/C-states-12__workout_done__390__en__nav-on_today-on.png"
+    },
+    {
+      "id": "C-states-12__workout_done__390__tr__nav-on_today-on",
+      "matrix": "C-states-12",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "completed-workout",
+      "expected_state": "workout_done",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "workout_done",
+        "today_mount_scroll_width": 390,
+        "today_mount_client_width": 390,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/C-states-12__workout_done__390__tr__nav-on_today-on.png"
+    },
+    {
+      "id": "C-states-12__workout_done__1366__en__nav-on_today-on",
+      "matrix": "C-states-12",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "en",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "completed-workout",
+      "expected_state": "workout_done",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "workout_done",
+        "today_mount_scroll_width": 1280,
+        "today_mount_client_width": 1280,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "en"
+      },
+      "screenshot": "screenshots/C-states-12__workout_done__1366__en__nav-on_today-on.png"
+    },
+    {
+      "id": "C-states-12__workout_done__1366__tr__nav-on_today-on",
+      "matrix": "C-states-12",
+      "viewport": "1366",
+      "viewport_px": {
+        "width": 1366,
+        "height": 768
+      },
+      "locale": "tr",
+      "nav_v2": true,
+      "today_v2": true,
+      "scenario": "completed-workout",
+      "expected_state": "workout_done",
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m1h2v9251835945za200zd9251835945&_p=1784563200000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1770873166.1784563200&frm=0&ngs=1&pscdl=noapi&rcb=15&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938465~115938468~118897920~118897930~119896802&sid=1784563200&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=scroll&epn.percent_scrolled=90&tfd=2756&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m1h2v9251835945za200zd9251835945&_p=1784563200000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1770873166.1784563200&frm=0&ngs=1&pscdl=noapi&rcb=15&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938465~115938468~118897920~118897930~119896802&sid=1784563200&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=scroll&epn.percent_scrolled=90&tfd=2756&gaf=1. Refused to connect because it violates the document's Content Security Policy.",
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m1h2v9251835945za200zd9251835945&_p=1784563200000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1770873166.1784563200&frm=0&ngs=1&pscdl=noapi&rcb=15&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938468~118897920~118897930~119896802&sid=1784563200&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2655&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je67m1h2v9251835945za200zd9251835945&_p=1784563200000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1770873166.1784563200&frm=0&ngs=1&pscdl=noapi&rcb=15&sr=1366x768&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938468~118897920~118897930~119896802&sid=1784563200&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Bug%C3%BCn&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2655&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:32947/coach/history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "measurements": {
+        "doc_scroll_width": 1366,
+        "doc_client_width": 1366,
+        "doc_horizontal_overflow": false,
+        "today_present": true,
+        "today_state": "workout_done",
+        "today_mount_scroll_width": 1280,
+        "today_mount_client_width": 1280,
+        "today_mount_overflow": false,
+        "legacy_dash_grid_present": false,
+        "primary_nav_raw_count": 2,
+        "primary_nav_exposed_count": 1,
+        "primary_action_count": 0,
+        "primary_action_label": null,
+        "primary_action_clipped": false,
+        "active_nav_destination": [
+          "today",
+          "today"
+        ],
+        "raw_key_leak": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/C-states-12__workout_done__1366__tr__nav-on_today-on.png"
+    }
+  ]
+}

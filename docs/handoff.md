@@ -3004,3 +3004,245 @@ Transaction ownership before PR2: each writer owned its own inline transaction w
 ### Authorization boundary
 
 Nothing was pushed, no PR opened, nothing merged, deployed, or production-flag-changed. Sprint 7 PR3 not started. Docker Desktop + a disposable local Postgres container were started for the concurrency test only, and the container/credential are torn down afterward.
+
+## UIUX Sprint 1 PR2 - Today Experience: Next-Action Hierarchy & State Semantics
+
+### Dependency and base (reconciled against current origin/main)
+
+- **PR1 is now merged into `origin/main`** as `a272b5b` (PR #182; its tree is **byte-identical** to the
+  original stacked base `1f32c2f`). After PR1 landed on `d68186a`, **Sprint 7 PR1** (`3d9c582`,
+  "Canonical Workout State Contract and Read Model", PR #183) landed on top, so `origin/main` advanced
+  from `d68186a` to `3d9c582`.
+- PR2 was therefore **rebased onto `origin/main` = `3d9c582`** (PR1 is present in main's ancestry via
+  `a272b5b`, so the stacked-PR rule against rebasing past an absent/unmerged PR1 no longer applies).
+  Branch `uiux/sprint1-pr2-today-next-action`, worktree `.worktrees/uiux-sprint1-pr2-today-next-action`.
+  The PR1 worktree/branch was left untouched at `1f32c2f`.
+- **Second reconciliation (after PR #185 opened):** `origin/main` advanced again from `3d9c582` to
+  `307b7b5` when **Sprint 7 PR2** ("Canonical Workout Mutation Integrity", PR #184) merged. PR2 was
+  **rebased onto `origin/main` = `307b7b5`**. Only two files overlapped: `app/blueprints/training.py`
+  (auto-merged — #184 rewrote the *write* path `complete_workout()`/import block while PR2 touched the
+  *read* paths `workout_status()`/`get_active_training_plan()`) and `docs/handoff.md` (both append a
+  section; both preserved). Sprint 7 PR2 owns the write side via `app/services/workout_completion/`;
+  PR2's `today_facts` still reads through `workout_state.resolve_workout_state`, which #184 left intact,
+  so the read/write split holds and no PR2 behavior changed. Full reconciled suite re-run green after
+  the rebase.
+
+### Reconciliation with Sprint 7 PR1 (canonical workout-state)
+
+The two commits main gained since PR1's base were **PR1 itself** (`a272b5b`) and **Sprint 7 PR1**
+(`3d9c582`). Sprint 7 PR1 introduced `app/services/workout_state/resolve_workout_state()` as the
+**single canonical owner** of current workout-state and refactored `/workout/status` to return the
+`completed` flag **plus** an additive `state` object from that resolver. That directly overlaps PR2:
+
+- **`app/blueprints/training.py`** conflicted on `workout_status()`. Resolution: **keep Sprint 7's
+  canonical version** — PR2 no longer touches that route, so the additive `state` field is preserved.
+  PR2 keeps only its `get_active_training_plan()` change (share the active-plan selector), which
+  Sprint 7 did not touch.
+- **`app/services/today_facts.workout_completed_today`** now **delegates to
+  `resolve_workout_state(user_id).completed_today`** instead of running its own day-bounded `PumpCheck`
+  query. After Sprint 7 that resolver *is* the completion helper behind `/workout/status`, so a second
+  query would re-introduce exactly the duplication correction #2 forbids. `gather_today_facts` maps the
+  resolver's fail-safe `resolution_error` anomaly to `read_ok=False` (honest error), while benign
+  domain anomalies (e.g. an unparseable schedule) stay non-error → the plan-exists state is preserved.
+- `docs/handoff.md` auto-merged cleanly (Sprint 7 PR1, UIUX PR1 and UIUX PR2 sections all intact).
+
+### Objective
+
+Turn the Today destination (`/` -> `tracking.py:home()`) into a production-safe, accessible,
+responsive, reversible experience behind a new default-OFF flag: one authoritative next action,
+honest missing/completed/error semantics, a labeled quick-log, PR1 nav consumed (not redefined),
+no backend authority moved into the UI, and no client-side recommendation engine.
+
+### Current-state findings (before)
+
+- Legacy Today (`templates/index.html`) is an 8-card "AI command center". Its primary defect was a
+  **client-side next-action engine** (`computeNextAction()`) guessing the next step from
+  `new Date().getHours()`, consumed calories, water and a workout flag — forbidden client-owned
+  inference. Loading/no-plan/completed/error were conflated.
+- Legacy first-render HTTP: `GET /last-session`, `/meal-log/today`, `/water`, `/workout/status`,
+  `/checkin-history`, `/leaderboard/reward-check` = **6 requests** (+ Chart.js CDN).
+
+### Files changed
+
+- `app/config.py` — `UIUX_TODAY_V2_ENABLED` (env `== "1"`, default OFF) + registered into `app.config`.
+- `app/today_presenter.py` (new) — **pure** presenter: frozen `TodayFacts` -> `build_today_view` ->
+  frozen `TodayView`. No DB/session/model/query/write/AI/HTTP/timezone/business logic.
+- `app/services/today_facts.py` (new) — read-only facts layer: owns the canonical active-plan selector
+  (shared with `/training-plan/active`) and **delegates today-completion to the Sprint 7 canonical
+  `resolve_workout_state`**; `gather_today_facts` tolerates read failure (`read_ok=False`, including the
+  resolver's fail-safe `resolution_error` anomaly).
+- `app/blueprints/training.py` — `/training-plan/active` shares `today_facts.get_active_plan`;
+  `/workout/status` is left as Sprint 7's canonical `{completed, state}` (PR2 reads completion from the
+  same resolver rather than re-querying). Endpoint responses characterization-tested.
+- `app/blueprints/tracking.py` — `home()` reads the flag; OFF renders unchanged `index.html`, ON
+  builds facts+view and renders `today.html`.
+- `templates/today.html` (new), `static/today.css` (new), `locales/{tr,en}.json` (+21 `today.*` keys,
+  parity kept), `.env.example` (flag doc), `tests/test_today_v2.py` (new),
+  `scripts/frontend_audit/today_pr2_matrix.py` (new, evidence tooling; now records per-cell
+  `server_errors`/`failed_requests` and adds a `--behavior` interaction-evidence run).
+- `scripts/frontend_audit/app.py` — **harness-only** request-serialization lock so the hermetic audit's
+  per-request global clock/validator patching is coherent under the threaded server's parallel XHRs
+  (Blocker-2 fix; no application code changed).
+- `docs/frontend-readiness/sprint-0/inventory.json` — additive `today.html` variant entry (excluded /
+  audit_only) so the "every rendered template is inventoried" invariant holds for the new template.
+- `docs/frontend-readiness/sprint-1-pr2/` — `validation-manifest.json` (48 cells) +
+  `interaction-results.json` (6 cells) + `behavior-results.json` (17 checks) + curated `screenshots/` +
+  `test-partition.json` (chunked-suite proof) + `xhr-500-investigation.md` + `provenance.json`.
+
+### Presentation contract (canonical sources + states)
+
+Facts are gathered by the route/read layer and mapped by the pure presenter. Canonical sources:
+`has_active_plan` reuses the exact `/training-plan/active` selector (most recent `TrainingPlan`);
+`workout_completed_today` delegates to the Sprint 7 canonical
+`resolve_workout_state(...).completed_today` — the same signal `/workout/status` now returns (today's
+`PumpCheck`, Istanbul day window). States: `no_plan` (primary "Create your plan" -> `/training`); `plan_ready`
+(neutral primary "View your plan"/"Planini goruntule" -> `/training` — **not** "today's workout /
+recommended"); `workout_done` (explicit completion, **no dominant CTA**, secondary View progress /
+Open Plan, no stale Start); `error` (`read_ok=False` -> honest error, **not** no-plan, neutral
+secondary Open Plan only). State ids are stable ASCII, never derived from translated copy.
+
+### Ownership confirmation
+
+UIUX-owned: Today page hierarchy/visual/layout/state presentation, primary-action placement,
+quick-log presentation, Today a11y/i18n/flag/init/browser validation. **No recommendation engine
+was created.** No workout/recovery/nutrition/entitlement/Coach/Progress rule was reconstructed;
+backend authority is unchanged. The presenter is a pure mapping over already-authoritative facts.
+
+### Unsupported states (Core/Training dependencies, not fabricated)
+
+The repository has no authoritative "active/in-progress workout session", "scheduled workout-for-
+today", explicit "rest day", "check-in required", or user-facing "why the plan changed" reason.
+Per spec they are **not** invented: the "Why this changed" section is omitted, and rest-day / active-
+session are recorded here as Core/Training dependencies for a later PR.
+
+### Feature flag (four combinations)
+
+`UIUX_TODAY_V2_ENABLED` — default OFF, server-config only (not query/cookie/header/storage),
+independent of `UIUX_NAV_V2_ENABLED`. OFF renders legacy `index.html` byte-identically; ON renders
+`today.html`. All four Nav x Today combinations render exactly one Today tree and one accessibility-
+exposed primary nav (verified by tests + the browser matrix). Either flag rolls back alone.
+
+### Request counts and performance
+
+Today V2 first-render HTTP: `/last-session`, `/meal-log/today`, `/water`, `/checkin-history`,
+`/leaderboard/reward-check` = **5 requests** — the legacy client `/workout/status` fetch is
+**dropped** because completion is now read server-side for the primary action (+2 cheap server-side
+reads, not HTTP). Net: **V2 (5) < legacy (6)**, no duplicated authoritative read, no new dependency.
+Tested by `test_v2_does_not_client_fetch_workout_status` / `test_legacy_off_path_still_fetches_workout_status`.
+
+### Automated tests
+
+Command: `python -m pytest -q` (worktree; load tests deselected by `pytest.ini -m "not load"`).
+`tests/test_today_v2.py` (**27 tests**): presenter purity/contract, primary-action, four-combo flag
+matrix, canonical endpoint sources (`/training-plan/active` selector reused; `/workout/status` owned by
+the Sprint 7 resolver with its `completed` signal shared), the today-facts↔`/workout/status` agreement,
+the resolver `resolution_error`→honest-error mapping (with a benign domain anomaly staying non-error),
+request-count dedup, one-H1/no-raw-key-leak, AxisAI-only copy. Affected slices (`test_today_v2`,
+`test_training_routes`, `test_workout_state`, `test_nav_shell_v2`, `test_app_shell`, `test_i18n`,
+`test_nav_contract`): **all passed**.
+
+**Full reconciled suite on the rebased stack: 2423 tests, `pytest.ini -m "not load"` applied.** Run in
+four file-partitioned chunks (single long runs were being SIGTERM-killed in this environment):
+**606 + 606 + 605 + 606 = 2423 passed, 0 failed.** Partition proof (`test-partition.json`): the suite
+was partitioned **by file** (each node in exactly one chunk → chunks provably disjoint, union = the
+whole suite; 129 files), the per-chunk collected counts re-summed to the full 2423, and every chunk
+exited 0 — no node omitted or duplicated. (The earlier pre-rebase run had found and fixed one
+PR2-caused inventory failure — `today.html` now carries a documented `excluded`/`audit_only` Sprint-0
+inventory entry since it shares `/` in production; that fix is included here.)
+
+### Browser validation (WSL Playwright / Chromium, hermetic) — re-run on the rebased stack
+
+`scripts/frontend_audit/today_pr2_matrix.py` reuses the Sprint-0 hermetic audit app + `AuditServer` +
+fixed browser clock + Chromium, toggling the Nav/Today flags per cell. Re-run in WSL Ubuntu-24.04 with
+the Sprint-0 venv (python 3.12.3) + `PLAYWRIGHT_BROWSERS_PATH` browsers (Chromium 149.0.7827.55) after
+the rebase. Matrices: A = 20-cell Today (5 viewports x 2 locales x Today{off,on}, Nav ON); B = 16-cell
+cross-flag (2 viewports x 2 locales x 4 combos); C = 12-cell state (no_plan/plan_ready/workout_done x
+390/1366 x EN/TR). Per cell: document + Today-mount scroll/client width, horizontal overflow, visible
+Today tree, `data-today-state`, raw + exposed primary-nav counts, primary-action count/label, label
+clipping, raw-key leakage, **plus (new) per-cell `server_errors` (same-origin ≥500) and
+`failed_requests`** — any same-origin 5xx now **fails** the cell so a passing layout can no longer hide
+a network failure. Result: **48/48 cells passed, 0 failed, 0 blocked**, and **zero same-origin 5xx
+across all 48 cells**. Every cell: no document or Today-shell horizontal overflow across
+320/390/768/1024/1366; exactly one accessibility-exposed primary nav in all four flag combinations;
+correct `data-today-state`; neutral primary label ("View your plan" / plan_ready) and **no** dominant
+CTA on `workout_done`; no raw-key leakage. External Google-Analytics/CDN requests fail by design in the
+no-network hermetic env and are recorded but not counted as cell failures (they are environmental and
+identical on the legacy page). Chromium is the required minimum engine; WebKit/Firefox not installed →
+recorded as an environmental limitation.
+
+#### Blocker-2: the transient summary-XHR 5xx — investigated, classified, fixed
+
+The single pre-rebase cell that logged a `500` was fully investigated (`xhr-500-investigation.md`):
+single-threaded, all five Today summary endpoints return 200; under concurrency the failure reproduces
+**probabilistically (~1-2 % of authed reads), endpoint-agnostically**, as a 503 (or 500 in a different
+race) from the **auth/session layer** (`auth_middleware._service_unavailable` ← `session_store`
+`SessionTransient`). Root cause: the hermetic audit installs **per-request GLOBAL** clock+validator
+patching that is not thread-safe under the threaded server when a page fires parallel XHRs; the legacy
+page fires **more** authed XHRs, so the base is equally/more exposed → **a harness (audit-environment)
+defect, not a PR2 defect**. Fix: a harness-only request-serialization lock in
+`scripts/frontend_audit/app.py` (A/B proof: pre-fix 3 of 4 concurrency runs hit a 503; post-fix
+0 across 480+ authed reads). The affected cell (`A-today-20__plan_ready__320__tr__nav-on_today-on`) now
+**passes cleanly** on rerun (empty `server_errors`/`failed_requests`/`console_errors`); the hardened
+manifest proves no same-origin 5xx hides behind a layout pass.
+
+#### Interaction + behavioral evidence
+
+Interaction checks (`interaction-results.json`), Today ON: **6/6 passed** — reduced-motion (plan_ready
+390/EN, workout_done 390/TR), 200% page zoom (plan_ready 1366/EN, 768/TR), 150% text (plan_ready
+390/TR, no_plan 390/EN); each held zero horizontal overflow, an intact non-clipped primary action, and
+the correct state. Behavioral checks (`behavior-results.json`, `--behavior`): **16 passed, 1 n/a, 0
+failed** — primary-CTA pointer + keyboard activation (→ `/training`); quick-log pointer + keyboard
+activation (→ `/nutrition`; the quick-log is a labeled link, not an in-page overlay → the "open
+overlay / keyboard-navigate-within / Escape-restore" sub-checks are recorded **n/a** with
+justification); browser back/forward with route-return-to-Today (state + single primary preserved);
+breakpoint transitions below and above 1024 px (320/768/1023/1024/1366/1440 — no overflow, one primary
+each); repeated breakpoint transitions with **no duplicate init** (`window.__axTodayInit` single) and
+**no duplicate summary XHRs**; no duplicate HTTP requests on load (each summary endpoint once); no
+duplicate analytics loader; no duplicate same-origin action submission (primary + quick-log are
+GET-navigation links; no in-page mutating POST); no hidden-but-tabbable controls inside the Today tree;
+exactly one accessibility-exposed Today tree and one primary nav across all four flag combinations; and
+Escape + focus behaviour for the one dismissible surface (the pre-existing reward dialog — seeded so it
+opens: focus enters the dialog, Escape closes it, focus not trapped). Evidence:
+`docs/frontend-readiness/sprint-1-pr2/{validation-manifest,interaction-results,behavior-results,test-partition,provenance}.json`
++ `xhr-500-investigation.md` + curated `screenshots/`; raw runs (gitignored) under `artifacts/ui-audit/`.
+
+### Accessibility
+
+One H1 ("Today"/"Bugun"), `main` landmark, `role="status"` live regions for loading/summary-error,
+server-rendered primary action as a real link with visible token-based focus, icon-only controls
+`aria-hidden` with text labels, completion/error communicated by icon+text (not color alone),
+reduced-motion honored (CSS + Chart.js animation off), no duplicate IDs, PR1 `aria-current` nav
+preserved. Validated by template tests + the real-browser matrix.
+
+### Rollout / rollback (operational)
+
+- Rollout: set `UIUX_TODAY_V2_ENABLED=1` (optionally with `UIUX_NAV_V2_ENABLED=1` for the beta shell)
+  and restart. Smoke `/`: confirm one primary action, `data-today-state` correct, no new network
+  requests vs legacy, TR/EN. Independent of nav v2.
+- Rollback: set `UIUX_TODAY_V2_ENABLED=0` and restart -> legacy Today dashboard returns. Server-side
+  branch, no session/cache/static-asset or data-migration dependency; nav v2 unaffected.
+
+### Known limitations
+
+- Quick Log is a single labeled meal-logging entry (-> `/nutrition`). Inline water/weight quick-entry
+  is deferred: adding it safely needs the legacy inline logging extracted into a shared partial/JS
+  module (avoids a duplicate write implementation) — a UIUX follow-up.
+- `error` and loading states are validated at unit/route level; a real DB read failure is not
+  reproducible in the hermetic browser run without fault injection.
+- The hermetic audit harness now serializes request bodies (a harness-only lock) because its
+  per-request global clock/validator patching is not thread-safe under a page's parallel XHRs. This is
+  an audit-environment property only — production has no such global patching and is unaffected.
+- WebKit/Firefox are not installed in the WSL audit environment, so cross-browser coverage beyond the
+  required Chromium minimum is not claimed.
+
+### Dependencies and follow-up (PR3)
+
+Core/Training: authoritative active-session, scheduled-workout-for-today, explicit rest-day,
+check-in-required, and a user-facing plan-change explanation would let Today surface richer honest
+states. UIUX: shared logging partial for inline quick-log; optional Coach entry on Today.
+
+### Authorization boundary
+
+Local implementation and validation were completed under a local-only boundary; the branch was
+subsequently pushed and a pull request opened against `main` under explicit authorization
+(PR #185). Nothing was merged, nothing was deployed, and no production feature flag was changed.
