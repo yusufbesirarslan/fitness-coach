@@ -9,23 +9,22 @@ inputs always yield the same snapshot. All impure data access lives in
 from .models import (
     ACTION_BLOCKED,
     ACTION_NONE,
-    ACTION_RESUME,
     ACTION_START,
     ANOMALY_COMPLETION_MARKER_MISMATCH,
     ANOMALY_SCHEDULE_UNPARSEABLE,
     EXEC_COMPLETED,
-    EXEC_IN_PROGRESS,
     EXEC_NONE,
+    EXEC_RECORDED,
     KIND_REST,
     KIND_WORKOUT,
     PRIMARY_COMPLETED,
-    PRIMARY_IN_PROGRESS,
+    PRIMARY_EXECUTION_RECORDED,
     PRIMARY_NEEDS_ATTENTION,
     PRIMARY_NO_PLAN,
     PRIMARY_REST_DAY,
     PRIMARY_SCHEDULED_NOT_STARTED,
     PRIMARY_UNSCHEDULED_COMPLETED,
-    PRIMARY_UNSCHEDULED_IN_PROGRESS,
+    PRIMARY_UNSCHEDULED_EXECUTION,
     REL_INDETERMINATE,
     REL_MATCHES_SCHEDULED,
     REL_UNRELATED_DATE,
@@ -55,13 +54,15 @@ def _schedule_state(i: WorkoutStateInputs) -> str:
 
 def _execution_state(i: WorkoutStateInputs) -> str:
     # Completion (PumpCheck) is canonical and outranks raw exercise rows, so a
-    # completed session with logged exercises is COMPLETED, never in_progress.
+    # completed session with logged exercises is COMPLETED, never mere evidence.
     if i.completed_today:
         return EXEC_COMPLETED
-    # Real exercise rows with no completion = genuine in-progress/partial work
-    # (e.g. logged via the AI coach). A partial record is never "completed".
+    # Non-marker rows with no completion = RECORDED EXECUTION EVIDENCE only (they
+    # can come from the AI-coach per-exercise tool, outside any interactive flow).
+    # This is never "completed" and never an active/resumable session — the server
+    # persists no started session, so no `resume` is derivable from it.
     if i.real_entry_count_today > 0:
-        return EXEC_IN_PROGRESS
+        return EXEC_RECORDED
     return EXEC_NONE
 
 
@@ -70,7 +71,7 @@ def _plan_relationship(i: WorkoutStateInputs, schedule_state: str,
     # Association is by local-date + schedule kind only; WorkoutLog carries no
     # planned-workout identifier, so identifier-level matching is not derivable
     # (documented gap — docs/WORKOUT_STATE.md).
-    if execution_state in (EXEC_COMPLETED, EXEC_IN_PROGRESS):
+    if execution_state in (EXEC_COMPLETED, EXEC_RECORDED):
         if schedule_state == SCHEDULE_SCHEDULED:
             return REL_MATCHES_SCHEDULED
         if schedule_state in (SCHEDULE_REST_DAY, SCHEDULE_NO_PLAN):
@@ -84,13 +85,18 @@ def _plan_relationship(i: WorkoutStateInputs, schedule_state: str,
 
 
 def _action(schedule_state: str, execution_state: str) -> str:
-    # Inconsistent schedule → grant no action (spec §6/§12).
+    # Inconsistent/unavailable schedule → grant no action (spec §6/§12): a
+    # malformed schedule can never yield START (an unsafe "begin your workout").
     if schedule_state == SCHEDULE_UNAVAILABLE:
         return ACTION_BLOCKED
     if execution_state == EXEC_COMPLETED:
         return ACTION_NONE
-    if execution_state == EXEC_IN_PROGRESS:
-        return ACTION_RESUME
+    if execution_state == EXEC_RECORDED:
+        # Recorded evidence, but the server holds NO resumable session — it must
+        # not fabricate a `resume` (over-claims an active session) nor a `start`
+        # (ignores the evidence). Offer no directed action; the client "complete"
+        # affordance is a separate mutation, always available.
+        return ACTION_NONE
     # no_execution:
     if schedule_state == SCHEDULE_SCHEDULED:
         return ACTION_START
@@ -104,9 +110,9 @@ def _primary_state(schedule_state: str, execution_state: str,
     if execution_state == EXEC_COMPLETED:
         return (PRIMARY_UNSCHEDULED_COMPLETED
                 if plan_relationship == REL_UNSCHEDULED else PRIMARY_COMPLETED)
-    if execution_state == EXEC_IN_PROGRESS:
-        return (PRIMARY_UNSCHEDULED_IN_PROGRESS
-                if plan_relationship == REL_UNSCHEDULED else PRIMARY_IN_PROGRESS)
+    if execution_state == EXEC_RECORDED:
+        return (PRIMARY_UNSCHEDULED_EXECUTION
+                if plan_relationship == REL_UNSCHEDULED else PRIMARY_EXECUTION_RECORDED)
     # no_execution:
     if schedule_state == SCHEDULE_NO_PLAN:
         return PRIMARY_NO_PLAN

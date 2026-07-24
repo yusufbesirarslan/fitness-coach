@@ -14,6 +14,7 @@ from app.blueprints import training as training_bp
 from app.extensions import db
 from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
 from tests.test_validators import _image_data_url
+from tests.test_workout_state import assert_valid_state_contract
 
 PLAN_JSON = {
     "program": [{"gun": "Pazartesi", "tip": "antrenman", "odak": "Sırt",
@@ -312,26 +313,44 @@ def test_workout_status_flips_after_completion(client, workout_ready, monkeypatc
     # B3: tamamlanma sinyali PumpCheck'tir (idempotency guard'la aynı, M3) —
     # görev satırı değil. Görev tohumlanmamış ortamda quest-bazlı durum,
     # tamamlanan antrenmanı 'completed: False' gösteriyordu.
-    # Sprint 7 PR1: /workout/status now also returns an additive `state` snapshot.
-    # `completed` is preserved (byte-identical value); assert on it directly rather
-    # than exact-dict equality.
+    # Sprint 7 PR1 (review Finding 4): /workout/status returns the additive `state`
+    # snapshot alongside the preserved `completed` field. Assert the STRICT
+    # contract — exact top-level shape (no field removed/added), closed enum
+    # vocabularies, and completed↔snapshot consistency — not a loose field check.
     before = client.get("/workout/status").get_json()
-    assert before["completed"] is False and "state" in before
+    assert set(before) == {"completed", "state"}          # legacy field preserved, no extra
+    assert before["completed"] is False
+    assert_valid_state_contract(before["state"])          # keys + enum vocab + no `resume`
+    assert before["state"]["completed_today"] is False    # snapshot mirrors legacy field
+
     db.session.add(PumpCheck(user_id=workout_ready.id, valid=True,
                              date_key=date.today().isoformat()))
     db.session.commit()
+
     after = client.get("/workout/status").get_json()
-    assert after["completed"] is True and after["state"]["completed_today"] is True
+    assert set(after) == {"completed", "state"}
+    assert after["completed"] is True
+    assert_valid_state_contract(after["state"])
+    assert after["state"]["completed_today"] is True
+    assert after["state"]["execution_state"] == "completed"
 
 
 def test_workout_status_true_even_without_seeded_quest(client, auth_user):
     # Görevsiz ortam (seed-quests koşmamış): PumpCheck varsa yine True dönmeli.
+    # Strict contract preserved on both transitions (Finding 4).
     assert DailyQuest.query.filter_by(quest_type="workout_logged").first() is None
-    assert client.get("/workout/status").get_json()["completed"] is False
+    before = client.get("/workout/status").get_json()
+    assert set(before) == {"completed", "state"}
+    assert before["completed"] is False
+    assert_valid_state_contract(before["state"])
     db.session.add(PumpCheck(user_id=auth_user.id, valid=True,
                              date_key=date.today().isoformat()))
     db.session.commit()
-    assert client.get("/workout/status").get_json()["completed"] is True
+    after = client.get("/workout/status").get_json()
+    assert set(after) == {"completed", "state"}
+    assert after["completed"] is True
+    assert_valid_state_contract(after["state"])
+    assert after["state"]["completed_today"] is True
 
 
 # ---------------------------------------------------------------------------

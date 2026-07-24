@@ -27,8 +27,16 @@ SCHEDULE_NO_PLAN = "no_plan"
 SCHEDULE_UNAVAILABLE = "schedule_unavailable"
 
 # ── Dimension B: execution state (today only) ────────────────────────────────
+# ``execution_recorded`` means non-marker WorkoutLog rows exist for today — this
+# is RECORDED EXECUTION EVIDENCE, NOT proof of an active, interrupted or resumable
+# session. No interactive workout session is persisted server-side (the client
+# session in static/training.js is ephemeral/in-memory), and these rows can be
+# written entirely outside any interactive flow — e.g. the AI-coach
+# ``commit_workout_log`` per-exercise tool (app/services/ai_coach.py:417). The
+# contract therefore never derives a resumable "in progress" session from them
+# (see docs/WORKOUT_STATE.md "Execution evidence vs. active session").
 EXEC_NONE = "no_execution"
-EXEC_IN_PROGRESS = "in_progress"
+EXEC_RECORDED = "execution_recorded"
 EXEC_COMPLETED = "completed"
 
 # ── Dimension C: plan ↔ performance relationship ─────────────────────────────
@@ -38,21 +46,25 @@ REL_UNRELATED_DATE = "unrelated_date"
 REL_INDETERMINATE = "indeterminate"
 
 # ── Dimension D: current action eligibility ──────────────────────────────────
-# `complete` is intentionally NOT a distinct value: the client "complete" is a
-# mutation (POST /workout/complete) reachable from an in-progress session, and no
-# started-session is persisted server-side to gate a separate complete action.
-# Adding it would be an unused state (docs/WORKOUT_STATE.md §Action).
+# Deliberately only START / NONE / BLOCKED. Two client-side affordances are
+# intentionally ABSENT from the read model:
+#   * ``complete`` — the client "complete" is a mutation (POST /workout/complete);
+#     no started-session is persisted server-side to gate it as a read-model action.
+#   * ``resume`` — resuming presupposes trusted persisted evidence that a *resumable*
+#     session exists. None is persisted (recorded execution evidence is NOT a
+#     resumable session — see EXEC_RECORDED), so the contract MUST NOT emit
+#     ``resume``. It would over-claim an active session the server cannot prove
+#     (docs/WORKOUT_STATE.md §Action).
 ACTION_START = "start"
-ACTION_RESUME = "resume"
 ACTION_NONE = "none"
 ACTION_BLOCKED = "blocked"
 
 # ── Dimension E: dominant consumer state ─────────────────────────────────────
 PRIMARY_REST_DAY = "rest_day"
 PRIMARY_SCHEDULED_NOT_STARTED = "scheduled_not_started"
-PRIMARY_IN_PROGRESS = "in_progress"
+PRIMARY_EXECUTION_RECORDED = "execution_recorded"        # evidence today, not confirmed done
 PRIMARY_COMPLETED = "completed"
-PRIMARY_UNSCHEDULED_IN_PROGRESS = "unscheduled_in_progress"
+PRIMARY_UNSCHEDULED_EXECUTION = "unscheduled_execution"  # evidence off-schedule, not confirmed done
 PRIMARY_UNSCHEDULED_COMPLETED = "unscheduled_completed"
 PRIMARY_NO_PLAN = "no_plan"
 PRIMARY_NEEDS_ATTENTION = "needs_attention"
@@ -75,7 +87,9 @@ class WorkoutStateInputs:
     weekday absent from the plan, or an unrecognized ``tip``). ``completed_today``
     is the canonical completion proof (today's PumpCheck); the marker flag only
     corroborates it. ``real_entry_count_today`` counts non-marker WorkoutLog rows
-    — execution evidence, never proof of completion.
+    — recorded execution evidence only: never proof of completion, and never proof
+    of an active or resumable session (those rows can be written outside any
+    interactive workout flow).
     """
     today: date
     has_plan: bool

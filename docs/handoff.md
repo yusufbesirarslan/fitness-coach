@@ -2481,19 +2481,23 @@ association is date-only).
   consumes existing contracts; copies no heuristics. Public entry:
   `resolve_workout_state(user_id, *, today=None) -> WorkoutStateSnapshot`.
 - **Dimensions:** A `schedule_state` {scheduled, rest_day, no_plan,
-  schedule_unavailable} · B `execution_state` {no_execution, in_progress,
+  schedule_unavailable} · B `execution_state` {no_execution, **execution_recorded**,
   completed} · C `plan_relationship` {matches_scheduled, unscheduled,
-  unrelated_date, indeterminate} · D `action` {start, resume, none, blocked} · E
-  dominant `primary_state` {rest_day, scheduled_not_started, in_progress,
-  completed, unscheduled_in_progress, unscheduled_completed, no_plan,
+  unrelated_date, indeterminate} · D `action` {start, none, blocked} · E
+  dominant `primary_state` {rest_day, scheduled_not_started, **execution_recorded**,
+  completed, **unscheduled_execution**, unscheduled_completed, no_plan,
   needs_attention}. Diagnostics: `completed_today`, `is_rest_day`,
   `stale_previous_workout`, `anomaly`, `today`, `contract_version=1`.
+  (Review Finding 2: the former `in_progress` execution/primary states were renamed
+  to `execution_recorded` — *recorded execution evidence*, not an active session —
+  and the `resume` action was removed from the contract entirely.)
 - **Source precedence:** completion = today's PumpCheck (marker corroborates only);
-  execution = today's non-marker WorkoutLog (never proves completion); schedule =
-  newest plan's program matched to Istanbul weekday, parse failure →
-  schedule_unavailable (never a silent rest day); association = local-date + tip
-  (no identifier linkage). Conflicts resolve to a deterministic safe result;
-  malformed → blocked; today evaluated independently of prior days.
+  execution = today's non-marker WorkoutLog = **recorded evidence only** (never
+  proves completion, never an active/resumable session); schedule = newest plan's
+  program matched to Istanbul weekday, parse failure → schedule_unavailable (never
+  a silent rest day); association = local-date + tip (no identifier linkage).
+  Conflicts resolve to a deterministic safe result; malformed → blocked; today
+  evaluated independently of prior days.
 - **Timezone:** `app.timeutil` only (`app_today`/`app_date_of`/`utc_day_bounds`) —
   no second helper; UTC-boundary completion counts for the Istanbul day (tested).
 - **Anomaly handling:** unexpected read failure fails safe to
@@ -2507,9 +2511,56 @@ association is date-only).
   snapshot. Change is **additive** — `completed` preserved (derived from
   `snapshot.completed_today`, byte-identical to the old inline PumpCheck query) and
   a new `state` object added. Route stays thin (one resolver call, no state logic).
-- Updated two over-strict existing assertions in `tests/test_training_routes.py`
-  (exact-dict `== {"completed": …}`) to assert the `completed` field + presence of
-  `state`. **No behavior change** — the `completed` value is identical.
+- Rewrote the two `tests/test_training_routes.py` `/workout/status` assertions to
+  the **strict** additive contract (exact top-level shape `{"completed","state"}`,
+  closed enum vocabularies via `assert_valid_state_contract`, completed↔snapshot
+  consistency) — restoring strict contract testing rather than loosening it
+  (review Finding 4). Still **no behavior change** — the `completed` value is
+  identical.
+
+### Review remediation (Sprint 7 PR1 review — READY WITH CONDITIONS → closed)
+
+The post-implementation review returned four conditions; all are now closed on
+this same branch (no PR2 started):
+
+1. **Real full-suite baseline (Finding 1).** Ran the same complete command
+   (`pytest -q -p no:cacheprovider`) to **completion** in a clean detached worktree
+   at the exact base commit `d68186a` — no interruption, no subtraction. Result:
+   **2306 passed, 3 deselected, 0 failed, 0 errors, 9411 warnings in 2707.10s
+   (45:07)**; junit records 2306 testcases, 0 failures, 0 errors. Compared
+   test-by-test against the final run (see *Tests & exact results*).
+2. **`in_progress`/`resume` semantics (Finding 2).** A non-marker `WorkoutLog`
+   proves execution *evidence*, not an active/interrupted/resumable session — and
+   the AI-coach `commit_workout_log` tool writes exactly such rows outside any
+   interactive flow. Renamed the execution/primary state `in_progress` →
+   `execution_recorded` (*recorded execution evidence*) and **removed the `resume`
+   action from the contract**; the ambiguous "evidence, completion unconfirmed"
+   case now resolves to `action = none` (safe) — the server never fabricates a
+   resumable session it cannot prove. Adversarial tests added:
+   `test_service_ai_coach_logged_exercise_is_evidence_not_resumable`,
+   `test_no_scenario_ever_emits_resume` (exhaustive input sweep),
+   `test_contract_has_no_resume_action`.
+3. **PumpCheck completion authority (Finding 3).** Audited every completion path
+   (normal `/workout/complete`, AI-coach pump-check tool, AI-coach exercise
+   logging, manual/imported/wearable logs, legacy quest path) — table in
+   `docs/WORKOUT_STATE.md#completion-authority`. The two paths the product treats
+   as "completed" both write a `PumpCheck`; paths that don't are genuinely not
+   completions. The contract now keeps three distinct safe states: confirmed
+   completion (PumpCheck), recorded execution evidence (non-marker rows), and
+   inconsistent/unconfirmed (marker without PumpCheck →
+   `completion_marker_mismatch`, completion **not** granted). Test:
+   `test_service_marker_without_pumpcheck_is_not_completion`.
+4. **Strict API contract testing + report clarifications (Finding 4).** Restored
+   strict `GET /workout/status` assertions (exact shape, preserved legacy fields,
+   exact `completed`, required keys, allowed enum values, no field removal). The
+   structural read-only guard was upgraded from a crude substring scan to an
+   **AST-based** check (real imports + real `db.session` write-calls) so it proves
+   the dependency/no-write property precisely. Report clarifications (canonical
+   Istanbul timezone is repo-wide via `app.timeutil`; all 11 `state` keys are
+   intentionally public/additive; the single broad `except` is scoped to the DB
+   read, records a `resolution_error` anomaly and fails safe rather than swallowing;
+   malformed/unavailable schedule is `blocked` before any `start` branch) are all
+   documented in `docs/WORKOUT_STATE.md`.
 
 ### API & compatibility impact
 
@@ -2526,12 +2577,15 @@ association is date-only).
 parametrization + invariants. Covered scenarios 1–14, 16, 20 with deterministic
 outcomes; **scenario 15** (completed but scheduled-workout identifier mismatch)
 documented as **not derivable** (no identifier linkage); "started"/"partial"
-(2/3) both surface as `in_progress` because no started-session is persisted.
-Invariants asserted: single dominant state; execution=completed iff PumpCheck;
-malformed→blocked/needs_attention; historical record ≠ today; rest day preserves
-unscheduled workout; in-progress never completed; **no DB writes**; no
-AI/provider imports (structural guard); repeated resolution identical; flags do
-not alter execution truth.
+(2/3) both surface as `execution_recorded` (recorded evidence, `action=none`)
+because no started-session is persisted — the contract never claims a resumable
+session. Invariants asserted (via `assert_valid_state_contract` on every row):
+exact key set + closed enum vocabularies; **`resume` never emitted**;
+execution=completed iff PumpCheck; recorded-evidence ⇒ not completed & `action=none`;
+malformed→blocked/needs_attention (before any `start` branch); historical record
+≠ today; rest day preserves unscheduled workout; **no DB writes** (AST guard); no
+AI/provider imports (AST guard); repeated resolution identical; flags do not alter
+execution truth.
 
 ### Query & performance evidence
 
@@ -2566,9 +2620,14 @@ an empty session `new/dirty/deleted`.
   `app/services/workout_state/queries.py`,
   `tests/test_workout_state.py`, `docs/WORKOUT_STATE.md`.
 - **Modified:** `app/blueprints/training.py` (additive `state` on
-  `/workout/status` + import), `tests/test_training_routes.py` (2 assertions),
+  `/workout/status` + import), `tests/test_training_routes.py` (strict contract on
+  the two `/workout/status` assertions + import of `assert_valid_state_contract`),
   `CLAUDE.md`, `docs/handoff.md`.
 - **Deleted:** none.
+- **Review remediation touched** (same 6 created / 4 modified files — no new files):
+  `models.py`/`resolver.py` (rename `in_progress`→`execution_recorded`, drop
+  `ACTION_RESUME`), `tests/test_workout_state.py` (evidence/no-resume matrix,
+  adversarial + strict-contract tests, AST structural guard), and the two docs.
 
 ### Tests & exact results
 
@@ -2576,29 +2635,35 @@ Environment: Python 3.14.3, Flask 3.1.3, pytest 9.1.1, SQLite; `pytest.ini` runs
 `-m "not load"` by default. Warnings are pre-existing `datetime.utcnow()`
 deprecations across the codebase (not introduced here).
 
-- **Focused baseline (base `d68186a`, before implementation):**
-  `pytest tests/test_training_routes.py tests/test_tracking_routes.py
-  tests/test_training_history.py tests/test_training_progression.py
-  tests/test_training_planning.py tests/test_adaptive_plan_context.py
-  tests/test_progress_api.py` → **175 passed, 0 failed, 0 skipped** (119.57s).
-- **New contract tests:** `pytest tests/test_workout_state.py` → **59 passed**
-  (39.43s).
-- **Focused final (with implementation):** `pytest <focused set above> +
-  tests/test_workout_state.py` → **234 passed, 0 failed, 0 skipped** (146.96s) —
-  i.e. 175 + 59, with the two updated `test_training_routes.py` assertions passing.
+- **Full-suite baseline (base `d68186a`, before implementation) — COMPLETED, not
+  inferred (Finding 1):** a clean detached worktree at exactly `d68186a`, same
+  command as the final run `pytest -q -p no:cacheprovider` → **2306 passed,
+  3 deselected, 0 failed, 0 errors, 9411 warnings in 2707.10s (45:07)**; the junit
+  report records **2306 testcases, 0 failures, 0 errors**. This is a real,
+  uninterrupted run — the earlier subtraction-derived baseline is superseded.
 - **Full-suite final (after, with implementation):** `pytest -q -p no:cacheprovider`
-  → **2365 passed, 0 failed, 0 errors, 3 deselected** (the 3 `@pytest.mark.load`
-  tests, excluded by `pytest.ini`'s `-m "not load"`) in **3891.12s (1:04:51)**.
-  No FAILED/ERROR lines.
-- **Full-suite baseline (pre-change, pre-existing tests):** **2306 passed, 0 failed,
-  3 deselected** — derived as full-final (2365) − 59 new `test_workout_state.py`
-  tests. The change is purely additive (one new test module; the only modified
-  pre-existing test file, `test_training_routes.py`, keeps the same test count and
-  passes), so the pre-existing suite is unchanged. A live baseline run on the base
-  commit was observed all-passing through 62% (dots, zero F/E) before being
-  manually interrupted to conserve the ~65-minute wall time; the derived count is
-  therefore exact for the pre-existing set.
-- **Environment limitations:** the full suite is slow (~65 min; AI/concurrency/
+  → **2370 passed, 3 deselected, 0 failed, 0 errors, 9518 warnings in 3485.75s
+  (58:05)**; the junit report records **2370 testcases, 0 failures, 0 errors** (the
+  3 `@pytest.mark.load` tests are deselected by `pytest.ini`'s `-m "not load"`).
+- **Baseline-vs-final delta (test-by-test, from the two junit reports):**
+  baseline **2306** → final **2370** testcases (**net +64**). Programmatic id-level
+  diff of `baseline.xml` vs `final.xml`: **0 removed** (every pre-existing testcase
+  still present), **0 regressions**, **0 status changes** across all 2306 shared
+  cases — each still passes identically, including the reworked
+  `test_training_routes.py` assertions (same test ids, still green). The **+64**
+  added are exactly the net-new `tests.test_workout_state` cases. Both runs: **0
+  failures, 0 errors**. Delta is confirmed real, not inferred.
+- **New/updated contract tests:** `pytest tests/test_workout_state.py` →
+  **64 passed** (was 59 pre-review; +5: no-resume/exhaustive-sweep, AI-coach
+  adversarial evidence, marker-without-pumpcheck, strict completed-contract).
+- **Focused final set:** `pytest tests/test_training_routes.py
+  tests/test_tracking_routes.py tests/test_training_history.py
+  tests/test_training_progression.py tests/test_training_planning.py
+  tests/test_adaptive_plan_context.py tests/test_progress_api.py
+  tests/test_workout_state.py` → **239 passed, 0 failed, 0 skipped** (112.52s) —
+  up from 234 pre-review (+5 new contract tests; the strict
+  `test_training_routes.py` assertions pass).
+- **Environment limitations:** the full suite is slow (~45–65 min; AI/concurrency/
   Cognito tests dominate the wall time). The 3 `load` tests are excluded by the
   repo's default `-m "not load"`. Warnings are pre-existing `datetime.utcnow()`
   deprecations across the codebase — none introduced by this PR.
