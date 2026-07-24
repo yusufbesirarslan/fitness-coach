@@ -21,6 +21,19 @@ After both finish we assert on the *persisted* rows: exactly one canonical
 completion, a deterministic replay/conflict outcome for the loser, and no
 duplicated PumpCheck / marker / XP side effects.
 
+Faithful-context note: each contender first loads its ``User`` and keeps a
+**strong reference** to it for the whole completion. In production the canonical
+service is only ever invoked inside an authenticated request, where Flask-Login
+holds ``current_user`` for the request's lifetime, so the row stays resident in
+the session's (weak-ref) identity map. The leaderboard ``after_commit`` hook
+(``gamification._flush_lb_dirty``) does ``db.session.get(User, id)``; with the
+user resident that is a no-SQL identity-map hit, which is legal post-commit. A
+detached worker thread that discards the loaded user would let it be
+weak-ref-collected, forcing that ``get`` to emit SQL inside ``after_commit`` and
+raising ``InvalidRequestError`` — an artifact of the test harness, never of the
+production request path (proven: the real HTTP ``/workout/complete`` flow passes
+against this same postgres:16). Holding the reference keeps the race faithful.
+
 Run it:
     FITX_PG_CONCURRENCY_TEST=1 \
     PG_TEST_DATABASE_URL=postgresql://user:pass@localhost:5432/fitx_test \
@@ -95,6 +108,14 @@ def test_concurrent_completion_has_single_winner_on_postgres():
         # Each thread gets its own app context → its own thread-local session and
         # DB connection, so the two completions are genuinely independent txns.
         with flask_app.app_context():
+            # Keep a STRONG reference to the user for the whole completion, exactly
+            # as Flask-Login's current_user does inside a real request. Without it
+            # the row is weak-ref-collected from the identity map and the
+            # leaderboard after_commit hook's db.session.get() would emit SQL on a
+            # committed session (harness artifact, not a production defect). See the
+            # module docstring's faithful-context note.
+            resident_user = db.session.get(User, user_id)
+            assert resident_user is not None
             cmd = CompleteWorkoutCommand(
                 user_id=user_id,
                 today=today,
@@ -142,4 +163,9 @@ def test_concurrent_completion_has_single_winner_on_postgres():
             assert db.session.get(User, user_id).rank_points == 35
     finally:
         with flask_app.app_context():
+            # Dispose the pool first: a contender connection returned to the pool
+            # while still mid-transaction would hold locks and make drop_all's
+            # ACCESS EXCLUSIVE DROP TABLE block. Disposing closes them cleanly.
+            db.session.remove()
+            db.engine.dispose()
             db.drop_all()

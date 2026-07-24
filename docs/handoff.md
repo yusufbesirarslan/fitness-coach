@@ -2888,6 +2888,7 @@ production feature flag was changed.
 ## Sprint 7 PR2 — Canonical Workout Mutation Integrity, Idempotency, and Completion Convergence
 
 - **Track:** Core Feature. **Sprint:** 7. **PR:** 2. **Production authorization:** local implementation + validation only.
+- **Verdict:** **READY FOR REVIEW.** The one prior condition — execute the committed postgres:16 concurrency test — is **discharged: executed 2026-07-24 against real postgres:16, PASSED 4/4** (single winner on `uq_pump_check_day`). A test-harness defect surfaced during that run (detached-thread invocation trip­ping the pre-existing `_flush_lb_dirty` after_commit hook) was root-caused, proven **not** to affect the production request path, and fixed in the test only (one remediation commit). See "Postgres concurrency test — execution".
 - **Branch:** `sprint7-pr2-workout-mutation-integrity`. **Worktree:** `.worktrees/sprint7-pr2-workout-mutation-integrity`.
 - **origin/main:** `3d9c582` (Sprint 7 PR1 "Canonical Workout State Contract" #183 — merged squash — plus UIUX nav #182). **Base commit:** `3d9c582`. **Merged PR1:** #183, contained in `3d9c582`. **PR2-only diff range:** `3d9c582..HEAD`.
 - **Base note:** an earlier plan pinned the unmerged PR1 dev branch `4f5fd75`; a `git fetch` showed PR1 had since merged into `origin/main`, so PR2 was re-based onto merged main (byte-identical PR1 contract) — a normal, non-stacked branch, no future rebase needed.
@@ -2928,7 +2929,7 @@ Transaction ownership before PR2: each writer owned its own inline transaction w
 - **Sequential replay:** second attempt → `ALREADY_COMPLETED`, no duplicate rows/XP (`test_sequential_replay_is_idempotent`).
 - **Constraint > preflight:** with an injected past date the preflight misses but the constraint still yields `ALREADY_COMPLETED` (`test_replay_caught_by_constraint_even_when_preflight_misses`).
 - **Race-loser:** deterministic non-500 replay; only `uq_pump_check_day` maps that way (`test_unrelated_integrity_error_is_reraised_not_already_completed`, `test_is_pump_check_day_violation_identity`).
-- **Concurrency proof:** deterministic SQLite (constraint + simulated race + rollback) is the default. A real two-thread, separate-session Postgres race lives in `tests/test_workout_completion_pg.py`, gated by `@pytest.mark.pg_concurrency` + `FITX_PG_CONCURRENCY_TEST=1` + `PG_TEST_DATABASE_URL` (targets `postgres:16`, matching CI). **Not executed locally — Docker daemon down;** committed but reported NOT EXECUTED. No claim of full production concurrency proof from SQLite alone.
+- **Concurrency proof:** deterministic SQLite (constraint + simulated race + rollback) is the default. A real two-thread, separate-session Postgres race lives in `tests/test_workout_completion_pg.py`, gated by `@pytest.mark.pg_concurrency` + `FITX_PG_CONCURRENCY_TEST=1` + `PG_TEST_DATABASE_URL` (targets `postgres:16`, matching CI). **EXECUTED 2026-07-24 against a real disposable postgres:16 (16.14) — PASSED 4/4** (see "Postgres concurrency test — execution" below). Outcome: exactly one `CREATED`, one `ALREADY_COMPLETED` (loser via the `uq_pump_check_day` constraint), one PumpCheck, one marker, XP credited once (35). Genuine multi-connection race, not SQLite-simulated.
 
 ### Atomicity / rollback evidence
 
@@ -2965,7 +2966,7 @@ Transaction ownership before PR2: each writer owned its own inline transaction w
 
 **Test-by-test comparison:**
 - **+19 passed** = the 19 new `tests/test_workout_completion.py` cases (2396 + 19 = 2415). Every baseline-passing test still passes.
-- **+1 skipped** = `tests/test_workout_completion_pg.py` (opt-in `pg_concurrency`; Docker daemon down → **NOT EXECUTED**, reported as such — not counted as concurrency coverage).
+- **+1 skipped** = `tests/test_workout_completion_pg.py` (opt-in `pg_concurrency`; skips in the default no-env run by design). It was **executed separately against real postgres:16 and PASSED 4/4** — see "Postgres concurrency test — execution" below.
 - **The single final "failure"** = `tests/test_mcp_gate.py::test_http_transport_refused_without_optin[entrypoint1]` — `subprocess.TimeoutExpired` after 60 s spawning `python fitx_mcp/server.py --http`. A **non-deterministic CPU-contention artifact** of 3 parallel pytest processes (that subprocess needs ~54 s uncontended): **re-run in isolation it passes 3/3 (53.76 s)** and it **did not fail in the baseline run**. PR2 does not touch `fitx_mcp`. **Not a regression.**
 - **Pre-existing failures: none. Newly-introduced real failures: none.**
 
@@ -2990,8 +2991,16 @@ Transaction ownership before PR2: each writer owned its own inline transaction w
 ### Deferred (record only — not implemented)
 
 - Persisted/active sessions, resume/recovery, plan-to-log linkage, `/api/progress/workout` + `renderHero` convergence, workout UI/nav redesign, XP/challenge redesign — later Sprint 7 PRs.
-- Opt-in Postgres concurrency test to be executed where Docker/PG is available (CI has `postgres:16`).
+- Opt-in Postgres concurrency test now runs in CI too (CI has `postgres:16`); wire the `pg_concurrency` marker + env into a CI job if a standing gate is wanted (currently opt-in/manual).
+- **Latent fragility (record only — NOT a PR2 defect, do not fix in PR2):** `gamification._flush_lb_dirty` (an `after_commit` listener, pre-existing) calls `db.session.get(User, id)`. If the completing session no longer holds the `User` (e.g. a **detached** caller that awarded XP + committed without keeping a strong reference — no Flask-Login `current_user`), the object is weak-ref-collected from the identity map and that `get()` emits SQL on a committed session → `InvalidRequestError`. Every current production caller (`POST /workout/complete`, AI-coach tool) runs inside an authenticated request that holds `current_user`, so this is **unreachable today**. A future detached/background XP writer would hit it. Defensive hardening (make `_flush_lb_dirty` never emit SQL post-commit — snapshot the ids/values pre-commit, or guard for absent identity) is out of PR2 scope (shared gamification infra, affects all XP paths).
+
+### Postgres concurrency test — execution (2026-07-24)
+
+- **Environment:** Docker Desktop 29.6.2 (overlayfs) started locally; disposable, loopback-only container `postgres:16` (digest `sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20`, server **PostgreSQL 16.14**), bound to `127.0.0.1:55432`, ephemeral throwaway credential (redacted, destroyed at teardown). **No production or shared-dev DB touched.**
+- **Command (creds redacted):** `FITX_PG_CONCURRENCY_TEST=1 PG_TEST_DATABASE_URL=postgresql://fitx_race:<REDACTED>@localhost:55432/fitx_test python -m pytest -m pg_concurrency tests/test_workout_completion_pg.py -q`.
+- **Result:** **PASSED, run 4×** (≈40–49 s each; single-completion + two-thread race). Separate connections + separate SQLAlchemy sessions per contender (own app context). Asserted on persisted rows: winner `CREATED`, loser `ALREADY_COMPLETED` via `uq_pump_check_day`, PumpCheck=1, marker=1, XP=35 once; no poisoned transaction, no partial rows; disposable DB dropped afterward.
+- **Harness defect found & fixed (PR2-scoped, test-only):** the committed test initially FAILED — the winner raised `InvalidRequestError` from the `_flush_lb_dirty` `after_commit` hook (see "Latent fragility" above). Root-caused to the test invoking `complete_workout` from a **detached** worker thread that discarded the loaded `User`, so it was weak-ref-collected — a calling convention production never uses. **Verified production is unaffected**: the real HTTP `/workout/complete` path (`test_complete_awards_xp_and_records_pump_check`, `test_pump_check_day_unique_constraint`, `test_workout_status_flips_after_completion`, 6 tests) **passes against this same postgres:16**. Fix: each contender now holds a **strong reference** to its `User` for the whole completion (mirroring Flask-Login `current_user`) and teardown disposes the pool before `drop_all`. Only `tests/test_workout_completion_pg.py` changed — no source, no shared test infra (`conftest.py` unchanged) — so no full-suite rerun was triggered; the focused SQLite suite (completion + both writer entry points + pump-check sharing) re-ran green (**112 passed, 1 skipped**).
 
 ### Authorization boundary
 
-Nothing was pushed, no PR opened, nothing merged, deployed, or production-flag-changed. Sprint 7 PR3 not started.
+Nothing was pushed, no PR opened, nothing merged, deployed, or production-flag-changed. Sprint 7 PR3 not started. Docker Desktop + a disposable local Postgres container were started for the concurrency test only, and the container/credential are torn down afterward.
