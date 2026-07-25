@@ -411,3 +411,183 @@ def test_plan_prompt_includes_deterministic_classification_and_style(client, wit
     assert "Final classified level" in captured["prompt"]
     assert "LLM sınıflandırma yapmayacak" in captured["prompt"]
     assert "ana kaldırış" in captured["prompt"]
+
+
+# ---------------------------------------------------------------------------
+# Persisted workout-session lifecycle routes (Sprint 7 PR3)
+#
+# The routes are gated by FITX_WORKOUT_SESSIONS_ENABLED (default OFF): OFF => every
+# session route is INERT (404) and /workout/complete ignores a supplied session_id
+# (byte-identical legacy path). ON => the full start->current->checkpoint->
+# (resume|abandon|complete) lifecycle over the stable envelope. The flag is a
+# rollout gate, NOT an auth gate -- @require_auth + server-side ownership always hold.
+# ---------------------------------------------------------------------------
+import secrets as _secrets
+
+from app.models import (
+    WORKOUT_SESSION_ABANDONED,
+    WORKOUT_SESSION_ACTIVE,
+    WORKOUT_SESSION_COMPLETED,
+    WorkoutSession,
+)
+from app.timeutil import app_today
+from app.services.training_generation.response_validator import WEEKDAYS
+
+
+@pytest.fixture
+def sessions_on(app):
+    """Turn the persisted-session lifecycle flag ON for the duration of a test."""
+    app.config["FITX_WORKOUT_SESSIONS_ENABLED"] = True
+    yield app
+    app.config["FITX_WORKOUT_SESSIONS_ENABLED"] = False
+
+
+def _save_today_workout_plan(user_id):
+    """Persist a plan whose today (Istanbul) weekday is an antrenman, so a freshly
+    started session's relationship classifies as matching_current_plan (resumable)."""
+    today_weekday = WEEKDAYS[app_today().weekday()]
+    program = []
+    for name in WEEKDAYS:
+        if name == today_weekday:
+            program.append({"gun": name, "tip": "antrenman",
+                            "egzersizler": [{"isim": "Squat"}, {"isim": "Bench"}]})
+        else:
+            program.append({"gun": name, "tip": "dinlenme", "egzersizler": []})
+    plan = TrainingPlan(user_id=user_id, score=5,
+                        plan_data=json.dumps({"program": program, "haftalik_ozet": {}}))
+    db.session.add(plan)
+    db.session.commit()
+    return plan
+
+
+def _foreign_active_session(user_id):
+    s = WorkoutSession(
+        public_id=_secrets.token_urlsafe(16),
+        user_id=user_id,
+        status=WORKOUT_SESSION_ACTIVE,
+        workout_date=app_today().isoformat(),
+        weekday_slot=WEEKDAYS[app_today().weekday()],
+        source="scheduled",
+        version=1,
+    )
+    db.session.add(s)
+    db.session.commit()
+    return s
+
+
+# -- Flag OFF: routes are inert -----------------------------------------------
+
+@pytest.mark.parametrize("method,path", [
+    ("post", "/workout/session/start"),
+    ("get", "/workout/session/current"),
+    ("post", "/workout/session/anything/resume"),
+    ("post", "/workout/session/anything/checkpoint"),
+    ("post", "/workout/session/anything/abandon"),
+])
+def test_session_routes_are_404_when_flag_off(client, auth_user, method, path):
+    resp = getattr(client, method)(path, json={})
+    assert resp.status_code == 404
+    assert resp.get_json()["code"] == "not_found"
+    # Nothing is ever persisted through the disabled surface.
+    assert WorkoutSession.query.count() == 0
+
+
+def test_complete_ignores_session_id_when_flag_off(client, with_session, monkeypatch):
+    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 7.0})
+    monkeypatch.setattr(training_bp, "validate_pump_check_image",
+                        lambda *a, **k: (b"jpeg", "image/jpeg", None))
+    monkeypatch.setattr(training_bp, "validate_pump_check",
+                        lambda *a, **k: {"valid": True, "fallback": False})
+    resp = client.post("/workout/complete",
+                       json={"image": "x", "location_type": "salon",
+                             "session_id": "does-not-exist"})
+    # Legacy path: the bogus session_id is never read; completion succeeds and no
+    # session row is fabricated.
+    assert resp.status_code == 200
+    assert "session_completed" not in resp.get_json()
+    assert WorkoutSession.query.count() == 0
+
+
+# -- Flag ON: full lifecycle --------------------------------------------------
+
+def test_start_current_checkpoint_lifecycle(client, auth_user, sessions_on):
+    started = client.post("/workout/session/start", json={})
+    assert started.status_code == 201
+    body = started.get_json()
+    assert body["outcome"] == "created"
+    public_id = body["session"]["public_id"]
+    assert public_id
+
+    current = client.get("/workout/session/current")
+    assert current.status_code == 200
+    assert current.get_json()["session"]["public_id"] == public_id
+
+    checkpoint = client.post(f"/workout/session/{public_id}/checkpoint", json={})
+    assert checkpoint.status_code == 200
+    assert checkpoint.get_json()["outcome"] == "checkpointed"
+
+
+def test_start_twice_is_existing_active(client, auth_user, sessions_on):
+    first = client.post("/workout/session/start", json={})
+    second = client.post("/workout/session/start", json={})
+    assert first.status_code == 201
+    assert second.status_code == 200
+    assert second.get_json()["outcome"] == "existing_active"
+    # The idempotent replay returns the SAME session -- never a second ACTIVE row.
+    assert first.get_json()["session"]["public_id"] == second.get_json()["session"]["public_id"]
+    assert WorkoutSession.query.filter_by(
+        user_id=auth_user.id, status=WORKOUT_SESSION_ACTIVE).count() == 1
+
+
+def test_resume_matching_plan_returns_resumed(client, auth_user, sessions_on):
+    _save_today_workout_plan(auth_user.id)
+    public_id = client.post("/workout/session/start", json={}).get_json()["session"]["public_id"]
+    resumed = client.post(f"/workout/session/{public_id}/resume", json={})
+    assert resumed.status_code == 200
+    assert resumed.get_json()["outcome"] == "resumed"
+
+
+def test_abandon_is_idempotent_over_the_route(client, auth_user, sessions_on):
+    public_id = client.post("/workout/session/start", json={}).get_json()["session"]["public_id"]
+    first = client.post(f"/workout/session/{public_id}/abandon",
+                        json={"reason": "changed my mind"})
+    assert first.status_code == 200
+    assert first.get_json()["outcome"] == "abandoned"
+    # A retried abandon is a deterministic no-op, never a false conflict.
+    second = client.post(f"/workout/session/{public_id}/abandon", json={})
+    assert second.status_code == 200
+    assert second.get_json()["outcome"] == "already_abandoned"
+    row = WorkoutSession.query.filter_by(user_id=auth_user.id).one()
+    assert row.status == WORKOUT_SESSION_ABANDONED
+
+
+@pytest.mark.parametrize("verb", ["resume", "checkpoint", "abandon"])
+def test_cannot_touch_another_users_session(client, auth_user, make_user, sessions_on, verb):
+    other = make_user("other_owner")
+    foreign = _foreign_active_session(other.id)
+    resp = client.post(f"/workout/session/{foreign.public_id}/{verb}", json={})
+    # Ownership is re-enforced server-side: the caller cannot even observe another
+    # user's session -- it is indistinguishable from a non-existent one.
+    assert resp.status_code == 404
+    assert resp.get_json()["code"] == "not_found"
+    # The victim's session is untouched.
+    assert db.session.get(WorkoutSession, foreign.id).status == WORKOUT_SESSION_ACTIVE
+
+
+def test_complete_with_session_terminalizes_it(client, auth_user, sessions_on, monkeypatch):
+    _save_today_workout_plan(auth_user.id)
+    public_id = client.post("/workout/session/start", json={}).get_json()["session"]["public_id"]
+    monkeypatch.setattr(training_bp, "validate_pump_check_image",
+                        lambda *a, **k: (b"jpeg", "image/jpeg", None))
+    monkeypatch.setattr(training_bp, "validate_pump_check",
+                        lambda *a, **k: {"valid": True, "fallback": False})
+
+    resp = client.post("/workout/complete",
+                       json={"image": "x", "location_type": "salon",
+                             "session_id": public_id})
+    assert resp.status_code == 200
+    assert resp.get_json()["session_completed"] is True
+    # The linked session was terminalized COMPLETED atomically with the completion.
+    row = WorkoutSession.query.filter_by(user_id=auth_user.id).one()
+    assert row.status == WORKOUT_SESSION_COMPLETED
+    assert row.completed_at is not None

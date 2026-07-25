@@ -7,6 +7,7 @@ ownership, and evidence-writer separation. The opt-in real-concurrency proof
 lives in ``test_workout_completion_pg.py`` (Postgres, marker+env gated).
 """
 import json
+import secrets
 from datetime import timedelta
 
 import pytest
@@ -20,12 +21,17 @@ from app.models import (
     PumpCheck,
     User,
     WORKOUT_COMPLETION_MARKER,
+    WORKOUT_SESSION_ABANDONED,
+    WORKOUT_SESSION_ACTIVE,
+    WORKOUT_SESSION_COMPLETED,
     WorkoutLog,
+    WorkoutSession,
 )
 from app.services import ai_coach
 from app.services.workout_completion import (
     CompleteWorkoutCommand,
     CompletionOutcome,
+    SessionCompletionConflict,
     already_completed_today,
     complete_workout,
 )
@@ -366,3 +372,176 @@ def test_ai_coach_exercise_logging_stays_evidence_only(app, auth_user):
     snap = resolve_workout_state(auth_user.id)
     assert snap.completed_today is False
     assert snap.execution_state == "execution_recorded"
+
+
+# ---------------------------------------------------------------------------
+# Correction #3 — completion↔session reconciliation (Sprint 7 PR3)
+#
+# A linked ACTIVE session is terminalized ACTIVE→COMPLETED inside the SAME
+# transaction as the PumpCheck/marker/XP on EVERY path that ends the day
+# completed (fresh create, preflight replay, uq_pump_check_day race-loser),
+# with no duplicated artifacts and never left permanently ACTIVE — and never
+# marked COMPLETED without PumpCheck authority.
+# ---------------------------------------------------------------------------
+
+def _mk_active_session(user_id, *, status=WORKOUT_SESSION_ACTIVE, version=1):
+    s = WorkoutSession(
+        public_id=secrets.token_urlsafe(16),
+        user_id=user_id,
+        status=status,
+        workout_date=app_today().isoformat(),
+        weekday_slot="Perşembe",
+        source="scheduled",
+        started_at=None,
+        last_activity_at=None,
+        version=version,
+    )
+    db.session.add(s)
+    db.session.commit()
+    return s
+
+
+def test_fresh_completion_with_session_terminalizes_atomically(app, make_user):
+    """session_id present + fresh completion (CREATED): one atomic transaction
+    writes the PumpCheck/marker AND terminalizes the ACTIVE session."""
+    user = make_user("sess_fresh")
+    session = _mk_active_session(user.id)
+    result = complete_workout(_cmd(user.id, session_id=session.id))
+
+    assert result.outcome is CompletionOutcome.CREATED
+    assert PumpCheck.query.filter_by(user_id=user.id).count() == 1
+    assert _markers(user.id) == 1
+    row = db.session.get(WorkoutSession, session.id)
+    assert row.status == WORKOUT_SESSION_COMPLETED
+    assert row.completed_at is not None
+    assert row.version == 2  # bumped on the terminal transition
+
+
+def test_preexisting_pumpcheck_still_terminalizes_session_no_duplicates(app, make_user):
+    """ACTIVE session + a pre-existing matching PumpCheck (preflight sees it):
+    the day is already completed, but the owned ACTIVE session is STILL
+    terminalized — with NO duplicate PumpCheck/marker/XP."""
+    user = make_user("sess_recon")
+    db.session.add(PumpCheck(user_id=user.id, valid=True,
+                             date_key=app_today().isoformat()))
+    db.session.commit()
+    before_xp = db.session.get(User, user.id).rank_points or 0
+    session = _mk_active_session(user.id)
+
+    result = complete_workout(_cmd(user.id, session_id=session.id))
+
+    assert result.outcome is CompletionOutcome.ALREADY_COMPLETED
+    # No duplicated artifacts — exactly the one pre-existing PumpCheck, no marker,
+    # no XP re-award.
+    assert PumpCheck.query.filter_by(user_id=user.id).count() == 1
+    assert _markers(user.id) == 0
+    assert (db.session.get(User, user.id).rank_points or 0) == before_xp
+    # ...but the session is terminalized, never left permanently ACTIVE.
+    row = db.session.get(WorkoutSession, session.id)
+    assert row.status == WORKOUT_SESSION_COMPLETED
+    assert row.version == 2
+
+
+def test_race_loser_still_terminalizes_session(app, make_user, monkeypatch):
+    """uq_pump_check_day race-loser: the preflight misses (monkeypatched), the
+    INSERT hits the unique constraint, the transaction rolls back — and the
+    owned ACTIVE session is STILL terminalized in the fresh reconciliation
+    transaction (never left ACTIVE), with no duplicate PumpCheck."""
+    user = make_user("sess_race")
+    # The winner already wrote the day's PumpCheck.
+    db.session.add(PumpCheck(user_id=user.id, valid=True,
+                             date_key=app_today().isoformat()))
+    db.session.commit()
+    session = _mk_active_session(user.id)
+
+    # Force the preflight to miss so the code proceeds to the INSERT, which then
+    # loses the uq_pump_check_day race exactly like a real concurrent request.
+    monkeypatch.setattr(
+        "app.services.workout_completion.service.already_completed_today",
+        lambda *a, **k: False,
+    )
+    result = complete_workout(_cmd(user.id, session_id=session.id))
+
+    assert result.outcome is CompletionOutcome.ALREADY_COMPLETED
+    assert PumpCheck.query.filter_by(user_id=user.id).count() == 1  # no duplicate
+    assert _markers(user.id) == 0
+    row = db.session.get(WorkoutSession, session.id)
+    assert row.status == WORKOUT_SESSION_COMPLETED
+    assert row.version == 2
+
+
+def test_duplicate_session_completion_is_a_noop(app, make_user):
+    """Completing the same session twice is deterministic: the second call is an
+    ALREADY_COMPLETED no-op that neither duplicates artifacts nor re-touches the
+    already-terminal session."""
+    user = make_user("sess_dup")
+    session = _mk_active_session(user.id)
+    first = complete_workout(_cmd(user.id, session_id=session.id))
+    assert first.outcome is CompletionOutcome.CREATED
+    version_after_first = db.session.get(WorkoutSession, session.id).version
+
+    second = complete_workout(_cmd(user.id, session_id=session.id))
+    assert second.outcome is CompletionOutcome.ALREADY_COMPLETED
+    assert PumpCheck.query.filter_by(user_id=user.id).count() == 1
+    assert _markers(user.id) == 1
+    row = db.session.get(WorkoutSession, session.id)
+    assert row.status == WORKOUT_SESSION_COMPLETED
+    assert row.version == version_after_first  # not re-bumped by the replay
+
+
+def test_failed_completion_leaves_session_active(app, make_user, monkeypatch):
+    """A required-side-effect failure rolls back EVERYTHING, including the session
+    terminalization — the session stays ACTIVE, never falsely COMPLETED."""
+    user = make_user("sess_fail")
+    session = _mk_active_session(user.id)
+    monkeypatch.setattr(
+        "app.services.workout_completion.service.award_xp",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("fail")),
+    )
+    with pytest.raises(RuntimeError):
+        complete_workout(_cmd(user.id, session_id=session.id))
+
+    assert PumpCheck.query.filter_by(user_id=user.id).count() == 0
+    assert _markers(user.id) == 0
+    row = db.session.get(WorkoutSession, session.id)
+    assert row.status == WORKOUT_SESSION_ACTIVE  # untouched
+    assert row.version == 1
+
+
+def test_completing_an_abandoned_session_conflicts_with_no_artifacts(app, make_user):
+    """A session-scoped completion of an already-ABANDONED session fails closed:
+    SessionCompletionConflict, rolled back, no PumpCheck/marker fabricated, and
+    the session stays ABANDONED."""
+    user = make_user("sess_abandoned")
+    session = _mk_active_session(user.id, status=WORKOUT_SESSION_ABANDONED)
+    with pytest.raises(SessionCompletionConflict):
+        complete_workout(_cmd(user.id, session_id=session.id))
+
+    assert PumpCheck.query.filter_by(user_id=user.id).count() == 0
+    assert _markers(user.id) == 0
+    row = db.session.get(WorkoutSession, session.id)
+    assert row.status == WORKOUT_SESSION_ABANDONED
+
+
+def test_legacy_completion_fabricates_no_session(app, make_user):
+    """session_id=None is the unchanged legacy path — a valid completion that
+    creates NO WorkoutSession (no synthetic session fabricated)."""
+    user = make_user("legacy")
+    result = complete_workout(_cmd(user.id))
+    assert result.outcome is CompletionOutcome.CREATED
+    assert WorkoutSession.query.filter_by(user_id=user.id).count() == 0
+
+
+def test_session_of_another_user_is_never_terminalized(app, make_user):
+    """The linked session is loaded by (user_id, session_id): a caller can never
+    terminalize another user's session by supplying its id."""
+    owner = make_user("owner_sess")
+    attacker = make_user("attacker_sess")
+    victim_session = _mk_active_session(owner.id)
+    # Attacker completes their own day, pointing session_id at the victim's row.
+    result = complete_workout(_cmd(attacker.id, session_id=victim_session.id))
+    assert result.outcome is CompletionOutcome.CREATED
+    # The victim's session is untouched (ownership filter excluded it).
+    row = db.session.get(WorkoutSession, victim_session.id)
+    assert row.status == WORKOUT_SESSION_ACTIVE
+    assert row.version == 1
