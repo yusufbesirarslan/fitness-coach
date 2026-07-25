@@ -144,10 +144,13 @@ def test_complete_versus_abandon_only_one_terminal_wins_on_postgres():
 
     from app.extensions import db
     from app.models import (
+        Activity,
         PumpCheck,
         User,
+        WORKOUT_COMPLETION_MARKER,
         WORKOUT_SESSION_ABANDONED,
         WORKOUT_SESSION_COMPLETED,
+        WorkoutLog,
         WorkoutSession,
     )
     from app.services.workout_session import (
@@ -200,12 +203,88 @@ def test_complete_versus_abandon_only_one_terminal_wins_on_postgres():
             row = WorkoutSession.query.filter_by(user_id=user_id).one()
             # Exactly one terminal state — never both, never still ACTIVE.
             assert row.status in (WORKOUT_SESSION_COMPLETED, WORKOUT_SESSION_ABANDONED)
-            # If completion won there is exactly one PumpCheck; if abandon won there
-            # is none (abandon never creates completion artifacts).
             pumps = PumpCheck.query.filter_by(user_id=user_id).count()
+            markers = WorkoutLog.query.filter_by(
+                user_id=user_id, exercise_name=WORKOUT_COMPLETION_MARKER).count()
+            activities = Activity.query.filter_by(
+                user_id=user_id, activity_type="workout_completed").count()
             if row.status == WORKOUT_SESSION_COMPLETED:
-                assert pumps == 1
+                # The winner's canonical completion is atomic and un-duplicated:
+                # exactly one of each artifact, and the session terminalized once.
+                assert pumps == 1 and markers == 1 and activities == 1
+                assert row.completed_at is not None and row.version == 2
             else:
-                assert pumps == 0
+                # Abandon never creates any completion artifact.
+                assert pumps == 0 and markers == 0 and activities == 0
+    finally:
+        _teardown(flask_app)
+
+
+@pytest.mark.skipif(not (_ENABLED and _PG_URL), reason=_SKIP_REASON)
+def test_concurrent_session_completion_no_duplicate_artifacts_on_postgres():
+    """Two contenders complete the SAME active session at once (a duplicate-request
+    race). ``uq_pump_check_day`` lets exactly one win (``CREATED`` — writes the
+    PumpCheck/marker/activity and terminalizes the session inline); the loser is the
+    real multi-connection ``uq_pump_check_day`` race-loser that reconciles the owned
+    session ACTIVE→COMPLETED in a fresh transaction (correction #3) — proving on real
+    Postgres that a matching session is never left ACTIVE and NO artifact is
+    duplicated. This is the reconciliation invariant SQLite cannot exercise."""
+    if not _pg_reachable(_PG_URL):
+        pytest.skip(f"Postgres not reachable at PG_TEST_DATABASE_URL ({_SKIP_REASON})")
+
+    from app.extensions import db
+    from app.models import (
+        Activity,
+        PumpCheck,
+        User,
+        WORKOUT_COMPLETION_MARKER,
+        WORKOUT_SESSION_COMPLETED,
+        WorkoutLog,
+        WorkoutSession,
+    )
+    from app.services.workout_session import SessionOutcome, complete_session, start_session
+
+    flask_app, user_id = _make_pg_app()
+    with flask_app.app_context():
+        public_id = start_session(user_id).session.public_id
+
+    barrier = threading.Barrier(2)
+    results = {}
+
+    def _contender(tag):
+        with flask_app.app_context():
+            resident = db.session.get(User, user_id)
+            assert resident is not None
+            barrier.wait()
+            try:
+                results[tag] = ("ok", complete_session(user_id, public_id).outcome)
+            except Exception as exc:  # pragma: no cover - surfaced via assertion
+                results[tag] = ("raise", type(exc).__name__)
+            finally:
+                db.session.remove()
+
+    threads = [threading.Thread(target=_contender, args=(i,)) for i in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+
+    try:
+        outcomes = [results[i] for i in range(2)]
+        assert all(kind == "ok" for kind, _ in outcomes), outcomes
+        values = [v for _, v in outcomes]
+        # Exactly one canonical completion, one deterministic replay — never two.
+        assert values.count(SessionOutcome.COMPLETED) == 1, values
+        assert values.count(SessionOutcome.ALREADY_COMPLETED) == 1, values
+        with flask_app.app_context():
+            row = WorkoutSession.query.filter_by(user_id=user_id).one()
+            assert row.status == WORKOUT_SESSION_COMPLETED
+            assert row.version == 2  # terminalized exactly once (no double-bump)
+            # No artifact duplicated by the race-loser reconciliation.
+            assert PumpCheck.query.filter_by(user_id=user_id).count() == 1
+            assert WorkoutLog.query.filter_by(
+                user_id=user_id, exercise_name=WORKOUT_COMPLETION_MARKER).count() == 1
+            assert Activity.query.filter_by(
+                user_id=user_id, activity_type="workout_completed").count() == 1
     finally:
         _teardown(flask_app)

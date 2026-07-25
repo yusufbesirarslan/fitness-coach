@@ -390,7 +390,7 @@ ownership; `__init__.py` = public API).
 `public_id` (`secrets.token_urlsafe`, unique) for **all** API exposure. Fields:
 `user_id` (FK, CASCADE, indexed), `status` (`active|completed|abandoned` +
 `CheckConstraint`), `workout_date` (ISO Istanbul **start** day — context, not
-identity), `weekday_slot`, `source` (`scheduled|unscheduled`), `training_plan_id`
+identity), `weekday_slot`, `source` (`scheduled|unscheduled`), `planned_training_plan_id`
 (**plain Integer soft reference, intentionally NOT a hard FK** so the session
 survives plan deletion/regeneration and we can *detect* a now-missing plan),
 `plan_fingerprint` (versioned; below), `started_at`, `last_activity_at`,
@@ -518,7 +518,9 @@ Invariants held: a matching session is **never** left permanently ACTIVE after i
 day is completed; COMPLETED is **never** written without PumpCheck authority;
 unique-conflict handling never silently drops the terminalization. Real Postgres
 two-contender proof: `tests/test_workout_session_pg.py` (opt-in, `pg_concurrency`
-marker + env-gated).
+marker + env-gated) — **executed 2026-07-25 on a disposable `postgres:16` (16.14),
+all 3 tests passed** (concurrent-start, complete-vs-abandon, concurrent-completion
+reconciliation); see `docs/handoff.md` for the full execution record.
 
 ### API routes
 
