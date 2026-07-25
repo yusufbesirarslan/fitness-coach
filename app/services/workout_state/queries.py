@@ -24,7 +24,13 @@ from app.services.training_generation.response_validator import VALID_TIPS, WEEK
 from app.services.training_history import fetch_workout_entries
 from app.timeutil import app_date_of, utc_day_bounds
 
-from .models import KIND_REST, KIND_WORKOUT, WorkoutStateInputs
+from .models import (
+    ACTIVE_SESSION_FACTS_NONE,
+    KIND_REST,
+    KIND_WORKOUT,
+    ActiveSessionFacts,
+    WorkoutStateInputs,
+)
 
 # The one non-rest, recognized workout tips (antrenman/kardiyo). Derived from the
 # canonical ``VALID_TIPS`` so it can never drift from the plan validator.
@@ -120,6 +126,31 @@ def _load_execution(user_id: int, today: date) -> Tuple[bool, bool, int, bool]:
 
     stale_prev = (real_yest > 0) and not (marker_yest > 0 or completed_yest)
     return completed_today, marker_today > 0, real_today, stale_prev
+
+
+def load_session_facts(user_id: int, today: date) -> ActiveSessionFacts:
+    """Load the persisted-session facts for the v2 (flag-ON) enrichment.
+
+    Delegates to the ``workout_session`` read model (the single owner of session
+    truth) — read-only, never mutating. Imported lazily so the PR1 read model
+    carries no hard dependency on the PR3 session package when the flag is OFF and
+    this is never called. Returns :data:`ACTIVE_SESSION_FACTS_NONE` when nothing
+    is persisted for the user/day.
+    """
+    from app.services.workout_session import read_session_for_state
+
+    view = read_session_for_state(user_id, today=today)
+    if view is None:
+        return ACTIVE_SESSION_FACTS_NONE
+    return ActiveSessionFacts(
+        present=True,
+        status=view.status,
+        resumable=view.resumable,
+        public_id=view.public_id,
+        workout_date=view.workout_date,
+        relationship=view.relationship,
+        stale_reason=view.stale_reason,
+    )
 
 
 def load_inputs(user_id: int, today: date) -> WorkoutStateInputs:

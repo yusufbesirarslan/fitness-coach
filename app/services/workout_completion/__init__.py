@@ -15,7 +15,12 @@ Public contract:
 Layering mirrors ``workout_state``: ``queries`` (impure reads) + ``service``
 (the mutation) + ``models`` (framework-free value objects).
 """
-from .models import CompleteWorkoutCommand, CompletionOutcome, CompletionResult
+from .models import (
+    CompleteWorkoutCommand,
+    CompletionOutcome,
+    CompletionResult,
+    SessionCompletionConflict,
+)
 from .queries import already_completed_today
 from .service import complete_workout
 
@@ -25,4 +30,5 @@ __all__ = [
     "CompleteWorkoutCommand",
     "CompletionResult",
     "CompletionOutcome",
+    "SessionCompletionConflict",
 ]

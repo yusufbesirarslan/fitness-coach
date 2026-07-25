@@ -13,7 +13,13 @@ from datetime import date
 from typing import Optional
 
 # Additive-only contract version. Consumers may branch on it; PR1 == 1.
+# When the persisted workout-session lifecycle is enabled (Sprint 7 PR3,
+# ``FITX_WORKOUT_SESSIONS_ENABLED``) the resolver emits ``CONTRACT_VERSION_SESSIONS``
+# with the additive session-aware fields below. With the flag OFF the snapshot is
+# byte-identical to the PR1 ``CONTRACT_VERSION`` contract (no session keys, no new
+# enum values) — see docs/WORKOUT_STATE.md "Sprint 7 PR3".
 CONTRACT_VERSION = 1
+CONTRACT_VERSION_SESSIONS = 2
 
 # ── Normalized schedule kind (query layer owns the TR vocabulary; the resolver
 #    stays vocabulary-free) ─────────────────────────────────────────────────
@@ -25,6 +31,33 @@ SCHEDULE_SCHEDULED = "scheduled"
 SCHEDULE_REST_DAY = "rest_day"
 SCHEDULE_NO_PLAN = "no_plan"
 SCHEDULE_UNAVAILABLE = "schedule_unavailable"
+
+# ── Session-aware additions (Sprint 7 PR3; emitted ONLY at CONTRACT_VERSION_SESSIONS)
+# ``in_progress`` and ``resume`` are producible ONLY from a persisted ELIGIBLE
+# ACTIVE WorkoutSession — never from evidence-only WorkoutLog rows (which stay
+# ``execution_recorded`` / ``none``). This is the whole point of PR3: a resumable
+# session is a server-owned fact, not an inference from execution evidence.
+EXEC_IN_PROGRESS = "in_progress"        # an eligible ACTIVE session exists
+ACTION_RESUME = "resume"                # resume that eligible ACTIVE session
+PRIMARY_IN_PROGRESS = "in_progress"     # dominant state: a resumable session
+
+# Derived session lifecycle state for the v2 contract (read-only classification of
+# the persisted session, never a mutation): no session · resumable · blocked/stale
+# · completed · abandoned · execution-evidence-without-session · inconsistent.
+SESSION_STATE_NONE = "none"
+SESSION_STATE_ACTIVE_RESUMABLE = "active_resumable"
+SESSION_STATE_ACTIVE_BLOCKED = "active_blocked"
+SESSION_STATE_COMPLETED = "completed"
+SESSION_STATE_ABANDONED = "abandoned"
+SESSION_STATE_EXECUTION_WITHOUT_SESSION = "execution_without_session"
+SESSION_STATE_INCONSISTENT = "inconsistent"
+
+# Persisted WorkoutSession status values, mirrored BY VALUE from
+# app.models.WORKOUT_SESSION_* so this pure layer imports no ORM (a drift guard in
+# tests asserts they stay equal). Never compare against ORM constants here.
+SESSION_STATUS_ACTIVE = "active"
+SESSION_STATUS_COMPLETED = "completed"
+SESSION_STATUS_ABANDONED = "abandoned"
 
 # ── Dimension B: execution state (today only) ────────────────────────────────
 # ``execution_recorded`` means non-marker WorkoutLog rows exist for today — this
@@ -73,6 +106,12 @@ PRIMARY_NEEDS_ATTENTION = "needs_attention"
 ANOMALY_SCHEDULE_UNPARSEABLE = "schedule_unparseable"
 ANOMALY_COMPLETION_MARKER_MISMATCH = "completion_marker_mismatch"
 ANOMALY_RESOLUTION_ERROR = "resolution_error"
+# Session lifecycle disagrees with completion proof: the day has a confirmed
+# PumpCheck completion while a session for it is still ACTIVE (Sprint 7 PR3).
+ANOMALY_SESSION_INCONSISTENT = "session_lifecycle_inconsistent"
+# The session read failed while enriching a v2 snapshot — the base state stays
+# valid; the session dimension is reported empty and this is logged.
+ANOMALY_SESSION_READ_ERROR = "session_read_error"
 
 
 @dataclass(frozen=True)
@@ -102,12 +141,43 @@ class WorkoutStateInputs:
 
 
 @dataclass(frozen=True)
+class ActiveSessionFacts:
+    """Trusted, already-loaded persisted-session facts for the v2 enrichment.
+
+    Built by the query layer from the ``workout_session`` read model (impure);
+    consumed by ``resolver.enrich_with_session`` (pure). ``status`` is the raw
+    persisted status string (``SESSION_STATUS_*``) or ``None`` when no session is
+    relevant to today. ``resumable`` is only meaningful when ``status`` is active.
+    """
+    present: bool
+    status: Optional[str]
+    resumable: bool
+    public_id: Optional[str]
+    workout_date: Optional[str]
+    relationship: Optional[str]
+    stale_reason: Optional[str]
+
+
+# The "no session at all" facts — used when the flag is on but nothing is
+# persisted, or when the session read fails (fail-safe empty dimension).
+ACTIVE_SESSION_FACTS_NONE = ActiveSessionFacts(
+    present=False, status=None, resumable=False, public_id=None,
+    workout_date=None, relationship=None, stale_reason=None,
+)
+
+
+@dataclass(frozen=True)
 class WorkoutStateSnapshot:
     """Deterministic, serializable snapshot of the user's current workout state.
 
     The single canonical answer API/client consumers read instead of recombining
     raw flags. ``primary_state`` is the one dominant field; the individual
     dimensions and diagnostics are exposed for consumers that need them.
+
+    ``session_state`` / ``session`` are the additive Sprint 7 PR3 dimensions and
+    are serialized ONLY at ``CONTRACT_VERSION_SESSIONS`` — at ``CONTRACT_VERSION``
+    (flag OFF) they are absent from ``to_dict`` so the projection stays byte-for-
+    byte identical to the PR1 contract.
     """
     today: date
     schedule_state: str
@@ -120,10 +190,16 @@ class WorkoutStateSnapshot:
     stale_previous_workout: bool
     anomaly: Optional[str] = None
     contract_version: int = CONTRACT_VERSION
+    session_state: str = SESSION_STATE_NONE
+    session: Optional[dict] = None
 
     def to_dict(self) -> dict:
-        """Stable snake_case projection for JSON responses (additive-only)."""
-        return {
+        """Stable snake_case projection for JSON responses (additive-only).
+
+        At ``CONTRACT_VERSION`` this is exactly the PR1 key set; the session keys
+        appear only once the contract has advanced to ``CONTRACT_VERSION_SESSIONS``.
+        """
+        data = {
             "contract_version": self.contract_version,
             "today": self.today.isoformat(),
             "schedule_state": self.schedule_state,
@@ -136,3 +212,7 @@ class WorkoutStateSnapshot:
             "stale_previous_workout": self.stale_previous_workout,
             "anomaly": self.anomaly,
         }
+        if self.contract_version >= CONTRACT_VERSION_SESSIONS:
+            data["session_state"] = self.session_state
+            data["session"] = self.session
+        return data

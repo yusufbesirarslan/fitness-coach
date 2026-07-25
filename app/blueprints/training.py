@@ -24,14 +24,44 @@ from app.services.validators import validate_pump_check_image
 from app.services.weekly_program import build_weekly_program, weekly_program_payload
 from app.services.workout_completion import (
     CompleteWorkoutCommand,
+    SessionCompletionConflict,
     already_completed_today,
     complete_workout as run_completion,
+)
+from app.services.workout_session import (
+    SessionOutcome,
+    abandon_session,
+    checkpoint_session,
+    get_current_session,
+    resolve_for_completion,
+    resume_session,
+    start_session,
 )
 from app.services.workout_state import resolve_workout_state
 from app.timeutil import app_today, display_dt
 
 
 bp = Blueprint("training", __name__)
+
+# Sprint 7 PR3: HTTP status for each deterministic session lifecycle outcome. 2xx =
+# the operation succeeded or an idempotent equivalent; 409 = a deterministic
+# conflict (stale/needs-resolution, a different active workout, an abandoned
+# session); 404 = not owned / not found. The body always carries the machine
+# ``outcome`` (and ``code`` on non-2xx) so clients branch on a stable value.
+_SESSION_HTTP = {
+    SessionOutcome.CREATED: 201,
+    SessionOutcome.EXISTING_ACTIVE: 200,
+    SessionOutcome.RESUMED: 200,
+    SessionOutcome.CHECKPOINTED: 200,
+    SessionOutcome.ABANDONED: 200,
+    SessionOutcome.COMPLETED: 200,
+    SessionOutcome.ALREADY_COMPLETED: 200,
+    SessionOutcome.ALREADY_ABANDONED: 200,
+    SessionOutcome.STALE_SESSION_REQUIRES_RESOLUTION: 409,
+    SessionOutcome.CONFLICT: 409,
+    SessionOutcome.INVALID_TRANSITION: 409,
+    SessionOutcome.NOT_FOUND: 404,
+}
 _WEEKLY_PROGRAM_PATH = "/api/training/weekly-program"
 
 
@@ -172,19 +202,48 @@ def complete_workout():
     if not plan:
         return jsonify({"error": t("route.no_active_training_plan")}), 400
 
+    data = request.get_json(silent=True) or {}
+
+    # Sprint 7 PR3 (optional, flag-gated): an OPTIONAL persisted session may be
+    # supplied by opaque public id. Resolve ownership → internal id BEFORE the
+    # expensive Bedrock/S3 work so a terminal/not-owned session fails fast. Absent
+    # (or flag OFF) ⇒ the unchanged legacy completion path — no session fabricated.
+    session_internal_id = None
+    if _workout_sessions_enabled():
+        session_public_id = (data.get("session_id") or "").strip()[:64] or None
+        if session_public_id:
+            session_internal_id, sess_err = resolve_for_completion(
+                current_user.id, session_public_id)
+            if sess_err is not None:
+                # Terminal/not-found session → deterministic conflict, no completion.
+                return _session_response(sess_err)
+
     # M3 + Sprint 7 PR2: günlük idempotency artık kanonik tamamlanma sınırının
     # salt-okunur preflight'ıdır (app/services/workout_completion). Bugün zaten bir
     # Pump Check varsa antrenman tamamlanmış sayılır → pahalı Bedrock görü + S3
     # yüklemesi AŞAĞIDAKİ bloklardan ÖNCE atlanır. Yarış-güvenli asıl iddia
     # uq_pump_check_day; bu preflight yalnızca maliyet/gecikme optimizasyonudur.
     if already_completed_today(current_user.id, app_today()):
+        # Sprint 7 PR3: a session-linked replay must still terminalize the owned
+        # ACTIVE session (no new artifacts, no Bedrock/S3) — correction #3.
+        if session_internal_id is not None:
+            try:
+                run_completion(CompleteWorkoutCommand(
+                    user_id=current_user.id, today=app_today(),
+                    session_id=session_internal_id, entry_path="route",
+                ))
+            except SessionCompletionConflict:
+                return jsonify({"error": "session_conflict",
+                                "code": "session_conflict"}), 409
+            except Exception as e:  # noqa: BLE001 — never leak; reconcile is best-effort
+                current_app.logger.warning(
+                    "[WORKOUT] session reconcile failed: %s: %s", type(e).__name__, e)
         return jsonify({"error": t("route.workout_already_done"),
                         "code": "already_completed"}), 400
 
     # ── PUMP CHECK GATE ──────────────────────────────────────────────────────
     # Antrenman tamamlanmadan önce ortam fotoğrafı + konum AI ile doğrulanmalı.
     # Doğrulama geçerse fotoğraf S3'e (özel bucket) yüklenir ve kaydı tutulur.
-    data = request.get_json(silent=True) or {}
     image_bytes, img_mime, img_err = validate_pump_check_image(data.get("image"))
     if img_err:
         return jsonify({"error": img_err}), 400
@@ -226,6 +285,7 @@ def complete_workout():
         result = run_completion(CompleteWorkoutCommand(
             user_id=current_user.id,
             today=app_today(),
+            session_id=session_internal_id,  # Sprint 7 PR3: None ⇒ legacy path
             image_key=pump_image_key,
             location_type=location_type,
             description=description,
@@ -239,6 +299,10 @@ def complete_workout():
             activity_text="Bugünkü antrenmanını tamamladı (foto eklendi)",
             entry_path="route",
         ))
+    except SessionCompletionConflict:
+        # The linked session was abandoned before it could be completed — a
+        # deterministic conflict, rolled back with no artifacts (correction #3).
+        return jsonify({"error": "session_conflict", "code": "session_conflict"}), 409
     except Exception as e:
         # Servis beklenmeyen hatada rollback edip yeniden fırlatır (uq_pump_check_day
         # DIŞINDAKİ IntegrityError dahil). Kanonik dostça 500; iç hata istemciye sızmaz.
@@ -259,6 +323,10 @@ def complete_workout():
         "visibility": visibility,
         "shared_friend_ids": selected_friend_ids,
     }
+    if session_internal_id is not None:
+        # The linked session was terminalized COMPLETED atomically with this
+        # completion (Sprint 7 PR3) — signal it without a second query.
+        response["session_completed"] = True
     if result.quest_result:
         response["quest_awarded"] = result.quest_result
     if pump_image_key:
@@ -289,6 +357,92 @@ def workout_status():
         "completed": snapshot.completed_today,
         "state": snapshot.to_dict(),
     })
+
+
+# ── Persisted workout-session lifecycle (Sprint 7 PR3) ───────────────────────
+# All session routes are gated by FITX_WORKOUT_SESSIONS_ENABLED (default OFF): when
+# OFF they are INERT (404), so enabling PR1/PR2 behavior stays byte-identical. The
+# flag is a presentation/rollout gate, NOT an authorization gate — every route is
+# @require_auth and the service always re-enforces ownership from current_user.id
+# (no client-supplied user_id / status / timestamps / version is ever trusted).
+def _workout_sessions_enabled() -> bool:
+    return bool(current_app.config.get("FITX_WORKOUT_SESSIONS_ENABLED", False))
+
+
+def _session_disabled_404():
+    # Feature OFF ⇒ the route is indistinguishable from a non-existent one. Stable
+    # machine envelope (no localized copy — there is no UI consumer yet; the UI
+    # rollout is a later, out-of-scope PR).
+    return jsonify({"error": "not_found", "code": "not_found"}), 404
+
+
+def _session_response(result):
+    """Serialize a :class:`SessionResult` to the stable envelope + deterministic
+    HTTP status. Includes the completion reward fields when a completion result is
+    attached (session completed through the PR2 authority)."""
+    status = _SESSION_HTTP.get(result.outcome, 200)
+    body = {
+        "outcome": result.outcome.value,
+        "session": result.session.to_dict() if result.session is not None else None,
+    }
+    if status >= 400:
+        body["code"] = result.outcome.value
+        body["error"] = result.outcome.value
+    completion = getattr(result, "completion", None)
+    if completion is not None:
+        body["completion"] = {
+            "outcome": completion.outcome.value,
+            "xp_awarded": completion.xp_awarded,
+            "new_total": completion.new_total,
+            "level": completion.level,
+            "title": completion.title,
+        }
+    return jsonify(body), status
+
+
+@bp.route("/workout/session/start", methods=["POST"])
+@require_auth
+def workout_session_start():
+    if not _workout_sessions_enabled():
+        return _session_disabled_404()
+    # No client body is trusted: the user, Istanbul date, plan snapshot and
+    # fingerprint are all derived server-side. The insert is the atomic claim.
+    return _session_response(start_session(current_user.id))
+
+
+@bp.route("/workout/session/current", methods=["GET"])
+@require_auth
+def workout_session_current():
+    if not _workout_sessions_enabled():
+        return _session_disabled_404()
+    return _session_response(get_current_session(current_user.id))
+
+
+@bp.route("/workout/session/<public_id>/resume", methods=["POST"])
+@require_auth
+def workout_session_resume(public_id):
+    if not _workout_sessions_enabled():
+        return _session_disabled_404()
+    return _session_response(resume_session(current_user.id, public_id[:64]))
+
+
+@bp.route("/workout/session/<public_id>/checkpoint", methods=["POST"])
+@require_auth
+def workout_session_checkpoint(public_id):
+    if not _workout_sessions_enabled():
+        return _session_disabled_404()
+    return _session_response(checkpoint_session(current_user.id, public_id[:64]))
+
+
+@bp.route("/workout/session/<public_id>/abandon", methods=["POST"])
+@require_auth
+def workout_session_abandon(public_id):
+    if not _workout_sessions_enabled():
+        return _session_disabled_404()
+    data = request.get_json(silent=True) or {}
+    reason = (data.get("reason") or "").strip()[:40] or None
+    return _session_response(
+        abandon_session(current_user.id, public_id[:64], reason=reason))
 
 
 @bp.route("/training-plan/active")
