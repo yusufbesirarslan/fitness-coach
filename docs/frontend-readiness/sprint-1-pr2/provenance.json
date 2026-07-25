@@ -1,0 +1,41 @@
+{
+  "pr": "uiux-sprint1-pr2-today-next-action",
+  "reconciliation": {
+    "note": "Re-validated against the CURRENT integration tree after origin/main advanced twice. PR1 (originally the stacked base 1f32c2f) merged to main as a272b5b (byte-identical tree); Sprint 7 PR1 (3d9c582) then landed the canonical workout-state read model; and after PR #185 was opened, Sprint 7 PR2 (307b7b5, canonical workout-completion mutation, PR #184) merged. PR2 was rebased onto origin/main (307b7b5). Overlap was only app/blueprints/training.py (auto-merged: #184 owns the write path complete_workout(), PR2 owns the read paths workout_status()/get_active_training_plan()) and docs/handoff.md (both sections preserved). PR2's today_facts still reads via workout_state.resolve_workout_state, which #184 left intact.",
+    "origin_main_before": "d68186a",
+    "pr1_original_stacked_base": "1f32c2f",
+    "pr1_merged_into_main_as": "a272b5b",
+    "pr1_local_tree_identical_to_merged": true,
+    "sprint7_pr1_commit": "3d9c582",
+    "sprint7_pr2_commit": "307b7b5",
+    "origin_main_after_first_rebase": "3d9c582",
+    "origin_main_after_second_rebase": "307b7b5",
+    "pr2_base_after_rebase": "307b7b5",
+    "pr2_pre_rebase_commit": "700941d",
+    "pr2_branch": "uiux/sprint1-pr2-today-next-action",
+    "pr2_worktree": ".worktrees/uiux-sprint1-pr2-today-next-action",
+    "pr2_commit": "recorded in the final report and as the branch tip (a commit cannot embed its own hash)",
+    "pr_number": 185
+  },
+  "engine": {
+    "browser": "chromium",
+    "chromium_version": "149.0.7827.55",
+    "runtime": "WSL Ubuntu-24.04, reused Sprint-0 audit venv (python 3.12.3) + PLAYWRIGHT_BROWSERS_PATH",
+    "webkit_firefox": "not installed — cross-browser coverage not claimed (environmental limitation)"
+  },
+  "results": {
+    "matrix": {"cells": 48, "passed": 48, "failed": 0, "blocked": 0, "manifest": "validation-manifest.json"},
+    "interactions": {"cells": 6, "passed": 6, "failed": 0, "blocked": 0, "manifest": "interaction-results.json"},
+    "behavior": {"cells": 17, "passed": 16, "failed": 0, "blocked": 0, "na": 1, "manifest": "behavior-results.json"},
+    "reconciled_pytest": {"total_nodes": 2447, "passed": 2443, "skipped": 1, "deselected": 3, "failed": 0, "marker": "not load", "partition_proof": "test-partition.json", "rerun_after_second_rebase": "re-run in full against the 307b7b5 base (Sprint 7 PR1/PR2 tests now in-tree); count grew from 2423 to 2443 passed"}
+  },
+  "blocker_2_xhr_5xx": {
+    "classification": "harness (audit-environment) concurrency defect — not a PR2 application defect",
+    "root_cause": "per-request GLOBAL clock+validator patching in the hermetic audit app is not thread-safe under the threaded server when a page fires parallel XHRs; a transient session-read failure surfaces as a 503 (or, in a different race, a 500) from the auth layer, endpoint-agnostic and equally present on the legacy page (which fires MORE authed XHRs)",
+    "harness_fix": "request-serialization lock in scripts/frontend_audit/app.py (serializes request bodies; threaded server still owns sockets)",
+    "manifest_hardening": "matrix + interaction cells now record per-cell server_errors (same-origin >=500) and failed_requests and FAIL on any same-origin 5xx, so a passing layout can no longer hide a network failure",
+    "clean_rerun": "the previously-failing cell A-today-20__plan_ready__320__tr__nav-on_today-on now passes with empty server_errors/failed_requests/console_errors; zero same-origin 5xx across all 48 cells",
+    "detail": "xhr-500-investigation.md"
+  },
+  "authorization_boundary": "local implementation + validation completed under a local-only boundary; branch subsequently pushed and PR #185 opened against main under explicit authorization. Nothing merged, nothing deployed, no production feature flag changed."
+}

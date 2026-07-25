@@ -101,6 +101,17 @@ WEEKLY_PROGRAM_UI_ENABLED = os.getenv("WEEKLY_PROGRAM_UI_ENABLED", "0") == "1"
 # its own @require_auth regardless of this flag. Independent of every other flag
 # (own env name, own config key). Full rollback: set UIUX_NAV_V2_ENABLED=0.
 UIUX_NAV_V2_ENABLED = os.getenv("UIUX_NAV_V2_ENABLED", "0") == "1"
+# ── AxisAI UIUX Sprint 1 PR2: Today experience v2 rollout gate ──
+# Spec identity: uiux_sprint1_today_v2. Default OFF renders the legacy Today
+# dashboard (templates/index.html) byte-identically. ON renders the PR2 Today
+# hierarchy (templates/today.html): one authoritative next action + honest
+# missing/completed/error semantics. PRESENTATION ONLY — never an authorization
+# boundary (every route keeps its own @require_auth) and it carries no business
+# rule. Server-config only: it is read from current_app.config, never from a
+# query param, cookie, header, or browser storage. Independent of every other
+# flag, including UIUX_NAV_V2_ENABLED (own env name, own config key — either can
+# roll back alone). Full rollback: set UIUX_TODAY_V2_ENABLED=0.
+UIUX_TODAY_V2_ENABLED = os.getenv("UIUX_TODAY_V2_ENABLED", "0") == "1"
 # ── Sprint 4 WS1: AI koç kalıcı konuşma hafızası ──
 # Operasyonel kapatma anahtarı: 0 → eski davranış (yalnızca widget'ın gönderdiği
 # kısa geçmiş; DB'ye tur yazılmaz). Tablolar expand-only olduğundan geri açmak güvenli.
@@ -294,6 +305,7 @@ def configure_app(app):
     app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = AI_ADAPTIVE_PLAN_CONTEXT
     app.config["WEEKLY_PROGRAM_UI_ENABLED"] = WEEKLY_PROGRAM_UI_ENABLED
     app.config["UIUX_NAV_V2_ENABLED"] = UIUX_NAV_V2_ENABLED
+    app.config["UIUX_TODAY_V2_ENABLED"] = UIUX_TODAY_V2_ENABLED
     app.config["AI_MEMORY_ENABLED"] = AI_MEMORY_ENABLED
     app.config["LOGIN_FAIL_CLOSED"] = LOGIN_FAIL_CLOSED
     app.config["BEDROCK_ENABLED"] = BEDROCK_ENABLED

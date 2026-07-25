@@ -5,7 +5,22 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import threading
 from pathlib import Path
+
+
+# The hermetic audit installs per-request GLOBAL state — a fixed audit clock and
+# a monkeypatched Cognito token validator (see _activate_audit_context). That is
+# only consistent while ONE request runs at a time, but a single Today/legacy page
+# fires several XHRs in parallel and the server is threaded, so concurrent requests
+# would interleave their global patch/restore and corrupt each other's auth/clock
+# — surfacing as spurious 5xx (a transient 503 "identity unavailable" or an
+# unhandled 500) on a random subset of the parallel reads. This lock serializes
+# the request BODIES (the threaded server still owns the sockets, so the browser's
+# concurrent connections never head-of-line block) so each request holds a
+# coherent clock+validator for its whole lifetime. It is a harness-only fix: no
+# application code is involved and production is unaffected.
+_AUDIT_REQUEST_LOCK = threading.Lock()
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -91,6 +106,11 @@ def create_audit_app(database_path: Path):
         db.create_all()
 
     def _activate_audit_context():
+        # Hold the serialization lock for the whole request so the global clock +
+        # validator patch below stays coherent under the threaded server's
+        # concurrent requests (released in _restore_audit_context / teardown).
+        _AUDIT_REQUEST_LOCK.acquire()
+        g._audit_lock_held = True
         clocks = app.extensions["frontend_audit"]["scenario_clocks"]
         scenario_id = session.get("audit_scenario", "anonymous")
         scenario = clocks.get(scenario_id, clocks["anonymous"])
@@ -114,12 +134,17 @@ def create_audit_app(database_path: Path):
 
     @app.teardown_request
     def _restore_audit_context(_error=None):
-        original = getattr(g, "_audit_original_validator", None)
-        if original is not None:
-            cognito_jwt.validate_token = original
-        manager = getattr(g, "_audit_clock_manager", None)
-        if manager is not None:
-            manager.__exit__(None, None, None)
+        try:
+            original = getattr(g, "_audit_original_validator", None)
+            if original is not None:
+                cognito_jwt.validate_token = original
+            manager = getattr(g, "_audit_clock_manager", None)
+            if manager is not None:
+                manager.__exit__(None, None, None)
+        finally:
+            if getattr(g, "_audit_lock_held", False):
+                g._audit_lock_held = False
+                _AUDIT_REQUEST_LOCK.release()
 
     @app.get("/__audit__/login/<scenario_id>")
     def audit_login(scenario_id):

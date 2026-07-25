@@ -17,6 +17,7 @@ from app.services.gamification import complete_quest_for_user
 from app.services.menu_extract import validate_pump_check
 from app.services.pump_checks import get_friend_ids, normalize_workout_score
 from app.services.premium import premium_ai_plan_gate
+from app.services.today_facts import get_active_plan
 from app.services.training_generation.response_validator import PlanValidationError
 from app.services.training_generation.service import generate_training_plan_payload
 from app.services.validators import validate_pump_check_image
@@ -279,6 +280,10 @@ def workout_status():
     # guard. The additive `state` object exposes the full contract; existing
     # consumers that only read `completed` are unaffected. The resolver performs
     # NO writes and no external calls.
+    #
+    # UIUX Sprint 1 PR2 note: Today V2's server-side completion read reuses THIS
+    # canonical owner (app/services/today_facts delegates to resolve_workout_state)
+    # rather than re-querying — so the page and this endpoint can never disagree.
     snapshot = resolve_workout_state(current_user.id)
     return jsonify({
         "completed": snapshot.completed_today,
@@ -289,9 +294,10 @@ def workout_status():
 @bp.route("/training-plan/active")
 @require_auth
 def get_active_training_plan():
-    plan = TrainingPlan.query.filter_by(user_id=current_user.id)\
-        .order_by(TrainingPlan.created_at.desc())\
-        .first()
+    # Kanonik "aktif plan" seçicisi app/services/today_facts.get_active_plan'da
+    # (UIUX Sprint 1 PR2): en son oluşturulan plan. Today V2 ile bu uç aynı
+    # kuralı paylaşsın diye tek yerden okunur; yanıt AYNI kalır.
+    plan = get_active_plan(current_user.id)
 
     if not plan:
         return jsonify({"exists": False})

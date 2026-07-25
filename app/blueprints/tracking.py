@@ -2,7 +2,7 @@
 import json
 import math
 from datetime import timedelta
-from flask import Blueprint, Response, g, jsonify, redirect, render_template, request, url_for
+from flask import Blueprint, Response, current_app, g, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user
 from app.auth_middleware import require_auth
 from sqlalchemy.exc import IntegrityError
@@ -48,6 +48,27 @@ def home():
     last_checkin = WeeklyCheckIn.query.filter_by(user_id=current_user.id)\
         .order_by(WeeklyCheckIn.created_at.desc()).first()
     last_weight_update = (last_checkin.created_at.isoformat() + "Z") if last_checkin else ""
+
+    # ── AxisAI UIUX Sprint 1 PR2: Today experience v2 (flag-gated) ──
+    # OFF (default) renders the legacy dashboard unchanged. ON gathers the two
+    # canonical facts (active-plan + today-completion) through the shared
+    # read-only helpers — the SAME source /training-plan/active and
+    # /workout/status use — and maps them with the pure presenter. These are the
+    # only authoritative reads added; the primary action is server-rendered so
+    # the client no longer needs the /workout/status hydration fetch. The flag is
+    # read from config at request time so tests/rollout toggle one key.
+    if current_app.config.get("UIUX_TODAY_V2_ENABLED", False):
+        from app.services.today_facts import gather_today_facts
+        from app.today_presenter import build_today_view
+        today_view = build_today_view(gather_today_facts(current_user.id))
+        return render_template("today.html",
+            username=current_user.username,
+            profile_picture=current_user.avatar_src,
+            streak_count=current_user.streak_count or 0,
+            last_weight_update=last_weight_update,
+            today=today_view,
+        )
+
     return render_template("index.html",
         username=current_user.username,
         profile_picture=current_user.avatar_src,
