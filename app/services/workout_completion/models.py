@@ -26,6 +26,19 @@ class CompletionOutcome(Enum):
     ALREADY_COMPLETED = "already_completed"
 
 
+class SessionCompletionConflict(Exception):
+    """A session-scoped completion cannot proceed because the referenced session
+    is in a terminal state incompatible with completion (it was explicitly
+    ABANDONED). Raised *after* rolling back, before any completion artifact is
+    written — so no PumpCheck/marker/XP is produced. The caller maps it to a
+    deterministic conflict outcome (never an HTTP 500).
+
+    Defined here (not in ``workout_session``) so the completion authority never
+    imports the session package — the dependency arrow stays one-way
+    (``workout_session`` → ``workout_completion``), avoiding an import cycle.
+    """
+
+
 @dataclass(frozen=True)
 class CompleteWorkoutCommand:
     """Everything the canonical mutation needs — already validated by the caller.
@@ -38,6 +51,12 @@ class CompleteWorkoutCommand:
 
     user_id: int
     today: date
+    # OPTIONAL persisted-session linkage (Sprint 7 PR3). When present, this
+    # completion also terminalizes the owned ACTIVE ``WorkoutSession`` (id) as
+    # COMPLETED, atomically, inside the single completion transaction. ``None``
+    # (the default) is the unchanged legacy path — a completion without a session
+    # stays fully valid and no session is fabricated.
+    session_id: Optional[int] = None
     image_key: Optional[str] = None
     location_type: str = ""
     description: str = ""

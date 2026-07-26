@@ -6,19 +6,26 @@ external calls — every branch is a total function of the inputs, so the same
 inputs always yield the same snapshot. All impure data access lives in
 ``queries.py``; all logging/error handling lives in ``__init__.py``.
 """
+from dataclasses import replace
+
 from .models import (
     ACTION_BLOCKED,
     ACTION_NONE,
+    ACTION_RESUME,
     ACTION_START,
     ANOMALY_COMPLETION_MARKER_MISMATCH,
     ANOMALY_SCHEDULE_UNPARSEABLE,
+    ANOMALY_SESSION_INCONSISTENT,
+    CONTRACT_VERSION_SESSIONS,
     EXEC_COMPLETED,
+    EXEC_IN_PROGRESS,
     EXEC_NONE,
     EXEC_RECORDED,
     KIND_REST,
     KIND_WORKOUT,
     PRIMARY_COMPLETED,
     PRIMARY_EXECUTION_RECORDED,
+    PRIMARY_IN_PROGRESS,
     PRIMARY_NEEDS_ATTENTION,
     PRIMARY_NO_PLAN,
     PRIMARY_REST_DAY,
@@ -33,6 +40,17 @@ from .models import (
     SCHEDULE_REST_DAY,
     SCHEDULE_SCHEDULED,
     SCHEDULE_UNAVAILABLE,
+    SESSION_STATE_ABANDONED,
+    SESSION_STATE_ACTIVE_BLOCKED,
+    SESSION_STATE_ACTIVE_RESUMABLE,
+    SESSION_STATE_COMPLETED,
+    SESSION_STATE_EXECUTION_WITHOUT_SESSION,
+    SESSION_STATE_INCONSISTENT,
+    SESSION_STATE_NONE,
+    SESSION_STATUS_ABANDONED,
+    SESSION_STATUS_ACTIVE,
+    SESSION_STATUS_COMPLETED,
+    ActiveSessionFacts,
     WorkoutStateInputs,
     WorkoutStateSnapshot,
 )
@@ -152,4 +170,78 @@ def resolve(i: WorkoutStateInputs) -> WorkoutStateSnapshot:
         is_rest_day=schedule_state == SCHEDULE_REST_DAY,
         stale_previous_workout=i.stale_previous_workout,
         anomaly=_anomaly(i, schedule_state),
+    )
+
+
+# ── Sprint 7 PR3: flag-conditional v2 session enrichment (PURE) ───────────────
+def _session_projection(base: WorkoutStateSnapshot, facts: ActiveSessionFacts):
+    """Return ``(session_state, action, execution_state, primary_state)`` for the
+    v2 contract. ``resume``/``in_progress`` are produced ONLY for an ELIGIBLE
+    (resumable) ACTIVE session — never from evidence-only WorkoutLog; and ``start``
+    is never emitted when an ACTIVE session exists (a conflicting active session
+    blocks a fresh start)."""
+    if not facts.present or facts.status is None:
+        # No persisted session. Evidence-only execution is labeled as such, but it
+        # can never become resume/in_progress — the base action/state are kept.
+        if base.execution_state == EXEC_RECORDED:
+            return (SESSION_STATE_EXECUTION_WITHOUT_SESSION,
+                    base.action, base.execution_state, base.primary_state)
+        return SESSION_STATE_NONE, base.action, base.execution_state, base.primary_state
+
+    if facts.status == SESSION_STATUS_ACTIVE:
+        if base.completed_today:
+            # Confirmed completion (PumpCheck) with a still-ACTIVE session — a
+            # lifecycle inconsistency. The day IS done: keep the completed base
+            # action/state (never offer resume), only flag the inconsistency.
+            return (SESSION_STATE_INCONSISTENT,
+                    base.action, base.execution_state, base.primary_state)
+        if facts.resumable:
+            return (SESSION_STATE_ACTIVE_RESUMABLE,
+                    ACTION_RESUME, EXEC_IN_PROGRESS, PRIMARY_IN_PROGRESS)
+        # ACTIVE but not resumable (stale / requires explicit resolution): never a
+        # safe resume, never a fresh start — block until the user resolves it.
+        return (SESSION_STATE_ACTIVE_BLOCKED,
+                ACTION_BLOCKED, base.execution_state, PRIMARY_NEEDS_ATTENTION)
+
+    if facts.status == SESSION_STATUS_COMPLETED:
+        return SESSION_STATE_COMPLETED, base.action, base.execution_state, base.primary_state
+    if facts.status == SESSION_STATUS_ABANDONED:
+        return SESSION_STATE_ABANDONED, base.action, base.execution_state, base.primary_state
+    # Unknown status → treat as no directed session influence (fail safe).
+    return SESSION_STATE_NONE, base.action, base.execution_state, base.primary_state
+
+
+def _session_dict(facts: ActiveSessionFacts):
+    if not facts.present or facts.status is None:
+        return None
+    return {
+        "public_id": facts.public_id,
+        "status": facts.status,
+        "resumable": facts.resumable,
+        "relationship": facts.relationship,
+        "stale_reason": facts.stale_reason,
+        "workout_date": facts.workout_date,
+    }
+
+
+def enrich_with_session(
+    base: WorkoutStateSnapshot, facts: ActiveSessionFacts
+) -> WorkoutStateSnapshot:
+    """Pure v2 projection: fold persisted-session truth into ``base`` and advance
+    the contract to ``CONTRACT_VERSION_SESSIONS``. Returns a NEW snapshot; ``base``
+    (the exact PR1 v1 snapshot) is never mutated, so the flag-OFF path that skips
+    this call stays byte-identical."""
+    session_state, action, execution_state, primary_state = _session_projection(base, facts)
+    anomaly = base.anomaly
+    if anomaly is None and session_state == SESSION_STATE_INCONSISTENT:
+        anomaly = ANOMALY_SESSION_INCONSISTENT
+    return replace(
+        base,
+        contract_version=CONTRACT_VERSION_SESSIONS,
+        execution_state=execution_state,
+        action=action,
+        primary_state=primary_state,
+        session_state=session_state,
+        session=_session_dict(facts),
+        anomaly=anomaly,
     )

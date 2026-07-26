@@ -33,7 +33,9 @@ def test_alembic_migrations_have_single_head():
 
     heads = sorted(set(revisions) - down_revisions)
 
-    assert heads == ["bb88cc99dd00"]
+    # Sprint 7 PR3 adds the workout_session table as the single new head off
+    # bb88cc99dd00 (the PR2 base). One head only — no branching.
+    assert heads == ["a994f9bed783"]
 
 
 def test_activity_trigger_revision_is_postgresql_guarded():

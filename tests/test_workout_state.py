@@ -205,10 +205,16 @@ def test_execution_evidence_never_completed_or_resumable():
     assert snap.action != "resume"
 
 
-def test_contract_has_no_resume_action():
-    # `resume` is not part of the action alphabet at all — the server persists no
-    # resumable session, so it can never be offered (Finding 2).
-    assert not hasattr(m, "ACTION_RESUME")
+def test_v1_contract_never_offers_resume_action():
+    # Sprint 7 PR3 adds the ACTION_RESUME constant, but it is a v2-only value: it
+    # is producible ONLY from a persisted eligible ACTIVE session via the flag-ON
+    # enrichment (tests/test_workout_state_sessions.py). The pure v1 resolver's
+    # action alphabet still excludes it entirely — flag OFF stays byte-identical to
+    # PR1 (Finding 2). The constant exists...
+    assert m.ACTION_RESUME == "resume"
+    # ...but `resume` is never part of the v1 contract vocabulary the pure resolver
+    # can emit.
+    assert m.ACTION_RESUME not in VALID_ACTIONS
     assert "resume" not in VALID_ACTIONS
 
 

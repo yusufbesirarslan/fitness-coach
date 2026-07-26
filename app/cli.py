@@ -96,13 +96,14 @@ def _user_child_models():
         UserBadge, UserChallengeProgress, UserQuestProgress, UserSession,
         UserWearableConnection, WaterLog,
         WearableActivityLog, WearableSleepLog, WearableWorkoutLog,
-        WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog,
+        WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog, WorkoutSession,
     )
     return (
         UserSession, CognitoSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
         TrainingPlan, MealLog, PendingAction, PumpCheckLike, PumpCheckComment,
         PumpCheck, Activity, Supplement, UserQuestProgress, WeeklyWinner,
-        WaterLog, WorkoutLog, DailyActivity, CustomMeal, CoachConversation,
+        WaterLog, WorkoutLog, WorkoutSession, DailyActivity, CustomMeal,
+        CoachConversation,
         UserWearableConnection, WearableSleepLog, WearableActivityLog,
         WearableWorkoutLog, FeedItemLike, FeedItemComment, FeedItem,
         FeedHide, FeedReport, Notification,
