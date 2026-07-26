@@ -4,11 +4,11 @@
   "chunks": [
     {
       "chunk": 0,
-      "n_files": 34,
+      "n_files": 35,
       "exit_code": 0,
-      "collected": 526,
+      "collected": 540,
       "counts": {
-        "passed": 523,
+        "passed": 537,
         "failed": 0,
         "skipped": 0,
         "deselected": 3,
@@ -48,18 +48,19 @@
         "tests/test_training_progression.py",
         "tests/test_wearables.py",
         "tests/test_weekly_program_ui_flag.py",
-        "tests/test_workout_state.py"
+        "tests/test_workout_session.py",
+        "tests/test_write_rate_limits.py"
       ]
     },
     {
       "chunk": 1,
       "n_files": 34,
       "exit_code": 0,
-      "collected": 715,
+      "collected": 721,
       "counts": {
-        "passed": 715,
+        "passed": 718,
         "failed": 0,
-        "skipped": 0,
+        "skipped": 3,
         "deselected": 0,
         "error": 0
       },
@@ -97,16 +98,16 @@
         "tests/test_training_routes.py",
         "tests/test_weekly_program.py",
         "tests/test_weekly_program_ui_js.py",
-        "tests/test_write_rate_limits.py"
+        "tests/test_workout_session_pg.py"
       ]
     },
     {
       "chunk": 2,
-      "n_files": 33,
+      "n_files": 34,
       "exit_code": 0,
-      "collected": 669,
+      "collected": 741,
       "counts": {
-        "passed": 669,
+        "passed": 741,
         "failed": 0,
         "skipped": 0,
         "deselected": 0,
@@ -145,16 +146,17 @@
         "tests/test_training_page_characterization.py",
         "tests/test_training_ui.py",
         "tests/test_weekly_program_route.py",
-        "tests/test_workout_completion.py"
+        "tests/test_workout_completion.py",
+        "tests/test_workout_state.py"
       ]
     },
     {
       "chunk": 3,
-      "n_files": 33,
+      "n_files": 34,
       "exit_code": 0,
-      "collected": 595,
+      "collected": 614,
       "counts": {
-        "passed": 594,
+        "passed": 613,
         "failed": 0,
         "skipped": 1,
         "deselected": 0,
@@ -193,24 +195,25 @@
         "tests/test_training_planning.py",
         "tests/test_validators.py",
         "tests/test_weekly_program_ui.py",
-        "tests/test_workout_completion_pg.py"
+        "tests/test_workout_completion_pg.py",
+        "tests/test_workout_state_sessions.py"
       ]
     }
   ],
   "coverage_proof": {
-    "total_files": 134,
+    "total_files": 137,
     "files_union_equals_all": true,
     "chunks_disjoint_by_file": true,
     "missing_files": [],
     "duplicate_files": []
   },
   "run_summary": {
-    "total_passed": 2501,
+    "total_passed": 2609,
     "total_failed": 0,
-    "total_skipped": 1,
+    "total_skipped": 4,
     "total_deselected": 3,
     "total_error": 0,
-    "grand_collected_across_chunks": 2505,
+    "grand_collected_across_chunks": 2616,
     "all_chunks_exit_zero": true
   }
 }

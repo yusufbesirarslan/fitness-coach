@@ -137,6 +137,18 @@ UIUX_PLAN_V2_ENABLED = os.getenv("UIUX_PLAN_V2_ENABLED", "0") == "1"
 # moderation policy. Server-config only. Independent of every other flag (own env
 # name, own config key). Full rollback: set UIUX_COACH_PAGE_V2_ENABLED=0.
 UIUX_COACH_PAGE_V2_ENABLED = os.getenv("UIUX_COACH_PAGE_V2_ENABLED", "0") == "1"
+
+# ── Sprint 7 PR3: persisted workout-session lifecycle rollout gate ──
+# Default OFF. The single canonical owner of the session-lifecycle rollout.
+# OFF preserves the PR1/PR2 contract EXACTLY: the /workout/session/* write routes
+# are unavailable (404) and the PR1 resolver emits contract_version=1 with the
+# pre-PR3 vocabulary (no `resume`/`in_progress`). ON enables session creation and
+# the additive contract_version=2 (persisted-session-only `resume`/`in_progress`).
+# PRESENTATION/ROLLOUT boundary, never authorization — the underlying services
+# still enforce @require_auth + ownership regardless. Disabling after sessions
+# already exist is safe: persisted rows are simply ignored by the read contract,
+# never deleted. Full rollback: FITX_WORKOUT_SESSIONS_ENABLED=0. docs/WORKOUT_STATE.md
+FITX_WORKOUT_SESSIONS_ENABLED = os.getenv("FITX_WORKOUT_SESSIONS_ENABLED", "0") == "1"
 # ── Sprint 4 WS1: AI koç kalıcı konuşma hafızası ──
 # Operasyonel kapatma anahtarı: 0 → eski davranış (yalnızca widget'ın gönderdiği
 # kısa geçmiş; DB'ye tur yazılmaz). Tablolar expand-only olduğundan geri açmak güvenli.
@@ -333,6 +345,7 @@ def configure_app(app):
     app.config["UIUX_TODAY_V2_ENABLED"] = UIUX_TODAY_V2_ENABLED
     app.config["UIUX_PLAN_V2_ENABLED"] = UIUX_PLAN_V2_ENABLED
     app.config["UIUX_COACH_PAGE_V2_ENABLED"] = UIUX_COACH_PAGE_V2_ENABLED
+    app.config["FITX_WORKOUT_SESSIONS_ENABLED"] = FITX_WORKOUT_SESSIONS_ENABLED
     app.config["AI_MEMORY_ENABLED"] = AI_MEMORY_ENABLED
     app.config["LOGIN_FAIL_CLOSED"] = LOGIN_FAIL_CLOSED
     app.config["BEDROCK_ENABLED"] = BEDROCK_ENABLED

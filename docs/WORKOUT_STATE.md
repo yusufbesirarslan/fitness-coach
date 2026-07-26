@@ -368,3 +368,204 @@ challenge/notification. They remain `execution_recorded` on the read side.
 **Migration:** none — `uq_pump_check_day` already provides the atomic claim.
 **Feature flag:** none — a single mutation authority; a flag would create a
 competing one. **Rollback:** code revert only (no schema change).
+
+## Sprint 7 PR3 — persisted workout-session lifecycle, safe resume, abandonment & stale recovery
+
+PR1 is the read model; PR2 is the canonical completion write. **PR3 adds the one
+thing the server previously could not answer: whether a workout *session* was
+started, is active, is safely resumable, was completed/abandoned, or has gone
+stale.** Before PR3 the only "session" was the ephemeral in-memory `_session` in
+`static/training.js` (lost on refresh); `localStorage` held only a paint-cache
+flag. PR3 gives the server durable, owned session truth **without** touching the
+UI, `TrainingPlan` storage, or set logging.
+
+Owner: `app/services/workout_session/` — same pure/impure split as PR1/PR2
+(`models.py` = frozen commands/results + outcome enum + **pure** classification,
+no ORM/Flask; `queries.py` = impure DB reads/writes; `service.py` = transaction
+ownership; `__init__.py` = public API).
+
+### `WorkoutSession` model & the active-owner invariant
+
+`app/models.py::WorkoutSession` — integer PK `id` (never exposed) + opaque
+`public_id` (`secrets.token_urlsafe`, unique) for **all** API exposure. Fields:
+`user_id` (FK, CASCADE, indexed), `status` (`active|completed|abandoned` +
+`CheckConstraint`), `workout_date` (ISO Istanbul **start** day — context, not
+identity), `weekday_slot`, `source` (`scheduled|unscheduled`), `planned_training_plan_id`
+(**plain Integer soft reference, intentionally NOT a hard FK** so the session
+survives plan deletion/regeneration and we can *detect* a now-missing plan),
+`plan_fingerprint` (versioned; below), `started_at`, `last_activity_at`,
+`completed_at?`, `abandoned_at?`, `terminal_reason?`, `version` (transition
+version), `created_at`, `updated_at`.
+
+**Active-session uniqueness invariant (DB-level, the single atomic claim):**
+partial unique index `uq_workout_session_active_owner` on `user_id WHERE
+status='active'` (`sqlite_where`/`postgresql_where` — supported on SQLite ≥3.8 and
+PostgreSQL). At most one ACTIVE session per user, enforced by the database, exactly
+mirroring PR2's reliance on `uq_pump_check_day`. A terminal row does not occupy the
+active slot, so a new session is always startable afterwards.
+`is_active_session_owner_violation(exc)` classifies that specific `IntegrityError`;
+any *other* integrity error re-raises (fail-closed).
+
+### Lifecycle state machine (small, explicit)
+
+States `ACTIVE / COMPLETED / ABANDONED`. **Stale is a *derived* condition of an
+ACTIVE session, never a persisted status.** Transitions: none→ACTIVE (start);
+ACTIVE→ACTIVE (idempotent resume/checkpoint); ACTIVE→COMPLETED (only via the PR2
+completion authority); ACTIVE→ABANDONED (explicit). Terminal→terminal is immutable.
+No PAUSED. **Reads never mutate.**
+
+### Public operations & outcomes
+
+`start_session`, `get_current_session`, `read_session_for_state` (the read model
+the flag-ON resolver consumes), `resume_session`, `checkpoint_session`,
+`abandon_session`, `resolve_for_completion`, `complete_session`. Outcome enum:
+`CREATED, EXISTING_ACTIVE, RESUMED, CHECKPOINTED, ABANDONED, COMPLETED,
+ALREADY_COMPLETED, ALREADY_ABANDONED, STALE_SESSION_REQUIRES_RESOLUTION, CONFLICT,
+NOT_FOUND, INVALID_TRANSITION`.
+
+- **`start_session`** — derives user + Istanbul date + plan snapshot/fingerprint
+  **server-side** (no client body trusted); inserts ACTIVE. On the partial-index
+  `IntegrityError` it loads the existing active session → same intended workout ⇒
+  idempotent `EXISTING_ACTIVE`, different ⇒ `CONFLICT`. Replay-safe after a client
+  timeout.
+- **`resume_session`** — normal `RESUMED` **only** for an owned, ACTIVE, same-day
+  session whose relationship is `matching_current_plan` (or `unscheduled`). Any
+  mismatch/stale case ⇒ `STALE_SESSION_REQUIRES_RESOLUTION`: the session is
+  **preserved**, no unsafe normal resume is exposed, an explicit recovery choice is
+  required. A terminal session yields `ALREADY_COMPLETED`/`ALREADY_ABANDONED`
+  (never re-attached).
+
+### Heartbeat replay-idempotency (correction #2)
+
+`checkpoint_session` is a **lock-free conditional `UPDATE`**:
+`UPDATE workout_session SET last_activity_at=now WHERE public_id=? AND user_id=?
+AND status='active' AND last_activity_at < (now - HEARTBEAT_COALESCE_SECONDS)`.
+It touches **only** `last_activity_at` — never identity/start/ownership/status —
+and coalesces (no-op → `CHECKPOINTED`) within the bounded interval
+(`HEARTBEAT_COALESCE_SECONDS = 30`). No client optimistic version, no progress
+blob. A retried heartbeat never returns a false conflict. The row-lock /
+`version` bump are reserved for **terminal** transitions only.
+
+### Session↔plan relationship & the versioned fingerprint (correction #4)
+
+On `get_current`/`resume` the current newest `TrainingPlan` is loaded and the
+fingerprint for the session's `weekday_slot` is **recomputed server-side** and
+compared — weekday text is never trusted alone. `plan_fingerprint` is stored as
+`v1:<sha256hex>` over the ordered, casefolded exercise names of the slot
+(order-preserving, never client-supplied, never the plan itself).
+`fingerprints_match(stored, current)` returns `None` on an algorithm/**version
+mismatch** ⇒ the relationship classifies as `indeterminate` (safe), **never a
+silent match**. Relationship vocabulary: `matching_current_plan`,
+`plan_regenerated`, `plan_missing`, `schedule_slot_changed`, `unscheduled`,
+`indeterminate`; temporal `previous_day`; `lifecycle_inconsistent` when a same-day
+`PumpCheck` completion coexists with a still-ACTIVE session.
+
+### No inactivity-based staleness (correction #6)
+
+Stale derives **only** from concrete lifecycle/relationship evidence (previous
+local day, plan missing/regenerated/replaced, schedule-slot changed,
+lifecycle/completion inconsistency, indeterminate relationship). A same-day
+session with no recent heartbeat is still `matching_current_plan`/resumable —
+`last_activity_at` is heartbeat/observability only and **never gates resume**.
+
+### Flag-conditional read contract (correction #1)
+
+The contract version is **not a static bump**. With `FITX_WORKOUT_SESSIONS_ENABLED`
+**OFF**, `resolve_workout_state` returns the **exact PR1 `contract_version=1`
+snapshot** — identical key set, identical enum vocabulary (`action` stays
+`{start,none,blocked}`), no `session` keys, `resume`/`in_progress` never emitted.
+With it **ON**, the read model loads session truth read-only and returns the
+additive `contract_version=2` snapshot: two new keys (`session_state`, `session`),
+the additive `action=resume` and `execution_state/primary_state=in_progress`
+values — producible **only** from a persisted, *eligible* ACTIVE session, never
+from evidence-only `WorkoutLog`, and `start` is never emitted while a conflicting
+ACTIVE session exists. Pure projection: `resolver.enrich_with_session(base,
+facts)` — folds session facts into the v1 base without mutating it (the OFF path
+that skips enrichment stays byte-identical). Both modes have strict snapshot
+tests (`tests/test_workout_state.py`, `tests/test_workout_state_sessions.py`).
+
+`v2` `session` object: `{public_id, status, resumable, relationship, stale_reason,
+workout_date}`. `session_state` vocabulary: `none, active_resumable,
+active_blocked, completed, abandoned, execution_without_session, inconsistent`.
+
+### Completion↔session reconciliation & fixed lock order (correction #3)
+
+`CompleteWorkoutCommand` gains an additive `session_id: Optional[int] = None`;
+`session_id is None` is the **unchanged legacy path** (no synthetic session
+fabricated, legacy completion without a session stays valid). When present, the
+completion authority (`app/services/workout_completion/service.py`) owns the
+ACTIVE→COMPLETED transition **inside its single transaction**:
+
+- **Fixed lock order** (documented + tested, both paths, so create and
+  reconciliation can never deadlock): the session row is locked **first**
+  (`SELECT … FOR UPDATE` on PG; the enclosing txn suffices on SQLite —
+  `lock_session_for_completion`), *then* the PumpCheck/completion artifacts.
+- **Fresh completion (`CREATED`):** create the PR2 artifacts, then — before the
+  single `commit()` — terminalize the session (`mark_session_completed`:
+  conditional on `status='active'`, sets `completed_at`, bumps `version`). One
+  atomic unit.
+- **Existing confirmed completion / reconciliation:** every path that ends the day
+  completed **still** terminalizes the owned matching ACTIVE session, with **no**
+  duplicated PumpCheck/marker/XP/quest/challenge/activity/notification —
+  (a) the preflight-detected replay reconciles the already-locked session;
+  (b) the `uq_pump_check_day` race-loser re-locks and terminalizes in a fresh,
+  artifact-free transaction (`_reconcile_session_after_race`);
+  (c) a duplicate session completion is a deterministic no-op.
+- An explicitly **ABANDONED** session cannot be completed ⇒ `SessionCompletionConflict`,
+  rolled back with no artifacts.
+
+Invariants held: a matching session is **never** left permanently ACTIVE after its
+day is completed; COMPLETED is **never** written without PumpCheck authority;
+unique-conflict handling never silently drops the terminalization. Real Postgres
+two-contender proof: `tests/test_workout_session_pg.py` (opt-in, `pg_concurrency`
+marker + env-gated) — **executed 2026-07-25 on a disposable `postgres:16` (16.14),
+all 3 tests passed** (concurrent-start, complete-vs-abandon, concurrent-completion
+reconciliation); see `docs/handoff.md` for the full execution record.
+
+### API routes
+
+All `@require_auth`, `current_user.id` server-side, bounded payloads, stable error
+envelope, no client-supplied `user_id`/`status`/timestamps/`version`:
+`POST /workout/session/start`, `GET /workout/session/current`,
+`POST /workout/session/<public_id>/resume|checkpoint|abandon`, and the extended
+`POST /workout/complete` (optionally accepts the session `public_id` →
+ownership-resolve → internal id → `CompleteWorkoutCommand.session_id`; absent ⇒
+legacy). The session routes are gated by the flag: **OFF ⇒ 404 (inert)**, so
+enabling PR1/PR2 behavior stays byte-identical. The flag is a rollout/presentation
+gate, **not** an authorization gate — `@require_auth` and server-side ownership
+always hold. HTTP status map: `CREATED`→201, `*_ACTIVE`/`RESUMED`/`CHECKPOINTED`/
+`ABANDONED`/`COMPLETED`/`ALREADY_*`→200, `STALE…`/`CONFLICT`/`INVALID_TRANSITION`
+→409, `NOT_FOUND`→404.
+
+### Migration — fail-closed, verify-or-create (correction #5)
+
+`migrations/versions/a994f9bed783_add_workout_session_sprint_7_pr3.py`
+(down_revision `bb88cc99dd00`; single new head). Because the repo boot order is
+`create_all` → stamp → upgrade, the migration is **expand-only and
+verify-or-create**: it does **not** blanket-skip when `workout_session` already
+exists — it inspects and creates each missing required object (table, all required
+columns, the status `CheckConstraint`, `public_id` uniqueness, the active-owner
+partial unique index, supporting indexes). If an existing table is present but
+**incompatible** (missing required columns) it raises `RuntimeError` rather than
+reporting a successful upgrade with an incomplete invariant. Downgrade drops the
+indexes + table. Tested (`tests/test_workout_session.py`): fresh DB creates the
+full table, verify-or-create is idempotent, fail-closed on an incompatible table,
+downgrade removes it.
+
+### Feature flag, rollout & rollback
+
+`FITX_WORKOUT_SESSIONS_ENABLED` (default `False`, `app/config.py`, single canonical
+owner). **OFF:** session-write routes are inert (404) **and** the resolver emits
+the exact PR1 `contract_version=1` vocabulary — PR1/PR2 behavior byte-for-byte.
+**ON:** full lifecycle + `contract_version=2`. Disabling after sessions already
+exist is safe: persisted sessions are simply **ignored** by the read contract,
+never deleted. Do **not** enable in prod as part of this PR. Removal criteria:
+once the UI consumer ships and the lifecycle has soaked, the flag and its OFF
+branch can be retired.
+
+### Deferred / out of scope (recorded)
+
+Stable plan-day identifier linkage (session↔plan is a soft reference only; no
+set-level restoration — checkpoint is a lifecycle heartbeat, documented gap),
+workout UI/nav redesign, offline sync, `TrainingPlan` schema redesign, historical
+`WorkoutLog` backfill, automated destructive stale cleanup, Sprint 7 PR4.

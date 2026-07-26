@@ -20,10 +20,16 @@ PR1 resolver's ``completed_today`` (``workout_state/queries.py``) — today's
 this is equivalent to the ``date_key`` the row is written with (both derive from
 the same instant); the unique constraint on ``date_key`` is the durable claim.
 """
-from datetime import date
+from datetime import date, datetime
+from typing import Optional
 
 from app.extensions import db
-from app.models import PumpCheck
+from app.models import (
+    WORKOUT_SESSION_ACTIVE,
+    WORKOUT_SESSION_COMPLETED,
+    PumpCheck,
+    WorkoutSession,
+)
 from app.timeutil import utc_day_bounds
 
 # The daily-completion unique constraint (app/models.py PumpCheck.__table_args__).
@@ -77,3 +83,37 @@ def is_pump_check_day_violation(exc) -> bool:
     # SQLite / generic: match the constraint name or the date_key column token.
     text = str(orig if orig is not None else exc)
     return PUMP_CHECK_DAY_CONSTRAINT in text or "pump_check.date_key" in text
+
+
+# ── Session terminalization (Sprint 7 PR3) ───────────────────────────────────
+# The completion authority owns the ACTIVE→COMPLETED transition of a linked
+# session, inside its single transaction, so a session is never left ACTIVE after
+# its day is completed and COMPLETED is never written without PumpCheck authority.
+# The completion authority imports ONLY the WorkoutSession ORM model here — never
+# the ``workout_session`` service package — keeping the dependency arrow one-way.
+
+def lock_session_for_completion(user_id: int, session_id: int) -> Optional[WorkoutSession]:
+    """``SELECT … FOR UPDATE`` the owned session by internal id — the FIXED lock
+    order: the session row is locked BEFORE any PumpCheck/completion artifact, on
+    both the create and the reconciliation path, so the two paths can never
+    deadlock against each other. On SQLite ``with_for_update`` is a harmless no-op
+    (the enclosing write transaction already serializes)."""
+    return (
+        db.session.query(WorkoutSession)
+        .filter_by(id=session_id, user_id=user_id)
+        .with_for_update()
+        .first()
+    )
+
+
+def mark_session_completed(session: Optional[WorkoutSession], now: datetime) -> bool:
+    """Terminalize an already-locked ACTIVE session as COMPLETED (mutates the ORM
+    object; the caller owns the commit). Conditional on ``status == 'active'`` so
+    it is idempotent and a concurrent abandon/complete leaves exactly one winner.
+    Returns True iff this call performed the transition."""
+    if session is None or session.status != WORKOUT_SESSION_ACTIVE:
+        return False
+    session.status = WORKOUT_SESSION_COMPLETED
+    session.completed_at = now
+    session.version = (session.version or 1) + 1
+    return True

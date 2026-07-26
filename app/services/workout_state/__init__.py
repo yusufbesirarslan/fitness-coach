@@ -25,16 +25,25 @@ from app.timeutil import app_today
 from .models import (
     ACTION_BLOCKED,
     ANOMALY_RESOLUTION_ERROR,
+    ANOMALY_SESSION_READ_ERROR,
     CONTRACT_VERSION,
+    CONTRACT_VERSION_SESSIONS,
     EXEC_NONE,
     PRIMARY_NEEDS_ATTENTION,
     REL_INDETERMINATE,
     SCHEDULE_UNAVAILABLE,
+    ACTIVE_SESSION_FACTS_NONE,
     WorkoutStateInputs,
     WorkoutStateSnapshot,
 )
-from .queries import load_inputs
-from .resolver import resolve
+from .queries import load_inputs, load_session_facts
+from .resolver import enrich_with_session, resolve
+
+# Config flag (single canonical owner in app/config.py) gating the persisted
+# workout-session lifecycle. OFF ⇒ the resolver returns the exact PR1 contract;
+# ON ⇒ the session-aware v2 contract. Read defensively so a missing key or a
+# broken app context can never turn a read into a failure.
+_SESSIONS_FLAG = "FITX_WORKOUT_SESSIONS_ENABLED"
 
 __all__ = [
     "resolve_workout_state",
@@ -42,11 +51,16 @@ __all__ = [
     "WorkoutStateSnapshot",
     "WorkoutStateInputs",
     "CONTRACT_VERSION",
+    "CONTRACT_VERSION_SESSIONS",
 ]
 
 
 def resolve_from_inputs(inputs: WorkoutStateInputs) -> WorkoutStateSnapshot:
-    """Pure re-export of the resolver for callers that already hold inputs."""
+    """Pure re-export of the PR1 resolver for callers that already hold inputs.
+
+    Always the v1 base snapshot (no session enrichment) — the flag-conditional v2
+    projection lives in :func:`resolve_workout_state`, which owns the session read.
+    """
     return resolve(inputs)
 
 
@@ -59,18 +73,49 @@ def resolve_workout_state(
     hermetic tests. Never raises for domain conditions; an unexpected read
     failure fails **safe** (a blocked ``needs_attention`` snapshot) rather than a
     misleading rest/completed state, and logs only safe operational metadata.
+
+    Contract is flag-conditional (Sprint 7 PR3): with ``FITX_WORKOUT_SESSIONS_ENABLED``
+    OFF the returned snapshot is the exact PR1 ``contract_version=1`` contract; ON,
+    it is enriched (read-only) to the session-aware ``contract_version=2``.
     """
     day = today or app_today()
     try:
         inputs = load_inputs(user_id, day)
     except Exception as exc:  # noqa: BLE001 — fail safe, never leak to the client
         _log_anomaly(user_id, ANOMALY_RESOLUTION_ERROR, type(exc).__name__)
-        return _safe_snapshot(day)
+        return _maybe_enrich(user_id, day, _safe_snapshot(day))
 
     snapshot = resolve(inputs)
     if snapshot.anomaly:
         _log_anomaly(user_id, snapshot.anomaly, None)
-    return snapshot
+    return _maybe_enrich(user_id, day, snapshot)
+
+
+def _sessions_enabled() -> bool:
+    try:
+        return bool(current_app.config.get(_SESSIONS_FLAG, False))
+    except Exception:  # noqa: BLE001 — no app context / missing config → OFF
+        return False
+
+
+def _maybe_enrich(
+    user_id: int, day: date, base: WorkoutStateSnapshot
+) -> WorkoutStateSnapshot:
+    """Flag OFF ⇒ return the PR1 base untouched (byte-identical v1). Flag ON ⇒
+    load session truth read-only and return the v2 enrichment; a session-read
+    failure still yields a valid v2 snapshot with an empty session dimension
+    (fail-safe) so the contract mode stays consistent with the flag."""
+    if not _sessions_enabled():
+        return base
+    try:
+        facts = load_session_facts(user_id, day)
+    except Exception as exc:  # noqa: BLE001 — never break the read on a session error
+        _log_anomaly(user_id, ANOMALY_SESSION_READ_ERROR, type(exc).__name__)
+        facts = ACTIVE_SESSION_FACTS_NONE
+    enriched = enrich_with_session(base, facts)
+    if enriched.anomaly and enriched.anomaly != base.anomaly:
+        _log_anomaly(user_id, enriched.anomaly, None)
+    return enriched
 
 
 def _safe_snapshot(day: date) -> WorkoutStateSnapshot:

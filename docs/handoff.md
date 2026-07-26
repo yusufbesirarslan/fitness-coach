@@ -3003,7 +3003,7 @@ Transaction ownership before PR2: each writer owned its own inline transaction w
 
 ### Authorization boundary
 
-Nothing was pushed, no PR opened, nothing merged, deployed, or production-flag-changed. Sprint 7 PR3 not started. Docker Desktop + a disposable local Postgres container were started for the concurrency test only, and the container/credential are torn down afterward.
+Nothing was pushed, no PR opened, nothing merged, deployed, or production-flag-changed (this is the PR2 boundary as of 2026-07-24). Docker Desktop + a disposable local Postgres container were started for the concurrency test only, and the container/credential were torn down afterward. **Sprint 7 PR3 is documented in its own section below, with its own authorization boundary.**
 
 ## UIUX Sprint 1 PR2 - Today Experience: Next-Action Hierarchy & State Semantics
 
@@ -3450,3 +3450,106 @@ escaping/sanitization are preserved.
 Local implementation and validation only. This work is **not** authorization to push, open a PR, merge,
 deploy, change production configuration, or enable a production feature flag. Nothing was pushed, nothing
 merged, nothing deployed, and no production feature flag was changed. Both flags remain default OFF.
+## Sprint 7 PR3 — Persisted Workout Session Lifecycle, Safe Resume, Abandonment & Stale Recovery
+
+- **Track:** Core Feature. **Sprint:** 7. **PR:** 3. **Production authorization:** implemented and validated locally, then — **under explicit user authorization** — the branch was pushed and **PR #186** was opened against `main` (rebased onto current `main`, past #185). **Still nothing merged / no deploy / no prod migration / no prod flag change / no PR4.**
+- **Verdict:** **READY FOR REVIEW.** Full suite green vs. baseline (node-level reconciliation below, not arithmetic); the persisted-session lifecycle is default-OFF and, with the flag OFF, PR1/PR2 behavior is byte-identical. The opt-in Postgres proof was **executed 2026-07-25 against a real disposable `postgres:16` (16.14) — the migration validation and all three concurrency tests PASSED**; the tests still skip cleanly in the default run for reviewers without Docker (see "Opt-in Postgres concurrency proof — executed" below).
+- **Branch:** `sprint7-pr3-workout-session-lifecycle`. **Worktree:** `.worktrees/sprint7-pr3-workout-session-lifecycle`.
+- **origin/main:** originally branched from `307b7b524f8a6ea6dc2a820fa37b1731f5ffd22d` (Sprint 7 PR2 merge #184; PR1 `3d9c582` #183 is a merged ancestor). Since then `main` advanced with **#185** (`9400641`), so the 5 PR3 commits were **rebased onto `9400641`** (linear, no merge commit). **Current base commit:** `9400641`. **PR3-only diff range:** `9400641..HEAD`.
+
+### The gap PR3 closes
+
+Before PR3 the server had **no persisted workout-session concept**. The client `_session` (`static/training.js`) was in-memory only and lost on refresh; `localStorage` held only a paint-cache flag. PR1 deliberately never emitted `resume`/`in_progress` because nothing resumable was persisted. PR3 adds a **server-owned, durable session lifecycle** so the server can truthfully answer whether a session started, is active, is safely resumable, was completed/abandoned, or has gone stale — **without** redesigning the UI, plan storage, or set logging.
+
+### Design (as built)
+
+- **Model** `app/models.py::WorkoutSession` — int PK `id` (never exposed) + opaque `public_id` (`secrets.token_urlsafe`, unique) for all API exposure; `user_id` (FK CASCADE, indexed), `status` (`active|completed|abandoned` + `CheckConstraint`), `workout_date` (ISO Istanbul **start** day — context not identity), `weekday_slot`, `source` (`scheduled|unscheduled`), `planned_training_plan_id` (**plain Integer soft reference, NOT a hard FK**), `plan_fingerprint` (versioned `v1:<sha256>`), `started_at`, `last_activity_at`, `completed_at?`, `abandoned_at?`, `terminal_reason?`, `version` (terminal-transition version), `created_at`, `updated_at`. Added to `app/cli.py::_user_child_models` (cascade-delete introspection).
+- **Active-owner invariant (single atomic claim):** partial unique index `uq_workout_session_active_owner` on `user_id WHERE status='active'` (SQLite ≥3.8 + PostgreSQL). `is_active_session_owner_violation(exc)` classifies that `IntegrityError`; any other integrity error re-raises (fail-closed).
+- **Service** `app/services/workout_session/` — pure/impure split (`models.py`=frozen commands/results + `SessionOutcome` enum + pure classification, no ORM/Flask; `queries.py`=DB; `service.py`=transaction ownership; `__init__.py`=public API).
+- **Lifecycle:** `ACTIVE / COMPLETED / ABANDONED`; stale is a **derived** condition of ACTIVE, never a persisted status. Terminal→terminal immutable. No PAUSED. Reads never mutate.
+
+### Six mandatory corrections — how each is satisfied
+
+1. **Contract version is flag-conditional.** Flag OFF ⇒ `resolve_workout_state` returns the exact PR1 `contract_version=1` snapshot (identical key set / enum vocabulary / legacy fields, no `session` keys, `resume`/`in_progress` never emitted). Flag ON ⇒ additive `contract_version=2` (new `session_state`, `session`; additive `action=resume`, `execution_state/primary_state=in_progress` — producible only from a persisted *eligible* ACTIVE session). Pure projection `resolver.enrich_with_session(base, facts)` never mutates the v1 base. Strict snapshot tests for **both** modes.
+2. **Heartbeat replay-idempotent.** `checkpoint_session` is a lock-free conditional `UPDATE … WHERE status='active' AND last_activity_at < cutoff`, touching **only** `last_activity_at`, coalescing within `HEARTBEAT_COALESCE_SECONDS=30`. No client version, no progress blob; a retried heartbeat never returns a false conflict and never touches identity/start/ownership/status. Row-lock/`version` reserved for terminal transitions only.
+3. **Explicit completion↔session reconciliation.** `CompleteWorkoutCommand.session_id` (additive, default `None` = unchanged legacy path). **Fixed lock order** (session row first via `lock_session_for_completion` `FOR UPDATE`, then artifacts) on both create and reconcile. Every path that ends the day completed terminalizes the owned matching ACTIVE session (`mark_session_completed`, conditional on `active`): fresh `CREATED`, preflight replay, and the `uq_pump_check_day` race-loser (`_reconcile_session_after_race`, fresh artifact-free txn). No duplicated PumpCheck/marker/XP/quest/challenge/activity/notification; a matching session is never left permanently ACTIVE; COMPLETED is never written without PumpCheck authority; an ABANDONED session ⇒ `SessionCompletionConflict` (rolled back, no artifacts).
+4. **Versioned fingerprint.** `plan_fingerprint = v1:<sha256hex>` over ordered casefolded exercise names of the session's `weekday_slot`, computed server-side, never client-supplied. `fingerprints_match` returns `None` on a version/algorithm mismatch ⇒ relationship `indeterminate` (safe), never a silent match.
+5. **Fail-closed migration.** `migrations/versions/a994f9bed783_add_workout_session_sprint_7_pr3.py` (down_revision `bb88cc99dd00`, single new head). Verify-or-create — does not blanket-skip when the table exists; inspects and creates each missing required object; raises `RuntimeError` on an incompatible existing table. Downgrade drops indexes + table.
+6. **No inactivity-based staleness.** Stale derives only from concrete lifecycle/relationship evidence (previous local day, plan missing/regenerated/replaced, schedule-slot changed, lifecycle/completion inconsistency, indeterminate relationship). `last_activity_at` is heartbeat/observability only and never gates a same-day resume.
+
+### Public operations & outcomes
+
+`start_session`, `get_current_session`, `read_session_for_state`, `resume_session`, `checkpoint_session`, `abandon_session`, `resolve_for_completion`, `complete_session`. `SessionOutcome ∈ {CREATED, EXISTING_ACTIVE, RESUMED, CHECKPOINTED, ABANDONED, COMPLETED, ALREADY_COMPLETED, ALREADY_ABANDONED, STALE_SESSION_REQUIRES_RESOLUTION, CONFLICT, NOT_FOUND, INVALID_TRANSITION}`.
+
+### API routes
+
+`@require_auth`, `current_user.id` server-side, no client-supplied `user_id`/`status`/timestamps/`version`. `POST /workout/session/start`, `GET /workout/session/current`, `POST /workout/session/<public_id>/{resume,checkpoint,abandon}`, and the extended `POST /workout/complete` (optional session `public_id` → ownership-resolve → internal id → `session_id`; absent ⇒ legacy). Session routes gated by the flag — **OFF ⇒ 404 (inert)**. The flag is a rollout gate, not an auth gate. HTTP map: `CREATED`→201, active/resumed/checkpointed/abandoned/completed/already_*→200, stale/conflict/invalid_transition→409, not_found→404.
+
+### Feature flag / rollout / rollback
+
+`FITX_WORKOUT_SESSIONS_ENABLED` (default `False`, `app/config.py`, single owner). OFF ⇒ routes inert + resolver byte-identical to PR1/PR2. ON ⇒ full lifecycle + `contract_version=2`. Disabling after sessions exist is safe (persisted sessions ignored by the read contract, never deleted). **Not enabled in prod in this PR.** Removal criteria: once the UI consumer ships and soaks, the flag + OFF branch retire.
+
+### Tests and exact results
+
+**Command:** `python -m pytest -q -p no:cacheprovider` (canonical; `pytest.ini` applies `-m "not load"`).
+
+**Method note:** this environment's background-job wall-clock cap kills a single serial full run (same constraint documented for PR2). The suite (134 test files) was therefore run as **four file-partition chunks** (`files[i::4]`), plus `tests/test_mcp_gate.py` executed **in isolation** (its subprocess-spawn test times out under parallel CPU contention — a pre-existing, documented artifact, not a regression).
+
+- **Full baseline** (pristine `307b7b5`, captured pre-work): **2416 passed, 1 skipped, 3 deselected, 0 failed** (the 1 pre-existing skip is `test_workout_completion_pg.py`'s opt-in PG test; the 3 deselected are the `-m "not load"` load tests).
+- **Full final** (PR3, current HEAD): **2524 passed, 4 skipped, 3 deselected, 0 failed, 0 errors.** The partitioned execution (four `files[i::4]` chunks + isolated `test_mcp_gate.py`) was captured with the PG test file at 2 opt-in tests and totalled 2524 passed / 3 skipped; a **third** opt-in PG test was then added to strengthen coverage (§ reconciliation race), so the current tree's default run is **2524 passed / 4 skipped** — the +1 is purely the added opt-in skip (`tests/test_workout_session_pg.py` now reports **3 skipped** in a default run, re-verified directly; passed count unchanged because opt-in PG tests never run without the env). The 3 deselected load tests are unchanged.
+- **Test-by-test (node-level, not arithmetic):** a true collected-node manifest was produced at both the PR2 base (`307b7b5`) and PR3 HEAD and diffed set-wise. Baseline **2417** selected nodes → final **2528** selected nodes. Diff: **1 removed, 112 added.** The single removed node is a **rename** (`test_contract_has_no_resume_action` → `test_v1_contract_never_offers_resume_action`) whose target is in the added set and still passes — **not a deletion**. The 112 added = rename-target (1) + `test_training_routes.py` 14 + `test_workout_completion.py` 8 + `test_workout_session.py` 67 + `test_workout_session_pg.py` 3 + `test_workout_state_sessions.py` 19 = **111 genuinely new nodes** (of which 3 are the opt-in PG skips). No pre-existing node changed pass→fail or pass→skip; nothing was silently dropped.
+- **Two pre-existing tests deliberately updated for PR3 reality** (both still pass): `tests/test_migration_graph.py` single-head assertion `bb88cc99dd00`→`a994f9bed783`; `tests/test_workout_state.py::test_contract_has_no_resume_action` → `test_v1_contract_never_offers_resume_action` (the `ACTION_RESUME` constant now exists but is a v2-only value the pure v1 resolver never emits and is not in the v1 action alphabet).
+- **New skipped:** `tests/test_workout_session_pg.py` (3, opt-in `pg_concurrency` — skip cleanly without the env). Total default skips = 4 (3 PR3 + 1 pre-existing `test_workout_completion_pg.py`).
+
+New/updated test files: `tests/test_workout_session.py` (67 — model, active-owner invariant, start/resume/checkpoint/abandon, ownership isolation, heartbeat replay-idempotency, stale/relationship classification, versioned-fingerprint mismatch, fault-injection rollback, timezone, 4 fail-closed migration tests), `tests/test_workout_session_pg.py` (3 opt-in PG — concurrent-start, complete-vs-abandon, concurrent-completion reconciliation), `tests/test_workout_state_sessions.py` (19 — flag-conditional v2 contract, both modes, pure enrich matrix + service flag on/off), `tests/test_workout_completion.py` (+8 reconciliation), `tests/test_training_routes.py` (+14 session routes flag on/off + envelope + ownership + complete-with-session), `tests/test_workout_state.py` + `tests/test_migration_graph.py` (updated).
+
+#### Test-suite reconciliation (collected-node manifest)
+
+Per the review's explicit requirement to not rely on arithmetic totals, the canonical full-suite manifest was reconciled against the executed partitions:
+
+- **Canonical collect** (`pytest --collect-only -q` with default `-m "not load"`): **2528** selected node IDs, zero duplicates. Including the deselected load file it is **2531** (2528 + 3 `tests/load/test_ai_load.py` nodes; the load marker is the only deselection).
+- **Partition completeness + disjointness (file-level, exact):** the 4 chunks carried **34 / 33 / 33 / 33** file-path args (`files[i::4]`), **pairwise disjoint** (0 cross-chunk overlap), and `tests/test_mcp_gate.py` was in **none** of them (run isolated). The union of chunk files covers **every** canonical node-producing file (0 missing); the only executed file contributing 0 selected nodes is `tests/load/test_ai_load.py` (fully deselected). Because a partition runs whole files and the only deselection (`-m "not load"`) is identical to the canonical collect, the executed node union equals the 2528-node canonical manifest **node-for-node**.
+- **Exact skip reasons (4):** `test_workout_completion_pg.py::test_concurrent_completion_has_single_winner_on_postgres` (1, pre-existing, in chunk3) and `test_workout_session_pg.py::{concurrent_start, complete_vs_abandon, concurrent_completion}` (3, PR3, in chunk1) — all skipped by the `pg_concurrency` skipif because `FITX_PG_CONCURRENCY_TEST`/`PG_TEST_DATABASE_URL` are unset. **Exact deselection reason (3):** the `load` marker via `pytest.ini addopts = -m "not load"` (`tests/load/test_ai_load.py`).
+
+### Migration / database
+
+Single new head `a994f9bed783` off `bb88cc99dd00`; verify-or-create, fail-closed; downgrade drops the table. Fresh-DB create, verify-or-create idempotency, incompatible-table `RuntimeError`, and downgrade are unit-tested (`tests/test_workout_session.py`). Boot order (`create_all`→stamp→upgrade) is safe because the migration is verify-or-create rather than blanket-skip.
+
+**CLI verification (local, disposable scratch SQLite — prod never touched; `.env` absent in the worktree and `load_dotenv()` does not override the exported scratch `DATABASE_URL`, confirmed by printing the resolved URI):** `flask db upgrade` ran the full chain to `a994f9bed783 (head)` and created `workout_session` with all four indexes (`ix_workout_session_user_id`, `ix_workout_session_user_status`, `uq_workout_session_active_owner`, `uq_workout_session_public_id`); `flask db downgrade bb88cc99dd00` dropped the table cleanly. `flask db check` at head reports drift, but it contains **zero `workout_session` references** (grep count 0) — it is entirely **pre-existing SQLite-vs-model divergence** (models define `pump_check_comment`/`pump_check_like`, which only `create_all` builds, plus Postgres-only `JSONB` columns and `CASCADE` FKs the SQLite reflection can't match). The CI `migration-drift` gate runs on **PostgreSQL 16**, where these artifacts don't appear; PR3's table is absent from even the noisier SQLite drift, so PR3 introduces **no** new drift on any dialect.
+
+**PostgreSQL 16 migration validation (executed 2026-07-25, disposable `postgres:16` 16.14 — the CI drift dialect):**
+- `flask db upgrade` ran the chain to `a994f9bed783 (head)` and created `workout_session` with the expected columns, the `status` `CheckConstraint` (`active|completed|abandoned`), `public_id` uniqueness, and **all four indexes**. The active-owner index was verified on PG as `UNIQUE btree (user_id) WHERE status::text = 'active'::text` — the **partial** predicate is present (not a plain unique index).
+- **Drift check clean:** `flask db check` at head reported **no new upgrade operations** for `workout_session` (the two Alembic log mentions were SERIAL-sequence detection lines, not drift ops).
+- **Terminal sessions don't block a new active:** inserting COMPLETED + ABANDONED rows for a user then a fresh ACTIVE succeeded (partial index ignores terminal rows); a **second** ACTIVE for the same user raised `IntegrityError`, correctly classified by `is_active_session_owner_violation`.
+- **Downgrade → re-upgrade** per policy: `flask db downgrade bb88cc99dd00` dropped the indexes + table cleanly; re-`upgrade` recreated them.
+- **Fail-closed existing-table / boot `create_all` path:** with an incompatible pre-existing `workout_session` table, the verify-or-create migration raised `RuntimeError` and left the revision at `bb88cc99dd00` (it did **not** silently report success). The `create_all`→stamp→upgrade boot order is therefore safe because the migration is verify-or-create, not blanket-skip.
+
+### Opt-in Postgres concurrency proof — EXECUTED
+
+`tests/test_workout_session_pg.py` (mirrors `test_workout_completion_pg.py`): two threads + `threading.Barrier` + per-thread app context (independent connection/session) + strong `User` ref, gated by `@pytest.mark.pg_concurrency` + `FITX_PG_CONCURRENCY_TEST=1` + `PG_TEST_DATABASE_URL`. **Executed 2026-07-25 against a real disposable PostgreSQL 16 — all three tests PASSED (3/3, re-run for flakiness).**
+
+**Environment (disposable, isolated, prod never touched):**
+- **Image** `postgres:16` @ `sha256:33f923b05f64ca54ac4401c01126a6b92afe839a0aa0a52bc5aeb5cc958e5f20`; **server version 16.14 (Debian 16.14-1.pgdg13+1)**.
+- Container `fitx_pg_pr3`, **loopback-only** bind `127.0.0.1:55433→5432` (never exposed off-host), throwaway role/db (credentials redacted; not the prod `.env` — the PG URL was passed only via `PG_TEST_DATABASE_URL`/`DATABASE_URL` in the test env with `FITX_SKIP_DB_INIT=1`). Each test `_make_pg_app()` does its own `drop_all`/`create_all` and tears the schema down after; the container + credential were destroyed at the end of the session.
+- Confirmed **no prod/shared DB** referenced: the resolved URI was the loopback disposable throughout; `.env` is absent in the worktree and `load_dotenv()` does not override the exported test URL.
+
+**Results (all PASSED):**
+- `test_concurrent_start_yields_single_active_on_postgres` — two simultaneous `start_session` ⇒ exactly one `CREATED` + one `EXISTING_ACTIVE`, exactly one ACTIVE row (the `uq_workout_session_active_owner` partial unique index is the atomic claim; the loser is a deterministic idempotent replay).
+- `test_complete_versus_abandon_only_one_terminal_wins_on_postgres` — `complete` vs `abandon` on the same active session ⇒ exactly one terminal state, never both, never still ACTIVE. When the winner is COMPLETED: exactly **1** PumpCheck + **1** marker + **1** `workout_completed` Activity, `completed_at` set, `version==2`. When ABANDONED: **0** completion artifacts.
+- `test_concurrent_session_completion_no_duplicate_artifacts_on_postgres` (added this session) — two contenders complete the **same** session at once ⇒ exactly one `COMPLETED` + one `ALREADY_COMPLETED`; the `uq_pump_check_day` race-loser reconciles the owned session ACTIVE→COMPLETED in a fresh artifact-free txn. Session COMPLETED with `version==2` (terminalized exactly once, no double-bump) and **exactly 1** PumpCheck / marker / Activity — the multi-connection reconciliation invariant SQLite cannot exercise. No poisoned transaction, no partial rows.
+
+Run: `FITX_PG_CONCURRENCY_TEST=1 PG_TEST_DATABASE_URL=postgresql://…@127.0.0.1:55433/… python -m pytest -m pg_concurrency tests/test_workout_session_pg.py -q`. The SQLite default suite already enforces the `uq_workout_session_active_owner` partial unique index (`test_partial_index_forbids_two_active_sessions`) and the terminalization/reconciliation invariants deterministically; these PG tests add the genuine multi-connection proof and still skip cleanly for reviewers without Docker.
+
+### Files changed
+
+- **Created:** `app/services/workout_session/{__init__,models,queries,service}.py`; `migrations/versions/a994f9bed783_add_workout_session_sprint_7_pr3.py`; `tests/test_workout_session.py`; `tests/test_workout_session_pg.py`; `tests/test_workout_state_sessions.py`.
+- **Modified:** `app/models.py` (WorkoutSession + active-owner index + violation helper); `app/cli.py` (`_user_child_models`); `app/config.py` (flag); `app/blueprints/training.py` (5 session routes + `/workout/complete` session linkage); `app/services/workout_completion/{models,queries,service,__init__}.py` (session_id + reconciliation + fixed lock order); `app/services/workout_state/{__init__,models,queries,resolver}.py` (flag-conditional v2 enrichment); `tests/test_workout_completion.py`; `tests/test_training_routes.py`; `tests/test_workout_state.py`; `tests/test_migration_graph.py`; `docs/WORKOUT_STATE.md`; `CLAUDE.md`; `docs/handoff.md`.
+- **Deleted:** none.
+
+### Authorization boundary
+
+The branch was pushed and **PR #186** opened against `main` under explicit user authorization, then rebased onto current `main` (past #185, resolving two trivial both-appended conflicts in `app/config.py` and this file). **Nothing merged, deployed, or production-flag/DB-changed; Sprint 7 PR4 not started.** Work confined to the `sprint7-pr3-workout-session-lifecycle` worktree; no other worktree's files absorbed.
+
+### Deferred (record only — not implemented)
+
+Stable plan-day identifier linkage (session↔plan soft reference; no set-level restoration — checkpoint is a lifecycle heartbeat), workout UI/nav redesign, offline sync, `TrainingPlan` schema redesign, historical `WorkoutLog` backfill, `/api/progress/workout` + `renderHero` convergence, automated destructive stale cleanup, **Sprint 7 PR4**.
