@@ -3,6 +3,7 @@
 # [KULLANICI PROFİLİ & HAFIZA], [HAFTALIK CHECK-IN TRENDİ], [GÜNLÜK AKTİVİTE],
 # [ARKADAŞ AKTİVİTELERİ], [PROAKTİF BİLDİRİMLER]) kurar. Her bölüm kendi
 # try/except'inde: bir sorgu patlarsa diğer bölümler yine de döner.
+import json
 import re
 from datetime import timedelta
 
@@ -12,6 +13,7 @@ from app.extensions import db
 from app.models import (DailyActivity, MealLog, User, UserSession, WaterLog,
                         WeeklyCheckIn, WorkoutLog)
 from app.services import coach_context_queries
+from app.services.workout_state import resolve_workout_state
 from app.timeutil import app_date_of, app_today
 
 
@@ -115,6 +117,16 @@ def fetch_coach_context(user_id, question="", language="tr"):
     # üzerinden tek yoldan gelir; burada FatSecret verisi enjekte ETMİYORUZ ki
     # model rakip bir veri kaynağı görüp staging adımını atlamasın.
     parts = []
+    try:
+        current_workout = resolve_workout_state(user_id).to_dict()
+        parts.append(
+            "[GÜNCEL ANTRENMAN DURUMU]\n" +
+            json.dumps(current_workout, ensure_ascii=False, separators=(",", ":"))
+        )
+    except Exception:
+        current_app.logger.warning(
+            "[COACH] güncel antrenman durumu alınamadı", exc_info=True)
+        parts.append("[GÜNCEL ANTRENMAN DURUMU] Veri alınamadı.")
     try:
         parts.append(
             f"[FITNESS ÖZETİ]\n"

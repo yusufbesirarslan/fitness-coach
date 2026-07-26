@@ -316,6 +316,7 @@
     <div class="sv-progress"><div id="sv-progress-bar"></div></div>
     <div class="sv-body" id="sv-body"></div>
     <div class="sv-foot">
+        <button class="btn-ghost" id="sv-abandon" data-action="abandonWorkout" hidden>{{ 'Abandon workout' if locale == 'en' else 'Antrenmanı bırak' }}</button>
         <button class="btn-volt w-full" data-action="finishSession">{{ t('training.finish_workout') }}</button>
     </div>
 </div>
@@ -352,6 +353,7 @@
 <div class="toast-wrap" id="toast-wrap"></div>
 
 <script nonce="{{ csp_nonce }}">window.__TRAINING = { injuries: {{ injuries|tojson }} };</script>
+<script src="/static/workout_state_client.js?v={{ _v }}"></script>
 <script src="/static/training.js?v={{ _v }}"></script>
 {%- if weekly_program_ui_enabled %}
 <script src="/static/weekly_program.js?v={{ _v }}"></script>

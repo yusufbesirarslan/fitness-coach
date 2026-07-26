@@ -40,6 +40,9 @@ from app.services.workout_session import (
     start_session,
 )
 from app.services.workout_state import resolve_workout_state
+from app.services.workout_state.snapshot import coherent_read_snapshot
+from app.services.workout_state.serialization import (
+    serialize_plan, serialize_today_plan, workout_state_payload)
 from app.timeutil import app_today, display_dt
 
 
@@ -178,7 +181,7 @@ def training_plan_generate():
     except (json.JSONDecodeError, PlanValidationError):
         return jsonify({"error": t("plan.gen_failed")}), 500
     except Exception:
-        current_app.logger.exception("Plan oluÅŸturma hatasÄ±")
+        current_app.logger.exception("Plan oluşturma hatası")
         return jsonify({"error": t("route.plan_failed")}), 500
 
 
@@ -367,10 +370,56 @@ def workout_status():
     # canonical owner (app/services/today_facts delegates to resolve_workout_state)
     # rather than re-querying — so the page and this endpoint can never disagree.
     snapshot = resolve_workout_state(current_user.id)
-    return jsonify({
-        "completed": snapshot.completed_today,
-        "state": snapshot.to_dict(),
-    })
+    return jsonify(workout_state_payload(snapshot))
+
+
+def _active_plan_payload(plan, plan_data=None):
+    if plan is None:
+        return {"exists": False}
+    parsed = json.loads(plan.plan_data) if plan_data is None else plan_data
+    return {
+        "exists": True,
+        "plan": parsed,
+        "score": plan.score,
+        "created_at": display_dt(plan.created_at, "%d.%m.%Y"),
+    }
+
+
+@bp.route("/training/bootstrap")
+@require_auth
+def training_bootstrap():
+    """Return one coherent, fail-closed Training presentation snapshot."""
+    user_id = None
+    try:
+        # Capture request/auth facts before resetting Flask-SQLAlchemy's scoped
+        # session.  Nothing below the boundary may dereference current_user.
+        user_id = current_user.id
+        today = app_today()
+        sessions_enabled = _workout_sessions_enabled()
+        with coherent_read_snapshot():
+            plan = get_active_plan(user_id)
+            plan_data = json.loads(plan.plan_data) if plan is not None else None
+            snapshot = resolve_workout_state(
+                user_id, today=today, plan=plan,
+                sessions_enabled=sessions_enabled, strict_reads=True,
+            )
+            response = jsonify({
+                "workout": workout_state_payload(snapshot),
+                "plan": _active_plan_payload(plan, serialize_plan(plan_data)),
+                "today_plan": serialize_today_plan(plan_data, today),
+            })
+    except Exception as exc:  # noqa: BLE001 - coherent response must fail closed
+        current_app.logger.warning(
+            "[TRAINING_BOOTSTRAP] unavailable user_id=%s detail=%s",
+            user_id, type(exc).__name__,
+        )
+        response = jsonify({
+            "error": t("route.generic_error_retry"),
+            "code": "bootstrap_unavailable",
+        })
+        response.status_code = 500
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 # ── Persisted workout-session lifecycle (Sprint 7 PR3) ───────────────────────
@@ -467,15 +516,7 @@ def get_active_training_plan():
     # kuralı paylaşsın diye tek yerden okunur; yanıt AYNI kalır.
     plan = get_active_plan(current_user.id)
 
-    if not plan:
-        return jsonify({"exists": False})
-
-    return jsonify({
-        "exists"    : True,
-        "plan"      : json.loads(plan.plan_data),
-        "score"     : plan.score,
-        "created_at": display_dt(plan.created_at, "%d.%m.%Y")
-    })
+    return jsonify(_active_plan_payload(plan))
 
 
 @bp.route("/api/training/weekly-program")
