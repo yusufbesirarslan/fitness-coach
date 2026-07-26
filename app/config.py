@@ -112,6 +112,31 @@ UIUX_NAV_V2_ENABLED = os.getenv("UIUX_NAV_V2_ENABLED", "0") == "1"
 # flag, including UIUX_NAV_V2_ENABLED (own env name, own config key — either can
 # roll back alone). Full rollback: set UIUX_TODAY_V2_ENABLED=0.
 UIUX_TODAY_V2_ENABLED = os.getenv("UIUX_TODAY_V2_ENABLED", "0") == "1"
+# ── AxisAI UIUX Sprint 1 PR3: Plan experience v2 rollout gate ──
+# Spec identity: uiux_sprint1_plan_v2. Default OFF renders the legacy /training
+# page (templates/training.html + static/training.js) byte-identically. ON renders
+# the server-authoritative Plan v2 surface (templates/plan.html): the active plan
+# read only from canonical data — no clock-based "today" selection, no rest-day
+# inference, no completion-from-localStorage. PRESENTATION ONLY — never an
+# authorization boundary (every route keeps its own @require_auth) and it carries
+# no business rule. Server-config only: read from current_app.config, never a query
+# param, cookie, header, or browser storage. Independent of every other flag,
+# including WEEKLY_PROGRAM_UI_ENABLED and UIUX_TODAY_V2_ENABLED / UIUX_NAV_V2_ENABLED
+# (own env name, own config key — either can roll back alone). Full rollback: set
+# UIUX_PLAN_V2_ENABLED=0.
+UIUX_PLAN_V2_ENABLED = os.getenv("UIUX_PLAN_V2_ENABLED", "0") == "1"
+# ── AxisAI UIUX Sprint 1 PR3: Coach page v2 rollout gate ──
+# Spec identity: uiux_sprint1_coach_page_v2. Default OFF renders the legacy thin
+# /coach host (templates/coach.html). ON renders the hardened Coach destination
+# (templates/coach_v2.html) which REUSES the existing widget (no second Coach
+# implementation) and guarantees exactly one interactive Coach instance. The shared
+# widget's lifecycle idempotency is a correctness invariant on every page; the
+# route-mode behaviours (auto-open, page-shell) activate ONLY on this V2 route.
+# PRESENTATION ONLY — never an authorization boundary (@require_auth preserved on
+# both paths) and it changes no AI prompt/model/streaming/persistence/rate-limit/
+# moderation policy. Server-config only. Independent of every other flag (own env
+# name, own config key). Full rollback: set UIUX_COACH_PAGE_V2_ENABLED=0.
+UIUX_COACH_PAGE_V2_ENABLED = os.getenv("UIUX_COACH_PAGE_V2_ENABLED", "0") == "1"
 
 # ── Sprint 7 PR3: persisted workout-session lifecycle rollout gate ──
 # Default OFF. The single canonical owner of the session-lifecycle rollout.
@@ -318,6 +343,8 @@ def configure_app(app):
     app.config["WEEKLY_PROGRAM_UI_ENABLED"] = WEEKLY_PROGRAM_UI_ENABLED
     app.config["UIUX_NAV_V2_ENABLED"] = UIUX_NAV_V2_ENABLED
     app.config["UIUX_TODAY_V2_ENABLED"] = UIUX_TODAY_V2_ENABLED
+    app.config["UIUX_PLAN_V2_ENABLED"] = UIUX_PLAN_V2_ENABLED
+    app.config["UIUX_COACH_PAGE_V2_ENABLED"] = UIUX_COACH_PAGE_V2_ENABLED
     app.config["FITX_WORKOUT_SESSIONS_ENABLED"] = FITX_WORKOUT_SESSIONS_ENABLED
     app.config["AI_MEMORY_ENABLED"] = AI_MEMORY_ENABLED
     app.config["LOGIN_FAIL_CLOSED"] = LOGIN_FAIL_CLOSED

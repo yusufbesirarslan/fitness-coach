@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}">
+<head>
+    {% include "_head.html" %}
+    <title>AxisAI — {{ t('plan.title') }}</title>
+    <link rel="stylesheet" href="/static/theme.css">
+    <link rel="stylesheet" href="/static/nav.css">
+    <link rel="stylesheet" href="/static/plan.css">
+</head>
+<body class="page-body">
+
+{# PR1 gezinme kabuğunu TÜKET — yeniden tanımlama. Plan birincil hedefi 'plan'
+   nav_active işaretiyle aktif olur (çeviri/DOM'dan değil). #}
+{% set nav_active = 'plan' %}
+{% include "_nav.html" %}
+
+{# ══════════════════════════════════════════════════════════════════════════
+   PLAN V2 — Sunucu-otoriter antrenman planı. Legacy training.js'in YASAK istemci
+   yetkisi (saate dayalı "bugün" seçimi, dinlenme çıkarımı, localStorage tamamlanma)
+   BURADA YOK: her şey kanonik veriden sunucuda render edilir. Sayfa durum kimliği
+   `plan.state` kanoniktir (çeviriden türetilmez); haftalık bölüm durumu AYRIDIR.
+   ══════════════════════════════════════════════════════════════════════════ #}
+<main class="main-content plan-main" id="plan-page" data-plan-v2 data-plan-state="{{ plan.state }}">
+
+  <header class="plan-head">
+    <h1 class="plan-h1">{{ t('plan.title') }}</h1>
+    {# Durum ikon + METİN (yalnızca renkle iletilmez). Kanonik state'ten gelir;
+       read_error 'no plan'a çevrilmez, populated 'start' göstermez. #}
+    <p class="plan-status plan-status--{{ plan.state }}" role="status">
+      <span class="plan-status-ic" aria-hidden="true">
+        {%- if plan.state == 'active_plan' %}✓{% elif plan.state == 'partial_active_plan' %}!{% elif plan.state == 'read_error' %}!{% else %}◔{% endif -%}
+      </span>
+      <span class="plan-status-txt">{{ t('plan.status.' ~ plan.state) }}</span>
+    </p>
+  </header>
+
+  {% if plan.state == 'read_error' %}
+    {# Dürüst hata: kanonik okuma başarısız. 'Open Plan' YOK (kullanıcı zaten
+       Plan'da) — güvenli yeniden dene (sayfayı yeniden yükler). #}
+    <section class="plan-error" aria-labelledby="plan-error-label">
+      <h2 id="plan-error-label" class="sec-label">{{ t('plan.error.title') }}</h2>
+      <p class="plan-error-body">{{ t('plan.error.body') }}</p>
+      <button class="btn-volt" type="button" data-action="fxReload">{{ t('plan.action.retry') }}</button>
+    </section>
+
+  {% elif plan.state == 'no_active_plan' %}
+    {# Aktif plan yok → tek dürüst adım: mevcut kanonik in-page üreticiyle plan
+       oluştur. /training'e SELF-LINK YOK; sunucu tek plan otoritesi kalır. #}
+    <section class="plan-create" data-plan-create aria-labelledby="plan-create-label">
+      <h2 id="plan-create-label" class="sec-label">{{ t('plan.create.title') }}</h2>
+      <p class="plan-create-intro">{{ t('plan.create.intro') }}</p>
+      <p class="plan-create-msg" data-plan-create-msg role="status" aria-live="polite" hidden></p>
+
+      <div class="plan-field">
+        <label for="pc-days">{{ t('plan.create.field.days') }}</label>
+        <select id="pc-days" class="plan-select" data-plan-field="gun_sayisi" data-plan-type="int">
+          <option value="3">{{ t('plan.create.days.3') }}</option>
+          <option value="4">{{ t('plan.create.days.4') }}</option>
+          <option value="5">{{ t('plan.create.days.5') }}</option>
+          <option value="6">{{ t('plan.create.days.6') }}</option>
+        </select>
+      </div>
+
+      <div class="plan-field">
+        <label for="pc-style">{{ t('plan.create.field.style') }}</label>
+        <select id="pc-style" class="plan-select" data-plan-field="antrenman_tarzi">
+          <option value="genel">{{ t('plan.create.style.genel') }}</option>
+          <option value="crossfit">{{ t('plan.create.style.crossfit') }}</option>
+          <option value="calisthenics">{{ t('plan.create.style.calisthenics') }}</option>
+          <option value="powerlifting">{{ t('plan.create.style.powerlifting') }}</option>
+          <option value="bodybuilding">{{ t('plan.create.style.bodybuilding') }}</option>
+          <option value="fonksiyonel">{{ t('plan.create.style.fonksiyonel') }}</option>
+        </select>
+      </div>
+
+      <div class="plan-field">
+        <label for="pc-goal">{{ t('plan.create.field.goal') }}</label>
+        <select id="pc-goal" class="plan-select" data-plan-field="odak_hedef">
+          <option value="genel">{{ t('plan.create.goal.genel') }}</option>
+          <option value="guc">{{ t('plan.create.goal.guc') }}</option>
+          <option value="kondisyon">{{ t('plan.create.goal.kondisyon') }}</option>
+          <option value="kas_kutlesi">{{ t('plan.create.goal.kas_kutlesi') }}</option>
+          <option value="yag_yakimi">{{ t('plan.create.goal.yag_yakimi') }}</option>
+          <option value="esneklik">{{ t('plan.create.goal.esneklik') }}</option>
+        </select>
+      </div>
+
+      <div class="plan-field">
+        <label for="pc-equip">{{ t('plan.create.field.equip') }}</label>
+        <select id="pc-equip" class="plan-select" data-plan-field="ekipman">
+          <option value="spor_salonu">{{ t('plan.create.equip.spor_salonu') }}</option>
+          <option value="ev">{{ t('plan.create.equip.ev') }}</option>
+          <option value="minimal">{{ t('plan.create.equip.minimal') }}</option>
+        </select>
+      </div>
+
+      <div class="plan-field">
+        <label for="pc-focus">{{ t('plan.create.field.focus') }}</label>
+        <select id="pc-focus" class="plan-select" data-plan-field="odak">
+          <option value="tum_vucut">{{ t('plan.create.focus.tum_vucut') }}</option>
+          <option value="ust_vucut">{{ t('plan.create.focus.ust_vucut') }}</option>
+          <option value="sirt">{{ t('plan.create.focus.sirt') }}</option>
+          <option value="alt_vucut">{{ t('plan.create.focus.alt_vucut') }}</option>
+          <option value="core">{{ t('plan.create.focus.core') }}</option>
+        </select>
+      </div>
+
+      <div class="plan-field">
+        <label for="pc-dur">{{ t('plan.create.field.dur') }}</label>
+        <select id="pc-dur" class="plan-select" data-plan-field="sure" data-plan-type="int">
+          <option value="30">{{ t('plan.create.dur.30') }}</option>
+          <option value="45">{{ t('plan.create.dur.45') }}</option>
+          <option value="60">{{ t('plan.create.dur.60') }}</option>
+          <option value="90">{{ t('plan.create.dur.90') }}</option>
+        </select>
+      </div>
+
+      <div class="plan-field">
+        <label for="pc-cardio">{{ t('plan.create.field.cardio') }}</label>
+        <select id="pc-cardio" class="plan-select" data-plan-field="kardiyo_tipi">
+          <option value="yok">{{ t('plan.create.cardio.yok') }}</option>
+          <option value="kosu">{{ t('plan.create.cardio.kosu') }}</option>
+          <option value="bisiklet">{{ t('plan.create.cardio.bisiklet') }}</option>
+          <option value="yuzme">{{ t('plan.create.cardio.yuzme') }}</option>
+          <option value="ip_atlama">{{ t('plan.create.cardio.ip_atlama') }}</option>
+          <option value="yuruyus">{{ t('plan.create.cardio.yuruyus') }}</option>
+          <option value="karisik">{{ t('plan.create.cardio.karisik') }}</option>
+        </select>
+      </div>
+
+      <div class="plan-field">
+        <label for="pc-injuries">{{ t('plan.create.field.injury') }}</label>
+        <input type="text" id="pc-injuries" class="plan-input" data-plan-field="injuries"
+               maxlength="200" placeholder="{{ t('plan.create.injury_ph') }}">
+      </div>
+
+      <button class="btn-volt w-full" type="button" data-action="createPlan" data-plan-create-submit>
+        {{ t('plan.create.submit') }}
+      </button>
+    </section>
+
+  {% else %}
+    {# active_plan / partial_active_plan — plan içeriği hedefin KENDİSİ: baskın CTA
+       YOK. partial'da dürüst not gösterilir; plan yine görünür kalır. #}
+    {% if plan.partial %}
+      <p class="plan-partial-note" role="status">{{ t('plan.partial.note') }}</p>
+    {% endif %}
+
+    <div class="plan-meta">
+      {% if plan.created_at %}<span class="plan-meta-created">{{ t('plan.created_on', date=plan.created_at) }}</span>{% endif %}
+      {% if plan.score is not none %}<span class="badge badge-primary" title="{{ t('plan.score_aria') }}">{{ plan.score }}</span>{% endif %}
+    </div>
+
+{#- ── ADAPTIVE WEEKLY PROGRAM MOUNT (reused consumer contract, answer.txt §7) ──
+    Rendered ONLY when the weekly section state is 'loading' (its own flag on AND a
+    plan context exists). In the 'disabled' state the whole block — markup, copy,
+    and the script tag below — is omitted server-side: no indefinite loading mount,
+    no error, active plan stays visible (answer.txt §6). weekly_program.js is a
+    standalone consumer (queries `document` for the mount, one GET, copy from the
+    inline JSON block, reads window.LOCALE) — no training.js/training.html needed. -#}
+{%- if plan.weekly_section_state == 'loading' %}
+{%- set weekly_program_copy = {
+    "training.weekly_program": t("training.weekly_program"),
+    "weekly_program.loading": t("weekly_program.loading"),
+    "weekly_program.focus.insufficient_data.title": t("weekly_program.focus.insufficient_data.title"),
+    "weekly_program.focus.insufficient_data.description": t("weekly_program.focus.insufficient_data.description"),
+    "weekly_program.focus.build_consistency.title": t("weekly_program.focus.build_consistency.title"),
+    "weekly_program.focus.build_consistency.description": t("weekly_program.focus.build_consistency.description"),
+    "weekly_program.focus.deload.title": t("weekly_program.focus.deload.title"),
+    "weekly_program.focus.deload.description": t("weekly_program.focus.deload.description"),
+    "weekly_program.focus.maintenance.title": t("weekly_program.focus.maintenance.title"),
+    "weekly_program.focus.maintenance.description": t("weekly_program.focus.maintenance.description"),
+    "weekly_program.focus.overload.title": t("weekly_program.focus.overload.title"),
+    "weekly_program.focus.overload.description": t("weekly_program.focus.overload.description"),
+    "weekly_program.focus.steady.title": t("weekly_program.focus.steady.title"),
+    "weekly_program.focus.steady.description": t("weekly_program.focus.steady.description"),
+    "weekly_program.volume_action.decrease": t("weekly_program.volume_action.decrease"),
+    "weekly_program.volume_action.hold": t("weekly_program.volume_action.hold"),
+    "weekly_program.volume_action.increase": t("weekly_program.volume_action.increase"),
+    "weekly_program.intensity_action.deload": t("weekly_program.intensity_action.deload"),
+    "weekly_program.intensity_action.hold": t("weekly_program.intensity_action.hold"),
+    "weekly_program.intensity_action.progress": t("weekly_program.intensity_action.progress"),
+    "weekly_program.metric.observed": t("weekly_program.metric.observed"),
+    "weekly_program.metric.target": t("weekly_program.metric.target"),
+    "weekly_program.metric.kg": t("weekly_program.metric.kg"),
+    "weekly_program.reason.insufficient_history": t("weekly_program.reason.insufficient_history"),
+    "weekly_program.reason.inconsistent_training": t("weekly_program.reason.inconsistent_training"),
+    "weekly_program.reason.deload_due": t("weekly_program.reason.deload_due"),
+    "weekly_program.reason.plateau_detected": t("weekly_program.reason.plateau_detected"),
+    "weekly_program.reason.progressing": t("weekly_program.reason.progressing"),
+    "weekly_program.reason.steady_state": t("weekly_program.reason.steady_state"),
+    "weekly_program.reason.volume_trend_down": t("weekly_program.reason.volume_trend_down"),
+    "weekly_program.reason.strength_trend_down": t("weekly_program.reason.strength_trend_down"),
+    "weekly_program.state.insufficient_data": t("weekly_program.state.insufficient_data"),
+    "weekly_program.state.missing_baseline": t("weekly_program.state.missing_baseline"),
+    "weekly_program.state.error": t("weekly_program.state.error"),
+    "weekly_program.state.malformed_response": t("weekly_program.state.malformed_response"),
+    "weekly_program.state.retry": t("weekly_program.state.retry")
+} %}
+    <section id="weekly-program" data-weekly-program-mount aria-hidden="true">
+      <script type="application/json" data-weekly-program-copy>{{ weekly_program_copy|tojson }}</script>
+    </section>
+{%- endif %}
+
+    <section class="plan-days" aria-labelledby="plan-days-label">
+      <h2 id="plan-days-label" class="sec-label">{{ t('plan.days_label') }}</h2>
+      {% for day in plan.days %}
+      <details class="plan-day{% if day.is_rest %} plan-day--rest{% endif %}">
+        <summary class="plan-day-summary">
+          <span class="plan-day-name">{{ day.label if day.label else t('plan.day.untitled') }}</span>
+          <span class="plan-day-meta">
+            {%- if not day.is_rest %}{{ day.exercises|length }} · {{ day.duration_min }} {{ t('plan.min') }} · ~{{ day.est_calories }} kcal{%- endif -%}
+          </span>
+          <span class="plan-day-focus">
+            {%- if day.is_rest %}{{ t('plan.day.rest') }}{% elif day.focus %}{{ day.focus }}{% else %}{{ t('plan.day.workout') }}{% endif -%}
+          </span>
+        </summary>
+        <div class="plan-day-body">
+          {% if day.is_rest %}
+            <p class="plan-day-note">{{ t('plan.day.rest_note') }}</p>
+          {% elif day.exercises %}
+            <ul class="plan-ex-list">
+              {% for ex in day.exercises %}
+              <li class="plan-ex">
+                <span class="plan-ex-name">{{ ex.name if ex.name else t('plan.ex.unnamed') }}</span>
+                <span class="plan-ex-meta">
+                  {%- if ex.sets %}{{ ex.sets }} × {% endif %}{{ ex.reps }}{% if ex.rest %} · {{ ex.rest }}{% endif -%}
+                </span>
+                {% if ex.note %}<span class="plan-ex-note">{{ ex.note }}</span>{% endif %}
+              </li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            {# Boş egzersiz listesi dinlenme DEĞİLDİR (answer.txt §8) — dürüst not. #}
+            <p class="plan-day-note">{{ t('plan.day.no_exercises') }}</p>
+          {% endif %}
+        </div>
+      </details>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  {% if plan.secondary %}
+    <nav class="plan-secondary" aria-label="{{ t('plan.secondary_aria') }}">
+      {% for a in plan.secondary %}
+        <a class="plan-secondary-link" href="{{ a.href }}">{{ t(a.label_key) }}</a>
+      {% endfor %}
+    </nav>
+  {% endif %}
+
+</main>
+
+{% include "_actionbar.html" %}
+
+<div class="toast-wrap" id="toast-wrap"></div>
+
+{# Creation-only submitter — loaded ONLY in the no_active_plan state so the
+   populated/partial/error trees ship none of it (one surface tree). #}
+{% if plan.state == 'no_active_plan' %}
+<script src="/static/plan_create.js?v={{ _v }}"></script>
+{% endif %}
+
+{# Weekly-program consumer — loaded ONLY when the section is mounted (loading). #}
+{% if plan.weekly_section_state == 'loading' %}
+<script src="/static/weekly_program.js?v={{ _v }}"></script>
+{% endif %}
+
+<script src="/static/actions.js?v={{ _v }}"></script>
+<script src="/static/coach_widget.js?v={{ _v }}"></script>
+</body>
+</html>

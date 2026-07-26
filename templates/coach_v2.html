@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="{{ locale }}" data-theme="dark">
+<head>
+    {% include "_head.html" %}
+    <title>{{ t('coach.page_title') }}</title>
+    <link rel="stylesheet" href="/static/theme.css">
+    <link rel="stylesheet" href="/static/nav.css">
+</head>
+{% set nav_active = 'coach' %}
+<body class="page-body">
+
+{% include "_nav.html" %}
+
+<main class="main-content" id="main-content" data-coach-v2>
+    <div class="coach-page">
+        <h1 class="coach-page-title">{{ t('coach.v2.title') }}</h1>
+        <p class="coach-page-intro">{{ t('coach.v2.intro') }}</p>
+        <div class="coach-page-cta">
+            <button type="button" class="btn-volt" data-action="axCoachOpen">{{ t('coach.v2.open') }}</button>
+        </div>
+        <p class="coach-page-hint">{{ t('coach.v2.hint') }}</p>
+    </div>
+</main>
+
+{% include "_actionbar.html" %}
+
+{# AxisAI UIUX Sprint 1 PR3 — Coach Page V2 (UIUX_COACH_PAGE_V2_ENABLED).
+   Reuses the EXACT existing floating widget — NO second Coach implementation.
+   coach_widget.js self-injects its host + CSS, defines window.CW and boots ONCE
+   (module-level guard), so there is exactly one interactive instance / composer /
+   submit / stream. AI behaviour, prompt, streaming, persistence UNCHANGED. #}
+<script src="/static/coach_widget.js"></script>
+<script src="/static/actions.js"></script>
+<script nonce="{{ csp_nonce }}">
+(function(){
+    // Route-mode ONLY behavior (answer.txt §5): auto-opening the ONE widget on
+    // arrival and the "Open Coach" fallback live HERE, never in the shared widget,
+    // so the floating widget on every other page is untouched.
+    //
+    // Idempotent open: CW.toggle() FLIPS state, so we toggle only when CLOSED.
+    // Calling this repeatedly (fallback re-clicks, poll re-fires) never closes an
+    // open widget and never creates a second instance.
+    function openCoach(){
+        var CW = window.CW;
+        if (!CW || typeof CW.toggle !== 'function') return false;  // widget not ready yet
+        if (!CW.open) CW.toggle();                                  // open only when closed
+        return true;                                               // ready (opened or already open)
+    }
+    // "Open Coach" fallback button (data-action delegation via actions.js).
+    window.axCoachOpen = function(){ openCoach(); };
+
+    // Auto-open the single widget once it has self-injected. It injects
+    // synchronously above, so the first call usually succeeds; poll briefly as a
+    // defensive fallback. No dialog/alert is triggered.
+    if (openCoach()) return;
+    var tries = 0;
+    var iv = setInterval(function(){
+        if (openCoach() || ++tries > 40) clearInterval(iv);
+    }, 50);
+})();
+</script>
+</body>
+</html>

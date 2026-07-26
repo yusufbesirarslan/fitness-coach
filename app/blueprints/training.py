@@ -17,6 +17,8 @@ from app.services.gamification import complete_quest_for_user
 from app.services.menu_extract import validate_pump_check
 from app.services.pump_checks import get_friend_ids, normalize_workout_score
 from app.services.premium import premium_ai_plan_gate
+from app.plan_presenter import build_plan_view
+from app.services.plan_facts import gather_plan_facts
 from app.services.today_facts import get_active_plan
 from app.services.training_generation.response_validator import PlanValidationError
 from app.services.training_generation.service import generate_training_plan_payload
@@ -120,6 +122,19 @@ def _parse_pump_visibility(data):
 @bp.route("/training")
 @require_auth
 def training():
+    # UIUX Sprint 1 PR3: full-template swap IN the route (never a mixed tree),
+    # mirroring the PR2 Today swap. Flag OFF → the legacy /training page renders
+    # byte-identically; ON → the server-authoritative Plan v2 surface, which reads
+    # only canonical data (no clock-based "today", no rest-day inference, no
+    # completion-from-storage). The flag is read only here, only from server config
+    # (never a query param/cookie/header/browser storage). Independent of
+    # WEEKLY_PROGRAM_UI_ENABLED, which Plan v2 also honors for its weekly section.
+    weekly_enabled = current_app.config.get("WEEKLY_PROGRAM_UI_ENABLED", False)
+    if current_app.config.get("UIUX_PLAN_V2_ENABLED", False):
+        plan_view = build_plan_view(
+            gather_plan_facts(current_user.id), weekly_enabled=weekly_enabled)
+        return render_template("plan.html", plan=plan_view)
+
     # Kayıtlı sakatlık verisini forma ön-doldur (yapışkan alan). None-güvenli.
     _meta = getattr(current_user, "user_metadata", None) or {}
     injuries = _meta.get("injuries") or ""
@@ -132,8 +147,7 @@ def training():
     return render_template("training.html", username=current_user.username,
                            profile_picture=current_user.avatar_src,
                            injuries=injuries,
-                           weekly_program_ui_enabled=current_app.config.get(
-                               "WEEKLY_PROGRAM_UI_ENABLED", False))
+                           weekly_program_ui_enabled=weekly_enabled)
 
 
 @bp.route("/training-plan", methods=["POST"])

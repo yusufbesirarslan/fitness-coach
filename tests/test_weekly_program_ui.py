@@ -273,10 +273,16 @@ def test_page_view_reads_no_history_planner_or_weekly_program_service():
 
 
 def test_page_view_exposes_only_the_boolean_flag():
-    """Exactly one config read, and it is the UI flag — not the whole config object."""
+    """Only boolean feature flags are read — never the whole config object.
+
+    UIUX Sprint 1 PR3 adds one more request-time read to the route: the Plan V2
+    swap flag `UIUX_PLAN_V2_ENABLED` sits alongside the weekly-UI flag. Both are
+    single `.get(NAME, False)` boolean reads; the route still never dumps the whole
+    config nor reads the independent coach adaptive flag."""
     source = ast.unparse(_page_view_ast())
-    assert source.count("current_app.config") == 1
+    assert source.count("current_app.config") == 2       # weekly UI + Plan V2 flags
     assert "WEEKLY_PROGRAM_UI_ENABLED" in source
+    assert "UIUX_PLAN_V2_ENABLED" in source
     assert "AI_ADAPTIVE_PLAN_CONTEXT" not in source
     assert "current_app.config)" not in source          # no whole-config dump
     assert "config.items" not in source

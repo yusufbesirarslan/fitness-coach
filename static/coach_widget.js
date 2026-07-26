@@ -3,6 +3,22 @@
 (function () {
   'use strict';
 
+  /* ── 0. Lifecycle ownership (AxisAI UIUX Sprint 1 PR3) ──
+     The widget self-injects its host, wires its events, defines window.CW and
+     boots exactly ONCE per document. Guarding on an explicit module-level flag —
+     not on window.CW existence alone (a page may legitimately have set it) and not
+     on #cw-root existence alone (a host may be server-rendered) — makes a second
+     script evaluation a clean no-op: no duplicate #cw-root (no second
+     accessibility-exposed Coach instance), no duplicate event/bootstrap/stream
+     wiring, no duplicate /coach/history fetch. This is a shared correctness
+     invariant: on the first (and, on a normal single-include page, only)
+     evaluation the flag is unset, so every step below runs exactly as before —
+     single-init behavior is unchanged. Route-mode behaviors (auto-open,
+     page-shell) are NOT added here; they live in the Coach route template so the
+     floating widget is untouched (answer.txt §4, §5). */
+  if (window.__cwWidgetInit) return;
+  window.__cwWidgetInit = true;
+
 
   function mealWriteHeaders() {
     var key = (window.crypto && window.crypto.randomUUID)
@@ -104,9 +120,15 @@
   '</div>' +
   '<div id="cw-notify" aria-live="assertive"></div>';
 
-  var wrap = document.createElement('div');
-  wrap.innerHTML = html;
-  while (wrap.firstChild) document.body.appendChild(wrap.firstChild);
+  /* Adopt a pre-existing host instead of injecting a second one: with the
+     module-level guard above, #cw-root can only pre-exist if it was
+     server-rendered (a legitimately-present-but-uninitialized host) — never from a
+     prior evaluation. Injecting is otherwise identical to before. */
+  if (!document.getElementById('cw-root')) {
+    var wrap = document.createElement('div');
+    wrap.innerHTML = html;
+    while (wrap.firstChild) document.body.appendChild(wrap.firstChild);
+  }
 
   /* ── 3. Wire events ── */
   document.getElementById('cw-close').addEventListener('click', function () { CW.toggle(); });

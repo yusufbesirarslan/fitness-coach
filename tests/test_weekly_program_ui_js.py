@@ -240,7 +240,28 @@ def test_script_is_not_referenced_from_any_other_template_or_asset():
                  + list((root / "static").glob("*.js"))
                  if path.name != "weekly_program.js"
                  and "weekly_program.js" in path.read_text(encoding="utf-8")]
-    assert referrers == [root / "templates" / "training.html"]
+    # training.html owns the canonical mount; plan.html (UIUX Sprint 1 PR3) REUSES
+    # the same standalone consumer to render the weekly section on /training's V2
+    # tree — a deliberate, flag-gated reference (answer.txt §7 "reuse the consumer
+    # contract"), not accidental coupling, and NEVER a training.js dependency. Both
+    # load it only behind their respective conditions (see the two guards below).
+    assert sorted(referrers) == sorted([
+        root / "templates" / "training.html",
+        root / "templates" / "plan.html",
+    ])
+
+
+def test_plan_v2_references_the_script_only_when_the_section_mounts():
+    """Plan V2 loads the reused consumer ONLY when its weekly section is in the
+    'loading' state (flag ON + a plan context). Every other Plan state ships zero
+    bytes of it — mirroring training.html's flag-gated inclusion."""
+    template = (Path(__file__).resolve().parents[1] / "templates" / "plan.html"
+                ).read_text(encoding="utf-8")
+    assert template.count("/static/weekly_program.js") == 1
+    lines = template.splitlines()
+    at = next(i for i, line in enumerate(lines) if "/static/weekly_program.js" in line)
+    assert lines[at - 1].strip() == "{% if plan.weekly_section_state == 'loading' %}"
+    assert lines[at + 1].strip() == "{% endif %}"
 
 
 def test_css_is_owned_by_training_stylesheet_and_uses_scoped_classes():
@@ -253,13 +274,38 @@ def test_css_is_owned_by_training_stylesheet_and_uses_scoped_classes():
     for sheet in css_dir.glob("*.css"):
         text = sheet.read_text(encoding="utf-8")
         body = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-        if sheet.name == "training.css":
+        # training.css owns the canonical rules; plan.css (UIUX Sprint 1 PR3) carries
+        # an IDENTICAL copy so Plan V2 can style the REUSED weekly mount without
+        # loading training.css (answer.txt §7 — reuse the mount, never train­ing.js).
+        # Drift is impossible: test_plan_css_weekly_rules_match_training_css pins the
+        # two rule-sets byte-equal.
+        if sheet.name in ("training.css", "plan.css"):
             assert ".weekly-program-" in body
         else:
             assert "weekly-program" not in body, sheet.name
         assert "weekly_program" not in body, sheet.name
         # a bare `section { ... }` / `section,` / `main section` rule would style it
         assert not re.search(r"(?m)(^|[,{}>+~]|\s)section\s*(\{|,)", body), sheet.name
+
+
+def _weekly_rules(css_text):
+    """The set of (selector, normalized-declarations) pairs for every rule whose
+    selector names a `.weekly-program-*` class — order/whitespace-insensitive."""
+    body = re.sub(r"/\*.*?\*/", "", css_text, flags=re.DOTALL)
+    rules = re.findall(r"([^{}]*?weekly-program[^{}]*?)\{([^}]*)\}", body)
+    return {(" ".join(sel.split()), " ".join(decl.split())) for sel, decl in rules}
+
+
+def test_plan_css_weekly_rules_match_training_css():
+    """Plan V2 copies the scoped `.weekly-program-*` rules into plan.css so it can
+    style the reused mount without loading training.css. Pin them equal to
+    training.css's set so the copy can never silently drift — the single-owner
+    intent the guard above protects, preserved across the deliberate reuse."""
+    static = Path(__file__).resolve().parents[1] / "static"
+    training = _weekly_rules((static / "training.css").read_text(encoding="utf-8"))
+    plan = _weekly_rules((static / "plan.css").read_text(encoding="utf-8"))
+    assert training, "no .weekly-program-* rules found in training.css"
+    assert plan == training, "plan.css .weekly-program-* rules drifted from training.css"
 
 
 def test_asset_stays_small():

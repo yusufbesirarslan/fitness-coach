@@ -108,3 +108,21 @@ def test_weekly_program_ui_flag_is_documented_default_off():
         ENV_EXAMPLE_SOURCE, "WEEKLY_PROGRAM_UI_ENABLED=0"
     )
     assert "WEEKLY_PROGRAM_UI_ENABLED=1" not in ENV_EXAMPLE_SOURCE
+
+
+def test_plan_v2_flag_is_documented_default_off():
+    """UIUX Sprint 1 PR3 rollout gate. Commented-out `=0` so copying `.env.example`
+    can never enable Plan V2 by accident; never documented as `=1`."""
+    assert _has_exact_commented_setting(
+        ENV_EXAMPLE_SOURCE, "UIUX_PLAN_V2_ENABLED=0"
+    )
+    assert "UIUX_PLAN_V2_ENABLED=1" not in ENV_EXAMPLE_SOURCE
+
+
+def test_coach_page_v2_flag_is_documented_default_off():
+    """UIUX Sprint 1 PR3 rollout gate. Commented-out `=0` so copying `.env.example`
+    can never enable Coach Page V2 by accident; never documented as `=1`."""
+    assert _has_exact_commented_setting(
+        ENV_EXAMPLE_SOURCE, "UIUX_COACH_PAGE_V2_ENABLED=0"
+    )
+    assert "UIUX_COACH_PAGE_V2_ENABLED=1" not in ENV_EXAMPLE_SOURCE

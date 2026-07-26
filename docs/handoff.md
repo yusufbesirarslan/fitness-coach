@@ -3247,6 +3247,209 @@ Local implementation and validation were completed under a local-only boundary; 
 subsequently pushed and a pull request opened against `main` under explicit authorization
 (PR #185). Nothing was merged, nothing was deployed, and no production feature flag was changed.
 
+## UIUX Sprint 1 PR3 - Plan Experience & Coach Destination Hardening
+
+### Dependency and base
+
+- **PR2 is already merged into `origin/main`** as `9400641` (PR #185). `origin/main` therefore already
+  contains UIUX PR1 (`a272b5b`, #182), Sprint 7 PR1 (`3d9c582`, #183), Sprint 7 PR2 (`307b7b5`, #184)
+  and UIUX PR2 (`9400641`, #185). PR3 branches **directly from `origin/main` = `9400641`**, so — unlike
+  PR2 — there is **no separate PR2-reconciliation commit**: PR3 is a single clean commit on merged main,
+  matching the one-local-PR3-commit boundary. Branch `uiux/sprint1-pr3-plan-coach-separation`, worktree
+  `.worktrees/uiux-sprint1-pr3-plan-coach-separation` (fresh; the PR2 worktree was left untouched).
+
+### Objective
+
+Two production-safe, accessible, responsive, independently reversible surfaces behind two new
+default-OFF server-owned flags: **Plan V2** (a server-authoritative redesign of the existing `/training`
+page that removes legacy `training.js`'s forbidden client-side authority) and **Coach Page V2** (a
+hardened `/coach` destination that **reuses the exact existing widget** and guarantees exactly one
+interactive Coach instance via explicit lifecycle ownership). No second training-plan authority, no
+second Coach implementation, no change to AI system/adaptive prompts, model/provider, streaming
+protocol, conversation persistence, rate-limit/entitlement/auth/moderation policy, or API contracts.
+
+### Two independent flags
+
+`app/config.py` after `UIUX_TODAY_V2_ENABLED` (same `os.getenv(NAME,"0")=="1"` idiom), registered in
+`configure_app()`, read only at request time, documented in `.env.example` as commented `=0`:
+
+- `UIUX_PLAN_V2_ENABLED` — default OFF. ON → `plan.html`; OFF/invalid/missing → legacy `training.html`.
+- `UIUX_COACH_PAGE_V2_ENABLED` — default OFF. ON → `coach_v2.html`; OFF/invalid/missing → legacy
+  `coach.html`.
+
+Server-config only (never query/cookie/header/localStorage/sessionStorage). Each rolls back alone and
+is independent of `UIUX_NAV_V2_ENABLED` / `UIUX_TODAY_V2_ENABLED` / `WEEKLY_PROGRAM_UI_ENABLED`.
+
+### Plan V2 (`/training`) — two independent state contracts
+
+- **Read layer** `app/services/plan_facts.py` (read-only; no writes/AI/HTTP): reuses the exact
+  `get_active_plan` selector (shared with `/training-plan/active`), then **safely** parses
+  `TrainingPlan.plan_data` into a presentation-only, canonically-ordered day→exercise structure.
+  Fallback semantics: DB/read failure → `read_ok=False` (honest error, never fabricated/`no plan`);
+  unparseable `plan_data` → `parse_ok=False` (→ `partial_active_plan`, malformed ≠ no plan); canonical
+  order preserved; unknown labels neutral; **empty exercise list is NOT a rest day** (only explicit
+  `tip == "dinlenme"`).
+- **Presenter** `app/plan_presenter.py` (PURE, frozen dataclasses, mirrors `today_presenter.py`) →
+  `PlanView`. **Two separate state models:** a **page** state (`read_error` / `no_active_plan` /
+  `active_plan` / `partial_active_plan`) and an **independent weekly-section** state (`loading` /
+  `populated` / `missing_baseline` / `insufficient_data` / `partial` / `error` / `disabled`). A weekly
+  failure never collapses the page. `active_plan` has **no dominant CTA** (`primary=None` — plan content
+  is the destination, no "View plan" self-link, no invented "Start today's workout"); `no_active_plan`
+  uses the existing canonical in-page generator (no `/training` self-link, not an error); `read_error`
+  offers a **safe retry** (page reload), not an "Open Plan" action. Actions carry a label KEY, never
+  copy; state ids are stable ASCII.
+- **Route** `app/blueprints/training.py training()` mirrors the PR2 swap: `if config[UIUX_PLAN_V2_ENABLED]:
+  render plan.html(build_plan_view(gather_plan_facts(user), weekly_enabled))` else legacy
+  `training.html` unchanged. No new SQL beyond the shared selector.
+- **Template** `templates/plan.html` (new, dedicated tree): one `<h1>`, `{% set nav_active='plan' %}`,
+  status conveyed by icon **and** text; **never loads `static/training.js`**; plan days use native
+  `<details>/<summary>` (keyboard/reduced-motion/CSP-safe, no new JS); inline scripts none; interactions
+  via `data-action` delegation. Creation submitter `static/plan_create.js` (creation-only, no plan
+  authority — POST `/training-plan` → POST `/training-plan/save` → reload; 400 → `/setup`) loaded ONLY
+  in `no_active_plan`. `static/plan.css` new (`.weekly-program-*` copied from `training.css` so the
+  reused mount is styled without loading `training.css`).
+- **Weekly section (answer.txt §6/§7):** `weekly_program.js` verified reusable as a standalone consumer
+  (queries `document` for the mount, one GET `/api/training/weekly-program`, reads `window.LOCALE`, no
+  `training.html`/`training.js` dependency). `WEEKLY_PROGRAM_UI_ENABLED=0` → section `disabled`: no
+  mount, no script, no request, active plan stays visible. ENABLED + active/partial → section mounts and
+  fires at most one weekly GET; a weekly endpoint error leaves the plan page 200 and visible.
+
+### Coach Page V2 (`/coach`) — lifecycle idempotency + classified shared changes
+
+- **Shared-widget hardening (answer.txt §4/§5)** in `static/coach_widget.js`: a **module-level init
+  guard** (`window.__cwWidgetInit`) placed before any injection / `var CW` / `/coach/history` fetch, plus
+  **adopt-existing `#cw-root`** — so a second script evaluation is a clean no-op (no duplicate root /
+  event/bootstrap wiring / history fetch / second accessibility-exposed instance). On the first (normal)
+  evaluation every step runs exactly as before, so single-init behavior is unchanged (proven by the
+  behavior suite). Route-mode behaviors are **NOT** added to the shared widget.
+- **Route** `app/blueprints/coach.py coach_page()`: `if config[UIUX_COACH_PAGE_V2_ENABLED]: render
+  coach_v2.html else render coach.html`; `@require_auth` on both. No business logic / data fetch added.
+- **Template** `templates/coach_v2.html` (new): one `<h1>`, honest concise intro (no promotional claim,
+  no "Coach controls the Plan"), stable shell, `{% set nav_active='coach' %}`, reuses the exact widget
+  (`coach_widget.js` + `.css` + `actions.js`). Route-mode behaviors live HERE only: a nonce'd inline
+  opener `window.axCoachOpen` that toggles **only when closed** (idempotent open — re-clicks/poll never
+  close an open widget or make a second), an "Open Coach" fallback button via `data-action` delegation,
+  and a one-time auto-open on arrival. The floating widget on every other page is untouched. `.coach-page-cta`
+  / `.coach-page-hint` added to the existing `.coach-page` block in `nav.css`.
+
+### i18n
+
+`locales/{tr,en}.json`: **+73 `plan.*`** keys (page/section state labels, neutral secondary-action
+labels, retry, creation-form labels/options, day/rest/exercise labels) and **+4 `coach.v2.*`** keys
+(title/intro/open/hint), added by textual append (CRLF + mixed-escaping preserved). TR/EN parity kept
+(**1188 keys each**, verified by `tests/test_i18n.py`). AxisAI-only copy, no "FitX". State identity
+derives from presenter ids, never translated text.
+
+### Automated tests
+
+`python -m pytest -q` (worktree; `pytest.ini -m "not load"`).
+
+- `tests/test_plan_v2.py` (**29**): pure-presenter matrix (no-dominant-CTA in every state, populated has
+  no self-link/no start, no_active_plan≠error, read_error has no "Open Plan", partial keeps the plan,
+  weekly independence, ASCII state ids); read layer (honest absence, canonical order, empty-exercise≠rest,
+  malformed→partial, non-list/empty→partial, read failure→read_error); flag OFF legacy / ON V2 /
+  missing→fail-safe / exactly-one-tree; template (inline generator only in no_active_plan, days render
+  with no CTA, one h1, no key leak, no client-authority markers); weekly disabled/enabled/never-without-plan.
+- `tests/test_coach_page_v2.py` (**26**): route flag OFF→coach.html / ON→coach_v2.html; `@require_auth`
+  both; reuses widget once, no re-implemented composer; **source-encoded lifecycle invariant** (single
+  module guard before side-effects, adopt-existing host, one bootstrap, one history fetch); route-mode
+  lives in the template not the shared widget; one h1, nonce'd inline script, data-action (no onclick),
+  AxisAI-only + no plan-authority claim; key presence.
+- Extended `tests/test_env_example.py` (both new flags documented `=0`, never `=1`) and the audit
+  inventory (`plan.html` + `coach_v2.html` added as `audit_only`/`excluded` variant entries so the
+  "every rendered template is inventoried" invariant holds).
+- Affected + regression slices (`test_plan_v2`, `test_coach_page_v2`, `test_i18n`, `test_env_example`,
+  `test_frontend_audit_inventory`, `test_nav_contract`, `test_nav_shell_v2`, `test_today_v2`,
+  `test_coach_routes`): **211 passed, 0 failed.** Full-suite partition proof in `test-partition.json`.
+
+### Browser validation (WSL Playwright / Chromium, hermetic)
+
+`scripts/frontend_audit/plan_coach_pr3_matrix.py` reuses the Sprint-0 hermetic audit app + `AuditServer`
++ fixed browser clock + Chromium (WSL Ubuntu-24.04, Sprint-0 venv python 3.12.3,
+`PLAYWRIGHT_BROWSERS_PATH`, Playwright build chromium-1228), toggling the Plan/Coach (and, for the
+weekly cells, `WEEKLY_PROGRAM_UI_ENABLED`) flags per cell. Each cell fails on unexpected same-origin
+≥500, failed same-origin requests, duplicate bootstrap/history fetch, more than one
+accessibility-exposed Coach instance/composer/submit, horizontal overflow, or raw-key leakage.
+
+- **Matrix (`validation-manifest.json`): 86 cells, 86 passed, 0 failed, 0 blocked.** Matrices A(Plan 20),
+  B(Coach 20), C(Plan×Coach cross 16), D(upstream Nav/Today 8), E(Plan states 16), W(weekly 6 —
+  disabled/enabled/enabled-error). Every PR3-owned surface passes at every width 320–1366, EN/TR: Plan V2
+  one tree / no `training.js` / status-as-text / no `/training` self-link / correct page state / create
+  form only in `no_active_plan` / retry only in `read_error` / weekly disabled→no mount+no request,
+  enabled→one mount+≤1 request, weekly error→plan still visible; Coach V2 exactly one root/window/
+  composer/submit and auto-open, and exactly one Coach instance on every Plan page too.
+- **Legacy 320px overflow — investigated and reconciled (answer.txt 2026-07-26).** The first run reported
+  84/86: the two 320px **legacy `training.html`** cells (Plan V2 **OFF**) overflowed the document by 24px
+  (EN) / 36px (TR). Proven **pre-existing** — reproduced identically on a clean checkout of base `9400641`
+  and on HEAD flags-OFF (byte-identical screenshots), with the legacy render files `git diff`-identical to
+  base. **Precise cause** (measured per-element, not assumed): `static/training.css`
+  `.wstats { grid-template-columns: repeat(3, 1fr) }` — three `.stat-card` grid items can't shrink below
+  their locale-dependent text min-content at 320px (TR>EN confirms text sizing, not a fixed width).
+  **Fix** (smallest safe, PR3-scoped, presentation-only): `@media (max-width: 380px) { .wstats {
+  grid-template-columns: repeat(2, minmax(0, 1fr)); } }` — legacy-only (`training.css` is loaded solely by
+  `training.html`; `.wstats` exists in no other template), inert under Plan ON and on Nav/Today, 390px+
+  layout unchanged. After the fix both cells measure zero overflow (`scrollWidth=clientWidth=320`). Full
+  detail + evidence: `docs/frontend-readiness/sprint-1-pr3/legacy-overflow/` (`investigation.md`,
+  `diag-overflow-{base,head,headfix}.json`, before/after screenshots); regression test
+  `tests/test_training_ui.py::test_wstats_collapses_to_fewer_columns_on_narrow_screens`.
+- **Interactions (`interaction-results.json`): 6/6 passed** — reduced-motion, 200% page zoom, 150% text
+  across Plan V2 and Coach V2 at 390/768/1366, EN/TR (no overflow, one Coach instance, plan/composer
+  intact).
+- **Behavior (`behavior-results.json`): 10/10 passed** — the answer.txt §9 Coach lifecycle set: Coach OFF
+  floating unchanged (one root, toggle flips, exactly one history fetch); Coach ON route single instance
+  (one root/composer/submit, auto-open, one history fetch); **script evaluated twice** → no duplicate
+  root/composer, still one history fetch; **init() twice** → no duplicate; **route-after-floating** and
+  **floating-after-route** → one root each; close→reopen keeps one instance; Plan day expand/collapse via
+  native `<details>`; **read_error safe-retry** (`fxReload` → `active_plan` after the injected read
+  failure clears); Plan back/forward keeps the surface + one Coach instance.
+
+Chromium is the required minimum engine; WebKit/Firefox are not installed → cross-browser coverage beyond
+Chromium is not claimed (environmental limitation). External GA/CDN requests fail by design in the
+no-network hermetic env and are recorded but not counted.
+
+### Accessibility
+
+Plan V2: one H1, `main` landmark, `role="status"` on the status line, status by icon **and** text (not
+color alone), native `<details>` progressive disclosure (keyboard + reduced-motion safe), server-rendered
+secondary links, `nav_active='plan'` `aria-current`. Coach V2: one H1, honest intro, reuses the existing
+widget's a11y, one accessibility-exposed Coach instance. Validated by template tests + the browser matrix.
+
+### Ownership confirmation
+
+UIUX-owned: Plan page hierarchy/state presentation/creation-form presentation and Coach destination
+shell/lifecycle. **No second training-plan authority and no second Coach implementation were created.**
+No AI system/adaptive prompt, model/provider, streaming protocol, conversation persistence, or
+rate-limit/entitlement/auth/moderation policy was changed. CSP per-request nonce, CSRF, and output
+escaping/sanitization are preserved.
+
+### Rollout / rollback (operational)
+
+- **Rollout:** each flag independently. `UIUX_PLAN_V2_ENABLED=1` + restart → smoke `/training`: populated
+  plan shows no dominant CTA, `no_active_plan` shows the in-page generator, `WEEKLY_PROGRAM_UI_ENABLED=0`
+  keeps the plan valid with no weekly mount, ≤1 `/api/training/weekly-program` request when enabled, TR/EN.
+  `UIUX_COACH_PAGE_V2_ENABLED=1` + restart → smoke `/coach`: exactly one interactive widget (one
+  `#cw-root`/composer/`/coach/history`), auto-open, "Open Coach" fallback. Verify the legacy floating
+  widget is unchanged on other pages. Flags are independent of Nav/Today/Weekly and of each other.
+- **Rollback:** set the flag back to `0` and restart → the legacy `/training` (training.html) or `/coach`
+  (thin host) returns. Server-side branch only; no session/cache/static-asset dependency, no
+  migration/data repair. Disabling one flag never touches the other.
+
+### Known limitations / pre-existing findings
+
+- Legacy `training.html` (Plan V2 OFF) had a pre-existing 320px horizontal overflow (24–36px), proven on
+  base `9400641`. **Resolved** in this PR by a narrow, presentation-only, legacy-scoped CSS fix
+  (`.wstats` collapses to two columns below 380px) — see the "Legacy 320px overflow" note above and
+  `legacy-overflow/investigation.md`. Plan V2 itself was and remains overflow-clean at 320.
+- `read_error` and the weekly-section `error` state are exercised in-browser via fault injection (patched
+  selector / patched planner) since a real DB/planner failure is not otherwise reproducible in the
+  hermetic run; both are also unit-tested.
+- WebKit/Firefox not installed in the WSL audit environment → only the required Chromium minimum is claimed.
+
+### Authorization boundary
+
+Local implementation and validation only. This work is **not** authorization to push, open a PR, merge,
+deploy, change production configuration, or enable a production feature flag. Nothing was pushed, nothing
+merged, nothing deployed, and no production feature flag was changed. Both flags remain default OFF.
 ## Sprint 7 PR3 — Persisted Workout Session Lifecycle, Safe Resume, Abandonment & Stale Recovery
 
 - **Track:** Core Feature. **Sprint:** 7. **PR:** 3. **Production authorization:** implemented and validated locally, then — **under explicit user authorization** — the branch was pushed and **PR #186** was opened against `main` (rebased onto current `main`, past #185). **Still nothing merged / no deploy / no prod migration / no prod flag change / no PR4.**
