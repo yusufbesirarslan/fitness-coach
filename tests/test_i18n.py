@@ -258,15 +258,18 @@ def test_training_renders_localized(app, client, make_user, login):
     assert "Antrenman Tarzı" not in body
     # Kuplaj koruması: pump-location HTML değeri şablonda TR kalır
     assert '<option value="Spor Salonu"' in body                   # pump-location değeri
-    # OPTIONS val kodları + gün adları + localStorage anahtarı artık harici
-    # static/training.js'te (Phase 5: satır-içi script dışa taşındı); kanonik
-    # TR değerlerin orada korunduğunu doğrula.
+    # OPTIONS val kodları ve kanonik gün adları static/training.js'te korunur;
+    # tarih ve tamamlanma otoritesi sunucunun bootstrap snapshot'ındadır.
     import os
     js_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "training.js")
     js = open(js_path, encoding="utf-8").read()
     assert '"spor_salonu"' in js and '"tum_vucut"' in js           # OPTIONS val
-    assert "getTodayTurkish" in js and "'Pazartesi'" in js         # backend gün eşleşmesi
-    assert "fitx_workout_completed_" in js                         # localStorage anahtarı
+    assert "'Pazartesi'" in js                                      # backend gün eşleşmesi
+    assert "getTodayTurkish" not in js
+    assert "fitx_workout_completed_" not in js
+    state_js_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "workout_state_client.js")
+    state_js = open(state_js_path, encoding="utf-8").read()
+    assert "/training/bootstrap" in state_js                        # sunucu snapshot otoritesi
 
 
 def test_secondary_pages_render_en(app, client, make_user, login):

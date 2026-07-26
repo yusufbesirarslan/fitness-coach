@@ -15,6 +15,8 @@ from app.services.training_progression import ProgressionReport
 
 
 BASELINE_CONTEXT = (
+    "[G\u00dcNCEL ANTRENMAN DURUMU]\n"
+    '{"primary_state":"ready","action":"start_workout"}\n\n'
     "[FITNESS ÖZETİ]\nfitness-summary\n\n"
     "[ANTRENMAN GEÇMİŞİ (7 gün)]\nworkout-history\n\n"
     "[SUPPLEMENT STACK]\nsupplement-stack\n\n"
@@ -78,6 +80,16 @@ def _overload_plan():
 
 
 def _stub_baseline_context_sources(monkeypatch):
+    class DeterministicWorkoutState:
+        def to_dict(self):
+            return {"primary_state": "ready", "action": "start_workout"}
+
+    monkeypatch.setattr(
+        context_builder,
+        "resolve_workout_state",
+        lambda _uid: DeterministicWorkoutState(),
+    )
+
     from app.services import analytics_engine, coach_context_queries
 
     monkeypatch.setattr(context_builder, "fetch_profile_and_trends", lambda _uid: [])
