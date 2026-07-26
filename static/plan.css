@@ -1,0 +1,89 @@
+/* AxisAI UIUX Sprint 1 PR3 — Plan v2 (server-authoritative /training).
+   Tokens + shared primitives come from tokens.css / components.css (via _head).
+   This sheet adds only Plan v2's own layout and re-declares the .weekly-program-*
+   rules the reused mount needs, so plan.html never has to load legacy training.css. */
+
+.plan-main { max-width: 720px; margin: 0 auto; padding: var(--space-5) var(--space-4) calc(var(--space-8) + 64px); }
+
+/* ── Header + honest status ── */
+.plan-head { margin-bottom: var(--space-5); }
+.plan-h1 { margin: 0 0 var(--space-2); font-family: var(--font-display); font-size: var(--text-3xl); letter-spacing: 1px; color: var(--color-text-1); }
+.plan-status { display: inline-flex; align-items: center; gap: var(--space-2); margin: 0; padding: var(--space-1) var(--space-3); border-radius: var(--radius-full); font-size: var(--text-sm); color: var(--color-text-2); background: var(--color-surface-2); border: var(--border-w-1) solid var(--color-border-1); }
+.plan-status-ic { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: var(--radius-full); font-size: var(--text-xs); font-weight: var(--weight-bold); color: #fff; background: var(--color-text-3); }
+.plan-status--active_plan .plan-status-ic { background: var(--color-primary); }
+.plan-status--partial_active_plan .plan-status-ic { background: var(--color-warning); }
+.plan-status--read_error .plan-status-ic { background: var(--color-danger); }
+
+/* ── Error state (safe retry, never "Open Plan") ── */
+.plan-error { margin-top: var(--space-5); display: flex; flex-direction: column; gap: var(--space-3); align-items: flex-start; }
+.plan-error-body { margin: 0; color: var(--color-text-2); line-height: var(--leading-relaxed); }
+
+/* ── Partial note (honest, plan stays visible) ── */
+.plan-partial-note { margin: var(--space-4) 0 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); border: var(--border-w-1) solid var(--color-border-1); background: var(--color-surface-2); color: var(--color-text-2); line-height: var(--leading-relaxed); }
+
+/* ── Plan meta (opaque score + created date; neutral) ── */
+.plan-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-top: var(--space-5); }
+.plan-meta-created { color: var(--color-text-3); font-size: var(--text-sm); }
+
+/* ── Days (native <details> — keyboard/reduced-motion/CSP safe) ── */
+.plan-days { margin-top: var(--space-6); }
+.plan-day { min-width: 0; margin-top: var(--space-3); border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-md); background: var(--color-surface-1); overflow: hidden; }
+.plan-day--rest { opacity: 0.9; }
+.plan-day-summary { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: var(--space-2) var(--space-3); padding: var(--space-4); cursor: pointer; list-style: none; }
+.plan-day-summary::-webkit-details-marker { display: none; }
+.plan-day-summary:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; }
+.plan-day-name { font-family: var(--font-display); font-size: var(--text-lg); letter-spacing: 0.5px; color: var(--color-text-1); overflow-wrap: anywhere; }
+.plan-day-focus { grid-column: 1 / -1; color: var(--color-text-2); overflow-wrap: anywhere; }
+.plan-day-meta { color: var(--color-text-3); font-size: var(--text-sm); white-space: nowrap; }
+.plan-day-body { padding: 0 var(--space-4) var(--space-4); }
+.plan-day-note { margin: 0; color: var(--color-text-2); line-height: var(--leading-relaxed); }
+
+.plan-ex-list { margin: 0; padding: 0; list-style: none; display: grid; gap: var(--space-2); }
+.plan-ex { display: grid; grid-template-columns: 1fr auto; gap: var(--space-1) var(--space-3); padding: var(--space-3); border-radius: var(--radius-sm); background: var(--color-surface-2); }
+.plan-ex-name { color: var(--color-text-1); overflow-wrap: anywhere; }
+.plan-ex-meta { color: var(--color-text-3); font-size: var(--text-sm); white-space: nowrap; }
+.plan-ex-note { grid-column: 1 / -1; color: var(--color-text-3); font-size: var(--text-sm); overflow-wrap: anywhere; }
+
+/* ── In-page generator (no_active_plan): native controls, no chip framework ── */
+.plan-create { margin-top: var(--space-5); display: flex; flex-direction: column; gap: var(--space-4); }
+.plan-create-intro { margin: 0; color: var(--color-text-2); line-height: var(--leading-relaxed); }
+.plan-create-msg { margin: 0; padding: var(--space-3) var(--space-4); border-radius: var(--radius-md); border: var(--border-w-1) solid var(--color-border-1); background: var(--color-surface-2); color: var(--color-text-2); line-height: var(--leading-relaxed); }
+.plan-create-msg--error { border-color: var(--color-danger); }
+.plan-create-msg a { color: var(--color-primary); }
+.plan-field { display: flex; flex-direction: column; gap: var(--space-2); }
+.plan-field label { color: var(--color-text-2); font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.plan-select, .plan-input { min-height: 44px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); border: var(--border-w-1) solid var(--color-border-1); background: var(--color-surface-1); color: var(--color-text-1); font: inherit; }
+.plan-select:focus-visible, .plan-input:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 1px; border-color: var(--color-primary); }
+
+/* ── Secondary actions (existing canonical routes; never a self-link) ── */
+.plan-secondary { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-6); padding-top: var(--space-5); border-top: var(--border-w-1) solid var(--color-border-1); }
+.plan-secondary-link { color: var(--color-text-2); text-decoration: none; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); border: var(--border-w-1) solid var(--color-border-1); }
+.plan-secondary-link:hover { color: var(--color-text-1); border-color: var(--color-border-2); background: var(--overlay-4); }
+.plan-secondary-link:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+/* ── Adaptive weekly program (reused mount) — copied from training.css so the
+      mount is styled without loading the legacy sheet (answer.txt §7). ── */
+.weekly-program-card { min-width: 0; margin-top: var(--space-6); padding: var(--space-5); overflow: hidden; }
+.weekly-program-heading { margin: 0 0 var(--space-4); color: var(--color-text-2); }
+.weekly-program-content, .weekly-program-loading, .weekly-program-alert { min-width: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.weekly-program-message, .weekly-program-focus-description, .weekly-program-action, .weekly-program-reason { margin: 0; color: var(--color-text-2); line-height: var(--leading-relaxed); overflow-wrap: anywhere; }
+.weekly-program-focus { min-width: 0; }
+.weekly-program-focus-title { margin: 0 0 var(--space-1); color: var(--color-text-1); font-size: var(--text-lg); line-height: var(--leading-snug); overflow-wrap: anywhere; }
+.weekly-program-actions, .weekly-program-metrics { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.weekly-program-action, .weekly-program-metric { min-width: 0; padding: var(--space-3); border-radius: var(--radius-md); border: var(--border-w-1) solid var(--color-border-1); background: var(--color-surface-2); }
+.weekly-program-metric { display: flex; flex-direction: column; gap: var(--space-1); }
+.weekly-program-metric-label { color: var(--color-text-3); font-size: var(--text-xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-label); text-transform: uppercase; overflow-wrap: anywhere; }
+.weekly-program-metric-value { color: var(--color-text-1); font-family: var(--font-display); font-size: var(--text-2xl); letter-spacing: 1px; overflow-wrap: anywhere; }
+.weekly-program-reasons { margin: 0; padding-left: var(--space-5); display: grid; gap: var(--space-2); }
+.weekly-program-skeleton { width: 100%; }
+.weekly-program-skeleton:last-child { width: 68%; }
+.weekly-program-retry { align-self: flex-start; min-height: 44px; margin-top: var(--space-1); }
+.weekly-program-retry:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+  .weekly-program-card { padding: var(--space-4); }
+  .weekly-program-actions, .weekly-program-metrics { grid-template-columns: 1fr; }
+  .weekly-program-retry { width: 100%; }
+  .plan-day-summary { grid-template-columns: 1fr; }
+  .plan-day-meta { white-space: normal; }
+}

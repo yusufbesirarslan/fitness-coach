@@ -1,0 +1,120 @@
+{
+  "schema_version": "1.0.0",
+  "pr": "uiux-sprint1-pr3-plan-coach-separation",
+  "kind": "behavior-interaction",
+  "totals": {
+    "cells": 10,
+    "passed": 10,
+    "failed": 0,
+    "blocked": 0
+  },
+  "cells": [
+    {
+      "id": "BH-coach-off-floating-unchanged",
+      "verdict": "pass",
+      "reasons": [],
+      "evidence": {
+        "roots": 1,
+        "history_fetches": 1,
+        "toggle_states": [
+          true,
+          false,
+          true
+        ]
+      }
+    },
+    {
+      "id": "BH-coach-on-route-single-instance",
+      "verdict": "pass",
+      "reasons": [],
+      "evidence": {
+        "measurements": {
+          "doc_scroll_width": 390,
+          "doc_client_width": 390,
+          "doc_horizontal_overflow": false,
+          "coach_v2_present": 1,
+          "h1_count": 1,
+          "cw_root_count": 1,
+          "cw_window_count": 1,
+          "cw_input_count": 1,
+          "cw_send_count": 1,
+          "cw_fab_count": 1,
+          "coach_open": true,
+          "ax_coach_open_defined": true,
+          "raw_key_leak": [],
+          "html_lang": "en"
+        },
+        "history_fetches": 1
+      }
+    },
+    {
+      "id": "BH-script-twice-no-duplicate",
+      "verdict": "pass",
+      "reasons": [],
+      "evidence": {
+        "roots": 1,
+        "composers": 1,
+        "history_fetches": 1
+      }
+    },
+    {
+      "id": "BH-init-twice-no-duplicate",
+      "verdict": "pass",
+      "reasons": [],
+      "evidence": {
+        "roots": 1,
+        "composers": 1
+      }
+    },
+    {
+      "id": "BH-route-after-floating",
+      "verdict": "pass",
+      "reasons": [],
+      "evidence": {
+        "floating_roots": 1,
+        "route_roots": 1
+      }
+    },
+    {
+      "id": "BH-floating-after-route",
+      "verdict": "pass",
+      "reasons": [],
+      "evidence": {
+        "route_roots": 1,
+        "floating_roots": 1
+      }
+    },
+    {
+      "id": "BH-coach-close-reopen",
+      "verdict": "pass",
+      "reasons": [],
+      "evidence": {
+        "root": 1,
+        "open": true
+      }
+    },
+    {
+      "id": "BH-plan-day-expand-collapse",
+      "verdict": "pass",
+      "reasons": [],
+      "evidence": {}
+    },
+    {
+      "id": "BH-plan-read-error-retry",
+      "verdict": "pass",
+      "reasons": [],
+      "evidence": {
+        "state_under_error": "read_error",
+        "state_after_retry": "active_plan"
+      }
+    },
+    {
+      "id": "BH-plan-back-forward",
+      "verdict": "pass",
+      "reasons": [],
+      "evidence": {
+        "state_after_back": "active_plan"
+      }
+    }
+  ]
+}

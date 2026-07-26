@@ -282,3 +282,8 @@
   letter-spacing: var(--tracking-wide); color: var(--color-text-1); margin-bottom: var(--space-3); }
 .coach-page-intro { color: var(--color-text-3); font-size: var(--text-base);
   line-height: var(--leading-relaxed); }
+/* Coach Page V2 (UIUX_COACH_PAGE_V2_ENABLED): "Open Coach" fallback + hint.
+   Reuses the shared .btn-volt; only spacing/secondary-text tokens added here. */
+.coach-page-cta { margin-top: var(--space-6); }
+.coach-page-hint { margin-top: var(--space-3); color: var(--color-text-3);
+  font-size: var(--text-sm); line-height: var(--leading-relaxed); }

@@ -97,4 +97,10 @@
     var href = el.getAttribute("data-href");
     if (href) window.location.href = href;
   };
+
+  // <button data-action="fxReload"> → window.location.reload() — a safe retry
+  // that re-fetches the CURRENT page (no navigation, no self-link target).
+  window.fxReload = function () {
+    window.location.reload();
+  };
 })();

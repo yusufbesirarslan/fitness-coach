@@ -43,6 +43,14 @@
 
 /* ── 3 · Weekly stats (reuse .stat-card) ──────────────────────────── */
 .wstats { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-2); }
+/* At ~320px the three stat cards cannot shrink below their (locale-dependent)
+   text min-content, so the fixed 3-column row overflowed the viewport (24px EN /
+   36px TR). Collapse to two shrinkable columns on very narrow screens; the 390px+
+   layout is unchanged. Legacy-only: training.css is loaded solely by
+   templates/training.html and .wstats appears nowhere else. */
+@media (max-width: 380px) {
+  .wstats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 /* ── 4 · Plan meta row (meta text + score badge + reset button) ──── */
 .apv-meta-row { display: flex; align-items: center; gap: var(--space-3);

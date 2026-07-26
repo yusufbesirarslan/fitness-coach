@@ -36,7 +36,15 @@ def coach_page():
     İŞ MANTIĞI / VERİ ÇEKME YOK — mevcut yüzen koç widget'ını (static/
     coach_widget.js) barındırır ve açılışta açar. Koç/AI davranışı, promptu,
     akışı DEĞİŞMEZ; bu yalnızca widget'a kanonik bir gezinme hedefi verir.
-    @require_auth diğer sayfalarla aynı kimlik doğrulama sözleşmesini korur."""
+    @require_auth diğer sayfalarla aynı kimlik doğrulama sözleşmesini korur.
+
+    PR3 (UIUX_COACH_PAGE_V2_ENABLED): bayrak AÇIKken sertleştirilmiş Coach Page
+    V2 kabuğu (coach_v2.html) sunulur — AYNI yüzen widget'ı yeniden kullanır
+    (İKİNCİ koç uygulaması YOK), tek etkileşimli örnek garanti edilir. Bayrak
+    request-zamanında okunur; geçersiz/eksik → KAPALI → eski coach.html (fail-safe).
+    Veri çekme/iş mantığı yine YOK; her iki yolda da @require_auth korunur."""
+    if current_app.config.get("UIUX_COACH_PAGE_V2_ENABLED", False):
+        return render_template("coach_v2.html")
     return render_template("coach.html")
 
 

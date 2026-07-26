@@ -1,0 +1,67 @@
+{
+  "pr": "uiux-sprint1-pr3-plan-coach-separation",
+  "title": "Plan Experience & Coach Destination Hardening",
+  "base": {
+    "note": "PR3 branches directly from origin/main, which ALREADY contains UIUX PR1, Sprint 7 PR1/PR2, and UIUX PR2 (merged as #185). Because PR2 is merged, there is NO separate PR2-reconciliation commit — PR3 is a single clean commit on merged main (matches the one-local-PR3-commit boundary).",
+    "origin_main": "9400641",
+    "ancestry": {
+      "uiux_pr1": "a272b5b (#182)",
+      "sprint7_pr1": "3d9c582 (#183)",
+      "sprint7_pr2": "307b7b5 (#184)",
+      "uiux_pr2": "9400641 (#185, merged into main)"
+    },
+    "pr3_base": "9400641",
+    "pr3_branch": "uiux/sprint1-pr3-plan-coach-separation",
+    "pr3_worktree": ".worktrees/uiux-sprint1-pr3-plan-coach-separation",
+    "pr3_commit": "recorded in the final report and as the branch tip (a commit cannot embed its own hash)"
+  },
+  "flags": {
+    "UIUX_PLAN_V2_ENABLED": "server-config only, default OFF, independent",
+    "UIUX_COACH_PAGE_V2_ENABLED": "server-config only, default OFF, independent",
+    "WEEKLY_PROGRAM_UI_ENABLED": "pre-existing; Plan V2 honors it for its weekly section (disabled/loading)"
+  },
+  "engine": {
+    "browser": "chromium",
+    "playwright_build": "chromium-1228 (Playwright-pinned)",
+    "runtime": "WSL Ubuntu-24.04, reused Sprint-0 audit venv (python 3.12.3) + PLAYWRIGHT_BROWSERS_PATH=/home/yusuf/.cache/axisai-sprint0-playwright",
+    "webkit_firefox": "not installed — cross-browser coverage beyond the required Chromium minimum not claimed (environmental limitation)"
+  },
+  "hermetic": {
+    "app": "scripts/frontend_audit/app.py create_audit_app — configure_audit_environment() runs before any app.* import; FatSecret/Bedrock/Resend/S3/Redis pinned to inert values; SQLite audit DB on loopback only",
+    "clock": "fixed per-scenario browser clock (scenario-clocks.json)",
+    "request_serialization_lock": "harness-only lock in app.py (inherited from PR2) keeps per-request global clock/validator patching coherent under the threaded server"
+  },
+  "results": {
+    "matrix": {
+      "manifest": "validation-manifest.json",
+      "cells": 86, "passed": 86, "failed": 0, "blocked": 0,
+      "matrices": {
+        "A-plan-20": "5 viewports x 2 locales x Plan{off,on}; Nav ON, Today ON, Coach OFF",
+        "B-coach-20": "5 viewports x 2 locales x Coach{off,on}; Nav ON, Today ON, Plan ON",
+        "C-crossflag-16": "{390,1366} x {en,tr} x 4 Plan/Coach flag combos (Plan surface)",
+        "D-upstream-8": "{390,1366} x 4 Nav/Today combos; Plan ON + Coach ON (Coach surface)",
+        "E-states-16": "4 canonical Plan page states x {390,1366} x {en,tr}, Plan ON",
+        "W-weekly-6": "{disabled, enabled, enabled-error} x {390,1366}, Plan ON + active plan"
+      },
+      "legacy_overflow_reconciliation": {
+        "history": "The initial run reported 84/86: the two 320px legacy (Plan OFF) cells A-plan-20__active_plan__320__{en,tr}__plan-off_coach-off_weekly-off overflowed the document horizontally by 24px (EN) / 36px (TR). Per answer.txt (2026-07-26), 'pre-existing legacy' was NOT accepted as an implicit quality-gate exception; the defect was reconciled.",
+        "proof_pre_existing": "Reproduced identically on a clean detached checkout of base 9400641 AND on HEAD with every PR3 flag OFF (24px EN / 36px TR both); the base and HEAD-flags-OFF screenshots are byte-identical (48272 B EN, 48437 B TR). The legacy /training render files (training.html, _head/_nav/_actionbar, theme.css, training.css, training.js) are git-diff-identical to base; PR3's only shared-file changes on that path (nav.css new .coach-page-* classes, actions.js window.fxReload, coach_widget.js lifecycle guard) do not alter the legacy layout. Evidence: legacy-overflow/{diag-overflow-base.json, diag-overflow-head.json, investigation.md, *-{base,head}.png}.",
+        "root_cause": "static/training.css '.wstats { grid-template-columns: repeat(3, 1fr) }': the three .stat-card grid items (default min-width:auto) cannot shrink below their locale-dependent text min-content at 320px, so the tracks total 328px (EN) / 340px (TR) inside a 288px content box. The locale-dependent magnitude (TR 36 > EN 24, driven by a wider first Turkish label track 122.9px vs 106.7px) confirms a text-min-content cause, not a fixed width / ring / transform. #cw-send (position:fixed) reports a rect past the edge but is not the scrollWidth driver (Plan V2 loads the same widget and is overflow-clean).",
+        "fix": "static/training.css: @media (max-width: 380px) { .wstats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }. Presentation-only; legacy-only (training.css is loaded solely by templates/training.html and .wstats appears in no other template); inert under Plan ON (plan.html has no .wstats) and on Nav (PR1) / Today (PR2); the 390px+ layout is byte-identical. No business-rule / training-authority / workout-selection / localStorage change. Regression test: tests/test_training_ui.py::test_wstats_collapses_to_fewer_columns_on_narrow_screens (verified genuine: absent in base 9400641, present on HEAD).",
+        "after": "Both 320px legacy cells now measure doc_horizontal_overflow=false (scrollWidth=clientWidth=320, EN and TR) — legacy-overflow/diag-overflow-headfix.json + *-headfix.png. Full Plan matrix re-run: 86/86."
+      }
+    },
+    "interactions": {
+      "manifest": "interaction-results.json",
+      "cells": 6, "passed": 6, "failed": 0, "blocked": 0,
+      "conditions": "reduced-motion, 200% page zoom, 150% increased text across Plan V2 and Coach V2 at 390/768/1366, EN/TR"
+    },
+    "behavior": {
+      "manifest": "behavior-results.json",
+      "cells": 10, "passed": 10, "failed": 0, "blocked": 0,
+      "coverage": "answer.txt §9 Coach lifecycle: Coach OFF floating unchanged (one root, toggle flips, one history fetch); Coach ON route single instance (one root/composer/submit, auto-open, one history fetch); script evaluated twice (no duplicate root/composer, one history fetch); init() twice (no duplicate); route-after-floating; floating-after-route; close->reopen keeps one instance; Plan day expand/collapse (native <details>); read_error safe-retry (fxReload -> active_plan); Plan back/forward keeps the surface + one Coach instance"
+    }
+  },
+  "fail_conditions_enforced": "each cell FAILS on unexpected same-origin >=500, failed same-origin requests, duplicate widget bootstrap/history fetch, more than one accessibility-exposed Coach instance/composer/submit, horizontal overflow (document or surface shell), and raw localization-key leakage. The weekly-section error cell intentionally 500s /api/training/weekly-program and that one path is whitelisted for that cell only; the plan page stays 200 and visible.",
+  "authorization_boundary": "Local implementation and validation only. This work is NOT authorization to push, open a PR, merge, deploy, change production config, or enable a production feature flag. Nothing pushed, nothing merged, nothing deployed, no production flag changed."
+}
