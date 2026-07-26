@@ -3553,3 +3553,101 @@ The branch was pushed and **PR #186** opened against `main` under explicit user 
 ### Deferred (record only — not implemented)
 
 Stable plan-day identifier linkage (session↔plan soft reference; no set-level restoration — checkpoint is a lifecycle heartbeat), workout UI/nav redesign, offline sync, `TrainingPlan` schema redesign, historical `WorkoutLog` backfill, `/api/progress/workout` + `renderHero` convergence, automated destructive stale cleanup, **Sprint 7 PR4**.
+
+## Sprint 7 PR4 — Workout-State Consumer Convergence
+
+- **Track:** Core Feature. **Sprint:** 7. **PR:** 4.
+- **Status:** validation complete locally; independent PR4-diff review clean; closed out with local commits only (no push / no merge / no deploy / no migration / no prod flag change).
+- **Branch:** `sprint7-pr4-workout-state-convergence`.
+- **Worktree:** `.worktrees/sprint7-pr4-workout-state-convergence`.
+- **Selected base:** `1e76e1374d1a8a61b4a44ceb1a763e9c2758061c` (frozen; Sprint 7 PR1 `3d9c582` #183, PR2 `307b7b5` #184, PR3 `8c486de` #186 are all merged ancestors). **PR4-only diff range:** `1e76e13..<PR4 commits>`.
+- **Upstream advancement at closeout (2026-07-26):** `origin/main` advanced past the base to `cab7c27` ("UIUX Sprint 1 PR3 — flag-gated Plan v2 + Coach v2", #189). Its changes overlap four PR4 files — `app/blueprints/training.py`, `CLAUDE.md`, `docs/handoff.md`, `tests/test_training_ui.py` — so a future merge/rebase onto `main` will need conflict resolution there (the `CLAUDE.md`/`docs/handoff.md` overlaps are both-appended-in-different-sections and trivial). **No rebase was performed** during closeout: per governance the base stays `1e76e13` so this workout-state PR does not silently absorb unrelated UIUX work. The anticipated conflicts are additive on both sides (distinct routes/sections/tests) and are expected to resolve cleanly at integration time.
+
+### Contract and ownership result
+
+- `GET /training/bootstrap` is authenticated, current-user scoped, and `Cache-Control: private, no-store`. It resolves the Istanbul date, session flag, newest active plan, and workout/session snapshot coherently, passing the same plan/date into strict canonical resolution.
+- Bootstrap returns one public snapshot only after every required read and serialization succeeds. A plan read, malformed JSON/schedule, strict session read, canonical resolution, or bounds failure returns the generic localized `bootstrap_unavailable` envelope with HTTP 500—never partial contradictory data, raw exceptions, database identifiers, or sensitive content.
+- No-plan, no-session, active, completed, blocked, and unavailable states are represented honestly. A missing persisted session never fabricates resume.
+- The full-week and `today_plan` projections are closed and deterministic. `today_plan` is limited to `gun`, `tip`, `odak`, `sure_dk` 0..1440, `tahmini_kalori` 0..900, and at most 50 exercises; exercise keys and integer/text bounds are enforced, unknown/internal fields dropped. Legacy list and wrapped `{"program": [...]}` storage shapes remain supported.
+- The same pure workout envelope serializer feeds bootstrap, `/workout/status`, and Progress's additive `current`. Barcode and Coach resolve current state once through the same canonical service.
+- No migration, model, new feature flag, cache, offline queue, plan-schema redesign, or durable set/rep storage was added.
+
+### Consumer ownership matrix
+
+| Consumer | Canonical fields | Canonical source | Refresh trigger | Mutation owner | Failure/fallback | Independent authority removed |
+|---|---|---|---|---|---|---|
+| Training | `completed`, all `workout.state` fields, `session`, `plan`, `today_plan` | ordered `/training/bootstrap` backed by PR1/PR3 | load, focus/visibility return, every mutation settlement | PR2 completion and PR3 session endpoints | blocked fail-closed UI; no cached truth | no localStorage/local-date/DOM/POST inference of completion, active session, workout date, current plan, or success |
+| Progress | `current.completed`, `current.state`; historical `days`/`totals` unchanged | shared canonical envelope in `/api/progress/workout` | each request/navigation refresh | none | history may render; current state is never guessed | no reconstruction from historical rows |
+| Barcode | `completed_today` | one canonical resolver call per barcode context | context build | none | safe canonical unavailable/false; nutrition context unchanged | no marker/log inference of completion or other current state |
+| Coach | compact canonical current snapshot plus unchanged historical context | one canonical resolver call per Coach context | context build/request | none | history remains; unavailable is explicit | no history/prompt-local inference of completion, session, date, plan, or mutation success |
+
+Historical heatmap, streak, analytics, and detailed set/rep/timer behavior keep
+only historical or page-ephemeral ownership. Remaining legacy debt is explicit:
+set/rep progress is not durable; heatmap/streak/analytics keep their historical
+models; plan-to-log identifier linkage and set-level checkpoint restoration are
+outside PR4.
+
+### Refresh, mutation, and heartbeat lifecycle
+
+- A monotonic generation plus `AbortController` prevents stale/superseded reads from applying or clearing newer state.
+- Mutations are single-flight. A transport success never claims canonical success; every settled mutation orders an authoritative bootstrap refresh, including failures.
+- Initialization and teardown are idempotent. `pagehide`/navigation removes listeners, aborts controllers, and clears timers.
+- Exactly one visible-page 60-second heartbeat exists only for an active v2 session. V1, inactive, blocked, completed, hidden, logged-out, terminal-error, and torn-down states have none.
+- Checkpoint writes are single-flight. Failures never alter canonical workout state; terminal/auth-expiry responses stop the timer and trigger at most one ordered refresh. No unbounded retry or high-frequency polling was introduced. PR3's 30-second server coalescing remains unchanged.
+
+### Reconciled repository suite
+
+Commands and every node/result are machine-readable in
+`docs/frontend-readiness/sprint-7-pr4/test-partition.json`.
+
+- Final default collection: 2,581 selected; unfiltered collection: 2,584; three `load`-marked nodes deselected by repository configuration.
+- Selected-node SHA-256: `40ab2557b2c0bf51aa0f95d3a8e2bebd648e196e22823f762ef2e481bb37ce45`.
+- Deterministic disjoint union: all 2,581 selected nodes assigned once, no omissions, extras, or duplicates.
+- Execution: 2,577 passed, four opt-in PostgreSQL tests skipped, zero failed/errors, all partition exit codes 0. The 13-test closeout addendum is included in the final manifest and hash.
+
+### Hermetic browser validation
+
+<!-- PR4_BROWSER_RESULT_START -->
+Final command:
+`PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/axisai-sprint0-playwright $HOME/axisai-sprint0-audit-venv/bin/python -m scripts.frontend_audit.workout_pr4_matrix`.
+
+Result: 52/52 passed, zero failed/blocked, exit 0; runner 229.196 seconds,
+shell 266.2 seconds. The 48 matrix cells covered no-plan, active, and completed
+Training states across English/Turkish and all eight required viewports. Four
+special cells covered bootstrap fail-closed behavior, browser navigation and
+cross-consumer consistency, ordered stale/mutation/heartbeat controller behavior,
+and the real persisted-session heartbeat lifecycle.
+
+Observed totals: zero unexpected same-origin 5xx, zero PR4 console errors, zero
+hard failed requests, and zero analytics-event requests. Matrix cells made 96
+bootstrap calls, exactly two per cell (initial load plus audit identity probe),
+with no on-load mutation. The heartbeat evidence records one 60-second timer,
+one forced checkpoint, and zero timers after teardown. Canonical identities and
+Progress/barcode/Coach consistency passed; no duplicate bootstrap, mutation,
+heartbeat, or analytics event was observed. Stale localStorage values did not
+control rendering, and the static authority scans found neither localStorage
+workout authority nor client-local-date authority.
+
+Machine-readable evidence:
+`docs/frontend-readiness/sprint-7-pr4/browser-validation.json`.
+<!-- PR4_BROWSER_RESULT_END -->
+
+The approved harness configures the hermetic environment before importing
+`app.*`, uses isolated SQLite and non-production integration settings, disables
+external network access, and runs Chromium on Linux. Required locales are
+English/Turkish; required viewports are 320x720, 360x800, 375x812, 390x844,
+430x932, 768x1024, 1024x900, and 1440x900. Evidence records requests, same-origin
+4xx/5xx, failed requests, console/page errors, canonical identities, duplicate
+guards, timer counts, and interactions.
+
+### Rollout, rollback, and authorization
+
+Roll out with the existing `FITX_WORKOUT_SESSIONS_ENABLED` flag OFF; enable it
+only in controlled non-production validation after all closeout gates pass.
+Rollback is flag OFF for PR3 lifecycle calls and a PR4 code revert. No database
+rollback is required.
+
+Authorization remains local only: do not push, open a pull request, merge,
+deploy, run migrations, access production data, or change production feature
+flags. No final local commit may be created until the browser and final
+verification gates pass.
