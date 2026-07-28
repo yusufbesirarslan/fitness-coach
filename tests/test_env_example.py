@@ -119,6 +119,25 @@ def test_plan_v2_flag_is_documented_default_off():
     assert "UIUX_PLAN_V2_ENABLED=1" not in ENV_EXAMPLE_SOURCE
 
 
+@pytest.mark.parametrize('setting', [
+    'MOBILE_AUTH_ACCESS_TTL_SECONDS=900',
+    'MOBILE_AUTH_REFRESH_ABSOLUTE_DAYS=7',
+    'MOBILE_AUTH_REFRESH_RETRY_GRACE_SECONDS=10',
+    'MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS=60',
+    'MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS=0',
+    'MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS=300',
+    'MOBILE_AUTH_REFRESH_RATELIMIT=30 per minute; 300 per hour',
+    'MOBILE_AUTH_LOGOUT_RATELIMIT=30 per minute',
+])
+def test_mobile_auth_defaults_are_documented(setting):
+    assert _has_exact_commented_setting(ENV_EXAMPLE_SOURCE, setting)
+
+
+def test_mobile_auth_derivation_key_settings_are_placeholders_not_secrets():
+    assert '# MOBILE_AUTH_ACTIVE_DERIVATION_KEY_VERSION=v1' in ENV_EXAMPLE_SOURCE
+    assert '# MOBILE_AUTH_DERIVATION_KEYRING={...}' in ENV_EXAMPLE_SOURCE
+
+
 def test_coach_page_v2_flag_is_documented_default_off():
     """UIUX Sprint 1 PR3 rollout gate. Commented-out `=0` so copying `.env.example`
     can never enable Coach Page V2 by accident; never documented as `=1`."""

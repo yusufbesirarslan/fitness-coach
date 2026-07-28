@@ -9,6 +9,7 @@ okur (ör. OpenAI istemcisi anahtar yoksa import'ta patlar).
 """
 import os
 import sys
+import json
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -40,6 +41,10 @@ os.environ["S3_BUCKET_NAME"] = ""
 os.environ["COGNITO_USER_POOL_ID"] = ""
 os.environ["COGNITO_APP_CLIENT_ID"] = ""
 # Resend (merkezi e-posta altyapısı): testlerde KAPALI — anahtar boş, servis
+os.environ['MOBILE_AUTH_DERIVATION_KEYRING'] = (
+    json.dumps({'test-v1': 'a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s'})
+)
+os.environ['MOBILE_AUTH_ACTIVE_DERIVATION_KEY_VERSION'] = 'test-v1'
 # no-op. email_service testleri _get_resend'i kendi içinde monkeypatch'ler.
 os.environ["RESEND_API_KEY"] = ""
 os.environ.pop("FLASK_DEBUG", None)
