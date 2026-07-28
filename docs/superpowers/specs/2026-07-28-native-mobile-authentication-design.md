@@ -109,6 +109,7 @@ Add validated config values with these defaults:
 | `MOBILE_AUTH_REFRESH_ABSOLUTE_DAYS` | 7 | Fixed family lifetime from login |
 | `MOBILE_AUTH_REFRESH_RETRY_GRACE_SECONDS` | 10 | Consumed refresh retry window |
 | `MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS` | 60 | Provider renewal threshold |
+| `MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS` | 0 | Mobile JWT validation and coverage allowance |
 | `MOBILE_AUTH_REFRESH_RATELIMIT` | `30 per minute; 300 per hour` | Refresh abuse bound |
 | `MOBILE_AUTH_LOGOUT_RATELIMIT` | `30 per minute` | Logout abuse bound |
 | `MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS` | 300 | Clock-skew/deployment-drain key-retention buffer |
@@ -116,12 +117,45 @@ Add validated config values with these defaults:
 | `MOBILE_AUTH_DERIVATION_KEYRING` | none | Secret version-to-key mapping |
 
 TTL values must be positive. Access TTL must be shorter than refresh absolute
-lifetime. Retry grace must be short and less than access TTL. The retention
-buffer must be non-negative and bounded. Invalid production configuration fails
-at startup instead of silently using unsafe values. The keyring has no default:
+lifetime. Retry grace must be short and less than access TTL. Validation clock
+skew and the retention buffer must be non-negative and bounded. The mobile JWT
+validator and coverage calculation use the same skew value; zero preserves the
+current strict-expiry behavior. Invalid production configuration fails at
+startup instead of silently using unsafe values. The keyring has no default:
 every decoded root key must contain at least 256 bits, the active version must
 exist, versions must be unique and canonical, and secret values must never be
 logged or persisted.
+
+## Provider-Coverage Invariant
+
+Login and first-use refresh fix one UTC `now` for the transaction and calculate:
+
+```text
+child_access_expires_at = min(
+    now + MOBILE_AUTH_ACCESS_TTL_SECONDS,
+    family_absolute_expires_at
+)
+coverage_deadline = (
+    child_access_expires_at + MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS
+)
+renewal_trigger = max(
+    now + MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS,
+    coverage_deadline
+)
+```
+
+Provider expiry comes only from the fully validated Cognito access JWT `exp`;
+an untrusted `ExpiresIn` value cannot establish coverage. Renew Cognito when
+`cognito_access_expires_at <= renewal_trigger`. Equality triggers renewal
+because a JWT is not valid at its `exp` instant. After renewal, the newly
+validated provider access token must satisfy
+`cognito_access_expires_at > coverage_deadline`.
+
+If the renewed token does not satisfy that strict postcondition, roll back the
+whole login or refresh transaction. Do not consume a parent, persist a family or
+credential row, or return an opaque credential. Return retryable
+`AUTH_TEMPORARILY_UNAVAILABLE` and emit a structured event containing only
+request ID, family identifier when one exists, and a safe failure category.
 
 ## Detailed Flows
 
@@ -133,13 +167,18 @@ logged or persisted.
 3. Call existing Cognito authentication.
 4. Map verification-required, rate-limit, invalid-credential, and temporary
    failures to the mobile envelope.
-5. Validate the Cognito ID token through the canonical validator.
-6. Resolve/reconcile the local user using only verified claims.
-7. Create a new family with original absolute expiry `login_time + configured
-   refresh lifetime`.
-8. Encrypt the Cognito token set.
-9. Generate and hash one access and one refresh credential.
-10. Commit before returning credentials.
+5. Validate the Cognito ID and access tokens through the canonical validators.
+6. Require their verified subjects to agree and resolve/reconcile the local user
+   using only verified claims.
+7. Calculate the new family's original absolute expiry as
+   `login_time + configured refresh lifetime` without persisting it yet.
+8. Calculate the capped access expiry and enforce the provider-coverage
+   invariant, renewing Cognito first when required.
+9. If renewed provider coverage is insufficient, roll back and return retryable
+   `AUTH_TEMPORARILY_UNAVAILABLE` without creating a family or credentials.
+10. Create the family and encrypt the covered Cognito token set.
+11. Generate and hash one access and one refresh credential.
+12. Commit before returning credentials with the calculated expiry timestamps.
 
 If commit fails, no credential is returned. Raw password and token values are
 not added to logs, exception strings, or telemetry.
@@ -169,18 +208,24 @@ and cannot replace the authenticated identity.
    - outside grace, revoke the family as credential reuse, clear Cognito
      ciphertext, commit, and return `AUTH_REFRESH_FAILED`.
 6. For first use, verify the optimistic family version in the update predicate.
-7. If Cognito access is expired or within leeway, decrypt the provider refresh
-   token and renew the provider token set under the same lock.
-8. On definitive provider refresh rejection, revoke the family.
-9. On temporary provider failure, roll back without consuming the presented
-   refresh credential.
-10. Select the active derivation-key version and fixed issuance/expiry values.
-11. Derive one N+1 access/refresh pair from the locked N parent.
-12. Mark N consumed, set its grace deadline, and record the key version, child
+7. Fix one transaction `now`; calculate the capped child access expiry,
+   coverage deadline, and renewal trigger.
+8. When verified Cognito expiry is at or before the renewal trigger, decrypt the
+   provider refresh token and renew the provider token set under the same lock.
+9. Fully validate a renewed provider access JWT and require its expiry to be
+   strictly after the coverage deadline.
+10. On insufficient renewed coverage or temporary provider failure, roll back
+   without consuming the presented refresh credential, creating child rows, or
+   returning opaque credentials; emit a safe structured event and return
+   retryable `AUTH_TEMPORARILY_UNAVAILABLE`.
+11. On definitive provider refresh rejection, revoke the family.
+12. Select the active derivation-key version and fixed issuance/expiry values.
+13. Derive one N+1 access/refresh pair from the locked N parent.
+14. Mark N consumed, set its grace deadline, and record the key version, child
     generation, linked child row identifiers, and fixed issuance/expiry values.
-13. Persist exactly one access hash and one refresh hash for N+1.
-14. Preserve the original family absolute expiry as the child refresh expiry.
-15. Increment the family version once, commit atomically, and return the pair.
+15. Persist exactly one access hash and one refresh hash for N+1.
+16. Preserve the original family absolute expiry as the child refresh expiry.
+17. Increment the family version once, commit atomically, and return the pair.
 
 The grace replay path derives the pair using the recorded key version and the
 presented raw parent, verifies both hashes in constant time against the linked
@@ -328,6 +373,8 @@ credential, or AWS mutation is allowed.
 
 - Login success schema and exact allowed keys
 - Login failure envelope
+- Login access expiry is capped and covered by the verified Cognito access token
+- Insufficient renewed provider coverage during login creates no family or credentials
 - Refresh success rotates both credentials
 - Refresh failure envelope
 - Logout exact empty `204`
@@ -362,13 +409,17 @@ the optimistic version path.
 
 ### Cognito renewal tests
 
-- No provider refresh outside leeway
-- Refresh at and inside leeway
+- Cognito remaining lifetime shorter than the new opaque access TTL triggers renewal
+- Cognito expiry exactly at the coverage boundary triggers renewal
+- Sufficient Cognito lifetime outside leeway avoids renewal
+- Renewed provider access still too short rolls back with no credential issuance
+- Opaque access expiry is capped at family absolute expiry
+- Refresh near the seven-day boundary returns the truthful shortened access expiry
 - New provider token set encrypted and persisted atomically
 - Optional provider refresh-token replacement
 - Definitive provider failure revokes family
 - Temporary provider failure rolls back token consumption
-- Concurrent same-parent calls perform exactly one renewal when renewal is due
+- Concurrent same-parent calls perform at most one renewal under the coverage rule
 
 ### Middleware and JWKS tests
 

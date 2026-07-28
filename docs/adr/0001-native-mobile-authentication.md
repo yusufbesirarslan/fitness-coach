@@ -101,24 +101,52 @@ MOBILE_AUTH_ACCESS_TTL_SECONDS=900
 MOBILE_AUTH_REFRESH_ABSOLUTE_DAYS=7
 MOBILE_AUTH_REFRESH_RETRY_GRACE_SECONDS=10
 MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS=60
+MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS=0
 MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS=300
 MOBILE_AUTH_ACTIVE_DERIVATION_KEY_VERSION=<configured-version>
 MOBILE_AUTH_DERIVATION_KEYRING=<secret version-to-key mapping>
 ```
 
-The lifetime and key-retention values are application configuration, validated
-as non-negative or positive as appropriate and bounded at startup. The
-derivation keyring has no insecure default. Every decoded key must contain at
-least 256 bits, and the configured active version must exist. Invalid or missing
-key configuration fails startup. Refresh never changes the original absolute
-expiry.
+The lifetime, validator-skew, and key-retention values are application
+configuration, validated as non-negative or positive as appropriate and bounded
+at startup. The mobile JWT validator uses the same configured clock-skew value
+as the coverage calculation; the default zero preserves the current strict
+expiry behavior. The derivation keyring has no insecure default. Every decoded
+key must contain at least 256 bits, and the configured active version must
+exist. Invalid or missing key configuration fails startup. Refresh never changes
+the original absolute expiry.
 
 ## Login
 
 Login accepts JSON only and requires username and password. It applies the
 existing IP and per-account throttles and the existing fail-closed login policy.
 The backend calls Cognito `USER_PASSWORD_AUTH`, validates the returned ID token,
-and resolves or reconciles the local user from the verified `sub`.
+validates the returned access token, and resolves or reconciles the local user
+from the verified `sub`.
+
+Login fixes `now` once for the transaction, sets the family absolute expiry to
+`now + MOBILE_AUTH_REFRESH_ABSOLUTE_DAYS`, and calculates:
+
+```text
+access_expires_at = min(
+    now + MOBILE_AUTH_ACCESS_TTL_SECONDS,
+    family_absolute_expires_at
+)
+coverage_deadline = (
+    access_expires_at + MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS
+)
+renewal_trigger = max(
+    now + MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS,
+    coverage_deadline
+)
+```
+
+The Cognito expiry is taken from the verified access JWT `exp`. If it is at or
+before `renewal_trigger`, login renews the provider token set with the returned
+refresh token before creating the family. The resulting verified Cognito access
+token must expire strictly after `coverage_deadline`. Otherwise login returns
+retryable `AUTH_TEMPORARILY_UNAVAILABLE`, emits a safe structured event, and
+does not persist a family or return opaque credentials.
 
 A successful login creates a new mobile session family and returns:
 
@@ -154,21 +182,34 @@ On first use:
 
 1. Validate the hash, family state, original absolute expiry, and credential
    state while holding the lock.
-2. Select the active derivation-key version and calculate fixed child issuance
-   and expiry timestamps.
-3. Mark the presented refresh credential consumed, set its grace deadline, and
+2. Fix one transaction `now` and calculate the child access expiry as
+   `min(now + MOBILE_AUTH_ACCESS_TTL_SECONDS, family_absolute_expires_at)`.
+3. Calculate `coverage_deadline` and `renewal_trigger` with the same formulas
+   used by login.
+4. Renew the encrypted Cognito token set when its verified access-token expiry
+   is at or before `renewal_trigger`. Verify that the resulting provider access
+   token expires strictly after `coverage_deadline`.
+5. Select the active derivation-key version and fixed child issuance and expiry
+   timestamps.
+6. Mark the presented refresh credential consumed, set its grace deadline, and
    record the child generation, key version, child row identifiers, and fixed
    issuance and expiry timestamps.
-4. Revoke access credentials belonging to generations older than the new
+7. Revoke access credentials belonging to generations older than the new
    generation.
-5. Renew the encrypted Cognito token set if its access token is expired or
-   within `MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS`.
-6. Derive exactly one access/refresh pair, create exactly one hashed access row
+8. Derive exactly one access/refresh pair, create exactly one hashed access row
    and one hashed refresh row, and link them from the consumed parent.
-7. Increment the family version once and commit all provider and opaque
+9. Increment the family version once and commit all provider and opaque
    credential changes atomically.
-8. Return the raw derived credentials only from process memory with the stored
+10. Return the raw derived credentials only from process memory with the stored
    issuance and expiry timestamps.
+
+If renewal fails temporarily or the renewed, fully validated provider access
+token still expires at or before `coverage_deadline`, the transaction rolls
+back. The parent remains unconsumed, no child or opaque credential row is
+created, no credential is returned, and the response is retryable
+`AUTH_TEMPORARILY_UNAVAILABLE`. A safe structured event records only request
+ID, family identifier, key version where applicable, and a redacted failure
+category.
 
 A concurrent or repeated presentation of the same parent inside grace waits for
 the family and parent locks. It then observes the committed child, recomputes the
@@ -226,10 +267,20 @@ rotations use the active version.
 ## Cognito Token Renewal
 
 The encrypted Cognito token set remains attached to the mobile session family.
-During refresh, the backend checks the stored Cognito access expiry while the
-family lock is held. If the access token is expired or inside the configured
-leeway, it uses the encrypted Cognito refresh token through the existing
-backend-owned Cognito service.
+During refresh, the backend checks the verified stored Cognito access expiry
+while the family lock is held. It renews with the encrypted Cognito refresh token
+when:
+
+```text
+cognito_access_expires_at <= max(
+    now + MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS,
+    child_access_expires_at + MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS
+)
+```
+
+This retains the proactive 60-second provider leeway while also guaranteeing
+that Cognito validation material outlives the opaque child access credential and
+the validator's allowed clock skew.
 
 Successful provider renewal atomically replaces the encrypted Cognito access
 token, optional ID token, optional rotated Cognito refresh token, and provider
@@ -238,6 +289,14 @@ failure revokes the local family and returns `AUTH_REFRESH_FAILED`. A temporary
 Cognito/network failure preserves the family and old refresh credential state,
 rolls back the transaction, and returns retryable
 `AUTH_TEMPORARILY_UNAVAILABLE`.
+
+The renewed access JWT is fully validated before its `exp` is trusted. It must
+expire strictly after
+`child_access_expires_at + MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS`.
+Insufficient renewed lifetime is classified as temporary provider coverage
+failure: the transaction rolls back without consuming the parent or issuing
+opaque credentials and emits a safe structured event without provider text or
+token material.
 
 Because consumed-parent grace replay is recognized before provider-expiry
 evaluation, only the first locked N-to-N+1 transition may renew Cognito. Replays
