@@ -84,10 +84,15 @@ Separate access- and refresh-credential rows store only indexed, unique
 SHA-256 hashes. Raw mobile credentials are never persisted, encrypted, logged,
 or included in telemetry.
 
-Every credential is generated from at least 32 bytes from Python's
-cryptographically secure `secrets` source and encoded with a URL-safe format.
-Credential comparison is hash lookup followed by constant-time hash comparison
-where an in-memory comparison is necessary.
+Initial login credentials are generated from at least 32 bytes from Python's
+cryptographically secure `secrets` source. Replacement credentials are
+deterministic 256-bit PRF outputs as defined below, seeded by both an independent
+256-bit server key and the 256-bit parent refresh credential. All credentials
+are the unpadded base64url encoding of exactly 32 bytes. Input is rejected unless
+it decodes to 32 bytes and re-encodes byte-for-byte to the presented ASCII form.
+The indexed database digest is SHA-256 of that canonical ASCII form. Credential
+comparison is hash lookup followed by constant-time hash comparison where an
+in-memory comparison is necessary.
 
 Default configuration:
 
@@ -96,10 +101,17 @@ MOBILE_AUTH_ACCESS_TTL_SECONDS=900
 MOBILE_AUTH_REFRESH_ABSOLUTE_DAYS=7
 MOBILE_AUTH_REFRESH_RETRY_GRACE_SECONDS=10
 MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS=60
+MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS=300
+MOBILE_AUTH_ACTIVE_DERIVATION_KEY_VERSION=<configured-version>
+MOBILE_AUTH_DERIVATION_KEYRING=<secret version-to-key mapping>
 ```
 
-All four values are application configuration, validated as positive and
-bounded at startup. Refresh never changes the original absolute expiry.
+The lifetime and key-retention values are application configuration, validated
+as non-negative or positive as appropriate and bounded at startup. The
+derivation keyring has no insecure default. Every decoded key must contain at
+least 256 bits, and the configured active version must exist. Invalid or missing
+key configuration fails startup. Refresh never changes the original absolute
+expiry.
 
 ## Login
 
@@ -128,8 +140,10 @@ Cognito token or provider metadata is exposed.
 
 ## Refresh Rotation
 
-Every successful refresh returns a new access credential and a new refresh
-credential. Refresh credentials are one-time members of a session family.
+The first successful use of refresh generation N returns a new access
+credential and refresh credential for exactly one child generation N+1.
+Refresh credentials are one-time members of a session family, subject only to
+idempotent replay of that committed response during the grace window.
 
 The refresh transaction locks the session family and presented credential row
 with `SELECT ... FOR UPDATE` on PostgreSQL and also uses an optimistic version
@@ -140,32 +154,74 @@ On first use:
 
 1. Validate the hash, family state, original absolute expiry, and credential
    state while holding the lock.
-2. Mark the presented refresh credential consumed and set its grace deadline.
-3. Revoke access credentials belonging to generations older than the new
+2. Select the active derivation-key version and calculate fixed child issuance
+   and expiry timestamps.
+3. Mark the presented refresh credential consumed, set its grace deadline, and
+   record the child generation, key version, child row identifiers, and fixed
+   issuance and expiry timestamps.
+4. Revoke access credentials belonging to generations older than the new
    generation.
-4. Renew the encrypted Cognito token set if its access token is expired or
+5. Renew the encrypted Cognito token set if its access token is expired or
    within `MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS`.
-5. Create new hashed access and refresh credential rows.
-6. Increment the family version and commit atomically.
-7. Return the raw newly generated credentials only from process memory.
+6. Derive exactly one access/refresh pair, create exactly one hashed access row
+   and one hashed refresh row, and link them from the consumed parent.
+7. Increment the family version once and commit all provider and opaque
+   credential changes atomically.
+8. Return the raw derived credentials only from process memory with the stored
+   issuance and expiry timestamps.
 
-A retry of the consumed refresh credential within its configured grace period
-may create a sibling child generation. This avoids persisting a replayable raw
-response while allowing a request whose first response was lost to succeed.
-Sibling credentials are bounded to the grace branch; when one child is later
-used, unused siblings are marked superseded. Multiple access credentials issued
-for grace siblings may remain valid only until their normal 15-minute expiry or
-until one sibling advances the family.
+A concurrent or repeated presentation of the same parent inside grace waits for
+the family and parent locks. It then observes the committed child, recomputes the
+same access/refresh pair, verifies both SHA-256 hashes in constant time against
+the linked child rows, and returns that pair with the originally stored
+timestamps. This replay path performs no write, version increment, child
+creation, access creation, or Cognito renewal. A missing derivation key, missing
+child, or hash mismatch returns retryable `AUTH_TEMPORARILY_UNAVAILABLE`, emits a
+redacted high-severity event, and never issues a different or untracked pair.
 
-Use of a consumed credential after grace, a superseded credential, or any known
-revoked refresh credential is credential reuse. The entire affected local
-session family is irreversibly revoked, its Cognito ciphertext is cleared, and
-the response is `AUTH_REFRESH_FAILED`. An unknown random credential cannot be
-associated with a family and therefore returns the same error without affecting
-other sessions.
+Use of a consumed credential after grace or any known revoked refresh credential
+is credential reuse. The entire affected local session family is irreversibly
+revoked, its Cognito ciphertext is cleared, and the response is
+`AUTH_REFRESH_FAILED`. An unknown random credential cannot be associated with a
+family and therefore returns the same error without affecting other sessions.
 
 Refresh rotation is an AxisAI rule independent of Cognito refresh-token
 rotation.
+
+## Idempotent Credential Derivation
+
+`MOBILE_AUTH_DERIVATION_KEYRING` is an independently managed keyring. Its raw
+keys are never stored in the database or logs and are not the Fernet key. For
+key version V, the credential codec first derives a 32-byte replacement subkey
+with HKDF-SHA-256 from the configured root key. The HKDF salt is the ASCII bytes
+`axisai/mobile-auth/credential-derivation/salt/v1`. Its info is the ASCII bytes
+`axisai/mobile-auth/replacement-subkey/v1`, one NUL byte, the unsigned 16-bit
+big-endian byte length of the canonical ASCII family identifier, the family
+identifier bytes, then unsigned 64-bit big-endian parent and child generations.
+
+The codec then computes two HMAC-SHA-256 PRF outputs over the presented raw
+parent refresh credential. Each message is its fixed ASCII label
+(`axisai/mobile-auth/access/v1` or `axisai/mobile-auth/refresh/v1`), one NUL
+byte, and the decoded 32 parent bytes. The 32-byte outputs are encoded with
+unpadded base64url. This explicit HKDF and HMAC domain separation prevents
+cross-purpose key reuse and does not use raw Fernet material as an HMAC key.
+
+The consumed parent persists only non-secret derivation context: key version,
+parent and child generations, linked child row identifiers, original child
+issuance time, access expiry, refresh expiry, and grace deadline. Credential
+rows still persist only indexed SHA-256 hashes. The parent raw credential is
+supplied again by the retry and is never persisted.
+
+Key rotation adds a new key version before making it active. A version used for
+issuance must remain available until every parent issued with it is outside its
+retry-grace interval, including configured clock-skew and deployment-drain
+allowance represented by
+`MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS`. Startup validates the
+active key and every configured retained key. Startup/readiness preflight rejects
+a deployment if a replayable parent references a missing version. A key version
+cannot be removed until the last referencing grace deadline plus the retention
+buffer has passed. Replays always use the recorded version, while new first-use
+rotations use the active version.
 
 ## Cognito Token Renewal
 
@@ -182,6 +238,11 @@ failure revokes the local family and returns `AUTH_REFRESH_FAILED`. A temporary
 Cognito/network failure preserves the family and old refresh credential state,
 rolls back the transaction, and returns retryable
 `AUTH_TEMPORARILY_UNAVAILABLE`.
+
+Because consumed-parent grace replay is recognized before provider-expiry
+evaluation, only the first locked N-to-N+1 transition may renew Cognito. Replays
+return the already committed opaque pair and provider state without a second
+provider call.
 
 The current Cognito app client uses `REFRESH_TOKEN_AUTH` according to repository
 configuration. PR4 does not enable or assume Cognito refresh-token rotation.
@@ -200,7 +261,7 @@ Authorization: Bearer <AxisAI opaque access credential>
 They never authenticate from Flask-Login or browser cookies. The middleware:
 
 1. Hashes and resolves the active access credential.
-2. Rejects expired, revoked, or superseded credentials with
+2. Rejects expired or revoked credentials with
    `AUTH_SESSION_EXPIRED`.
 3. Decrypts and validates the Cognito access token signature, issuer,
    client/audience, expiry, `token_use=access`, and `sub`.
@@ -287,7 +348,7 @@ Every non-204 error uses:
 | Verification required | 403 | `AUTH_VERIFICATION_REQUIRED` | false | Start verification flow |
 | Login or refresh throttled | 429 | `AUTH_RATE_LIMITED` | true | Honor `Retry-After` |
 | Access credential missing, invalid, revoked, or expired | 401 | `AUTH_SESSION_EXPIRED` | false | Attempt one refresh if available |
-| Refresh credential invalid, expired, revoked, superseded, or reused | 401 | `AUTH_REFRESH_FAILED` | false | Clear credentials and return to login |
+| Refresh credential invalid, expired, revoked, or reused | 401 | `AUTH_REFRESH_FAILED` | false | Clear credentials and return to login |
 | Cognito, JWKS, database-lock, or network failure classified as temporary | 503 | `AUTH_TEMPORARILY_UNAVAILABLE` | true | Preserve credentials and retry |
 | Successful or repeated logout after local revocation | 204 | none | n/a | Clear local credentials |
 

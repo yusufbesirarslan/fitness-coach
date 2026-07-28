@@ -48,7 +48,8 @@ Add three expand-only models and an idempotent Alembic migration:
 `MobileAuthSession` owns the device session family and encrypted Cognito token
 set. `MobileAccessCredential` stores access hashes and expiry. A
 `MobileRefreshCredential` stores refresh hashes, generation, parent,
-consumption, retry-grace, and supersession state.
+consumption, retry-grace, committed-child references, derivation-key version,
+and fixed replacement issuance/expiry metadata.
 
 Required indexes and constraints:
 
@@ -67,10 +68,17 @@ contains Fernet ciphertext only for Cognito token material.
 
 ### Credential codec
 
-A focused service generates 32 random bytes with `secrets.token_urlsafe(32)` or
-an equivalent 256-bit CSPRNG operation, hashes credentials with SHA-256, and
+A focused service generates initial login credentials with
+`secrets.token_urlsafe(32)` or an equivalent 256-bit CSPRNG operation. It derives
+replacement credentials with the versioned HKDF/HMAC construction in the
+Idempotent Grace Replay section, hashes all credentials with SHA-256, and
 returns raw values only to the immediate route response. It also parses Bearer
 syntax without accepting multiple, empty, or non-Bearer credentials.
+
+The wire form is canonical unpadded base64url of exactly 32 bytes. The codec
+rejects an input unless it decodes to 32 bytes and re-encodes byte-for-byte to
+the presented ASCII form. Indexed credential hashes are SHA-256 of that
+canonical ASCII form.
 
 ### Mobile session service
 
@@ -103,10 +111,17 @@ Add validated config values with these defaults:
 | `MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS` | 60 | Provider renewal threshold |
 | `MOBILE_AUTH_REFRESH_RATELIMIT` | `30 per minute; 300 per hour` | Refresh abuse bound |
 | `MOBILE_AUTH_LOGOUT_RATELIMIT` | `30 per minute` | Logout abuse bound |
+| `MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS` | 300 | Clock-skew/deployment-drain key-retention buffer |
+| `MOBILE_AUTH_ACTIVE_DERIVATION_KEY_VERSION` | none | Version used for new replacements |
+| `MOBILE_AUTH_DERIVATION_KEYRING` | none | Secret version-to-key mapping |
 
 TTL values must be positive. Access TTL must be shorter than refresh absolute
-lifetime. Retry grace must be short and less than access TTL. Invalid production
-configuration fails at startup instead of silently using unsafe values.
+lifetime. Retry grace must be short and less than access TTL. The retention
+buffer must be non-negative and bounded. Invalid production configuration fails
+at startup instead of silently using unsafe values. The keyring has no default:
+every decoded root key must contain at least 256 bits, the active version must
+exist, versions must be unique and canonical, and secret values must never be
+logged or persisted.
 
 ## Detailed Flows
 
@@ -147,21 +162,33 @@ and cannot replace the authenticated identity.
 1. Require a JSON `refresh_credential`.
 2. Hash it and begin a transaction.
 3. Resolve credential and family; lock both rows.
-4. Verify the optimistic family version in the update predicate.
-5. Reject and locally revoke known expired/revoked/superseded families.
-6. If the credential was consumed:
-   - inside grace, allow a bounded sibling child;
-   - outside grace, revoke the family as credential reuse.
+4. Reject and locally revoke known expired or revoked families.
+5. If the credential was already consumed:
+   - inside grace, execute the read-only idempotent replay path before any
+     Cognito-expiry evaluation;
+   - outside grace, revoke the family as credential reuse, clear Cognito
+     ciphertext, commit, and return `AUTH_REFRESH_FAILED`.
+6. For first use, verify the optimistic family version in the update predicate.
 7. If Cognito access is expired or within leeway, decrypt the provider refresh
    token and renew the provider token set under the same lock.
 8. On definitive provider refresh rejection, revoke the family.
 9. On temporary provider failure, roll back without consuming the presented
    refresh credential.
-10. Mark the presented credential consumed and set its grace deadline.
-11. Supersede obsolete siblings when a branch advances.
-12. Generate new access/refresh credentials and persist only their hashes.
-13. Preserve the original family absolute expiry in the response.
-14. Increment version, commit, and return the raw credentials.
+10. Select the active derivation-key version and fixed issuance/expiry values.
+11. Derive one N+1 access/refresh pair from the locked N parent.
+12. Mark N consumed, set its grace deadline, and record the key version, child
+    generation, linked child row identifiers, and fixed issuance/expiry values.
+13. Persist exactly one access hash and one refresh hash for N+1.
+14. Preserve the original family absolute expiry as the child refresh expiry.
+15. Increment the family version once, commit atomically, and return the pair.
+
+The grace replay path derives the pair using the recorded key version and the
+presented raw parent, verifies both hashes in constant time against the linked
+child rows, and returns the stored issuance and expiry timestamps. It creates no
+row, performs no provider call, and does not mutate the family version. Missing
+key material, missing child metadata, or a hash mismatch emits a redacted
+high-severity event and returns retryable `AUTH_TEMPORARILY_UNAVAILABLE`; it
+never derives or persists a replacement alternative.
 
 The service performs a bounded retry on optimistic conflicts. Exhaustion maps
 to `AUTH_TEMPORARILY_UNAVAILABLE`, not `AUTH_REFRESH_FAILED`.
@@ -202,24 +229,40 @@ Nullable model fields remain JSON `null`. The route does not expose local
 database IDs, Cognito `sub`, email, provider claims, session identifiers, token
 material, metadata blobs, or password fields.
 
-## Refresh-Grace Branch Rules
+## Idempotent Grace Replay
 
-Only credential hashes are persisted, so the backend cannot replay a lost
-plaintext response. Retry grace therefore uses bounded branches:
+Only hashes and non-secret derivation metadata are persisted. For key version V,
+the credential codec derives a 32-byte replacement subkey with HKDF-SHA-256 from
+the independently configured root key. The HKDF salt is the ASCII bytes
+`axisai/mobile-auth/credential-derivation/salt/v1`. Its info is the ASCII bytes
+`axisai/mobile-auth/replacement-subkey/v1`, one NUL byte, the unsigned 16-bit
+big-endian byte length of the canonical ASCII family identifier, the family
+identifier bytes, then unsigned 64-bit big-endian parent and child generations.
 
-- First use of refresh generation N creates child N+1 and consumes N.
-- Reuse of N during grace may create one additional N+1 sibling.
-- Both returned siblings are independently high entropy and initially valid.
-- The first sibling that advances consumes itself and supersedes unused sibling
-  leaves from the same parent.
-- A consumed token outside grace, a superseded leaf, or a revoked known token
-  revokes the full family.
-- Consumed hashes remain as tombstones until family absolute expiry so reuse can
-  be detected.
+The codec computes the two credential bytes as HMAC-SHA-256 under that subkey.
+Each message is its distinct ASCII label
+(`axisai/mobile-auth/access/v1` or `axisai/mobile-auth/refresh/v1`), one NUL
+byte, and the decoded 32 parent bytes. Outputs use canonical unpadded base64url.
+The derivation root is independent of Fernet; the raw Fernet key is never used
+as an HMAC key. The key version and all serialization rules are part of the
+stable credential format and cannot vary by request.
 
-The allowed sibling count is a fixed security invariant, not client input. Unit
-and transaction tests cover response loss, concurrent refresh, both sibling
-orders, grace expiry, and reuse-family revocation.
+First use of N creates exactly one N+1 generation, one access row, one refresh
+row, one version increment, and at most one Cognito renewal. A concurrent caller
+blocks on the same rows, then takes the consumed-parent replay path. Every replay
+recomputes and verifies the committed pair before returning it with the original
+stored timestamps. Replays do not mutate state. Consumed parent hashes remain as
+tombstones until family absolute expiry, allowing post-grace reuse to revoke the
+full affected family without touching other device families.
+
+The keyring is versioned. Rotation first deploys a new version alongside old
+versions, then changes the active version. A recorded version must remain
+available through the last referencing grace deadline plus
+`MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS`. Startup/readiness
+preflight rejects a deployment when a replayable parent references a missing
+version. New first-use rotations use the active version; replay always uses the
+recorded version. Missing referenced key material fails safely with
+`AUTH_TEMPORARILY_UNAVAILABLE` and cannot issue untracked credentials.
 
 ## JWKS Cache Rules
 
@@ -295,15 +338,23 @@ credential, or AWS mutation is allowed.
 
 - Old access invalid after ordinary refresh
 - Old refresh accepted only inside configured grace
-- Grace retry returns a distinct access/refresh pair
-- Maximum sibling bound
-- First sibling advancement supersedes the other
+- Lost-response retry returns the identical pair and timestamps
+- Two concurrent same-parent requests return identical pairs
+- Exactly one child generation, access row, and refresh row exist
+- No sibling credential rows exist
+- Repeated grace replay does not mutate generation or family version
 - Reuse after grace revokes the family
 - Unknown refresh does not revoke another family
 - Absolute expiry never moves
-- Concurrent refresh yields race-safe committed generations
+- Concurrent refresh increments the family version exactly once
 - Optimistic conflict retry and exhaustion mapping
-- Only hashes exist in database rows and logs
+- Derivation-key/configuration failure issues no untracked credentials
+- Startup rejects missing active, undersized, duplicate, or malformed keys
+- Replay uses the recorded old key after the active version changes
+- Readiness rejects removal of a still-referenced key version
+- Grace replay hash mismatch fails temporarily without an alternative pair
+- Only hashes and non-secret derivation metadata exist in database rows
+- Credentials, hashes, derivation keys, and provider material are absent from logs
 
 PostgreSQL row-lock behavior receives an opt-in concurrency test mirroring the
 repository's existing `pg_concurrency` convention; SQLite unit tests exercise
@@ -317,12 +368,12 @@ the optimistic version path.
 - Optional provider refresh-token replacement
 - Definitive provider failure revokes family
 - Temporary provider failure rolls back token consumption
-- Concurrent calls perform at most the expected renewal under lock
+- Concurrent same-parent calls perform exactly one renewal when renewal is due
 
 ### Middleware and JWKS tests
 
 - Missing/malformed Bearer
-- Invalid, expired, revoked, and superseded access
+- Invalid, expired, and revoked access
 - Valid request
 - Wrong issuer, audience/client, token type, signature, expiry, or subject
 - Unknown/disabled local user
