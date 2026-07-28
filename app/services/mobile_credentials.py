@@ -58,7 +58,8 @@ def generate_credential() -> str:
 
 
 def hash_credential(value: str) -> str:
-    return hashlib.sha256(canonical_credential(value)).hexdigest()
+    canonical_credential(value)
+    return hashlib.sha256(value.encode('ascii')).hexdigest()
 
 
 def _unique_object(pairs):

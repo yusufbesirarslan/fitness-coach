@@ -29,7 +29,7 @@ def test_generate_credential_is_canonical_256_bit_value():
 def test_hash_credential_is_lowercase_sha256_and_not_plaintext():
     digest = mobile_credentials.hash_credential(PARENT_WIRE)
 
-    assert digest == 'a7cbbfdfe39c7df7502aa43b785e40940817b89fbff7834b364d2e343c80c25c'
+    assert digest == 'ce330f8b7d3a29bfa9d210bb1acc7eedab4344745406344718bab7f649c22ef7'
     assert re.fullmatch(r'[0-9a-f]{64}', digest)
     assert PARENT_WIRE not in digest
 
