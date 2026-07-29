@@ -624,3 +624,15 @@ def test_training_planning_import_allowlist_blocks_encoder_bypasses(tmp_path):
         f"{alternate_encoder}:1 -> app.services.training_planning",
         f"{manual_formatter}:1 -> app.services.training_planning",
     }
+
+
+def test_mobile_auth_dependency_direction_is_one_way():
+    api = Path("app/blueprints/mobile_api.py").read_text(encoding="utf-8")
+    middleware = Path("app/mobile_auth_middleware.py").read_text(encoding="utf-8")
+    service = Path("app/services/mobile_auth.py").read_text(encoding="utf-8")
+    assert "from app.models" not in api + middleware
+    assert "cognito_service" not in api + middleware
+    assert "from app.services import mobile_auth" in api
+    assert "from app.services import mobile_auth" in middleware
+    assert "from app.models import" in service
+    assert "cognito_service" in service

@@ -70,10 +70,14 @@ def log_request(response):
         return response
     start = getattr(g, "_req_start", None)
     dur_ms = round((time.monotonic() - start) * 1000, 1) if start is not None else "-"
-    try:
-        uid = current_user.id if current_user.is_authenticated else "-"
-    except Exception:
-        uid = "-"
+    if request.blueprint == "mobile_api":
+        mobile_user = getattr(g, "mobile_user", None)
+        uid = getattr(mobile_user, "id", "-")
+    else:
+        try:
+            uid = current_user.id if current_user.is_authenticated else "-"
+        except Exception:
+            uid = "-"
     # L6: ham X-Forwarded-For istemci-kontrollü (birden çok IP, sahte değer, hatta
     # log-injection için satır-başı içerebilir). ProxyFix(x_for=1) zaten güvenilen
     # tek proxy (host nginx) hop'undan gerçek istemci IP'sini remote_addr'a

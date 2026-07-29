@@ -306,6 +306,8 @@ def configure_app(app):
     app.config["FITX_IS_DEV"] = _is_dev
     _LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
     _gunicorn_logger = logging.getLogger("gunicorn.error")
+    from app.services.mobile_credentials import validate_mobile_auth_config
+    validate_mobile_auth_config(app)
     if _gunicorn_logger.handlers:
         app.logger.handlers = _gunicorn_logger.handlers
         app.logger.setLevel(_gunicorn_logger.level or getattr(logging, _LOG_LEVEL, logging.INFO))

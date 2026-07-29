@@ -162,6 +162,8 @@ def _csrf_protect():
     """
     if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
         return
+    if request.blueprint == "mobile_api":
+        return
     expected_origin = _origin_tuple(request.host_url)
     if expected_origin is None:
         abort(403, description="CSRF validation failed.")
@@ -273,8 +275,9 @@ def maybe_weekly_rollover():
     if not _purge_throttle_passed(now):
         return
     try:
-        from app.services import session_store
+        from app.services import mobile_auth, session_store
         session_store.purge_expired()
+        mobile_auth.purge_expired(now)
     except Exception:
         db.session.rollback()
         current_app.logger.warning("[SESSION] Oturum süpürme başarısız", exc_info=True)
@@ -289,6 +292,10 @@ def maybe_weekly_rollover():
 
 
 def update_streak():
+    # Mobile API identity is Bearer-only. Never load or mutate an ambient
+    # Flask-Login cookie user while serving /api/v1 requests.
+    if request.blueprint == "mobile_api":
+        return
     if not current_user.is_authenticated:
         return
     today = app_today()

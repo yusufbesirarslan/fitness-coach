@@ -331,6 +331,52 @@ unverified decode):
 - Add browser-level recovery accessibility and visual regression coverage in
   addition to the current template, route, and JavaScript contract tests.
 
+## Native mobile authentication boundary
+
+The native mobile client authenticates only through `/api/v1/`. Cognito remains
+the password authority, while AxisAI returns its own opaque access and rotating
+refresh credentials. The API never accepts Flask-Login cookies as a fallback.
+Mobile session families are isolated per device, have a non-sliding seven-day
+absolute lifetime, and persist only indexed SHA-256 credential hashes. Cognito
+token material is Fernet-encrypted at rest and is never returned to the device.
+
+`scripts/check_cognito_pool.py` reports the app client's mobile-relevant posture:
+whether a client secret is present, token revocation state, token lifetimes, and
+Cognito refresh-token rotation. The report deliberately emits only the boolean
+presence of the client secret, never its value. Unexpected provider failures are
+reported by exception type and stable AWS error code only; raw provider messages
+and payloads are excluded.
+
+The app-managed refresh credential is the rotating credential for this API.
+Cognito refresh-token rotation may remain disabled because Cognito token
+material stays server-side and renewal is serialized against the mobile session
+family. Validate pool configuration with read-only `DescribeUserPool` and
+`DescribeUserPoolClient`; this checker never mutates Cognito.
+
+`MOBILE_AUTH_ENABLED` defaults to `0`. Disabled startup does not register the
+`/api/v1` mobile blueprint, parse or require the derivation keyring, or query the
+mobile tables for readiness. Existing web authentication, cookies, and CSRF are
+unchanged. Enabled startup requires a valid independent keyring and active
+version and performs the read-only database preflight for derivation-key
+rotation. Every key version referenced by a still-replayable consumed parent
+must remain in `MOBILE_AUTH_DERIVATION_KEYRING` through its grace deadline plus
+`MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS`; enabled startup fails
+closed if a referenced version was removed too early. There is no default key.
+
+Use this staged production rollout order:
+
+1. Merge and deploy with `MOBILE_AUTH_ENABLED=0`.
+2. Apply the additive mobile-auth migration.
+3. Provision the independent derivation keyring and active version.
+4. Verify database and derivation-key readiness.
+5. Enable mobile authentication in a controlled deployment.
+
+Deploy a new key alongside old keys, make it active in a later deployment, and
+remove an old key only after the retention window has drained.
+`COGNITO_TOKEN_ENC_KEY` remains a separate mandatory Fernet key outside
+development/test and must never be reused as a derivation root. This task does
+not change live production configuration.
+
 ## Sprint 3 — Markalı Auth E-postaları (Resend)
 
 Cognito'nun varsayılan düz e-postaları markalı AxisAI e-postalarıyla

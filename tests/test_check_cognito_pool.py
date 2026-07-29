@@ -127,3 +127,38 @@ def test_missing_args_is_usage_error(monkeypatch):
     monkeypatch.delenv("COGNITO_USER_POOL_ID", raising=False)
     monkeypatch.delenv("COGNITO_APP_CLIENT_ID", raising=False)
     assert check_cognito_pool.main([]) == 2
+
+
+def test_mobile_posture_contains_no_secret_value():
+    client = _good_client(
+        ClientSecret="raw-client-secret",
+        EnableTokenRevocation=True,
+        AccessTokenValidity=15,
+        IdTokenValidity=15,
+        RefreshTokenValidity=7,
+        TokenValidityUnits={
+            "AccessToken": "minutes", "IdToken": "minutes",
+            "RefreshToken": "days"},
+        RefreshTokenRotation={"Feature": "DISABLED"},
+    )
+    posture = check_cognito_pool.mobile_posture(client)
+    assert posture == {
+        "client_secret_present": True,
+        "token_revocation_enabled": True,
+        "access_token_lifetime": "15 minutes",
+        "id_token_lifetime": "15 minutes",
+        "refresh_token_lifetime": "7 days",
+        "refresh_token_rotation": "DISABLED",
+    }
+    assert "raw-client-secret" not in repr(posture)
+
+
+def test_unexpected_provider_error_does_not_expose_raw_text(monkeypatch, capsys):
+    monkeypatch.setattr(
+        check_cognito_pool, "_describe",
+        lambda pool_id, client_id: (_ for _ in ()).throw(
+            RuntimeError("raw-provider-secret-payload")))
+    assert check_cognito_pool.main(["--pool-id", "p", "--client-id", "c"]) == 0
+    output = capsys.readouterr().out
+    assert "raw-provider-secret-payload" not in output
+    assert "RuntimeError" in output

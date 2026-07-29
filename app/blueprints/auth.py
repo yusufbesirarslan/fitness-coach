@@ -17,6 +17,7 @@ from app.services import (cognito_jwt, cognito_service, email_service,
                           email_templates, session_store)
 from app.services.cognito_service import CognitoServiceError
 from app.services.cognito_jwt import TokenValidationError
+from app.services.cognito_identity import reconcilable_local_user
 from app.services.gamification import complete_quest_for_user
 from app.services.referral import consume_referral, ensure_referral_code
 from app.services.validators import validate_email, validate_password, validate_username
@@ -339,17 +340,18 @@ def _reconcile_local_user(verified_claims, cognito_username):
             cognito_username)
         return None
 
-    existing = (User.query.filter_by(username=cognito_username).first()
-                or User.query.filter(func.lower(User.email) == email).first())
+    existing, denial = reconcilable_local_user(cognito_username, email, sub)
+    if denial == "username_email_mismatch":
+        current_app.logger.warning(
+            "[LOGIN] orphan uzlaştırma reddedildi: kullanıcı adı doğrulanmış "
+            "e-postayla eşleşmiyor (user=%s)", cognito_username)
+        return None
+    if denial == "subject_mismatch":
+        current_app.logger.warning(
+            "[LOGIN] orphan uzlaştırma atlandı: yerel kayıt başka bir sub'a "
+            "bağlı (user=%s)", cognito_username)
+        return None
     if existing is not None:
-        if existing.cognito_sub and existing.cognito_sub != sub:
-            # Yerel kayıt BAŞKA bir Cognito kimliğine bağlı — ASLA yeniden bağlama.
-            # Bu, aynı e-postayla ikinci kez kayıt olmuş (ve zaten çalışan bir
-            # hesabı bulunan) kullanıcının orphan'ıdır; kendi hesabıyla girmeli.
-            current_app.logger.warning(
-                "[LOGIN] orphan uzlaştırma atlandı: yerel kayıt başka bir sub'a "
-                "bağlı (user=%s)", cognito_username)
-            return None
         existing.cognito_sub = sub
         db.session.commit()
         current_app.logger.info(
@@ -426,6 +428,11 @@ def login():
             if e.code == "UserNotConfirmedException":
                 return jsonify({"error": e.message, "needs_verification": True,
                                 "username": username}), 403
+            if e.code == "JWKSUnavailable":
+                response = jsonify({"error": t("auth.temporarily_unavailable")})
+                response.status_code = 503
+                response.headers["Retry-After"] = "15"
+                return response
             return jsonify({"error": e.message}), 401
         tokens = result["tokens"]
         # Kimlik token'ını KRİPTOGRAFİK olarak doğrula (JWKS) — claim'lere manuel

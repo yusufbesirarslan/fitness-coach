@@ -50,9 +50,16 @@ def weekly_reset_cmd():
     # süpürür — çünkü bu komutun varsaydığı host cron'u repo'da hiçbir yerde
     # kurulmuyordu (bir host yeniden kurulumunda sessizce kaybolabilirdi ve
     # tablo sınırsız büyümeye devam ederdi). Burada kalması zararsız: idempotent.
+    from flask import current_app
     from app.services import session_store
     removed = session_store.purge_expired()
     click.echo(f"cognito-sessions purged: {removed}")
+    if current_app.config["MOBILE_AUTH_ENABLED"]:
+        from app.services import mobile_auth
+        mobile_removed = mobile_auth.purge_expired()
+    else:
+        mobile_removed = 0
+    click.echo(f"mobile-auth-sessions purged: {mobile_removed}")
 
 
 
@@ -91,7 +98,7 @@ def _user_child_models():
     from app.models import (
         Activity, CoachConversation, CognitoSession, CustomMeal, DailyActivity,
         FeedHide, FeedItem, FeedItemComment, FeedItemLike, FeedReport,
-        MealLog, Notification, NutritionPlan, PendingAction, PumpCheck,
+        MealLog, MobileAuthSession, Notification, NutritionPlan, PendingAction, PumpCheck,
         PumpCheckComment, PumpCheckLike, Supplement, TrainingPlan,
         UserBadge, UserChallengeProgress, UserQuestProgress, UserSession,
         UserWearableConnection, WaterLog,
@@ -99,7 +106,7 @@ def _user_child_models():
         WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog, WorkoutSession,
     )
     return (
-        UserSession, CognitoSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
+        UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
         TrainingPlan, MealLog, PendingAction, PumpCheckLike, PumpCheckComment,
         PumpCheck, Activity, Supplement, UserQuestProgress, WeeklyWinner,
         WaterLog, WorkoutLog, WorkoutSession, DailyActivity, CustomMeal,

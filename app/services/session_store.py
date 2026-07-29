@@ -85,12 +85,20 @@ def _get_fernet():
     return _fernet
 
 
-def _enc(value):
+def encrypt_token(value):
     return _get_fernet().encrypt((value or "").encode()).decode()
 
 
-def _dec(value):
+def decrypt_token(value):
     return _get_fernet().decrypt(value.encode()).decode()
+
+
+def _enc(value):
+    return encrypt_token(value)
+
+
+def _dec(value):
+    return decrypt_token(value)
 
 
 def create(user, tokens, cognito_username):
