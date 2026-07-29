@@ -87,6 +87,57 @@ def test_modified_signature_rejected(signer):
     assert e.value.reason == "invalid_signature"
 
 
+def test_cached_matching_kid_bad_signature_does_not_fetch(rsa_key, monkeypatch):
+    trusted = RSAKey.import_key(
+        rsa_key, parameters={"kid": "shared-kid", "use": "sig", "alg": "RS256"})
+    attacker = RSAKey.import_key(
+        rsa.generate_private_key(public_exponent=65537, key_size=2048),
+        parameters={"kid": "shared-kid", "use": "sig", "alg": "RS256"})
+    cognito_jwt._jwks_cache = KeySet.import_key_set({
+        "keys": [trusted.as_dict(private=False)]})
+    token = jose_jwt.encode(
+        {"alg": "RS256", "kid": "shared-kid"}, _claims("access"), attacker,
+        algorithms=["RS256"])
+    fetches = {"n": 0}
+
+    def fail_fetch(*args, **kwargs):
+        fetches["n"] += 1
+        raise OSError("offline")
+
+    monkeypatch.setattr(cognito_jwt.urllib.request, "urlopen", fail_fetch)
+
+    with pytest.raises(TokenValidationError) as exc:
+        cognito_jwt.validate_token(token, "access")
+    assert exc.value.reason == "invalid_signature"
+    assert fetches["n"] == 0
+
+
+def test_unknown_kid_fetch_failure_is_temporary(rsa_key, monkeypatch):
+    old = RSAKey.import_key(
+        rsa_key, parameters={"kid": "old-kid", "use": "sig", "alg": "RS256"})
+    rotated = RSAKey.import_key(
+        rsa.generate_private_key(public_exponent=65537, key_size=2048),
+        parameters={"kid": "new-kid", "use": "sig", "alg": "RS256"})
+    cognito_jwt._jwks_cache = KeySet.import_key_set({
+        "keys": [old.as_dict(private=False)]})
+    token = jose_jwt.encode(
+        {"alg": "RS256", "kid": "new-kid"}, _claims("access"), rotated,
+        algorithms=["RS256"])
+    monkeypatch.setattr(
+        cognito_jwt.urllib.request, "urlopen",
+        lambda *args, **kwargs: (_ for _ in ()).throw(OSError("offline")))
+
+    with pytest.raises(TokenValidationError) as exc:
+        cognito_jwt.validate_token(token, "access")
+    assert exc.value.reason == "jwks_unavailable"
+
+
+def test_expiry_leeway_is_configurable(signer):
+    token = signer(_claims("access", exp=int(time.time()) - 2))
+    claims = cognito_jwt.validate_token(token, "access", leeway_seconds=5)
+    assert claims["sub"] == "sub-123"
+
+
 def test_wrong_token_use_rejected(signer):
     # access token doğrulanırken "id" beklenirse reddet.
     with pytest.raises(TokenValidationError) as e:
@@ -140,7 +191,7 @@ def test_unknown_kid_triggers_single_refetch(signer, rsa_key, monkeypatch):
     assert calls["n"] == 2
 
 
-def test_refetch_jwks_unavailable_reason_preserved(monkeypatch):
+def test_matching_kid_signature_failure_is_definitive(monkeypatch):
     """İlk keyset imzayı doğrulayamaz (JoseError) → yeniden çekme tetiklenir. Yeniden
     çekme (force=True) alt yapı hatasıyla başarısız olursa gerçek neden
     (jwks_unavailable) invalid_signature ile ezilmemeli.
@@ -175,5 +226,5 @@ def test_refetch_jwks_unavailable_reason_preserved(monkeypatch):
 
     with pytest.raises(TokenValidationError) as e:
         cognito_jwt.validate_token(token, "access")
-    assert e.value.reason == "jwks_unavailable"
-    assert calls["n"] == 2
+    assert e.value.reason == "invalid_signature"
+    assert calls["n"] == 1

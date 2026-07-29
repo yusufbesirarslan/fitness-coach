@@ -264,8 +264,23 @@ def refresh_tokens(refresh_token, cognito_username):
     new_access = auth.get("AccessToken", "")
     if not new_access:
         raise CognitoServiceError("Oturum yenilenemedi.", "RefreshFailed")
-    return {"access_token": new_access, "id_token": auth.get("IdToken", ""),
-            "expires_in": auth.get("ExpiresIn", 3600)}
+    return {
+        "access_token": new_access,
+        "id_token": auth.get("IdToken", ""),
+        "refresh_token": auth.get("RefreshToken") or refresh_token,
+        "expires_in": auth.get("ExpiresIn", 3600),
+    }
+
+
+def revoke_token(refresh_token):
+    """Revoke one provider refresh token without widening to global sign-out."""
+    kwargs = {"Token": refresh_token, "ClientId": COGNITO_APP_CLIENT_ID}
+    if COGNITO_CLIENT_SECRET:
+        kwargs["ClientSecret"] = COGNITO_CLIENT_SECRET
+    try:
+        _get_client().revoke_token(**kwargs)
+    except Exception as exc:
+        raise _wrap(exc)
 
 
 def global_sign_out(access_token):

@@ -35,6 +35,12 @@ class _FakeIdp:
             raise self.raises
         return {}
 
+    def revoke_token(self, **kw):
+        self.calls.append(("revoke_token", kw))
+        if self.raises:
+            raise self.raises
+        return {}
+
     def forgot_password(self, **kw):
         self.calls.append(("forgot_password", kw))
         if self.raises:
@@ -98,6 +104,30 @@ def test_refresh_tokens_returns_new_access(monkeypatch):
     name, kw = fake.calls[-1]
     assert kw["AuthFlow"] == "REFRESH_TOKEN_AUTH"
     assert kw["AuthParameters"]["REFRESH_TOKEN"] == "refresh-tok"
+
+
+def test_refresh_tokens_preserves_or_replaces_provider_refresh(monkeypatch):
+    unchanged = _FakeIdp(result={"AuthenticationResult": {
+        "AccessToken": "newacc", "IdToken": "newid", "ExpiresIn": 1200}})
+    _use_fake(monkeypatch, unchanged)
+    assert cognito_service.refresh_tokens("old-refresh", "ali") == {
+        "access_token": "newacc", "id_token": "newid",
+        "refresh_token": "old-refresh", "expires_in": 1200,
+    }
+
+    rotated = _FakeIdp(result={"AuthenticationResult": {
+        "AccessToken": "nextacc", "RefreshToken": "rotated-refresh"}})
+    _use_fake(monkeypatch, rotated)
+    assert cognito_service.refresh_tokens("old-refresh", "ali")["refresh_token"] == (
+        "rotated-refresh")
+
+
+def test_revoke_token_uses_refresh_token(monkeypatch):
+    fake = _FakeIdp()
+    _use_fake(monkeypatch, fake)
+    cognito_service.revoke_token("provider-refresh")
+    assert fake.calls == [("revoke_token", {
+        "Token": "provider-refresh", "ClientId": "client-123"})]
 
 
 def test_refresh_tokens_failure_maps_error(monkeypatch):

@@ -45,6 +45,13 @@ def test_fernet_falls_back_to_secret_key_in_dev(app, monkeypatch):
     assert f.decrypt(f.encrypt(b"x")) == b"x"
 
 
+def test_public_cipher_helpers_are_legacy_compatible(app):
+    ciphertext = session_store.encrypt_token("provider-token")
+    assert ciphertext != "provider-token"
+    assert session_store.decrypt_token(ciphertext) == "provider-token"
+    assert session_store._dec(session_store._enc("legacy-token")) == "legacy-token"
+
+
 def test_boot_enforces_dedicated_key_when_cognito_enabled(monkeypatch):
     # S2 (boot yarısı): _get_fernet tembeldir (ilk login'de çalışır); yalnız
     # kullanım anında patlasaydı deploy gate yeşil geçip login 500'lenirdi.
