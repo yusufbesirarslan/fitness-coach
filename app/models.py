@@ -168,6 +168,128 @@ class CognitoSession(db.Model):
     )
 
 
+class MobileAuthSession(db.Model):
+    '''One opaque mobile credential family for one device login.'''
+
+    id = db.Column(db.Integer, primary_key=True)
+    family_id = db.Column(db.String(64), nullable=False)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
+    cognito_username = db.Column(db.String(80), nullable=False)
+    cognito_sub = db.Column(db.String(64), nullable=False)
+    cognito_access_token = db.Column(db.Text, nullable=True)
+    cognito_refresh_token = db.Column(db.Text, nullable=True)
+    cognito_access_expires_at = db.Column(db.DateTime, nullable=True)
+    absolute_expires_at = db.Column(db.DateTime, nullable=False)
+    revoked_at = db.Column(db.DateTime, nullable=True)
+    revoked_reason = db.Column(db.String(40), nullable=True)
+    version = db.Column(
+        db.Integer, nullable=False, default=1, server_default='1')
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    last_used_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow,
+        onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index('uq_mobile_auth_session_family_id', 'family_id', unique=True),
+        db.Index('ix_mobile_auth_session_user_id', 'user_id'),
+        db.Index(
+            'ix_mobile_auth_session_expiry_revoked',
+            'absolute_expires_at', 'revoked_at'),
+        db.CheckConstraint(
+            'version >= 1', name='ck_mobile_auth_session_version'),
+    )
+
+    user = db.relationship(
+        'User', backref=db.backref('mobile_auth_sessions', passive_deletes=True))
+
+
+class MobileAccessCredential(db.Model):
+    '''Hash-only opaque mobile access credential.'''
+
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(
+        db.Integer,
+        db.ForeignKey('mobile_auth_session.id', ondelete='CASCADE'),
+        nullable=False)
+    credential_hash = db.Column(db.String(64), nullable=False)
+    generation = db.Column(db.Integer, nullable=False)
+    issued_at = db.Column(db.DateTime, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    revoked_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        db.Index(
+            'uq_mobile_access_credential_hash', 'credential_hash', unique=True),
+        db.UniqueConstraint(
+            'session_id', 'generation',
+            name='uq_mobile_access_session_generation'),
+        db.Index(
+            'ix_mobile_access_expiry_revoked', 'expires_at', 'revoked_at'),
+        db.CheckConstraint(
+            'generation >= 0', name='ck_mobile_access_generation'),
+    )
+
+    session = db.relationship(
+        'MobileAuthSession',
+        backref=db.backref('access_credentials', passive_deletes=True))
+
+
+class MobileRefreshCredential(db.Model):
+    '''Hash-only rotating refresh credential and idempotent replay context.'''
+
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(
+        db.Integer,
+        db.ForeignKey('mobile_auth_session.id', ondelete='CASCADE'),
+        nullable=False)
+    credential_hash = db.Column(db.String(64), nullable=False)
+    generation = db.Column(db.Integer, nullable=False)
+    parent_id = db.Column(
+        db.Integer,
+        db.ForeignKey('mobile_refresh_credential.id', ondelete='CASCADE'),
+        nullable=True)
+    issued_at = db.Column(db.DateTime, nullable=False)
+    expires_at = db.Column(db.DateTime, nullable=False)
+    consumed_at = db.Column(db.DateTime, nullable=True)
+    grace_expires_at = db.Column(db.DateTime, nullable=True)
+    replacement_key_version = db.Column(db.String(32), nullable=True)
+    replacement_generation = db.Column(db.Integer, nullable=True)
+    replacement_access_id = db.Column(
+        db.Integer,
+        db.ForeignKey('mobile_access_credential.id', ondelete='SET NULL'),
+        nullable=True)
+    replacement_refresh_id = db.Column(
+        db.Integer,
+        db.ForeignKey('mobile_refresh_credential.id', ondelete='SET NULL'),
+        nullable=True)
+    replacement_issued_at = db.Column(db.DateTime, nullable=True)
+    replacement_access_expires_at = db.Column(db.DateTime, nullable=True)
+    replacement_refresh_expires_at = db.Column(db.DateTime, nullable=True)
+    revoked_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        db.Index(
+            'uq_mobile_refresh_credential_hash', 'credential_hash', unique=True),
+        db.UniqueConstraint(
+            'session_id', 'generation',
+            name='uq_mobile_refresh_session_generation'),
+        db.UniqueConstraint('parent_id', name='uq_mobile_refresh_parent'),
+        db.Index(
+            'ix_mobile_refresh_expiry_revoked', 'expires_at', 'revoked_at'),
+        db.CheckConstraint(
+            'generation >= 0', name='ck_mobile_refresh_generation'),
+        db.CheckConstraint(
+            'replacement_generation IS NULL OR replacement_generation >= 0',
+            name='ck_mobile_refresh_replacement_generation'),
+    )
+
+    session = db.relationship(
+        'MobileAuthSession',
+        backref=db.backref('refresh_credentials', passive_deletes=True))
+
+
 class WeeklyLog(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
     user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)

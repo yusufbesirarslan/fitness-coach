@@ -91,7 +91,7 @@ def _user_child_models():
     from app.models import (
         Activity, CoachConversation, CognitoSession, CustomMeal, DailyActivity,
         FeedHide, FeedItem, FeedItemComment, FeedItemLike, FeedReport,
-        MealLog, Notification, NutritionPlan, PendingAction, PumpCheck,
+        MealLog, MobileAuthSession, Notification, NutritionPlan, PendingAction, PumpCheck,
         PumpCheckComment, PumpCheckLike, Supplement, TrainingPlan,
         UserBadge, UserChallengeProgress, UserQuestProgress, UserSession,
         UserWearableConnection, WaterLog,
@@ -99,7 +99,7 @@ def _user_child_models():
         WeeklyCheckIn, WeeklyLog, WeeklyWinner, WorkoutLog, WorkoutSession,
     )
     return (
-        UserSession, CognitoSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
+        UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
         TrainingPlan, MealLog, PendingAction, PumpCheckLike, PumpCheckComment,
         PumpCheck, Activity, Supplement, UserQuestProgress, WeeklyWinner,
         WaterLog, WorkoutLog, WorkoutSession, DailyActivity, CustomMeal,
