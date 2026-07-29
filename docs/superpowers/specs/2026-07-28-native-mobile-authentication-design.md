@@ -105,6 +105,7 @@ Add validated config values with these defaults:
 
 | Setting | Default | Purpose |
 |---|---:|---|
+| `MOBILE_AUTH_ENABLED` | 0 | Dark-launch gate for mobile config, readiness, and routes |
 | `MOBILE_AUTH_ACCESS_TTL_SECONDS` | 900 | Opaque access lifetime |
 | `MOBILE_AUTH_REFRESH_ABSOLUTE_DAYS` | 7 | Fixed family lifetime from login |
 | `MOBILE_AUTH_REFRESH_RETRY_GRACE_SECONDS` | 10 | Consumed refresh retry window |
@@ -124,7 +125,11 @@ current strict-expiry behavior. Invalid production configuration fails at
 startup instead of silently using unsafe values. The keyring has no default:
 every decoded root key must contain at least 256 bits, the active version must
 exist, versions must be unique and canonical, and secret values must never be
-logged or persisted.
+logged or persisted. When `MOBILE_AUTH_ENABLED=0`, startup does not parse or
+require any other mobile setting, does not run derivation-key database readiness,
+and does not register the `/api/v1` blueprint. When it is `1`, all mobile
+configuration remains mandatory and fails closed. No derivation key has a
+default value.
 
 ## Provider-Coverage Invariant
 
@@ -397,6 +402,9 @@ credential, or AWS mutation is allowed.
 - Optimistic conflict retry and exhaustion mapping
 - Derivation-key/configuration failure issues no untracked credentials
 - Startup rejects missing active, undersized, duplicate, or malformed keys
+- Disabled startup succeeds without a keyring and exposes no mobile routes
+- Enabled startup requires a valid keyring and exposes only the approved routes
+- Web routes, cookies, Flask-Login, and CSRF match in both gate states
 - Replay uses the recorded old key after the active version changes
 - Readiness rejects removal of a still-referenced key version
 - Grace replay hash mismatch fails temporarily without an alternative pair
@@ -418,6 +426,9 @@ the optimistic version path.
 - New provider token set encrypted and persisted atomically
 - Optional provider refresh-token replacement
 - Definitive provider failure revokes family
+- Definitive renewed-token validation or subject mismatch revokes the family
+- Renewed-token JWKS unavailability is retryable and preserves the family
+- Every revocation commit failure returns normalized retryable 503
 - Temporary provider failure rolls back token consumption
 - Concurrent same-parent calls perform at most one renewal under the coverage rule
 
@@ -495,9 +506,19 @@ manual flow may use fully mocked provider calls only.
 ## Rollout and Rollback
 
 The API is additive and versioned. Existing web routes are never redirected to
-it. The migration only creates new tables and indexes. Rollback unregisters or
-disables the mobile blueprint; existing web code continues unchanged and the
-new tables may remain. Clients are forced to log in again after rollback.
+it. `MOBILE_AUTH_ENABLED` defaults to `0`; disabled startup omits the mobile
+blueprint, derivation-key parsing, and mobile readiness query. The production
+rollout order is:
+
+1. Merge and deploy with mobile authentication disabled.
+2. Apply the additive migration.
+3. Provision the independent derivation keyring and active version.
+4. Verify database and derivation-key readiness.
+5. Enable mobile authentication in a controlled deployment.
+
+Rollback disables the mobile blueprint; existing web code continues unchanged
+and the additive tables may remain. Clients are forced to log in again after
+rollback. This design does not mutate production configuration.
 
 ## Explicit Non-Goals
 

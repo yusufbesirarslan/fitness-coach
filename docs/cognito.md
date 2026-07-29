@@ -353,14 +353,29 @@ material stays server-side and renewal is serialized against the mobile session
 family. Validate pool configuration with read-only `DescribeUserPool` and
 `DescribeUserPoolClient`; this checker never mutates Cognito.
 
-Production startup also performs a read-only database preflight for derivation
-key rotation. Every key version referenced by a still-replayable consumed parent
+`MOBILE_AUTH_ENABLED` defaults to `0`. Disabled startup does not register the
+`/api/v1` mobile blueprint, parse or require the derivation keyring, or query the
+mobile tables for readiness. Existing web authentication, cookies, and CSRF are
+unchanged. Enabled startup requires a valid independent keyring and active
+version and performs the read-only database preflight for derivation-key
+rotation. Every key version referenced by a still-replayable consumed parent
 must remain in `MOBILE_AUTH_DERIVATION_KEYRING` through its grace deadline plus
-`MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS`; startup fails closed if a
-referenced version was removed too early. Deploy a new key alongside old keys,
-make it active in a later deployment, and remove an old key only after this
-window has drained. `COGNITO_TOKEN_ENC_KEY` remains a separate mandatory Fernet
-key outside development/test and must never be reused as a derivation root.
+`MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS`; enabled startup fails
+closed if a referenced version was removed too early. There is no default key.
+
+Use this staged production rollout order:
+
+1. Merge and deploy with `MOBILE_AUTH_ENABLED=0`.
+2. Apply the additive mobile-auth migration.
+3. Provision the independent derivation keyring and active version.
+4. Verify database and derivation-key readiness.
+5. Enable mobile authentication in a controlled deployment.
+
+Deploy a new key alongside old keys, make it active in a later deployment, and
+remove an old key only after the retention window has drained.
+`COGNITO_TOKEN_ENC_KEY` remains a separate mandatory Fernet key outside
+development/test and must never be reused as a derivation root. This task does
+not change live production configuration.
 
 ## Sprint 3 — Markalı Auth E-postaları (Resend)
 

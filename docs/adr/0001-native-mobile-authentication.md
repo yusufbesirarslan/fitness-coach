@@ -41,6 +41,27 @@ GET  /api/v1/account/me
 
 The Flutter application is not modified in PR4.
 
+### Dark launch and rollout
+
+`MOBILE_AUTH_ENABLED` defaults to `0`. While disabled, AxisAI does not import or
+register the mobile blueprint, parse or require the mobile derivation keyring,
+or query the mobile tables for derivation-key readiness. Web routes,
+Flask-Login, browser cookies, CSRF, and existing Cognito web sessions remain
+unchanged. When the flag is `1`, the independent derivation keyring and active
+version are mandatory, mobile readiness fails closed, and the complete approved
+`/api/v1/` contract is registered without weaker defaults.
+
+Production rollout is deliberately staged:
+
+1. Merge and deploy the application with mobile authentication disabled.
+2. Apply the additive mobile-auth migration.
+3. Provision the independent derivation keyring and active version.
+4. Verify database and derivation-key readiness.
+5. Enable mobile authentication in a controlled deployment.
+
+There is no insecure default derivation key, and PR4 does not change live
+production configuration.
+
 ## Alternatives
 
 ### Direct Cognito access tokens
@@ -289,6 +310,16 @@ failure revokes the local family and returns `AUTH_REFRESH_FAILED`. A temporary
 Cognito/network failure preserves the family and old refresh credential state,
 rolls back the transaction, and returns retryable
 `AUTH_TEMPORARILY_UNAVAILABLE`.
+
+Renewed-token validation uses refresh-specific classification. Invalid
+signature, malformed token, wrong issuer, wrong audience/client, wrong
+`token_use`, expiry, missing required claims, and verified-subject mismatch are
+definitive: only the affected family is irreversibly revoked, Cognito ciphertext
+is cleared, all local credential rows are revoked, and `AUTH_REFRESH_FAILED` is
+returned after the revocation commit succeeds. `jwks_unavailable` and temporary
+Cognito/network failures remain retryable and preserve the parent and family.
+`/api/v1/auth/refresh` never exposes the login-only
+`AUTH_INVALID_CREDENTIALS` code.
 
 The renewed access JWT is fully validated before its `exp` is trusted. It must
 expire strictly after

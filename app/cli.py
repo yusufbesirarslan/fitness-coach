@@ -50,10 +50,15 @@ def weekly_reset_cmd():
     # süpürür — çünkü bu komutun varsaydığı host cron'u repo'da hiçbir yerde
     # kurulmuyordu (bir host yeniden kurulumunda sessizce kaybolabilirdi ve
     # tablo sınırsız büyümeye devam ederdi). Burada kalması zararsız: idempotent.
-    from app.services import mobile_auth, session_store
+    from flask import current_app
+    from app.services import session_store
     removed = session_store.purge_expired()
     click.echo(f"cognito-sessions purged: {removed}")
-    mobile_removed = mobile_auth.purge_expired()
+    if current_app.config["MOBILE_AUTH_ENABLED"]:
+        from app.services import mobile_auth
+        mobile_removed = mobile_auth.purge_expired()
+    else:
+        mobile_removed = 0
     click.echo(f"mobile-auth-sessions purged: {mobile_removed}")
 
 

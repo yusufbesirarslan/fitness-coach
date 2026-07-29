@@ -170,7 +170,8 @@ def create_app():
 
     register_cli(app)
     init_database(app)
-    if os.environ.get("FITX_SKIP_DB_INIT") != "1":
+    if (app.config["MOBILE_AUTH_ENABLED"]
+            and os.environ.get("FITX_SKIP_DB_INIT") != "1"):
         from app.services.mobile_auth import validate_derivation_key_readiness
         with app.app_context():
             validate_derivation_key_readiness()
@@ -202,9 +203,13 @@ def register_blueprints(app):
     from app.blueprints.wearables import bp as wearables_bp
     from app.blueprints.notifications import bp as notifications_bp
     from app.blueprints.challenges import bp as challenges_bp
-    from app.blueprints.mobile_api import bp as mobile_api_bp
-    for bp in (auth_bp, profile_bp, nutrition_bp, food_bp, menu_bp, training_bp,
-               tracking_bp, social_bp, gamification_bp, supplements_bp, coach_bp,
-               pages_bp, wearables_bp, notifications_bp, challenges_bp,
-               mobile_api_bp):
+    blueprints = [
+        auth_bp, profile_bp, nutrition_bp, food_bp, menu_bp, training_bp,
+        tracking_bp, social_bp, gamification_bp, supplements_bp, coach_bp,
+        pages_bp, wearables_bp, notifications_bp, challenges_bp,
+    ]
+    if app.config["MOBILE_AUTH_ENABLED"]:
+        from app.blueprints.mobile_api import bp as mobile_api_bp
+        blueprints.append(mobile_api_bp)
+    for bp in blueprints:
         app.register_blueprint(bp)

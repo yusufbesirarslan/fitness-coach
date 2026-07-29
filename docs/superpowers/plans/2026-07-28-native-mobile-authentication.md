@@ -26,6 +26,8 @@
 - Local logout commit is final; Cognito `RevokeToken` is post-commit best effort and never changes the empty `204`.
 - Cached JWKS matching `kid` remains usable on fetch failure; unknown `kid` plus fetch failure maps to retryable `AUTH_TEMPORARILY_UNAVAILABLE`.
 - Every non-204 mobile error has `{error:{code,message,retryable,request_id}}`; never expose raw Cognito messages.
+- `MOBILE_AUTH_ENABLED` defaults to `0`; disabled startup omits mobile routes, keyring parsing, and derivation-key database readiness while web auth remains unchanged.
+- Enabled startup requires the independent keyring and active version and fails closed; never provide a default derivation key.
 - Operational rollback unregisters the additive mobile blueprint and leaves new tables unused; do not require destructive schema rollback.
 - Run targeted tests after every task and the complete `python -m pytest` suite with at least a two-hour command timeout before completion.
 
@@ -41,6 +43,16 @@
 - Create `tests/test_mobile_credentials.py`, `tests/test_mobile_auth_models.py`, `tests/test_mobile_auth_migration.py`, `tests/test_mobile_auth_service.py`, `tests/test_mobile_auth_api.py`, and `tests/test_mobile_auth_pg.py`.
 - Modify Cognito/JWKS, CSRF, audit, migration-graph, env-example, drift-checker, and web-regression tests.
 - Modify `.env.example`, `docs/cognito.md`, and the read-only Cognito drift checker; add no deployment or live-mutation code.
+
+## Dark-Launch Rollout Amendment
+
+The production sequence is fixed: (1) merge/deploy with
+`MOBILE_AUTH_ENABLED=0`; (2) apply the additive migration; (3) provision the
+independent derivation keyring and active version; (4) verify database and
+derivation-key readiness; (5) enable mobile auth in a controlled deployment.
+The disabled application neither imports/registers the mobile blueprint nor
+parses mobile secrets. The enabled application preserves every route, error,
+rotation, revocation, and provider-coverage invariant in this plan.
 
 ---
 

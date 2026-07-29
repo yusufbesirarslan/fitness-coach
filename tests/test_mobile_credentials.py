@@ -134,6 +134,7 @@ def test_rate_limit_key_safely_hmacs_malformed_wire_values():
 
 
 def _valid_mobile_env(monkeypatch):
+    monkeypatch.setenv('MOBILE_AUTH_ENABLED', '1')
     monkeypatch.setenv('MOBILE_AUTH_DERIVATION_KEYRING', _keyring(v1=ROOT_WIRE))
     monkeypatch.setenv('MOBILE_AUTH_ACTIVE_DERIVATION_KEY_VERSION', 'v1')
 

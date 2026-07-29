@@ -45,6 +45,7 @@ os.environ['MOBILE_AUTH_DERIVATION_KEYRING'] = (
     json.dumps({'test-v1': 'a2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2s'})
 )
 os.environ['MOBILE_AUTH_ACTIVE_DERIVATION_KEY_VERSION'] = 'test-v1'
+os.environ['MOBILE_AUTH_ENABLED'] = '1'
 # no-op. email_service testleri _get_resend'i kendi içinde monkeypatch'ler.
 os.environ["RESEND_API_KEY"] = ""
 os.environ.pop("FLASK_DEBUG", None)

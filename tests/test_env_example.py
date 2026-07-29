@@ -120,6 +120,7 @@ def test_plan_v2_flag_is_documented_default_off():
 
 
 @pytest.mark.parametrize('setting', [
+    'MOBILE_AUTH_ENABLED=0',
     'MOBILE_AUTH_ACCESS_TTL_SECONDS=900',
     'MOBILE_AUTH_REFRESH_ABSOLUTE_DAYS=7',
     'MOBILE_AUTH_REFRESH_RETRY_GRACE_SECONDS=10',
@@ -136,6 +137,8 @@ def test_mobile_auth_defaults_are_documented(setting):
 def test_mobile_auth_derivation_key_settings_are_placeholders_not_secrets():
     assert '# MOBILE_AUTH_ACTIVE_DERIVATION_KEY_VERSION=v1' in ENV_EXAMPLE_SOURCE
     assert '# MOBILE_AUTH_DERIVATION_KEYRING={...}' in ENV_EXAMPLE_SOURCE
+    assert not _has_exact_commented_setting(
+        ENV_EXAMPLE_SOURCE, 'MOBILE_AUTH_ENABLED=1')
 
 
 def test_coach_page_v2_flag_is_documented_default_off():

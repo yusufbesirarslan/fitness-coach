@@ -158,6 +158,14 @@ def _integer_setting(name: str, default: int, *, positive: bool,
 
 
 def validate_mobile_auth_config(app) -> None:
+    enabled_value = os.environ.get('MOBILE_AUTH_ENABLED', '0')
+    if enabled_value not in {'0', '1'}:
+        raise CredentialConfigurationError('invalid MOBILE_AUTH_ENABLED')
+    enabled = enabled_value == '1'
+    app.config['MOBILE_AUTH_ENABLED'] = enabled
+    if not enabled:
+        return
+
     access_ttl = _integer_setting('MOBILE_AUTH_ACCESS_TTL_SECONDS', 900,
                                   positive=True, maximum=86400)
     absolute_days = _integer_setting('MOBILE_AUTH_REFRESH_ABSOLUTE_DAYS', 7,
