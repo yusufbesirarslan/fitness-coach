@@ -605,6 +605,27 @@ def test_orphan_recovery_links_existing_unbound_row(client, cognito_native, monk
     assert User.query.filter_by(username="bagsiz").one().cognito_sub == "sub-bagsiz"
 
 
+def test_orphan_recovery_rejects_same_username_with_different_verified_email(
+        client, cognito_native, monkeypatch):
+    from app.extensions import db
+    db.session.add(User(username="legacy-victim", email="victim@example.com"))
+    db.session.commit()
+
+    _verified_claims(monkeypatch, "sub-attacker", "attacker@example.com")
+    monkeypatch.setattr(cognito_service, "authenticate", lambda u, p: {
+        "tokens": {"access_token": "acc", "id_token": "id", "refresh_token": "ref",
+                   "expires_in": 3600},
+        "claims": {"sub": "sub-attacker"},
+    })
+
+    response = client.post(
+        "/login", json={"username": "legacy-victim", "password": "Sifre123"})
+    assert response.status_code == 401
+    victim = User.query.filter_by(username="legacy-victim").one()
+    assert victim.cognito_sub is None
+    assert victim.email == "victim@example.com"
+
+
 def test_orphan_recovery_never_rebinds_row_owned_by_another_sub(
         client, cognito_native, monkeypatch):
     """Yerel kayıt BAŞKA bir Cognito kimliğine bağlıysa ASLA yeniden bağlama —
@@ -642,6 +663,18 @@ def test_orphan_recovery_requires_verified_email(client, cognito_native, monkeyp
     resp = client.post("/login", json={"username": "suphe", "password": "Sifre123"})
     assert resp.status_code == 401
     assert User.query.filter_by(username="suphe").first() is None
+
+
+def test_web_login_preserves_temporary_jwks_unavailability(
+        client, cognito_native, monkeypatch):
+    monkeypatch.setattr(
+        cognito_service, "authenticate",
+        lambda *args: (_ for _ in ()).throw(CognitoServiceError(
+            "safe temporary identity failure", "JWKSUnavailable")))
+    response = client.post(
+        "/login", json={"username": "alice", "password": "Sifre123"})
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "15"
 
 
 # ---------------------------------------------------------------------------

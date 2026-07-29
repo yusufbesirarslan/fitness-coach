@@ -9,7 +9,7 @@ göç etmemiş sayfalar Türkçe kalır ve eksik çeviri kırılma değil görü
 import json
 import os
 
-from flask import g, session
+from flask import g, request, session
 
 DEFAULT_LOCALE = "tr"
 AVAILABLE_LOCALES = ("tr", "en")
@@ -105,6 +105,9 @@ def resolve_locale():
     2) Anonim → session['lang'] (kayıt-öncesi TR/EN seçimi burada saklanır)
     3) Varsayılan → 'tr'
     current_user importu döngü yaratmasın diye fonksiyon içinde yapılır."""
+    if request.blueprint == "mobile_api":
+        g.locale = DEFAULT_LOCALE
+        return
     loc = None
     try:
         from flask_login import current_user

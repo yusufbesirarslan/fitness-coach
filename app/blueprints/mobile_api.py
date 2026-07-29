@@ -19,6 +19,12 @@ from app.services.mobile_credentials import (
 bp = Blueprint("mobile_api", __name__, url_prefix="/api/v1")
 
 
+@bp.after_request
+def prevent_mobile_response_caching(response):
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 def mobile_error(code, message, status, retryable, retry_after=None):
     response = jsonify({"error": {
         "code": code,
@@ -54,7 +60,8 @@ def _json_object():
 
 def _login_username_key():
     data = _json_object() or {}
-    username = (data.get("username") or "").strip().lower()
+    submitted = data.get("username")
+    username = submitted.strip().lower() if isinstance(submitted, str) else ""
     return f"mobile-login-user:{username}" if username else get_remote_address()
 
 
@@ -88,8 +95,14 @@ def _run_issuance(operation, *args):
     deduct_when=lambda response: response.status_code in (401, 403))
 def login():
     data = _json_object()
-    username = (data.get("username") or "").strip() if data else ""
-    password = data.get("password") or "" if data else ""
+    submitted_username = data.get("username") if data else None
+    submitted_password = data.get("password") if data else None
+    if (not isinstance(submitted_username, str)
+            or not isinstance(submitted_password, str)):
+        return mobile_error(
+            "AUTH_INVALID_REQUEST", "Invalid request.", 400, False)
+    username = submitted_username.strip()
+    password = submitted_password
     if not username or not password:
         return mobile_error(
             "AUTH_INVALID_REQUEST", "Invalid request.", 400, False)
@@ -102,6 +115,9 @@ def login():
 
 
 @bp.post("/auth/refresh")
+@limiter.limit(
+    lambda: current_app.config["MOBILE_AUTH_REFRESH_RATELIMIT"],
+    key_func=get_remote_address)
 @limiter.limit(
     lambda: current_app.config["MOBILE_AUTH_REFRESH_RATELIMIT"],
     key_func=_refresh_credential_key)
@@ -129,16 +145,22 @@ def logout():
     refresh_credential = data.get("refresh_credential")
     if not isinstance(refresh_credential, str):
         refresh_credential = None
-    result = mobile_auth.prepare_logout(
-        access_credential, refresh_credential)
+    try:
+        result = mobile_auth.prepare_logout(
+            access_credential, refresh_credential)
+    except mobile_auth.MobileAuthFailure as exc:
+        return mobile_error(
+            exc.code, _safe_message(exc.code), exc.status, exc.retryable)
     mobile_auth.best_effort_provider_revoke(result)
     return "", 204
 
 
 @bp.errorhandler(429)
-def rate_limited(_error):
+def rate_limited(error):
+    retry_after = error.limit.limit.get_expiry()
     return mobile_error(
-        "AUTH_RATE_LIMITED", "Too many requests.", 429, True)
+        "AUTH_RATE_LIMITED", "Too many requests.", 429, True,
+        retry_after=retry_after)
 
 
 @bp.get("/account/me")

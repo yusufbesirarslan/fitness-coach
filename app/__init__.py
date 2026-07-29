@@ -170,6 +170,10 @@ def create_app():
 
     register_cli(app)
     init_database(app)
+    if os.environ.get("FITX_SKIP_DB_INIT") != "1":
+        from app.services.mobile_auth import validate_derivation_key_readiness
+        with app.app_context():
+            validate_derivation_key_readiness()
     return app
 
 

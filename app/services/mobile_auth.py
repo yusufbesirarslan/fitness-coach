@@ -1,22 +1,24 @@
 """Transactional opaque mobile-session lifecycle."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import hmac
 
 from flask import current_app
 
 from app.extensions import db
+from app.observability import current_request_id
 from app.models import (
     MobileAccessCredential, MobileAuthSession, MobileRefreshCredential, User,
 )
 from app.services import cognito_jwt, cognito_service, mobile_credentials, session_store
+from app.services.cognito_identity import reconcilable_local_user
 
 
 @dataclass(frozen=True)
 class IssuedSession:
-    access_credential: str
-    refresh_credential: str
+    access_credential: str = field(repr=False)
+    refresh_credential: str = field(repr=False)
     access_expires_at: datetime
     refresh_expires_at: datetime
 
@@ -31,7 +33,7 @@ class MobilePrincipal:
 @dataclass(frozen=True)
 class LogoutResult:
     family_id: str | None = None
-    provider_refresh_token: str | None = None
+    provider_refresh_token: str | None = field(default=None, repr=False)
 
 
 class MobileAuthFailure(Exception):
@@ -45,6 +47,12 @@ class MobileAuthFailure(Exception):
 
 def _failure(code, status, retryable, reason):
     return MobileAuthFailure(code, status, retryable, reason)
+
+
+def _security_event(event, family_id="-", category="auth", key_version="-"):
+    current_app.logger.warning(
+        "mobile_auth event=%s family=%s category=%s key_version=%s request_id=%s",
+        event, family_id, category, key_version, current_request_id())
 
 
 def calculate_access_expiry(now, family_absolute_expires_at):
@@ -85,11 +93,10 @@ def _resolve_user(claims, username):
     verified = claims.get("email_verified")
     if not email or (verified is not True and str(verified).lower() != "true"):
         return None
-    user = (User.query.filter_by(username=username).first()
-            or User.query.filter(db.func.lower(User.email) == email).first())
+    user, denial = reconcilable_local_user(username, email, sub)
+    if denial is not None:
+        return None
     if user is not None:
-        if user.cognito_sub and user.cognito_sub != sub:
-            return None
         user.cognito_sub = sub
         return user
     user = User(
@@ -108,6 +115,7 @@ def _validate_provider(token, expected_use):
                 "MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS"])
     except cognito_jwt.TokenValidationError as exc:
         if exc.reason == "jwks_unavailable":
+            _security_event("jwks_unavailable", category="provider")
             raise _failure(
                 "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
                 "jwks_unavailable") from exc
@@ -127,7 +135,8 @@ def login(username, password, now=None):
                 "AUTH_VERIFICATION_REQUIRED", 403, False,
                 "verification_required") from exc
         if exc.code in {"TooManyRequestsException", "InternalErrorException",
-                        "LimitExceededException", "ServiceUnavailableException", ""}:
+                        "LimitExceededException", "ServiceUnavailableException",
+                        "JWKSUnavailable", ""}:
             raise _failure(
                 "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
                 "provider_unavailable") from exc
@@ -160,6 +169,7 @@ def login(username, password, now=None):
                     "provider_subject_mismatch")
             provider_exp = _claim_expiry(access_claims)
         if provider_exp <= deadline:
+            _security_event("provider_coverage_insufficient", category="provider")
             raise _failure(
                 "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
                 "provider_coverage_insufficient")
@@ -229,17 +239,48 @@ def authenticate_access(raw_access, now=None):
     except mobile_credentials.InvalidMobileCredential as exc:
         raise _failure(
             "AUTH_SESSION_EXPIRED", 401, False, "access_invalid") from exc
-    row = MobileAccessCredential.query.filter_by(credential_hash=digest).first()
+    try:
+        row = MobileAccessCredential.query.filter_by(credential_hash=digest).first()
+        family = (db.session.get(MobileAuthSession, row.session_id)
+                  if row is not None else None)
+    except Exception as exc:
+        db.session.rollback()
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "storage_unavailable") from exc
     if row is None or not hmac.compare_digest(row.credential_hash, digest):
         raise _failure("AUTH_SESSION_EXPIRED", 401, False, "access_invalid")
-    family = db.session.get(MobileAuthSession, row.session_id)
-    if (family is None or row.revoked_at is not None or family.revoked_at is not None
-            or row.expires_at <= now or family.absolute_expires_at <= now):
+    if (family is None or row.revoked_at is not None
+            or family.revoked_at is not None):
         raise _failure("AUTH_SESSION_EXPIRED", 401, False, "access_expired")
-    user = db.session.get(User, family.user_id)
+    if family.absolute_expires_at <= now:
+        try:
+            _revoke_family(family, "absolute_expired", now)
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            raise _failure(
+                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+                "storage_unavailable") from exc
+        raise _failure("AUTH_SESSION_EXPIRED", 401, False, "access_expired")
+    if row.expires_at <= now:
+        raise _failure("AUTH_SESSION_EXPIRED", 401, False, "access_expired")
     try:
-        claims = _validate_provider(
-            session_store.decrypt_token(family.cognito_access_token), "access")
+        provider_access = session_store.decrypt_token(family.cognito_access_token)
+    except Exception as exc:
+        try:
+            _revoke_family(family, "provider_ciphertext_invalid", now)
+            db.session.commit()
+        except Exception as storage_exc:
+            db.session.rollback()
+            raise _failure(
+                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+                "storage_unavailable") from storage_exc
+        raise _failure(
+            "AUTH_SESSION_EXPIRED", 401, False,
+            "provider_ciphertext_invalid") from exc
+    try:
+        claims = _validate_provider(provider_access, "access")
     except MobileAuthFailure as exc:
         if exc.code == "AUTH_TEMPORARILY_UNAVAILABLE":
             raise
@@ -248,6 +289,13 @@ def authenticate_access(raw_access, now=None):
         raise _failure(
             "AUTH_SESSION_EXPIRED", 401, False,
             "provider_validation_failed") from exc
+    try:
+        user = db.session.get(User, family.user_id)
+    except Exception as exc:
+        db.session.rollback()
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "storage_unavailable") from exc
     sub = claims.get("sub")
     if (user is None or not family.cognito_sub or sub != family.cognito_sub
             or user.cognito_sub != family.cognito_sub):
@@ -264,6 +312,7 @@ def _refresh_failed(reason):
 
 def _replay_consumed_parent(parent, family, raw_refresh, now):
     if parent.grace_expires_at is None or now > parent.grace_expires_at:
+        _security_event("refresh_reuse", family.family_id, "credential")
         _revoke_family(family, "refresh_reuse", now)
         db.session.commit()
         raise _refresh_failed("refresh_reuse")
@@ -305,35 +354,57 @@ def refresh(raw_refresh, now=None):
     except mobile_credentials.InvalidMobileCredential as exc:
         raise _refresh_failed("refresh_invalid") from exc
 
-    located = MobileRefreshCredential.query.filter_by(
-        credential_hash=digest).first()
-    if located is None or not hmac.compare_digest(located.credential_hash, digest):
-        raise _refresh_failed("refresh_invalid")
-    family_id, parent_id = located.session_id, located.id
-    family = (MobileAuthSession.query.filter_by(id=family_id)
-              .with_for_update().one_or_none())
-    parent = (MobileRefreshCredential.query.filter_by(
-        id=parent_id, session_id=family_id).with_for_update().one_or_none())
+    try:
+        located = db.session.query(
+            MobileRefreshCredential.id,
+            MobileRefreshCredential.session_id,
+        ).filter_by(credential_hash=digest).first()
+        if located is None:
+            raise _refresh_failed("refresh_invalid")
+        parent_id, family_id = located
+        family = (MobileAuthSession.query.filter_by(id=family_id)
+                  .with_for_update().one_or_none())
+        parent = (MobileRefreshCredential.query.filter_by(
+            id=parent_id, session_id=family_id).with_for_update().one_or_none())
+    except MobileAuthFailure:
+        db.session.rollback()
+        raise
+    except Exception as exc:
+        db.session.rollback()
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "storage_unavailable") from exc
     if family is None or parent is None:
+        db.session.rollback()
+        raise _refresh_failed("refresh_invalid")
+    if not hmac.compare_digest(parent.credential_hash, digest):
         db.session.rollback()
         raise _refresh_failed("refresh_invalid")
     if family.revoked_at is not None or parent.revoked_at is not None:
         db.session.rollback()
         raise _refresh_failed("refresh_revoked")
+    if family.absolute_expires_at <= now or parent.expires_at <= now:
+        try:
+            _revoke_family(family, "refresh_expired", now)
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            raise _failure(
+                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+                "storage_unavailable") from exc
+        raise _refresh_failed("refresh_expired")
     if parent.consumed_at is not None:
         return _replay_consumed_parent(parent, family, raw_refresh, now)
-    if family.absolute_expires_at <= now or parent.expires_at <= now:
-        _revoke_family(family, "refresh_expired", now)
-        db.session.commit()
-        raise _refresh_failed("refresh_expired")
 
     expected_version = family.version
     child_generation = parent.generation + 1
     access_exp, deadline, trigger = _coverage(now, family.absolute_expires_at)
     try:
-        provider_access = session_store.decrypt_token(family.cognito_access_token)
-        access_claims = _validate_provider(provider_access, "access")
-        provider_exp = _claim_expiry(access_claims)
+        provider_exp = family.cognito_access_expires_at
+        if not isinstance(provider_exp, datetime):
+            raise _failure(
+                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+                "provider_expiry_unavailable")
         if provider_exp <= trigger:
             provider_refresh = session_store.decrypt_token(
                 family.cognito_refresh_token)
@@ -344,6 +415,9 @@ def refresh(raw_refresh, now=None):
                 raise _refresh_failed("provider_subject_mismatch")
             provider_exp = _claim_expiry(access_claims)
             if provider_exp <= deadline:
+                _security_event(
+                    "provider_coverage_insufficient", family.family_id,
+                    "provider")
                 raise _failure(
                     "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
                     "provider_coverage_insufficient")
@@ -352,10 +426,6 @@ def refresh(raw_refresh, now=None):
             family.cognito_refresh_token = session_store.encrypt_token(
                 tokens["refresh_token"])
             family.cognito_access_expires_at = provider_exp
-        elif provider_exp <= deadline:
-            raise _failure(
-                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
-                "provider_coverage_insufficient")
 
         key_version = current_app.config[
             "MOBILE_AUTH_ACTIVE_DERIVATION_KEY_VERSION"]
@@ -413,7 +483,10 @@ def refresh(raw_refresh, now=None):
             family = db.session.get(MobileAuthSession, family_id)
             _revoke_family(family, "provider_refresh_rejected", now)
             db.session.commit()
+            _security_event(
+                "provider_refresh_rejected", family.family_id, "provider")
             raise _refresh_failed("provider_refresh_rejected") from exc
+        _security_event("provider_renewal_failed", category="provider")
         raise _failure(
             "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
             "provider_renewal_failed") from exc
@@ -443,26 +516,33 @@ def _family_id_for_credential(access_credential=None, refresh_credential=None):
 def prepare_logout(access_credential=None, refresh_credential=None, now=None):
     """Commit irreversible local revocation and return provider work in memory."""
     now = now or datetime.utcnow()
-    family_id = _family_id_for_credential(access_credential, refresh_credential)
-    if family_id is None:
+    try:
+        family_id = _family_id_for_credential(
+            access_credential, refresh_credential)
+        if family_id is None:
+            db.session.rollback()
+            return LogoutResult()
+        family = (MobileAuthSession.query.filter_by(id=family_id)
+                  .with_for_update().one_or_none())
+        if family is None or family.revoked_at is not None:
+            db.session.rollback()
+            return LogoutResult()
+        provider_refresh = None
+        if family.cognito_refresh_token:
+            try:
+                provider_refresh = session_store.decrypt_token(
+                    family.cognito_refresh_token)
+            except Exception:
+                provider_refresh = None
+        public_family_id = family.family_id
+        _revoke_family(family, "logout", now)
+        db.session.commit()
+        return LogoutResult(public_family_id, provider_refresh)
+    except Exception as exc:
         db.session.rollback()
-        return LogoutResult()
-    family = (MobileAuthSession.query.filter_by(id=family_id)
-              .with_for_update().one_or_none())
-    if family is None or family.revoked_at is not None:
-        db.session.rollback()
-        return LogoutResult()
-    provider_refresh = None
-    if family.cognito_refresh_token:
-        try:
-            provider_refresh = session_store.decrypt_token(
-                family.cognito_refresh_token)
-        except Exception:
-            provider_refresh = None
-    public_family_id = family.family_id
-    _revoke_family(family, "logout", now)
-    db.session.commit()
-    return LogoutResult(public_family_id, provider_refresh)
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "storage_unavailable") from exc
 
 
 def best_effort_provider_revoke(result):
@@ -471,24 +551,52 @@ def best_effort_provider_revoke(result):
     try:
         cognito_service.revoke_token(result.provider_refresh_token)
     except Exception:
-        current_app.logger.warning(
-            "mobile_auth event=provider_revoke_failed family=%s category=provider",
-            result.family_id or "-")
+        _security_event(
+            "provider_revoke_failed", result.family_id or "-", "provider")
+
+
+def validate_derivation_key_readiness(now=None):
+    """Fail closed while a replayable parent references a removed key version."""
+    now = now or datetime.utcnow()
+    cutoff = now - timedelta(seconds=current_app.config[
+        "MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS"])
+    referenced = {
+        row[0] for row in db.session.query(
+            MobileRefreshCredential.replacement_key_version).join(
+                MobileAuthSession,
+                MobileAuthSession.id == MobileRefreshCredential.session_id,
+            ).filter(
+                MobileAuthSession.revoked_at.is_(None),
+                MobileRefreshCredential.consumed_at.is_not(None),
+                MobileRefreshCredential.grace_expires_at >= cutoff,
+                MobileRefreshCredential.replacement_key_version.is_not(None),
+            ).distinct().all()
+    }
+    missing = referenced.difference(current_app.config[
+        "MOBILE_AUTH_DERIVATION_KEYRING"])
+    if missing:
+        raise mobile_credentials.CredentialConfigurationError(
+            "missing retained mobile derivation key version: "
+            + ",".join(sorted(missing)))
 
 
 def purge_expired(now=None):
     """Revoke due families without deleting refresh-hash tombstones."""
     now = now or datetime.utcnow()
-    due_ids = [row[0] for row in db.session.query(MobileAuthSession.id).filter(
-        MobileAuthSession.absolute_expires_at <= now,
-        MobileAuthSession.revoked_at.is_(None)).limit(500).all()]
     removed = 0
-    for family_id in due_ids:
-        family = (MobileAuthSession.query.filter_by(id=family_id)
-                  .with_for_update().one_or_none())
-        if family is None or family.revoked_at is not None:
-            continue
-        _revoke_family(family, "absolute_expired", now)
-        db.session.commit()
-        removed += 1
+    while True:
+        due_ids = [row[0] for row in db.session.query(MobileAuthSession.id).filter(
+            MobileAuthSession.absolute_expires_at <= now,
+            MobileAuthSession.revoked_at.is_(None)).limit(500).all()]
+        if not due_ids:
+            break
+        for family_id in due_ids:
+            family = (MobileAuthSession.query.filter_by(id=family_id)
+                      .with_for_update().one_or_none())
+            if family is None or family.revoked_at is not None:
+                db.session.rollback()
+                continue
+            _revoke_family(family, "absolute_expired", now)
+            db.session.commit()
+            removed += 1
     return removed

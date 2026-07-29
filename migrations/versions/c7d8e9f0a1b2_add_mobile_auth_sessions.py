@@ -44,6 +44,54 @@ _REQUIRED_COLUMNS = {
     },
 }
 
+_COLUMN_SPECS = {
+    _SESSION: {
+        'id': (sa.Integer, None, False),
+        'family_id': (sa.String, 64, False),
+        'user_id': (sa.Integer, None, False),
+        'cognito_username': (sa.String, 80, False),
+        'cognito_sub': (sa.String, 64, False),
+        'cognito_access_token': (sa.Text, None, True),
+        'cognito_refresh_token': (sa.Text, None, True),
+        'cognito_access_expires_at': (sa.DateTime, None, True),
+        'absolute_expires_at': (sa.DateTime, None, False),
+        'revoked_at': (sa.DateTime, None, True),
+        'revoked_reason': (sa.String, 40, True),
+        'version': (sa.Integer, None, False),
+        'created_at': (sa.DateTime, None, False),
+        'last_used_at': (sa.DateTime, None, False),
+        'updated_at': (sa.DateTime, None, False),
+    },
+    _ACCESS: {
+        'id': (sa.Integer, None, False),
+        'session_id': (sa.Integer, None, False),
+        'credential_hash': (sa.String, 64, False),
+        'generation': (sa.Integer, None, False),
+        'issued_at': (sa.DateTime, None, False),
+        'expires_at': (sa.DateTime, None, False),
+        'revoked_at': (sa.DateTime, None, True),
+    },
+    _REFRESH: {
+        'id': (sa.Integer, None, False),
+        'session_id': (sa.Integer, None, False),
+        'credential_hash': (sa.String, 64, False),
+        'generation': (sa.Integer, None, False),
+        'parent_id': (sa.Integer, None, True),
+        'issued_at': (sa.DateTime, None, False),
+        'expires_at': (sa.DateTime, None, False),
+        'consumed_at': (sa.DateTime, None, True),
+        'grace_expires_at': (sa.DateTime, None, True),
+        'replacement_key_version': (sa.String, 32, True),
+        'replacement_generation': (sa.Integer, None, True),
+        'replacement_access_id': (sa.Integer, None, True),
+        'replacement_refresh_id': (sa.Integer, None, True),
+        'replacement_issued_at': (sa.DateTime, None, True),
+        'replacement_access_expires_at': (sa.DateTime, None, True),
+        'replacement_refresh_expires_at': (sa.DateTime, None, True),
+        'revoked_at': (sa.DateTime, None, True),
+    },
+}
+
 
 def _create_session_table():
     op.create_table(
@@ -165,29 +213,46 @@ def _existing_named_objects(inspector, table):
 
 
 def _ensure_indexes(inspector, table):
+    existing_items = {
+        item['name']: (tuple(item.get('column_names') or ()), bool(item.get('unique')))
+        for item in inspector.get_indexes(table) if item.get('name')
+    }
     existing = _existing_named_objects(inspector, table)
     for name, columns, unique in _INDEXES[table]:
+        if name in existing and name not in existing_items:
+            _incompatible(table, f'{name} exists but is not the required index')
+        if name in existing_items and existing_items[name] != (columns, unique):
+            _incompatible(table, f'index {name} has wrong columns or uniqueness')
         if name not in existing:
             op.create_index(name, table, list(columns), unique=unique)
 
 
 _REQUIRED_UNIQUES = {
-    _SESSION: set(),
-    _ACCESS: {'uq_mobile_access_session_generation'},
+    _SESSION: {},
+    _ACCESS: {'uq_mobile_access_session_generation': ('session_id', 'generation')},
     _REFRESH: {
-        'uq_mobile_refresh_session_generation',
-        'uq_mobile_refresh_parent',
+        'uq_mobile_refresh_session_generation': ('session_id', 'generation'),
+        'uq_mobile_refresh_parent': ('parent_id',),
     },
 }
 
 _REQUIRED_FOREIGN_KEYS = {
-    _SESSION: {(('user_id',), 'user')},
-    _ACCESS: {(('session_id',), _SESSION)},
+    _SESSION: {(('user_id',), 'user', ('id',), 'CASCADE')},
+    _ACCESS: {(('session_id',), _SESSION, ('id',), 'CASCADE')},
     _REFRESH: {
-        (('session_id',), _SESSION),
-        (('parent_id',), _REFRESH),
-        (('replacement_access_id',), _ACCESS),
-        (('replacement_refresh_id',), _REFRESH),
+        (('session_id',), _SESSION, ('id',), 'CASCADE'),
+        (('parent_id',), _REFRESH, ('id',), 'CASCADE'),
+        (('replacement_access_id',), _ACCESS, ('id',), 'SET NULL'),
+        (('replacement_refresh_id',), _REFRESH, ('id',), 'SET NULL'),
+    },
+}
+
+_REQUIRED_CHECKS = {
+    _SESSION: {'ck_mobile_auth_session_version'},
+    _ACCESS: {'ck_mobile_access_generation'},
+    _REFRESH: {
+        'ck_mobile_refresh_generation',
+        'ck_mobile_refresh_replacement_generation',
     },
 }
 
@@ -199,26 +264,53 @@ def _incompatible(table, detail):
 
 
 def _verify_existing(inspector, table):
-    columns = {item['name'] for item in inspector.get_columns(table)}
-    missing_columns = _REQUIRED_COLUMNS[table] - columns
+    columns = {item['name']: item for item in inspector.get_columns(table)}
+    missing_columns = _REQUIRED_COLUMNS[table] - set(columns)
     if missing_columns:
         _incompatible(table, f'missing columns {sorted(missing_columns)}')
+    for name, (type_class, length, nullable) in _COLUMN_SPECS[table].items():
+        actual = columns[name]
+        actual_type = actual['type']
+        if not isinstance(actual_type, type_class):
+            _incompatible(table, f'column {name} has wrong type {actual_type}')
+        if length is not None and getattr(actual_type, 'length', None) != length:
+            _incompatible(table, f'column {name} has wrong length')
+        if bool(actual.get('nullable')) != nullable:
+            _incompatible(table, f'column {name} has wrong nullability')
 
-    unique_names = {
-        item['name'] for item in inspector.get_unique_constraints(table)
-        if item.get('name')
+    primary_key = tuple(inspector.get_pk_constraint(table).get(
+        'constrained_columns') or ())
+    if primary_key != ('id',):
+        _incompatible(table, f'wrong primary key {primary_key}')
+
+    uniques = {
+        item['name']: tuple(item.get('column_names') or ())
+        for item in inspector.get_unique_constraints(table) if item.get('name')
     }
-    missing_uniques = _REQUIRED_UNIQUES[table] - unique_names
+    missing_uniques = set(_REQUIRED_UNIQUES[table]) - set(uniques)
     if missing_uniques:
         _incompatible(table, f'missing unique constraints {sorted(missing_uniques)}')
+    for name, expected_columns in _REQUIRED_UNIQUES[table].items():
+        if uniques[name] != expected_columns:
+            _incompatible(table, f'unique {name} has wrong columns')
 
     foreign_keys = {
-        (tuple(item['constrained_columns']), item['referred_table'])
+        (tuple(item['constrained_columns']), item['referred_table'],
+         tuple(item.get('referred_columns') or ()),
+         (item.get('options') or {}).get('ondelete'))
         for item in inspector.get_foreign_keys(table)
     }
     missing_foreign_keys = _REQUIRED_FOREIGN_KEYS[table] - foreign_keys
     if missing_foreign_keys:
         _incompatible(table, f'missing foreign keys {sorted(missing_foreign_keys)}')
+
+    checks = {
+        item['name'] for item in inspector.get_check_constraints(table)
+        if item.get('name')
+    }
+    missing_checks = _REQUIRED_CHECKS[table] - checks
+    if missing_checks:
+        _incompatible(table, f'missing checks {sorted(missing_checks)}')
 
 
 def upgrade():

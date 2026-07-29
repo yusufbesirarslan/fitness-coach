@@ -96,6 +96,21 @@ def test_authenticate_challenge_rejected(monkeypatch):
         cognito_service.authenticate("ali", "Sifre123")
 
 
+def test_authenticate_preserves_temporary_jwks_unavailability(monkeypatch):
+    fake = _FakeIdp(result={"AuthenticationResult": {
+        "AccessToken": "acc", "IdToken": "id", "RefreshToken": "ref"}})
+    _use_fake(monkeypatch, fake)
+    monkeypatch.setattr(cognito_service, "COGNITO_USER_POOL_ID", "pool-id")
+    from app.services import cognito_jwt
+    monkeypatch.setattr(
+        cognito_jwt, "validate_token",
+        lambda *args: (_ for _ in ()).throw(
+            cognito_jwt.TokenValidationError("jwks_unavailable")))
+    with pytest.raises(CognitoServiceError) as exc:
+        cognito_service.authenticate("ali", "Sifre123")
+    assert exc.value.code == "JWKSUnavailable"
+
+
 def test_refresh_tokens_returns_new_access(monkeypatch):
     fake = _FakeIdp(result={"AuthenticationResult": {"AccessToken": "newacc", "ExpiresIn": 3600}})
     _use_fake(monkeypatch, fake)

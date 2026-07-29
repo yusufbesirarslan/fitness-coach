@@ -353,6 +353,15 @@ material stays server-side and renewal is serialized against the mobile session
 family. Validate pool configuration with read-only `DescribeUserPool` and
 `DescribeUserPoolClient`; this checker never mutates Cognito.
 
+Production startup also performs a read-only database preflight for derivation
+key rotation. Every key version referenced by a still-replayable consumed parent
+must remain in `MOBILE_AUTH_DERIVATION_KEYRING` through its grace deadline plus
+`MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS`; startup fails closed if a
+referenced version was removed too early. Deploy a new key alongside old keys,
+make it active in a later deployment, and remove an old key only after this
+window has drained. `COGNITO_TOKEN_ENC_KEY` remains a separate mandatory Fernet
+key outside development/test and must never be reused as a derivation root.
+
 ## Sprint 3 — Markalı Auth E-postaları (Resend)
 
 Cognito'nun varsayılan düz e-postaları markalı AxisAI e-postalarıyla

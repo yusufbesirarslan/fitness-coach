@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import pytest
 from flask import Flask
 import sqlalchemy as sa
+from sqlalchemy import event
 
 from app.extensions import db
 from app.models import (
@@ -115,8 +116,21 @@ def test_same_parent_race_commits_exactly_one_child_and_one_provider_renewal(
     app, counter = pg_app
     with app.app_context():
         original = mobile_auth.login("pg-mobile-race", "correct", now=NOW)
+        engine = db.engine
 
     barrier = threading.Barrier(2)
+    pre_family_lock = threading.Barrier(2)
+
+    def force_both_scalar_lookups_before_family_lock(
+            conn, cursor, statement, parameters, context, executemany):
+        normalized = " ".join(statement.lower().split())
+        if ("from mobile_auth_session" in normalized
+                and "for update" in normalized):
+            pre_family_lock.wait(timeout=10)
+
+    event.listen(
+        engine, "before_cursor_execute",
+        force_both_scalar_lookups_before_family_lock)
 
     def rotate():
         with app.app_context():
@@ -125,9 +139,14 @@ def test_same_parent_race_commits_exactly_one_child_and_one_provider_renewal(
                 original.refresh_credential,
                 now=NOW + timedelta(seconds=850))
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = [executor.submit(rotate) for _ in range(2)]
-        results = [future.result(timeout=30) for future in futures]
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(rotate) for _ in range(2)]
+            results = [future.result(timeout=30) for future in futures]
+    finally:
+        event.remove(
+            engine, "before_cursor_execute",
+            force_both_scalar_lookups_before_family_lock)
 
     assert results[0] == results[1]
     with app.app_context():

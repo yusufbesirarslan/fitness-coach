@@ -292,6 +292,10 @@ def maybe_weekly_rollover():
 
 
 def update_streak():
+    # Mobile API identity is Bearer-only. Never load or mutate an ambient
+    # Flask-Login cookie user while serving /api/v1 requests.
+    if request.blueprint == "mobile_api":
+        return
     if not current_user.is_authenticated:
         return
     today = app_today()

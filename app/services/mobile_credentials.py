@@ -86,11 +86,16 @@ def _canonical_root_key(value: str) -> bytes:
 
 def credential_rate_limit_key(value: str, keyring: dict[str, bytes],
                               key_version: str) -> str:
-    raw = canonical_credential(value)
     try:
         root = keyring[key_version]
     except KeyError as exc:
         raise CredentialConfigurationError('derivation key version unavailable') from exc
+    try:
+        raw = canonical_credential(value)
+    except InvalidMobileCredential:
+        if not isinstance(value, str):
+            raise
+        raw = b'invalid-wire\0' + value.encode('utf-8', errors='surrogatepass')
     digest = hmac.new(
         root, _RATE_LIMIT_LABEL + b'\0' + raw, hashlib.sha256).hexdigest()
     return f'mobile-refresh:{digest[:32]}'

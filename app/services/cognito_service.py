@@ -311,6 +311,10 @@ def _decode_claims(id_token):
         claims = cognito_jwt.validate_token(id_token, "id")
     except cognito_jwt.TokenValidationError as exc:
         _logger.warning("[COGNITO-IDP] ID token doğrulaması başarısız: %s", exc.reason)
+        if exc.reason == "jwks_unavailable":
+            raise CognitoServiceError(
+                "Kimlik doğrulama geçici olarak kullanılamıyor.",
+                "JWKSUnavailable") from exc
         return {}
     sub = (claims.get("sub") or "").strip()
     if not sub:

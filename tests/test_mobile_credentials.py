@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import json
 import re
 
@@ -120,6 +121,16 @@ def test_rate_limit_key_is_stable_and_exposes_neither_credential_nor_hash():
     assert value.startswith('mobile-refresh:')
     assert PARENT_WIRE not in value
     assert mobile_credentials.hash_credential(PARENT_WIRE) not in value
+
+
+def test_rate_limit_key_safely_hmacs_malformed_wire_values():
+    raw = "not-a-canonical-mobile-credential"
+    value = mobile_credentials.credential_rate_limit_key(
+        raw, {'v1': ROOT_KEY}, 'v1')
+    assert value == mobile_credentials.credential_rate_limit_key(
+        raw, {'v1': ROOT_KEY}, 'v1')
+    assert raw not in value
+    assert hashlib.sha256(raw.encode()).hexdigest() not in value
 
 
 def _valid_mobile_env(monkeypatch):

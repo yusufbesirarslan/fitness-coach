@@ -87,6 +87,23 @@ def test_migration_fails_closed_on_incompatible_existing_table(tmp_path):
     engine.dispose()
 
 
+def test_migration_fails_closed_on_wrong_named_index_shape(tmp_path):
+    migration = _load_migration()
+    database_path = tmp_path / 'mobile-wrong-index.db'
+    engine = sa.create_engine(f'sqlite:///{database_path}')
+    _run(engine, migration.upgrade)
+    with engine.begin() as connection:
+        connection.execute(sa.text(
+            'DROP INDEX uq_mobile_access_credential_hash'))
+        connection.execute(sa.text(
+            'CREATE INDEX uq_mobile_access_credential_hash '
+            'ON mobile_access_credential (generation)'))
+
+    with pytest.raises(RuntimeError, match='wrong columns or uniqueness'):
+        _run(engine, migration.upgrade)
+    engine.dispose()
+
+
 def test_migration_downgrade_removes_only_additive_mobile_tables(tmp_path):
     migration = _load_migration()
     database_path = tmp_path / 'mobile-down.db'
