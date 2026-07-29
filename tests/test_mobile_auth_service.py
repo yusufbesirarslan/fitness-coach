@@ -98,3 +98,52 @@ def test_access_authentication_requires_all_ownership_links(
     with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
         mobile_auth.authenticate_access(issued.access_credential, now=NOW)
     assert exc.value.code == "AUTH_SESSION_EXPIRED"
+
+
+def test_first_refresh_creates_one_child_and_revokes_old_access(
+        app, mobile_user, provider):
+    from app.services import mobile_auth
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    rotated = mobile_auth.refresh(
+        original.refresh_credential, now=NOW + timedelta(seconds=1))
+    family = MobileAuthSession.query.one()
+    assert family.version == 2
+    assert MobileAccessCredential.query.filter_by(generation=1).count() == 1
+    assert MobileRefreshCredential.query.filter_by(generation=1).count() == 1
+    assert MobileRefreshCredential.query.filter_by(parent_id=1).count() == 1
+    assert MobileAccessCredential.query.filter_by(generation=0).one().revoked_at is not None
+    assert rotated.refresh_expires_at == family.absolute_expires_at
+
+
+def test_grace_replay_returns_identical_pair_without_writes(
+        app, mobile_user, provider):
+    from app.services import mobile_auth
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    first = mobile_auth.refresh(
+        original.refresh_credential, now=NOW + timedelta(seconds=1))
+    replay = mobile_auth.refresh(
+        original.refresh_credential, now=NOW + timedelta(seconds=3))
+    assert replay == first
+    assert MobileAuthSession.query.one().version == 2
+    assert MobileAccessCredential.query.count() == 2
+    assert MobileRefreshCredential.query.count() == 2
+
+
+def test_post_grace_reuse_revokes_only_affected_family(
+        app, mobile_user, provider):
+    from app.services import mobile_auth
+
+    first_family = mobile_auth.login("mobile-service", "correct", now=NOW)
+    mobile_auth.login("mobile-service", "correct", now=NOW)
+    mobile_auth.refresh(
+        first_family.refresh_credential, now=NOW + timedelta(seconds=1))
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.refresh(
+            first_family.refresh_credential, now=NOW + timedelta(seconds=12))
+    assert exc.value.code == "AUTH_REFRESH_FAILED"
+    families = MobileAuthSession.query.order_by(MobileAuthSession.id).all()
+    assert families[0].revoked_at is not None
+    assert families[0].cognito_access_token is None
+    assert families[1].revoked_at is None

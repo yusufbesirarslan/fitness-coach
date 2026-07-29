@@ -250,3 +250,167 @@ def authenticate_access(raw_access, now=None):
         raise _failure(
             "AUTH_SESSION_EXPIRED", 401, False, "ownership_mismatch")
     return MobilePrincipal(user, family, claims)
+
+
+def _refresh_failed(reason):
+    return _failure("AUTH_REFRESH_FAILED", 401, False, reason)
+
+
+def _replay_consumed_parent(parent, family, raw_refresh, now):
+    if parent.grace_expires_at is None or now > parent.grace_expires_at:
+        _revoke_family(family, "refresh_reuse", now)
+        db.session.commit()
+        raise _refresh_failed("refresh_reuse")
+    try:
+        pair = mobile_credentials.derive_replacement_pair(
+            raw_refresh, family.family_id, parent.generation,
+            parent.replacement_generation, parent.replacement_key_version,
+            current_app.config["MOBILE_AUTH_DERIVATION_KEYRING"])
+        access = db.session.get(
+            MobileAccessCredential, parent.replacement_access_id)
+        child = db.session.get(
+            MobileRefreshCredential, parent.replacement_refresh_id)
+        if (access is None or child is None
+                or not hmac.compare_digest(
+                    access.credential_hash,
+                    mobile_credentials.hash_credential(pair.access))
+                or not hmac.compare_digest(
+                    child.credential_hash,
+                    mobile_credentials.hash_credential(pair.refresh))):
+            raise ValueError("replacement hash mismatch")
+        issued = IssuedSession(
+            pair.access, pair.refresh,
+            parent.replacement_access_expires_at,
+            parent.replacement_refresh_expires_at)
+    except Exception as exc:
+        db.session.rollback()
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "refresh_replay_unavailable") from exc
+    db.session.rollback()
+    return issued
+
+
+def refresh(raw_refresh, now=None):
+    """Rotate one refresh generation or replay its one committed child."""
+    now = now or datetime.utcnow()
+    try:
+        digest = mobile_credentials.hash_credential(raw_refresh)
+    except mobile_credentials.InvalidMobileCredential as exc:
+        raise _refresh_failed("refresh_invalid") from exc
+
+    located = MobileRefreshCredential.query.filter_by(
+        credential_hash=digest).first()
+    if located is None or not hmac.compare_digest(located.credential_hash, digest):
+        raise _refresh_failed("refresh_invalid")
+    family_id, parent_id = located.session_id, located.id
+    family = (MobileAuthSession.query.filter_by(id=family_id)
+              .with_for_update().one_or_none())
+    parent = (MobileRefreshCredential.query.filter_by(
+        id=parent_id, session_id=family_id).with_for_update().one_or_none())
+    if family is None or parent is None:
+        db.session.rollback()
+        raise _refresh_failed("refresh_invalid")
+    if parent.consumed_at is not None:
+        return _replay_consumed_parent(parent, family, raw_refresh, now)
+    if (family.revoked_at is not None or parent.revoked_at is not None
+            or family.absolute_expires_at <= now or parent.expires_at <= now):
+        _revoke_family(family, "refresh_expired", now)
+        db.session.commit()
+        raise _refresh_failed("refresh_expired")
+
+    expected_version = family.version
+    child_generation = parent.generation + 1
+    access_exp, deadline, trigger = _coverage(now, family.absolute_expires_at)
+    try:
+        provider_access = session_store.decrypt_token(family.cognito_access_token)
+        access_claims = _validate_provider(provider_access, "access")
+        provider_exp = _claim_expiry(access_claims)
+        if provider_exp <= trigger:
+            provider_refresh = session_store.decrypt_token(
+                family.cognito_refresh_token)
+            tokens = cognito_service.refresh_tokens(
+                provider_refresh, family.cognito_username)
+            access_claims = _validate_provider(tokens["access_token"], "access")
+            if access_claims.get("sub") != family.cognito_sub:
+                raise _refresh_failed("provider_subject_mismatch")
+            provider_exp = _claim_expiry(access_claims)
+            if provider_exp <= deadline:
+                raise _failure(
+                    "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+                    "provider_coverage_insufficient")
+            family.cognito_access_token = session_store.encrypt_token(
+                tokens["access_token"])
+            family.cognito_refresh_token = session_store.encrypt_token(
+                tokens["refresh_token"])
+            family.cognito_access_expires_at = provider_exp
+        elif provider_exp <= deadline:
+            raise _failure(
+                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+                "provider_coverage_insufficient")
+
+        key_version = current_app.config[
+            "MOBILE_AUTH_ACTIVE_DERIVATION_KEY_VERSION"]
+        pair = mobile_credentials.derive_replacement_pair(
+            raw_refresh, family.family_id, parent.generation,
+            child_generation, key_version,
+            current_app.config["MOBILE_AUTH_DERIVATION_KEYRING"])
+        access = MobileAccessCredential(
+            session_id=family.id,
+            credential_hash=mobile_credentials.hash_credential(pair.access),
+            generation=child_generation, issued_at=now, expires_at=access_exp)
+        child = MobileRefreshCredential(
+            session_id=family.id,
+            credential_hash=mobile_credentials.hash_credential(pair.refresh),
+            generation=child_generation, parent_id=parent.id,
+            issued_at=now, expires_at=family.absolute_expires_at)
+        db.session.add_all([access, child])
+        db.session.flush()
+        parent.consumed_at = now
+        parent.grace_expires_at = now + timedelta(seconds=current_app.config[
+            "MOBILE_AUTH_REFRESH_RETRY_GRACE_SECONDS"])
+        parent.replacement_key_version = key_version
+        parent.replacement_generation = child_generation
+        parent.replacement_access_id = access.id
+        parent.replacement_refresh_id = child.id
+        parent.replacement_issued_at = now
+        parent.replacement_access_expires_at = access_exp
+        parent.replacement_refresh_expires_at = family.absolute_expires_at
+        (MobileAccessCredential.query.filter(
+            MobileAccessCredential.session_id == family.id,
+            MobileAccessCredential.generation < child_generation,
+            MobileAccessCredential.revoked_at.is_(None)).update(
+                {MobileAccessCredential.revoked_at: now},
+                synchronize_session=False))
+        updated = (MobileAuthSession.query.filter_by(
+            id=family.id, version=expected_version, revoked_at=None).update({
+                MobileAuthSession.version: expected_version + 1,
+                MobileAuthSession.last_used_at: now,
+                MobileAuthSession.updated_at: now,
+            }, synchronize_session=False))
+        if updated != 1:
+            raise _failure(
+                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+                "refresh_conflict")
+        db.session.commit()
+        return IssuedSession(
+            pair.access, pair.refresh, access_exp, family.absolute_expires_at)
+    except MobileAuthFailure:
+        db.session.rollback()
+        raise
+    except cognito_service.CognitoServiceError as exc:
+        db.session.rollback()
+        if exc.code in {"NotAuthorizedException", "UserNotFoundException",
+                        "RefreshFailed"}:
+            family = db.session.get(MobileAuthSession, family_id)
+            _revoke_family(family, "provider_refresh_rejected", now)
+            db.session.commit()
+            raise _refresh_failed("provider_refresh_rejected") from exc
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "provider_renewal_failed") from exc
+    except Exception as exc:
+        db.session.rollback()
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "refresh_transaction_failed") from exc
