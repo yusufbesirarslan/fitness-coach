@@ -2,10 +2,12 @@ import calendar
 from datetime import datetime, timedelta
 
 import pytest
+from types import SimpleNamespace
 
 from app.services import cognito_jwt, cognito_service, mobile_auth
 from app.models import MobileAuthSession
-from app.extensions import db
+from app.extensions import db, limiter
+from app.blueprints import mobile_api
 
 
 @pytest.fixture
@@ -72,6 +74,41 @@ def test_login_success_has_exact_opaque_session_contract(raw_client, monkeypatch
     assert "Set-Cookie" not in response.headers
 
 
+def test_mobile_login_fails_closed_when_distributed_throttle_is_unavailable(
+        raw_client, monkeypatch):
+    monkeypatch.setattr(mobile_api, "login_throttle_available", lambda: False)
+    monkeypatch.setattr(
+        mobile_auth, "login",
+        lambda *args: (_ for _ in ()).throw(AssertionError("must not call provider")))
+    response = raw_client.post("/api/v1/auth/login", json={
+        "username": "alice", "password": "correct"})
+    assert response.status_code == 503
+    assert response.json["error"]["code"] == "AUTH_TEMPORARILY_UNAVAILABLE"
+    assert response.json["error"]["retryable"] is True
+
+
+def test_mobile_refresh_limit_uses_mobile_error_envelope(raw_client, app):
+    app.config["MOBILE_AUTH_REFRESH_RATELIMIT"] = "1 per minute"
+    limiter.reset()
+    limiter.enabled = True
+    try:
+        request = {"refresh_credential": "not-a-valid-credential"}
+        first = raw_client.post(
+            "/api/v1/auth/refresh", json=request,
+            environ_base={"REMOTE_ADDR": "192.0.2.88"})
+        second = raw_client.post(
+            "/api/v1/auth/refresh", json=request,
+            environ_base={"REMOTE_ADDR": "192.0.2.88"})
+        assert first.status_code != 429
+        assert second.status_code == 429
+        assert second.json["error"]["code"] == "AUTH_RATE_LIMITED"
+        assert set(second.json["error"]) == {
+            "code", "message", "retryable", "request_id"}
+    finally:
+        limiter.enabled = False
+        limiter.reset()
+
+
 def test_strict_bearer_parser_rejects_cookie_and_malformed_headers(
         raw_client, monkeypatch):
     monkeypatch.setattr(
@@ -82,6 +119,23 @@ def test_strict_bearer_parser_rejects_cookie_and_malformed_headers(
         response = raw_client.get("/api/v1/account/me", headers=headers)
         assert response.status_code == 401
         assert response.json["error"]["code"] == "AUTH_SESSION_EXPIRED"
+
+
+def test_account_projection_is_exact_and_has_no_cors_headers(
+        raw_client, make_user, monkeypatch):
+    user = make_user("mobile-projection")
+    user.full_name = "Mobile User"
+    monkeypatch.setattr(
+        mobile_auth, "authenticate_access",
+        lambda value: mobile_auth.MobilePrincipal(
+            user, SimpleNamespace(id=1), {"sub": "safe-sub"}))
+    response = raw_client.get(
+        "/api/v1/account/me", headers={"Authorization": "Bearer opaque"})
+    assert response.status_code == 200
+    assert set(response.json["user"]) == {
+        "username", "display_name", "profile_complete", "preferred_language",
+        "goal", "goal_type"}
+    assert "Access-Control-Allow-Origin" not in response.headers
 
 
 def test_logout_commits_local_revoke_before_provider_call(
@@ -107,7 +161,7 @@ def test_logout_commits_local_revoke_before_provider_call(
 
 
 def test_remote_revoke_failure_still_returns_empty_204(
-        raw_client, mobile_user, provider, monkeypatch):
+        raw_client, mobile_user, provider, monkeypatch, caplog):
     issued = mobile_auth.login("mobile-service", "correct", now=datetime(2026, 7, 29, 10))
     from app.services import cognito_service
     monkeypatch.setattr(
@@ -118,3 +172,6 @@ def test_remote_revoke_failure_still_returns_empty_204(
         headers={"Authorization": f"Bearer {issued.access_credential}"})
     assert response.status_code == 204
     assert response.data == b""
+    assert "raw-provider-error" not in caplog.text
+    assert issued.access_credential not in caplog.text
+    assert issued.refresh_credential not in caplog.text

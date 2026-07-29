@@ -131,6 +131,22 @@ def test_grace_replay_returns_identical_pair_without_writes(
     assert MobileRefreshCredential.query.count() == 2
 
 
+def test_grace_replay_never_reissues_credentials_after_family_revocation(
+        app, mobile_user, provider):
+    from app.services import mobile_auth
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    mobile_auth.refresh(
+        original.refresh_credential, now=NOW + timedelta(seconds=1))
+    family = MobileAuthSession.query.one()
+    family.revoked_at = NOW + timedelta(seconds=2)
+    db.session.commit()
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.refresh(
+            original.refresh_credential, now=NOW + timedelta(seconds=3))
+    assert exc.value.code == "AUTH_REFRESH_FAILED"
+
+
 def test_post_grace_reuse_revokes_only_affected_family(
         app, mobile_user, provider):
     from app.services import mobile_auth

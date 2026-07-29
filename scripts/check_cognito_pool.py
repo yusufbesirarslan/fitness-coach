@@ -79,6 +79,30 @@ def evaluate(pool, client):
     return problems
 
 
+def mobile_posture(client):
+    """Return mobile-relevant app-client posture without returning secrets."""
+    units = client.get("TokenValidityUnits") or {}
+
+    def lifetime(field, unit_field, fallback):
+        value = client.get(field)
+        unit = units.get(unit_field, fallback)
+        return f"{value} {unit}" if value is not None else "not reported"
+
+    return {
+        "client_secret_present": bool(client.get("ClientSecret")),
+        "token_revocation_enabled": bool(client.get("EnableTokenRevocation")),
+        "access_token_lifetime": lifetime(
+            "AccessTokenValidity", "AccessToken", "hours"),
+        "id_token_lifetime": lifetime(
+            "IdTokenValidity", "IdToken", "hours"),
+        "refresh_token_lifetime": lifetime(
+            "RefreshTokenValidity", "RefreshToken", "days"),
+        "refresh_token_rotation": (
+            (client.get("RefreshTokenRotation") or {}).get("Feature")
+            or "not reported"),
+    }
+
+
 def _describe(pool_id, client_id):
     import boto3
     idp = boto3.client("cognito-idp")
@@ -113,11 +137,15 @@ def main(argv=None):
                   "cognito-idp:DescribeUserPool / DescribeUserPoolClient izni yok. "
                   "İzni ekleyip bu adımı bloklayıcı yapın (H4).")
             return 0
-        print(f"UYARI: havuz yapılandırması okunamadı ({type(exc).__name__}: {code or exc}) "
+        print(f"UYARI: havuz yapılandırması okunamadı "
+              f"({type(exc).__name__}: {code or 'unclassified'}) "
               "— deploy bloklanmadı.")
         return 0
 
     problems = evaluate(pool, client)
+    posture = mobile_posture(client)
+    print("Mobile app-client posture: " + ", ".join(
+        f"{name}={value}" for name, value in posture.items()))
     if not problems:
         print("Cognito havuz yapılandırması UYUMLU "
               "(PreventUserExistenceErrors, MFA, auth flows, parola politikası, "

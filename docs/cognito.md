@@ -331,6 +331,28 @@ unverified decode):
 - Add browser-level recovery accessibility and visual regression coverage in
   addition to the current template, route, and JavaScript contract tests.
 
+## Native mobile authentication boundary
+
+The native mobile client authenticates only through `/api/v1/`. Cognito remains
+the password authority, while AxisAI returns its own opaque access and rotating
+refresh credentials. The API never accepts Flask-Login cookies as a fallback.
+Mobile session families are isolated per device, have a non-sliding seven-day
+absolute lifetime, and persist only indexed SHA-256 credential hashes. Cognito
+token material is Fernet-encrypted at rest and is never returned to the device.
+
+`scripts/check_cognito_pool.py` reports the app client's mobile-relevant posture:
+whether a client secret is present, token revocation state, token lifetimes, and
+Cognito refresh-token rotation. The report deliberately emits only the boolean
+presence of the client secret, never its value. Unexpected provider failures are
+reported by exception type and stable AWS error code only; raw provider messages
+and payloads are excluded.
+
+The app-managed refresh credential is the rotating credential for this API.
+Cognito refresh-token rotation may remain disabled because Cognito token
+material stays server-side and renewal is serialized against the mobile session
+family. Validate pool configuration with read-only `DescribeUserPool` and
+`DescribeUserPoolClient`; this checker never mutates Cognito.
+
 ## Sprint 3 — Markalı Auth E-postaları (Resend)
 
 Cognito'nun varsayılan düz e-postaları markalı AxisAI e-postalarıyla

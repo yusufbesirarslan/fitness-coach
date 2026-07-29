@@ -2,13 +2,18 @@
 
 from datetime import timezone
 
-from flask import Blueprint, g, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
+from flask_limiter.util import get_remote_address
 
 from app.mobile_auth_middleware import (
     _safe_message, parse_bearer_header, require_mobile_auth,
 )
 from app.observability import current_request_id
+from app.extensions import limiter, login_throttle_available
 from app.services import mobile_auth
+from app.services.mobile_credentials import (
+    InvalidMobileCredential, credential_rate_limit_key,
+)
 
 
 bp = Blueprint("mobile_api", __name__, url_prefix="/api/v1")
@@ -47,6 +52,27 @@ def _json_object():
     return data if isinstance(data, dict) else None
 
 
+def _login_username_key():
+    data = _json_object() or {}
+    username = (data.get("username") or "").strip().lower()
+    return f"mobile-login-user:{username}" if username else get_remote_address()
+
+
+def _refresh_credential_key():
+    data = _json_object() or {}
+    credential = data.get("refresh_credential")
+    if not isinstance(credential, str):
+        return get_remote_address()
+    try:
+        return credential_rate_limit_key(
+            credential,
+            current_app.config["MOBILE_AUTH_DERIVATION_KEYRING"],
+            current_app.config["MOBILE_AUTH_ACTIVE_DERIVATION_KEY_VERSION"],
+        )
+    except (InvalidMobileCredential, KeyError):
+        return get_remote_address()
+
+
 def _run_issuance(operation, *args):
     try:
         return _session_response(operation(*args))
@@ -56,6 +82,10 @@ def _run_issuance(operation, *args):
 
 
 @bp.post("/auth/login")
+@limiter.limit("10 per minute; 50 per hour")
+@limiter.limit(
+    "15 per 15 minutes", key_func=_login_username_key,
+    deduct_when=lambda response: response.status_code in (401, 403))
 def login():
     data = _json_object()
     username = (data.get("username") or "").strip() if data else ""
@@ -63,10 +93,18 @@ def login():
     if not username or not password:
         return mobile_error(
             "AUTH_INVALID_REQUEST", "Invalid request.", 400, False)
+    if (current_app.config.get("LOGIN_FAIL_CLOSED", True)
+            and not login_throttle_available()):
+        return mobile_error(
+            "AUTH_TEMPORARILY_UNAVAILABLE",
+            "Authentication is temporarily unavailable.", 503, True)
     return _run_issuance(mobile_auth.login, username, password)
 
 
 @bp.post("/auth/refresh")
+@limiter.limit(
+    lambda: current_app.config["MOBILE_AUTH_REFRESH_RATELIMIT"],
+    key_func=_refresh_credential_key)
 def refresh():
     data = _json_object()
     credential = data.get("refresh_credential") if data else None
@@ -77,6 +115,9 @@ def refresh():
 
 
 @bp.post("/auth/logout")
+@limiter.limit(
+    lambda: current_app.config["MOBILE_AUTH_LOGOUT_RATELIMIT"],
+    key_func=get_remote_address)
 def logout():
     access_credential = None
     try:
@@ -92,6 +133,12 @@ def logout():
         access_credential, refresh_credential)
     mobile_auth.best_effort_provider_revoke(result)
     return "", 204
+
+
+@bp.errorhandler(429)
+def rate_limited(_error):
+    return mobile_error(
+        "AUTH_RATE_LIMITED", "Too many requests.", 429, True)
 
 
 @bp.get("/account/me")

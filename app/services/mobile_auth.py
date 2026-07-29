@@ -317,10 +317,12 @@ def refresh(raw_refresh, now=None):
     if family is None or parent is None:
         db.session.rollback()
         raise _refresh_failed("refresh_invalid")
+    if family.revoked_at is not None or parent.revoked_at is not None:
+        db.session.rollback()
+        raise _refresh_failed("refresh_revoked")
     if parent.consumed_at is not None:
         return _replay_consumed_parent(parent, family, raw_refresh, now)
-    if (family.revoked_at is not None or parent.revoked_at is not None
-            or family.absolute_expires_at <= now or parent.expires_at <= now):
+    if family.absolute_expires_at <= now or parent.expires_at <= now:
         _revoke_family(family, "refresh_expired", now)
         db.session.commit()
         raise _refresh_failed("refresh_expired")

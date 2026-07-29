@@ -58,6 +58,11 @@ jobs:
       S3_BUCKET_NAME: ""
       COGNITO_USER_POOL_ID: ""
       COGNITO_APP_CLIENT_ID: ""
+      # Synthetic CI-only derivation root. Mobile auth config is boot-validated
+      # even though this job never issues credentials or calls Cognito.
+      MOBILE_AUTH_ACTIVE_DERIVATION_KEY_VERSION: ci-v1
+      MOBILE_AUTH_DERIVATION_KEYRING: >-
+        {"ci-v1":"Y2ktb25seS1tb2JpbGUtZGVyaXZhdGlvbi1yb290LTAx"}
       FITX_SKIP_DB_INIT: "1"
     steps:
       - uses: actions/checkout@v7

@@ -51,3 +51,15 @@ def test_runtime_auth_does_not_use_password_hash():
 def test_no_duplicate_cognito_implementations():
     assert not Path("app/services/cognito.py").exists()
     assert not Path("app/services/cognito_idp.py").exists()
+
+
+def test_mobile_auth_boundary_has_no_cookie_or_flask_login_fallback():
+    sources = "\n".join(Path(path).read_text(encoding="utf-8") for path in (
+        "app/blueprints/mobile_api.py",
+        "app/mobile_auth_middleware.py",
+        "app/services/mobile_auth.py",
+    ))
+    assert "flask_login" not in sources
+    assert "current_user" not in sources
+    assert "session[" not in sources
+    assert "flask_cors" not in sources.lower()
