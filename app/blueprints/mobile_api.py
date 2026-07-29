@@ -9,7 +9,7 @@ from app.mobile_auth_middleware import (
     _safe_message, parse_bearer_header, require_mobile_auth,
 )
 from app.observability import current_request_id
-from app.extensions import limiter, login_throttle_available
+from app.extensions import db, limiter, login_throttle_available
 from app.services import mobile_auth
 from app.services.mobile_credentials import (
     InvalidMobileCredential, credential_rate_limit_key,
@@ -80,12 +80,15 @@ def _refresh_credential_key():
         return get_remote_address()
 
 
-def _run_issuance(operation, *args):
+def _run_issuance(operation, *args, refresh_context=False):
     try:
         return _session_response(operation(*args))
     except mobile_auth.MobileAuthFailure as exc:
+        code = exc.code
+        if refresh_context and code == "AUTH_INVALID_CREDENTIALS":
+            code = "AUTH_REFRESH_FAILED"
         return mobile_error(
-            exc.code, _safe_message(exc.code), exc.status, exc.retryable)
+            code, _safe_message(code), exc.status, exc.retryable)
 
 
 @bp.post("/auth/login")
@@ -127,7 +130,8 @@ def refresh():
     if not isinstance(credential, str) or not credential:
         return mobile_error(
             "AUTH_INVALID_REQUEST", "Invalid request.", 400, False)
-    return _run_issuance(mobile_auth.refresh, credential)
+    return _run_issuance(
+        mobile_auth.refresh, credential, refresh_context=True)
 
 
 @bp.post("/auth/logout")
@@ -161,6 +165,21 @@ def rate_limited(error):
     return mobile_error(
         "AUTH_RATE_LIMITED", "Too many requests.", 429, True,
         retry_after=retry_after)
+
+
+@bp.errorhandler(Exception)
+def normalize_unhandled_mobile_failure(error):
+    try:
+        db.session.rollback()
+    except Exception:
+        pass
+    current_app.logger.error(
+        "mobile_auth event=unhandled_failure category=storage "
+        "error_type=%s request_id=%s",
+        type(error).__name__, current_request_id())
+    return mobile_error(
+        "AUTH_TEMPORARILY_UNAVAILABLE",
+        "Authentication is temporarily unavailable.", 503, True)
 
 
 @bp.get("/account/me")

@@ -161,6 +161,23 @@ def test_mobile_refresh_has_stacked_per_ip_budget(raw_client, app):
         limiter.reset()
 
 
+def test_mobile_refresh_never_exposes_login_invalid_credentials_code(
+        raw_client, monkeypatch):
+    failure = mobile_auth.MobileAuthFailure(
+        "AUTH_INVALID_CREDENTIALS", 401, False, "provider_token_invalid")
+    monkeypatch.setattr(
+        mobile_auth, "refresh",
+        lambda *args: (_ for _ in ()).throw(failure))
+
+    response = raw_client.post(
+        "/api/v1/auth/refresh",
+        json={"refresh_credential": mobile_credentials.generate_credential()})
+
+    assert response.status_code == 401
+    assert response.json["error"]["code"] == "AUTH_REFRESH_FAILED"
+    assert response.json["error"]["retryable"] is False
+
+
 def test_strict_bearer_parser_rejects_cookie_and_malformed_headers(
         raw_client, monkeypatch):
     monkeypatch.setattr(
@@ -242,3 +259,52 @@ def test_logout_storage_failure_uses_normalized_retryable_error(
     assert response.status_code == 503
     assert response.json["error"]["code"] == "AUTH_TEMPORARILY_UNAVAILABLE"
     assert response.json["error"]["retryable"] is True
+
+
+@pytest.mark.parametrize(("method", "path", "payload", "service_name"), [
+    ("get", "/api/v1/account/me", None, "authenticate_access"),
+    ("post", "/api/v1/auth/refresh", {
+        "refresh_credential": "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg",
+    }, "refresh"),
+])
+def test_mobile_revocation_storage_failure_never_falls_through_to_html_500(
+        raw_client, monkeypatch, method, path, payload, service_name):
+    failure = mobile_auth.MobileAuthFailure(
+        "AUTH_TEMPORARILY_UNAVAILABLE", 503, True, "storage_unavailable")
+    monkeypatch.setattr(
+        mobile_auth, service_name,
+        lambda *args: (_ for _ in ()).throw(failure))
+    headers = ({"Authorization": "Bearer opaque"}
+               if service_name == "authenticate_access" else None)
+
+    response = getattr(raw_client, method)(path, json=payload, headers=headers)
+
+    assert response.status_code == 503
+    assert response.is_json
+    assert response.json["error"]["code"] == "AUTH_TEMPORARILY_UNAVAILABLE"
+    assert response.json["error"]["retryable"] is True
+    assert "request_id" in response.json["error"]
+
+
+@pytest.mark.parametrize(("method", "path", "payload", "service_name"), [
+    ("get", "/api/v1/account/me", None, "authenticate_access"),
+    ("post", "/api/v1/auth/refresh", {
+        "refresh_credential": "eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHh4eHg",
+    }, "refresh"),
+    ("post", "/api/v1/auth/logout", None, "prepare_logout"),
+])
+def test_raw_mobile_storage_failure_is_normalized_as_json_503(
+        raw_client, monkeypatch, method, path, payload, service_name):
+    monkeypatch.setattr(
+        mobile_auth, service_name,
+        lambda *args: (_ for _ in ()).throw(RuntimeError("raw database failure")))
+    headers = ({"Authorization": "Bearer opaque"}
+               if service_name == "authenticate_access" else None)
+
+    response = getattr(raw_client, method)(path, json=payload, headers=headers)
+
+    assert response.status_code == 503
+    assert response.is_json
+    assert response.json["error"]["code"] == "AUTH_TEMPORARILY_UNAVAILABLE"
+    assert response.json["error"]["retryable"] is True
+    assert "request_id" in response.json["error"]

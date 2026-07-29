@@ -299,6 +299,136 @@ def test_definitive_provider_refresh_rejection_revokes_family(
     assert family.cognito_refresh_token is None
 
 
+@pytest.mark.parametrize("reason", [
+    "invalid_signature",
+    "malformed",
+    "wrong_issuer",
+    "wrong_audience",
+    "wrong_use",
+    "expired",
+])
+def test_definitive_refreshed_token_validation_failure_revokes_family(
+        app, mobile_user, provider, monkeypatch, reason):
+    from app.services import mobile_auth
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    previous_validate = cognito_jwt.validate_token
+
+    def reject_refreshed_access(token, expected_use, leeway_seconds=0):
+        if token == "renewed-access":
+            raise cognito_jwt.TokenValidationError(reason)
+        return previous_validate(token, expected_use, leeway_seconds)
+
+    monkeypatch.setattr(cognito_jwt, "validate_token", reject_refreshed_access)
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.refresh(
+            original.refresh_credential, now=NOW + timedelta(minutes=50))
+
+    assert exc.value.code == "AUTH_REFRESH_FAILED"
+    assert exc.value.retryable is False
+    family = MobileAuthSession.query.one()
+    assert family.revoked_at is not None
+    assert family.cognito_access_token is None
+    assert family.cognito_refresh_token is None
+    assert all(row.revoked_at is not None for row in MobileAccessCredential.query.all())
+    assert all(row.revoked_at is not None for row in MobileRefreshCredential.query.all())
+
+
+def test_refreshed_token_missing_subject_revokes_family(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    previous_validate = cognito_jwt.validate_token
+
+    def omit_refreshed_subject(token, expected_use, leeway_seconds=0):
+        if token == "renewed-access":
+            return {"exp": calendar.timegm((NOW + timedelta(hours=2)).timetuple())}
+        return previous_validate(token, expected_use, leeway_seconds)
+
+    monkeypatch.setattr(cognito_jwt, "validate_token", omit_refreshed_subject)
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.refresh(
+            original.refresh_credential, now=NOW + timedelta(minutes=50))
+
+    assert exc.value.code == "AUTH_REFRESH_FAILED"
+    assert MobileAuthSession.query.one().revoked_at is not None
+
+
+def test_refreshed_token_subject_mismatch_revokes_family(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    previous_validate = cognito_jwt.validate_token
+
+    def mismatch_refreshed_subject(token, expected_use, leeway_seconds=0):
+        claims = previous_validate(token, expected_use, leeway_seconds)
+        if token == "renewed-access":
+            claims["sub"] = "different-sub"
+        return claims
+
+    monkeypatch.setattr(cognito_jwt, "validate_token", mismatch_refreshed_subject)
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.refresh(
+            original.refresh_credential, now=NOW + timedelta(minutes=50))
+
+    assert exc.value.code == "AUTH_REFRESH_FAILED"
+    assert MobileAuthSession.query.one().revoked_at is not None
+
+
+def test_refreshed_jwks_unavailability_preserves_family(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    previous_validate = cognito_jwt.validate_token
+
+    def reject_refreshed_jwks(token, expected_use, leeway_seconds=0):
+        if token == "renewed-access":
+            raise cognito_jwt.TokenValidationError("jwks_unavailable")
+        return previous_validate(token, expected_use, leeway_seconds)
+
+    monkeypatch.setattr(cognito_jwt, "validate_token", reject_refreshed_jwks)
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.refresh(
+            original.refresh_credential, now=NOW + timedelta(minutes=50))
+
+    assert exc.value.code == "AUTH_TEMPORARILY_UNAVAILABLE"
+    assert exc.value.retryable is True
+    family = MobileAuthSession.query.one()
+    assert family.revoked_at is None
+    assert family.cognito_access_token is not None
+    assert family.cognito_refresh_token is not None
+    assert MobileAccessCredential.query.one().revoked_at is None
+    assert MobileRefreshCredential.query.one().revoked_at is None
+
+
+def test_definitive_refreshed_token_revoke_commit_failure_is_retryable(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    previous_validate = cognito_jwt.validate_token
+
+    def reject_refreshed_access(token, expected_use, leeway_seconds=0):
+        if token == "renewed-access":
+            raise cognito_jwt.TokenValidationError("invalid_signature")
+        return previous_validate(token, expected_use, leeway_seconds)
+
+    monkeypatch.setattr(cognito_jwt, "validate_token", reject_refreshed_access)
+    monkeypatch.setattr(
+        db.session, "commit",
+        lambda: (_ for _ in ()).throw(RuntimeError("database unavailable")))
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.refresh(
+            original.refresh_credential, now=NOW + timedelta(minutes=50))
+
+    assert exc.value.code == "AUTH_TEMPORARILY_UNAVAILABLE"
+    assert exc.value.retryable is True
+
+
 def test_temporary_provider_refresh_failure_rolls_back_without_revocation(
         app, mobile_user, provider, monkeypatch):
     from app.services import mobile_auth
@@ -433,6 +563,150 @@ def test_absolute_expiry_revoke_commit_failure_is_typed_retryable(
         mobile_auth.authenticate_access(issued.access_credential, now=NOW)
     assert exc.value.code == "AUTH_TEMPORARILY_UNAVAILABLE"
     assert exc.value.retryable is True
+
+
+def _fail_revocation_commit(monkeypatch):
+    monkeypatch.setattr(
+        db.session, "commit",
+        lambda: (_ for _ in ()).throw(RuntimeError("database unavailable")))
+
+
+def _assert_retryable_storage_failure(exc):
+    assert exc.value.code == "AUTH_TEMPORARILY_UNAVAILABLE"
+    assert exc.value.status == 503
+    assert exc.value.retryable is True
+
+
+def test_access_provider_validation_revoke_commit_failure_is_typed_retryable(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    issued = mobile_auth.login("mobile-service", "correct", now=NOW)
+    monkeypatch.setattr(
+        cognito_jwt, "validate_token",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            cognito_jwt.TokenValidationError("invalid_signature")))
+    _fail_revocation_commit(monkeypatch)
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.authenticate_access(issued.access_credential, now=NOW)
+
+    _assert_retryable_storage_failure(exc)
+
+
+def test_ownership_mismatch_revoke_commit_failure_is_typed_retryable(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    issued = mobile_auth.login("mobile-service", "correct", now=NOW)
+    family = MobileAuthSession.query.one()
+    family.cognito_sub = "different-sub"
+    db.session.commit()
+    _fail_revocation_commit(monkeypatch)
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.authenticate_access(issued.access_credential, now=NOW)
+
+    _assert_retryable_storage_failure(exc)
+
+
+def test_refresh_expiry_revoke_commit_failure_is_typed_retryable(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    issued = mobile_auth.login("mobile-service", "correct", now=NOW)
+    family = MobileAuthSession.query.one()
+    family.absolute_expires_at = NOW
+    db.session.commit()
+    _fail_revocation_commit(monkeypatch)
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.refresh(issued.refresh_credential, now=NOW)
+
+    _assert_retryable_storage_failure(exc)
+
+
+def test_post_grace_reuse_revoke_commit_failure_is_typed_retryable(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    mobile_auth.refresh(
+        original.refresh_credential, now=NOW + timedelta(seconds=1))
+    _fail_revocation_commit(monkeypatch)
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.refresh(
+            original.refresh_credential, now=NOW + timedelta(seconds=12))
+
+    _assert_retryable_storage_failure(exc)
+
+
+def test_definitive_cognito_rejection_revoke_commit_failure_is_typed_retryable(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    monkeypatch.setattr(
+        cognito_service, "refresh_tokens",
+        lambda *args: (_ for _ in ()).throw(cognito_service.CognitoServiceError(
+            "raw provider rejection", "NotAuthorizedException")))
+    _fail_revocation_commit(monkeypatch)
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.refresh(
+            original.refresh_credential, now=NOW + timedelta(minutes=50))
+
+    _assert_retryable_storage_failure(exc)
+
+
+def test_definitive_cognito_rejection_reload_failure_is_typed_retryable(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    monkeypatch.setattr(
+        cognito_service, "refresh_tokens",
+        lambda *args: (_ for _ in ()).throw(cognito_service.CognitoServiceError(
+            "raw provider rejection", "NotAuthorizedException")))
+    monkeypatch.setattr(
+        db.session, "get",
+        lambda *args: (_ for _ in ()).throw(RuntimeError("database unavailable")))
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.refresh(
+            original.refresh_credential, now=NOW + timedelta(minutes=50))
+
+    _assert_retryable_storage_failure(exc)
+
+
+def test_logout_revoke_commit_failure_is_typed_retryable(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    issued = mobile_auth.login("mobile-service", "correct", now=NOW)
+    _fail_revocation_commit(monkeypatch)
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.prepare_logout(access_credential=issued.access_credential, now=NOW)
+
+    _assert_retryable_storage_failure(exc)
+
+
+def test_cleanup_revoke_commit_failure_is_typed_retryable(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    mobile_auth.login("mobile-service", "correct", now=NOW)
+    family = MobileAuthSession.query.one()
+    family.absolute_expires_at = NOW
+    db.session.commit()
+    _fail_revocation_commit(monkeypatch)
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as exc:
+        mobile_auth.purge_expired(now=NOW + timedelta(seconds=1))
+
+    _assert_retryable_storage_failure(exc)
 
 
 def test_expiry_cleanup_is_idempotent_and_clears_ciphertext(
