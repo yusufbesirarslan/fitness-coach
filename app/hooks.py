@@ -162,6 +162,8 @@ def _csrf_protect():
     """
     if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
         return
+    if request.blueprint == "mobile_api":
+        return
     expected_origin = _origin_tuple(request.host_url)
     if expected_origin is None:
         abort(403, description="CSRF validation failed.")
