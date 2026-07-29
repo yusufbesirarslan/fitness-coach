@@ -28,6 +28,12 @@ class MobilePrincipal:
     claims: dict
 
 
+@dataclass(frozen=True)
+class LogoutResult:
+    family_id: str | None = None
+    provider_refresh_token: str | None = None
+
+
 class MobileAuthFailure(Exception):
     def __init__(self, code, status, retryable, reason):
         super().__init__(reason)
@@ -414,3 +420,73 @@ def refresh(raw_refresh, now=None):
         raise _failure(
             "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
             "refresh_transaction_failed") from exc
+
+
+def _family_id_for_credential(access_credential=None, refresh_credential=None):
+    for raw, model in (
+            (access_credential, MobileAccessCredential),
+            (refresh_credential, MobileRefreshCredential)):
+        if not raw:
+            continue
+        try:
+            digest = mobile_credentials.hash_credential(raw)
+        except mobile_credentials.InvalidMobileCredential:
+            continue
+        row = model.query.filter_by(credential_hash=digest).first()
+        if row is not None and hmac.compare_digest(row.credential_hash, digest):
+            return row.session_id
+    return None
+
+
+def prepare_logout(access_credential=None, refresh_credential=None, now=None):
+    """Commit irreversible local revocation and return provider work in memory."""
+    now = now or datetime.utcnow()
+    family_id = _family_id_for_credential(access_credential, refresh_credential)
+    if family_id is None:
+        db.session.rollback()
+        return LogoutResult()
+    family = (MobileAuthSession.query.filter_by(id=family_id)
+              .with_for_update().one_or_none())
+    if family is None or family.revoked_at is not None:
+        db.session.rollback()
+        return LogoutResult()
+    provider_refresh = None
+    if family.cognito_refresh_token:
+        try:
+            provider_refresh = session_store.decrypt_token(
+                family.cognito_refresh_token)
+        except Exception:
+            provider_refresh = None
+    public_family_id = family.family_id
+    _revoke_family(family, "logout", now)
+    db.session.commit()
+    return LogoutResult(public_family_id, provider_refresh)
+
+
+def best_effort_provider_revoke(result):
+    if not result.provider_refresh_token:
+        return
+    try:
+        cognito_service.revoke_token(result.provider_refresh_token)
+    except Exception:
+        current_app.logger.warning(
+            "mobile_auth event=provider_revoke_failed family=%s category=provider",
+            result.family_id or "-")
+
+
+def purge_expired(now=None):
+    """Revoke due families without deleting refresh-hash tombstones."""
+    now = now or datetime.utcnow()
+    due_ids = [row[0] for row in db.session.query(MobileAuthSession.id).filter(
+        MobileAuthSession.absolute_expires_at <= now,
+        MobileAuthSession.revoked_at.is_(None)).limit(500).all()]
+    removed = 0
+    for family_id in due_ids:
+        family = (MobileAuthSession.query.filter_by(id=family_id)
+                  .with_for_update().one_or_none())
+        if family is None or family.revoked_at is not None:
+            continue
+        _revoke_family(family, "absolute_expired", now)
+        db.session.commit()
+        removed += 1
+    return removed

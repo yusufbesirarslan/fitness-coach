@@ -275,8 +275,9 @@ def maybe_weekly_rollover():
     if not _purge_throttle_passed(now):
         return
     try:
-        from app.services import session_store
+        from app.services import mobile_auth, session_store
         session_store.purge_expired()
+        mobile_auth.purge_expired(now)
     except Exception:
         db.session.rollback()
         current_app.logger.warning("[SESSION] Oturum süpürme başarısız", exc_info=True)

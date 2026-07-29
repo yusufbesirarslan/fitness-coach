@@ -1,6 +1,37 @@
-from datetime import datetime
+import calendar
+from datetime import datetime, timedelta
 
-from app.services import mobile_auth
+import pytest
+
+from app.services import cognito_jwt, cognito_service, mobile_auth
+from app.models import MobileAuthSession
+from app.extensions import db
+
+
+@pytest.fixture
+def mobile_user(app, make_user):
+    return make_user("mobile-service", cognito_sub="sub-mobile")
+
+
+@pytest.fixture
+def provider(monkeypatch):
+    access_exp = datetime(2026, 7, 29, 11)
+    monkeypatch.setattr(cognito_service, "authenticate", lambda username, password: {
+        "tokens": {
+            "access_token": "provider-access", "id_token": "provider-id",
+            "refresh_token": "provider-refresh", "expires_in": 3600,
+        }, "claims": {"sub": "sub-mobile"},
+    })
+
+    def validate(token, expected_use, leeway_seconds=0):
+        if expected_use == "id":
+            return {"sub": "sub-mobile", "email": "mobile@example.com",
+                    "email_verified": True}
+        return {"sub": "sub-mobile",
+                "exp": calendar.timegm(access_exp.timetuple())}
+
+    monkeypatch.setattr(cognito_jwt, "validate_token", validate)
+    return access_exp
 
 
 def test_mobile_error_envelope_contains_only_approved_fields(raw_client):
@@ -51,3 +82,39 @@ def test_strict_bearer_parser_rejects_cookie_and_malformed_headers(
         response = raw_client.get("/api/v1/account/me", headers=headers)
         assert response.status_code == 401
         assert response.json["error"]["code"] == "AUTH_SESSION_EXPIRED"
+
+
+def test_logout_commits_local_revoke_before_provider_call(
+        raw_client, mobile_user, provider, monkeypatch):
+    issued = mobile_auth.login("mobile-service", "correct", now=datetime(2026, 7, 29, 10))
+    family_id = MobileAuthSession.query.one().id
+    observed = {}
+
+    def revoke(token):
+        family = db.session.get(MobileAuthSession, family_id)
+        observed["revoked_at"] = family.revoked_at
+        observed["ciphertext"] = family.cognito_refresh_token
+
+    from app.services import cognito_service
+    monkeypatch.setattr(cognito_service, "revoke_token", revoke)
+    response = raw_client.post(
+        "/api/v1/auth/logout",
+        headers={"Authorization": f"Bearer {issued.access_credential}"})
+    assert response.status_code == 204
+    assert response.data == b""
+    assert observed["revoked_at"] is not None
+    assert observed["ciphertext"] is None
+
+
+def test_remote_revoke_failure_still_returns_empty_204(
+        raw_client, mobile_user, provider, monkeypatch):
+    issued = mobile_auth.login("mobile-service", "correct", now=datetime(2026, 7, 29, 10))
+    from app.services import cognito_service
+    monkeypatch.setattr(
+        cognito_service, "revoke_token",
+        lambda token: (_ for _ in ()).throw(RuntimeError("raw-provider-error")))
+    response = raw_client.post(
+        "/api/v1/auth/logout",
+        headers={"Authorization": f"Bearer {issued.access_credential}"})
+    assert response.status_code == 204
+    assert response.data == b""

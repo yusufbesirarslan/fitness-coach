@@ -78,8 +78,19 @@ def refresh():
 
 @bp.post("/auth/logout")
 def logout():
-    # Task 7 fills the local-first provider-revocation lifecycle. The public
-    # contract is already idempotent and empty.
+    access_credential = None
+    try:
+        access_credential = parse_bearer_header(
+            request.headers.get("Authorization"))
+    except ValueError:
+        pass
+    data = _json_object() or {}
+    refresh_credential = data.get("refresh_credential")
+    if not isinstance(refresh_credential, str):
+        refresh_credential = None
+    result = mobile_auth.prepare_logout(
+        access_credential, refresh_credential)
+    mobile_auth.best_effort_provider_revoke(result)
     return "", 204
 
 

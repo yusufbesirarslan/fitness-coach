@@ -147,3 +147,19 @@ def test_post_grace_reuse_revokes_only_affected_family(
     assert families[0].revoked_at is not None
     assert families[0].cognito_access_token is None
     assert families[1].revoked_at is None
+
+
+def test_expiry_cleanup_is_idempotent_and_clears_ciphertext(
+        app, mobile_user, provider):
+    from app.services import mobile_auth
+
+    mobile_auth.login("mobile-service", "correct", now=NOW)
+    family = MobileAuthSession.query.one()
+    family.absolute_expires_at = NOW
+    db.session.commit()
+    assert mobile_auth.purge_expired(now=NOW + timedelta(seconds=1)) == 1
+    assert mobile_auth.purge_expired(now=NOW + timedelta(seconds=2)) == 0
+    family = MobileAuthSession.query.one()
+    assert family.revoked_at is not None
+    assert family.cognito_access_token is None
+    assert family.cognito_refresh_token is None
