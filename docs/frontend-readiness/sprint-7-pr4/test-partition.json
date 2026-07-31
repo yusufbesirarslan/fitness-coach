@@ -2869,6 +2869,8 @@
                   "Four skipped nodes are opt-in PostgreSQL concurrency tests; exact node IDs remain in their partitions.",
                   "Three load-marked nodes are deselected by the repository default pytest configuration and recorded under collection.deselected_nodes.",
                   "Temporary argument files and raw logs live in the git-ignored SDD ledger; this artifact contains the complete selected node lists.",
-                  "Thirteen tests added during closeout were run as an exact disjoint addendum; the final 2,581-node recollection hash equals the combined partition union."
-              ]
+                  "Thirteen tests added during closeout were run as an exact disjoint addendum; the final 2,581-node recollection hash equals the combined partition union.",
+                  "SUPERSEDED FOR MERGE PURPOSES by test-partition-latest-main.json: PR4 was rebased onto origin/main 989d1e7d713f0e99e5b3a837d6b9549872f174e0 and the canonical manifest was regenerated (2,786 selected nodes, SHA-256 16b1be322d56edbef0e5a690c494e56a375ac6199bfc19b3b0aa49c8a1dec360). This artifact stays the unmodified record of the frozen-base 1e76e13 run."
+              ],
+    "superseded_by":  "test-partition-latest-main.json"
 }
