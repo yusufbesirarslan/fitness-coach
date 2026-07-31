@@ -569,3 +569,148 @@ Stable plan-day identifier linkage (session↔plan is a soft reference only; no
 set-level restoration — checkpoint is a lifecycle heartbeat, documented gap),
 workout UI/nav redesign, offline sync, `TrainingPlan` schema redesign, historical
 `WorkoutLog` backfill, automated destructive stale cleanup, Sprint 7 PR4.
+
+## Sprint 7 PR4 — consumer convergence
+
+PR4 keeps PR1 as the read authority, PR2 as the confirmed-completion authority,
+and PR3 as the persisted-session authority. It adds no schema, migration, new
+feature flag, or competing workout-state resolver.
+
+### Coherent Training bootstrap
+
+`GET /training/bootstrap` is authenticated and user-scoped. It returns one
+`Cache-Control: private, no-store` snapshot containing the shared `workout`
+envelope, the active `plan` envelope, and the server-selected `today_plan`. The
+route resolves the Istanbul date and session flag once, loads the newest
+`TrainingPlan` once, and passes that same plan object and date into strict
+canonical resolution. No-plan, no-session, active-session, completed, and
+unavailable remain distinct; absence never fabricates a resumable session.
+
+Every required authoritative read and public serialization must succeed before
+the response is emitted. A plan-read, strict session-read, canonical-resolution,
+malformed-plan, or bounded-serialization failure returns only the localized
+generic error and `code=bootstrap_unavailable` with HTTP 500. It returns no
+partial plan/workout combination, raw exception, database identifier, or
+sensitive payload.
+
+`today_plan` contains only `gun`, `tip`, `odak`, `sure_dk` (0..1440),
+`tahmini_kalori` (0..900), and at most 50 exercises. Exercise keys are `isim`,
+`set` (1..100), `tekrar`, `dinlenme`, and `not`, with bounded strings. The
+full-week projection is closed and key ordering deterministic; unknown/internal
+fields, IDs, other-day metadata, and generation metadata are dropped. Malformed
+schedules cannot be presented as rest or startable content. Both persisted
+shapes remain compatible: the legacy top-level seven-day list and wrapped
+`{ "program": [...] }`.
+
+### Consumer ownership matrix
+
+| Consumer | Canonical fields consumed | Canonical source | Refresh trigger | Mutation ownership | Failure/fallback | No independent reconstruction |
+|---|---|---|---|---|---|---|
+| Training | `completed`, complete `workout.state`, `session`, `plan`, `today_plan` | ordered `GET /training/bootstrap`; PR1/PR3 services behind it | initial load, focus/visibility return, mutation settlement | PR2 completion and PR3 session routes; client only orchestrates | fail-closed blocked UI; no cached truth | no completion, active session, workout date, current plan, or mutation success from local date, localStorage, DOM, or POST response |
+| Progress | additive `current.completed` and `current.state`; historical `days`/`totals` stay historical | shared canonical envelope in `/api/progress/workout` | each request/navigation refresh | none | historical aggregates may render; current state is not guessed | no current state from history rows |
+| Barcode | `completed_today` | one canonical resolver call in barcode service | each barcode context build | none | safe canonical unavailable/false; nutrition context remains | no marker/log completion inference or session/date/plan/mutation reconstruction |
+| Coach | compact canonical current-state projection plus unchanged history | one canonical resolver call in context builder | each context build/request | none | history remains; unavailable canonical state is honest | no current state or mutation success from history/prompt-local rules |
+
+Historical heatmap, streak, analytics, and detailed set/rep views retain only
+their historical or page-ephemeral ownership; they are not alternative
+current-workout authorities.
+
+### Refresh, mutation, and heartbeat lifecycle
+
+The Training controller uses a monotonic generation and `AbortController`: a
+superseded response cannot apply state or clear a newer request. Mutations are
+single-flight, their transport result is never painted as canonical success, and
+every settled mutation triggers a newly ordered authoritative bootstrap. Repeated
+initialization and destruction are idempotent; `pagehide`/navigation removes
+listeners, aborts controllers, and stops timers.
+
+For an active v2 session, exactly one visible-page 60-second heartbeat may exist.
+There is no heartbeat for v1, inactive, blocked, completed, logged-out, hidden, or
+torn-down state. Checkpoints are single-flight, failures cannot mutate canonical
+state, and terminal/authentication failures stop the timer and request at most
+one ordered refresh. There is no immediate retry loop or high-frequency polling;
+PR3's server-side 30-second coalescing remains unchanged.
+
+### Validation, limitations, rollout, and rollback
+
+PR4 now sits on the latest verified `origin/main`,
+`989d1e7d713f0e99e5b3a837d6b9549872f174e0` (native mobile authentication
+foundation, #191); branch `sprint7-pr4-workout-state-convergence`, isolated
+worktree `.worktrees/sprint7-pr4-workout-state-convergence`. Sprint 7 PR1/PR2/PR3
+remain merged ancestors. The original frozen base was
+`1e76e1374d1a8a61b4a44ceb1a763e9c2758061c`; the 2026-07-26 closeout deliberately
+did not rebase, and the 2026-07-31 integration performed that rebase explicitly
+over `cab7c27` (UIUX Sprint 1 PR3, #189) and `989d1e7`. Only
+`tests/test_training_ui.py` conflicted, and it was resolved to the exact union of
+both sides' tests; `app/blueprints/training.py`, `CLAUDE.md`, and
+`docs/handoff.md` auto-merged with both sides' content intact. Conflict detail,
+overlap analysis, and the full validation ledger are in docs/handoff.md
+"Sprint 7 PR4 — Workout-State Consumer Convergence".
+
+The regenerated canonical suite collected 2,786 selected nodes (2,789 unfiltered;
+three `load`-marked deselected), SHA-256
+`16b1be322d56edbef0e5a690c494e56a375ac6199bfc19b3b0aa49c8a1dec360`. Disjoint
+partitions executed every selected node: **2,782 passed, four opt-in PostgreSQL
+tests skipped, zero failures/errors, all exit 0**, with `union_equals_selected`,
+`disjoint`, and `executed_selected_equals_manifest` all true and zero
+missing/extra/duplicate assignments. Versus the frozen-base manifest the delta is
++206 / −1, fully attributed: 205 nodes from `origin/main`, one from the shared
+`tests/test_training_ui.py`, and the single removal is `origin/main`'s own rename
+of `tests/test_cognito_jwt.py::test_refetch_jwks_unavailable_reason_preserved`
+(PR4 never touches that file). Exact proof is in
+`docs/frontend-readiness/sprint-7-pr4/test-partition-latest-main.json`; the
+frozen-base run stays unmodified in `test-partition.json`.
+
+The four skipped nodes were then executed for real: a disposable loopback-bound
+`postgres:16` container (PostgreSQL 16.14, throwaway role/database, ephemeral
+credential, destroyed afterwards) ran
+`FITX_SKIP_DB_INIT=1 FITX_PG_CONCURRENCY_TEST=1 PG_TEST_DATABASE_URL=… python -m pytest -m pg_concurrency`
+→ **5 passed, 0 failed** (the fifth is `origin/main`'s
+`tests/test_mobile_auth_pg.py` race, which only collects once the gate variable is
+set). Focused post-integration backend coverage across 25 files — convergence,
+workout state/session/completion, training routes/UI/characterization, training
+history, progress current-versus-history separation, barcode, coach context,
+i18n, and every relevant feature flag — was **660 passed, 4 skipped, 0 failed**.
+`node --test tests/js/workout_state_client.test.js` passed 17/17. The migration
+graph keeps a single head, `c7d8e9f0a1b2` (main's); PR4 adds none.
+
+<!-- PR4_BROWSER_RESULT_START -->
+The hermetic WSL/Linux Playwright/Chromium matrix was re-run on the integrated
+tree (base `989d1e7`) and passed all **52/52 cells** (zero failed/blocked), exit
+0, runner duration 79.529 seconds. The 48 English/Turkish matrix cells covered
+no-plan, active, and completed states at 320x720, 360x800, 375x812, 390x844,
+430x932, 768x1024, 1024x900, and 1440x900. Special cases covered fail-closed
+bootstrap, ordered stale/mutation behavior, repeated refresh, direct
+load/refresh, back/forward, breakpoint transitions, Progress/barcode/Coach
+consistency, and real/controller heartbeat lifecycle.
+
+The artifact records zero page errors, zero hard failed requests, zero PR4
+console errors, and exactly one same-origin 5xx — the intended
+`bootstrap_unavailable` 500 in the fail-closed cell. Matrix traffic was 96
+bootstrap requests, exactly two per cell (initial load plus the audit identity
+probe), with no on-load mutations. The controller cell applied only the newest of
+two racing reads, ordered every mutation as `POST → GET /training/bootstrap`
+(`post_count == bootstrap_count == 2`), and reported heartbeat timers
+`1 → 1 → 0` with no listeners left behind; the real-session cell recorded one
+60,000 ms timer, one fired callback, one checkpoint request, and zero timers
+after teardown. Stale `localStorage` completion values were present but
+`hero_done` stayed false, so cached values never controlled rendering, and
+`authority_scan` confirmed no localStorage workout authority and no
+client-local-date authority.
+
+One recorded observation changed with the new base: `horizontal_overflow` is now
+false at 320/360/375 px (previously true in 12 cells) because `cab7c27` added
+`@media (max-width: 380px) { .wstats { 2 columns } }` to `static/training.css`.
+390 px still reports true, exactly as before the integration and by that fix's
+explicit design; it is a pre-existing `main` observation, not a PR4 regression.
+
+Exact requests, responses, errors, identities, timer counts, and interactions are
+in `docs/frontend-readiness/sprint-7-pr4/browser-validation.json`.
+<!-- PR4_BROWSER_RESULT_END -->
+
+Remaining legacy debt: set/rep/timer progress is page-memory-only; historical
+heatmap/streak/analytics retain their existing models; plan-to-log identifier
+linkage and durable per-set checkpoint data remain outside PR4. Roll out with the
+existing session flag OFF; enable it only after a clean non-production browser
+gate. Rollback is flag OFF for PR3 lifecycle calls plus a PR4 code revert; no
+database rollback is needed.

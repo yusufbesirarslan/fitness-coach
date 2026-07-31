@@ -18,6 +18,8 @@ from app.services.ai_gate import ai_concurrency_gate
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
 from app.services.gamification import complete_quest_for_user, get_level, level_title
 from app.services.training_history import fetch_workout_entries
+from app.services.workout_state import resolve_workout_state
+from app.services.workout_state.serialization import workout_state_payload
 from app.services.validators import _to_int
 from app.timeutil import app_date_of, app_today, display_dt, utc_day_bounds
 
@@ -614,9 +616,11 @@ def progress_workout():
         days.append({"date": dt, "sessions": 1 if dt in session_days else 0,
                      "volume": round(vol_by_day.get(dt, 0)),
                      "active_min": round(min_by_day.get(dt, 0))})
+    current = workout_state_payload(resolve_workout_state(current_user.id))
     return jsonify({"days": days, "totals": {
         "sessions": len(session_days),
-        "volume": round(sum(vol_by_day.values()))}})
+        "volume": round(sum(vol_by_day.values()))},
+        "current": current})
 
 
 @bp.route("/api/progress/heatmap")

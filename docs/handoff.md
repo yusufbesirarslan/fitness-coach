@@ -3553,3 +3553,210 @@ The branch was pushed and **PR #186** opened against `main` under explicit user 
 ### Deferred (record only — not implemented)
 
 Stable plan-day identifier linkage (session↔plan soft reference; no set-level restoration — checkpoint is a lifecycle heartbeat), workout UI/nav redesign, offline sync, `TrainingPlan` schema redesign, historical `WorkoutLog` backfill, `/api/progress/workout` + `renderHero` convergence, automated destructive stale cleanup, **Sprint 7 PR4**.
+
+## Sprint 7 PR4 — Workout-State Consumer Convergence
+
+- **Track:** Core Feature. **Sprint:** 7. **PR:** 4.
+- **Status:** **integrated onto latest `main` and re-validated (2026-07-31)**; independent post-integration diff review clean; PR #190 pushed with `--force-with-lease` (no merge / no deploy / no migration / no prod flag change).
+- **Branch:** `sprint7-pr4-workout-state-convergence`.
+- **Worktree:** `.worktrees/sprint7-pr4-workout-state-convergence`.
+- **Current base:** `989d1e7d713f0e99e5b3a837d6b9549872f174e0` (`origin/main`, "feat: add native mobile authentication foundation" #191). Sprint 7 PR1 `3d9c582` #183, PR2 `307b7b5` #184, PR3 `8c486de` #186 remain merged ancestors. **PR4-only diff range:** `989d1e7..HEAD`.
+- **Original frozen base:** `1e76e1374d1a8a61b4a44ceb1a763e9c2758061c` (#188). At the 2026-07-26 closeout the base was deliberately **not** rebased so the workout-state PR would not silently absorb unrelated UIUX work; the integration below performs that rebase explicitly, as its own reviewed step.
+
+### Latest-main integration (2026-07-31)
+
+**Integrated upstream.** `origin/main` had advanced two commits past the frozen
+base `1e76e13`: `cab7c27` ("flag-gated Plan v2 + Coach sayfası v2", UIUX Sprint 1
+PR3, #189) and `989d1e7` ("native mobile authentication foundation", #191).
+`989d1e7` is the latest verified `origin/main` and the **new PR4 base**. PR1/PR2/PR3
+are still ancestors (`git merge-base --is-ancestor` holds for `3d9c582`,
+`307b7b5`, `8c486de`).
+
+**Strategy: rebase, not merge.** `main` carries only single-parent squash merges
+and PR1–PR3 each rebased onto their base, so the governed strategy is
+`git rebase origin/main` with `rebase.autostash`. New PR4 commits:
+`472dd74` (implementation) → `3ab7291` (tests) → `6661005` (docs/closeout), plus
+this integration commit. A safety tag `pr4-pre-integration-backup` pins the
+pre-rebase head `f7f165b`.
+
+**Overlap inspected before rewriting history.** The upstream delta touches
+exactly four PR4 files and nothing else — no route, blueprint-prefix, template,
+locale-key, config, or migration collision. `989d1e7` registers
+`app/blueprints/mobile_api.py` under `/api/v1`, which cannot collide with PR4's
+`/training/bootstrap`; its new request hooks are all `before_request` and
+blueprint-scoped to `mobile_api`, so they never wrap PR4's mid-request
+`db.session.remove()` boundary, and `log_request` keeps its pre-existing
+try/except on the non-mobile path. `989d1e7` also adds migration
+`c7d8e9f0a1b2_add_mobile_auth_sessions`; PR4 adds no migration, so the graph
+keeps a single head.
+
+| Overlap file | Conflict | Resolution |
+|---|---|---|
+| `app/blueprints/training.py` | none (auto-merged) | Both preserved: UIUX's `build_plan_view`/`gather_plan_facts` imports and the flag-gated `plan.html` swap inside `/training`, and PR4's `/training/bootstrap` + `workout_state_payload` on `/workout/status`. PR4's contribution is byte-identical to the pre-rebase diff apart from line offsets. |
+| `CLAUDE.md` | none (auto-merged) | UIUX Sprint 1 PR3 bullet and the PR4 convergence bullet both retained; PR1 bullet keeps its "PR4'te bu kanonik yola CONVERGE edildi" update. |
+| `docs/handoff.md` | none (auto-merged) | Both handoff sections retained (UIUX PR3 at its own heading, Sprint 7 PR4 here). |
+| `tests/test_training_ui.py` | **one real conflict** | Both sides appended imports and tests. Resolved to the **exact union** of both test sets — nothing dropped, nothing invented — and the auto-merge's duplicated import block consolidated into one ordered block that reuses `STATIC` for `TRAINING_SCRIPT`/`WORKOUT_STATE_CLIENT` (provably identical paths). Final inventory is 5 nodes: `test_training_renders_hero_and_session`, `test_training_loads_external_assets`, `test_wstats_collapses_to_fewer_columns_on_narrow_screens` (UIUX), `test_training_abandon_label_follows_authenticated_locale` (PR4), `test_blocked_training_state_never_falls_back_to_the_setup_form` (PR4). |
+
+No conflict was resolved by taking one side wholesale, and no test, route, locale
+key, documentation section, or feature-flag behavior was removed.
+
+**Files touched by the integration itself:** `tests/test_training_ui.py`
+(conflict resolution), `docs/handoff.md`, `docs/WORKOUT_STATE.md`,
+`docs/frontend-readiness/sprint-7-pr4/browser-validation.json` (regenerated),
+`docs/frontend-readiness/sprint-7-pr4/test-partition.json` (supersession
+pointer only), and the new
+`docs/frontend-readiness/sprint-7-pr4/test-partition-latest-main.json`. Full PR4
+diff versus the new base: 25 files, 20,691 insertions, 118 deletions (24 files /
+17,244 insertions before this integration commit added the new evidence
+artifact). `.claude/settings.local.json` is a local Claude Code permission file,
+was never staged, and stays out of every commit.
+
+**Behavioural change inherited from the integration (recorded, not a PR4
+change).** UIUX PR3 added `@media (max-width: 380px) { .wstats { 2 columns } }`
+to `static/training.css`. The re-run browser matrix therefore records
+`horizontal_overflow: false` at 320/360/375 where the pre-integration artifact
+recorded `true` (12 cells). 390 px still records `true`, exactly as before the
+integration and by UIUX PR3's explicit design ("the 390px+ layout is
+unchanged") — a pre-existing main-side observation that PR4 neither causes nor
+regresses. `tests/test_training_ui.py::test_wstats_collapses_to_fewer_columns_on_narrow_screens`,
+preserved through the conflict resolution, guards the collapse.
+
+### Post-integration validation
+
+All commands were run in the integrated worktree at
+`6661005` + this docs commit, base `989d1e7`.
+
+- **Focused backend (25 files):** `python -m pytest -q -p no:cacheprovider -rs` over workout convergence/state/session/completion (+ the two `*_pg` gate files), training routes/UI/characterization, training history, progress API/UI, barcode (+ workflow), coach routes/tools/AI/adaptive context, i18n, Plan v2, Coach page v2, weekly-program flag/route, and mobile-auth feature gate → **660 passed, 4 skipped, 0 failed** in 147.00 s. The four skips are the opt-in `pg_concurrency` nodes, each printing its gate reason.
+- **JavaScript:** `node --test tests/js/workout_state_client.test.js` → **17/17 pass**. (`node --test tests/js/` cannot be used on Windows — Node treats the directory as a module and raises `MODULE_NOT_FOUND`.)
+- **Static / AST / structural:** `python -m compileall` over `app tests scripts fitx_mcp migrations starter.py` → exit 0; `node --check` over every file in `static/` → clean; `tests/test_dependency_boundaries.py tests/test_migration_graph.py tests/test_cascade_delete.py tests/test_env_example.py` → **64 passed**.
+- **Migration head:** single head `c7d8e9f0a1b2` (main's mobile-auth revision). PR4 adds no migration and no model change.
+- **Import/startup + feature-flag smoke:** hermetic double boot of `create_app()` with a purged module cache — `FITX_WORKOUT_SESSIONS_ENABLED` unset → config `False`, `=1` → `True`; `/training/bootstrap` is registered and auth-gated (302) in both; identical 141-route map in both.
+- **PostgreSQL 16 opt-in concurrency (PR2/PR3 harness):** a disposable `postgres:16` container (**PostgreSQL 16.14**) bound to `127.0.0.1:55434` only, throwaway role/database, ephemeral credential passed solely through `PG_TEST_DATABASE_URL`, container **and** credential destroyed afterwards. `FITX_SKIP_DB_INIT=1 FITX_PG_CONCURRENCY_TEST=1 PG_TEST_DATABASE_URL=… python -m pytest -m pg_concurrency -q -p no:cacheprovider -rs` → **5 passed, 0 failed** in 19.99 s. Five, not four: with the gate variable set, `origin/main`'s `tests/test_mobile_auth_pg.py` stops skipping at module level and collects one additional race test.
+- **Whitespace:** `git diff --check` and `git diff --cached --check` clean; no untracked files besides the intended new evidence artifact.
+
+### Reconciled repository suite
+
+The frozen-base run stays in
+`docs/frontend-readiness/sprint-7-pr4/test-partition.json`. The regenerated
+post-integration manifest, partitions, node lists, per-partition exit codes,
+skip reasons, and delta proof are in
+`docs/frontend-readiness/sprint-7-pr4/test-partition-latest-main.json`.
+
+- Default collection: **2,786 selected**; unfiltered: **2,789**; the three-node difference is `tests/load/test_ai_load.py` deselected by `pytest.ini addopts = -m "not load"` (node IDs recorded).
+- New canonical selected-node SHA-256: **`16b1be322d56edbef0e5a690c494e56a375ac6199bfc19b3b0aa49c8a1dec360`** (frozen-base hash was `40ab2557…` over 2,581 nodes).
+- Partitioning: MCP gate nodes isolated (they bind sockets); remainder split into 8 contiguous balanced partitions (7×348 + 1×347) executed from `@args` files.
+- Proof: `assigned 2786 / unique 2786`, `missing 0`, `extra 0`, `duplicate_assignment 0`, `union_equals_selected true`, `disjoint true`, `executed_selected_equals_manifest true`, `all_partition_exit_codes_zero true`.
+- Execution: **2,782 passed, 4 skipped, 0 failed, 0 errors**, every partition exit code 0. The four skips are the opt-in `pg_concurrency` nodes, all of which were executed separately against the real PostgreSQL 16.14 above.
+- **Nothing was lost.** Against the frozen-base manifest the delta is +206 / −1. All 206 additions are attributed: 205 to `origin/main` (mobile-auth `#191` test files, Plan v2 29, Coach page v2 24, `test_env_example` 12, and smaller cognito/auth/session additions) and 1 to `tests/test_training_ui.py::test_wstats_collapses_to_fewer_columns_on_narrow_screens`, whose file both sides touched. The single removal is `tests/test_cognito_jwt.py::test_refetch_jwks_unavailable_reason_preserved`, which **`origin/main` itself renamed** to `test_matching_kid_signature_failure_is_definitive` (and inverted, because `989d1e7` made a matching-kid signature failure definitive with no re-fetch). `git log 989d1e7..HEAD -- tests/test_cognito_jwt.py` is empty: PR4 never touches that file. No PR4 test was lost, renamed, or disabled by the rebase.
+
+### Contract and ownership result
+
+- `GET /training/bootstrap` is authenticated, current-user scoped, and `Cache-Control: private, no-store`. It resolves the Istanbul date, session flag, newest active plan, and workout/session snapshot coherently, passing the same plan/date into strict canonical resolution.
+- Bootstrap returns one public snapshot only after every required read and serialization succeeds. A plan read, malformed JSON/schedule, strict session read, canonical resolution, or bounds failure returns the generic localized `bootstrap_unavailable` envelope with HTTP 500—never partial contradictory data, raw exceptions, database identifiers, or sensitive content.
+- No-plan, no-session, active, completed, blocked, and unavailable states are represented honestly. A missing persisted session never fabricates resume.
+- The full-week and `today_plan` projections are closed and deterministic. `today_plan` is limited to `gun`, `tip`, `odak`, `sure_dk` 0..1440, `tahmini_kalori` 0..900, and at most 50 exercises; exercise keys and integer/text bounds are enforced, unknown/internal fields dropped. Legacy list and wrapped `{"program": [...]}` storage shapes remain supported.
+- The same pure workout envelope serializer feeds bootstrap, `/workout/status`, and Progress's additive `current`. Barcode and Coach resolve current state once through the same canonical service.
+- No migration, model, new feature flag, cache, offline queue, plan-schema redesign, or durable set/rep storage was added.
+
+### Consumer ownership matrix
+
+| Consumer | Canonical fields | Canonical source | Refresh trigger | Mutation owner | Failure/fallback | Independent authority removed |
+|---|---|---|---|---|---|---|
+| Training | `completed`, all `workout.state` fields, `session`, `plan`, `today_plan` | ordered `/training/bootstrap` backed by PR1/PR3 | load, focus/visibility return, every mutation settlement | PR2 completion and PR3 session endpoints | blocked fail-closed UI; no cached truth | no localStorage/local-date/DOM/POST inference of completion, active session, workout date, current plan, or success |
+| Progress | `current.completed`, `current.state`; historical `days`/`totals` unchanged | shared canonical envelope in `/api/progress/workout` | each request/navigation refresh | none | history may render; current state is never guessed | no reconstruction from historical rows |
+| Barcode | `completed_today` | one canonical resolver call per barcode context | context build | none | safe canonical unavailable/false; nutrition context unchanged | no marker/log inference of completion or other current state |
+| Coach | compact canonical current snapshot plus unchanged historical context | one canonical resolver call per Coach context | context build/request | none | history remains; unavailable is explicit | no history/prompt-local inference of completion, session, date, plan, or mutation success |
+
+Historical heatmap, streak, analytics, and detailed set/rep/timer behavior keep
+only historical or page-ephemeral ownership. Remaining legacy debt is explicit:
+set/rep progress is not durable; heatmap/streak/analytics keep their historical
+models; plan-to-log identifier linkage and set-level checkpoint restoration are
+outside PR4.
+
+### Refresh, mutation, and heartbeat lifecycle
+
+- A monotonic generation plus `AbortController` prevents stale/superseded reads from applying or clearing newer state.
+- Mutations are single-flight. A transport success never claims canonical success; every settled mutation orders an authoritative bootstrap refresh, including failures.
+- Initialization and teardown are idempotent. `pagehide`/navigation removes listeners, aborts controllers, and clears timers.
+- Exactly one visible-page 60-second heartbeat exists only for an active v2 session. V1, inactive, blocked, completed, hidden, logged-out, terminal-error, and torn-down states have none.
+- Checkpoint writes are single-flight. Failures never alter canonical workout state; terminal/auth-expiry responses stop the timer and trigger at most one ordered refresh. No unbounded retry or high-frequency polling was introduced. PR3's 30-second server coalescing remains unchanged.
+
+### Reconciled repository suite — frozen base (historical, 2026-07-26)
+
+Superseded by the post-integration run above; kept as the record of the
+`1e76e13` base. Commands and every node/result are machine-readable in
+`docs/frontend-readiness/sprint-7-pr4/test-partition.json`.
+
+- Final default collection: 2,581 selected; unfiltered collection: 2,584; three `load`-marked nodes deselected by repository configuration.
+- Selected-node SHA-256: `40ab2557b2c0bf51aa0f95d3a8e2bebd648e196e22823f762ef2e481bb37ce45`.
+- Deterministic disjoint union: all 2,581 selected nodes assigned once, no omissions, extras, or duplicates.
+- Execution: 2,577 passed, four opt-in PostgreSQL tests skipped, zero failed/errors, all partition exit codes 0. The 13-test closeout addendum is included in the final manifest and hash.
+
+### Hermetic browser validation
+
+<!-- PR4_BROWSER_RESULT_START -->
+Re-run on the integrated tree (base `989d1e7`), 2026-07-31, under WSL
+Ubuntu-24.04:
+`PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/axisai-sprint0-playwright $HOME/axisai-sprint0-audit-venv/bin/python -m scripts.frontend_audit.workout_pr4_matrix`.
+
+Result: **52/52 passed, zero failed/blocked, exit 0**; runner 79.529 seconds
+(`failed_ids` and `blocked_ids` both empty, every cell `verdict: pass`). The 48
+matrix cells covered no-plan, active, and completed Training states across
+English/Turkish and all eight required viewports. Four special cells covered
+bootstrap fail-closed behavior, browser navigation plus cross-consumer
+consistency, ordered stale/mutation/heartbeat controller behavior, and the real
+persisted-session heartbeat lifecycle.
+
+Observed totals: zero page errors, zero hard failed requests, zero PR4 console
+errors, and exactly one same-origin 5xx — the deliberate `bootstrap_unavailable`
+500 inside the `bootstrap-fail-closed` cell. The 115 recorded console errors are
+all hermetic-environment SRI blocks for `cdn.jsdelivr.net` marked/DOMPurify/
+Chart.js plus that intended 500; external network is disabled, so
+`external_blocked` also lists Google Fonts and GTM. Matrix cells made exactly
+two bootstrap calls each (96 of the 103 total: initial load plus the audit
+identity probe) with no on-load mutation. The controller cell recorded
+`stale.applied = ["new"]` (superseded read discarded), mutation order
+`POST → GET /training/bootstrap` twice with `post_count = bootstrap_count = 2`,
+and heartbeat timers `1 → 1 (repeat init) → 0 (inactive)` with one checkpoint and
+no remaining listeners. The real-session cell recorded one 60,000 ms timer, one
+fired callback, one checkpoint request, and zero timers after teardown. Stale
+`localStorage` (`fitx_workout_state = {"completed":true}` and
+`fitx_workout_completed_2026-07-20 = true`) was present yet `hero_done` stayed
+`false`, so cached values never controlled rendering; `authority_scan` reports
+`local_storage_workout_authority_absent` and
+`client_local_date_authority_absent` both true.
+
+Machine-readable evidence:
+`docs/frontend-readiness/sprint-7-pr4/browser-validation.json`.
+<!-- PR4_BROWSER_RESULT_END -->
+
+The approved harness configures the hermetic environment before importing
+`app.*`, uses isolated SQLite and non-production integration settings, disables
+external network access, and runs Chromium on Linux. Required locales are
+English/Turkish; required viewports are 320x720, 360x800, 375x812, 390x844,
+430x932, 768x1024, 1024x900, and 1440x900. Evidence records requests, same-origin
+4xx/5xx, failed requests, console/page errors, canonical identities, duplicate
+guards, timer counts, and interactions.
+
+### Rollout, rollback, and authorization
+
+Roll out with the existing `FITX_WORKOUT_SESSIONS_ENABLED` flag OFF; enable it
+only in controlled non-production validation after all closeout gates pass.
+Rollback is flag OFF for PR3 lifecycle calls and a PR4 code revert. No database
+rollback is required. `UIUX_PLAN_V2_ENABLED` and `UIUX_COACH_PAGE_V2_ENABLED`
+(inherited from `cab7c27`) also stay default OFF; PR4 does not read or change
+them.
+
+Authorization after the latest-main integration extends to the branch and its
+pull request only: the branch is pushed with `--force-with-lease` (never an
+unconditional force push) and PR #190 is kept up to date. Merging still requires
+separate human authorization after review. Do not deploy, run migrations, access
+production data, or change production feature flags.
+
+### Remaining limitations (unchanged by the integration)
+
+Set/rep/timer progress is page-memory-only; historical heatmap, streak, and
+analytics keep their existing models; plan-to-log identifier linkage and durable
+per-set checkpoint restoration remain outside PR4. `/training` still records
+`horizontal_overflow: true` at 390 px in the browser artifact — pre-existing on
+`main` and explicitly out of UIUX PR3's scope. Sprint 8–12 scope is untouched.

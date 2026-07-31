@@ -7,8 +7,7 @@ var _EN = (window.LOCALE === 'en');
 /* Sakatlık: görünen etiket EN, değer (backend'e giden) TR kalır. */
 var INJURY_LABELS_EN = { 'Hiçbiri':'None','Menisküs':'Meniscus','Diz':'Knee','Kifoz':'Kyphosis','Skolyoz':'Scoliosis','Bel fıtığı':'Herniated disc','Bel ağrısı':'Lower-back pain','Omuz':'Shoulder','Bilek':'Wrist','Dirsek':'Elbow','Ayak bileği':'Ankle','Kalça':'Hip','Boyun':'Neck' };
 function injuryLabel(v) { return (_EN && INJURY_LABELS_EN[v]) ? INJURY_LABELS_EN[v] : v; }
-/* Gün adı: backend plan değeri (gun) TR KALIR — getTodayTurkish() ile eşleşir ve
-   plan kanonik anahtarıdır; yalnızca GÖRÜNEN ad EN'e çevrilir. */
+/* Gün adı backend'den gelir; yalnızca görünen etiket EN'e çevrilir. */
 var DAY_LABELS_EN = { 'Pazartesi':'Monday','Salı':'Tuesday','Çarşamba':'Wednesday','Perşembe':'Thursday','Cuma':'Friday','Cumartesi':'Saturday','Pazar':'Sunday' };
 function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; }
     // ── OPTIONS DATA ──
@@ -219,22 +218,24 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
         } catch(e) {}
     }
 
-    // ── DAY DETECTION ──
-    function getTodayTurkish() {
-        const days = ['Pazar','Pazartesi','Salı','Çarşamba','Perşembe','Cuma','Cumartesi'];
-        return days[new Date().getDay()];
-    }
-
     // ── ACTIVE PLAN ──
     let activePlan = null;
+    let activeTodayPlan = null;
+    let currentWorkoutState = null;
+    let workoutStateClient = null;
 
-    async function loadActivePlan() {
-        try {
-            const res  = await fetch("/training-plan/active");
-            const data = await res.json();
-            if (!data.exists) return;
+    function applyTrainingSnapshot(snapshot) {
+            const data = snapshot.plan || { exists: false };
+            currentWorkoutState = snapshot.workout && snapshot.workout.state;
+            activeTodayPlan = snapshot.today_plan || null;
+            if (!data.exists) {
+                activePlan = null;
+                document.getElementById('active-plan-view').style.display = 'none';
+                document.getElementById('setup-form').style.display = 'block';
+                return;
+            }
 
-            activePlan = data.plan; // array of day objects
+            activePlan = Array.isArray(data.plan) ? data.plan : data.plan.program;
 
             // Score color & label
             const score = parseFloat(data.score) || 0;
@@ -247,14 +248,26 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
                 __t('training.created_on', { date: data.created_at, label: scoreLabel });
 
             // Today's Workout Hero + this-week strip + weekly stats
-            renderHero(activePlan, false);
+            renderHero(activePlan, !!(snapshot.workout && snapshot.workout.completed));
             renderWeekStrip(activePlan);
             renderWeekStats(activePlan);
 
             // Switch views
             document.getElementById('active-plan-view').style.display = 'block';
             document.getElementById('setup-form').style.display        = 'none';
-        } catch(e) {}
+    }
+
+    function renderTrainingBlocked() {
+        activePlan = null;
+        currentWorkoutState = null;
+        activeTodayPlan = null;
+        const activePlanView = document.getElementById('active-plan-view');
+        if (activePlanView) activePlanView.style.display = 'block';
+        const setupForm = document.getElementById('setup-form');
+        if (setupForm) setupForm.style.display = 'none';
+        const cta = document.getElementById('wh-cta');
+        if (cta) cta.innerHTML = '<span class="badge badge-warning">' +
+            (_EN ? 'Workout state unavailable' : 'Antrenman durumu alınamadı') + '</span>';
     }
 
     // Plan text (exercise names, notes, day focus) originates from the AI model;
@@ -266,8 +279,7 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
     }
 
     function todayDay() {
-        const name = getTodayTurkish();
-        return (activePlan || []).find(g => g.gun === name) || null;
+        return activeTodayPlan;
     }
 
     // Progress ring: r=48 (matches the shared .ring-* markup in components.css /
@@ -289,14 +301,23 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
     function renderHero(program, completed) {
         const hero = document.getElementById('workout-hero');
         const day = todayDay();
-        const isRest = !day || day.tip === 'dinlenme';
+        const isRest = currentWorkoutState &&
+            currentWorkoutState.schedule_state === 'rest_day';
+        const blocked = !currentWorkoutState || currentWorkoutState.action === 'blocked';
         hero.classList.toggle('is-rest', isRest);
         hero.classList.toggle('is-done', !!completed);
         const focusEl   = document.getElementById('wh-focus');
         const metaEl    = document.getElementById('wh-meta');
         const cta       = document.getElementById('wh-cta');
         const ringLabel = document.getElementById('wh-ring-label');
-        if (isRest) {
+        if (blocked) {
+            focusEl.textContent = _EN ? 'WORKOUT UNAVAILABLE' : 'ANTRENMAN KULLANILAMIYOR';
+            metaEl.textContent = _EN ? 'Refresh to try again.' : 'Yenile ve tekrar dene.';
+            cta.innerHTML = currentWorkoutState && currentWorkoutState.session &&
+                currentWorkoutState.session.status === 'active'
+                ? '<button class="btn-ghost w-full" data-action="abandonWorkout">' +
+                  (_EN ? 'Abandon workout' : 'Antrenmanı bırak') + '</button>' : '';
+        } else if (isRest) {
             focusEl.textContent = __t('training.rest_day');
             metaEl.textContent  = __t('training.active_recovery');
             cta.innerHTML = '';
@@ -312,9 +333,14 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
             if (completed) {
                 cta.innerHTML = '<span class="wh-done-badge badge badge-success">✓ ' +
                     __t('training.workout_done_label') + '</span>';
-            } else {
+            } else if (currentWorkoutState.action === 'start' ||
+                       currentWorkoutState.action === 'resume') {
                 cta.innerHTML = '<button class="btn-volt w-full" data-action="startWorkout">' +
-                    __t('training.start_workout') + '</button>';
+                    (currentWorkoutState.action === 'resume'
+                        ? (_EN ? 'Continue workout' : 'Antrenmana devam et')
+                        : __t('training.start_workout')) + '</button>';
+            } else {
+                cta.innerHTML = '';
             }
             if (ringLabel) ringLabel.innerHTML =
                 '<div style="font-family:var(--font-display);font-size:20px;color:var(--color-primary);line-height:1;">' +
@@ -328,7 +354,7 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
 
     function renderWeekStrip(program) {
         const strip = document.getElementById('week-strip');
-        const todayName = getTodayTurkish();
+        const todayName = activeTodayPlan && activeTodayPlan.gun;
         strip.innerHTML = (program || []).map(gun => {
             const isRest = gun.tip === 'dinlenme', isCardio = gun.tip === 'kardiyo';
             const cls = 'week-chip' + (gun.gun === todayName ? ' is-today' : '') +
@@ -362,8 +388,8 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
         openDayPreview(day, el);   // read-only sheet listing exercises (Task 4 reuses .sheet)
     }
 
-    // ── WORKOUT SESSION — ephemeral, in-memory only. No localStorage, no network.
-    //    A future Workout Log backend plugs in at the prProvider seam (Task 5). ──
+    // ── WORKOUT SESSION — set/rep interaction stays ephemeral in page memory;
+    //    lifecycle transitions are owned by the canonical server controller. ──
     var _session = null;        // { startedAt, day, exercises:[{isim,tekrar,dinlenme,not,sets:[{weightKg,reps,done,isPR}]}] }
     var _pendingStats = null;   // stats snapshot handed to the celebration after Pump Check
     var _sessionTrigger = null;     // element that opened #session-view (focus returns here on close)
@@ -409,14 +435,39 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
                  elapsedMin: Math.max(0, Math.round((Date.now() - session.startedAt) / 60000)) };
     }
 
-    function startWorkout(el) {
+    async function startWorkout(el) {
         var day = todayDay();
         if (!day || day.tip === 'dinlenme') return;
+        if (currentWorkoutState && currentWorkoutState.contract_version === 2) {
+            var action = currentWorkoutState.action;
+            var session = currentWorkoutState.session;
+            var url = action === 'resume' && session
+                ? '/workout/session/' + encodeURIComponent(session.public_id) + '/resume'
+                : '/workout/session/start';
+            if (action !== 'start' && action !== 'resume') return;
+            var result = await workoutStateClient.mutate(url, { method: 'POST' });
+            if (!result || !result.ok) return;
+        }
         openSession(day, el);
+    }
+
+    async function abandonWorkout() {
+        var session = currentWorkoutState && currentWorkoutState.session;
+        if (!workoutStateClient || !session || session.status !== 'active') return;
+        closeSession();
+        await workoutStateClient.mutate(
+            '/workout/session/' + encodeURIComponent(session.public_id) + '/abandon',
+            { method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ reason: 'user_abandoned' }) }
+        );
     }
 
     function openSession(day, trigger) {
         _session = buildSession(day);
+        var persistedSession = currentWorkoutState && currentWorkoutState.session;
+        document.getElementById('sv-abandon').hidden = !(
+            currentWorkoutState && currentWorkoutState.contract_version === 2 &&
+            persistedSession && persistedSession.status === 'active');
         document.getElementById('sv-title').textContent =
             (day.odak || __t('training.session'));
         renderSession();
@@ -614,28 +665,6 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
         document.getElementById('day-preview').classList.remove('open');
         _restoreFocus(_dayPreviewTrigger);
         _dayPreviewTrigger = null;
-    }
-
-    function getTodayKey() {
-        const d = new Date();
-        return 'fitx_workout_completed_' + d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-    }
-
-    async function checkWorkoutCompleted() {
-        // hızlı yol: yerel önbellek (anlık boyama)
-        try {
-            if (localStorage.getItem(getTodayKey()) === 'true') renderHero(activePlan, true);
-        } catch (e) {}
-        // doğru yol: sunucudan (cihazlar arası senkron)
-        try {
-            const res = await fetch('/workout/status');
-            if (!res.ok) return;
-            const data = await res.json();
-            if (data.completed) {
-                renderHero(activePlan, true);
-                try { localStorage.setItem(getTodayKey(), 'true'); } catch (e) {}
-            }
-        } catch (e) {}
     }
 
     // ── PUMP CHECK MODAL ──
@@ -891,25 +920,27 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
             visibility: pumpVisibility,
             shared_friend_ids: Array.from(pumpSelectedFriends.keys())
         };
+        if (currentWorkoutState && currentWorkoutState.contract_version === 2 &&
+            workoutStateClient.getSessionId()) {
+            payload.session_id = workoutStateClient.getSessionId();
+        }
         try {
-            const res = await fetch('/workout/complete', {
+            const mutation = await workoutStateClient.mutate('/workout/complete', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             });
             setPumpProgress(75);
-            const data = await res.json().catch(() => ({}));
+            const data = mutation ? mutation.body : {};
             // Sunucu "zaten tamamlandı" yapısal kodunu (ör. başka cihazda yapıldı)
             // dönerse bunu hata değil, tamamlanmış kabul et. Dile bağımlı metin
             // yerine code alanına bak (i18n: error metni artık çevriliyor).
-            const already = !res.ok && data.code === 'already_completed';
-            if (res.ok || already) {
+            const already = mutation && !mutation.ok && data.code === 'already_completed';
+            if ((mutation && mutation.ok) || already) {
                 setPumpProgress(100);
-                if (res.ok) showToast(data.message, 'success');
-                // localStorage bazı mobil tarayıcılarda hata fırlatabilir; ayrı koru.
-                try { localStorage.setItem(getTodayKey(), 'true'); } catch (e) {}
+                if (mutation.ok) showToast(data.message, 'success');
                 closePumpCheck();
-                showCelebration(res.ok ? data : null, _pendingStats);
+                showCelebration(mutation.ok ? data : null, _pendingStats);
             } else {
                 // 422 = doğrulama eşleşmedi, 400 = eksik/biçim hatası → modalda göster, yeniden dene.
                 showPumpError(data.error || __t('training.verify_failed'));
@@ -968,7 +999,7 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
         document.getElementById('celebration').classList.remove('open');
         document.body.style.overflow = '';
         _session = null; _pendingStats = null;      // discard ephemeral state
-        renderHero(activePlan, true);               // repaint hero as completed
+        workoutStateClient.refresh('celebration_closed');
     }
 
     function resetPlan() {
@@ -1078,17 +1109,18 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
         const btn = document.getElementById("save-btn");
         if (!currentPlan) return;
         try {
-            const res = await fetch("/training-plan/save", {
+            const result = await workoutStateClient.mutate("/training-plan/save", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ plan: currentPlan, score: currentScore })
             });
-            await res.json();
+            if (!result || !result.ok) {
+                const detail = result && result.body && result.body.error;
+                throw new Error(detail || "request_failed");
+            }
             btn.textContent = __t('training.saved');
             btn.classList.add("saved");
             showToast(__t('training.program_saved'), 'success');
-            // Reload and switch to active plan view
-            await loadActivePlan();
         } catch (err) {
             showToast(__t('training.save_error_prefix') + err.message, 'error');
         }
@@ -1189,4 +1221,30 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
     populateOptions();
     setupInjuryPicker();
     loadInfo();
-    loadActivePlan().then(() => checkWorkoutCompleted());
+
+    function initWorkoutStateClient() {
+        if (workoutStateClient) return workoutStateClient;
+        workoutStateClient = window.FitXWorkoutStateClient.createWorkoutStateClient({
+            fetchImpl: window.fetch.bind(window),
+            onSnapshot: applyTrainingSnapshot,
+            onBlocked: renderTrainingBlocked,
+            documentRef: document,
+            addEventListener: window.addEventListener.bind(window),
+            removeEventListener: window.removeEventListener.bind(window)
+        });
+        workoutStateClient.refresh('load');
+        return workoutStateClient;
+    }
+
+    function destroyWorkoutStateClient() {
+        if (!workoutStateClient) return;
+        const ownedClient = workoutStateClient;
+        workoutStateClient = null;
+        ownedClient.destroy();
+    }
+
+    initWorkoutStateClient();
+    window.addEventListener('pagehide', destroyWorkoutStateClient);
+    window.addEventListener('pageshow', function (event) {
+        if (event.persisted) initWorkoutStateClient();
+    });

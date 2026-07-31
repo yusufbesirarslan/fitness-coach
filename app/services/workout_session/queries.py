@@ -70,9 +70,8 @@ def _parse_program(plan: TrainingPlan) -> Optional[list]:
         data = json.loads(plan.plan_data)
     except (ValueError, TypeError):
         return None
-    if not isinstance(data, dict):
-        return None
-    program = data.get("program")
+    program = data if isinstance(data, list) else (
+        data.get("program") if isinstance(data, dict) else None)
     if not isinstance(program, list) or len(program) != 7:
         return None
     return program

@@ -36,7 +36,7 @@ from .models import (
     WorkoutStateInputs,
     WorkoutStateSnapshot,
 )
-from .queries import load_inputs, load_session_facts
+from .queries import PLAN_NOT_PROVIDED, load_inputs, load_session_facts
 from .resolver import enrich_with_session, resolve
 
 # Config flag (single canonical owner in app/config.py) gating the persisted
@@ -52,7 +52,12 @@ __all__ = [
     "WorkoutStateInputs",
     "CONTRACT_VERSION",
     "CONTRACT_VERSION_SESSIONS",
+    "WorkoutStateReadError",
 ]
+
+
+class WorkoutStateReadError(RuntimeError):
+    """Unexpected persistence failure requested to propagate fail-closed."""
 
 
 def resolve_from_inputs(inputs: WorkoutStateInputs) -> WorkoutStateSnapshot:
@@ -65,7 +70,8 @@ def resolve_from_inputs(inputs: WorkoutStateInputs) -> WorkoutStateSnapshot:
 
 
 def resolve_workout_state(
-    user_id: int, *, today: Optional[date] = None
+    user_id: int, *, today: Optional[date] = None, plan=PLAN_NOT_PROVIDED,
+    sessions_enabled: Optional[bool] = None, strict_reads: bool = False,
 ) -> WorkoutStateSnapshot:
     """Resolve ``user_id``'s current workout state for Istanbul day ``today``.
 
@@ -80,15 +86,18 @@ def resolve_workout_state(
     """
     day = today or app_today()
     try:
-        inputs = load_inputs(user_id, day)
+        inputs = load_inputs(user_id, day, plan=plan)
     except Exception as exc:  # noqa: BLE001 — fail safe, never leak to the client
         _log_anomaly(user_id, ANOMALY_RESOLUTION_ERROR, type(exc).__name__)
-        return _maybe_enrich(user_id, day, _safe_snapshot(day))
+        if strict_reads:
+            raise WorkoutStateReadError("workout-state input read failed") from exc
+        return _maybe_enrich(
+            user_id, day, _safe_snapshot(day), sessions_enabled, strict_reads)
 
     snapshot = resolve(inputs)
     if snapshot.anomaly:
         _log_anomaly(user_id, snapshot.anomaly, None)
-    return _maybe_enrich(user_id, day, snapshot)
+    return _maybe_enrich(user_id, day, snapshot, sessions_enabled, strict_reads)
 
 
 def _sessions_enabled() -> bool:
@@ -99,18 +108,22 @@ def _sessions_enabled() -> bool:
 
 
 def _maybe_enrich(
-    user_id: int, day: date, base: WorkoutStateSnapshot
+    user_id: int, day: date, base: WorkoutStateSnapshot,
+    sessions_enabled: Optional[bool] = None, strict_reads: bool = False,
 ) -> WorkoutStateSnapshot:
     """Flag OFF ⇒ return the PR1 base untouched (byte-identical v1). Flag ON ⇒
     load session truth read-only and return the v2 enrichment; a session-read
     failure still yields a valid v2 snapshot with an empty session dimension
     (fail-safe) so the contract mode stays consistent with the flag."""
-    if not _sessions_enabled():
+    enabled = _sessions_enabled() if sessions_enabled is None else sessions_enabled
+    if not enabled:
         return base
     try:
         facts = load_session_facts(user_id, day)
     except Exception as exc:  # noqa: BLE001 — never break the read on a session error
         _log_anomaly(user_id, ANOMALY_SESSION_READ_ERROR, type(exc).__name__)
+        if strict_reads:
+            raise WorkoutStateReadError("workout-session read failed") from exc
         facts = ACTIVE_SESSION_FACTS_NONE
     enriched = enrich_with_session(base, facts)
     if enriched.anomaly and enriched.anomaly != base.anomaly:

@@ -36,6 +36,7 @@ from .models import (
 # canonical ``VALID_TIPS`` so it can never drift from the plan validator.
 _REST_TIP = "dinlenme"
 _WORKOUT_TIPS = frozenset(VALID_TIPS) - {_REST_TIP}
+PLAN_NOT_PROVIDED = object()
 
 
 def _weekday_name_tr(d: date) -> str:
@@ -47,7 +48,9 @@ def _weekday_name_tr(d: date) -> str:
     return WEEKDAYS[d.weekday()]
 
 
-def _load_schedule(user_id: int, today: date) -> Tuple[bool, bool, Optional[str]]:
+def _load_schedule(
+    user_id: int, today: date, *, plan=PLAN_NOT_PROVIDED
+) -> Tuple[bool, bool, Optional[str]]:
     """Return ``(has_plan, schedule_valid, today_schedule_kind)``.
 
     ``schedule_valid`` means ``plan_data`` parsed to a proper 7-day program;
@@ -55,19 +58,19 @@ def _load_schedule(user_id: int, today: date) -> Tuple[bool, bool, Optional[str]
     today's weekday is absent or its ``tip`` is unrecognized. Malformed data is
     reported as ``schedule_valid=False`` — the resolver decides the safe state.
     """
-    plan = (TrainingPlan.query
-            .filter_by(user_id=user_id)
-            .order_by(TrainingPlan.created_at.desc())
-            .first())
+    if plan is PLAN_NOT_PROVIDED:
+        plan = (TrainingPlan.query
+                .filter_by(user_id=user_id)
+                .order_by(TrainingPlan.created_at.desc())
+                .first())
     if plan is None:
         return False, False, None
     try:
         data = json.loads(plan.plan_data)
     except (ValueError, TypeError):
         return True, False, None
-    if not isinstance(data, dict):
-        return True, False, None
-    program = data.get("program")
+    program = data if isinstance(data, list) else (
+        data.get("program") if isinstance(data, dict) else None)
     if not isinstance(program, list) or len(program) != 7:
         return True, False, None
 
@@ -153,9 +156,12 @@ def load_session_facts(user_id: int, today: date) -> ActiveSessionFacts:
     )
 
 
-def load_inputs(user_id: int, today: date) -> WorkoutStateInputs:
+def load_inputs(
+    user_id: int, today: date, *, plan=PLAN_NOT_PROVIDED
+) -> WorkoutStateInputs:
     """Gather all trusted facts for ``user_id`` on Istanbul day ``today``."""
-    has_plan, schedule_valid, today_kind = _load_schedule(user_id, today)
+    has_plan, schedule_valid, today_kind = _load_schedule(
+        user_id, today, plan=plan)
     completed_today, has_marker_today, real_count_today, stale_prev = \
         _load_execution(user_id, today)
     return WorkoutStateInputs(

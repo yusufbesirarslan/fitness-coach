@@ -17,11 +17,10 @@ from app.models import (
     BarcodeFoodCache,
     MealLog,
     UserSession,
-    WorkoutLog,
-    WORKOUT_COMPLETION_MARKER,
 )
 from app.services.fatsecret import _food_find_by_barcode
-from app.timeutil import day_key, utc_day_bounds
+from app.services.workout_state import resolve_workout_state
+from app.timeutil import day_key
 
 
 SUPPORTED_BARCODE_LENGTHS = {6, 8, 12, 13}
@@ -239,16 +238,6 @@ def _today_totals(user_id):
     }
 
 
-def _workout_completed_today(user_id):
-    start, end = utc_day_bounds()
-    return db.session.query(WorkoutLog.id).filter(
-        WorkoutLog.user_id == user_id,
-        WorkoutLog.exercise_name == WORKOUT_COMPLETION_MARKER,
-        WorkoutLog.created_at >= start,
-        WorkoutLog.created_at < end,
-    ).first() is not None
-
-
 def get_user_barcode_context(user_id, meal_time=""):
     session = UserSession.query.filter_by(user_id=user_id).order_by(UserSession.created_at.desc()).first()
     targets = _target_macros(session)
@@ -259,7 +248,8 @@ def get_user_barcode_context(user_id, meal_time=""):
         "targets": targets,
         "consumed": consumed,
         "remaining": remaining,
-        "workout_completed_today": _workout_completed_today(user_id),
+        "workout_completed_today": resolve_workout_state(
+            user_id).completed_today,
         "meal_time": meal_time or "",
         "daily_progress": {
             key: round((consumed[key] / targets[key]) * 100, 1) if targets[key] else 0
