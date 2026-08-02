@@ -141,9 +141,140 @@ def test_rollout_flags_are_not_read_as_module_constants_in_config():
 
 
 def test_operational_keys_are_classified_as_a_known_category():
-    valid = {feature_flags.CATEGORY_OPERATIONAL,
-             feature_flags.CATEGORY_KILL_SWITCH}
-    assert set(OPERATIONAL_BOOLEAN_KEYS.values()) <= valid
+    assert set(OPERATIONAL_BOOLEAN_KEYS.values()) <= set(
+        feature_flags.NON_ROLLOUT_CATEGORIES)
+
+
+# ── Repository-wide drift detection ────────────────────────────────────────
+# The gates above only look at app/config.py, which is where every rollout flag
+# has historically been declared. That is not enough: nothing stops a future
+# change from reading a flag with os.getenv() inside a blueprint or a service and
+# bypassing the registry entirely. The three gates below scan the whole
+# application package.
+SCANNED_PATHS = tuple(sorted((REPO_ROOT / "app").rglob("*.py"))) + (
+    REPO_ROOT / "starter.py",
+)
+
+# Where each rollout key is ALLOWED to be read from the environment, derived
+# from the registry's own `parsed_by` field rather than a hand-kept exception
+# list — so a record cannot claim one owner while the code has another.
+_PARSED_BY_PATHS = {
+    feature_flags.PARSED_BY_REGISTRY: "app/feature_flags.py",
+    feature_flags.PARSED_BY_MOBILE_CREDENTIALS:
+        "app/services/mobile_credentials.py",
+}
+
+
+def _env_key(node):
+    """The literal env key this expression reads, or None.
+
+    Covers `os.getenv("K")`, `os.environ.get("K")`, `environ.get("K")` and
+    `os.environ["K"]` — every form used in this repository.
+    """
+    if isinstance(node, ast.Call):
+        func = node.func
+        if isinstance(func, ast.Attribute) and node.args:
+            arg = node.args[0]
+            if not (isinstance(arg, ast.Constant)
+                    and isinstance(arg.value, str)):
+                return None
+            if func.attr == "getenv":
+                return arg.value
+            if func.attr == "get":
+                target = func.value
+                if ((isinstance(target, ast.Attribute)
+                     and target.attr == "environ")
+                        or (isinstance(target, ast.Name)
+                            and target.id == "environ")):
+                    return arg.value
+        return None
+    if isinstance(node, ast.Subscript):
+        target = node.value
+        is_environ = ((isinstance(target, ast.Attribute)
+                       and target.attr == "environ")
+                      or (isinstance(target, ast.Name)
+                          and target.id == "environ"))
+        index = node.slice
+        if (is_environ and isinstance(index, ast.Constant)
+                and isinstance(index.value, str)):
+            return index.value
+    return None
+
+
+def _scan_package():
+    """(env reads, boolean-style comparisons) per repo-relative path."""
+    reads, comparisons = {}, {}
+    for path in SCANNED_PATHS:
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            key = _env_key(node)
+            if key:
+                reads.setdefault(key, set()).add(rel)
+            # `os.getenv(K, "0") == "1"` and its inverted twin
+            # `os.environ.get(K, "1") != "0"` — the same rollout idiom.
+            if (isinstance(node, ast.Compare) and len(node.ops) == 1
+                    and isinstance(node.ops[0], (ast.Eq, ast.NotEq))):
+                key = _env_key(node.left)
+                if key:
+                    comparisons.setdefault(key, set()).add(rel)
+    return reads, comparisons
+
+
+PACKAGE_ENV_READS, PACKAGE_BOOLEAN_COMPARISONS = _scan_package()
+
+
+@pytest.mark.parametrize("key", feature_flags.FEATURE_FLAG_KEYS)
+def test_no_rollout_key_is_read_from_the_environment_outside_its_owner(key):
+    """A rollout flag may only be read where its record says it is read.
+
+    Reading `os.getenv("UIUX_NAV_V2_ENABLED")` inside a blueprint would restore
+    every failure mode PR2 removed at once: the value would skip the strict
+    parser (so `true` becomes a silent OFF again), skip `app.config` (so
+    /health?deep=1 and the [FLAGS] boot line would no longer describe what the
+    process is actually doing), and skip the registry (so the flag would have no
+    owner, no review date and no rollback procedure).
+
+    The allowance is derived from the flag's own `parsed_by` field — the record
+    and the code cannot disagree about who owns the read.
+    """
+    owner_path = _PARSED_BY_PATHS[feature_flags.FLAGS_BY_KEY[key].parsed_by]
+    offenders = sorted(PACKAGE_ENV_READS.get(key, set()) - {owner_path})
+    assert offenders == [], (
+        f"{key} is read directly from the environment in {offenders}. Read it "
+        f"from current_app.config['{key}'] instead; the registry resolves it "
+        "once at boot through the strict parser.")
+
+
+def test_no_unclassified_boolean_env_setting_anywhere_in_the_package():
+    """Every boolean env switch in the package must be classified.
+
+    The narrow version of this gate only watched app/config.py. A rollout flag
+    introduced in a service or a blueprint would have sailed straight past it.
+    """
+    classified = set(feature_flags.FEATURE_FLAG_KEYS) | set(
+        OPERATIONAL_BOOLEAN_KEYS)
+    unclassified = {key: sorted(paths)
+                    for key, paths in PACKAGE_BOOLEAN_COMPARISONS.items()
+                    if key not in classified}
+    assert unclassified == {}, (
+        f"Unclassified boolean env setting(s): {unclassified}. Add a FeatureFlag "
+        "record to app/feature_flags.py if this gates a product rollout, or add "
+        "it to OPERATIONAL_BOOLEAN_KEYS with the category that fits (operational "
+        "/ kill_switch / environment / escape_hatch) if it is not a rollout.")
+
+
+def test_classified_non_rollout_keys_are_permitted_anywhere():
+    """The gate above must not become a ban on ordinary configuration.
+
+    Operational settings, kill switches, environment identity and escape hatches
+    are read with exactly the same idiom and are deliberately allowed. This
+    asserts the currently-classified keys really are exempt, so a future tighten
+    cannot quietly outlaw them.
+    """
+    classified_in_use = {key for key in PACKAGE_BOOLEAN_COMPARISONS
+                         if key in OPERATIONAL_BOOLEAN_KEYS}
+    assert classified_in_use, "expected classified non-rollout keys in the package"
+    assert not (classified_in_use & set(feature_flags.FEATURE_FLAG_KEYS))
 
 
 @pytest.mark.parametrize("key", feature_flags.FEATURE_FLAG_KEYS)

@@ -169,41 +169,6 @@ ROLLOUT_FLAGS = (
         decision=DECISION_ENABLE,
     ),
     FeatureFlag(
-        key="UIUX_NAV_V2_ENABLED",
-        capability=(
-            "Replaces the legacy 5-tab shell (Home/Nutrition/Training/Progress/"
-            "Profile) with the four-destination information architecture "
-            "(Today/Plan/Coach/Progress) and moves Nutrition + Community + "
-            "utility into the secondary drawer tier. Presentation only; every "
-            "route keeps its own @require_auth."),
-        owner=_OWNER,
-        default=False,
-        depends_on=(),
-        observability=(
-            "PARTIAL — no feature-specific log line or metric exists. Visible "
-            "only through the PR1 per-blueprint HttpRequests/HttpLatency/"
-            "HttpClientErrors SLIs, which cannot separate a navigation "
-            "regression from any other change on the same blueprint."),
-        prerequisites=(
-            "RUNTIME_METRICS_ENABLED=1 with a per-blueprint baseline",
-            "every destination reachable in the new shell verified by hand — "
-            "the flag has the widest UI blast radius of the eight",
-        ),
-        success_signals=(
-            "no increase in 4xx on any blueprint reachable from the shell",
-            "no drop in requests to blueprints demoted to the drawer tier "
-            "(nutrition, social), which would indicate they became unreachable",
-        ),
-        abort_signals=(
-            "requests to a demoted blueprint fall sharply",
-            "4xx/5xx increase on any blueprint after activation",
-        ),
-        rollback=_rollback("UIUX_NAV_V2_ENABLED"),
-        lifecycle=LIFECYCLE_SHIPPED_DARK,
-        review_by="2026-10-01",
-        decision=DECISION_ENABLE,
-    ),
-    FeatureFlag(
         key="UIUX_TODAY_V2_ENABLED",
         capability=(
             "Renders the PR2 Today hierarchy (templates/today.html: one "
@@ -219,9 +184,11 @@ ROLLOUT_FLAGS = (
             "through the PR1 tracking-blueprint HTTP SLIs."),
         prerequisites=(
             "RUNTIME_METRICS_ENABLED=1 with a tracking-blueprint baseline",
-            "UIUX_NAV_V2_ENABLED decided first — Today is the nav shell's "
-            "default destination, so activating both at once makes an incident "
-            "ambiguous",
+            "UIUX_NAV_V2_ENABLED still OFF — Today is the nav shell's default "
+            "destination, so activating both in one window makes an incident "
+            "ambiguous. The dependency is one-directional: `/` is the legacy "
+            "shell's Home tab, so Today v2 is fully reachable and testable "
+            "without the new shell",
         ),
         success_signals=(
             "tracking blueprint 5xx rate and p95 unchanged",
@@ -289,6 +256,11 @@ ROLLOUT_FLAGS = (
             "RUNTIME_METRICS_ENABLED=1 with a coach-blueprint baseline",
             "a manual check that only one Coach instance mounts on /coach — "
             "double-mount is the specific failure this flag guards against",
+            "re-check this flag's signals AFTER UIUX_NAV_V2_ENABLED activates: "
+            "the legacy shell has no /coach entry point at all (not a tab, not "
+            "a drawer link), so until the new shell promotes Coach to the "
+            "primary tier this route is reached only by direct URL and a clean "
+            "window here proves less than it appears",
         ),
         success_signals=(
             "coach blueprint 5xx rate and p95 unchanged",
@@ -300,6 +272,46 @@ ROLLOUT_FLAGS = (
             "coach blueprint 5xx or p95 regression",
         ),
         rollback=_rollback("UIUX_COACH_PAGE_V2_ENABLED"),
+        lifecycle=LIFECYCLE_SHIPPED_DARK,
+        review_by="2026-10-01",
+        decision=DECISION_ENABLE,
+    ),
+    FeatureFlag(
+        key="UIUX_NAV_V2_ENABLED",
+        capability=(
+            "Replaces the legacy 5-tab shell (Home/Nutrition/Training/Progress/"
+            "Profile) with the four-destination information architecture "
+            "(Today/Plan/Coach/Progress) and moves Nutrition + Community + "
+            "utility into the secondary drawer tier. Presentation only; every "
+            "route keeps its own @require_auth."),
+        owner=_OWNER,
+        default=False,
+        depends_on=(),
+        observability=(
+            "PARTIAL — no feature-specific log line or metric exists. Visible "
+            "only through the PR1 per-blueprint HttpRequests/HttpLatency/"
+            "HttpClientErrors SLIs, which cannot separate a navigation "
+            "regression from any other change on the same blueprint."),
+        prerequisites=(
+            "RUNTIME_METRICS_ENABLED=1 with a per-blueprint baseline",
+            "every destination reachable in the new shell verified by hand — "
+            "the flag has the widest UI blast radius of the eight",
+            "the presentation flags it hosts (Today/Plan/Coach v2) settled "
+            "first. This flag goes LAST among the presentation flags because it "
+            "pairs the widest blast radius with the weakest observability: "
+            "activating it earlier would put every subsequent rollout behind a "
+            "shell change that no metric can attribute a regression to",
+        ),
+        success_signals=(
+            "no increase in 4xx on any blueprint reachable from the shell",
+            "no drop in requests to blueprints demoted to the drawer tier "
+            "(nutrition, social), which would indicate they became unreachable",
+        ),
+        abort_signals=(
+            "requests to a demoted blueprint fall sharply",
+            "4xx/5xx increase on any blueprint after activation",
+        ),
+        rollback=_rollback("UIUX_NAV_V2_ENABLED"),
         lifecycle=LIFECYCLE_SHIPPED_DARK,
         review_by="2026-10-01",
         decision=DECISION_ENABLE,
@@ -449,12 +461,23 @@ FLAGS_BY_KEY = {flag.key: flag for flag in ROLLOUT_FLAGS}
 
 # ── Not rollout flags ──────────────────────────────────────────────────────
 # Permanent settings. They are listed here ONLY so the drift test can tell an
-# undocumented new rollout flag from a deliberate operational setting. They are
+# undocumented new rollout flag from a deliberate non-rollout switch. They are
 # never reported by feature_flag_state() and have no review date: an emergency
 # kill switch that gets "cleaned up" is an incident waiting to happen.
-CATEGORY_OPERATIONAL = "operational"
-CATEGORY_KILL_SWITCH = "kill_switch"
+#
+# Four categories, because they are not interchangeable and an operator needs to
+# know which one they are touching:
+CATEGORY_OPERATIONAL = "operational"    # production tuning knob; safe to change
+CATEGORY_KILL_SWITCH = "kill_switch"    # default ON; exists to stop an incident
+CATEGORY_ENVIRONMENT = "environment"    # environment identity / boot mode
+CATEGORY_ESCAPE_HATCH = "escape_hatch"  # weakens a safety property; incident-only
+NON_ROLLOUT_CATEGORIES = (
+    CATEGORY_OPERATIONAL, CATEGORY_KILL_SWITCH,
+    CATEGORY_ENVIRONMENT, CATEGORY_ESCAPE_HATCH,
+)
 
+# Name kept for continuity: this is every boolean env key in the application
+# package that is deliberately NOT a rollout flag.
 OPERATIONAL_BOOLEAN_KEYS = {
     "AI_PLAN_QUOTA_ENABLED": CATEGORY_OPERATIONAL,
     "AI_CHAT_QUOTA_ENABLED": CATEGORY_OPERATIONAL,
@@ -466,6 +489,19 @@ OPERATIONAL_BOOLEAN_KEYS = {
     "AI_MEMORY_ENABLED": CATEGORY_KILL_SWITCH,
     "AI_CACHE_ENABLED": CATEGORY_KILL_SWITCH,
     "AI_RECOVERY_ENABLED": CATEGORY_KILL_SWITCH,
+    # Environment identity and boot mode. Not tuning knobs and not rollout
+    # candidates: they answer "which environment is this?", not "is this feature
+    # on?". Flipping one in production changes the security posture of the whole
+    # process, not the behaviour of one capability.
+    "FLASK_DEBUG": CATEGORY_ENVIRONMENT,
+    "FLASK_ENV": CATEGORY_ENVIRONMENT,
+    "FITX_SKIP_DB_INIT": CATEGORY_ENVIRONMENT,
+    # Escape hatches: each one deliberately disables a safety property, and each
+    # exists for a documented incident procedure. They must never be staged,
+    # rolled out, or "enabled to see what happens".
+    "FATSECRET_ALLOW_INSECURE": CATEGORY_ESCAPE_HATCH,   # allows non-https base URL
+    "FITX_DB_AUTO_UPGRADE": CATEGORY_ESCAPE_HATCH,       # disables boot migrations
+    "FITX_DB_UPGRADE_FAIL_OPEN": CATEGORY_ESCAPE_HATCH,  # boots past a failed migration
 }
 
 
