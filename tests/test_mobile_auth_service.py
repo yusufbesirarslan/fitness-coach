@@ -1,11 +1,12 @@
 import calendar
 from datetime import datetime, timedelta
+import threading
 
 import pytest
 
 from app.extensions import db
 from app.models import MobileAccessCredential, MobileAuthSession, MobileRefreshCredential
-from app.services import cognito_jwt, cognito_service, mobile_credentials
+from app.services import ai_gate, cognito_jwt, cognito_service, mobile_credentials
 
 
 NOW = datetime(2026, 7, 29, 10, 0, 0)
@@ -108,6 +109,104 @@ def test_login_treats_cold_jwks_failure_as_temporary(
         mobile_auth.login("mobile-service", "correct", now=NOW)
     assert exc.value.code == "AUTH_TEMPORARILY_UNAVAILABLE"
     assert exc.value.retryable is True
+
+
+def test_login_hides_unconfirmed_account_and_logs_only_safe_event(
+        app, monkeypatch, caplog):
+    from app.services import mobile_auth
+
+    monkeypatch.setattr(
+        cognito_service, "authenticate",
+        lambda *args: (_ for _ in ()).throw(cognito_service.CognitoServiceError(
+            "raw cognito detail", "UserNotConfirmedException")))
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as caught:
+        mobile_auth.login(
+            "unconfirmed@example.test", "do-not-log-password", now=NOW)
+
+    assert (caught.value.code, caught.value.status, caught.value.retryable) == (
+        "AUTH_INVALID_CREDENTIALS", 401, False)
+    assert "do-not-log-password" not in caplog.text
+    assert "unconfirmed@example.test" not in caplog.text
+    assert "raw cognito detail" not in caplog.text
+    assert "unconfirmed_account" in caplog.text
+
+
+def test_login_rejects_saturation_before_any_provider_work(
+        app, monkeypatch):
+    from app.services import mobile_auth
+
+    semaphore = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_ai_slots", semaphore)
+    calls = {"authenticate": 0, "refresh": 0}
+
+    def unexpected_authenticate(*args):
+        calls["authenticate"] += 1
+        raise AssertionError("authenticate must not run")
+
+    def unexpected_refresh(*args):
+        calls["refresh"] += 1
+        raise AssertionError("refresh must not run")
+
+    monkeypatch.setattr(cognito_service, "authenticate", unexpected_authenticate)
+    monkeypatch.setattr(cognito_service, "refresh_tokens", unexpected_refresh)
+    assert semaphore.acquire(blocking=False)
+    try:
+        with pytest.raises(mobile_auth.MobileAuthFailure) as caught:
+            mobile_auth.login("mobile-service", "correct", now=NOW)
+    finally:
+        semaphore.release()
+
+    assert calls == {"authenticate": 0, "refresh": 0}
+    assert (
+        caught.value.code,
+        caught.value.status,
+        caught.value.retryable,
+        caught.value.retry_after,
+    ) == ("AUTH_TEMPORARILY_UNAVAILABLE", 503, True, 15)
+
+
+def test_login_gate_covers_provider_work_but_not_local_identity(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    provider["access_exp"] = NOW + timedelta(minutes=5)
+    semaphore = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_ai_slots", semaphore)
+    original_authenticate = cognito_service.authenticate
+    original_validate = cognito_jwt.validate_token
+    original_refresh = cognito_service.refresh_tokens
+    original_resolve_user = mobile_auth._resolve_user
+
+    def assert_gate_held():
+        acquired = semaphore.acquire(blocking=False)
+        if acquired:
+            semaphore.release()
+        assert acquired is False
+
+    def authenticate(*args):
+        assert_gate_held()
+        return original_authenticate(*args)
+
+    def validate(*args, **kwargs):
+        assert_gate_held()
+        return original_validate(*args, **kwargs)
+
+    def refresh(*args):
+        assert_gate_held()
+        return original_refresh(*args)
+
+    def resolve_user(*args):
+        assert semaphore.acquire(blocking=False)
+        semaphore.release()
+        return original_resolve_user(*args)
+
+    monkeypatch.setattr(cognito_service, "authenticate", authenticate)
+    monkeypatch.setattr(cognito_jwt, "validate_token", validate)
+    monkeypatch.setattr(cognito_service, "refresh_tokens", refresh)
+    monkeypatch.setattr(mobile_auth, "_resolve_user", resolve_user)
+
+    mobile_auth.login("mobile-service", "correct", now=NOW)
 
 
 def test_access_authentication_requires_all_ownership_links(

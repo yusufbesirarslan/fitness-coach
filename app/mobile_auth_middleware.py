@@ -41,7 +41,6 @@ def _safe_message(code):
     return {
         "AUTH_INVALID_REQUEST": "Invalid request.",
         "AUTH_INVALID_CREDENTIALS": "Invalid credentials.",
-        "AUTH_VERIFICATION_REQUIRED": "Account verification is required.",
         "AUTH_RATE_LIMITED": "Too many requests.",
         "AUTH_SESSION_EXPIRED": "Mobile session expired.",
         "AUTH_REFRESH_FAILED": "Refresh failed. Sign in again.",

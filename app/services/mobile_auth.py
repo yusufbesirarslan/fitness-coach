@@ -12,6 +12,9 @@ from app.models import (
     MobileAccessCredential, MobileAuthSession, MobileRefreshCredential, User,
 )
 from app.services import cognito_jwt, cognito_service, mobile_credentials, session_store
+from app.services.ai_gate import (
+    BlockingConcurrencyLimit, blocking_concurrency_slot,
+)
 from app.services.cognito_identity import reconcilable_local_user
 
 
@@ -37,20 +40,22 @@ class LogoutResult:
 
 
 class MobileAuthFailure(Exception):
-    def __init__(self, code, status, retryable, reason):
+    def __init__(self, code, status, retryable, reason, retry_after=None):
         super().__init__(reason)
         self.code = code
         self.status = status
         self.retryable = retryable
         self.reason = reason
+        self.retry_after = retry_after
 
 
 class _DefinitiveRefreshFailure(Exception):
     pass
 
 
-def _failure(code, status, retryable, reason):
-    return MobileAuthFailure(code, status, retryable, reason)
+def _failure(code, status, retryable, reason, retry_after=None):
+    return MobileAuthFailure(
+        code, status, retryable, reason, retry_after=retry_after)
 
 
 def _security_event(event, family_id="-", category="auth", key_version="-"):
@@ -155,53 +160,78 @@ def _validate_refreshed_provider(token, expected_sub):
 def login(username, password, now=None):
     now = now or datetime.utcnow()
     try:
-        result = cognito_service.authenticate(username, password)
-        tokens = dict(result["tokens"])
-    except cognito_service.CognitoServiceError as exc:
-        if exc.code == "UserNotConfirmedException":
-            raise _failure(
-                "AUTH_VERIFICATION_REQUIRED", 403, False,
-                "verification_required") from exc
-        if exc.code in {"TooManyRequestsException", "InternalErrorException",
+        with blocking_concurrency_slot():
+            try:
+                result = cognito_service.authenticate(username, password)
+                tokens = dict(result["tokens"])
+            except cognito_service.CognitoServiceError as exc:
+                if exc.code == "UserNotConfirmedException":
+                    _security_event("unconfirmed_account")
+                    raise _failure(
+                        "AUTH_INVALID_CREDENTIALS", 401, False,
+                        "invalid_credentials") from exc
+                if exc.code in {
+                        "TooManyRequestsException", "InternalErrorException",
                         "LimitExceededException", "ServiceUnavailableException",
                         "JWKSUnavailable", ""}:
-            raise _failure(
-                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
-                "provider_unavailable") from exc
-        raise _failure(
-            "AUTH_INVALID_CREDENTIALS", 401, False,
-            "invalid_credentials") from exc
-    except Exception as exc:
-        raise _failure(
-            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
-            "provider_response_invalid") from exc
+                    raise _failure(
+                        "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+                        "provider_unavailable") from exc
+                raise _failure(
+                    "AUTH_INVALID_CREDENTIALS", 401, False,
+                    "invalid_credentials") from exc
+            except Exception as exc:
+                raise _failure(
+                    "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+                    "provider_response_invalid") from exc
 
-    try:
-        id_claims = _validate_provider(tokens.get("id_token", ""), "id")
-        access_claims = _validate_provider(tokens.get("access_token", ""), "access")
-        if not id_claims.get("sub") or id_claims.get("sub") != access_claims.get("sub"):
-            raise _failure(
-                "AUTH_INVALID_CREDENTIALS", 401, False,
-                "provider_subject_mismatch")
-        absolute_exp = now + timedelta(
-            days=current_app.config["MOBILE_AUTH_REFRESH_ABSOLUTE_DAYS"])
-        access_exp, deadline, trigger = _coverage(now, absolute_exp)
-        provider_exp = _claim_expiry(access_claims)
-        if provider_exp <= trigger:
-            tokens = cognito_service.refresh_tokens(
-                tokens.get("refresh_token", ""), username)
-            access_claims = _validate_provider(tokens.get("access_token", ""), "access")
-            if access_claims.get("sub") != id_claims.get("sub"):
+            id_claims = _validate_provider(tokens.get("id_token", ""), "id")
+            access_claims = _validate_provider(
+                tokens.get("access_token", ""), "access")
+            if (not id_claims.get("sub")
+                    or id_claims.get("sub") != access_claims.get("sub")):
                 raise _failure(
                     "AUTH_INVALID_CREDENTIALS", 401, False,
                     "provider_subject_mismatch")
+            absolute_exp = now + timedelta(
+                days=current_app.config["MOBILE_AUTH_REFRESH_ABSOLUTE_DAYS"])
+            access_exp, deadline, trigger = _coverage(now, absolute_exp)
             provider_exp = _claim_expiry(access_claims)
-        if provider_exp <= deadline:
-            _security_event("provider_coverage_insufficient", category="provider")
-            raise _failure(
-                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
-                "provider_coverage_insufficient")
+            if provider_exp <= trigger:
+                tokens = cognito_service.refresh_tokens(
+                    tokens.get("refresh_token", ""), username)
+                access_claims = _validate_provider(
+                    tokens.get("access_token", ""), "access")
+                if access_claims.get("sub") != id_claims.get("sub"):
+                    raise _failure(
+                        "AUTH_INVALID_CREDENTIALS", 401, False,
+                        "provider_subject_mismatch")
+                provider_exp = _claim_expiry(access_claims)
+            if provider_exp <= deadline:
+                _security_event(
+                    "provider_coverage_insufficient", category="provider")
+                raise _failure(
+                    "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+                    "provider_coverage_insufficient")
+    except BlockingConcurrencyLimit as exc:
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "blocking_capacity_exhausted", retry_after=15) from exc
+    except MobileAuthFailure:
+        db.session.rollback()
+        raise
+    except cognito_service.CognitoServiceError as exc:
+        db.session.rollback()
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "provider_renewal_failed") from exc
+    except Exception as exc:
+        db.session.rollback()
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "session_commit_failed") from exc
 
+    try:
         user = _resolve_user(id_claims, username)
         if user is None:
             raise _failure(

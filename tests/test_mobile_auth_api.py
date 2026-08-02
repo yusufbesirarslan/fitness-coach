@@ -1,11 +1,12 @@
 import calendar
 from datetime import datetime, timedelta
+import threading
 
 import pytest
 from types import SimpleNamespace
 
 from app.services import (
-    cognito_jwt, cognito_service, mobile_auth, mobile_credentials,
+    ai_gate, cognito_jwt, cognito_service, mobile_auth, mobile_credentials,
 )
 from app.models import MobileAuthSession
 from app.extensions import db, limiter
@@ -95,6 +96,61 @@ def test_mobile_login_fails_closed_when_distributed_throttle_is_unavailable(
     assert response.status_code == 503
     assert response.json["error"]["code"] == "AUTH_TEMPORARILY_UNAVAILABLE"
     assert response.json["error"]["retryable"] is True
+
+
+def test_mobile_unconfirmed_and_invalid_logins_are_indistinguishable(
+        raw_client, monkeypatch):
+    def reject(username, password):
+        code = ("UserNotConfirmedException"
+                if username == "unconfirmed@example.test"
+                else "NotAuthorizedException")
+        detail = ("raw unconfirmed detail"
+                  if code == "UserNotConfirmedException"
+                  else "raw invalid detail")
+        raise cognito_service.CognitoServiceError(detail, code)
+
+    monkeypatch.setattr(cognito_service, "authenticate", reject)
+    unconfirmed = raw_client.post("/api/v1/auth/login", json={
+        "username": "unconfirmed@example.test", "password": "correct"})
+    invalid = raw_client.post("/api/v1/auth/login", json={
+        "username": "invalid@example.test", "password": "wrong"})
+
+    assert unconfirmed.status_code == invalid.status_code == 401
+    unconfirmed_error = unconfirmed.json["error"]
+    invalid_error = invalid.json["error"]
+    unconfirmed_error["request_id"] = "<generated>"
+    invalid_error["request_id"] = "<generated>"
+    assert unconfirmed_error == invalid_error
+
+
+def test_mobile_login_saturation_returns_retryable_envelope_without_provider_call(
+        raw_client, monkeypatch):
+    semaphore = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_ai_slots", semaphore)
+    calls = {"authenticate": 0, "refresh": 0}
+
+    def unexpected_authenticate(*args):
+        calls["authenticate"] += 1
+        raise AssertionError("authenticate must not run")
+
+    def unexpected_refresh(*args):
+        calls["refresh"] += 1
+        raise AssertionError("refresh must not run")
+
+    monkeypatch.setattr(cognito_service, "authenticate", unexpected_authenticate)
+    monkeypatch.setattr(cognito_service, "refresh_tokens", unexpected_refresh)
+    assert semaphore.acquire(blocking=False)
+    try:
+        response = raw_client.post("/api/v1/auth/login", json={
+            "username": "alice", "password": "correct"})
+    finally:
+        semaphore.release()
+
+    assert response.status_code == 503
+    assert response.json["error"]["code"] == "AUTH_TEMPORARILY_UNAVAILABLE"
+    assert response.json["error"]["retryable"] is True
+    assert response.headers["Retry-After"] == "15"
+    assert calls == {"authenticate": 0, "refresh": 0}
 
 
 @pytest.mark.parametrize("payload", [
