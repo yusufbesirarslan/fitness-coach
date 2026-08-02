@@ -97,9 +97,10 @@ def _parse_day(raw) -> "PlanDay | None":
 def _parse_plan_days(plan_data):
     """Safely parse a plan row's ``plan_data`` JSON text into ordered days.
 
-    Returns ``(parse_ok, days)``. ``parse_ok`` is False when the text is not valid
-    JSON, is not a list, or yields zero usable day entries — every one of which is
-    an honest ``partial_active_plan`` signal, not "no plan". Canonical order is
+    Returns ``(parse_ok, days)``. Accepted JSON shapes are a bare list or an
+    object whose ``program`` field is a list. ``parse_ok`` is False for invalid
+    JSON, any other shape, or zero usable day entries — every one of which is an
+    honest ``partial_active_plan`` signal, not "no plan". Canonical order is
     preserved; malformed individual entries are skipped, not reordered.
     """
     try:

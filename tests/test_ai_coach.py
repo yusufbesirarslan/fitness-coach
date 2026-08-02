@@ -9,6 +9,7 @@ function-calling döngüsü ve koç metin üreticileri. OpenAI mock'lu — ağ y
 import builtins
 import importlib
 import json
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -407,6 +408,19 @@ class _ControlledClock:
         return self._readings[-1]
 
 
+def _install_advancing_model_slot(monkeypatch, clock, advance_seconds):
+    deadlines = []
+
+    @contextmanager
+    def advancing_slot(*, deadline=None):
+        deadlines.append(deadline)
+        clock.now += advance_seconds
+        yield
+
+    monkeypatch.setattr(ai_coach, "model_concurrency_slot", advancing_slot)
+    return deadlines
+
+
 def test_bedrock_fallback_does_not_reset_exhausted_turn_deadline(
         auth_user, monkeypatch):
     bedrock_calls = []
@@ -417,7 +431,7 @@ def test_bedrock_fallback_does_not_reset_exhausted_turn_deadline(
             raise RuntimeError("bedrock unavailable")
 
     openai = _ScriptedLLM([_llm_msg("OpenAI must not run")])
-    clock = _ControlledClock(0.0, 80.0, 89.0, 91.0)
+    clock = _ControlledClock(0.0, 80.0, 80.0, 89.0, 91.0)
     monkeypatch.setattr(
         ai_coach, "time", SimpleNamespace(monotonic=clock.monotonic)
     )
@@ -456,6 +470,44 @@ def test_openai_call_timeout_uses_remaining_turn_budget(auth_user, monkeypatch):
 
     assert answer == "answer"
     assert openai.calls[0]["timeout"] == pytest.approx(7.5)
+
+
+def test_openai_timeout_is_recomputed_after_model_gate_wait(
+        auth_user, monkeypatch):
+    clock = SimpleNamespace(now=5.0)
+    openai = _ScriptedLLM([_llm_msg("answer")])
+    monkeypatch.setattr(
+        ai_coach, "time", SimpleNamespace(monotonic=lambda: clock.now)
+    )
+    deadlines = _install_advancing_model_slot(monkeypatch, clock, 12.0)
+    monkeypatch.setattr(ai_coach, "openai_client", openai)
+
+    answer = ai_coach._run_coach_conversation_openai(
+        auth_user.id, "question", "", [], deadline=40.0
+    )
+
+    assert answer == "answer"
+    assert openai.calls[0]["timeout"] == pytest.approx(23.0)
+    assert deadlines == [40.0]
+
+
+def test_openai_gate_wait_past_deadline_skips_provider(
+        auth_user, monkeypatch):
+    clock = SimpleNamespace(now=5.0)
+    openai = _ScriptedLLM([_llm_msg("must not run")])
+    monkeypatch.setattr(
+        ai_coach, "time", SimpleNamespace(monotonic=lambda: clock.now)
+    )
+    deadlines = _install_advancing_model_slot(monkeypatch, clock, 36.0)
+    monkeypatch.setattr(ai_coach, "openai_client", openai)
+
+    answer = ai_coach._run_coach_conversation_openai(
+        auth_user.id, "question", "", [], language="en", deadline=40.0
+    )
+
+    assert openai.calls == []
+    assert deadlines == [40.0]
+    assert answer == ai_coach._COACH_FALLBACKS["en"]["tool"]
 
 
 def test_openai_tool_rounds_share_one_decreasing_deadline(
@@ -589,7 +641,7 @@ def test_bedrock_tool_loop_stops_when_turn_budget_expires(
             calls.append(kwargs)
             return tool_turn
 
-    clock = iter([0.0, 0.0, 91.0])
+    clock = iter([0.0, 0.0, 0.0, 91.0])
     monkeypatch.setattr(
         ai_coach,
         "time",
@@ -613,13 +665,74 @@ def test_bedrock_tool_loop_stops_when_turn_budget_expires(
     assert calls[0]["timeout"] == pytest.approx(60.0)
 
 
+def test_bedrock_timeout_is_recomputed_after_model_gate_wait(
+        auth_user, monkeypatch):
+    clock = SimpleNamespace(now=5.0)
+    calls = []
+    response = SimpleNamespace(
+        stop_reason="end_turn",
+        content=[SimpleNamespace(type="text", text="answer")],
+    )
+
+    class _Msgs:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return response
+
+    monkeypatch.setattr(
+        ai_coach, "time", SimpleNamespace(monotonic=lambda: clock.now)
+    )
+    deadlines = _install_advancing_model_slot(monkeypatch, clock, 12.0)
+    monkeypatch.setattr(
+        ai_coach, "bedrock_client", SimpleNamespace(messages=_Msgs())
+    )
+
+    answer = ai_coach._run_coach_conversation_bedrock(
+        auth_user.id, "question", "", [], deadline=40.0
+    )
+
+    assert answer == "answer"
+    assert calls[0]["timeout"] == pytest.approx(23.0)
+    assert deadlines == [40.0]
+
+
+def test_bedrock_gate_wait_past_deadline_skips_provider(
+        auth_user, monkeypatch):
+    clock = SimpleNamespace(now=5.0)
+    calls = []
+
+    class _Msgs:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                stop_reason="end_turn",
+                content=[SimpleNamespace(type="text", text="must not run")],
+            )
+
+    monkeypatch.setattr(
+        ai_coach, "time", SimpleNamespace(monotonic=lambda: clock.now)
+    )
+    deadlines = _install_advancing_model_slot(monkeypatch, clock, 36.0)
+    monkeypatch.setattr(
+        ai_coach, "bedrock_client", SimpleNamespace(messages=_Msgs())
+    )
+
+    answer = ai_coach._run_coach_conversation_bedrock(
+        auth_user.id, "question", "", [], language="en", deadline=40.0
+    )
+
+    assert calls == []
+    assert deadlines == [40.0]
+    assert answer == ai_coach._COACH_FALLBACKS["en"]["tool"]
+
+
 def test_bedrock_timeout_at_turn_deadline_does_not_start_fallback(
         auth_user, monkeypatch):
     class _Msgs:
         def create(self, **kwargs):
             raise TimeoutError("provider deadline")
 
-    clock = iter([0.0, 0.0, 91.0])
+    clock = iter([0.0, 0.0, 0.0, 91.0])
     monkeypatch.setattr(
         ai_coach,
         "time",

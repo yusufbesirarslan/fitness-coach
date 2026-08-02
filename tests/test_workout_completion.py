@@ -577,6 +577,15 @@ def test_route_rejects_previous_day_session_without_any_mutation(
         training_bp, "validate_pump_check",
         lambda *a, **k: {"valid": True, "fallback": False},
     )
+    route_day_calls = []
+    route_days = iter((today, today + timedelta(days=1)))
+
+    def divergent_app_today():
+        value = next(route_days)
+        route_day_calls.append(value)
+        return value
+
+    monkeypatch.setattr(training_bp, "app_today", divergent_app_today)
 
     response = client.post(
         "/workout/complete",
@@ -608,3 +617,4 @@ def test_route_rejects_previous_day_session_without_any_mutation(
         db.session.get(User, auth_user.id).rank_points or 0,
     ) == before_counts
     assert _markers(auth_user.id) == 0
+    assert route_day_calls == [today]

@@ -37,10 +37,14 @@ def test_route_gate_defaults_to_fail_fast():
 class _RecordingSemaphore:
     def __init__(self):
         self.timeouts = []
+        self.releases = 0
 
     def acquire(self, *, timeout):
         self.timeouts.append(timeout)
         return True
+
+    def release(self):
+        self.releases += 1
 
 
 def test_acquire_before_deadline_uses_remaining_monotonic_budget():
@@ -51,6 +55,22 @@ def test_acquire_before_deadline_uses_remaining_monotonic_budget():
     assert ai_gate._acquire_before_deadline(
         sem, 1, clock=lambda: next(clock_values))
     assert sem.timeouts == [0.75]
+
+
+def test_model_slot_wait_is_capped_by_coach_deadline(monkeypatch):
+    sem = _RecordingSemaphore()
+    clock_values = iter((10.0, 10.25))
+    monkeypatch.setattr(ai_gate, "_model_slots", sem)
+    monkeypatch.setattr(
+        ai_gate, "time",
+        SimpleNamespace(monotonic=lambda: next(clock_values)),
+    )
+
+    with ai_gate.model_concurrency_slot(wait_seconds=5.0, deadline=11.0):
+        pass
+
+    assert sem.timeouts == [0.75]
+    assert sem.releases == 1
 
 
 def test_blocking_slot_fails_fast_when_full(monkeypatch):

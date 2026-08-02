@@ -1029,7 +1029,13 @@ def _run_coach_conversation_openai(user_id, question, context, history,
             current_app.logger.warning("[COACH] OpenAI turn budget exhausted")
             return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
         try:
-            with model_concurrency_slot():
+            with model_concurrency_slot(deadline=deadline):
+                remaining = _remaining_coach_turn_seconds(deadline)
+                if remaining <= 0:
+                    current_app.logger.warning(
+                        "[COACH] OpenAI turn budget exhausted after model gate")
+                    return _COACH_FALLBACKS[
+                        _coach_lang(language)]["tool"]
                 resp = openai_client.chat.completions.create(
                     model=OPENAI_MODEL,
                     messages=messages,
@@ -1040,6 +1046,10 @@ def _run_coach_conversation_openai(user_id, question, context, history,
                     timeout=min(30.0, remaining),
                 )
         except Exception as e:
+            if _remaining_coach_turn_seconds(deadline) <= 0:
+                current_app.logger.warning(
+                    "[COACH] OpenAI turn budget exhausted during model gate")
+                return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
             current_app.logger.warning("[COACH] OpenAI çağrısı başarısız: %s", type(e).__name__)
             return _COACH_FALLBACKS[_coach_lang(language)]["error"]
         if not resp.choices:
@@ -1134,7 +1144,13 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
         # tools_ran mantığını uygula: hiç araç çalışmadıysa OpenAI'ya düş, çalıştıysa
         # sağlayıcı değiştirme (yan etkiyi tekrarlama) → yumuşak hata.
         try:
-            with model_concurrency_slot():
+            with model_concurrency_slot(deadline=deadline):
+                remaining = _remaining_coach_turn_seconds(deadline)
+                if remaining <= 0:
+                    current_app.logger.warning(
+                        "[COACH][Bedrock] turn budget exhausted after model gate")
+                    return _COACH_FALLBACKS[
+                        _coach_lang(language)]["tool"]
                 resp = bedrock_client.messages.create(
                     model=BEDROCK_MODEL,
                     max_tokens=max_tokens,

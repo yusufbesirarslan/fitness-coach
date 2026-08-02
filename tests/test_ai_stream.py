@@ -15,6 +15,7 @@ get_final_message), gerçek AWS/OpenAI yok.
     python -m pytest tests/test_ai_stream.py -v
 """
 import threading
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -118,6 +119,20 @@ class _ControlledClock:
             self._index += 1
             return value
         return self._readings[-1]
+
+
+def _install_advancing_model_slot(
+        monkeypatch, module, clock, advance_seconds):
+    deadlines = []
+
+    @contextmanager
+    def advancing_slot(*, deadline=None):
+        deadlines.append(deadline)
+        clock.now += advance_seconds
+        yield
+
+    monkeypatch.setattr(module, "model_concurrency_slot", advancing_slot)
+    return deadlines
 
 
 @pytest.fixture
@@ -314,7 +329,7 @@ def test_stream_bedrock_stops_when_turn_budget_expires(
     monkeypatch.setattr(
         ai_coach, "AI_COACH_TURN_TIMEOUT_SECONDS", 90.0, raising=False
     )
-    clock = iter([0.0, 0.0, 91.0])
+    clock = iter([0.0, 0.0, 0.0, 91.0])
     monkeypatch.setattr(
         ai_coach,
         "time",
@@ -341,7 +356,7 @@ def test_stream_bedrock_stops_when_turn_budget_expires(
 
 def test_stream_timeout_at_turn_deadline_does_not_start_fallback(
         app, bedrock_on, monkeypatch):
-    clock = iter([0.0, 0.0, 91.0])
+    clock = iter([0.0, 0.0, 0.0, 91.0])
     monkeypatch.setattr(
         ai_coach,
         "time",
@@ -382,7 +397,7 @@ def test_stream_bedrock_fallback_keeps_remaining_budget_for_openai(
     with app.app_context():
         events = _collect(1, "question", language="en")
 
-    assert bedrock.calls[0]["timeout"] == pytest.approx(10.0)
+    assert bedrock.calls[0]["timeout"] == pytest.approx(8.0)
     assert openai_calls[0]["timeout"] == pytest.approx(7.5)
     assert events[-1] == {
         "type": "done",
@@ -392,9 +407,121 @@ def test_stream_bedrock_fallback_keeps_remaining_budget_for_openai(
     }
 
 
+def test_stream_bedrock_timeout_is_computed_in_producer_after_gate_wait(
+        app, bedrock_on, monkeypatch):
+    clock = SimpleNamespace(now=5.0)
+    monkeypatch.setattr(
+        ai_coach, "time", SimpleNamespace(monotonic=lambda: clock.now)
+    )
+    deadlines = _install_advancing_model_slot(
+        monkeypatch, ai_stream, clock, 12.0)
+    bedrock = bedrock_on(_FakeStream(["answer"], _final()))
+
+    with app.app_context():
+        events = list(ai_stream._stream_bedrock(
+            1, "question", "", [], "en", deadline=40.0))
+
+    assert bedrock.calls[0]["timeout"] == pytest.approx(23.0)
+    assert deadlines == [40.0]
+    assert events[-1]["text"] == "answer"
+
+
+def test_stream_bedrock_gate_wait_past_deadline_skips_provider(
+        app, bedrock_on, monkeypatch):
+    clock = SimpleNamespace(now=5.0)
+    monkeypatch.setattr(
+        ai_coach, "time", SimpleNamespace(monotonic=lambda: clock.now)
+    )
+    deadlines = _install_advancing_model_slot(
+        monkeypatch, ai_stream, clock, 36.0)
+    bedrock = bedrock_on(_FakeStream(["must not run"], _final()))
+
+    with app.app_context():
+        events = list(ai_stream._stream_bedrock(
+            1, "question", "", [], "en", deadline=40.0))
+
+    assert bedrock.calls == []
+    assert deadlines == [40.0]
+    assert events[-1] == {
+        "type": "done",
+        "text": ai_coach._COACH_FALLBACKS["en"]["tool"],
+        "usage": None,
+        "provider": "bedrock",
+    }
+
+
+def test_stream_openai_timeout_is_recomputed_after_model_gate_wait(
+        app, monkeypatch):
+    clock = SimpleNamespace(now=5.0)
+    calls = []
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        message = SimpleNamespace(content="answer", tool_calls=[])
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    monkeypatch.setattr(
+        ai_coach, "time", SimpleNamespace(monotonic=lambda: clock.now)
+    )
+    deadlines = _install_advancing_model_slot(
+        monkeypatch, ai_coach, clock, 12.0)
+    monkeypatch.setattr(
+        ai_coach,
+        "openai_client",
+        SimpleNamespace(chat=SimpleNamespace(
+            completions=SimpleNamespace(create=create))),
+    )
+
+    with app.app_context():
+        events = list(ai_stream._stream_openai_fallback(
+            1, "question", "", [], "en", deadline=40.0))
+
+    assert calls[0]["timeout"] == pytest.approx(23.0)
+    assert deadlines == [40.0]
+    assert events[-1] == {
+        "type": "done", "text": "answer", "usage": None,
+        "provider": "openai",
+    }
+
+
+def test_stream_openai_gate_wait_past_deadline_skips_provider(
+        app, monkeypatch):
+    clock = SimpleNamespace(now=5.0)
+    calls = []
+
+    def create(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(choices=[])
+
+    monkeypatch.setattr(
+        ai_coach, "time", SimpleNamespace(monotonic=lambda: clock.now)
+    )
+    deadlines = _install_advancing_model_slot(
+        monkeypatch, ai_coach, clock, 36.0)
+    monkeypatch.setattr(
+        ai_coach,
+        "openai_client",
+        SimpleNamespace(chat=SimpleNamespace(
+            completions=SimpleNamespace(create=create))),
+    )
+
+    with app.app_context():
+        events = list(ai_stream._stream_openai_fallback(
+            1, "question", "", [], "en", deadline=40.0))
+
+    assert calls == []
+    assert deadlines == [40.0]
+    assert events[-1] == {
+        "type": "done",
+        "text": ai_coach._COACH_FALLBACKS["en"]["tool"],
+        "usage": None,
+        "provider": "openai",
+    }
+
+
 def test_stream_exhausted_fallback_skips_openai_and_emits_localized_done(
         app, bedrock_on, monkeypatch):
-    clock = _ControlledClock(0.0, 80.0, 89.0, 91.0)
+    clock = _ControlledClock(0.0, 80.0, 80.0, 89.0, 91.0)
     monkeypatch.setattr(
         ai_coach, "time", SimpleNamespace(monotonic=clock.monotonic)
     )
@@ -848,7 +975,8 @@ def test_stream_bedrock_turn_cancels_producer_on_consumer_close():
 
     client = SimpleNamespace(stream=lambda **kw: _EndlessStream())
 
-    gen = ai_stream._stream_bedrock_turn(client, {})
+    gen = ai_stream._stream_bedrock_turn(
+        client, {}, deadline=float("inf"))
     assert next(gen) == {"kind": "delta", "text": "ilk"}
     gen.close()                # istemci koptu (GeneratorExit)
     consumer_closed.set()      # üretici devam etmeyi DENER — iptali görmeli

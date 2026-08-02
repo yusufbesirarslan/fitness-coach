@@ -1,8 +1,8 @@
 # PR #194 Findings #1-#9 Design
 
-**Date:** 2026-08-02  
-**Branch:** `fix/triage-findings-1-9`  
-**Base:** latest `origin/main` at worktree creation (`95d94cd063e55d22fba7f63e8a575743e8a4f4b8`)  
+**Date:** 2026-08-02
+**Branch:** `fix/triage-findings-1-9`
+**Base:** latest `origin/main` at worktree creation (`95d94cd063e55d22fba7f63e8a575743e8a4f4b8`)
 **Source:** PR #194, `NEEDED_FIXES_2026-08-02.md`
 
 ## Scope

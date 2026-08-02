@@ -64,7 +64,7 @@ def _bedrock_work_error(parts, tools_ran):
 
 
 
-def _stream_bedrock_turn(messages_client, call_kwargs):
+def _stream_bedrock_turn(messages_client, call_kwargs, *, deadline):
     messages = queue.SimpleQueue()
     # Triage 2026-07-19 #6: tüketici (istemci) kopunca üretici thread Bedrock
     # akışını doğal bitimine dek sürüyordu — giden kullanıcı için faturalanan
@@ -73,9 +73,18 @@ def _stream_bedrock_turn(messages_client, call_kwargs):
     cancelled = threading.Event()
 
     def produce():
+        from app.services import ai_coach
+
         try:
-            with model_concurrency_slot():
-                with messages_client.stream(**call_kwargs) as stream:
+            with model_concurrency_slot(deadline=deadline):
+                remaining = ai_coach._remaining_coach_turn_seconds(deadline)
+                if remaining <= 0:
+                    messages.put({"kind": "deadline_exhausted"})
+                    return
+                provider_kwargs = dict(call_kwargs)
+                provider_kwargs["timeout"] = min(
+                    ai_coach.BEDROCK_CALL_TIMEOUT_SECONDS, remaining)
+                with messages_client.stream(**provider_kwargs) as stream:
                     for text in stream.text_stream:
                         if cancelled.is_set():
                             return
@@ -93,7 +102,8 @@ def _stream_bedrock_turn(messages_client, call_kwargs):
         while True:
             message = messages.get()
             yield message
-            if message["kind"] in {"final", "exception"}:
+            if message["kind"] in {
+                    "final", "exception", "deadline_exhausted"}:
                 return
     finally:
         cancelled.set()
@@ -162,17 +172,24 @@ def _stream_bedrock(user_id, question, context, history, language,
             "system": system,
             "messages": convo,
             "tools": tools,
-            "timeout": min(ai_coach.BEDROCK_CALL_TIMEOUT_SECONDS, remaining),
         }
         try:
             for message in _stream_bedrock_turn(
-                    ai_coach.bedrock_client.messages, call_kwargs):
+                    ai_coach.bedrock_client.messages, call_kwargs,
+                    deadline=deadline):
                 if message["kind"] == "delta":
                     text = message["text"]
                     parts.append(text)
                     yield {"type": "delta", "text": text}
                 elif message["kind"] == "final":
                     final = message["message"]
+                elif message["kind"] == "deadline_exhausted":
+                    current_app.logger.warning(
+                        "[COACH][stream] Bedrock turn budget exhausted after model gate")
+                    yield from _emit_text(ai_coach._COACH_FALLBACKS[
+                        ai_coach._coach_lang(language)]["tool"],
+                        provider="bedrock", usage=usage)
+                    return
                 else:
                     raise message["exception"]
         except Exception as e:

@@ -59,10 +59,14 @@ class BlockingConcurrencyLimit(RuntimeError):
     pass
 
 
-def _acquire_before_deadline(semaphore, wait_seconds, *, clock=None):
+def _acquire_before_deadline(
+        semaphore, wait_seconds, *, deadline=None, clock=None):
     monotonic = clock or time.monotonic
-    deadline = monotonic() + max(0.0, wait_seconds)
-    return semaphore.acquire(timeout=max(0.0, deadline - monotonic()))
+    acquire_deadline = monotonic() + max(0.0, wait_seconds)
+    if deadline is not None:
+        acquire_deadline = min(acquire_deadline, deadline)
+    return semaphore.acquire(
+        timeout=max(0.0, acquire_deadline - monotonic()))
 
 
 @contextmanager
@@ -78,10 +82,11 @@ def blocking_concurrency_slot(wait_seconds=None):
 
 
 @contextmanager
-def model_concurrency_slot(wait_seconds=None):
-    """Bound one complete provider/fallback sequence independently of routes."""
+def model_concurrency_slot(wait_seconds=None, *, deadline=None):
+    """Bound one provider call by gate budget and an optional outer deadline."""
     wait = AI_GATE_WAIT_SECONDS if wait_seconds is None else wait_seconds
-    if not _acquire_before_deadline(_model_slots, wait):
+    if not _acquire_before_deadline(
+            _model_slots, wait, deadline=deadline):
         raise BlockingConcurrencyLimit("model blocking capacity exhausted")
     try:
         yield
