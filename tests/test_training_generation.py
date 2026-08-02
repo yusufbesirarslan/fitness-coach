@@ -16,6 +16,7 @@ from app.services.training_generation.response_validator import (
     WEEKDAYS,
     validate_generated_plan,
 )
+from app.services.workout_state.serialization import serialize_plan
 from app.services.training_generation import service as training_service
 
 
@@ -280,6 +281,42 @@ def _valid_generated_plan():
             "uygunluk_skoru": 7,
         },
     }
+
+
+@pytest.mark.parametrize("raw, expected", [
+    (-1, 0), (0, 0), (1440, 1440), (1441, 1440),
+])
+def test_generated_day_duration_is_clamped_before_serialization(raw, expected):
+    preferences = TrainingPreferences(gun_sayisi=1, sure=45)
+    generated = _valid_generated_plan()
+    generated["program"][0]["sure_dk"] = raw
+    generated["program"][0]["egzersizler"][0]["set"] = 3
+
+    validated, _ = validate_generated_plan(generated, preferences)
+    serialized = serialize_plan(validated)
+
+    assert validated["program"][0]["sure_dk"] == expected
+    assert validated["program"][0]["egzersizler"][0]["set"] == 3
+    assert serialized["program"][0]["sure_dk"] == expected
+    assert serialized["program"][0]["egzersizler"][0]["set"] == 3
+
+
+@pytest.mark.parametrize("raw, expected", [
+    (0, 1), (1, 1), (100, 100), (101, 100),
+])
+def test_generated_exercise_sets_are_clamped_before_serialization(raw, expected):
+    preferences = TrainingPreferences(gun_sayisi=1, sure=45)
+    generated = _valid_generated_plan()
+    generated["program"][0]["sure_dk"] = 45
+    generated["program"][0]["egzersizler"][0]["set"] = raw
+
+    validated, _ = validate_generated_plan(generated, preferences)
+    serialized = serialize_plan(validated)
+
+    assert validated["program"][0]["sure_dk"] == 45
+    assert validated["program"][0]["egzersizler"][0]["set"] == expected
+    assert serialized["program"][0]["sure_dk"] == 45
+    assert serialized["program"][0]["egzersizler"][0]["set"] == expected
 
 
 def _stub_generation_pipeline(monkeypatch):

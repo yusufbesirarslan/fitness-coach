@@ -8,6 +8,8 @@ import pytest
 
 from app.extensions import db
 from app.models import TrainingPlan
+from app.services.training_generation.models import TrainingPreferences
+from app.services.training_generation.response_validator import validate_generated_plan
 MONDAY = date(2026, 7, 27)
 
 
@@ -215,6 +217,35 @@ def test_training_bootstrap_projects_full_week_onto_closed_public_schema(
             "unknown_plan_field", "unknown_day_field",
             "unknown_exercise_field", "internal_id"):
         assert sentinel not in raw
+
+
+@pytest.mark.parametrize(("raw_duration", "raw_sets", "duration", "sets"), [
+    (-1, 0, 0, 1),
+    (1441, 101, 1440, 100),
+])
+def test_training_bootstrap_serves_validator_bounded_generated_plan(
+        client, auth_user, monkeypatch,
+        raw_duration, raw_sets, duration, sets):
+    program = _program()
+    program[0]["sure_dk"] = raw_duration
+    program[0]["egzersizler"][0]["set"] = raw_sets
+    generated = {"program": program, "haftalik_ozet": {}}
+
+    validated, _ = validate_generated_plan(
+        generated, TrainingPreferences(gun_sayisi=1, sure=45))
+    db.session.add(TrainingPlan(
+        user_id=auth_user.id,
+        plan_data=json.dumps(validated, ensure_ascii=False),
+        score=8,
+    ))
+    db.session.commit()
+    monkeypatch.setattr("app.blueprints.training.app_today", lambda: MONDAY)
+
+    response = client.get("/training/bootstrap")
+
+    assert response.status_code == 200
+    assert response.get_json()["today_plan"]["sure_dk"] == duration
+    assert response.get_json()["today_plan"]["egzersizler"][0]["set"] == sets
 
 def test_training_bootstrap_fails_closed_without_partial_payload(
         client, auth_user, monkeypatch):
