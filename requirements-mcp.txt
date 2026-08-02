@@ -1,2 +1,2 @@
 -r requirements.txt
-mcp[cli]==1.28.1
+mcp[cli]==2.0.0
