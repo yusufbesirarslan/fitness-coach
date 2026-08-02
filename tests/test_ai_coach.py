@@ -394,6 +394,122 @@ class _ScriptedLLM:
         self.chat = SimpleNamespace(completions=_Completions())
 
 
+class _ControlledClock:
+    def __init__(self, *readings):
+        self._readings = list(readings)
+        self._index = 0
+
+    def monotonic(self):
+        if self._index < len(self._readings):
+            value = self._readings[self._index]
+            self._index += 1
+            return value
+        return self._readings[-1]
+
+
+def test_bedrock_fallback_does_not_reset_exhausted_turn_deadline(
+        auth_user, monkeypatch):
+    bedrock_calls = []
+
+    class _Messages:
+        def create(self, **kwargs):
+            bedrock_calls.append(kwargs)
+            raise RuntimeError("bedrock unavailable")
+
+    openai = _ScriptedLLM([_llm_msg("OpenAI must not run")])
+    clock = _ControlledClock(0.0, 80.0, 89.0, 91.0)
+    monkeypatch.setattr(
+        ai_coach, "time", SimpleNamespace(monotonic=clock.monotonic)
+    )
+    monkeypatch.setattr(ai_coach, "AI_COACH_TURN_TIMEOUT_SECONDS", 90.0)
+    monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", True)
+    monkeypatch.setattr(ai_coach, "_anthropic", object())
+    monkeypatch.setattr(
+        ai_coach,
+        "bedrock_client",
+        SimpleNamespace(messages=_Messages()),
+    )
+    monkeypatch.setattr(ai_coach, "openai_client", openai)
+
+    answer = _run_coach_conversation(
+        auth_user.id, "question", "", client_history=[], language="en"
+    )
+
+    assert openai.calls == []
+    assert answer == ai_coach._COACH_FALLBACKS["en"]["tool"]
+    assert bedrock_calls[0]["timeout"] == pytest.approx(10.0)
+
+
+def test_openai_call_timeout_uses_remaining_turn_budget(auth_user, monkeypatch):
+    openai = _ScriptedLLM([_llm_msg("answer")])
+    clock = _ControlledClock(0.0, 82.5)
+    monkeypatch.setattr(
+        ai_coach, "time", SimpleNamespace(monotonic=clock.monotonic)
+    )
+    monkeypatch.setattr(ai_coach, "AI_COACH_TURN_TIMEOUT_SECONDS", 90.0)
+    monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
+    monkeypatch.setattr(ai_coach, "openai_client", openai)
+
+    answer = _run_coach_conversation(
+        auth_user.id, "question", "", client_history=[]
+    )
+
+    assert answer == "answer"
+    assert openai.calls[0]["timeout"] == pytest.approx(7.5)
+
+
+def test_openai_tool_rounds_share_one_decreasing_deadline(
+        auth_user, monkeypatch):
+    clock = SimpleNamespace(now=0.0)
+    calls = []
+    responses = [
+        _llm_msg(tool_calls=[_tool_call("cancel_pending_log")]),
+        _llm_msg("done"),
+    ]
+
+    class _Completions:
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            response = responses.pop(0)
+            clock.now += 10.0
+            return response
+
+    client = SimpleNamespace(
+        chat=SimpleNamespace(completions=_Completions())
+    )
+    monkeypatch.setattr(
+        ai_coach,
+        "time",
+        SimpleNamespace(monotonic=lambda: clock.now),
+    )
+    monkeypatch.setattr(ai_coach, "openai_client", client)
+    monkeypatch.setattr(ai_coach, "_dispatch_coach_tool", lambda *args: "{}")
+
+    answer = ai_coach._run_coach_conversation_openai(
+        auth_user.id, "question", "", [], deadline=35.0
+    )
+
+    assert answer == "done"
+    assert [call["timeout"] for call in calls] == pytest.approx([30.0, 25.0])
+
+
+def test_openai_exhausted_deadline_skips_provider_call(auth_user, monkeypatch):
+    openai = _ScriptedLLM([_llm_msg("must not run")])
+    monkeypatch.setattr(
+        ai_coach,
+        "time",
+        SimpleNamespace(monotonic=lambda: 25.0),
+    )
+    monkeypatch.setattr(ai_coach, "openai_client", openai)
+
+    answer = ai_coach._run_coach_conversation_openai(
+        auth_user.id, "question", "", [], language="en", deadline=25.0
+    )
+
+    assert openai.calls == []
+    assert answer == ai_coach._COACH_FALLBACKS["en"]["tool"]
+
+
 def test_conversation_plain_answer(auth_user, monkeypatch):
     llm = _ScriptedLLM([_llm_msg("Protein hedefin 150g.")])
     monkeypatch.setattr(ai_coach, "openai_client", llm)
