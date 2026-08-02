@@ -22,7 +22,7 @@ touches (`git reset --hard origin/main` does not modify it). Consequences:
 ```bash
 # On the host, as the deploy user:
 cd <app-dir>
-grep -E '^(WEEKLY_PROGRAM_UI_ENABLED|UIUX_NAV_V2_ENABLED|UIUX_TODAY_V2_ENABLED|UIUX_PLAN_V2_ENABLED|UIUX_COACH_PAGE_V2_ENABLED|FITX_WORKOUT_SESSIONS_ENABLED|AI_ADAPTIVE_PLAN_CONTEXT|MOBILE_AUTH_ENABLED)=' .env
+grep -E '^(WEEKLY_PROGRAM_UI_ENABLED|UIUX_TODAY_V2_ENABLED|UIUX_PLAN_V2_ENABLED|UIUX_COACH_PAGE_V2_ENABLED|UIUX_NAV_V2_ENABLED|FITX_WORKOUT_SESSIONS_ENABLED|AI_ADAPTIVE_PLAN_CONTEXT|MOBILE_AUTH_ENABLED)=' .env
 ```
 
 ---
@@ -37,8 +37,8 @@ first is cheaper than a rolled-back deploy.
 ```bash
 # On the host. Prints a line for every rollout flag whose value is not exactly
 # 0, 1, or empty. Expected output: nothing.
-for k in WEEKLY_PROGRAM_UI_ENABLED UIUX_NAV_V2_ENABLED UIUX_TODAY_V2_ENABLED \
-         UIUX_PLAN_V2_ENABLED UIUX_COACH_PAGE_V2_ENABLED \
+for k in WEEKLY_PROGRAM_UI_ENABLED UIUX_TODAY_V2_ENABLED UIUX_PLAN_V2_ENABLED \
+         UIUX_COACH_PAGE_V2_ENABLED UIUX_NAV_V2_ENABLED \
          FITX_WORKOUT_SESSIONS_ENABLED AI_ADAPTIVE_PLAN_CONTEXT \
          MOBILE_AUTH_ENABLED; do
   v=$(grep -E "^${k}=" .env | tail -1 | cut -d= -f2-)
@@ -79,13 +79,26 @@ activate first.
 | Order | Flag | Why here |
 |---|---|---|
 | 1 | `WEEKLY_PROGRAM_UI_ENABLED` | Only presentation flag with a real feature-specific signal (`[TRAINING][WEEKLY_PROGRAM]` state line). Additive, read-only, one GET. |
-| 2 | `UIUX_NAV_V2_ENABLED` | Widest UI blast radius; must be settled before the destinations it hosts. |
-| 3 | `UIUX_TODAY_V2_ENABLED` | The new shell's default destination. |
-| 4 | `UIUX_PLAN_V2_ENABLED` | Shares a page with #1; do them in separate windows. |
-| 5 | `UIUX_COACH_PAGE_V2_ENABLED` | Independent, but sits on the AI path — go last among presentation flags. |
+| 2 | `UIUX_TODAY_V2_ENABLED` | Independently reachable through the legacy shell's Home tab (`/`). |
+| 3 | `UIUX_PLAN_V2_ENABLED` | Reachable through the legacy Training tab (`/training`). Shares a page with #1; separate windows. |
+| 4 | `UIUX_COACH_PAGE_V2_ENABLED` | Independent, but sits on the AI path. Re-check after #5 — see the note below. |
+| 5 | `UIUX_NAV_V2_ENABLED` | **Last among the presentation flags**: widest UI blast radius paired with the weakest observability. |
 | 6 | `FITX_WORKOUT_SESSIONS_ENABLED` | Mutating and schema-backed. Staging first; needs migration `a994f9bed783`. |
 | 7 | `AI_ADAPTIVE_PLAN_CONTEXT` | Changes AI behaviour for every user. Staging + human answer review; no metric can judge quality. |
 | 8 | `MOBILE_AUTH_ENABLED` | **Blocked until PR4 merges.** Attack-surface change with an unbounded pre-auth blocking call today. |
+
+**Nav v2 is not a prerequisite for anything.** `app/nav.py` points its four
+primary destinations at pre-existing canonical routes (`/`, `/training`,
+`/coach`, `/progress-page`), all of which respond regardless of the Today/Plan/
+Coach v2 flags — so it can be activated at any point, and it goes last because a
+regression under it is the hardest of the eight to attribute.
+
+**One caveat on #4.** The legacy shell has no `/coach` entry point (not a tab,
+not a drawer link), so until #5 activates, `/coach` is reached only by direct URL
+— the everyday coach entry point is the floating widget, which this flag does not
+change. A clean window at #4 therefore proves less than it appears: **re-check
+`UIUX_COACH_PAGE_V2_ENABLED`'s abort signals during #5's observation window**,
+particularly duplicated `/coach/history` fetches.
 
 ### First activation candidate: `WEEKLY_PROGRAM_UI_ENABLED`
 
