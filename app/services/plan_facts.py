@@ -106,6 +106,8 @@ def _parse_plan_days(plan_data):
         parsed = json.loads(plan_data)
     except (TypeError, ValueError):
         return False, ()
+    if isinstance(parsed, dict):
+        parsed = parsed.get("program")
     if not isinstance(parsed, list):
         return False, ()
     days = tuple(day for day in (_parse_day(raw) for raw in parsed) if day is not None)
