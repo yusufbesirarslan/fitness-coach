@@ -107,10 +107,13 @@ def stream_coach_answer(user_id, question, context, history, language="tr"):
     from app.services import ai_coach
 
     ai_coach._begin_coach_turn()  # S1: tur-içi stage→confirm kilidini sıfırla
+    deadline = ai_coach._coach_turn_deadline()
 
     if ai_coach.BEDROCK_ENABLED and ai_coach._anthropic is not None:
         try:
-            yield from _stream_bedrock(user_id, question, context, history, language)
+            yield from _stream_bedrock(
+                user_id, question, context, history, language,
+                deadline=deadline)
             return
         except ai_coach._BedrockFallback:
             # Buraya YALNIZCA hiç delta gitmemişken ve hiç araç çalışmamışken
@@ -118,10 +121,13 @@ def stream_coach_answer(user_id, question, context, history, language="tr"):
             current_app.logger.warning(
                 "[COACH][stream] Bedrock failed before work; trying OpenAI fallback")
 
-    yield from _stream_openai_fallback(user_id, question, context, history, language)
+    yield from _stream_openai_fallback(
+        user_id, question, context, history, language,
+        deadline=deadline)
 
 
-def _stream_bedrock(user_id, question, context, history, language):
+def _stream_bedrock(user_id, question, context, history, language,
+                    deadline=None):
     """Bedrock (Anthropic Messages) akışlı araç-kullanım döngüsü.
 
     Her tur AKITILIR: model araç çağırmadan önce bir giriş cümlesi yazarsa
@@ -130,6 +136,8 @@ def _stream_bedrock(user_id, question, context, history, language):
     parçaları birleşip kalıcılaşan yanıtı oluşturur."""
     from app.services import ai_coach
 
+    if deadline is None:
+        deadline = ai_coach._coach_turn_deadline()
     system = ai_coach._build_bedrock_system(context, language)
     tools = ai_coach._anthropic_tools_for_call()
     convo = prompt_builder.build_anthropic_messages(history, question)
@@ -138,7 +146,6 @@ def _stream_bedrock(user_id, question, context, history, language):
     parts = []
     tools_ran = 0
     usage = None
-    deadline = ai_coach._coach_turn_deadline()
 
     for _ in range(ai_coach._COACH_TOOL_LOOP_CAP):
         remaining = ai_coach._remaining_coach_turn_seconds(deadline)
@@ -222,7 +229,8 @@ def _stream_bedrock(user_id, question, context, history, language):
         ai_coach._coach_lang(language)]["tool"], provider="bedrock", usage=usage)
 
 
-def _stream_openai_fallback(user_id, question, context, history, language):
+def _stream_openai_fallback(user_id, question, context, history, language,
+                            deadline=None):
     """OpenAI yedeği: kanıtlanmış BLOKLAYICI araç döngüsünü koşar, sonucu akıtır.
 
     Gerçek token akışı değildir (ilk-token kazancı yok) — amaç tek olay
@@ -230,9 +238,21 @@ def _stream_openai_fallback(user_id, question, context, history, language):
     ayrıştırılması ayrı bir doğruluk riski; yedek yolda bu riski almıyoruz."""
     from app.services import ai_coach
 
+    if deadline is None:
+        deadline = ai_coach._coach_turn_deadline()
+    if ai_coach._remaining_coach_turn_seconds(deadline) <= 0:
+        current_app.logger.warning(
+            "[COACH][stream] turn budget exhausted before OpenAI fallback")
+        yield from _emit_text(
+            ai_coach._COACH_FALLBACKS[
+                ai_coach._coach_lang(language)]["tool"],
+            provider="openai", usage=None)
+        return
+
     try:
         text = ai_coach._run_coach_conversation_openai(
-            user_id, question, context, history, language)
+            user_id, question, context, history, language,
+            deadline=deadline)
     except Exception:
         current_app.logger.warning("[COACH][stream] OpenAI fallback failed before work")
         yield {

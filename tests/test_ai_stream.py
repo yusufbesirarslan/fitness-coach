@@ -107,6 +107,19 @@ class _FakeBedrock:
         return self._turns.pop(0)
 
 
+class _ControlledClock:
+    def __init__(self, *readings):
+        self._readings = list(readings)
+        self._index = 0
+
+    def monotonic(self):
+        if self._index < len(self._readings):
+            value = self._readings[self._index]
+            self._index += 1
+            return value
+        return self._readings[-1]
+
+
 @pytest.fixture
 def bedrock_on(monkeypatch):
     """Bedrock akış yolunu aç ve fake istemciyi enjekte et."""
@@ -342,6 +355,70 @@ def test_stream_timeout_at_turn_deadline_does_not_start_fallback(
 
     assert events[-1]["type"] == "done"
     assert events[-1]["text"] == ai_coach._COACH_FALLBACKS["en"]["tool"]
+
+
+def test_stream_bedrock_fallback_keeps_remaining_budget_for_openai(
+        app, bedrock_on, monkeypatch):
+    clock = _ControlledClock(0.0, 80.0, 82.0, 82.5)
+    monkeypatch.setattr(
+        ai_coach, "time", SimpleNamespace(monotonic=clock.monotonic)
+    )
+    monkeypatch.setattr(ai_coach, "AI_COACH_TURN_TIMEOUT_SECONDS", 90.0)
+    bedrock = bedrock_on(_RaisingStream(pre_chunks=()))
+    openai_calls = []
+
+    def create(**kwargs):
+        openai_calls.append(kwargs)
+        message = SimpleNamespace(content="OpenAI answer", tool_calls=[])
+        return SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+    monkeypatch.setattr(
+        ai_coach,
+        "openai_client",
+        SimpleNamespace(chat=SimpleNamespace(
+            completions=SimpleNamespace(create=create))),
+    )
+
+    with app.app_context():
+        events = _collect(1, "question", language="en")
+
+    assert bedrock.calls[0]["timeout"] == pytest.approx(10.0)
+    assert openai_calls[0]["timeout"] == pytest.approx(7.5)
+    assert events[-1] == {
+        "type": "done",
+        "text": "OpenAI answer",
+        "usage": None,
+        "provider": "openai",
+    }
+
+
+def test_stream_exhausted_fallback_skips_openai_and_emits_localized_done(
+        app, bedrock_on, monkeypatch):
+    clock = _ControlledClock(0.0, 80.0, 89.0, 91.0)
+    monkeypatch.setattr(
+        ai_coach, "time", SimpleNamespace(monotonic=clock.monotonic)
+    )
+    monkeypatch.setattr(ai_coach, "AI_COACH_TURN_TIMEOUT_SECONDS", 90.0)
+    bedrock = bedrock_on(_RaisingStream(pre_chunks=()))
+    openai_calls = []
+
+    def openai(*args, **kwargs):
+        openai_calls.append((args, kwargs))
+        return "OpenAI must not run"
+
+    monkeypatch.setattr(ai_coach, "_run_coach_conversation_openai", openai)
+
+    with app.app_context():
+        events = _collect(1, "question", language="en")
+
+    assert bedrock.calls[0]["timeout"] == pytest.approx(10.0)
+    assert openai_calls == []
+    assert events[-1] == {
+        "type": "done",
+        "text": ai_coach._COACH_FALLBACKS["en"]["tool"],
+        "usage": None,
+        "provider": "openai",
+    }
 
 
 def test_bedrock_error_before_first_delta_falls_back_to_openai(
