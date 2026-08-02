@@ -269,17 +269,24 @@ def abandon_session(
 
 
 def resolve_for_completion(
-    user_id: int, public_id: str
+    user_id: int, public_id: str, today: date
 ) -> Tuple[Optional[int], Optional[SessionResult]]:
     """Ownership-checked resolution of a public id to an internal session id for
     the completion route. Returns ``(session_id, None)`` to proceed, or
-    ``(None, error_result)`` for a terminal/not-found session."""
+    ``(None, error_result)`` for a stale/terminal/not-found session. ``today`` is
+    the completion caller's authoritative day; this resolver never recalculates
+    it independently."""
     session = get_owned_session(user_id, public_id)
     if session is None:
         return None, SessionResult(SessionOutcome.NOT_FOUND)
+    if session.workout_date != today.isoformat():
+        return None, SessionResult(
+            SessionOutcome.STALE_SESSION_REQUIRES_RESOLUTION,
+            session=_build_view(session, today),
+        )
     if session.status == WORKOUT_SESSION_ABANDONED:
         return None, SessionResult(
-            SessionOutcome.ALREADY_ABANDONED, session=_build_view(session, app_today()))
+            SessionOutcome.ALREADY_ABANDONED, session=_build_view(session, today))
     # ACTIVE or already COMPLETED → proceed; complete_workout is idempotent and
     # reconciles a duplicate into ALREADY_COMPLETED without duplicate side effects.
     return session.id, None
@@ -301,7 +308,7 @@ def complete_session(
     )
 
     day = today or app_today()
-    session_id, error = resolve_for_completion(user_id, public_id)
+    session_id, error = resolve_for_completion(user_id, public_id, day)
     if error is not None:
         return error
 

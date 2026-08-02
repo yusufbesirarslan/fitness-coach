@@ -29,12 +29,15 @@ from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models import (
+    Activity,
     PumpCheck,
     TrainingPlan,
     User,
+    WORKOUT_COMPLETION_MARKER,
     WORKOUT_SESSION_ABANDONED,
     WORKOUT_SESSION_ACTIVE,
     WORKOUT_SESSION_COMPLETED,
+    WorkoutLog,
     WorkoutSession,
 )
 from app.services.training_generation.response_validator import WEEKDAYS
@@ -600,10 +603,59 @@ def test_complete_abandoned_session_is_terminal_conflict(app, make_user):
     assert PumpCheck.query.filter_by(user_id=u.id).count() == 0   # nothing written
 
 
+def test_previous_day_completion_link_is_rejected_read_only(app, make_user):
+    """A caller-supplied completion day may not attach today's artifacts to a
+    previous-day ACTIVE session or resolve that stale lifecycle implicitly."""
+    u = make_user("cp_stale")
+    _save_plan(u.id)
+    today = app_today()
+    pid = start_session(u.id, today=today - timedelta(days=1)).session.public_id
+    row = WorkoutSession.query.filter_by(user_id=u.id).one()
+    before_row = (
+        row.user_id, row.public_id, row.status, row.workout_date,
+        row.started_at, row.last_activity_at, row.version,
+        row.completed_at, row.abandoned_at, row.terminal_reason,
+    )
+    before_counts = (
+        WorkoutSession.query.filter_by(user_id=u.id).count(),
+        PumpCheck.query.filter_by(user_id=u.id).count(),
+        WorkoutLog.query.filter_by(user_id=u.id).count(),
+        Activity.query.filter_by(user_id=u.id).count(),
+        db.session.get(User, u.id).rank_points or 0,
+    )
+
+    result = complete_session(u.id, pid, today=today)
+
+    db.session.expire_all()
+    row = WorkoutSession.query.filter_by(user_id=u.id).one()
+    assert result.outcome is SessionOutcome.STALE_SESSION_REQUIRES_RESOLUTION
+    assert (
+        row.user_id, row.public_id, row.status, row.workout_date,
+        row.started_at, row.last_activity_at, row.version,
+        row.completed_at, row.abandoned_at, row.terminal_reason,
+    ) == before_row
+    assert row.status == WORKOUT_SESSION_ACTIVE
+    assert WorkoutSession.query.filter_by(
+        user_id=u.id, status=WORKOUT_SESSION_ACTIVE).count() == 1
+    assert WorkoutSession.query.filter_by(
+        user_id=u.id, status=WORKOUT_SESSION_COMPLETED).count() == 0
+    assert WorkoutSession.query.filter_by(
+        user_id=u.id, status=WORKOUT_SESSION_ABANDONED).count() == 0
+    assert (
+        WorkoutSession.query.filter_by(user_id=u.id).count(),
+        PumpCheck.query.filter_by(user_id=u.id).count(),
+        WorkoutLog.query.filter_by(user_id=u.id).count(),
+        Activity.query.filter_by(user_id=u.id).count(),
+        db.session.get(User, u.id).rank_points or 0,
+    ) == before_counts
+    assert WorkoutLog.query.filter_by(
+        user_id=u.id, exercise_name=WORKOUT_COMPLETION_MARKER).count() == 0
+
+
 def test_resolve_for_completion_returns_internal_id(app, make_user):
     u = make_user("cp4")
     pid = start_session(u.id).session.public_id
-    session_id, error = resolve_for_completion(u.id, pid)
+    session_id, error = resolve_for_completion(u.id, pid, app_today())
     assert error is None
     assert session_id == _row_id(u.id)
 
@@ -620,7 +672,7 @@ def test_ownership_isolation_across_all_operations(app, make_user):
     assert checkpoint_session(b.id, a_pid).outcome is SessionOutcome.NOT_FOUND
     assert abandon_session(b.id, a_pid).outcome is SessionOutcome.NOT_FOUND
     assert complete_session(b.id, a_pid).outcome is SessionOutcome.NOT_FOUND
-    _sid, err = resolve_for_completion(b.id, a_pid)
+    _sid, err = resolve_for_completion(b.id, a_pid, app_today())
     assert err.outcome is SessionOutcome.NOT_FOUND
     # A's session is untouched by any of B's attempts.
     assert WorkoutSession.query.filter_by(user_id=a.id).one().status == WORKOUT_SESSION_ACTIVE
