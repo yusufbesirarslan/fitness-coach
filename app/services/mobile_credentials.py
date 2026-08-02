@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
+from app.feature_flags import FeatureFlagConfigurationError, parse_bool_flag
+
 
 _CREDENTIAL_BYTES = 32
 _DERIVATION_SALT = b'axisai/mobile-auth/credential-derivation/salt/v1'
@@ -158,10 +160,19 @@ def _integer_setting(name: str, default: int, *, positive: bool,
 
 
 def validate_mobile_auth_config(app) -> None:
-    enabled_value = os.environ.get('MOBILE_AUTH_ENABLED', '0')
-    if enabled_value not in {'0', '1'}:
-        raise CredentialConfigurationError('invalid MOBILE_AUTH_ENABLED')
-    enabled = enabled_value == '1'
+    # Shares app/feature_flags.py's parser so there is ONE definition of what a
+    # flag value means, but keeps allow_empty=False and its own exception type:
+    # this flag opens a pre-auth attack surface, so `MOBILE_AUTH_ENABLED=` is
+    # rejected here even though it is tolerated for the presentation flags.
+    # Behaviour is unchanged from before PR2 for every accepted and rejected
+    # value, including the error message.
+    try:
+        enabled = parse_bool_flag(
+            'MOBILE_AUTH_ENABLED', os.environ.get('MOBILE_AUTH_ENABLED'),
+            default=False, allow_empty=False)
+    except FeatureFlagConfigurationError as exc:
+        raise CredentialConfigurationError(
+            'invalid MOBILE_AUTH_ENABLED') from exc
     app.config['MOBILE_AUTH_ENABLED'] = enabled
     if not enabled:
         return

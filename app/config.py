@@ -6,6 +6,8 @@ from datetime import timedelta
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 
+from app import feature_flags as _feature_flags
+
 
 
 load_dotenv()
@@ -82,93 +84,25 @@ BEDROCK_ENABLED = os.getenv("BEDROCK_ENABLED", "0") == "1"  # açık opt-in; pro
 # tanımları önbelleğe alınır; deploy bölgesinde (eu-central-1) doğrulanana kadar
 # KARANLIK gönder (varsayılan kapalı). Yalnızca tool-use koç döngüsünü etkiler.
 BEDROCK_PROMPT_CACHE = os.getenv("BEDROCK_PROMPT_CACHE", "0") == "1"
-# Sprint 6 PR4: deterministic AdaptivePlan context for AI Coach. Strict opt-in:
-# OFF preserves the pre-PR4 prompt/context path exactly.
-AI_ADAPTIVE_PLAN_CONTEXT = os.getenv("AI_ADAPTIVE_PLAN_CONTEXT", "0") == "1"
-# Sprint 6 PR6.1: server-controlled rollout gate for the Adaptive Weekly Program UI.
-# Deliberately a SEPARATE env name and config key from AI_ADAPTIVE_PLAN_CONTEXT above:
-# one governs what the AI coach may read, the other only whether a UI mount point is
-# rendered. Coupling them would make a prompt rollout drag a UI rollout with it.
-# PRESENTATION ONLY — never an authorization boundary. GET /api/training/weekly-program
-# stays @require_auth regardless of this flag. Setting it back to 0 is the full rollback.
-WEEKLY_PROGRAM_UI_ENABLED = os.getenv("WEEKLY_PROGRAM_UI_ENABLED", "0") == "1"
-# ── AxisAI UIUX Sprint 1 PR1: primary-navigation shell v2 rollout gate ──
-# Spec identity: uiux_sprint1_navigation_v2. Default OFF preserves the legacy
-# 5-tab shell exactly (Home/Nutrition/Training/Progress/Profile). ON renders the
-# beta-critical four-destination information architecture (Today/Plan/Coach/
-# Progress) and moves Nutrition + Community + utility into the secondary drawer
-# tier. PRESENTATION ONLY — never an authorization boundary: every route keeps
-# its own @require_auth regardless of this flag. Independent of every other flag
-# (own env name, own config key). Full rollback: set UIUX_NAV_V2_ENABLED=0.
-UIUX_NAV_V2_ENABLED = os.getenv("UIUX_NAV_V2_ENABLED", "0") == "1"
-# ── AxisAI UIUX Sprint 1 PR2: Today experience v2 rollout gate ──
-# Spec identity: uiux_sprint1_today_v2. Default OFF renders the legacy Today
-# dashboard (templates/index.html) byte-identically. ON renders the PR2 Today
-# hierarchy (templates/today.html): one authoritative next action + honest
-# missing/completed/error semantics. PRESENTATION ONLY — never an authorization
-# boundary (every route keeps its own @require_auth) and it carries no business
-# rule. Server-config only: it is read from current_app.config, never from a
-# query param, cookie, header, or browser storage. Independent of every other
-# flag, including UIUX_NAV_V2_ENABLED (own env name, own config key — either can
-# roll back alone). Full rollback: set UIUX_TODAY_V2_ENABLED=0.
-UIUX_TODAY_V2_ENABLED = os.getenv("UIUX_TODAY_V2_ENABLED", "0") == "1"
-# ── AxisAI UIUX Sprint 1 PR3: Plan experience v2 rollout gate ──
-# Spec identity: uiux_sprint1_plan_v2. Default OFF renders the legacy /training
-# page (templates/training.html + static/training.js) byte-identically. ON renders
-# the server-authoritative Plan v2 surface (templates/plan.html): the active plan
-# read only from canonical data — no clock-based "today" selection, no rest-day
-# inference, no completion-from-localStorage. PRESENTATION ONLY — never an
-# authorization boundary (every route keeps its own @require_auth) and it carries
-# no business rule. Server-config only: read from current_app.config, never a query
-# param, cookie, header, or browser storage. Independent of every other flag,
-# including WEEKLY_PROGRAM_UI_ENABLED and UIUX_TODAY_V2_ENABLED / UIUX_NAV_V2_ENABLED
-# (own env name, own config key — either can roll back alone). Full rollback: set
-# UIUX_PLAN_V2_ENABLED=0.
-UIUX_PLAN_V2_ENABLED = os.getenv("UIUX_PLAN_V2_ENABLED", "0") == "1"
-# ── AxisAI UIUX Sprint 1 PR3: Coach page v2 rollout gate ──
-# Spec identity: uiux_sprint1_coach_page_v2. Default OFF renders the legacy thin
-# /coach host (templates/coach.html). ON renders the hardened Coach destination
-# (templates/coach_v2.html) which REUSES the existing widget (no second Coach
-# implementation) and guarantees exactly one interactive Coach instance. The shared
-# widget's lifecycle idempotency is a correctness invariant on every page; the
-# route-mode behaviours (auto-open, page-shell) activate ONLY on this V2 route.
-# PRESENTATION ONLY — never an authorization boundary (@require_auth preserved on
-# both paths) and it changes no AI prompt/model/streaming/persistence/rate-limit/
-# moderation policy. Server-config only. Independent of every other flag (own env
-# name, own config key). Full rollback: set UIUX_COACH_PAGE_V2_ENABLED=0.
-UIUX_COACH_PAGE_V2_ENABLED = os.getenv("UIUX_COACH_PAGE_V2_ENABLED", "0") == "1"
-
-# ── Sprint 7 PR3: persisted workout-session lifecycle rollout gate ──
-# Default OFF. The single canonical owner of the session-lifecycle rollout.
-# OFF preserves the PR1/PR2 contract EXACTLY: the /workout/session/* write routes
-# are unavailable (404) and the PR1 resolver emits contract_version=1 with the
-# pre-PR3 vocabulary (no `resume`/`in_progress`). ON enables session creation and
-# the additive contract_version=2 (persisted-session-only `resume`/`in_progress`).
-# PRESENTATION/ROLLOUT boundary, never authorization — the underlying services
-# still enforce @require_auth + ownership regardless. Disabling after sessions
-# already exist is safe: persisted rows are simply ignored by the read contract,
-# never deleted. Full rollback: FITX_WORKOUT_SESSIONS_ENABLED=0. docs/WORKOUT_STATE.md
-FITX_WORKOUT_SESSIONS_ENABLED = os.getenv("FITX_WORKOUT_SESSIONS_ENABLED", "0") == "1"
-
 # ── Ürün rollout bayraklarının TEK envanteri ──
-# Yalnızca ürün/rollout bayrakları (operasyonel kapatma anahtarları — AI_MEMORY_
-# ENABLED, AI_CACHE_ENABLED, LOGIN_FAIL_CLOSED vb. — buraya GİRMEZ; onlar kalıcı
-# yapılandırmadır, aşamalı açılış adayı değil). Bu liste /health?deep=1'in `flags`
-# bloğunu ve boot log satırını besler; hangi bayrağın canlıda AÇIK olduğunu tahmin
-# etmek yerine SORMAYI mümkün kılar.
-# MOBILE_AUTH_ENABLED burada YOK: onu app/services/mobile_credentials.py kendi
-# katı doğrulamasıyla app.config'e yazar (aynı anahtar adı) — envantere runtime'da
-# eklenir, bkz. feature_flag_state().
-FEATURE_FLAG_KEYS = (
-    "AI_ADAPTIVE_PLAN_CONTEXT",
-    "WEEKLY_PROGRAM_UI_ENABLED",
-    "UIUX_NAV_V2_ENABLED",
-    "UIUX_TODAY_V2_ENABLED",
-    "UIUX_PLAN_V2_ENABLED",
-    "UIUX_COACH_PAGE_V2_ENABLED",
-    "FITX_WORKOUT_SESSIONS_ENABLED",
-    "MOBILE_AUTH_ENABLED",
-)
+# Sekiz rollout bayrağının değeri ARTIK burada modül-yükü sabitleriyle değil,
+# app/feature_flags.py kayıt defterinden çözülür (configure_app içinde, bkz.
+# resolve_rollout_flags). Sebep: eski `os.getenv(X, "0") == "1"` deyimi `true`/
+# `TRUE`/`yes`/`"1 "` değerlerini SESSİZCE KAPALI okuyordu — operatör bayrağı
+# açtığını sanıyor, hiçbir yerde hata yok. Katı ayrıştırıcı bunu reddeder.
+# Bayrağın tam yaşam döngüsü kaydı (sahip, bağımlılık, gözlemlenebilirlik,
+# ön koşul, başarı/iptal sinyalleri, geri alma, gözden geçirme tarihi, karar)
+# app/feature_flags.py + docs/FEATURE_FLAGS.md içindedir.
+#
+# Yalnızca ürün/rollout bayrakları girer (operasyonel kapatma anahtarları —
+# AI_MEMORY_ENABLED, AI_CACHE_ENABLED, LOGIN_FAIL_CLOSED vb. — GİRMEZ; onlar
+# kalıcı yapılandırmadır, aşamalı açılış adayı değil; sınıflandırma
+# feature_flags.OPERATIONAL_BOOLEAN_KEYS'te).
+# MOBILE_AUTH_ENABLED'ı app/services/mobile_credentials.py kendi katı
+# doğrulamasıyla app.config'e yazar (kimlik bilgisi ömürlerini ve türetme
+# anahtarlığını da doğrular) — kayıt defteri onu okur, İKİNCİ bir ayrıştırma
+# yolu açmaz.
+FEATURE_FLAG_KEYS = _feature_flags.FEATURE_FLAG_KEYS
 
 
 def feature_flag_state(app):
@@ -349,6 +283,15 @@ def configure_app(app):
     _gunicorn_logger = logging.getLogger("gunicorn.error")
     from app.services.mobile_credentials import validate_mobile_auth_config
     validate_mobile_auth_config(app)
+    # Rollout bayrakları: kayıt defterinden KATI ayrıştırma. Bozuk bir değer
+    # (`true`, `yes`, `"1 "`) sessizce KAPALI'ya düşmek yerine boot'u durdurur —
+    # ve deploy'un /health?deep=1 kapısı önceki sürüme otomatik döner. Aynı anda
+    # birden fazla bozuk anahtar varsa HEPSİ tek hatada listelenir, operatör
+    # ikincisini bir sonraki başarısız deploy'da keşfetmesin. Bu çağrı
+    # validate_mobile_auth_config'ten SONRA gelir; o kendi anahtarını (ve
+    # kimlik bilgisi ömürlerini) zaten yazmıştır, buradaki güncelleme ona
+    # DOKUNMAZ (parsed_by ile atlanır).
+    app.config.update(_feature_flags.resolve_rollout_flags(os.environ))
     if _gunicorn_logger.handlers:
         app.logger.handlers = _gunicorn_logger.handlers
         app.logger.setLevel(_gunicorn_logger.level or getattr(logging, _LOG_LEVEL, logging.INFO))
@@ -382,13 +325,6 @@ def configure_app(app):
         }
     app.config["AI_PLAN_QUOTA_ENABLED"] = AI_PLAN_QUOTA_ENABLED
     app.config["AI_CHAT_QUOTA_ENABLED"] = AI_CHAT_QUOTA_ENABLED
-    app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = AI_ADAPTIVE_PLAN_CONTEXT
-    app.config["WEEKLY_PROGRAM_UI_ENABLED"] = WEEKLY_PROGRAM_UI_ENABLED
-    app.config["UIUX_NAV_V2_ENABLED"] = UIUX_NAV_V2_ENABLED
-    app.config["UIUX_TODAY_V2_ENABLED"] = UIUX_TODAY_V2_ENABLED
-    app.config["UIUX_PLAN_V2_ENABLED"] = UIUX_PLAN_V2_ENABLED
-    app.config["UIUX_COACH_PAGE_V2_ENABLED"] = UIUX_COACH_PAGE_V2_ENABLED
-    app.config["FITX_WORKOUT_SESSIONS_ENABLED"] = FITX_WORKOUT_SESSIONS_ENABLED
     app.config["AI_MEMORY_ENABLED"] = AI_MEMORY_ENABLED
     app.config["LOGIN_FAIL_CLOSED"] = LOGIN_FAIL_CLOSED
     app.config["BEDROCK_ENABLED"] = BEDROCK_ENABLED
