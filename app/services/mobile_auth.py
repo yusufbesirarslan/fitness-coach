@@ -578,6 +578,13 @@ def _lock_and_revalidate_refresh(snapshot, raw_refresh, digest, now):
         _revoke_family_and_commit(family, "refresh_expired", now)
         raise _refresh_failed("refresh_expired")
     if parent.consumed_at is not None:
+        if (snapshot.parent_consumed_at is None
+                and (parent.grace_expires_at is None
+                     or now > parent.grace_expires_at)):
+            db.session.rollback()
+            raise _failure(
+                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+                "refresh_conflict")
         return _replay_consumed_parent(parent, family, raw_refresh, now)
     if not _snapshot_matches_current(snapshot, family, parent):
         db.session.rollback()
@@ -698,21 +705,23 @@ def _revalidate_and_revoke_provider_failure(
 
 def refresh(raw_refresh, now=None):
     """Rotate in two short transactions or replay one committed child."""
-    now = now or datetime.utcnow()
+    fixed_now = now
+    phase_one_now = fixed_now or datetime.utcnow()
     try:
         digest = mobile_credentials.hash_credential(raw_refresh)
     except mobile_credentials.InvalidMobileCredential as exc:
         raise _refresh_failed("refresh_invalid") from exc
 
-    snapshot = _snapshot_refresh(raw_refresh, digest, now)
+    snapshot = _snapshot_refresh(raw_refresh, digest, phase_one_now)
     if isinstance(snapshot, IssuedSession):
         return snapshot
     try:
         renewed_tokens = _renew_provider_tokens(snapshot)
     except _DefinitiveRefreshFailure as exc:
         db.session.rollback()
+        phase_two_now = fixed_now or datetime.utcnow()
         return _revalidate_and_revoke_provider_failure(
-            snapshot, raw_refresh, digest, exc.args[0], now)
+            snapshot, raw_refresh, digest, exc.args[0], phase_two_now)
     except MobileAuthFailure:
         db.session.rollback()
         raise
@@ -720,12 +729,13 @@ def refresh(raw_refresh, now=None):
         db.session.rollback()
         if exc.code in {"NotAuthorizedException", "UserNotFoundException",
                         "RefreshFailed"}:
+            phase_two_now = fixed_now or datetime.utcnow()
             return _revalidate_and_revoke_provider_failure(
                 snapshot,
                 raw_refresh,
                 digest,
                 "provider_refresh_rejected",
-                now,
+                phase_two_now,
             )
         _security_event("provider_renewal_failed", category="provider")
         raise _failure(
@@ -736,8 +746,9 @@ def refresh(raw_refresh, now=None):
         raise _failure(
             "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
             "refresh_transaction_failed") from exc
+    phase_two_now = fixed_now or datetime.utcnow()
     return _persist_refresh(
-        snapshot, raw_refresh, digest, renewed_tokens, now)
+        snapshot, raw_refresh, digest, renewed_tokens, phase_two_now)
 
 
 def _family_id_for_credential(access_credential=None, refresh_credential=None):

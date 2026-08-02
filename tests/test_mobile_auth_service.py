@@ -1,5 +1,5 @@
 import calendar
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import threading
 
 import pytest
@@ -319,15 +319,37 @@ def test_refresh_provider_saturation_is_retryable_without_provider_work(
 
 
 def _run_same_version_refresh_race(
-        app, raw_refresh, monkeypatch, *, reject_stale_provider_token=False):
+        app, raw_refresh, monkeypatch, *, reject_stale_provider_token=False,
+        phase_times=None):
     from app.services import mobile_auth
 
+    monkeypatch.setattr(
+        ai_gate, "_ai_slots", threading.BoundedSemaphore(2))
     provider_barrier = threading.Barrier(2)
     winner_at_provider = threading.Event()
     winner_finished = threading.Event()
     thread_state = threading.local()
     provider_calls = []
     previous_validate = cognito_jwt.validate_token
+
+    if phase_times is not None:
+        real_datetime = datetime
+
+        class RaceDatetimeMeta(type):
+            def __instancecheck__(cls, instance):
+                return isinstance(instance, real_datetime)
+
+        class RaceDatetime(metaclass=RaceDatetimeMeta):
+            @classmethod
+            def utcnow(cls):
+                return next(thread_state.phase_times)
+
+            @classmethod
+            def utcfromtimestamp(cls, value):
+                return real_datetime.fromtimestamp(
+                    value, timezone.utc).replace(tzinfo=None)
+
+        monkeypatch.setattr(mobile_auth, "datetime", RaceDatetime)
 
     def renew(_provider_refresh, _username):
         contender = thread_state.contender
@@ -366,11 +388,17 @@ def _run_same_version_refresh_race(
     def rotate(contender):
         with app.app_context():
             thread_state.contender = contender
+            if phase_times is not None:
+                thread_state.phase_times = iter(phase_times[contender])
             try:
                 outcomes[contender] = (
                     "issued",
                     mobile_auth.refresh(
-                        raw_refresh, now=NOW + timedelta(minutes=50)),
+                        raw_refresh,
+                        now=(
+                            None if phase_times is not None
+                            else NOW + timedelta(minutes=50)),
+                    ),
                 )
             except mobile_auth.MobileAuthFailure as exc:
                 outcomes[contender] = (
@@ -455,6 +483,90 @@ def test_stale_provider_rejection_does_not_revoke_refresh_race_winner(
     assert outcomes["winner"][0] == "issued", outcomes
     assert outcomes["stale"] == outcomes["winner"]
     family = MobileAuthSession.query.one()
+    assert family.version == 2
+    assert family.revoked_at is None
+    assert family.revoked_reason is None
+    assert MobileAccessCredential.query.filter_by(generation=1).count() == 1
+    assert MobileRefreshCredential.query.filter_by(generation=1).count() == 1
+    assert session_store.decrypt_token(
+        family.cognito_access_token) == "race-provider-access-winner"
+    assert session_store.decrypt_token(
+        family.cognito_refresh_token) == "race-provider-refresh-winner"
+
+
+def test_post_grace_stale_success_conflicts_without_revoking_race_winner(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth, session_store
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    winner_phase_one = NOW + timedelta(minutes=50)
+    stale_phase_one = winner_phase_one + timedelta(seconds=11)
+    winner_phase_two = winner_phase_one + timedelta(seconds=12)
+    stale_phase_two = winner_phase_one + timedelta(seconds=23)
+
+    outcomes = _run_same_version_refresh_race(
+        app,
+        original.refresh_credential,
+        monkeypatch,
+        phase_times={
+            "winner": (winner_phase_one, winner_phase_two),
+            "stale": (stale_phase_one, stale_phase_two),
+        },
+    )
+
+    family = MobileAuthSession.query.one()
+    parent = MobileRefreshCredential.query.filter_by(generation=0).one()
+    assert outcomes["winner"][0] == "issued", outcomes
+    assert outcomes["stale"] == (
+        "failed",
+        "AUTH_TEMPORARILY_UNAVAILABLE",
+        "refresh_conflict",
+        True,
+    )
+    assert parent.consumed_at == winner_phase_two
+    assert parent.grace_expires_at == winner_phase_two + timedelta(seconds=10)
+    assert family.version == 2
+    assert family.revoked_at is None
+    assert MobileAccessCredential.query.filter_by(generation=1).count() == 1
+    assert MobileRefreshCredential.query.filter_by(generation=1).count() == 1
+    assert session_store.decrypt_token(
+        family.cognito_access_token) == "race-provider-access-winner"
+    assert session_store.decrypt_token(
+        family.cognito_refresh_token) == "race-provider-refresh-winner"
+
+
+def test_post_grace_stale_provider_rejection_does_not_revoke_race_winner(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth, session_store
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    winner_phase_one = NOW + timedelta(minutes=50)
+    stale_phase_one = winner_phase_one + timedelta(seconds=11)
+    winner_phase_two = winner_phase_one + timedelta(seconds=12)
+    stale_phase_two = winner_phase_one + timedelta(seconds=23)
+
+    outcomes = _run_same_version_refresh_race(
+        app,
+        original.refresh_credential,
+        monkeypatch,
+        reject_stale_provider_token=True,
+        phase_times={
+            "winner": (winner_phase_one, winner_phase_two),
+            "stale": (stale_phase_one, stale_phase_two),
+        },
+    )
+
+    family = MobileAuthSession.query.one()
+    parent = MobileRefreshCredential.query.filter_by(generation=0).one()
+    assert outcomes["winner"][0] == "issued", outcomes
+    assert outcomes["stale"] == (
+        "failed",
+        "AUTH_TEMPORARILY_UNAVAILABLE",
+        "refresh_conflict",
+        True,
+    )
+    assert parent.consumed_at == winner_phase_two
+    assert parent.grace_expires_at == winner_phase_two + timedelta(seconds=10)
     assert family.version == 2
     assert family.revoked_at is None
     assert family.revoked_reason is None

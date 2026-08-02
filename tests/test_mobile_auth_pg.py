@@ -17,7 +17,9 @@ from app.extensions import db
 from app.models import (
     MobileAccessCredential, MobileAuthSession, MobileRefreshCredential, User,
 )
-from app.services import cognito_jwt, cognito_service, mobile_auth, session_store
+from app.services import (
+    ai_gate, cognito_jwt, cognito_service, mobile_auth, session_store,
+)
 
 
 pytestmark = pytest.mark.pg_concurrency
@@ -61,6 +63,8 @@ def pg_app(monkeypatch):
         MOBILE_AUTH_DERIVATION_KEYRING={"pg-v1": b"p" * 32},
     )
     db.init_app(app)
+    monkeypatch.setattr(
+        ai_gate, "_ai_slots", threading.BoundedSemaphore(2))
 
     old_exp = NOW + timedelta(seconds=901)
     new_exp = NOW + timedelta(hours=3)
