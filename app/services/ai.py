@@ -36,7 +36,7 @@ def _openai_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
     try:
         # Slot yalnızca gerçek ağ çağrısını sarar — retry/backoff uykular ve
         # sağlayıcı geçişi slotsuz kalır (triage 2026-07-19 #3, ai_coach deseni).
-        with model_concurrency_slot():
+        with model_concurrency_slot("openai"):
             resp = openai_client.chat.completions.create(
                 model=OPENAI_MODEL,
                 messages=full_messages,
@@ -94,7 +94,7 @@ def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
                       messages=convo, temperature=temperature)
         if system:
             kwargs["system"] = system
-        with model_concurrency_slot():
+        with model_concurrency_slot("bedrock"):
             resp = bedrock_client.messages.create(**kwargs)
         if getattr(resp, "stop_reason", None) == "max_tokens":
             logger.warning("Claude yanıtı max_tokens=%s sınırında kesildi (stop_reason=max_tokens)", capped)
@@ -130,7 +130,7 @@ def _bedrock_validate_image(image_bytes, media_type, prompt, max_tokens=400, tem
         {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": b64}},
     ]
     try:
-        with model_concurrency_slot():
+        with model_concurrency_slot("bedrock"):
             resp = bedrock_client.messages.create(
                 model=BEDROCK_MODEL,
                 max_tokens=min(max_tokens, BEDROCK_MAX_TOKENS),

@@ -69,6 +69,16 @@ def _backoff_delay(attempt):
     return capped * (0.5 + random.random() * 0.5)
 
 
+def _record_retry(feature):
+    """Yeniden-deneme sayacı (SLI). `feature` sabit kümeli bir çağrı-yeri adıdır
+    (kullanıcı girdisi değil) → metrik boyutu olarak güvenlidir."""
+    try:
+        from app.services import runtime_metrics
+        runtime_metrics.increment("AiRetries", dimensions={"Feature": str(feature)})
+    except Exception:
+        pass
+
+
 def call_with_recovery(fn, *, feature, retryable=(TransientAIError,), attempts=None):
     """`fn`'i çağır; `retryable` sınıfından hata gelirse sınırlı jitter'lı geri
     çekilmeyle yeniden dene. `retryable` DIŞI hata anında yükselir. Denemeler
@@ -89,6 +99,7 @@ def call_with_recovery(fn, *, feature, retryable=(TransientAIError,), attempts=N
             _log.warning(
                 "[AI RECOVERY] %s: gecici hata (deneme %d/%d), %.2fs sonra yeniden: %s: %s",
                 feature, i + 1, total, delay, type(e).__name__, e)
+            _record_retry(feature)
             _sleep(delay)
     # Ulaşılmaz (döngü ya döner ya yükseltir); tamamlık için:
     raise RuntimeError("call_with_recovery: beklenmeyen döngü çıkışı")

@@ -250,13 +250,16 @@ def _fake_bedrock(monkeypatch, responses):
 
 
 def _install_model_slot_probe(monkeypatch):
-    state = {"active": False, "entries": 0}
+    state = {"active": False, "entries": 0, "providers": []}
 
     @contextmanager
-    def slot():
+    def slot(provider="unknown"):
         assert state["active"] is False
         state["active"] = True
         state["entries"] += 1
+        # Sağlayıcı etiketi metrik BOYUTUDUR: yanlış etiket, hata oranını yanlış
+        # sağlayıcıya yazar ve bir Bedrock kesintisini OpenAI arızası gibi gösterir.
+        state["providers"].append(provider)
         try:
             yield
         finally:
@@ -285,6 +288,7 @@ def test_openai_coach_provider_call_uses_model_slot(app, monkeypatch):
 
     assert result == "OPENAI"
     assert state["entries"] == 1
+    assert state["providers"] == ["openai"]
 
 
 def test_bedrock_coach_provider_call_uses_model_slot(app, monkeypatch):
@@ -305,6 +309,7 @@ def test_bedrock_coach_provider_call_uses_model_slot(app, monkeypatch):
 
     assert result == "BEDROCK"
     assert state["entries"] == 1
+    assert state["providers"] == ["bedrock"]
 
 
 def test_router_uses_openai_when_bedrock_disabled(app, monkeypatch):

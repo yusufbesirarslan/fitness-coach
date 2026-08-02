@@ -46,6 +46,56 @@ def start_request_timer():
     g._req_start = time.monotonic()
 
 
+def client_class():
+    """İsteğin istemci sınıfı: "mobile" | "web".
+
+    SUNUCU-TARAFI olgudan türetilir (isteği hangi blueprint karşıladı), istemcinin
+    yolladığı bir başlıktan DEĞİL. Doğrulanmamış istemci etiketleri güvenlik ya da
+    kapasite kararlarında kullanılmaz (prod-hardening §6 "Mobile versus web");
+    burada yalnızca metrik boyutu olarak kullanılsa bile aynı kural geçerli —
+    sahte bir başlık metrikleri kirletebilirdi.
+    """
+    return "mobile" if request.blueprint == "mobile_api" else "web"
+
+
+def _status_class(status_code):
+    """Status kodunu SABİT kümeli bir sınıfa indir (kardinalite sınırı)."""
+    try:
+        return f"{int(status_code) // 100}xx"
+    except (TypeError, ValueError):
+        return "unknown"
+
+
+def _record_request_metrics(response, dur_ms):
+    """HTTP SLI'larını tampona yaz. Metrik yolu isteği ASLA düşürmez."""
+    try:
+        from app.services import runtime_metrics
+        if not runtime_metrics.is_enabled():
+            return
+        # Boyutlar SABİT kümeli: blueprint (~16) × status sınıfı (~5) × istemci (2).
+        # Ham path ya da kullanıcı kimliği ASLA boyut olmaz (yüksek kardinalite).
+        dims = {
+            "Blueprint": request.blueprint or "root",
+            "Status": _status_class(response.status_code),
+            "Client": client_class(),
+        }
+        runtime_metrics.increment("HttpRequests", dimensions=dims)
+        if isinstance(dur_ms, (int, float)):
+            runtime_metrics.record_latency("HttpLatency", dur_ms, dimensions=dims)
+        # Ayrı sayaçlar BİLEREK: 500 bir HATA (kod kusuru), 503 KASITLI yük atma
+        # (kapı/limiter doluysa) ve 429 hız sınırı. Aynı "5xx" kovasına atılırlarsa
+        # sağlıklı bir sırt-sırta yük atma, gerçek bir arıza gibi alarm üretirdi.
+        narrow = {"Blueprint": dims["Blueprint"], "Client": dims["Client"]}
+        if response.status_code == 503:
+            runtime_metrics.increment("HttpOverload", dimensions=narrow)
+        elif response.status_code >= 500:
+            runtime_metrics.increment("HttpServerErrors", dimensions=narrow)
+        elif response.status_code == 429:
+            runtime_metrics.increment("HttpThrottled", dimensions=narrow)
+    except Exception:
+        pass
+
+
 def assign_request_id():
     """WS6: her isteğe kısa bir izleme kimliği (request_id) ata. logfmt satırında,
     /ask/stream SSE `meta` çerçevesinde ve (Sentry açıksa) hata etiketinde görünür
@@ -70,6 +120,7 @@ def log_request(response):
         return response
     start = getattr(g, "_req_start", None)
     dur_ms = round((time.monotonic() - start) * 1000, 1) if start is not None else "-"
+    _record_request_metrics(response, dur_ms)
     if request.blueprint == "mobile_api":
         mobile_user = getattr(g, "mobile_user", None)
         uid = getattr(mobile_user, "id", "-")

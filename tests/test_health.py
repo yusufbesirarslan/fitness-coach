@@ -10,7 +10,8 @@ Derin görünüm artık yalnızca iç ağdan (loopback / private) verilir.
 """
 import pytest
 
-_DEEP_KEYS = ("redis", "login", "bedrock", "fatsecret_proxy", "worker")
+_DEEP_KEYS = ("redis", "login", "bedrock", "fatsecret_proxy", "worker",
+              "flags", "capacity")
 
 
 @pytest.fixture(autouse=True)
@@ -85,6 +86,48 @@ def test_deep_health_ignored_from_public_ip(client, public_ip):
     body = resp.get_json()
     for key in _DEEP_KEYS:
         assert key not in body
+
+
+# ── Production Hardening PR1: bayrak + kapasite görünürlüğü ────────────────
+
+def test_deep_health_reports_flag_state(client):
+    """Bayraklar host .env'inde yaşar ve deploy pipeline'ı onları TAŞIMAZ →
+    "canlıda ne açık?" sorusu yalnızca çalışan süreçten yanıtlanabilir."""
+    from app.config import FEATURE_FLAG_KEYS
+    body = client.get("/health?deep=1",
+                      environ_base={"REMOTE_ADDR": "127.0.0.1"}).get_json()
+    assert set(body["flags"]) == set(FEATURE_FLAG_KEYS)
+    assert all(isinstance(v, bool) for v in body["flags"].values())
+
+
+def test_deep_health_flags_expose_only_names_and_booleans(client):
+    """Sır/bağlantı dizesi/anahtar ASLA sızmamalı — yalnızca ad + boolean."""
+    body = client.get("/health?deep=1",
+                      environ_base={"REMOTE_ADDR": "127.0.0.1"}).get_json()
+    for name, value in body["flags"].items():
+        assert isinstance(value, bool), name
+    blob = repr(body)
+    for secret in ("SECRET_KEY", "DATABASE_URL", "postgresql://", "sk-",
+                   "DERIVATION_KEYRING", "RESEND_API_KEY"):
+        assert secret not in blob
+
+
+def test_deep_health_reports_capacity_model(client):
+    """Sunum kapasitesi ve DB havuzu YAN YANA raporlanır ki uyumsuzluk görülsün."""
+    body = client.get("/health?deep=1",
+                      environ_base={"REMOTE_ADDR": "127.0.0.1"}).get_json()
+    capacity = body["capacity"]
+    assert capacity["workers"] >= 1
+    assert capacity["threads"] >= 1
+    assert capacity["ai_max_concurrency"] >= 1
+    assert capacity["scrape_max_concurrency"] >= 1
+
+
+def test_shallow_health_hides_flags_and_capacity(client):
+    """Sığ görünüm public'tir — bayrak/kapasite duruşu oradan ASLA sızmaz."""
+    body = client.get("/health").get_json()
+    assert "flags" not in body
+    assert "capacity" not in body
 
 
 def test_deep_health_not_spoofable_via_forwarded_for(client):
