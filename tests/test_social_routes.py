@@ -424,6 +424,50 @@ def test_structured_comma_or_newline_meal_suggestion_is_local(
     assert semaphore.acquisitions == 0
 
 
+@pytest.mark.parametrize("ambiguous_body", [
+    "-tavuk\n-pilav",
+    "- tavuk, pilav",
+    "Bugün tavuk ve pilav yemelisin\nAkşam da çorba içebilirsin",
+    "Tavuk ye\nPilav tüket",
+    "1,5 porsiyon yoğurt, yeşil salata",
+], ids=[
+    "malformed-markers",
+    "marker-plus-comma",
+    "unpunctuated-prose",
+    "short-unpunctuated-prose",
+    "decimal-comma",
+])
+def test_ambiguous_list_grammar_uses_whole_gated_openai_parse(
+        client, auth_user, friend, monkeypatch, ambiguous_body):
+    """A partial grammar match must not turn malformed/prose text into items."""
+    semaphore = _RecordingSharedSemaphore(check_transaction=True)
+    monkeypatch.setattr(ai_gate, "_ai_slots", semaphore)
+    parser_calls = []
+    cached_items = []
+
+    def parse(body):
+        assert db.session().in_transaction() is False
+        parser_calls.append(body)
+        return ["model tavuk", "model pilav"]
+
+    def cached(items, basis="per_serving"):
+        cached_items.append(list(items))
+        return _cached_macros(items, basis)
+
+    monkeypatch.setattr(social_bp, "_parse_suggestion_items", parse)
+    monkeypatch.setattr(social_bp, "_get_cached_macros", cached)
+    msg = _send_suggestion(
+        client, friend, auth_user, "suggestion_meal", ambiguous_body)
+    response = client.post(
+        f"/suggest/respond/{msg.id}", json={"action": "accept"})
+
+    assert response.status_code == 200
+    assert parser_calls == [ambiguous_body]
+    assert cached_items == [["model tavuk", "model pilav"]]
+    assert MealLog.query.one().yemekler == "model tavuk, model pilav"
+    assert semaphore.acquisitions == semaphore.releases == 1
+
+
 def test_ambiguous_meal_suggestion_uses_gated_openai_parser(
         client, auth_user, friend, monkeypatch):
     semaphore = _RecordingSharedSemaphore(check_transaction=True)

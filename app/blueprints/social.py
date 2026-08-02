@@ -893,7 +893,21 @@ class _SuggestionSnapshot:
 
 
 _SUGGESTION_LIST_MARKER = re.compile(r"^(?:[-*•]\s+|\d+[.)]\s+)(.+)$")
-_SUGGESTION_SENTENCE_END = re.compile(r"[.!?;:]$")
+_SUGGESTION_ANY_LIST_MARKER = re.compile(r"^(?:[-*•]|\d+[.)])")
+_SUGGESTION_DECIMAL_COMMA = re.compile(r"\d\s*,\s*\d")
+_SUGGESTION_ITEM_PUNCTUATION = re.compile(r"[,.!?;:]")
+_SUGGESTION_PROSE_WORDS = frozenset({
+    "akşam", "bence", "bugün", "ekle", "ekleyin", "için", "istersen",
+    "lütfen", "olur", "olsun", "önce", "öğlen", "öner", "sabah",
+    "sonra", "tüket", "tüketin", "yanında", "yarın", "ye", "yiyin",
+})
+_SUGGESTION_PROSE_SUFFIXES = (
+    "malısın", "melisin", "malısınız", "melisiniz",
+    "abilirsin", "ebilirsin", "abilirsiniz", "ebilirsiniz",
+    "yorum", "yorsun", "yorsunuz", "yoruz", "yorlar",
+)
+_SUGGESTION_LOCAL_ITEM_MAX_WORDS = 4
+_SUGGESTION_LOCAL_QUANTIFIED_ITEM_MAX_WORDS = 7
 
 
 def _normalize_suggestion_items(raw_items):
@@ -911,6 +925,30 @@ def _normalize_suggestion_items(raw_items):
     return normalized
 
 
+def _is_clear_local_suggestion_item(item):
+    """Accept compact item phrases; sentence-like text remains model-owned."""
+    if (_SUGGESTION_ITEM_PUNCTUATION.search(item)
+            or _SUGGESTION_ANY_LIST_MARKER.match(item)):
+        return False
+
+    words = item.split()
+    max_words = (_SUGGESTION_LOCAL_QUANTIFIED_ITEM_MAX_WORDS
+                 if item[0].isdigit()
+                 else _SUGGESTION_LOCAL_ITEM_MAX_WORDS)
+    if not words or len(words) > max_words:
+        return False
+
+    lexical_words = [
+        re.sub(r"^\W+|\W+$", "", word.casefold()) for word in words
+    ]
+    return not any(
+        word in _SUGGESTION_PROSE_WORDS
+        or word.endswith(_SUGGESTION_PROSE_SUFFIXES)
+        for word in lexical_words
+        if word
+    )
+
+
 def _parse_structured_suggestion_items(body):
     """Parse only explicit lists; return None when OpenAI must decide semantics."""
     if not isinstance(body, str) or not body.strip():
@@ -918,17 +956,23 @@ def _parse_structured_suggestion_items(body):
 
     lines = [line.strip() for line in body.splitlines() if line.strip()]
     raw_items = None
+    marker_matches = [
+        _SUGGESTION_LIST_MARKER.fullmatch(line) for line in lines
+    ]
     if len(lines) >= 2:
-        matches = [_SUGGESTION_LIST_MARKER.fullmatch(line) for line in lines]
-        if all(matches):
-            raw_items = [match.group(1) for match in matches]
-        elif any(matches) or any("," in line for line in lines):
-            # Mixed list markers/delimiters are ambiguous as a whole. Never salvage
-            # only the valid-looking subset.
+        if all(marker_matches):
+            raw_items = [match.group(1) for match in marker_matches]
+        elif (any(_SUGGESTION_ANY_LIST_MARKER.match(line) for line in lines)
+              or any("," in line for line in lines)):
+            # A malformed/mixed marker or a second delimiter invalidates the
+            # complete grammar. Never salvage only the valid-looking subset.
             return None
         else:
             raw_items = lines
     elif len(lines) == 1 and "," in lines[0]:
+        if (_SUGGESTION_ANY_LIST_MARKER.match(lines[0])
+                or _SUGGESTION_DECIMAL_COMMA.search(lines[0])):
+            return None
         raw_items = lines[0].split(",")
 
     if raw_items is None or len(raw_items) < 2:
@@ -936,9 +980,7 @@ def _parse_structured_suggestion_items(body):
     items = _normalize_suggestion_items(raw_items)
     if len(items) != len(raw_items):
         return None
-    # Sentence-like clauses are not confidently item names; keep them for the
-    # existing model parser rather than treating prose as a deterministic list.
-    if any(_SUGGESTION_SENTENCE_END.search(item) for item in items):
+    if not all(_is_clear_local_suggestion_item(item) for item in items):
         return None
     return items
 
