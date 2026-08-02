@@ -63,6 +63,28 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
       kalmalı; ihlal boot'ta loglanır. Thread rezervi /health ve ucuz route'ları
       AI yükünden korur (A1/I1).
     - `SENTRY_DSN` (yoksa kapalı) + opsiyonel `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE` — hata izleme (app/observability.py). DSN yoksa no-op.
+    - `RUNTIME_METRICS_ENABLED` (vars. 0) + `RUNTIME_METRICS_NAMESPACE` (vars.
+      `FitX/Runtime`) + `RUNTIME_METRICS_FLUSH_SECONDS` (vars. 60) — üretim
+      runtime SLI'ları (app/services/runtime_metrics.py). `AI_METRICS_ENABLED`in
+      KARDEŞİ ve ondan BAĞIMSIZ (ayrı namespace, tek başına geri alınır); aynı
+      `cloudwatch:PutMetricData` iznini ister. KRİTİK TASARIM: kayıt istek
+      yolunda SÜREÇ-İÇİ TAMPONA yazılır, CloudWatch'a yalnızca daemon flush
+      thread'i çıkar — `put_metric_data` bir ağ çağrısıdır ve satır-içi
+      çağrılsaydı tek worker/8 thread'lik kapasiteye istek başına bir round-trip
+      eklerdi (ölçmeye çalıştığı gecikmeyi bozardı). Gecikmeler kova histogramı
+      olarak `Values`/`Counts` ile gider (StatisticSet yüzdelik veremez → p95
+      hesaplanamazdı). Boyutlar SABİT kümeli: blueprint/status-sınıfı/istemci-
+      sınıfı/sağlayıcı/sonuç; kullanıcı kimliği, ham path ve token ASLA. İstemci
+      sınıfı (`web`/`mobile`) `request.blueprint`'ten türetilir, istemci
+      başlığından ASLA. 503 (`HttpOverload`, kasıtlı yük atma) ile 500
+      (`HttpServerErrors`, kusur) AYRI sayaçlardır — birleştirilirse sağlıklı
+      yük atma alarm üretirdi. docs/OBSERVABILITY.md
+    - Rollout bayrakları host `.env`'inde yaşar ve deploy pipeline'ı onları
+      TAŞIMAZ (`git reset --hard origin/main` `.env`'e dokunmaz) → "canlıda hangi
+      bayrak açık?" sorusunun repodan yanıtı YOKTUR. İki görünürlük yolu:
+      boot'ta tek `[FLAGS] enabled=...` satırı ve `/health?deep=1` içindeki
+      `flags` + `capacity` blokları (yalnızca ad+boolean; iç-ağ sınırlı, M3).
+      Envanter: `app/config.py` `FEATURE_FLAG_KEYS` / `feature_flag_state()`.
   - Operasyon notu: web konteyneri hâlâ tek gunicorn worker + 8 thread çalışır.
     Coach/menu/plan AI çağrıları senkron ve bloklayıcıdır; 8 uzun AI isteği tüm
     uygulama thread'lerini doldurabilir. Worker sayısını artırmadan önce in-memory

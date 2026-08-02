@@ -74,7 +74,7 @@ def _stream_bedrock_turn(messages_client, call_kwargs):
 
     def produce():
         try:
-            with model_concurrency_slot():
+            with model_concurrency_slot("bedrock-stream"):
                 with messages_client.stream(**call_kwargs) as stream:
                     for text in stream.text_stream:
                         if cancelled.is_set():

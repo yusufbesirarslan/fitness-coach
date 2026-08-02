@@ -149,6 +149,37 @@ UIUX_COACH_PAGE_V2_ENABLED = os.getenv("UIUX_COACH_PAGE_V2_ENABLED", "0") == "1"
 # already exist is safe: persisted rows are simply ignored by the read contract,
 # never deleted. Full rollback: FITX_WORKOUT_SESSIONS_ENABLED=0. docs/WORKOUT_STATE.md
 FITX_WORKOUT_SESSIONS_ENABLED = os.getenv("FITX_WORKOUT_SESSIONS_ENABLED", "0") == "1"
+
+# ── Ürün rollout bayraklarının TEK envanteri ──
+# Yalnızca ürün/rollout bayrakları (operasyonel kapatma anahtarları — AI_MEMORY_
+# ENABLED, AI_CACHE_ENABLED, LOGIN_FAIL_CLOSED vb. — buraya GİRMEZ; onlar kalıcı
+# yapılandırmadır, aşamalı açılış adayı değil). Bu liste /health?deep=1'in `flags`
+# bloğunu ve boot log satırını besler; hangi bayrağın canlıda AÇIK olduğunu tahmin
+# etmek yerine SORMAYI mümkün kılar.
+# MOBILE_AUTH_ENABLED burada YOK: onu app/services/mobile_credentials.py kendi
+# katı doğrulamasıyla app.config'e yazar (aynı anahtar adı) — envantere runtime'da
+# eklenir, bkz. feature_flag_state().
+FEATURE_FLAG_KEYS = (
+    "AI_ADAPTIVE_PLAN_CONTEXT",
+    "WEEKLY_PROGRAM_UI_ENABLED",
+    "UIUX_NAV_V2_ENABLED",
+    "UIUX_TODAY_V2_ENABLED",
+    "UIUX_PLAN_V2_ENABLED",
+    "UIUX_COACH_PAGE_V2_ENABLED",
+    "FITX_WORKOUT_SESSIONS_ENABLED",
+    "MOBILE_AUTH_ENABLED",
+)
+
+
+def feature_flag_state(app):
+    """Bayrak adı → bool eşlemesi. YALNIZCA ad ve boolean döner.
+
+    Sır, bağlantı dizesi, anahtar ya da başka yapılandırma ASLA sızmaz — çağıran
+    (/health?deep=1) iç ağ ile sınırlı olsa bile içerik en dar hâlinde tutulur.
+    """
+    return {key: bool(app.config.get(key, False)) for key in FEATURE_FLAG_KEYS}
+
+
 # ── Sprint 4 WS1: AI koç kalıcı konuşma hafızası ──
 # Operasyonel kapatma anahtarı: 0 → eski davranış (yalnızca widget'ın gönderdiği
 # kısa geçmiş; DB'ye tur yazılmaz). Tablolar expand-only olduğundan geri açmak güvenli.
@@ -209,6 +240,16 @@ AI_FAILURE_COOLDOWN_SECONDS = int(os.getenv("AI_FAILURE_COOLDOWN_SECONDS", "60")
 # boto3/izin yokken tam no-op (asıl AI akışını asla bloklamaz).
 AI_METRICS_ENABLED = os.getenv("AI_METRICS_ENABLED", "0") == "1"
 AI_METRICS_NAMESPACE = os.getenv("AI_METRICS_NAMESPACE", "FitX/AI")
+
+# ── Üretim runtime SLI'ları (CloudWatch) ──
+# app/services/runtime_metrics.py — namespace FitX/Runtime. AI_METRICS_ENABLED'in
+# KARDEŞİ ve ondan BAĞIMSIZ: ayrı env adı, ayrı namespace, tek başına geri alınır.
+# Aynı gerekçeyle varsayılan KAPALI (cloudwatch:PutMetricData izni gerekir).
+# Kayıt istek yolunda TAMPONA yazılır; ağ'a yalnızca flush thread'i çıkar
+# (RUNTIME_METRICS_FLUSH_SECONDS'ta bir) — istek gecikmesine round-trip EKLENMEZ.
+RUNTIME_METRICS_ENABLED = os.getenv("RUNTIME_METRICS_ENABLED", "0") == "1"
+RUNTIME_METRICS_NAMESPACE = os.getenv("RUNTIME_METRICS_NAMESPACE", "FitX/Runtime")
+RUNTIME_METRICS_FLUSH_SECONDS = int(os.getenv("RUNTIME_METRICS_FLUSH_SECONDS", "60"))
 
 # Amazon Cognito native backend API flow. Hosted UI/OIDC redirects are disabled.
 # User Pool and App Client come from .env. If the app client has a secret, set
@@ -396,3 +437,8 @@ def configure_app(app):
     # ayarlanabilir (gün), aksi halde 7 gün. Çerez/oturum maruziyetini kısaltır.
     _session_days = int(os.environ.get("PERMANENT_SESSION_LIFETIME_DAYS", "7"))
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=_session_days)
+    # Boot'ta AÇIK bayrakları TEK satırda logla. Bir olayda "o an hangi bayraklar
+    # açıktı?" sorusu, host .env'ine SSH ile bakmadan deploy/konteyner logundan
+    # yanıtlanabilsin (bayraklar .env'de yaşar, repoda DEĞİL — bkz. docs/ROLLOUT.md).
+    _on = sorted(k for k, v in feature_flag_state(app).items() if v)
+    app.logger.info("[FLAGS] enabled=%s", ",".join(_on) if _on else "-")

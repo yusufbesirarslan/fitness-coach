@@ -1012,7 +1012,7 @@ def _run_coach_conversation_openai(user_id, question, context, history, language
     final_text = ""
     for _ in range(_COACH_TOOL_LOOP_CAP):
         try:
-            with model_concurrency_slot():
+            with model_concurrency_slot("openai"):
                 resp = openai_client.chat.completions.create(
                     model=OPENAI_MODEL,
                     messages=messages,
@@ -1114,7 +1114,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history, languag
         # tools_ran mantığını uygula: hiç araç çalışmadıysa OpenAI'ya düş, çalıştıysa
         # sağlayıcı değiştirme (yan etkiyi tekrarlama) → yumuşak hata.
         try:
-            with model_concurrency_slot():
+            with model_concurrency_slot("bedrock"):
                 resp = bedrock_client.messages.create(
                     model=BEDROCK_MODEL,
                     max_tokens=max_tokens,

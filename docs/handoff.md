@@ -3760,3 +3760,119 @@ analytics keep their existing models; plan-to-log identifier linkage and durable
 per-set checkpoint restoration remain outside PR4. `/training` still records
 `horizontal_overflow: true` at 390 px in the browser artifact — pre-existing on
 `main` and explicitly out of UIUX PR3's scope. Sprint 8–12 scope is untouched.
+
+---
+
+## Production Hardening PR1 — Runtime Metrics & Baseline Instrumentation
+
+- **Track:** Production Activation & Hardening Sprint. **PR:** 1 of 5.
+- **Status:** implemented; default OFF; no runtime behaviour change.
+- **Branch:** `chore/prod-metrics-baseline`. **Base:** `95d94cd` (`origin/main`,
+  "docs: triage report 2026-08-02" #194).
+- **Rollback:** `RUNTIME_METRICS_ENABLED=0` in the host `.env` + restart the web
+  service. That is also the merge-time default, so merging this PR changes nothing
+  operationally until someone opts in.
+
+### Why this PR exists and why it is first
+
+The sprint brief (`prod-hardening.txt`) asks for controlled activation of latent
+capabilities, bounded AI concurrency and measurable service objectives. Every one
+of those needs numbers that do not exist yet. Before PR1 the only production
+signal was a logfmt line per request and `FitX/AI`, which is default-OFF and wired
+only to coach turns. There was no HTTP success rate, no latency percentile, no
+DB-pool utilisation, no provider failure breakdown, and **no way to ask a running
+instance which feature flags are ON** — because flags live in the host `.env`,
+which the deploy pipeline never ships. So this PR lands first: nothing downstream
+can claim an SLO, an abort threshold, or a "measured" Gunicorn setting without it.
+
+### What was verified before writing code
+
+Claims in the brief were checked against `origin/main`, not against docstrings:
+
+| Brief's claim | Verified state |
+|---|---|
+| "Five default-OFF feature flags" | **Eight** backend flags plus one Dart compile-time flag in the Flutter client |
+| AI calls lack timeouts / bounded retries | Already present — Bedrock `max_retries=1`, OpenAI `timeout=30`, per-turn 90 s budget, `ai_recovery` 2 jittered attempts |
+| Gunicorn config is ad hoc | Already version-controlled in `gunicorn.conf.py` |
+| Worker count is the lever | `ai_gate.enforce_gate_invariants` **raises at boot** outside dev when `FITX_WEB_WORKERS != 1` |
+
+The genuine observability gaps — no HTTP SLIs, no pool visibility, no provider
+failure categories, no flag introspection — are what PR1 closes.
+
+### Design decision: buffer, do not emit inline
+
+`put_metric_data` is a network call and the app serves on one worker with eight
+threads. Emitting per request in `after_request` would add a round-trip to every
+request and make a CloudWatch slowdown an application slowdown — it would degrade
+the very latency it measures. Recording therefore writes to a process-local
+buffer (dict update under a lock) and one daemon thread flushes every
+`RUNTIME_METRICS_FLUSH_SECONDS` (default 60).
+
+Accepted trade-offs, stated rather than hidden:
+
+- a worker restart loses at most one unflushed window — metrics must never be
+  more durable than the requests they measure;
+- on a CloudWatch outage the buffer is still drained, so memory stays bounded;
+- counters are per-window sums, so alarms must use `Sum`, not `Average`.
+
+Latency uses `Values`/`Counts` over a fixed bucket ladder rather than
+`StatisticValues`, because a StatisticSet cannot produce percentiles and §7 of the
+brief requires p50/p95/p99.
+
+### Components created
+
+| File | Role |
+|---|---|
+| `app/services/runtime_metrics.py` | Buffered CloudWatch emitter for `FitX/Runtime`; counters, bucketed timings, gauges; total no-op when disabled |
+| `tests/test_runtime_metrics.py` | 13 tests: OFF = no-op *and no buffering*, recording never touches the network, bucketing, ≤20 chunking, outage drains the buffer, dimension/PII safety |
+
+### Modified files
+
+| File | Change |
+|---|---|
+| `app/config.py` | `RUNTIME_METRICS_*` settings; `FEATURE_FLAG_KEYS` inventory + `feature_flag_state()`; `[FLAGS] enabled=…` boot log |
+| `app/observability.py` | `client_class()`, `_status_class()`, `_record_request_metrics()`; `log_request` now also records HTTP SLIs |
+| `app/services/ai_gate.py` | `_provider_error_category()`, `_measured_model_slot()`, `provider=` label on `model_concurrency_slot`, gate-rejection counter |
+| `app/services/ai_recovery.py` | `_record_retry()` on the retry ladder |
+| `app/__init__.py` | `_capacity_snapshot()`, `_record_capacity_gauges()`, `_record_dependency_gauges()`; `flags` + `capacity` in `/health?deep=1` |
+| `.env.example`, `docs/OBSERVABILITY.md` | New settings, metric table, cardinality rules, SLI/SLO/alert tables |
+| `tests/test_ai_gate.py`, `tests/test_health.py` | Gate/provider SLI tests; deep-health flag and capacity assertions |
+
+### Deliberate design choices worth reviewing
+
+1. **`ai_metrics.py` was not refactored.** `runtime_metrics` duplicates ~30 lines
+   of boto3 transport instead of extracting a shared module. Existing tests
+   monkeypatch `ai_metrics._get_client` / `_BOTO3_AVAILABLE`, the two modules have
+   genuinely different lifecycles (per-event vs. buffered), and the brief forbids
+   broad refactors. The duplication is the cheaper risk.
+2. **503 and 500 are separate counters.** `HttpOverload` (503) is the AI gate
+   working correctly under load; `HttpServerErrors` (5xx) is a defect. Collapsing
+   them would page someone for healthy load shedding.
+3. **`GeneratorExit` is classified `cancelled`, not `error`.** A user closing a
+   streaming coach response is normal behaviour; counting it as a provider error
+   would inflate the failure rate and mistrigger the timeout alarm.
+4. **Zero-overhead OFF path.** `model_concurrency_slot` keeps its original single
+   `acquire()` when metrics are disabled; the measured path (non-blocking probe →
+   contention counter → blocking acquire) only runs when the flag is ON. Semaphore
+   accept/reject semantics are identical either way — only "we had to wait"
+   becomes visible. Bounding that wait is PR4's job, not PR1's.
+5. **Client class is a server-side fact.** `web` vs `mobile` comes from
+   `request.blueprint == "mobile_api"`, never a client header (brief §6). A test
+   asserts a spoofed `X-Client: mobile` header still classifies as `web`.
+
+### Known limitations
+
+- Per-worker gauges (`DbPool*`, `RedisUp`) are sampled on `/health?deep=1`, so
+  their resolution is the probe interval, not the flush interval.
+- The SLO column in `docs/OBSERVABILITY.md` is **proposed**, not validated. No
+  production baseline exists yet; the flag must run for a full weekly traffic
+  cycle before any number there is treated as agreed.
+- Gunicorn worker restarts/boot failures are not yet instrumented — that needs a
+  Gunicorn server hook and belongs with PR4's capacity work.
+
+### Verification
+
+- `python -m pytest -q` — full suite green.
+- `python -m pytest tests/test_runtime_metrics.py tests/test_ai_gate.py tests/test_health.py tests/test_observability.py tests/test_ai_metrics.py tests/test_env_example.py -q` — targeted green.
+- Deep health from loopback returns `flags` + `capacity`; the shallow public body
+  returns neither (asserted).
