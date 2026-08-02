@@ -7,10 +7,14 @@ sınırlar. Slot doluyken 503 + Retry-After döner, slot boşalınca istek geçe
     python -m pytest tests/test_ai_gate.py -v
 """
 import threading
+from types import SimpleNamespace
 
 import pytest
 from flask import Response, jsonify
 
+from app.blueprints import food as food_bp
+from app.blueprints import social as social_bp
+from app.services import mobile_auth
 from app.services import ai_gate
 
 
@@ -79,6 +83,121 @@ def test_shared_then_model_nesting_releases_both(monkeypatch):
     """Catches leaked shared or model permits in the required nesting order."""
     monkeypatch.setattr(ai_gate, "_ai_slots", threading.BoundedSemaphore(1))
     monkeypatch.setattr(ai_gate, "_model_slots", threading.BoundedSemaphore(1))
+
+    for _ in range(2):
+        with ai_gate.blocking_concurrency_slot(0):
+            with ai_gate.model_concurrency_slot(0):
+                pass
+
+
+def test_shared_saturation_preserves_reserve_and_recovers_without_deadlock(
+        app, monkeypatch):
+    """Real caller contracts must fail fast while two cheap workers still run."""
+    monkeypatch.setattr(ai_gate, "_ai_slots", threading.BoundedSemaphore(2))
+    monkeypatch.setattr(ai_gate, "_model_slots", threading.BoundedSemaphore(2))
+    monkeypatch.setattr(ai_gate, "AI_GATE_WAIT_SECONDS", 0)
+
+    holders_ready = threading.Barrier(3)
+    release_holders = threading.Event()
+
+    def hold_shared_then_model():
+        with ai_gate.blocking_concurrency_slot(0):
+            with ai_gate.model_concurrency_slot(0):
+                holders_ready.wait(timeout=2)
+                release_holders.wait(timeout=5)
+
+    holders = [
+        threading.Thread(target=hold_shared_then_model, daemon=True)
+        for _ in range(2)
+    ]
+    for worker in holders:
+        worker.start()
+    holders_ready.wait(timeout=2)
+
+    provider_calls = {"food": 0, "suggestion": 0, "mobile": 0}
+    monkeypatch.setattr(food_bp, "_get_cached_macros", lambda *args: ({}, ["muz"]))
+    monkeypatch.setattr(
+        social_bp, "_get_cached_macros", lambda items, **kwargs: ({}, list(items)))
+
+    def provider(name):
+        provider_calls[name] += 1
+        raise AssertionError(f"{name} provider must remain untouched")
+
+    monkeypatch.setattr(food_bp, "_coach_search_food", lambda _q: provider("food"))
+    monkeypatch.setattr(
+        social_bp, "_parse_suggestion_items", lambda _body: provider("suggestion"))
+    monkeypatch.setattr(social_bp, "_get_fatsecret_token", lambda: provider("suggestion"))
+    monkeypatch.setattr(
+        mobile_auth.cognito_service, "authenticate",
+        lambda *_args: provider("mobile"))
+
+    def original_view(view):
+        while hasattr(view, "__wrapped__"):
+            view = view.__wrapped__
+        return view
+
+    def food_attempt():
+        with app.test_request_context("/api/food/search?q=muz"):
+            return original_view(food_bp.food_search)().get_json()
+
+    def suggestion_attempt():
+        snapshot = SimpleNamespace(
+            message_id=1, receiver_id=1, sender_id=2,
+            sender_name="Arkadaş", body="- tavuk\n- pilav",
+        )
+        with app.app_context():
+            return social_bp._calculate_meal_suggestion(snapshot)
+
+    def mobile_attempt():
+        with app.app_context():
+            with pytest.raises(mobile_auth.MobileAuthFailure) as caught:
+                mobile_auth.login("alice", "password")
+            return caught.value.status, caught.value.code
+
+    results = {}
+    errors = {}
+    cheap_finished = []
+
+    def capture(name, fn):
+        try:
+            results[name] = fn()
+        except BaseException as exc:  # surfaced in the main test thread below
+            errors[name] = exc
+
+    attempts = [
+        threading.Thread(target=capture, args=("food", food_attempt), daemon=True),
+        threading.Thread(
+            target=capture, args=("suggestion", suggestion_attempt), daemon=True),
+        threading.Thread(target=capture, args=("mobile", mobile_attempt), daemon=True),
+        threading.Thread(target=lambda: cheap_finished.append("cheap-1"), daemon=True),
+        threading.Thread(target=lambda: cheap_finished.append("cheap-2"), daemon=True),
+    ]
+    for worker in attempts:
+        worker.start()
+    for worker in attempts:
+        worker.join(timeout=1)
+
+    finished_before_release = all(not worker.is_alive() for worker in attempts)
+    calls_before_release = dict(provider_calls)
+    results_before_release = dict(results)
+    errors_before_release = dict(errors)
+    cheap_before_release = list(cheap_finished)
+
+    release_holders.set()
+    for worker in holders:
+        worker.join(timeout=2)
+    for worker in attempts:
+        worker.join(timeout=2)
+
+    assert finished_before_release
+    assert not errors_before_release
+    assert results_before_release == {
+        "food": {"results": []},
+        "suggestion": None,
+        "mobile": (503, "AUTH_TEMPORARILY_UNAVAILABLE"),
+    }
+    assert sorted(cheap_before_release) == ["cheap-1", "cheap-2"]
+    assert calls_before_release == {"food": 0, "suggestion": 0, "mobile": 0}
 
     for _ in range(2):
         with ai_gate.blocking_concurrency_slot(0):

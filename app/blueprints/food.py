@@ -6,6 +6,7 @@ from app.auth_middleware import require_auth
 from app.config import FOOD_SEARCH_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter
 from app.services.ai_coach import _coach_search_food
+from app.services.ai_gate import BlockingConcurrencyLimit, blocking_concurrency_slot
 from app.services import barcode as barcode_svc
 from app.services.fatsecret import _food_get_servings, _fs_relevant_candidates, _get_fatsecret_token
 from app.services.foodcache import _cache_food_id, _get_cached_food_id, _get_cached_macros
@@ -41,7 +42,13 @@ def food_search():
     # Alaka-kapısı + TR→EN normalizasyonlu birleşik arama (koç ile aynı yol):
     # FatSecret Türkçe sorgulara ilgisiz jenerik besin döndürdüğü için ham
     # results[0]'a güvenmek yanlış makro veriyordu ('patates' → 'Soy Nuts').
-    results = _coach_search_food(q)
+    try:
+        with blocking_concurrency_slot():
+            results = _coach_search_food(q)
+    except BlockingConcurrencyLimit:
+        current_app.logger.warning(
+            "food_search event=blocking_capacity_exhausted")
+        results = []
 
     return jsonify({"results": results})
 
