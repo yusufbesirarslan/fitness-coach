@@ -893,21 +893,20 @@ class _SuggestionSnapshot:
 
 
 _SUGGESTION_LIST_MARKER = re.compile(r"^(?:[-*•]\s+|\d+[.)]\s+)(.+)$")
-_SUGGESTION_ANY_LIST_MARKER = re.compile(r"^(?:[-*•]|\d+[.)])")
+_SUGGESTION_ANY_LIST_MARKER = re.compile(
+    r"^(?:[-*•]|\d+\)|\d+\.(?!\d))")
 _SUGGESTION_DECIMAL_COMMA = re.compile(r"\d\s*,\s*\d")
-_SUGGESTION_ITEM_PUNCTUATION = re.compile(r"[,.!?;:]")
-_SUGGESTION_PROSE_WORDS = frozenset({
-    "akşam", "bence", "bugün", "ekle", "ekleyin", "için", "istersen",
-    "lütfen", "olur", "olsun", "önce", "öğlen", "öner", "sabah",
-    "sonra", "tüket", "tüketin", "yanında", "yarın", "ye", "yiyin",
-})
-_SUGGESTION_PROSE_SUFFIXES = (
-    "malısın", "melisin", "malısınız", "melisiniz",
-    "abilirsin", "ebilirsin", "abilirsiniz", "ebilirsiniz",
-    "yorum", "yorsun", "yorsunuz", "yoruz", "yorlar",
+_SUGGESTION_SINGLE_TOKEN_ITEM = re.compile(
+    r"^[^\W_]+(?:[-'’][^\W_]+)*$", re.UNICODE)
+_SUGGESTION_QUANTITY_ITEM = re.compile(
+    r"^\d+(?:[.,]\d+)?\s*"
+    r"(?:kilogram|gram|mililitre|litre|porsiyon|adet|kase|"
+    r"su\s+bardağı|çay\s+bardağı|bardak|tabak|dilim|avuç|"
+    r"yemek\s+kaşığı|çay\s+kaşığı|tatlı\s+kaşığı|kaşık|"
+    r"paket|kutu|şişe|kepçe|ölçek|kg|gr|ml|cl|g|l)"
+    r"\s+[^,\n]+$",
+    re.IGNORECASE,
 )
-_SUGGESTION_LOCAL_ITEM_MAX_WORDS = 4
-_SUGGESTION_LOCAL_QUANTIFIED_ITEM_MAX_WORDS = 7
 
 
 def _normalize_suggestion_items(raw_items):
@@ -925,27 +924,11 @@ def _normalize_suggestion_items(raw_items):
     return normalized
 
 
-def _is_clear_local_suggestion_item(item):
-    """Accept compact item phrases; sentence-like text remains model-owned."""
-    if (_SUGGESTION_ITEM_PUNCTUATION.search(item)
-            or _SUGGESTION_ANY_LIST_MARKER.match(item)):
-        return False
-
-    words = item.split()
-    max_words = (_SUGGESTION_LOCAL_QUANTIFIED_ITEM_MAX_WORDS
-                 if item[0].isdigit()
-                 else _SUGGESTION_LOCAL_ITEM_MAX_WORDS)
-    if not words or len(words) > max_words:
-        return False
-
-    lexical_words = [
-        re.sub(r"^\W+|\W+$", "", word.casefold()) for word in words
-    ]
-    return not any(
-        word in _SUGGESTION_PROSE_WORDS
-        or word.endswith(_SUGGESTION_PROSE_SUFFIXES)
-        for word in lexical_words
-        if word
+def _is_unmarked_suggestion_item(item):
+    """Use syntax only: a single token or a quantity/unit-led phrase."""
+    return bool(
+        _SUGGESTION_SINGLE_TOKEN_ITEM.fullmatch(item)
+        or _SUGGESTION_QUANTITY_ITEM.fullmatch(item)
     )
 
 
@@ -956,31 +939,40 @@ def _parse_structured_suggestion_items(body):
 
     lines = [line.strip() for line in body.splitlines() if line.strip()]
     raw_items = None
+    grammar = None
     marker_matches = [
         _SUGGESTION_LIST_MARKER.fullmatch(line) for line in lines
     ]
     if len(lines) >= 2:
         if all(marker_matches):
             raw_items = [match.group(1) for match in marker_matches]
-        elif (any(_SUGGESTION_ANY_LIST_MARKER.match(line) for line in lines)
-              or any("," in line for line in lines)):
-            # A malformed/mixed marker or a second delimiter invalidates the
-            # complete grammar. Never salvage only the valid-looking subset.
+            grammar = "marker"
+        elif any(_SUGGESTION_ANY_LIST_MARKER.match(line) for line in lines):
+            # A malformed/mixed marker invalidates the complete grammar. Never
+            # salvage only the valid-looking subset.
             return None
         else:
             raw_items = lines
+            grammar = "newline"
     elif len(lines) == 1 and "," in lines[0]:
         if (_SUGGESTION_ANY_LIST_MARKER.match(lines[0])
                 or _SUGGESTION_DECIMAL_COMMA.search(lines[0])):
             return None
         raw_items = lines[0].split(",")
+        grammar = "comma"
 
     if raw_items is None or len(raw_items) < 2:
         return None
     items = _normalize_suggestion_items(raw_items)
     if len(items) != len(raw_items):
         return None
-    if not all(_is_clear_local_suggestion_item(item) for item in items):
+    if grammar == "marker":
+        # Marker syntax alone is explicit: retain punctuation, quantities, and
+        # long descriptions. Only a second marker would make it mixed.
+        if any(_SUGGESTION_ANY_LIST_MARKER.match(item) for item in items):
+            return None
+        return items
+    if not all(_is_unmarked_suggestion_item(item) for item in items):
         return None
     return items
 

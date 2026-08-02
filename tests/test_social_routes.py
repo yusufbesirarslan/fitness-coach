@@ -392,12 +392,66 @@ def test_structured_bullet_meal_suggestion_is_local_without_gate_or_openai(
     assert semaphore.acquisitions == semaphore.releases == 0
 
 
-@pytest.mark.parametrize("structured_body", [
-    "200g tavuk göğsü, 1 kase pilav, yeşil salata",
-    "200g tavuk göğsü\n1 kase pilav\nyeşil salata",
+@pytest.mark.parametrize(("structured_body", "expected_items"), [
+    (
+        "- 1,5 porsiyon süzme yoğurt\n- yeşil salata",
+        ["1,5 porsiyon süzme yoğurt", "yeşil salata"],
+    ),
+    (
+        "- ev yapımı bol yeşillikli ızgara tavuk göğsü\n"
+        "- fırında uzun süre pişmiş baharatlı kök sebzeler",
+        [
+            "ev yapımı bol yeşillikli ızgara tavuk göğsü",
+            "fırında uzun süre pişmiş baharatlı kök sebzeler",
+        ],
+    ),
+])
+def test_explicit_marker_lists_preserve_full_items_without_gate_or_openai(
+        client, auth_user, friend, monkeypatch,
+        structured_body, expected_items):
+    semaphore = _RecordingSharedSemaphore()
+    monkeypatch.setattr(ai_gate, "_ai_slots", semaphore)
+    captured = []
+
+    monkeypatch.setattr(
+        social_bp, "_parse_suggestion_items",
+        lambda _body: (_ for _ in ()).throw(
+            AssertionError("valid marker grammar must not call OpenAI")),
+    )
+
+    def cached(items, basis="per_serving"):
+        captured.append(list(items))
+        return _cached_macros(items, basis)
+
+    monkeypatch.setattr(social_bp, "_get_cached_macros", cached)
+    msg = _send_suggestion(
+        client, friend, auth_user, "suggestion_meal", structured_body)
+    response = client.post(
+        f"/suggest/respond/{msg.id}", json={"action": "accept"})
+
+    assert response.status_code == 200
+    assert captured == [expected_items]
+    assert MealLog.query.one().yemekler == ", ".join(expected_items)
+    assert semaphore.acquisitions == semaphore.releases == 0
+
+
+@pytest.mark.parametrize(("structured_body", "expected_items"), [
+    (
+        "200g tavuk göğsü, 1 kase pilav, salata",
+        ["200g tavuk göğsü", "1 kase pilav", "salata"],
+    ),
+    (
+        "200g tavuk göğsü\n1 kase pilav\nsalata",
+        ["200g tavuk göğsü", "1 kase pilav", "salata"],
+    ),
+    (
+        "1,5 porsiyon süzme yoğurt\nsalata",
+        ["1,5 porsiyon süzme yoğurt", "salata"],
+    ),
 ])
 def test_structured_comma_or_newline_meal_suggestion_is_local(
-        client, auth_user, friend, monkeypatch, structured_body):
+        client, auth_user, friend, monkeypatch,
+        structured_body, expected_items):
     captured = []
     semaphore = _RecordingSharedSemaphore()
     monkeypatch.setattr(ai_gate, "_ai_slots", semaphore)
@@ -420,7 +474,7 @@ def test_structured_comma_or_newline_meal_suggestion_is_local(
         f"/suggest/respond/{msg.id}", json={"action": "accept"})
 
     assert response.status_code == 200
-    assert captured == [["200g tavuk göğsü", "1 kase pilav", "yeşil salata"]]
+    assert captured == [expected_items]
     assert semaphore.acquisitions == 0
 
 
@@ -429,13 +483,19 @@ def test_structured_comma_or_newline_meal_suggestion_is_local(
     "- tavuk, pilav",
     "Bugün tavuk ve pilav yemelisin\nAkşam da çorba içebilirsin",
     "Tavuk ye\nPilav tüket",
+    "Tavuk hazırla\nPilav pişir",
     "1,5 porsiyon yoğurt, yeşil salata",
+    "200g tavuk göğsü\n1 kase pilav\nyeşil salata",
+    "200g tavuk göğsü, 1 kase pilav, yeşil salata",
 ], ids=[
     "malformed-markers",
     "marker-plus-comma",
     "unpunctuated-prose",
     "short-unpunctuated-prose",
+    "unseen-unpunctuated-prose",
     "decimal-comma",
+    "ambiguous-multiword-newline-item",
+    "ambiguous-multiword-comma-item",
 ])
 def test_ambiguous_list_grammar_uses_whole_gated_openai_parse(
         client, auth_user, friend, monkeypatch, ambiguous_body):
