@@ -39,6 +39,35 @@ class LogoutResult:
     provider_refresh_token: str | None = field(default=None, repr=False)
 
 
+@dataclass(frozen=True)
+class _RefreshSnapshot:
+    family_db_id: int
+    parent_id: int
+    public_family_id: str
+    family_version: int
+    parent_generation: int
+    family_revoked_at: datetime | None
+    parent_revoked_at: datetime | None
+    parent_consumed_at: datetime | None
+    parent_grace_expires_at: datetime | None
+    provider_access_expires_at: datetime
+    family_absolute_expires_at: datetime
+    parent_expires_at: datetime
+    access_expires_at: datetime
+    coverage_deadline: datetime
+    coverage_trigger: datetime
+    encrypted_provider_refresh_token: str | None = field(repr=False)
+    cognito_username: str
+    cognito_sub: str
+
+
+@dataclass(frozen=True)
+class _RenewedProviderTokens:
+    encrypted_access_token: str = field(repr=False)
+    encrypted_refresh_token: str = field(repr=False)
+    access_expires_at: datetime
+
+
 class MobileAuthFailure(Exception):
     def __init__(self, code, status, retryable, reason, retry_after=None):
         super().__init__(reason)
@@ -401,14 +430,8 @@ def _replay_consumed_parent(parent, family, raw_refresh, now):
     return issued
 
 
-def refresh(raw_refresh, now=None):
-    """Rotate one refresh generation or replay its one committed child."""
-    now = now or datetime.utcnow()
-    try:
-        digest = mobile_credentials.hash_credential(raw_refresh)
-    except mobile_credentials.InvalidMobileCredential as exc:
-        raise _refresh_failed("refresh_invalid") from exc
-
+def _snapshot_refresh(raw_refresh, digest, now):
+    """Lock and validate current state, then return only detached scalars."""
     try:
         located = db.session.query(
             MobileRefreshCredential.id,
@@ -421,6 +444,47 @@ def refresh(raw_refresh, now=None):
                   .with_for_update().one_or_none())
         parent = (MobileRefreshCredential.query.filter_by(
             id=parent_id, session_id=family_id).with_for_update().one_or_none())
+        if family is None or parent is None:
+            raise _refresh_failed("refresh_invalid")
+        if not hmac.compare_digest(parent.credential_hash, digest):
+            raise _refresh_failed("refresh_invalid")
+        if family.revoked_at is not None or parent.revoked_at is not None:
+            raise _refresh_failed("refresh_revoked")
+        if family.absolute_expires_at <= now or parent.expires_at <= now:
+            _revoke_family_and_commit(family, "refresh_expired", now)
+            raise _refresh_failed("refresh_expired")
+        if parent.consumed_at is not None:
+            return _replay_consumed_parent(
+                parent, family, raw_refresh, now)
+        provider_exp = family.cognito_access_expires_at
+        if not isinstance(provider_exp, datetime):
+            raise _failure(
+                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+                "provider_expiry_unavailable")
+        access_exp, deadline, trigger = _coverage(
+            now, family.absolute_expires_at)
+        snapshot = _RefreshSnapshot(
+            family_db_id=family.id,
+            parent_id=parent.id,
+            public_family_id=family.family_id,
+            family_version=family.version,
+            parent_generation=parent.generation,
+            family_revoked_at=family.revoked_at,
+            parent_revoked_at=parent.revoked_at,
+            parent_consumed_at=parent.consumed_at,
+            parent_grace_expires_at=parent.grace_expires_at,
+            provider_access_expires_at=provider_exp,
+            family_absolute_expires_at=family.absolute_expires_at,
+            parent_expires_at=parent.expires_at,
+            access_expires_at=access_exp,
+            coverage_deadline=deadline,
+            coverage_trigger=trigger,
+            encrypted_provider_refresh_token=family.cognito_refresh_token,
+            cognito_username=family.cognito_username,
+            cognito_sub=family.cognito_sub,
+        )
+        db.session.rollback()
+        return snapshot
     except MobileAuthFailure:
         db.session.rollback()
         raise
@@ -429,7 +493,79 @@ def refresh(raw_refresh, now=None):
         raise _failure(
             "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
             "storage_unavailable") from exc
-    if family is None or parent is None:
+
+
+def _renew_provider_tokens(snapshot):
+    """Prepare provider material while no database transaction or lock is held."""
+    if snapshot.provider_access_expires_at > snapshot.coverage_trigger:
+        return None
+    try:
+        with blocking_concurrency_slot():
+            provider_refresh = session_store.decrypt_token(
+                snapshot.encrypted_provider_refresh_token)
+            if db.session().in_transaction():
+                raise RuntimeError(
+                    "provider renewal attempted during database transaction")
+            tokens = cognito_service.refresh_tokens(
+                provider_refresh, snapshot.cognito_username)
+            _, provider_exp = _validate_refreshed_provider(
+                tokens["access_token"], snapshot.cognito_sub)
+            if provider_exp <= snapshot.coverage_deadline:
+                _security_event(
+                    "provider_coverage_insufficient",
+                    snapshot.public_family_id,
+                    "provider",
+                )
+                raise _failure(
+                    "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+                    "provider_coverage_insufficient")
+            return _RenewedProviderTokens(
+                encrypted_access_token=session_store.encrypt_token(
+                    tokens["access_token"]),
+                encrypted_refresh_token=session_store.encrypt_token(
+                    tokens["refresh_token"]),
+                access_expires_at=provider_exp,
+            )
+    except BlockingConcurrencyLimit as exc:
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "blocking_capacity_exhausted", retry_after=15) from exc
+
+
+def _snapshot_matches_current(snapshot, family, parent):
+    return (
+        family.family_id == snapshot.public_family_id
+        and family.version == snapshot.family_version
+        and family.revoked_at == snapshot.family_revoked_at
+        and family.absolute_expires_at == snapshot.family_absolute_expires_at
+        and family.cognito_access_expires_at
+        == snapshot.provider_access_expires_at
+        and family.cognito_refresh_token
+        == snapshot.encrypted_provider_refresh_token
+        and family.cognito_username == snapshot.cognito_username
+        and family.cognito_sub == snapshot.cognito_sub
+        and parent.generation == snapshot.parent_generation
+        and parent.revoked_at == snapshot.parent_revoked_at
+        and parent.consumed_at == snapshot.parent_consumed_at
+        and parent.grace_expires_at == snapshot.parent_grace_expires_at
+        and parent.expires_at == snapshot.parent_expires_at
+    )
+
+
+def _lock_and_revalidate_refresh(snapshot, raw_refresh, digest, now):
+    """Return locked current rows, or replay a child committed by a winner."""
+    try:
+        family = db.session.get(
+            MobileAuthSession, snapshot.family_db_id, with_for_update=True)
+        parent = db.session.get(
+            MobileRefreshCredential, snapshot.parent_id, with_for_update=True)
+    except Exception as exc:
+        db.session.rollback()
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "storage_unavailable") from exc
+    if (family is None or parent is None
+            or parent.session_id != snapshot.family_db_id):
         db.session.rollback()
         raise _refresh_failed("refresh_invalid")
     if not hmac.compare_digest(parent.credential_hash, digest):
@@ -443,51 +579,72 @@ def refresh(raw_refresh, now=None):
         raise _refresh_failed("refresh_expired")
     if parent.consumed_at is not None:
         return _replay_consumed_parent(parent, family, raw_refresh, now)
+    if not _snapshot_matches_current(snapshot, family, parent):
+        db.session.rollback()
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "refresh_conflict")
+    return family, parent
 
-    expected_version = family.version
-    child_generation = parent.generation + 1
-    access_exp, deadline, trigger = _coverage(now, family.absolute_expires_at)
+
+def _persist_refresh(snapshot, raw_refresh, digest, renewed_tokens, now):
+    """Revalidate under locks and commit exactly one child generation."""
     try:
-        provider_exp = family.cognito_access_expires_at
-        if not isinstance(provider_exp, datetime):
-            raise _failure(
-                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
-                "provider_expiry_unavailable")
-        if provider_exp <= trigger:
-            provider_refresh = session_store.decrypt_token(
-                family.cognito_refresh_token)
-            tokens = cognito_service.refresh_tokens(
-                provider_refresh, family.cognito_username)
-            access_claims, provider_exp = _validate_refreshed_provider(
-                tokens["access_token"], family.cognito_sub)
-            if provider_exp <= deadline:
-                _security_event(
-                    "provider_coverage_insufficient", family.family_id,
-                    "provider")
-                raise _failure(
-                    "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
-                    "provider_coverage_insufficient")
-            family.cognito_access_token = session_store.encrypt_token(
-                tokens["access_token"])
-            family.cognito_refresh_token = session_store.encrypt_token(
-                tokens["refresh_token"])
-            family.cognito_access_expires_at = provider_exp
-
+        current = _lock_and_revalidate_refresh(
+            snapshot, raw_refresh, digest, now)
+        if isinstance(current, IssuedSession):
+            return current
+        _, parent = current
+        child_generation = snapshot.parent_generation + 1
         key_version = current_app.config[
             "MOBILE_AUTH_ACTIVE_DERIVATION_KEY_VERSION"]
         pair = mobile_credentials.derive_replacement_pair(
-            raw_refresh, family.family_id, parent.generation,
-            child_generation, key_version,
-            current_app.config["MOBILE_AUTH_DERIVATION_KEYRING"])
+            raw_refresh,
+            snapshot.public_family_id,
+            snapshot.parent_generation,
+            child_generation,
+            key_version,
+            current_app.config["MOBILE_AUTH_DERIVATION_KEYRING"],
+        )
+        family_updates = {
+            MobileAuthSession.version: snapshot.family_version + 1,
+            MobileAuthSession.last_used_at: now,
+            MobileAuthSession.updated_at: now,
+        }
+        if renewed_tokens is not None:
+            family_updates.update({
+                MobileAuthSession.cognito_access_token:
+                    renewed_tokens.encrypted_access_token,
+                MobileAuthSession.cognito_refresh_token:
+                    renewed_tokens.encrypted_refresh_token,
+                MobileAuthSession.cognito_access_expires_at:
+                    renewed_tokens.access_expires_at,
+            })
+        updated = (MobileAuthSession.query.filter_by(
+            id=snapshot.family_db_id,
+            version=snapshot.family_version,
+            revoked_at=None,
+        ).update(family_updates, synchronize_session=False))
+        if updated != 1:
+            raise _failure(
+                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+                "refresh_conflict")
+
         access = MobileAccessCredential(
-            session_id=family.id,
+            session_id=snapshot.family_db_id,
             credential_hash=mobile_credentials.hash_credential(pair.access),
-            generation=child_generation, issued_at=now, expires_at=access_exp)
+            generation=child_generation,
+            issued_at=now,
+            expires_at=snapshot.access_expires_at,
+        )
         child = MobileRefreshCredential(
-            session_id=family.id,
+            session_id=snapshot.family_db_id,
             credential_hash=mobile_credentials.hash_credential(pair.refresh),
-            generation=child_generation, parent_id=parent.id,
-            issued_at=now, expires_at=family.absolute_expires_at)
+            generation=child_generation,
+            parent_id=snapshot.parent_id,
+            issued_at=now,
+            expires_at=snapshot.family_absolute_expires_at,
+        )
         db.session.add_all([access, child])
         db.session.flush()
         parent.consumed_at = now
@@ -498,41 +655,64 @@ def refresh(raw_refresh, now=None):
         parent.replacement_access_id = access.id
         parent.replacement_refresh_id = child.id
         parent.replacement_issued_at = now
-        parent.replacement_access_expires_at = access_exp
-        parent.replacement_refresh_expires_at = family.absolute_expires_at
+        parent.replacement_access_expires_at = snapshot.access_expires_at
+        parent.replacement_refresh_expires_at = (
+            snapshot.family_absolute_expires_at)
         (MobileAccessCredential.query.filter(
-            MobileAccessCredential.session_id == family.id,
+            MobileAccessCredential.session_id == snapshot.family_db_id,
             MobileAccessCredential.generation < child_generation,
             MobileAccessCredential.revoked_at.is_(None)).update(
                 {MobileAccessCredential.revoked_at: now},
                 synchronize_session=False))
-        updated = (MobileAuthSession.query.filter_by(
-            id=family.id, version=expected_version, revoked_at=None).update({
-                MobileAuthSession.version: expected_version + 1,
-                MobileAuthSession.last_used_at: now,
-                MobileAuthSession.updated_at: now,
-            }, synchronize_session=False))
-        if updated != 1:
-            raise _failure(
-                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
-                "refresh_conflict")
         db.session.commit()
         return IssuedSession(
-            pair.access, pair.refresh, access_exp, family.absolute_expires_at)
+            pair.access,
+            pair.refresh,
+            snapshot.access_expires_at,
+            snapshot.family_absolute_expires_at,
+        )
+    except MobileAuthFailure:
+        db.session.rollback()
+        raise
+    except Exception as exc:
+        db.session.rollback()
+        raise _failure(
+            "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
+            "refresh_transaction_failed") from exc
+
+
+def _revalidate_and_revoke_provider_failure(
+        snapshot, raw_refresh, digest, reason, now):
+    """Revoke only if the provider rejection still describes current state."""
+    current = _lock_and_revalidate_refresh(
+        snapshot, raw_refresh, digest, now)
+    if isinstance(current, IssuedSession):
+        return current
+    family, _ = current
+    public_family_id = family.family_id
+    _revoke_family_and_commit(family, "provider_refresh_rejected", now)
+    _security_event(
+        "provider_refresh_rejected", public_family_id, "provider")
+    raise _refresh_failed(reason)
+
+
+def refresh(raw_refresh, now=None):
+    """Rotate in two short transactions or replay one committed child."""
+    now = now or datetime.utcnow()
+    try:
+        digest = mobile_credentials.hash_credential(raw_refresh)
+    except mobile_credentials.InvalidMobileCredential as exc:
+        raise _refresh_failed("refresh_invalid") from exc
+
+    snapshot = _snapshot_refresh(raw_refresh, digest, now)
+    if isinstance(snapshot, IssuedSession):
+        return snapshot
+    try:
+        renewed_tokens = _renew_provider_tokens(snapshot)
     except _DefinitiveRefreshFailure as exc:
         db.session.rollback()
-        try:
-            family = db.session.get(MobileAuthSession, family_id)
-        except Exception as storage_exc:
-            db.session.rollback()
-            raise _failure(
-                "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
-                "storage_unavailable") from storage_exc
-        _revoke_family_and_commit(
-            family, "provider_refresh_rejected", now)
-        _security_event(
-            "provider_refresh_rejected", family.family_id, "provider")
-        raise _refresh_failed(exc.args[0]) from exc
+        return _revalidate_and_revoke_provider_failure(
+            snapshot, raw_refresh, digest, exc.args[0], now)
     except MobileAuthFailure:
         db.session.rollback()
         raise
@@ -540,18 +720,13 @@ def refresh(raw_refresh, now=None):
         db.session.rollback()
         if exc.code in {"NotAuthorizedException", "UserNotFoundException",
                         "RefreshFailed"}:
-            try:
-                family = db.session.get(MobileAuthSession, family_id)
-            except Exception as storage_exc:
-                db.session.rollback()
-                raise _failure(
-                    "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
-                    "storage_unavailable") from storage_exc
-            _revoke_family_and_commit(
-                family, "provider_refresh_rejected", now)
-            _security_event(
-                "provider_refresh_rejected", family.family_id, "provider")
-            raise _refresh_failed("provider_refresh_rejected") from exc
+            return _revalidate_and_revoke_provider_failure(
+                snapshot,
+                raw_refresh,
+                digest,
+                "provider_refresh_rejected",
+                now,
+            )
         _security_event("provider_renewal_failed", category="provider")
         raise _failure(
             "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
@@ -561,6 +736,8 @@ def refresh(raw_refresh, now=None):
         raise _failure(
             "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
             "refresh_transaction_failed") from exc
+    return _persist_refresh(
+        snapshot, raw_refresh, digest, renewed_tokens, now)
 
 
 def _family_id_for_credential(access_credential=None, refresh_credential=None):

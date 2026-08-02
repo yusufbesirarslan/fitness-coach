@@ -1,21 +1,23 @@
-"""Disposable-PostgreSQL concurrency coverage for mobile refresh rotation."""
+"""Disposable-PostgreSQL concurrency coverage for mobile refresh rotation.
+
+Two requests may renew the provider token from the same phase-one snapshot, but
+only one phase-two transaction may persist its provider material and child.
+"""
 
 import calendar
 import os
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 
 import pytest
 from flask import Flask
 import sqlalchemy as sa
-from sqlalchemy import event
 
 from app.extensions import db
 from app.models import (
     MobileAccessCredential, MobileAuthSession, MobileRefreshCredential, User,
 )
-from app.services import cognito_jwt, cognito_service, mobile_auth
+from app.services import cognito_jwt, cognito_service, mobile_auth, session_store
 
 
 pytestmark = pytest.mark.pg_concurrency
@@ -62,7 +64,13 @@ def pg_app(monkeypatch):
 
     old_exp = NOW + timedelta(seconds=901)
     new_exp = NOW + timedelta(hours=3)
-    counter = {"calls": 0}
+    counter = {
+        "calls": 0,
+        "provider_barrier": None,
+        "thread_state": threading.local(),
+        "winner_at_provider": None,
+        "winner_finished": None,
+    }
     counter_lock = threading.Lock()
 
     monkeypatch.setattr(cognito_service, "authenticate", lambda username, password: {
@@ -79,18 +87,25 @@ def pg_app(monkeypatch):
                 "sub": "pg-mobile-race-sub", "email": "pg-race@example.invalid",
                 "email_verified": True,
             }
-        expiry = new_exp if token == "pg-provider-new" else old_exp
+        expiry = (
+            new_exp if token.startswith("pg-provider-new-") else old_exp)
         return {
             "sub": "pg-mobile-race-sub",
             "exp": calendar.timegm(expiry.timetuple()),
         }
 
-    def renew(refresh_token, username):
+    def renew(_refresh_token, _username):
+        contender = counter["thread_state"].contender
         with counter_lock:
             counter["calls"] += 1
+        if contender == "winner":
+            counter["winner_at_provider"].set()
+        counter["provider_barrier"].wait(timeout=10)
+        if contender == "stale":
+            assert counter["winner_finished"].wait(timeout=10)
         return {
-            "access_token": "pg-provider-new",
-            "refresh_token": refresh_token,
+            "access_token": f"pg-provider-new-{contender}",
+            "refresh_token": f"pg-provider-refresh-{contender}",
         }
 
     monkeypatch.setattr(cognito_jwt, "validate_token", validate)
@@ -111,48 +126,71 @@ def pg_app(monkeypatch):
             db.drop_all()
             db.engine.dispose()
 
-def test_same_parent_race_commits_exactly_one_child_and_one_provider_renewal(
+
+def test_same_parent_race_commits_one_child_and_keeps_winner_provider_tokens(
         pg_app):
     app, counter = pg_app
     with app.app_context():
         original = mobile_auth.login("pg-mobile-race", "correct", now=NOW)
-        engine = db.engine
 
-    barrier = threading.Barrier(2)
-    pre_family_lock = threading.Barrier(2)
+    counter["provider_barrier"] = threading.Barrier(2)
+    counter["winner_at_provider"] = threading.Event()
+    counter["winner_finished"] = threading.Event()
+    outcomes = {}
 
-    def force_both_scalar_lookups_before_family_lock(
-            conn, cursor, statement, parameters, context, executemany):
-        normalized = " ".join(statement.lower().split())
-        if ("from mobile_auth_session" in normalized
-                and "for update" in normalized):
-            pre_family_lock.wait(timeout=10)
-
-    event.listen(
-        engine, "before_cursor_execute",
-        force_both_scalar_lookups_before_family_lock)
-
-    def rotate():
+    def rotate(contender):
         with app.app_context():
-            barrier.wait(timeout=10)
-            return mobile_auth.refresh(
-                original.refresh_credential,
-                now=NOW + timedelta(seconds=850))
+            counter["thread_state"].contender = contender
+            try:
+                outcomes[contender] = (
+                    "issued",
+                    mobile_auth.refresh(
+                        original.refresh_credential,
+                        now=NOW + timedelta(seconds=850),
+                    ),
+                )
+            except mobile_auth.MobileAuthFailure as exc:
+                outcomes[contender] = (
+                    "failed", exc.code, exc.reason, exc.retryable)
+            except Exception as exc:  # pragma: no cover - surfaced by assertions
+                outcomes[contender] = (
+                    "unexpected", type(exc).__name__, str(exc))
+            finally:
+                if contender == "winner":
+                    counter["winner_finished"].set()
+                db.session.remove()
 
-    try:
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = [executor.submit(rotate) for _ in range(2)]
-            results = [future.result(timeout=30) for future in futures]
-    finally:
-        event.remove(
-            engine, "before_cursor_execute",
-            force_both_scalar_lookups_before_family_lock)
+    threads = {
+        contender: threading.Thread(
+            target=rotate, args=(contender,), daemon=True)
+        for contender in ("winner", "stale")
+    }
+    threads["winner"].start()
+    assert counter["winner_at_provider"].wait(timeout=10), outcomes
+    threads["stale"].start()
+    for thread in threads.values():
+        thread.join(timeout=30)
 
-    assert results[0] == results[1]
+    assert not any(thread.is_alive() for thread in threads.values()), outcomes
+    assert outcomes["winner"][0] == "issued", outcomes
+    if outcomes["stale"][0] == "issued":
+        assert outcomes["stale"][1] == outcomes["winner"][1]
+    else:
+        assert outcomes["stale"] == (
+            "failed",
+            "AUTH_TEMPORARILY_UNAVAILABLE",
+            "refresh_conflict",
+            True,
+        )
     with app.app_context():
         family = MobileAuthSession.query.one()
         assert family.version == 2
+        assert family.revoked_at is None
         assert MobileAccessCredential.query.filter_by(generation=1).count() == 1
         assert MobileRefreshCredential.query.filter_by(generation=1).count() == 1
         assert MobileRefreshCredential.query.filter_by(generation=2).count() == 0
-    assert counter["calls"] == 1
+        assert session_store.decrypt_token(
+            family.cognito_access_token) == "pg-provider-new-winner"
+        assert session_store.decrypt_token(
+            family.cognito_refresh_token) == "pg-provider-refresh-winner"
+    assert counter["calls"] == 2
