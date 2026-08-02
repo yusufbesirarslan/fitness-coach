@@ -24,6 +24,7 @@ Env ayarları:
 """
 import os
 import threading
+import time
 from contextlib import contextmanager
 from functools import wraps
 
@@ -54,10 +55,34 @@ _model_slots = threading.BoundedSemaphore(AI_MODEL_MAX_CONCURRENCY)
 _scrape_slots = threading.BoundedSemaphore(SCRAPE_MAX_CONCURRENCY)
 
 
+class BlockingConcurrencyLimit(RuntimeError):
+    pass
+
+
+def _acquire_before_deadline(semaphore, wait_seconds, *, clock=None):
+    monotonic = clock or time.monotonic
+    deadline = monotonic() + max(0.0, wait_seconds)
+    return semaphore.acquire(timeout=max(0.0, deadline - monotonic()))
+
+
 @contextmanager
-def model_concurrency_slot():
+def blocking_concurrency_slot(wait_seconds=None):
+    """Bound one blocking AI route sequence with the shared capacity gate."""
+    wait = AI_GATE_WAIT_SECONDS if wait_seconds is None else wait_seconds
+    if not _acquire_before_deadline(_ai_slots, wait):
+        raise BlockingConcurrencyLimit("shared blocking capacity exhausted")
+    try:
+        yield
+    finally:
+        _ai_slots.release()
+
+
+@contextmanager
+def model_concurrency_slot(wait_seconds=None):
     """Bound one complete provider/fallback sequence independently of routes."""
-    _model_slots.acquire()
+    wait = AI_GATE_WAIT_SECONDS if wait_seconds is None else wait_seconds
+    if not _acquire_before_deadline(_model_slots, wait):
+        raise BlockingConcurrencyLimit("model blocking capacity exhausted")
     try:
         yield
     finally:

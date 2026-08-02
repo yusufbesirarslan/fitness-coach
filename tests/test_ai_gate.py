@@ -30,26 +30,60 @@ def test_route_gate_defaults_to_fail_fast():
     assert ai_gate.AI_GATE_WAIT_SECONDS == 0
 
 
-def test_model_slot_prevents_simultaneous_entry(monkeypatch):
+class _RecordingSemaphore:
+    def __init__(self):
+        self.timeouts = []
+
+    def acquire(self, *, timeout):
+        self.timeouts.append(timeout)
+        return True
+
+
+def test_acquire_before_deadline_uses_remaining_monotonic_budget():
+    """Catches a gate that gives acquire the original wait instead of remaining time."""
+    sem = _RecordingSemaphore()
+    clock_values = iter((10.0, 10.25))
+
+    assert ai_gate._acquire_before_deadline(
+        sem, 1, clock=lambda: next(clock_values))
+    assert sem.timeouts == [0.75]
+
+
+def test_blocking_slot_fails_fast_when_full(monkeypatch):
+    """Catches entering shared work after its fail-fast capacity is exhausted."""
+    sem = threading.BoundedSemaphore(1)
+    assert sem.acquire(blocking=False)
+    monkeypatch.setattr(ai_gate, "_ai_slots", sem)
+    try:
+        with pytest.raises(ai_gate.BlockingConcurrencyLimit):
+            with ai_gate.blocking_concurrency_slot(0):
+                pytest.fail("must not enter")
+    finally:
+        sem.release()
+
+
+def test_model_slot_fails_fast_when_full(monkeypatch):
+    """Catches the model slot's former indefinitely blocking acquisition."""
     sem = threading.BoundedSemaphore(1)
     monkeypatch.setattr(ai_gate, "_model_slots", sem)
-    worker_started = threading.Event()
-    worker_entered = threading.Event()
+    assert sem.acquire(blocking=False)
+    try:
+        with pytest.raises(ai_gate.BlockingConcurrencyLimit):
+            with ai_gate.model_concurrency_slot(0):
+                pytest.fail("must not enter")
+    finally:
+        sem.release()
 
-    def enter_model_slot():
-        worker_started.set()
-        with ai_gate.model_concurrency_slot():
-            worker_entered.set()
 
-    with ai_gate.model_concurrency_slot():
-        worker = threading.Thread(target=enter_model_slot)
-        worker.start()
-        assert worker_started.wait(timeout=1)
-        assert not worker_entered.wait(timeout=0.05)
+def test_shared_then_model_nesting_releases_both(monkeypatch):
+    """Catches leaked shared or model permits in the required nesting order."""
+    monkeypatch.setattr(ai_gate, "_ai_slots", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(ai_gate, "_model_slots", threading.BoundedSemaphore(1))
 
-    assert worker_entered.wait(timeout=1)
-    worker.join(timeout=1)
-    assert not worker.is_alive()
+    for _ in range(2):
+        with ai_gate.blocking_concurrency_slot(0):
+            with ai_gate.model_concurrency_slot(0):
+                pass
 
 
 def test_model_slot_releases_after_error(monkeypatch):
