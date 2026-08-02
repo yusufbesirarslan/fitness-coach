@@ -412,7 +412,15 @@ def test_serializer_preserves_canonical_plan_semantics(
 def test_adaptive_context_config_is_off_when_unset_or_zero(
     tmp_path, env_value
 ):
-    config_path = Path(__file__).parents[1] / "app" / "config.py"
+    """Default-OFF, proven outside the test process.
+
+    `tests/conftest.py` pins `AI_ADAPTIVE_PLAN_CONTEXT=0` at import time, so an
+    in-process assertion would only prove what conftest set. This resolves the
+    real registry in a clean interpreter against the real process environment.
+    PR2 moved the parse out of `app/config.py` into the stdlib-only
+    `app/feature_flags.py`, which is what the probe loads now.
+    """
+    flags_path = Path(__file__).parents[1] / "app" / "feature_flags.py"
     env = os.environ.copy()
     env.pop("AI_ADAPTIVE_PLAN_CONTEXT", None)
     env.pop("PYTHONPATH", None)
@@ -420,16 +428,14 @@ def test_adaptive_context_config_is_off_when_unset_or_zero(
         env["AI_ADAPTIVE_PLAN_CONTEXT"] = env_value
 
     probe = (
-        "import runpy, sys, types\n"
-        "dotenv = types.ModuleType('dotenv')\n"
-        "dotenv.load_dotenv = lambda *args, **kwargs: None\n"
-        "sys.modules['dotenv'] = dotenv\n"
+        "import os, runpy, sys\n"
         "namespace = runpy.run_path(sys.argv[1])\n"
-        "assert namespace['AI_ADAPTIVE_PLAN_CONTEXT'] is False, "
-        "namespace['AI_ADAPTIVE_PLAN_CONTEXT']\n"
+        "resolved = namespace['resolve_rollout_flags'](os.environ)\n"
+        "assert resolved['AI_ADAPTIVE_PLAN_CONTEXT'] is False, "
+        "resolved['AI_ADAPTIVE_PLAN_CONTEXT']\n"
     )
     completed = subprocess.run(
-        [sys.executable, "-I", "-c", probe, str(config_path)],
+        [sys.executable, "-I", "-c", probe, str(flags_path)],
         cwd=tmp_path,
         env=env,
         capture_output=True,
