@@ -48,6 +48,75 @@ def _deep_health_allowed():
     )
 
 
+def _capacity_snapshot():
+    """DB havuzu + sunum kapasitesinin anlık görünümü (deep health + metrikler).
+
+    Sunum kapasitesi ile DB havuzu kapasitesi AYRI iki sayıdır ve birbirinden
+    habersiz ayarlanabilir; prod-hardening §6 "DB pool sizing aligned with maximum
+    process/thread concurrency" tam olarak bu ikisinin uyumunu ister. Burada ikisi
+    YAN YANA raporlanır ki uyumsuzluk gözle görülsün (hizalamanın kendisi PR4).
+
+    Herhangi bir alan çözülemezse o alan atlanır — sağlık yanıtı ASLA bu yüzden
+    düşmez (havuz iç görüsü SQLAlchemy sürümüne bağlı bir ayrıntıdır).
+    """
+    from app.services import ai_gate
+    snapshot = {
+        "workers": ai_gate.WEB_WORKERS,
+        "threads": ai_gate.WEB_THREADS,
+        "ai_max_concurrency": ai_gate.AI_MAX_CONCURRENCY,
+        "ai_model_max_concurrency": ai_gate.AI_MODEL_MAX_CONCURRENCY,
+        "scrape_max_concurrency": ai_gate.SCRAPE_MAX_CONCURRENCY,
+    }
+    try:
+        pool = db.engine.pool
+        snapshot["db_pool"] = {
+            "size": pool.size(),
+            "checked_out": pool.checkedout(),
+            "overflow": pool.overflow(),
+        }
+    except Exception:
+        pass  # SQLite/StaticPool ya da sürüm farkı — kapasite görünümü opsiyonel
+    return snapshot
+
+
+def _record_capacity_gauges(snapshot):
+    """Kapasite anlık görünümünü metrik olarak da yaz (deep-health probe'unda).
+
+    Deploy gate ve konteyner probe'u bu ucu zaten düzenli çağırıyor; ayrı bir
+    zamanlayıcı eklemek yerine var olan periyodikliği kullanıyoruz.
+    """
+    try:
+        from app.services import runtime_metrics
+        pool = snapshot.get("db_pool")
+        if not pool:
+            return
+        runtime_metrics.set_gauge("DbPoolCheckedOut", pool["checked_out"])
+        runtime_metrics.set_gauge("DbPoolOverflow", pool["overflow"])
+        runtime_metrics.set_gauge("DbPoolSize", pool["size"])
+    except Exception:
+        pass
+
+
+def _record_dependency_gauges(body):
+    """Bağımlılık sağlığını 0/1 gauge olarak yaz (alarm eşiği kurulabilsin).
+
+    Metin durumlar ("ok"/"degraded"/"offline") loglar ve insanlar içindir; alarm
+    kuralları sayı ister. Boyut YOK: bunlar süreç-geneli tekil sinyaller.
+    """
+    try:
+        from app.services import runtime_metrics
+        runtime_metrics.set_gauge("DbUp", 1 if body.get("db") == "ok" else 0)
+        runtime_metrics.set_gauge(
+            "RedisUp", 1 if body.get("redis") == "ok" else 0)
+        runtime_metrics.set_gauge(
+            "LoginUp", 1 if body.get("login") == "ok" else 0)
+        runtime_metrics.set_gauge(
+            "LimiterDegraded",
+            1 if body.get("limiter_storage") == "degraded" else 0)
+    except Exception:
+        pass
+
+
 def create_app():
     app = Flask(
         __name__,
@@ -131,6 +200,15 @@ def create_app():
                     body["fatsecret_proxy"] = "ok" if r.status_code < 500 else "error"
                 except Exception:
                     body["fatsecret_proxy"] = "error"
+            # Rollout bayraklarının O ANKİ durumu. Bayraklar host .env'inde yaşar
+            # ve deploy pipeline'ı onları TAŞIMAZ (bkz. docs/ROLLOUT.md) — yani
+            # "canlıda ne açık?" sorusunun repodan yanıtı YOKTUR. Yalnızca ad +
+            # boolean; sır/bağlantı dizesi/anahtar ASLA. Zaten iç-ağ sınırlı.
+            import app.config as _config_mod
+            body["flags"] = _config_mod.feature_flag_state(app)
+            body["capacity"] = _capacity_snapshot()
+            _record_capacity_gauges(body["capacity"])
+            _record_dependency_gauges(body)
             if not login_ok:
                 body["status"] = "error"
                 status = 503

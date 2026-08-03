@@ -76,7 +76,7 @@ def _stream_bedrock_turn(messages_client, call_kwargs, *, deadline):
         from app.services import ai_coach
 
         try:
-            with model_concurrency_slot(deadline=deadline):
+            with model_concurrency_slot("bedrock-stream", deadline=deadline):
                 remaining = ai_coach._remaining_coach_turn_seconds(deadline)
                 if remaining <= 0:
                     messages.put({"kind": "deadline_exhausted"})

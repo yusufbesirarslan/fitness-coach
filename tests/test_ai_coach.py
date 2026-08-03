@@ -412,7 +412,7 @@ def _install_advancing_model_slot(monkeypatch, clock, advance_seconds):
     deadlines = []
 
     @contextmanager
-    def advancing_slot(*, deadline=None):
+    def advancing_slot(_provider="unknown", *, deadline=None):
         deadlines.append(deadline)
         clock.now += advance_seconds
         yield

@@ -126,7 +126,7 @@ def _install_advancing_model_slot(
     deadlines = []
 
     @contextmanager
-    def advancing_slot(*, deadline=None):
+    def advancing_slot(_provider="unknown", *, deadline=None):
         deadlines.append(deadline)
         clock.now += advance_seconds
         yield

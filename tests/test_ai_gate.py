@@ -467,3 +467,103 @@ def test_stream_gate_double_close_does_not_over_release(app, monkeypatch):
         assert sem.acquire(blocking=False)      # tam bir slot serbest
         assert not sem.acquire(blocking=False)  # ikincisi yok (fazla release olmadı)
         sem.release()
+
+
+# ── Production Hardening PR1: kapı/sağlayıcı SLI'ları ──────────────────────
+
+@pytest.fixture
+def metrics_on(monkeypatch):
+    """runtime_metrics'i tamponlu modda aç (flush thread'i ve ağ YOK)."""
+    from app.services import runtime_metrics
+    monkeypatch.setattr(runtime_metrics, "RUNTIME_METRICS_ENABLED", True)
+    monkeypatch.setattr(runtime_metrics, "_BOTO3_AVAILABLE", True)
+    monkeypatch.setattr(runtime_metrics, "_ensure_flusher", lambda: None)
+    runtime_metrics.reset_for_test()
+    yield runtime_metrics
+    runtime_metrics.reset_for_test()
+
+
+def _counter(runtime_metrics, name):
+    return {dims: total for (metric, dims), total
+            in runtime_metrics._counters.items() if metric == name}
+
+
+def test_model_slot_records_provider_outcome(metrics_on):
+    with ai_gate.model_concurrency_slot("bedrock"):
+        pass
+    calls = _counter(metrics_on, "AiProviderCalls")
+    assert calls == {(("Outcome", "success"), ("Provider", "bedrock")): 1.0}
+
+
+class _FakeRateLimitError(RuntimeError):
+    """Sağlayıcı SDK'sı taklidi — ai_gate SDK import ETMEDEN ad'a göre sınıflar."""
+
+
+def test_model_slot_classifies_provider_errors_by_name(metrics_on):
+    with pytest.raises(_FakeRateLimitError):
+        with ai_gate.model_concurrency_slot("openai"):
+            raise _FakeRateLimitError("429")
+    calls = _counter(metrics_on, "AiProviderCalls")
+    assert calls == {(("Outcome", "rate_limit"), ("Provider", "openai")): 1.0}
+
+
+def test_client_disconnect_is_cancelled_not_error(metrics_on):
+    """İstemci akışı koparınca generator kapanır. Bu NORMAL kullanıcı davranışı;
+    "error" sayılırsa sağlayıcı hata oranı şişer ve alarm yanlış tetiklenir."""
+    with pytest.raises(GeneratorExit):
+        with ai_gate.model_concurrency_slot("bedrock-stream"):
+            raise GeneratorExit()
+    calls = _counter(metrics_on, "AiProviderCalls")
+    assert calls == {
+        (("Outcome", "cancelled"), ("Provider", "bedrock-stream")): 1.0}
+
+
+def test_model_slot_records_contention(metrics_on, monkeypatch):
+    sem = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_model_slots", sem)
+    monkeypatch.setattr(ai_gate, "AI_GATE_WAIT_SECONDS", 1)
+    entered = threading.Event()
+
+    def worker():
+        with ai_gate.model_concurrency_slot("bedrock"):
+            entered.set()
+
+    with ai_gate.model_concurrency_slot("bedrock"):
+        thread = threading.Thread(target=worker)
+        thread.start()
+        assert not entered.wait(timeout=0.1)  # slot dolu → beklemek zorunda
+    assert entered.wait(timeout=1)
+    thread.join(timeout=1)
+    assert _counter(metrics_on, "AiModelSlotContended") == {
+        (("Provider", "bedrock"),): 1.0}
+
+
+def test_gate_rejection_is_counted(app, metrics_on, monkeypatch):
+    sem = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_ai_slots", sem)
+    monkeypatch.setattr(ai_gate, "AI_GATE_WAIT_SECONDS", 0)
+
+    @ai_gate.ai_concurrency_gate
+    def route():
+        return jsonify({"ok": True})
+
+    sem.acquire()  # kapıyı doldur
+    try:
+        with app.test_request_context("/"):
+            assert route().status_code == 503
+    finally:
+        sem.release()
+    assert _counter(metrics_on, "GateRejections") == {(("Gate", "AI-GATE"),): 1.0}
+
+
+def test_slot_behaviour_unchanged_when_metrics_disabled(monkeypatch):
+    """Varsayılan (KAPALI) yolda semafor semantiği PR1 öncesiyle aynı olmalı."""
+    from app.services import runtime_metrics
+    monkeypatch.setattr(runtime_metrics, "RUNTIME_METRICS_ENABLED", False)
+    sem = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_model_slots", sem)
+    with ai_gate.model_concurrency_slot("bedrock"):
+        assert not sem.acquire(blocking=False)  # slot gerçekten tutuluyor
+    assert sem.acquire(blocking=False)          # ve sonra bırakılıyor
+    sem.release()
+    assert runtime_metrics._counters == {}      # kapalıyken tampon dolmaz

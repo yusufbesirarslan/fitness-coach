@@ -81,17 +81,88 @@ def blocking_concurrency_slot(wait_seconds=None):
         _ai_slots.release()
 
 
+def _provider_error_category(exc):
+    """Sağlayıcı istisnasını SABİT kümeli bir metrik kategorisine indir.
+
+    Sağlayıcı SDK'ları (openai / anthropic) burada import EDİLMEZ — bu modül
+    onlara bağımlı değildir ve olmamalıdır. İki SDK da aynı sınıf adlarını
+    (RateLimitError / APITimeoutError / APIConnectionError / APIError) kullandığı
+    için sınıflandırma AD üzerinden yapılır. Tanınmayan her şey tek bir "error"
+    kovasına düşer → kardinalite sabit kalır.
+    """
+    # İstemci akışın ortasında koparsa generator kapatılır (ai_stream.produce).
+    # Bu bir ARIZA DEĞİLDİR; "error" sayılırsa normal kullanıcı davranışı
+    # sağlayıcı hata oranını şişirir ve alarmı yanlış tetikler.
+    if isinstance(exc, GeneratorExit):
+        return "cancelled"
+    name = type(exc).__name__
+    if "RateLimit" in name:
+        return "rate_limit"
+    if "Timeout" in name:
+        return "timeout"
+    if "Connection" in name:
+        return "connection"
+    if "Transient" in name:
+        return "transient"
+    if "APIStatus" in name or "APIError" in name:
+        return "api_error"
+    return "error"
+
+
 @contextmanager
-def model_concurrency_slot(wait_seconds=None, *, deadline=None):
-    """Bound one provider call by gate budget and an optional outer deadline."""
+def model_concurrency_slot(
+        provider="unknown", wait_seconds=None, *, deadline=None):
+    """Bound one provider call and retain provider-scoped runtime metrics.
+
+    Acquisition is bounded by both the configured gate wait and an optional
+    outer monotonic deadline. Numeric first arguments remain compatible with
+    the pre-observability ``model_concurrency_slot(wait_seconds)`` API.
+    """
+    from app.services import runtime_metrics
+
+    if not isinstance(provider, str) and wait_seconds is None:
+        wait_seconds = provider
+        provider = "unknown"
+
     wait = AI_GATE_WAIT_SECONDS if wait_seconds is None else wait_seconds
-    if not _acquire_before_deadline(
-            _model_slots, wait, deadline=deadline):
+    metrics_enabled = runtime_metrics.is_enabled()
+    dims = {"Provider": str(provider)}
+    wait_start = time.monotonic() if metrics_enabled else None
+
+    acquired = False
+    if metrics_enabled:
+        acquired = _model_slots.acquire(blocking=False)
+        if not acquired:
+            runtime_metrics.increment("AiModelSlotContended", dimensions=dims)
+    if not acquired:
+        acquired = _acquire_before_deadline(
+            _model_slots, wait, deadline=deadline)
+    if not acquired:
         raise BlockingConcurrencyLimit("model blocking capacity exhausted")
+
+    call_start = time.monotonic() if metrics_enabled else None
+    outcome = "success"
     try:
         yield
+    except BaseException as exc:  # noqa: BLE001 - classify, then re-raise
+        outcome = _provider_error_category(exc)
+        raise
     finally:
         _model_slots.release()
+        if metrics_enabled:
+            try:
+                now = time.monotonic()
+                runtime_metrics.record_latency(
+                    "AiModelSlotWait", (call_start - wait_start) * 1000,
+                    dimensions=dims)
+                runtime_metrics.record_latency(
+                    "AiProviderLatency", (now - call_start) * 1000,
+                    dimensions=dims)
+                runtime_metrics.increment(
+                    "AiProviderCalls",
+                    dimensions={"Provider": str(provider), "Outcome": outcome})
+            except Exception:
+                pass
 
 
 
@@ -121,6 +192,17 @@ def enforce_gate_invariants(app):
     raise RuntimeError(f"[AI-GATE] {message}")
 
 
+def _record_gate_rejection(label):
+    """Kapı reddini SLI olarak say. Boyut yalnızca sabit kümeli kapı etiketi —
+    view adı BOYUT DEĞİL (yeni route eklendikçe kardinalite büyürdü); view adı
+    zaten log satırında duruyor."""
+    try:
+        from app.services import runtime_metrics
+        runtime_metrics.increment("GateRejections", dimensions={"Gate": label})
+    except Exception:
+        pass
+
+
 def _concurrency_gate(fn, semaphore, wait_seconds, max_concurrency, label):
     @wraps(fn)
     def wrapper(*args, **kwargs):
@@ -129,6 +211,7 @@ def _concurrency_gate(fn, semaphore, wait_seconds, max_concurrency, label):
             current_app.logger.warning(
                 "[%s] Eşzamanlı tavan dolu (%s) — istek reddedildi: %s",
                 label, max_concurrency, getattr(fn, "__name__", "?"))
+            _record_gate_rejection(label)
             resp = jsonify({"error": t("error.ai_busy")})
             resp.status_code = 503
             resp.headers["Retry-After"] = "15"
@@ -175,6 +258,7 @@ def ai_stream_concurrency_gate(fn):
             current_app.logger.warning(
                 "[AI-GATE] Eşzamanlı tavan dolu (%s) — stream reddedildi: %s",
                 AI_MAX_CONCURRENCY, getattr(fn, "__name__", "?"))
+            _record_gate_rejection("AI-GATE-STREAM")
             resp = jsonify({"error": t("error.ai_busy")})
             resp.status_code = 503
             resp.headers["Retry-After"] = "15"

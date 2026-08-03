@@ -1029,7 +1029,7 @@ def _run_coach_conversation_openai(user_id, question, context, history,
             current_app.logger.warning("[COACH] OpenAI turn budget exhausted")
             return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
         try:
-            with model_concurrency_slot(deadline=deadline):
+            with model_concurrency_slot("openai", deadline=deadline):
                 remaining = _remaining_coach_turn_seconds(deadline)
                 if remaining <= 0:
                     current_app.logger.warning(
@@ -1144,7 +1144,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
         # tools_ran mantığını uygula: hiç araç çalışmadıysa OpenAI'ya düş, çalıştıysa
         # sağlayıcı değiştirme (yan etkiyi tekrarlama) → yumuşak hata.
         try:
-            with model_concurrency_slot(deadline=deadline):
+            with model_concurrency_slot("bedrock", deadline=deadline):
                 remaining = _remaining_coach_turn_seconds(deadline)
                 if remaining <= 0:
                     current_app.logger.warning(
