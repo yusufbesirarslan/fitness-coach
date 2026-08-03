@@ -53,6 +53,28 @@ Any line printed must be corrected to `0` or `1`, or the whole line removed,
 **before** merging PR2 to `main`. Note `MOBILE_AUTH_ENABLED=` (empty) is also
 rejected — that one has always been strict.
 
+### Retired setting — `MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS`
+
+PR3 pins request-authentication expiry leeway to `0` on both clients and
+**retires** this setting. It is rejected at boot rather than ignored: a host
+still carrying a non-zero value believes mobile tolerates expired tokens, and
+silently dropping it would leave the running system and the documentation
+disagreeing with nobody the wiser.
+
+```bash
+# On the host. Expected output: nothing.
+grep -n '^MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS=' .env
+```
+
+If the line exists, **remove it** before deploying PR3. `=0` boots fine and
+`=120` does not; removing the line is correct in both cases. The check runs
+regardless of `MOBILE_AUTH_ENABLED`, because a stale value on a flag-off host
+is exactly the value that would take effect the day mobile auth is switched on.
+
+Missing this is not an outage — the deploy health gate fails and rolls back
+automatically — but a rolled-back deploy costs more than one `grep`. Rationale
+and the full value table: [AUTH_CONTRACT.md](AUTH_CONTRACT.md) §3.
+
 ---
 
 ## 2. Prerequisites for any activation

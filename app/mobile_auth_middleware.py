@@ -4,7 +4,7 @@ from functools import wraps
 
 from flask import g, request
 
-from app.services import mobile_auth
+from app.services import auth_contract, mobile_auth
 
 
 def parse_bearer_header(value):
@@ -24,14 +24,22 @@ def require_mobile_auth(view):
             raw = parse_bearer_header(request.headers.get("Authorization"))
             principal = mobile_auth.authenticate_access(raw)
         except ValueError:
+            # A missing or malformed Authorization header is the mobile
+            # equivalent of an anonymous browser request, not a rejected token.
+            auth_contract.record_outcome(
+                auth_contract.MOBILE, auth_contract.OUTCOME_NO_IDENTITY)
             return mobile_error(
                 "AUTH_SESSION_EXPIRED", "Mobile session expired.", 401, False)
         except mobile_auth.MobileAuthFailure as exc:
+            auth_contract.record_outcome(
+                auth_contract.MOBILE, auth_contract.mobile_outcome_for(exc.code))
             return mobile_error(
                 exc.code, _safe_message(exc.code), exc.status, exc.retryable)
         g.mobile_user = principal.user
         g.mobile_session = principal.family
         g.mobile_claims = principal.claims
+        auth_contract.record_outcome(
+            auth_contract.MOBILE, auth_contract.OUTCOME_OK)
         return view(*args, **kwargs)
     wrapped._require_mobile_auth = True
     return wrapped

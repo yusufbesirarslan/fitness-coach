@@ -47,6 +47,13 @@ def test_seed_is_idempotent_and_uses_only_synthetic_users(tmp_path):
 
 
 def test_seeded_scenario_login_satisfies_real_auth_middleware(tmp_path):
+    """End-to-end: a seeded login must reach `/` through the REAL @require_auth.
+
+    The harness monkeypatches the token validator, so every change to how
+    production calls that validator lands here first. This test is the reason
+    the audit harness cannot quietly rot into a stub that only satisfies
+    itself — it exercises the actual middleware, not a mock of it.
+    """
     from scripts.frontend_audit.app import create_audit_app
     from scripts.frontend_audit.seed import seed_all
 
@@ -59,3 +66,41 @@ def test_seeded_scenario_login_satisfies_real_auth_middleware(tmp_path):
     page = client.get("/")
     assert page.status_code == 200
     assert b"audit-active-workout" in page.data
+
+
+def test_audit_validator_stub_matches_the_production_validator_signature():
+    """The stub is installed by monkeypatching, so its signature is a contract.
+
+    When the auth contract began passing `leeway_seconds`, the two-argument
+    stub raised TypeError inside @require_auth and every seeded audit page came
+    back as a 500 — a harness defect wearing the costume of an application bug.
+    Comparing the signatures directly turns the next such change into an
+    immediate, self-explaining failure.
+    """
+    import inspect
+
+    from app.services import cognito_jwt
+    from scripts.frontend_audit.app import audit_validate_token
+
+    assert (inspect.signature(audit_validate_token)
+            == inspect.signature(cognito_jwt.validate_token))
+
+
+def test_audit_validator_stub_rejects_anything_but_a_seeded_access_token():
+    """It stands in for a validator; it must still refuse what the real one
+    refuses, or the audit would pass with credentials production rejects."""
+    from app.services import cognito_jwt
+    from scripts.frontend_audit.app import (
+        AUDIT_ACCESS_TOKEN_PREFIX, audit_validate_token,
+    )
+
+    claims = audit_validate_token(f"{AUDIT_ACCESS_TOKEN_PREFIX}sub-1", "access")
+    assert claims == {"sub": "sub-1", "token_use": "access"}
+    # Leeway is accepted and ignored — audit tokens are opaque, not signed JWTs.
+    assert audit_validate_token(
+        f"{AUDIT_ACCESS_TOKEN_PREFIX}sub-1", "access", leeway_seconds=30) == claims
+
+    for token, use in ((f"{AUDIT_ACCESS_TOKEN_PREFIX}sub-1", "id"),
+                       ("not-an-audit-token", "access")):
+        with pytest.raises(cognito_jwt.TokenValidationError):
+            audit_validate_token(token, use)

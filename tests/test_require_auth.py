@@ -65,7 +65,7 @@ def test_user_without_cognito_identity_invalidated(client, probe_route, legacy_u
 
 
 def test_cognito_valid_token_allowed(client, probe_route, cognito_user, monkeypatch):
-    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use: {"sub": "sub-cog"})
+    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use, **kw: {"sub": "sub-cog"})
     sid = session_store.create(cognito_user, {"access_token": "a", "refresh_token": "r",
                                               "id_token": "i", "expires_in": 3600}, "cog")
     _login_session(client, cognito_user, sid)
@@ -73,14 +73,14 @@ def test_cognito_valid_token_allowed(client, probe_route, cognito_user, monkeypa
 
 
 def test_cognito_missing_session_row_invalidated(client, probe_route, cognito_user, monkeypatch):
-    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use: {"sub": "sub-cog"})
+    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use, **kw: {"sub": "sub-cog"})
     _login_session(client, cognito_user, "no-such-sid")
     resp = client.get(probe_route)
     assert resp.status_code == 302  # geçersiz → login'e
 
 
 def test_cognito_expired_access_refreshed(client, probe_route, cognito_user, monkeypatch):
-    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use: {"sub": "sub-cog"})
+    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use, **kw: {"sub": "sub-cog"})
     from app.services import cognito_service
     monkeypatch.setattr(cognito_service, "refresh_tokens",
                         lambda ref, uname: {"access_token": "fresh", "id_token": "", "expires_in": 3600})
@@ -94,7 +94,7 @@ def test_cognito_expired_access_refreshed(client, probe_route, cognito_user, mon
 
 
 def test_cognito_dead_refresh_invalidated(client, probe_route, cognito_user, monkeypatch):
-    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use: {"sub": "sub-cog"})
+    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use, **kw: {"sub": "sub-cog"})
     from app.services import cognito_service
     def boom(ref, uname):
         raise cognito_service.CognitoServiceError("x", "NotAuthorizedException")
@@ -112,7 +112,8 @@ def test_cognito_dead_refresh_invalidated(client, probe_route, cognito_user, mon
 
 def test_session_user_mismatch_invalidated(
         client, probe_route, cognito_user, make_user, monkeypatch):
-    monkeypatch.setattr(cognito_jwt, "validate_token", lambda token, use: {"sub": "sub-cog"})
+    monkeypatch.setattr(
+        cognito_jwt, "validate_token", lambda token, use, **kw: {"sub": "sub-cog"})
     other = make_user("other")
     sid = session_store.create(other, {
         "access_token": "a", "refresh_token": "r", "id_token": "i", "expires_in": 3600,
@@ -125,7 +126,8 @@ def test_session_user_mismatch_invalidated(
 def test_verified_sub_must_resolve_same_user(
         client, probe_route, cognito_user, monkeypatch):
     monkeypatch.setattr(
-        cognito_jwt, "validate_token", lambda token, use: {"sub": "sub-other"})
+        cognito_jwt, "validate_token",
+        lambda token, use, **kw: {"sub": "sub-other"})
     sid = session_store.create(cognito_user, {
         "access_token": "a", "refresh_token": "r", "id_token": "i", "expires_in": 3600,
     }, "cog")
@@ -163,7 +165,7 @@ def _expired_session(cognito_user):
 def test_transient_refresh_failure_preserves_session(
         client, probe_route, cognito_user, monkeypatch, code):
     """Yenileme GEÇİCİ olarak başarısız → 503 + Retry-After, oturum satırı DURUR."""
-    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use: {"sub": "sub-cog"})
+    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use, **kw: {"sub": "sub-cog"})
     from app.services import cognito_service
 
     def transient(ref, uname):
@@ -188,7 +190,7 @@ def test_jwks_unavailable_preserves_session(
     da 503'e çevrilmeli, oturum silinmemeli. Soğuk JWKS önbelleği her taze
     konteynerde (yani her deploy'dan sonra) gerçeğe dönüşen bir durumdur.
     """
-    def unavailable(tok, use):
+    def unavailable(tok, use, **kw):
         raise cognito_jwt.TokenValidationError("jwks_unavailable")
 
     monkeypatch.setattr(cognito_jwt, "validate_token", unavailable)
@@ -205,7 +207,7 @@ def test_invalid_signature_still_invalidates(
         client, probe_route, cognito_user, monkeypatch):
     """Karşı-test: KESİN ret hâlâ yıkıcı olmalı — geçici/kesin ayrımı, kesin
     reddi yumuşatarak yapılmadı."""
-    def bad(tok, use):
+    def bad(tok, use, **kw):
         raise cognito_jwt.TokenValidationError("invalid_signature")
 
     monkeypatch.setattr(cognito_jwt, "validate_token", bad)

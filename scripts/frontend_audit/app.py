@@ -22,6 +22,32 @@ from pathlib import Path
 # application code is involved and production is unaffected.
 _AUDIT_REQUEST_LOCK = threading.Lock()
 
+AUDIT_ACCESS_TOKEN_PREFIX = "audit-access:"
+
+
+def audit_validate_token(token, expected_use, leeway_seconds=0):
+    """Stand-in for cognito_jwt.validate_token while the audit harness runs.
+
+    Module level, and its signature MUST stay identical to the production
+    validator's. It is installed by monkeypatching, so the real caller decides
+    how it is invoked: when the auth contract started passing `leeway_seconds`,
+    a two-argument stub here turned every seeded audit page into a 500 that
+    looked like an application bug. `leeway_seconds` is accepted and ignored on
+    purpose — audit tokens are opaque strings, not signed JWTs, so there is no
+    expiry to be lenient about. tests/test_frontend_audit_app.py compares the
+    two signatures directly so the next change fails loudly instead.
+    """
+    # Deferred like every other app import in this module: the harness sets its
+    # hermetic environment before anything under app/ is imported.
+    from app.services import cognito_jwt
+    if (expected_use != "access"
+            or not token.startswith(AUDIT_ACCESS_TOKEN_PREFIX)):
+        raise cognito_jwt.TokenValidationError("invalid audit token")
+    return {
+        "sub": token.removeprefix(AUDIT_ACCESS_TOKEN_PREFIX),
+        "token_use": "access",
+    }
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SPRINT_DIR = ROOT / "docs" / "frontend-readiness" / "sprint-0"
@@ -118,14 +144,7 @@ def create_audit_app(database_path: Path):
         manager.__enter__()
         g._audit_clock_manager = manager
         g._audit_original_validator = cognito_jwt.validate_token
-
-        def _validate(token, expected_use):
-            prefix = "audit-access:"
-            if expected_use != "access" or not token.startswith(prefix):
-                raise cognito_jwt.TokenValidationError("invalid audit token")
-            return {"sub": token.removeprefix(prefix), "token_use": "access"}
-
-        cognito_jwt.validate_token = _validate
+        cognito_jwt.validate_token = audit_validate_token
 
     app.before_request(_activate_audit_context)
     handlers = app.before_request_funcs[None]
@@ -156,7 +175,8 @@ def create_audit_app(database_path: Path):
         session["cognito_sid"] = session_store.create(
             user,
             {
-                "access_token": f"audit-access:{user.cognito_sub}",
+                "access_token": (
+                    f"{AUDIT_ACCESS_TOKEN_PREFIX}{user.cognito_sub}"),
                 "refresh_token": "audit-refresh-never-used",
                 "expires_in": 86400,
             },

@@ -281,6 +281,14 @@ def configure_app(app):
     app.config["FITX_IS_DEV"] = _is_dev
     _LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
     _gunicorn_logger = logging.getLogger("gunicorn.error")
+    # Emekliye ayrılmış kimlik doğrulama ayarları: KOŞULSUZ kontrol edilir,
+    # MOBILE_AUTH_ENABLED'ın arkasında DEĞİL. Bayrağı kapalı bir host'ta duran
+    # bayat bir MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS değeri, tam da mobil
+    # auth açıldığı gün — yani en kötü anda — yürürlüğe girecek olan değerdir.
+    # Sessizce yok saymak yerine boot'u durdururuz; deploy'un health gate'i
+    # önceki sürüme döner. Göç ön koşulu: docs/AUTH_CONTRACT.md §3.
+    from app.services.auth_contract import enforce_retired_settings
+    enforce_retired_settings(os.environ)
     from app.services.mobile_credentials import validate_mobile_auth_config
     validate_mobile_auth_config(app)
     # Rollout bayrakları: kayıt defterinden KATI ayrıştırma. Bozuk bir değer
@@ -378,3 +386,8 @@ def configure_app(app):
     # yanıtlanabilsin (bayraklar .env'de yaşar, repoda DEĞİL — bkz. docs/ROLLOUT.md).
     _on = sorted(k for k, v in feature_flag_state(app).items() if v)
     app.logger.info("[FLAGS] enabled=%s", ",".join(_on) if _on else "-")
+    # Aynı gerekçe kimlik doğrulama sözleşmesi için de geçerli: web ve mobil
+    # yolun expiry leeway'i host .env'inden gelir, repodan okunamaz. Boot'ta tek
+    # satır + uyuşmazlıkta açık uyarı — sessiz asimetri bir daha oluşmasın.
+    from app.services.auth_contract import log_contract_state
+    log_contract_state(app)

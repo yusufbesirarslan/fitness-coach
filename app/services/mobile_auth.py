@@ -11,7 +11,10 @@ from app.observability import current_request_id
 from app.models import (
     MobileAccessCredential, MobileAuthSession, MobileRefreshCredential, User,
 )
-from app.services import cognito_jwt, cognito_service, mobile_credentials, session_store
+from app.services import (
+    auth_contract, cognito_jwt, cognito_service, mobile_credentials,
+    session_store,
+)
 from app.services.cognito_identity import reconcilable_local_user
 
 
@@ -67,8 +70,15 @@ def calculate_access_expiry(now, family_absolute_expires_at):
 
 def _coverage(now, absolute_expires_at):
     access_exp = calculate_access_expiry(now, absolute_expires_at)
-    deadline = access_exp + timedelta(seconds=current_app.config[
-        "MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS"])
+    # The provider token must stay valid for the whole life of the opaque
+    # access credential. That used to be `access_exp + validation clock skew`,
+    # because a token accepted N seconds past expiry needed N more seconds of
+    # provider coverage. With leeway pinned to zero on both paths
+    # (app/services/auth_contract.py) the skew term is structurally zero, so
+    # the deadline IS the credential expiry. Behaviour is unchanged for every
+    # host that used the default; a host that had set the retired key no longer
+    # boots at all rather than silently getting different coverage here.
+    deadline = access_exp
     trigger = max(
         now + timedelta(seconds=current_app.config[
             "MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS"]),
@@ -113,12 +123,13 @@ def _resolve_user(claims, username):
 
 def _validate_provider(token, expected_use):
     try:
-        return cognito_jwt.validate_token(
-            token, expected_use,
-            leeway_seconds=current_app.config[
-                "MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS"])
+        # Expiry leeway comes from the cross-client contract, not from a local
+        # config read: the web path reads the same module, so the two cannot
+        # drift apart without the drift test noticing.
+        return auth_contract.validate_provider_token(
+            auth_contract.MOBILE, token, expected_use)
     except cognito_jwt.TokenValidationError as exc:
-        if exc.reason == "jwks_unavailable":
+        if auth_contract.is_transient_validation_reason(exc.reason):
             _security_event("jwks_unavailable", category="provider")
             raise _failure(
                 "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
@@ -131,12 +142,10 @@ def _validate_provider(token, expected_use):
 def _validate_refreshed_provider(token, expected_sub):
     """Validate renewed access material using refresh failure semantics."""
     try:
-        claims = cognito_jwt.validate_token(
-            token, "access",
-            leeway_seconds=current_app.config[
-                "MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS"])
+        claims = auth_contract.validate_provider_token(
+            auth_contract.MOBILE, token, auth_contract.REQUEST_TOKEN_USE)
     except cognito_jwt.TokenValidationError as exc:
-        if exc.reason == "jwks_unavailable":
+        if auth_contract.is_transient_validation_reason(exc.reason):
             _security_event("jwks_unavailable", category="provider")
             raise _failure(
                 "AUTH_TEMPORARILY_UNAVAILABLE", 503, True,
