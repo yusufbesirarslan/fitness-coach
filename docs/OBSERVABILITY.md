@@ -105,6 +105,7 @@ approximate `p50`/`p95`/`p99`. Bucket edges are the reported values, so a p95 of
 | `HttpServerErrors` | Count | `Blueprint`, `Client` | 5xx **excluding** 503 |
 | `HttpOverload` | Count | `Blueprint`, `Client` | 503 — deliberate load shedding |
 | `HttpThrottled` | Count | `Blueprint`, `Client` | 429 — rate limited |
+| `AuthOutcomes` | Count | `Path`, `Outcome` | `Path` ∈ web / mobile; `Outcome` ∈ ok / no_identity / session_invalid / token_rejected / provider_unavailable |
 | `AiProviderCalls` | Count | `Provider`, `Outcome` | `Outcome` ∈ success / rate_limit / timeout / connection / transient / api_error / error |
 | `AiProviderLatency` | Milliseconds | `Provider` | Provider call duration |
 | `AiModelSlotWait` | Milliseconds | `Provider` | Time spent waiting for a model slot |
@@ -122,11 +123,22 @@ Pool and dependency gauges are sampled on the `/health?deep=1` path rather than 
 a second timer, because the deploy gate and container probe already call it
 regularly.
 
+`AuthOutcomes` answers what the HTTP counters cannot. A 503 on an auth route
+could be an overloaded gate or an unreachable identity provider, and a 401 could
+be an expired session or a rejected token — the status code alone does not say
+which. `provider_unavailable` climbing while `token_rejected` stays flat is an
+outage; the reverse is worth looking at as an attack. Throttling is deliberately
+absent from the vocabulary: a 429 is not an authentication outcome and is already
+counted as `HttpThrottled`. Both boundaries report into the same five-value
+vocabulary, defined once in `app/services/auth_contract.py` — see
+[AUTH_CONTRACT.md](AUTH_CONTRACT.md).
+
 ### Cardinality and privacy rules
 
 Every dimension value comes from a **fixed set**: blueprint name (~16), status
 class (~5), client class (2), provider (3), outcome (7), gate label (3), feature
-name. The following are **never** metric dimensions or values:
+name, auth path (2), auth outcome (5). The following are **never** metric
+dimensions or values:
 
 - user IDs, emails, usernames, Cognito `sub`
 - raw request paths or query strings
@@ -150,6 +162,12 @@ Two mechanisms close that gap:
 
 Both emit **names and booleans only**. `/health?deep=1` is already restricted to
 loopback + `DEEP_HEALTH_TRUSTED_CIDRS` (M3).
+
+The authentication contract has the same problem and the same two mechanisms:
+a `[AUTH_CONTRACT]` boot line and an `auth_contract` object in `/health?deep=1`,
+carrying the required token use and both paths' expiry leeway (names and
+integers only). A divergence also logs a `WARNING`. See
+[AUTH_CONTRACT.md](AUTH_CONTRACT.md) §3.
 
 ### SLIs, SLOs and alerts
 

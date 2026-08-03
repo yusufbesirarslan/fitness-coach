@@ -378,3 +378,8 @@ def configure_app(app):
     # yanıtlanabilsin (bayraklar .env'de yaşar, repoda DEĞİL — bkz. docs/ROLLOUT.md).
     _on = sorted(k for k, v in feature_flag_state(app).items() if v)
     app.logger.info("[FLAGS] enabled=%s", ",".join(_on) if _on else "-")
+    # Aynı gerekçe kimlik doğrulama sözleşmesi için de geçerli: web ve mobil
+    # yolun expiry leeway'i host .env'inden gelir, repodan okunamaz. Boot'ta tek
+    # satır + uyuşmazlıkta açık uyarı — sessiz asimetri bir daha oluşmasın.
+    from app.services.auth_contract import log_contract_state
+    log_contract_state(app)

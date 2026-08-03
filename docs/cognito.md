@@ -2,6 +2,10 @@
 
 Date: 2026-07-09
 
+> This document covers the **web** flow. What the web and mobile clients share,
+> what they deliberately do differently, and which of those differences is
+> enforced in CI is in [AUTH_CONTRACT.md](AUTH_CONTRACT.md).
+
 ## Architecture
 
 Sprint 1 uses Amazon Cognito User Pools for registration and email verification

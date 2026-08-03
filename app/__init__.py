@@ -206,6 +206,11 @@ def create_app():
             # boolean; sır/bağlantı dizesi/anahtar ASLA. Zaten iç-ağ sınırlı.
             import app.config as _config_mod
             body["flags"] = _config_mod.feature_flag_state(app)
+            # Kimlik doğrulama sözleşmesinin O ANKİ hâli — bayraklarla aynı
+            # gerekçe: leeway host .env'inde yaşar, repodan okunamaz. Yalnızca
+            # ad + tamsayı; token/başlık/kullanıcı ASLA (docs/AUTH_CONTRACT.md).
+            from app.services.auth_contract import contract_state
+            body["auth_contract"] = contract_state(app.config)
             body["capacity"] = _capacity_snapshot()
             _record_capacity_gauges(body["capacity"])
             _record_dependency_gauges(body)

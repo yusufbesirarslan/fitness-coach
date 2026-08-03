@@ -4,6 +4,9 @@
 - Date: 2026-07-28
 - Decision owners: AxisAI backend and mobile architecture
 - Scope: Backend PR4 only
+- Cross-client contract: [../AUTH_CONTRACT.md](../AUTH_CONTRACT.md) — what this
+  path shares with the web path, and the machine-readable error envelope below
+  recorded there as an intentional difference
 
 ## Context
 
