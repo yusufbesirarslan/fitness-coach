@@ -253,7 +253,7 @@ def _install_model_slot_probe(monkeypatch):
     state = {"active": False, "entries": 0, "providers": []}
 
     @contextmanager
-    def slot(provider="unknown"):
+    def slot(provider="unknown", *, deadline=None):
         assert state["active"] is False
         state["active"] = True
         state["entries"] += 1
