@@ -7,10 +7,14 @@ sınırlar. Slot doluyken 503 + Retry-After döner, slot boşalınca istek geçe
     python -m pytest tests/test_ai_gate.py -v
 """
 import threading
+from types import SimpleNamespace
 
 import pytest
 from flask import Response, jsonify
 
+from app.blueprints import food as food_bp
+from app.blueprints import social as social_bp
+from app.services import mobile_auth
 from app.services import ai_gate
 
 
@@ -30,26 +34,195 @@ def test_route_gate_defaults_to_fail_fast():
     assert ai_gate.AI_GATE_WAIT_SECONDS == 0
 
 
-def test_model_slot_prevents_simultaneous_entry(monkeypatch):
+class _RecordingSemaphore:
+    def __init__(self):
+        self.timeouts = []
+        self.releases = 0
+
+    def acquire(self, *, timeout):
+        self.timeouts.append(timeout)
+        return True
+
+    def release(self):
+        self.releases += 1
+
+
+def test_acquire_before_deadline_uses_remaining_monotonic_budget():
+    """Catches a gate that gives acquire the original wait instead of remaining time."""
+    sem = _RecordingSemaphore()
+    clock_values = iter((10.0, 10.25))
+
+    assert ai_gate._acquire_before_deadline(
+        sem, 1, clock=lambda: next(clock_values))
+    assert sem.timeouts == [0.75]
+
+
+def test_model_slot_wait_is_capped_by_coach_deadline(monkeypatch):
+    sem = _RecordingSemaphore()
+    clock_values = iter((10.0, 10.25))
+    monkeypatch.setattr(ai_gate, "_model_slots", sem)
+    monkeypatch.setattr(
+        ai_gate, "time",
+        SimpleNamespace(monotonic=lambda: next(clock_values)),
+    )
+
+    with ai_gate.model_concurrency_slot(wait_seconds=5.0, deadline=11.0):
+        pass
+
+    assert sem.timeouts == [0.75]
+    assert sem.releases == 1
+
+
+def test_blocking_slot_fails_fast_when_full(monkeypatch):
+    """Catches entering shared work after its fail-fast capacity is exhausted."""
+    sem = threading.BoundedSemaphore(1)
+    assert sem.acquire(blocking=False)
+    monkeypatch.setattr(ai_gate, "_ai_slots", sem)
+    try:
+        with pytest.raises(ai_gate.BlockingConcurrencyLimit):
+            with ai_gate.blocking_concurrency_slot(0):
+                pytest.fail("must not enter")
+    finally:
+        sem.release()
+
+
+def test_model_slot_fails_fast_when_full(monkeypatch):
+    """Catches the model slot's former indefinitely blocking acquisition."""
     sem = threading.BoundedSemaphore(1)
     monkeypatch.setattr(ai_gate, "_model_slots", sem)
-    worker_started = threading.Event()
-    worker_entered = threading.Event()
+    assert sem.acquire(blocking=False)
+    try:
+        with pytest.raises(ai_gate.BlockingConcurrencyLimit):
+            with ai_gate.model_concurrency_slot(0):
+                pytest.fail("must not enter")
+    finally:
+        sem.release()
 
-    def enter_model_slot():
-        worker_started.set()
-        with ai_gate.model_concurrency_slot():
-            worker_entered.set()
 
-    with ai_gate.model_concurrency_slot():
-        worker = threading.Thread(target=enter_model_slot)
+def test_shared_then_model_nesting_releases_both(monkeypatch):
+    """Catches leaked shared or model permits in the required nesting order."""
+    monkeypatch.setattr(ai_gate, "_ai_slots", threading.BoundedSemaphore(1))
+    monkeypatch.setattr(ai_gate, "_model_slots", threading.BoundedSemaphore(1))
+
+    for _ in range(2):
+        with ai_gate.blocking_concurrency_slot(0):
+            with ai_gate.model_concurrency_slot(0):
+                pass
+
+
+def test_shared_saturation_preserves_reserve_and_recovers_without_deadlock(
+        app, monkeypatch):
+    """Real caller contracts must fail fast while two cheap workers still run."""
+    monkeypatch.setattr(ai_gate, "_ai_slots", threading.BoundedSemaphore(2))
+    monkeypatch.setattr(ai_gate, "_model_slots", threading.BoundedSemaphore(2))
+    monkeypatch.setattr(ai_gate, "AI_GATE_WAIT_SECONDS", 0)
+
+    holders_ready = threading.Barrier(3)
+    release_holders = threading.Event()
+
+    def hold_shared_then_model():
+        with ai_gate.blocking_concurrency_slot(0):
+            with ai_gate.model_concurrency_slot(0):
+                holders_ready.wait(timeout=2)
+                release_holders.wait(timeout=5)
+
+    holders = [
+        threading.Thread(target=hold_shared_then_model, daemon=True)
+        for _ in range(2)
+    ]
+    for worker in holders:
         worker.start()
-        assert worker_started.wait(timeout=1)
-        assert not worker_entered.wait(timeout=0.05)
+    holders_ready.wait(timeout=2)
 
-    assert worker_entered.wait(timeout=1)
-    worker.join(timeout=1)
-    assert not worker.is_alive()
+    provider_calls = {"food": 0, "suggestion": 0, "mobile": 0}
+    monkeypatch.setattr(food_bp, "_get_cached_macros", lambda *args: ({}, ["muz"]))
+    monkeypatch.setattr(
+        social_bp, "_get_cached_macros", lambda items, **kwargs: ({}, list(items)))
+
+    def provider(name):
+        provider_calls[name] += 1
+        raise AssertionError(f"{name} provider must remain untouched")
+
+    monkeypatch.setattr(food_bp, "_coach_search_food", lambda _q: provider("food"))
+    monkeypatch.setattr(
+        social_bp, "_parse_suggestion_items", lambda _body: provider("suggestion"))
+    monkeypatch.setattr(social_bp, "_get_fatsecret_token", lambda: provider("suggestion"))
+    monkeypatch.setattr(
+        mobile_auth.cognito_service, "authenticate",
+        lambda *_args: provider("mobile"))
+
+    def original_view(view):
+        while hasattr(view, "__wrapped__"):
+            view = view.__wrapped__
+        return view
+
+    def food_attempt():
+        with app.test_request_context("/api/food/search?q=muz"):
+            return original_view(food_bp.food_search)().get_json()
+
+    def suggestion_attempt():
+        snapshot = SimpleNamespace(
+            message_id=1, receiver_id=1, sender_id=2,
+            sender_name="Arkadaş", body="- tavuk\n- pilav",
+        )
+        with app.app_context():
+            return social_bp._calculate_meal_suggestion(snapshot)
+
+    def mobile_attempt():
+        with app.app_context():
+            with pytest.raises(mobile_auth.MobileAuthFailure) as caught:
+                mobile_auth.login("alice", "password")
+            return caught.value.status, caught.value.code
+
+    results = {}
+    errors = {}
+    cheap_finished = []
+
+    def capture(name, fn):
+        try:
+            results[name] = fn()
+        except BaseException as exc:  # surfaced in the main test thread below
+            errors[name] = exc
+
+    attempts = [
+        threading.Thread(target=capture, args=("food", food_attempt), daemon=True),
+        threading.Thread(
+            target=capture, args=("suggestion", suggestion_attempt), daemon=True),
+        threading.Thread(target=capture, args=("mobile", mobile_attempt), daemon=True),
+        threading.Thread(target=lambda: cheap_finished.append("cheap-1"), daemon=True),
+        threading.Thread(target=lambda: cheap_finished.append("cheap-2"), daemon=True),
+    ]
+    for worker in attempts:
+        worker.start()
+    for worker in attempts:
+        worker.join(timeout=1)
+
+    finished_before_release = all(not worker.is_alive() for worker in attempts)
+    calls_before_release = dict(provider_calls)
+    results_before_release = dict(results)
+    errors_before_release = dict(errors)
+    cheap_before_release = list(cheap_finished)
+
+    release_holders.set()
+    for worker in holders:
+        worker.join(timeout=2)
+    for worker in attempts:
+        worker.join(timeout=2)
+
+    assert finished_before_release
+    assert not errors_before_release
+    assert results_before_release == {
+        "food": {"results": []},
+        "suggestion": None,
+        "mobile": (503, "AUTH_TEMPORARILY_UNAVAILABLE"),
+    }
+    assert sorted(cheap_before_release) == ["cheap-1", "cheap-2"]
+    assert calls_before_release == {"food": 0, "suggestion": 0, "mobile": 0}
+
+    for _ in range(2):
+        with ai_gate.blocking_concurrency_slot(0):
+            with ai_gate.model_concurrency_slot(0):
+                pass
 
 
 def test_model_slot_releases_after_error(monkeypatch):
@@ -348,6 +521,7 @@ def test_client_disconnect_is_cancelled_not_error(metrics_on):
 def test_model_slot_records_contention(metrics_on, monkeypatch):
     sem = threading.BoundedSemaphore(1)
     monkeypatch.setattr(ai_gate, "_model_slots", sem)
+    monkeypatch.setattr(ai_gate, "AI_GATE_WAIT_SECONDS", 1)
     entered = threading.Event()
 
     def worker():

@@ -12,6 +12,8 @@ time); the weekly section is gated independently by WEEKLY_PROGRAM_UI_ENABLED.
 import json
 import re
 
+import pytest
+
 from app.plan_presenter import (
     STATE_ACTIVE_PLAN,
     STATE_NO_ACTIVE_PLAN,
@@ -158,6 +160,23 @@ def test_facts_valid_plan_parses_in_canonical_order(app, make_user):
     assert [d.label for d in facts.days] == ["Pazartesi", "Salı", "Çarşamba"]  # order preserved
     assert facts.days[0].is_rest is False and facts.days[1].is_rest is True
     assert facts.days[0].exercises[0].name == "Bench Press"
+
+
+def test_facts_accepts_program_wrapper(app, make_user):
+    from app.services.plan_facts import gather_plan_facts
+    user = make_user("wrapped_valid", profile_complete=True)
+    _seed_plan(user.id, json.dumps({"program": json.loads(_VALID_PLAN)}))
+    facts = gather_plan_facts(user.id)
+    assert facts.has_active_plan is True and facts.parse_ok is True
+
+
+@pytest.mark.parametrize("payload", [{}, {"program": {}}, {"program": []}])
+def test_bad_wrapper_remains_partial(app, make_user, payload):
+    from app.services.plan_facts import gather_plan_facts
+    user = make_user("wrapped_partial")
+    _seed_plan(user.id, json.dumps(payload))
+    facts = gather_plan_facts(user.id)
+    assert facts.has_active_plan is True and facts.parse_ok is False
 
 
 def test_facts_empty_exercise_list_is_not_rest(app, make_user):

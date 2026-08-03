@@ -384,12 +384,13 @@ def test_ai_coach_exercise_logging_stays_evidence_only(app, auth_user):
 # marked COMPLETED without PumpCheck authority.
 # ---------------------------------------------------------------------------
 
-def _mk_active_session(user_id, *, status=WORKOUT_SESSION_ACTIVE, version=1):
+def _mk_active_session(user_id, *, status=WORKOUT_SESSION_ACTIVE, version=1,
+                       workout_date=None):
     s = WorkoutSession(
         public_id=secrets.token_urlsafe(16),
         user_id=user_id,
         status=status,
-        workout_date=app_today().isoformat(),
+        workout_date=workout_date or app_today().isoformat(),
         weekday_slot="Perşembe",
         source="scheduled",
         started_at=None,
@@ -545,3 +546,75 @@ def test_session_of_another_user_is_never_terminalized(app, make_user):
     row = db.session.get(WorkoutSession, victim_session.id)
     assert row.status == WORKOUT_SESSION_ACTIVE
     assert row.version == 1
+
+
+def test_route_rejects_previous_day_session_without_any_mutation(
+        app, client, auth_user, monkeypatch):
+    """The route's authoritative completion day rejects yesterday's linkage
+    before completion artifacts, XP, activity, or lifecycle writes can occur."""
+    app.config["FITX_WORKOUT_SESSIONS_ENABLED"] = True
+    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 7.0})
+    today = app_today()
+    session = _mk_active_session(
+        auth_user.id, workout_date=(today - timedelta(days=1)).isoformat())
+    before_row = (
+        session.user_id, session.public_id, session.status, session.workout_date,
+        session.started_at, session.last_activity_at, session.version,
+        session.completed_at, session.abandoned_at, session.terminal_reason,
+    )
+    before_counts = (
+        WorkoutSession.query.filter_by(user_id=auth_user.id).count(),
+        PumpCheck.query.filter_by(user_id=auth_user.id).count(),
+        WorkoutLog.query.filter_by(user_id=auth_user.id).count(),
+        Activity.query.filter_by(user_id=auth_user.id).count(),
+        db.session.get(User, auth_user.id).rank_points or 0,
+    )
+    monkeypatch.setattr(
+        training_bp, "validate_pump_check_image",
+        lambda *a, **k: (b"jpeg", "image/jpeg", None),
+    )
+    monkeypatch.setattr(
+        training_bp, "validate_pump_check",
+        lambda *a, **k: {"valid": True, "fallback": False},
+    )
+    route_day_calls = []
+    route_days = iter((today, today + timedelta(days=1)))
+
+    def divergent_app_today():
+        value = next(route_days)
+        route_day_calls.append(value)
+        return value
+
+    monkeypatch.setattr(training_bp, "app_today", divergent_app_today)
+
+    response = client.post(
+        "/workout/complete",
+        json={"session_id": session.public_id, "image": "x",
+              "location_type": "salon"},
+    )
+
+    db.session.expire_all()
+    row = db.session.get(WorkoutSession, session.id)
+    assert response.status_code == 409
+    assert response.get_json()["code"] == "stale_session_requires_resolution"
+    assert (
+        row.user_id, row.public_id, row.status, row.workout_date,
+        row.started_at, row.last_activity_at, row.version,
+        row.completed_at, row.abandoned_at, row.terminal_reason,
+    ) == before_row
+    assert row.status == WORKOUT_SESSION_ACTIVE
+    assert WorkoutSession.query.filter_by(
+        user_id=auth_user.id, status=WORKOUT_SESSION_ACTIVE).count() == 1
+    assert WorkoutSession.query.filter_by(
+        user_id=auth_user.id, status=WORKOUT_SESSION_COMPLETED).count() == 0
+    assert WorkoutSession.query.filter_by(
+        user_id=auth_user.id, status=WORKOUT_SESSION_ABANDONED).count() == 0
+    assert (
+        WorkoutSession.query.filter_by(user_id=auth_user.id).count(),
+        PumpCheck.query.filter_by(user_id=auth_user.id).count(),
+        WorkoutLog.query.filter_by(user_id=auth_user.id).count(),
+        Activity.query.filter_by(user_id=auth_user.id).count(),
+        db.session.get(User, auth_user.id).rank_points or 0,
+    ) == before_counts
+    assert _markers(auth_user.id) == 0
+    assert route_day_calls == [today]

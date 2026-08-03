@@ -220,6 +220,7 @@ def complete_workout():
         return jsonify({"error": t("route.no_active_training_plan")}), 400
 
     data = request.get_json(silent=True) or {}
+    today = app_today()
 
     # Sprint 7 PR3 (optional, flag-gated): an OPTIONAL persisted session may be
     # supplied by opaque public id. Resolve ownership → internal id BEFORE the
@@ -230,7 +231,7 @@ def complete_workout():
         session_public_id = (data.get("session_id") or "").strip()[:64] or None
         if session_public_id:
             session_internal_id, sess_err = resolve_for_completion(
-                current_user.id, session_public_id)
+                current_user.id, session_public_id, today)
             if sess_err is not None:
                 # Terminal/not-found session → deterministic conflict, no completion.
                 return _session_response(sess_err)
@@ -240,13 +241,13 @@ def complete_workout():
     # Pump Check varsa antrenman tamamlanmış sayılır → pahalı Bedrock görü + S3
     # yüklemesi AŞAĞIDAKİ bloklardan ÖNCE atlanır. Yarış-güvenli asıl iddia
     # uq_pump_check_day; bu preflight yalnızca maliyet/gecikme optimizasyonudur.
-    if already_completed_today(current_user.id, app_today()):
+    if already_completed_today(current_user.id, today):
         # Sprint 7 PR3: a session-linked replay must still terminalize the owned
         # ACTIVE session (no new artifacts, no Bedrock/S3) — correction #3.
         if session_internal_id is not None:
             try:
                 run_completion(CompleteWorkoutCommand(
-                    user_id=current_user.id, today=app_today(),
+                    user_id=current_user.id, today=today,
                     session_id=session_internal_id, entry_path="route",
                 ))
             except SessionCompletionConflict:
@@ -301,7 +302,7 @@ def complete_workout():
     try:
         result = run_completion(CompleteWorkoutCommand(
             user_id=current_user.id,
-            today=app_today(),
+            today=today,
             session_id=session_internal_id,  # Sprint 7 PR3: None ⇒ legacy path
             image_key=pump_image_key,
             location_type=location_type,

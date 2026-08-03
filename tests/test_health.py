@@ -9,6 +9,7 @@ Derin görünüm artık yalnızca iç ağdan (loopback / private) verilir.
     python -m pytest tests/test_health.py -v
 """
 import pytest
+from flask import request, url_for
 
 _DEEP_KEYS = ("redis", "login", "bedrock", "fatsecret_proxy", "worker",
               "flags", "capacity")
@@ -147,3 +148,35 @@ def test_deep_health_not_spoofable_via_forwarded_for(client):
     body = resp.get_json()
     for key in _DEEP_KEYS:
         assert key not in body
+
+
+def test_proxyfix_ignores_forwarded_host_and_port_but_trusts_for_and_proto(app, client):
+    """A client cannot turn trusted proxy headers into an external evil URL."""
+    @app.route("/__proxyfix-probe")
+    def proxyfix_probe():
+        return {
+            "host": request.host,
+            "remote_addr": request.remote_addr,
+            "scheme": request.scheme,
+            "external_url": url_for("proxyfix_probe", _external=True),
+        }
+
+    resp = client.get(
+        "/__proxyfix-probe",
+        environ_base={"REMOTE_ADDR": "172.17.0.1"},
+        headers={
+            "Host": "fitness.test",
+            "X-Forwarded-For": "8.8.8.8",
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "evil.test",
+            "X-Forwarded-Port": "4444",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.get_json() == {
+        "host": "fitness.test",
+        "remote_addr": "8.8.8.8",
+        "scheme": "https",
+        "external_url": "https://fitness.test/__proxyfix-probe",
+    }

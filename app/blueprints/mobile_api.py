@@ -88,7 +88,8 @@ def _run_issuance(operation, *args, refresh_context=False):
         if refresh_context and code == "AUTH_INVALID_CREDENTIALS":
             code = "AUTH_REFRESH_FAILED"
         return mobile_error(
-            code, _safe_message(code), exc.status, exc.retryable)
+            code, _safe_message(code), exc.status, exc.retryable,
+            retry_after=exc.retry_after)
 
 
 @bp.post("/auth/login")

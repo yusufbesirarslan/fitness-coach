@@ -24,6 +24,7 @@ Env ayarları:
 """
 import os
 import threading
+import time
 from contextlib import contextmanager
 from functools import wraps
 
@@ -52,6 +53,32 @@ SCRAPE_GATE_WAIT_SECONDS = float(os.getenv("SCRAPE_GATE_WAIT_SECONDS", "10"))
 _ai_slots = threading.BoundedSemaphore(AI_MAX_CONCURRENCY)
 _model_slots = threading.BoundedSemaphore(AI_MODEL_MAX_CONCURRENCY)
 _scrape_slots = threading.BoundedSemaphore(SCRAPE_MAX_CONCURRENCY)
+
+
+class BlockingConcurrencyLimit(RuntimeError):
+    pass
+
+
+def _acquire_before_deadline(
+        semaphore, wait_seconds, *, deadline=None, clock=None):
+    monotonic = clock or time.monotonic
+    acquire_deadline = monotonic() + max(0.0, wait_seconds)
+    if deadline is not None:
+        acquire_deadline = min(acquire_deadline, deadline)
+    return semaphore.acquire(
+        timeout=max(0.0, acquire_deadline - monotonic()))
+
+
+@contextmanager
+def blocking_concurrency_slot(wait_seconds=None):
+    """Bound one blocking AI route sequence with the shared capacity gate."""
+    wait = AI_GATE_WAIT_SECONDS if wait_seconds is None else wait_seconds
+    if not _acquire_before_deadline(_ai_slots, wait):
+        raise BlockingConcurrencyLimit("shared blocking capacity exhausted")
+    try:
+        yield
+    finally:
+        _ai_slots.release()
 
 
 def _provider_error_category(exc):
@@ -83,62 +110,59 @@ def _provider_error_category(exc):
 
 
 @contextmanager
-def _measured_model_slot(provider):
-    """`model_concurrency_slot`'un ölçümlü yolu (yalnızca metrikler AÇIKken).
+def model_concurrency_slot(
+        provider="unknown", wait_seconds=None, *, deadline=None):
+    """Bound one provider call and retain provider-scoped runtime metrics.
 
-    Semafor semantiği DEĞİŞMEZ: önce bloklamayan bir deneme yapılır; başarısızsa
-    doygunluk sayılır ve ARDINDAN eskisi gibi bloklanarak beklenir. Yani kapının
-    kabul/ret davranışı aynıdır, yalnızca "beklemek zorunda kaldık" olgusu
-    görünür hâle gelir (sınırlama işi PR4'te).
+    Acquisition is bounded by both the configured gate wait and an optional
+    outer monotonic deadline. Numeric first arguments remain compatible with
+    the pre-observability ``model_concurrency_slot(wait_seconds)`` API.
     """
-    import time as _time
     from app.services import runtime_metrics
-    dims = {"Provider": provider}
-    wait_start = _time.monotonic()
-    if not _model_slots.acquire(blocking=False):
-        runtime_metrics.increment("AiModelSlotContended", dimensions=dims)
-        _model_slots.acquire()
-    wait_ms = (_time.monotonic() - wait_start) * 1000
-    call_start = _time.monotonic()
+
+    if not isinstance(provider, str) and wait_seconds is None:
+        wait_seconds = provider
+        provider = "unknown"
+
+    wait = AI_GATE_WAIT_SECONDS if wait_seconds is None else wait_seconds
+    metrics_enabled = runtime_metrics.is_enabled()
+    dims = {"Provider": str(provider)}
+    wait_start = time.monotonic() if metrics_enabled else None
+
+    acquired = False
+    if metrics_enabled:
+        acquired = _model_slots.acquire(blocking=False)
+        if not acquired:
+            runtime_metrics.increment("AiModelSlotContended", dimensions=dims)
+    if not acquired:
+        acquired = _acquire_before_deadline(
+            _model_slots, wait, deadline=deadline)
+    if not acquired:
+        raise BlockingConcurrencyLimit("model blocking capacity exhausted")
+
+    call_start = time.monotonic() if metrics_enabled else None
     outcome = "success"
     try:
         yield
-    except BaseException as exc:  # noqa: BLE001 - sınıflandır, sonra OLDUĞU GİBİ yükselt
+    except BaseException as exc:  # noqa: BLE001 - classify, then re-raise
         outcome = _provider_error_category(exc)
         raise
     finally:
         _model_slots.release()
-        try:
-            call_ms = (_time.monotonic() - call_start) * 1000
-            runtime_metrics.record_latency("AiModelSlotWait", wait_ms,
-                                           dimensions=dims)
-            runtime_metrics.record_latency("AiProviderLatency", call_ms,
-                                           dimensions=dims)
-            runtime_metrics.increment(
-                "AiProviderCalls",
-                dimensions={"Provider": provider, "Outcome": outcome})
-        except Exception:
-            pass
-
-
-@contextmanager
-def model_concurrency_slot(provider="unknown"):
-    """Bound one complete provider/fallback sequence independently of routes.
-
-    Metrikler KAPALIYKEN (varsayılan) yol PR1 öncesiyle aynıdır: tek `acquire()`,
-    ölçüm yok, ek dallanma yok. Açıkken sağlayıcı SLI'ları kaydedilir — kayıt
-    tampona yazılır, bu context manager AĞ'a ÇIKMAZ.
-    """
-    from app.services import runtime_metrics
-    if runtime_metrics.is_enabled():
-        with _measured_model_slot(str(provider)):
-            yield
-        return
-    _model_slots.acquire()
-    try:
-        yield
-    finally:
-        _model_slots.release()
+        if metrics_enabled:
+            try:
+                now = time.monotonic()
+                runtime_metrics.record_latency(
+                    "AiModelSlotWait", (call_start - wait_start) * 1000,
+                    dimensions=dims)
+                runtime_metrics.record_latency(
+                    "AiProviderLatency", (now - call_start) * 1000,
+                    dimensions=dims)
+                runtime_metrics.increment(
+                    "AiProviderCalls",
+                    dimensions={"Provider": str(provider), "Outcome": outcome})
+            except Exception:
+                pass
 
 
 

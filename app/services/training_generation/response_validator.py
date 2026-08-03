@@ -25,6 +25,10 @@ def _to_int(value, default):
     return int(m.group()) if m else default
 
 
+def _bounded_int(value, default, low, high):
+    return max(low, min(high, _to_int(value, default)))
+
+
 def _clamp_score(value):
     parsed = _to_int(value, 7)
     if parsed == 0:
@@ -59,7 +63,9 @@ def validate_generated_plan(plan: dict, preferences: TrainingPreferences, injuri
         if tip == "antrenman":
             training_days += 1
         day["odak"] = str(day.get("odak") or ("Aktif Toparlanma" if tip == "dinlenme" else "Antrenman"))[:120]
-        day["sure_dk"] = _to_int(day.get("sure_dk"), 0) or (0 if tip == "dinlenme" else preferences.sure)
+        default_duration = 0 if tip == "dinlenme" else preferences.sure
+        day["sure_dk"] = _bounded_int(
+            day.get("sure_dk"), default_duration, 0, 1440)
         day["tahmini_kalori"] = max(0, min(900, _to_int(day.get("tahmini_kalori"), 0)))
         exercises = day.get("egzersizler") or []
         if not isinstance(exercises, list):
@@ -74,7 +80,7 @@ def validate_generated_plan(plan: dict, preferences: TrainingPreferences, injuri
             ex["isim"] = str(ex.get("isim") or "").strip()[:120]
             if not ex["isim"]:
                 raise PlanValidationError("egzersiz isim alanı boş olamaz")
-            ex["set"] = _to_int(ex.get("set"), 1) or 1
+            ex["set"] = _bounded_int(ex.get("set"), 1, 1, 100)
             ex["tekrar"] = str(ex.get("tekrar") or "8-12")[:40]
             ex["dinlenme"] = str(ex.get("dinlenme") or "60-90 sn")[:40]
             hit = injury_constraints.find_contraindicated(ex["isim"], injuries)

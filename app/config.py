@@ -267,10 +267,10 @@ def _enforce_fatsecret_tls(app):
 
 
 def configure_app(app):
-    # Tek güvenilir reverse proxy (host nginx) arkasında: X-Forwarded-For/-Proto'nun
-    # yanı sıra -Host ve -Port'a da güven; url_for(_external)/redirect'ler ve secure
-    # cookie kararları için doğru host/şema/port'u Flask'ın görmesini sağlar.
-    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
+    # Tek güvenilir reverse proxy (host nginx) arkasında X-Forwarded-For/-Proto'ya
+    # güven. Host ve port doğrudan Host başlığından gelir; istemci tarafından
+    # enjekte edilebilecek X-Forwarded-Host/-Port kesinlikle güvenilir değil.
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=0, x_port=0)
     # Dev/debug bayrağını configure_app içinde TEK kez değerlendir ve hem SECRET_KEY
     # hem secure-cookie kararlarında AYNI değeri kullan (M9). Eskiden cookie kararı
     # modül-yükü sabiti _IS_DEV'e, SECRET_KEY mantığı ise çağrı-anı env okumasına

@@ -974,16 +974,26 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
             history = list(session.get("coach_history", []))
         history = history[-COACH_HISTORY_LIMIT:]
 
+    deadline = _coach_turn_deadline()
     final_text = None
     if BEDROCK_ENABLED and _anthropic is not None:
         try:
-            final_text = _run_coach_conversation_bedrock(user_id, question, context, history, language)
+            final_text = _run_coach_conversation_bedrock(
+                user_id, question, context, history, language,
+                deadline=deadline)
         except _BedrockFallback as e:
             current_app.logger.warning(
                 "[COACH] Bedrock ilk çağrı başarısız, OpenAI'ya düşülüyor: %s", e)
             final_text = None
     if final_text is None:
-        final_text = _run_coach_conversation_openai(user_id, question, context, history, language)
+        if _remaining_coach_turn_seconds(deadline) <= 0:
+            current_app.logger.warning(
+                "[COACH] turn budget exhausted before OpenAI fallback")
+            final_text = _COACH_FALLBACKS[_coach_lang(language)]["tool"]
+        else:
+            final_text = _run_coach_conversation_openai(
+                user_id, question, context, history, language,
+                deadline=deadline)
 
     # C3/B16 kararı response_formatter.finalize_reply'de: yedek/boş yanıt
     # dostça hata metnine çevrilir ve geçmişe yazılMAZ.
@@ -1002,17 +1012,30 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
     return final_text
 
 
-def _run_coach_conversation_openai(user_id, question, context, history, language="tr"):
+def _run_coach_conversation_openai(user_id, question, context, history,
+                                   language="tr", deadline=None):
     """OpenAI function-calling döngüsü: system → (gerekirse araç çağrıları) → final metin.
     Geçmişi session'a YAZMAZ (çağıran yönlendirici halleder)."""
+    if deadline is None:
+        deadline = _coach_turn_deadline()
     messages = prompt_builder.build_openai_messages(
         language, context, history, question,
         adaptive_plan_context=_adaptive_plan_context_enabled())
 
     final_text = ""
     for _ in range(_COACH_TOOL_LOOP_CAP):
+        remaining = _remaining_coach_turn_seconds(deadline)
+        if remaining <= 0:
+            current_app.logger.warning("[COACH] OpenAI turn budget exhausted")
+            return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
         try:
-            with model_concurrency_slot("openai"):
+            with model_concurrency_slot("openai", deadline=deadline):
+                remaining = _remaining_coach_turn_seconds(deadline)
+                if remaining <= 0:
+                    current_app.logger.warning(
+                        "[COACH] OpenAI turn budget exhausted after model gate")
+                    return _COACH_FALLBACKS[
+                        _coach_lang(language)]["tool"]
                 resp = openai_client.chat.completions.create(
                     model=OPENAI_MODEL,
                     messages=messages,
@@ -1020,8 +1043,13 @@ def _run_coach_conversation_openai(user_id, question, context, history, language
                     tool_choice="auto",
                     max_tokens=700,
                     temperature=0.6,
+                    timeout=min(30.0, remaining),
                 )
         except Exception as e:
+            if _remaining_coach_turn_seconds(deadline) <= 0:
+                current_app.logger.warning(
+                    "[COACH] OpenAI turn budget exhausted during model gate")
+                return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
             current_app.logger.warning("[COACH] OpenAI çağrısı başarısız: %s", type(e).__name__)
             return _COACH_FALLBACKS[_coach_lang(language)]["error"]
         if not resp.choices:
@@ -1088,7 +1116,8 @@ def _first_text_block(resp):
     return ""
 
 
-def _run_coach_conversation_bedrock(user_id, question, context, history, language="tr"):
+def _run_coach_conversation_bedrock(user_id, question, context, history,
+                                    language="tr", deadline=None):
     """Bedrock (Anthropic Messages API) araç-kullanım döngüsü. stop_reason=='tool_use'
     olduğu sürece araçları çalıştırır, tool_result'ları geri besler ve modelin final
     metnine (stop_reason=='end_turn') ulaşana dek zincirler (güvenli üst sınır).
@@ -1096,13 +1125,14 @@ def _run_coach_conversation_bedrock(user_id, question, context, history, languag
     İlk create() çağrısı hiçbir araç çalışmadan hata verirse _BedrockFallback fırlatır
     (yönlendirici OpenAI'ya düşer). Bir araç YAN ETKİ ürettikten sonraki hatada
     sağlayıcı DEĞİŞTİRİLMEZ — yumuşak hata metni döner."""
+    if deadline is None:
+        deadline = _coach_turn_deadline()
     system = _build_bedrock_system(context, language)
     tools = _anthropic_tools_for_call()
     convo = prompt_builder.build_anthropic_messages(history, question)
     max_tokens = min(700, BEDROCK_MAX_TOKENS)
 
     tools_ran = 0
-    deadline = _coach_turn_deadline()
     for _ in range(_COACH_TOOL_LOOP_CAP):
         remaining = _remaining_coach_turn_seconds(deadline)
         if remaining <= 0:
@@ -1114,7 +1144,13 @@ def _run_coach_conversation_bedrock(user_id, question, context, history, languag
         # tools_ran mantığını uygula: hiç araç çalışmadıysa OpenAI'ya düş, çalıştıysa
         # sağlayıcı değiştirme (yan etkiyi tekrarlama) → yumuşak hata.
         try:
-            with model_concurrency_slot("bedrock"):
+            with model_concurrency_slot("bedrock", deadline=deadline):
+                remaining = _remaining_coach_turn_seconds(deadline)
+                if remaining <= 0:
+                    current_app.logger.warning(
+                        "[COACH][Bedrock] turn budget exhausted after model gate")
+                    return _COACH_FALLBACKS[
+                        _coach_lang(language)]["tool"]
                 resp = bedrock_client.messages.create(
                     model=BEDROCK_MODEL,
                     max_tokens=max_tokens,

@@ -1,11 +1,12 @@
 import calendar
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import threading
 
 import pytest
 
 from app.extensions import db
 from app.models import MobileAccessCredential, MobileAuthSession, MobileRefreshCredential
-from app.services import cognito_jwt, cognito_service, mobile_credentials
+from app.services import ai_gate, cognito_jwt, cognito_service, mobile_credentials
 
 
 NOW = datetime(2026, 7, 29, 10, 0, 0)
@@ -110,6 +111,104 @@ def test_login_treats_cold_jwks_failure_as_temporary(
     assert exc.value.retryable is True
 
 
+def test_login_hides_unconfirmed_account_and_logs_only_safe_event(
+        app, monkeypatch, caplog):
+    from app.services import mobile_auth
+
+    monkeypatch.setattr(
+        cognito_service, "authenticate",
+        lambda *args: (_ for _ in ()).throw(cognito_service.CognitoServiceError(
+            "raw cognito detail", "UserNotConfirmedException")))
+
+    with pytest.raises(mobile_auth.MobileAuthFailure) as caught:
+        mobile_auth.login(
+            "unconfirmed@example.test", "do-not-log-password", now=NOW)
+
+    assert (caught.value.code, caught.value.status, caught.value.retryable) == (
+        "AUTH_INVALID_CREDENTIALS", 401, False)
+    assert "do-not-log-password" not in caplog.text
+    assert "unconfirmed@example.test" not in caplog.text
+    assert "raw cognito detail" not in caplog.text
+    assert "unconfirmed_account" in caplog.text
+
+
+def test_login_rejects_saturation_before_any_provider_work(
+        app, monkeypatch):
+    from app.services import mobile_auth
+
+    semaphore = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_ai_slots", semaphore)
+    calls = {"authenticate": 0, "refresh": 0}
+
+    def unexpected_authenticate(*args):
+        calls["authenticate"] += 1
+        raise AssertionError("authenticate must not run")
+
+    def unexpected_refresh(*args):
+        calls["refresh"] += 1
+        raise AssertionError("refresh must not run")
+
+    monkeypatch.setattr(cognito_service, "authenticate", unexpected_authenticate)
+    monkeypatch.setattr(cognito_service, "refresh_tokens", unexpected_refresh)
+    assert semaphore.acquire(blocking=False)
+    try:
+        with pytest.raises(mobile_auth.MobileAuthFailure) as caught:
+            mobile_auth.login("mobile-service", "correct", now=NOW)
+    finally:
+        semaphore.release()
+
+    assert calls == {"authenticate": 0, "refresh": 0}
+    assert (
+        caught.value.code,
+        caught.value.status,
+        caught.value.retryable,
+        caught.value.retry_after,
+    ) == ("AUTH_TEMPORARILY_UNAVAILABLE", 503, True, 15)
+
+
+def test_login_gate_covers_provider_work_but_not_local_identity(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    provider["access_exp"] = NOW + timedelta(minutes=5)
+    semaphore = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_ai_slots", semaphore)
+    original_authenticate = cognito_service.authenticate
+    original_validate = cognito_jwt.validate_token
+    original_refresh = cognito_service.refresh_tokens
+    original_resolve_user = mobile_auth._resolve_user
+
+    def assert_gate_held():
+        acquired = semaphore.acquire(blocking=False)
+        if acquired:
+            semaphore.release()
+        assert acquired is False
+
+    def authenticate(*args):
+        assert_gate_held()
+        return original_authenticate(*args)
+
+    def validate(*args, **kwargs):
+        assert_gate_held()
+        return original_validate(*args, **kwargs)
+
+    def refresh(*args):
+        assert_gate_held()
+        return original_refresh(*args)
+
+    def resolve_user(*args):
+        assert semaphore.acquire(blocking=False)
+        semaphore.release()
+        return original_resolve_user(*args)
+
+    monkeypatch.setattr(cognito_service, "authenticate", authenticate)
+    monkeypatch.setattr(cognito_jwt, "validate_token", validate)
+    monkeypatch.setattr(cognito_service, "refresh_tokens", refresh)
+    monkeypatch.setattr(mobile_auth, "_resolve_user", resolve_user)
+
+    mobile_auth.login("mobile-service", "correct", now=NOW)
+
+
 def test_access_authentication_requires_all_ownership_links(
         app, mobile_user, provider):
     from app.services import mobile_auth
@@ -159,6 +258,324 @@ def test_absolute_expired_family_revokes_and_clears_ciphertext_on_access(
     assert family.revoked_at == NOW + timedelta(seconds=1)
     assert family.cognito_access_token is None
     assert family.cognito_refresh_token is None
+
+
+def test_refresh_provider_renewal_runs_without_database_transaction(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    provider_refresh = cognito_service.refresh_tokens
+
+    def renew_without_database_transaction(*args):
+        assert db.session().in_transaction() is False
+        return provider_refresh(*args)
+
+    monkeypatch.setattr(
+        cognito_service, "refresh_tokens", renew_without_database_transaction)
+
+    rotated = mobile_auth.refresh(
+        original.refresh_credential, now=NOW + timedelta(minutes=50))
+
+    assert rotated.access_expires_at == NOW + timedelta(minutes=65)
+    assert MobileAuthSession.query.one().version == 2
+
+
+def test_refresh_provider_saturation_is_retryable_without_provider_work(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    semaphore = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_ai_slots", semaphore)
+    calls = {"refresh": 0}
+
+    def unexpected_refresh(*args):
+        calls["refresh"] += 1
+        raise AssertionError("refresh must not run")
+
+    monkeypatch.setattr(cognito_service, "refresh_tokens", unexpected_refresh)
+    assert semaphore.acquire(blocking=False)
+    try:
+        with pytest.raises(mobile_auth.MobileAuthFailure) as caught:
+            mobile_auth.refresh(
+                original.refresh_credential,
+                now=NOW + timedelta(minutes=50),
+            )
+    finally:
+        semaphore.release()
+
+    assert calls == {"refresh": 0}
+    assert (
+        caught.value.code,
+        caught.value.status,
+        caught.value.retryable,
+        caught.value.retry_after,
+    ) == ("AUTH_TEMPORARILY_UNAVAILABLE", 503, True, 15)
+    family = MobileAuthSession.query.one()
+    assert family.version == 1
+    assert family.revoked_at is None
+    assert MobileRefreshCredential.query.one().consumed_at is None
+
+
+def _run_same_version_refresh_race(
+        app, raw_refresh, monkeypatch, *, reject_stale_provider_token=False,
+        phase_times=None):
+    from app.services import mobile_auth
+
+    monkeypatch.setattr(
+        ai_gate, "_ai_slots", threading.BoundedSemaphore(2))
+    provider_barrier = threading.Barrier(2)
+    winner_at_provider = threading.Event()
+    winner_finished = threading.Event()
+    thread_state = threading.local()
+    provider_calls = []
+    previous_validate = cognito_jwt.validate_token
+
+    if phase_times is not None:
+        real_datetime = datetime
+
+        class RaceDatetimeMeta(type):
+            def __instancecheck__(cls, instance):
+                return isinstance(instance, real_datetime)
+
+        class RaceDatetime(metaclass=RaceDatetimeMeta):
+            @classmethod
+            def utcnow(cls):
+                return next(thread_state.phase_times)
+
+            @classmethod
+            def utcfromtimestamp(cls, value):
+                return real_datetime.fromtimestamp(
+                    value, timezone.utc).replace(tzinfo=None)
+
+        monkeypatch.setattr(mobile_auth, "datetime", RaceDatetime)
+
+    def renew(_provider_refresh, _username):
+        contender = thread_state.contender
+        provider_calls.append(contender)
+        if contender == "winner":
+            winner_at_provider.set()
+        provider_barrier.wait(timeout=10)
+        if contender == "stale":
+            assert winner_finished.wait(timeout=10)
+        return {
+            "access_token": f"race-provider-access-{contender}",
+            "id_token": "",
+            "refresh_token": f"race-provider-refresh-{contender}",
+            "expires_in": 7200,
+        }
+
+    def validate(token, expected_use, leeway_seconds=0):
+        if token.startswith("race-provider-access-"):
+            contender = token.rsplit("-", 1)[-1]
+            subject = (
+                "different-sub"
+                if reject_stale_provider_token and contender == "stale"
+                else "sub-mobile"
+            )
+            return {
+                "sub": subject,
+                "exp": calendar.timegm(
+                    (NOW + timedelta(hours=3)).timetuple()),
+            }
+        return previous_validate(token, expected_use, leeway_seconds)
+
+    monkeypatch.setattr(cognito_service, "refresh_tokens", renew)
+    monkeypatch.setattr(cognito_jwt, "validate_token", validate)
+    outcomes = {}
+
+    def rotate(contender):
+        with app.app_context():
+            thread_state.contender = contender
+            if phase_times is not None:
+                thread_state.phase_times = iter(phase_times[contender])
+            try:
+                outcomes[contender] = (
+                    "issued",
+                    mobile_auth.refresh(
+                        raw_refresh,
+                        now=(
+                            None if phase_times is not None
+                            else NOW + timedelta(minutes=50)),
+                    ),
+                )
+            except mobile_auth.MobileAuthFailure as exc:
+                outcomes[contender] = (
+                    "failed", exc.code, exc.reason, exc.retryable)
+            except Exception as exc:  # pragma: no cover - surfaced by assertions
+                outcomes[contender] = (
+                    "unexpected", type(exc).__name__, str(exc))
+            finally:
+                if contender == "winner":
+                    winner_finished.set()
+                db.session.remove()
+
+    db.session.remove()
+    threads = {
+        contender: threading.Thread(
+            target=rotate, args=(contender,), daemon=True)
+        for contender in ("winner", "stale")
+    }
+    threads["winner"].start()
+    assert winner_at_provider.wait(timeout=10), outcomes
+    threads["stale"].start()
+    for thread in threads.values():
+        thread.join(timeout=15)
+
+    assert not any(thread.is_alive() for thread in threads.values()), outcomes
+    assert sorted(provider_calls) == ["stale", "winner"], outcomes
+    return outcomes
+
+
+def test_same_version_refresh_race_keeps_winner_tokens_and_one_child(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth, session_store
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+
+    outcomes = _run_same_version_refresh_race(
+        app, original.refresh_credential, monkeypatch)
+
+    assert outcomes["winner"][0] == "issued", outcomes
+    if outcomes["stale"][0] == "issued":
+        assert outcomes["stale"][1] == outcomes["winner"][1]
+    else:
+        assert outcomes["stale"] == (
+            "failed",
+            "AUTH_TEMPORARILY_UNAVAILABLE",
+            "refresh_conflict",
+            True,
+        )
+
+    family = MobileAuthSession.query.one()
+    access_rows = MobileAccessCredential.query.order_by(
+        MobileAccessCredential.generation).all()
+    refresh_rows = MobileRefreshCredential.query.order_by(
+        MobileRefreshCredential.generation).all()
+    parent, child = refresh_rows
+    assert family.version == 2
+    assert family.revoked_at is None
+    assert [row.generation for row in access_rows] == [0, 1]
+    assert [row.generation for row in refresh_rows] == [0, 1]
+    assert child.parent_id == parent.id
+    assert parent.replacement_access_id == access_rows[1].id
+    assert parent.replacement_refresh_id == child.id
+    assert session_store.decrypt_token(
+        family.cognito_access_token) == "race-provider-access-winner"
+    assert session_store.decrypt_token(
+        family.cognito_refresh_token) == "race-provider-refresh-winner"
+
+
+def test_stale_provider_rejection_does_not_revoke_refresh_race_winner(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth, session_store
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+
+    outcomes = _run_same_version_refresh_race(
+        app,
+        original.refresh_credential,
+        monkeypatch,
+        reject_stale_provider_token=True,
+    )
+
+    assert outcomes["winner"][0] == "issued", outcomes
+    assert outcomes["stale"] == outcomes["winner"]
+    family = MobileAuthSession.query.one()
+    assert family.version == 2
+    assert family.revoked_at is None
+    assert family.revoked_reason is None
+    assert MobileAccessCredential.query.filter_by(generation=1).count() == 1
+    assert MobileRefreshCredential.query.filter_by(generation=1).count() == 1
+    assert session_store.decrypt_token(
+        family.cognito_access_token) == "race-provider-access-winner"
+    assert session_store.decrypt_token(
+        family.cognito_refresh_token) == "race-provider-refresh-winner"
+
+
+def test_post_grace_stale_success_conflicts_without_revoking_race_winner(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth, session_store
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    winner_phase_one = NOW + timedelta(minutes=50)
+    stale_phase_one = winner_phase_one + timedelta(seconds=11)
+    winner_phase_two = winner_phase_one + timedelta(seconds=12)
+    stale_phase_two = winner_phase_one + timedelta(seconds=23)
+
+    outcomes = _run_same_version_refresh_race(
+        app,
+        original.refresh_credential,
+        monkeypatch,
+        phase_times={
+            "winner": (winner_phase_one, winner_phase_two),
+            "stale": (stale_phase_one, stale_phase_two),
+        },
+    )
+
+    family = MobileAuthSession.query.one()
+    parent = MobileRefreshCredential.query.filter_by(generation=0).one()
+    assert outcomes["winner"][0] == "issued", outcomes
+    assert outcomes["stale"] == (
+        "failed",
+        "AUTH_TEMPORARILY_UNAVAILABLE",
+        "refresh_conflict",
+        True,
+    )
+    assert parent.consumed_at == winner_phase_two
+    assert parent.grace_expires_at == winner_phase_two + timedelta(seconds=10)
+    assert family.version == 2
+    assert family.revoked_at is None
+    assert MobileAccessCredential.query.filter_by(generation=1).count() == 1
+    assert MobileRefreshCredential.query.filter_by(generation=1).count() == 1
+    assert session_store.decrypt_token(
+        family.cognito_access_token) == "race-provider-access-winner"
+    assert session_store.decrypt_token(
+        family.cognito_refresh_token) == "race-provider-refresh-winner"
+
+
+def test_post_grace_stale_provider_rejection_does_not_revoke_race_winner(
+        app, mobile_user, provider, monkeypatch):
+    from app.services import mobile_auth, session_store
+
+    original = mobile_auth.login("mobile-service", "correct", now=NOW)
+    winner_phase_one = NOW + timedelta(minutes=50)
+    stale_phase_one = winner_phase_one + timedelta(seconds=11)
+    winner_phase_two = winner_phase_one + timedelta(seconds=12)
+    stale_phase_two = winner_phase_one + timedelta(seconds=23)
+
+    outcomes = _run_same_version_refresh_race(
+        app,
+        original.refresh_credential,
+        monkeypatch,
+        reject_stale_provider_token=True,
+        phase_times={
+            "winner": (winner_phase_one, winner_phase_two),
+            "stale": (stale_phase_one, stale_phase_two),
+        },
+    )
+
+    family = MobileAuthSession.query.one()
+    parent = MobileRefreshCredential.query.filter_by(generation=0).one()
+    assert outcomes["winner"][0] == "issued", outcomes
+    assert outcomes["stale"] == (
+        "failed",
+        "AUTH_TEMPORARILY_UNAVAILABLE",
+        "refresh_conflict",
+        True,
+    )
+    assert parent.consumed_at == winner_phase_two
+    assert parent.grace_expires_at == winner_phase_two + timedelta(seconds=10)
+    assert family.version == 2
+    assert family.revoked_at is None
+    assert family.revoked_reason is None
+    assert MobileAccessCredential.query.filter_by(generation=1).count() == 1
+    assert MobileRefreshCredential.query.filter_by(generation=1).count() == 1
+    assert session_store.decrypt_token(
+        family.cognito_access_token) == "race-provider-access-winner"
+    assert session_store.decrypt_token(
+        family.cognito_refresh_token) == "race-provider-refresh-winner"
 
 
 def test_first_refresh_creates_one_child_and_revokes_old_access(

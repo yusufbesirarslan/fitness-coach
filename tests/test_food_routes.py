@@ -5,10 +5,13 @@ Arama/porsiyon uçları; FatSecret ve koç-arama katmanı monkeypatch'lidir
 
     python -m pytest tests/test_food_routes.py -v
 """
+import threading
+
 import pytest
 
 from app.blueprints import food as food_bp
-from app.services import foodcache
+from app.extensions import db
+from app.services import ai_gate, foodcache
 
 BANANA = {"calories": 89.0, "protein": 1.1, "carbs": 23.0, "fat": 0.3}
 
@@ -50,6 +53,82 @@ def test_search_cache_miss_uses_coach_search(client, auth_user, monkeypatch):
     canned = [{"name": "Banana", "per_100g": BANANA}]
     monkeypatch.setattr(food_bp, "_coach_search_food", lambda q: canned)
     assert client.get("/api/food/search?q=muz").get_json()["results"] == canned
+
+
+def test_search_cache_miss_saturation_returns_empty_without_lookup(
+        client, auth_user, monkeypatch):
+    """A missing shared admission must preserve the food route's empty fallback."""
+    semaphore = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_ai_slots", semaphore)
+    calls = 0
+
+    def unexpected_lookup(_query):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("provider lookup must not start after saturation")
+
+    monkeypatch.setattr(food_bp, "_coach_search_food", unexpected_lookup)
+    assert semaphore.acquire(blocking=False)
+    try:
+        response = client.get("/api/food/search?q=muz")
+    finally:
+        semaphore.release()
+
+    assert response.status_code == 200
+    assert response.get_json() == {"results": []}
+    assert calls == 0
+
+
+def test_search_cache_hit_bypasses_saturated_shared_gate(
+        client, auth_user, monkeypatch):
+    """Putting the gate around the whole route would reject cheap cached work."""
+    foodcache._cache_macros({"muz": BANANA}, "per_100g")
+    semaphore = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(ai_gate, "_ai_slots", semaphore)
+    monkeypatch.setattr(
+        food_bp, "_coach_search_food",
+        lambda _query: (_ for _ in ()).throw(
+            AssertionError("cache hit must not call the provider")),
+    )
+
+    assert semaphore.acquire(blocking=False)
+    try:
+        response = client.get("/api/food/search?q=muz")
+    finally:
+        semaphore.release()
+
+    assert response.status_code == 200
+    assert response.get_json()["results"][0]["macros"] == BANANA
+
+
+def test_search_gate_and_provider_run_without_database_transaction(
+        client, auth_user, monkeypatch):
+    """Authentication reads must not leave a DB transaction around provider I/O."""
+    class TransactionCheckingSemaphore:
+        def __init__(self):
+            self._semaphore = threading.BoundedSemaphore(1)
+            self.acquisitions = 0
+
+        def acquire(self, *, timeout):
+            assert db.session().in_transaction() is False
+            self.acquisitions += 1
+            return self._semaphore.acquire(timeout=timeout)
+
+        def release(self):
+            self._semaphore.release()
+
+    semaphore = TransactionCheckingSemaphore()
+    monkeypatch.setattr(ai_gate, "_ai_slots", semaphore)
+
+    def lookup(_query):
+        assert db.session().in_transaction() is False
+        return [{"name": "Banana", "per_100g": BANANA}]
+
+    monkeypatch.setattr(food_bp, "_coach_search_food", lookup)
+    response = client.get("/api/food/search?q=muz")
+
+    assert response.status_code == 200
+    assert semaphore.acquisitions == 1
 
 
 # ---------------------------------------------------------------------------
