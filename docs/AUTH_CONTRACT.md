@@ -75,50 +75,68 @@ a decision rather than an assumption.
 
 ---
 
-## 3. The one accidental difference — expiry leeway
+## 3. Expiry leeway — one value, pinned to zero
 
 `cognito_jwt.validate_token` takes `leeway_seconds`, the window in which an
-already-expired token is still accepted.
+already-expired token is still accepted. It is **zero on every path**, and
+there is no setting that can change it.
 
 | Path | Leeway | Source |
 |---|---|---|
-| Web request auth | `0`, not configurable | `auth_contract.WEB_CLOCK_SKEW_SECONDS` |
-| Mobile request auth | `MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS`, default `0`, maximum `300` | `app/services/mobile_credentials.py` |
-| Web login (ID token) | `0`, pinned | `app/blueprints/auth.py` |
-| Shared login decode | `0`, pinned | `app/services/cognito_service.py` |
+| Web request auth | `0` | `auth_contract.REQUEST_CLOCK_SKEW_SECONDS` |
+| Mobile request auth | `0` | `auth_contract.REQUEST_CLOCK_SKEW_SECONDS` |
+| Web login (ID token) | `0`, pinned default | `app/blueprints/auth.py` |
+| Shared login decode | `0`, pinned default | `app/services/cognito_service.py` |
 
-Three of the four are pinned at zero. Only the mobile request path can be
-widened, and widening it means mobile accepts expired tokens that web rejects —
-with no web equivalent and, before PR3, no signal that it had happened.
+This is the one **accidental** difference PR3 found. The mobile request path
+used to read `MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS` (default `0`, maximum
+`300`) while web had no equivalent, so setting it made mobile accept expired
+tokens that web rejected — with no web counterpart and no signal it had
+happened. Three of the four paths already ignored the knob.
 
-**PR3 does not change the values.** With the default configuration every path
-uses `0`, and `test_both_paths_record_the_same_token_use` asserts it. What
-changed is that the divergence can no longer be silent:
+**It was retired rather than generalised.** A shared configurable knob would
+have been uniform, but a mobile-named setting would then have widened the
+browser's expired-token window too — a security loosening arriving through an
+unrelated-looking lever. Leeway is a security decision, not a tuning parameter.
+If production evidence later shows non-zero leeway is genuinely required, that
+is a separate, security-reviewed change applying to **both** paths at once.
 
-- both paths read their leeway from `auth_contract.validation_clock_skew_seconds`,
-  so the two numbers are decided in one file;
+Enforced by:
+
+- `auth_contract.validation_clock_skew_seconds` returns the pinned value and
+  consults no configuration — `test_supplying_the_retired_setting_cannot_reintroduce_leeway`
+  proves the key cannot beat it even if it reappears in `app.config`;
 - `test_only_the_contract_module_varies_the_expiry_leeway` fails CI if any
   other module passes `leeway_seconds` at all;
-- boot logs one `[AUTH_CONTRACT]` line, and a `WARNING` when the paths disagree;
-- `/health?deep=1` publishes `auth_contract` with both numbers and
-  `clock_skew_aligned`.
+- `test_nothing_writes_the_retired_key_into_config` — a booted application does
+  not carry the key, so nothing can read it back;
+- boot logs `[AUTH_CONTRACT] token_use=access skew=0s paths=web,mobile configurable=no`;
+- `/health?deep=1` publishes the same values under `auth_contract`.
 
-### Open decision for review
+### Migration prerequisite — read before deploying
 
-Converging is a three-line change inside
-`auth_contract.validation_clock_skew_seconds`, and there are two directions:
+`MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS` is **rejected at boot**, not
+ignored. A retired setting that is silently dropped is worse than one that is
+still honoured: the host believes mobile tolerates expired tokens and nothing
+contradicts it.
 
-1. **Pin mobile to zero as well.** Uniform and strictest. Costs the operator
-   the only remaining lever for provider clock drift.
-2. **Give both paths one shared knob.** Uniform and configurable — but a knob
-   named for mobile would then widen the browser path too, which is a security
-   loosening arriving through an unrelated-looking setting.
+| Value in the host `.env` | Result |
+|---|---|
+| absent | boots normally — nothing to do |
+| `=0` | boots normally (agrees with the pinned contract); removing the line is still tidier |
+| any non-zero value | **boot fails** with a message naming the key and this document |
+| empty, or non-numeric | **boot fails** — the same strictness the setting had before retirement |
 
-Recommendation: **option 1**, on the evidence that the knob has never been set
-away from its default and that three of the four validation paths already
-ignore it. It is left undone here because it is a behaviour change and PR3 is
-scoped to verification; the alternative — landing it silently inside a test PR
-— is exactly the kind of change this document exists to prevent.
+The check runs **unconditionally**, not behind `MOBILE_AUTH_ENABLED`. A host
+with the mobile flag off can still be carrying a stale non-zero value, and that
+is precisely the value that would take effect the day mobile auth is switched
+on — the worst possible moment to discover it.
+
+**Action before deploying:** remove the line from the host `.env`. The
+pre-deployment scan in [ROLLOUT.md](ROLLOUT.md) §1 checks it alongside the
+rollout flags. If it is missed, the deploy health gate fails and rolls back to
+the previous commit automatically — a rolled-back deploy, not an outage, but
+finding it first is cheaper.
 
 ---
 
@@ -174,9 +192,9 @@ instrumentation never decides whether a request is authenticated.
   Activation is blocked until PR4 — see [ROLLOUT.md](ROLLOUT.md) §3.
 - After a restart, confirm the contract from the boot log:
   `docker compose logs --no-color --tail 40 web | grep '\[AUTH_CONTRACT\]'`.
-  Expect `aligned=yes`.
+  Expect `skew=0s paths=web,mobile configurable=no`.
 - `/health?deep=1` carries the same values in its `auth_contract` block. It is
   restricted to internal networks; there is deliberately no public equivalent.
-- Changing `MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS` needs no deploy — it
-  lives in the host `.env` like the rollout flags — so the boot line and the
-  deep-health block are the only reliable ways to see its current value.
+- `MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS` is **retired**. Remove it from the
+  host `.env` before deploying this change; a non-zero or malformed value stops
+  the boot. See §3 for the full table and the reasoning.

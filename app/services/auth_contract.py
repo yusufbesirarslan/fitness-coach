@@ -11,7 +11,8 @@ to reach the other.
 This module is that statement. It owns:
 
   * the token use each request-authentication path requires,
-  * the expiry leeway each path passes to the validator,
+  * the expiry leeway both paths pass to the validator — one value, pinned to
+    zero, with the per-client knob retired and its old key rejected at boot,
   * the transient/definitive split applied to a ``TokenValidationError``, and
   * the fixed outcome vocabulary both paths report as metrics.
 
@@ -26,9 +27,6 @@ it must not import any of them back. Flask plus stdlib only.
 
 Contract table and the intentional/accidental classification: docs/AUTH_CONTRACT.md
 """
-
-from flask import current_app
-
 
 # --- Paths -----------------------------------------------------------------
 # Server-side facts, not client-supplied labels. A request is "mobile" because
@@ -48,31 +46,73 @@ IDENTITY_TOKEN_USE = "id"
 
 
 # --- Expiry leeway ---------------------------------------------------------
-# The web path is PINNED to zero: it has never had an operator knob, and adding
-# one silently would widen the window in which an expired token is still
-# accepted. The mobile path keeps its existing configurable knob (default 0,
-# maximum 300 — app/services/mobile_credentials.py).
+# ONE canonical value for request authentication, and it is zero on every path.
+# Leeway is the window in which an already-expired token is still accepted, so
+# a non-zero value is a security decision, not a tuning knob. Web never had a
+# knob; mobile's was retired here rather than generalised, because generalising
+# it would have let a mobile-named setting widen the browser's expired-token
+# window too.
 #
-# This asymmetry is real and is the one accidental difference PR3 found. It is
-# kept here rather than fixed here so the two values are decided in ONE place
-# and cannot silently diverge further; converging them is a reviewer decision
-# recorded in docs/AUTH_CONTRACT.md, not a side effect of this refactor.
-WEB_CLOCK_SKEW_SECONDS = 0
-MOBILE_CLOCK_SKEW_CONFIG_KEY = "MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS"
+# If production evidence ever shows non-zero leeway is genuinely required, that
+# is a separate security-reviewed change applying to BOTH paths at once — not a
+# per-client setting. docs/AUTH_CONTRACT.md §3 records the reasoning.
+REQUEST_CLOCK_SKEW_SECONDS = 0
+
+# Retired 2026-08-03. Kept as a named constant because a retired setting must
+# be REJECTED rather than ignored: a host still carrying a non-zero value
+# believes mobile tolerates expired tokens, and silently dropping it would make
+# the documentation and the running system disagree without anyone noticing.
+RETIRED_CLOCK_SKEW_KEY = "MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS"
 
 
-def _mobile_skew(config):
-    try:
-        return int(config.get(MOBILE_CLOCK_SKEW_CONFIG_KEY, 0) or 0)
-    except (TypeError, ValueError):
-        return 0
+class AuthContractConfigurationError(RuntimeError):
+    """A retired authentication setting is still configured on this host."""
 
 
 def validation_clock_skew_seconds(path):
-    """Return the expiry leeway ``path`` passes to ``cognito_jwt``."""
-    if path == MOBILE:
-        return _mobile_skew(current_app.config)
-    return WEB_CLOCK_SKEW_SECONDS
+    """Return the expiry leeway ``path`` passes to ``cognito_jwt``.
+
+    ``path`` is still required, and the answer is deliberately independent of
+    it: a caller has to name which boundary it is, and gets told that both get
+    the same number. Config is not consulted — there is nothing to consult.
+    """
+    if path not in PATHS:
+        raise ValueError(f"unknown authentication path: {path!r}")
+    return REQUEST_CLOCK_SKEW_SECONDS
+
+
+def enforce_retired_settings(environ):
+    """Refuse to boot while a retired authentication setting is still set.
+
+    Checked UNCONDITIONALLY — not behind ``MOBILE_AUTH_ENABLED``. A host with
+    the mobile flag off can still be carrying a stale non-zero value, and that
+    is precisely the value that would take effect at the worst possible moment:
+    the day mobile auth is switched on. Failing here, with the deploy health
+    gate able to roll back, is much cheaper than discovering it during a
+    rollout.
+
+    Accepted: absent, or an explicit ``0`` (which agrees with the pinned
+    contract). Everything else — non-zero, empty, non-numeric — is rejected,
+    matching the strictness the setting already had before retirement.
+    """
+    raw = environ.get(RETIRED_CLOCK_SKEW_KEY)
+    if raw is None:
+        return
+    value = raw.strip()
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise AuthContractConfigurationError(
+            f"{RETIRED_CLOCK_SKEW_KEY} is retired and its value "
+            f"{raw!r} is not a valid integer. Remove the line from the host "
+            f".env — see docs/AUTH_CONTRACT.md §3.") from None
+    if parsed != REQUEST_CLOCK_SKEW_SECONDS:
+        raise AuthContractConfigurationError(
+            f"{RETIRED_CLOCK_SKEW_KEY}={parsed} is retired and would have made "
+            f"mobile accept tokens up to {parsed}s past expiry while web "
+            f"accepts none. Request authentication is now pinned to "
+            f"{REQUEST_CLOCK_SKEW_SECONDS}s on both paths. Remove the line "
+            f"from the host .env — see docs/AUTH_CONTRACT.md §3.")
 
 
 def validate_provider_token(path, token, expected_use=REQUEST_TOKEN_USE):
@@ -177,38 +217,31 @@ def record_outcome(path, outcome):
 
 # --- Boot-time visibility --------------------------------------------------
 
-def contract_state(config=None):
+def contract_state():
     """Names and integers only — safe for logs and /health?deep=1.
 
-    ``config`` is passed explicitly at boot, where there is no app context yet;
-    inside a request it defaults to the running application's config.
+    Every value is a property of the deployed build rather than of the host
+    `.env`, which is exactly what makes it worth publishing: an operator can
+    confirm the running process holds the pinned contract instead of an older
+    one that still honoured a per-client knob.
     """
-    mobile_skew = (_mobile_skew(config) if config is not None
-                   else validation_clock_skew_seconds(MOBILE))
     return {
         "request_token_use": REQUEST_TOKEN_USE,
-        "web_clock_skew_seconds": WEB_CLOCK_SKEW_SECONDS,
-        "mobile_clock_skew_seconds": mobile_skew,
-        "clock_skew_aligned": mobile_skew == WEB_CLOCK_SKEW_SECONDS,
+        "request_clock_skew_seconds": REQUEST_CLOCK_SKEW_SECONDS,
+        "clock_skew_configurable": False,
+        "paths": list(PATHS),
     }
 
 
 def log_contract_state(app):
-    """Emit the contract on one boot line, loudly if the paths disagree.
+    """Emit the contract on one boot line.
 
-    The point is that a divergence is never silent again. An operator who sets
-    MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS is widening the expired-token
-    window for mobile only, and that decision should be visible in the deploy
-    log rather than discovered during an incident.
+    There is no divergence branch any more: a host that still configures the
+    retired knob does not reach this line, because enforce_retired_settings
+    stops the boot first.
     """
-    state = contract_state(app.config)
+    state = contract_state()
     app.logger.info(
-        "[AUTH_CONTRACT] token_use=%s web_skew=%ss mobile_skew=%ss aligned=%s",
-        state["request_token_use"], state["web_clock_skew_seconds"],
-        state["mobile_clock_skew_seconds"],
-        "yes" if state["clock_skew_aligned"] else "NO")
-    if not state["clock_skew_aligned"]:
-        app.logger.warning(
-            "[AUTH_CONTRACT] mobile accepts tokens up to %ss past expiry while "
-            "web accepts none. Intentional? See docs/AUTH_CONTRACT.md.",
-            state["mobile_clock_skew_seconds"])
+        "[AUTH_CONTRACT] token_use=%s skew=%ss paths=%s configurable=no",
+        state["request_token_use"], state["request_clock_skew_seconds"],
+        ",".join(state["paths"]))

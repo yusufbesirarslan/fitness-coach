@@ -185,8 +185,11 @@ def validate_mobile_auth_config(app) -> None:
                              positive=True, maximum=60)
     leeway = _integer_setting('MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS', 60,
                               positive=False, maximum=3600)
-    skew = _integer_setting('MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS', 0,
-                            positive=False, maximum=300)
+    # MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS was read here. It is retired:
+    # request-authentication leeway is pinned to zero on both clients by
+    # app/services/auth_contract.py, and a host still carrying a live value is
+    # rejected at boot rather than ignored (enforce_retired_settings). Nothing
+    # writes the key into app.config any more, so nothing can read it back.
     retention = _integer_setting(
         'MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS', 300,
         positive=False, maximum=86400)
@@ -206,7 +209,6 @@ def validate_mobile_auth_config(app) -> None:
         MOBILE_AUTH_REFRESH_ABSOLUTE_DAYS=absolute_days,
         MOBILE_AUTH_REFRESH_RETRY_GRACE_SECONDS=grace,
         MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS=leeway,
-        MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS=skew,
         MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS=retention,
         MOBILE_AUTH_REFRESH_RATELIMIT=os.environ.get(
             'MOBILE_AUTH_REFRESH_RATELIMIT', '30 per minute; 300 per hour'),

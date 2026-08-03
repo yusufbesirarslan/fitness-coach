@@ -70,8 +70,15 @@ def calculate_access_expiry(now, family_absolute_expires_at):
 
 def _coverage(now, absolute_expires_at):
     access_exp = calculate_access_expiry(now, absolute_expires_at)
-    deadline = access_exp + timedelta(seconds=current_app.config[
-        "MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS"])
+    # The provider token must stay valid for the whole life of the opaque
+    # access credential. That used to be `access_exp + validation clock skew`,
+    # because a token accepted N seconds past expiry needed N more seconds of
+    # provider coverage. With leeway pinned to zero on both paths
+    # (app/services/auth_contract.py) the skew term is structurally zero, so
+    # the deadline IS the credential expiry. Behaviour is unchanged for every
+    # host that used the default; a host that had set the retired key no longer
+    # boots at all rather than silently getting different coverage here.
+    deadline = access_exp
     trigger = max(
         now + timedelta(seconds=current_app.config[
             "MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS"]),

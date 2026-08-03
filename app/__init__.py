@@ -210,7 +210,7 @@ def create_app():
             # gerekçe: leeway host .env'inde yaşar, repodan okunamaz. Yalnızca
             # ad + tamsayı; token/başlık/kullanıcı ASLA (docs/AUTH_CONTRACT.md).
             from app.services.auth_contract import contract_state
-            body["auth_contract"] = contract_state(app.config)
+            body["auth_contract"] = contract_state()
             body["capacity"] = _capacity_snapshot()
             _record_capacity_gauges(body["capacity"])
             _record_dependency_gauges(body)

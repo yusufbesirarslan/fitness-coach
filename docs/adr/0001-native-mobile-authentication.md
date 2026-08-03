@@ -8,6 +8,15 @@
   path shares with the web path, and the machine-readable error envelope below
   recorded there as an intentional difference
 
+> **Amendment (2026-08-03, hardening PR3).** The body below is kept as the
+> record of the decision as accepted. One setting it describes has since been
+> retired: `MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS` no longer exists.
+> Request-authentication expiry leeway is pinned to `0` on both clients, so
+> every `+ MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS` term in the coverage
+> formulas below is now structurally zero and the deadline equals the credential
+> expiry. A host that still sets the key is rejected at boot. Rationale and
+> migration: [../AUTH_CONTRACT.md](../AUTH_CONTRACT.md) §3.
+
 ## Context
 
 AxisAI web authentication uses Flask-Login and a signed browser cookie containing

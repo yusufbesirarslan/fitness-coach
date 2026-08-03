@@ -277,48 +277,124 @@ def test_mobile_boundary_never_accepts_a_browser_session(client, shared_user):
 
 
 # ---------------------------------------------------------------------------
-# Clock skew — the one accidental difference PR3 found.
+# Clock skew — one canonical value, pinned to zero, knob retired.
 # ---------------------------------------------------------------------------
 
-def test_web_clock_skew_cannot_be_configured(app):
-    """Web has no leeway knob and must not acquire one implicitly. Setting the
-    mobile knob must not widen the browser path's expired-token window."""
-    app.config[auth_contract.MOBILE_CLOCK_SKEW_CONFIG_KEY] = 120
+def test_both_paths_use_exactly_zero_leeway(app):
+    """One canonical value for request authentication, and it is zero."""
     with app.test_request_context("/"):
-        assert auth_contract.validation_clock_skew_seconds(
-            auth_contract.WEB) == 0
-        assert auth_contract.validation_clock_skew_seconds(
-            auth_contract.MOBILE) == 120
+        for path in auth_contract.PATHS:
+            assert auth_contract.validation_clock_skew_seconds(path) == 0
 
 
-def test_divergent_clock_skew_is_reported_not_silent(app, caplog):
-    """The asymmetry is allowed; being invisible is not. An operator who widens
-    the mobile window should see it in the deploy log and in deep health."""
-    app.config[auth_contract.MOBILE_CLOCK_SKEW_CONFIG_KEY] = 120
-    state = auth_contract.contract_state(app.config)
-    assert state["clock_skew_aligned"] is False
-    assert state["mobile_clock_skew_seconds"] == 120
-    with caplog.at_level("WARNING"):
+def test_supplying_the_retired_setting_cannot_reintroduce_leeway(app):
+    """Even if the retired key reappears in config — through a stale deploy
+    artefact, a fixture, or a future refactor that resurrects it — neither path
+    reads it. The pinning is structural, not a default that config can beat."""
+    app.config[auth_contract.RETIRED_CLOCK_SKEW_KEY] = 120
+    with app.test_request_context("/"):
+        for path in auth_contract.PATHS:
+            assert auth_contract.validation_clock_skew_seconds(path) == 0
+
+
+def test_supplying_the_retired_setting_does_not_change_the_wire_call(
+        client, raw_client, probe_route, web_session, mobile_session, app,
+        monkeypatch):
+    """The end-to-end version of the assertion above: with the retired key set,
+    both middlewares still call the validator with leeway 0."""
+    app.config[auth_contract.RETIRED_CLOCK_SKEW_KEY] = 300
+    seen = []
+
+    def capture(token, expected_use, leeway_seconds=0):
+        seen.append(leeway_seconds)
+        return _valid_claims()
+
+    monkeypatch.setattr(cognito_jwt, "validate_token", capture)
+    assert client.get(probe_route).status_code == 200
+    assert raw_client.get(
+        "/api/v1/account/me",
+        headers=_mobile_headers(mobile_session)).status_code == 200
+    assert seen == [0, 0]
+
+
+def test_unknown_path_is_rejected_rather_than_defaulted(app):
+    """A typo must not silently resolve to "some path's" leeway."""
+    with app.test_request_context("/"):
+        with pytest.raises(ValueError):
+            auth_contract.validation_clock_skew_seconds("desktop")
+
+
+@pytest.mark.parametrize("environ", [
+    {},
+    {auth_contract.RETIRED_CLOCK_SKEW_KEY: "0"},
+    {auth_contract.RETIRED_CLOCK_SKEW_KEY: " 0 "},
+])
+def test_absent_or_zero_retired_setting_still_boots(environ):
+    """Migration must not break hosts that never set it, or that set it to the
+    value the contract now pins anyway."""
+    auth_contract.enforce_retired_settings(environ)
+
+
+@pytest.mark.parametrize("value", ["1", "120", "300", "-1", "301"])
+def test_non_zero_retired_setting_refuses_to_boot(value):
+    """A retired setting that is silently ignored is worse than one that is
+    still honoured: the host believes mobile tolerates expired tokens and
+    nothing contradicts it. Fail the boot instead — the deploy health gate then
+    rolls back rather than shipping a system that disagrees with its own docs.
+    """
+    with pytest.raises(auth_contract.AuthContractConfigurationError) as exc:
+        auth_contract.enforce_retired_settings(
+            {auth_contract.RETIRED_CLOCK_SKEW_KEY: value})
+    message = str(exc.value)
+    assert auth_contract.RETIRED_CLOCK_SKEW_KEY in message
+    assert "docs/AUTH_CONTRACT.md" in message
+
+
+@pytest.mark.parametrize("value", ["", "   ", "true", "0.5", "60s"])
+def test_malformed_retired_setting_refuses_to_boot(value):
+    """Same strictness the setting had before retirement — a malformed value
+    was never read as zero, and must not start being read as zero now."""
+    with pytest.raises(auth_contract.AuthContractConfigurationError):
+        auth_contract.enforce_retired_settings(
+            {auth_contract.RETIRED_CLOCK_SKEW_KEY: value})
+
+
+def test_retired_setting_is_checked_independently_of_the_mobile_flag():
+    """Checked unconditionally, NOT behind MOBILE_AUTH_ENABLED.
+
+    A host with mobile auth off can still carry a stale non-zero value, and
+    that is exactly the value that would take effect on the day mobile auth is
+    switched on — the worst possible moment to discover it.
+    """
+    with pytest.raises(auth_contract.AuthContractConfigurationError):
+        auth_contract.enforce_retired_settings({
+            "MOBILE_AUTH_ENABLED": "0",
+            auth_contract.RETIRED_CLOCK_SKEW_KEY: "120",
+        })
+
+
+def test_nothing_writes_the_retired_key_into_config(app):
+    """The key must not exist in a booted application's config at all: a dead
+    setting that still appears operational is what lets docs and behaviour
+    drift apart."""
+    assert auth_contract.RETIRED_CLOCK_SKEW_KEY not in app.config
+
+
+def test_boot_line_states_the_pinned_contract(app, caplog):
+    with caplog.at_level("INFO"):
         auth_contract.log_contract_state(app)
     assert "[AUTH_CONTRACT]" in caplog.text
-    assert "past expiry" in caplog.text
-
-
-def test_aligned_clock_skew_logs_no_warning(app, caplog):
-    app.config[auth_contract.MOBILE_CLOCK_SKEW_CONFIG_KEY] = 0
-    assert auth_contract.contract_state(app.config)["clock_skew_aligned"] is True
-    with caplog.at_level("WARNING"):
-        auth_contract.log_contract_state(app)
-    assert "past expiry" not in caplog.text
+    assert "skew=0s" in caplog.text
+    assert "configurable=no" in caplog.text
 
 
 def test_deep_health_publishes_the_contract_without_secrets(client):
     body = client.get("/health?deep=1").json
     assert body["auth_contract"] == {
         "request_token_use": "access",
-        "web_clock_skew_seconds": 0,
-        "mobile_clock_skew_seconds": 0,
-        "clock_skew_aligned": True,
+        "request_clock_skew_seconds": 0,
+        "clock_skew_configurable": False,
+        "paths": ["web", "mobile"],
     }
 
 
@@ -521,10 +597,22 @@ def test_documented_contract_lists_every_path_and_flag():
     """The doc is the operator-facing half of this contract; a path that exists
     in code but not in the table is a path nobody reviews."""
     doc = (REPO_ROOT / "docs" / "AUTH_CONTRACT.md").read_text(encoding="utf-8")
-    for token in (auth_contract.MOBILE_CLOCK_SKEW_CONFIG_KEY,
+    for token in (auth_contract.RETIRED_CLOCK_SKEW_KEY,
                   "MOBILE_AUTH_ENABLED", "jwks_unavailable",
                   *auth_contract.VALIDATOR_CALL_SITES):
         assert token in doc, f"docs/AUTH_CONTRACT.md does not mention {token}"
+
+
+def test_retirement_migration_is_documented_for_the_operator():
+    """A boot-blocking setting is only safe to introduce if the operator can
+    find out how to clear it before deploying."""
+    contract = (REPO_ROOT / "docs" / "AUTH_CONTRACT.md").read_text(
+        encoding="utf-8")
+    rollout = (REPO_ROOT / "docs" / "ROLLOUT.md").read_text(encoding="utf-8")
+    for doc, name in ((contract, "AUTH_CONTRACT.md"), (rollout, "ROLLOUT.md")):
+        assert auth_contract.RETIRED_CLOCK_SKEW_KEY in doc, (
+            f"docs/{name} does not name the retired setting")
+    assert "retired" in rollout.lower()
 
 
 def test_web_session_row_is_untouched_by_a_mobile_rejection(
