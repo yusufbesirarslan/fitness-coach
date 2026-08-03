@@ -626,13 +626,55 @@ def test_training_planning_import_allowlist_blocks_encoder_bypasses(tmp_path):
     }
 
 
+def _imported_names(path):
+    """Every fully-qualified name a module imports, from its AST."""
+    return {name for name, _ in _python_imports(Path(path))}
+
+
+def _service_modules(names):
+    """Collapse `app.services.x.Symbol` down to `app.services.x`."""
+    return {".".join(name.split(".")[:3]) for name in names
+            if name.startswith("app.services.")}
+
+
 def test_mobile_auth_dependency_direction_is_one_way():
-    api = Path("app/blueprints/mobile_api.py").read_text(encoding="utf-8")
-    middleware = Path("app/mobile_auth_middleware.py").read_text(encoding="utf-8")
-    service = Path("app/services/mobile_auth.py").read_text(encoding="utf-8")
-    assert "from app.models" not in api + middleware
-    assert "cognito_service" not in api + middleware
-    assert "from app.services import mobile_auth" in api
-    assert "from app.services import mobile_auth" in middleware
-    assert "from app.models import" in service
-    assert "cognito_service" in service
+    """Transport and boundary depend on the service; the service never depends
+    back, and neither upper layer reaches past it into the ORM or the provider
+    client.
+
+    Structural on purpose. The previous form matched source strings, so a
+    perfectly legal grouped import — `from app.services import auth_contract,
+    mobile_auth` — broke it even though the dependency graph was unchanged. A
+    boundary test that fails on formatting trains people to edit imports to
+    please the test, which is the opposite of what it is for.
+    """
+    api = _imported_names("app/blueprints/mobile_api.py")
+    middleware = _imported_names("app/mobile_auth_middleware.py")
+    service = _imported_names("app/services/mobile_auth.py")
+
+    # Downward: both upper layers reach the service…
+    assert "app.services.mobile_auth" in api
+    assert "app.services.mobile_auth" in middleware
+
+    # …and stop there. No ORM and no provider client above the service, so the
+    # service stays the only place mobile session state and Cognito calls meet.
+    for name, names in (("mobile_api", api), ("mobile_auth_middleware", middleware)):
+        assert not {n for n in names if n.startswith("app.models")}, (
+            f"{name} imports the ORM directly")
+        assert "app.services.cognito_service" not in names, (
+            f"{name} imports the provider client directly")
+
+    # The exact service dependencies of each upper layer, so a new one has to be
+    # added here deliberately rather than appearing by accident.
+    assert _service_modules(api) == {
+        "app.services.mobile_auth", "app.services.mobile_credentials"}
+    assert _service_modules(middleware) == {
+        "app.services.auth_contract", "app.services.mobile_auth"}
+
+    # The service owns both of the things its callers may not touch.
+    assert {n for n in service if n.startswith("app.models")}
+    assert "app.services.cognito_service" in service
+
+    # Upward: the service must never import its own callers.
+    assert "app.mobile_auth_middleware" not in service
+    assert "app.blueprints.mobile_api" not in service

@@ -31,7 +31,9 @@ def cognito_env(monkeypatch):
     # doğrulayıcı, token'daki kullanıcı adından tutarlı sub üretir
     # (id-<username> → sub-<username>).
     monkeypatch.setattr(cognito_jwt, "validate_token",
-                        lambda tok, use: {"sub": "sub-" + tok.removeprefix("id-").removeprefix("acc-")})
+                        lambda tok, use, **kw: {
+                            "sub": "sub-" + tok.removeprefix(
+                                "id-").removeprefix("acc-")})
     return monkeypatch
 
 
@@ -49,7 +51,7 @@ def test_login_compares_sub_from_verified_claims(client, cognito_env, cog_accoun
     # kayıtla eşleşmiyorsa giriş reddedilmeli — aksi hâlde bir refactor
     # doğrulamayı sessizce anlamsızlaştırır.
     cognito_env.setattr(cognito_jwt, "validate_token",
-                        lambda tok, use: {"sub": "baskasi"})
+                        lambda tok, use, **kw: {"sub": "baskasi"})
     resp = client.post("/login", json={"username": "e2e", "password": "x"})
     assert resp.status_code == 401
     assert CognitoSession.query.count() == 0

@@ -149,7 +149,11 @@ def test_mobile_auth_config_loads_approved_defaults(monkeypatch):
     assert app.config['MOBILE_AUTH_REFRESH_ABSOLUTE_DAYS'] == 7
     assert app.config['MOBILE_AUTH_REFRESH_RETRY_GRACE_SECONDS'] == 10
     assert app.config['MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS'] == 60
-    assert app.config['MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS'] == 0
+    # Retired: request-authentication leeway is pinned to zero for both clients
+    # by app/services/auth_contract.py, so nothing writes this key any more.
+    # A dead-but-present config key is what lets documentation and behaviour
+    # drift apart, so its ABSENCE is asserted rather than its value.
+    assert 'MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS' not in app.config
     assert app.config['MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS'] == 300
     assert app.config['MOBILE_AUTH_REFRESH_RATELIMIT'] == '30 per minute; 300 per hour'
     assert app.config['MOBILE_AUTH_LOGOUT_RATELIMIT'] == '30 per minute'
@@ -161,7 +165,6 @@ def test_mobile_auth_config_loads_approved_defaults(monkeypatch):
     ('MOBILE_AUTH_REFRESH_ABSOLUTE_DAYS', '0'),
     ('MOBILE_AUTH_REFRESH_RETRY_GRACE_SECONDS', '0'),
     ('MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS', '-1'),
-    ('MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS', '-1'),
     ('MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS', '-1'),
 ])
 def test_mobile_auth_config_rejects_unsafe_numeric_values(monkeypatch, name, value):
@@ -177,7 +180,6 @@ def test_mobile_auth_config_rejects_unsafe_numeric_values(monkeypatch, name, val
     ('MOBILE_AUTH_REFRESH_ABSOLUTE_DAYS', '8'),
     ('MOBILE_AUTH_REFRESH_RETRY_GRACE_SECONDS', '61'),
     ('MOBILE_AUTH_COGNITO_EXPIRY_LEEWAY_SECONDS', '3601'),
-    ('MOBILE_AUTH_VALIDATION_CLOCK_SKEW_SECONDS', '301'),
     ('MOBILE_AUTH_DERIVATION_KEY_RETENTION_BUFFER_SECONDS', '86401'),
 ])
 def test_mobile_auth_config_rejects_values_above_reviewed_bounds(

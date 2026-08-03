@@ -163,7 +163,9 @@ def login(client, monkeypatch):
     monkeypatch.setattr(
         cognito_jwt,
         "validate_token",
-        lambda token, use: {
+        # **kw: the canonical caller (app/services/auth_contract.py) passes
+        # leeway_seconds; the stub must accept the real signature.
+        lambda token, use, **kw: {
             "sub": f"sub-{token.removeprefix('id-').removeprefix('acc-')}"
         },
     )

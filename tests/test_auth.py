@@ -256,7 +256,10 @@ def cognito_native(monkeypatch):
     monkeypatch.setattr(cognito_service, "confirm_sign_up", fake_confirm)
     monkeypatch.setattr(cognito_service, "authenticate", fake_authenticate)
     # JWKS doğrulaması testte sahte token'ları geçsin (kripto testi test_cognito_jwt'de).
-    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use: {"sub": tok.replace("id-", "sub-").replace("acc-", "sub-")})
+    monkeypatch.setattr(
+        cognito_jwt, "validate_token",
+        lambda tok, use, **kw: {
+            "sub": tok.replace("id-", "sub-").replace("acc-", "sub-")})
     return captured
 
 
@@ -541,7 +544,7 @@ def test_login_returns_quest_awarded_when_login_quest_exists(client, make_user, 
 
 def _verified_claims(monkeypatch, sub, email, name="", email_verified=True):
     """cognito_jwt.validate_token'ı TAM (doğrulanmış) claim seti dönecek şekilde kur."""
-    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use: {
+    monkeypatch.setattr(cognito_jwt, "validate_token", lambda tok, use, **kw: {
         "sub": sub, "email": email, "email_verified": email_verified,
         "name": name,
     })
@@ -687,7 +690,7 @@ def test_login_jwks_unavailable_returns_503_not_401(client, cognito_native, monk
     _register(client, "jwksuser")
     client.post("/verify", json={"username": "jwksuser", "code": "123456"})
 
-    def unavailable(tok, use):
+    def unavailable(tok, use, **kw):
         raise cognito_jwt.TokenValidationError("jwks_unavailable")
 
     monkeypatch.setattr(cognito_jwt, "validate_token", unavailable)
