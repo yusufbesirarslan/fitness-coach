@@ -186,12 +186,19 @@ signals are in the registry; the always-applicable ones:
 | `HttpServerErrors` (5xx) by blueprint | `FitX/Runtime` | above the pre-activation baseline |
 | `HttpLatency` p95 by blueprint | `FitX/Runtime` | regression versus baseline |
 | `HttpOverload` (503) | `FitX/Runtime` | any sustained rise — thread starvation |
-| `ThreadReserve` | `FitX/Runtime` | approaching its floor |
+| `ThreadReserve` | `FitX/Runtime` | approaching its floor (`< 2` for 2 consecutive periods) |
 | Feature-specific log state | container logs | any `state=error` |
 
 `HttpOverload` (503, deliberate shedding) and `HttpServerErrors` (5xx, defect)
 are separate counters on purpose — merging them makes healthy load-shedding
 look like an outage.
+
+`ThreadReserve` is emitted as a real gauge from the runtime-metrics flush thread
+as of Hardening PR4 — before that it was named here and in the
+`MOBILE_AUTH_ENABLED` lifecycle record as an abort trigger while nothing ever
+published it. It measures `FITX_WEB_THREADS − active AI permits − active scrape
+permits`; the floor is `2`. Its prerequisite is `RUNTIME_METRICS_ENABLED=1`.
+Capacity formula, per-path overload behavior and known limits: `docs/CAPACITY.md`.
 
 ---
 

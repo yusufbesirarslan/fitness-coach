@@ -3,6 +3,9 @@
 import base64
 import json
 import logging
+import os
+import threading
+import time
 import urllib.request
 
 from joserfc import jwt
@@ -18,6 +21,28 @@ _ISSUER = f"https://cognito-idp.{COGNITO_REGION}.amazonaws.com/{COGNITO_USER_POO
 _JWKS_URL = f"{_ISSUER}/.well-known/jwks.json"
 _jwks_cache = None
 
+# Hardening PR4 — zorunlu JWKS tazelemesi TEK-UÇUŞ + soğuma penceresi altındadır.
+#
+# Önceden: önbellekte olmayan her `kid` KOŞULSUZ bir `force=True` tazeleme
+# tetikliyordu; yani 5 sn'lik BLOKLAYICI bir ağ çağrısı. Bu çağrı hiçbir
+# eşzamanlılık kapısının arkasında DEĞİLDİR ve thread rezervi aritmetiğinde
+# SAYILMAZ. Uydurma `kid` taşıyan bir Bearer token'ı üretmek bedava olduğundan,
+# kimliği doğrulanmamış bir istek akışı her istek başına bir web thread'ini 5 sn
+# park ettirebiliyordu → 8 thread tükenir, /health kuyruğa girer, deploy health
+# gate'i sahte rollback tetikler. Tam olarak A1/I1 rezervinin engellemek için var
+# olduğu senaryo, ama auth sınırından.
+#
+# Şimdi: pencere başına EN FAZLA bir tazeleme, ve tazelemeyi bekleyen thread'ler
+# kilidi aldıklarında ağ'a çıkmadan önce yeniden bakar. Bilinen sınır: gerçek bir
+# anahtar rotasyonu bir tazelemeden hemen SONRA olursa, yeni `kid` soğuma
+# penceresi kadar reddedilebilir. Cognito rotasyon sırasında eski anahtarla
+# imzalamayı sürdürür ve pencere sınırlıdır; sınırsız thread park etmeye kıyasla
+# bilinçli takas (docs/CAPACITY.md).
+JWKS_FORCED_REFRESH_COOLDOWN_SECONDS = max(
+    0.0, float(os.getenv("JWKS_FORCED_REFRESH_COOLDOWN_SECONDS", "60")))
+_refresh_lock = threading.Lock()
+_last_forced_refresh = None  # monotonic; None = bu süreçte hiç zorlanmadı
+
 
 class TokenValidationError(Exception):
     def __init__(self, reason):
@@ -26,8 +51,9 @@ class TokenValidationError(Exception):
 
 
 def _reset_cache():
-    global _jwks_cache
+    global _jwks_cache, _last_forced_refresh
     _jwks_cache = None
+    _last_forced_refresh = None
 
 
 def _load_jwks(force=False):
@@ -60,20 +86,48 @@ def _unverified_kid(token):
         raise TokenValidationError("malformed") from exc
 
 
+def _key_by_kid(key_set, kid):
+    if key_set is None:
+        return None
+    try:
+        return key_set.get_by_kid(kid)
+    except JoseError:
+        return None
+
+
+def _forced_refresh_for(kid):
+    """Bilinmeyen bir `kid` için EN FAZLA bir tazeleme uçur, sonucu döndür.
+
+    Kilit ağ çağrısını kapsar (tek-uçuş): aynı anda gelen N bilinmeyen-kid
+    isteği N ayrı 5 sn'lik fetch yerine TEK fetch'i paylaşır. Kilidi bekleyen
+    thread'ler önce önbelleğe yeniden bakar — kazanan thread anahtarı zaten
+    getirdiyse ağ'a hiç çıkılmaz. Soğuma penceresi içindeyken tazeleme
+    ATLANIR ve `None` dönülür (çağıran bunu kesin `invalid_key` reddine çevirir).
+    """
+    global _last_forced_refresh
+    with _refresh_lock:
+        # Zorlamasız `_load_jwks()` önbelleği döndürür; kilidi bekleyen thread'ler
+        # böylece kazanan thread'in getirdiği TAZE seti görür ve ağ'a çıkmaz.
+        key = _key_by_kid(_load_jwks(), kid)
+        if key is not None:
+            return key
+        now = time.monotonic()
+        if (_last_forced_refresh is not None
+                and now - _last_forced_refresh
+                < JWKS_FORCED_REFRESH_COOLDOWN_SECONDS):
+            return None
+        # Zaman damgası fetch'ten ÖNCE yazılır: JWKS ucu düşmüşse de soğuma
+        # işler, yoksa her istek düşen bir uca 5 sn'lik yeni bir çağrı açardı.
+        _last_forced_refresh = now
+        return _key_by_kid(_load_jwks(force=True), kid)
+
+
 def _select_key(token):
     kid = _unverified_kid(token)
-    cached = _load_jwks()
-    try:
-        key = cached.get_by_kid(kid)
-    except JoseError:
-        key = None
+    key = _key_by_kid(_load_jwks(), kid)
     if key is not None:
         return key
-    fresh = _load_jwks(force=True)
-    try:
-        key = fresh.get_by_kid(kid)
-    except JoseError:
-        key = None
+    key = _forced_refresh_for(kid)
     if key is None:
         raise TokenValidationError("invalid_key")
     return key

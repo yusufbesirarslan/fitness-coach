@@ -54,6 +54,63 @@ _ai_slots = threading.BoundedSemaphore(AI_MAX_CONCURRENCY)
 _model_slots = threading.BoundedSemaphore(AI_MODEL_MAX_CONCURRENCY)
 _scrape_slots = threading.BoundedSemaphore(SCRAPE_MAX_CONCURRENCY)
 
+# Hardening PR4: rezerv artık YALNIZCA boot-zamanı bir aritmetik değil, ölçülen
+# bir büyüklüktür. `docs/ROLLOUT.md` ve MOBILE_AUTH_ENABLED yaşam döngüsü kaydı
+# rollout'u durdurma sinyali olarak "ThreadReserve taban değerine yaklaşıyor"
+# diyordu ama böyle bir gauge HİÇ yayınlanmıyordu — belgelenmiş ama var olmayan
+# bir abort tetikleyicisi. Aşağıdaki sayaçlar semaforların TUTULAN izinlerini
+# sayar; `capacity_snapshot()` bunu rezerve çevirir, flush thread'i gauge olarak
+# yayar. Sayaçlar semaforun kendi durumunu ÇOĞALTMAZ: karar hâlâ semaforundur,
+# bunlar yalnızca gözlemdir (kaydın patlaması bir isteği ASLA düşürmez).
+_active_lock = threading.Lock()
+_active = {"ai": 0, "model": 0, "scrape": 0}
+
+
+def _enter(kind):
+    with _active_lock:
+        _active[kind] += 1
+
+
+def _leave(kind):
+    with _active_lock:
+        if _active[kind] > 0:
+            _active[kind] -= 1
+
+
+def capacity_snapshot():
+    """Anlık thread kapasitesi görünümü (süreç-içi, ağ'a çıkmaz).
+
+    `model` izinleri `ai` izinlerinin İÇİNDE alınır (her model çağrısı zaten bir
+    route kapısı ya da `blocking_concurrency_slot` tutan bir thread'den gelir),
+    bu yüzden rezerv hesabından İKİNCİ KEZ düşülmez — düşülseydi rezerv olduğundan
+    düşük görünür ve sahte alarm üretirdi.
+    """
+    with _active_lock:
+        ai_active = _active["ai"]
+        model_active = _active["model"]
+        scrape_active = _active["scrape"]
+    return {
+        "threads": WEB_THREADS,
+        "ai_active": ai_active,
+        "model_active": model_active,
+        "scrape_active": scrape_active,
+        "thread_reserve": WEB_THREADS - ai_active - scrape_active,
+        "thread_reserve_floor": THREAD_RESERVE_MIN,
+    }
+
+
+def record_capacity_gauges():
+    """Kapasite anlık görünümünü gauge olarak yaz (flush thread'inden çağrılır).
+
+    Boyut YOK: bunlar süreç-geneli tekil sinyallerdir → kardinalite sabit kalır.
+    """
+    from app.services import runtime_metrics
+    snapshot = capacity_snapshot()
+    runtime_metrics.set_gauge("ThreadReserve", snapshot["thread_reserve"])
+    runtime_metrics.set_gauge("AiSlotsActive", snapshot["ai_active"])
+    runtime_metrics.set_gauge("AiModelSlotsActive", snapshot["model_active"])
+    runtime_metrics.set_gauge("ScrapeSlotsActive", snapshot["scrape_active"])
+
 
 class BlockingConcurrencyLimit(RuntimeError):
     pass
@@ -75,9 +132,11 @@ def blocking_concurrency_slot(wait_seconds=None):
     wait = AI_GATE_WAIT_SECONDS if wait_seconds is None else wait_seconds
     if not _acquire_before_deadline(_ai_slots, wait):
         raise BlockingConcurrencyLimit("shared blocking capacity exhausted")
+    _enter("ai")
     try:
         yield
     finally:
+        _leave("ai")
         _ai_slots.release()
 
 
@@ -140,6 +199,7 @@ def model_concurrency_slot(
     if not acquired:
         raise BlockingConcurrencyLimit("model blocking capacity exhausted")
 
+    _enter("model")
     call_start = time.monotonic() if metrics_enabled else None
     outcome = "success"
     try:
@@ -148,6 +208,7 @@ def model_concurrency_slot(
         outcome = _provider_error_category(exc)
         raise
     finally:
+        _leave("model")
         _model_slots.release()
         if metrics_enabled:
             try:
@@ -166,14 +227,56 @@ def model_concurrency_slot(
 
 
 
+def _db_pool_problems(app):
+    """Havuz kapasitesi thread kapasitesini karşılıyor mu?
+
+    Bir istek thread'i işini yaparken bir DB bağlantısı TUTAR. Havuz
+    (`pool_size + max_overflow`) thread sayısının altındaysa, thread'ler birbirini
+    havuzda bekler: kapılar sağlayıcı beklemesini sınırlar ama DB checkout'u
+    sınırsız kalırsa rezerv edilen thread'ler /health'i yine servis EDEMEZ —
+    rezerv kâğıt üzerinde kalırdı. Havuz ayarları yalnızca PostgreSQL'de
+    uygulanır (SQLite lokal/test yolu havuzlamaz), bu yüzden yalnızca config'e
+    yazıldıklarında kontrol edilir.
+    """
+    size = app.config.get("DB_POOL_SIZE")
+    overflow = app.config.get("DB_POOL_MAX_OVERFLOW")
+    if size is None or overflow is None:
+        return []
+    capacity = size + overflow
+    if capacity >= WEB_THREADS:
+        return []
+    return [
+        "db pool invariant failed: "
+        f"pool_size({size}) + max_overflow({overflow}) = {capacity} "
+        f"cannot serve {WEB_THREADS} request threads"
+    ]
+
+
+def blocking_thread_ceiling():
+    """Sağlayıcı beklemesine park edebilecek EN FAZLA istek thread'i.
+
+    Model izinleri route/`blocking_concurrency_slot` izinlerinin İÇİNDE alınır,
+    yani normalde ek thread talebi YARATMAZ. Ama `AI_MODEL_MAX_CONCURRENCY` AYRI
+    yapılandırılabilir bir tavandır: dış kapıdan BÜYÜK bırakılırsa, iç içe geçme
+    ileride herhangi bir yerde bozulduğu anda fazlalık kadar EK thread park
+    edilebilir. Rezerv aritmetiği bu fazlalığı da sayar — böylece invariant
+    "bugünkü çağrı grafiği"ne değil, yapılandırmanın kendisine dayanır.
+    """
+    model_excess = max(0, AI_MODEL_MAX_CONCURRENCY - AI_MAX_CONCURRENCY)
+    return AI_MAX_CONCURRENCY + SCRAPE_MAX_CONCURRENCY + model_excess
+
+
 def enforce_gate_invariants(app):
     """Fail unsafe process-local gate configuration outside development."""
-    reserve = WEB_THREADS - (AI_MAX_CONCURRENCY + SCRAPE_MAX_CONCURRENCY)
+    ceiling = blocking_thread_ceiling()
+    reserve = WEB_THREADS - ceiling
     problems = []
     if reserve < THREAD_RESERVE_MIN:
+        model_excess = max(0, AI_MODEL_MAX_CONCURRENCY - AI_MAX_CONCURRENCY)
         problems.append(
             "thread reserve invariant failed: "
             f"AI({AI_MAX_CONCURRENCY}) + scrape({SCRAPE_MAX_CONCURRENCY}) "
+            f"+ model excess({model_excess}) "
             f"against {WEB_THREADS} threads leaves {reserve}; "
             f"at least {THREAD_RESERVE_MIN} required"
         )
@@ -182,6 +285,7 @@ def enforce_gate_invariants(app):
             "single worker invariant failed: process-local gates require "
             f"FITX_WEB_WORKERS=1, got {WEB_WORKERS}"
         )
+    problems.extend(_db_pool_problems(app))
     if not problems:
         return
 
@@ -203,7 +307,8 @@ def _record_gate_rejection(label):
         pass
 
 
-def _concurrency_gate(fn, semaphore, wait_seconds, max_concurrency, label):
+def _concurrency_gate(fn, semaphore, wait_seconds, max_concurrency, label,
+                      kind):
     @wraps(fn)
     def wrapper(*args, **kwargs):
         if not semaphore.acquire(timeout=wait_seconds):
@@ -216,9 +321,11 @@ def _concurrency_gate(fn, semaphore, wait_seconds, max_concurrency, label):
             resp.status_code = 503
             resp.headers["Retry-After"] = "15"
             return resp
+        _enter(kind)
         try:
             return fn(*args, **kwargs)
         finally:
+            _leave(kind)
             semaphore.release()
 
     # İçe-bakış işareti (test_ai_gate coverage): hangi view'ların kapıyı taşıdığını
@@ -236,7 +343,7 @@ def ai_concurrency_gate(fn):
     kimliksiz/limitli istekler slot tüketmesin.
     """
     return _concurrency_gate(fn, _ai_slots, AI_GATE_WAIT_SECONDS,
-                             AI_MAX_CONCURRENCY, "AI-GATE")
+                             AI_MAX_CONCURRENCY, "AI-GATE", "ai")
 
 
 def ai_stream_concurrency_gate(fn):
@@ -264,13 +371,17 @@ def ai_stream_concurrency_gate(fn):
             resp.headers["Retry-After"] = "15"
             return resp
 
+        _enter("ai")
         released = threading.Event()
 
         def _release():
             # Tam olarak bir kez bırak: BoundedSemaphore çift release'te ValueError
-            # fırlatır ve kapının sayacını kalıcı bozardı.
+            # fırlatır ve kapının sayacını kalıcı bozardı. Aktif sayaç da AYNI
+            # koruma altında düşer — istemci akış ortasında koparsa (call_on_close)
+            # izin ve sayaç birlikte geri döner, kapasite sızmaz.
             if not released.is_set():
                 released.set()
+                _leave("ai")
                 _ai_slots.release()
 
         try:
@@ -296,4 +407,4 @@ def scrape_concurrency_gate(fn):
     """Menü scrape route'ları için AYRI (LLM'den bağımsız) eşzamanlılık kapısı.
     Ağ-bağımlı taramanın AI slotlarını tutmasını önler (INF-5)."""
     return _concurrency_gate(fn, _scrape_slots, SCRAPE_GATE_WAIT_SECONDS,
-                             SCRAPE_MAX_CONCURRENCY, "SCRAPE-GATE")
+                             SCRAPE_MAX_CONCURRENCY, "SCRAPE-GATE", "scrape")

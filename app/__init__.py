@@ -60,12 +60,19 @@ def _capacity_snapshot():
     düşmez (havuz iç görüsü SQLAlchemy sürümüne bağlı bir ayrıntıdır).
     """
     from app.services import ai_gate
+    live = ai_gate.capacity_snapshot()
     snapshot = {
         "workers": ai_gate.WEB_WORKERS,
         "threads": ai_gate.WEB_THREADS,
         "ai_max_concurrency": ai_gate.AI_MAX_CONCURRENCY,
         "ai_model_max_concurrency": ai_gate.AI_MODEL_MAX_CONCURRENCY,
         "scrape_max_concurrency": ai_gate.SCRAPE_MAX_CONCURRENCY,
+        # PR4: yapılandırılmış tavanların YANINDA ölçülen anlık kullanım.
+        "ai_active": live["ai_active"],
+        "ai_model_active": live["model_active"],
+        "scrape_active": live["scrape_active"],
+        "thread_reserve": live["thread_reserve"],
+        "thread_reserve_floor": live["thread_reserve_floor"],
     }
     try:
         pool = db.engine.pool
@@ -115,6 +122,39 @@ def _record_dependency_gauges(body):
             1 if body.get("limiter_storage") == "degraded" else 0)
     except Exception:
         pass
+
+
+def _install_capacity_sampling(app):
+    """Kapasite seviyelerini periyodik flush thread'inden örnekle (PR4).
+
+    İki boşluğu birlikte kapatır:
+    1. `ThreadReserve` — MOBILE_AUTH_ENABLED yaşam döngüsü kaydı ve
+       docs/ROLLOUT.md rollout'u durdurma sinyali olarak bu gauge'a atıf yapıyordu
+       ama gauge HİÇ yayınlanmıyordu (belgelenmiş ama var olmayan abort kapısı).
+    2. `DbPool*` — yalnızca `/health?deep=1` yolunda yazılıyordu; o uç düzenli
+       poll EDİLMEZ (konteyner probe'u sığ /health'i çağırır), dolayısıyla alarm
+       INSUFFICIENT_DATA'da kalıyordu.
+
+    Örnekleyici AĞ'a ÇIKMAZ: yalnızca süreç-içi semafor sayaçlarını ve havuzun
+    kendi sayaçlarını okur. `DbUp`/`RedisUp`/`LoginUp` BİLEREK burada değildir —
+    onlar gerçek bağımlılık probe'u gerektirir ve flush thread'inden çağrılırsa
+    metrik yolu ağ'a çıkmış olurdu (bkz. docs/CAPACITY.md "Bilinen sınırlar").
+    """
+    from app.services import ai_gate, runtime_metrics
+
+    def _sample():
+        ai_gate.record_capacity_gauges()
+        try:
+            with app.app_context():
+                pool = db.engine.pool
+                runtime_metrics.set_gauge("DbPoolCheckedOut", pool.checkedout())
+                runtime_metrics.set_gauge("DbPoolOverflow", pool.overflow())
+                runtime_metrics.set_gauge("DbPoolSize", pool.size())
+        except Exception:
+            pass  # SQLite/StaticPool ya da sürüm farkı — havuz görünümü opsiyonel
+
+    runtime_metrics.register_sampler(_sample)
+    runtime_metrics.install_shutdown_flush()
 
 
 def create_app():
@@ -236,6 +276,7 @@ def create_app():
     warn_if_limiter_degraded(app)
     from app.services.ai_gate import enforce_gate_invariants
     enforce_gate_invariants(app)
+    _install_capacity_sampling(app)
     app.before_request(maybe_weekly_rollover)
     app.before_request(update_streak)
     # Dil çözümü (g.locale): current_user/session'a bağlı, şablon render'dan önce.

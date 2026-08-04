@@ -7,6 +7,8 @@ from app.auth_middleware import require_auth
 from app.config import SCRAPE_RATELIMIT
 from app.extensions import _user_or_ip_key, limiter
 from app.models import UserWearableConnection
+from app.services.ai_gate import (BlockingConcurrencyLimit,
+                                  blocking_concurrency_slot)
 from app.services.wearables.adapters import WearableError, get_adapter
 from app.services.wearables.sync import sync_provider_day
 from app.services.wearables.tokens import save_wearable_tokens
@@ -26,6 +28,28 @@ _WHOOP_QUERY_PARAMS = {
 
 def _json_error(message, status=400):
     return jsonify({"error": message}), status
+
+
+# Hardening PR4 — giyilebilir sağlayıcı çağrıları PAYLAŞILAN bloklayıcı kapasiteyi
+# tüketir.
+#
+# Bu üç route senkron dış HTTP atar ve `_authed_json` 401'de token yenileyip
+# yeniden dener: çağrı başına 10 sn × en fazla 3 ardışık istek ≈ 30 sn boyunca
+# bir web thread'i park eder. Hiçbir eşzamanlılık kapısı YOKTU ve bu yüzey
+# thread-rezervi aritmetiğinde SAYILMIYORDU — WHOOP/Google gecikme artışında
+# yeterli eşzamanlı senkronizasyon 8 thread'i doldurup /health'i kuyruğa
+# sokabilir, deploy health gate'ini düşürüp sahte rollback tetikleyebilirdi.
+# Bu, PR #199'un mobil Cognito uçları için kapattığı boşluğun AYNISIDIR; burada
+# da AYNI mekanizmayı kullanırız (yeni bir kapı/semafor İCAT ETMEYİZ).
+#
+# Aşırı yük yanıtı kapı dekoratörünün sözleşmesiyle aynıdır: 503 + Retry-After.
+def _overload_response():
+    current_app.logger.warning(
+        "wearables event=blocking_capacity_exhausted")
+    resp = jsonify({"error": "Servis yoğun, lütfen birazdan tekrar deneyin."})
+    resp.status_code = 503
+    resp.headers["Retry-After"] = "15"
+    return resp
 
 
 def _whoop_query_params(resource):
@@ -80,7 +104,17 @@ def wearable_callback(provider):
     if not code:
         return _json_error("OAuth code eksik.", 400)
     try:
-        token_data = adapter.exchange_code(code)
+        # Kapı YALNIZCA ağ alışverişini sarar; token yazımı (kısa, yerel DB işi)
+        # izni tutmaz — hiçbir DB transaction'ı sağlayıcı I/O'sunu KAPSAMAZ.
+        with blocking_concurrency_slot():
+            token_data = adapter.exchange_code(code)
+    except BlockingConcurrencyLimit:
+        return _overload_response()
+    except Exception:
+        current_app.logger.warning("[WEARABLE] %s bağlantısı kurulamadı",
+                                   adapter.provider, exc_info=True)
+        return _json_error(f"{adapter.provider} bağlantısı kurulamadı.", 502)
+    try:
         save_wearable_tokens(current_user.id, adapter.provider, token_data)
     except Exception:
         # S3: ham exception metni (iç URL/kütüphane detayı) istemciye sızmasın —
@@ -121,7 +155,10 @@ def wearable_sync(provider):
     except ValueError:
         return _json_error("date YYYY-MM-DD formatında olmalı.", 400)
     try:
-        return jsonify(sync_provider_day(current_user.id, provider, target))
+        with blocking_concurrency_slot():
+            return jsonify(sync_provider_day(current_user.id, provider, target))
+    except BlockingConcurrencyLimit:
+        return _overload_response()
     except WearableError as exc:
         return _json_error(str(exc), 400)
     except Exception:
@@ -143,7 +180,11 @@ def whoop_resource(resource):
     except ValueError as exc:
         return _json_error(str(exc), 400)  # uygulama-yazımı mesaj, sızıntı yok
     try:
-        return jsonify(adapter.request(endpoint, current_user.id, params=params))
+        with blocking_concurrency_slot():
+            return jsonify(
+                adapter.request(endpoint, current_user.id, params=params))
+    except BlockingConcurrencyLimit:
+        return _overload_response()
     except Exception:
         current_app.logger.warning("[WEARABLE] WHOOP %s isteği başarısız",
                                    resource, exc_info=True)

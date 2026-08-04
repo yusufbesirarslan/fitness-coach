@@ -112,8 +112,31 @@ approximate `p50`/`p95`/`p99`. Bucket edges are the reported values, so a p95 of
 | `AiModelSlotContended` | Count | `Provider` | Calls that could not take a slot immediately |
 | `AiRetries` | Count | `Feature` | Recovery-ladder retries |
 | `GateRejections` | Count | `Gate` | Concurrency gate 503s |
-| `DbPoolCheckedOut` / `DbPoolOverflow` / `DbPoolSize` | None | — | Sampled on `/health?deep=1` |
-| `DbUp` / `RedisUp` / `LoginUp` / `LimiterDegraded` | None | — | 0/1 dependency health |
+| `DbPoolCheckedOut` / `DbPoolOverflow` / `DbPoolSize` | None | — | Pool usage — sampled by the flush thread (PR4) and on `/health?deep=1` |
+| `ThreadReserve` | None | — | Measured free request threads: `FITX_WEB_THREADS − active AI permits − active scrape permits`. Floor is `2` |
+| `AiSlotsActive` / `AiModelSlotsActive` / `ScrapeSlotsActive` | None | — | Permits currently held per gate |
+| `DbUp` / `RedisUp` / `LoginUp` / `LimiterDegraded` | None | — | 0/1 dependency health — **still `/health?deep=1` only** (they need real dependency probes; sampling them from the flush thread would put the metrics path on the network) |
+
+#### Level metrics are sampled, not event-driven (Hardening PR4)
+
+Counters and latencies are written by the request path. Levels have no "event" to
+write them, so `register_sampler()` hooks a callback that the flush thread runs
+immediately before each flush. Emitting them from `/health?deep=1` was not enough:
+the container HEALTHCHECK polls the **shallow** `/health`, and the deep endpoint is
+hit only a handful of times per deploy — so those gauges produced no datapoints and
+alarms sat in `INSUFFICIENT_DATA`. Samplers must not touch the network, and a
+sampler that raises is swallowed (instrumentation never changes request behavior).
+
+`ThreadReserve` did not exist before PR4 even though `docs/ROLLOUT.md` and the
+`MOBILE_AUTH_ENABLED` lifecycle record both named it as the rollout abort signal.
+
+A final `flush()` now runs on shutdown (`atexit` + gunicorn `worker_exit`).
+Previously the daemon flush thread was killed mid-window on every deploy, losing
+up to `RUNTIME_METRICS_FLUSH_SECONDS` of buffered metrics — precisely the
+pre-restart window containing the spike that motivated the restart.
+
+Capacity formula, per-path overload behavior, alarm thresholds and known limits:
+`docs/CAPACITY.md`.
 
 `HttpServerErrors` and `HttpOverload` are **separate on purpose**. A 503 from the
 AI gate is the system working correctly under load; a 500 is a defect. Collapsing

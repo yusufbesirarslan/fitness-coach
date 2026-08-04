@@ -53,6 +53,10 @@ def _claims(use="access", **over):
 @pytest.fixture(autouse=True)
 def _client_id(monkeypatch):
     monkeypatch.setattr(cognito_jwt, "COGNITO_APP_CLIENT_ID", "client-123")
+    # Zorunlu JWKS tazeleme soğuma penceresi SÜREÇ-GENELİ modül durumudur
+    # (Hardening PR4). Sıfırlanmazsa bir testin tetiklediği tazeleme sonraki
+    # testin tazelemesini bastırır ve testler sıraya bağımlı hâle gelirdi.
+    cognito_jwt._reset_cache()
 
 
 def test_valid_access_token(signer):
@@ -178,17 +182,23 @@ def test_unknown_kid_triggers_single_refetch(signer, rsa_key, monkeypatch):
     ).as_dict(private=False)]})
     fresh = KeySet.import_key_set({"keys": [rotated.as_dict(private=False)]})
 
-    calls = {"n": 0}
+    calls = {"n": 0, "forced": 0}
 
     def fake_load_jwks(force=False):
         calls["n"] += 1
+        if force:
+            calls["forced"] += 1
         return fresh if force else stale
 
     monkeypatch.setattr(cognito_jwt, "_load_jwks", fake_load_jwks)
 
     claims = cognito_jwt.validate_token(token, "access")
     assert claims["sub"] == "sub-123"
-    assert calls["n"] == 2
+    # AĞ'a çıkan tek çağrı zorunlu tazelemedir; zorlamasız çağrılar sıcak
+    # önbellekte saf bellek okumasıdır (PR4 tek-uçuş çift-kontrolü bir tane
+    # daha ekler — kilidi bekleyen thread'in ağ'a çıkmadan önceki son bakışı).
+    assert calls["forced"] == 1
+    assert calls["n"] == 3
 
 
 def test_matching_kid_signature_failure_is_definitive(monkeypatch):

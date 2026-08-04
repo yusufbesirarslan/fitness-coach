@@ -16,3 +16,20 @@ timeout = 300
 graceful_timeout = 30
 accesslog = "-"
 errorlog = "-"
+
+
+def worker_exit(server, worker):
+    """Worker kapanırken son runtime-metrik penceresini boşalt (Hardening PR4).
+
+    Flush thread'i daemon'dır → graceful shutdown'da pencere ortasında ölür ve o
+    pencere kaybolur. Kaybedilen pencere tam olarak yeniden başlatmadan ÖNCEKİ
+    penceredir; yani deploy'u ya da rollback'i tetikleyen doygunluk/hata artışı.
+    `atexit` kancası da kuruludur — bu, gunicorn'un worker'ı kendi yönettiği
+    yolda ikinci ve daha güvenilir tetikleyicidir (flush idempotenttir: tampon
+    atomik olarak boşaltılır, çift çağrı veri ÇOĞALTMAZ).
+    """
+    try:
+        from app.services import runtime_metrics
+        runtime_metrics.flush_on_shutdown()
+    except Exception:
+        pass
