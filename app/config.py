@@ -12,6 +12,25 @@ from app import feature_flags as _feature_flags
 
 load_dotenv()
 
+
+def _env_int(name, default):
+    """Bozuk/eksik bir sayısal ayarı varsayılana düşür (kapasite ayarları için).
+
+    Bu değerler bir GÜVENLİK kararı değil bir kapasite ayarıdır: bozuk bir değer
+    boot'u durdurmak yerine belgelenmiş varsayılana düşer, ve gerçek koruma
+    ai_gate boot invariant'ıdır (yapılandırma birleşimi güvensizse ORASI patlar).
+    """
+    try:
+        return int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _positive_env_int(name, default):
+    value = _env_int(name, default)
+    return value if value > 0 else default
+
+
 _BOOT_TS = int(time.time())  # cache-bust static assets on each deploy
 FATSECRET_TOKEN_URL = "https://oauth.fatsecret.com/connect/token"
 # Güvensiz bir varsayılan YOK: ayarlanmazsa boş kalır ve _enforce_fatsecret_tls
@@ -326,11 +345,40 @@ def configure_app(app):
     # SELECT 1'i bile flap edebilirdi. pre_ping ölü bağlantıyı kullanmadan önce
     # yakalar; recycle (< RDS idle timeout) bağlantıları proaktif tazeler.
     # SQLite'ta (lokal/test) gereksiz — yalnızca Postgres'te uygula.
+    # Hardening PR4: havuz boyutu ARTIK AÇIK. Önceden yalnızca pre_ping/recycle
+    # verilirdi ve SQLAlchemy'nin örtük varsayılanları yürürlükteydi
+    # (pool_size=5, max_overflow=10, pool_timeout=30). Bu üç sayı kapasite
+    # sözleşmesinin parçasıdır ama hiçbir yerde YAZMIYORDU:
+    #   - pool_size(5) < FITX_WEB_THREADS(8) → normal yükte bile her istek
+    #     overflow bağlantısı açıp kapatır (RDS'e bağlantı churn'ü),
+    #   - pool_timeout(30) bir thread'i havuzda 30 sn SESSİZCE park eder; bu
+    #     bekleme hiçbir istek deadline'ına bağlı değildir ve kapıların
+    #     koruduğu thread rezervini havuz tarafından delerdi.
+    # Varsayılanlar thread sayısından TÜRETİLİR (ai_gate boot invariant'ı
+    # `pool_size + max_overflow >= FITX_WEB_THREADS` şartını doğrular), bekleme
+    # ise 30 sn yerine sınırlı ve belirlenimci bir tavana çekilir. Desteklenen
+    # topolojide (8 thread ≤ 8+4 kapasite) checkout ASLA kuyruğa girmez —
+    # timeout bir emniyet supabı, normal yol değil.
+    _web_threads = _positive_env_int("FITX_WEB_THREADS", 8)
+    _pool_size = _positive_env_int("DB_POOL_SIZE", _web_threads)
+    _pool_overflow = max(0, _env_int("DB_POOL_MAX_OVERFLOW", 4))
+    _pool_timeout = _positive_env_int("DB_POOL_TIMEOUT_SECONDS", 10)
+    app.config["DB_POOL_SIZE"] = _pool_size
+    app.config["DB_POOL_MAX_OVERFLOW"] = _pool_overflow
+    app.config["DB_POOL_TIMEOUT_SECONDS"] = _pool_timeout
     if database_url.startswith("postgresql"):
         app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
             "pool_pre_ping": True,
             "pool_recycle": int(os.environ.get("DB_POOL_RECYCLE_SECONDS", "280")),
+            "pool_size": _pool_size,
+            "max_overflow": _pool_overflow,
+            "pool_timeout": _pool_timeout,
         }
+    else:
+        # SQLite (lokal/test) QueuePool kullanmaz — havuz ayarları uygulanmaz,
+        # dolayısıyla invariant da onları doğrulamamalı.
+        app.config["DB_POOL_SIZE"] = None
+        app.config["DB_POOL_MAX_OVERFLOW"] = None
     app.config["AI_PLAN_QUOTA_ENABLED"] = AI_PLAN_QUOTA_ENABLED
     app.config["AI_CHAT_QUOTA_ENABLED"] = AI_CHAT_QUOTA_ENABLED
     app.config["AI_MEMORY_ENABLED"] = AI_MEMORY_ENABLED
