@@ -55,6 +55,8 @@ _counters = {}   # (name, dims_key) -> float
 _timings = {}    # (name, dims_key) -> {bucket_ms: count}
 _gauges = {}     # (name, dims_key) -> float (son yazan kazanır)
 _flusher = None
+_samplers = []   # her flush'tan ÖNCE çağrılan seviye-örnekleyicileri
+_shutdown_hooked = False
 
 
 def is_enabled():
@@ -105,14 +107,73 @@ def _ensure_flusher():
         _flusher = thread
 
 
+def register_sampler(fn):
+    """Her flush'tan ÖNCE çağrılacak bir seviye-örnekleyici kaydet (idempotent).
+
+    Sayaç/gecikme metrikleri istek yolundan yazılır; SEVİYE metrikleri (thread
+    rezervi, havuz kullanımı) ise yazacak bir "olay" olmadığı için bir
+    örnekleyiciye ihtiyaç duyar. Bunları `/health?deep=1` yolundan yazmak
+    yetmiyordu: konteyner probe'u SIĞ /health'i çağırır, deep yalnızca deploy
+    sırasında birkaç kez vurulur → gauge'lar veri üretmez ve alarm sürekli
+    INSUFFICIENT_DATA'da kalır. Zaten periyodik olan flush thread'i doğru sahip.
+
+    Örnekleyici AĞ'a çıkmamalıdır (flush thread'i bir sonraki pencereyi
+    geciktirmemeli); yalnızca süreç-içi seviye okur. Hatası YUTULUR.
+    """
+    with _lock:
+        if fn not in _samplers:
+            _samplers.append(fn)
+
+
+def _run_samplers():
+    if not is_enabled():
+        return  # kapalıyken seviye örneklemeye gerek yok (tam no-op yolu)
+    for sampler in list(_samplers):
+        try:
+            sampler()
+        except Exception as e:
+            _log.warning("[RUNTIME METRICS] sampler basarisiz: %s: %s",
+                         type(e).__name__, e)
+
+
 def _flush_loop():  # pragma: no cover - zamanlayıcı döngüsü
     while True:
         time.sleep(max(5, RUNTIME_METRICS_FLUSH_SECONDS))
         try:
+            _run_samplers()
             flush()
         except Exception as e:
             _log.warning("[RUNTIME METRICS] flush basarisiz: %s: %s",
                          type(e).__name__, e)
+
+
+def flush_on_shutdown():
+    """Süreç kapanırken tamponu SON bir kez boşalt.
+
+    `_flush_loop` bir daemon thread'dir: kapanışta pencere ortasında öldürülür ve
+    o pencere (varsayılan 60 sn) kaybolur. Kaybedilen pencere tam olarak
+    yeniden başlatmadan ÖNCEKİ penceredir — yani deploy'u/rollback'i tetikleyen
+    hata ve doygunluk artışının kendisi. İstemcinin zaten sıkı zaman aşımları
+    var (connect 2 sn / read 3 sn / tek deneme), bu yüzden kapanış sınırlıdır.
+    """
+    if not is_enabled():
+        return  # kapalıyken örnekleyicileri de çalıştırmaya gerek yok
+    try:
+        _run_samplers()
+        flush()
+    except Exception:
+        pass
+
+
+def install_shutdown_flush():
+    """`atexit` üzerinden son flush'ı bir kez kur (idempotent)."""
+    global _shutdown_hooked
+    with _lock:
+        if _shutdown_hooked:
+            return
+        _shutdown_hooked = True
+    import atexit
+    atexit.register(flush_on_shutdown)
 
 
 # ── Kayıt yüzeyi (istek yolundan çağrılır; ASLA ağ'a çıkmaz) ───────────────
@@ -228,3 +289,4 @@ def reset_for_test():
         _counters.clear()
         _timings.clear()
         _gauges.clear()
+        _samplers.clear()
