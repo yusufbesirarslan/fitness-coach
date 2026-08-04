@@ -59,10 +59,30 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
     - `AI_MAX_CONCURRENCY` (vars. 4) + `SCRAPE_MAX_CONCURRENCY` (vars. 2) +
       `AI_MODEL_MAX_CONCURRENCY` (vars. AI_MAX_CONCURRENCY) +
       `AI_GATE_WAIT_SECONDS` (vars. 0) — ağır AI/scrape route'larında eşzamanlılık
-      tavanı (app/services/ai_gate.py); dolunca 503 + Retry-After. İki kapının toplamı
-      `FITX_WEB_THREADS`'in (vars. 8, gunicorn --threads ile eş) en az 2 altında
-      kalmalı; ihlal boot'ta loglanır. Thread rezervi /health ve ucuz route'ları
-      AI yükünden korur (A1/I1).
+      tavanı (app/services/ai_gate.py); dolunca 503 + Retry-After. Thread rezervi
+      /health ve ucuz route'ları AI yükünden korur (A1/I1).
+      **Hardening PR4** rezervi belgeden KODA taşıdı — TEK kaynak `docs/CAPACITY.md`:
+      (1) boot invariant'ı artık model kapısının dış kapıyı AŞAN kısmını
+      (`max(0, AI_MODEL_MAX - AI_MAX)`) ve DB havuzunu da sayar
+      (`DB_POOL_SIZE + DB_POOL_MAX_OVERFLOW >= FITX_WEB_THREADS`); üretimde ihlal
+      loglanmaz, boot'u DURDURUR (deploy health gate rollback yapar).
+      (2) DB havuzu artık AÇIK: `DB_POOL_SIZE` (vars. FITX_WEB_THREADS),
+      `DB_POOL_MAX_OVERFLOW` (vars. 4), `DB_POOL_TIMEOUT_SECONDS` (vars. 10) —
+      önceden SQLAlchemy örtük varsayılanları (5/10/**30 sn sessiz bekleme**)
+      yürürlükteydi ve havuz thread sayısının ALTINDAYDI.
+      (3) Rezerv ÖLÇÜLÜR: `ThreadReserve`/`AiSlotsActive`/`AiModelSlotsActive`/
+      `ScrapeSlotsActive` gauge'ları flush thread'inden yayılır (`/health?deep=1`
+      yolundan DEĞİL — o uç düzenli poll edilmiyor, alarmlar INSUFFICIENT_DATA'da
+      kalıyordu). `ThreadReserve` PR4 öncesi HİÇ yayınlanmıyordu, oysa ROLLOUT.md
+      ve MOBILE_AUTH_ENABLED kaydı onu rollout abort sinyali olarak adlandırıyordu.
+      (4) Giyilebilir sağlayıcı route'ları (`callback`/`sync`/`whoop`) artık
+      PAYLAŞILAN `blocking_concurrency_slot`'u tüketir — çağrı başına ~30 sn'ye
+      kadar thread park eden bu yüzey rezerv aritmetiğinde SAYILMIYORDU (PR #199'un
+      mobil Cognito uçları için kapattığı boşluğun aynısı, aynı mekanizmayla).
+      (5) Bilinmeyen `kid` için zorunlu JWKS tazelemesi TEK-UÇUŞ + soğuma
+      penceresi altındadır (`JWKS_FORCED_REFRESH_COOLDOWN_SECONDS`, vars. 60):
+      koşulsuzken uydurma kid taşıyan istek seli her istek başına bir thread'i
+      5 sn park ettirebiliyordu. Kanıtlar: `tests/test_capacity_invariants.py`.
     - `SENTRY_DSN` (yoksa kapalı) + opsiyonel `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE` — hata izleme (app/observability.py). DSN yoksa no-op.
     - `RUNTIME_METRICS_ENABLED` (vars. 0) + `RUNTIME_METRICS_NAMESPACE` (vars.
       `FitX/Runtime`) + `RUNTIME_METRICS_FLUSH_SECONDS` (vars. 60) — üretim
