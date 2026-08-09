@@ -1,6 +1,30 @@
 # Phase 6 - Authentication, Onboarding & Security Handoff
 
 
+## Sprint 9 Backend Prerequisite — Mobile Nutrition Contract
+
+Full contract, null semantics and source-of-truth matrix:
+[MOBILE_NUTRITION.md](MOBILE_NUTRITION.md).
+
+1. **Baseline.** Branch `sprint9-backend-mobile-nutrition-contract` was cut in the isolated worktree `.worktrees/sprint9-backend-mobile-nutrition-contract` from `origin/main` at `34f8dc7` (Hardening PR4, #200). The primary checkout was dirty with unrelated work (`app/__init__.py`, `app/config.py`, `AGENTS.md`, `app/services/db_pool.py`, `tests/test_db_pool.py` at `102a21b`) and was not used, reset, stashed or staged.
+2. **Problem.** No nutrition data was reachable from the native client. Every nutrition, food, barcode, menu and progress route carries `@require_auth` (Flask-Login cookie plus `cognito_sid`); `@require_mobile_auth` existed on exactly one non-auth route, `GET /api/v1/account/me`.
+3. **Decision.** A versioned adapter, `GET /api/v1/nutrition/diary/today`, over the existing canonical ledger — not `@require_mobile_auth` bolted onto the web routes, which would have published their ambiguities (`DD.MM` day, no entry identity, naive timestamps, fabricated zeroes, sequential ids) as the mobile contract.
+4. **One authority.** The adapter reads `MealLog` only. `/api/diary/today` (the `CustomMeal`/`CustomMealItem` builder) is never queried: committing a builder meal writes it to the ledger as well, so the two totals must never be added. No third definition of "today's nutrition" was created, and a test proves a committed builder meal appears exactly once.
+5. **Day.** Full ISO `YYYY-MM-DD` plus the IANA zone, both from `app/timeutil` (`app_today`, `APP_TZ`). `?day`, `?timezone` and `X-Timezone` are ignored — the day boundary is server-owned, and a test pins that.
+6. **Timestamps.** `logged_at` is offset-aware ISO 8601 via `timeutil.to_app_tz`, the repository's single rule for the naive-UTC `created_at` column. A missing `created_at` stays `null`.
+7. **Identity.** `meals[].id` is `base64url(HMAC-SHA256(SECRET_KEY subkey, "<user_id>\0<meal_log_id>")[:18])` — opaque, stable, owner-bound, 24 characters. Derived rather than persisted, so **no migration**: `MealLog.id` already is the internal identity. `matches_diary_entry_id` ships with it so the future mutation PR resolves a token by constant-time comparison against the caller's own rows.
+8. **Unknown is not zero.** Null macros stay `null`; a stored `0` stays a measured zero; a missing or non-positive `UserSession.target_calories` publishes as `goal: null` instead of `/api/progress/nutrition`'s ambiguous `target_kcal: 0`. Regression tests cover each.
+9. **Totals.** Server-authoritative and unchanged in arithmetic: NULL counts as zero, exactly as `/meal-log/today` already sums. The consequence — a client re-sum can legitimately disagree when an entry carries a null — is documented rather than hidden, and the client does not recompute.
+10. **Vocabularies.** `ogun` maps to `kahvalti`/`ogle`/`aksam`/`ara_ogun`, the keys `POST /api/quick-add-meal` already accepts, with `unknown` for anything else (the AI coach writes `AI Koç`, a shared suggestion writes a sentence containing the sender's name). `source` is published verbatim or `unknown`; a NULL is never folded into `manual`.
+11. **Registration.** The route lives on the existing `mobile_api` blueprint, so it inherits `/api/v1`, `Cache-Control: no-store`, the 429 handler and the `MOBILE_AUTH_ENABLED` gate, and stays inside the approved-route allow-list in `tests/test_mobile_auth_feature_gate.py`. `app/__init__.py` was deliberately not touched.
+12. **Errors.** One new code, `NUTRITION_TEMPORARILY_UNAVAILABLE` (503, retryable). The blueprint catch-all answers `AUTH_TEMPORARILY_UNAVAILABLE`, and a client reading a storage fault as an authentication outcome would discard a valid session.
+13. **Privacy.** One log line, failure only: `mobile_nutrition event=diary_read_failed error_type=… request_id=…`. No meal, macro, target, slot, account identifier, credential or provider text on any path; no new analytics. Tested.
+14. **Performance.** Two bounded user-scoped SELECTs per request (`ix_meal_log_user_id_tarih`, newest `UserSession`), rows returned as frozen value objects so no lazy load can become an N+1. A test asserts the query count is identical for a one-entry and a five-entry day. No provider call, cache, lock, write or transaction of its own.
+15. **Compatibility.** No route, payload, field name, model, column, index, constraint or migration changed. A characterisation test pins that `/meal-log/today` still answers `DD.MM` with no entry id.
+16. **Tests.** Baseline on `34f8dc7`: **3,070 passed, 5 skipped, 0 failed**. Final: **3,120 passed, 5 skipped, 0 failed** — exactly the 50 new contract tests, nothing else moved. Both runs were executed in six alphabetical batches because the full single invocation exceeds this environment's process budget. `-m load` and `-m pg_concurrency` were not run (repo default deselects load; no local PostgreSQL) and no persistence behaviour was modified.
+17. **Deferred, with owners.** `/meal-log/history` keeps its `DD.MM` labels — mobile PR1 already scoped history out, and no mobile history surface exists yet (owner: the mobile PR that adds trends). Mobile-reachable food search, barcode, serving detail and a canonical LogFood command are Mobile PR2's backend adapters; `app/services/meal_idempotency.py` already provides durable, user-scoped, race-safe duplicate-submit protection and should be reused verbatim rather than replaced.
+
+
 ## Sprint 6 PR6.2 ? Adaptive Weekly Program client integration
 
 1. **Baseline.** Branch `sprint6-pr6.2-weekly-program-client` was created in the isolated worktree `C:\Users\yusuf\.worktrees\sprint6-pr6.2-weekly-program-client` from `origin/main` at `195fd40`; the unrelated primary checkout was not modified.
