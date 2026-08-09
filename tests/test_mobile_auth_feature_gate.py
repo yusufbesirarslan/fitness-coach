@@ -57,6 +57,7 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("post", "/api/v1/auth/refresh"),
         ("post", "/api/v1/auth/logout"),
         ("get", "/api/v1/account/me"),
+        ("get", "/api/v1/nutrition/diary/today"),
     ):
         headers = post_headers if method == "post" else None
         assert getattr(client, method)(path, headers=headers).status_code == 404
@@ -106,6 +107,9 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
         ("/api/v1/auth/refresh", ("POST",)),
         ("/api/v1/auth/logout", ("POST",)),
         ("/api/v1/account/me", ("GET",)),
+        # Sprint 9 backend prerequisite. Product routes live on this blueprint
+        # too, so the allow-list keeps covering every /api/v1 route there is.
+        ("/api/v1/nutrition/diary/today", ("GET",)),
     }
 
 

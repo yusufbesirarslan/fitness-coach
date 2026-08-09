@@ -195,3 +195,11 @@ def me():
         "goal": user.goal,
         "goal_type": user.goal_type,
     }})
+
+
+# Product route modules that extend this same blueprint, imported last so `bp`
+# and `mobile_error` already exist. Keeping them on one blueprint keeps one
+# `/api/v1` surface, one no-store policy, one throttling handler and one feature
+# gate — and keeps every mobile route inside the approved-route allow-list in
+# tests/test_mobile_auth_feature_gate.py.
+from app.blueprints import mobile_nutrition  # noqa: E402,F401
