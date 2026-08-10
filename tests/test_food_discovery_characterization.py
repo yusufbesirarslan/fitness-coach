@@ -287,6 +287,30 @@ def test_commit_once_resolves_a_duplicate_key_to_the_winner_row(app, make_user):
     assert MealLog.query.filter_by(user_id=user.id).count() == 1
 
 
+def test_commit_once_legacy_replays_same_key_even_when_payload_differs(
+        app, make_user):
+    user = make_user("idem-semantic-mismatch")
+    first = MealLog(
+        user_id=user.id, ogun="Kahvaltı", yemekler="Yulaf",
+        kalori=100.0, protein=5.0, karb=15.0, yag=2.0,
+        tarih="2026-08-09")
+    winner, created = meal_idempotency.commit_once(first, "semantic-key-01")
+
+    different = MealLog(
+        user_id=user.id, ogun="Akşam", yemekler="Somon",
+        kalori=500.0, protein=45.0, karb=0.0, yag=30.0,
+        tarih="2026-08-09")
+    replay, created_again = meal_idempotency.commit_once(
+        different, "semantic-key-01")
+
+    assert created is True
+    assert created_again is False
+    assert replay.id == winner.id
+    assert replay.ogun == "Kahvaltı"
+    assert replay.yemekler == "Yulaf"
+    assert MealLog.query.filter_by(user_id=user.id).count() == 1
+
+
 def test_commit_once_without_a_key_never_deduplicates(app, make_user):
     user = make_user("idem-keyless")
     for _ in range(2):
