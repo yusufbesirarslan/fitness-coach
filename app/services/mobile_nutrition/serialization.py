@@ -42,7 +42,9 @@ SLOT_BY_MEAL_LABEL = {
 # it becomes `unknown` rather than being folded into a source it may not have
 # had. The web surface reads NULL as "manual"; that is a display default, and
 # copying it here would be the same fabrication this contract exists to stop.
-KNOWN_SOURCES = frozenset({"manual", "diary", "ai_plan", "barcode", "coach"})
+KNOWN_SOURCES = frozenset({
+    "manual", "diary", "ai_plan", "barcode", "search", "coach",
+})
 
 
 def slot_token(meal_label):

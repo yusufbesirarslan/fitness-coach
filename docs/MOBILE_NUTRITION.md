@@ -5,7 +5,8 @@ its shape. Web nutrition behaviour is unchanged by everything in this file; the
 corrections described here happen at a new versioned boundary, not underneath a
 live browser surface.
 
-- Endpoint: `GET /api/v1/nutrition/diary/today`
+- Endpoints: diary read, food discovery, and canonical LogFood under
+  `/api/v1/nutrition/*`
 - Route: `app/blueprints/mobile_nutrition.py`
 - Service: `app/services/mobile_nutrition/`
 - Tests: `tests/test_mobile_nutrition_api.py`
@@ -103,7 +104,7 @@ so the list order is stable between reads.
 | `id` | string | Opaque entry identity — see below |
 | `slot` | string | `kahvalti` / `ogle` / `aksam` / `ara_ogun` / `unknown` |
 | `description` | string | The display string the server composed when the meal was logged |
-| `source` | string | `manual` / `diary` / `ai_plan` / `barcode` / `coach` / `unknown` |
+| `source` | string | `manual` / `diary` / `ai_plan` / `search` / `barcode` / `coach` / `unknown` |
 | `logged_at` | string \| null | Offset-aware ISO 8601 instant, or `null` when unrecorded |
 | `nutrition` | object | Four nutrients, each a number or `null` |
 
@@ -278,7 +279,9 @@ Nothing existing changed behaviour:
   test pins that `/meal-log/today` still answers `DD.MM` with no entry id;
 - no route switched to Bearer-only auth;
 - no persisted total, diary grouping or timezone behaviour changed;
-- **no database migration.** No model, column, index or constraint was touched.
+- the PR1 read adapter itself changed no schema; PR2A later added only the
+  nullable fingerprint column documented below, without changing legacy writer
+  behavior or the existing unique constraint.
 
 ## PR2 prerequisites — what exists and what does not
 
@@ -341,3 +344,44 @@ The builder-shaped types (`DiaryFoodItem`, `FoodServing`, `ProviderFoodRef`,
 `MassAmount`, per-100 g reference) have no counterpart on this surface, and that
 is correct: they describe the discovery/logging path, which is a separate
 backend surface still to be adapted.
+
+## PR2A discovery and canonical LogFood
+
+The mobile discovery routes are read-only:
+
+- `GET /api/v1/nutrition/foods/search?q=...`
+- `GET /api/v1/nutrition/foods/fatsecret/<food_id>/servings`
+- `GET /api/v1/nutrition/foods/barcode?code=...`
+
+They project raw provider data before legacy portion estimation. Missing metric
+mass and underivable per-100 g nutrition are `null`, never fabricated zero. The
+barcode adapter may read an existing cache row but does not populate the cache,
+and no discovery route writes `MealLog`.
+
+`POST /api/v1/nutrition/logs` is the only mobile food persistence boundary. It
+accepts a strict `provider_backed` or `manual` command. Provider commands carry
+provider/food/serving identity, quantity, slot and discovery source; client
+nutrition is forbidden and the server resolves/scales the serving. Manual
+commands carry a trimmed description, slot and explicit bounded nutrition
+snapshot; provider identity, serving and quantity are forbidden.
+
+Both variants write one `MealLog` row and return the same `meal` shape with the
+owner-bound opaque ID and server diary day. A required `Idempotency-Key` is
+scoped by authenticated user. The server hashes the typed, versioned
+`axisai/mobile-log-food/v1` semantic command:
+
+- equal fingerprint replays the original row and opaque ID;
+- different fingerprint returns `409 IDEMPOTENCY_CONFLICT`;
+- a legacy row with a `NULL` fingerprint also conflicts because its semantic
+  ownership cannot be proven.
+
+The sole schema change is nullable
+`MealLog.idempotency_fingerprint VARCHAR(64)`. Legacy writers leave it `NULL`;
+the existing `(user_id, idempotency_key)` unique constraint remains the sole
+database race arbiter. The fingerprint excludes user identity, credentials,
+request IDs, timestamps, diary day, resolved provider nutrition and raw provider
+payloads. Changing v1 canonicalization requires a new fingerprint version.
+
+Menu discovery is not published on mobile in PR2A. Its independent gate is
+recorded in
+`docs/superpowers/reports/2026-08-10-sprint9-pr2a-menu-security-gate.md`.
