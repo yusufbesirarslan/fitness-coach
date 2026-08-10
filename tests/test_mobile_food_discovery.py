@@ -146,6 +146,54 @@ def test_raw_search_adapter_preserves_provider_identity(app, monkeypatch):
     }]
 
 
+def test_raw_serving_adapter_never_logs_provider_exception_detail(
+        app, monkeypatch, caplog):
+    food_id = "sensitive-provider-food-id"
+    provider_detail = "upstream echoed credential-shaped detail"
+    monkeypatch.setattr(fatsecret, "_get_fatsecret_token", lambda: "token")
+
+    def fail(*args, **kwargs):
+        raise RuntimeError(provider_detail)
+
+    monkeypatch.setattr(fatsecret, "_fs_get", fail)
+
+    with app.app_context():
+        assert mobile_food_discovery.servings(food_id) is None
+
+    assert provider_detail not in caplog.text
+    assert food_id not in caplog.text
+
+
+def test_raw_serving_adapter_never_logs_token_failure_detail(
+        app, monkeypatch, caplog):
+    provider_detail = "token endpoint echoed provider credential"
+
+    def fail():
+        raise RuntimeError(provider_detail)
+
+    monkeypatch.setattr(fatsecret, "_get_fatsecret_token", fail)
+
+    with app.app_context():
+        assert mobile_food_discovery.servings("food-77") is None
+
+    assert provider_detail not in caplog.text
+
+
+def test_raw_serving_adapter_never_logs_provider_error_payload(
+        app, monkeypatch, caplog):
+    provider_detail = "raw upstream response detail"
+    monkeypatch.setattr(fatsecret, "_get_fatsecret_token", lambda: "token")
+    monkeypatch.setattr(
+        fatsecret, "_fs_get", lambda *args, **kwargs: ProviderResponse({
+            "error": {"code": 13, "message": provider_detail},
+        }))
+
+    with app.app_context():
+        assert mobile_food_discovery.servings("food-77") is None
+
+    assert provider_detail not in caplog.text
+
+
 def test_raw_barcode_resolution_never_logs_the_value(app, monkeypatch, caplog):
     barcode = "0012345678905"
     monkeypatch.setattr(fatsecret, "_get_fatsecret_token", lambda: "token")

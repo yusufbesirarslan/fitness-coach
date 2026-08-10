@@ -182,9 +182,10 @@ def _food_get_raw(food_id):
     """Fetch provider food data without applying legacy serving semantics."""
     try:
         token = _get_fatsecret_token()
-        current_app.logger.debug("_food_get_servings: got token for food_id=%s", food_id)
-    except Exception as e:
-        current_app.logger.error("_food_get_servings: token failed: %s", e)
+    except Exception as error:
+        current_app.logger.error(
+            "fatsecret event=food_servings_token_failed error_type=%s",
+            type(error).__name__)
         return None
 
     for method in ("food.get.v4", "food.get.v2", "food.get"):
@@ -195,14 +196,15 @@ def _food_get_raw(food_id):
                 "format": "json",
             }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
             data = resp.json()
-            current_app.logger.debug("_food_get_servings %s status=%s keys=%s",
-                            method, resp.status_code, list(data.keys())[:5])
-        except Exception as e:
-            current_app.logger.warning("_food_get_servings %s failed: %s", method, e)
+        except Exception as error:
+            current_app.logger.warning(
+                "fatsecret event=food_servings_request_failed method=%s "
+                "error_type=%s", method, type(error).__name__)
             continue
 
         if "error" in data:
-            current_app.logger.warning("_food_get_servings %s error: %s", method, data["error"])
+            current_app.logger.warning(
+                "fatsecret event=food_servings_provider_error method=%s", method)
             continue
 
         try:
@@ -213,11 +215,13 @@ def _food_get_raw(food_id):
                 food["servings"] = dict(food["servings"])
                 food["servings"]["serving"] = [servings_raw]
                 servings_raw = food["servings"]["serving"]
-            current_app.logger.debug("_food_get_servings %s OK: %d servings", method, len(servings_raw))
+            current_app.logger.debug(
+                "fatsecret event=food_servings_ok method=%s serving_count=%d",
+                method, len(servings_raw))
             return food
         except (KeyError, TypeError):
-            current_app.logger.warning("_food_get_servings %s: no servings in response keys=%s",
-                               method, list(data.get("food", {}).keys()) if "food" in data else list(data.keys()))
+            current_app.logger.warning(
+                "fatsecret event=food_servings_missing method=%s", method)
             continue
 
     return None

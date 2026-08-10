@@ -138,6 +138,23 @@ def test_provider_nutrition_is_resolved_and_scaled_server_side(
     }
 
 
+def test_provider_resolution_runs_outside_the_preflight_db_transaction(
+        raw_client, as_mobile, mobile_user, provider, monkeypatch):
+    transaction_states = []
+
+    def resolve(food_id):
+        transaction_states.append(db.session().in_transaction())
+        return dict(provider, food_id=food_id)
+
+    monkeypatch.setattr(mobile_food_discovery, "servings", resolve)
+
+    response = post(
+        raw_client, as_mobile(mobile_user), provider_command())
+
+    assert response.status_code == 201
+    assert transaction_states == [False]
+
+
 @pytest.mark.parametrize("payload", [
     provider_command(nutrition={"energy_kcal": 1}),
     manual_command(provider="fatsecret"),

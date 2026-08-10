@@ -3,6 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
+from app.extensions import db
 from app.models import MealLog
 from app.services import meal_idempotency, mobile_food_discovery
 from app.services.mobile_nutrition.identity import diary_entry_id
@@ -74,6 +75,11 @@ def log_food(user_id, key, command):
     existing = _existing_or_conflict(user_id, key, fingerprint)
     if existing:
         return existing, False
+
+    # The preflight SELECT starts an implicit SQLAlchemy transaction. Close that
+    # read transaction before any provider network I/O; persistence below opens
+    # the short transaction whose race arbiter is the existing unique key.
+    db.session.rollback()
 
     if isinstance(command, ProviderBackedLogFoodCommand):
         description, nutrition = _provider_snapshot(command)
