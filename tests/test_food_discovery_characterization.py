@@ -151,6 +151,29 @@ def test_food_get_servings_substitutes_a_matrix_estimate_for_unknown_mass(
     assert by_id["b"]["metric_serving_amount"] == 0.0  # no entry -> measured zero
 
 
+def test_raw_food_fetch_preserves_provider_unknown_mass(app, monkeypatch):
+    """The extraction boundary returns provider truth before legacy estimates."""
+    monkeypatch.setattr(fatsecret, "_get_fatsecret_token", lambda: "tok")
+    payload = _servings_payload([{
+        "serving_id": "raw-1",
+        "serving_description": "1 mystery portion",
+        "metric_serving_amount": None,
+        "metric_serving_unit": None,
+        "calories": "120",
+        "protein": "4",
+        "carbohydrate": "20",
+        "fat": "3",
+    }])
+    monkeypatch.setattr(fatsecret, "_fs_get", lambda url, **kw: _Resp(payload))
+
+    with app.app_context():
+        food = fatsecret._food_get_raw("1")
+
+    serving = food["servings"]["serving"][0]
+    assert serving["metric_serving_amount"] is None
+    assert serving["metric_serving_unit"] is None
+
+
 def test_parse_fatsecret_serving_turns_absent_nutrients_into_zero():
     """LEGACY: a nutrient the provider never sent arrives as `0.0`."""
     parsed = nutrition_pipeline.parse_fatsecret_serving({
@@ -221,6 +244,21 @@ def test_food_find_by_barcode_rejects_non_numeric_before_any_call(
     monkeypatch.setattr(fatsecret, "_get_fatsecret_token", explode)
     with app.app_context():
         assert fatsecret._food_find_by_barcode("abc") is None
+
+
+def test_food_find_by_barcode_never_logs_provider_echo_of_barcode(
+        app, monkeypatch, caplog):
+    barcode = "5449000000996"
+    monkeypatch.setattr(fatsecret, "_get_fatsecret_token", lambda: "tok")
+
+    def fail_with_echo(*args, **kwargs):
+        raise RuntimeError(f"provider rejected barcode {barcode}")
+
+    monkeypatch.setattr(fatsecret, "_fs_get", fail_with_echo)
+    with app.app_context():
+        assert fatsecret._food_find_by_barcode(barcode) is None
+
+    assert barcode not in caplog.text
 
 
 # ---------------------------------------------------------------------------

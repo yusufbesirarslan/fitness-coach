@@ -178,7 +178,8 @@ def _normalize_servings(results):
     return results
 
 
-def _food_get_servings(food_id):
+def _food_get_raw(food_id):
+    """Fetch provider food data without applying legacy serving semantics."""
     try:
         token = _get_fatsecret_token()
         current_app.logger.debug("_food_get_servings: got token for food_id=%s", food_id)
@@ -186,7 +187,6 @@ def _food_get_servings(food_id):
         current_app.logger.error("_food_get_servings: token failed: %s", e)
         return None
 
-    servings_raw = None
     for method in ("food.get.v4", "food.get.v2", "food.get"):
         try:
             resp = _fs_get(FATSECRET_API_URL, params={
@@ -206,18 +206,33 @@ def _food_get_servings(food_id):
             continue
 
         try:
-            servings_raw = data["food"]["servings"]["serving"]
+            food = data["food"]
+            servings_raw = food["servings"]["serving"]
             if isinstance(servings_raw, dict):
-                servings_raw = [servings_raw]
+                food = dict(food)
+                food["servings"] = dict(food["servings"])
+                food["servings"]["serving"] = [servings_raw]
+                servings_raw = food["servings"]["serving"]
             current_app.logger.debug("_food_get_servings %s OK: %d servings", method, len(servings_raw))
-            break
+            return food
         except (KeyError, TypeError):
             current_app.logger.warning("_food_get_servings %s: no servings in response keys=%s",
                                method, list(data.get("food", {}).keys()) if "food" in data else list(data.keys()))
             continue
 
-    if not servings_raw:
+    return None
+
+
+def _food_get_servings(food_id):
+    food = _food_get_raw(food_id)
+    if not food:
         return None
+    return _legacy_servings_from_raw(food_id, food)
+
+
+def _legacy_servings_from_raw(food_id, food):
+    """Apply the existing web estimates and sanitization after raw fetch."""
+    servings_raw = food["servings"]["serving"]
 
     results = []
     for s in servings_raw:
@@ -247,6 +262,28 @@ def _food_get_servings(food_id):
     return _normalize_servings(results)
 
 
+def _food_find_id_by_barcode_raw(code):
+    """Resolve a barcode to provider identity without logging its value."""
+    digits = "".join(ch for ch in (code or "") if ch.isdigit())
+    if not digits:
+        return None
+    gtin = digits[-13:].rjust(13, "0")
+    try:
+        token = _get_fatsecret_token()
+        response = _fs_get(FATSECRET_API_URL, params={
+            "method": "food.find_id_for_barcode",
+            "barcode": gtin,
+            "format": "json",
+        }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
+        data = response.json()
+    except Exception:
+        # Provider errors may echo query parameters, so log no exception text.
+        current_app.logger.warning("fatsecret event=barcode_lookup_failed")
+        return None
+    food_id = str((data.get("food_id") or {}).get("value", "0"))
+    return food_id if food_id and food_id != "0" else None
+
+
 def _food_find_by_barcode(code):
     """FatSecret barkod → food_id → ad/marka + porsiyonlar.
 
@@ -270,7 +307,8 @@ def _food_find_by_barcode(code):
         }, headers={"Authorization": f"Bearer {token}"}, timeout=5)
         data = resp.json()
     except Exception as e:
-        current_app.logger.warning("_food_find_by_barcode lookup failed: %s", e)
+        # Provider exceptions may echo the barcode query; never log detail.
+        current_app.logger.warning("fatsecret event=barcode_lookup_failed")
         return None
 
     fid = str((data.get("food_id") or {}).get("value", "0"))
@@ -298,8 +336,8 @@ def _food_find_by_barcode(code):
     return {"food_id": fid, "name": name, "brand": brand, "servings": servings}
 
 
-def _food_search_fatsecret(q):
-    """Try FatSecret API. Returns list of results or None on failure."""
+def _food_search_raw(q):
+    """Fetch search matches without parsing provider description text."""
     try:
         token = _get_fatsecret_token()
     except Exception:
@@ -322,6 +360,14 @@ def _food_search_fatsecret(q):
     foods = data.get("foods", {}).get("food", [])
     if isinstance(foods, dict):
         foods = [foods]
+    if not foods:
+        return None
+    return foods
+
+
+def _food_search_fatsecret(q):
+    """Try FatSecret API. Returns list of results or None on failure."""
+    foods = _food_search_raw(q)
     if not foods:
         return None
 

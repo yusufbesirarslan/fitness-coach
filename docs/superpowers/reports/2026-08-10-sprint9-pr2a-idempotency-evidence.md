@@ -7,9 +7,8 @@ Idempotency-Key + same canonical LogFood command" from the same key paired with 
 materially different command. Safe, deterministic conflict detection cannot be
 implemented from the current `MealLog` schema without new durable semantic state.
 
-No migration has been implemented. The smallest sufficient schema change is one
-nullable SHA-256 fingerprint column on `meal_log`; it requires an explicit approval
-checkpoint before production work continues.
+The one-column migration was subsequently approved and implemented. It remains
+the smallest sufficient durable semantic state.
 
 ## Existing service behavior
 
@@ -106,7 +105,7 @@ that the same user/key replays only the same canonical command and returns a
 deterministic conflict for a different provider-backed/manual command, including a
 concurrent race.
 
-## Proposed migration (not implemented)
+## Approved migration (implemented)
 
 Exact model addition:
 
@@ -194,7 +193,17 @@ different or `NULL` conflicts. No advisory lock and no second transaction/table 
 needed. A real PostgreSQL race test remains required because local PostgreSQL test
 configuration is unavailable; SQLite tests alone cannot prove PostgreSQL timing.
 
-## Approval checkpoint
+## Approval checkpoint outcome
 
-No production extraction, schema edit, or migration implementing this proposal has
-been made. Explicit migration approval is required before proceeding.
+The user approved exactly the nullable 64-character fingerprint column, with no
+table, index, constraint, backfill or second store. Revision `d8e9f0a1b2c3`
+implements it after `c7d8e9f0a1b2`. Focused migration tests exercise upgrade,
+downgrade, upgrade, fresh-schema bootstrap compatibility, single-head integrity,
+nullability/type, and the unchanged sole unique constraint.
+
+The real SQLite Alembic chain completed upgrade → downgrade → upgrade. The
+repository-wide `flask db check` still reports unrelated pre-existing SQLite
+drift across legacy tables/indexes; it did not report this column. Migration
+graph and golden tests are the authoritative local drift evidence. PostgreSQL
+race tests are present but opt in through `FITX_PG_CONCURRENCY_TEST` and a
+disposable `PG_TEST_DATABASE_URL`.

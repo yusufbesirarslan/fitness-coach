@@ -107,10 +107,14 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
         ("/api/v1/auth/refresh", ("POST",)),
         ("/api/v1/auth/logout", ("POST",)),
         ("/api/v1/account/me", ("GET",)),
-        # Sprint 9 backend prerequisite. Product routes live on this blueprint
-        # too, so the allow-list keeps covering every /api/v1 route there is.
-        ("/api/v1/nutrition/diary/today", ("GET",)),
-    }
+            # Sprint 9 backend prerequisite. Product routes live on this blueprint
+            # too, so the allow-list keeps covering every /api/v1 route there is.
+            ("/api/v1/nutrition/diary/today", ("GET",)),
+            ("/api/v1/nutrition/foods/search", ("GET",)),
+            ("/api/v1/nutrition/foods/fatsecret/<food_id>/servings", ("GET",)),
+            ("/api/v1/nutrition/foods/barcode", ("GET",)),
+            ("/api/v1/nutrition/logs", ("POST",)),
+        }
 
 
 def test_derivation_readiness_runs_only_when_mobile_auth_enabled(monkeypatch):

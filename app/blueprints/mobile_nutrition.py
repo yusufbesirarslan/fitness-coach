@@ -14,13 +14,16 @@ published their ambiguities — `DD.MM` days, no entry identity, naive timestamp
 fabricated zeroes — as the mobile contract. This is an adapter over the same
 canonical ledger instead.
 """
-from flask import current_app, g, jsonify
+from flask import current_app, g, jsonify, request
 
 from app.blueprints.mobile_api import bp, mobile_error
 from app.extensions import db
 from app.mobile_auth_middleware import require_mobile_auth
 from app.observability import current_request_id
 from app.services import mobile_nutrition
+from app.services import mobile_food_discovery
+from app.services.barcode import normalize_barcode
+from app.services import meal_idempotency, mobile_log_food
 
 
 @bp.get("/nutrition/diary/today")
@@ -53,3 +56,92 @@ def nutrition_diary_today():
             "NUTRITION_TEMPORARILY_UNAVAILABLE",
             "Nutrition data is temporarily unavailable.", 503, True)
     return jsonify(payload)
+
+
+def _discovery_failure(error):
+    current_app.logger.error(
+        "mobile_nutrition event=food_discovery_failed error_type=%s request_id=%s",
+        type(error).__name__, current_request_id())
+    return mobile_error(
+        "FOOD_PROVIDER_UNAVAILABLE",
+        "Food discovery is temporarily unavailable.", 503, True)
+
+
+@bp.get("/nutrition/foods/search")
+@require_mobile_auth
+def nutrition_food_search():
+    query = request.args.get("q", "").strip()
+    if not 2 <= len(query) <= 100:
+        return mobile_error("INVALID_FOOD_QUERY", "Invalid food query.", 400, False)
+    try:
+        return jsonify({"foods": mobile_food_discovery.search(query)})
+    except Exception as error:
+        return _discovery_failure(error)
+
+
+@bp.get("/nutrition/foods/fatsecret/<food_id>/servings")
+@require_mobile_auth
+def nutrition_food_servings(food_id):
+    if not food_id or len(food_id) > 128:
+        return mobile_error("INVALID_FOOD_ID", "Invalid food identifier.", 400, False)
+    try:
+        food = mobile_food_discovery.servings(food_id)
+    except Exception as error:
+        return _discovery_failure(error)
+    if not food:
+        return mobile_error("FOOD_NOT_FOUND", "Food was not found.", 404, False)
+    return jsonify({"food": food})
+
+
+@bp.get("/nutrition/foods/barcode")
+@require_mobile_auth
+def nutrition_food_barcode():
+    code = request.args.get("code", "").strip()
+    if not code.isdigit() or not normalize_barcode(code):
+        return mobile_error("INVALID_BARCODE", "Invalid barcode.", 400, False)
+    try:
+        food = mobile_food_discovery.barcode_lookup(code)
+    except Exception as error:
+        return _discovery_failure(error)
+    if not food:
+        return mobile_error("FOOD_NOT_FOUND", "Food was not found.", 404, False)
+    return jsonify({"food": food})
+
+
+@bp.post("/nutrition/logs")
+@require_mobile_auth
+def nutrition_log_food():
+    key = meal_idempotency.read_idempotency_key()
+    if key is None:
+        return mobile_error(
+            "INVALID_IDEMPOTENCY_KEY", "A valid Idempotency-Key is required.",
+            400, False)
+    try:
+        command = mobile_log_food.parse_command(request.get_json(silent=True))
+        entry, created = mobile_log_food.log_food(g.mobile_user.id, key, command)
+    except mobile_log_food.InvalidLogFoodCommand:
+        return mobile_error(
+            "INVALID_LOG_FOOD_COMMAND", "Invalid LogFood command.", 400, False)
+    except mobile_log_food.IdempotencyConflict:
+        return mobile_error(
+            "IDEMPOTENCY_CONFLICT",
+            "The Idempotency-Key belongs to a different command.", 409, False)
+    except mobile_log_food.ProviderFoodNotFound:
+        return mobile_error("FOOD_NOT_FOUND", "Food was not found.", 404, False)
+    except Exception as error:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        current_app.logger.error(
+            "mobile_nutrition event=log_food_failed error_type=%s request_id=%s",
+            type(error).__name__, current_request_id())
+        return mobile_error(
+            "NUTRITION_TEMPORARILY_UNAVAILABLE",
+            "Nutrition data is temporarily unavailable.", 503, True)
+    response = jsonify({
+        "meal": mobile_log_food.response_meal(
+            entry, current_app.config["SECRET_KEY"], g.mobile_user.id)
+    })
+    response.status_code = 201 if created else 200
+    return response

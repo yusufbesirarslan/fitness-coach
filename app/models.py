@@ -355,6 +355,7 @@ class MealLog(db.Model):
     tarih      = db.Column(db.String(10), nullable=False, default=lambda: app_today().isoformat())
     source     = db.Column(db.String(20), default="manual")
     idempotency_key = db.Column(db.String(64), nullable=True)
+    idempotency_fingerprint = db.Column(db.String(64), nullable=True)
     photo_key  = db.Column(db.String(300), nullable=True)  # S3 nesne anahtarı (opsiyonel)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
