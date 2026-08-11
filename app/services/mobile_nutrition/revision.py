@@ -90,6 +90,26 @@ def _canonical_state(state):
     ))
 
 
+def revision_state_from_entry(entry):
+    """Build typed revision input from a canonical ledger projection."""
+    return DiaryEntryRevisionState(
+        user_id=entry.user_id,
+        entry_id=entry.entry_id,
+        meal_label=entry.meal_label,
+        description=entry.description,
+        energy_kcal=entry.energy_kcal,
+        protein_g=entry.protein_g,
+        carbohydrate_g=entry.carbohydrate_g,
+        fat_g=entry.fat_g,
+        diary_date=entry.diary_date,
+        source=entry.source,
+        idempotency_key=entry.idempotency_key,
+        idempotency_fingerprint=entry.idempotency_fingerprint,
+        photo_key=entry.photo_key,
+        created_at=entry.created_at,
+    )
+
+
 def diary_entry_revision(secret, state):
     digest = hmac.new(
         _subkey(secret), _canonical_state(state), hashlib.sha256).digest()

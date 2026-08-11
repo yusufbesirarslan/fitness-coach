@@ -7,6 +7,10 @@ from app.extensions import db
 from app.models import MealLog
 from app.services import meal_idempotency, mobile_food_discovery
 from app.services.mobile_nutrition.identity import diary_entry_id
+from app.services.mobile_nutrition.revision import (
+    diary_entry_revision,
+    revision_state_from_entry,
+)
 from app.services.mobile_nutrition.serialization import logged_meal
 from app.timeutil import day_key
 
@@ -111,6 +115,7 @@ def log_food(user_id, key, command):
 
 def response_meal(entry, secret, user_id):
     projected = SimpleNamespace(
+        user_id=entry.user_id,
         entry_id=entry.id,
         meal_label=entry.ogun,
         description=entry.yemekler,
@@ -120,8 +125,16 @@ def response_meal(entry, secret, user_id):
         protein_g=entry.protein,
         carbohydrate_g=entry.karb,
         fat_g=entry.yag,
+        diary_date=entry.tarih,
+        idempotency_key=entry.idempotency_key,
+        idempotency_fingerprint=entry.idempotency_fingerprint,
+        photo_key=entry.photo_key,
     )
     payload = logged_meal(
-        projected, lambda entry_id: diary_entry_id(secret, user_id, entry_id))
+        projected,
+        lambda entry_id: diary_entry_id(secret, user_id, entry_id),
+        lambda item: diary_entry_revision(
+            secret, revision_state_from_entry(item)),
+    )
     payload["day"] = entry.tarih
     return payload

@@ -28,6 +28,7 @@ from .revision import (
     DiaryEntryRevisionState,
     diary_entry_revision,
     matches_diary_entry_revision,
+    revision_state_from_entry,
 )
 from .serialization import diary_day_payload
 
@@ -54,4 +55,7 @@ def build_diary_day(user_id, secret, day=None):
     target = fetch_target_energy_kcal(user_id)
     return diary_day_payload(
         resolved_day, entries, target,
-        lambda entry_id: diary_entry_id(secret, user_id, entry_id))
+        lambda entry_id: diary_entry_id(secret, user_id, entry_id),
+        lambda entry: diary_entry_revision(
+            secret, revision_state_from_entry(entry)),
+    )

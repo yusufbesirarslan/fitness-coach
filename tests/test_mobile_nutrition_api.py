@@ -215,6 +215,20 @@ def test_every_entry_carries_an_opaque_identity(
     assert not identity.isdigit()
 
 
+def test_every_entry_carries_a_stable_opaque_mutation_revision(
+        raw_client, as_mobile, mobile_user):
+    row = log_meal(mobile_user)
+    headers = as_mobile(mobile_user)
+
+    first = read_diary(raw_client, headers).json["meals"][0]["revision"]
+    second = read_diary(raw_client, headers).json["meals"][0]["revision"]
+
+    assert isinstance(first, str) and first
+    assert first == second
+    assert first != str(row.id)
+    assert not first.isdigit()
+
+
 def test_entry_identity_is_stable_across_reads(
         raw_client, as_mobile, mobile_user):
     log_meal(mobile_user)
