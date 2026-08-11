@@ -24,13 +24,21 @@ from app.timeutil import app_today
 
 from .identity import diary_entry_id, matches_diary_entry_id
 from .queries import fetch_ledger_entries, fetch_target_energy_kcal
+from .revision import (
+    DiaryEntryRevisionState,
+    diary_entry_revision,
+    matches_diary_entry_revision,
+)
 from .serialization import diary_day_payload
 
 
 __all__ = [
     "build_diary_day",
     "diary_entry_id",
+    "diary_entry_revision",
+    "DiaryEntryRevisionState",
     "matches_diary_entry_id",
+    "matches_diary_entry_revision",
 ]
 
 
