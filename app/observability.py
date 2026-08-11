@@ -133,9 +133,15 @@ def log_request(response):
     # log-injection için satır-başı içerebilir). ProxyFix(x_for=1) zaten güvenilen
     # tek proxy (host nginx) hop'undan gerçek istemci IP'sini remote_addr'a
     # koyuyor; ham başlık yerine onu logla.
+    # Dynamic resource identifiers are frequently opaque credentials or
+    # owner-bound handles. Log the matched route template rather than the
+    # concrete path so diagnostics retain route identity without persisting a
+    # DiaryItemId (or any other path parameter). Unmatched requests have no
+    # rule and keep their literal path for 404 diagnosis.
+    safe_path = request.url_rule.rule if request.url_rule is not None else request.path
     current_app.logger.info(
         "request id=%s method=%s path=%s status=%s dur_ms=%s user=%s ip=%s",
-        current_request_id(), request.method, request.path, response.status_code,
+        current_request_id(), request.method, safe_path, response.status_code,
         dur_ms, uid, request.remote_addr or "-",
     )
     return response

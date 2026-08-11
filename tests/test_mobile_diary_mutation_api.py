@@ -231,3 +231,46 @@ def test_stale_delete_fails_and_second_delete_is_private_not_found(
     assert (second.status_code, second.json["error"]["code"]) == (
         404, "DIARY_ENTRY_NOT_FOUND")
     assert diary(raw_client, as_mobile(mobile_user)).json["meals"] == []
+
+
+def test_delete_rejects_a_body_instead_of_ignoring_it(
+        raw_client, as_mobile, mobile_user):
+    log_meal(mobile_user)
+    path, target = mutation_target(raw_client, as_mobile(mobile_user))
+
+    response = raw_client.delete(
+        path,
+        headers=as_mobile(mobile_user, target["revision"]),
+        json={"user_id": 999},
+    )
+
+    assert response.status_code == 400
+    assert response.json["error"]["code"] == "INVALID_DIARY_MUTATION"
+    assert diary(raw_client, as_mobile(mobile_user)).json["meals"] == [target]
+
+
+def test_unexpected_mutation_failure_is_bounded_and_redacted(
+        raw_client, as_mobile, mobile_user, monkeypatch, caplog):
+    from app.services import mobile_diary_mutation
+
+    log_meal(mobile_user, description="Private nutrition description")
+    path, target = mutation_target(raw_client, as_mobile(mobile_user))
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("raw database SELECT meal_log secret detail")
+
+    monkeypatch.setattr(mobile_diary_mutation, "set_slot", fail)
+    response = patch_slot(
+        raw_client, path, as_mobile(mobile_user, target["revision"]))
+
+    assert response.status_code == 503
+    assert response.json["error"] == {
+        "code": "NUTRITION_TEMPORARILY_UNAVAILABLE",
+        "message": "Nutrition data is temporarily unavailable.",
+        "retryable": True,
+        "request_id": response.json["error"]["request_id"],
+    }
+    assert "raw database" not in caplog.text
+    assert "Private nutrition description" not in caplog.text
+    assert target["id"] not in caplog.text
+    assert target["revision"] not in caplog.text
