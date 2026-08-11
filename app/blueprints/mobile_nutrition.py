@@ -24,6 +24,8 @@ from app.services import mobile_nutrition
 from app.services import mobile_food_discovery
 from app.services.barcode import normalize_barcode
 from app.services import meal_idempotency, mobile_log_food
+from app.services import mobile_diary_mutation
+from app.timeutil import day_key
 
 
 @bp.get("/nutrition/diary/today")
@@ -145,3 +147,102 @@ def nutrition_log_food():
     })
     response.status_code = 201 if created else 200
     return response
+
+
+def _mutation_precondition():
+    try:
+        return mobile_diary_mutation.parse_if_match(
+            request.headers.get("If-Match")), None
+    except mobile_diary_mutation.MissingPrecondition:
+        return None, mobile_error(
+            "DIARY_PRECONDITION_REQUIRED",
+            "An If-Match precondition is required.", 428, False)
+    except mobile_diary_mutation.InvalidPrecondition:
+        return None, mobile_error(
+            "INVALID_DIARY_PRECONDITION",
+            "The If-Match precondition is invalid.", 400, False)
+
+
+def _mutation_error(code, message, status):
+    try:
+        db.session.rollback()
+    except Exception:
+        pass
+    return mobile_error(code, message, status, False)
+
+
+@bp.patch("/nutrition/logs/<entry_token>")
+@require_mobile_auth
+def nutrition_set_log_slot(entry_token):
+    revision, error_response = _mutation_precondition()
+    if error_response is not None:
+        return error_response
+    try:
+        command = mobile_diary_mutation.parse_mutation_command(
+            request.get_json(silent=True))
+        meal = mobile_diary_mutation.set_slot(
+            g.mobile_user.id,
+            day_key(),
+            entry_token,
+            revision,
+            command,
+            current_app.config["SECRET_KEY"],
+        )
+    except mobile_diary_mutation.InvalidDiaryMutation:
+        return _mutation_error(
+            "INVALID_DIARY_MUTATION", "Invalid diary mutation.", 400)
+    except mobile_diary_mutation.EntryNotFound:
+        return _mutation_error(
+            "DIARY_ENTRY_NOT_FOUND", "Diary entry was not found.", 404)
+    except mobile_diary_mutation.StaleDiaryEntry:
+        return _mutation_error(
+            "STALE_DIARY_ENTRY", "Diary entry has changed.", 412)
+    except Exception as error:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        current_app.logger.error(
+            "mobile_nutrition event=diary_mutation_failed error_type=%s "
+            "request_id=%s", type(error).__name__, current_request_id())
+        return mobile_error(
+            "NUTRITION_TEMPORARILY_UNAVAILABLE",
+            "Nutrition data is temporarily unavailable.", 503, True)
+    return jsonify({"meal": meal})
+
+
+@bp.delete("/nutrition/logs/<entry_token>")
+@require_mobile_auth
+def nutrition_delete_log(entry_token):
+    revision, error_response = _mutation_precondition()
+    if error_response is not None:
+        return error_response
+    if request.get_data(cache=True):
+        return _mutation_error(
+            "INVALID_DIARY_MUTATION", "Invalid diary mutation.", 400)
+    try:
+        mobile_diary_mutation.delete_entry(
+            g.mobile_user.id,
+            day_key(),
+            entry_token,
+            revision,
+            current_app.config["SECRET_KEY"],
+        )
+    except mobile_diary_mutation.EntryNotFound:
+        return _mutation_error(
+            "DIARY_ENTRY_NOT_FOUND", "Diary entry was not found.", 404)
+    except mobile_diary_mutation.StaleDiaryEntry:
+        return _mutation_error(
+            "STALE_DIARY_ENTRY", "Diary entry has changed.", 412)
+    except Exception as error:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        current_app.logger.error(
+            "mobile_nutrition event=diary_delete_failed error_type=%s "
+            "request_id=%s", type(error).__name__, current_request_id())
+        return mobile_error(
+            "NUTRITION_TEMPORARILY_UNAVAILABLE",
+            "Nutrition data is temporarily unavailable.", 503, True)
+    return "", 204

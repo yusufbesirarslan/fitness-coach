@@ -1,12 +1,11 @@
 """Strict, transport-independent mobile diary mutation commands."""
 from dataclasses import dataclass
 
+from app.services.mobile_nutrition.serialization import SLOT_BY_MEAL_LABEL
+
 
 SLOT_LABELS = {
-    "kahvalti": "KahvaltÄ±",
-    "ogle": "Ã–ÄŸle",
-    "aksam": "AkÅŸam",
-    "ara_ogun": "Ara Ã–ÄŸÃ¼n",
+    slot: meal_label for meal_label, slot in SLOT_BY_MEAL_LABEL.items()
 }
 
 
