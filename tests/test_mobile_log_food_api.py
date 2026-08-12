@@ -121,6 +121,9 @@ def test_each_command_writes_a_server_fingerprint_and_opaque_identity(
     assert len(row.idempotency_fingerprint) == 64
     assert all(char in "0123456789abcdef" for char in row.idempotency_fingerprint)
     assert response.json["meal"]["id"] != str(row.id)
+    assert isinstance(response.json["meal"]["revision"], str)
+    assert response.json["meal"]["revision"]
+    assert response.json["meal"]["revision"] != str(row.id)
     assert response.json["meal"]["day"] == row.tarih
 
 

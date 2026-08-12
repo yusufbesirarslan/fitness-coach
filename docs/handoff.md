@@ -1,3 +1,37 @@
+# Sprint 9 PR3A - Backend Diary Mutation Reliability
+
+Date: 2026-08-11
+
+Backend PR3A adds a no-migration, mobile-only mutation slice over the canonical
+`MealLog` ledger. Canonical diary and LogFood entries now carry an opaque
+`revision`. `PATCH /api/v1/nutrition/logs/<DiaryItemId>` accepts only absolute
+`set_slot`; `DELETE` on the same path hard-deletes. Both require one strong
+quoted `If-Match`, use Bearer-only mobile auth, resolve within the authenticated
+owner's current server day, lock the row, and revalidate the revision at the
+write boundary.
+
+Supported for all current-day entries: slot move and delete. Deferred because
+authoritative provenance is absent: manual description/nutrition edits,
+provider quantity/serving/food edits, and provider/manual conversion. No source
+string, fingerprint, description, barcode, or macro ratio is treated as
+provenance. No migration, tombstone, soft delete, mutation journal, provider
+call, or Flutter change exists in PR3A.
+
+Preconditions/errors: missing `If-Match` is
+`428 DIARY_PRECONDITION_REQUIRED`; malformed is
+`400 INVALID_DIARY_PRECONDITION`; stale is `412 STALE_DIARY_ENTRY`; unknown,
+malformed, cross-user, historical, and already-deleted IDs share private
+`404 DIARY_ENTRY_NOT_FOUND`; unsupported bodies are
+`400 INVALID_DIARY_MUTATION`; storage failure is retryable
+`503 NUTRITION_TEMPORARILY_UNAVAILABLE`.
+
+Delete success is `204`. A lost response is reconciled through
+`GET /api/v1/nutrition/diary/today`: absence means the desired state is reached,
+and returned totals remain the sole authority. A second DELETE is private 404;
+there is deliberately no replayable delete record. PR3B must refresh after
+ambiguous mutation outcomes and must not begin until PR3A is reviewed,
+CI-green, and merged. Full wire details are in `docs/MOBILE_NUTRITION.md`.
+
 # Phase 6 - Authentication, Onboarding & Security Handoff
 
 

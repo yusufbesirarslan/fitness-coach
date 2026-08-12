@@ -24,6 +24,7 @@ class LedgerEntry:
     projection's job, not this layer's.
     """
 
+    user_id: int
     entry_id: int
     meal_label: str
     description: str
@@ -32,6 +33,10 @@ class LedgerEntry:
     protein_g: "float | None"
     carbohydrate_g: "float | None"
     fat_g: "float | None"
+    diary_date: str
+    idempotency_key: "str | None"
+    idempotency_fingerprint: "str | None"
+    photo_key: "str | None"
     created_at: "datetime | None"
 
 
@@ -48,6 +53,7 @@ def fetch_ledger_entries(user_id, day_key):
             .all())
     return tuple(
         LedgerEntry(
+            user_id=row.user_id,
             entry_id=row.id,
             meal_label=row.ogun,
             description=row.yemekler,
@@ -56,6 +62,10 @@ def fetch_ledger_entries(user_id, day_key):
             protein_g=row.protein,
             carbohydrate_g=row.karb,
             fat_g=row.yag,
+            diary_date=row.tarih,
+            idempotency_key=row.idempotency_key,
+            idempotency_fingerprint=row.idempotency_fingerprint,
+            photo_key=row.photo_key,
             created_at=row.created_at,
         )
         for row in rows

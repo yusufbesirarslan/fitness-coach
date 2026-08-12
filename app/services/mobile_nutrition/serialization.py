@@ -86,9 +86,10 @@ def nutrient_facts(energy_kcal, protein_g, carbohydrate_g, fat_g):
     }
 
 
-def logged_meal(entry, entry_id_for):
+def logged_meal(entry, entry_id_for, revision_for):
     return {
         "id": entry_id_for(entry.entry_id),
+        "revision": revision_for(entry),
         "slot": slot_token(entry.meal_label),
         "description": entry.description,
         "source": source_token(entry.source),
@@ -140,11 +141,15 @@ def nutrition_goal(target_energy_kcal):
     return {"target_energy_kcal": value}
 
 
-def diary_day_payload(day, entries, target_energy_kcal, entry_id_for):
+def diary_day_payload(
+        day, entries, target_energy_kcal, entry_id_for, revision_for):
     """Project one canonical ledger day onto the mobile contract."""
     return {
         "day": {"date": day.isoformat(), "timezone": APP_TZ.key},
-        "meals": [logged_meal(entry, entry_id_for) for entry in entries],
+        "meals": [
+            logged_meal(entry, entry_id_for, revision_for)
+            for entry in entries
+        ],
         "totals": day_totals(entries),
         "goal": nutrition_goal(target_energy_kcal),
     }

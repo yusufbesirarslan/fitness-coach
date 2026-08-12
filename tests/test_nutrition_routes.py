@@ -302,6 +302,32 @@ def test_diary_delete_item(client, meal_id):
     assert db.session.get(CustomMealItem, item_id) is None
 
 
+def test_legacy_diary_item_mutations_keep_response_and_logged_lock_contract(
+        client, meal_id):
+    item_id = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "pirinÃ§", "grams": 100,
+        "per_100g": {
+            "calories": 130, "protein": 2.7, "carbs": 28, "fat": 0.3,
+        },
+    }).get_json()["item_id"]
+
+    updated = client.patch(
+        f"/api/diary/item/{item_id}", json={"grams": 50})
+    assert updated.status_code == 200
+    assert set(updated.get_json()) == {
+        "item_id", "grams", "calories", "protein", "carbs", "fat",
+    }
+
+    assert client.post(f"/api/diary/meal/{meal_id}/log").status_code == 200
+    update_after_log = client.patch(
+        f"/api/diary/item/{item_id}", json={"grams": 25})
+    delete_after_log = client.delete(f"/api/diary/item/{item_id}")
+
+    assert update_after_log.status_code == 400
+    assert delete_after_log.status_code == 400
+    assert db.session.get(CustomMealItem, item_id) is not None
+
+
 def test_diary_log_meal_totals_labels_and_lock(client, auth_user, meal_id):
     assert client.post(f"/api/diary/meal/{meal_id}/log").status_code == 400  # boş öğün
 

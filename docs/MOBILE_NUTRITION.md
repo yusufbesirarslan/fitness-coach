@@ -385,3 +385,127 @@ payloads. Changing v1 canonicalization requires a new fingerprint version.
 Menu discovery is not published on mobile in PR2A. Its independent gate is
 recorded in
 `docs/superpowers/reports/2026-08-10-sprint9-pr2a-menu-security-gate.md`.
+
+## Sprint 9 PR3A diary mutation contract
+
+PR3A adds stale-safe mutation for the two operations that are authoritative
+with the fields `MealLog` already persists. It does not add a schema migration.
+
+| Operation | Status | Reason |
+| --- | --- | --- |
+| Delete a current-day entry | supported | Entry identity and ownership are authoritative |
+| Set canonical meal slot | supported | `MealLog.ogun` is authoritative persisted state |
+| Edit manual description or nutrition | deferred | No durable authoritative entry-kind provenance |
+| Change provider quantity or serving | deferred | Provider food, serving, and original quantity are not persisted |
+| Replace provider food | deferred | Provider identity is not persisted |
+| Convert provider/manual kind | forbidden | Would fabricate provenance and change semantics |
+
+The supported actions apply to every current-day entry, including legacy rows,
+so no capability booleans are required. A client must not infer future
+capabilities from `source`, description, macros, fingerprint, or barcode text.
+
+### Entry revision
+
+Every canonical `meals[]` element now includes required string `revision`. The
+same field appears in a successful LogFood response and PATCH response. It is an
+opaque precondition, not a database version, and Flutter must only store and
+echo it.
+
+The backend derives it from a typed canonical encoding of the owner, row
+identity, slot, description, four nutrition values, diary date, source,
+idempotency fields, photo key, and creation timestamp. The digest is an
+owner-bound HMAC under the separately domain-separated context
+`axisai/mobile-nutrition/diary-entry-revision/v1`. Identical authoritative state
+has an identical token; material changes have a different token. It is not
+derived from timestamp alone and exposes no raw database value.
+
+### Set slot
+
+```http
+PATCH /api/v1/nutrition/logs/<DiaryItemId>
+Authorization: Bearer <opaque access credential>
+If-Match: "<meals[].revision>"
+Content-Type: application/json
+
+{"operation":"set_slot","slot":"ogle"}
+```
+
+`slot` is exactly one of `kahvalti`, `ogle`, `aksam`, or `ara_ogun`. The request
+sets an absolute target; there is no increment, next-slot, quantity, or delta
+operation. The body must have exactly `operation` and `slot`. Description,
+nutrition, provider/food/serving identity, quantity, user, ID, day, timezone,
+timestamp, source, fingerprint, idempotency key, and body revision are rejected.
+
+Success is `200`:
+
+```json
+{"meal":{"id":"opaque","revision":"opaque","slot":"ogle","description":"...","source":"manual","logged_at":"2026-08-11T08:24:00+03:00","nutrition":{"energy_kcal":320.0,"protein_g":12.0,"carbohydrate_g":40.0,"fat_g":9.0}}}
+```
+
+The response uses the same canonical entry serializer as the diary read. The
+DiaryItemId is unchanged. A real slot change returns a new revision. Setting the
+already-current slot is an idempotent `200` with unchanged state and revision.
+Daily totals are unchanged by a slot move.
+
+### Hard delete and ambiguous transport outcomes
+
+```http
+DELETE /api/v1/nutrition/logs/<DiaryItemId>
+Authorization: Bearer <opaque access credential>
+If-Match: "<meals[].revision>"
+```
+
+DELETE accepts no body. Confirmed success is an empty `204`. It hard-deletes the
+row; PR3A introduces no tombstone, soft-delete flag, mutation journal, or delete
+idempotency table. A second request receives private `404 DIARY_ENTRY_NOT_FOUND`,
+the same answer as a malformed, unknown, historical, or cross-user token.
+
+If the server commits but the response is lost, repeating DELETE cannot prove
+what happened because the identifying row is gone. PR3B must refresh
+`GET /api/v1/nutrition/diary/today`: if the entry is absent, the desired state
+has been achieved. The refreshed server totals are authoritative; Flutter does
+not subtract macros locally.
+
+### Preconditions, errors, and retryability
+
+`If-Match` is the only mutation precondition transport. It must contain exactly
+one strong quoted revision. Weak validators, wildcards, lists, unquoted or blank
+tokens, and body revisions are invalid.
+
+| Condition | HTTP | Mobile code | Retryable |
+| --- | ---: | --- | --- |
+| Bearer absent/rejected | 401 | `AUTH_SESSION_EXPIRED` | false |
+| `If-Match` absent | 428 | `DIARY_PRECONDITION_REQUIRED` | false |
+| `If-Match` malformed | 400 | `INVALID_DIARY_PRECONDITION` | false |
+| Revision stale | 412 | `STALE_DIARY_ENTRY` | false; refresh diary |
+| ID malformed/unknown/cross-user/not current day | 404 | `DIARY_ENTRY_NOT_FOUND` | false; reconcile |
+| Command/body unsupported | 400 | `INVALID_DIARY_MUTATION` | false |
+| Database/storage failure | 503 | `NUTRITION_TEMPORARILY_UNAVAILABLE` | true |
+| Blueprint throttled | 429 | `AUTH_RATE_LIMITED` | true |
+
+PATCH is retryable as an absolute desired-state request. If a response was lost,
+the old revision may now return `412`; refresh and compare the canonical slot.
+DELETE ambiguity is always resolved by the canonical diary read, not by treating
+arbitrary missing tokens as successful deletes.
+
+### Ownership, concurrency, and transaction boundary
+
+Both routes use `@require_mobile_auth`; user authority is only `g.mobile_user`.
+The server resolves DiaryItemId across that owner's current Istanbul diary day,
+then selects the exact `user_id`/row/day with PostgreSQL `FOR UPDATE`. It
+recomputes and compares the revision while holding that row lock immediately
+before changing or deleting state. No provider call or process-local lock is
+inside the transaction.
+
+Consequences for two writers using one starting revision:
+
+- slot/slot: one changed mutation succeeds and one is stale;
+- slot/delete: one wins and the loser is stale or privately missing; no
+  resurrection or overwrite occurs;
+- delete/delete: one actual delete succeeds and the other is privately missing.
+
+The existing PostgreSQL concurrency CI job runs these races in
+`tests/test_mobile_diary_mutation_pg.py`. Legacy web PATCH/DELETE routes keep
+their Flask-Login, CSRF, payload, numeric, response, and no-precondition
+behavior. PR3B must wait until this backend contract is reviewed, CI-green, and
+merged.
