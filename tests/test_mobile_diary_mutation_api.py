@@ -1,5 +1,7 @@
 """Mobile diary slot mutation and reconciliation-based hard delete contract."""
 from datetime import date, datetime
+import logging
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -15,6 +17,12 @@ FIXED_NOW = datetime(2026, 8, 11, 12, 0, tzinfo=APP_TZ)
 FIXED_DAY = date(2026, 8, 11)
 DIARY_PATH = "/api/v1/nutrition/diary/today"
 MEAL_LABELS = {slot: label for label, slot in SLOT_BY_MEAL_LABEL.items()}
+
+
+@pytest.fixture(autouse=True)
+def fixed_diary_clock():
+    with audit_clock(FIXED_NOW):
+        yield
 
 
 @pytest.fixture
@@ -274,3 +282,39 @@ def test_unexpected_mutation_failure_is_bounded_and_redacted(
     assert "Private nutrition description" not in caplog.text
     assert target["id"] not in caplog.text
     assert target["revision"] not in caplog.text
+
+
+def test_matched_mutation_request_log_is_structured_and_redacted(
+        raw_client, as_mobile, mobile_user, caplog):
+    entry_token = "opaque-sensitive-diary-item"
+    revision = "sensitive-revision-token"
+    path = f"/api/v1/nutrition/logs/{entry_token}"
+    headers = as_mobile(mobile_user)
+    headers["If-Match"] = f'"{revision}"'
+    caplog.clear()
+
+    with caplog.at_level(logging.INFO):
+        response = raw_client.patch(
+            path,
+            headers=headers,
+            json={"operation": "set_slot", "slot": "ogle"},
+        )
+
+    line = next((record.getMessage() for record in caplog.records
+                 if "method=PATCH" in record.getMessage()), None)
+    assert response.status_code == 404
+    assert line is not None
+    assert "path=/api/v1/nutrition/logs/<entry_token>" in line
+    assert "status=404" in line
+    assert "dur_ms=" in line
+    assert re.search(r"\bid=[0-9a-f]{16}\b", line)
+    assert "user=-" in line
+    assert f"user={mobile_user.id}" not in line
+    for sensitive in (
+        entry_token,
+        revision,
+        "opaque-access-credential",
+        "set_slot",
+        "ogle",
+    ):
+        assert sensitive not in caplog.text

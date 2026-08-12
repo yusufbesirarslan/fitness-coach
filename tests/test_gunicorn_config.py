@@ -33,6 +33,13 @@ def test_gunicorn_config_accepts_positive_worker_and_thread_overrides(monkeypatc
     assert config["threads"] == 6
 
 
+def test_gunicorn_uses_application_request_logs_and_keeps_error_log(monkeypatch):
+    config = _load_config(monkeypatch)
+
+    assert config["accesslog"] is None
+    assert config["errorlog"] == "-"
+
+
 @pytest.mark.parametrize("value", ["0", "invalid"])
 def test_gunicorn_config_falls_back_for_non_positive_or_invalid_values(
     monkeypatch, value

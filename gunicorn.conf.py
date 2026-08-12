@@ -14,7 +14,10 @@ workers = _positive_int("FITX_WEB_WORKERS", 1)
 threads = _positive_int("FITX_WEB_THREADS", 8)
 timeout = 300
 graceful_timeout = 30
-accesslog = "-"
+# Flask emits the canonical structured request log with route templates and
+# request IDs. A second Gunicorn access log would duplicate it and expose the
+# raw request URI before application-level redaction.
+accesslog = None
 errorlog = "-"
 
 

@@ -46,16 +46,26 @@ def start_request_timer():
     g._req_start = time.monotonic()
 
 
+def _is_mobile_boundary():
+    """Classify matched and routing-error requests in the reserved mobile API."""
+    return (
+        request.blueprint == "mobile_api"
+        or request.path == "/api/v1"
+        or request.path.startswith("/api/v1/")
+    )
+
+
 def client_class():
     """İsteğin istemci sınıfı: "mobile" | "web".
 
-    SUNUCU-TARAFI olgudan türetilir (isteği hangi blueprint karşıladı), istemcinin
-    yolladığı bir başlıktan DEĞİL. Doğrulanmamış istemci etiketleri güvenlik ya da
-    kapasite kararlarında kullanılmaz (prod-hardening §6 "Mobile versus web");
-    burada yalnızca metrik boyutu olarak kullanılsa bile aynı kural geçerli —
-    sahte bir başlık metrikleri kirletebilirdi.
+    SUNUCU-TARAFI olgudan türetilir (isteği hangi blueprint karşıladı veya ayrılmış
+    mobil API ad alanında kaldı), istemcinin yolladığı bir başlıktan DEĞİL.
+    Doğrulanmamış istemci etiketleri güvenlik ya da kapasite kararlarında
+    kullanılmaz (prod-hardening §6 "Mobile versus web"); burada yalnızca metrik
+    boyutu olarak kullanılsa bile aynı kural geçerli — sahte bir başlık metrikleri
+    kirletebilirdi.
     """
-    return "mobile" if request.blueprint == "mobile_api" else "web"
+    return "mobile" if _is_mobile_boundary() else "web"
 
 
 def _status_class(status_code):
@@ -121,9 +131,10 @@ def log_request(response):
     start = getattr(g, "_req_start", None)
     dur_ms = round((time.monotonic() - start) * 1000, 1) if start is not None else "-"
     _record_request_metrics(response, dur_ms)
-    if request.blueprint == "mobile_api":
-        mobile_user = getattr(g, "mobile_user", None)
-        uid = getattr(mobile_user, "id", "-")
+    if _is_mobile_boundary():
+        # The mobile boundary uses opaque credentials and owner-bound handles;
+        # keep user identity out of its request log systematically.
+        uid = "-"
     else:
         try:
             uid = current_user.id if current_user.is_authenticated else "-"
@@ -137,8 +148,8 @@ def log_request(response):
     # owner-bound handles. Log the matched route template rather than the
     # concrete path so diagnostics retain route identity without persisting a
     # DiaryItemId (or any other path parameter). Unmatched requests have no
-    # rule and keep their literal path for 404 diagnosis.
-    safe_path = request.url_rule.rule if request.url_rule is not None else request.path
+    # rule and use a bounded placeholder instead of sensitive path text.
+    safe_path = request.url_rule.rule if request.url_rule is not None else "<unmatched>"
     current_app.logger.info(
         "request id=%s method=%s path=%s status=%s dur_ms=%s user=%s ip=%s",
         current_request_id(), request.method, safe_path, response.status_code,
