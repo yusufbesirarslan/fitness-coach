@@ -23,8 +23,15 @@ LIST_MAX = 4
 _HTML_RE = re.compile(r"<[^>]+>")
 _MEDICAL_RE = re.compile(
     r"(?:diagnos|injur|disease|fractur|tear|arthritis|tendon|cancer|"
-    r"hormonal|eating disorder|anorexi|bulimi|scoliosis|"
+    r"hormonal|eating disorder|anorexi|bulimi|scoliosis|impingement|"
+    r"infect|dislocat|sprain|tumou?r|osteopor|"
     r"skeletal abnormal|clinical postur)",
+    re.IGNORECASE,
+)
+_DIAGNOSTIC_ASSERTION_RE = re.compile(
+    r"(?:you (?:have|may have|appear to have)|"
+    r"(?:this|it) (?:looks? like|suggests?|indicates?|shows?)|"
+    r"(?:signs?|evidence) of)",
     re.IGNORECASE,
 )
 _BODY_CLAIM_RE = re.compile(
@@ -49,7 +56,8 @@ def _plain_text(value, maximum, field):
     value = value.strip()
     if not value or len(value) > maximum:
         raise InvalidAnalysis("analysis text is outside bounds")
-    if _HTML_RE.search(value) or _MEDICAL_RE.search(value):
+    if (_HTML_RE.search(value) or _MEDICAL_RE.search(value)
+            or _DIAGNOSTIC_ASSERTION_RE.search(value)):
         raise InvalidAnalysis("analysis text violates safety policy")
     if _BODY_CLAIM_RE.search(value):
         raise InvalidAnalysis("analysis contains a prohibited body claim")

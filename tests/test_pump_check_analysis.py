@@ -87,6 +87,13 @@ def test_analysis_parser_enforces_output_bounds(field, value):
         "This looks like a fractured clavicle.",
         "This shows signs of cancer.",
         "This suggests anorexia.",
+        "This suggests shoulder impingement.",
+        "This looks like an infection.",
+        "You have a dislocated shoulder.",
+        "Signs of osteoporosis are visible.",
+        "This indicates an unknown medical condition.",
+        "You may have an unnamed condition.",
+        "There is evidence of an unspecified disorder.",
         "The arms differ by two centimeters.",
     ],
 )
