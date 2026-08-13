@@ -124,3 +124,4 @@ jobs:
           tests/test_mobile_auth_pg.py
           tests/test_mobile_log_food_pg.py
           tests/test_mobile_diary_mutation_pg.py
+          tests/test_mobile_pump_check_pg.py

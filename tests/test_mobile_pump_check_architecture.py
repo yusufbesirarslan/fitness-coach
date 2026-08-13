@@ -1,8 +1,14 @@
 import inspect
+from pathlib import Path
 
 from app import create_app
 from app.models import PumpCheck
 from app.services.mobile_pump_checks import analysis, service
+
+
+def test_postgresql_ci_executes_pump_check_concurrency_suite():
+    workflow = Path('.github/workflows/ci.yml').read_text(encoding='utf-8')
+    assert 'tests/test_mobile_pump_check_pg.py' in workflow
 
 
 def test_one_pump_check_persistence_authority_and_no_future_routes():
