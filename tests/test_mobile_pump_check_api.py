@@ -1,6 +1,7 @@
 import json
 from io import BytesIO
 from types import SimpleNamespace
+from datetime import datetime, timedelta
 
 import pytest
 from PIL import Image
@@ -8,6 +9,7 @@ from PIL import Image
 from app.extensions import db
 from app.models import PumpCheck
 from app.services import mobile_auth
+from app.services import ai_gate
 from app.services.mobile_pump_checks import service
 from app.services.mobile_pump_checks.analysis import InvalidAnalysis
 
@@ -56,10 +58,12 @@ def dependencies(monkeypatch, mobile_user):
     calls = {"upload": 0, "analysis": 0, "presign": 0}
 
     def upload(*args, **kwargs):
+        assert db.session().in_transaction() is False
         calls["upload"] += 1
         return f"pump-checks/{mobile_user.id}/2026/08/private.jpg"
 
     def analyze(*args, **kwargs):
+        assert db.session().in_transaction() is False
         calls["analysis"] += 1
         return _analysis()
 
@@ -92,6 +96,23 @@ def test_mobile_create_requires_bearer_and_valid_idempotency_key(client):
         data=_command(),
         headers={"Authorization": "Bearer invalid"},
     ).status_code == 401
+
+
+def test_mobile_ai_capacity_rejection_preserves_error_envelope(
+        client, headers, monkeypatch):
+    class FullGate:
+        def acquire(self, timeout=0):
+            return False
+
+        def release(self):
+            raise AssertionError("unacquired gate must not release")
+
+    monkeypatch.setattr(ai_gate, "_ai_slots", FullGate())
+    response = client.post(PATH, data=_command(), headers=headers)
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "15"
+    assert response.get_json()["error"]["code"] == "PUMP_CHECK_PROVIDER_BUSY"
+    assert response.get_json()["error"]["retryable"] is True
 
 
 def test_mobile_create_and_get_share_one_private_canonical_shape(
@@ -182,6 +203,30 @@ def test_provider_failure_persists_one_failed_row_and_same_key_retries_it(
     assert PumpCheck.query.count() == 1
     assert dependencies["upload"] == 1
     assert attempts["count"] == 2
+
+
+def test_stale_analysis_lease_is_reclaimed_with_new_generation(
+        client, headers, dependencies):
+    first = client.post(PATH, data=_command(), headers=headers)
+    row = PumpCheck.query.one()
+    row.analysis_status = "analyzing"
+    row.analysis = None
+    row.analysis_version = None
+    row.analysis_started_at = datetime.utcnow() - timedelta(minutes=5)
+    old_attempt = row.analysis_attempt
+    db.session.commit()
+
+    replay = client.post(PATH, data=_command(), headers=headers)
+    db.session.refresh(row)
+    assert first.status_code == 201
+    assert replay.status_code == 200
+    assert row.analysis_status == "completed"
+    assert row.analysis_attempt == old_attempt + 1
+    assert service._finalize_success(
+        row.id, row.user_id, old_attempt, _analysis()) is False
+    db.session.refresh(row)
+    assert row.analysis_attempt == old_attempt + 1
+    assert row.analysis_status == "completed"
 
 
 def test_storage_and_invalid_analysis_have_distinct_stable_errors(

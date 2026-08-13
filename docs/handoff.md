@@ -3944,7 +3944,7 @@ brief requires p50/p95/p99.
   blocks false precision, medical claims, and prompt injection.
 - S3 remains private; one-hour signed URLs require owner validation. Storage
   logs no longer include keys, buckets, or owner IDs.
-- Local PostgreSQL is unavailable. Three opt-in Pump Check race tests and CI
+- Local PostgreSQL is unavailable. Three opt-in real-service Pump Check race tests and CI
   PostgreSQL flask db check are the authoritative review conditions.
 - Flutter is untouched. PR2 waits for reviewed, CI-green, merged PR1. PR3
   comparison and PR4 history/retention remain deferred.

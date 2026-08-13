@@ -498,6 +498,9 @@ class PumpCheck(db.Model):
     analysis_status = db.Column(db.String(20), nullable=True)
     analysis      = db.Column(JSONB().with_variant(db.JSON(), "sqlite"), nullable=True)
     analysis_version = db.Column(db.String(40), nullable=True)
+    analysis_started_at = db.Column(db.DateTime, nullable=True)
+    analysis_attempt = db.Column(db.Integer, nullable=True)
+    analysis_failure_kind = db.Column(db.String(20), nullable=True)
     idempotency_key = db.Column(db.String(64), nullable=True)
     idempotency_fingerprint = db.Column(db.String(64), nullable=True)
     # Günlük idempotency anahtarı (Istanbul ISO 'YYYY-MM-DD'). Aşağıdaki UNIQUE

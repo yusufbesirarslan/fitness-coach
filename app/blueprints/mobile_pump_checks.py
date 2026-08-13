@@ -6,7 +6,7 @@ from app.config import BEDROCK_RATELIMIT
 from app.extensions import db, limiter
 from app.mobile_auth_middleware import require_mobile_auth
 from app.observability import current_request_id
-from app.services.ai_gate import ai_concurrency_gate
+from app.services.ai_gate import mobile_ai_concurrency_gate
 from app.services import meal_idempotency
 from app.services.mobile_pump_checks import service
 from app.services.validators import validate_uploaded_pump_check_image
@@ -23,7 +23,8 @@ def _response(row, status=200):
 @bp.post("/pump-checks")
 @require_mobile_auth
 @limiter.limit(BEDROCK_RATELIMIT, key_func=lambda: str(g.mobile_user.id))
-@ai_concurrency_gate
+@mobile_ai_concurrency_gate(
+    "PUMP_CHECK_PROVIDER_BUSY", "Pump Check analysis is busy.")
 def create_pump_check():
     key = meal_idempotency.read_idempotency_key()
     if key is None:

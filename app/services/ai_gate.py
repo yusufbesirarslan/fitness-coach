@@ -346,6 +346,34 @@ def ai_concurrency_gate(fn):
                              AI_MAX_CONCURRENCY, "AI-GATE", "ai")
 
 
+def mobile_ai_concurrency_gate(code, message):
+    """Mobile variant that preserves the stable mobile error envelope."""
+    def decorate(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if not _ai_slots.acquire(timeout=AI_GATE_WAIT_SECONDS):
+                from app.observability import current_request_id
+                _record_gate_rejection("AI-GATE-MOBILE")
+                response = jsonify({"error": {
+                    "code": code,
+                    "message": message,
+                    "retryable": True,
+                    "request_id": current_request_id(),
+                }})
+                response.status_code = 503
+                response.headers["Retry-After"] = "15"
+                return response
+            _enter("ai")
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                _leave("ai")
+                _ai_slots.release()
+        wrapper._ai_concurrency_gated = True
+        return wrapper
+    return decorate
+
+
 def ai_stream_concurrency_gate(fn):
     """Streaming (SSE) route'ları için AI kapısı — slotu YANIT KAPANANA dek tutar.
 

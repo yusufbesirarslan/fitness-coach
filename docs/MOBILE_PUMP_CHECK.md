@@ -48,6 +48,7 @@ owner-only endpoint.
 | PUMP_CHECK_STORAGE_UNAVAILABLE | 503 | Retry with same key |
 | PUMP_CHECK_PROVIDER_UNAVAILABLE | 503 | Retry with same key |
 | PUMP_CHECK_ANALYSIS_INVALID | 503 | Retry with same key |
+| PUMP_CHECK_PROVIDER_BUSY | 503 | Honor Retry-After; retry with same key |
 | AUTH_RATE_LIMITED | 429 | Honor Retry-After; retry with same key |
 
 The semantic fingerprint includes image SHA-256, normalized region,
@@ -55,9 +56,12 @@ environment, description, and canonical captured timestamp in domain
 axisai/mobile-pump-check-create/v1. Multipart boundaries, filename, header
 order, signed URLs, and raw JSON encoding are excluded.
 
-A failed operation keeps one row and status failed. Same-key retry reuses and
-reclaims it. Completed replay never reuploads or reruns Bedrock. A concurrent
-request observing analyzing returns that same canonical state.
+A provider, storage, or invalid-output failure keeps one row and status failed.
+Same-key retry reuses and reclaims it. An ambiguous persistence failure after a
+provider result is not reanalyzed automatically. Completed replay never
+reuploads or reruns Bedrock. A concurrent request observing analyzing returns
+that same canonical state; an interrupted attempt becomes reclaimable after its
+bounded lease, with generation-aware finalization.
 
 ## Privacy and PR2 boundary
 

@@ -16,6 +16,10 @@ Mobile creation uses bounded persistence phases:
 3. Upload privately and invoke Bedrock with no database lock held; persist the
    S3 key before analysis; finalize completed or failed in a short transaction.
 
+The claim carries a two-minute lease and monotonic attempt generation. An
+interrupted worker can be reclaimed after expiry; every key/final-state write is
+generation-conditional, so a stale worker cannot overwrite the new attempt.
+
 The unique constraint, not process-local locking, is race authority. Bedrock
 receives only image bytes and bounded region/environment/description. User text
 is labeled untrusted JSON. Strict validation rejects unknown keys, malformed

@@ -48,6 +48,9 @@ def test_canonical_pump_check_model_maps_only_required_additive_fields():
     assert columns["analysis_status"].type.length == 20
     assert columns["analysis"].nullable is True
     assert columns["analysis_version"].type.length == 40
+    assert columns["analysis_started_at"].nullable is True
+    assert columns["analysis_attempt"].nullable is True
+    assert columns["analysis_failure_kind"].type.length == 20
     assert columns["idempotency_key"].type.length == 64
     assert columns["idempotency_fingerprint"].type.length == 64
     assert {constraint.name for constraint in PumpCheck.__table__.constraints
@@ -74,7 +77,8 @@ def test_additive_migration_preserves_legacy_row_without_fabricated_backfill(tmp
 
         row = connection.execute(sa.text("""
             SELECT captured_at, body_region, analysis_status, analysis,
-                   analysis_version, idempotency_key, idempotency_fingerprint
+                   analysis_version, analysis_started_at, analysis_attempt,
+                   analysis_failure_kind, idempotency_key, idempotency_fingerprint
             FROM pump_check WHERE id = 7
         """)).mappings().one()
         assert dict(row) == {
@@ -83,6 +87,9 @@ def test_additive_migration_preserves_legacy_row_without_fabricated_backfill(tmp
             "analysis_status": None,
             "analysis": None,
             "analysis_version": None,
+            "analysis_started_at": None,
+            "analysis_attempt": None,
+            "analysis_failure_kind": None,
             "idempotency_key": None,
             "idempotency_fingerprint": None,
         }
@@ -107,3 +114,10 @@ def test_additive_migration_downgrade_removes_only_canonical_fields(tmp_path):
         assert {item["name"] for item in sa.inspect(connection).get_unique_constraints("pump_check")} == {
             "uq_pump_check_day"
         }
+
+
+def test_migration_analysis_type_compiles_as_jsonb_on_postgresql():
+    from sqlalchemy.dialects import postgresql
+    migration = _load_migration()
+    assert str(migration._ANALYSIS_TYPE.compile(
+        dialect=postgresql.dialect())) == "JSONB"

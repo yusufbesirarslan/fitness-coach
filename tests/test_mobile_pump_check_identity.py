@@ -3,6 +3,7 @@ import re
 from app.services.mobile_pump_checks.identity import (
     matches_pump_check_id,
     pump_check_id,
+    resolve_pump_check_row_id,
 )
 
 
@@ -20,6 +21,8 @@ def test_pump_check_id_is_owner_and_row_bound():
     assert matches_pump_check_id("secret", 12, 34, token) is True
     assert matches_pump_check_id("secret", 13, 34, token) is False
     assert matches_pump_check_id("secret", 12, 35, token) is False
+    assert resolve_pump_check_row_id("secret", 12, token) == 34
+    assert resolve_pump_check_row_id("secret", 13, token) is None
 
 
 def test_pump_check_id_uses_a_distinct_domain_from_diary_identity():

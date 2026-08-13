@@ -5,6 +5,7 @@ Revises: d8e9f0a1b2c3
 """
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 revision = "e9f0a1b2c3d4"
@@ -13,12 +14,16 @@ branch_labels = None
 depends_on = None
 
 
+_ANALYSIS_TYPE = postgresql.JSONB().with_variant(sa.JSON(), "sqlite")
 _COLUMNS = (
     sa.Column("captured_at", sa.DateTime(), nullable=True),
     sa.Column("body_region", sa.String(length=20), nullable=True),
     sa.Column("analysis_status", sa.String(length=20), nullable=True),
-    sa.Column("analysis", sa.JSON(), nullable=True),
+    sa.Column("analysis", _ANALYSIS_TYPE, nullable=True),
     sa.Column("analysis_version", sa.String(length=40), nullable=True),
+    sa.Column("analysis_started_at", sa.DateTime(), nullable=True),
+    sa.Column("analysis_attempt", sa.Integer(), nullable=True),
+    sa.Column("analysis_failure_kind", sa.String(length=20), nullable=True),
     sa.Column("idempotency_key", sa.String(length=64), nullable=True),
     sa.Column("idempotency_fingerprint", sa.String(length=64), nullable=True),
 )

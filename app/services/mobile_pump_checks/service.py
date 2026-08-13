@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from flask import current_app
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 
 import s3_helper
@@ -16,8 +17,8 @@ from app.services.mobile_pump_checks.analysis import (
     analyze_image,
 )
 from app.services.mobile_pump_checks.identity import (
-    matches_pump_check_id,
     pump_check_id,
+    resolve_pump_check_row_id,
 )
 
 
@@ -26,6 +27,7 @@ BODY_REGIONS = frozenset({
 })
 ENVIRONMENTS = frozenset({"gym", "home", "outdoor", "other"})
 FINGERPRINT_DOMAIN = "axisai/mobile-pump-check-create/v1"
+ANALYSIS_LEASE_SECONDS = 120
 
 
 class InvalidCommand(ValueError):
@@ -156,27 +158,29 @@ def _claim_row(user_id, key, command):
 
 def create_or_replay(user_id, key, command):
     row, created = _claim_row(user_id, key, command)
-    if not created and row.analysis_status in {"completed", "analyzing"}:
-        return row, False
-    claimed = PumpCheck.query.filter(
-        PumpCheck.id == row.id,
-        PumpCheck.user_id == user_id,
-        PumpCheck.analysis_status.in_(("pending", "failed")),
-    ).update({PumpCheck.analysis_status: "analyzing"}, synchronize_session=False)
-    db.session.commit()
-    if not claimed:
-        return db.session.get(PumpCheck, row.id), False
-    row = db.session.get(PumpCheck, row.id)
+    row_id = row.id
+    db.session.rollback()
+    attempt = _claim_analysis(row_id, user_id)
+    if attempt is None:
+        return db.session.get(PumpCheck, row_id), False
+    image_key = db.session.query(PumpCheck.image_key).filter_by(
+        id=row_id, user_id=user_id).scalar()
+    db.session.rollback()
     try:
-        if not row.image_key:
+        if not image_key:
             if not s3_helper.is_enabled():
                 raise StorageUnavailable("private image storage unavailable")
-            row.image_key = s3_helper.upload_image(
+            image_key = s3_helper.upload_image(
                 command.image_bytes,
                 content_type=command.media_type,
                 prefix="pump-checks",
                 user_id=user_id,
             )
+            PumpCheck.query.filter_by(
+                id=row_id, user_id=user_id,
+                analysis_status="analyzing",
+                analysis_attempt=attempt,
+            ).update({PumpCheck.image_key: image_key}, synchronize_session=False)
             db.session.commit()
         analysis = analyze_image(
             command.image_bytes,
@@ -187,18 +191,13 @@ def create_or_replay(user_id, key, command):
                 "description": command.description,
             },
         )
-        row.analysis = analysis
-        row.analysis_version = ANALYSIS_VERSION
-        row.analysis_status = "completed"
-        db.session.commit()
-        return row, created
+        if not _finalize_success(row_id, user_id, attempt, analysis):
+            return db.session.get(PumpCheck, row_id), False
+        return db.session.get(PumpCheck, row_id), created
     except Exception as exc:
         db.session.rollback()
-        row = db.session.get(PumpCheck, row.id)
-        row.analysis = None
-        row.analysis_version = None
-        row.analysis_status = "failed"
-        db.session.commit()
+        kind = _failure_kind(exc)
+        _finalize_failure(row_id, user_id, attempt, kind)
         if isinstance(exc, StorageUnavailable):
             raise
         if isinstance(exc, s3_helper.S3Error):
@@ -208,13 +207,100 @@ def create_or_replay(user_id, key, command):
         raise ProviderUnavailable("pump check provider unavailable") from exc
 
 
+def _claim_analysis(row_id, user_id, now=None):
+    now = now or datetime.utcnow()
+    stale_before = now - timedelta(seconds=ANALYSIS_LEASE_SECONDS)
+    eligible = or_(
+        PumpCheck.analysis_status == "pending",
+        (
+            (PumpCheck.analysis_status == "failed")
+            & (PumpCheck.analysis_failure_kind != "persistence")
+        ),
+        (
+            (PumpCheck.analysis_status == "analyzing")
+            & (PumpCheck.analysis_started_at < stale_before)
+        ),
+    )
+    claimed = PumpCheck.query.filter(
+        PumpCheck.id == row_id,
+        PumpCheck.user_id == user_id,
+        eligible,
+    ).update({
+        PumpCheck.analysis_status: "analyzing",
+        PumpCheck.analysis_started_at: now,
+        PumpCheck.analysis_attempt: func.coalesce(
+            PumpCheck.analysis_attempt, 0) + 1,
+        PumpCheck.analysis_failure_kind: None,
+    }, synchronize_session=False)
+    db.session.commit()
+    if not claimed:
+        return None
+    attempt = db.session.query(PumpCheck.analysis_attempt).filter_by(
+        id=row_id, user_id=user_id).scalar()
+    db.session.rollback()
+    return attempt
+
+
+def _finalize_success(row_id, user_id, attempt, analysis):
+    updated = PumpCheck.query.filter_by(
+        id=row_id,
+        user_id=user_id,
+        analysis_status="analyzing",
+        analysis_attempt=attempt,
+    ).update({
+        PumpCheck.analysis: analysis,
+        PumpCheck.analysis_version: ANALYSIS_VERSION,
+        PumpCheck.analysis_status: "completed",
+        PumpCheck.analysis_started_at: None,
+        PumpCheck.analysis_failure_kind: None,
+    }, synchronize_session=False)
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        completed = db.session.query(PumpCheck.analysis_status).filter_by(
+            id=row_id, user_id=user_id,
+            analysis_attempt=attempt).scalar() == "completed"
+        db.session.rollback()
+        if completed:
+            return True
+        _finalize_failure(row_id, user_id, attempt, "persistence")
+        raise
+    return bool(updated)
+
+
+def _finalize_failure(row_id, user_id, attempt, kind):
+    PumpCheck.query.filter_by(
+        id=row_id,
+        user_id=user_id,
+        analysis_status="analyzing",
+        analysis_attempt=attempt,
+    ).update({
+        PumpCheck.analysis: None,
+        PumpCheck.analysis_version: None,
+        PumpCheck.analysis_status: "failed",
+        PumpCheck.analysis_started_at: None,
+        PumpCheck.analysis_failure_kind: kind,
+    }, synchronize_session=False)
+    db.session.commit()
+
+
+def _failure_kind(error):
+    if isinstance(error, (StorageUnavailable, s3_helper.S3Error)):
+        return "storage"
+    if isinstance(error, InvalidAnalysis):
+        return "invalid_output"
+    return "provider"
+
+
 def get_owned(user_id, token, secret):
-    if not isinstance(token, str) or len(token) != 24:
+    row_id = resolve_pump_check_row_id(secret, user_id, token)
+    if row_id is None:
         raise PumpCheckNotFound()
-    for row in PumpCheck.query.filter_by(user_id=user_id).all():
-        if matches_pump_check_id(secret, user_id, row.id, token):
-            return row
-    raise PumpCheckNotFound()
+    row = PumpCheck.query.filter_by(id=row_id, user_id=user_id).first()
+    if row is None:
+        raise PumpCheckNotFound()
+    return row
 
 
 def _iso(value):
