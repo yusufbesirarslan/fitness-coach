@@ -14,6 +14,8 @@ import struct
 import zlib
 
 import pytest
+from io import BytesIO
+from werkzeug.datastructures import FileStorage
 from PIL import Image
 
 from app.services.validators import (
@@ -27,6 +29,39 @@ from app.services.validators import (
     validate_pump_check_image,
     validate_username,
 )
+
+
+def _uploaded_image(fmt="JPEG", declared="image/jpeg", size=(10, 10)):
+    from PIL import Image
+    stream = BytesIO()
+    Image.new("RGB", size, "blue").save(stream, format=fmt)
+    stream.seek(0)
+    return FileStorage(stream=stream, filename="upload.bin", content_type=declared)
+
+
+def test_mobile_pump_upload_accepts_detected_image_and_canonicalizes_mime(app):
+    from app.services.validators import validate_uploaded_pump_check_image
+    image, mime, error = validate_uploaded_pump_check_image(
+        _uploaded_image("JPEG", "image/jpeg"))
+    assert image.startswith(b"\xff\xd8")
+    assert mime == "image/jpeg"
+    assert error is None
+
+
+def test_mobile_pump_upload_rejects_declared_mime_mismatch(app):
+    from app.services.validators import validate_uploaded_pump_check_image
+    assert validate_uploaded_pump_check_image(
+        _uploaded_image("PNG", "image/jpeg"))[2] == "unsupported_type"
+
+
+def test_mobile_pump_upload_rejects_malformed_and_oversized_bytes(app):
+    from app.services.validators import validate_uploaded_pump_check_image
+    malformed = FileStorage(
+        stream=BytesIO(b"not-an-image"), filename="x.jpg", content_type="image/jpeg")
+    oversized = FileStorage(
+        stream=BytesIO(b"x" * 6_000_001), filename="x.jpg", content_type="image/jpeg")
+    assert validate_uploaded_pump_check_image(malformed)[2] == "invalid_image"
+    assert validate_uploaded_pump_check_image(oversized)[2] == "image_too_large"
 
 
 def _image_data_url(fmt="PNG", size=(2, 2)):

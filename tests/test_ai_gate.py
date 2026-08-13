@@ -287,6 +287,7 @@ EXPECTED_GATED_ENDPOINTS = {
     "coach.chat",                         # koç sohbet
     "training.training_plan_generate",    # antrenman planı (Sonnet)
     "training.complete_workout",          # pump-check görü doğrulama (N1)
+    "mobile_api.create_pump_check",       # canonical mobile pump-check analysis
     "tracking.checkin",                   # haftalık check-in geri bildirimi (N2)
 }
 

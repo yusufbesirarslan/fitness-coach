@@ -94,3 +94,16 @@ def test_presigned_url_ownership_parses_segment_not_substring(s3_on):
     sneaky = "pump-checks/99/2026/06/42/evil.jpg"
     assert generate_presigned_url(sneaky, expected_user_id=42) is None
     assert generate_presigned_url(sneaky, expected_user_id=99) is not None
+
+
+def test_s3_logs_never_contain_private_key_bucket_or_owner(caplog, s3_on, monkeypatch):
+    private_key = "pump-checks/424242/2026/08/private-secret.jpg"
+    upload_image(b"resim", prefix="pump-checks", user_id=424242)
+    generate_presigned_url(private_key, expected_user_id=7)
+    monkeypatch.setattr(s3_helper, "_client", _FakeS3(fail=True))
+    generate_presigned_url(private_key, expected_user_id=424242)
+
+    rendered = caplog.text
+    assert private_key not in rendered
+    assert "test-bucket" not in rendered
+    assert "424242" not in rendered

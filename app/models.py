@@ -491,6 +491,19 @@ class PumpCheck(db.Model):
     reposts_count = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     valid         = db.Column(db.Boolean, default=True)
     fallback      = db.Column(db.Boolean, default=False)  # AI atlandıysa (fail-open)
+    # Sprint 10 PR1 canonical mobile truth. Nullable is deliberate: historical
+    # web rows have no authoritative capture/region/structured-analysis data.
+    captured_at   = db.Column(db.DateTime, nullable=True)
+    body_region   = db.Column(db.String(20), nullable=True)
+    analysis_status = db.Column(db.String(20), nullable=True)
+    analysis      = db.Column(JSONB().with_variant(db.JSON(), "sqlite"), nullable=True)
+    analysis_version = db.Column(db.String(40), nullable=True)
+    analysis_started_at = db.Column(db.DateTime, nullable=True)
+    analysis_attempt = db.Column(db.Integer, nullable=True)
+    analysis_failure_kind = db.Column(db.String(20), nullable=True)
+    idempotency_key = db.Column(db.String(64), nullable=True)
+    idempotency_fingerprint = db.Column(db.String(64), nullable=True)
+    public_id = db.Column(db.String(24), nullable=True)
     # Günlük idempotency anahtarı (Istanbul ISO 'YYYY-MM-DD'). Aşağıdaki UNIQUE
     # ile birlikte, eşzamanlı iki "antrenmanı tamamla" isteğinin TOCTOU yarışında
     # ikinci kez PumpCheck/XP yazmasını DB seviyesinde engeller (created_at-bazlı
@@ -500,6 +513,12 @@ class PumpCheck(db.Model):
 
     __table_args__ = (
         db.UniqueConstraint("user_id", "date_key", name="uq_pump_check_day"),
+        db.UniqueConstraint(
+            "user_id", "idempotency_key",
+            name="uq_pump_check_user_idempotency",
+        ),
+        db.UniqueConstraint(
+            "user_id", "public_id", name="uq_pump_check_user_public_id"),
         # Feed V2 birincil kaynak sorgusu: user_id IN (arkadaslar) + ORDER BY
         # created_at DESC. Tek-kolon user_id indeksi siralamayi karsilamiyordu.
         db.Index("ix_pump_check_user_created", "user_id", "created_at"),
