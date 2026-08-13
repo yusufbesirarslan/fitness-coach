@@ -3934,3 +3934,17 @@ brief requires p50/p95/p99.
 - `python -m pytest tests/test_runtime_metrics.py tests/test_ai_gate.py tests/test_health.py tests/test_observability.py tests/test_ai_metrics.py tests/test_env_example.py -q` — targeted green.
 - Deep health from loopback returns `flags` + `capacity`; the shallow public body
   returns neither (asserted).
+# Sprint 10 PR1 canonical Pump Check foundation (local, 2026-08-13)
+
+- Canonical authority remains pump_check. Migration e9f0a1b2c3d4 is additive
+  and performs no fabricated legacy backfill.
+- Mobile surface is multipart POST /api/v1/pump-checks with required
+  Idempotency-Key and owner-only GET /api/v1/pump-checks/<PumpCheckId>.
+- Analysis contract pump-check-analysis/v1 is strict, bounded, plain text, and
+  blocks false precision, medical claims, and prompt injection.
+- S3 remains private; one-hour signed URLs require owner validation. Storage
+  logs no longer include keys, buckets, or owner IDs.
+- Local PostgreSQL is unavailable. Three opt-in Pump Check race tests and CI
+  PostgreSQL flask db check are the authoritative review conditions.
+- Flutter is untouched. PR2 waits for reviewed, CI-green, merged PR1. PR3
+  comparison and PR4 history/retention remain deferred.
