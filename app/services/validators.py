@@ -138,6 +138,43 @@ def validate_pump_check_image(value):
     return image_bytes, content_type, None
 
 
+_PUMP_UPLOAD_MAX_BYTES = 6_000_000
+_MIME_BY_IMAGE_FORMAT = {
+    "JPEG": "image/jpeg",
+    "PNG": "image/png",
+    "WEBP": "image/webp",
+}
+
+
+def validate_uploaded_pump_check_image(upload):
+    """Validate a bounded multipart image by decoded content, not its filename."""
+    if upload is None:
+        return None, None, "missing_image"
+    declared = (getattr(upload, "mimetype", None) or "").lower()
+    if declared not in set(_MIME_BY_IMAGE_FORMAT.values()):
+        return None, None, "unsupported_type"
+    image_bytes = upload.stream.read(_PUMP_UPLOAD_MAX_BYTES + 1)
+    if len(image_bytes) > _PUMP_UPLOAD_MAX_BYTES:
+        return None, None, "image_too_large"
+    if not image_bytes:
+        return None, None, "invalid_image"
+    try:
+        from PIL import Image
+        import io
+        Image.MAX_IMAGE_PIXELS = _MAX_IMAGE_PIXELS
+        image = Image.open(io.BytesIO(image_bytes))
+        detected = _MIME_BY_IMAGE_FORMAT.get((image.format or "").upper())
+        width, height = image.size
+        image.verify()
+    except Exception:
+        return None, None, "invalid_image"
+    if detected is None or detected != declared:
+        return None, None, "unsupported_type"
+    if width * height > _MAX_IMAGE_PIXELS:
+        return None, None, "image_too_large"
+    return image_bytes, detected, None
+
+
 def validate_meal_photo(value):
     """Öğün fotoğrafı (opsiyonel) için base64 data-URL'i doğrular. Boş değer
     geçerli kabul edilir (foto isteğe bağlı). Return: (image_bytes, content_type, error)."""

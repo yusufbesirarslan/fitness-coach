@@ -131,10 +131,10 @@ def upload_image(image_bytes, content_type="image/jpeg", prefix="uploads", user_
             ContentType=content_type or "application/octet-stream",
             ServerSideEncryption="AES256",
         )
-        logger.info("[S3] Yüklendi: s3://%s/%s (%d bayt)", S3_BUCKET_NAME, key, len(image_bytes))
+        logger.info("[S3] event=upload_succeeded bytes=%d", len(image_bytes))
         return key
     except (BotoCoreError, ClientError) as e:
-        logger.warning("[S3] Yükleme başarısız (%s): %s: %s", key, type(e).__name__, e)
+        logger.warning("[S3] event=upload_failed error_type=%s", type(e).__name__)
         raise S3Error(str(e)) from e
 
 
@@ -149,15 +149,14 @@ def get_object_bytes(key, expected_user_id=None):
     if not key:
         raise S3Error("Nesne anahtarı boş.")
     if expected_user_id is not None and not _key_belongs_to(key, expected_user_id):
-        logger.warning("[S3] İndirme reddedildi: anahtar (%s) kullanıcı %s ile eşleşmiyor.",
-                       key, expected_user_id)
+        logger.warning("[S3] event=download_denied reason=owner_mismatch")
         raise S3Error("Sahiplik doğrulaması başarısız.")
     try:
         client = _get_client()
         resp = client.get_object(Bucket=S3_BUCKET_NAME, Key=key)
         return resp["Body"].read()
     except (BotoCoreError, ClientError) as e:
-        logger.warning("[S3] İndirme başarısız (%s): %s: %s", key, type(e).__name__, e)
+        logger.warning("[S3] event=download_failed error_type=%s", type(e).__name__)
         raise S3Error(str(e)) from e
 
 
@@ -171,8 +170,7 @@ def generate_presigned_url(key, expires_in=3600, expected_user_id=None):
     if not key:
         return None
     if expected_user_id is not None and not _key_belongs_to(key, expected_user_id):
-        logger.warning("[S3] Pre-signed URL reddedildi: anahtar (%s) kullanıcı %s ile eşleşmiyor.",
-                       key, expected_user_id)
+        logger.warning("[S3] event=presign_denied reason=owner_mismatch")
         return None
     try:
         client = _get_client()
@@ -182,5 +180,5 @@ def generate_presigned_url(key, expires_in=3600, expected_user_id=None):
             ExpiresIn=expires_in,
         )
     except (BotoCoreError, ClientError, S3Error) as e:
-        logger.warning("[S3] Pre-signed URL üretilemedi (%s): %s: %s", key, type(e).__name__, e)
+        logger.warning("[S3] event=presign_failed error_type=%s", type(e).__name__)
         return None
