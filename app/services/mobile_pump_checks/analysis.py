@@ -53,7 +53,7 @@ def _plain_text(value, maximum, field):
         raise InvalidAnalysis("analysis text violates safety policy")
     if _BODY_CLAIM_RE.search(value):
         raise InvalidAnalysis("analysis contains a prohibited body claim")
-    if field != "next_check_guidance" and _MEASUREMENT_RE.search(value):
+    if _MEASUREMENT_RE.search(value):
         raise InvalidAnalysis("analysis contains image-derived false precision")
     return value
 

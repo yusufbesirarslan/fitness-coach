@@ -109,10 +109,13 @@ def test_prompt_treats_injection_like_description_as_untrusted_json_data():
     assert "Do not mention prohibited medical or numeric concepts even as disclaimers" in prompt
 
 
-def test_guidance_may_include_safe_training_load_but_not_body_claims():
-    parsed = parse_analysis(json.dumps(_valid(
-        next_check_guidance="Use 5 kg dumbbells in your next training session.")))
-    assert parsed["next_check_guidance"].startswith("Use 5 kg")
+def test_guidance_rejects_measurements_and_body_claims_too():
+    with pytest.raises(InvalidAnalysis):
+        parse_analysis(json.dumps(_valid(
+            next_check_guidance="Your left arm is 2 cm larger; repeat this pose.")))
+    with pytest.raises(InvalidAnalysis):
+        parse_analysis(json.dumps(_valid(
+            next_check_guidance="Use 5 kg dumbbells next time.")))
     with pytest.raises(InvalidAnalysis):
         parse_analysis(json.dumps(_valid(
             next_check_guidance="Your muscle mass increased by 5 kg.")))
