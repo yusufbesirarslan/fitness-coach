@@ -4,7 +4,7 @@
 
 **Goal:** Add an owner-isolated, idempotent mobile Pump Check create/read contract with private media and strictly validated Bedrock analysis while preserving all legacy web and feed behavior.
 
-**Architecture:** The existing `pump_check` table remains the sole persistence authority and receives only nullable/additive canonical fields. A mobile service atomically claims a user-scoped idempotency key, commits before S3/Bedrock work, conditionally claims analysis work, and persists only validated normalized analysis. The `/api/v1` adapter uses multipart upload, Bearer-derived ownership, one canonical serializer, and an owner-bound derived opaque ID.
+**Architecture:** The existing `pump_check` table remains the sole persistence authority and receives only nullable/additive canonical fields. A mobile service atomically claims a user-scoped idempotency key, commits before S3/Bedrock work, conditionally claims analysis work, and persists only validated normalized analysis. The `/api/v1` adapter uses multipart upload, Bearer-derived ownership, one canonical serializer, and a persisted random opaque public ID.
 
 **Tech Stack:** Flask 3.1, SQLAlchemy 2, Alembic, PostgreSQL/SQLite test compatibility, Pillow, private Amazon S3, Amazon Bedrock through the existing Anthropic adapter, pytest.
 
