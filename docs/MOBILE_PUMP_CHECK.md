@@ -49,6 +49,7 @@ owner-only endpoint.
 | PUMP_CHECK_PROVIDER_UNAVAILABLE | 503 | Retry with same key |
 | PUMP_CHECK_ANALYSIS_INVALID | 503 | Retry with same key |
 | PUMP_CHECK_PROVIDER_BUSY | 503 | Honor Retry-After; retry with same key |
+| PUMP_CHECK_PERSISTENCE_UNAVAILABLE | 503 | Fetch/retry same key; analysis is not automatically duplicated |
 | AUTH_RATE_LIMITED | 429 | Honor Retry-After; retry with same key |
 
 The semantic fingerprint includes image SHA-256, normalized region,
@@ -65,8 +66,8 @@ bounded lease, with generation-aware finalization.
 
 ## Privacy and PR2 boundary
 
-PumpCheckId is a 144-bit URL-safe owner-bound HMAC in domain
-axisai/mobile-pump-check/id/v1, distinct from database, feed, and S3 identities.
+PumpCheckId is a persisted 144-bit URL-safe random owner-bound HMAC in domain
+axisai/mobile-pump-check/id/v1, indexed separately from database, feed, and S3 identities.
 Images remain private SSE-S3 objects. Presigned URLs are temporary capability,
 not authority, and are issued only after owner validation.
 

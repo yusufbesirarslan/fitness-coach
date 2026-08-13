@@ -17,8 +17,8 @@ from app.services.mobile_pump_checks.analysis import (
     analyze_image,
 )
 from app.services.mobile_pump_checks.identity import (
-    pump_check_id,
-    resolve_pump_check_row_id,
+    is_valid_pump_check_id,
+    new_pump_check_id,
 )
 
 
@@ -27,7 +27,7 @@ BODY_REGIONS = frozenset({
 })
 ENVIRONMENTS = frozenset({"gym", "home", "outdoor", "other"})
 FINGERPRINT_DOMAIN = "axisai/mobile-pump-check-create/v1"
-ANALYSIS_LEASE_SECONDS = 120
+ANALYSIS_LEASE_SECONDS = 900
 
 
 class InvalidCommand(ValueError):
@@ -55,6 +55,14 @@ class ProviderUnavailable(PumpCheckUnavailable):
 
 
 class AnalysisInvalid(PumpCheckUnavailable):
+    pass
+
+
+class PumpCheckPersistenceUnavailable(PumpCheckUnavailable):
+    pass
+
+
+class PersistenceFinalizationUncertain(RuntimeError):
     pass
 
 
@@ -140,6 +148,8 @@ def _claim_row(user_id, key, command):
         analysis_status="pending",
         idempotency_key=key,
         idempotency_fingerprint=digest,
+        public_id=new_pump_check_id(
+            current_app.config["SECRET_KEY"], user_id),
         date_key=None,
     )
     db.session.add(row)
@@ -182,6 +192,8 @@ def create_or_replay(user_id, key, command):
                 analysis_attempt=attempt,
             ).update({PumpCheck.image_key: image_key}, synchronize_session=False)
             db.session.commit()
+        if not _owns_attempt(row_id, user_id, attempt):
+            return db.session.get(PumpCheck, row_id), False
         analysis = analyze_image(
             command.image_bytes,
             command.media_type,
@@ -194,6 +206,10 @@ def create_or_replay(user_id, key, command):
         if not _finalize_success(row_id, user_id, attempt, analysis):
             return db.session.get(PumpCheck, row_id), False
         return db.session.get(PumpCheck, row_id), created
+    except PersistenceFinalizationUncertain as exc:
+        db.session.rollback()
+        raise PumpCheckPersistenceUnavailable(
+            "pump check finalization unavailable") from exc
     except Exception as exc:
         db.session.rollback()
         kind = _failure_kind(exc)
@@ -256,16 +272,27 @@ def _finalize_success(row_id, user_id, attempt, analysis):
     }, synchronize_session=False)
     try:
         db.session.commit()
-    except Exception:
+    except Exception as commit_error:
         db.session.rollback()
-        completed = db.session.query(PumpCheck.analysis_status).filter_by(
-            id=row_id, user_id=user_id,
-            analysis_attempt=attempt).scalar() == "completed"
+        try:
+            completed = db.session.query(PumpCheck.analysis_status).filter_by(
+                id=row_id, user_id=user_id,
+                analysis_attempt=attempt).scalar() == "completed"
+        except Exception as reconcile_error:
+            db.session.rollback()
+            raise PersistenceFinalizationUncertain(
+                "cannot reconcile analysis finalization") from reconcile_error
         db.session.rollback()
         if completed:
             return True
-        _finalize_failure(row_id, user_id, attempt, "persistence")
-        raise
+        try:
+            _finalize_failure(row_id, user_id, attempt, "persistence")
+        except Exception as reconcile_error:
+            db.session.rollback()
+            raise PersistenceFinalizationUncertain(
+                "cannot persist terminal analysis failure") from reconcile_error
+        raise PersistenceFinalizationUncertain(
+            "analysis completion was not persisted") from commit_error
     return bool(updated)
 
 
@@ -293,11 +320,22 @@ def _failure_kind(error):
     return "provider"
 
 
+def _owns_attempt(row_id, user_id, attempt):
+    owner = db.session.query(PumpCheck.id).filter_by(
+        id=row_id,
+        user_id=user_id,
+        analysis_status="analyzing",
+        analysis_attempt=attempt,
+    ).scalar()
+    db.session.rollback()
+    return owner is not None
+
+
 def get_owned(user_id, token, secret):
-    row_id = resolve_pump_check_row_id(secret, user_id, token)
-    if row_id is None:
+    if not is_valid_pump_check_id(token):
         raise PumpCheckNotFound()
-    row = PumpCheck.query.filter_by(id=row_id, user_id=user_id).first()
+    row = PumpCheck.query.filter_by(
+        public_id=token, user_id=user_id).first()
     if row is None:
         raise PumpCheckNotFound()
     return row
@@ -315,7 +353,7 @@ def serialize_pump_check(row, user_id, secret):
         image_url = s3_helper.generate_presigned_url(
             row.image_key, expires_in=3600, expected_user_id=user_id)
     return {
-        "id": pump_check_id(secret, user_id, row.id),
+        "id": row.public_id,
         "captured_at": _iso(row.captured_at),
         "created_at": _iso(row.created_at),
         "body_region": row.body_region,

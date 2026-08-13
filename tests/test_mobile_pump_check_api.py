@@ -212,7 +212,7 @@ def test_stale_analysis_lease_is_reclaimed_with_new_generation(
     row.analysis_status = "analyzing"
     row.analysis = None
     row.analysis_version = None
-    row.analysis_started_at = datetime.utcnow() - timedelta(minutes=5)
+    row.analysis_started_at = datetime.utcnow() - timedelta(minutes=20)
     old_attempt = row.analysis_attempt
     db.session.commit()
 
@@ -227,6 +227,31 @@ def test_stale_analysis_lease_is_reclaimed_with_new_generation(
     db.session.refresh(row)
     assert row.analysis_attempt == old_attempt + 1
     assert row.analysis_status == "completed"
+
+
+def test_analysis_lease_exceeds_provider_and_storage_retry_budget():
+    assert service.ANALYSIS_LEASE_SECONDS >= 600
+
+
+def test_unreconciled_finalization_is_never_classified_as_provider_failure(
+        app, mobile_user, monkeypatch):
+    row = PumpCheck(
+        user_id=mobile_user.id,
+        public_id="A" * 24,
+        analysis_status="analyzing",
+        analysis_attempt=1,
+        analysis_started_at=datetime.utcnow(),
+    )
+    db.session.add(row)
+    db.session.commit()
+
+    def unavailable_commit():
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(db.session, "commit", unavailable_commit)
+    with pytest.raises(service.PersistenceFinalizationUncertain):
+        service._finalize_success(
+            row.id, row.user_id, 1, _analysis())
 
 
 def test_storage_and_invalid_analysis_have_distinct_stable_errors(

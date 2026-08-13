@@ -23,7 +23,7 @@ The existing `pump_check` row remains the only persistence authority. Legacy web
 | Prompt/schema version | MISSING — ADDITIVE STORAGE REQUIRED | `analysis_version` identifies both contract and prompt schema |
 | Idempotency key | MISSING — ADDITIVE STORAGE REQUIRED | nullable user-scoped key |
 | Idempotency fingerprint | MISSING — ADDITIVE STORAGE REQUIRED | nullable typed command digest |
-| Opaque mobile identity | DERIVABLE SAFELY | owner-bound HMAC over owner and row ID |
+| Opaque mobile identity | MISSING — ADDITIVE STORAGE REQUIRED | indexed random owner-bound HMAC token |
 
 Historical rows remain valid with every new field null. No body region, captured timestamp, quality, version, or structured analysis is inferred from legacy description/environment data.
 

@@ -58,12 +58,15 @@ def create_pump_check():
             service.StorageUnavailable,
             service.ProviderUnavailable,
             service.AnalysisInvalid,
+            service.PumpCheckPersistenceUnavailable,
     ) as error:
         db.session.rollback()
         current_app.logger.error(
             "mobile_pump_check event=create_failed error_type=%s request_id=%s",
             type(error).__name__, current_request_id())
-        if isinstance(error, service.StorageUnavailable):
+        if isinstance(error, service.PumpCheckPersistenceUnavailable):
+            code = "PUMP_CHECK_PERSISTENCE_UNAVAILABLE"
+        elif isinstance(error, service.StorageUnavailable):
             code = "PUMP_CHECK_STORAGE_UNAVAILABLE"
         elif isinstance(error, service.AnalysisInvalid):
             code = "PUMP_CHECK_ANALYSIS_INVALID"

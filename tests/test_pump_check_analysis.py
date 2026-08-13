@@ -84,6 +84,10 @@ def test_analysis_parser_enforces_output_bounds(field, value):
         "The left arm is 2 cm larger.",
         "This looks like a rotator cuff tear.",
         "This suggests arthritis.",
+        "This looks like a fractured clavicle.",
+        "This shows signs of cancer.",
+        "This suggests anorexia.",
+        "The arms differ by two centimeters.",
     ],
 )
 def test_analysis_parser_rejects_unsafe_claims(unsafe):
@@ -103,6 +107,15 @@ def test_prompt_treats_injection_like_description_as_untrusted_json_data():
     assert "Never estimate body-fat percentages" in prompt
     assert "Do not diagnose" in prompt
     assert "Do not mention prohibited medical or numeric concepts even as disclaimers" in prompt
+
+
+def test_guidance_may_include_safe_training_load_but_not_body_claims():
+    parsed = parse_analysis(json.dumps(_valid(
+        next_check_guidance="Use 5 kg dumbbells in your next training session.")))
+    assert parsed["next_check_guidance"].startswith("Use 5 kg")
+    with pytest.raises(InvalidAnalysis):
+        parse_analysis(json.dumps(_valid(
+            next_check_guidance="Your muscle mass increased by 5 kg.")))
 
 
 def test_analysis_adapter_passes_only_bounded_context_and_validates_output():

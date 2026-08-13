@@ -38,7 +38,7 @@ def test_mobile_routes_use_bearer_auth_and_one_serializer():
 def test_serializer_and_provider_boundary_do_not_publish_internal_authority():
     serializer_source = inspect.getsource(service.serialize_pump_check)
     adapter_source = inspect.getsource(analysis.analyze_image)
-    assert "pump_check_id(" in serializer_source
+    assert "row.public_id" in serializer_source
     assert '"image_key":' not in serializer_source
     assert '"user_id":' not in serializer_source
     assert "parse_analysis(raw)" in adapter_source

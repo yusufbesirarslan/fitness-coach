@@ -53,10 +53,12 @@ def test_canonical_pump_check_model_maps_only_required_additive_fields():
     assert columns["analysis_failure_kind"].type.length == 20
     assert columns["idempotency_key"].type.length == 64
     assert columns["idempotency_fingerprint"].type.length == 64
+    assert columns["public_id"].type.length == 24
     assert {constraint.name for constraint in PumpCheck.__table__.constraints
             if isinstance(constraint, sa.UniqueConstraint)} == {
                 "uq_pump_check_day",
                 "uq_pump_check_user_idempotency",
+                "uq_pump_check_user_public_id",
             }
 
 
@@ -78,7 +80,8 @@ def test_additive_migration_preserves_legacy_row_without_fabricated_backfill(tmp
         row = connection.execute(sa.text("""
             SELECT captured_at, body_region, analysis_status, analysis,
                    analysis_version, analysis_started_at, analysis_attempt,
-                   analysis_failure_kind, idempotency_key, idempotency_fingerprint
+                   analysis_failure_kind, idempotency_key, idempotency_fingerprint,
+                   public_id
             FROM pump_check WHERE id = 7
         """)).mappings().one()
         assert dict(row) == {
@@ -92,9 +95,12 @@ def test_additive_migration_preserves_legacy_row_without_fabricated_backfill(tmp
             "analysis_failure_kind": None,
             "idempotency_key": None,
             "idempotency_fingerprint": None,
+            "public_id": None,
         }
         uniques = {item["name"] for item in sa.inspect(connection).get_unique_constraints("pump_check")}
-        assert uniques == {"uq_pump_check_day", "uq_pump_check_user_idempotency"}
+        assert uniques == {
+            "uq_pump_check_day", "uq_pump_check_user_idempotency",
+            "uq_pump_check_user_public_id"}
 
 
 def test_additive_migration_downgrade_removes_only_canonical_fields(tmp_path):

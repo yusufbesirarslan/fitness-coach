@@ -16,7 +16,8 @@ Mobile creation uses bounded persistence phases:
 3. Upload privately and invoke Bedrock with no database lock held; persist the
    S3 key before analysis; finalize completed or failed in a short transaction.
 
-The claim carries a two-minute lease and monotonic attempt generation. An
+The claim carries a fifteen-minute lease (well above bounded S3 plus all
+configured Bedrock attempts) and monotonic attempt generation. An
 interrupted worker can be reclaimed after expiry; every key/final-state write is
 generation-conditional, so a stale worker cannot overwrite the new attempt.
 

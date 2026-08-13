@@ -106,7 +106,6 @@ def _race(app, users, commands):
         IdempotencyConflict,
         create_or_replay,
     )
-    from app.services.mobile_pump_checks.identity import pump_check_id
 
     barrier = threading.Barrier(2)
     outcomes = {}
@@ -119,7 +118,7 @@ def _race(app, users, commands):
                     users[index], "pump-race-key-0001", commands[index])
                 outcomes[index] = (
                     "ok", created,
-                    pump_check_id(app.config["SECRET_KEY"], users[index], row.id),
+                    row.public_id,
                 )
             except IdempotencyConflict:
                 outcomes[index] = ("conflict",)

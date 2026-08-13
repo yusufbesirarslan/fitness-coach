@@ -21,11 +21,20 @@ OBSERVATIONS_MAX = 5
 LIST_MAX = 4
 
 _HTML_RE = re.compile(r"<[^>]+>")
-_UNSAFE_RE = re.compile(
-    r"(?:\b\d+(?:\.\d+)?\s*(?:%|kg|cm|mm|millimet)|"
-    r"body[ -]?fat|lean mass|muscle (?:mass|growth)|gained?\s+\d|"
-    r"circumference|diagnos|injur|disease|tear|arthritis|tendon|"
-    r"hormonal|eating disorder|scoliosis|skeletal abnormal|clinical postur)",
+_MEDICAL_RE = re.compile(
+    r"(?:diagnos|injur|disease|fractur|tear|arthritis|tendon|cancer|"
+    r"hormonal|eating disorder|anorexi|bulimi|scoliosis|"
+    r"skeletal abnormal|clinical postur)",
+    re.IGNORECASE,
+)
+_BODY_CLAIM_RE = re.compile(
+    r"(?:body[ -]?fat|lean mass|muscle (?:mass|growth)|circumference|asymmetr)",
+    re.IGNORECASE,
+)
+_MEASUREMENT_RE = re.compile(
+    r"(?:\b\d+(?:\.\d+)?\s*(?:%|kg|cm|mm|millimet|centimet)|"
+    r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten)\s+"
+    r"(?:percent|kilograms?|centimeters?|millimeters?))",
     re.IGNORECASE,
 )
 
@@ -34,21 +43,25 @@ class InvalidAnalysis(ValueError):
     """Provider output does not satisfy the public Pump Check contract."""
 
 
-def _plain_text(value, maximum):
+def _plain_text(value, maximum, field):
     if not isinstance(value, str):
         raise InvalidAnalysis("analysis text must be a string")
     value = value.strip()
     if not value or len(value) > maximum:
         raise InvalidAnalysis("analysis text is outside bounds")
-    if _HTML_RE.search(value) or _UNSAFE_RE.search(value):
+    if _HTML_RE.search(value) or _MEDICAL_RE.search(value):
         raise InvalidAnalysis("analysis text violates safety policy")
+    if _BODY_CLAIM_RE.search(value):
+        raise InvalidAnalysis("analysis contains a prohibited body claim")
+    if field != "next_check_guidance" and _MEASUREMENT_RE.search(value):
+        raise InvalidAnalysis("analysis contains image-derived false precision")
     return value
 
 
-def _text_list(value, maximum_count):
+def _text_list(value, maximum_count, field):
     if not isinstance(value, list) or len(value) > maximum_count:
         raise InvalidAnalysis("analysis list is outside bounds")
-    return [_plain_text(item, ITEM_MAX) for item in value]
+    return [_plain_text(item, ITEM_MAX, field) for item in value]
 
 
 def parse_analysis(raw):
@@ -64,13 +77,16 @@ def parse_analysis(raw):
     if not isinstance(quality, str) or quality not in QUALITY_VALUES:
         raise InvalidAnalysis("analysis quality is invalid")
     return {
-        "summary": _plain_text(value["summary"], SUMMARY_MAX),
-        "observations": _text_list(value["observations"], OBSERVATIONS_MAX),
-        "strengths": _text_list(value["strengths"], LIST_MAX),
-        "focus_areas": _text_list(value["focus_areas"], LIST_MAX),
-        "limitations": _text_list(value["limitations"], LIST_MAX),
+        "summary": _plain_text(value["summary"], SUMMARY_MAX, "summary"),
+        "observations": _text_list(
+            value["observations"], OBSERVATIONS_MAX, "observations"),
+        "strengths": _text_list(value["strengths"], LIST_MAX, "strengths"),
+        "focus_areas": _text_list(
+            value["focus_areas"], LIST_MAX, "focus_areas"),
+        "limitations": _text_list(
+            value["limitations"], LIST_MAX, "limitations"),
         "next_check_guidance": _plain_text(
-            value["next_check_guidance"], GUIDANCE_MAX),
+            value["next_check_guidance"], GUIDANCE_MAX, "next_check_guidance"),
         "quality": quality,
     }
 

@@ -26,8 +26,10 @@ _COLUMNS = (
     sa.Column("analysis_failure_kind", sa.String(length=20), nullable=True),
     sa.Column("idempotency_key", sa.String(length=64), nullable=True),
     sa.Column("idempotency_fingerprint", sa.String(length=64), nullable=True),
+    sa.Column("public_id", sa.String(length=24), nullable=True),
 )
 _UNIQUE = "uq_pump_check_user_idempotency"
+_PUBLIC_UNIQUE = "uq_pump_check_user_public_id"
 
 
 def _state():
@@ -41,7 +43,7 @@ def upgrade():
     columns, uniques = _state()
     missing = [column for column in _COLUMNS if column.name not in columns]
     if op.get_bind().dialect.name == "sqlite":
-        if not missing and _UNIQUE in uniques:
+        if not missing and _UNIQUE in uniques and _PUBLIC_UNIQUE in uniques:
             return
         with op.batch_alter_table("pump_check") as batch:
             for column in missing:
@@ -49,12 +51,18 @@ def upgrade():
             if _UNIQUE not in uniques:
                 batch.create_unique_constraint(
                     _UNIQUE, ["user_id", "idempotency_key"])
+            if _PUBLIC_UNIQUE not in uniques:
+                batch.create_unique_constraint(
+                    _PUBLIC_UNIQUE, ["user_id", "public_id"])
         return
     for column in missing:
         op.add_column("pump_check", column)
     if _UNIQUE not in uniques:
         op.create_unique_constraint(
             _UNIQUE, "pump_check", ["user_id", "idempotency_key"])
+    if _PUBLIC_UNIQUE not in uniques:
+        op.create_unique_constraint(
+            _PUBLIC_UNIQUE, "pump_check", ["user_id", "public_id"])
 
 
 def downgrade():
@@ -62,11 +70,15 @@ def downgrade():
     present = [column.name for column in _COLUMNS if column.name in columns]
     if op.get_bind().dialect.name == "sqlite":
         with op.batch_alter_table("pump_check") as batch:
+            if _PUBLIC_UNIQUE in uniques:
+                batch.drop_constraint(_PUBLIC_UNIQUE, type_="unique")
             if _UNIQUE in uniques:
                 batch.drop_constraint(_UNIQUE, type_="unique")
             for name in reversed(present):
                 batch.drop_column(name)
         return
+    if _PUBLIC_UNIQUE in uniques:
+        op.drop_constraint(_PUBLIC_UNIQUE, "pump_check", type_="unique")
     if _UNIQUE in uniques:
         op.drop_constraint(_UNIQUE, "pump_check", type_="unique")
     for name in reversed(present):
