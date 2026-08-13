@@ -10,7 +10,11 @@ from sqlalchemy.exc import IntegrityError
 import s3_helper
 from app.extensions import db
 from app.models import PumpCheck
-from app.services.mobile_pump_checks.analysis import ANALYSIS_VERSION, analyze_image
+from app.services.mobile_pump_checks.analysis import (
+    ANALYSIS_VERSION,
+    InvalidAnalysis,
+    analyze_image,
+)
 from app.services.mobile_pump_checks.identity import (
     matches_pump_check_id,
     pump_check_id,
@@ -37,6 +41,18 @@ class PumpCheckNotFound(Exception):
 
 
 class PumpCheckUnavailable(Exception):
+    pass
+
+
+class StorageUnavailable(PumpCheckUnavailable):
+    pass
+
+
+class ProviderUnavailable(PumpCheckUnavailable):
+    pass
+
+
+class AnalysisInvalid(PumpCheckUnavailable):
     pass
 
 
@@ -154,7 +170,7 @@ def create_or_replay(user_id, key, command):
     try:
         if not row.image_key:
             if not s3_helper.is_enabled():
-                raise PumpCheckUnavailable("private image storage unavailable")
+                raise StorageUnavailable("private image storage unavailable")
             row.image_key = s3_helper.upload_image(
                 command.image_bytes,
                 content_type=command.media_type,
@@ -183,9 +199,13 @@ def create_or_replay(user_id, key, command):
         row.analysis_version = None
         row.analysis_status = "failed"
         db.session.commit()
-        if isinstance(exc, PumpCheckUnavailable):
+        if isinstance(exc, StorageUnavailable):
             raise
-        raise PumpCheckUnavailable("pump check analysis unavailable") from exc
+        if isinstance(exc, s3_helper.S3Error):
+            raise StorageUnavailable("private image storage unavailable") from exc
+        if isinstance(exc, InvalidAnalysis):
+            raise AnalysisInvalid("provider analysis was invalid") from exc
+        raise ProviderUnavailable("pump check provider unavailable") from exc
 
 
 def get_owned(user_id, token, secret):

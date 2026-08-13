@@ -9,6 +9,7 @@ from app.extensions import db
 from app.models import PumpCheck
 from app.services import mobile_auth
 from app.services.mobile_pump_checks import service
+from app.services.mobile_pump_checks.analysis import InvalidAnalysis
 
 
 PATH = "/api/v1/pump-checks"
@@ -170,6 +171,7 @@ def test_provider_failure_persists_one_failed_row_and_same_key_retries_it(
 
     failed = client.post(PATH, data=_command(), headers=headers)
     assert failed.status_code == 503
+    assert failed.get_json()["error"]["code"] == "PUMP_CHECK_PROVIDER_UNAVAILABLE"
     row = PumpCheck.query.one()
     assert row.analysis_status == "failed"
     assert row.image_key is not None
@@ -180,3 +182,20 @@ def test_provider_failure_persists_one_failed_row_and_same_key_retries_it(
     assert PumpCheck.query.count() == 1
     assert dependencies["upload"] == 1
     assert attempts["count"] == 2
+
+
+def test_storage_and_invalid_analysis_have_distinct_stable_errors(
+        client, headers, dependencies, monkeypatch):
+    monkeypatch.setattr(service.s3_helper, "is_enabled", lambda: False)
+    storage = client.post(PATH, data=_command(), headers=headers)
+    assert storage.status_code == 503
+    assert storage.get_json()["error"]["code"] == "PUMP_CHECK_STORAGE_UNAVAILABLE"
+
+    headers["Idempotency-Key"] = "pump-operation-0002"
+    monkeypatch.setattr(service.s3_helper, "is_enabled", lambda: True)
+    monkeypatch.setattr(
+        service, "analyze_image",
+        lambda *args, **kwargs: (_ for _ in ()).throw(InvalidAnalysis("bad")))
+    invalid = client.post(PATH, data=_command(), headers=headers)
+    assert invalid.status_code == 503
+    assert invalid.get_json()["error"]["code"] == "PUMP_CHECK_ANALYSIS_INVALID"

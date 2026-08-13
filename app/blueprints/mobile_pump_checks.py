@@ -1,12 +1,12 @@
 """Owner-only canonical mobile Pump Check HTTP contract."""
 from flask import current_app, g, jsonify, request
-from flask_limiter.util import get_remote_address
 
 from app.blueprints.mobile_api import bp, mobile_error
 from app.config import BEDROCK_RATELIMIT
 from app.extensions import db, limiter
 from app.mobile_auth_middleware import require_mobile_auth
 from app.observability import current_request_id
+from app.services.ai_gate import ai_concurrency_gate
 from app.services import meal_idempotency
 from app.services.mobile_pump_checks import service
 from app.services.validators import validate_uploaded_pump_check_image
@@ -22,7 +22,8 @@ def _response(row, status=200):
 
 @bp.post("/pump-checks")
 @require_mobile_auth
-@limiter.limit(BEDROCK_RATELIMIT, key_func=get_remote_address)
+@limiter.limit(BEDROCK_RATELIMIT, key_func=lambda: str(g.mobile_user.id))
+@ai_concurrency_gate
 def create_pump_check():
     key = meal_idempotency.read_idempotency_key()
     if key is None:
@@ -52,14 +53,23 @@ def create_pump_check():
         return mobile_error(
             "IDEMPOTENCY_CONFLICT",
             "The Idempotency-Key belongs to a different command.", 409, False)
-    except service.PumpCheckUnavailable as error:
+    except (
+            service.StorageUnavailable,
+            service.ProviderUnavailable,
+            service.AnalysisInvalid,
+    ) as error:
         db.session.rollback()
         current_app.logger.error(
             "mobile_pump_check event=create_failed error_type=%s request_id=%s",
             type(error).__name__, current_request_id())
+        if isinstance(error, service.StorageUnavailable):
+            code = "PUMP_CHECK_STORAGE_UNAVAILABLE"
+        elif isinstance(error, service.AnalysisInvalid):
+            code = "PUMP_CHECK_ANALYSIS_INVALID"
+        else:
+            code = "PUMP_CHECK_PROVIDER_UNAVAILABLE"
         return mobile_error(
-            "PUMP_CHECK_TEMPORARILY_UNAVAILABLE",
-            "Pump Check is temporarily unavailable.", 503, True)
+            code, "Pump Check is temporarily unavailable.", 503, True)
 
 
 @bp.get("/pump-checks/<pump_check_token>")
