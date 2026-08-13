@@ -37,7 +37,7 @@ def test_alembic_migrations_have_single_head():
 
     # Sprint 7 PR3 adds the workout_session table as the single new head off
     # bb88cc99dd00 (the PR2 base). One head only — no branching.
-    assert heads == ["d8e9f0a1b2c3"]
+    assert heads == ["e9f0a1b2c3d4"]
 
 
 def test_meal_idempotency_fingerprint_migration_round_trips_only_nullable_column(
