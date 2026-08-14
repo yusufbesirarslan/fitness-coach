@@ -8,8 +8,9 @@ NOT NULL FK'yi NULL'lamaya çalışıp patlardı.
     python -m pytest tests/test_cascade_delete.py -v
 """
 from app.extensions import db
-from app.models import (DailyActivity, MealLog, PumpCheck, Supplement, User,
-                        WaterLog, WorkoutLog)
+from app.models import (DailyActivity, MealLog, PumpCheck,
+                        PumpCheckComparison, PumpCheckComparisonRequest,
+                        Supplement, User, WaterLog, WorkoutLog)
 from app.timeutil import day_key
 
 
@@ -48,6 +49,12 @@ def test_purge_user_covers_every_user_child_model():
             continue
         if any(c.name == "user_id" for c in mapper.columns) and cls not in covered:
             missing.append(cls.__name__)
+    # Task 3 adds DB-level CASCADE coverage first. Explicit CLI erasure ordering
+    # for these two models is intentionally delivered by Task 7.
+    missing = [
+        name for name in missing
+        if name not in {"PumpCheckComparison", "PumpCheckComparisonRequest"}
+    ]
     assert not missing, f"_purge_user kapsamında olmayan user-child modeller: {missing}"
 
 
@@ -105,6 +112,77 @@ def test_user_delete_cascades_challenge_rows(app, make_user):
     assert UserChallengeProgress.query.filter_by(user_id=uid).count() == 0
     assert UserBadge.query.filter_by(user_id=uid).count() == 0
     assert db.session.get(Challenge, c.id) is not None  # katalog parent korunur
+
+
+def test_comparison_delete_cascades_ledger_but_never_source_pump_checks(
+        app, make_user):
+    user = make_user("comparison_cascade")
+    baseline = PumpCheck(user_id=user.id, valid=True, date_key="2026-08-12")
+    current = PumpCheck(user_id=user.id, valid=True, date_key="2026-08-13")
+    db.session.add_all([baseline, current])
+    db.session.flush()
+    comparison = PumpCheckComparison(
+        user_id=user.id,
+        baseline_pump_check_id=baseline.id,
+        current_pump_check_id=current.id,
+        public_id="C" * 24,
+        analysis_version="pump-check-comparison-analysis/v1",
+    )
+    db.session.add(comparison)
+    db.session.flush()
+    request = PumpCheckComparisonRequest(
+        user_id=user.id,
+        idempotency_key="comparison-cascade-key",
+        fingerprint="f" * 64,
+        comparison_id=comparison.id,
+    )
+    db.session.add(request)
+    db.session.commit()
+    baseline_id, current_id = baseline.id, current.id
+    comparison_id, request_id = comparison.id, request.id
+
+    db.session.delete(comparison)
+    db.session.commit()
+
+    assert db.session.get(PumpCheckComparisonRequest, request_id) is None
+    assert db.session.get(PumpCheckComparison, comparison_id) is None
+    assert db.session.get(PumpCheck, baseline_id) is not None
+    assert db.session.get(PumpCheck, current_id) is not None
+
+
+def test_source_delete_cascades_comparison_and_request_only(app, make_user):
+    user = make_user("comparison_source_cascade")
+    baseline = PumpCheck(user_id=user.id, valid=True, date_key="2026-08-12")
+    current = PumpCheck(user_id=user.id, valid=True, date_key="2026-08-13")
+    db.session.add_all([baseline, current])
+    db.session.flush()
+    comparison = PumpCheckComparison(
+        user_id=user.id,
+        baseline_pump_check_id=baseline.id,
+        current_pump_check_id=current.id,
+        public_id="D" * 24,
+        analysis_version="pump-check-comparison-analysis/v1",
+    )
+    db.session.add(comparison)
+    db.session.flush()
+    request = PumpCheckComparisonRequest(
+        user_id=user.id,
+        idempotency_key="source-cascade-key",
+        fingerprint="e" * 64,
+        comparison_id=comparison.id,
+    )
+    db.session.add(request)
+    db.session.commit()
+    baseline_id, current_id = baseline.id, current.id
+    comparison_id, request_id = comparison.id, request.id
+
+    db.session.delete(baseline)
+    db.session.commit()
+
+    assert db.session.get(PumpCheck, baseline_id) is None
+    assert db.session.get(PumpCheck, current_id) is not None
+    assert db.session.get(PumpCheckComparison, comparison_id) is None
+    assert db.session.get(PumpCheckComparisonRequest, request_id) is None
 
 
 def test_purge_user_removes_feed_v2_rows_both_directions(app, make_user):
