@@ -101,20 +101,28 @@ def create_audit_app(database_path: Path):
     database_path = Path(database_path).resolve()
     database_path.parent.mkdir(parents=True, exist_ok=True)
     database_url = sqlite_url(database_path)
+    previous_database_url = os.environ.get("DATABASE_URL")
     configure_audit_environment(database_url)
 
-    from datetime import datetime
+    try:
+        from datetime import datetime
 
-    from flask import abort, g, jsonify, redirect, session
-    from flask_login import login_user
+        from flask import abort, g, jsonify, redirect, session
+        from flask_login import login_user
 
-    from app import create_app
-    from app.extensions import db, limiter
-    from app.models import User
-    from app.services import cognito_jwt, session_store
-    from app.timeutil import audit_clock
+        from app import create_app
+        from app.extensions import db, limiter
+        from app.models import User
+        from app.services import cognito_jwt, session_store
+        from app.timeutil import audit_clock
 
-    app = create_app()
+        app = create_app()
+    finally:
+        if previous_database_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = previous_database_url
+
     app.config.update(
         TESTING=True,
         PROPAGATE_EXCEPTIONS=False,
