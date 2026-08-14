@@ -2,6 +2,8 @@
 import json
 import re
 
+from app.services.vision_images import prepare_image_for_vision
+
 
 ANALYSIS_VERSION = "pump-check-analysis/v1"
 QUALITY_VALUES = frozenset({"sufficient", "limited", "insufficient"})
@@ -143,6 +145,7 @@ def analyze_image(image_bytes, media_type, context, provider=None):
     if provider is None:
         from app.services.ai import _bedrock_validate_image
         provider = _bedrock_validate_image
+    image_bytes, media_type = prepare_image_for_vision(image_bytes, media_type)
     raw = provider(
         image_bytes,
         media_type,

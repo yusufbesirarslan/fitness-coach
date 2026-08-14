@@ -2,6 +2,8 @@ import json
 
 import pytest
 
+from app.services.mobile_pump_checks import analysis
+
 from app.services.mobile_pump_checks.analysis import (
     ANALYSIS_VERSION,
     InvalidAnalysis,
@@ -173,6 +175,22 @@ def test_analysis_adapter_passes_only_bounded_context_and_validates_output():
     assert seen["media_type"] == "image/jpeg"
     assert seen["max_tokens"] == 1200
     assert "user_id" not in seen["prompt"]
+
+
+def test_canonical_pr1_normalizes_before_single_image_provider(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        analysis, "prepare_image_for_vision", lambda raw, media: (b"bounded", "image/jpeg")
+    )
+
+    def provider(raw, media, prompt, max_tokens):
+        seen.update(raw=raw, media=media)
+        return json.dumps(_valid())
+
+    assert analysis.analyze_image(
+        b"oversized", "image/png", {}, provider=provider
+    ) == _valid()
+    assert seen == {"raw": b"bounded", "media": "image/jpeg"}
 
 
 def test_analysis_adapter_never_returns_raw_invalid_provider_output():

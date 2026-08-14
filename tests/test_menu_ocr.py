@@ -12,6 +12,7 @@ import pytest
 from PIL import Image
 
 from app.services import menu_ocr
+from app.services import vision_images
 from app.services.menu_ocr import (
     _compress_image_for_vision,
     _extract_text_from_image,
@@ -104,7 +105,7 @@ def _png_bytes(size=(2000, 2000)):
 
 
 def test_compress_resizes_and_converts_to_jpeg(app):
-    out_bytes, mime = _compress_image_for_vision(_png_bytes())
+    out_bytes, mime = _compress_image_for_vision(_png_bytes() + b"\x00" * 1_500_001, "image/png")
     assert mime == "image/jpeg"
     img = Image.open(io.BytesIO(out_bytes))
     assert img.format == "JPEG"
@@ -112,20 +113,20 @@ def test_compress_resizes_and_converts_to_jpeg(app):
 
 
 def test_compress_passes_through_non_image(app):
-    out_bytes, mime = _compress_image_for_vision(b"gorsel degil")
+    out_bytes, mime = _compress_image_for_vision(b"gorsel degil", "image/jpeg")
     assert out_bytes == b"gorsel degil"
     assert mime == "image/jpeg"
 
 
 def test_compress_rejects_decompression_bomb(app, monkeypatch):
     # Tavanı küçült: 2000x2000 (4 MP) görsel sınırı aşar → decode etmeden reddedilir (3.1).
-    monkeypatch.setattr(menu_ocr, "_MAX_IMAGE_PIXELS", 100)
+    monkeypatch.setattr(vision_images, "MAX_IMAGE_PIXELS", 100)
     with pytest.raises(menu_ocr.ImageTooLargeError):
-        _compress_image_for_vision(_png_bytes(size=(2000, 2000)))
+        _compress_image_for_vision(_png_bytes(size=(2000, 2000)) + b"\x00" * 1_500_001, "image/png")
 
 
 def test_extract_text_returns_empty_on_oversized_image(app, monkeypatch):
-    monkeypatch.setattr(menu_ocr, "_MAX_IMAGE_PIXELS", 100)
+    monkeypatch.setattr(vision_images, "MAX_IMAGE_PIXELS", 100)
     # >1.5MB olsun ki compress çağrılsın; trailing padding PNG'yi bozmaz.
     payload = _png_bytes(size=(2000, 2000)) + b"\x00" * 1_500_001
     assert _extract_text_from_image(payload, "image/png") == ""
