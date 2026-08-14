@@ -329,15 +329,151 @@ class NutritionPlan(db.Model):
         return f"<NutritionPlan {self.user_id} - {self.created_at}>"
 
 
+def _new_plan_lineage_id():
+    """Opaque, non-guessable identity for one training-plan lineage."""
+    return secrets.token_urlsafe(32)
+
+
+def _new_mutation_public_id():
+    """Opaque, non-guessable identity for one journal entry.
+
+    Deliberately its own function rather than a reuse of the lineage generator:
+    the two identify different things, and a shared helper is how one of them
+    quietly inherits a change meant for the other.
+    """
+    return secrets.token_urlsafe(32)
+
+
 class TrainingPlan(db.Model):
+    """The canonical persisted training plan.
+
+    ``plan_data`` stays the one authority on current plan state (Sprint 1 PR1);
+    Sprint 1 PR2 adds two durable columns *about* that state, never a second copy
+    of it.
+
+    ``lineage_id`` names one *plan lineage*. It matters because
+    ``POST /training-plan/save`` replaces a plan by deleting every row for the
+    user and inserting a new one — the primary key never survives regeneration,
+    so it cannot identify "the same plan over time". A fresh row therefore gets a
+    fresh lineage automatically (column default), which is what makes an undo
+    physically unable to restore an old plan's snapshot into a newly generated
+    one, no matter how similar their day and exercise names are.
+
+    ``mutation_version`` is the server-authoritative history position of that
+    lineage: +1 per persisted state transition, including an undo. It is not a
+    hash of the contents — after an undo the contents may equal an earlier
+    version while the version itself has moved forward.
+    """
     id         = db.Column(db.Integer, primary_key=True)
     user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
     plan_data  = db.Column(db.Text, nullable=False)
     score      = db.Column(db.Float)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    lineage_id = db.Column(
+        db.String(64), nullable=False, default=_new_plan_lineage_id)
+    mutation_version = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0")
+
+    __table_args__ = (
+        # A unique INDEX rather than a table constraint (the convention
+        # WorkoutSession.public_id already follows): an index can be added to a
+        # live table on both PostgreSQL and SQLite, so the migration needs no
+        # table rebuild to enforce this on either backend.
+        db.Index("uq_training_plan_lineage_id", "lineage_id", unique=True),
+    )
 
     def __repr__(self):
         return f"<TrainingPlan {self.user_id} - {self.created_at}>"
+
+
+class PlanMutationRecord(db.Model):
+    """One durable entry in the training-plan mutation journal (Sprint 1 PR2).
+
+    The journal explains *how* plan state changed and carries the material a safe
+    undo needs. It is deliberately **not** a second plan authority: current state
+    is always ``TrainingPlan.plan_data``, and nothing reads the plan from here.
+
+    Append-only in practice. An undo never deletes or rewrites the entry it
+    reverses — it appends its own entry pointing back at it through
+    ``reverts_mutation_id``, so "M1, M2, U2" is the whole history and remains so.
+
+    Two database constraints carry invariants the application must not be trusted
+    to enforce alone:
+
+    * ``(user_id, idempotency_key)`` unique — the final arbiter of a same-key
+      race between two concurrent workers. Whoever loses the INSERT replays the
+      winner's durable result instead of mutating a second time.
+    * ``reverts_mutation_id`` unique — a mutation can be reversed at most once,
+      even if two undo requests somehow select the same target concurrently.
+
+    ``plan_lineage_id`` is a SOFT reference (deliberately un-FK'd, mirroring
+    ``WorkoutSession.planned_training_plan_id``). A hard foreign key to
+    ``training_plan`` would be cascade-deleted by the legacy full-plan replace
+    path, silently destroying audit history that must outlive the row it
+    describes.
+    """
+    __tablename__ = "plan_mutation_record"
+
+    id = db.Column(db.Integer, primary_key=True)
+    # Opaque durable identity for the operation. A future tool/API layer refers
+    # to a mutation by this, never by the sequential primary key.
+    public_id = db.Column(
+        db.String(64), nullable=False, default=_new_mutation_public_id)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    # Which plan lineage this operation belongs to (see the class docstring).
+    plan_lineage_id = db.Column(db.String(64), nullable=False)
+    # 'mutation' (an original typed command) | 'undo' (a compensating event).
+    operation_kind = db.Column(db.String(20), nullable=False)
+    # Stable snake_case command identity, e.g. 'replace_exercise'. Never a
+    # localized or user-visible string.
+    command_type = db.Column(db.String(60), nullable=False)
+    # Versioned semantic digest of the typed command — the replay comparator.
+    command_fingerprint = db.Column(db.String(64), nullable=False)
+    # Bounded, server-supplied: 'user' | 'ai_coach' | 'system'. Audit metadata,
+    # never an authorization input.
+    actor = db.Column(db.String(20), nullable=False)
+    # Optional bounded audit note. Never interpreted, never logged.
+    reason = db.Column(db.String(200), nullable=True)
+    # 'applied' (a real state transition) | 'no_op' (accepted, nothing to change).
+    outcome = db.Column(db.String(20), nullable=False)
+    before_version = db.Column(db.Integer, nullable=False)
+    after_version = db.Column(db.Integer, nullable=False)
+    # EXACT persisted plan_data text on both sides — not a projection. A known-
+    # field projection would silently drop the unmodelled plan fields PR1 goes
+    # out of its way to preserve, and undo restores from these bytes.
+    before_snapshot = db.Column(db.Text, nullable=False)
+    after_snapshot = db.Column(db.Text, nullable=False)
+    before_fingerprint = db.Column(db.String(64), nullable=False)
+    after_fingerprint = db.Column(db.String(64), nullable=False)
+    idempotency_key = db.Column(db.String(64), nullable=False)
+    # Which mutation this entry reverses; NULL on an original mutation. A SOFT
+    # self-reference on purpose. A hard self-FK is checked immediately by SQLite,
+    # so purging a user would have to delete this table in exactly the right
+    # order or fail, and the two escape hatches both corrupt the audit trail:
+    # ON DELETE CASCADE destroys history, ON DELETE SET NULL rewrites it. The
+    # uniqueness below — the invariant that actually matters — needs no FK.
+    reverts_mutation_id = db.Column(db.Integer, nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "public_id", name="uq_plan_mutation_public_id"),
+        db.UniqueConstraint(
+            "user_id", "idempotency_key", name="uq_plan_mutation_user_key"),
+        db.UniqueConstraint(
+            "reverts_mutation_id", name="uq_plan_mutation_reverts"),
+        # The undo selector's access path: newest reversible entry of one
+        # lineage, owner-scoped.
+        db.Index(
+            "ix_plan_mutation_lineage",
+            "user_id", "plan_lineage_id", "id"),
+    )
+
+    def __repr__(self):
+        return f"<PlanMutationRecord {self.operation_kind} {self.outcome}>"
 
 
 class MealLog(db.Model):

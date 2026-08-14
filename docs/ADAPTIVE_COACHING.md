@@ -1,7 +1,12 @@
 # Adaptive Coaching — canonical training-plan mutation boundary
 
-Adaptive Coaching Sprint 1 PR1. Domain foundation only: **no route, no AI tool,
-no feature flag, no migration.**
+Adaptive Coaching Sprint 1, PR1 + PR2. Domain foundation only: **no route, no AI
+tool, no feature flag.** PR2 adds the first schema of the track (one additive
+migration) and still exposes nothing — the history it keeps is internal evidence,
+not an API.
+
+Read §§1-11 for the boundary PR1 established; §§12-18 for the durable versioning,
+mutation journal, idempotent replay and undo PR2 adds on top of it.
 
 The principle this document exists to fix in place:
 
@@ -208,20 +213,24 @@ never reaches the ORM row.
 harmless no-op on SQLite) and prevents the obvious lost update when two mutations
 race on one plan. No speculative distributed locking is introduced.
 
-**No provider I/O of any kind happens in PR1**, and no network call is made
-inside the transaction.
+**No provider I/O of any kind happens**, and no network call is made inside the
+transaction.
 
-**Exactly-once is not claimed.** A caller retrying after a lost response can apply
-the same change twice; for replace/update/move that converges on the desired
-state, and for `add` it appends a second entry. The persistent mutation journal
-that would make this exactly-once is deliberately deferred (see §11).
+> **PR2 supersedes the sequence above.** Exactly-once *is* now claimed, the plan
+> version and the journal row commit inside the same transaction, and a no-op is
+> durably recorded rather than silently dropped. See §16 for the current
+> sequence and §15 for why a no-op must leave a trace.
 
 ### No-op semantics
 
 When the requested state already holds — sets already equal, day moved onto
-itself, prescription already matching — the service returns
-`PlanMutationResult(changed=False, …)` and **does not write**. No churn, no
-regeneration, no fabricated progression, no history row.
+itself, prescription already matching — the plan document is **not rewritten**:
+no churn, no regeneration, no fabricated progression, and the version does not
+move. `PlanMutationResult.changed` stays `False`.
+
+Since PR2 the *request* is still recorded, with `outcome = "no_op"` and identical
+before/after snapshots. That row is not history of a change; it is history of an
+answered request, and §15 explains why dropping it is unsafe.
 
 ---
 
@@ -248,12 +257,18 @@ fingerprint, and a linked ACTIVE session classifies as
 `plan_regenerated_or_replaced` → stale, which the existing UX resolves by asking
 the user.
 
-**PR1 changes nothing here, on purpose.** That behaviour is already correct and
-fail-safe, and "refresh the session fingerprint" would make the mutation service
-a second writer of workout-session state — breaking the single-authority rule
-this PR exists to establish. Whether a mid-workout mutation should instead be
-refused is a product question, and it belongs to the confirmation/impact work
-listed in §11.
+**PR1 changed nothing here, on purpose, and PR2 keeps that decision** — including
+on the undo path, where "put the fingerprint back too" is even more tempting and
+even more wrong: it would let a reversal silently re-bless a session whose
+planned workout no longer exists. Refreshing the fingerprint from here would make
+the mutation service a second writer of workout-session state, breaking the
+single-authority rule this domain exists to establish. Whether a mid-workout
+mutation should instead be *refused* is a product question, and it belongs to the
+confirmation/impact work listed in §11.
+
+`TestHistoricalSafety.test_an_active_session_fingerprint_is_not_refreshed` pins
+this: an ACTIVE session's fingerprint, status, version, `updated_at` and plan
+pointer are byte-identical across a mutation followed by an undo.
 
 ---
 
@@ -271,25 +286,270 @@ activation.
 No existing caller was migrated to this service. `POST /training-plan/save` keeps
 its whole-plan replace semantics, and the Training Generator is unchanged.
 
-### Handoff to Sprint 1 PR2
+---
 
-PR2 owns plan version identity, mutation history with actor/reason metadata,
-before/after representation, `undo_last_change` and safe rollback. Three notes
-for whoever picks it up:
+# Sprint 1 PR2 — versioning, journal, replay, undo
 
-1. `PlanMutationResult.changed` already distinguishes an applied mutation from a
-   no-op; a journal should record only the former.
-2. Idempotency keys / replay protection belong there, not here — see the
-   exactly-once note in §8.
-3. Versioning will interact with the workout-session fingerprint in §10; decide
-   the two together.
+## 12. The mutation envelope
+
+Every call now carries a `MutationContext` alongside the typed command:
+
+```python
+apply_plan_mutation(user_id, ReplaceExerciseCommand(...),
+                    MutationContext(idempotency_key="…", actor="ai_coach",
+                                    reason="omuz ağrısı"))
+undo_last_change(user_id, MutationContext(idempotency_key="…"))
+```
+
+The split is the point. The **command** is canonical intent — what should become
+true of the plan. The **context** is everything about the request that must never
+influence what the mutation does.
+
+* `idempotency_key` — required, `[A-Za-z0-9._:-]{8,64}` (the shape the repo's
+  existing `Idempotency-Key` contract already accepts), scoped to one user.
+  Required rather than optional because PR1 shipped with no callers, so nothing
+  is being migrated — and an optional key is a contract in which a future
+  consumer can quietly opt out of replay protection and reintroduce the
+  duplicate-`add` bug PR2 exists to close.
+* `actor` — closed vocabulary `user | ai_coach | system`, server-supplied.
+  **Never authorization.** A row saying `ai_coach` grants the AI Coach exactly
+  nothing; ownership still comes from the authenticated session and the
+  owner-scoped plan query.
+* `reason` — optional, ≤200 characters, stored verbatim, never logged, never
+  interpreted. Over the bound it is **refused, not truncated**: a silently
+  shortened audit note is a different note the caller was never told about.
+
+## 13. Plan version and plan lineage
+
+`TrainingPlan` gains two columns.
+
+`mutation_version` is the server-authoritative history position: **+1 on every
+persisted state transition, including an undo; unchanged on a no-op, a validation
+failure, a replay, a conflict or a failed commit.** It only ever counts up.
+Restoring old *content* is what undo means; restoring an old *version number*
+would make two different histories report the same position, and any optimistic
+check later built on it would pass on stale state. Existing rows start at 0 —
+"never mutated through this boundary" — and no historical events are fabricated
+to justify a higher number.
+
+`lineage_id` is an opaque `secrets.token_urlsafe(32)` naming one plan *lineage*.
+It exists because `POST /training-plan/save` replaces a plan by deleting every
+row for the user and inserting a new one: the primary key never survives
+regeneration, so it cannot identify "the same plan over time". A regenerated plan
+gets a fresh lineage from the column default, which makes it **structurally
+impossible** for an undo to restore an old plan's snapshot into a new one, no
+matter how similar the day and exercise names look.
+
+## 14. The mutation journal
+
+`plan_mutation_record` — one row per accepted operation, append-oriented.
+
+| Field | Note |
+| --- | --- |
+| `public_id` | opaque identity returned to callers; the sequential PK never leaves the service |
+| `user_id`, `plan_lineage_id` | owner and lineage; every query filters on both |
+| `operation_kind` | `mutation` (an original typed command) or `undo` (a compensating event) |
+| `command_type` | stable snake_case identity, e.g. `replace_exercise`; never a class name or localized string |
+| `command_fingerprint` | versioned semantic digest — the replay comparator |
+| `actor`, `reason` | audit metadata from the envelope |
+| `outcome` | `applied` or `no_op`; only `applied` is reversible |
+| `before_version`, `after_version` | the exact transition |
+| `before_snapshot`, `after_snapshot` | **the exact persisted `plan_data` text**, both sides |
+| `before_fingerprint`, `after_fingerprint` | sha256 of those bytes; the undo precondition |
+| `idempotency_key` | unique per `(user_id, key)` |
+| `reverts_mutation_id` | which mutation an undo reverses; unique, so a change is reversed at most once |
+
+Two decisions carry most of the weight.
+
+**Snapshots are the exact text, not a projection.** §5 explains that PR1 preserves
+plan fields this domain does not model; rebuilding a snapshot from `plan_facts`,
+a DTO or an exercise list would silently drop them, so an undo would "restore" a
+lossy plan. The snapshot is what was in the column, byte for byte.
+
+**`plan_lineage_id` and `reverts_mutation_id` are soft references.** A hard FK to
+`training_plan` would be cascade-deleted by the legacy replace path, destroying
+audit history that must outlive the row it describes (the same reasoning as
+`WorkoutSession.planned_training_plan_id`). A hard *self*-FK would make owner
+purge order-dependent under SQLite's immediate FK checks, and both escape hatches
+corrupt the trail: `ON DELETE CASCADE` destroys history, `ON DELETE SET NULL`
+rewrites it. The uniqueness constraints — which are the invariants that actually
+matter — need no foreign key.
+
+The journal is **evidence, never authorization**. A matching `user_id` on a row
+is a fact about the past, not a permission.
+
+### The semantic fingerprint
+
+Domain-separated and versioned: `axisai/training-plan-mutation/v1`. What is
+hashed is an explicitly constructed payload — never `repr()`, dict iteration
+order, a raw HTTP body, a prompt, or display text — canonicalized as
+`json.dumps(…, sort_keys=True, separators=(",", ":"))` and sha256'd.
+
+Normalization mirrors how `document.py` actually resolves a target, so the
+fingerprint agrees with the mutation it protects:
+
+* `day` / `target_day` — stripped (`_find_day` compares the stripped label
+  exactly, so case is meaning).
+* the **target** exercise of replace/remove/update — stripped and casefolded,
+  because `_find_exercise_index` matches that way: `"bench press"` and
+  `"Bench  Press "` address the same slot and must replay, not conflict.
+* a **stored** name (`replacement`, and `exercise` on an add) — stripped only. It
+  is written into the plan verbatim, so `"Machine Press"` and `"machine press"`
+  are genuinely different intents.
+* `reps` — stripped; `sets` — the integer, with `None` preserved as "field not
+  supplied", which differs from supplying the value the plan already holds.
+
+Changing which fields participate, or this normalization, requires a **new
+version** rather than redefining what stored digests meant.
+
+## 15. Idempotent replay
+
+Three outcomes, decided durably:
+
+| Same user, same key… | Result |
+| --- | --- |
+| …same semantic operation | **replay** — the original `outcome`, `plan_version`, `mutation_id` and stored after-snapshot, with `replayed=True`. Nothing is applied. |
+| …different operation | **`IdempotencyConflict`** — fail closed. The command is not applied and no row is written. |
+| different users, same key text | fully independent operations |
+
+A replay returns **the state that call produced**, read from its stored
+after-snapshot — not the plan as it stands now. A retry of an old key must not
+report a later, unrelated change.
+
+**The database is the final arbiter.** No process memory, no Redis, no timestamp
+window: two concurrent workers both pass their pre-flight check, both reach the
+INSERT, and `uq_plan_mutation_user_key` picks one. The loser rolls back, re-reads
+the winner's row and replays it. The `add_exercise` retry — the one command that
+is not naturally convergent — is the concrete bug this closes.
+
+**A validation failure consumes nothing.** The command is rejected before any row
+is inserted, so a corrected retry under the same key succeeds instead of being
+refused as a conflict or, worse, replaying a mutation that never happened.
+
+**A no-op is recorded anyway**, and this is the non-obvious one. Sets are 3. A
+no-op "set them to 3" is accepted under key K. The user then really changes them
+to 4. A retransmitted K arrives. If the no-op left no durable trace, K looks
+fresh and quietly drags the plan back to 3 — a mutation nobody asked for,
+produced by a *retry*. The row makes the retry a replay instead.
+
+## 16. `undo_last_change`
+
+The one canonical reversal. There is **no redo, no `rollback_to_version`, no
+`restore_snapshot`**: an operation that can restore an arbitrary past state is a
+plan-writing API with extra steps, and this boundary exists precisely so plan
+writes stay typed and narrow.
+
+```
+validate the envelope
+→ durable replay check
+→ resolve the caller's OWN active plan (SELECT … FOR UPDATE, populate_existing)
+→ re-check the operation key under the lock
+→ select the newest still-effective reversible mutation of THIS lineage
+→ verify current bytes are exactly what that mutation produced
+→ restore its stored before-snapshot; version + 1
+→ append the undo row pointing at the reverted mutation
+→ ONE commit
+```
+
+Selection filters, each carrying an invariant: same lineage (§13), `operation_kind
+= mutation` (an undo is not something to undo), `outcome = applied` (a no-op
+produced no transition), and not already reverted (which is what lets a second
+undo reach further back). Ordering is by primary key, not `created_at` — two rows
+in one millisecond must still have one deterministic "latest".
+
+**The precondition is bytes, not version.** After two undos the plan sits at a
+much higher version than the mutation being reversed, which is correct, so a
+version equality check would break multi-level undo. Comparing
+`snapshot_fingerprint(plan_data)` against the target's `after_fingerprint` is the
+honest check, and a mismatch means an out-of-band writer touched the plan →
+`UndoConflict`, fail closed. Restoring an old snapshot on top of that would
+silently destroy the other writer's work. There is no "close enough", no name
+similarity, no partial match.
+
+Restoration is the **exact stored bytes**, never an inferred inverse command and
+never a model call. An inverse of "replace X with Y" looks obvious and is wrong
+the moment the plan holds fields this domain does not model.
+
+Undo is itself idempotent: the same key retried replays the original undo rather
+than walking a second change back. Two *different* undo keys racing for one
+target produce one winner and one deterministic refusal —
+`uq_plan_mutation_reverts` decides.
+
+Domain errors: `IdempotencyConflict`, `UndoUnavailable` (nothing reversible on
+this lineage), `UndoConflict` (a precondition failed), `PlanStateConflict` (the
+authoritative row moved between the locked read and the write). They are internal
+outcomes, deliberately **not** HTTP codes — there is no transport layer to map
+them onto yet.
+
+## 17. Schema and migration
+
+One migration, `b3c4d5e6f7a8`, a single new head off `f0a1b2c3d4e5`. Additive
+only: two columns on `training_plan` and one new table. Nothing is dropped,
+renamed or rewritten, so a code-only rollback stays safe (CLAUDE.md A2).
+
+`lineage_id` is backfilled with a fresh random token **per row** — one shared
+constant would be far easier to write and would make two users' plans look like a
+single lineage. `mutation_version` starts at 0 for everything that already
+exists. **No historical mutation events are fabricated**: the application never
+recorded them, so any row written here would be fiction, and an undo standing on
+fiction would restore a snapshot that was never real.
+
+The revision follows a994f9bed783's verify-or-create shape, because the fresh-DB
+boot path runs `db.create_all()` before stamping and upgrading: it creates only
+what is missing, and raises rather than reporting success against a table that
+shares the name but not the shape.
+
+`lineage_id`'s uniqueness is a unique **index**, not a table constraint (the
+convention `WorkoutSession.public_id` already follows), because an index can be
+added to a live table on both PostgreSQL and SQLite — so the invariant holds on
+both rather than on production only. Only the NOT NULL tightening needs SQLite's
+batch rebuild, and it is guarded to run solely when the reflected column is
+actually nullable, so the create_all boot path never pays for one.
+`tests/test_migration_graph.py` runs the revision upgrade → downgrade → upgrade
+against a deployed pre-column schema and against a create_all-built one.
+
+## 18. Explicitly NOT in PR2
+
+No AI Coach tool, LLM function calling, prompt change, intent classification or
+tool schema · no confirmation UX or impact classification · no public, mobile or
+AI-facing API — **no history endpoint, no journal serialization of any kind** ·
+no history UI · no Flutter change · no redo, no arbitrary rollback, no plan diff
+visualization · no proactive coaching, fatigue/plateau/adherence detection or
+deload · no Pump Check or Weekly Check-in driven mutation · no nutrition/calorie/
+macro mutation · no feature flag, no deployment.
+
+`POST /training-plan/save` is **not** migrated onto the journal. It replaces a
+plan wholesale; recording it as a targeted mutation would put a snapshot in the
+journal that an undo could later restore over a plan the user deliberately
+regenerated.
+
+### Handoff to Sprint 1 PR3
+
+PR3 owns the AI-facing surface: tool registration, intent → typed command,
+confirmation UX, and whatever transport carries the result. Four notes:
+
+1. The result contract is already shaped for it — `outcome`, `plan_version`,
+   `mutation_id` (opaque), `replayed`. Map those onto a response; do not add raw
+   database identifiers.
+2. The operation key is the caller's to mint, and it must be **stable across the
+   retry of one logical user request**. A key generated per HTTP attempt provides
+   no protection at all.
+3. `actor="ai_coach"` is metadata. Authorization stays with the authenticated
+   session; do not let a tool argument choose it.
+4. The four domain errors in §16 need an HTTP/tool mapping. Deliberately
+   unassigned here so the transport layer owns its own vocabulary.
 
 ### What a later tool/API layer will need to observe
 
-PR1 introduces **no logging of user content and no metrics** — it has no endpoint
-and no provider interaction, so any metric would be speculative. When a transport
-layer lands it will want: mutation-outcome counts by command type and error kind,
-and rejection rates for ambiguous targets (a rising rate is the signal that
-name-only identity has become the bottleneck). None of that may carry plan
-payloads, exercise text from user input, prompts, tokens, or user IDs as metric
-dimensions.
+This domain introduces **no logging of user content and no metrics** — it has no
+endpoint and no provider interaction, so any metric would be speculative. The
+package has no logger at all, and an architecture test enforces that: snapshots,
+command payloads, reason text, exercise lists, operation keys and fingerprints
+are exactly the material that must not reach a log line.
+
+When a transport layer lands it will want: mutation-outcome counts by command
+type and error kind, replay and conflict rates (a rising conflict rate means
+callers are minting keys wrong), undo rate, and rejection rates for ambiguous
+targets (a rising rate is the signal that name-only identity has become the
+bottleneck). None of that may carry plan payloads, exercise text from user input,
+reasons, keys, prompts, tokens, or user IDs as metric dimensions.

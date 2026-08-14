@@ -4093,3 +4093,118 @@ before/after representation · `undo_last_change` · safe rollback · idempotenc
 keys/replay protection. Also still unowned: AI Coach tool registration and
 execution, intent parsing, impact classification, confirmation UX, proactive
 coaching, plateau/fatigue/adherence detection, nutrition-plan mutations.
+
+---
+
+# Adaptive Coaching Sprint 1 PR2 — Plan Versioning, Mutation Journal, Idempotent Replay & Safe Undo (local, 2026-08-14)
+
+Branch `adaptive-coaching-s1-pr2-plan-history-undo`, worktree
+`.worktrees/adaptive-coaching-s1-pr2-plan-history-undo`, based on `origin/main`
+`154a3f5` (which is PR1 merged as #210). Local commit only — **not pushed, no PR,
+not merged, not deployed.**
+
+Full architecture: **docs/ADAPTIVE_COACHING.md §§12-18**.
+
+## What shipped
+
+PR1 could change a plan safely. It could not answer *"did this retry already
+happen?"* or *"put that back"*. PR2 answers both, and the whole design follows
+from one sentence: **plan bytes, plan version and the journal row must move as
+one unit, or none of them may move.**
+
+New modules under `app/services/plan_mutation/`: `context.py` (the mutation
+envelope — operation key, actor, bounded reason) · `fingerprint.py` (versioned
+semantic digests, pure) · `journal.py` (history queries + the record shape).
+`service.py` rewritten around one transaction; `errors.py` gains four domain
+outcomes. Two additive columns on `TrainingPlan` (`lineage_id`,
+`mutation_version`), one new table `plan_mutation_record`, one migration
+`b3c4d5e6f7a8` (single head off `f0a1b2c3d4e5`).
+
+**Still no runtime surface.** No route, no AI tool, no feature flag, no prompt
+change, no mobile change. The journal is internal evidence — there is no history
+endpoint and no serialization of it anywhere, and an architecture test fails if a
+blueprint so much as imports the package.
+
+## Decisions worth not re-litigating
+
+- **The version only ever counts up — including on undo.** Restoring old
+  *content* is what undo means. Restoring an old *version number* would make two
+  different histories report the same position, and any optimistic check later
+  built on it would pass on stale state. Undo is a forward version that happens
+  to restore old bytes.
+- **The undo precondition is bytes, not version.** After two undos the plan sits
+  at a much higher version than the mutation being reversed — that is correct, so
+  a version-equality precondition silently breaks multi-level undo. Comparing
+  `snapshot_fingerprint(plan_data)` against the target's `after_fingerprint` is
+  the honest check, and a mismatch means an out-of-band writer touched the plan →
+  `UndoConflict`, fail closed.
+- **Snapshots are the exact persisted `plan_data` text.** PR1 preserves plan
+  fields this domain does not model; a snapshot rebuilt from `plan_facts`, a DTO
+  or an exercise list would pass every other test and still lose them, so undo
+  would "restore" a lossy plan.
+- **The idempotency key is REQUIRED, not optional.** PR1 shipped with zero
+  callers, so nothing was migrated by making it mandatory — and an optional key
+  is a contract in which a future consumer can quietly opt out of replay
+  protection and reintroduce the duplicate-`add` bug PR2 exists to close.
+- **The database is the final race arbiter.** `uq_plan_mutation_user_key`, not
+  process memory, not Redis, not a timestamp window. Both contenders reach the
+  INSERT; the loser rolls back, re-reads the winner and replays it.
+- **An accepted no-op is recorded.** The unsafe version is subtle: sets are 3, a
+  no-op "set them to 3" is accepted under key K, the user really changes them to
+  4, then K is retransmitted. Without a durable row K looks fresh and drags the
+  plan back to 3 — a mutation nobody asked for, produced by a *retry*.
+- **A validation failure consumes no operation identity.** Rejected before any
+  insert, so the corrected retry under the same key succeeds instead of being
+  refused as a conflict.
+- **Lineage is an opaque column default, not a rule.** `POST
+  /training-plan/save` deletes every row and inserts a new one, so the PK cannot
+  identify "the same plan over time". A regenerated plan gets a fresh
+  `lineage_id` automatically, which makes cross-lineage undo *unexpressible*
+  rather than merely checked.
+- **`plan_lineage_id` and `reverts_mutation_id` are soft references.** A hard FK
+  to `training_plan` would be cascade-deleted by the legacy replace path,
+  destroying audit history that must outlive the row it describes. A hard *self*
+  FK would make owner purge order-dependent under SQLite's immediate FK checks,
+  and both escape hatches corrupt the trail (`CASCADE` destroys it, `SET NULL`
+  rewrites it). Uniqueness — the invariant that matters — needs no FK.
+- **`populate_existing()` on the locking query is load-bearing.** `get_active_plan`
+  has already put the row in the identity map, so without it SQLAlchemy hands the
+  `FOR UPDATE` query the same in-memory instance with pre-lock values: the lock is
+  real, the data under it is stale, and two mutations compute from one base. This
+  is the repository's known footgun (`tests/test_concurrency_staleness.py`) and it
+  is what PG race C exists to catch.
+- **The package has no logger at all**, enforced by an AST guard. Snapshots,
+  command payloads, reasons, exercise lists, operation keys and fingerprints are
+  exactly the material that must not reach a log line, and "no logger" is cheaper
+  to keep true than "careful logging".
+- **The legacy full-plan save is NOT migrated onto the journal.** Recording a
+  wholesale replacement as a targeted mutation would put a snapshot in the journal
+  that an undo could later restore over a plan the user deliberately regenerated.
+
+## Known interaction (documented, unchanged on purpose)
+
+PR1 decided this boundary is not a second writer of workout-session state, and
+PR2 keeps that decision **including on the undo path**, where "put the fingerprint
+back too" is more tempting and more wrong: it would let a reversal silently
+re-bless a session whose planned workout no longer exists. Pinned by
+`TestHistoricalSafety.test_an_active_session_fingerprint_is_not_refreshed`.
+
+## Verification
+
+Commands and exact results are in the completion report for this PR; the two that
+cannot run on this machine are called out there rather than claimed:
+`tests/test_plan_mutation_history_pg.py` (5 races — no local PostgreSQL or Docker;
+collected and wired into CI's `PostgreSQL concurrency` job) and the PostgreSQL
+schema-drift guard (`flask db check`, CI-only).
+
+## Deferred to Sprint 1 PR3
+
+AI Coach tool registration and execution · intent → typed command · confirmation
+UX and impact classification · the transport that carries `outcome` /
+`plan_version` / `mutation_id` / `replayed` and maps the four domain errors ·
+history API or UI, if ever · redo and arbitrary rollback (deliberately absent) ·
+proactive coaching, plateau/fatigue/adherence detection, nutrition-plan mutation.
+
+One trap for whoever wires the transport: **the operation key must be stable
+across the retries of one logical user request.** A key minted per HTTP attempt
+provides no protection at all.

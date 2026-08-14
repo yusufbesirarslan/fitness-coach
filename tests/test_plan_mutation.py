@@ -13,6 +13,7 @@ history).
 persisted state, ownership, unrelated state preserved, transaction outcome — not
 private method layout or source strings (brief §20).
 """
+import itertools
 import json
 
 import pytest
@@ -25,6 +26,7 @@ from app.services.plan_mutation import (
     InvalidMutation,
     InvalidPrescription,
     MoveTrainingDayCommand,
+    MutationContext,
     PlanNotFound,
     PlanNotMutable,
     RemoveExerciseCommand,
@@ -32,6 +34,26 @@ from app.services.plan_mutation import (
     UpdateExercisePrescriptionCommand,
     apply_plan_mutation,
 )
+
+
+_KEYS = itertools.count()
+
+
+def _mutate(user_id, command, context=None):
+    """Call the boundary the way an independent request would.
+
+    Sprint 1 PR2 made the mutation envelope mandatory, so every call now carries
+    an operation key. These PR1 tests are about *plan semantics*, and each of
+    them means "a separate request" — so the default is a fresh key per call.
+    Reusing one key here would silently turn the second call of a two-step test
+    into a replay and quietly stop testing the mutation.
+
+    Replay behaviour itself is not tested by omission; it is tested explicitly,
+    with a deliberately reused key, in tests/test_plan_mutation_history.py.
+    """
+    if context is None:
+        context = MutationContext(idempotency_key="pr1-case-%08d" % next(_KEYS))
+    return apply_plan_mutation(user_id, command, context)
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -168,7 +190,7 @@ class TestOwnership:
         user = make_user("owner")
         seed_plan(user.id)
 
-        result = apply_plan_mutation(user.id, RemoveExerciseCommand(
+        result = _mutate(user.id, RemoveExerciseCommand(
             day="Pazartesi", exercise="Shoulder Press"))
 
         assert result.changed is True
@@ -180,7 +202,7 @@ class TestOwnership:
         victim_text = seed_plan(victim.id)
         seed_plan(actor.id)
 
-        apply_plan_mutation(actor.id, RemoveExerciseCommand(
+        _mutate(actor.id, RemoveExerciseCommand(
             day="Pazartesi", exercise="Bench Press"))
 
         assert _stored_text(victim.id) == victim_text
@@ -201,7 +223,7 @@ class TestOwnership:
         superseded_text = superseded.plan_data
         seed_plan(user.id)
 
-        apply_plan_mutation(user.id, RemoveExerciseCommand(
+        _mutate(user.id, RemoveExerciseCommand(
             day="Pazartesi", exercise="Bench Press"))
 
         assert _names(_stored(user.id), "Pazartesi") == ["Shoulder Press"]
@@ -212,7 +234,7 @@ class TestOwnership:
         user = make_user("planless")
 
         with pytest.raises(PlanNotFound):
-            apply_plan_mutation(user.id, RemoveExerciseCommand(
+            _mutate(user.id, RemoveExerciseCommand(
                 day="Pazartesi", exercise="Bench Press"))
 
     def test_unparseable_plan_is_rejected_without_repair(
@@ -221,7 +243,7 @@ class TestOwnership:
         seed_plan(user.id, "not json at all")
 
         with pytest.raises(PlanNotMutable):
-            apply_plan_mutation(user.id, RemoveExerciseCommand(
+            _mutate(user.id, RemoveExerciseCommand(
                 day="Pazartesi", exercise="Bench Press"))
         assert _stored_text(user.id) == "not json at all"
 
@@ -234,7 +256,7 @@ class TestReplaceExercise:
         user = make_user("replacer")
         seed_plan(user.id)
 
-        apply_plan_mutation(user.id, ReplaceExerciseCommand(
+        _mutate(user.id, ReplaceExerciseCommand(
             day="Pazartesi", exercise="Bench Press",
             replacement="Machine Chest Press"))
 
@@ -248,7 +270,7 @@ class TestReplaceExercise:
         user = make_user("preserver")
         seed_plan(user.id)
 
-        apply_plan_mutation(user.id, ReplaceExerciseCommand(
+        _mutate(user.id, ReplaceExerciseCommand(
             day="Pazartesi", exercise="Bench Press",
             replacement="Machine Chest Press"))
 
@@ -264,7 +286,7 @@ class TestReplaceExercise:
         seed_plan(user.id)
         before = _other_days(_stored(user.id), "Pazartesi")
 
-        apply_plan_mutation(user.id, ReplaceExerciseCommand(
+        _mutate(user.id, ReplaceExerciseCommand(
             day="Pazartesi", exercise="Bench Press",
             replacement="Machine Chest Press"))
 
@@ -278,7 +300,7 @@ class TestReplaceExercise:
         seed_plan(user.id)
         before = _day(_stored(user.id), "Pazartesi")["egzersizler"][1]
 
-        apply_plan_mutation(user.id, ReplaceExerciseCommand(
+        _mutate(user.id, ReplaceExerciseCommand(
             day="Pazartesi", exercise="Bench Press",
             replacement="Machine Chest Press"))
 
@@ -288,7 +310,7 @@ class TestReplaceExercise:
         user = make_user("planfields")
         seed_plan(user.id)
 
-        apply_plan_mutation(user.id, ReplaceExerciseCommand(
+        _mutate(user.id, ReplaceExerciseCommand(
             day="Pazartesi", exercise="Bench Press",
             replacement="Machine Chest Press"))
 
@@ -300,7 +322,7 @@ class TestReplaceExercise:
         text = seed_plan(user.id)
 
         with pytest.raises(ExerciseNotFound):
-            apply_plan_mutation(user.id, ReplaceExerciseCommand(
+            _mutate(user.id, ReplaceExerciseCommand(
                 day="Pazartesi", exercise="Deadlift", replacement="Rack Pull"))
         assert _stored_text(user.id) == text
 
@@ -309,7 +331,7 @@ class TestReplaceExercise:
         text = seed_plan(user.id)
 
         with pytest.raises(DayNotFound):
-            apply_plan_mutation(user.id, ReplaceExerciseCommand(
+            _mutate(user.id, ReplaceExerciseCommand(
                 day="Funday", exercise="Bench Press", replacement="Push Up"))
         assert _stored_text(user.id) == text
 
@@ -321,7 +343,7 @@ class TestReplaceExercise:
         text = seed_plan(user.id, document)
 
         with pytest.raises(AmbiguousExerciseTarget):
-            apply_plan_mutation(user.id, ReplaceExerciseCommand(
+            _mutate(user.id, ReplaceExerciseCommand(
                 day="Pazartesi", exercise="Bench Press",
                 replacement="Machine Chest Press"))
         assert _stored_text(user.id) == text
@@ -331,7 +353,7 @@ class TestReplaceExercise:
         text = seed_plan(user.id)
 
         with pytest.raises(InvalidMutation):
-            apply_plan_mutation(user.id, ReplaceExerciseCommand(
+            _mutate(user.id, ReplaceExerciseCommand(
                 day="Pazartesi", exercise="Bench Press", replacement="   "))
         assert _stored_text(user.id) == text
 
@@ -344,7 +366,7 @@ class TestAddExercise:
         user = make_user("adder")
         seed_plan(user.id)
 
-        apply_plan_mutation(user.id, AddExerciseCommand(
+        _mutate(user.id, AddExerciseCommand(
             day="Çarşamba", exercise="Lat Pulldown", sets=3, reps="10-12"))
 
         assert _names(_stored(user.id), "Çarşamba") == [
@@ -355,7 +377,7 @@ class TestAddExercise:
         user = make_user("adderx")
         seed_plan(user.id)
 
-        apply_plan_mutation(user.id, AddExerciseCommand(
+        _mutate(user.id, AddExerciseCommand(
             day="Çarşamba", exercise="Lat Pulldown", sets=3, reps="10-12"))
 
         added = _day(_stored(user.id), "Çarşamba")["egzersizler"][-1]
@@ -368,7 +390,7 @@ class TestAddExercise:
         seed_plan(user.id)
         before = _other_days(_stored(user.id), "Çarşamba")
 
-        apply_plan_mutation(user.id, AddExerciseCommand(
+        _mutate(user.id, AddExerciseCommand(
             day="Çarşamba", exercise="Lat Pulldown", sets=3, reps="10-12"))
 
         assert _other_days(_stored(user.id), "Çarşamba") == before
@@ -379,7 +401,7 @@ class TestAddExercise:
         text = seed_plan(user.id)
 
         with pytest.raises(InvalidMutation):
-            apply_plan_mutation(user.id, AddExerciseCommand(
+            _mutate(user.id, AddExerciseCommand(
                 day="Çarşamba", exercise="Lat Pulldown", sets=None, reps=None))
         assert _stored_text(user.id) == text
 
@@ -388,7 +410,7 @@ class TestAddExercise:
         text = seed_plan(user.id)
 
         with pytest.raises(InvalidMutation):
-            apply_plan_mutation(user.id, AddExerciseCommand(
+            _mutate(user.id, AddExerciseCommand(
                 day="Çarşamba", exercise="", sets=3, reps="10"))
         assert _stored_text(user.id) == text
 
@@ -398,7 +420,7 @@ class TestAddExercise:
         text = seed_plan(user.id)
 
         with pytest.raises(InvalidMutation):
-            apply_plan_mutation(user.id, AddExerciseCommand(
+            _mutate(user.id, AddExerciseCommand(
                 day="Salı", exercise="Lat Pulldown", sets=3, reps="10"))
         assert _stored_text(user.id) == text
 
@@ -411,7 +433,7 @@ class TestRemoveExercise:
         user = make_user("remover")
         seed_plan(user.id)
 
-        apply_plan_mutation(user.id, RemoveExerciseCommand(
+        _mutate(user.id, RemoveExerciseCommand(
             day="Pazartesi", exercise="Bench Press"))
 
         assert _names(_stored(user.id), "Pazartesi") == ["Shoulder Press"]
@@ -421,7 +443,7 @@ class TestRemoveExercise:
         text = seed_plan(user.id)
 
         with pytest.raises(ExerciseNotFound):
-            apply_plan_mutation(user.id, RemoveExerciseCommand(
+            _mutate(user.id, RemoveExerciseCommand(
                 day="Pazartesi", exercise="Deadlift"))
         assert _stored_text(user.id) == text
 
@@ -432,7 +454,7 @@ class TestRemoveExercise:
         text = seed_plan(user.id)
 
         with pytest.raises(InvalidMutation):
-            apply_plan_mutation(user.id, RemoveExerciseCommand(
+            _mutate(user.id, RemoveExerciseCommand(
                 day="Çarşamba", exercise="Barbell Row"))
         assert _stored_text(user.id) == text
 
@@ -441,7 +463,7 @@ class TestRemoveExercise:
         seed_plan(user.id)
         before = _other_days(_stored(user.id), "Pazartesi")
 
-        apply_plan_mutation(user.id, RemoveExerciseCommand(
+        _mutate(user.id, RemoveExerciseCommand(
             day="Pazartesi", exercise="Bench Press"))
 
         assert _other_days(_stored(user.id), "Pazartesi") == before
@@ -456,7 +478,7 @@ class TestUpdatePrescription:
         seed_plan(user.id)
         before = _day(_stored(user.id), "Pazartesi")["egzersizler"][0]
 
-        apply_plan_mutation(user.id, UpdateExercisePrescriptionCommand(
+        _mutate(user.id, UpdateExercisePrescriptionCommand(
             day="Pazartesi", exercise="Bench Press", sets=5))
 
         after = _day(_stored(user.id), "Pazartesi")["egzersizler"][0]
@@ -469,7 +491,7 @@ class TestUpdatePrescription:
         seed_plan(user.id)
         before = _day(_stored(user.id), "Pazartesi")["egzersizler"][0]
 
-        apply_plan_mutation(user.id, UpdateExercisePrescriptionCommand(
+        _mutate(user.id, UpdateExercisePrescriptionCommand(
             day="Pazartesi", exercise="Bench Press", reps="5-8"))
 
         after = _day(_stored(user.id), "Pazartesi")["egzersizler"][0]
@@ -482,7 +504,7 @@ class TestUpdatePrescription:
         text = seed_plan(user.id)
 
         with pytest.raises(InvalidPrescription):
-            apply_plan_mutation(user.id, UpdateExercisePrescriptionCommand(
+            _mutate(user.id, UpdateExercisePrescriptionCommand(
                 day="Pazartesi", exercise="Bench Press", sets=0))
         assert _stored_text(user.id) == text
 
@@ -491,7 +513,7 @@ class TestUpdatePrescription:
         text = seed_plan(user.id)
 
         with pytest.raises(InvalidPrescription):
-            apply_plan_mutation(user.id, UpdateExercisePrescriptionCommand(
+            _mutate(user.id, UpdateExercisePrescriptionCommand(
                 day="Pazartesi", exercise="Bench Press", sets=101))
         assert _stored_text(user.id) == text
 
@@ -500,7 +522,7 @@ class TestUpdatePrescription:
         text = seed_plan(user.id)
 
         with pytest.raises(InvalidPrescription):
-            apply_plan_mutation(user.id, UpdateExercisePrescriptionCommand(
+            _mutate(user.id, UpdateExercisePrescriptionCommand(
                 day="Pazartesi", exercise="Bench Press", reps="x" * 41))
         assert _stored_text(user.id) == text
 
@@ -509,7 +531,7 @@ class TestUpdatePrescription:
         text = seed_plan(user.id)
 
         with pytest.raises(InvalidMutation):
-            apply_plan_mutation(user.id, UpdateExercisePrescriptionCommand(
+            _mutate(user.id, UpdateExercisePrescriptionCommand(
                 day="Pazartesi", exercise="Bench Press"))
         assert _stored_text(user.id) == text
 
@@ -518,7 +540,7 @@ class TestUpdatePrescription:
         user = make_user("noop")
         text = seed_plan(user.id)
 
-        result = apply_plan_mutation(user.id, UpdateExercisePrescriptionCommand(
+        result = _mutate(user.id, UpdateExercisePrescriptionCommand(
             day="Pazartesi", exercise="Bench Press", sets=3))
 
         assert result.changed is False
@@ -534,7 +556,7 @@ class TestMoveTrainingDay:
         user = make_user("mover")
         seed_plan(user.id)
 
-        apply_plan_mutation(user.id, MoveTrainingDayCommand(
+        _mutate(user.id, MoveTrainingDayCommand(
             day="Pazartesi", target_day="Salı"))
 
         document = _stored(user.id)
@@ -556,7 +578,7 @@ class TestMoveTrainingDay:
                                   sets=3, reps=10, weight_kg=80, volume=2400))
         db.session.commit()
 
-        apply_plan_mutation(user.id, MoveTrainingDayCommand(
+        _mutate(user.id, MoveTrainingDayCommand(
             day="Pazartesi", target_day="Salı"))
 
         log = WorkoutLog.query.filter_by(user_id=user.id).one()
@@ -567,7 +589,7 @@ class TestMoveTrainingDay:
         user = make_user("selfmove")
         text = seed_plan(user.id)
 
-        result = apply_plan_mutation(user.id, MoveTrainingDayCommand(
+        result = _mutate(user.id, MoveTrainingDayCommand(
             day="Pazartesi", target_day="Pazartesi"))
 
         assert result.changed is False
@@ -578,7 +600,7 @@ class TestMoveTrainingDay:
         text = seed_plan(user.id)
 
         with pytest.raises(DayNotFound):
-            apply_plan_mutation(user.id, MoveTrainingDayCommand(
+            _mutate(user.id, MoveTrainingDayCommand(
                 day="Pazartesi", target_day="Funday"))
         assert _stored_text(user.id) == text
 
@@ -598,7 +620,7 @@ class TestHistoricalSafety:
                                   sets=3, reps=10, weight_kg=80, volume=2400))
         db.session.commit()
 
-        apply_plan_mutation(user.id, ReplaceExerciseCommand(
+        _mutate(user.id, ReplaceExerciseCommand(
             day="Pazartesi", exercise="Bench Press",
             replacement="Machine Chest Press"))
 
@@ -612,7 +634,7 @@ class TestHistoricalSafety:
         user = make_user("nohistorycreate")
         seed_plan(user.id)
 
-        apply_plan_mutation(user.id, UpdateExercisePrescriptionCommand(
+        _mutate(user.id, UpdateExercisePrescriptionCommand(
             day="Pazartesi", exercise="Bench Press", sets=4))
 
         assert WorkoutLog.query.filter_by(user_id=user.id).count() == 0
@@ -629,7 +651,7 @@ class TestAtomicity:
         text = seed_plan(user.id)
 
         with pytest.raises(InvalidPrescription):
-            apply_plan_mutation(user.id, UpdateExercisePrescriptionCommand(
+            _mutate(user.id, UpdateExercisePrescriptionCommand(
                 day="Pazartesi", exercise="Bench Press", sets=999))
 
         from app.extensions import db
@@ -649,7 +671,7 @@ class TestAtomicity:
         monkeypatch.setattr(db.session, "commit", _boom)
 
         with pytest.raises(RuntimeError):
-            apply_plan_mutation(user.id, ReplaceExerciseCommand(
+            _mutate(user.id, ReplaceExerciseCommand(
                 day="Pazartesi", exercise="Bench Press",
                 replacement="Machine Chest Press"))
 
@@ -664,7 +686,7 @@ class TestAtomicity:
         text = seed_plan(user.id)
 
         with pytest.raises(InvalidMutation):
-            apply_plan_mutation(user.id, {"day": "Pazartesi", "sets": 3})
+            _mutate(user.id, {"day": "Pazartesi", "sets": 3})
         assert _stored_text(user.id) == text
 
 
@@ -679,7 +701,7 @@ class TestResultingPlanStaysValid:
         user = make_user("stillreadable")
         seed_plan(user.id)
 
-        apply_plan_mutation(user.id, ReplaceExerciseCommand(
+        _mutate(user.id, ReplaceExerciseCommand(
             day="Pazartesi", exercise="Bench Press",
             replacement="Machine Chest Press"))
 
@@ -693,7 +715,7 @@ class TestResultingPlanStaysValid:
         user = make_user("sevendays")
         seed_plan(user.id)
 
-        apply_plan_mutation(user.id, AddExerciseCommand(
+        _mutate(user.id, AddExerciseCommand(
             day="Cuma", exercise="Leg Press", sets=3, reps="12"))
 
         program = _stored(user.id)["program"]
