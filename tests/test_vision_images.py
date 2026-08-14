@@ -48,3 +48,13 @@ def test_preparation_fails_closed_when_quality_floor_cannot_meet_ceiling(monkeyp
     )
     with pytest.raises(ImagePreparationError):
         prepare_image_for_vision(_jpeg_bytes((1700, 1700)), "image/jpeg")
+
+
+def test_caller_cannot_raise_provider_byte_ceiling(app):
+    raw = _jpeg_bytes((32, 32))
+    raw += b"\x00" * (vision_images.MAX_IMAGE_BYTES + 1 - len(raw))
+    prepared, media_type = prepare_image_for_vision(
+        raw, "image/jpeg", max_bytes=vision_images.MAX_IMAGE_BYTES + 1
+    )
+    assert len(prepared) <= vision_images.MAX_IMAGE_BYTES
+    assert media_type == "image/jpeg"

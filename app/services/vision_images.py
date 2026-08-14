@@ -22,6 +22,7 @@ class ImageTooLargeError(ImagePreparationError):
 def prepare_image_for_vision(image_bytes: bytes, media_type: str = "image/jpeg",
                              max_bytes: int = MAX_IMAGE_BYTES) -> tuple[bytes, str]:
     """Return image bytes that satisfy the vision provider byte ceiling."""
+    max_bytes = min(max_bytes, MAX_IMAGE_BYTES)
     if not isinstance(image_bytes, bytes) or not image_bytes:
         raise ImagePreparationError("image bytes are required")
     media_type = _safe_media_type(media_type)
