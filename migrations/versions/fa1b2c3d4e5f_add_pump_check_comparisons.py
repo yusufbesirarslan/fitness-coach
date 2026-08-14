@@ -7,6 +7,8 @@ The repository boot path can run db.create_all() before Alembic. This revision
 therefore verifies compatible existing tables, creates absent tables and
 indexes, and fails closed instead of accepting an incomplete partial schema.
 """
+import re
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
@@ -91,12 +93,21 @@ _REQUIRED_FOREIGN_KEYS = {
 
 _REQUIRED_CHECKS = {
     _COMPARISON: {
-        "ck_pump_comparison_distinct_sources",
-        "ck_pump_comparison_status",
-        "ck_pump_comparison_comparability",
-        "ck_pump_comparison_terminal_fields",
+        "ck_pump_comparison_distinct_sources": (
+            "baseline_pump_check_id <> current_pump_check_id"),
+        "ck_pump_comparison_status": _STATUS_CHECK_SQL,
+        "ck_pump_comparison_comparability": _COMPARABILITY_CHECK_SQL,
+        "ck_pump_comparison_terminal_fields": _TERMINAL_COHERENCE_SQL,
     },
-    _REQUEST: set(),
+    _REQUEST: {},
+}
+
+_REQUIRED_DEFAULTS = {
+    _COMPARISON: {
+        "status": "pending",
+        "analysis_attempt": "0",
+    },
+    _REQUEST: {},
 }
 
 _INDEXES = {
@@ -201,6 +212,76 @@ def _incompatible(table, detail):
         "Refusing an incomplete Pump Check comparison invariant.")
 
 
+def _dialect_name(inspector):
+    bind = getattr(inspector, "bind", None)
+    dialect = getattr(bind, "dialect", None)
+    return str(getattr(dialect, "name", "") or "").lower()
+
+
+def _type_is_compatible(name, actual_type, expected_type, dialect_name):
+    if name == "analysis":
+        if dialect_name == "postgresql":
+            return isinstance(actual_type, postgresql.JSONB)
+        return (
+            isinstance(actual_type, sa.JSON)
+            and not isinstance(actual_type, postgresql.JSONB)
+        )
+    if expected_type is sa.Integer:
+        return getattr(actual_type, "__visit_name__", "").lower() == "integer"
+    if expected_type is sa.String:
+        return (
+            isinstance(actual_type, sa.String)
+            and getattr(actual_type, "__visit_name__", "").lower()
+            in {"string", "varchar"}
+        )
+    if expected_type is sa.DateTime:
+        return getattr(actual_type, "__visit_name__", "").lower() == "datetime"
+    return type(actual_type) is expected_type
+
+
+_DEFAULT_CAST_RE = re.compile(
+    r"::\s*(?:character\s+varying|varchar|text|integer|int4)\b",
+    re.IGNORECASE,
+)
+
+
+def _strip_outer_parentheses(value):
+    value = value.strip()
+    while value.startswith("(") and value.endswith(")"):
+        depth = 0
+        wraps_whole_value = True
+        in_quote = False
+        for index, character in enumerate(value):
+            if character == "'":
+                in_quote = not in_quote
+            elif not in_quote:
+                if character == "(":
+                    depth += 1
+                elif character == ")":
+                    depth -= 1
+                    if depth == 0 and index != len(value) - 1:
+                        wraps_whole_value = False
+                        break
+        if not wraps_whole_value or depth != 0:
+            break
+        value = value[1:-1].strip()
+    return value
+
+
+def _normalize_server_default(value):
+    if value is None:
+        return None
+    normalized = _DEFAULT_CAST_RE.sub("", str(value).strip())
+    normalized = _strip_outer_parentheses(normalized)
+    if (
+        len(normalized) >= 2
+        and normalized.startswith("'")
+        and normalized.endswith("'")
+    ):
+        normalized = normalized[1:-1].replace("''", "'")
+    return normalized.strip()
+
+
 def _verify_columns(inspector, table):
     columns = {
         item["name"]: item for item in inspector.get_columns(table)
@@ -209,15 +290,27 @@ def _verify_columns(inspector, table):
     if missing:
         _incompatible(table, f"missing columns {sorted(missing)}")
 
+    dialect_name = _dialect_name(inspector)
     for name, (type_class, length, nullable) in _COLUMN_SPECS[table].items():
         actual = columns[name]
         actual_type = actual["type"]
-        if not isinstance(actual_type, type_class):
+        if not _type_is_compatible(
+            name, actual_type, type_class, dialect_name
+        ):
             _incompatible(table, f"column {name} has wrong type {actual_type}")
         if length is not None and getattr(actual_type, "length", None) != length:
             _incompatible(table, f"column {name} has wrong length")
         if bool(actual.get("nullable")) != nullable:
             _incompatible(table, f"column {name} has wrong nullability")
+        if name in _REQUIRED_DEFAULTS[table]:
+            expected_default = _REQUIRED_DEFAULTS[table][name]
+            actual_default = _normalize_server_default(actual.get("default"))
+            if actual_default != expected_default:
+                _incompatible(
+                    table,
+                    f"column {name} has wrong server default "
+                    f"{actual.get('default')!r}",
+                )
 
     primary_key = tuple(
         inspector.get_pk_constraint(table).get("constrained_columns") or ())
@@ -253,14 +346,75 @@ def _verify_foreign_keys(inspector, table):
         _incompatible(table, f"missing foreign keys {sorted(missing)}")
 
 
+_CHECK_CAST_RE = re.compile(
+    r"::\s*(?:character\s+varying|varchar|text|integer|int4)"
+    r"(?:\s*\[\s*\])?",
+    re.IGNORECASE,
+)
+_ANY_ARRAY_RE = re.compile(
+    r"=\s*any\s*\(\s*\(?\s*array\s*\[([^\]]*)\]"
+    r"\s*\)?\s*\)",
+    re.IGNORECASE,
+)
+_IDENTIFIER_PARENS_RE = re.compile(
+    r"\(\s*([a-z_][a-z0-9_.]*)\s*\)",
+    re.IGNORECASE,
+)
+_SQL_LITERAL = r"'(?:''|[^'])*'"
+_SQL_IDENTIFIER = r"[a-z_][a-z0-9_.]*"
+_SQL_IN_LIST = (
+    rf"\(\s*{_SQL_LITERAL}"
+    rf"(?:\s*,\s*{_SQL_LITERAL})*\s*\)"
+)
+_ATOMIC_PARENS_RE = re.compile(
+    rf"\(\s*("
+    rf"(?:{_SQL_IDENTIFIER}\s+is\s+(?:not\s+)?null)"
+    rf"|(?:{_SQL_IDENTIFIER}\s*(?:=|<>)\s*"
+    rf"(?:{_SQL_IDENTIFIER}|{_SQL_LITERAL}))"
+    rf"|(?:{_SQL_IDENTIFIER}\s+in\s*{_SQL_IN_LIST})"
+    rf")\s*\)",
+    re.IGNORECASE,
+)
+
+
+def _normalize_check_sql(value):
+    if value is None:
+        return None
+    normalized = str(value).strip().replace('"', "")
+    parts = re.split(r"('(?:''|[^'])*')", normalized)
+    normalized = "".join(
+        part if index % 2 else part.lower()
+        for index, part in enumerate(parts)
+    )
+    if normalized.startswith("check"):
+        normalized = normalized[len("check"):].strip()
+    normalized = _CHECK_CAST_RE.sub("", normalized)
+    normalized = _ANY_ARRAY_RE.sub(r" in (\1)", normalized)
+    normalized = normalized.replace("!=", "<>")
+    while True:
+        previous = normalized
+        normalized = _IDENTIFIER_PARENS_RE.sub(r"\1", normalized)
+        normalized = _ATOMIC_PARENS_RE.sub(r"\1", normalized)
+        if normalized == previous:
+            break
+    normalized = _strip_outer_parentheses(normalized)
+    return re.sub(r"\s+", "", normalized)
+
+
 def _verify_checks(inspector, table):
     checks = {
-        item["name"] for item in inspector.get_check_constraints(table)
+        item["name"]: item.get("sqltext")
+        for item in inspector.get_check_constraints(table)
         if item.get("name")
     }
-    missing = _REQUIRED_CHECKS[table] - checks
+    missing = set(_REQUIRED_CHECKS[table]) - set(checks)
     if missing:
         _incompatible(table, f"missing checks {sorted(missing)}")
+    for name, expected_sql in _REQUIRED_CHECKS[table].items():
+        if _normalize_check_sql(checks[name]) != _normalize_check_sql(
+            expected_sql
+        ):
+            _incompatible(table, f"check {name} has wrong SQL")
 
 
 def _verify_existing(inspector, table):

@@ -1,6 +1,7 @@
 import importlib.util
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import sqlalchemy as sa
@@ -189,6 +190,128 @@ def _assert_expected_constraints(inspector):
     }
 
 
+class _ColumnInspector:
+    def __init__(self, dialect_name, type_overrides=None, default_overrides=None):
+        self.bind = SimpleNamespace(
+            dialect=SimpleNamespace(name=dialect_name)
+        )
+        json_type = (
+            postgresql.JSONB()
+            if dialect_name == "postgresql"
+            else sa.JSON()
+        )
+        self._types = {
+            "id": sa.Integer(),
+            "user_id": sa.Integer(),
+            "baseline_pump_check_id": sa.Integer(),
+            "current_pump_check_id": sa.Integer(),
+            "public_id": sa.String(24),
+            "status": sa.String(20),
+            "comparability": sa.String(20),
+            "analysis": json_type,
+            "analysis_version": sa.String(50),
+            "analysis_started_at": sa.DateTime(),
+            "analysis_attempt": sa.Integer(),
+            "analysis_failure_kind": sa.String(24),
+            "created_at": sa.DateTime(),
+        }
+        self._types.update(type_overrides or {})
+        self._defaults = {
+            "status": (
+                "('pending'::character varying)"
+                if dialect_name == "postgresql"
+                else "'pending'"
+            ),
+            "analysis_attempt": (
+                "('0'::integer)"
+                if dialect_name == "postgresql"
+                else "'0'"
+            ),
+        }
+        self._defaults.update(default_overrides or {})
+
+    def get_columns(self, table):
+        assert table == COMPARISON
+        nullable = {
+            "comparability",
+            "analysis",
+            "analysis_started_at",
+            "analysis_failure_kind",
+        }
+        return [
+            {
+                "name": name,
+                "type": column_type,
+                "nullable": name in nullable,
+                "default": self._defaults.get(name),
+            }
+            for name, column_type in self._types.items()
+        ]
+
+    @staticmethod
+    def get_pk_constraint(table):
+        assert table == COMPARISON
+        return {"constrained_columns": ["id"]}
+
+
+class _CheckInspector:
+    def __init__(self, checks):
+        self._checks = checks
+
+    def get_check_constraints(self, table):
+        assert table == COMPARISON
+        return [
+            {"name": name, "sqltext": sqltext}
+            for name, sqltext in self._checks.items()
+        ]
+
+
+def _create_wrong_check_comparison(connection):
+    connection.execute(sa.text("""
+        CREATE TABLE pump_check_comparison (
+            id INTEGER NOT NULL PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            baseline_pump_check_id INTEGER NOT NULL,
+            current_pump_check_id INTEGER NOT NULL,
+            public_id VARCHAR(24) NOT NULL,
+            status VARCHAR(20) DEFAULT 'pending' NOT NULL,
+            comparability VARCHAR(20),
+            analysis JSON,
+            analysis_version VARCHAR(50) NOT NULL,
+            analysis_started_at DATETIME,
+            analysis_attempt INTEGER DEFAULT '0' NOT NULL,
+            analysis_failure_kind VARCHAR(24),
+            created_at DATETIME NOT NULL,
+            CONSTRAINT uq_pump_comparison_pair_version UNIQUE (user_id, baseline_pump_check_id, current_pump_check_id, analysis_version),
+            CONSTRAINT uq_pump_comparison_user_public_id UNIQUE (user_id, public_id),
+            CONSTRAINT ck_pump_comparison_distinct_sources
+                CHECK (baseline_pump_check_id <> current_pump_check_id),
+            CONSTRAINT ck_pump_comparison_status
+                CHECK (status IN ('pending', 'analyzing', 'completed',
+                                  'failed', 'unexpected')),
+            CONSTRAINT ck_pump_comparison_comparability
+                CHECK (
+                    comparability IS NULL OR comparability IN (
+                        'comparable', 'limited', 'not_comparable'
+                    )
+                ),
+            CONSTRAINT ck_pump_comparison_terminal_fields
+                CHECK (
+                    (status = 'completed'
+                     AND analysis IS NOT NULL
+                     AND comparability IS NOT NULL)
+                    OR
+                    (status <> 'completed'
+                     AND analysis IS NULL
+                     AND comparability IS NULL)
+                ),
+            FOREIGN KEY(user_id) REFERENCES user(id) ON DELETE CASCADE,
+            FOREIGN KEY(baseline_pump_check_id) REFERENCES pump_check(id) ON DELETE CASCADE,
+            FOREIGN KEY(current_pump_check_id) REFERENCES pump_check(id) ON DELETE CASCADE
+        )
+    """))
+
+
 def test_upgrade_creates_both_tables_on_legacy_schema(tmp_path):
     with _legacy_engine(tmp_path) as connection:
         _run_upgrade(connection)
@@ -229,6 +352,161 @@ def test_upgrade_rejects_incompatible_partial_request_table(tmp_path):
             RuntimeError, match="incompatible pump_check_comparison_request schema"
         ):
             _run(connection, migration.upgrade)
+
+
+def test_upgrade_rejects_correctly_named_but_wrong_check_sql(tmp_path):
+    with _legacy_engine(tmp_path, "wrong-check.db") as connection:
+        _create_wrong_check_comparison(connection)
+        with pytest.raises(
+            RuntimeError,
+            match="incompatible pump_check_comparison schema: "
+                  "check ck_pump_comparison_status has wrong SQL",
+        ):
+            _run_upgrade(connection)
+
+
+def test_check_verifier_accepts_postgresql_reflection_forms():
+    migration = _load_migration()
+    inspector = _CheckInspector({
+        "ck_pump_comparison_distinct_sources": (
+            "((baseline_pump_check_id <> current_pump_check_id))"
+        ),
+        "ck_pump_comparison_status": (
+            "((status)::text = ANY "
+            "((ARRAY['pending'::character varying, "
+            "'analyzing'::character varying, "
+            "'completed'::character varying, "
+            "'failed'::character varying])::text[]))"
+        ),
+        "ck_pump_comparison_comparability": (
+            "((comparability IS NULL) OR "
+            "((comparability)::text = ANY "
+            "((ARRAY['comparable'::character varying, "
+            "'limited'::character varying, "
+            "'not_comparable'::character varying])::text[])))"
+        ),
+        "ck_pump_comparison_terminal_fields": (
+            "(((status)::text = 'completed'::text) "
+            "AND (analysis IS NOT NULL) "
+            "AND (comparability IS NOT NULL)) OR "
+            "(((status)::text <> 'completed'::text) "
+            "AND (analysis IS NULL) "
+            "AND (comparability IS NULL))"
+        ),
+    })
+
+    migration._verify_checks(inspector, COMPARISON)
+
+
+def test_check_verifier_rejects_wrong_terminal_boolean_grouping():
+    migration = _load_migration()
+    inspector = _CheckInspector({
+        "ck_pump_comparison_distinct_sources": (
+            "baseline_pump_check_id <> current_pump_check_id"
+        ),
+        "ck_pump_comparison_status": (
+            "status IN ('pending', 'analyzing', 'completed', 'failed')"
+        ),
+        "ck_pump_comparison_comparability": (
+            "comparability IS NULL OR comparability IN "
+            "('comparable', 'limited', 'not_comparable')"
+        ),
+        "ck_pump_comparison_terminal_fields": (
+            "status = 'completed' AND "
+            "(analysis IS NOT NULL AND comparability IS NOT NULL OR "
+            "status <> 'completed') AND "
+            "analysis IS NULL AND comparability IS NULL"
+        ),
+    })
+
+    with pytest.raises(
+        RuntimeError,
+        match="check ck_pump_comparison_terminal_fields has wrong SQL",
+    ):
+        migration._verify_checks(inspector, COMPARISON)
+
+
+def test_check_verifier_rejects_case_changed_allowed_literal():
+    migration = _load_migration()
+    inspector = _CheckInspector({
+        "ck_pump_comparison_distinct_sources": (
+            "baseline_pump_check_id <> current_pump_check_id"
+        ),
+        "ck_pump_comparison_status": (
+            "status IN ('PENDING', 'analyzing', 'completed', 'failed')"
+        ),
+        "ck_pump_comparison_comparability": (
+            "comparability IS NULL OR comparability IN "
+            "('comparable', 'limited', 'not_comparable')"
+        ),
+        "ck_pump_comparison_terminal_fields": (
+            "(status = 'completed' AND analysis IS NOT NULL AND "
+            "comparability IS NOT NULL) OR "
+            "(status <> 'completed' AND analysis IS NULL AND "
+            "comparability IS NULL)"
+        ),
+    })
+
+    with pytest.raises(
+        RuntimeError,
+        match="check ck_pump_comparison_status has wrong SQL",
+    ):
+        migration._verify_checks(inspector, COMPARISON)
+
+
+@pytest.mark.parametrize("dialect_name", ["sqlite", "postgresql"])
+def test_column_verifier_accepts_required_dialect_types_and_default_forms(
+        dialect_name):
+    migration = _load_migration()
+    migration._verify_columns(
+        _ColumnInspector(dialect_name), COMPARISON)
+
+
+@pytest.mark.parametrize(
+    ("column_name", "wrong_type"),
+    [
+        ("analysis", postgresql.JSON()),
+        ("analysis_attempt", sa.BigInteger()),
+    ],
+)
+def test_postgresql_column_verifier_rejects_json_and_broad_integer_subtypes(
+        column_name, wrong_type):
+    migration = _load_migration()
+    inspector = _ColumnInspector(
+        "postgresql", type_overrides={column_name: wrong_type})
+
+    with pytest.raises(
+        RuntimeError,
+        match=f"incompatible pump_check_comparison schema: "
+              f"column {column_name} has wrong type",
+    ):
+        migration._verify_columns(inspector, COMPARISON)
+
+
+@pytest.mark.parametrize(
+    ("column_name", "wrong_default"),
+    [
+        ("status", None),
+        ("status", "'queued'::character varying"),
+        ("status", "'PENDING'::character varying"),
+        ("analysis_attempt", None),
+        ("analysis_attempt", "1"),
+    ],
+)
+def test_column_verifier_rejects_missing_or_wrong_server_defaults(
+        column_name, wrong_default):
+    migration = _load_migration()
+    inspector = _ColumnInspector(
+        "postgresql",
+        default_overrides={column_name: wrong_default},
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=f"incompatible pump_check_comparison schema: "
+              f"column {column_name} has wrong server default",
+    ):
+        migration._verify_columns(inspector, COMPARISON)
 
 
 def test_downgrade_preserves_pump_check_sources(tmp_path):
