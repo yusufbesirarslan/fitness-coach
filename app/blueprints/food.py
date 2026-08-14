@@ -17,6 +17,23 @@ from app.services import meal_idempotency
 bp = Blueprint("food", __name__)
 
 
+# Hardening PR4 rezervi: uygulama TEK gunicorn worker + 8 thread çalışır ve
+# FatSecret çağrıları senkron bloklayıcıdır (fatsecret.py timeout=5..10). PR #199
+# food_search'ü rezerv-sayılan `blocking_concurrency_slot()`e aldı ama kardeş üç
+# route (barkod, porsiyon-by-id, porsiyon-by-name) kapısız kaldı: FatSecret
+# gecikme atağında kullanıcılar-arası bir yığın istek 8 thread'in hepsini
+# park edip /health'i kuyruğa sokabilirdi — rezervin tam olarak önlediği yanlış
+# deploy-rollback'i (triage 2026-08-07 #2). Kullanıcı-başı rate limit
+# kullanıcılar-arası yığını SINIRLAMAZ.
+def _fatsecret_busy_response(route):
+    from app.i18n import t
+    current_app.logger.warning("%s event=blocking_capacity_exhausted", route)
+    resp = jsonify({"error": t("error.ai_busy")})
+    resp.status_code = 503
+    resp.headers["Retry-After"] = "15"
+    return resp
+
+
 @bp.route("/api/food/search")
 @require_auth
 @limiter.limit(FOOD_SEARCH_RATELIMIT, key_func=_user_or_ip_key)
@@ -63,7 +80,10 @@ def food_by_barcode():
     code = request.args.get("code", "").strip()
     if not barcode_svc.normalize_barcode(code):
         return jsonify({"error": "invalid_barcode"}), 400
-    product = barcode_svc.get_barcode_product(code)
+    try:
+        product = barcode_svc.get_barcode_product(code)
+    except BlockingConcurrencyLimit:
+        return _fatsecret_busy_response("food_by_barcode")
     if not product:
         return jsonify(barcode_svc.not_found_response()), 404
     context = barcode_svc.get_user_barcode_context(
@@ -102,7 +122,10 @@ def barcode_add_to_diary():
 
     food = data.get("food")
     if not isinstance(food, dict):
-        product = barcode_svc.get_barcode_product(data.get("barcode", ""))
+        try:
+            product = barcode_svc.get_barcode_product(data.get("barcode", ""))
+        except BlockingConcurrencyLimit:
+            return _fatsecret_busy_response("barcode_add_to_diary")
         food = product["food"] if product else None
     if not food:
         return jsonify(barcode_svc.not_found_response()), 404
@@ -151,7 +174,11 @@ def barcode_add_to_diary():
 @limiter.limit(FOOD_SEARCH_RATELIMIT, key_func=_user_or_ip_key)
 def food_servings(food_id):
     current_app.logger.info("food_servings called with food_id=%s", food_id)
-    servings = _food_get_servings(food_id)
+    try:
+        with blocking_concurrency_slot():
+            servings = _food_get_servings(food_id)
+    except BlockingConcurrencyLimit:
+        return _fatsecret_busy_response("food_servings")
     if servings:
         current_app.logger.info("Servings OK for food_id=%s: %d options, first=%s",
                         food_id, len(servings), servings[0].get("serving_description", "?"))
@@ -173,7 +200,11 @@ def food_servings_by_name():
     cached_fid = _get_cached_food_id(name) or None
     if cached_fid:
         current_app.logger.info("servings-by-name: cache hit food_id=%s for '%s'", cached_fid, name)
-        servings = _food_get_servings(cached_fid)
+        try:
+            with blocking_concurrency_slot():
+                servings = _food_get_servings(cached_fid)
+        except BlockingConcurrencyLimit:
+            return _fatsecret_busy_response("food_servings_by_name")
         if servings:
             return jsonify({"servings": servings, "food_id": cached_fid})
 
@@ -203,19 +234,24 @@ def food_servings_by_name():
     # _is_specific_match ile ele, en spesifik eşleşmeyi al, YALNIZCA doğrulanmış
     # eşleşmede _cache_food_id yaz.
     try:
-        token = _get_fatsecret_token()
-        candidates = _fs_relevant_candidates(name, english, token)
-        if candidates:
-            fid = candidates[0].get("food_id", "")
-            current_app.logger.info("servings-by-name: relevant food_id=%s for '%s'", fid, name)
-            if fid:
-                servings = _food_get_servings(fid)
-                if servings:
-                    _cache_food_id(name, fid)  # yalnızca porsiyonlar da geldiyse önbelleğe al
-                    return jsonify({"servings": servings, "food_id": fid})
-                current_app.logger.warning("servings-by-name: food.get returned no servings for id=%s", fid)
-        else:
-            current_app.logger.info("servings-by-name: no relevant match for '%s'", name)
+        with blocking_concurrency_slot():
+            token = _get_fatsecret_token()
+            candidates = _fs_relevant_candidates(name, english, token)
+            if candidates:
+                fid = candidates[0].get("food_id", "")
+                current_app.logger.info("servings-by-name: relevant food_id=%s for '%s'", fid, name)
+                if fid:
+                    servings = _food_get_servings(fid)
+                    if servings:
+                        _cache_food_id(name, fid)  # yalnızca porsiyonlar da geldiyse önbelleğe al
+                        return jsonify({"servings": servings, "food_id": fid})
+                    current_app.logger.warning("servings-by-name: food.get returned no servings for id=%s", fid)
+            else:
+                current_app.logger.info("servings-by-name: no relevant match for '%s'", name)
+    except BlockingConcurrencyLimit:
+        # Aşağıdaki geniş `except Exception` bunu sessizce boş sonuca çevirirdi;
+        # kapasite reddi bir "besin bulunamadı" DEĞİLDİR → açık 503 + Retry-After.
+        return _fatsecret_busy_response("food_servings_by_name")
     except Exception as e:
         current_app.logger.warning("servings-by-name failed for '%s': %s", name, e)
     return jsonify({"servings": [], "food_id": ""})

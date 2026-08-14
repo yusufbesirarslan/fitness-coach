@@ -298,6 +298,16 @@ def configure_app(app):
     _is_dev = (os.environ.get("FLASK_DEBUG") == "1"
                or os.environ.get("FLASK_ENV") == "development")
     app.config["FITX_IS_DEV"] = _is_dev
+    # Genel istek-gövdesi tavanı. Flask varsayılanı SINIRSIZDIR: her route kendi
+    # alan-başı kapısına (avatar 500 KB, pump-check 8 MB data-URL, menü metni
+    # 40 KB) güveniyordu ve bu kapılara ULAŞMADAN önce gövde zaten tamamen
+    # okunuyordu — kapısı olmayan bir alan (örn. /chat `message`) tek istekte
+    # megabaytlarca veri taşıyabilirdi (triage 2026-08-14 #2). Tavan en büyük
+    # meşru yükün (8 MB base64 data-URL + JSON/multipart yükü) ÜSTÜNDE tutulur:
+    # bu bir DoS ceza çizgisi değil, akıl-sağlığı tavanıdır; alan-başı kapılar
+    # kanonik sınır olmayı sürdürür.
+    app.config["MAX_CONTENT_LENGTH"] = _positive_env_int(
+        "MAX_CONTENT_LENGTH_BYTES", 12 * 1024 * 1024)
     _LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
     _gunicorn_logger = logging.getLogger("gunicorn.error")
     # Emekliye ayrılmış kimlik doğrulama ayarları: KOŞULSUZ kontrol edilir,

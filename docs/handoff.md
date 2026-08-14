@@ -3948,3 +3948,71 @@ brief requires p50/p95/p99.
   PostgreSQL flask db check are the authoritative review conditions.
 - Flutter is untouched. PR2 waits for reviewed, CI-green, merged PR1. PR3
   comparison and PR4 history/retention remain deferred.
+
+# Triage fixes — PR #201 (2026-08-07) + PR #208 (2026-08-14) findings
+
+Both PRs are documentation-only triage reports. This change closes the code
+findings they raised. **PR #208's carried items #4–#7 were re-verified as
+already fixed at HEAD** — that report used `NEEDED_FIXES_2026-08-02.md` as its
+baseline and never saw the (still-unmerged) 08-07 report, so it re-listed work
+PR #199/#200 had already landed:
+
+| Carried item | State at `dc6fda1` | Evidence |
+|---|---|---|
+| #4 `ai_gate` unbounded `_model_slots` | Fixed | `model_concurrency_slot` acquires via `_acquire_before_deadline` and raises `BlockingConcurrencyLimit` (`ai_gate.py`) |
+| #5 `mobile_auth.refresh()` lock across network | Fixed | Two-phase snapshot → network (asserts `not in_transaction()`) → re-lock (`mobile_auth.py:507-517`) |
+| #6 `ProxyFix` trusts `X-Forwarded-Host/-Port` | Fixed | `ProxyFix(..., x_host=0, x_port=0)` (`config.py`) |
+| #7 OpenAI non-stream turn budget | Fixed | `_coach_turn_deadline` / `_remaining_coach_turn_seconds` (`ai_coach.py:932-1084`) |
+
+## Fixed here
+
+1. **`weekly_water` completable in one day** (201 #1 / 208 #1, the only Medium).
+   The funnel gate read the user-resettable `WaterLog.count`, so a `5 → 0 → 5`
+   toggle re-armed the `0 → positive` transition and drove the "5 different
+   days" challenge to completion in one afternoon. The gate is now a durable
+   per-day marker, `WaterLog.quest_fired` (migration `f0a1b2c3d4e5`, additive
+   with an existence guard for the `create_all` boot path), claimed by a
+   conditional `UPDATE ... WHERE quest_fired = false`. `uq_user_water_day`
+   already makes the row unique per user+day, so that UPDATE is the single
+   atomic claim — concurrent POSTs cannot both fire, and no extra lock is
+   needed. A genuinely new day gets a new row, so the funnel still fires daily;
+   `count=0` never consumes the marker.
+2. **Ungated FatSecret surfaces** (201 #2). The slot now wraps the network
+   round-trip in `barcode.get_barcode_product` (covers every caller), in
+   `food_servings` / `food_servings_by_name`, and in the three
+   `mobile_food_discovery` entry points — that mobile surface landed in #205,
+   after the 08-07 audit, and carried the identical pattern. The permit wraps
+   **only** the provider call: barcode cache hits stay pure DB and never
+   consume capacity, and the cache write commits outside the permit. Saturation
+   returns `503` + `Retry-After`, never a fabricated "not found" — on the
+   mobile side it surfaces through the existing `FOOD_PROVIDER_UNAVAILABLE`.
+3. **`/chat` unbounded input** (208 #2). `/chat` interpolated `message` straight
+   into a Sonnet prompt with no cap while `/ask*` enforced `MAX_QUESTION_CHARS`;
+   rate limits bound request *count*, not per-request token *cost*. `/chat` now
+   applies the same cap (and rejects non-string values, which `len()` would
+   otherwise mis-measure) before any model call. A global
+   `MAX_CONTENT_LENGTH` (12 MiB, `MAX_CONTENT_LENGTH_BYTES`) sits above the
+   largest legitimate upload (8 MB pump-check data URL); per-field validators
+   remain the canonical limits. 413 returns JSON, and `mobile_api` maps it to
+   `REQUEST_TOO_LARGE` with `retryable=False` — its generic handler would
+   otherwise have reported a permanent client error as a retryable outage.
+4. **`award_badge` deferred flush** (208 #3, latent). The insert now runs in its
+   own savepoint and flushes immediately, so a duplicate `uq_user_badge` fails
+   locally instead of at the caller's `begin_nested` exit — where it would have
+   rolled back `_try_complete`'s guarded `completed_at` UPDATE and left the
+   challenge in a permanent retry loop.
+
+## Not fixed (deliberate)
+
+- **God-modules** (201 #3 / 208 #8): `social.py` (1191), `ai_coach.py` (1247),
+  `tracking.py` (728). Both reports classify this as tech debt with no
+  behavioral defect and recommend *incremental* extraction; splitting these
+  alongside behavioral fixes would move the monkeypatch/test surface for
+  unrelated code in the same change. Left for a dedicated PR.
+- **201 #4** (duplicate Istanbul-date helper in `coach_context_queries.py`) —
+  the report itself marks it "no action required": functionally equivalent and
+  deliberately Flask/SQLAlchemy-free for the psycopg2 read path.
+- **208 informational notes** (`nbf`/`iat` not validated, menu-fetch exception
+  *class* name, `/health?deep=1` outbound GET, `_pin_getaddrinfo` global
+  monkeypatch) — all verified non-exploitable by that report; each would change
+  a security-reviewed boundary for no measured gain.

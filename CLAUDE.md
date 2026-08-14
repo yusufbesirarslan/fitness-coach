@@ -84,6 +84,16 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
       penceresi altındadır (`JWKS_FORCED_REFRESH_COOLDOWN_SECONDS`, vars. 60):
       koşulsuzken uydurma kid taşıyan istek seli her istek başına bir thread'i
       5 sn park ettirebiliyordu. Kanıtlar: `tests/test_capacity_invariants.py`.
+    - `MAX_CONTENT_LENGTH_BYTES` (vars. 12 MiB) — GENEL istek-gövdesi tavanı
+      (app/config.py). Flask varsayılanı SINIRSIZDIR ve alan-başı kapılara
+      (avatar 500 KB, pump-check 8 MB data-URL) ulaşılmadan önce gövde zaten
+      okunur. Tavan en büyük meşru yükün ÜSTÜNDE tutulur — kanonik sınır
+      alan-başı doğrulayıcılar olmayı sürdürür, bu yalnızca akıl-sağlığı
+      tavanıdır. Aşım JSON 413 döner; mobil yüzeyde `REQUEST_TOO_LARGE` +
+      retryable=False (blueprint'in genel kancası bunu retryable bir arıza
+      sanmasın). `/chat` ayrıca `MAX_QUESTION_CHARS` girdi tavanını `/ask*` ile
+      AYNI şekilde uygular — rate limit istek SAYISINI sınırlar, istek-başı
+      token MALİYETİNİ değil.
     - `SENTRY_DSN` (yoksa kapalı) + opsiyonel `SENTRY_ENVIRONMENT`, `SENTRY_TRACES_SAMPLE_RATE` — hata izleme (app/observability.py). DSN yoksa no-op.
     - `RUNTIME_METRICS_ENABLED` (vars. 0) + `RUNTIME_METRICS_NAMESPACE` (vars.
       `FitX/Runtime`) + `RUNTIME_METRICS_FLUSH_SECONDS` (vars. 60) — üretim
@@ -175,3 +185,15 @@ migration'lar bu yüzden TEKRAR-ÇALIŞTIRILABİLİR olmalı (bkz. cc33dd44ee55:
   `flask db upgrade` adımı olarak çalıştır. Boot'ta migration hatası artık FATAL'dir
   (app/db_init.py; kaçış: FITX_DB_UPGRADE_FAIL_OPEN=1) — health gate rollback yapar.
 - Sorgular daima current_user.id'ye scope'lanır; ID ile yüklenen kayıtlarda sahiplik kontrolü zorunlu
+- Gün-anlamlı challenge hunileri (`water_logged` gibi) KALICI bir gün-başı
+  işaretle dedup edilir — `challenges.record_event` per-day dedup YAPMAZ, dedup
+  çağıranın sorumluluğudur (`active_day` deseni). Kullanıcının değiştirebildiği
+  bir sayıya ("0→pozitif geçiş") bakan kapı yazma: sayıyı sıfırlamak geçişi
+  yeniden üretir ve "N GÜN" challenge'ı tek günde tamamlanır. Kanonik örnek:
+  `WaterLog.quest_fired` + koşullu UPDATE (`training.py:_claim_water_funnel_for_today`).
+- Bloklayıcı sağlayıcı çağrısı (FatSecret/Cognito/wearable/model) eklerken
+  `blocking_concurrency_slot()` ZORUNLU: tek gunicorn worker + 8 thread; kapısız
+  senkron ağ turu /health'i kuyruğa sokup yanlış deploy-rollback tetikler. Slot
+  YALNIZCA ağ turunu sarsın — cache okuması/DB yazımı izin tutulurken yapılmaz.
+  Kapasite reddi (`BlockingConcurrencyLimit`) 503 + Retry-After'a çevrilir,
+  "sonuç bulunamadı"ya ASLA.

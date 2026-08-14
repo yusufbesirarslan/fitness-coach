@@ -22,6 +22,7 @@ sahte monotonik saat ve deterministik problar kullanılır.
     python -m pytest tests/test_capacity_invariants.py -v
 """
 import ast
+import contextlib
 import os
 import threading
 
@@ -660,3 +661,86 @@ def test_failed_forced_refresh_still_opens_the_cooldown(monkeypatch):
         assert forced["n"] == 1
     finally:
         cognito_jwt._reset_cache()
+
+
+# ---------------------------------------------------------------------------
+# FatSecret besin yüzeyleri — triage 2026-08-07 #2
+#
+# PR #199 `food_search`ü rezerv-sayılan slota aldı ama kardeş FatSecret
+# route'ları (barkod, porsiyon-by-id, porsiyon-by-name) ve daha sonra eklenen
+# mobil keşif yüzeyi kapısız kaldı: sağlayıcı gecikme atağında kullanıcılar-arası
+# bir yığın 8 web thread'ini park edip /health'i kuyruğa sokabilirdi. Kullanıcı
+# başı rate limit kullanıcılar-arası yığını sınırlamaz.
+# ---------------------------------------------------------------------------
+
+@contextlib.contextmanager
+def _saturated_blocking_capacity():
+    """Paylaşılan bloklayıcı izinlerin TAMAMINI tut (bekleme 0 → anında ret)."""
+    held = 0
+    try:
+        while ai_gate._ai_slots.acquire(blocking=False):
+            held += 1
+        assert held, "izin alınamadı — doygunluk kurulumu bozuk"
+        yield
+    finally:
+        for _ in range(held):
+            ai_gate._ai_slots.release()
+
+
+@pytest.mark.parametrize("path", [
+    "/api/food/barcode?code=5000159407236",
+    "/api/food/77777/servings",
+    "/api/food/servings-by-name?name=yumurta",
+])
+def test_fatsecret_food_routes_shed_load_instead_of_parking_threads(
+        client, auth_user, path):
+    with _saturated_blocking_capacity():
+        response = client.get(path)
+    assert response.status_code == 503, (
+        f"{path} kapasite dolayken sağlayıcıya gidiyor (thread park eder)")
+    assert response.headers.get("Retry-After") == "15"
+    # Doygunluk bir "besin bulunamadı" DEĞİLDİR: istemci 404/boş sonuç GÖRMEMELİ.
+    assert "error" in response.get_json()
+
+
+def test_barcode_cache_hit_does_not_consume_a_blocking_permit(client, auth_user):
+    """Slot YALNIZCA ağ turunu sarar — cache HIT saf DB'dir.
+
+    Aksi halde ucuz tarama akışı sağlayıcıya hiç gitmediği hâlde 503 yerdi.
+    """
+    from app.extensions import db
+    from app.models import BarcodeFoodCache
+
+    db.session.add(BarcodeFoodCache(
+        barcode="5000159407236", food_id="77777", food_name="Protein Bar",
+        brand="Acme", payload={"food_id": "77777", "name": "Protein Bar",
+                               "brand": "Acme", "servings": []}))
+    db.session.commit()
+
+    with _saturated_blocking_capacity():
+        response = client.get("/api/food/barcode?code=5000159407236")
+    assert response.status_code == 200
+
+
+def test_mobile_food_discovery_provider_calls_are_gated():
+    """Mobil keşif yüzeyi de PAYLAŞILAN kapasiteyi tüketir (aynı sınıf)."""
+    path = os.path.join("app", "services", "mobile_food_discovery.py")
+    for name in ("search", "servings", "barcode_lookup"):
+        node = _function_source(path, name)
+        assert "blocking_concurrency_slot" in _calls_in(node), (
+            f"mobile_food_discovery.{name} sağlayıcıya gider ama kapısız")
+
+
+def test_barcode_lookup_gate_wraps_only_the_network_round_trip():
+    """Kapı izni DB yazımını (cache satırı + commit) KAPSAMAMALI."""
+    node = _function_source(
+        os.path.join("app", "services", "barcode.py"), "get_barcode_product")
+    for child in ast.walk(node):
+        if not isinstance(child, ast.With):
+            continue
+        if any(isinstance(item.context_expr, ast.Call)
+               and getattr(item.context_expr.func, "id", None)
+               == "blocking_concurrency_slot"
+               for item in child.items):
+            assert "commit" not in _calls_in(child), (
+                "cache yazımı kapı izni tutulurken commit ediliyor")

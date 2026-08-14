@@ -168,6 +168,19 @@ def rate_limited(error):
         retry_after=retry_after)
 
 
+@bp.errorhandler(413)
+def payload_too_large(error):
+    """MAX_CONTENT_LENGTH aşımı mobil zarfla döner.
+
+    Bu handler OLMASAYDI aşağıdaki genel `Exception` kancası 413'ü
+    `AUTH_TEMPORARILY_UNAVAILABLE` + retryable=True'ya çevirirdi — istemci AYNI
+    aşırı-büyük gövdeyi sonsuza dek yeniden denerdi. İstek kalıcı olarak
+    geçersizdir: retryable=False.
+    """
+    return mobile_error(
+        "REQUEST_TOO_LARGE", "Request body is too large.", 413, False)
+
+
 @bp.errorhandler(Exception)
 def normalize_unhandled_mobile_failure(error):
     try:

@@ -66,6 +66,48 @@ def test_award_badge_dedup_and_unknown(app):
     assert "pump_week" in codes
 
 
+def test_award_badge_duplicate_does_not_poison_the_enclosing_savepoint(app, monkeypatch):
+    """Duplicate rozet YEREL kalmalı — çağıranın savepoint'ini geri ALMAMALI.
+
+    Eskiden insert flush EDİLMEDEN session'a bırakılırdı: uq_user_badge ihlali
+    ancak _try_complete'in begin_nested'i kapanırken patlardı — award_badge
+    çoktan başarıyla dönmüşken. O rollback KORUMALI `completed_at` UPDATE'ini de
+    geri alır, challenge bir daha ASLA tamamlanamaz ve her yeniden deneme aynı
+    duplicate'e çarpardı (triage 2026-08-14 #3).
+
+    Gerçek tetikleyici, exists-kontrolü ile flush ARASINDA araya giren eşzamanlı
+    bir insert'tir; burada exists-kontrolü kör edilerek aynı sıralama kurulur.
+    """
+    from app.services import badges
+    u = _mkuser(app)
+    c = _seed_challenge(app, code="weekly_pump", badge_code="pump_week")
+
+    db.session.add(UserBadge(user_id=u.id, badge_code="pump_week"))
+    db.session.commit()
+
+    class _BlindQuery:
+        """exists-kontrolünü ıskalatan sorgu (yarışın kaybeden tarafı)."""
+        def filter_by(self, **_kw):
+            return self
+
+        def first(self):
+            return None
+
+    monkeypatch.setattr(UserBadge, "query", _BlindQuery())
+
+    # Çağıranın savepoint'ini taklit et: KORUMALI bir yazım + duplicate rozet.
+    with db.session.begin_nested():
+        c.title = "korumalı yazım"
+        assert badges.award_badge(u.id, "pump_week", source="race") is None
+
+    monkeypatch.undo()
+    db.session.commit()
+
+    assert db.session.get(Challenge, c.id).title == "korumalı yazım"  # yazım HAYATTA
+    assert UserBadge.query.filter_by(
+        user_id=u.id, badge_code="pump_week").count() == 1
+
+
 # ── Task 3: period math ───────────────────────────────────────────────────
 def test_current_challenge_week_boundaries():
     from app.services.challenges import current_challenge_week

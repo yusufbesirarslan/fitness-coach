@@ -437,3 +437,49 @@ def test_purge_throttle_uses_redis_nx_lock_fleet_wide(app, monkeypatch):
     assert seen["key"] == "fitx:session_purge"
     assert seen["nx"] is True
     assert seen["ex"] == 86400
+
+
+# ---------------------------------------------------------------------------
+# Genel istek-gövdesi tavanı (MAX_CONTENT_LENGTH) — triage 2026-08-14 #2
+# ---------------------------------------------------------------------------
+
+def test_request_body_ceiling_is_configured_above_the_largest_legit_upload(app):
+    """Tavan VAR ve en büyük meşru yükün (8 MB data-URL) ÜSTÜNDE.
+
+    Flask varsayılanı SINIRSIZDIR; alan-başı kapılara ulaşılmadan önce gövde
+    zaten tamamen okunur.
+    """
+    ceiling = app.config.get("MAX_CONTENT_LENGTH")
+    assert ceiling, "genel gövde tavanı yapılandırılmamış"
+    assert ceiling > 8_000_000, "tavan meşru pump-check data-URL'ini keserdi"
+
+
+def test_oversized_body_returns_json_413_not_an_html_page(client, auth_user, app):
+    """413 gövdesi JSON: tüm yazma yolları fetch+JSON konuşuyor."""
+    ceiling = app.config["MAX_CONTENT_LENGTH"]
+    response = client.post(
+        "/chat", data=b"x" * (ceiling + 1),
+        content_type="application/json")
+    assert response.status_code == 413
+    assert response.is_json
+    assert response.get_json()["error"]
+
+
+def test_mobile_413_is_not_reported_as_a_retryable_outage(client, app):
+    """Mobil zarf: aşırı büyük gövde KALICI geçersizdir (retryable=False).
+
+    Blueprint'in genel `Exception` kancası 413'ü AUTH_TEMPORARILY_UNAVAILABLE +
+    retryable=True'ya çevirseydi istemci aynı gövdeyi sonsuza dek yeniden
+    denerdi.
+    """
+    if not app.config.get("MOBILE_AUTH_ENABLED"):
+        import pytest
+        pytest.skip("mobil yüzey kapalı")
+    ceiling = app.config["MAX_CONTENT_LENGTH"]
+    response = client.post(
+        "/api/v1/auth/login", data=b"x" * (ceiling + 1),
+        content_type="application/json")
+    assert response.status_code == 413
+    body = response.get_json()["error"]
+    assert body["code"] == "REQUEST_TOO_LARGE"
+    assert body["retryable"] is False
