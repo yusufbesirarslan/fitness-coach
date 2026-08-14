@@ -272,3 +272,48 @@ def test_analysis_adapter_never_returns_raw_invalid_provider_output():
             "comparable",
             provider=lambda *args, **kwargs: '{"summary":"raw"}',
         )
+
+
+@pytest.mark.parametrize(
+    "unsafe",
+    [
+        "Score: 82",
+        "I rate progress 8/10",
+        "Progress rating is 82",
+    ],
+)
+def test_parser_rejects_score_and_rating_bypasses(unsafe):
+    with pytest.raises(InvalidComparisonAnalysis):
+        parse_analysis(json.dumps(_valid(summary=unsafe)), "comparable")
+
+
+@pytest.mark.parametrize(
+    "ordinary",
+    [
+        "Progress toward consistent framing is limited.",
+        "The change in camera angle limits comparison.",
+        "Score lines on the wall remain visible.",
+        "Rate of visual change cannot be established.",
+    ],
+)
+def test_parser_allows_non_scoring_uses_of_score_progress_and_rate(ordinary):
+    _, payload = parse_analysis(
+        json.dumps(_valid(summary=ordinary)), "comparable"
+    )
+    assert payload["summary"] == ordinary
+
+
+@pytest.mark.parametrize(
+    "unsafe",
+    [
+        "The workout explains the difference.",
+        "This change stems from training.",
+        "The routine produced the improvement.",
+        "The difference is attributable to exercise.",
+    ],
+)
+def test_parser_rejects_causal_bypass_phrasing(unsafe):
+    with pytest.raises(InvalidComparisonAnalysis):
+        parse_analysis(
+            json.dumps(_valid(observed_changes=[unsafe])), "comparable"
+        )

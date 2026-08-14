@@ -18,10 +18,18 @@ REQUIRED_FIELDS = frozenset({
 })
 
 _PROGRESS_SCORE_RE = re.compile(
-    r"\b(?:progress|change|transformation)\s+score\b", re.IGNORECASE)
+    r"(?:\bscore\s*(?:(?::|is|of)\s*)?\d|"
+    r"\b(?:progress|change|transformation)\s+(?:score|rating)\b|"
+    r"\brate\s+(?:progress|change|transformation)\s+\d+(?:\s*/\s*\d+)?)",
+    re.IGNORECASE,
+)
 _CAUSAL_CLAIM_RE = re.compile(
     r"\b(?:caus(?:e|es|ed|ing)|due\s+to|because\s+of|"
-    r"result(?:ed|s)?\s+from|led\s+to|leads\s+to|responsible\s+for)\b",
+    r"result(?:ed|s)?\s+from|led\s+to|leads\s+to|responsible\s+for)\b|"
+    r"\b(?:explain(?:s|ed|ing)|produc(?:e|es|ed|ing))\s+"
+    r"(?:the\s+)?(?:changes?|differences?|improvements?)\b|"
+    r"\b(?:changes?|differences?|improvements?)\s+(?:is\s+|are\s+)?"
+    r"(?:attributable\s+to|stem(?:s|med|ming)?\s+from)\b",
     re.IGNORECASE,
 )
 

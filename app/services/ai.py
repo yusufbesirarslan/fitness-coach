@@ -143,8 +143,8 @@ def _bedrock_image_message(content, max_tokens, temperature):
         raise RuntimeError("AI servisi \u015fu an yo\u011fun (rate limit). L\u00fctfen biraz sonra tekrar deneyin.")
     except (anthropic.APITimeoutError, anthropic.APIConnectionError):
         raise RuntimeError("AI servisine ula\u015f\u0131lamad\u0131 (zaman a\u015f\u0131m\u0131). L\u00fctfen tekrar deneyin.")
-    except anthropic.APIError as e:
-        logger.warning("Bedrock g\u00f6rsel do\u011frulama APIError: %s", e)
+    except anthropic.APIError:
+        logger.warning("bedrock_image_request_failed")
         raise RuntimeError("AI servisi hatas\u0131. L\u00fctfen tekrar deneyin.")
 
 
