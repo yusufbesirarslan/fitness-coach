@@ -4016,3 +4016,80 @@ PR #199/#200 had already landed:
   *class* name, `/health?deep=1` outbound GET, `_pin_getaddrinfo` global
   monkeypatch) — all verified non-exploitable by that report; each would change
   a security-reviewed boundary for no measured gain.
+
+---
+
+# Adaptive Coaching Sprint 1 PR1 — Canonical Plan Mutation Foundation (local, 2026-08-14)
+
+Branch `adaptive-coaching-s1-pr1-plan-mutation-foundation`, worktree
+`.worktrees/adaptive-coaching-s1-pr1-plan-mutation-foundation`, based on
+`origin/main` `c38a8d9`. Local commit only — **not pushed, no PR, not merged,
+not deployed.** Sprint 1 PR2 stays deferred until this is independently
+reviewed.
+
+Full architecture: **docs/ADAPTIVE_COACHING.md**.
+
+## What shipped
+
+`app/services/plan_mutation/` — the one server-authoritative, typed, targeted
+mutation boundary over the canonical `TrainingPlan`. Five commands (replace /
+add / remove exercise, update `sets`+`reps` prescription, move a training day's
+content between weekday slots), owner-scoped, atomic, validated against the
+generator's own bounds.
+
+Files: `commands.py` (typed contract) · `document.py` (PURE mutation engine, no
+ORM/Flask) · `validation.py` (bounds reused from
+`training_generation/response_validator.py`) · `service.py` (transaction +
+ownership) · `errors.py` · `__init__.py`. Tests:
+`tests/test_plan_mutation.py`, `tests/test_plan_mutation_architecture.py`.
+
+**No runtime surface.** No route, no AI tool, no feature flag, no model change,
+no migration (Alembic head stays `f0a1b2c3d4e5`). Nothing existing was migrated
+onto the new boundary; `POST /training-plan/save` keeps its whole-plan replace
+semantics and the Training Generator is untouched.
+
+## Decisions worth not re-litigating
+
+- **Ownership is structural, not a check.** No command carries a `user_id` or a
+  plan id; the service resolves the caller's own active plan by scoping the
+  query. Cross-user mutation is therefore unexpressible, and "no plan" and
+  "someone else's plan" both surface as `PlanNotFound` so existence never leaks.
+- **Targeted-ness lives in the document layer.** The plan is one JSON text
+  column, so any write rewrites the column. `document.apply_command` deep-copies,
+  reaches exactly one node and mutates it in place — untouched subtrees are the
+  same parsed objects, so unknown/unmodelled fields survive. Rebuilding from a
+  projection (the way `plan_facts` parses for display) would silently drop them.
+- **Bounds reused, posture inverted.** Same limits as the generator; the
+  generator *clamps* LLM output, the mutation boundary *rejects*. Storing 100
+  when the caller asked for 999 would report success for a request that did not
+  happen.
+- **Ambiguous exercise names are refused, not resolved by position.** Exercise
+  identity in `plan_data` is `isim` only — there are no exercise IDs. A stable
+  exercise catalog is the correct long-term fix and is out of scope here.
+- **Derived plan-level values are never recomputed.** `haftalik_ozet` is left
+  exactly as the generator wrote it; recomputing it from one exercise swap would
+  be this boundary inventing planning authority.
+- **History safety is schema-level, not diligence-level.** `WorkoutLog` snapshots
+  `exercise_name`/`sets`/`reps`/`weight_kg`/`volume` in its own columns and
+  derives nothing from `plan_data`, so no code path exists from a plan mutation
+  to a historical row.
+- **Exactly-once is NOT claimed.** A retried call can apply the same change
+  twice (converging for replace/update/move, additive for `add`). The mutation
+  journal that would fix that is PR2 work.
+
+## Known interaction (documented, unchanged on purpose)
+
+Mutating a day's exercises changes the Sprint 7 PR3 workout-session fingerprint
+(`v1:sha256(ordered names)`), so a linked ACTIVE session classifies as
+`plan_regenerated_or_replaced` → stale and the existing UX asks the user to
+resolve it. Refreshing that fingerprint here would make the mutation service a
+second writer of workout-session state. Whether a mid-workout mutation should
+instead be *refused* is a product question for the confirmation/impact work.
+
+## Deferred to Sprint 1 PR2
+
+Plan version identity · mutation history with actor/reason metadata ·
+before/after representation · `undo_last_change` · safe rollback · idempotency
+keys/replay protection. Also still unowned: AI Coach tool registration and
+execution, intent parsing, impact classification, confirmation UX, proactive
+coaching, plateau/fatigue/adherence detection, nutrition-plan mutations.
