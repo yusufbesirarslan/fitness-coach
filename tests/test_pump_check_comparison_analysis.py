@@ -317,3 +317,52 @@ def test_parser_rejects_causal_bypass_phrasing(unsafe):
         parse_analysis(
             json.dumps(_valid(observed_changes=[unsafe])), "comparable"
         )
+
+
+@pytest.mark.parametrize(
+    "unsafe",
+    [
+        "I rate the progress 8/10",
+        "Progress is rated 8/10",
+        "The rating for progress is 82",
+        "Score = 82",
+    ],
+)
+def test_parser_rejects_score_auxiliary_and_delimiter_bypasses(unsafe):
+    with pytest.raises(InvalidComparisonAnalysis):
+        parse_analysis(json.dumps(_valid(summary=unsafe)), "comparable")
+
+
+@pytest.mark.parametrize(
+    "unsafe",
+    [
+        "The workout explains a difference",
+        "This change appears to stem from training",
+        "The difference was attributable to exercise",
+        "The difference can be attributed to exercise",
+        "The routine produced no improvement",
+    ],
+)
+def test_parser_rejects_causal_auxiliary_determiner_and_negation_bypasses(
+        unsafe):
+    with pytest.raises(InvalidComparisonAnalysis):
+        parse_analysis(
+            json.dumps(_valid(observed_changes=[unsafe])), "comparable"
+        )
+
+
+@pytest.mark.parametrize(
+    "ordinary",
+    [
+        "Explain the camera setup next time.",
+        "Use even lighting to produce consistent framing.",
+        "The pose appears similar in both images.",
+        "The difference in camera angle limits comparison.",
+        "No improvement can be established from two images.",
+    ],
+)
+def test_parser_allows_non_causal_coaching_uses_of_matcher_words(ordinary):
+    _, payload = parse_analysis(
+        json.dumps(_valid(summary=ordinary)), "comparable"
+    )
+    assert payload["summary"] == ordinary
