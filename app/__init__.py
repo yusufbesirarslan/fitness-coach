@@ -264,7 +264,7 @@ def create_app():
     from app.hooks import _csrf_protect, generate_csp_nonce, inject_csp_nonce, \
         inject_csrf_token, inject_i18n, inject_nav, maybe_weekly_rollover, \
         set_csp_header, update_streak, inject_rank, ratelimit_exceeded, \
-        not_found, server_error
+        not_found, payload_too_large, server_error
     from app.i18n import resolve_locale
     from app.observability import assign_request_id, log_request, start_request_timer
     # İstek süresini en baştan ölç + izleme kimliği ata (diğer before_request'lerden önce).
@@ -289,6 +289,7 @@ def create_app():
     app.after_request(set_csp_header)
     app.after_request(log_request)
     app.errorhandler(429)(ratelimit_exceeded)
+    app.errorhandler(413)(payload_too_large)
     app.errorhandler(404)(not_found)
     app.errorhandler(500)(server_error)
 

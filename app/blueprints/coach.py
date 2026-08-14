@@ -12,7 +12,7 @@ from app.services import ai_recovery, memory_manager
 from app.services.ai_coach import generate_coach_reply
 from app.services.ai_gate import ai_concurrency_gate, ai_stream_concurrency_gate
 from app.services.ai_pipeline import generate_answer, stream_answer
-from app.services.moderation import validate_question
+from app.services.moderation import MAX_QUESTION_CHARS, validate_question
 from app.observability import current_request_id
 from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee, generate_nutrition_plan, generate_training_plan
 from app.services.premium import (
@@ -82,12 +82,24 @@ def chat():
     except (ValueError, TypeError):
         return jsonify({"reply": t("coach.numeric_required")}), 400
 
+    # /ask* girdiyi MAX_QUESTION_CHARS ile sınırlar (H2: token-maliyeti
+    # amplifikasyonu). /chat AYNI Sonnet yoluna gider ve `message`i prompta
+    # DOĞRUDAN interpole eder ama hiçbir uzunluk kapısı yoktu: rate limit istek
+    # SAYISINI sınırlar, istek-başı token MALİYETİNİ değil (triage 2026-08-14 #2).
+    # Aynı sınır, aynı i18n anahtarı — /chat'te `message` opsiyonel olduğu için
+    # yalnızca uzunluk kapısı (boşluk reddi YOK).
+    raw_message = data.get("message", "")
+    if not isinstance(raw_message, str):
+        return jsonify({"reply": t("route.invalid_value")}), 400
+    if len(raw_message) > MAX_QUESTION_CHARS:
+        return jsonify({"reply": t("coach.question_too_long")}), 400
+
     name             = current_user.username  # formdan değil, oturumdan al
     gender           = data["gender"]
     goal             = data["goal"]
     level            = data["fitness_level"]
     current_activity = data["current_activity"]
-    user_message     = data.get("message", "")
+    user_message     = raw_message
 
     # Kullanıcının önceki kaydını çek
     previous_session = UserSession.query.filter_by(user_id=current_user.id)\

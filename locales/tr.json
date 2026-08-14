@@ -69,6 +69,7 @@
   "validate.email_invalid": "Geçerli bir e-posta adresi girin.",
 
   "error.rate_limited": "Çok fazla deneme yaptınız. Lütfen biraz sonra tekrar deneyin.",
+  "error.payload_too_large": "İstek gövdesi çok büyük. Lütfen daha küçük bir dosya veya daha kısa bir metin gönderin.",
   "error.ai_busy": "Yapay zekâ şu anda çok yoğun — lütfen birkaç saniye sonra tekrar dene.",
   "error.404_title": "Sayfa Bulunamadı",
   "error.404_body": "Aradığın sayfa bulunamadı.",

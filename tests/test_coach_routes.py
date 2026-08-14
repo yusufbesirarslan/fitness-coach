@@ -56,6 +56,48 @@ def test_chat_non_scalar_numeric_rejected(client, auth_user, field, value):
     assert response.status_code == 400
 
 
+def test_chat_rejects_oversized_message_before_calling_the_model(
+        client, auth_user, monkeypatch):
+    """/chat da /ask ile AYNI girdi tavanını uygular (triage 2026-08-14 #2).
+
+    Rate limit istek SAYISINI sınırlar, istek-başı token MALİYETİNİ değil: kapısız
+    `message` prompta doğrudan interpole edildiği için tek istek megabaytlarca
+    girdiyle Sonnet'e gidebilirdi. Model çağrısı HİÇ başlamamalı.
+    """
+    from app.services.moderation import MAX_QUESTION_CHARS
+
+    called = {"n": 0}
+
+    def _boom(*args, **kwargs):
+        called["n"] += 1
+        raise AssertionError("aşırı uzun girdi model çağrısını tetikledi")
+
+    monkeypatch.setattr(coach_bp, "generate_coach_reply", _boom)
+    response = client.post("/chat", json={
+        **CHAT_PAYLOAD, "message": "x" * (MAX_QUESTION_CHARS + 1)})
+
+    assert response.status_code == 400
+    assert called["n"] == 0
+    assert response.get_json()["reply"]
+
+
+def test_chat_accepts_message_at_the_cap(client, auth_user, fake_reply):
+    """Sınır KAPSAYICI: tam tavandaki girdi geçerlidir (off-by-one koruması)."""
+    from app.services.moderation import MAX_QUESTION_CHARS
+
+    response = client.post("/chat", json={
+        **CHAT_PAYLOAD, "message": "x" * MAX_QUESTION_CHARS})
+    assert response.status_code == 200
+
+
+def test_chat_rejects_non_string_message(client, auth_user, monkeypatch):
+    """Uzunluk kapısı tip kapısı ister: len(dict) sessizce 0 döner."""
+    monkeypatch.setattr(coach_bp, "generate_coach_reply",
+                        lambda *a, **k: pytest.fail("geçersiz tip modele gitti"))
+    response = client.post("/chat", json={**CHAT_PAYLOAD, "message": {"a": 1}})
+    assert response.status_code == 400
+
+
 def test_chat_first_session_no_comparison(client, auth_user, fake_reply):
     response = client.post("/chat", json=CHAT_PAYLOAD)
     assert response.status_code == 200

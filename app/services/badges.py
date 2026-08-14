@@ -27,7 +27,17 @@ def award_badge(user_id, badge_code, source=None):
         if exists:
             return None
         b = UserBadge(user_id=user_id, badge_code=badge_code, source=source)
-        db.session.add(b)
+        # KENDİ savepoint'inde ekle ve HEMEN flush et. Eskiden insert yalnızca
+        # session'a eklenip flush ERTELENİYORDU: bir duplicate (uq_user_badge)
+        # ancak ÇAĞIRANIN savepoint'i kapanırken patlar, yani award_badge'in
+        # try/except'i çoktan başarıyla dönmüş olurdu. O IntegrityError
+        # _try_complete'in begin_nested'ini geri alır — KORUMALI `completed_at`
+        # UPDATE'iyle birlikte — ve challenge bir daha ASLA tamamlanamazdı
+        # (her yeniden deneme aynı duplicate'e çarpar; triage 2026-08-14 #3).
+        # İç savepoint hatayı YEREL tutar: rollback yalnız rozet insert'ini alır.
+        with db.session.begin_nested():
+            db.session.add(b)
+            db.session.flush()
         return b
     except Exception:
         log.warning("award_badge başarısız (yutuldu): user=%s badge=%s",

@@ -389,6 +389,74 @@ def test_water_challenge_counts_days_not_posts(client, auth_user):
     assert row.completed_at is None
 
 
+def _seed_weekly_water_challenge():
+    from app.models import Challenge
+    ch = Challenge(code="weekly_water", title="Su Kahramanı",
+                   description="Bu hafta 5 gün su takibini gir", category="hydration",
+                   metric="water_logged", target_value=5, xp_reward=75,
+                   badge_code=None, challenge_type="global", period_type="weekly",
+                   is_active=True)
+    db.session.add(ch)
+    db.session.commit()
+    return ch
+
+
+def test_water_challenge_survives_zero_toggle_replay(client, auth_user):
+    """0↔pozitif toggle'ı huniyi YENİDEN silahlandırmamalı.
+
+    Eski kapı mutable `prev_count`e bakıyordu: 5 → 0 → 5 dizisi geçişi tekrar
+    üretip "5 GÜN" challenge'ını tek günde tamamlanabilir kılıyordu
+    (triage 2026-08-07 #1 / 2026-08-14 #1). Kalıcı gün-başı işaret ilk pozitif
+    kayıttan sonra sayıyı sıfırlamayı bir daha ateşlenme sebebi yapmaz.
+    """
+    from app.models import UserChallengeProgress
+    ch = _seed_weekly_water_challenge()
+
+    for _ in range(5):                              # aynı gün 5 kez toggle
+        assert client.post("/water", json={"count": 5}).status_code == 200
+        assert client.post("/water", json={"count": 0}).status_code == 200
+
+    row = UserChallengeProgress.query.filter_by(
+        user_id=auth_user.id, challenge_id=ch.id).first()
+    assert row is not None
+    assert row.progress == 1                        # 5 toggle ≠ 5 gün
+    assert row.completed_at is None                 # challenge tek günde bitmez
+
+
+def test_water_funnel_fires_on_a_genuinely_new_day(client, auth_user):
+    """Gün-başı işaret huniyi SUSTURMAZ — yeni gün yeni satır, yeni ateşleme."""
+    from app.models import UserChallengeProgress
+    ch = _seed_weekly_water_challenge()
+
+    assert client.post("/water", json={"count": 3}).status_code == 200
+    # Dünün satırını taklit et: günün anahtarı serbest kalsın (uq_user_water_day
+    # user+date_key üzerinde tek satır garanti eder).
+    todays_row = WaterLog.query.filter_by(user_id=auth_user.id).one()
+    todays_row.date_key = "2020-01-01"
+    db.session.commit()
+
+    assert client.post("/water", json={"count": 1}).status_code == 200
+
+    row = UserChallengeProgress.query.filter_by(
+        user_id=auth_user.id, challenge_id=ch.id).first()
+    assert row.progress == 2                        # iki AYRI gün → iki ateşleme
+
+
+def test_water_zero_post_never_fires_the_funnel(client, auth_user):
+    """count=0 bir su kaydı DEĞİLDİR: işareti tüketmemeli."""
+    from app.models import UserChallengeProgress
+    ch = _seed_weekly_water_challenge()
+
+    assert client.post("/water", json={"count": 0}).status_code == 200
+    assert UserChallengeProgress.query.filter_by(
+        user_id=auth_user.id, challenge_id=ch.id).first() is None
+
+    assert client.post("/water", json={"count": 2}).status_code == 200
+    row = UserChallengeProgress.query.filter_by(
+        user_id=auth_user.id, challenge_id=ch.id).first()
+    assert row.progress == 1                        # ilk POZİTİF kayıt ateşler
+
+
 def test_training_page_renders(client, auth_user):
     assert client.get("/training").status_code == 200
 

@@ -750,6 +750,12 @@ class WaterLog(db.Model):
     user_id  = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
     date_key = db.Column(db.String(10), nullable=False, default=lambda: app_today().isoformat())
     count    = db.Column(db.Integer, nullable=False, default=0)
+    # Günün su hunisi (water_logged) ateşlendi mi? weekly_water challenge'ı GÜN
+    # sayar; kapı sayının kendisine bakarsa kullanıcı 0↔pozitif toggle'layıp aynı
+    # gün defalarca ateşleyebilir. Bu KALICI gün-başı işaret toggle'a dayanıklıdır
+    # (satır user+date_key'de tek — uq_user_water_day).
+    quest_fired = db.Column(db.Boolean, nullable=False, default=False,
+                            server_default="false")
 
     __table_args__ = (
         db.UniqueConstraint("user_id", "date_key", name="uq_user_water_day"),
