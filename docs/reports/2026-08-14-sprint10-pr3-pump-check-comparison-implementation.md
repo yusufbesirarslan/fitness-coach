@@ -409,8 +409,10 @@ not rebased onto — the shipping brief and the committed reports cite `a69c958`
 and `05cbb1f` by SHA, and a rebase would rewrite both.
 
 This supersedes §3's file count. The diff against `origin/main` is now **41
-files, +7,445 / −85** — still backend, tests, docs, and CI only, with **no
-Flutter or mobile-repository file of any kind**. §3 counted 36 because it scoped
+files, −85 deletions** (the insertion count is dominated by new test modules and
+this documentation; the pull request carries the exact figure at the final SHA)
+— still backend, tests, docs, and CI only, with **no Flutter or
+mobile-repository file of any kind**. §3 counted 36 because it scoped
 itself to PR3 product work; the full branch diff additionally carries
 `scripts/frontend_audit/app.py` and `tests/test_frontend_audit_app.py` (the
 `a69c958` baseline harness fix, reviewed separately in §2) and the documentation
