@@ -18,6 +18,11 @@ if os.environ.get("FITX_PG_CONCURRENCY_TEST") != "1":
 
 BASELINE_TOKEN = "A" * 24
 CURRENT_TOKEN = "B" * 24
+# A third eligible source so "same key, different command" can be tested with a
+# command that is genuinely comparable. A reversed pair would fail deterministic
+# eligibility before idempotency is ever consulted, proving nothing about the
+# ledger.
+LATER_TOKEN = "C" * 24
 SOURCE_ANALYSIS = {
     "summary": "Visible definition can be assessed in this image.",
     "observations": ["Shoulder outline is visible."],
@@ -88,6 +93,7 @@ def pg_comparison_app(monkeypatch):
             for token, captured_at in (
                 (BASELINE_TOKEN, datetime(2026, 8, 1, 9, 0, 0)),
                 (CURRENT_TOKEN, datetime(2026, 8, 14, 9, 0, 0)),
+                (LATER_TOKEN, datetime(2026, 8, 20, 9, 0, 0)),
             ):
                 db.session.add(PumpCheck(
                     user_id=user_id,
@@ -210,19 +216,45 @@ def test_different_keys_same_pair_converge(pg_comparison_app):
 
 def test_same_key_different_command_has_one_winner_and_conflict(
         pg_comparison_app):
-    from app.models import PumpCheckComparison
+    from app.models import PumpCheckComparisonRequest
     app, user_ids, _calls = pg_comparison_app
 
     outcomes = _race(app, [
         (user_ids[0], "comparison-key-0001", _command()),
         (user_ids[0], "comparison-key-0001",
-         _command(CURRENT_TOKEN, BASELINE_TOKEN)),
+         _command(BASELINE_TOKEN, LATER_TOKEN)),
     ])
 
-    assert sorted(outcome[0] for outcome in outcomes.values()) == [
-        "conflict", "ok"]
+    assert sorted(
+        outcome[0] for outcome in outcomes.values()) == ["conflict", "ok"], (
+        outcomes)
     with app.app_context():
-        assert PumpCheckComparison.query.count() == 1
+        # One key maps to exactly one canonical comparison, whoever won.
+        assert PumpCheckComparisonRequest.query.filter_by(
+            user_id=user_ids[0],
+            idempotency_key="comparison-key-0001").count() == 1
+
+
+def test_reversed_pair_is_ineligible_before_idempotency_is_consulted(
+        pg_comparison_app):
+    from app.models import PumpCheckComparisonRequest
+    from app.services.mobile_pump_check_comparisons import service
+    app, user_ids, calls = pg_comparison_app
+
+    with app.app_context():
+        service.create_or_replay(
+            user_ids[0], "comparison-key-0001", _command())
+
+        # Chronology is a deterministic rule, not an idempotency question: the
+        # reversed pair is refused on its own merits even on a used key.
+        with pytest.raises(service.ChecksNotComparable):
+            service.create_or_replay(
+                user_ids[0], "comparison-key-0009",
+                _command(CURRENT_TOKEN, BASELINE_TOKEN))
+
+        assert PumpCheckComparisonRequest.query.filter_by(
+            idempotency_key="comparison-key-0009").count() == 0
+    assert calls["bedrock"] == 1
 
 
 def test_cross_user_same_key_is_independent(pg_comparison_app):
