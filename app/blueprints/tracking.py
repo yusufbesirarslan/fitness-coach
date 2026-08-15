@@ -5,11 +5,12 @@ from datetime import timedelta
 from flask import Blueprint, Response, current_app, g, jsonify, redirect, render_template, request, url_for
 from flask_login import current_user
 from app.auth_middleware import require_auth
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.config import AI_RATELIMIT, BEDROCK_RATELIMIT
 from app.extensions import _user_or_ip_key, auth_write_limit, db, limiter
 from app.i18n import t
+from app.observability import current_request_id
 from app.models import (DailyActivity, MealLog, User, UserQuestProgress, UserSession,
                         WaterLog, WearableActivityLog, WeeklyCheckIn, WeeklyLog,
                         WeeklyWinner, WorkoutLog)
@@ -17,6 +18,8 @@ from app.services.ai_coach import generate_checkin_feedback
 from app.services.ai_gate import ai_concurrency_gate
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
 from app.services.gamification import complete_quest_for_user, get_level, level_title
+from app.services.progress_summary import (UnknownProgressionSignal, build_progress_summary,
+                                           progress_summary_payload)
 from app.services.training_history import fetch_workout_entries
 from app.services.workout_state import resolve_workout_state
 from app.services.workout_state.serialization import workout_state_payload
@@ -25,6 +28,27 @@ from app.timeutil import app_date_of, app_today, display_dt, utc_day_bounds
 
 
 bp = Blueprint("tracking", __name__)
+
+# Canonical Progress summary endpoint (Progress Redesign PR2).
+_PROGRESS_SUMMARY_PATH = "/api/progress/summary"
+
+
+@bp.after_request
+def _progress_summary_private_no_store(response):
+    """Per-user trajectory must not be stored by a shared cache or bfcache."""
+    if request.path == _PROGRESS_SUMMARY_PATH:
+        response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+def _progress_summary_error_class(error):
+    """Coarse, PII-free bucket for the failure log line (never the message)."""
+    if isinstance(error, UnknownProgressionSignal):
+        return "contract_drift"
+    if isinstance(error, SQLAlchemyError):
+        return "upstream_error"
+    return "unexpected_error"
+
 
 def _parse_weight(value):
     if value in (None, ""):
@@ -621,6 +645,45 @@ def progress_workout():
         "sessions": len(session_days),
         "volume": round(sum(vol_by_day.values()))},
         "current": current})
+
+
+@bp.route("/api/progress/summary")
+@require_auth
+def progress_summary_read():
+    """The canonical Progress summary for the signed-in user (PR2).
+
+    The one authority behind YOUR PROGRESS, BODY, PERFORMANCE and CONSISTENCY.
+    Deliberately thin: one service call, one pure projection, no decision of its
+    own — every state in the response was decided by
+    ``app/services/progress_summary`` on top of ``training_progression``.
+
+    There is **no** input. The owner is the authenticated user (no ``user_id``
+    parameter can express another one), and the window is pinned to the service
+    default rather than read off the query string: a client that can re-window the
+    analysis until the answer improves owns the trajectory, and the server is
+    supposed to (``docs/PROGRESS_SUMMARY.md``).
+
+    Failure semantics matter here more than usual. ``building_baseline`` is a
+    legitimate user state meaning "not enough of your history yet", so returning
+    it on a DB or contract failure would report broken infrastructure as an
+    honest assessment of the user. Failures therefore surface as the blueprint's
+    generic JSON 500 — no exception text, SQL, identifier or path leaves the
+    process, only a coarse error class in the log line.
+    """
+    try:
+        summary = build_progress_summary(current_user.id)
+    except Exception as e:
+        current_app.logger.warning(
+            "[PROGRESS][SUMMARY] request_id=%s state=error error_class=%s",
+            current_request_id(), _progress_summary_error_class(e))
+        return jsonify({"error": t("route.generic_error_retry")}), 500
+
+    # Enough observability to tell the three trajectories apart from an upstream
+    # failure, without emitting weights, sessions, or the payload itself.
+    current_app.logger.info(
+        "[PROGRESS][SUMMARY] request_id=%s trajectory=%s body=%s",
+        current_request_id(), summary.trajectory.state, summary.body.status)
+    return jsonify(progress_summary_payload(summary))
 
 
 @bp.route("/api/progress/heatmap")
