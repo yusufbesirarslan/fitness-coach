@@ -1,16 +1,21 @@
 /* ══════════════════════════════════════════════════════════════════════
-   progress.js — Phase 5 (AxisAI V2) progress page
-   showToast / escapeHTML / selectOverload / submitCheckin are preserved
-   VERBATIM from the old templates/progress.html inline <script> (Phase 5
-   Task 5) — the weekly Check-In POST flow must keep working unchanged.
-   Everything else (tabs, sheet open/close, loaders) is new scaffold for
-   this redesign; Tasks 6-9 replace the no-op stubs at the bottom.
+   progress.js — Progress redesign PR1 (information architecture + shell)
+
+   showToast / escapeHTML / selectOverload / submitCheckin / openCheckin /
+   closeCheckin / activateOnEnter are preserved VERBATIM — the weekly
+   Check-In POST flow must keep working unchanged.
+
+   Everything below the check-in block renders the redesigned sections. Hard
+   rule for this file: every user-visible number comes from an existing
+   endpoint or an existing canonical calculation. Nothing here classifies a
+   trajectory, scores adherence, or assesses a physique — when a signal is
+   missing the section degrades to a neutral state instead of inventing one.
+
    No IIFE: functions must resolve as window.<name> for actions.js's
    data-action dispatcher (see static/actions.js).
    ══════════════════════════════════════════════════════════════════════ */
 
 var __t = (window.t) || function (k) { return k; };
-var _EN = (window.LOCALE === 'en');
 
 // ── TOAST ── (verbatim)
 function showToast(msg, type = 'info') {
@@ -81,6 +86,10 @@ async function submitCheckin() {
         fb.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         showToast(__t('progress.checkin_saved'), 'success');
         if (window.CW) window.CW.receiveCheckinFeedback(data.coach_feedback);
+        // A fresh check-in changes Body/Consistency and adds a history row —
+        // repaint the data-driven sections so the page stays truthful without
+        // a manual reload.
+        loadProgress();
     } catch (err) {
         showToast(__t('progress.error_prefix') + err.message, 'error');
     } finally {
@@ -89,29 +98,24 @@ async function submitCheckin() {
     }
 }
 
-// ── TABS ──
-function switchTab(name, btn) {
-  document.querySelectorAll('.tab-btn').forEach(b => {
-    b.classList.remove('active');
-    b.setAttribute('aria-selected', 'false');
-  });
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  if (btn) { btn.classList.add('active'); btn.setAttribute('aria-selected', 'true'); }
-  var panel = document.getElementById('tab-' + name);
-  if (panel) panel.classList.add('active');
-  if (name === 'weight')       loadWeightTab();        // Task 7
-  if (name === 'nutrition')    loadNutritionTab();     // Task 8
-  if (name === 'workout')      loadWorkoutTab();       // Task 8
-  if (name === 'achievements') loadAchievementsTab();  // Task 9
-}
-
 // Keyboard activation for non-native "button" elements (overload chips are
 // plain divs with tabindex=0 + role=button): data-action-keydown fires on
 // EVERY keydown while focused, so this only forwards Enter/Space to the
 // element's own click handler (data-action="selectOverload") — anything
 // else (Tab, arrows, ...) is a no-op and keeps its default behavior.
-function activateOnEnter(el, e) {
-  if (e.key !== 'Enter' && e.key !== ' ') return;
+//
+// The element and event MUST be read off the END of the argument list.
+// actions.js dispatches as fn.apply(el, dataArgs.concat([el, event])), and the
+// chips also carry data-args ('["kismen"]') for their click action — those
+// values are prepended to EVERY handler on the element, so fixed positional
+// parameters (el, e) landed on the string "kismen" and the element instead.
+// `e.key` was then undefined, the guard returned early, and the chips were
+// focusable but not operable by keyboard (role=button advertised to assistive
+// tech with no keyboard behavior behind it).
+function activateOnEnter() {
+  var e = arguments[arguments.length - 1];
+  var el = arguments[arguments.length - 2];
+  if (!e || !el || (e.key !== 'Enter' && e.key !== ' ')) return;
   e.preventDefault();
   el.click();
 }
@@ -140,347 +144,256 @@ document.addEventListener('keydown', function (e) {
   if (sheet && sheet.classList.contains('open')) closeCheckin();
 });
 
-// ── INIT ──
-// Task 6/7/8/9 define the loaders + renderHeatmap/renderInsights/overview.
-function initProgress() { loadOverviewAndExtras(); loadWeightTab(); }
-document.addEventListener('DOMContentLoaded', initProgress);
+/* ══════════════════════════════════════════════════════════════════════
+   REDESIGNED SECTIONS
+   ══════════════════════════════════════════════════════════════════════ */
 
-// ── OVERVIEW / HEATMAP / INSIGHTS ── (Task 6)
-async function loadOverviewAndExtras() {
-  try {
-    var [hm, ins, ach] = await Promise.all([
-      fetch('/api/progress/heatmap?weeks=26').then(r => r.json()),
-      fetch('/api/progress/insights').then(r => r.json()),
-      fetch('/api/progress/achievements').then(r => r.json()),
-    ]);
-    renderHeatmap(hm.cells || []);
-    renderInsights(ins.insights || []);
-    renderOverview(ach);
-  } catch (e) {}
+// Small helpers ───────────────────────────────────────────────────────
+function _el(id) { return document.getElementById(id); }
+
+// Signed number for a delta ("+0.4" / "-1.2"). Callers only pass values they
+// already proved are finite numbers.
+function _signed(n, digits) {
+  var v = n.toFixed(digits == null ? 1 : digits);
+  return (n > 0 ? '+' : '') + v;
 }
 
-function renderHeatmap(cells) {
-  var grid = document.getElementById('heatmap-grid');
-  if (!grid) return;
-  grid.innerHTML = cells.map(function (c) {
-    return '<div class="hm-cell lvl-' + (c.level || 0) + '" title="' +
-      escapeHTML(c.date) + '"></div>';
-  }).join('');
+// Fills one WHAT CHANGED card. `sub` is optional; when a card has no signal
+// the caller passes the neutral copy so the card never renders blank.
+function _fillCard(id, value, sub) {
+  var card = _el(id);
+  if (!card) return;
+  var v = card.querySelector('[data-slot="value"]');
+  var s = card.querySelector('[data-slot="sub"]');
+  if (v) v.textContent = value;
+  if (s) s.textContent = sub;
 }
 
-function renderInsights(list) {
-  var row = document.getElementById('insight-row');
-  if (!row) return;
-  if (!list.length) { row.innerHTML = ''; return; }
-  row.innerHTML = list.map(function (n) {
-    // Whitelist tone → drives the .insight-card[data-tone] left accent; map to a
-    // real badge variant (components.css has no .badge-info → use primary).
-    var tone = (n.tone === 'success' || n.tone === 'warning') ? n.tone : 'info';
-    var badge = tone === 'info' ? 'primary' : tone;
-    return '<div class="insight-card" data-tone="' + tone + '"><div class="ic-head"><span class="ic-icon">' +
-      escapeHTML(n.icon || '💡') + '</span><span class="ic-title badge badge-' +
-      badge + '">' + escapeHTML(n.title) + '</span></div>' +
-      '<div class="ic-body">' + escapeHTML(n.body) + '</div></div>';
-  }).join('');
+// Renders a components.css `.empty-state` block — used wherever a section has
+// nothing truthful to show.
+function _emptyState(title, desc) {
+  return '<div class="empty-state"><div class="empty-title">' + escapeHTML(title) +
+    '</div><p class="empty-desc">' + escapeHTML(desc) + '</p></div>';
 }
 
-function renderOverview(a) {
-  if (!a) return;
-  var set = function (id, v) { var el = document.getElementById(id); if (el) el.textContent = v; };
-  set('po-streak', (a.streak || 0));
-  set('po-level', (a.level || 0));
-  set('po-xp', (a.weekly_xp || 0));
+// A section that fails to load says so plainly instead of showing a stale or
+// invented value; one failing fetch must not take the page down.
+function _sectionError(container) {
+  if (container) container.innerHTML = '<p class="prog-note">' + escapeHTML(__t('progress.load_error')) + '</p>';
 }
 
-// Shared render helper (used by the Weight/Workout/Achievements tabs, Tasks 7–9).
-function statCard(v, label) {
-  return '<div class="stat-card"><div class="stat-value">' + v +
-    '</div><div class="stat-label">' + escapeHTML(label) + '</div></div>';
-}
-
-// ── WEIGHT & BODY TAB (Task 7) ──
-// Shared responsive Chart.js base options, extracted from the old inline
-// `baseOpts` (grid/text colors kept as JS literals — documented CSP
-// exception). Tasks 8/9 reuse this for the nutrition/workout charts.
-function _chartBase(yOpts) {
-  var gridColor = 'rgba(255,255,255,0.05)';
-  var textColor = '#606060';
-  var yScale = { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } };
-  Object.assign(yScale, yOpts || {});
-  return {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: { legend: { labels: { color: textColor, font: { family: 'DM Sans', size: 11 } } } },
-    scales: {
-      x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
-      y: yScale
-    }
-  };
-}
-
-// Loading skeleton shown in a chart's `.chart-container` while its tab's
-// fetch is in flight (reuses components.css' `.skeleton` shimmer via the
-// page-scoped `.chart-skeleton` sizing rule in progress.css).
-function _setChartLoading(canvasIds, loading) {
-  canvasIds.forEach(function (id) {
-    var canvas = document.getElementById(id);
-    var box = canvas && canvas.closest('.chart-container');
-    if (!box) return;
-    var sk = box.querySelector('.chart-skeleton');
-    if (loading) {
-      if (!sk) {
-        sk = document.createElement('div');
-        sk.className = 'skeleton chart-skeleton';
-        box.appendChild(sk);
-      }
-    } else if (sk) {
-      sk.remove();
-    }
+function _getJSON(url) {
+  return fetch(url, { headers: { 'Accept': 'application/json' } }).then(function (r) {
+    if (!r.ok) throw new Error(String(r.status));
+    return r.json();
   });
 }
 
-var weightChart, wellnessChart;
-async function loadWeightTab() {
-  _setChartLoading(['weightChart', 'wellnessChart'], true);
-  try {
-    var data = await fetch('/checkin-history').then(function (r) { return r.json(); });
-    renderBodyStats(data);
+// ── INIT ──
+// Each section owns its own fetch + catch: a secondary failure degrades that
+// one section, never the whole page.
+function initProgress() {
+  var ask = _el('ps-ask');
+  // Reuse of the EXISTING coach entry point (coach_widget.js). Only revealed
+  // when the widget actually loaded — no new AI workflow is introduced here.
+  if (ask && window.CW && typeof window.CW.toggle === 'function') ask.hidden = false;
+  loadProgress();
+}
+function loadProgress() {
+  loadSummaryAndPerformance();
+  loadBodyAndHistory();
+  loadConsistency();
+  loadInsights();
+  loadPhysique();
+}
+document.addEventListener('DOMContentLoaded', initProgress);
 
-    var noData = data.length === 0;
-    ['weight', 'wellness'].forEach(function (k) {
-      var nd = document.getElementById(k + '-nodata');
-      if (nd) nd.style.display = noData ? 'block' : 'none';
-    });
-    if (noData) {
-      if (weightChart) { weightChart.destroy(); weightChart = null; }
-      if (wellnessChart) { wellnessChart.destroy(); wellnessChart = null; }
-      return;
+// Reuses the existing coach widget rather than creating a second AI surface.
+function askAxis() {
+  if (window.CW && typeof window.CW.toggle === 'function') window.CW.toggle();
+}
+
+// ── YOUR PROGRESS + PERFORMANCE ──────────────────────────────────────
+// Both read the SAME existing endpoint (/api/progress/workout?range=month),
+// so they are fetched once. `totals.sessions` is the endpoint's own count of
+// distinct days with a workout in the last 30 days — no new aggregation.
+function loadSummaryAndPerformance() {
+  var meta = _el('ps-meta');
+  _getJSON('/api/progress/workout?range=month').then(function (d) {
+    var sessions = (d && d.totals && d.totals.sessions) || 0;
+    if (meta) meta.textContent = __t('progress.summary_meta', { workouts: sessions });
+    _fillCard('wc-perf', String(sessions), __t('progress.perf_sub'));
+  }).catch(function () {
+    if (meta) meta.textContent = __t('progress.summary_meta_none');
+    _fillCard('wc-perf', '—', __t('progress.card_nodata'));
+  });
+}
+
+// ── BODY CARD + PROGRESS HISTORY ─────────────────────────────────────
+// Both are built from the existing /checkin-history payload (ascending by
+// date), so they share one fetch.
+function loadBodyAndHistory() {
+  _getJSON('/checkin-history').then(function (rows) {
+    renderBodyCard(Array.isArray(rows) ? rows : []);
+    renderHistory(Array.isArray(rows) ? rows : []);
+  }).catch(function () {
+    _fillCard('wc-body', '—', __t('progress.card_nodata'));
+    _sectionError(_el('history-list'));
+  });
+}
+
+// BODY = current weight + the delta against the PREVIOUS check-in. That
+// two-point delta is the same calculation /api/progress/insights already
+// performs canonically — nothing new is derived here. Falls back to the
+// profile weight (window.__PROGRESS.current_weight, written by the same
+// canonical source the dashboard uses) when there are no check-ins yet.
+function renderBodyCard(rows) {
+  var p = window.__PROGRESS || {};
+  var weighed = rows.filter(function (r) { return typeof r.kilo === 'number' && r.kilo > 0; });
+  var latest = weighed.length ? weighed[weighed.length - 1].kilo
+             : (typeof p.current_weight === 'number' && p.current_weight > 0 ? p.current_weight : null);
+
+  if (latest == null) {
+    _fillCard('wc-body', '—', __t('progress.body_sub_none'));
+    return;
+  }
+
+  var value = latest.toFixed(1) + ' ' + __t('progress.unit_kg');
+  var sub;
+  if (weighed.length >= 2) {
+    var delta = latest - weighed[weighed.length - 2].kilo;
+    sub = Math.abs(delta) < 0.05
+      ? __t('progress.body_sub_flat')
+      : __t('progress.body_sub_delta', { delta: _signed(delta) });
+  } else if (p.goal_weight > 0) {
+    // Nothing to compare against, but the profile carries a goal weight —
+    // distance to goal is a plain subtraction of two stored values.
+    sub = __t('progress.body_sub_goal', { delta: _signed(latest - p.goal_weight) });
+  } else if (weighed.length === 1) {
+    sub = __t('progress.body_sub_first');
+  } else {
+    // The weight came from the profile, not from a check-in — say so rather
+    // than implying a check-in exists.
+    sub = __t('progress.body_sub_profile');
+  }
+  _fillCard('wc-body', value, sub);
+}
+
+// HISTORY = one row per existing weekly check-in, newest first. The only
+// derived number is the weight delta against the previous check-in. No week
+// is labelled On Track / Needs Attention — that classification does not
+// exist canonically (PR5 converges history semantics).
+var HISTORY_LIMIT = 12;
+function renderHistory(rows) {
+  var box = _el('history-list');
+  if (!box) return;
+
+  if (!rows.length) {
+    box.innerHTML = _emptyState(__t('progress.history_empty_title'), __t('progress.history_empty_desc'));
+    return;
+  }
+
+  // rows arrive oldest-first; walk backwards so each row can see the check-in
+  // that preceded it.
+  var items = [];
+  for (var i = rows.length - 1; i >= 0 && items.length < HISTORY_LIMIT; i--) {
+    var cur = rows[i];
+    var prev = rows[i - 1];
+    var weightTxt = (typeof cur.kilo === 'number' && cur.kilo > 0)
+      ? cur.kilo.toFixed(1) + ' ' + __t('progress.unit_kg')
+      : __t('progress.history_no_weight');
+
+    var deltaTxt = '';
+    if (prev && typeof cur.kilo === 'number' && typeof prev.kilo === 'number' &&
+        cur.kilo > 0 && prev.kilo > 0) {
+      var d = cur.kilo - prev.kilo;
+      deltaTxt = Math.abs(d) < 0.05 ? '±0.0' : _signed(d);
+      deltaTxt += ' ' + __t('progress.unit_kg');
     }
 
-    var labels = data.map(function (d) { return d.tarih; });
-
-    if (weightChart) weightChart.destroy();
-    weightChart = new Chart(document.getElementById('weightChart'), {
-      type: 'line',
-      data: {
-        labels: labels,
-        datasets: [{
-          label: __t('progress.chart_weight'), data: data.map(function (d) { return d.kilo; }),
-          borderColor: '#3D8BFF', backgroundColor: 'rgba(61,139,255,0.08)',
-          fill: true, tension: 0.35, pointRadius: 5, pointHoverRadius: 8,
-          pointBackgroundColor: '#3D8BFF', borderWidth: 2
-        }]
-      },
-      options: _chartBase({ beginAtZero: false })
-    });
-
-    if (wellnessChart) wellnessChart.destroy();
-    wellnessChart = new Chart(document.getElementById('wellnessChart'), {
-      type: 'line',
-      data: {
-        labels: labels,
-        datasets: [
-          { label: __t('progress.chart_intensity'), data: data.map(function (d) { return d.yogunluk; }),
-            borderColor: '#3D8BFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
-          { label: __t('progress.chart_fatigue'), data: data.map(function (d) { return d.fatigue; }),
-            borderColor: '#FF4D4D', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
-          { label: __t('progress.chart_sleep'), data: data.map(function (d) { return d.uyku; }),
-            borderColor: '#3D9EFF', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false },
-          { label: __t('progress.chart_nutrition'), data: data.map(function (d) { return d.beslenme; }),
-            borderColor: '#FFB020', borderWidth: 2, tension: 0.3, pointRadius: 4, fill: false }
-        ]
-      },
-      options: _chartBase({ min: 0, max: 5 })
-    });
-  } finally {
-    _setChartLoading(['weightChart', 'wellnessChart'], false);
-  }
-}
-
-// current weight / BMI / Δ vs first check-in — writes into #body-stats via
-// the shared statCard() helper (Task 6).
-function renderBodyStats(data) {
-  var el = document.getElementById('body-stats');
-  if (!el) return;
-  var p = window.__PROGRESS || {};
-
-  var latest = data.length ? data[data.length - 1].kilo : p.current_weight;
-  var first  = data.length ? data[0].kilo : latest;
-
-  // Label already carries the unit ("Current Weight (kg)") — don't repeat
-  // it in the value, or the stat card doubles up ("72.5 kg" under "… (KG)").
-  var weightVal = (latest != null && latest > 0) ? latest.toFixed(1) : '—';
-
-  var bmi = (latest > 0 && p.height_cm > 0)
-    ? latest / Math.pow(p.height_cm / 100, 2)
-    : null;
-  var bmiVal = (bmi != null) ? bmi.toFixed(1) : '—';
-
-  var delta = (latest != null && first != null) ? (latest - first) : null;
-  var deltaVal = (delta != null)
-    ? (delta > 0 ? '+' : '') + delta.toFixed(1) + ' kg'
-    : '—';
-
-  // Goal delta (uses the plumbed window.__PROGRESS.goal_weight = User.target_weight).
-  var goalCard = '';
-  if (p.goal_weight > 0 && latest != null && latest > 0) {
-    var toGoal = latest - p.goal_weight;
-    var toGoalVal = (Math.abs(toGoal) < 0.05)
-      ? '✓'
-      : (toGoal > 0 ? '+' : '') + toGoal.toFixed(1) + ' kg';
-    goalCard = statCard(toGoalVal, __t('progress.to_goal'));
+    items.push(
+      '<li class="hist-row">' +
+        '<span class="hist-date">' + escapeHTML(cur.tarih || '') + '</span>' +
+        '<span class="hist-weight">' + escapeHTML(weightTxt) + '</span>' +
+        (deltaTxt ? '<span class="hist-delta">' + escapeHTML(deltaTxt) + '</span>' : '') +
+      '</li>'
+    );
   }
 
-  el.innerHTML =
-    statCard(weightVal, __t('progress.current_weight')) +
-    statCard(bmiVal, __t('progress.bmi')) +
-    statCard(deltaVal, __t('progress.change')) +
-    goalCard;
-}
-
-// ── NUTRITION & WORKOUT TREND TABS (Task 8) ──
-// Shared week/month toggle: `.tt-btn` lives once per panel (Nutrition AND
-// Workout each have their own `.trend-toggle`), so the active-class swap is
-// scoped to the panel that's currently showing — otherwise clearing it
-// document-wide would also wipe the OTHER tab's toggle state, leaving it
-// with no active button the next time the user switches to it.
-var _trendRange = 'week';
-function setTrendRange(range, btn) {
-  _trendRange = range;
-  var active = document.querySelector('.tab-panel.active');
-  if (active) {
-    active.querySelectorAll('.tt-btn').forEach(function (b) { b.classList.remove('active'); });
+  var html = '<ul class="hist-list">' + items.join('') + '</ul>';
+  // Never truncate silently: say what is being shown when the list is capped.
+  if (rows.length > HISTORY_LIMIT) {
+    html += '<p class="prog-note">' +
+      escapeHTML(__t('progress.history_showing', { shown: HISTORY_LIMIT, total: rows.length })) +
+      '</p>';
   }
-  if (btn) btn.classList.add('active');
-  if (active && active.id === 'tab-nutrition') loadNutritionTab();
-  else if (active && active.id === 'tab-workout') loadWorkoutTab();
+  box.innerHTML = html;
 }
 
-var nutritionChart, macroChart, workoutChart;
-async function loadNutritionTab() {
-  _setChartLoading(['nutritionChart', 'macroChart'], true);
-  try {
-    var d = await fetch('/api/progress/nutrition?range=' + _trendRange).then(function (r) { return r.json(); });
-    var labels = d.days.map(function (x) { return x.date.slice(5); });   // MM-DD
-    renderNutritionStats(d);
-
-    var noData = d.days.every(function (x) { return !x.kcal; });
-    ['nutrition', 'macro'].forEach(function (k) {
-      var nd = document.getElementById(k + '-nodata');
-      if (nd) nd.style.display = noData ? 'block' : 'none';
-    });
-
-    if (nutritionChart) { nutritionChart.destroy(); nutritionChart = null; }
-    if (macroChart) { macroChart.destroy(); macroChart = null; }
-    if (noData) return;
-
-    nutritionChart = new Chart(document.getElementById('nutritionChart'), {
-      type: 'bar',
-      data: { labels: labels, datasets: [{ label: __t('progress.chart_calories'),
-        data: d.days.map(function (x) { return x.kcal; }), backgroundColor: 'rgba(61,139,255,0.55)' }] },
-      options: _chartBase({ beginAtZero: true })
-    });
-
-    var macroOpts = _chartBase({ beginAtZero: true });
-    macroOpts.scales.x.stacked = true;
-    macroOpts.scales.y.stacked = true;
-    macroChart = new Chart(document.getElementById('macroChart'), {
-      type: 'bar',
-      data: {
-        labels: labels,
-        datasets: [
-          { label: __t('nutrition.macro_protein'), data: d.days.map(function (x) { return x.p; }),
-            backgroundColor: 'rgba(61,139,255,0.65)' },
-          { label: __t('nutrition.macro_carb'), data: d.days.map(function (x) { return x.c; }),
-            backgroundColor: 'rgba(255,176,32,0.65)' },
-          { label: __t('nutrition.macro_fat'), data: d.days.map(function (x) { return x.f; }),
-            backgroundColor: 'rgba(255,77,77,0.65)' }
-        ]
-      },
-      options: macroOpts
-    });
-  } finally {
-    _setChartLoading(['nutritionChart', 'macroChart'], false);
-  }
+// ── CONSISTENCY CARD ─────────────────────────────────────────────────
+// streak_count is the product's existing canonical consistency counter
+// (surfaced by /api/progress/achievements). It is NOT re-derived here, and
+// the retired Level/XP hero strip is not reinstated — only this one signal.
+function loadConsistency() {
+  _getJSON('/api/progress/achievements').then(function (a) {
+    var streak = (a && a.streak) || 0;
+    _fillCard('wc-cons', String(streak) + ' ' + __t('progress.unit_day'), __t('progress.cons_sub'));
+  }).catch(function () {
+    _fillCard('wc-cons', '—', __t('progress.card_nodata'));
+  });
 }
 
-// Average vs. target calorie adherence — writes into #nutrition-stats via
-// the shared statCard() helper (Task 6).
-function renderNutritionStats(d) {
-  var el = document.getElementById('nutrition-stats');
-  if (!el) return;
-  var avg = d.avg || { kcal: 0 };
-  var target = d.target_kcal || 0;
-  var diffVal = '—';
-  if (target > 0) {
-    var diff = avg.kcal - target;
-    diffVal = (diff > 0 ? '+' : '') + diff + ' kcal';
-  }
-  el.innerHTML =
-    statCard(avg.kcal + ' kcal', __t('index.cal_daily')) +
-    statCard(target > 0 ? target + ' kcal' : '—', __t('index.cal_target')) +
-    statCard(diffVal, __t('progress.target_diff'));
+// ── AXIS INSIGHTS ────────────────────────────────────────────────────
+// Renders the existing deterministic insight payload. `tone` is the
+// endpoint's own field; it drives the accent AND a visible text label so the
+// signal is never carried by colour alone.
+function loadInsights() {
+  var box = _el('insight-list');
+  _getJSON('/api/progress/insights').then(function (d) {
+    var list = (d && d.insights) || [];
+    if (!box) return;
+    if (!list.length) {
+      box.innerHTML = _emptyState(__t('progress.insights_empty_title'), __t('progress.insights_empty_desc'));
+      return;
+    }
+    box.innerHTML = list.map(function (n) {
+      var tone = (n.tone === 'success' || n.tone === 'warning') ? n.tone : 'info';
+      return '<article class="insight-card" data-tone="' + tone + '">' +
+        '<div class="ic-head">' +
+          '<span class="ic-icon" aria-hidden="true">' + escapeHTML(n.icon || '💡') + '</span>' +
+          '<h3 class="ic-title">' + escapeHTML(n.title) + '</h3>' +
+          '<span class="ic-tone tone-' + tone + '">' + escapeHTML(__t('progress.tone_' + tone)) + '</span>' +
+        '</div>' +
+        '<p class="ic-body">' + escapeHTML(n.body) + '</p>' +
+      '</article>';
+    }).join('');
+  }).catch(function () { _sectionError(box); });
 }
 
-async function loadWorkoutTab() {
-  _setChartLoading(['workoutChart'], true);
-  try {
-    var d = await fetch('/api/progress/workout?range=' + _trendRange).then(function (r) { return r.json(); });
-    var labels = d.days.map(function (x) { return x.date.slice(5); });
-    renderWorkoutStats(d);
-
-    var totals = d.totals || { sessions: 0, volume: 0 };
-    var noData = !totals.sessions && !totals.volume;
-    var nd = document.getElementById('workout-nodata');
-    if (nd) nd.style.display = noData ? 'block' : 'none';
-
-    if (workoutChart) { workoutChart.destroy(); workoutChart = null; }
-    if (noData) return;
-
-    workoutChart = new Chart(document.getElementById('workoutChart'), {
-      type: 'bar',
-      data: { labels: labels, datasets: [{ label: __t('progress.chart_volume'),
-        data: d.days.map(function (x) { return x.volume; }), backgroundColor: 'rgba(61,139,255,0.55)' }] },
-      options: _chartBase({ beginAtZero: true })
-    });
-  } finally {
-    _setChartLoading(['workoutChart'], false);
-  }
-}
-
-// totals.sessions / totals.volume / summed active minutes — writes into
-// #workout-stats via the shared statCard() helper (Task 6). Reuses the same
-// training.volume/training.min/training.duration i18n keys + " kg" unit
-// convention as the Pump Check celebration stats in static/training.js.
-function renderWorkoutStats(d) {
-  var el = document.getElementById('workout-stats');
-  if (!el) return;
-  var totals = d.totals || { sessions: 0, volume: 0 };
-  var activeMin = (d.days || []).reduce(function (sum, x) { return sum + (x.active_min || 0); }, 0);
-  el.innerHTML =
-    statCard(totals.sessions, __t('training.session')) +
-    statCard(totals.volume + ' kg', __t('training.volume')) +
-    statCard(activeMin + ' ' + __t('training.min'), __t('training.duration'));
-}
-
-// ── ACHIEVEMENTS TAB (Task 9) ──
-// Level/XP/streak/quests/wins stat row + milestone badges — writes into
-// #achievements-body via the shared statCard() helper (Task 6).
-async function loadAchievementsTab() {
-  var a = await fetch('/api/progress/achievements').then(r => r.json());
-  var box = document.getElementById('achievements-body');
-  if (!box) return;
-  var stats =
-    statCard(a.level, __t('progress.level')) +
-    statCard(a.rank_points, 'XP') +
-    statCard(a.streak, __t('progress.streak')) +
-    statCard(a.quests_done, __t('progress.quests')) +
-    statCard(a.weekly_wins, __t('progress.wins'));
-  var badges = (a.milestones || []).map(function (m) {
-    return '<span class="badge badge-' + (m.hit ? 'success' : 'neutral') + '">' +
-      (m.hit ? '✓ ' : '') + escapeHTML(m.label) + '</span>';
-  }).join(' ');
-  box.innerHTML = '<div class="metric-stats">' + stats + '</div>' +
-    '<div class="ach-title">' + escapeHTML(a.title || '') + '</div>' +
-    '<div class="ach-badges">' + badges + '</div>';
+// ── PHYSIQUE PROGRESS ────────────────────────────────────────────────
+// Presentational shell for PR4. Reads the EXISTING
+// /pump-check-gallery/data contract (unchanged) purely to link recent Pump
+// Checks; it does not compare images, detect body regions, or assess
+// physique change.
+var PHYSIQUE_THUMBS = 3;
+function loadPhysique() {
+  var box = _el('physique-body');
+  _getJSON('/pump-check-gallery/data?per_page=' + PHYSIQUE_THUMBS).then(function (d) {
+    if (!box) return;
+    var items = ((d && d.items) || []).filter(function (x) { return x && x.imageUrl; });
+    if (!items.length) {
+      box.innerHTML = _emptyState(__t('progress.physique_empty_title'), __t('progress.physique_empty_desc'));
+      return;
+    }
+    box.innerHTML =
+      '<p class="prog-note">' + escapeHTML(__t('progress.physique_recent')) + '</p>' +
+      '<div class="pp-strip">' + items.map(function (it) {
+        var when = it.timePosted || '';
+        return '<a class="pp-thumb" href="/pump-check-gallery">' +
+          '<img src="' + escapeHTML(it.imageUrl) + '" loading="lazy" alt="' +
+          escapeHTML(__t('progress.physique_alt', { date: when })) + '">' +
+        '</a>';
+      }).join('') + '</div>' +
+      '<a class="pp-link" href="/pump-check-gallery">' + escapeHTML(__t('progress.physique_view_all')) + '</a>';
+  }).catch(function () { _sectionError(box); });
 }

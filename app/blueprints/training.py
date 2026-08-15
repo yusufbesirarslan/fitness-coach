@@ -582,7 +582,6 @@ def set_water():
 
     today_key = app_today().isoformat()
     row = WaterLog.query.filter_by(user_id=current_user.id, date_key=today_key).first()
-    prev_count = row.count if row else 0
     if row:
         row.count = count
         db.session.commit()
@@ -599,22 +598,43 @@ def set_water():
             row = WaterLog.query.filter_by(user_id=current_user.id, date_key=today_key).first()
             if row is None:
                 raise
-            prev_count = row.count  # yarışı kazanan isteğin huni ateşi sayılır
             row.count = count
             db.session.commit()
 
     # Su takibi güncellenince "Su Hedefi" görevini ver (günde bir kez claim edilir;
     # complete_quest_for_user zaten claimliyse None döner). Önceden seed'leniyordu
     # ama hiç claim edilmiyordu (ölü görev — 1.1).
-    # Huni yalnız günün 0→pozitif geçişinde ateşlenir: weekly_water challenge'ı
-    # "5 gün" der; her bardak POST'unda ateşlemek olayları gün sayardı
-    # (triage 2026-07-19 #1). active_day deseni: dedup çağıranda.
     resp = {"count": row.count, "goal": WATER_GOAL}
-    if count > 0 and prev_count == 0:
+    if count > 0 and _claim_water_funnel_for_today(current_user.id, today_key):
         quest_result = complete_quest_for_user(current_user.id, "water_logged")
         if quest_result:
             resp["quest_awarded"] = quest_result
     return jsonify(resp)
+
+
+def _claim_water_funnel_for_today(user_id, today_key):
+    """Günün su hunisini (water_logged) TEK sefer talep et. True = bu istek aldı.
+
+    Huni GÜN-anlamlıdır: weekly_water challenge'ı "5 GÜN" sayar ve
+    challenges.record_event'in per-day dedup'ı YOKTUR — dedup çağıranın
+    sorumluluğu (active_day deseni). Eski kapı `count > 0 and prev_count == 0`
+    kullanıcının kendi SIFIRLAYABİLDİĞİ sayıya bakıyordu: 5 → 0 → 5 toggle'ı
+    geçişi yeniden silahlandırıp huniyi aynı gün defalarca ateşliyordu, yani
+    "5 gün" challenge'ı tek öğleden sonrada tamamlanabiliyordu
+    (triage 2026-08-07 #1 / 2026-08-14 #1).
+
+    Kalıcı gün-başı işaret (WaterLog.quest_fired) toggle'a dayanıklıdır; koşullu
+    UPDATE ... WHERE quest_fired = false, uq_user_water_day sayesinde satırın
+    kendisi gün-başına tek olduğu için eşzamanlı iki isteğin ikisinin birden
+    ateşlemesini de engeller (DB-düzeyi tek iddia; ayrı kilit gerekmez).
+    """
+    claimed = (db.session.query(WaterLog)
+               .filter(WaterLog.user_id == user_id,
+                       WaterLog.date_key == today_key,
+                       WaterLog.quest_fired.is_(False))
+               .update({WaterLog.quest_fired: True}, synchronize_session=False))
+    db.session.commit()
+    return bool(claimed)
 
 
 WATER_GOAL = 8  # bardak

@@ -3,6 +3,7 @@ import math
 
 from app.models import BarcodeFoodCache
 from app.services import fatsecret
+from app.services.ai_gate import blocking_concurrency_slot
 from app.services.barcode import normalize_barcode
 
 
@@ -64,7 +65,14 @@ def project_food(food_id, raw_food):
 
 
 def search(query):
-    foods = fatsecret._food_search_raw(query) or []
+    # FatSecret turları senkron ve bloklayıcıdır; rezerv-sayılan slot olmadan
+    # sağlayıcı gecikmesinde 8 web thread'inin hepsi park edebilir (triage
+    # 2026-08-07 #2 — web food route'larıyla AYNI sınıf; bu mobil yüzey denetimden
+    # sonra eklendi). Kapasite dolduğunda BlockingConcurrencyLimit route'un
+    # mevcut `except Exception` yoluna düşer → FOOD_PROVIDER_UNAVAILABLE 503
+    # retryable=True, yani istemci için doğru semantik.
+    with blocking_concurrency_slot():
+        foods = fatsecret._food_search_raw(query) or []
     return [{
         "provider": "fatsecret",
         "food_id": str(food.get("food_id") or ""),
@@ -74,7 +82,8 @@ def search(query):
 
 
 def servings(food_id):
-    raw = fatsecret._food_get_raw(food_id)
+    with blocking_concurrency_slot():
+        raw = fatsecret._food_get_raw(food_id)
     return project_food(food_id, raw) if raw else None
 
 
@@ -109,5 +118,7 @@ def barcode_lookup(code):
     cached = BarcodeFoodCache.query.filter_by(barcode=normalized).first()
     if cached:
         return _cached_food(cached)
-    food_id = fatsecret._food_find_id_by_barcode_raw(normalized)
+    # Slot yalnızca ağ turunu sarar — yukarıdaki cache HIT'i saf DB'dir.
+    with blocking_concurrency_slot():
+        food_id = fatsecret._food_find_id_by_barcode_raw(normalized)
     return servings(food_id) if food_id else None

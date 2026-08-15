@@ -88,7 +88,7 @@ jobs:
         run: flask --app starter db check
 
   mobile-pg-concurrency:
-    name: mobile PostgreSQL concurrency
+    name: PostgreSQL concurrency
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -118,7 +118,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
-      - name: Run deterministic mobile races
+      - name: Run deterministic races
         run: >-
           python -m pytest -m pg_concurrency -q
           tests/test_mobile_auth_pg.py
@@ -126,3 +126,4 @@ jobs:
           tests/test_mobile_diary_mutation_pg.py
           tests/test_mobile_pump_check_pg.py
           tests/test_mobile_pump_check_comparison_pg.py
+          tests/test_plan_mutation_history_pg.py

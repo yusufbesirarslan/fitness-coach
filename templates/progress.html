@@ -6,14 +6,18 @@
     <link rel="stylesheet" href="/static/theme.css">
     <link rel="stylesheet" href="/static/nav.css">
     <link rel="stylesheet" href="/static/progress.css?v={{ _v }}">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js" integrity="sha384-vsrfeLOOY6KuIYKDlmVH5UiBmgIdB1oEf7p01YgWHuqmOHfZr374+odEv96n9tNC" crossorigin="anonymous"></script>
 </head>
 <body class="page-body">
 
 {% set nav_active = 'progress' %}
 {% include "_nav.html" %}
 
-<!-- ── MAIN CONTENT ── -->
+<!-- ── MAIN CONTENT ──
+     Progress redesign PR1: the page answers three questions top-to-bottom —
+     "How am I doing?" (YOUR PROGRESS) → "What changed?" (WHAT CHANGED) →
+     "What matters next?" (AXIS INSIGHTS). Physique + History follow as
+     supporting detail. Every section renders from data that ALREADY exists;
+     none of them fabricate a trajectory, score or assessment. -->
 <main class="main-content">
 
     <div class="page-hdr">
@@ -21,128 +25,94 @@
         <p>{{ t('progress.page_sub') }}</p>
     </div>
 
-    <!-- OVERVIEW (streak / level / this-week XP — populated from /api/progress/achievements) -->
-    <div class="prog-overview">
-        <div class="po-level">
-            <span class="po-level-num" id="po-level">—</span>
-            <span class="po-level-lbl">{{ t('progress.level') }}</span>
-        </div>
-        <div class="po-stats">
-            <div class="po-stat">
-                <span class="po-val" id="po-streak">—</span>
-                <span class="po-lbl">{{ t('progress.streak') }}</span>
+    <!-- ══ 1 · YOUR PROGRESS ══
+         Primary above-the-fold surface. PR1 deliberately shows a NEUTRAL
+         overview: no On Track / Needs Attention classification exists
+         canonically in the product yet, so none is invented here (PR2 owns
+         the trajectory read-model and will replace .ps-state in place). -->
+    <section class="prog-section" aria-labelledby="ps-h">
+        <h2 class="sec-label" id="ps-h">{{ t('progress.summary_label') }}</h2>
+
+        <div class="ps-card">
+            <p class="ps-state">{{ t('progress.summary_state') }}</p>
+            <p class="ps-lede">{{ t('progress.summary_lede') }}</p>
+            <p class="ps-meta" id="ps-meta" aria-live="polite">{{ t('progress.loading') }}</p>
+
+            <div class="ps-actions">
+                <button type="button" class="btn-ghost" data-action="openCheckin">
+                    {{ t('progress.checkin_action') }}
+                </button>
+                <button type="button" class="btn-ghost" data-action="askAxis" id="ps-ask" hidden>
+                    {{ t('progress.ask_axis') }}
+                </button>
             </div>
-            <div class="po-stat">
-                <span class="po-val" id="po-xp">—</span>
-                <span class="po-lbl">XP</span>
-            </div>
         </div>
-    </div>
+    </section>
 
-    <!-- CONSISTENCY HEATMAP -->
-    <div class="card" style="padding:var(--space-5)">
-        <div class="sec-label">{{ t('progress.heatmap_title') }}</div>
-        <div class="heatmap">
-            <div class="hm-grid" id="heatmap-grid"></div>
+    <!-- ══ 2 · WHAT CHANGED ══
+         Exactly three cards, one primary signal each, all from existing
+         endpoints. Each renders its own neutral state when its signal is
+         unavailable — a missing card never blanks the others. -->
+    <section class="prog-section" aria-labelledby="wc-h">
+        <h2 class="sec-label" id="wc-h">{{ t('progress.changed_label') }}</h2>
+
+        <div class="wc-grid">
+            <article class="wc-card" id="wc-body" aria-labelledby="wc-body-h">
+                <h3 class="wc-label" id="wc-body-h">{{ t('progress.card_body') }}</h3>
+                <div class="wc-value" data-slot="value">—</div>
+                <p class="wc-sub" data-slot="sub">{{ t('progress.loading') }}</p>
+            </article>
+
+            <article class="wc-card" id="wc-perf" aria-labelledby="wc-perf-h">
+                <h3 class="wc-label" id="wc-perf-h">{{ t('progress.card_performance') }}</h3>
+                <div class="wc-value" data-slot="value">—</div>
+                <p class="wc-sub" data-slot="sub">{{ t('progress.loading') }}</p>
+            </article>
+
+            <article class="wc-card" id="wc-cons" aria-labelledby="wc-cons-h">
+                <h3 class="wc-label" id="wc-cons-h">{{ t('progress.card_consistency') }}</h3>
+                <div class="wc-value" data-slot="value">—</div>
+                <p class="wc-sub" data-slot="sub">{{ t('progress.loading') }}</p>
+            </article>
         </div>
-        <div class="hm-legend">
-            <span>{{ t('progress.less') }}</span>
-            <div class="hm-cell"></div>
-            <div class="hm-cell lvl-1"></div>
-            <div class="hm-cell lvl-2"></div>
-            <div class="hm-cell lvl-3"></div>
-            <div class="hm-cell lvl-4"></div>
-            <span>{{ t('progress.more') }}</span>
+    </section>
+
+    <!-- ══ 3 · AXIS INSIGHTS ══
+         Presentational foundation only. It renders the EXISTING deterministic
+         /api/progress/insights payload (no LLM, no new heuristics) as a
+         readable list. The What's Working / Watch This / Next Move grouping
+         is intentionally NOT implemented — that classification does not exist
+         yet and PR3 owns it. -->
+    <section class="prog-section" aria-labelledby="ai-h">
+        <h2 class="sec-label" id="ai-h">{{ t('progress.insights_label') }}</h2>
+        <div class="insight-list" id="insight-list" aria-live="polite">
+            <p class="prog-loading">{{ t('progress.loading') }}</p>
         </div>
-    </div>
+    </section>
 
-    <!-- AI INSIGHTS -->
-    <div class="sec-label">{{ t('progress.insights_title') }}</div>
-    <div class="insight-row" id="insight-row"></div>
-
-    <!-- TABS -->
-    <div class="tab-bar" role="tablist">
-        <button class="tab-btn active" data-action="switchTab" data-args='["weight"]' role="tab" aria-selected="true">
-            <svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-            {{ t('progress.tab_weight') }}
-        </button>
-        <button class="tab-btn" data-action="switchTab" data-args='["nutrition"]' role="tab" aria-selected="false">
-            <svg viewBox="0 0 24 24"><path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/></svg>
-            {{ t('progress.tab_nutrition') }}
-        </button>
-        <button class="tab-btn" data-action="switchTab" data-args='["workout"]' role="tab" aria-selected="false">
-            <svg viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            {{ t('progress.tab_workout') }}
-        </button>
-        <button class="tab-btn" data-action="switchTab" data-args='["achievements"]' role="tab" aria-selected="false">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="7"/><polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"/></svg>
-            {{ t('progress.tab_achievements') }}
-        </button>
-    </div>
-
-    <!-- TAB 1: WEIGHT & BODY -->
-    <div class="tab-panel active" id="tab-weight">
-        <button class="btn-volt w-full" data-action="openCheckin" style="margin-bottom:var(--space-4)">
-            <span aria-hidden="true">＋</span> {{ t('progress.checkin_title') }}
-        </button>
-
-        <div class="metric-stats" id="body-stats"></div>
-
-        <div class="chart-card">
-            <div class="chart-title">{{ t('progress.chart_weight_title') }}</div>
-            <div class="chart-container"><canvas id="weightChart" role="img" aria-label="{{ t('progress.chart_weight_title') }}"></canvas></div>
-            <div class="no-data" id="weight-nodata">{{ t('progress.no_data_checkin') }}</div>
+    <!-- ══ 4 · PHYSIQUE PROGRESS ══
+         Shell for the future Pump Check → Progress integration (PR4). PR1
+         only LINKS existing Pump Check data through the unchanged
+         /pump-check-gallery/data contract — no comparison, no body-region
+         detection, no assessment. -->
+    <section class="prog-section" aria-labelledby="pp-h">
+        <h2 class="sec-label" id="pp-h">{{ t('progress.physique_label') }}</h2>
+        <div id="physique-body" aria-live="polite">
+            <p class="prog-loading">{{ t('progress.loading') }}</p>
         </div>
+    </section>
 
-        <div class="chart-card">
-            <div class="chart-title">{{ t('progress.chart_wellness_title') }}</div>
-            <div class="chart-container"><canvas id="wellnessChart" role="img" aria-label="{{ t('progress.chart_wellness_title') }}"></canvas></div>
-            <div class="no-data" id="wellness-nodata">{{ t('progress.no_data') }}</div>
+    <!-- ══ 5 · PROGRESS HISTORY ══
+         Rows, not charts. Each row is one existing weekly check-in; the only
+         derived number is the weight delta against the PREVIOUS check-in,
+         which the product already computes canonically in
+         /api/progress/insights. No week is classified. -->
+    <section class="prog-section" aria-labelledby="ph-h">
+        <h2 class="sec-label" id="ph-h">{{ t('progress.history_label') }}</h2>
+        <div id="history-list" aria-live="polite">
+            <p class="prog-loading">{{ t('progress.loading') }}</p>
         </div>
-    </div>
-
-    <!-- TAB 2: NUTRITION -->
-    <div class="tab-panel" id="tab-nutrition">
-        <div class="trend-toggle">
-            <button class="tt-btn active" data-action="setTrendRange" data-args='["week"]'>{{ t('progress.range_week') }}</button>
-            <button class="tt-btn" data-action="setTrendRange" data-args='["month"]'>{{ t('progress.range_month') }}</button>
-        </div>
-
-        <div class="metric-stats" id="nutrition-stats"></div>
-
-        <div class="chart-card">
-            <div class="chart-title">{{ t('progress.chart_calories_title') }}</div>
-            <div class="chart-container"><canvas id="nutritionChart" role="img" aria-label="{{ t('progress.chart_calories_title') }}"></canvas></div>
-            <div class="no-data" id="nutrition-nodata">{{ t('progress.no_data') }}</div>
-        </div>
-
-        <div class="chart-card">
-            <div class="chart-title">{{ t('progress.chart_macro_title') }}</div>
-            <div class="chart-container"><canvas id="macroChart" role="img" aria-label="{{ t('progress.chart_macro_title') }}"></canvas></div>
-            <div class="no-data" id="macro-nodata">{{ t('progress.no_data') }}</div>
-        </div>
-    </div>
-
-    <!-- TAB 3: WORKOUT -->
-    <div class="tab-panel" id="tab-workout">
-        <div class="trend-toggle">
-            <button class="tt-btn active" data-action="setTrendRange" data-args='["week"]'>{{ t('progress.range_week') }}</button>
-            <button class="tt-btn" data-action="setTrendRange" data-args='["month"]'>{{ t('progress.range_month') }}</button>
-        </div>
-
-        <div class="metric-stats" id="workout-stats"></div>
-
-        <div class="chart-card">
-            <div class="chart-title">{{ t('progress.chart_volume_title') }}</div>
-            <div class="chart-container"><canvas id="workoutChart" role="img" aria-label="{{ t('progress.chart_volume_title') }}"></canvas></div>
-            <div class="no-data" id="workout-nodata">{{ t('progress.no_data') }}</div>
-        </div>
-    </div>
-
-    <!-- TAB 4: ACHIEVEMENTS -->
-    <div class="tab-panel" id="tab-achievements">
-        <div id="achievements-body"></div>
-    </div>
+    </section>
 
 </main>
 

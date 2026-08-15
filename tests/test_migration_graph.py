@@ -1,5 +1,6 @@
 import importlib.util
 
+import pytest
 import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
@@ -36,6 +37,10 @@ def test_alembic_migrations_have_single_head():
     heads = sorted(set(revisions) - down_revisions)
 
     # Sprint 10 PR3 adds canonical Pump Check comparisons as the sole new head.
+    # It chains off Adaptive Coaching Sprint 1 PR2's b3c4d5e6f7a8 (durable plan
+    # versioning + mutation journal) rather than off their shared ancestor
+    # e9f0a1b2c3d4 — a sibling would leave two heads and boot's automatic
+    # upgrade would have to choose. One head only, no branching.
     assert heads == ["fa1b2c3d4e5f"]
 
 
@@ -143,6 +148,145 @@ def test_activity_trigger_revision_is_postgresql_guarded():
     assert "CREATE TRIGGER trg_calc_activity" in source
     assert "DROP TRIGGER IF EXISTS trg_calc_activity ON daily_activity" in source
     assert "DROP FUNCTION IF EXISTS calc_activity_calories()" in source
+
+
+def _plan_history_migration():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "migrations"
+        / "versions"
+        / "b3c4d5e6f7a8_add_plan_mutation_history.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "plan_mutation_history_migration", migration_path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    return migration
+
+
+def _deployed_plan_schema(connection):
+    connection.execute(sa.text(
+        "CREATE TABLE user (id INTEGER PRIMARY KEY, username VARCHAR(80))"))
+    connection.execute(sa.text("""
+        CREATE TABLE training_plan (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            plan_data TEXT NOT NULL,
+            score FLOAT,
+            created_at DATETIME
+        )
+    """))
+    connection.execute(sa.text("INSERT INTO user (id, username) VALUES (1, 'a')"))
+    connection.execute(sa.text("INSERT INTO user (id, username) VALUES (2, 'b')"))
+    for plan_id, user_id in ((1, 1), (2, 2), (3, 2)):
+        connection.execute(
+            sa.text("INSERT INTO training_plan (id, user_id, plan_data) "
+                    "VALUES (:i, :u, '{\"program\": []}')"),
+            {"i": plan_id, "u": user_id},
+        )
+
+
+def test_plan_history_migration_round_trips_and_backfills_distinct_lineages(tmp_path):
+    """upgrade → downgrade → upgrade against a deployed pre-column schema.
+
+    The backfill must give every existing plan its OWN lineage. One shared
+    constant would be far easier to write and would make two users' plans look
+    like a single lineage, which is precisely how an undo could reach across
+    them.
+    """
+    migration = _plan_history_migration()
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'plan-history.db'}")
+
+    with engine.begin() as connection:
+        _deployed_plan_schema(connection)
+        context = MigrationContext.configure(connection)
+
+        with Operations.context(context):
+            migration.upgrade()
+
+        columns = {c["name"]: c for c in sa.inspect(connection).get_columns("training_plan")}
+        assert columns["lineage_id"]["type"].length == 64
+        assert columns["lineage_id"]["nullable"] is False
+        assert columns["mutation_version"]["nullable"] is False
+        plan_indexes = {ix["name"]: ix for ix in sa.inspect(connection).get_indexes(
+            "training_plan")}
+        assert plan_indexes["uq_training_plan_lineage_id"]["unique"]
+
+        rows = connection.execute(sa.text(
+            "SELECT lineage_id, mutation_version FROM training_plan")).fetchall()
+        lineages = [row[0] for row in rows]
+        assert len(set(lineages)) == 3
+        assert all(lineage and len(lineage) >= 32 for lineage in lineages)
+        # Existing plans are "version 0, never mutated" — not invented history.
+        assert {row[1] for row in rows} == {0}
+        assert connection.execute(
+            sa.text("SELECT COUNT(*) FROM plan_mutation_record")).scalar() == 0
+
+        journal = {c["name"] for c in sa.inspect(connection).get_columns(
+            "plan_mutation_record")}
+        assert {"public_id", "plan_lineage_id", "before_snapshot", "after_snapshot",
+                "before_fingerprint", "after_fingerprint", "idempotency_key",
+                "reverts_mutation_id", "outcome"} <= journal
+        uniques = {
+            tuple(uc["column_names"])
+            for uc in sa.inspect(connection).get_unique_constraints(
+                "plan_mutation_record")
+        }
+        assert ("user_id", "idempotency_key") in uniques
+        assert ("reverts_mutation_id",) in uniques
+
+        with Operations.context(context):
+            migration.downgrade()
+        remaining = {c["name"] for c in sa.inspect(connection).get_columns("training_plan")}
+        assert "lineage_id" not in remaining and "mutation_version" not in remaining
+        assert not sa.inspect(connection).has_table("plan_mutation_record")
+
+        with Operations.context(context):
+            migration.upgrade()
+        assert sa.inspect(connection).has_table("plan_mutation_record")
+        assert connection.execute(sa.text(
+            "SELECT COUNT(DISTINCT lineage_id) FROM training_plan")).scalar() == 3
+
+
+def test_plan_history_migration_accepts_a_create_all_built_schema(tmp_path):
+    """The boot path runs ``db.create_all()`` first, so this revision routinely
+    meets objects that already exist. It must verify rather than blow up — and
+    must not blanket-skip, which would hide a half-built journal."""
+    from app.models import PlanMutationRecord, TrainingPlan
+
+    migration = _plan_history_migration()
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'plan-created.db'}")
+
+    with engine.begin() as connection:
+        connection.execute(sa.text(
+            "CREATE TABLE user (id INTEGER PRIMARY KEY, username VARCHAR(80))"))
+        TrainingPlan.__table__.create(connection)
+        PlanMutationRecord.__table__.create(connection)
+        context = MigrationContext.configure(connection)
+
+        with Operations.context(context):
+            migration.upgrade()
+
+        names = [c["name"] for c in sa.inspect(connection).get_columns("training_plan")]
+        assert names.count("lineage_id") == 1
+        assert names.count("mutation_version") == 1
+
+
+def test_plan_history_migration_refuses_an_incompatible_journal(tmp_path):
+    """Fail closed: a table that shares the name but not the shape must not be
+    reported as a successful upgrade."""
+    migration = _plan_history_migration()
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'plan-broken.db'}")
+
+    with engine.begin() as connection:
+        _deployed_plan_schema(connection)
+        connection.execute(sa.text(
+            "CREATE TABLE plan_mutation_record (id INTEGER PRIMARY KEY)"))
+        context = MigrationContext.configure(connection)
+
+        with pytest.raises(RuntimeError):
+            with Operations.context(context):
+                migration.upgrade()
 
 
 def test_meal_idempotency_migration_upgrades_deployed_pre_column_schema(tmp_path):

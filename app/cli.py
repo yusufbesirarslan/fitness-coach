@@ -98,7 +98,8 @@ def _user_child_models():
     from app.models import (
         Activity, CoachConversation, CognitoSession, CustomMeal, DailyActivity,
         FeedHide, FeedItem, FeedItemComment, FeedItemLike, FeedReport,
-        MealLog, MobileAuthSession, Notification, NutritionPlan, PendingAction, PumpCheck,
+        MealLog, MobileAuthSession, Notification, NutritionPlan, PendingAction,
+        PlanMutationRecord, PumpCheck,
         PumpCheckComment, PumpCheckComparison, PumpCheckComparisonRequest,
         PumpCheckLike, Supplement, TrainingPlan,
         UserBadge, UserChallengeProgress, UserQuestProgress, UserSession,
@@ -108,7 +109,11 @@ def _user_child_models():
     )
     return (
         UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
-        TrainingPlan, MealLog, PendingAction, PumpCheckLike, PumpCheckComment,
+        # PlanMutationRecord before TrainingPlan: the journal describes plan
+        # history, so nothing should ever observe entries for a plan that is
+        # already gone.
+        PlanMutationRecord, TrainingPlan,
+        MealLog, PendingAction, PumpCheckLike, PumpCheckComment,
         # Sprint 10 PR3: the request ledger points at the comparison, and the
         # comparison points at both source Pump Checks — so erasure runs
         # ledger, then comparison, then the sources below.

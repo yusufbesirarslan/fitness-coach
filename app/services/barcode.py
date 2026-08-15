@@ -18,6 +18,7 @@ from app.models import (
     MealLog,
     UserSession,
 )
+from app.services.ai_gate import blocking_concurrency_slot
 from app.services.fatsecret import _food_find_by_barcode
 from app.services.workout_state import resolve_workout_state
 from app.timeutil import day_key
@@ -333,8 +334,18 @@ def get_barcode_product(code, lookup_func=None):
     if cached:
         return _cache_payload(cached)
 
+    # Cache MISS → FatSecret'e senkron, bloklayıcı bir tur (timeout=10). Uygulama
+    # tek gunicorn worker + 8 thread çalışır; bu tur rezerv-sayılan slotun DIŞINDA
+    # kalırsa, FatSecret gecikme atağında kullanıcılar-arası bir barkod yığını
+    # thread'lerin hepsini park edip /health'i kuyruğa sokabilir (triage
+    # 2026-08-07 #2; PR #199'un food_search için kapattığı sınıfın aynısı).
+    # Slot YALNIZCA ağ turunu sarar: yukarıdaki cache HIT'i saf DB'dir ve slot
+    # tüketmez, böylece ucuz tarama akışı gereksiz 503 yemez. Kapasite dolu ise
+    # BlockingConcurrencyLimit ÇAĞIRANA yükselir — "besin bulunamadı"ya
+    # ÇEVRİLMEZ (kapasite reddi bir arama sonucu değildir).
     lookup = lookup_func or _food_find_by_barcode
-    raw = lookup(barcode)
+    with blocking_concurrency_slot():
+        raw = lookup(barcode)
     if not raw:
         return None
 

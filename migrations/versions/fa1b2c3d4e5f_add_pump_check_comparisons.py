@@ -1,7 +1,7 @@
 """Add canonical Pump Check comparison result and request-ledger tables.
 
 Revision ID: fa1b2c3d4e5f
-Revises: e9f0a1b2c3d4
+Revises: b3c4d5e6f7a8
 
 The repository boot path can run db.create_all() before Alembic. This revision
 therefore verifies compatible existing tables, creates absent tables and
@@ -15,7 +15,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision = "fa1b2c3d4e5f"
-down_revision = "e9f0a1b2c3d4"
+down_revision = "b3c4d5e6f7a8"
 branch_labels = None
 depends_on = None
 

@@ -205,6 +205,14 @@ def ratelimit_exceeded(e):
     return jsonify({"error": t("error.rate_limited")}), 429
 
 
+def payload_too_large(e):
+    """MAX_CONTENT_LENGTH aşıldı (413). Werkzeug'un HTML sayfası yerine JSON:
+    yükleme/yazma yollarının tamamı fetch+JSON konuşur, istemciler hata
+    gövdesini ayrıştırabilmeli."""
+    from app.i18n import t
+    return jsonify({"error": t("error.payload_too_large")}), 413
+
+
 def _rollover_throttle_passed(now):
     """5-dk rollover-kontrol throttle'ı — bu istek kontrolü çalıştırmalı mı?
 

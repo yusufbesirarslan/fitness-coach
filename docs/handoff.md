@@ -3949,6 +3949,271 @@ brief requires p50/p95/p99.
 - Flutter is untouched. PR2 waits for reviewed, CI-green, merged PR1. PR3
   comparison and PR4 history/retention remain deferred.
 
+# Triage fixes — PR #201 (2026-08-07) + PR #208 (2026-08-14) findings
+
+Both PRs are documentation-only triage reports. This change closes the code
+findings they raised. **PR #208's carried items #4–#7 were re-verified as
+already fixed at HEAD** — that report used `NEEDED_FIXES_2026-08-02.md` as its
+baseline and never saw the (still-unmerged) 08-07 report, so it re-listed work
+PR #199/#200 had already landed:
+
+| Carried item | State at `dc6fda1` | Evidence |
+|---|---|---|
+| #4 `ai_gate` unbounded `_model_slots` | Fixed | `model_concurrency_slot` acquires via `_acquire_before_deadline` and raises `BlockingConcurrencyLimit` (`ai_gate.py`) |
+| #5 `mobile_auth.refresh()` lock across network | Fixed | Two-phase snapshot → network (asserts `not in_transaction()`) → re-lock (`mobile_auth.py:507-517`) |
+| #6 `ProxyFix` trusts `X-Forwarded-Host/-Port` | Fixed | `ProxyFix(..., x_host=0, x_port=0)` (`config.py`) |
+| #7 OpenAI non-stream turn budget | Fixed | `_coach_turn_deadline` / `_remaining_coach_turn_seconds` (`ai_coach.py:932-1084`) |
+
+## Fixed here
+
+1. **`weekly_water` completable in one day** (201 #1 / 208 #1, the only Medium).
+   The funnel gate read the user-resettable `WaterLog.count`, so a `5 → 0 → 5`
+   toggle re-armed the `0 → positive` transition and drove the "5 different
+   days" challenge to completion in one afternoon. The gate is now a durable
+   per-day marker, `WaterLog.quest_fired` (migration `f0a1b2c3d4e5`, additive
+   with an existence guard for the `create_all` boot path), claimed by a
+   conditional `UPDATE ... WHERE quest_fired = false`. `uq_user_water_day`
+   already makes the row unique per user+day, so that UPDATE is the single
+   atomic claim — concurrent POSTs cannot both fire, and no extra lock is
+   needed. A genuinely new day gets a new row, so the funnel still fires daily;
+   `count=0` never consumes the marker.
+2. **Ungated FatSecret surfaces** (201 #2). The slot now wraps the network
+   round-trip in `barcode.get_barcode_product` (covers every caller), in
+   `food_servings` / `food_servings_by_name`, and in the three
+   `mobile_food_discovery` entry points — that mobile surface landed in #205,
+   after the 08-07 audit, and carried the identical pattern. The permit wraps
+   **only** the provider call: barcode cache hits stay pure DB and never
+   consume capacity, and the cache write commits outside the permit. Saturation
+   returns `503` + `Retry-After`, never a fabricated "not found" — on the
+   mobile side it surfaces through the existing `FOOD_PROVIDER_UNAVAILABLE`.
+3. **`/chat` unbounded input** (208 #2). `/chat` interpolated `message` straight
+   into a Sonnet prompt with no cap while `/ask*` enforced `MAX_QUESTION_CHARS`;
+   rate limits bound request *count*, not per-request token *cost*. `/chat` now
+   applies the same cap (and rejects non-string values, which `len()` would
+   otherwise mis-measure) before any model call. A global
+   `MAX_CONTENT_LENGTH` (12 MiB, `MAX_CONTENT_LENGTH_BYTES`) sits above the
+   largest legitimate upload (8 MB pump-check data URL); per-field validators
+   remain the canonical limits. 413 returns JSON, and `mobile_api` maps it to
+   `REQUEST_TOO_LARGE` with `retryable=False` — its generic handler would
+   otherwise have reported a permanent client error as a retryable outage.
+4. **`award_badge` deferred flush** (208 #3, latent). The insert now runs in its
+   own savepoint and flushes immediately, so a duplicate `uq_user_badge` fails
+   locally instead of at the caller's `begin_nested` exit — where it would have
+   rolled back `_try_complete`'s guarded `completed_at` UPDATE and left the
+   challenge in a permanent retry loop.
+
+## Not fixed (deliberate)
+
+- **God-modules** (201 #3 / 208 #8): `social.py` (1191), `ai_coach.py` (1247),
+  `tracking.py` (728). Both reports classify this as tech debt with no
+  behavioral defect and recommend *incremental* extraction; splitting these
+  alongside behavioral fixes would move the monkeypatch/test surface for
+  unrelated code in the same change. Left for a dedicated PR.
+- **201 #4** (duplicate Istanbul-date helper in `coach_context_queries.py`) —
+  the report itself marks it "no action required": functionally equivalent and
+  deliberately Flask/SQLAlchemy-free for the psycopg2 read path.
+- **208 informational notes** (`nbf`/`iat` not validated, menu-fetch exception
+  *class* name, `/health?deep=1` outbound GET, `_pin_getaddrinfo` global
+  monkeypatch) — all verified non-exploitable by that report; each would change
+  a security-reviewed boundary for no measured gain.
+
+---
+
+# Adaptive Coaching Sprint 1 PR1 — Canonical Plan Mutation Foundation (local, 2026-08-14)
+
+Branch `adaptive-coaching-s1-pr1-plan-mutation-foundation`, worktree
+`.worktrees/adaptive-coaching-s1-pr1-plan-mutation-foundation`, based on
+`origin/main` `c38a8d9`. Local commit only — **not pushed, no PR, not merged,
+not deployed.** Sprint 1 PR2 stays deferred until this is independently
+reviewed.
+
+Full architecture: **docs/ADAPTIVE_COACHING.md**.
+
+## What shipped
+
+`app/services/plan_mutation/` — the one server-authoritative, typed, targeted
+mutation boundary over the canonical `TrainingPlan`. Five commands (replace /
+add / remove exercise, update `sets`+`reps` prescription, move a training day's
+content between weekday slots), owner-scoped, atomic, validated against the
+generator's own bounds.
+
+Files: `commands.py` (typed contract) · `document.py` (PURE mutation engine, no
+ORM/Flask) · `validation.py` (bounds reused from
+`training_generation/response_validator.py`) · `service.py` (transaction +
+ownership) · `errors.py` · `__init__.py`. Tests:
+`tests/test_plan_mutation.py`, `tests/test_plan_mutation_architecture.py`.
+
+**No runtime surface.** No route, no AI tool, no feature flag, no model change,
+no migration (Alembic head stays `f0a1b2c3d4e5`). Nothing existing was migrated
+onto the new boundary; `POST /training-plan/save` keeps its whole-plan replace
+semantics and the Training Generator is untouched.
+
+## Decisions worth not re-litigating
+
+- **Ownership is structural, not a check.** No command carries a `user_id` or a
+  plan id; the service resolves the caller's own active plan by scoping the
+  query. Cross-user mutation is therefore unexpressible, and "no plan" and
+  "someone else's plan" both surface as `PlanNotFound` so existence never leaks.
+- **Targeted-ness lives in the document layer.** The plan is one JSON text
+  column, so any write rewrites the column. `document.apply_command` deep-copies,
+  reaches exactly one node and mutates it in place — untouched subtrees are the
+  same parsed objects, so unknown/unmodelled fields survive. Rebuilding from a
+  projection (the way `plan_facts` parses for display) would silently drop them.
+- **Bounds reused, posture inverted.** Same limits as the generator; the
+  generator *clamps* LLM output, the mutation boundary *rejects*. Storing 100
+  when the caller asked for 999 would report success for a request that did not
+  happen.
+- **Ambiguous exercise names are refused, not resolved by position.** Exercise
+  identity in `plan_data` is `isim` only — there are no exercise IDs. A stable
+  exercise catalog is the correct long-term fix and is out of scope here.
+- **Derived plan-level values are never recomputed.** `haftalik_ozet` is left
+  exactly as the generator wrote it; recomputing it from one exercise swap would
+  be this boundary inventing planning authority.
+- **History safety is schema-level, not diligence-level.** `WorkoutLog` snapshots
+  `exercise_name`/`sets`/`reps`/`weight_kg`/`volume` in its own columns and
+  derives nothing from `plan_data`, so no code path exists from a plan mutation
+  to a historical row.
+- **Exactly-once is NOT claimed.** A retried call can apply the same change
+  twice (converging for replace/update/move, additive for `add`). The mutation
+  journal that would fix that is PR2 work.
+
+## Known interaction (documented, unchanged on purpose)
+
+Mutating a day's exercises changes the Sprint 7 PR3 workout-session fingerprint
+(`v1:sha256(ordered names)`), so a linked ACTIVE session classifies as
+`plan_regenerated_or_replaced` → stale and the existing UX asks the user to
+resolve it. Refreshing that fingerprint here would make the mutation service a
+second writer of workout-session state. Whether a mid-workout mutation should
+instead be *refused* is a product question for the confirmation/impact work.
+
+## Deferred to Sprint 1 PR2
+
+Plan version identity · mutation history with actor/reason metadata ·
+before/after representation · `undo_last_change` · safe rollback · idempotency
+keys/replay protection. Also still unowned: AI Coach tool registration and
+execution, intent parsing, impact classification, confirmation UX, proactive
+coaching, plateau/fatigue/adherence detection, nutrition-plan mutations.
+
+---
+
+# Adaptive Coaching Sprint 1 PR2 — Plan Versioning, Mutation Journal, Idempotent Replay & Safe Undo (local, 2026-08-14)
+
+Branch `adaptive-coaching-s1-pr2-plan-history-undo`, worktree
+`.worktrees/adaptive-coaching-s1-pr2-plan-history-undo`, based on `origin/main`
+`154a3f5` (which is PR1 merged as #210). Local commit only — **not pushed, no PR,
+not merged, not deployed.**
+
+Full architecture: **docs/ADAPTIVE_COACHING.md §§12-18**.
+
+## What shipped
+
+PR1 could change a plan safely. It could not answer *"did this retry already
+happen?"* or *"put that back"*. PR2 answers both, and the whole design follows
+from one sentence: **plan bytes, plan version and the journal row must move as
+one unit, or none of them may move.**
+
+New modules under `app/services/plan_mutation/`: `context.py` (the mutation
+envelope — operation key, actor, bounded reason) · `fingerprint.py` (versioned
+semantic digests, pure) · `journal.py` (history queries + the record shape).
+`service.py` rewritten around one transaction; `errors.py` gains four domain
+outcomes. Two additive columns on `TrainingPlan` (`lineage_id`,
+`mutation_version`), one new table `plan_mutation_record`, one migration
+`b3c4d5e6f7a8` (single head off `f0a1b2c3d4e5`).
+
+**Still no runtime surface.** No route, no AI tool, no feature flag, no prompt
+change, no mobile change. The journal is internal evidence — there is no history
+endpoint and no serialization of it anywhere, and an architecture test fails if a
+blueprint so much as imports the package.
+
+## Decisions worth not re-litigating
+
+- **The version only ever counts up — including on undo.** Restoring old
+  *content* is what undo means. Restoring an old *version number* would make two
+  different histories report the same position, and any optimistic check later
+  built on it would pass on stale state. Undo is a forward version that happens
+  to restore old bytes.
+- **The undo precondition is bytes, not version.** After two undos the plan sits
+  at a much higher version than the mutation being reversed — that is correct, so
+  a version-equality precondition silently breaks multi-level undo. Comparing
+  `snapshot_fingerprint(plan_data)` against the target's `after_fingerprint` is
+  the honest check, and a mismatch means an out-of-band writer touched the plan →
+  `UndoConflict`, fail closed.
+- **Snapshots are the exact persisted `plan_data` text.** PR1 preserves plan
+  fields this domain does not model; a snapshot rebuilt from `plan_facts`, a DTO
+  or an exercise list would pass every other test and still lose them, so undo
+  would "restore" a lossy plan.
+- **The idempotency key is REQUIRED, not optional.** PR1 shipped with zero
+  callers, so nothing was migrated by making it mandatory — and an optional key
+  is a contract in which a future consumer can quietly opt out of replay
+  protection and reintroduce the duplicate-`add` bug PR2 exists to close.
+- **The database is the final race arbiter.** `uq_plan_mutation_user_key`, not
+  process memory, not Redis, not a timestamp window. When both contenders get
+  past their pre-flight check they both reach the INSERT and the loser rolls back
+  its own half-applied mutation, re-reads the winner and replays it. Note that
+  the row lock usually settles it earlier — the loser blocks, then converges at
+  its second look without any exception — so a green PostgreSQL race run does not
+  by itself demonstrate that the constraint fired. That path is pinned separately
+  and deterministically by `TestDatabaseArbitration` in
+  `tests/test_plan_mutation_history.py` (added during PR2 review).
+- **An accepted no-op is recorded.** The unsafe version is subtle: sets are 3, a
+  no-op "set them to 3" is accepted under key K, the user really changes them to
+  4, then K is retransmitted. Without a durable row K looks fresh and drags the
+  plan back to 3 — a mutation nobody asked for, produced by a *retry*.
+- **A validation failure consumes no operation identity.** Rejected before any
+  insert, so the corrected retry under the same key succeeds instead of being
+  refused as a conflict.
+- **Lineage is an opaque column default, not a rule.** `POST
+  /training-plan/save` deletes every row and inserts a new one, so the PK cannot
+  identify "the same plan over time". A regenerated plan gets a fresh
+  `lineage_id` automatically, which makes cross-lineage undo *unexpressible*
+  rather than merely checked.
+- **`plan_lineage_id` and `reverts_mutation_id` are soft references.** A hard FK
+  to `training_plan` would be cascade-deleted by the legacy replace path,
+  destroying audit history that must outlive the row it describes. A hard *self*
+  FK would make owner purge order-dependent under SQLite's immediate FK checks,
+  and both escape hatches corrupt the trail (`CASCADE` destroys it, `SET NULL`
+  rewrites it). Uniqueness — the invariant that matters — needs no FK.
+- **`populate_existing()` on the locking query is load-bearing.** `get_active_plan`
+  has already put the row in the identity map, so without it SQLAlchemy hands the
+  `FOR UPDATE` query the same in-memory instance with pre-lock values: the lock is
+  real, the data under it is stale, and two mutations compute from one base. This
+  is the repository's known footgun (`tests/test_concurrency_staleness.py`) and it
+  is what PG race C exists to catch.
+- **The package has no logger at all**, enforced by an AST guard. Snapshots,
+  command payloads, reasons, exercise lists, operation keys and fingerprints are
+  exactly the material that must not reach a log line, and "no logger" is cheaper
+  to keep true than "careful logging".
+- **The legacy full-plan save is NOT migrated onto the journal.** Recording a
+  wholesale replacement as a targeted mutation would put a snapshot in the journal
+  that an undo could later restore over a plan the user deliberately regenerated.
+
+## Known interaction (documented, unchanged on purpose)
+
+PR1 decided this boundary is not a second writer of workout-session state, and
+PR2 keeps that decision **including on the undo path**, where "put the fingerprint
+back too" is more tempting and more wrong: it would let a reversal silently
+re-bless a session whose planned workout no longer exists. Pinned by
+`TestHistoricalSafety.test_an_active_session_fingerprint_is_not_refreshed`.
+
+## Verification
+
+Commands and exact results are in the completion report for this PR; the two that
+cannot run on this machine are called out there rather than claimed:
+`tests/test_plan_mutation_history_pg.py` (5 races — no local PostgreSQL or Docker;
+collected and wired into CI's `PostgreSQL concurrency` job) and the PostgreSQL
+schema-drift guard (`flask db check`, CI-only).
+
+## Deferred to Sprint 1 PR3
+
+AI Coach tool registration and execution · intent → typed command · confirmation
+UX and impact classification · the transport that carries `outcome` /
+`plan_version` / `mutation_id` / `replayed` and maps the four domain errors ·
+history API or UI, if ever · redo and arbitrary rollback (deliberately absent) ·
+proactive coaching, plateau/fatigue/adherence detection, nutrition-plan mutation.
+
+One trap for whoever wires the transport: **the operation key must be stable
+across the retries of one logical user request.** A key minted per HTTP attempt
+provides no protection at all.
 # Sprint 10 PR3 Pump Check Comparison Intelligence (local, 2026-08-14)
 
 ## Baseline validation finding (NOT a PR3 production change)
