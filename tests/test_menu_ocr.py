@@ -118,6 +118,14 @@ def test_compress_passes_through_non_image(app):
     assert mime == "image/jpeg"
 
 
+def test_extract_text_returns_empty_on_undecodable_oversized_image(app):
+    # Tavanı aşan AMA çözülemeyen girdi: paylaşılan hazırlayıcı ImageTooLargeError
+    # DEĞİL, üst sınıf ImagePreparationError fırlatır. Bu yol /menu view'ında
+    # try/except olmadan çağrılıyor — kaçarsa dostça 422 yerine 500 üretir.
+    payload = b"gorsel degil" + b"\x00" * 1_500_001
+    assert _extract_text_from_image(payload, "image/jpeg") == ""
+
+
 def test_compress_rejects_decompression_bomb(app, monkeypatch):
     # Tavanı küçült: 2000x2000 (4 MP) görsel sınırı aşar → decode etmeden reddedilir (3.1).
     monkeypatch.setattr(vision_images, "MAX_IMAGE_PIXELS", 100)

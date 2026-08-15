@@ -2,6 +2,7 @@
 from flask import current_app
 
 from app.services.vision_images import (
+    ImagePreparationError,
     ImageTooLargeError,
     prepare_image_for_vision as _compress_image_for_vision,
 )
@@ -127,9 +128,14 @@ def _extract_text_from_image(image_bytes, content_type="image/jpeg"):
     if len(image_bytes) > 1_500_000:
         try:
             image_bytes, content_type = _compress_image_for_vision(image_bytes, content_type)
-        except ImageTooLargeError:
+        except ImagePreparationError:
             # Dekompresyon-bombası riski → OCR yapmadan boş dön (çağıran "menü
             # okunamadı" mesajı verir). Worker'ı OOM riskine atma (3.1).
+            #
+            # ImageTooLargeError'ın ÜST sınıfını yakala: paylaşılan hazırlayıcı
+            # çözülemeyen görselde ve bayt tavanı aşıldığında da fırlatır. Yalnız
+            # ImageTooLargeError yakalanınca bu iki durum /menu view'ına kadar
+            # kaçıp 500 üretiyordu — eskiden dostça "okunamadı" yanıtıydı.
             return ""
 
     b64 = base64.b64encode(image_bytes).decode("utf-8")
