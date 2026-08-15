@@ -435,6 +435,84 @@ def test_check_verifier_accepts_postgresql_reflection_forms():
     migration._verify_checks(inspector, COMPARISON)
 
 
+# Captured VERBATIM from sa.inspect(engine).get_check_constraints() against a
+# real PostgreSQL 16 database and a real SQLite file, on the boot path where
+# db.create_all() builds the table BEFORE Alembic runs. These differ from the
+# raw pg_get_constraintdef text above: SQLAlchemy's inspector strips the
+# redundant parentheses that AND-binds-tighter-than-OR already implies, and
+# renders the enum membership with only ONE paren around ARRAY. Verifying only
+# the fully parenthesized form let a real production fresh-boot failure pass
+# CI, so both forms are pinned here.
+_INSPECTOR_REFLECTION_FORMS = {
+    "postgresql": {
+        "ck_pump_comparison_distinct_sources": (
+            "baseline_pump_check_id <> current_pump_check_id"
+        ),
+        "ck_pump_comparison_status": (
+            "status::text = ANY (ARRAY['pending'::character varying, "
+            "'analyzing'::character varying, 'completed'::character varying, "
+            "'failed'::character varying]::text[])"
+        ),
+        "ck_pump_comparison_comparability": (
+            "comparability IS NULL OR (comparability::text = ANY "
+            "(ARRAY['comparable'::character varying, "
+            "'limited'::character varying, "
+            "'not_comparable'::character varying]::text[]))"
+        ),
+        "ck_pump_comparison_terminal_fields": (
+            "status::text = 'completed'::text AND analysis IS NOT NULL AND "
+            "comparability IS NOT NULL OR status::text <> 'completed'::text "
+            "AND analysis IS NULL AND comparability IS NULL"
+        ),
+    },
+    "sqlite": {
+        "ck_pump_comparison_distinct_sources": (
+            "baseline_pump_check_id <> current_pump_check_id"
+        ),
+        "ck_pump_comparison_status": (
+            "status IN ('pending', 'analyzing', 'completed', 'failed')"
+        ),
+        "ck_pump_comparison_comparability": (
+            "comparability IS NULL OR comparability IN "
+            "('comparable', 'limited', 'not_comparable')"
+        ),
+        "ck_pump_comparison_terminal_fields": (
+            "(status = 'completed' AND analysis IS NOT NULL AND "
+            "comparability IS NOT NULL) OR (status <> 'completed' AND "
+            "analysis IS NULL AND comparability IS NULL)"
+        ),
+    },
+}
+
+
+@pytest.mark.parametrize("dialect_name", sorted(_INSPECTOR_REFLECTION_FORMS))
+def test_check_verifier_accepts_real_inspector_reflection_forms(dialect_name):
+    migration = _load_migration()
+    inspector = _CheckInspector(_INSPECTOR_REFLECTION_FORMS[dialect_name])
+
+    migration._verify_checks(inspector, COMPARISON)
+
+
+def test_check_verifier_rejects_drift_inside_inspector_any_array_form():
+    """Tolerating the inspector's spelling must not tolerate a wrong value."""
+    migration = _load_migration()
+    drifted = dict(_INSPECTOR_REFLECTION_FORMS["postgresql"])
+    drifted["ck_pump_comparison_comparability"] = (
+        "comparability IS NULL OR (comparability::text = ANY "
+        "(ARRAY['comparable'::character varying, "
+        "'limited'::character varying, "
+        "'not_comparable'::character varying, "
+        "'unknown'::character varying]::text[]))"
+    )
+    inspector = _CheckInspector(drifted)
+
+    with pytest.raises(
+        RuntimeError,
+        match="check ck_pump_comparison_comparability has wrong SQL",
+    ):
+        migration._verify_checks(inspector, COMPARISON)
+
+
 def test_check_verifier_rejects_wrong_terminal_boolean_grouping():
     migration = _load_migration()
     inspector = _CheckInspector({

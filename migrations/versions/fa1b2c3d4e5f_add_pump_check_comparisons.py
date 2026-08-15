@@ -376,9 +376,14 @@ _CHECK_CAST_RE = re.compile(
     r"(?:\s*\[\s*\])?",
     re.IGNORECASE,
 )
+# PostgreSQL renders an IN list as `= ANY (ARRAY[...])`, and reflection may or
+# may not keep the inner parentheses around ARRAY. The two spellings are matched
+# SEPARATELY on purpose: one optional-paren pattern would let the closing paren
+# of an ENCLOSING group be consumed as if it belonged to the ANY expression,
+# silently unbalancing the rest of the predicate.
 _ANY_ARRAY_RE = re.compile(
-    r"=\s*any\s*\(\s*\(?\s*array\s*\[([^\]]*)\]"
-    r"\s*\)?\s*\)",
+    r"=\s*any\s*\(\s*\(\s*array\s*\[([^\]]*)\]\s*\)\s*\)"
+    r"|=\s*any\s*\(\s*array\s*\[([^\]]*)\]\s*\)",
     re.IGNORECASE,
 )
 _IDENTIFIER_PARENS_RE = re.compile(
@@ -386,20 +391,83 @@ _IDENTIFIER_PARENS_RE = re.compile(
     re.IGNORECASE,
 )
 _SQL_LITERAL = r"'(?:''|[^'])*'"
-_SQL_IDENTIFIER = r"[a-z_][a-z0-9_.]*"
 _SQL_IN_LIST = (
     rf"\(\s*{_SQL_LITERAL}"
     rf"(?:\s*,\s*{_SQL_LITERAL})*\s*\)"
 )
-_ATOMIC_PARENS_RE = re.compile(
-    rf"\(\s*("
-    rf"(?:{_SQL_IDENTIFIER}\s+is\s+(?:not\s+)?null)"
-    rf"|(?:{_SQL_IDENTIFIER}\s*(?:=|<>)\s*"
-    rf"(?:{_SQL_IDENTIFIER}|{_SQL_LITERAL}))"
-    rf"|(?:{_SQL_IDENTIFIER}\s+in\s*{_SQL_IN_LIST})"
-    rf")\s*\)",
-    re.IGNORECASE,
-)
+_IN_LIST_RE = re.compile(rf"\bin\s*{_SQL_IN_LIST}", re.IGNORECASE)
+_OPEN_MASK = "\x02"
+_CLOSE_MASK = "\x03"
+_BOOL_TOKEN_RE = re.compile(r"\(|\)|[^()\s]+")
+_BOOL_KEYWORDS = ("(", ")", "and", "or")
+
+
+def _rewrite_any_array(match):
+    return " in (" + (match.group(1) or match.group(2)) + ")"
+
+
+def _mask_in_lists(value):
+    """Hide IN-list parentheses so they are not read as boolean grouping."""
+    return _IN_LIST_RE.sub(
+        lambda match: match.group(0)
+        .replace("(", _OPEN_MASK).replace(")", _CLOSE_MASK),
+        value,
+    )
+
+
+def _parse_disjunction(tokens, position):
+    operands = []
+    node, position = _parse_conjunction(tokens, position)
+    operands.append(node)
+    while position < len(tokens) and tokens[position] == "or":
+        node, position = _parse_conjunction(tokens, position + 1)
+        operands.append(node)
+    if len(operands) == 1:
+        return operands[0], position
+    return "or(" + ",".join(operands) + ")", position
+
+
+def _parse_conjunction(tokens, position):
+    operands = []
+    node, position = _parse_primary(tokens, position)
+    operands.append(node)
+    while position < len(tokens) and tokens[position] == "and":
+        node, position = _parse_primary(tokens, position + 1)
+        operands.append(node)
+    if len(operands) == 1:
+        return operands[0], position
+    return "and(" + ",".join(operands) + ")", position
+
+
+def _parse_primary(tokens, position):
+    if position < len(tokens) and tokens[position] == "(":
+        node, position = _parse_disjunction(tokens, position + 1)
+        if position < len(tokens) and tokens[position] == ")":
+            position += 1
+        return node, position
+    words = []
+    while position < len(tokens) and tokens[position] not in _BOOL_KEYWORDS:
+        words.append(tokens[position])
+        position += 1
+    return " ".join(words), position
+
+
+def _canonical_boolean(value):
+    """Re-express the predicate as an explicit AND/OR tree.
+
+    Reflection drops parentheses that AND-binds-tighter-than-OR already
+    implies, so a textual comparison would reject a schema that is in fact
+    identical. Rebuilding the tree makes redundant grouping disappear while a
+    GENUINELY different grouping still compares unequal.
+    """
+    tokens = _BOOL_TOKEN_RE.findall(value)
+    if not tokens:
+        return value
+    node, position = _parse_disjunction(tokens, 0)
+    if position != len(tokens):
+        # Something unparsed remains: keep it so the comparison fails closed.
+        return value
+    return node
 
 
 _QUOTED_IDENTIFIER_RE = re.compile(r'"(?:""|[^"])*"')
@@ -437,15 +505,17 @@ def _normalize_check_sql(value):
     if normalized.startswith("check"):
         normalized = normalized[len("check"):].strip()
     normalized = _CHECK_CAST_RE.sub("", normalized)
-    normalized = _ANY_ARRAY_RE.sub(r" in (\1)", normalized)
+    normalized = _ANY_ARRAY_RE.sub(_rewrite_any_array, normalized)
     normalized = normalized.replace("!=", "<>")
     while True:
         previous = normalized
         normalized = _IDENTIFIER_PARENS_RE.sub(r"\1", normalized)
-        normalized = _ATOMIC_PARENS_RE.sub(r"\1", normalized)
         if normalized == previous:
             break
+    normalized = _mask_in_lists(normalized)
     normalized = _strip_outer_parentheses(normalized)
+    normalized = _canonical_boolean(normalized)
+    normalized = normalized.replace(_OPEN_MASK, "(").replace(_CLOSE_MASK, ")")
     return re.sub(r"\s+", "", normalized)
 
 
