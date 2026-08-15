@@ -485,6 +485,14 @@ def fingerprint(baseline_token, current_token, version):
 
 Set `revision = 'fa1b2c3d4e5f'` and `down_revision = 'e9f0a1b2c3d4'`. Define full columns, FKs, indexes, uniques, and checks. Create absent tables in comparison-then-ledger order. If a table exists, inspect schema and raise `RuntimeError` for incompatible partial state. Downgrade ledger first, comparison second. Use PostgreSQL JSONB with SQLite JSON.
 
+> **Deviation (integration, commit `5caa31a`):** `down_revision` shipped as
+> `b3c4d5e6f7a8`, not the `e9f0a1b2c3d4` planned here. `main` advanced while this
+> branch was open and added two children of `e9f0a1b2c3d4` (`f0a1b2c3d4e5`,
+> `b3c4d5e6f7a8`), so the planned parent would have left two heads and forced
+> boot's automatic `db upgrade` to choose one. Nothing else about the migration
+> changed; the single-head assertion in `tests/test_migration_graph.py` was
+> updated with it.
+
 - [x] **Step 7: Verify schema and head**
 
 Run: `python -m pytest -q tests/test_pump_check_comparison_identity.py tests/test_pump_check_comparison_migration.py tests/test_migration_graph.py tests/test_cascade_delete.py`

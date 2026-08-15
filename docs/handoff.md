@@ -4338,3 +4338,83 @@ Excluded from PR3 and still deferred: history, automatic previous-check
 selection, image URLs, Flutter/mobile client work, progress scores, heatmaps,
 body-fat estimates, numeric deltas, program rewrites, social behavior, a second
 provider, and all PR4 retention work.
+
+## Integration with an advanced `main` + shipping review (local, 2026-08-15)
+
+The section above was executed at `3b3e131`, before `main` advanced. Everything
+below supersedes it. Branch HEAD is now `62c26f1`, 23 ahead of `origin/main`
+(`9bc2998`) and 0 behind.
+
+**Alembic head divergence, resolved.** While this branch was open, `main` gained
+two children of `e9f0a1b2c3d4` — `f0a1b2c3d4e5` (water funnel marker) and
+`b3c4d5e6f7a8` (Adaptive Coaching S1 PR2). `fa1b2c3d4e5f` was a third sibling,
+which would have left the graph with **two heads** and forced boot's automatic
+`db upgrade` to pick one. It now chains off `b3c4d5e6f7a8`. `main` was merged in
+rather than rebased onto, because the brief and the committed reports both cite
+`a69c958` and `05cbb1f` by SHA and a rebase would rewrite them.
+
+**Two bounded review fixes** (neither changes the comparison architecture):
+
+- `c0d036a` — the shared safety validator passed two claim spellings in **all
+  seven** text fields of **both** the single-image and comparison contracts: a
+  bare growth/gain/hypertrophy **rate** (a quantified progress claim carrying no
+  digit, so the numeric patterns never saw it) and `skeletal disorder` /
+  `pathology` / `condition` (the diagnosis the medical pattern already blocked,
+  under a different noun; only "skeletal abnormality" was listed). An
+  adversarial probe pushing every §19/§20 string through the real parser in
+  every field went from **14 leaks to 0**.
+- `62c26f1` — `menu_ocr._extract_text_from_image` caught only
+  `ImageTooLargeError` from the shared preparer, but the preparer raises the
+  parent `ImagePreparationError` for an undecodable image. `app/blueprints/
+  menu.py:110` calls that path with no `try/except`, so an oversized *and*
+  undecodable upload produced a **500** where it used to produce the friendly
+  "could not read the menu" answer. Reproduced concretely, then fixed by
+  catching the parent class.
+
+### Verification — all re-executed at HEAD `62c26f1`
+
+Local interpreter Python 3.14.3; CI is authoritative on 3.11.
+
+PostgreSQL 16 (disposable container, every database recreated for the run):
+
+- full `db upgrade` from an **empty** database — exit 0; the chain ends
+  `b3c4d5e6f7a8 -> fa1b2c3d4e5f`.
+- `flask --app starter db heads` → **`fa1b2c3d4e5f (head)`**, sole head.
+- `flask --app starter db check` → **"No new upgrade operations detected"**,
+  exit 0 — zero model/migration drift.
+- real fresh-DB boot path (`create_all` → automatic stamp → automatic upgrade) →
+  `alembic_version = ['fa1b2c3d4e5f']`, with `pump_check`, `pump_check_comment`,
+  `pump_check_comparison`, `pump_check_comparison_request`, `pump_check_like`
+  and `plan_mutation_record` all present.
+- incremental upgrade from `main`'s head (`b3c4d5e6f7a8`) to this branch's head —
+  exit 0; comparison tables **0 before, 2 after**.
+- schema-drift probe, **9/9 as designed**: `compatible_untouched` ACCEPTED,
+  `missing_request_table` ACCEPTED (recreated), and REJECTED with an explicit
+  message for `missing_column`, `widened_comparability_check`,
+  `analysis_json_not_jsonb`, `timezone_aware_created_at`, `dropped_pair_unique`,
+  `dropped_ledger_unique`, `nullable_analysis_version`.
+- real opt-in race suite, the **exact CI command** (6 modules, `-m
+  pg_concurrency`, `FITX_PG_CONCURRENCY_TEST=1`) — **22 passed**.
+
+Full local suite, 8 deterministic modulo-8 shards over 181 test files, every
+shard exit 0:
+
+| Shard | Result |
+|---|---|
+| 0 | 721 passed, 1 skipped |
+| 1 | 415 passed, 4 skipped |
+| 2 | 443 passed |
+| 3 | 467 passed |
+| 4 | 506 passed, 1 skipped |
+| 5 | 417 passed |
+| 6 | 395 passed, 2 skipped |
+| 7 | 477 passed, 2 skipped |
+| **Total** | **3841 passed, 10 skipped, ZERO failures** |
+
+Collection reconciles exactly: `pytest --collect-only -q` over `tests/` reports
+**3845/3848 collected (3 deselected**, the `-m "not load"` load tests), and the
+same 8 shard file groups collect 721/418/443/467/506/417/396/477 = **3845**. The
+run reports 3841 passed + 10 skipped = 3851 outcome lines; the 6-line difference
+is the six `pg_concurrency` modules, which call
+`pytest.skip(..., allow_module_level=True)` at **collection** time — one skip
+line each, zero collected items each. 3845 = 3841 passed + 4 in-run skips.
