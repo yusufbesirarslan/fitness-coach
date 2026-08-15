@@ -54,3 +54,39 @@ class InvalidMutation(PlanMutationError):
 
 class InvalidPrescription(PlanMutationError):
     """A prescription value falls outside canonical training bounds."""
+
+
+class IdempotencyConflict(PlanMutationError):
+    """The operation key is already bound to a *different* semantic operation.
+
+    Deterministic and fail-closed: the caller's command is not applied, because
+    letting a key silently change meaning is how a retry turns into a second,
+    different mutation. Reusing a key for the same command replays instead
+    (Sprint 1 PR2, brief §17).
+    """
+
+
+class UndoUnavailable(PlanMutationError):
+    """There is no reversible mutation to undo on the current plan lineage.
+
+    Nothing has been mutated yet, everything already reverted, or the only
+    history belongs to a plan lineage that was replaced. Distinct from
+    ``UndoConflict``: here the *selection* fails, not a precondition.
+    """
+
+
+class UndoConflict(PlanMutationError):
+    """Current plan state is not the state the target mutation produced.
+
+    Something changed the plan outside the reversal path — an out-of-band write,
+    or a regeneration. Undo fails closed and overwrites nothing rather than
+    restoring a snapshot on top of state it does not explain (brief §§27, 32).
+    """
+
+
+class PlanStateConflict(PlanMutationError):
+    """A persisted plan-state precondition failed while committing.
+
+    The authoritative row moved between the locked read and the write. The
+    transaction is rolled back whole; no partial mutation survives.
+    """
