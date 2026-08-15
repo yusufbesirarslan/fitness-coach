@@ -103,8 +103,19 @@ async function submitCheckin() {
 // EVERY keydown while focused, so this only forwards Enter/Space to the
 // element's own click handler (data-action="selectOverload") — anything
 // else (Tab, arrows, ...) is a no-op and keeps its default behavior.
-function activateOnEnter(el, e) {
-  if (e.key !== 'Enter' && e.key !== ' ') return;
+//
+// The element and event MUST be read off the END of the argument list.
+// actions.js dispatches as fn.apply(el, dataArgs.concat([el, event])), and the
+// chips also carry data-args ('["kismen"]') for their click action — those
+// values are prepended to EVERY handler on the element, so fixed positional
+// parameters (el, e) landed on the string "kismen" and the element instead.
+// `e.key` was then undefined, the guard returned early, and the chips were
+// focusable but not operable by keyboard (role=button advertised to assistive
+// tech with no keyboard behavior behind it).
+function activateOnEnter() {
+  var e = arguments[arguments.length - 1];
+  var el = arguments[arguments.length - 2];
+  if (!e || !el || (e.key !== 'Enter' && e.key !== ' ')) return;
   e.preventDefault();
   el.click();
 }

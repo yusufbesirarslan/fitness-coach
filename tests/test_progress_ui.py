@@ -99,6 +99,37 @@ def test_ask_axis_action_is_hidden_until_the_coach_widget_exists(app, client, ma
     assert ".ps-actions [hidden]" in css.get_data(as_text=True)
 
 
+def test_overload_chips_are_keyboard_operable(app, client, make_user, login):
+    """role=button + tabindex=0 must come with real keyboard behaviour.
+
+    The chips are plain divs, so Enter/Space only work because
+    data-action-keydown forwards them. actions.js dispatches every handler as
+    fn.apply(el, dataArgs.concat([el, event])) — the chips also carry data-args
+    for their click action, so those values are PREPENDED to the keydown
+    handler too. activateOnEnter must therefore read the element and event off
+    the END of the argument list; fixed (el, e) parameters silently receive
+    "kismen" and the element, `e.key` is undefined, and the chips become
+    focusable-but-dead for keyboard and screen-reader users.
+    """
+    html = _get_progress_html(client, make_user, login, "proguichip")
+
+    chips = re.findall(r'<div class="overload-chip[^"]*"[^>]*>', html)
+    assert len(chips) == 3
+    for chip in chips:
+        assert 'data-action="selectOverload"' in chip
+        assert 'data-action-keydown="activateOnEnter"' in chip
+        assert 'tabindex="0"' in chip
+        assert 'role="button"' in chip
+        assert "aria-pressed=" in chip
+
+    js = client.get("/static/progress.js").get_data(as_text=True)
+    body = js.split("function activateOnEnter", 1)[1].split("\n}", 1)[0]
+    assert "arguments[arguments.length - 1]" in body
+    assert "arguments[arguments.length - 2]" in body
+    # No fixed positional parameters — that is the shape that broke.
+    assert re.match(r"\s*\(\s*\)", body), "activateOnEnter must not take positional params"
+
+
 def test_progress_page_hardcodes_no_progress_values(app, client, make_user, login):
     """A brand-new user must not see invented trajectory/adherence numbers."""
     html = _get_progress_html(client, make_user, login, "proguiempty")
