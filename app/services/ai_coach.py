@@ -1072,7 +1072,8 @@ def _run_coach_conversation_openai(user_id, question, context, history,
         deadline = _coach_turn_deadline()
     messages = prompt_builder.build_openai_messages(
         language, context, history, question,
-        adaptive_plan_context=_adaptive_plan_context_enabled())
+        adaptive_plan_context=_adaptive_plan_context_enabled(),
+        plan_mutation_tools=coach_plan_tools.plan_mutation_tools_enabled())
 
     final_text = ""
     for _ in range(_COACH_TOOL_LOOP_CAP):
@@ -1150,7 +1151,8 @@ def _build_bedrock_system(context, language="tr"):
     Modül-global BEDROCK_PROMPT_CACHE çağrı anında okunur — testler patch'ler."""
     return prompt_builder.build_bedrock_system(
         context, language, prompt_cache=BEDROCK_PROMPT_CACHE,
-        adaptive_plan_context=_adaptive_plan_context_enabled())
+        adaptive_plan_context=_adaptive_plan_context_enabled(),
+        plan_mutation_tools=coach_plan_tools.plan_mutation_tools_enabled())
 
 
 def _anthropic_tools_for_call():

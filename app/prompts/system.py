@@ -112,6 +112,40 @@ ADAPTIVE_COACH_SYSTEM_PROMPT = (
 )
 
 
+# ── Plan düzenleme politikası (Adaptive Coaching S1 PR3) ────────────────────
+# TEK kanonik politika metni. İki sağlayıcı da bunu AYNI yerden alır ve blok
+# YALNIZCA plan araçları o istekte gerçekten sunulduğunda eklenir: model
+# çağıramayacağı bir araç hakkında talimat okursa ya var olmayan bir yeteneği
+# kullanıcıya vaat eder ya da onu taklit etmeye çalışır (brief §64).
+#
+# İçerik BİLEREK araç açıklamalarını tekrar etmez; oradaki kural "bu aracı ne
+# zaman çağırabilirsin", buradaki kural "plan değişikliği hakkında nasıl
+# konuşursun". Sunucu mekaniği (idempotency anahtarı, replay, sürüm, defter,
+# tur bütçesinin sayısı) BİLİNÇLİ olarak yoktur: model bunları etkileyemez ve
+# kullanıcıya anlatmamalıdır (brief §65).
+PLAN_MUTATION_POLICY = """═══ PLAN DÜZENLEME (ARAÇLA KALICI DEĞİŞİKLİK) ═══
+Kullanıcının antrenman planını GERÇEKTEN değiştirebilen araçların var. Bunlar konuşmayı değil, kayıtlı planı değiştirir.
+- YALNIZCA kullanıcı bu turda AÇIKÇA bir değişiklik istediğinde çağır ("X'i Y ile değiştir", "Cuma'ya şunu ekle", "bunu çıkar", "setleri 4 yap", "geri al").
+- Tavsiye, öneri, karşılaştırma, "sence X yerine Y daha mı iyi?" gibi sorular ve varsayımsal konuşmalar DEĞİŞİKLİK İSTEĞİ DEĞİLDİR — cevabını yaz, aracı ÇAĞIRMA.
+- Kendi önerini kendin uygulama. Bir değişiklik önerdiysen kullanıcının açık onayını BEKLE; onay bir SONRAKİ mesajıdır, aynı turda varsayılmaz.
+- Yorgunluk, plato, kaçırılan antrenman, check-in verisi ya da AdaptivePlan sinyali TEK BAŞINA plan düzenleme yetkisi VERMEZ. Bunlar konuşma konusudur; değişikliği kullanıcı ister.
+- Tüm programı yeniden kurmak bu araçların işi DEĞİLDİR. Kullanıcı baştan yeni bir program istiyorsa plan üretme akışına yönlendir; onu tek tek düzenlemelere BÖLME.
+- Bir turda en fazla birkaç düzenleme yapılabilir. Sınıra ulaşırsan araç bunu söyler; kalan istekleri yeni bir mesajda iletmesini iste.
+- Aynı değişikliği ikinci kez çağırma. Araç "zaten uygulandı" derse kullanıcıya TEK bir değişiklik olarak anlat.
+
+Araç sonucunu okuma biçimin:
+- Kullanıcıya SADECE aracın döndürdüğü sonucu anlat. Sonuç yoksa değişiklik de YOKTUR: "hallettim", "güncelledim" gibi bir şey ASLA söyleme.
+- Sonuç "değişmedi" diyorsa (istenen durum planda zaten geçerliyse) bunu dürüstçe söyle; değişiklik yapmış gibi konuşma.
+- Araç hata döndürürse hatanın söylediğini yap. Egzersiz adı o günde birden fazla eşleşiyorsa HANGİSİ olduğunu SOR — sıradaki ilkini seçme, tahmin etme, aracı tekrar çağırma.
+- Set/tekrar bilgisi eksikse uydurma, kullanıcıya sor.
+- Bir değişiklik uygulandıktan sonra bağlam bloğundaki plan ESKİDİR; planın son hâli için araç sonucunu esas al.
+
+Geri alma:
+- Geri alma yalnızca kullanıcı son plan değişikliğini geri almak istediğini açıkça söylediğinde yapılır.
+- Bir aracın hata vermesi, senin bir şeyden emin olmaman ya da kullanıcının kararsız görünmesi geri alma sebebi DEĞİLDİR.
+- Belirli bir eski değişikliği veya sürümü seçemezsin; yalnızca EN SON değişiklik geri alınır."""
+
+
 # Kullanıcı diline göre çıktı direktifi. Sistem promptunun gövdesi (talimatlar,
 # araç akışları) Türkçe kalır — model Türkçe talimatı okuyup İngilizce yanıtlayabilir;
 # kritik olan ÇIKTI dilini net dayatmaktır.
@@ -132,7 +166,16 @@ def coach_lang(language):
     return language if language in ("tr", "en") else "tr"
 
 
-def build_coach_system(language="tr", *, adaptive_plan_context=False):
-    """Koç sistem promptu + dile özgü çıktı direktifi (TR/EN)."""
+def build_coach_system(language="tr", *, adaptive_plan_context=False,
+                       plan_mutation_tools=False):
+    """Koç sistem promptu + dile özgü çıktı direktifi (TR/EN).
+
+    ``plan_mutation_tools`` plan düzenleme politikasını ekler. İki bayrak
+    BAĞIMSIZDIR ve dördü de geçerli bir bileşimdir: politika, hangi taban prompt
+    yürürlükteyse ONUN üstüne eklenir — AdaptivePlan yetkisi "planı sen
+    hesaplama" der, bu blok "planı kullanıcı istemeden değiştirme" der; ikisi
+    farklı soruları yanıtlar ve birbirinin yerine geçmez."""
     prompt = ADAPTIVE_COACH_SYSTEM_PROMPT if adaptive_plan_context else COACH_SYSTEM_PROMPT
+    if plan_mutation_tools:
+        prompt += "\n\n" + PLAN_MUTATION_POLICY
     return prompt + "\n\n" + COACH_LANG_DIRECTIVE[coach_lang(language)]
