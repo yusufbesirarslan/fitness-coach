@@ -7,7 +7,8 @@ import pytest
 import sqlalchemy as sa
 from alembic.operations import Operations
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models import PumpCheckComparison, PumpCheckComparisonRequest
@@ -191,29 +192,43 @@ def _assert_expected_constraints(inspector):
 
 
 class _ColumnInspector:
+    """Fake inspector returning the types real reflection produces.
+
+    Reflection never returns the model-side declaration classes. PostgreSQL
+    returns ``INTEGER`` / ``VARCHAR`` / ``postgresql.TIMESTAMP`` / ``JSONB``
+    and SQLite returns ``INTEGER`` / ``VARCHAR`` / ``DATETIME`` /
+    ``sqlite.JSON``. Building this fixture from ``sa.Integer`` / ``sa.String``
+    / ``sa.DateTime`` would make every dialect type rule decorative: it would
+    pass precisely because it does not resemble the database it claims to
+    model. ``dialect_name=None`` models an inspector whose dialect cannot be
+    determined at all.
+    """
+
     def __init__(self, dialect_name, type_overrides=None, default_overrides=None):
-        self.bind = SimpleNamespace(
-            dialect=SimpleNamespace(name=dialect_name)
+        self.bind = (
+            None
+            if dialect_name is None
+            else SimpleNamespace(dialect=SimpleNamespace(name=dialect_name))
         )
-        json_type = (
-            postgresql.JSONB()
-            if dialect_name == "postgresql"
-            else sa.JSON()
+        is_postgresql = dialect_name == "postgresql"
+        json_type = postgresql.JSONB() if is_postgresql else sqlite.JSON()
+        timestamp_type = (
+            postgresql.TIMESTAMP() if is_postgresql else sa.DATETIME()
         )
         self._types = {
-            "id": sa.Integer(),
-            "user_id": sa.Integer(),
-            "baseline_pump_check_id": sa.Integer(),
-            "current_pump_check_id": sa.Integer(),
-            "public_id": sa.String(24),
-            "status": sa.String(20),
-            "comparability": sa.String(20),
+            "id": sa.INTEGER(),
+            "user_id": sa.INTEGER(),
+            "baseline_pump_check_id": sa.INTEGER(),
+            "current_pump_check_id": sa.INTEGER(),
+            "public_id": sa.VARCHAR(24),
+            "status": sa.VARCHAR(20),
+            "comparability": sa.VARCHAR(20),
             "analysis": json_type,
-            "analysis_version": sa.String(50),
-            "analysis_started_at": sa.DateTime(),
-            "analysis_attempt": sa.Integer(),
-            "analysis_failure_kind": sa.String(24),
-            "created_at": sa.DateTime(),
+            "analysis_version": sa.VARCHAR(50),
+            "analysis_started_at": timestamp_type,
+            "analysis_attempt": sa.INTEGER(),
+            "analysis_failure_kind": sa.VARCHAR(24),
+            "created_at": timestamp_type,
         }
         self._types.update(type_overrides or {})
         self._defaults = {
@@ -264,6 +279,28 @@ class _CheckInspector:
             {"name": name, "sqltext": sqltext}
             for name, sqltext in self._checks.items()
         ]
+
+
+def _expected_check_definitions(**overrides):
+    definitions = {
+        "ck_pump_comparison_distinct_sources": (
+            "baseline_pump_check_id <> current_pump_check_id"
+        ),
+        "ck_pump_comparison_status": (
+            "status IN ('pending', 'analyzing', 'completed', 'failed')"
+        ),
+        "ck_pump_comparison_comparability": (
+            "comparability IS NULL OR comparability IN "
+            "('comparable', 'limited', 'not_comparable')"
+        ),
+        "ck_pump_comparison_terminal_fields": (
+            "(status = 'completed' AND analysis IS NOT NULL AND "
+            "comparability IS NOT NULL) OR (status <> 'completed' AND "
+            "analysis IS NULL AND comparability IS NULL)"
+        ),
+    }
+    definitions.update(overrides)
+    return definitions
 
 
 def _create_wrong_check_comparison(connection):
@@ -454,12 +491,85 @@ def test_check_verifier_rejects_case_changed_allowed_literal():
         migration._verify_checks(inspector, COMPARISON)
 
 
+@pytest.mark.parametrize(
+    "drifted_status_sql",
+    [
+        # Whitespace inside a quoted literal is a different allowed value.
+        "status IN ('pend ing', 'analyzing', 'completed', 'failed')",
+        # A quoted, case-sensitive PostgreSQL identifier is a different column.
+        '"STATUS" IN (\'pending\', \'analyzing\', \'completed\', \'failed\')',
+    ],
+)
+def test_check_verifier_rejects_literal_and_quoted_identifier_drift(
+        drifted_status_sql):
+    migration = _load_migration()
+    inspector = _CheckInspector(
+        _expected_check_definitions(
+            ck_pump_comparison_status=drifted_status_sql))
+
+    with pytest.raises(
+        RuntimeError,
+        match="check ck_pump_comparison_status has wrong SQL",
+    ):
+        migration._verify_checks(inspector, COMPARISON)
+
+
+def test_check_verifier_accepts_meaningless_identifier_quoting():
+    migration = _load_migration()
+    inspector = _CheckInspector(
+        _expected_check_definitions(
+            ck_pump_comparison_status=(
+                '"status" IN (\'pending\', \'analyzing\', '
+                "'completed', 'failed')"
+            )))
+
+    migration._verify_checks(inspector, COMPARISON)
+
+
 @pytest.mark.parametrize("dialect_name", ["sqlite", "postgresql"])
 def test_column_verifier_accepts_required_dialect_types_and_default_forms(
         dialect_name):
     migration = _load_migration()
     migration._verify_columns(
         _ColumnInspector(dialect_name), COMPARISON)
+
+
+@pytest.mark.parametrize("dialect_name", [None, "mysql"])
+def test_column_verifier_fails_closed_on_undetermined_dialect(dialect_name):
+    # An unresolvable dialect must not fall through to the permissive branch:
+    # that would silently drop the PostgreSQL JSONB requirement.
+    migration = _load_migration()
+
+    with pytest.raises(
+        RuntimeError,
+        match="incompatible pump_check_comparison schema: "
+              "unsupported or undetermined database dialect",
+    ):
+        migration._verify_columns(_ColumnInspector(dialect_name), COMPARISON)
+
+
+@pytest.mark.parametrize(
+    ("dialect_name", "column_name", "wrong_type"),
+    [
+        ("postgresql", "created_at", postgresql.TIMESTAMP(timezone=True)),
+        ("postgresql", "created_at", sa.DATE()),
+        ("sqlite", "created_at", sa.DATE()),
+        ("postgresql", "public_id", sa.TEXT()),
+        ("postgresql", "analysis_attempt", sa.SMALLINT()),
+    ],
+)
+def test_column_verifier_still_rejects_genuinely_wrong_reflected_types(
+        dialect_name, column_name, wrong_type):
+    migration = _load_migration()
+    inspector = _ColumnInspector(
+        dialect_name, type_overrides={column_name: wrong_type})
+
+    with pytest.raises(
+        RuntimeError,
+        match=f"incompatible pump_check_comparison schema: "
+              f"column {column_name} has wrong",
+    ):
+        migration._verify_columns(inspector, COMPARISON)
 
 
 @pytest.mark.parametrize(
@@ -507,6 +617,140 @@ def test_column_verifier_rejects_missing_or_wrong_server_defaults(
               f"column {column_name} has wrong server default",
     ):
         migration._verify_columns(inspector, COMPARISON)
+
+
+_INSERT_COMPARISON = sa.text("""
+    INSERT INTO pump_check_comparison (
+        user_id, baseline_pump_check_id, current_pump_check_id, public_id,
+        status, comparability, analysis, analysis_version, created_at
+    ) VALUES (
+        :user_id, :baseline_pump_check_id, :current_pump_check_id, :public_id,
+        :status, :comparability, :analysis, :analysis_version, :created_at
+    )
+""")
+
+_COMPARISON_ROW = {
+    "user_id": 1,
+    "baseline_pump_check_id": 10,
+    "current_pump_check_id": 11,
+    "public_id": "A" * 24,
+    "status": "pending",
+    "comparability": None,
+    "analysis": None,
+    "analysis_version": "pump-check-comparison-analysis/v1",
+    "created_at": "2026-08-14 09:00:00",
+}
+
+
+@contextmanager
+def _enforced_comparison_schema(tmp_path, name):
+    """A real database built by this migration, ready for insert probes.
+
+    Structural assertions cannot tell an enforced constraint from a
+    tautological one; only a rejected INSERT can.
+    """
+    with _legacy_engine(tmp_path, name) as connection:
+        _run_upgrade(connection)
+        connection.execute(sa.text("INSERT INTO user (id) VALUES (1), (2)"))
+        connection.execute(sa.text(
+            "INSERT INTO pump_check (id, user_id) VALUES (10, 1), (11, 1)"))
+        yield connection
+
+
+def _insert_comparison(connection, **overrides):
+    # A savepoint keeps the surrounding transaction usable after a rejection,
+    # so one test can probe several violations and a valid control row.
+    with connection.begin_nested():
+        connection.execute(
+            _INSERT_COMPARISON, dict(_COMPARISON_ROW, **overrides))
+
+
+def _comparison_count(connection):
+    return connection.execute(
+        sa.text("SELECT count(*) FROM pump_check_comparison")).scalar()
+
+
+def test_pair_unique_constraint_is_directional_and_owner_scoped(tmp_path):
+    with _enforced_comparison_schema(tmp_path, "pair-unique.db") as connection:
+        _insert_comparison(connection)
+        # (owner, B, A, v) is a different comparison than (owner, A, B, v):
+        # the constraint must not canonicalize or sort the pair.
+        _insert_comparison(
+            connection, public_id="B" * 24,
+            baseline_pump_check_id=11, current_pump_check_id=10)
+        # Another owner may hold the very same directional pair.
+        _insert_comparison(connection, user_id=2, public_id="C" * 24)
+        # Another analysis version is another comparison.
+        _insert_comparison(
+            connection, public_id="D" * 24,
+            analysis_version="pump-check-comparison-analysis/v2")
+
+        with pytest.raises(IntegrityError) as duplicate:
+            _insert_comparison(connection, public_id="E" * 24)
+
+        message = str(duplicate.value)
+        assert "UNIQUE constraint failed" in message
+        assert "analysis_version" in message
+        assert _comparison_count(connection) == 4
+
+
+def test_distinct_sources_check_rejects_a_self_comparison(tmp_path):
+    with _enforced_comparison_schema(
+            tmp_path, "distinct-sources.db") as connection:
+        with pytest.raises(IntegrityError) as violation:
+            _insert_comparison(connection, current_pump_check_id=10)
+
+        assert "ck_pump_comparison_distinct_sources" in str(violation.value)
+        assert _comparison_count(connection) == 0
+
+        _insert_comparison(connection)
+        assert _comparison_count(connection) == 1
+
+
+def test_terminal_coherence_check_is_enforced_on_insert(tmp_path):
+    analysis = '{"summary": "ok"}'
+    with _enforced_comparison_schema(tmp_path, "terminal.db") as connection:
+        for label, overrides in (
+            ("completed without analysis",
+             {"status": "completed", "comparability": "comparable"}),
+            ("completed without comparability",
+             {"status": "completed", "analysis": analysis}),
+            ("pending carrying analysis", {"analysis": analysis}),
+            ("failed carrying comparability",
+             {"status": "failed", "comparability": "limited"}),
+        ):
+            with pytest.raises(IntegrityError) as violation:
+                _insert_comparison(connection, **overrides)
+            assert (
+                "ck_pump_comparison_terminal_fields" in str(violation.value)
+            ), label
+
+        assert _comparison_count(connection) == 0
+
+        _insert_comparison(connection)
+        _insert_comparison(
+            connection, public_id="B" * 24,
+            baseline_pump_check_id=11, current_pump_check_id=10,
+            status="completed", comparability="comparable", analysis=analysis)
+        assert _comparison_count(connection) == 2
+
+
+def test_migration_and_model_check_sql_definitions_agree():
+    # The migration keeps its own copies on purpose (a migration must not
+    # import live models), but a silent divergence would make every fresh
+    # database boot fail closed with "check ... has wrong SQL".
+    migration = _load_migration()
+    model_checks = {
+        constraint.name: " ".join(str(constraint.sqltext).split())
+        for constraint in PumpCheckComparison.__table__.constraints
+        if isinstance(constraint, sa.CheckConstraint)
+    }
+    migration_checks = {
+        name: " ".join(sql.split())
+        for name, sql in migration._REQUIRED_CHECKS[COMPARISON].items()
+    }
+
+    assert model_checks == migration_checks
 
 
 def test_downgrade_preserves_pump_check_sources(tmp_path):

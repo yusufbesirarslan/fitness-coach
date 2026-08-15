@@ -212,10 +212,25 @@ def _incompatible(table, detail):
         "Refusing an incomplete Pump Check comparison invariant.")
 
 
+_SUPPORTED_DIALECTS = frozenset({"postgresql", "sqlite"})
+
+# Reflection never returns the model-side declaration classes. Each dialect
+# reports the type name its catalog actually stores, so the accepted spellings
+# are listed per dialect instead of per SQLAlchemy class.
+_DATETIME_VISIT_NAMES = {
+    "postgresql": {"datetime", "timestamp"},
+    "sqlite": {"datetime"},
+}
+
+
 def _dialect_name(inspector):
     bind = getattr(inspector, "bind", None)
     dialect = getattr(bind, "dialect", None)
     return str(getattr(dialect, "name", "") or "").lower()
+
+
+def _visit_name(actual_type):
+    return str(getattr(actual_type, "__visit_name__", "") or "").lower()
 
 
 def _type_is_compatible(name, actual_type, expected_type, dialect_name):
@@ -227,15 +242,20 @@ def _type_is_compatible(name, actual_type, expected_type, dialect_name):
             and not isinstance(actual_type, postgresql.JSONB)
         )
     if expected_type is sa.Integer:
-        return getattr(actual_type, "__visit_name__", "").lower() == "integer"
+        return _visit_name(actual_type) == "integer"
     if expected_type is sa.String:
         return (
             isinstance(actual_type, sa.String)
-            and getattr(actual_type, "__visit_name__", "").lower()
-            in {"string", "varchar"}
+            and _visit_name(actual_type) in {"string", "varchar"}
         )
     if expected_type is sa.DateTime:
-        return getattr(actual_type, "__visit_name__", "").lower() == "datetime"
+        # A timezone-aware column is a different column: the application
+        # stores naive UTC and comparing the two silently shifts instants.
+        return (
+            isinstance(actual_type, sa.DateTime)
+            and _visit_name(actual_type) in _DATETIME_VISIT_NAMES[dialect_name]
+            and not getattr(actual_type, "timezone", False)
+        )
     return type(actual_type) is expected_type
 
 
@@ -291,6 +311,11 @@ def _verify_columns(inspector, table):
         _incompatible(table, f"missing columns {sorted(missing)}")
 
     dialect_name = _dialect_name(inspector)
+    if dialect_name not in _SUPPORTED_DIALECTS:
+        # Falling through would drop every dialect-specific rule (notably the
+        # PostgreSQL JSONB requirement) and accept an unverified schema.
+        _incompatible(table, "unsupported or undetermined database dialect")
+
     for name, (type_class, length, nullable) in _COLUMN_SPECS[table].items():
         actual = columns[name]
         actual_type = actual["type"]
@@ -377,13 +402,36 @@ _ATOMIC_PARENS_RE = re.compile(
 )
 
 
+_QUOTED_IDENTIFIER_RE = re.compile(r'"(?:""|[^"])*"')
+_BARE_IDENTIFIER_RE = re.compile(r"[a-z_][a-z0-9_]*")
+
+
+def _resolve_quoted_identifier(match):
+    raw = match.group(0)[1:-1].replace('""', '"')
+    if _BARE_IDENTIFIER_RE.fullmatch(raw):
+        # Quoting a lower-case identifier changes nothing in any dialect.
+        return raw
+    # Any other quoted identifier is case-sensitive and therefore a DIFFERENT
+    # column: encode it so it can never collapse onto the unquoted name.
+    return "qi_" + raw.encode("utf-8").hex()
+
+
+def _encode_literal(part):
+    content = part[1:-1].replace("''", "'")
+    # Hex keeps the literal exactly distinguishable while surviving the
+    # case-folding and whitespace-stripping applied to the SQL around it.
+    return "'" + content.encode("utf-8").hex() + "'"
+
+
 def _normalize_check_sql(value):
     if value is None:
         return None
-    normalized = str(value).strip().replace('"', "")
-    parts = re.split(r"('(?:''|[^'])*')", normalized)
+    parts = re.split(r"('(?:''|[^'])*')", str(value).strip())
     normalized = "".join(
-        part if index % 2 else part.lower()
+        _encode_literal(part)
+        if index % 2
+        else _QUOTED_IDENTIFIER_RE.sub(
+            _resolve_quoted_identifier, part).lower()
         for index, part in enumerate(parts)
     )
     if normalized.startswith("check"):
