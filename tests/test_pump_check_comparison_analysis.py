@@ -172,6 +172,30 @@ def test_every_text_field_rejects_unsafe_language(field, unsafe):
         parse_analysis(json.dumps(_with_text(field, unsafe)), "comparable")
 
 
+@pytest.mark.parametrize("field", TEXT_FIELDS)
+@pytest.mark.parametrize(
+    "unsafe",
+    [
+        # A rate claim quantifies progress even with no digit in the sentence;
+        # "muscle growth" alone left these spellings reaching the client.
+        "The growth rate looks steady.",
+        "The growth-rate is encouraging.",
+        "The rate of growth is visible here.",
+        "The gain rate looks consistent.",
+        "The hypertrophy rate stands out.",
+        # A diagnosis under a different noun is still a diagnosis; the pattern
+        # previously matched only "skeletal abnormality".
+        "A skeletal disorder is visible.",
+        "This shape indicates skeletal pathology.",
+        "A skeletal condition stands out here.",
+    ],
+)
+def test_every_text_field_rejects_rate_and_skeletal_claim_spellings(
+        field, unsafe):
+    with pytest.raises(InvalidComparisonAnalysis):
+        parse_analysis(json.dumps(_with_text(field, unsafe)), "comparable")
+
+
 @pytest.mark.parametrize(
     "unsafe",
     [

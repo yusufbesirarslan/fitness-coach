@@ -120,6 +120,27 @@ def test_analysis_parser_rejects_passive_medical_and_imperial_claims(unsafe):
         parse_analysis(json.dumps(_valid(summary=unsafe)))
 
 
+@pytest.mark.parametrize(
+    'unsafe',
+    [
+        # A rate claim quantifies progress with no digit present, and a
+        # diagnosis keeps its meaning under a different noun. Both spellings
+        # previously passed every field of the single-image contract too.
+        'The growth rate looks steady.',
+        'The growth-rate is encouraging.',
+        'The rate of growth is visible here.',
+        'The gain rate looks consistent.',
+        'The hypertrophy rate stands out.',
+        'A skeletal disorder is visible.',
+        'This shape indicates skeletal pathology.',
+        'A skeletal condition stands out here.',
+    ],
+)
+def test_analysis_parser_rejects_rate_and_skeletal_claim_spellings(unsafe):
+    with pytest.raises(InvalidAnalysis):
+        parse_analysis(json.dumps(_valid(summary=unsafe)))
+
+
 def test_prompt_treats_injection_like_description_as_untrusted_json_data():
     prompt = build_prompt({
         "body_region": "upper_body",

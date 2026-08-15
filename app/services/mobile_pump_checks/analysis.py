@@ -27,7 +27,9 @@ _MEDICAL_RE = re.compile(
     r"(?:diagnos|injur|disease|fractur|tear|arthritis|tendon|cancer|"
     r"hormonal|eating disorder|anorexi|bulimi|scoliosis|impingement|"
     r"infect|dislocat|sprain|tumou?r|osteopor|"
-    r"skeletal abnormal|clinical postur)",
+    # "skeletal abnormality" alone left "skeletal disorder"/"skeletal
+    # pathology" — the same claim under another noun — reaching the client.
+    r"skeletal (?:abnormal|disorder|patholog|condition)|clinical postur)",
     re.IGNORECASE,
 )
 _PASSIVE_MEDICAL_RE = re.compile(
@@ -42,7 +44,10 @@ _DIAGNOSTIC_ASSERTION_RE = re.compile(
     re.IGNORECASE,
 )
 _BODY_CLAIM_RE = re.compile(
-    r"(?:body[ -]?fat|lean mass|muscle (?:mass|growth)|circumference|asymmetr)",
+    r"(?:body[ -]?fat|lean mass|muscle (?:mass|growth)|circumference|asymmetr|"
+    # A growth/gain RATE is a quantified progress claim even when the model
+    # states no number; "muscle growth" alone did not cover the bare noun.
+    r"(?:growth|gain|hypertrophy)[ -]?rate|rate of (?:growth|gain))",
     re.IGNORECASE,
 )
 _MEASUREMENT_RE = re.compile(
