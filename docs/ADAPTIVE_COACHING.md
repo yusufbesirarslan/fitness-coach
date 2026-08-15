@@ -417,10 +417,24 @@ after-snapshot — not the plan as it stands now. A retry of an old key must not
 report a later, unrelated change.
 
 **The database is the final arbiter.** No process memory, no Redis, no timestamp
-window: two concurrent workers both pass their pre-flight check, both reach the
-INSERT, and `uq_plan_mutation_user_key` picks one. The loser rolls back, re-reads
-the winner's row and replays it. The `add_exercise` retry — the one command that
-is not naturally convergent — is the concrete bug this closes.
+window. Two layers settle a same-key race, in this order. Usually the row lock
+does it: the loser blocks on `SELECT … FOR UPDATE`, and by the time it runs its
+second look the winner's row is committed, so it replays without any exception.
+When both contenders get past their pre-flight check before either commits — no
+lock held, a backend without row locks, or a future caller that resolves the plan
+differently — both reach the INSERT and `uq_plan_mutation_user_key` picks one;
+the loser rolls back its own half-applied mutation, re-reads the winner's row and
+replays it. The constraint is what makes the guarantee independent of the lock,
+which is why it is the arbiter of record even though the lock normally gets there
+first. The `add_exercise` retry — the one command that is not naturally
+convergent — is the concrete bug this closes.
+
+Both layers are pinned separately, because a test can only see one at a time:
+`TestDatabaseArbitration` (tests/test_plan_mutation_history.py) forces the
+constraint path deterministically, and the PostgreSQL races
+(tests/test_plan_mutation_history_pg.py) prove the outcome under real
+concurrency. A green PostgreSQL run on its own does **not** demonstrate that the
+constraint fired.
 
 **A validation failure consumes nothing.** The command is rejected before any row
 is inserted, so a corrected retry under the same key succeeds instead of being
@@ -485,7 +499,21 @@ them onto yet.
 
 One migration, `b3c4d5e6f7a8`, a single new head off `f0a1b2c3d4e5`. Additive
 only: two columns on `training_plan` and one new table. Nothing is dropped,
-renamed or rewritten, so a code-only rollback stays safe (CLAUDE.md A2).
+renamed or rewritten, and no existing value is edited (CLAUDE.md A2).
+
+One caveat that "additive" does not cover, so it is stated rather than implied:
+`lineage_id` lands `NOT NULL` with **no server default** (the value has to be
+unique per row, so there is no constant a default could supply). Pre-PR2 code
+does not name the column, so its `INSERT` into `training_plan` — the one in
+`POST /training-plan/save` — would violate the constraint. That does not make a
+code rollback *more* dangerous than this repository already treats it: rolling
+code back past any new revision leaves `alembic_version` naming a revision the
+old tree does not contain, and boot upgrade is fatal (CLAUDE.md A2), so the
+container refuses to start either way. It does mean the documented escape hatch
+of running old code against the migrated schema (`FITX_DB_AUTO_UPGRADE=0` /
+`FITX_DB_UPGRADE_FAIL_OPEN=1`) is not available for this revision. Making the
+column nullable and tightening it in a later contract migration is the standard
+two-step if that hatch is ever needed.
 
 `lineage_id` is backfilled with a fresh random token **per row** — one shared
 constant would be far easier to write and would make two users' plans look like a

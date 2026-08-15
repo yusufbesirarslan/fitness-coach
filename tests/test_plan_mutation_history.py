@@ -523,6 +523,74 @@ class TestNoOpReplay:
             undo_last_change(user.id, _ctx("n-undo-0002"))
 
 
+# ── Database arbitration of a same-key collision ─────────────────────────────
+
+class TestDatabaseArbitration:
+    """The path taken when both contenders reach the INSERT.
+
+    On PostgreSQL the row lock usually settles a same-key race earlier: the
+    loser blocks on ``SELECT … FOR UPDATE``, and by the time it runs its
+    second look the winner's row is committed, so it replays without the
+    constraint ever firing. That is why the PostgreSQL races cannot be relied
+    on to exercise ``uq_plan_mutation_user_key`` — and why these tests exist
+    instead of standing in for them.
+
+    The condition the constraint exists for is "both transactions read before
+    either committed", which no single-threaded call can produce naturally. It
+    is reproduced here by blinding ONLY the pre-flight lookup. Everything the
+    tests actually assert stays real: the unique constraint raises, the service
+    rolls back, re-reads the durable winner and resolves against it.
+
+    What is being proven is the part a rollback bug would silently break — that
+    the loser's own plan mutation does not survive. A journal row count alone
+    would pass with the plan left double-mutated.
+    """
+
+    @staticmethod
+    def _blind_preflight(monkeypatch):
+        monkeypatch.setattr(
+            "app.services.plan_mutation.service._existing_result",
+            lambda *_args, **_kwargs: None)
+
+    def test_the_loser_of_a_same_key_race_replays_and_keeps_no_mutation(
+            self, app, make_user, seed_plan, monkeypatch):
+        user = make_user("d_arb_replay")
+        seed_plan(user.id)
+        command = AddExerciseCommand(day="Çarşamba", exercise="Plank", sets=3,
+                                     reps="30 sn")
+        winner = apply_plan_mutation(user.id, command, _ctx("d-arb-0001"))
+
+        self._blind_preflight(monkeypatch)
+        loser = apply_plan_mutation(user.id, command, _ctx("d-arb-0001"))
+
+        assert loser.replayed is True
+        assert loser.mutation_id == winner.mutation_id
+        assert loser.plan_version == winner.plan_version == 1
+        # The decisive assertion: the loser applied its add before the INSERT
+        # failed, so a missing rollback would leave two.
+        assert _names(_text(user.id), "Çarşamba") == ["Barbell Row", "Plank"]
+        assert _version(user.id) == 1
+        assert len(_records(user.id)) == 1
+
+    def test_the_loser_of_a_same_key_conflict_keeps_no_mutation(
+            self, app, make_user, seed_plan, monkeypatch):
+        user = make_user("d_arb_conflict")
+        seed_plan(user.id)
+        apply_plan_mutation(user.id, _swap_bench(), _ctx("d-arb-0002"))
+        after_winner = _text(user.id)
+
+        self._blind_preflight(monkeypatch)
+        with pytest.raises(IdempotencyConflict):
+            apply_plan_mutation(
+                user.id,
+                RemoveExerciseCommand(day="Pazartesi", exercise="Shoulder Press"),
+                _ctx("d-arb-0002"))
+
+        assert _text(user.id) == after_winner
+        assert _version(user.id) == 1
+        assert len(_records(user.id)) == 1
+
+
 # ── Atomicity ────────────────────────────────────────────────────────────────
 
 class TestAtomicity:

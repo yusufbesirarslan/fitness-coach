@@ -4147,8 +4147,14 @@ blueprint so much as imports the package.
   is a contract in which a future consumer can quietly opt out of replay
   protection and reintroduce the duplicate-`add` bug PR2 exists to close.
 - **The database is the final race arbiter.** `uq_plan_mutation_user_key`, not
-  process memory, not Redis, not a timestamp window. Both contenders reach the
-  INSERT; the loser rolls back, re-reads the winner and replays it.
+  process memory, not Redis, not a timestamp window. When both contenders get
+  past their pre-flight check they both reach the INSERT and the loser rolls back
+  its own half-applied mutation, re-reads the winner and replays it. Note that
+  the row lock usually settles it earlier — the loser blocks, then converges at
+  its second look without any exception — so a green PostgreSQL race run does not
+  by itself demonstrate that the constraint fired. That path is pinned separately
+  and deterministically by `TestDatabaseArbitration` in
+  `tests/test_plan_mutation_history.py` (added during PR2 review).
 - **An accepted no-op is recorded.** The unsafe version is subtle: sets are 3, a
   no-op "set them to 3" is accepted under key K, the user really changes them to
   4, then K is retransmitted. Without a durable row K looks fresh and drags the

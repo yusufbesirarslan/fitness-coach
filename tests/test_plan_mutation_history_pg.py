@@ -8,6 +8,17 @@ These run against a disposable database and are collected in CI's
 Every race is coordinated with ``threading.Barrier`` — the contenders arrive
 together deterministically. No ``sleep()`` anywhere: a timing-based race test
 either passes by luck or turns into a flake, and both are worse than no test.
+
+WHAT THESE PROVE, AND WHAT THEY DO NOT. Each test asserts an *outcome* invariant
+— one addition, one winner, no lost update, one undo — against real PostgreSQL
+row locks, real transactions and real concurrency. They do not pin down WHICH
+mechanism produced it. In the ordinary interleaving the ``SELECT … FOR UPDATE``
+in ``_locked_active_plan`` settles a same-key race first: the loser blocks, and
+by the time it reaches its second look the winner's row is committed, so it
+replays without ``uq_plan_mutation_user_key`` ever firing. Reading a green run
+here as proof that the database arbitrated would therefore be wrong. The
+constraint path — both contenders reaching the INSERT — is pinned deterministically
+by ``TestDatabaseArbitration`` in tests/test_plan_mutation_history.py.
 """
 import os
 import threading
@@ -161,10 +172,11 @@ def _seed_one_mutation(app, user_id):
 def test_concurrent_same_key_same_command_applies_once(pg_plan_app):
     """The duplicate-``add`` race, run for real.
 
-    Both workers pass their pre-flight check before either commits, so both
-    reach the INSERT. Only the unique constraint can decide this — and the loser
-    must come back with the winner's result, not an error and not a second
-    exercise.
+    Two workers deliver one key concurrently against real PostgreSQL. However
+    the two layers settle it — the row lock plus the second look, or the unique
+    constraint if both reach the INSERT — the outcome must be identical: one
+    logical operation, and the loser comes back with the winner's result rather
+    than an error or a second exercise.
     """
     app, user_id = pg_plan_app
     command = _add("Plank")
@@ -251,6 +263,13 @@ def test_concurrent_distinct_key_undos_reverse_only_one_change(pg_plan_app):
     Exactly one may win. The other must fail closed rather than walk a second
     step back — the user asked to undo one change, twice by accident, not two
     changes.
+
+    Both refusals are correct and both are accepted below, because which one
+    appears depends on how far the loser got: with the row lock held it re-reads
+    the restored plan and finds nothing still reversible
+    (``UndoUnavailable``); without one it would reach the byte precondition and
+    refuse there (``UndoConflict``). ``uq_plan_mutation_reverts`` sits behind
+    both as a backstop and is not expected to fire while the lock holds.
     """
     app, user_id = pg_plan_app
     _seed_one_mutation(app, user_id)
