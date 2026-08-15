@@ -53,3 +53,19 @@ The canonical version is `pump-check-analysis/v1`. Required analysis keys are `s
 - P2: stale presigned URL sharing. URLs are bounded capabilities; they expire and are never accepted as API authority.
 
 No unresolved P0 or P1 is acceptable. Real PostgreSQL migration drift and race evidence remains an explicit review condition when a local PostgreSQL test URL is unavailable.
+
+## Comparison contract (Sprint 10 PR3)
+
+The comparison surface is `POST /api/v1/pump-check-comparisons` and owner-only `GET /api/v1/pump-check-comparisons/<comparison_id>`, both Bearer-authenticated on the existing `/api/v1` blueprint. The create body is exactly `baseline_pump_check_id` and `current_pump_check_id`. The pair is directional and is never sorted; `baseline.captured_at` must precede `current.captured_at`.
+
+The canonical version is `pump-check-comparison-analysis/v1`. Required provider keys are `summary`, `observed_changes`, `stable_areas`, `focus_areas`, `limitations`, `comparability_reasons`, `next_check_guidance`, and `comparability`; comparability is one of `comparable`, `limited`, or `not_comparable` and is promoted out of the JSON into its own column so there is one public authority. Beyond the PR1 validators, comparison text also rejects progress scores, body-fat estimates, circumference deltas, muscle-growth percentages, causal claims, and medical inference. `not_comparable` is a legitimate completed answer, never an error.
+
+Bedrock receives only the two normalized images (each at most 1,500,000 bytes and a 1,600-pixel longest edge, prepared in memory without touching the stored object), an explicit A-baseline/B-current label ordering, and the body region. Stored PR1 narratives are used ONLY as an eligibility signal and are never forwarded, so interpretations do not compound.
+
+Added threat-model entries:
+
+- P0: cross-user pair construction. Mitigated by owner-scoped resolution of BOTH sources, one shared private 404, and S3 owner-segment validation before any read.
+- P1: duplicate model spend across keys. Mitigated by the (owner, baseline, current, version) unique constraint, so different keys converge on one row and one call.
+- P1: stale worker overwriting a newer result. Mitigated by the bounded lease plus owner/id/status/attempt-conditional finalization.
+- P1: source-quality laundering. Mitigated by the `limited` cap — provider output claiming `comparable` over a limited source is rejected as invalid output.
+- P2: undecodable stored media wasting model spend. Mitigated by terminal `invalid_media`, which is 422 and deliberately not reclaimable.

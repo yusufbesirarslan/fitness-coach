@@ -53,7 +53,7 @@
 - Consumes: Pillow `Image`, Flask `current_app`, validated image bytes/media types.
 - Produces: `prepare_image_for_vision(image_bytes: bytes, media_type: str, max_bytes: int = 1_500_000) -> tuple[bytes, str]`, `ImagePreparationError`, `ImageTooLargeError`, and menu compatibility name `_compress_image_for_vision`.
 
-- [ ] **Step 1: Write failing shared-utility and PR1 characterization tests**
+- [x] **Step 1: Write failing shared-utility and PR1 characterization tests**
 
 ```python
 def test_small_valid_image_passes_through_without_reencoding():
@@ -94,13 +94,13 @@ def test_canonical_pr1_normalizes_before_single_image_provider(monkeypatch):
 
 Retain a menu test that imports `_compress_image_for_vision` from `app.services.menu_ocr` and proves its return shape and bomb guard are unchanged.
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 Run: `python -m pytest -q tests/test_vision_images.py tests/test_pump_check_analysis.py tests/test_menu_ocr.py`
 
 Expected: FAIL during import because `app.services.vision_images` and `prepare_image_for_vision` do not exist.
 
-- [ ] **Step 3: Promote the current algorithm into the shared utility**
+- [x] **Step 3: Promote the current algorithm into the shared utility**
 
 ```python
 MAX_IMAGE_BYTES = 1_500_000
@@ -139,13 +139,13 @@ def prepare_image_for_vision(image_bytes, media_type,
 
 Move the header-first pixel check, `Image.DecompressionBombError` handling, RGB conversion, LANCZOS resize, and JPEG encoding into focused private helpers. In `menu_ocr.py`, import `ImageTooLargeError` and alias `prepare_image_for_vision` as `_compress_image_for_vision`; do not retain a second implementation. In PR1 `analyze_image`, call preparation immediately before its existing provider call.
 
-- [ ] **Step 4: Run focused tests and existing call-site regressions**
+- [x] **Step 4: Run focused tests and existing call-site regressions**
 
 Run: `python -m pytest -q tests/test_vision_images.py tests/test_pump_check_analysis.py tests/test_menu_ocr.py tests/test_menu_extract_helpers.py tests/test_ai_coach.py tests/test_coach_tools.py`
 
 Expected: PASS; PR1 schema and the single-image adapter remain unchanged.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/services/vision_images.py app/services/menu_ocr.py app/services/mobile_pump_checks/analysis.py tests/test_vision_images.py tests/test_pump_check_analysis.py tests/test_menu_ocr.py
@@ -167,7 +167,7 @@ git commit -m 'refactor(ai): share bounded vision image preparation'
 - Consumes: Task 1 image preparation; PR1 safety semantics; existing Bedrock client/model/token ceiling/concurrency slot.
 - Produces: `ANALYSIS_VERSION`, `InvalidComparisonAnalysis`, `parse_analysis(raw: str, source_quality_cap: str) -> tuple[str, dict]`, `build_prompt(context: dict) -> str`, `analyze_images(baseline: tuple[bytes, str], current: tuple[bytes, str], context: dict, source_quality_cap: str, provider=None) -> tuple[str, dict]`, and `_bedrock_compare_images(baseline_bytes, baseline_media_type, current_bytes, current_media_type, prompt, max_tokens=1200, temperature=0.0) -> str`.
 
-- [ ] **Step 1: Write failing exact-schema and safety tests**
+- [x] **Step 1: Write failing exact-schema and safety tests**
 
 ```python
 def _valid(comparability='comparable'):
@@ -209,7 +209,7 @@ def test_limited_source_rejects_provider_comparable_claim():
 
 Add parameterized cases for every missing/unknown key, invalid enum, non-string text, empty scalar, 400/300/240 character limits, and list counts 5/4/4/4/5.
 
-- [ ] **Step 2: Write failing payload-order and single-image regression tests**
+- [x] **Step 2: Write failing payload-order and single-image regression tests**
 
 ```python
 def test_two_image_adapter_labels_and_orders_baseline_before_current(
@@ -237,13 +237,13 @@ def test_existing_single_image_layout_is_unchanged(monkeypatch):
     assert [block['type'] for block in content] == ['text', 'image']
 ```
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 Run: `python -m pytest -q tests/test_pump_check_comparison_analysis.py tests/test_bedrock_comparison_adapter.py`
 
 Expected: FAIL because the parser and `_bedrock_compare_images` are absent.
 
-- [ ] **Step 4: Implement the exact contract**
+- [x] **Step 4: Implement the exact contract**
 
 ```python
 ANALYSIS_VERSION = 'pump-check-comparison-analysis/v1'
@@ -295,13 +295,13 @@ def _bedrock_compare_images(
 
 Factor only private encoding/error handling. Keep the single-image signature and `[text, image]` layout intact.
 
-- [ ] **Step 5: Run comparison and existing adapter tests**
+- [x] **Step 5: Run comparison and existing adapter tests**
 
 Run: `python -m pytest -q tests/test_pump_check_comparison_analysis.py tests/test_bedrock_comparison_adapter.py tests/test_pump_check_analysis.py tests/test_ai_routing.py tests/test_coach_tools.py`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add app/services/ai.py app/services/mobile_pump_check_comparisons tests/test_pump_check_comparison_analysis.py tests/test_bedrock_comparison_adapter.py
@@ -325,7 +325,7 @@ git commit -m 'feat(ai): add bounded pump check comparison analysis'
 - Consumes: HMAC opaque-ID pattern, `PumpCheck`, `User`, JSONB/SQLite JSON convention, migration head `e9f0a1b2c3d4`.
 - Produces: `PumpCheckComparison`, `PumpCheckComparisonRequest`, `new_comparison_id`, `is_valid_comparison_id`, and directional `fingerprint`.
 
-- [ ] **Step 1: Write failing identity/model tests**
+- [x] **Step 1: Write failing identity/model tests**
 
 ```python
 def test_comparison_id_is_opaque_owner_bound():
@@ -354,7 +354,7 @@ def test_ledger_has_no_analysis_authority():
 
 Assert every column length/nullability, both unique constraints, distinct-source/status/comparability/terminal checks, and all FK `ondelete='CASCADE'` directions.
 
-- [ ] **Step 2: Write failing migration lifecycle tests**
+- [x] **Step 2: Write failing migration lifecycle tests**
 
 ```python
 def test_upgrade_creates_both_tables_on_legacy_schema(tmp_path):
@@ -386,13 +386,13 @@ def test_downgrade_preserves_pump_check_sources(tmp_path):
     assert 'pump_check_comparison_request' not in tables
 ```
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 Run: `python -m pytest -q tests/test_pump_check_comparison_identity.py tests/test_pump_check_comparison_migration.py tests/test_migration_graph.py tests/test_cascade_delete.py`
 
 Expected: FAIL because the models, identity helpers, and revision are absent.
 
-- [ ] **Step 4: Add the ORM authorities**
+- [x] **Step 4: Add the ORM authorities**
 
 ```python
 class PumpCheckComparison(db.Model):
@@ -461,7 +461,7 @@ class PumpCheckComparisonRequest(db.Model):
 
 Define the three check SQL strings explicitly so completed rows require analysis and comparability, while non-completed rows require both null. Add owner/source/ledger relationships with `passive_deletes=True`; comparison deletion must never delete a source Pump Check.
 
-- [ ] **Step 5: Implement identity and directional fingerprint**
+- [x] **Step 5: Implement identity and directional fingerprint**
 
 ```python
 ID_DOMAIN = b'axisai/mobile-pump-check-comparison/id/v1'
@@ -481,11 +481,11 @@ def fingerprint(baseline_token, current_token, version):
     return hashlib.sha256(encoded.encode('utf-8')).hexdigest()
 ```
 
-- [ ] **Step 6: Implement the create-all-aware migration**
+- [x] **Step 6: Implement the create-all-aware migration**
 
 Set `revision = 'fa1b2c3d4e5f'` and `down_revision = 'e9f0a1b2c3d4'`. Define full columns, FKs, indexes, uniques, and checks. Create absent tables in comparison-then-ledger order. If a table exists, inspect schema and raise `RuntimeError` for incompatible partial state. Downgrade ledger first, comparison second. Use PostgreSQL JSONB with SQLite JSON.
 
-- [ ] **Step 7: Verify schema and head**
+- [x] **Step 7: Verify schema and head**
 
 Run: `python -m pytest -q tests/test_pump_check_comparison_identity.py tests/test_pump_check_comparison_migration.py tests/test_migration_graph.py tests/test_cascade_delete.py`
 
@@ -493,7 +493,7 @@ Run: `flask --app starter db heads`
 
 Expected: tests PASS and the sole head is `fa1b2c3d4e5f`.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add app/models.py app/services/mobile_pump_check_comparisons/identity.py migrations/versions/fa1b2c3d4e5f_add_pump_check_comparisons.py tests/test_pump_check_comparison_identity.py tests/test_pump_check_comparison_migration.py tests/test_migration_graph.py tests/test_cascade_delete.py
@@ -514,7 +514,7 @@ git commit -m 'feat(db): add canonical pump check comparisons'
 - Consumes: Task 2 version/parser; Task 3 models/identity; PR1 `parse_analysis`, `PumpCheck`, and S3 owner-key grammar.
 - Produces: `CreateCommand`, `InvalidCommand`, `PumpCheckNotFound`, `ChecksNotComparable`, `create_command`, `resolve_eligible_sources`, `get_owned`, and `serialize_comparison`.
 
-- [ ] **Step 1: Write failing command, privacy, eligibility, and serializer tests**
+- [x] **Step 1: Write failing command, privacy, eligibility, and serializer tests**
 
 ```python
 def test_command_requires_exact_ordered_opaque_tokens():
@@ -577,13 +577,13 @@ def test_serializer_exposes_only_public_directional_contract(comparison):
 
 Add positive exact-region/chronology/stored-analysis cases, limited-source cap, reversed direction rejection, distinct-source rejection, corrupt stored PR1 JSON, and private-key owner mismatch.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run: `python -m pytest -q tests/test_pump_check_comparison_service.py tests/test_s3_helper.py`
 
 Expected: FAIL because the comparison service and public owner-key predicate are absent.
 
-- [ ] **Step 3: Implement exact parsing and owner-scoped resolution**
+- [x] **Step 3: Implement exact parsing and owner-scoped resolution**
 
 ```python
 @dataclass(frozen=True)
@@ -614,7 +614,7 @@ def _owned_source(user_id, token):
 
 Validate all seven design eligibility rules before any S3 read/Bedrock call. Re-run PR1 `parse_analysis(json.dumps(row.analysis))` so corrupt stored JSON fails closed. Expose `key_belongs_to_user(key, user_id) -> bool` from `s3_helper.py` as a thin public wrapper over its current segment check. Return `EligibleSources(baseline, current, source_quality_cap)`, where the cap is `limited` if either source is limited, otherwise `comparable`.
 
-- [ ] **Step 4: Implement private lookup and serializer**
+- [x] **Step 4: Implement private lookup and serializer**
 
 ```python
 def get_owned(user_id, token):
@@ -640,13 +640,13 @@ def serialize_comparison(row):
     }
 ```
 
-- [ ] **Step 5: Run focused regressions**
+- [x] **Step 5: Run focused regressions**
 
 Run: `python -m pytest -q tests/test_pump_check_comparison_service.py tests/test_pump_check_analysis.py tests/test_s3_helper.py`
 
 Expected: PASS and every deterministic rejection proves zero external calls.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add app/services/mobile_pump_check_comparisons/service.py s3_helper.py tests/test_pump_check_comparison_service.py tests/test_s3_helper.py
@@ -665,7 +665,7 @@ git commit -m 'feat(api): validate pump check comparison pairs'
 - Consumes: Tasks 1-4, `s3_helper.get_object_bytes`, `media_type_for_key`, and conditional SQLAlchemy updates.
 - Produces: `create_or_replay(user_id, key, command) -> tuple[PumpCheckComparison, bool]`, `IdempotencyConflict`, `ComparisonUnavailable`, `MediaNotComparable`, `_claim_analysis`, `_finalize_success`, and `_finalize_failure`.
 
-- [ ] **Step 1: Write failing ledger-order and convergence tests**
+- [x] **Step 1: Write failing ledger-order and convergence tests**
 
 ```python
 def test_existing_key_conflicts_before_source_lookup(
@@ -701,7 +701,7 @@ def test_different_keys_same_pair_converge(
 
 Add cross-owner identical-key independence and proof that ineligible new commands create neither canonical nor ledger row.
 
-- [ ] **Step 2: Write failing lease, retry, fencing, and I/O tests**
+- [x] **Step 2: Write failing lease, retry, fencing, and I/O tests**
 
 ```python
 def test_unexpired_lease_returns_analyzing_without_external_io(
@@ -758,13 +758,13 @@ def test_comparison_reads_originals_without_upload_or_replacement(
     assert len(reads) == 2
 ```
 
-- [ ] **Step 3: Run lifecycle tests and verify RED**
+- [x] **Step 3: Run lifecycle tests and verify RED**
 
 Run: `python -m pytest -q tests/test_pump_check_comparison_lifecycle.py`
 
 Expected: FAIL because convergence/claim/finalization is absent.
 
-- [ ] **Step 4: Implement ledger-first pair convergence**
+- [x] **Step 4: Implement ledger-first pair convergence**
 
 ```python
 def create_or_replay(user_id, key, command):
@@ -785,7 +785,7 @@ def create_or_replay(user_id, key, command):
 
 Use unique-constraint insert/rollback/owner-scoped re-query loops for pair and ledger. Compare the persisted fingerprint on a ledger race. Attach a new key to the persisted pair on a pair race. Never classify convergence `IntegrityError` as a provider failure.
 
-- [ ] **Step 5: Implement claim and generation-fenced finalization**
+- [x] **Step 5: Implement claim and generation-fenced finalization**
 
 ```python
 ANALYSIS_LEASE_SECONDS = 900
@@ -824,7 +824,7 @@ def _claim_analysis(row_id, user_id, now=None):
 
 Condition both finalizers on owner/id/`status='analyzing'`/attempt. Persist only `storage`, `invalid_media`, `invalid_output`, `provider`, or `persistence`; terminal invalid media is not reclaimable.
 
-- [ ] **Step 6: Implement external work after transaction end**
+- [x] **Step 6: Implement external work after transaction end**
 
 ```python
 baseline_raw = s3_helper.get_object_bytes(
@@ -855,13 +855,13 @@ def _log_outcome(event, *, status, comparability=None,
 
 The helper must not accept IDs, keys, fingerprints, descriptions, prompts, image bytes, or provider output; architecture tests inspect the signature and format string.
 
-- [ ] **Step 7: Run lifecycle regressions**
+- [x] **Step 7: Run lifecycle regressions**
 
 Run: `python -m pytest -q tests/test_pump_check_comparison_lifecycle.py tests/test_pump_check_comparison_service.py tests/test_mobile_pump_check_pg.py`
 
 Expected: comparison tests PASS; the existing opt-in PG module skips unless enabled.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add app/services/mobile_pump_check_comparisons/service.py tests/test_pump_check_comparison_lifecycle.py
@@ -882,7 +882,7 @@ git commit -m 'feat(api): orchestrate pump check comparison analysis'
 - Consumes: Task 5 service; existing mobile blueprint/error envelope, bearer middleware, limiter, shared AI gate, and idempotency parser.
 - Produces: POST `/api/v1/pump-check-comparisons` and GET `/api/v1/pump-check-comparisons/<comparison_id>`.
 
-- [ ] **Step 1: Write failing API/privacy tests**
+- [x] **Step 1: Write failing API/privacy tests**
 
 ```python
 def test_create_requires_bearer_json_and_idempotency(
@@ -926,7 +926,7 @@ def test_get_is_read_only(monkeypatch, client, auth_headers, comparison):
 
 Add cross-owner/unknown/malformed comparison private 404 equality and exact cases for: malformed 400, source-private 404, deterministic/media 422, idempotency 409, gate-busy 503 with `Retry-After`, transient 503, unexpired analyzing 200, new 201, and replay/converged 200.
 
-- [ ] **Step 2: Write failing architecture guards**
+- [x] **Step 2: Write failing architecture guards**
 
 ```python
 def test_only_explicit_create_and_read_routes_exist():
@@ -950,13 +950,13 @@ def test_comparison_code_has_no_second_provider_or_sensitive_output():
 
 Also assert only `PumpCheckComparison` owns analysis, GET source has no claim/analyze call, POST uses `g.mobile_user.id`, and serialization excludes internal IDs/images.
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 Run: `python -m pytest -q tests/test_mobile_pump_check_comparison_api.py tests/test_mobile_pump_check_comparison_architecture.py`
 
 Expected: FAIL because routes are absent.
 
-- [ ] **Step 4: Implement POST/GET and error mapping**
+- [x] **Step 4: Implement POST/GET and error mapping**
 
 ```python
 @bp.post('/pump-check-comparisons')
@@ -985,13 +985,13 @@ def create_pump_check_comparison():
 
 Map all remaining exceptions exactly to the approved taxonomy without details. Import the route module at the bottom of `mobile_api.py` beside `mobile_pump_checks`. GET only calls `get_owned` and `_response`.
 
-- [ ] **Step 5: Run API and adjacent regressions**
+- [x] **Step 5: Run API and adjacent regressions**
 
 Run: `python -m pytest -q tests/test_mobile_pump_check_comparison_api.py tests/test_mobile_pump_check_comparison_architecture.py tests/test_mobile_pump_check_api.py tests/test_mobile_pump_check_architecture.py tests/test_mobile_auth_api.py tests/test_write_rate_limits.py`
 
 Expected: PASS and PR1 routes remain unchanged.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add app/blueprints/mobile_pump_check_comparisons.py app/blueprints/mobile_api.py tests/test_mobile_pump_check_comparison_api.py tests/test_mobile_pump_check_comparison_architecture.py
@@ -1010,7 +1010,7 @@ git commit -m 'feat(api): expose owner-only pump check comparisons'
 - Consumes: Task 3 models/FKs and the existing explicit user-data deletion command.
 - Produces: ledger deletion before comparison deletion before source Pump Checks.
 
-- [ ] **Step 1: Write failing erasure regression**
+- [x] **Step 1: Write failing erasure regression**
 
 ```python
 def test_delete_user_removes_comparison_records_without_other_sources(
@@ -1024,23 +1024,23 @@ def test_delete_user_removes_comparison_records_without_other_sources(
     assert db.session.get(PumpCheck, other_check.id) is not None
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `python -m pytest -q tests/test_cascade_delete.py`
 
 Expected: FAIL because the explicit CLI registry/order omits both new models.
 
-- [ ] **Step 3: Implement FK-safe explicit ordering**
+- [x] **Step 3: Implement FK-safe explicit ordering**
 
 Import both models in `app/cli.py`; delete owner-ledger rows first, owner comparison rows second, then current Pump Check children and Pump Checks. Keep FK cascades as defense in depth.
 
-- [ ] **Step 4: Verify**
+- [x] **Step 4: Verify**
 
 Run: `python -m pytest -q tests/test_cascade_delete.py tests/test_pump_check_comparison_migration.py`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/cli.py tests/test_cascade_delete.py
@@ -1060,7 +1060,7 @@ git commit -m 'fix(privacy): erase pump check comparison records'
 - Consumes: Task 5 service, PostgreSQL 16 CI service, `FITX_PG_CONCURRENCY_TEST`, and `PG_TEST_DATABASE_URL`.
 - Produces: real-database uniqueness/fencing proof and CI enforcement.
 
-- [ ] **Step 1: Write opt-in PostgreSQL race tests**
+- [x] **Step 1: Write opt-in PostgreSQL race tests**
 
 ```python
 pytestmark = pytest.mark.pg_concurrency
@@ -1098,17 +1098,17 @@ def test_stale_generation_cannot_overwrite_newer_result(
 
 Add cross-user identical-key independence and same-key/different-command one-winner conflict. Use a barrier, separate Flask contexts/sessions, a strictly disposable URL, and 30-second join assertions.
 
-- [ ] **Step 2: Verify safe local skip**
+- [x] **Step 2: Verify safe local skip**
 
 Run: `python -m pytest -q tests/test_mobile_pump_check_comparison_pg.py`
 
 Expected without opt-in environment: one module-level skip and no database mutation.
 
-- [ ] **Step 3: Add the module to PostgreSQL CI**
+- [x] **Step 3: Add the module to PostgreSQL CI**
 
 Append `tests/test_mobile_pump_check_comparison_pg.py` to the existing `mobile-pg-concurrency` command. Extend the architecture test to require that exact path.
 
-- [ ] **Step 4: Run real PostgreSQL proof when available**
+- [x] **Step 4: Run real PostgreSQL proof when available**
 
 ```powershell
 $env:FITX_PG_CONCURRENCY_TEST='1'
@@ -1118,13 +1118,13 @@ python -m pytest -m pg_concurrency -q tests/test_mobile_pump_check_pg.py tests/t
 
 Expected: PASS. If disposable PostgreSQL 16 is unavailable, record the exact failure and reserve `READY WITH CONDITIONS`; SQLite is not a substitute.
 
-- [ ] **Step 5: Verify workflow guards**
+- [x] **Step 5: Verify workflow guards**
 
 Run: `python -m pytest -q tests/test_mobile_pump_check_comparison_architecture.py tests/test_mobile_pump_check_architecture.py`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests/test_mobile_pump_check_comparison_pg.py tests/test_mobile_pump_check_comparison_architecture.py .github/workflows/ci.yml
@@ -1148,7 +1148,7 @@ git commit -m 'test: cover pump comparison postgres races'
 - Consumes: Tasks 1-8 and the exact 27-section contract in `cf-sprint10-pr3.txt`.
 - Produces: canonical docs, checked plan, local report, verification evidence, and a clean committed worktree.
 
-- [ ] **Step 1: Write a failing documentation guard**
+- [x] **Step 1: Write a failing documentation guard**
 
 ```python
 def test_canonical_docs_name_version_routes_and_privacy_contract():
@@ -1166,17 +1166,17 @@ def test_canonical_docs_name_version_routes_and_privacy_contract():
         assert required in docs
 ```
 
-- [ ] **Step 2: Run guard and verify RED**
+- [x] **Step 2: Run guard and verify RED**
 
 Run: `python -m pytest -q tests/test_mobile_pump_check_comparison_architecture.py`
 
 Expected: FAIL because canonical docs do not yet describe PR3.
 
-- [ ] **Step 3: Update canonical docs and handoff**
+- [x] **Step 3: Update canonical docs and handoff**
 
 Document exact request/response/error schemas, privacy, directionality, eligibility, source-quality ceiling, no image URLs, image normalization, Bedrock-only behavior, uniqueness/idempotency, leases, GET read-only behavior, and exclusions. State verbatim in `docs/handoff.md` that commit `a69c958 test: isolate audit app database configuration` fixed a deterministic pre-existing test-harness isolation defect discovered during mandatory baseline validation before any Sprint 10 PR3 production changes.
 
-- [ ] **Step 4: Run focused PR3 and adjacent suites**
+- [x] **Step 4: Run focused PR3 and adjacent suites**
 
 ```powershell
 python -m pytest -q tests/test_vision_images.py tests/test_pump_check_analysis.py tests/test_pump_check_comparison_analysis.py tests/test_bedrock_comparison_adapter.py tests/test_pump_check_comparison_identity.py tests/test_pump_check_comparison_migration.py tests/test_pump_check_comparison_service.py tests/test_pump_check_comparison_lifecycle.py tests/test_mobile_pump_check_comparison_api.py tests/test_mobile_pump_check_comparison_architecture.py tests/test_cascade_delete.py tests/test_mobile_pump_check_api.py tests/test_mobile_pump_check_architecture.py
@@ -1184,7 +1184,7 @@ python -m pytest -q tests/test_vision_images.py tests/test_pump_check_analysis.p
 
 Expected: PASS with zero failures.
 
-- [ ] **Step 5: Verify Alembic head and PostgreSQL drift**
+- [x] **Step 5: Verify Alembic head and PostgreSQL drift**
 
 Run: `flask --app starter db heads`
 
@@ -1194,7 +1194,7 @@ Against disposable PostgreSQL 16 with CI environment values, run `flask --app st
 
 Expected: both exit zero and no model/migration drift.
 
-- [ ] **Step 6: Re-run mandatory harness regression sequence**
+- [x] **Step 6: Re-run mandatory harness regression sequence**
 
 Run: `python -m pytest -q tests/test_frontend_audit_app.py tests/test_gamification_routes.py::test_leaderboard_orders_by_xp_then_streak`
 
@@ -1202,7 +1202,7 @@ Run: `python -m pytest -q tests/test_gamification_routes.py::test_leaderboard_or
 
 Expected: both PASS, preserving `a69c958`.
 
-- [ ] **Step 7: Run all authoritative baseline shards**
+- [x] **Step 7: Run all authoritative baseline shards**
 
 Regenerate and execute the same deterministic modulo-8 file shards:
 
@@ -1231,7 +1231,7 @@ python -m pytest --collect-only -q
 
 Record each shard's passed/skipped/deselected totals and collection totals; require zero failures.
 
-- [ ] **Step 8: Run the complete real PostgreSQL race suite**
+- [x] **Step 8: Run the complete real PostgreSQL race suite**
 
 ```powershell
 $env:FITX_PG_CONCURRENCY_TEST='1'
@@ -1241,11 +1241,11 @@ python -m pytest -m pg_concurrency -q tests/test_mobile_auth_pg.py tests/test_mo
 
 Expected: PASS. Without reachable PostgreSQL, use only `READY WITH CONDITIONS`.
 
-- [ ] **Step 9: Write and audit the exact 27-section report**
+- [x] **Step 9: Write and audit the exact 27-section report**
 
 Re-open `C:\Users\yusuf\OneDrive\Masaüstü\cf-sprint10-pr3.txt`, copy its 27 headings verbatim and in order, and fill them with file/commit/test evidence. Separate `a69c958` from PR3 commits; include normalization, provider payload, idempotency/races, migration/drift, exclusions, no Flutter/PR4 work, and one exact verdict: `READY FOR REVIEW`, `READY WITH CONDITIONS`, or `NOT READY`.
 
-- [ ] **Step 10: Run final scope/diff checks**
+- [x] **Step 10: Run final scope/diff checks**
 
 Run: `git diff --check origin/main...HEAD`
 
@@ -1255,14 +1255,14 @@ Run: `git status --short`
 
 Expected: no whitespace errors; backend/tests/docs/CI only; no Flutter, history/timeline, or PR4 implementation.
 
-- [ ] **Step 11: Commit docs and report**
+- [x] **Step 11: Commit docs and report**
 
 ```bash
 git add docs/PUMP_CHECK.md docs/PUMP_CHECK_DESIGN.md docs/MOBILE_PUMP_CHECK.md docs/handoff.md docs/superpowers/plans/2026-08-14-pump-check-comparison-intelligence.md docs/reports/2026-08-14-sprint10-pr3-pump-check-comparison-implementation.md tests/test_mobile_pump_check_comparison_architecture.py
 git commit -m 'docs(api): document pump check comparisons'
 ```
 
-- [ ] **Step 12: Verify committed worktree**
+- [x] **Step 12: Verify committed worktree**
 
 Run: `git status --short --branch`
 

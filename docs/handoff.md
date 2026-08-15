@@ -3948,3 +3948,128 @@ brief requires p50/p95/p99.
   PostgreSQL flask db check are the authoritative review conditions.
 - Flutter is untouched. PR2 waits for reviewed, CI-green, merged PR1. PR3
   comparison and PR4 history/retention remain deferred.
+
+# Sprint 10 PR3 Pump Check Comparison Intelligence (local, 2026-08-14)
+
+## Baseline validation finding (NOT a PR3 production change)
+
+Commit `a69c958 test: isolate audit app database configuration` fixed a
+deterministic pre-existing test-harness isolation defect discovered during
+mandatory baseline validation before any Sprint 10 PR3 production changes.
+`tests/test_frontend_audit_app.py` built an app whose SQLAlchemy configuration
+leaked into the process, so a later test in the same session
+(`tests/test_gamification_routes.py::test_leaderboard_orders_by_xp_then_streak`)
+failed depending on file order. The defect existed on the branch point; it is
+not caused by, and does not belong to, the comparison feature. It is listed
+separately from the PR3 commits in the implementation report and must be
+reviewed as a test-harness fix, not as feature work.
+
+Regression guard (re-run at PR3 HEAD):
+`python -m pytest -q tests/test_frontend_audit_app.py tests/test_gamification_routes.py::test_leaderboard_orders_by_xp_then_streak`
+then the single-test form — both PASS.
+
+## What shipped
+
+- Comparison is a SEPARATE owner-private authority over an explicitly ordered
+  PAIR of canonical PR1 Pump Checks. PR1 routes, payloads, prompt, schema, and
+  `pump_check` columns are byte-identical; no comparison field was added there.
+- Surface: `POST /api/v1/pump-check-comparisons` (create/replay/converge) and
+  owner-only read `GET /api/v1/pump-check-comparisons/<comparison_id>` on the
+  existing `mobile_api` blueprint (one `/api/v1` surface, one no-store, one 429,
+  the same `MOBILE_AUTH_ENABLED` gate).
+- The pair is DIRECTIONAL and never sorted; `baseline.captured_at` must precede
+  `current.captured_at`. Seven deterministic eligibility rules all finish before
+  any S3 read or Bedrock call, and a failure creates neither a comparison row
+  nor a ledger row.
+- Analysis contract `pump-check-comparison-analysis/v1`. `comparability` is
+  promoted out of the JSON into its own column so there is exactly one public
+  authority. `not_comparable` is a legitimate COMPLETED answer, never an error.
+  A `limited` source CAPS the result at `limited` — provider output claiming
+  `comparable` over a limited source is rejected as invalid output.
+- One bounded two-image Bedrock call. Each image is normalized IN MEMORY to at
+  most 1,500,000 bytes and a 1,600-pixel longest edge; the stored S3 object is
+  read but never modified, replaced, or re-uploaded. Stored PR1 narratives are
+  an ELIGIBILITY signal only and are never forwarded, so interpretations do not
+  compound.
+- The create route consumes the shared heavy-AI concurrency gate, exactly like
+  the single pump-check route, and is declared in
+  `tests/test_ai_gate.py::EXPECTED_GATED_ENDPOINTS` so the thread-reserve
+  invariant counts it.
+- Privacy: comparison IDs are owner-bound 144-bit URL-safe HMAC tokens
+  (`axisai/mobile-pump-check-comparison/id/v1`). Responses carry no image URL,
+  S3 key, internal ID, idempotency key, fingerprint, prompt, provider response,
+  model metadata, lease field, or failure internals. Account erasure removes
+  comparison rows and their ledger rows (`tests/test_cascade_delete.py`).
+
+## Convergence, leases, and the one accepted artifact
+
+Uniqueness on `(owner, baseline, current, analysis_version)` means two different
+Idempotency-Keys for the same directional pair CONVERGE on one row and one model
+call. Work is claimed by atomically moving `pending`, a reclaimable `failed`, or
+an EXPIRED `analyzing` lease (900 s) to `analyzing` with an incremented attempt
+generation; finalization is conditional on owner, id, status, and attempt, so a
+stale generation can never overwrite a newer result. An unexpired lease held by
+another worker returns that canonical `analyzing` representation with HTTP 200 —
+not an error. No transaction or row lock spans S3 or Bedrock I/O.
+
+Accepted, documented artifact: an idempotency conflict detected at
+ledger-attach time can leave an orphan `pending` comparison row, because the
+ledger's FK to `comparison_id` is NOT NULL and the row must exist before the
+ledger insert can be attempted. The pair unique constraint makes a later
+legitimate request CONVERGE onto that same row, so there is no duplicate model
+spend and no duplicate canonical comparison. Cleanup of orphan `pending` rows is
+PR4 retention work, not a correctness gap here.
+
+## Migration fa1b2c3d4e5f (sole head)
+
+Additive, no backfill, and VERIFY-OR-CREATE + re-runnable, because
+`app/db_init.py` runs `db.create_all()` BEFORE Alembic on a fresh database — so
+this table-creating migration also runs against a schema `create_all` already
+built. When the tables exist it does not blanket-skip: it reflects columns,
+types, indexes, and CHECK constraints and FAILS CLOSED on drift.
+
+Dialect-aware check verification was the one real production defect found and
+fixed on this branch (`425e657`). SQLAlchemy's inspector does NOT return
+PostgreSQL's `pg_get_constraintdef` text: it strips redundant parentheses around
+AND-groups and renders membership as `= ANY (ARRAY[...])` with a single opening
+paren. The verifier now canonicalizes both spellings — literals are masked, casts
+dropped, `ANY (ARRAY[...])` rewritten to an IN-list, and the predicate rebuilt
+through an explicit AND/OR tree — and it FAILS CLOSED (returns the input
+unchanged) if any token does not parse. Tolerating the spelling does not tolerate
+a wrong value: `tests/test_pump_check_comparison_migration.py` asserts the exact
+inspector reflection strings captured verbatim from real PostgreSQL 16 and real
+SQLite, and asserts that adding one unexpected enum member to the inspector's
+`ANY (ARRAY[...])` form still raises. The earlier tests only used
+`pg_get_constraintdef` forms, which is exactly why CI stayed green while a
+`create_all`-then-upgrade boot failed on PostgreSQL.
+
+## Verification (all local; nothing pushed)
+
+Executed at branch HEAD `3b3e131`:
+
+- Disposable PostgreSQL 16: `create_all` → `db stamp e9f0a1b2c3d4` → `db upgrade`
+  exits 0 (the production fresh-DB boot path, previously broken).
+- Full `db upgrade` from an EMPTY PostgreSQL 16 database exits 0.
+- `flask --app starter db heads` → `fa1b2c3d4e5f (head)` only.
+- `flask --app starter db check` → "No new upgrade operations detected", exit 0
+  (zero model/migration drift).
+- Focused 13-module PR3 + adjacent suite: 338 passed.
+- Migration module alone: 36 passed.
+- All 8 authoritative modulo-8 file shards over 178 test files:
+  3654 passed, 9 skipped, 3 deselected, ZERO failures.
+  `pytest --collect-only -q` → 3658 collected / 3 deselected, exit 0.
+- Real opt-in PostgreSQL race suite (the exact CI command, 5 modules,
+  `FITX_PG_CONCURRENCY_TEST=1`): 17 passed — including comparison convergence on
+  one key, convergence across two keys, one-winner-one-conflict on a reused key
+  with different semantics, reversed-pair ineligibility BEFORE idempotency is
+  consulted, cross-user independence, stale-generation rejection, and
+  expired-lease reclamation by exactly one contender.
+
+Rollout: no new feature flag. The routes live behind the existing
+`MOBILE_AUTH_ENABLED` gate; rollback is the ordinary code rollback, and the
+migration is additive so it is safe to leave applied.
+
+Excluded from PR3 and still deferred: history, automatic previous-check
+selection, image URLs, Flutter/mobile client work, progress scores, heatmaps,
+body-fat estimates, numeric deltas, program rewrites, social behavior, a second
+provider, and all PR4 retention work.
