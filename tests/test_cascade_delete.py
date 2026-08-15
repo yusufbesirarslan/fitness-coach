@@ -49,12 +49,6 @@ def test_purge_user_covers_every_user_child_model():
             continue
         if any(c.name == "user_id" for c in mapper.columns) and cls not in covered:
             missing.append(cls.__name__)
-    # Task 3 adds DB-level CASCADE coverage first. Explicit CLI erasure ordering
-    # for these two models is intentionally delivered by Task 7.
-    missing = [
-        name for name in missing
-        if name not in {"PumpCheckComparison", "PumpCheckComparisonRequest"}
-    ]
     assert not missing, f"_purge_user kapsamında olmayan user-child modeller: {missing}"
 
 
@@ -183,6 +177,48 @@ def test_source_delete_cascades_comparison_and_request_only(app, make_user):
     assert db.session.get(PumpCheck, current_id) is not None
     assert db.session.get(PumpCheckComparison, comparison_id) is None
     assert db.session.get(PumpCheckComparisonRequest, request_id) is None
+
+
+def test_delete_user_removes_comparison_records_without_other_sources(
+        app, make_user):
+    from app.cli import _purge_user
+
+    owner = make_user("comparison_erasure")
+    other_user = make_user("comparison_bystander")
+    baseline = PumpCheck(user_id=owner.id, valid=True, date_key="2026-08-12")
+    current = PumpCheck(user_id=owner.id, valid=True, date_key="2026-08-13")
+    other_check = PumpCheck(
+        user_id=other_user.id, valid=True, date_key="2026-08-13")
+    db.session.add_all([baseline, current, other_check])
+    db.session.flush()
+    comparison = PumpCheckComparison(
+        user_id=owner.id,
+        baseline_pump_check_id=baseline.id,
+        current_pump_check_id=current.id,
+        public_id="E" * 24,
+        analysis_version="pump-check-comparison-analysis/v1",
+    )
+    db.session.add(comparison)
+    db.session.flush()
+    request = PumpCheckComparisonRequest(
+        user_id=owner.id,
+        idempotency_key="comparison-erasure-key",
+        fingerprint="d" * 64,
+        comparison_id=comparison.id,
+    )
+    db.session.add(request)
+    db.session.commit()
+    owner_id = owner.id
+    comparison_id, request_id = comparison.id, request.id
+    other_check_id = other_check.id
+
+    _purge_user(owner)
+    db.session.commit()
+
+    assert db.session.get(User, owner_id) is None
+    assert db.session.get(PumpCheckComparisonRequest, request_id) is None
+    assert db.session.get(PumpCheckComparison, comparison_id) is None
+    assert db.session.get(PumpCheck, other_check_id) is not None
 
 
 def test_purge_user_removes_feed_v2_rows_both_directions(app, make_user):

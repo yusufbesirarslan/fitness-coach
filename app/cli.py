@@ -99,7 +99,8 @@ def _user_child_models():
         Activity, CoachConversation, CognitoSession, CustomMeal, DailyActivity,
         FeedHide, FeedItem, FeedItemComment, FeedItemLike, FeedReport,
         MealLog, MobileAuthSession, Notification, NutritionPlan, PendingAction, PumpCheck,
-        PumpCheckComment, PumpCheckLike, Supplement, TrainingPlan,
+        PumpCheckComment, PumpCheckComparison, PumpCheckComparisonRequest,
+        PumpCheckLike, Supplement, TrainingPlan,
         UserBadge, UserChallengeProgress, UserQuestProgress, UserSession,
         UserWearableConnection, WaterLog,
         WearableActivityLog, WearableSleepLog, WearableWorkoutLog,
@@ -108,6 +109,10 @@ def _user_child_models():
     return (
         UserSession, CognitoSession, MobileAuthSession, WeeklyLog, WeeklyCheckIn, NutritionPlan,
         TrainingPlan, MealLog, PendingAction, PumpCheckLike, PumpCheckComment,
+        # Sprint 10 PR3: the request ledger points at the comparison, and the
+        # comparison points at both source Pump Checks — so erasure runs
+        # ledger, then comparison, then the sources below.
+        PumpCheckComparisonRequest, PumpCheckComparison,
         PumpCheck, Activity, Supplement, UserQuestProgress, WeeklyWinner,
         WaterLog, WorkoutLog, WorkoutSession, DailyActivity, CustomMeal,
         CoachConversation,
