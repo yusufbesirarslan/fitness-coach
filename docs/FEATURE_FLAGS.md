@@ -58,11 +58,11 @@ out, or "enabled to see what happens".
 Rollout flags are resolved in `configure_app` through
 `feature_flags.resolve_rollout_flags(os.environ)`.
 
-**The eight flags do not all treat an empty value the same way.** Seven share one
+**The nine flags do not all treat an empty value the same way.** Eight share one
 behaviour; `MOBILE_AUTH_ENABLED` is deliberately stricter, and the difference is
 tested:
 
-| Value | Seven presentation/behaviour flags | `MOBILE_AUTH_ENABLED` |
+| Value | Eight registry-parsed flags | `MOBILE_AUTH_ENABLED` |
 |---|---|---|
 | unset | default (OFF) | OFF |
 | `` (empty / whitespace) | default (OFF) — `KEY=` is a normal "not set" in a `.env` | **rejected** — `CredentialConfigurationError: invalid MOBILE_AUTH_ENABLED` |
@@ -75,7 +75,7 @@ PR2: `MOBILE_AUTH_ENABLED` refuses an empty value (`allow_empty=False`), and it
 raises `CredentialConfigurationError` instead of `FeatureFlagConfigurationError`.
 It opens a **pre-auth attack surface**, so "the operator left it blank" is not a
 safe thing to interpret as OFF — an ambiguous value must be corrected, not
-guessed. Anything relying on a uniform empty-value rule across all eight flags is
+guessed. Anything relying on a uniform empty-value rule across all nine flags is
 relying on something that is not true.
 
 **Why raise instead of defaulting.** The historical idiom
@@ -121,9 +121,9 @@ rollout flag or one of the four non-rollout categories.
 
 ---
 
-## The eight backend rollout flags
+## The nine backend rollout flags
 
-Owner for all eight: **@yusufbesirarslan** (single-maintainer repository; the
+Owner for all nine: **@yusufbesirarslan** (single-maintainer repository; the
 field exists so a second owner has somewhere to be recorded rather than being
 folklore).
 
@@ -138,11 +138,12 @@ Rows are in the recommended staged activation order.
 | 5 | `UIUX_NAV_V2_ENABLED` | OFF | shipped_dark | **Partial** — HTTP SLIs only | 2026-10-01 | enable |
 | 6 | `FITX_WORKOUT_SESSIONS_ENABLED` | OFF | staging_only | **Partial** — anomaly logs, no lifecycle metric | 2026-11-01 | enable |
 | 7 | `AI_ADAPTIVE_PLAN_CONTEXT` | OFF | staging_only | **Partial** — quality is not observable | 2026-11-01 | retain experimentally |
-| 8 | `MOBILE_AUTH_ENABLED` | OFF | **blocked** | **Full** — security events + client-class split | 2026-10-01 | enable (after PR4) |
+| 8 | `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` | OFF | staging_only | **Full** — `[COACH][PLAN_TOOL]` outcome line + the durable mutation journal | 2026-11-01 | enable |
+| 9 | `MOBILE_AUTH_ENABLED` | OFF | **blocked** | **Full** — security events + client-class split | 2026-10-01 | enable (after PR4) |
 
 ### Observability is the constraint on the order
 
-This is the finding that shaped the recommendation. Four of the eight —
+This is the finding that shaped the recommendation. Four of the nine —
 `UIUX_NAV_V2_ENABLED`, `UIUX_TODAY_V2_ENABLED`, `UIUX_PLAN_V2_ENABLED`,
 `UIUX_COACH_PAGE_V2_ENABLED` — emit **no feature-specific log line or metric at
 all**. After PR1 they are visible only through per-blueprint HTTP SLIs, which
@@ -210,7 +211,7 @@ signals after flag 5 — see the ordering note above.
 
 **5. `UIUX_NAV_V2_ENABLED`** — four-destination shell (Today/Plan/Coach/Progress)
 replacing the legacy 5-tab shell; Nutrition + Community move to the drawer tier.
-Widest UI blast radius of the eight and no feature-specific signal, which is why
+Widest UI blast radius of the nine and no feature-specific signal, which is why
 it goes last among the presentation flags. The specific abort signal is a *fall*
 in requests to a demoted blueprint (nutrition, social) — that means it became
 unreachable, which a 5xx-based alarm would never catch.
@@ -225,14 +226,34 @@ them. The migration is not rolled back (expand-only, by design).
 
 **7. `AI_ADAPTIVE_PLAN_CONTEXT`** — adds the versioned read-only AdaptivePlan
 block to coach context **and** switches the coach system prompt to
-`ADAPTIVE_COACH_SYSTEM_PROMPT`. Broadest behavioural change of the eight: it
+`ADAPTIVE_COACH_SYSTEM_PROMPT`. Broadest behavioural change of the nine: it
 alters what the AI says, on every turn, for every user. **Answer quality is not
 observable by any metric** — only human review of staging answers can judge it,
 which is why the decision is *retain experimentally* rather than *enable*.
 
-**8. `MOBILE_AUTH_ENABLED`** — registers the `/api/v1` mobile blueprint and the
-opaque credential flow. Unlike the other seven this is an **attack-surface**
-change, not a presentation change. **Blocked until PR4 merges**:
+**8. `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED`** — publishes six narrow plan-editing
+tools (replace / add / remove an exercise, update a prescription, move a day,
+undo the last change) to both coach providers and lets the Coach execute them
+through `app/services/coach_plan_tools` → `app/services/plan_mutation`. **This is
+the only flag of the nine that lets the AI cause a durable write to user data**;
+every other one changes presentation, context or attack surface. **Requires
+migration `b3c4d5e6f7a8`** — undo, replay and the audit trail are all built on
+the mutation journal. Decide flag 7 first: it owns which system prompt is
+active, and the plan-mutation policy block is appended to whichever one is, so
+activating both in one window makes a bad answer impossible to attribute.
+
+The abort signals are behavioural rather than numeric, and they are the point:
+any `actor='ai_coach'` journal row the user did not explicitly ask for, a
+mutation applied while the answer claims none was, an undo that reverses
+something other than the newest change, or an `AMBIGUOUS_TARGET` followed by a
+mutation in the same turn (the model guessed instead of asking). None of those
+is a 5xx, so the journal — not an alarm — is the instrument. Rollback stops new
+AI writes; it does **not** revert mutations already applied, which remain
+ordinary versioned plan history the user can undo.
+
+**9. `MOBILE_AUTH_ENABLED`** — registers the `/api/v1` mobile blueprint and the
+opaque credential flow. Unlike the presentation flags this is an
+**attack-surface** change. **Blocked until PR4 merges**:
 `NEEDED_FIXES_2026-08-02.md` finding 2 records that `/api/v1/auth/login` and
 `/refresh` make blocking Cognito calls (~20 s each, ~40 s chained on login) with
 no concurrency gate and no thread-reserve accounting, and are reachable

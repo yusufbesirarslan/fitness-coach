@@ -22,7 +22,7 @@ touches (`git reset --hard origin/main` does not modify it). Consequences:
 ```bash
 # On the host, as the deploy user:
 cd <app-dir>
-grep -E '^(WEEKLY_PROGRAM_UI_ENABLED|UIUX_TODAY_V2_ENABLED|UIUX_PLAN_V2_ENABLED|UIUX_COACH_PAGE_V2_ENABLED|UIUX_NAV_V2_ENABLED|FITX_WORKOUT_SESSIONS_ENABLED|AI_ADAPTIVE_PLAN_CONTEXT|MOBILE_AUTH_ENABLED)=' .env
+grep -E '^(WEEKLY_PROGRAM_UI_ENABLED|UIUX_TODAY_V2_ENABLED|UIUX_PLAN_V2_ENABLED|UIUX_COACH_PAGE_V2_ENABLED|UIUX_NAV_V2_ENABLED|FITX_WORKOUT_SESSIONS_ENABLED|AI_ADAPTIVE_PLAN_CONTEXT|AI_COACH_PLAN_MUTATION_TOOLS_ENABLED|MOBILE_AUTH_ENABLED)=' .env
 ```
 
 ---
@@ -40,7 +40,7 @@ first is cheaper than a rolled-back deploy.
 for k in WEEKLY_PROGRAM_UI_ENABLED UIUX_TODAY_V2_ENABLED UIUX_PLAN_V2_ENABLED \
          UIUX_COACH_PAGE_V2_ENABLED UIUX_NAV_V2_ENABLED \
          FITX_WORKOUT_SESSIONS_ENABLED AI_ADAPTIVE_PLAN_CONTEXT \
-         MOBILE_AUTH_ENABLED; do
+         AI_COACH_PLAN_MUTATION_TOOLS_ENABLED MOBILE_AUTH_ENABLED; do
   v=$(grep -E "^${k}=" .env | tail -1 | cut -d= -f2-)
   case "$v" in
     ""|0|1) ;;
@@ -107,13 +107,14 @@ activate first.
 | 5 | `UIUX_NAV_V2_ENABLED` | **Last among the presentation flags**: widest UI blast radius paired with the weakest observability. |
 | 6 | `FITX_WORKOUT_SESSIONS_ENABLED` | Mutating and schema-backed. Staging first; needs migration `a994f9bed783`. |
 | 7 | `AI_ADAPTIVE_PLAN_CONTEXT` | Changes AI behaviour for every user. Staging + human answer review; no metric can judge quality. |
-| 8 | `MOBILE_AUTH_ENABLED` | **Blocked until PR4 merges.** Attack-surface change with an unbounded pre-auth blocking call today. |
+| 8 | `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` | **The only flag that lets the AI write user data.** After #7, which owns the system prompt it extends. Staging + journal review; needs migration `b3c4d5e6f7a8`. |
+| 9 | `MOBILE_AUTH_ENABLED` | **Blocked until PR4 merges.** Attack-surface change with an unbounded pre-auth blocking call today. |
 
 **Nav v2 is not a prerequisite for anything.** `app/nav.py` points its four
 primary destinations at pre-existing canonical routes (`/`, `/training`,
 `/coach`, `/progress-page`), all of which respond regardless of the Today/Plan/
-Coach v2 flags — so it can be activated at any point, and it goes last because a
-regression under it is the hardest of the eight to attribute.
+Coach v2 flags — so it can be activated at any point, and it goes last among the
+presentation flags because a regression under it is the hardest to attribute.
 
 **One caveat on #4.** The legacy shell has no `/coach` entry point (not a tab,
 not a drawer link), so until #5 activates, `/coach` is reached only by direct URL
@@ -121,6 +122,28 @@ not a drawer link), so until #5 activates, `/coach` is reached only by direct UR
 change. A clean window at #4 therefore proves less than it appears: **re-check
 `UIUX_COACH_PAGE_V2_ENABLED`'s abort signals during #5's observation window**,
 particularly duplicated `/coach/history` fetches.
+
+**#8 is observed differently from the other eight.** Its abort signals are not
+rates, they are individual events: one plan change the user did not ask for is a
+rollback, even if every metric is flat. The instrument is the durable mutation
+journal, not an alarm:
+
+```sql
+-- Every AI-actor plan change, newest first. Each row must correspond to a user
+-- message in that turn that explicitly asked for that change.
+SELECT created_at, user_id, operation_kind, command_type, outcome,
+       before_version, after_version, reverts_mutation_id
+FROM plan_mutation_record
+WHERE actor = 'ai_coach'
+ORDER BY created_at DESC
+LIMIT 50;
+```
+
+Pair each row with the `[COACH][PLAN_TOOL] request_id=… tool=… outcome=…` line
+and the stored coach turn for that `request_id`. Two outcomes deserve immediate
+attention even though neither is an error: `MUTATION_BUDGET_EXHAUSTED` and
+`IDEMPOTENCY_CONFLICT` both mean the model called the tools more than once for
+one intent. During the first window, review **every** row rather than sampling.
 
 ### First activation candidate: `WEEKLY_PROGRAM_UI_ENABLED`
 

@@ -34,6 +34,11 @@ from app.prompts.system import (  # noqa: F401 (re-export)
 from app.services.ai import _bedrock_validate_image, _heavy_chat, anthropic as _anthropic
 from app.services.ai_gate import model_concurrency_slot
 from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _normalize_food_query_en
+# The ONLY route from the Coach to the training-plan mutation boundary. This
+# module deliberately does not import app.services.plan_mutation itself —
+# tests/test_plan_mutation_architecture.py fails the build if it ever does, so
+# "the AI cannot reach plan persistence directly" is structural, not a promise.
+from app.services import coach_plan_tools
 from app.services.context_builder import (  # noqa: F401 (re-export)
     assert_principal as _assert_principal,
     fetch_coach_context as _fetch_coach_context,
@@ -172,6 +177,9 @@ def _today_workout_totals(user_id):
 
 def _begin_coach_turn():
     g._coach_staged_ids = set()
+    # PR3: the plan-mutation budget is per turn, and "a turn" is defined here so
+    # the blocking and streaming paths cannot drift into two different answers.
+    coach_plan_tools.begin_turn()
 
 
 def _mark_staged_this_turn(pending_id):
@@ -877,14 +885,58 @@ COACH_TOOLS = [_to_openai_tool(t) for t in _COACH_TOOL_DEFS]
 COACH_TOOLS_ANTHROPIC = [_to_anthropic_tool(t) for t in _COACH_TOOL_DEFS]
 
 
+def _coach_tool_defs_for_call():
+    """Bu istekte modele sunulacak kanonik araç tanımları.
+
+    Plan düzenleme araçları bayrak AÇIKken TEK kanonik tanımdan (coach_plan_tools
+    .PLAN_MUTATION_TOOL_DEFS) eklenir — iki sağlayıcı biçimi de aşağıda BU
+    listeden türetilir, yani bir sağlayıcının şeması diğerinden ayrışamaz
+    (brief §41). Bayrak KAPALIYKEN liste, PR3 öncesiyle AYNI nesnedir: ek kopya,
+    ek alan, ek boşluk yok.
+    """
+    if not coach_plan_tools.plan_mutation_tools_enabled():
+        return _COACH_TOOL_DEFS
+    return _COACH_TOOL_DEFS + list(coach_plan_tools.PLAN_MUTATION_TOOL_DEFS)
+
+
+def _openai_tools_for_call():
+    """COACH_TOOLS'un çağrı-zamanı karşılığı (bayrak KAPALIYKEN aynı içerik).
+
+    Bayrak bir istek özelliğidir (`current_app.config`), modül import'u değil —
+    liste bu yüzden çağrı anında kurulur. Modül-global COACH_TOOLS DEĞİŞMEDEN
+    kalır: mevcut testler ve import yolları onu sekiz aracın kanonik OpenAI
+    projeksiyonu olarak kullanmayı sürdürür.
+    """
+    if not coach_plan_tools.plan_mutation_tools_enabled():
+        return COACH_TOOLS
+    return [_to_openai_tool(t) for t in _coach_tool_defs_for_call()]
+
+
 def _dispatch_coach_tool(user_id, name, arguments_json):
     """LLM'in istediği aracı sunucu tarafında çalıştır. user_id ASLA LLM'den
     gelmez — güvenlik için current_user'dan enjekte edilir. JSON string döndürür."""
     _assert_principal(user_id)
+    arguments_parsed = True
     try:
         args = json.loads(arguments_json) if arguments_json else {}
     except (json.JSONDecodeError, TypeError):
         args = {}
+        arguments_parsed = False
+
+    # Plan düzenleme araçları (PR3) — mutasyon yüzeyi, en başta ayrılır.
+    # Ayrıştırılamayan argümanlar bu yüzeyde {} DEĞİLDİR: undo argüman almadığı
+    # için bozuk JSON'u boş nesneye katlamak, model hiç göndermediği bir çağrıyı
+    # başarıyla yürütmek olurdu (brief §37/§38). Mevcut sekiz araç eski
+    # davranışını (bozuk JSON → boş args) aynen korur.
+    if name in coach_plan_tools.PLAN_MUTATION_TOOL_NAMES:
+        if not arguments_parsed:
+            return json.dumps(
+                coach_plan_tools.invalid_arguments_result(
+                    "araç argümanları okunamadı"),
+                ensure_ascii=False)
+        return json.dumps(
+            coach_plan_tools.execute_plan_tool(user_id, name, args),
+            ensure_ascii=False)
 
     # Araç gövdesindeki beklenmeyen hatayı (özellikle DB commit/delete) merkezi
     # olarak yakala: oturumu rollback ile temizle (kirli transaction sonraki
@@ -1039,7 +1091,7 @@ def _run_coach_conversation_openai(user_id, question, context, history,
                 resp = openai_client.chat.completions.create(
                     model=OPENAI_MODEL,
                     messages=messages,
-                    tools=COACH_TOOLS,
+                    tools=_openai_tools_for_call(),
                     tool_choice="auto",
                     max_tokens=700,
                     temperature=0.6,
@@ -1104,9 +1156,17 @@ def _build_bedrock_system(context, language="tr"):
 def _anthropic_tools_for_call():
     """COACH_TOOLS_ANTHROPIC'in çağrı-zamanı kopyası (mantık:
     prompt_builder.anthropic_tools_for_call). Modül-global BEDROCK_PROMPT_CACHE
-    çağrı anında okunur — testler bu globali monkeypatch'ler."""
+    çağrı anında okunur — testler bu globali monkeypatch'ler.
+
+    PR3: plan araçları bayrak AÇIKken _coach_tool_defs_for_call() üzerinden
+    eklenir; cache breakpoint yine SON araca konur, yani bayrak durumu değişmediği
+    sürece sıra sabit ve önbellek stabildir."""
+    if not coach_plan_tools.plan_mutation_tools_enabled():
+        tools = COACH_TOOLS_ANTHROPIC
+    else:
+        tools = [_to_anthropic_tool(t) for t in _coach_tool_defs_for_call()]
     return prompt_builder.anthropic_tools_for_call(
-        COACH_TOOLS_ANTHROPIC, prompt_cache=BEDROCK_PROMPT_CACHE)
+        tools, prompt_cache=BEDROCK_PROMPT_CACHE)
 
 
 def _first_text_block(resp):
