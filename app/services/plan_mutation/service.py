@@ -187,6 +187,31 @@ def _existing_result(user_id, context, expected_type, expected_fingerprint):
     return _replay_or_conflict(record, expected_type, expected_fingerprint)
 
 
+def _arbitrated_result(user_id, context, expected_type, expected_fingerprint):
+    """Resolve a lost insert race from durable history, holding nothing open.
+
+    The winning row can only be found by re-reading AFTER the rollback, and
+    that read autobegins a fresh transaction. PR2 shipped this boundary with no
+    production caller, so leaving that read to request teardown was a
+    documented Minor. Sprint 1 PR3 gives it a caller — an AI Coach tool with a
+    blocking provider call immediately after it — and a transaction held across
+    provider network I/O is exactly what the repository's provider/transaction
+    discipline forbids. So the read is closed here instead.
+
+    The rollback is in a ``finally`` and runs on both exits: a replay returns a
+    result whose columns are already materialized into plain values, and a
+    conflict raises after the same rollback. Nothing is discarded by it — the
+    only statement in this transaction is the lookup.
+    """
+    record = find_by_key(user_id, context.idempotency_key)
+    try:
+        if record is None:
+            return None
+        return _replay_or_conflict(record, expected_type, expected_fingerprint)
+    finally:
+        db.session.rollback()
+
+
 def apply_plan_mutation(user_id, command, context) -> PlanMutationResult:
     """Apply one typed mutation to the authenticated user's active plan.
 
@@ -271,8 +296,8 @@ def apply_plan_mutation(user_id, command, context) -> PlanMutationResult:
         # The database arbitrated, which is the only arbiter that can be trusted
         # across processes. Whoever holds the key now owns the result.
         db.session.rollback()
-        winner = find_by_key(user_id, context.idempotency_key)
-        if winner is None:
+        arbitrated = _arbitrated_result(user_id, context, ctype, fingerprint)
+        if arbitrated is None:
             raise PlanStateConflict(
                 "the plan changed while this mutation was being applied") from None
     except Exception:
@@ -287,9 +312,10 @@ def apply_plan_mutation(user_id, command, context) -> PlanMutationResult:
             replayed=False,
         )
 
-    # Reached only from the IntegrityError branch. Resolved out here rather than
-    # inside the handler so a resulting conflict carries no chained SQL error.
-    return _replay_or_conflict(winner, ctype, fingerprint)
+    # Reached only from the IntegrityError branch. Returned out here rather than
+    # from inside the handler so a resulting conflict carries no chained SQL
+    # error.
+    return arbitrated
 
 
 def undo_last_change(user_id, context) -> PlanMutationResult:
@@ -378,8 +404,9 @@ def undo_last_change(user_id, context) -> PlanMutationResult:
         db.session.commit()
     except IntegrityError:
         db.session.rollback()
-        winner = find_by_key(user_id, context.idempotency_key)
-        if winner is None:
+        arbitrated = _arbitrated_result(
+            user_id, context, UNDO_COMMAND_TYPE, fingerprint)
+        if arbitrated is None:
             # Not our key, so it was the one-undo-per-mutation constraint:
             # another request reversed this mutation first. Deterministically one
             # winner and one refusal, never two undos of one change.
@@ -396,4 +423,4 @@ def undo_last_change(user_id, context) -> PlanMutationResult:
             replayed=False,
         )
 
-    return _replay_or_conflict(winner, UNDO_COMMAND_TYPE, fingerprint)
+    return arbitrated
