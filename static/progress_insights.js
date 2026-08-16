@@ -20,7 +20,7 @@
    structural guards ("no arithmetic, no percent, exactly one fractional
    comparison") and this surface needs percentage FORMATTING — so it gets its
    own module with its own equally strict guards instead of loosening those.
-   Same pattern as static/weekly_program.js.
+   Same pattern as the standalone weekly-program consumer.
 
    No IIFE for the public entry point: progress.js calls
    window.FitXAxisInsights.load() on first paint and after a check-in.
