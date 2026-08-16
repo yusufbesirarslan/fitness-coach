@@ -4214,3 +4214,200 @@ proactive coaching, plateau/fatigue/adherence detection, nutrition-plan mutation
 One trap for whoever wires the transport: **the operation key must be stable
 across the retries of one logical user request.** A key minted per HTTP attempt
 provides no protection at all.
+
+# Adaptive Coaching Sprint 1 PR3 — AI Coach Training-Plan Tool Integration (local, 2026-08-16)
+
+Branch `adaptive-coaching-s1-pr3-ai-coach-plan-tools`, worktree
+`.worktrees/adaptive-coaching-s1-pr3-ai-coach-plan-tools`, based on `origin/main`
+`9bc2998` (which is PR2 merged as #211, on top of PR1 #210 `154a3f5`). Local
+commits only — **not pushed, no PR, not merged, not deployed, flag not enabled
+anywhere.**
+
+Full architecture: **docs/ADAPTIVE_COACHING.md §§19-30**. Flag record:
+**docs/FEATURE_FLAGS.md #8**. Rollout/observation: **docs/ROLLOUT.md**.
+
+## What shipped
+
+PR1 built the mutation boundary and PR2 gave it history, versioning and undo —
+both with **no caller**. PR3 is the caller, and it is the first time in this
+codebase that a language model can cause a durable write to user data.
+
+New package `app/services/coach_plan_tools/` — the trusted execution context and
+the single bridge between the Coach and `plan_mutation`:
+
+| Module | Owns |
+|---|---|
+| `schemas.py` | the six LLM-facing tool definitions; bounds imported from the domain |
+| `parser.py` | model arguments → a typed PR1 command, or a refusal |
+| `identity.py` | the server-minted operation key |
+| `results.py` | the bounded result + error vocabulary (4 statuses, 16 codes) |
+| `executor.py` | flag, turn, budget, actor, the domain call, transaction settle |
+
+Six narrow tools: `replace_training_plan_exercise`, `add_training_plan_exercise`,
+`remove_training_plan_exercise`, `update_training_plan_prescription`,
+`move_training_plan_day`, `undo_last_training_plan_change`.
+
+Wiring: `app/services/ai_coach.py` (per-turn init, flag-gated tool lists for both
+providers, plan-tool dispatch branch), `app/prompts/system.py`
+(`PLAN_MUTATION_POLICY`, emitted only when the flag is on),
+`app/services/prompt_builder.py` (`plan_mutation_tools=` threaded through both
+provider paths), `app/feature_flags.py`
+(`AI_COACH_PLAN_MUTATION_TOOLS_ENABLED`, default OFF, `staging_only`,
+`depends_on=("AI_ADAPTIVE_PLAN_CONTEXT",)`).
+
+**No new route, no schema change, no migration** (Alembic head unchanged at
+`b3c4d5e6f7a8`), no mobile/Flutter change, no new dependency. The eight existing
+Coach tools are byte-identical in behaviour with the flag off *and* on.
+
+PR2's known Minor is closed here rather than carried: `service.py`'s
+`IntegrityError` arbitration branch re-read the journal after its rollback and
+left that read open. With no caller that was a documented residual; with a
+blocking provider call immediately downstream it is a transaction held across
+network I/O, so `_arbitrated_result` now closes it in a `finally`, at the layer
+that owns the transaction.
+
+## Decisions worth not re-litigating
+
+- **Six narrow tools, never a generic one.** No `mutate_training_plan(operation,
+  payload)`, no JSON Patch, no `set_plan_field`. A generic tool would hand the
+  model an arbitrary mutation language *above* the typed boundary and make PR1's
+  contract decorative. An architecture test rejects a property named `operation`,
+  `payload`, `patch`, `path`, `field`, `value` or `sql` anywhere in a schema.
+- **A property exists only if it carries user intent.** `user_id`, `plan_id`,
+  `lineage_id`, `mutation_version`, `mutation_id`, `actor`, `reason`, the
+  operation key, both snapshots and every fingerprint appear in no schema, and a
+  test walks the published schemas to prove it.
+- **The parser refuses, it never coerces.** Unknown property → named in the
+  error, not silently dropped (dropping a field executes a *different* request
+  than the model expressed and nobody learns about it). Missing required property
+  → no defaulting; the plan *generator* fills gaps because a slightly-wrong plan
+  beats no plan, but a mutation that invents "3 sets" is a fabricated
+  instruction. `bool` is rejected before `int`, or `True` arrives as "1 set".
+- **The turn identity is the existing `g.request_id`, not a new one.** It is
+  server-generated, un-injectable, already the log/SSE correlation id, and it
+  survives a provider retry, a Bedrock→OpenAI fallback and every tool-continuation
+  round. A second turn-identity system would have been a competing source of
+  truth with no evidence one was needed.
+- **The operation key hashes the domain's own `semantic_fingerprint`, not raw
+  model JSON.** Whitespace, key order or one echoed field would each mint a fresh
+  key for one intent. Reusing PR2's comparator also means the key and the replay
+  check can never disagree about what "the same mutation" is.
+- **No occurrence counter in the key.** It would make the second delivery of one
+  mutation a *new* operation — precisely the duplicate `add` and double `undo`
+  this mechanism exists to prevent. Distinct commands separate themselves:
+  different intent, different fingerprint, different key.
+- **The replay guarantee is scoped to one server turn and said so out loud.** A
+  new HTTP request carries a new `request_id` and is a new intent, which is
+  correct — a user who says "add cable flies" in two messages has asked twice. No
+  durable client-supplied chat-request identity exists in this architecture, and
+  inventing fragile state to claim a broader guarantee would be a promise the
+  system cannot keep.
+- **`MAX_PLAN_OPERATIONS_PER_TURN = 2`, strictly below `_COACH_TOOL_LOOP_CAP`
+  (5).** The loop cap bounds how many times the model may call *any* tool; it was
+  never sized as a limit on durable writes, and a budget at or above it is
+  decorative. Two is what an honest single message asks for; more is a plan
+  redesign, which must not be decomposed into a mutation swarm.
+- **A repeated operation key costs no budget.** Otherwise the second delivery of
+  one mutation could be refused as "too many changes" and the model would tell
+  the user their edit was rejected when it had in fact been applied — the worst
+  available answer. The budget refusal also never rolls back earlier edits:
+  punishing the user for the model's behaviour is a second bug on top of the
+  first.
+- **`actor="ai_coach"` is audit metadata, not authorization.** It is set by the
+  server and appears in no schema; the mutation is scoped to the caller's own
+  plan either way, because PR1 made cross-user mutation structurally
+  inexpressible.
+- **`reason` is `None`.** Every candidate was worse: the raw user message is
+  untrusted input in a durable audit column, model-authored text is unverified
+  narration of what the model *believes* it did, and a fixed "AI Coach" string
+  says nothing the `actor` column does not.
+- **The result payload is small, closed and free of identifiers.** A tool result
+  is the next model call's input — billed, and paraphrasable to the user. Both
+  snapshots, the plan document, `lineage_id`, any row id, the operation key, any
+  fingerprint, SQL and raw exception text never cross. `mutation_id` is withheld
+  too: the model cannot act on it, and an identifier in the context window is an
+  identifier that can be echoed.
+- **`replayed` is a distinct status from `applied`.** The model must be able to
+  say "that is already done" instead of narrating a second change that never
+  happened. `no_op` likewise says so explicitly and instructs the model not to
+  claim a change.
+- **Every applied result carries a staleness note.** The plan block in the prompt
+  was built before the tools ran, so a committed mutation makes it stale.
+  Re-rendering the block mid-turn was rejected: it would put a second description
+  of the plan in the window and would be stale again after the next call.
+- **Error recovery guidance travels with the failure.** Each of the sixteen codes
+  carries a server-authored instruction in the payload rather than competing with
+  the system prompt, and codes are mapped by exception **class**, so a domain
+  wording change is not a contract change.
+- **Undo is a dedicated, argument-less tool.** No `undo(version)`, no
+  `rollback_to`, no redo. `undo_fingerprint()` is constant, so every undo in one
+  turn *is* the same operation and a duplicated delivery replays the first
+  instead of reaching back and reversing a second, earlier change. Arguments are
+  refused rather than ignored, so a model that thinks it can choose *which*
+  change to undo finds out that it cannot.
+- **A committed mutation is never rolled back for a provider failure.** The
+  B-rule now guards a durable write, so once a plan tool has run the turn
+  degrades to a soft error rather than re-running against a plan that has already
+  changed. A failed continuation is not a reason to reverse a change the user
+  asked for.
+- **`_settle_transaction()` rolls back only a provably read-only residual.**
+  Anything pending is left to its owner; a blanket rollback here would be a
+  second uninvited transaction authority. What it guarantees is the thing that
+  matters: no transaction is held across the provider call that follows a tool.
+- **The flag gates both halves.** OFF removes the tools from both provider
+  schemas *and* refuses execution, so a model that remembers a tool name from an
+  earlier turn still cannot reach the domain. OFF also emits no policy block — a
+  prompt must not describe a capability the model cannot use.
+- **One log line, no metric.** `[COACH][PLAN_TOOL] request_id=... tool=... outcome=...`,
+  both values from closed server-owned vocabularies, pinned by an AST test that
+  checks the logger call's *arguments* (the format string is a server constant;
+  the arguments are where user or model data would enter). No metric is emitted:
+  the honest signal for this capability — did the AI change something the user
+  did not ask for? — is not countable, and a counter implying it was would be
+  worse than none. The authoritative record stays the `PlanMutationRecord`
+  journal.
+- **PR1's `test_no_coach_module_imports_the_mutation_domain_yet` was narrowed,
+  not deleted.** It now asserts that every Coach module still reaches the domain
+  only through `coach_plan_tools`, and a companion test keeps an explicit
+  allow-list of who may import `plan_mutation` at all — the interesting failure
+  is a *new* consumer appearing quietly.
+
+## Known interaction (documented, unchanged on purpose)
+
+Editing a day's exercises changes the Sprint 7 PR3 session fingerprint, so a
+linked ACTIVE session becomes `plan_regenerated_or_replaced` → stale. PR1 decided
+this boundary is not a second writer of workout-session state and PR2 kept that
+on the undo path; PR3 keeps it with an AI in the loop, where "refresh the
+fingerprint too" would let a model-initiated edit silently re-bless a session
+whose planned workout no longer exists. `WorkoutSession` and `WorkoutLog` rows
+are asserted byte-identical across a plan edit.
+
+## Rollout / rollback
+
+Enable order and the observation query are in **docs/ROLLOUT.md** (#8, after
+`AI_ADAPTIVE_PLAN_CONTEXT`). The flag is `staging_only` — production activation
+is a separate, unauthorized decision and is **not** part of this PR.
+
+Rollback is `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED=0` (or removing the line) plus
+a restart. It stops new AI writes; it does **not** revert mutations already
+applied. Those are ordinary versioned plan history and the user can undo them —
+which is why the observation window watches individual journal events, not rates:
+one plan changed without a request is already the abort signal.
+
+## Verification
+
+Commands and exact results are in the completion report for this PR. As in PR2,
+the two things that cannot run on this machine are named rather than claimed:
+`tests/test_plan_mutation_history_pg.py` (no local PostgreSQL or Docker; wired
+into CI's `PostgreSQL concurrency` job) and the PostgreSQL schema-drift guard
+(`flask db check`, CI-only).
+
+## Deferred (explicitly not in PR3)
+
+Impact classification and confirmation/preview UX · mobile mutation UI and any
+Flutter change · a public or mobile REST mutation API, and still no history
+endpoint · redo, `rollback_to_version`, restore-by-id, plan diff view ·
+full-plan regeneration, frequency/goal/split mutation and deload through these
+tools · proactive or scheduled editing · plateau/fatigue/adherence detection ·
+Pump Check or Weekly Check-in driven mutation · nutrition mutation · push
+notification · production flag activation.
