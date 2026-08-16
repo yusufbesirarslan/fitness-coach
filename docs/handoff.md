@@ -4214,3 +4214,120 @@ proactive coaching, plateau/fatigue/adherence detection, nutrition-plan mutation
 One trap for whoever wires the transport: **the operation key must be stable
 across the retries of one logical user request.** A key minted per HTTP attempt
 provides no protection at all.
+
+# Progress Redesign PR2 — Canonical Progress Summary & Trajectory Read Model (local, 2026-08-15)
+
+Branch `feat/progress-redesign-pr2-summary`, worktree
+`.worktrees/progress-redesign-pr2`, based on `origin/main` `9bc2998`. PR1 (#212,
+`336a420`) is an ancestor. **Not merged, not deployed, no production config
+touched.**
+
+Full architecture: **docs/PROGRESS_SUMMARY.md**.
+
+## What shipped
+
+PR1 built the Progress information architecture and deliberately left the
+trajectory neutral, because no authority existed to fill it. PR2 builds that
+authority: one server-owned, deterministic read model behind
+`GET /api/progress/summary`, and YOUR PROGRESS / BODY / PERFORMANCE /
+CONSISTENCY all render it. The page can no longer show a card that disagrees
+with its own headline, because there is only one answer to disagree with.
+
+New package `app/services/progress_summary/`, layered exactly like
+`training_progression`: `models.py` (frozen value objects + every bounded state
+constant) · `analysis.py` (pure mappings, no DB/Flask/clock) · `queries.py` (the
+only impure reads: `User.weight` / `User.target_weight` / qualifying
+`WeeklyCheckIn` rows) · `payload.py` (explicit wire projection) · `__init__.py`
+(`build_progress_summary` orchestrator).
+
+Three trajectory states — `building_baseline`, `on_track`, `needs_attention`.
+No `off_track`. No score of any kind.
+
+**No schema change, no migration, no persistence, no cache, no LLM call.** The
+summary is recomputed per request. Every pre-existing endpoint
+(`/api/progress/workout`, `/api/progress/achievements`, `/checkin-history`,
+`/api/progress/insights`, `/api/progress/heatmap`, Pump Check) is untouched and
+keeps its other consumers.
+
+## Decisions worth not re-litigating
+
+- **The trajectory is training-led, and body does not vote.**
+  `training_progression` is the only domain with a validated, documented
+  longitudinal authority, and it already resolves its own overlapping booleans
+  into one `next_signal` with a fixed precedence. This layer consumes that
+  resolution and maps it — it does not build a second precedence chain out of
+  `is_plateau` / `deload_due`, which would put two disagreeing authorities in
+  one product. Deciding whether a weight movement is "good" would require
+  inventing rate thresholds the repo has no authority to create, so BODY is
+  context only. `test_body_does_not_override_the_training_trajectory` proves it
+  in both directions — a 4 kg gain and a 4 kg loss leave the state
+  byte-identical.
+
+- **An unknown `next_signal` raises; it does not degrade to a state.**
+  `UnknownProgressionSignal` → generic 500. Mapping unknown → `on_track` would
+  invent success; mapping it → `building_baseline` would report a *contract
+  drift* (a system fault) as "you haven't logged enough yet", which is a lie
+  about the user. Infrastructure failure and insufficient evidence are different
+  states and stay visibly different, on the client too: a failed fetch renders
+  `progress.traj_unavailable`, never a trajectory.
+
+- **`end_day` is resolved once, in the orchestrator.** Letting
+  `build_progression_report` default its own `end_day` while the window builder
+  read the clock again would let a request straddling Istanbul midnight report a
+  window the signals were not computed over. `start` also comes from
+  `weekly_windows(end_day, 4)[0]` — the same call the report makes — rather than
+  parallel date arithmetic that could drift.
+
+- **Sparse `/update-weight` rows are not check-ins, and the two concepts stay
+  separate.** "Qualifying" means `yogunluk IS NOT NULL`, the exact filter
+  `/checkin-history` and `/api/progress/insights` already use (BUG-5). A sparse
+  row is a perfectly good answer to *what does this user weigh* — so it feeds
+  the current-weight fallback — and not an answer to *is this a Progress
+  observation* — so it never produces a delta.
+
+- **Missing is not zero.** No target weight (or a stored non-positive one) →
+  `null`, matching the mobile nutrition boundary's non-positive calorie goal.
+  Fewer than two qualifying check-ins → `weight_delta_kg: null`, not `0.0`. But
+  four analyzed weeks with nothing trained → `sessions: 0`, a real measured
+  zero.
+
+- **Stored weights are echoed unrounded; only derived values round** (delta and
+  distance, 1 dp), matching `/api/progress/insights`.
+
+- **The client translates, it never decides.** Every state arrives as a bounded
+  enum and is looked up in an explicit table; an enum the build does not know
+  renders the neutral state rather than a guess.
+  `test_client_never_fabricates_a_trajectory` scans the file structurally and
+  rejects any threshold on a summary field. It has already earned its keep: it
+  caught an `analyzed_weeks > 0` display guard, which was removed rather than
+  exempted.
+
+- **The gamification streak is no longer a Progress consistency signal.**
+  Logging in is not training. `/api/progress/achievements` is unchanged and
+  still serves its other consumers.
+
+- **Trajectory is never carried by colour alone.** `#ps-state` always spells the
+  state out, and `data-state` (which tints only the card's left rule — no filled
+  red/green verdict background) is written by the same function that writes the
+  label.
+
+## Known interaction (documented, unchanged on purpose)
+
+`app/hooks.py::update_streak` is an app-wide `before_request` hook that writes
+`streak_count` on the first *authenticated* request of the day — including a
+`GET /api/progress/summary` that happens to be first. That is not this
+endpoint's write, and `test_summary_read_performs_no_write` isolates it with a
+warm-up request before capturing its baseline. Worth knowing before anyone reads
+a streak change on a read endpoint as a bug in this package.
+
+## Deferred to PR3 / PR4
+
+**PR3 — AXIS INSIGHTS intelligence:** What's Working / Watch This / Next Move,
+cross-domain narrative, recommendations. PR2 answers *how am I doing* and *why*
+at a bounded deterministic level; it does not answer *what should I do next*.
+**PR4 — Physique Progress:** Pump Check comparison, visual progression,
+body-region change. A future body-trajectory authority is recorded in
+docs/PROGRESS_SUMMARY.md §12, not implemented. Nutrition and recovery are
+excluded from V1 classification on purpose — the weekly check-in carries
+sleep/fatigue data but nothing validates it as a Progress authority, and using
+it would create exactly the hidden scoring model the design forbids.

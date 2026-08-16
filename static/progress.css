@@ -26,8 +26,8 @@
 
 /* ── 2 · YOUR PROGRESS (primary surface) ────────────────────────────── */
 /* Visually the loudest block on the page: full-width, primary-tinted, and
-   sitting directly under the page header. PR2 replaces .ps-state's copy
-   with the canonical trajectory — the slot is sized for it already. */
+   sitting directly under the page header. PR2 fills .ps-state with the
+   canonical trajectory — the slot was sized for it already. */
 .ps-card {
   background: var(--color-surface-2);
   border: var(--border-w-1) solid var(--color-border-1);
@@ -35,6 +35,13 @@
   border-radius: var(--radius-lg);
   padding: var(--space-6);
 }
+/* Trajectory accent. STRICTLY redundant: #ps-state always spells the state
+   out, so the accent adds emphasis and never information (WCAG 1.4.1). Only
+   the left rule is tinted — no filled backgrounds that would turn the card
+   into a red/green verdict, which `needs_attention` explicitly is not. */
+.ps-card[data-state="on_track"]        { border-left-color: var(--color-success); }
+.ps-card[data-state="needs_attention"] { border-left-color: var(--color-warning); }
+.ps-card[data-state="building_baseline"] { border-left-color: var(--color-border-2); }
 .ps-state {
   font-family: var(--font-display); font-size: var(--text-2xl);
   letter-spacing: 2px; color: var(--color-text-1);
