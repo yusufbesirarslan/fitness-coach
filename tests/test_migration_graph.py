@@ -36,10 +36,12 @@ def test_alembic_migrations_have_single_head():
 
     heads = sorted(set(revisions) - down_revisions)
 
-    # Adaptive Coaching Sprint 1 PR2 adds durable plan versioning + the mutation
-    # journal as the single new head off f0a1b2c3d4e5. One head only — no
-    # branching, so boot's automatic upgrade never has to choose.
-    assert heads == ["b3c4d5e6f7a8"]
+    # Sprint 10 PR3 adds canonical Pump Check comparisons as the sole new head.
+    # It chains off Adaptive Coaching Sprint 1 PR2's b3c4d5e6f7a8 (durable plan
+    # versioning + mutation journal) rather than off their shared ancestor
+    # e9f0a1b2c3d4 — a sibling would leave two heads and boot's automatic
+    # upgrade would have to choose. One head only, no branching.
+    assert heads == ["fa1b2c3d4e5f"]
 
 
 def test_meal_idempotency_fingerprint_migration_round_trips_only_nullable_column(

@@ -2,6 +2,8 @@ import json
 
 import pytest
 
+from app.services.mobile_pump_checks import analysis
+
 from app.services.mobile_pump_checks.analysis import (
     ANALYSIS_VERSION,
     InvalidAnalysis,
@@ -118,6 +120,27 @@ def test_analysis_parser_rejects_passive_medical_and_imperial_claims(unsafe):
         parse_analysis(json.dumps(_valid(summary=unsafe)))
 
 
+@pytest.mark.parametrize(
+    'unsafe',
+    [
+        # A rate claim quantifies progress with no digit present, and a
+        # diagnosis keeps its meaning under a different noun. Both spellings
+        # previously passed every field of the single-image contract too.
+        'The growth rate looks steady.',
+        'The growth-rate is encouraging.',
+        'The rate of growth is visible here.',
+        'The gain rate looks consistent.',
+        'The hypertrophy rate stands out.',
+        'A skeletal disorder is visible.',
+        'This shape indicates skeletal pathology.',
+        'A skeletal condition stands out here.',
+    ],
+)
+def test_analysis_parser_rejects_rate_and_skeletal_claim_spellings(unsafe):
+    with pytest.raises(InvalidAnalysis):
+        parse_analysis(json.dumps(_valid(summary=unsafe)))
+
+
 def test_prompt_treats_injection_like_description_as_untrusted_json_data():
     prompt = build_prompt({
         "body_region": "upper_body",
@@ -173,6 +196,22 @@ def test_analysis_adapter_passes_only_bounded_context_and_validates_output():
     assert seen["media_type"] == "image/jpeg"
     assert seen["max_tokens"] == 1200
     assert "user_id" not in seen["prompt"]
+
+
+def test_canonical_pr1_normalizes_before_single_image_provider(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(
+        analysis, "prepare_image_for_vision", lambda raw, media: (b"bounded", "image/jpeg")
+    )
+
+    def provider(raw, media, prompt, max_tokens):
+        seen.update(raw=raw, media=media)
+        return json.dumps(_valid())
+
+    assert analysis.analyze_image(
+        b"oversized", "image/png", {}, provider=provider
+    ) == _valid()
+    assert seen == {"raw": b"bounded", "media": "image/jpeg"}
 
 
 def test_analysis_adapter_never_returns_raw_invalid_provider_output():

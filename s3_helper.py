@@ -105,6 +105,15 @@ def _key_belongs_to(key, user_id):
     return len(parts) >= 2 and parts[1] == str(user_id)
 
 
+def key_belongs_to_user(key, user_id):
+    """Sahiplik kontrolünün public sarmalayıcısı.
+
+    Çağıranlar (örn. Pump Check karşılaştırma uygunluk kuralları) indirmeden
+    ÖNCE anahtarın sahibini doğrulayabilsin diye açılır — ikinci bir anahtar
+    grameri kopyası çıkmasın."""
+    return _key_belongs_to(key, user_id)
+
+
 def _build_key(prefix, content_type, user_id):
     """Çakışmayı önlemek için global benzersiz bir nesne anahtarı üret:
     <prefix>/<user_id>/<YYYY>/<MM>/<uuid4hex>.<ext>"""

@@ -1,6 +1,20 @@
+import os
 from pathlib import Path
 
 import pytest
+
+
+def test_audit_app_restores_database_environment_for_subsequent_apps(tmp_path):
+    from scripts.frontend_audit.app import create_audit_app
+
+    original_database_url = os.environ["DATABASE_URL"]
+
+    create_audit_app(tmp_path / "audit.db")
+
+    from app import create_app
+
+    assert os.environ["DATABASE_URL"] == original_database_url
+    assert create_app().config["SQLALCHEMY_DATABASE_URI"] == original_database_url
 
 
 def test_audit_settings_refuse_unsafe_host_and_database(tmp_path):

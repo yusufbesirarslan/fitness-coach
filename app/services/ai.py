@@ -112,6 +112,56 @@ def _claude_chat(messages, system_prompt=None, max_tokens=1024, temperature=0.7)
         raise RuntimeError("AI servisi hatası. Lütfen tekrar deneyin.")
 
 
+def _image_block(image_bytes, media_type):
+    import base64
+    if media_type not in ("image/jpeg", "image/png", "image/webp", "image/gif"):
+        media_type = "image/jpeg"
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": media_type,
+            "data": base64.b64encode(image_bytes).decode("utf-8"),
+        },
+    }
+
+
+def _bedrock_image_message(content, max_tokens, temperature):
+    try:
+        with model_concurrency_slot("bedrock"):
+            resp = bedrock_client.messages.create(
+                model=BEDROCK_MODEL,
+                max_tokens=min(max_tokens, BEDROCK_MAX_TOKENS),
+                messages=[{"role": "user", "content": content}],
+                temperature=temperature,
+            )
+        for block in resp.content:
+            if getattr(block, "type", None) == "text":
+                return block.text
+        return ""
+    except anthropic.RateLimitError:
+        raise RuntimeError("AI servisi \u015fu an yo\u011fun (rate limit). L\u00fctfen biraz sonra tekrar deneyin.")
+    except (anthropic.APITimeoutError, anthropic.APIConnectionError):
+        raise RuntimeError("AI servisine ula\u015f\u0131lamad\u0131 (zaman a\u015f\u0131m\u0131). L\u00fctfen tekrar deneyin.")
+    except anthropic.APIError:
+        logger.warning("bedrock_image_request_failed")
+        raise RuntimeError("AI servisi hatas\u0131. L\u00fctfen tekrar deneyin.")
+
+
+def _bedrock_compare_images(
+        baseline_bytes, baseline_media_type,
+        current_bytes, current_media_type, prompt,
+        max_tokens=1200, temperature=0.0):
+    content = [
+        {"type": "text", "text": prompt},
+        {"type": "text", "text": "Image A \u2014 baseline"},
+        _image_block(baseline_bytes, baseline_media_type),
+        {"type": "text", "text": "Image B \u2014 current"},
+        _image_block(current_bytes, current_media_type),
+    ]
+    return _bedrock_image_message(content, max_tokens, temperature)
+
+
 def _bedrock_validate_image(image_bytes, media_type, prompt, max_tokens=400, temperature=0.0):
     """Bedrock (Claude Sonnet) çok-kipli doğrulama: bir görsel + metin promptu gönderir,
     modelin ham metin yanıtını (genelde katı JSON) string olarak döndürür.
