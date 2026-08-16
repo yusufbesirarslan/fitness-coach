@@ -4361,7 +4361,13 @@ that owns the transaction.
 - **One log line, no metric.** `[COACH][PLAN_TOOL] request_id=... tool=... outcome=...`,
   both values from closed server-owned vocabularies, pinned by an AST test that
   checks the logger call's *arguments* (the format string is a server constant;
-  the arguments are where user or model data would enter). No metric is emitted:
+  the arguments are where user or model data would enter). The unexpected-error
+  path logs the exception **class**, not the exception, and the same test now
+  rejects `exc_info=`/`extra=`: a traceback carries the exception's own message,
+  and the realistic unexpected failure here is a SQLAlchemy `StatementError`
+  whose message embeds the statement and its bound `plan_data`. The same
+  reasoning added `from None` to `IdempotencyConflict`, which is raised from
+  inside an `except IntegrityError` handler. No metric is emitted:
   the honest signal for this capability — did the AI change something the user
   did not ask for? — is not countable, and a counter implying it was would be
   worse than none. The authoritative record stays the `PlanMutationRecord`

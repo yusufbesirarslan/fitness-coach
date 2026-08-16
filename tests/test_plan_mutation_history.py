@@ -15,6 +15,7 @@ import json
 
 import pytest
 
+from app.extensions import db
 from app.services.plan_mutation import (
     ACTOR_AI_COACH,
     ACTOR_SYSTEM,
@@ -580,7 +581,7 @@ class TestDatabaseArbitration:
         after_winner = _text(user.id)
 
         self._blind_preflight(monkeypatch)
-        with pytest.raises(IdempotencyConflict):
+        with pytest.raises(IdempotencyConflict) as raised:
             apply_plan_mutation(
                 user.id,
                 RemoveExerciseCommand(day="Pazartesi", exercise="Shoulder Press"),
@@ -589,6 +590,36 @@ class TestDatabaseArbitration:
         assert _text(user.id) == after_winner
         assert _version(user.id) == 1
         assert len(_records(user.id)) == 1
+        # This conflict is resolved from inside the ``except IntegrityError``
+        # handler, so implicit chaining would hang the driver's error — SQL
+        # statement and bound ``plan_data`` included — off an ordinary domain
+        # outcome, ready to be printed by anything that logs a traceback.
+        assert raised.value.__suppress_context__
+
+    def test_a_lost_race_leaves_no_transaction_open_for_the_caller(
+            self, app, make_user, seed_plan, monkeypatch):
+        """PR2's known Minor, closed in Sprint 1 PR3.
+
+        The winning row can only be found by re-reading AFTER the rollback, and
+        that read autobegins a transaction of its own. With no caller it was a
+        documented residual; the AI Coach tools put a blocking provider call
+        immediately downstream, where it becomes a database connection held
+        across network I/O.
+        """
+        user = make_user("d_arb_settled")
+        seed_plan(user.id)
+        command = AddExerciseCommand(day="Çarşamba", exercise="Side Plank",
+                                     sets=3, reps="30 sn")
+        apply_plan_mutation(user.id, command, _ctx("d-arb-0003"))
+        db.session.commit()
+
+        self._blind_preflight(monkeypatch)
+        replayed = apply_plan_mutation(user.id, command, _ctx("d-arb-0003"))
+
+        assert replayed.replayed is True
+        # Sampled before any assertion reads the plan back — a read of our own
+        # would autobegin a transaction and measure the test, not the service.
+        assert not db.session().in_transaction()
 
 
 # ── Atomicity ────────────────────────────────────────────────────────────────

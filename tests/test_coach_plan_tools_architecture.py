@@ -352,7 +352,7 @@ def test_no_module_in_the_package_can_log_audit_material():
     # server-authored constant, the arguments are where user or model data
     # would enter. Each of these is fixed-cardinality — a request id, a tool
     # name from a closed set, an outcome from a closed set (§61).
-    loggable_names = {"name", "outcome"}
+    loggable_names = {"name", "outcome", "failure"}
     loggable_calls = {"current_request_id"}
     calls = [
         node for node in ast.walk(_tree(PACKAGE_ROOT / "executor.py"))
@@ -363,6 +363,15 @@ def test_no_module_in_the_package_can_log_audit_material():
     assert calls
     for call in calls:
         assert isinstance(call.args[0], ast.Constant), call.lineno
+        # No keyword arguments at all. `exc_info=True` is the one that matters:
+        # it is not itself audit material, but it emits the exception's own
+        # message, and the likely unexpected failure here is a SQLAlchemy
+        # StatementError whose message embeds the bound `plan_data`. `extra=`
+        # and `stack_info=` smuggle unvetted material the same way, and none of
+        # the three is visible to the positional-argument check below.
+        assert not call.keywords, (
+            f"executor.py:{call.lineno} passes a logging keyword that can "
+            "carry unvetted material")
         for argument in call.args[1:]:
             if isinstance(argument, ast.Name):
                 assert argument.id in loggable_names, call.lineno

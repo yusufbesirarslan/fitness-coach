@@ -174,8 +174,14 @@ def _replay_or_conflict(record, expected_type, expected_fingerprint):
     """
     if (record.command_type != expected_type
             or record.command_fingerprint != expected_fingerprint):
+        # ``from None`` because one of this function's two callers runs inside
+        # an ``except IntegrityError`` handler, where implicit chaining would
+        # attach the driver's error — statement and bound ``plan_data`` included
+        # — to a conflict that is a perfectly ordinary domain outcome. On the
+        # other path there is no active exception and this is a no-op.
         raise IdempotencyConflict(
-            "this operation key is already bound to a different change")
+            "this operation key is already bound to a different change"
+        ) from None
     return _replay(record)
 
 
@@ -312,9 +318,11 @@ def apply_plan_mutation(user_id, command, context) -> PlanMutationResult:
             replayed=False,
         )
 
-    # Reached only from the IntegrityError branch. Returned out here rather than
-    # from inside the handler so a resulting conflict carries no chained SQL
-    # error.
+    # Reached only from the IntegrityError branch. The arbitration itself now
+    # happens inside the handler, because the winning row has to be materialized
+    # before its transaction is closed; a resulting conflict still carries no
+    # chained SQL error, which ``_replay_or_conflict`` guarantees with
+    # ``from None`` rather than by where it is called.
     return arbitrated
 
 

@@ -789,6 +789,49 @@ def test_an_unexpected_failure_is_never_dressed_up_as_user_error(
     assert "something internal" not in json.dumps(result, ensure_ascii=False)
 
 
+def test_an_unexpected_failure_does_not_log_the_exception_it_swallowed(
+        app, planned_user, tools_on, turn, monkeypatch, caplog):
+    """The internal-error path is the one that can leak the plan into a log.
+
+    A traceback is not deliberately audit material, but it carries the
+    exception's own message — and the realistic unexpected failure here is a
+    SQLAlchemy ``StatementError``, whose message embeds the statement and its
+    bound parameters, i.e. the whole plan document. So the handler logs the
+    exception *class*, never the exception (§60).
+    """
+    def _boom(*_args, **_kwargs):
+        raise ValueError("Bench Press -> Incline Press, plan_data={...}")
+
+    monkeypatch.setattr(
+        "app.services.coach_plan_tools.executor.apply_plan_mutation", _boom)
+
+    with caplog.at_level("WARNING"):
+        call(planned_user.id, REMOVE,
+             {"day": "Pazartesi", "exercise": "Bench Press"})
+
+    emitted = "\n".join(
+        record.getMessage() + (record.exc_text or "")
+        for record in caplog.records)
+    assert "ValueError" in emitted          # enough to route a diagnosis
+    assert "plan_data" not in emitted
+    assert "Incline Press" not in emitted
+    assert "Bench Press" not in emitted
+
+
+def test_a_boolean_principal_is_refused_instead_of_resolving_to_user_one(
+        app, planned_user, tools_on, turn):
+    """``bool`` is an ``int`` subclass, so a sloppy ``isinstance`` check would
+    let ``True`` through and then mutate whichever user has id 1 — the single
+    mistake this whole boundary exists to make impossible."""
+    before = names(planned_user.id)
+
+    result = call(True, REMOVE, {"day": "Pazartesi", "exercise": "Bench Press"})
+
+    assert result["error"] == results.ERROR_INTERNAL
+    assert names(planned_user.id) == before
+    assert PlanMutationRecord.query.count() == 0
+
+
 def test_without_a_turn_identity_the_tools_refuse(app, planned_user, tools_on):
     """No request, no turn — and no key that would be safe to mint (§16)."""
     with app.app_context():

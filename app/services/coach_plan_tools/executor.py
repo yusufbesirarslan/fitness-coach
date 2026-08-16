@@ -227,10 +227,13 @@ def _execute(user_id, name, arguments):
         return results.error_result(
             results.ERROR_INVALID_ARGUMENTS, "bilinmeyen plan aracı")
 
-    if not isinstance(user_id, int) or user_id <= 0:
+    if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
         # The dispatcher passes the authenticated user. A missing or malformed
         # one is a server defect, and guessing an owner is the one mistake this
-        # whole boundary exists to make impossible.
+        # whole boundary exists to make impossible. ``bool`` is excluded first
+        # for the same reason the parser excludes it from ``sets``: it is an
+        # ``int`` subclass, so ``True`` would pass this guard and then mutate
+        # user 1's plan.
         return results.error_result(results.ERROR_INTERNAL)
 
     try:
@@ -247,9 +250,18 @@ def _execute(user_id, name, arguments):
         # Mapped by exception CLASS, never by message: no domain wording, no
         # SQL and no snapshot reaches the model (brief §27).
         return results.error_result(results.error_code_for(e))
-    except Exception:
+    except Exception as exc:
+        # The exception CLASS, not the exception. A traceback is not deliberately
+        # audit material, but it carries the exception's own message, and an
+        # unexpected failure here is most likely a SQLAlchemy StatementError —
+        # whose message embeds the statement and its bound parameters, i.e. the
+        # whole plan document. "No plan text in logs" has to be structural
+        # (§60); the class name is fixed-cardinality and enough to route a
+        # diagnosis alongside the request id.
+        failure = type(exc).__name__
         current_app.logger.warning(
-            "[COACH][PLAN_TOOL] beklenmeyen hata tool=%s", name, exc_info=True)
+            "[COACH][PLAN_TOOL] beklenmeyen hata tool=%s failure=%s",
+            name, failure)
         return results.error_result(results.ERROR_INTERNAL)
 
 

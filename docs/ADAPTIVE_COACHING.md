@@ -834,6 +834,15 @@ the format string, because the format is a server constant and the arguments are
 where user or model data would enter. No arguments, plan text, summary, reason,
 operation key or fingerprint is ever logged.
 
+The unexpected-error path logs the exception's **class**, not the exception, and
+the same test rejects `exc_info=`/`extra=` outright. A traceback is not
+deliberately audit material, but it carries the exception's own message — and
+the realistic unexpected failure here is a SQLAlchemy `StatementError`, whose
+message embeds the statement and its bound parameters, i.e. the whole plan
+document. For the same reason `IdempotencyConflict` is raised `from None`: it is
+resolved inside an `except IntegrityError` handler, and implicit chaining would
+hang the driver's error off an ordinary domain outcome.
+
 The authoritative record of what changed remains the `PlanMutationRecord`
 journal, queryable by user and lineage. No metric is emitted: the honest
 signals for this capability (did the AI change something the user did not ask
