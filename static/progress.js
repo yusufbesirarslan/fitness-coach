@@ -204,8 +204,17 @@ function initProgress() {
 function loadProgress() {
   loadSummary();
   loadHistory();
-  loadInsights();
+  loadAxisInsights();
   loadPhysique();
+}
+
+// AXIS INSIGHTS lives in its own module (static/progress_insights.js) — this
+// file hands off rather than rendering it, so the three-slot contract has one
+// owner. Guarded because a failure to load that script must degrade only its
+// own section, exactly like a failing fetch does.
+function loadAxisInsights() {
+  var mod = window.FitXAxisInsights;
+  if (mod && typeof mod.load === 'function') mod.load();
 }
 document.addEventListener('DOMContentLoaded', initProgress);
 
@@ -441,33 +450,6 @@ function renderHistory(rows) {
       '</p>';
   }
   box.innerHTML = html;
-}
-
-// ── AXIS INSIGHTS ────────────────────────────────────────────────────
-// Renders the existing deterministic insight payload. `tone` is the
-// endpoint's own field; it drives the accent AND a visible text label so the
-// signal is never carried by colour alone.
-function loadInsights() {
-  var box = _el('insight-list');
-  _getJSON('/api/progress/insights').then(function (d) {
-    var list = (d && d.insights) || [];
-    if (!box) return;
-    if (!list.length) {
-      box.innerHTML = _emptyState(__t('progress.insights_empty_title'), __t('progress.insights_empty_desc'));
-      return;
-    }
-    box.innerHTML = list.map(function (n) {
-      var tone = (n.tone === 'success' || n.tone === 'warning') ? n.tone : 'info';
-      return '<article class="insight-card" data-tone="' + tone + '">' +
-        '<div class="ic-head">' +
-          '<span class="ic-icon" aria-hidden="true">' + escapeHTML(n.icon || '💡') + '</span>' +
-          '<h3 class="ic-title">' + escapeHTML(n.title) + '</h3>' +
-          '<span class="ic-tone tone-' + tone + '">' + escapeHTML(__t('progress.tone_' + tone)) + '</span>' +
-        '</div>' +
-        '<p class="ic-body">' + escapeHTML(n.body) + '</p>' +
-      '</article>';
-    }).join('');
-  }).catch(function () { _sectionError(box); });
 }
 
 // ── PHYSIQUE PROGRESS ────────────────────────────────────────────────
