@@ -10,7 +10,7 @@ no image read, and it creates no comparison. One bounded query serves one page.
 """
 from datetime import timezone
 
-from sqlalchemy import and_, or_
+from sqlalchemy import tuple_
 
 from app.extensions import db
 from app.models import PumpCheck
@@ -51,11 +51,19 @@ def parse_page_size(value):
 
 
 def _seek(captured_at, row_id):
-    """`(captured_at, id) < (cursor)` under `captured_at DESC, id DESC`."""
-    return or_(
-        PumpCheck.captured_at < captured_at,
-        and_(PumpCheck.captured_at == captured_at, PumpCheck.id < row_id),
-    )
+    """`(captured_at, id) < (cursor)` under `captured_at DESC, id DESC`.
+
+    A row-value comparison, not the equivalent `a < x OR (a = x AND b < y)`.
+    Both are correct, but only this form is planned as an index BOUND: with the
+    OR spelling PostgreSQL scans from the top of the index and filters, so page
+    N costs O(N x limit). Measured on 60k rows, the deep page dropped from 224
+    to 24 shared buffers when it became an `Index Cond`.
+
+    Safe here because `captured_at IS NULL` rows are already excluded — row
+    comparison with a NULL member yields NULL, which would silently drop rows.
+    """
+    return tuple_(PumpCheck.captured_at, PumpCheck.id) < tuple_(
+        captured_at, row_id)
 
 
 def _query(user_id, cursor_position):

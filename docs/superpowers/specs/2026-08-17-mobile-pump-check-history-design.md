@@ -257,6 +257,14 @@ A column projection, not an entity load — so no relationship (`user`, `likes`,
 `comments`) can lazy-load and turn one page into N queries. Exactly one query per
 page regardless of page size.
 
+The seek is written as a **row-value comparison**, not as the equivalent
+`captured_at < ? OR (captured_at = ? AND id < ?)`. Both are correct, but only
+the row-value form is planned as an index bound; with the OR spelling
+PostgreSQL scans from the top of the index and filters, making page N cost
+O(N x limit). This is safe only because `captured_at IS NULL` rows are already
+excluded — a row comparison with a NULL member yields NULL and would silently
+drop rows.
+
 Existing `pump_check` indexes are `user_id`, `visibility`, `date_key`,
 `ix_pump_check_user_created (user_id, created_at)`, and the uniqueness
 constraints on `(user_id, date_key)`, `(user_id, idempotency_key)`,
@@ -270,11 +278,44 @@ So PR4A adds the smallest index that serves it:
 ix_pump_check_user_captured (user_id, captured_at DESC, id DESC)
 ```
 
-Additive: one new index, no data rewrite, no column change, no comparison table
-change, based on the current single Alembic head `fa1b2c3d4e5f`. The migration is
-re-runnable (guarded by an inspector check) because a fresh database runs
-`db.create_all()` — which already builds the index from the model — before
-Alembic replays the chain.
+Both sort keys are DESC, so a plain ascending composite index is scanned
+backwards to satisfy the order; a DESC index would buy nothing and would make
+the definition dialect-sensitive.
+
+Additive: one new index (revision `c1d2e3f4a5b6`), no data rewrite, no column
+change, no comparison table change, based on the then-current single Alembic head
+`fa1b2c3d4e5f`. The migration is re-runnable (guarded by an inspector check)
+because a fresh database runs `db.create_all()` — which already builds the index
+from the model — before Alembic replays the chain.
+
+### Measured evidence
+
+SQLite, before the index:
+
+```
+SEARCH pump_check USING INDEX ix_pump_check_user_id (user_id=?)
+USE TEMP B-TREE FOR ORDER BY
+```
+
+SQLite, after:
+
+```
+SEARCH pump_check USING INDEX ix_pump_check_user_captured (user_id=? AND captured_at>?)
+```
+
+PostgreSQL 16, 60 000 rows / 1 200 owned by the caller, first and seek page:
+
+```
+Limit
+  ->  Index Scan Backward using ix_pump_check_user_captured on pump_check
+        Index Cond: ((user_id = 7) AND (captured_at IS NOT NULL)
+                     AND (ROW(captured_at, id) < ROW(?, ?)))
+        Buffers: shared hit=24
+```
+
+No `Sort` node, no `Rows Removed by Filter`, 24 shared buffers per page at any
+depth. `flask db check` against that database reports `No new upgrade operations
+detected` — models and migration head agree.
 
 ## 14. Out of scope
 
