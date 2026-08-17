@@ -241,6 +241,30 @@ def test_the_raw_analysis_body_is_never_a_published_value():
     assert bare_attributes == {"row.public_id", "row.body_region"}
 
 
+def test_every_writer_of_captured_at_also_writes_the_opaque_id():
+    """History filters on `captured_at`, but publishes `public_id`.
+
+    Both columns are nullable, and the endpoint would emit `"id": null` for a
+    row that carried one without the other. The two are written together today
+    (the mobile create path sets both; the legacy web completion path sets
+    neither), which is exactly why filtering on `captured_at` is safe. This
+    guard fails if a future writer separates them.
+    """
+    writers = []
+    for path in (ROOT / "app").rglob("*.py"):
+        for node in ast.walk(_tree(path)):
+            if not (isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Name)
+                    and node.func.id == "PumpCheck"):
+                continue
+            fields = {kw.arg for kw in node.keywords}
+            writers.append((path.name, fields))
+
+    assert writers, "no PumpCheck construction site found"
+    for name, fields in writers:
+        assert ("captured_at" in fields) == ("public_id" in fields), name
+
+
 def test_the_internal_row_id_is_selected_for_ordering_but_never_published():
     """`id` must reach the cursor and the ORDER BY, and stop there."""
     assert "PumpCheck.id" in inspect.getsource(history._query)
