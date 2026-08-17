@@ -658,6 +658,11 @@ class PumpCheck(db.Model):
         # Feed V2 birincil kaynak sorgusu: user_id IN (arkadaslar) + ORDER BY
         # created_at DESC. Tek-kolon user_id indeksi siralamayi karsilamiyordu.
         db.Index("ix_pump_check_user_created", "user_id", "created_at"),
+        # Sprint 10 PR4A kanonik mobil gecmis sorgusu: user_id = ? + ORDER BY
+        # captured_at DESC, id DESC. captured_at'i siralayabilen indeks YOKTU;
+        # her sayfa kullanicinin tum satirlarini gecici b-tree'de siraliyordu.
+        # Iki anahtar da DESC oldugu icin ASC indeks geriye taranarak yeter.
+        db.Index("ix_pump_check_user_captured", "user_id", "captured_at", "id"),
     )
 
     user = db.relationship("User", backref=db.backref("pump_checks", passive_deletes=True))

@@ -126,4 +126,5 @@ jobs:
           tests/test_mobile_diary_mutation_pg.py
           tests/test_mobile_pump_check_pg.py
           tests/test_mobile_pump_check_comparison_pg.py
+          tests/test_mobile_pump_check_history_pg.py
           tests/test_plan_mutation_history_pg.py
