@@ -233,6 +233,41 @@ def test_analysis_lease_exceeds_provider_and_storage_retry_budget():
     assert service.ANALYSIS_LEASE_SECONDS >= 600
 
 
+def test_row_creator_still_reports_creation_when_a_peer_owns_the_analysis(
+        client, headers, dependencies, monkeypatch):
+    """Two concurrent requests race twice, and the winners can differ.
+
+    The insert race picks who created the row; the lease race picks who runs
+    the analysis. When the inserter loses the lease it must still report the
+    creation it performed — the lease is a different question.
+    """
+    real_claim = service._claim_analysis
+    peer = {"done": False}
+
+    def claim_after_peer_takes_the_lease(row_id, user_id, now=None):
+        if not peer["done"]:
+            peer["done"] = True
+            peer["outcome"] = service.create_or_replay(
+                user_id,
+                headers["Idempotency-Key"],
+                service.create_command(
+                    _image().read(), "image/jpeg", "upper_body", "gym",
+                    "progress", "2026-08-13T05:00:00Z"),
+            )
+        return real_claim(row_id, user_id, now=now)
+
+    monkeypatch.setattr(service, "_claim_analysis", claim_after_peer_takes_the_lease)
+
+    creator = client.post(PATH, data=_command(), headers=headers)
+
+    assert peer["outcome"][1] is False
+    assert creator.status_code == 201
+    assert PumpCheck.query.count() == 1
+    assert PumpCheck.query.one().analysis_status == "completed"
+    assert dependencies["upload"] == 1
+    assert dependencies["analysis"] == 1
+
+
 def test_unreconciled_finalization_is_never_classified_as_provider_failure(
         app, mobile_user, monkeypatch):
     row = PumpCheck(
