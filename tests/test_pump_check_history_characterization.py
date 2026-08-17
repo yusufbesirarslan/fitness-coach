@@ -81,7 +81,7 @@ def test_single_item_stays_owner_scoped(client, headers, make_user, monkeypatch)
 
 
 def test_mobile_pump_check_route_inventory():
-    """PR4A may ADD the collection GET and nothing else on this prefix."""
+    """PR4A added the collection GET and nothing else on this prefix."""
     rules = {
         (rule.rule, tuple(sorted(rule.methods - {"HEAD", "OPTIONS"})))
         for rule in create_app().url_map.iter_rules()
@@ -90,6 +90,7 @@ def test_mobile_pump_check_route_inventory():
 
     assert rules == {
         ("/api/v1/pump-checks", ("POST",)),
+        ("/api/v1/pump-checks", ("GET",)),
         ("/api/v1/pump-checks/<pump_check_token>", ("GET",)),
         ("/api/v1/pump-check-comparisons", ("POST",)),
         ("/api/v1/pump-check-comparisons/<comparison_id>", ("GET",)),

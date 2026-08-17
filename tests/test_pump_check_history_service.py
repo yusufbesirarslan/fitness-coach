@@ -81,37 +81,37 @@ def test_non_ascii_digit_forms_are_rejected(value):
 # ---------------------------------------------------------------------------
 
 def test_history_is_ordered_by_capture_time_descending(app, owner):
-    _add(owner, BASE.replace(day=11), "history0000000000000001")
-    _add(owner, BASE.replace(day=13), "history0000000000000002")
-    _add(owner, BASE.replace(day=12), "history0000000000000003")
+    _add(owner, BASE.replace(day=11), "history00000000000000001")
+    _add(owner, BASE.replace(day=13), "history00000000000000002")
+    _add(owner, BASE.replace(day=12), "history00000000000000003")
 
     assert _ids(_page(owner)) == [
-        "history0000000000000002",
-        "history0000000000000003",
-        "history0000000000000001",
+        "history00000000000000002",
+        "history00000000000000003",
+        "history00000000000000001",
     ]
 
 
 def test_identical_capture_times_break_the_tie_deterministically(app, owner):
-    first = _add(owner, BASE, "history0000000000000001")
-    second = _add(owner, BASE, "history0000000000000002")
-    third = _add(owner, BASE, "history0000000000000003")
+    first = _add(owner, BASE, "history00000000000000001")
+    second = _add(owner, BASE, "history00000000000000002")
+    third = _add(owner, BASE, "history00000000000000003")
 
     assert [row.id for row in (third, second, first)] == sorted(
         (first.id, second.id, third.id), reverse=True)
     assert _ids(_page(owner)) == [
-        "history0000000000000003",
-        "history0000000000000002",
-        "history0000000000000001",
+        "history00000000000000003",
+        "history00000000000000002",
+        "history00000000000000001",
     ]
 
 
 def test_capture_time_outranks_write_order(app, owner):
     """A check uploaded late but captured early sorts by when it was taken."""
-    _add(owner, BASE.replace(day=13), "history0000000000000001")
-    _add(owner, BASE.replace(day=10), "history0000000000000002")
+    _add(owner, BASE.replace(day=13), "history00000000000000001")
+    _add(owner, BASE.replace(day=10), "history00000000000000002")
 
-    assert _ids(_page(owner))[0] == "history0000000000000001"
+    assert _ids(_page(owner))[0] == "history00000000000000001"
 
 
 # ---------------------------------------------------------------------------
@@ -119,15 +119,15 @@ def test_capture_time_outranks_write_order(app, owner):
 # ---------------------------------------------------------------------------
 
 def test_legacy_rows_without_capture_time_are_excluded(app, owner):
-    _add(owner, None, "history0000000000000001", body_region=None,
+    _add(owner, None, "history00000000000000001", body_region=None,
          analysis_status=None)
-    _add(owner, BASE, "history0000000000000002")
+    _add(owner, BASE, "history00000000000000002")
 
-    assert _ids(_page(owner)) == ["history0000000000000002"]
+    assert _ids(_page(owner)) == ["history00000000000000002"]
 
 
 def test_a_history_of_only_legacy_rows_reads_as_empty(app, owner):
-    _add(owner, None, "history0000000000000001", body_region=None)
+    _add(owner, None, "history00000000000000001", body_region=None)
 
     page = _page(owner)
 
@@ -138,8 +138,8 @@ def test_a_history_of_only_legacy_rows_reads_as_empty(app, owner):
 
 def test_legacy_rows_never_reappear_through_pagination(app, owner):
     for index in range(4):
-        _add(owner, None, "historylegacy000000000%d" % index, body_region=None)
-        _add(owner, BASE.replace(minute=index), "history000000000000000%d" % index)
+        _add(owner, None, "historylegacy0000000000%d" % index, body_region=None)
+        _add(owner, BASE.replace(minute=index), "history0000000000000000%d" % index)
 
     seen = []
     page = _page(owner, limit=1)
@@ -158,23 +158,23 @@ def test_legacy_rows_never_reappear_through_pagination(app, owner):
 # ---------------------------------------------------------------------------
 
 def test_history_contains_only_rows_owned_by_the_caller(app, owner, stranger):
-    _add(owner, BASE, "history0000000000000001")
-    _add(stranger, BASE.replace(day=14), "history0000000000000002")
+    _add(owner, BASE, "history00000000000000001")
+    _add(stranger, BASE.replace(day=14), "history00000000000000002")
 
-    assert _ids(_page(owner)) == ["history0000000000000001"]
-    assert _ids(_page(stranger)) == ["history0000000000000002"]
+    assert _ids(_page(owner)) == ["history00000000000000001"]
+    assert _ids(_page(stranger)) == ["history00000000000000002"]
 
 
 def test_feed_visibility_does_not_grant_history_visibility(app, owner, stranger):
     """Sharing to Feed changes who may SEE a check, never who OWNS it."""
-    _add(owner, BASE, "history0000000000000001", visibility="feed")
+    _add(owner, BASE, "history00000000000000001", visibility="feed")
 
     assert _ids(_page(stranger)) == []
 
 
 def test_a_cursor_from_another_owner_cannot_widen_a_page(app, owner, stranger):
-    _add(owner, BASE, "history0000000000000001")
-    _add(owner, BASE.replace(day=14), "history0000000000000002")
+    _add(owner, BASE, "history00000000000000001")
+    _add(owner, BASE.replace(day=14), "history00000000000000002")
     foreign = _page(owner, limit=1)["next_cursor"]
     assert foreign is not None
 
@@ -194,7 +194,7 @@ def test_an_empty_history_is_an_empty_page_not_an_error(app, owner):
 
 def test_a_full_walk_yields_every_row_once_and_in_order(app, owner):
     for index in range(7):
-        _add(owner, BASE.replace(minute=index), "history000000000000000%d" % index)
+        _add(owner, BASE.replace(minute=index), "history0000000000000000%d" % index)
 
     seen = []
     page = _page(owner, limit=2)
@@ -205,7 +205,7 @@ def test_a_full_walk_yields_every_row_once_and_in_order(app, owner):
         pages += 1
     seen.extend(_ids(page))
 
-    assert seen == ["history000000000000000%d" % i for i in range(6, -1, -1)]
+    assert seen == ["history0000000000000000%d" % i for i in range(6, -1, -1)]
     assert len(seen) == len(set(seen))
     assert pages == 4
 
@@ -213,7 +213,7 @@ def test_a_full_walk_yields_every_row_once_and_in_order(app, owner):
 def test_paging_through_identical_capture_times_skips_and_repeats_nothing(
         app, owner):
     for index in range(6):
-        _add(owner, BASE, "history000000000000000%d" % index)
+        _add(owner, BASE, "history0000000000000000%d" % index)
 
     seen = []
     page = _page(owner, limit=2)
@@ -228,8 +228,8 @@ def test_paging_through_identical_capture_times_skips_and_repeats_nothing(
 
 
 def test_next_cursor_is_present_only_while_more_rows_remain(app, owner):
-    _add(owner, BASE, "history0000000000000001")
-    _add(owner, BASE.replace(day=14), "history0000000000000002")
+    _add(owner, BASE, "history00000000000000001")
+    _add(owner, BASE.replace(day=14), "history00000000000000002")
 
     first = _page(owner, limit=1)
     assert first["has_more"] is True
@@ -242,8 +242,8 @@ def test_next_cursor_is_present_only_while_more_rows_remain(app, owner):
 
 def test_an_exactly_full_final_page_reports_the_end(app, owner):
     """limit == remaining must not promise a page that does not exist."""
-    _add(owner, BASE, "history0000000000000001")
-    _add(owner, BASE.replace(day=14), "history0000000000000002")
+    _add(owner, BASE, "history00000000000000001")
+    _add(owner, BASE.replace(day=14), "history00000000000000002")
 
     page = _page(owner, limit=2)
 
@@ -254,7 +254,7 @@ def test_an_exactly_full_final_page_reports_the_end(app, owner):
 
 def test_repeating_the_first_page_is_stable(app, owner):
     for index in range(4):
-        _add(owner, BASE.replace(minute=index), "history000000000000000%d" % index)
+        _add(owner, BASE.replace(minute=index), "history0000000000000000%d" % index)
 
     assert _ids(_page(owner, limit=2)) == _ids(_page(owner, limit=2))
 
@@ -262,7 +262,7 @@ def test_repeating_the_first_page_is_stable(app, owner):
 def test_a_cursor_still_pages_after_its_row_is_deleted(app, owner):
     """Keyset seeks on VALUES, so a deleted anchor does not break the walk."""
     for index in range(3):
-        _add(owner, BASE.replace(minute=index), "history000000000000000%d" % index)
+        _add(owner, BASE.replace(minute=index), "history0000000000000000%d" % index)
     first = _page(owner, limit=1)
     anchor = PumpCheck.query.filter_by(
         public_id=_ids(first)[0]).one()
@@ -272,7 +272,7 @@ def test_a_cursor_still_pages_after_its_row_is_deleted(app, owner):
     rest = _page(owner, limit=5, cursor=first["next_cursor"])
 
     assert _ids(rest) == [
-        "history0000000000000001", "history0000000000000000"]
+        "history00000000000000001", "history00000000000000000"]
 
 
 # ---------------------------------------------------------------------------
@@ -280,7 +280,7 @@ def test_a_cursor_still_pages_after_its_row_is_deleted(app, owner):
 # ---------------------------------------------------------------------------
 
 def test_a_history_item_publishes_exactly_the_lightweight_contract(app, owner):
-    _add(owner, BASE, "history0000000000000001",
+    _add(owner, BASE, "history00000000000000001",
          analysis={"quality": "sufficient", "summary": "x" * 400},
          analysis_version="pump-check-analysis/v1",
          description="private note",
@@ -290,7 +290,7 @@ def test_a_history_item_publishes_exactly_the_lightweight_contract(app, owner):
     item = _page(owner)["pump_checks"][0]
 
     assert item == {
-        "id": "history0000000000000001",
+        "id": "history00000000000000001",
         "captured_at": "2026-08-13T05:00:00Z",
         "body_region": "upper_body",
         "analysis_status": "completed",
@@ -299,7 +299,7 @@ def test_a_history_item_publishes_exactly_the_lightweight_contract(app, owner):
 
 
 def test_a_row_without_an_analysis_status_reads_as_unavailable(app, owner):
-    _add(owner, BASE, "history0000000000000001", analysis_status=None)
+    _add(owner, BASE, "history00000000000000001", analysis_status=None)
 
     assert _page(owner)["pump_checks"][0]["analysis_status"] == "unavailable"
 
@@ -316,7 +316,7 @@ def test_a_row_without_an_analysis_status_reads_as_unavailable(app, owner):
 ])
 def test_quality_is_published_only_from_a_completed_analysis(
         app, owner, analysis, status, expected):
-    _add(owner, BASE, "history0000000000000001",
+    _add(owner, BASE, "history00000000000000001",
          analysis=analysis, analysis_status=status)
 
     assert _page(owner)["pump_checks"][0]["analysis_quality"] == expected
@@ -324,7 +324,7 @@ def test_quality_is_published_only_from_a_completed_analysis(
 
 def test_capture_times_are_published_as_utc_zulu(app, owner):
     _add(owner, datetime(2026, 8, 13, 5, 0, 0, 123456),
-         "history0000000000000001")
+         "history00000000000000001")
 
     assert _page(owner)["pump_checks"][0]["captured_at"] == (
         "2026-08-13T05:00:00.123456Z")
@@ -336,7 +336,7 @@ def test_capture_times_are_published_as_utc_zulu(app, owner):
 
 def test_a_page_costs_exactly_one_pump_check_query(app, owner):
     for index in range(5):
-        _add(owner, BASE.replace(minute=index), "history000000000000000%d" % index)
+        _add(owner, BASE.replace(minute=index), "history0000000000000000%d" % index)
     statements = []
 
     def record(conn, cursor, statement, parameters, context, executemany):
@@ -354,7 +354,7 @@ def test_a_page_costs_exactly_one_pump_check_query(app, owner):
 
 def test_a_later_page_costs_exactly_one_pump_check_query(app, owner):
     for index in range(5):
-        _add(owner, BASE.replace(minute=index), "history000000000000000%d" % index)
+        _add(owner, BASE.replace(minute=index), "history0000000000000000%d" % index)
     cursor = _page(owner, limit=3)["next_cursor"]
     statements = []
 
@@ -373,7 +373,7 @@ def test_a_later_page_costs_exactly_one_pump_check_query(app, owner):
 def test_a_page_reads_no_more_rows_than_it_needs(app, owner):
     """The page probes limit+1, never the whole history."""
     for index in range(9):
-        _add(owner, BASE.replace(minute=index), "history000000000000000%d" % index)
+        _add(owner, BASE.replace(minute=index), "history0000000000000000%d" % index)
     statements = []
 
     def record(conn, cursor, statement, parameters, context, executemany):
@@ -390,7 +390,7 @@ def test_a_page_reads_no_more_rows_than_it_needs(app, owner):
 
 
 def test_history_never_writes(app, owner):
-    _add(owner, BASE, "history0000000000000001")
+    _add(owner, BASE, "history00000000000000001")
     statements = []
 
     def record(conn, cursor, statement, parameters, context, executemany):
