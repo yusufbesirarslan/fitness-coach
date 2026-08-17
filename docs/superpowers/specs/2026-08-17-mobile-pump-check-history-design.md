@@ -76,29 +76,38 @@ duplicate rows when the underlying set changes; keyset cannot.
 ### Encoding
 
 ```
-<base64url(payload)>.<base64url(tag)>
-payload = "v1:<captured_at ISO-8601 microseconds>:<id>"
-tag     = HMAC-SHA256(subkey, "<user_id>\0<payload>")[:18]
+cursor  = Fernet(subkey).encrypt("v1|<user_id>|<captured_at ISO µs>|<id>")
 subkey  = HMAC-SHA256(SECRET_KEY, b"axisai/mobile-pump-check/history-cursor/v1")
 ```
 
-Same construction as the other canonical mobile identity tokens
+The subkey is derived exactly as the other canonical mobile tokens derive theirs
 (`mobile_pump_checks.identity`, `mobile_nutrition.identity`): a versioned domain
-string, a `SECRET_KEY`-derived subkey, base64url, `hmac.compare_digest`.
+string over `SECRET_KEY`. It is then used as a Fernet key, reusing the
+encryption primitive `session_store` already depends on.
+
+The payload is **encrypted, not merely signed**. A signed-but-readable cursor
+would be base64 the client can decode, publishing sequential database ids as
+public API semantics — a client could read one and learn how many Pump Check
+rows exist, and how many were written between two of its own. Fernet
+authenticates as well as encrypts, so tamper-evidence comes with it.
 
 ### Properties
 
-- **Opaque.** The client never parses it, never constructs it, and needs no
-  knowledge of `id`, of SQL ordering, or of the tie-break. It is echoed back
-  verbatim.
-- **Owner-bound.** `user_id` is in the MAC message but not in the payload. A
-  cursor minted for A fails verification under B — so cursor reuse across users
-  is rejected at the boundary *and* would have been harmless anyway, because the
-  owner filter comes from the token, never from the cursor. Two independent
-  defences, and the authoritative one is the filter.
-- **Tamper-evident.** Editing the timestamp or the id invalidates the tag.
-- **Versioned.** The `v1:` prefix is inside the signed payload. An unsupported
+- **Opaque.** The ciphertext reveals neither the capture time nor the row id.
+  The client never parses it, never constructs it, and needs no knowledge of
+  `id`, of SQL ordering, or of the tie-break. It is echoed back verbatim. Two
+  cursors for the same position are not byte-identical, so a cursor is not a
+  stable fingerprint for a row either.
+- **Owner-bound.** `user_id` travels inside the sealed payload and is compared
+  against the authenticated user after decryption. A cursor minted for A is
+  rejected under B — and would have been harmless anyway, because the owner
+  filter comes from the token, never from the cursor. Two independent defences,
+  and the authoritative one is the filter.
+- **Versioned.** The `v1` field is inside the sealed payload. An unsupported
   version is rejected, not guessed.
+- **Re-validated.** A payload this server sealed is still parsed defensively —
+  field count, version, owner, integer tie-break and timestamp are all checked
+  before use. Authenticity is not taken as a licence to trust the contents.
 
 ### Validation
 
@@ -108,10 +117,11 @@ Every cursor failure is one deterministic outcome:
 400 INVALID_PAGE_CURSOR   retryable=False
 ```
 
-for: wrong length (raw input is length-capped before any decoding), non-ASCII,
-bad base64, missing separator, wrong field count, unsupported version,
-unparseable timestamp, non-integer id, and bad or absent MAC. A user-supplied
-cursor must never raise a 500 and never leak why it failed.
+for: a non-string, an empty string, an over-long string (length-capped before
+any decryption is attempted), non-ASCII, an unauthentic or truncated token, a
+non-UTF-8 payload, a wrong field count, an unsupported version, a foreign owner,
+a non-integer tie-break, an unparseable timestamp and a timezone-aware one. A
+user-supplied cursor must never raise a 500 and never leak why it failed.
 
 A *validly signed* cursor whose row has since been deleted still works: the
 keyset predicate compares values, not row existence, so the next page is still
