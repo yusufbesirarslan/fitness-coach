@@ -18,6 +18,9 @@ from app.services.ai_coach import generate_checkin_feedback
 from app.services.ai_gate import ai_concurrency_gate
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
 from app.services.gamification import complete_quest_for_user, get_level, level_title
+from app.services.progress_insights import (UnknownCanonicalVocabulary,
+                                            build_progress_insights,
+                                            progress_insights_payload)
 from app.services.progress_summary import (UnknownProgressionSignal, build_progress_summary,
                                            progress_summary_payload)
 from app.services.training_history import fetch_workout_entries
@@ -29,21 +32,30 @@ from app.timeutil import app_date_of, app_today, display_dt, utc_day_bounds
 
 bp = Blueprint("tracking", __name__)
 
-# Canonical Progress summary endpoint (Progress Redesign PR2).
+# Canonical Progress read-model endpoints (Progress Redesign PR2 + PR3).
 _PROGRESS_SUMMARY_PATH = "/api/progress/summary"
+_PROGRESS_AXIS_INSIGHTS_PATH = "/api/progress/axis-insights"
+_PROGRESS_PRIVATE_PATHS = frozenset(
+    {_PROGRESS_SUMMARY_PATH, _PROGRESS_AXIS_INSIGHTS_PATH})
 
 
 @bp.after_request
 def _progress_summary_private_no_store(response):
-    """Per-user trajectory must not be stored by a shared cache or bfcache."""
-    if request.path == _PROGRESS_SUMMARY_PATH:
+    """Per-user trajectory/advice must not be stored by a shared cache or bfcache."""
+    if request.path in _PROGRESS_PRIVATE_PATHS:
         response.headers["Cache-Control"] = "private, no-store"
     return response
 
 
 def _progress_summary_error_class(error):
-    """Coarse, PII-free bucket for the failure log line (never the message)."""
-    if isinstance(error, UnknownProgressionSignal):
+    """Coarse, PII-free bucket for the failure log line (never the message).
+
+    Shared by both canonical Progress read models: PR3's
+    ``UnknownCanonicalVocabulary`` is the same class of fault as PR2's
+    ``UnknownProgressionSignal`` — an upstream contract moved — so it buckets
+    the same way rather than inventing a competing observability vocabulary.
+    """
+    if isinstance(error, (UnknownProgressionSignal, UnknownCanonicalVocabulary)):
         return "contract_drift"
     if isinstance(error, SQLAlchemyError):
         return "upstream_error"
@@ -684,6 +696,51 @@ def progress_summary_read():
         "[PROGRESS][SUMMARY] request_id=%s trajectory=%s body=%s",
         current_request_id(), summary.trajectory.state, summary.body.status)
     return jsonify(progress_summary_payload(summary))
+
+
+@bp.route("/api/progress/axis-insights")
+@require_auth
+def progress_axis_insights_read():
+    """The canonical Axis Insights for the signed-in user (PR3).
+
+    The one authority behind WHAT'S WORKING / WATCH THIS / NEXT MOVE.
+    Deliberately thin, exactly like its PR2 sibling: one service call, one pure
+    projection, no decision of its own. Every code in the response was selected
+    by ``app/services/progress_insights`` from decisions ``progress_summary``
+    and ``training_planning`` had already made.
+
+    There is **no** input. The owner is the authenticated user (no ``user_id``
+    parameter can express another one), and the analysis window is pinned to the
+    service default rather than read off the query string — a caller who can
+    re-window the analysis until the advice improves owns the advice, and the
+    server is supposed to (``docs/PROGRESS_INSIGHTS.md``).
+
+    Failure semantics matter here for the same reason they do on the summary,
+    and for one extra one. An empty WATCH THIS is a legitimate, meaningful
+    product state ("nothing needs your attention"), so returning it on a DB or
+    contract failure would report broken infrastructure as an all-clear — the
+    single most misleading thing this endpoint could do. Failures therefore
+    surface as the blueprint's generic JSON 500; no exception text, SQL,
+    identifier or path leaves the process, only a coarse error class in the log.
+
+    This route is additive. Legacy ``GET /api/progress/insights`` is untouched
+    and keeps its exact contract for any consumer outside the Progress page.
+    """
+    try:
+        insights = build_progress_insights(current_user.id)
+    except Exception as e:
+        current_app.logger.warning(
+            "[PROGRESS][AXIS_INSIGHTS] request_id=%s state=error error_class=%s",
+            current_request_id(), _progress_summary_error_class(e))
+        return jsonify({"error": t("route.generic_error_retry")}), 500
+
+    # Enough observability to tell the slot states apart from an upstream
+    # failure, without emitting counts, volumes, weights, or the payload itself.
+    current_app.logger.info(
+        "[PROGRESS][AXIS_INSIGHTS] request_id=%s working=%s watch=%s next_move=%s",
+        current_request_id(), insights.working.status, insights.watch.status,
+        insights.next_move.code)
+    return jsonify(progress_insights_payload(insights))
 
 
 @bp.route("/api/progress/heatmap")

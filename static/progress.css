@@ -93,34 +93,51 @@
   line-height: var(--leading-normal);
 }
 
-/* ── 4 · AXIS INSIGHTS (vertical list — no carousel) ────────────────── */
-/* The old row scrolled horizontally and hid content off-screen; core
-   content must never depend on a carousel, so this stacks. */
-.insight-list { display: flex; flex-direction: column; gap: var(--space-2); }
-.insight-card {
+/* ── 4 · AXIS INSIGHTS (three fixed slots — no carousel, no ranking) ── */
+/* Exactly three slots, always all three, always stacked. The old row
+   scrolled horizontally and hid content off-screen; core content must never
+   depend on a carousel — and here it must also never depend on the payload,
+   because "there is nothing to watch" is itself the information. Each slot
+   therefore keeps its heading and its box whatever state it is in. */
+.ax-slots { display: flex; flex-direction: column; gap: var(--space-2); }
+.ax-slot {
   background: var(--color-surface-2);
   border: var(--border-w-1) solid var(--color-border-1);
   border-left: var(--border-w-3) solid var(--color-border-1);
   border-radius: var(--radius-lg); padding: var(--space-4);
 }
-.insight-card[data-tone="success"] { border-left-color: var(--color-success); }
-.insight-card[data-tone="warning"] { border-left-color: var(--color-warning); }
-.insight-card[data-tone="info"]    { border-left-color: var(--color-info); }
-.ic-head { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); flex-wrap: wrap; }
-.ic-icon { font-size: 20px; line-height: 1; }
-.ic-title { font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--color-text-1); }
-/* Text label beside the accent: the tone must not be carried by colour alone. */
-.ic-tone {
-  margin-left: auto;
+/* Accent per slot state. STRICTLY redundant, exactly like .ps-card's: the
+   headline text always states the insight or its absence, so the tint adds
+   emphasis and never information (WCAG 1.4.1). Only the left rule is tinted —
+   no filled green/amber verdict backgrounds. */
+.ax-slot[data-status="available"]         { border-left-color: var(--color-primary); }
+.ax-slot#ax-watch[data-status="available"] { border-left-color: var(--color-warning); }
+.ax-slot[data-status="unavailable"]       { border-left-color: var(--color-border-2); }
+
+/* The slot name (WHAT'S WORKING / WATCH THIS / NEXT MOVE) is a permanent
+   label, not a badge that appears with content. */
+.ax-slot-label {
   font-size: var(--text-2xs); font-weight: var(--weight-bold);
   letter-spacing: var(--tracking-widest); text-transform: uppercase;
-  padding: 3px var(--space-2); border-radius: var(--radius-xs);
-  color: var(--color-text-2); background: var(--overlay-4);
+  color: var(--color-text-3); margin-bottom: var(--space-2);
 }
-.ic-tone.tone-success { color: var(--color-success); background: var(--color-success-soft); }
-.ic-tone.tone-warning { color: var(--color-warning); background: var(--color-warning-soft); }
-.ic-tone.tone-info    { color: var(--color-primary); background: var(--color-primary-soft); }
-.ic-body { color: var(--color-text-2); font-size: var(--text-sm); line-height: var(--leading-normal); }
+.ax-headline {
+  font-size: var(--text-base); font-weight: var(--weight-semibold);
+  color: var(--color-text-1); line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+/* Empty / insufficient / unavailable slots read as quiet context rather than
+   as a claim with the same weight as a real insight. */
+.ax-slot[data-status="empty"] .ax-headline,
+.ax-slot[data-status="insufficient_data"] .ax-headline,
+.ax-slot[data-status="unavailable"] .ax-headline {
+  font-weight: var(--weight-regular); color: var(--color-text-2);
+}
+.ax-detail {
+  margin-top: var(--space-2);
+  font-size: var(--text-sm); color: var(--color-text-2);
+  line-height: var(--leading-normal); overflow-wrap: anywhere;
+}
 
 /* ── 5 · PHYSIQUE PROGRESS (shell for the PR4 Pump Check integration) ─ */
 .pp-strip { display: flex; gap: var(--space-2); flex-wrap: wrap; }
