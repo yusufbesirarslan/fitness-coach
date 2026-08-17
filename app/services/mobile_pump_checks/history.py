@@ -88,7 +88,15 @@ def _iso(value):
 
 
 def _quality(analysis, analysis_status):
-    """Publish quality only from a terminal analysis, and only as a string."""
+    """Publish quality only from a terminal analysis, and only as a string.
+
+    The allowed values (sufficient / limited / insufficient) are enforced ONCE,
+    at write time, by the canonical analysis parser — a stored completed
+    analysis cannot carry anything else. They are deliberately not re-checked
+    here: restating the set would create a second authority that could drift,
+    and importing it would pull the provider/vision adapter into what is meant
+    to be a pure read model. The type check below is all this layer owes.
+    """
     if analysis_status != TERMINAL_ANALYSIS_STATUS:
         return None
     if not isinstance(analysis, dict):

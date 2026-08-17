@@ -190,7 +190,11 @@ Reasons:
 - `analysis_quality` — the `quality` field of a completed analysis, else `null`.
   Read from the same row (no extra query, no provider call). PR3 refuses sources
   whose quality is blocking, so without it PR4B could only discover an
-  unusable baseline by attempting a comparison and being refused.
+  unusable baseline by attempting a comparison and being refused. Its value is
+  `sufficient` / `limited` / `insufficient`, enforced once at write time by the
+  canonical analysis parser. History does not re-check the set: restating it
+  would create a second authority that could drift, and importing it would pull
+  the provider/vision adapter into a pure read model.
 
 Deliberately **absent**: the structured `analysis` body, raw provider output,
 `image_key`, presigned URLs, `description`, `environment`, `created_at`, raw
