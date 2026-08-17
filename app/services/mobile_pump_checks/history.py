@@ -113,6 +113,14 @@ def list_history(user_id, secret, limit=DEFAULT_PAGE_SIZE, cursor=None):
     Ownership comes from `user_id`, never from the cursor. `cursor` is the raw
     client string; an unusable one raises `InvalidCursor`.
     """
+    # Re-checked here, not only at the HTTP boundary: this function is public,
+    # and an unchecked `limit < 1` slices the probe row away and then reads
+    # `page[-1]` to mint the cursor — an IndexError rather than a refusal.
+    if not isinstance(limit, int) or isinstance(limit, bool):
+        raise InvalidPageSize("page size must be an integer")
+    if limit < 1 or limit > MAX_PAGE_SIZE:
+        raise InvalidPageSize("page size is out of range")
+
     position = None
     if cursor is not None:
         position = decode_cursor(secret, user_id, cursor)

@@ -75,8 +75,10 @@ Logs exclude IDs, keys, bucket, URLs, image bytes, descriptions, analysis,
 prompts, provider responses, and tokens.
 
 PR2 may rely on only this contract after PR1 is reviewed, CI-green, and merged.
-PR4 history/retention is deferred. Reanalysis, feed expansion, notifications,
-body-fat estimates, heatmaps, and automatic program rewriting are excluded.
+Retention is deferred; the owner-private history collection landed in PR4A and
+is documented at the end of this file. Reanalysis, feed expansion,
+notifications, body-fat estimates, heatmaps, and automatic program rewriting are
+excluded.
 
 # Mobile Pump Check Comparison API — Sprint 10 PR3
 
@@ -191,3 +193,141 @@ Excluded from PR3: history, automatic previous-check selection, image URLs,
 Flutter/mobile client work, progress scores, heatmaps, body-fat estimates,
 numeric deltas, program rewrites, social behavior, a second provider, and all
 PR4 work.
+
+# Mobile Pump Check History API — Sprint 10 PR4A
+
+The owner-private collection read that PR1 did not have. Until PR4A a client
+could create a Pump Check and fetch one by id, but could not discover its own —
+so a first launch had nothing to show. This endpoint is the canonical durable
+history surface and the prerequisite for PR4B's mobile history and baseline
+selection.
+
+## Read
+
+```
+GET /api/v1/pump-checks?limit=<1..50>&cursor=<opaque>
+```
+
+Bearer authenticated on the same mobile path as every other /api/v1 route.
+Ownership is structural: the query is built from the authenticated principal, so
+neither the query string nor the cursor can name an owner. Read-only — no
+Bedrock, no reanalysis, no comparison, no presigned media, no database mutation.
+One bounded SELECT per page.
+
+```json
+{
+  "pump_checks": [
+    {
+      "id": "0hBv1Yq8Tn2mKQZ6r_pXcA",
+      "captured_at": "2026-08-13T05:00:00Z",
+      "body_region": "upper_body",
+      "analysis_status": "completed",
+      "analysis_quality": "sufficient"
+    }
+  ],
+  "next_cursor": "gAAAAABm…",
+  "has_more": true
+}
+```
+
+The list is deliberately lightweight. The structured analysis body, raw provider
+output, image_key, presigned URLs, description, environment, created_at, raw
+database ids, and every comparison field are absent; GET
+/api/v1/pump-checks/<PumpCheckId> remains the detailed surface. A history page
+never mints one presigned URL per row — the client signs a single item only when
+the user opens it.
+
+analysis_quality is the quality of a terminal analysis, or null. PR3 refuses a
+comparison whose source quality is blocking, so without it PR4B could only
+discover an unusable baseline by attempting a comparison and being refused. It
+is not history intelligence: no progress score, trend, similarity,
+comparison-readiness, or recommended baseline is computed or returned.
+
+## Ordering and paging
+
+Chronology is captured_at DESC — when the photo was taken, not when the server
+wrote the row. captured_at alone is not deterministic (several checks may share
+one timestamp), so the tie-break is the internal row id, descending. That id is
+used for ordering and inside the cursor only; it is never serialized.
+
+Paging is keyset, not offset: the page reads limit + 1 rows and returns limit,
+so has_more never costs a COUNT(*). next_cursor is a string while rows remain and
+null at the end; has_more carries the same fact as a boolean. Empty history is
+200 with an empty list, not 404.
+
+Pages are read independently and no cross-request snapshot is claimed. Keyset
+paging guarantees the property that matters — no row is skipped or duplicated
+because of pagination itself. A check created mid-walk with a newer captured_at
+sorts above the window already passed and appears when the client restarts.
+
+## Cursor
+
+The cursor is encrypted, not merely signed: a signed-but-readable cursor is
+base64 a client can decode, which would publish sequential database ids as public
+API semantics. Fernet over a SECRET_KEY-derived subkey in domain
+axisai/mobile-pump-check/history-cursor/v1 authenticates as well as encrypts.
+The owner is sealed inside and re-checked after decryption, so a cursor minted
+for one user is refused for another — a second line of defence behind the owner
+filter, which is the authoritative one.
+
+Every rejection — non-string, empty, over-long, non-ASCII, inauthentic,
+truncated, non-UTF-8 payload, wrong field count, unsupported version, foreign
+owner, non-integer tie-break, unparseable or timezone-aware timestamp — is one
+deterministic 400. A user-supplied cursor never produces a 5xx. A validly sealed
+cursor whose row was since deleted still pages correctly, because the seek
+compares values rather than row existence.
+
+## Legacy rows
+
+Rows without captured_at are excluded from this collection. PR1 deliberately left
+the column nullable rather than backfilling historical web rows with invented
+capture times, and this endpoint's chronology *is* captured_at: such a row has no
+position in it, and created_at is not substituted as a stand-in. PR3 already
+makes these rows ineligible as comparison sources, so listing them in the history
+that feeds PR4B's baseline selector would surface dead ends. They remain readable
+through the single-item GET and the legacy web gallery.
+
+## Errors and retry
+
+| Code | HTTP | Retry/action |
+|---|---:|---|
+| INVALID_PAGE_SIZE | 400 | Correct limit; must be an integer in 1..50 |
+| INVALID_PAGE_CURSOR | 400 | Discard the cursor and restart from the first page |
+| AUTH_RATE_LIMITED | 429 | Honor Retry-After |
+
+Both 400s are retryable=False: the request is permanently invalid, and a
+retryable classification would make a client loop on it. Absent limit defaults to
+20; an out-of-range or non-numeric limit is rejected rather than clamped, so a
+client asking for 500 is never silently served 50 and left to conclude the
+history holds 50 rows.
+
+## Database
+
+The page runs
+
+```sql
+WHERE user_id = ? AND captured_at IS NOT NULL
+  [AND (captured_at, id) < (?, ?)]
+ORDER BY captured_at DESC, id DESC LIMIT ?
+```
+
+as a column projection, not an entity load, so no relationship can lazy-load and
+turn one page into N queries. The seek is a row-value comparison rather than the
+equivalent OR spelling because only that form is planned as an index bound.
+
+PR4A adds ix_pump_check_user_captured (user_id, captured_at, id), migration
+c1d2e3f4a5b6 on top of fa1b2c3d4e5f. No existing index could order by
+captured_at, so every page previously sorted all of an owner's rows in a
+temporary b-tree. Both sort keys are DESC, so an ascending composite index is
+scanned backwards; a DESC index would add nothing and make the definition
+dialect-sensitive. The migration is additive and re-runnable — a fresh database
+builds the index from the model via db.create_all() before Alembic replays the
+chain. Evidence and the PostgreSQL plan are in
+docs/superpowers/specs/2026-08-17-mobile-pump-check-history-design.md.
+
+## Boundary
+
+Logs exclude the cursor, page contents, ids, and owner identity; the request
+logger records the route template, never the query string. PR4A changes no PR1
+create/read semantics and no PR3 comparison semantics. Flutter is untouched:
+PR4B begins only after PR4A has its own review and merge.

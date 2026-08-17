@@ -68,6 +68,19 @@ def test_an_unusable_page_size_is_rejected_rather_than_clamped(value):
         history.parse_page_size(value)
 
 
+@pytest.mark.parametrize("limit", [0, -1, 51, None, "20"])
+def test_the_read_model_enforces_the_page_size_it_documents(app, owner, limit):
+    """`list_history` is public, so it cannot trust its caller to have checked.
+
+    An unchecked `limit=0` slices the probe row away and then reads `page[-1]`
+    to mint the next cursor — an IndexError instead of an error response.
+    """
+    _add(owner, BASE, "history00000000000000001")
+
+    with pytest.raises(history.InvalidPageSize):
+        history.list_history(owner.id, SECRET, limit=limit)
+
+
 @pytest.mark.parametrize("value", ["٣", "²", "⁵", "１"])
 def test_non_ascii_digit_forms_are_rejected(value):
     """`str.isdigit()` accepts these; `int()` then crashes on some of them, so
