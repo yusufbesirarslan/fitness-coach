@@ -191,6 +191,20 @@ def test_comparability_is_textual_not_colour_only(app, client):
     assert "progress.physique_limited_label" in js
 
 
+def test_unknown_comparability_is_not_a_client_vocabulary(app, client):
+    js = _executable_js(_js(client))
+    assert "progress.physique_comparability_unknown" not in js
+    assert "unknown:" not in js
+    for locale in ("en", "tr"):
+        assert "progress.physique_comparability_unknown" not in _CATALOG[locale]
+    # A drifted comparability token must not render comparison_available
+    # content; the client degrades to the isolated unavailable state.
+    assert "progress.physique_unavailable" in js
+    render = js.split("function _render", 1)[1].split("function load", 1)[0]
+    assert "COMPARABILITY_LABELS" in render
+    assert "_unavailable" in render
+
+
 def test_stale_comparison_copy_is_present(app, client):
     js = _executable_js(_js(client))
     assert "progress.physique_latest_saved" in js

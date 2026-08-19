@@ -11,6 +11,7 @@ import pathlib
 import re
 from datetime import datetime, timedelta
 
+import pytest
 from sqlalchemy import event
 
 import s3_helper
@@ -25,13 +26,14 @@ from app.services.progress_physique import (
     COMPARABILITY_COMPARABLE,
     COMPARABILITY_LIMITED,
     COMPARABILITY_NOT_COMPARABLE,
-    COMPARABILITY_UNKNOWN,
+    COMPARABILITY_VALUES,
     CONTRACT_VERSION,
     InvalidProgressPhysiqueRegion,
     STATE_COMPARISON_AVAILABLE,
     STATE_EMPTY,
     STATE_HISTORY_ONLY,
     STATE_SINGLE_CHECK,
+    UnknownPhysiqueComparability,
     build_progress_physique,
     progress_physique_payload,
 )
@@ -309,36 +311,44 @@ def test_stale_comparison_is_flagged_not_latest(make_user):
     assert result.recent_checks[0].public_id == _token("s", 3)
 
 
-def test_limited_and_not_comparable_are_passed_through(make_user):
+def test_comparable_passes_through(make_user):
+    user = make_user("ppcmpok")
+    a = _check(user, token=_token("ok", 1), captured_at=datetime(2026, 7, 1, 8))
+    b = _check(user, token=_token("ok", 2), captured_at=datetime(2026, 7, 15, 8))
+    _comparison(user, a, b, comparability="comparable",
+                public_id=_token("okc", 1))
+    db.session.commit()
+    result = build_progress_physique(user.id)
+    assert result.state == STATE_COMPARISON_AVAILABLE
+    assert result.comparison.comparability == COMPARABILITY_COMPARABLE
+    assert result.comparison.comparability in COMPARABILITY_VALUES
+
+
+def test_limited_passes_through(make_user):
     user = make_user("pplim")
     a = _check(user, token=_token("l", 1), captured_at=datetime(2026, 7, 1, 8))
     b = _check(user, token=_token("l", 2), captured_at=datetime(2026, 7, 15, 8))
     _comparison(user, a, b, comparability="limited", public_id=_token("lm", 1))
     db.session.commit()
-    assert build_progress_physique(user.id).comparison.comparability == \
-        COMPARABILITY_LIMITED
+    result = build_progress_physique(user.id)
+    assert result.state == STATE_COMPARISON_AVAILABLE
+    assert result.comparison.comparability == COMPARABILITY_LIMITED
 
+
+def test_not_comparable_passes_through(make_user):
     other = make_user("ppnc")
     c = _check(other, token=_token("n", 1), captured_at=datetime(2026, 7, 1, 8))
     d = _check(other, token=_token("n", 2), captured_at=datetime(2026, 7, 15, 8))
     _comparison(other, c, d, comparability="not_comparable",
                 public_id=_token("nc", 1))
     db.session.commit()
-    assert build_progress_physique(other.id).comparison.comparability == \
-        COMPARABILITY_NOT_COMPARABLE
+    result = build_progress_physique(other.id)
+    assert result.state == STATE_COMPARISON_AVAILABLE
+    assert result.comparison.comparability == COMPARABILITY_NOT_COMPARABLE
 
 
-def test_unknown_comparability_fails_closed(make_user, monkeypatch):
-    user = make_user("ppunk")
-    a = _check(user, token=_token("u", 1), captured_at=datetime(2026, 7, 1, 8))
-    b = _check(user, token=_token("u", 2), captured_at=datetime(2026, 7, 15, 8))
-    row = _comparison(user, a, b, public_id=_token("uk", 1))
-    # Bypass the DB check by patching the loaded value after persist.
-    db.session.commit()
-
-    import app.services.progress_physique as pkg
-
-    real = pkg.load_latest_completed_comparison
+def _wrap_unknown_comparability(real, value="pretty_good"):
+    """Bypass the DB CHECK without weakening the canonical constraint."""
 
     def _mutated_row(user_id, region):
         loaded = real(user_id, region)
@@ -351,16 +361,59 @@ def test_unknown_comparability_fails_closed(make_user, monkeypatch):
 
             def __getattr__(self, name):
                 if name == "comparability":
-                    return "pretty_good"
+                    return value
                 return getattr(self._inner, name)
 
         return _Wrap(loaded)
 
-    monkeypatch.setattr(pkg, "load_latest_completed_comparison", _mutated_row)
-    result = build_progress_physique(user.id)
-    assert result.comparison.comparability == COMPARABILITY_UNKNOWN
-    assert result.comparison.comparability != COMPARABILITY_COMPARABLE
-    assert row.public_id == _token("uk", 1)
+    return _mutated_row
+
+
+def test_unknown_comparability_fails_closed(make_user, monkeypatch):
+    user = make_user("ppunk")
+    a = _check(user, token=_token("u", 1), captured_at=datetime(2026, 7, 1, 8))
+    b = _check(user, token=_token("u", 2), captured_at=datetime(2026, 7, 15, 8))
+    _comparison(user, a, b, public_id=_token("uk", 1))
+    db.session.commit()
+
+    import app.services.progress_physique as pkg
+
+    monkeypatch.setattr(
+        pkg, "load_latest_completed_comparison",
+        _wrap_unknown_comparability(pkg.load_latest_completed_comparison))
+    with pytest.raises(UnknownPhysiqueComparability):
+        build_progress_physique(user.id)
+
+
+def test_unknown_comparability_does_not_become_comparison_available(
+        make_user, monkeypatch):
+    user = make_user("ppunkstate")
+    a = _check(user, token=_token("s", 1), captured_at=datetime(2026, 7, 1, 8))
+    b = _check(user, token=_token("s", 2), captured_at=datetime(2026, 7, 15, 8))
+    _comparison(user, a, b, public_id=_token("uks", 1))
+    db.session.commit()
+
+    import app.services.progress_physique as pkg
+
+    monkeypatch.setattr(
+        pkg, "load_latest_completed_comparison",
+        _wrap_unknown_comparability(pkg.load_latest_completed_comparison))
+    with pytest.raises(UnknownPhysiqueComparability) as caught:
+        build_progress_physique(user.id)
+    assert "pretty_good" not in str(caught.value)
+    assert "comparison_available" not in str(caught.value)
+
+
+def test_public_wire_has_no_unknown_comparability_token():
+    import app.services.progress_physique as pkg
+    import app.services.progress_physique.models as models
+
+    assert not hasattr(pkg, "COMPARABILITY_UNKNOWN")
+    assert not hasattr(models, "COMPARABILITY_UNKNOWN")
+    assert set(COMPARABILITY_VALUES) == {
+        "comparable", "limited", "not_comparable",
+    }
+    assert "unknown" not in COMPARABILITY_VALUES
 
 
 def test_pending_comparison_is_ignored(make_user):

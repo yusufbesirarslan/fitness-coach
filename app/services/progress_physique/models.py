@@ -40,9 +40,6 @@ STATES = (
 COMPARABILITY_COMPARABLE = "comparable"
 COMPARABILITY_LIMITED = "limited"
 COMPARABILITY_NOT_COMPARABLE = "not_comparable"
-# Fail-closed stand-in when a completed row carries a value this build does
-# not know. Never mapped to comparable.
-COMPARABILITY_UNKNOWN = "unknown"
 
 # ── Bounds ─────────────────────────────────────────────────────────────────
 # Enough to establish chronology and baseline/current context. Not a gallery.
@@ -61,6 +58,20 @@ class InvalidProgressPhysiqueRegion(ValueError):
     user's latest region) would make an invalid selector look like a successful
     view of a different area.
     """
+
+
+class UnknownPhysiqueComparability(ValueError):
+    """A persisted comparability token this layer does not accept.
+
+    Raised rather than remapped. An unknown value is upstream contract drift
+    or corrupted canonical state, not a legitimate user-facing comparison
+    state. Mapping it to ``not_comparable`` (or a local ``unknown`` token)
+    would present a system fault as a comparison result. The route turns
+    this into the generic JSON 500.
+    """
+
+    def __init__(self):
+        super().__init__("unknown physique comparability")
 
 
 @dataclass(frozen=True)
@@ -133,11 +144,11 @@ __all__ = [
     "COMPARABILITY_COMPARABLE",
     "COMPARABILITY_LIMITED",
     "COMPARABILITY_NOT_COMPARABLE",
-    "COMPARABILITY_UNKNOWN",
     "COMPARABILITY_VALUES",
     "CONTRACT_VERSION",
     "IMAGE_URL_EXPIRES_IN",
     "InvalidProgressPhysiqueRegion",
+    "UnknownPhysiqueComparability",
     "PhysiqueCheck",
     "PhysiqueComparison",
     "PhysiqueComparisonAnalysis",

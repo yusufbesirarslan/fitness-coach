@@ -158,7 +158,12 @@
   color: var(--color-text-1);
   font-weight: var(--weight-semibold);
 }
-.pp-chip:focus-visible { outline: var(--focus-ring, 2px solid var(--color-primary)); outline-offset: 2px; }
+.pp-chip:focus,
+.pp-chip:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
 .pp-area {
   font-size: var(--text-xs); letter-spacing: var(--tracking-label);
   text-transform: uppercase; color: var(--color-text-3);
@@ -182,21 +187,19 @@
   letter-spacing: 1px; text-transform: uppercase;
   margin-bottom: var(--space-3);
 }
-.pp-reliability[data-comparability="not_comparable"],
-.pp-reliability[data-comparability="unknown"] {
+.pp-reliability[data-comparability="not_comparable"] {
   color: var(--color-text-1);
 }
 .pp-compare[data-comparability="limited"] {
   border-left: var(--border-w-3) solid var(--color-warning);
   padding-left: var(--space-4);
 }
-.pp-compare[data-comparability="not_comparable"],
-.pp-compare[data-comparability="unknown"] {
+.pp-compare[data-comparability="not_comparable"] {
   border-left: var(--border-w-3) solid var(--color-border-2);
   padding-left: var(--space-4);
 }
 .pp-pair {
-  display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3);
   margin: var(--space-3) 0;
 }
 .pp-figure { margin: 0; }
@@ -219,6 +222,7 @@
 .pp-summary {
   font-size: var(--text-sm); color: var(--color-text-1);
   line-height: var(--leading-normal); margin: var(--space-3) 0;
+  overflow-wrap: anywhere;
 }
 .pp-list { margin: var(--space-3) 0; }
 .pp-list-h {
@@ -230,6 +234,7 @@
 .pp-list li {
   font-size: var(--text-sm); color: var(--color-text-2);
   margin-bottom: var(--space-1);
+  overflow-wrap: anywhere;
 }
 .pp-guidance { margin: var(--space-3) 0; }
 .pp-guidance p {

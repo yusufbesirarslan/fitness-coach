@@ -11,7 +11,11 @@ from app.services.mobile_pump_check_comparisons.analysis import ANALYSIS_VERSION
 from app.services.mobile_pump_checks.analysis import (
     ANALYSIS_VERSION as SOURCE_ANALYSIS_VERSION,
 )
-from app.services.progress_physique import CONTRACT_VERSION, STATES
+from app.services.progress_physique import (
+    CONTRACT_VERSION,
+    STATES,
+    UnknownPhysiqueComparability,
+)
 
 PHYSIQUE_URL = "/api/progress/physique"
 SUMMARY_URL = "/api/progress/summary"
@@ -158,6 +162,88 @@ def test_comparable_payload_shape(app, client, make_user, login):
         "summary", "observed_changes", "stable_areas", "focus_areas",
         "limitations", "comparability_reasons", "next_check_guidance",
     }
+
+
+def _wrap_unknown_comparability(real, value="pretty_good"):
+    def _mutated_row(user_id, region):
+        loaded = real(user_id, region)
+        if loaded is None:
+            return None
+
+        class _Wrap:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def __getattr__(self, name):
+                if name == "comparability":
+                    return value
+                return getattr(self._inner, name)
+
+        return _Wrap(loaded)
+
+    return _mutated_row
+
+
+def test_canonical_comparability_values_pass_through_the_api(
+        app, client, make_user, login):
+    cases = (
+        ("ppapicmp", "comparable"),
+        ("ppapilim", "limited"),
+        ("ppapinc", "not_comparable"),
+    )
+    for name, value in cases:
+        user = _login(make_user, login, name)
+        a = _check(user, token=_token(name[-2:], 1),
+                   captured_at=datetime(2026, 8, 1, 8))
+        b = _check(user, token=_token(name[-2:], 2),
+                   captured_at=datetime(2026, 8, 14, 8))
+        _comparison(user, a, b, comparability=value)
+        d = client.get(PHYSIQUE_URL).get_json()
+        assert d["state"] == "comparison_available"
+        assert d["comparison"]["comparability"] == value
+
+
+def test_unknown_comparability_is_safe_generic_500(
+        app, client, make_user, login, monkeypatch):
+    user = _login(make_user, login, "ppapidrift")
+    a = _check(user, token=_token("d", 1), captured_at=datetime(2026, 8, 1, 8))
+    b = _check(user, token=_token("d", 2), captured_at=datetime(2026, 8, 14, 8))
+    _comparison(user, a, b)
+
+    import app.services.progress_physique as pkg
+
+    monkeypatch.setattr(
+        pkg, "load_latest_completed_comparison",
+        _wrap_unknown_comparability(pkg.load_latest_completed_comparison))
+    r = client.get(PHYSIQUE_URL)
+    assert r.status_code == 500
+    body = r.get_data(as_text=True)
+    payload = r.get_json()
+    assert payload["error"]
+    assert "state" not in payload
+    assert "comparison_available" not in body
+    assert "pretty_good" not in body
+    assert "UnknownPhysiqueComparability" not in body
+    assert "Traceback" not in body
+    assert tracking._progress_summary_error_class(
+        UnknownPhysiqueComparability()) == "contract_drift"
+
+
+def test_unknown_comparability_failure_is_isolated(
+        app, client, make_user, login, monkeypatch):
+    user = _login(make_user, login, "ppapidriftiso")
+    a = _check(user, token=_token("i", 1), captured_at=datetime(2026, 8, 1, 8))
+    b = _check(user, token=_token("i", 2), captured_at=datetime(2026, 8, 14, 8))
+    _comparison(user, a, b)
+
+    import app.services.progress_physique as pkg
+
+    monkeypatch.setattr(
+        pkg, "load_latest_completed_comparison",
+        _wrap_unknown_comparability(pkg.load_latest_completed_comparison))
+    assert client.get(PHYSIQUE_URL).status_code == 500
+    assert client.get(SUMMARY_URL).status_code == 200
+    assert client.get(INSIGHTS_URL).status_code == 200
 
 
 def test_backend_failure_is_not_an_empty_state(

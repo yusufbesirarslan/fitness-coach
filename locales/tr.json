@@ -820,7 +820,6 @@
   "progress.physique_comparability_comparable": "Karşılaştırılabilir",
   "progress.physique_comparability_limited": "Sınırlı karşılaştırma",
   "progress.physique_comparability_not_comparable": "Karşılaştırılamaz",
-  "progress.physique_comparability_unknown": "Karşılaştırma kullanılamıyor",
   "progress.physique_limited_label": "Sınırlı karşılaştırma",
   "progress.physique_not_comparable_title": "Bu iki kayıttan güvenilir bir karşılaştırma yapılamadı.",
   "progress.physique_not_comparable_desc": "Kayıtlı karşılaştırma, görsel değişiklikleri ilerleme olarak ele alacak kadar güvenilir değil.",

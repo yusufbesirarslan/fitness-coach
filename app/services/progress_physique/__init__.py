@@ -39,7 +39,6 @@ from app.services.progress_physique.models import (
     COMPARABILITY_COMPARABLE,
     COMPARABILITY_LIMITED,
     COMPARABILITY_NOT_COMPARABLE,
-    COMPARABILITY_UNKNOWN,
     COMPARABILITY_VALUES,
     CONTRACT_VERSION,
     IMAGE_URL_EXPIRES_IN,
@@ -55,6 +54,7 @@ from app.services.progress_physique.models import (
     STATE_HISTORY_ONLY,
     STATE_SINGLE_CHECK,
     STATES,
+    UnknownPhysiqueComparability,
 )
 from app.services.progress_physique.payload import progress_physique_payload
 from app.services.progress_physique.queries import (
@@ -71,11 +71,11 @@ __all__ = [
     "COMPARABILITY_COMPARABLE",
     "COMPARABILITY_LIMITED",
     "COMPARABILITY_NOT_COMPARABLE",
-    "COMPARABILITY_UNKNOWN",
     "COMPARABILITY_VALUES",
     "CONTRACT_VERSION",
     "IMAGE_URL_EXPIRES_IN",
     "InvalidProgressPhysiqueRegion",
+    "UnknownPhysiqueComparability",
     "PhysiqueCheck",
     "PhysiqueComparison",
     "PhysiqueComparisonAnalysis",
@@ -132,7 +132,7 @@ def _analysis_from_stored(raw):
 def _comparability(value):
     if isinstance(value, str) and value in COMPARABILITY_VALUES:
         return value
-    return COMPARABILITY_UNKNOWN
+    raise UnknownPhysiqueComparability()
 
 
 def _state(check_count, comparison):

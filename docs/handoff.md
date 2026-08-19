@@ -4768,9 +4768,49 @@ New client module `static/progress_physique.js`. `static/progress.js` only
 calls `FitXPhysiqueProgress.load()`.
 
 Chronology is `captured_at`. Legacy `captured_at IS NULL` rows stay in the
-gallery. Comparability is the persisted value. Unknown comparability fails
-closed. Images are short-lived owner-scoped URLs minted only for the rows the
-section renders.
+gallery. Comparability is the persisted canonical value
+(`comparable` / `limited` / `not_comparable`). An unknown persisted token
+raises `UnknownPhysiqueComparability` and `GET /api/progress/physique`
+returns the generic 500. It is **not** remapped to a local `unknown` wire
+value and is **not** rendered as `not_comparable` / `comparison_available`
+content. Images are short-lived owner-scoped URLs minted only for the rows
+the section renders.
+
+Merge-readiness follow-up (same branch, not merged):
+
+- Unknown canonical comparability is contract drift: dedicated exception,
+  generic 500, isolated PHYSIQUE PROGRESS unavailable state, no raw value
+  leak. `COMPARABILITY_UNKNOWN` removed from the Physique Progress wire
+  vocabulary. The Pump Check comparison domain and its DB CHECK are
+  unchanged.
+- Hermetic Chromium matrix (WSL Ubuntu-24.04, Sprint-0 venv +
+  `PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/axisai-sprint0-playwright`):
+  9 states × 4 viewports = **36/36 pass**, seed drift empty.
+  Evidence: `docs/frontend-readiness/progress-pr4/validation-manifest.json`
+  plus 18 curated screenshots (390 and 1440 for every state).
+  Command:
+  `python -m scripts.frontend_audit.progress_pr4_matrix --output docs/frontend-readiness/progress-pr4`
+
+  | State | 390 | 768 | 1280 | 1440 |
+  |---|---|---|---|---|
+  | empty | pass | pass | pass | pass |
+  | legacy_only | pass | pass | pass | pass |
+  | single_check | pass | pass | pass | pass |
+  | history_only | pass | pass | pass | pass |
+  | comparable | pass | pass | pass | pass |
+  | limited | pass | pass | pass | pass |
+  | not_comparable | pass | pass | pass | pass |
+  | stale_comparison | pass | pass | pass | pass |
+  | endpoint_failure | pass | pass | pass | pass |
+
+  Every cell recorded: correct render, no horizontal page overflow,
+  region-chip behaviour, baseline/current image layout, image load,
+  long-text containment, console/page errors, and the other four
+  Progress sections still rendering. Keyboard chip operation, visible
+  focus, meaningful image alt, and non-colour-only comparability were
+  asserted on the comparison/history cells. `comparable@390` first
+  blocked on a 20s `/progress-page` navigation timeout; the same
+  hermetic cell passed on retry.
 
 Rollback: revert the commit. No schema, no migration, no flag, no cache, no
 provider cleanup.

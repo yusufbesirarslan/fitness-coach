@@ -4,7 +4,9 @@
    Hard rule for this file: it RENDERS canonical facts, it does not decide.
    The server chose the body area, the recent checks, and whether a persisted
    comparison exists. Comparability arrives as comparable / limited /
-   not_comparable. This file never:
+   not_comparable only. An unknown token is contract drift and is rendered
+   as the isolated unavailable state, never as comparison content. This
+   file never:
 
      - compares two analyses to infer "improved"
      - upgrades limited → comparable
@@ -38,8 +40,7 @@
   var COMPARABILITY_LABELS = {
     comparable: 'progress.physique_comparability_comparable',
     limited: 'progress.physique_comparability_limited',
-    not_comparable: 'progress.physique_comparability_not_comparable',
-    unknown: 'progress.physique_comparability_unknown'
+    not_comparable: 'progress.physique_comparability_not_comparable'
   };
 
   var STATES = {
@@ -229,9 +230,11 @@
 
   function _comparison(container, payload) {
     var comparison = payload.comparison || {};
-    var comparability = COMPARABILITY_LABELS[comparison.comparability]
-      ? comparison.comparability
-      : 'unknown';
+    var comparability = comparison.comparability;
+    if (!COMPARABILITY_LABELS[comparability]) {
+      _unavailable(container);
+      return;
+    }
     var analysis = comparison.analysis || {};
     var pair = document.createElement('div');
     pair.className = 'pp-compare';
@@ -261,7 +264,7 @@
     ));
     pair.appendChild(frames);
 
-    if (comparability === 'not_comparable' || comparability === 'unknown') {
+    if (comparability === 'not_comparable') {
       pair.appendChild(_text('p', __t('progress.physique_not_comparable_title'), 'pp-status'));
       pair.appendChild(_text('p', __t('progress.physique_not_comparable_desc'), 'pp-note'));
       var reasons = _list(
@@ -307,6 +310,8 @@
 
   function _unavailable(container) {
     _clear(container);
+    container.removeAttribute('data-state');
+    container.setAttribute('data-status', 'unavailable');
     container.appendChild(_text('p', __t('progress.physique_unavailable'), 'prog-note'));
   }
 
@@ -316,6 +321,7 @@
       _unavailable(container);
       return;
     }
+    container.removeAttribute('data-status');
     container.setAttribute('data-state', payload.state);
     if (payload.selected_region) {
       container.setAttribute('data-region', payload.selected_region);
@@ -342,6 +348,10 @@
       return;
     }
     if (payload.state === 'comparison_available' && payload.comparison) {
+      if (!COMPARABILITY_LABELS[payload.comparison.comparability]) {
+        _unavailable(container);
+        return;
+      }
       _comparison(container, payload);
       return;
     }

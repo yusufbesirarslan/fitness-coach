@@ -820,7 +820,6 @@
   "progress.physique_comparability_comparable": "Comparable",
   "progress.physique_comparability_limited": "Limited comparison",
   "progress.physique_comparability_not_comparable": "Not comparable",
-  "progress.physique_comparability_unknown": "Comparison unavailable",
   "progress.physique_limited_label": "Limited comparison",
   "progress.physique_not_comparable_title": "We couldn't make a reliable comparison from these two checks.",
   "progress.physique_not_comparable_desc": "The saved comparison is not reliable enough to treat visual changes as progress.",

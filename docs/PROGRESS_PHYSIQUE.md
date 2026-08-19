@@ -122,8 +122,11 @@ Owned by the comparison authority:
 `comparable` · `limited` · `not_comparable`
 
 Progress renders those values faithfully. It does not derive comparability
-from quality, dates, or analysis text. An unknown value fails closed
-(`unknown`) and is never mapped to `comparable`.
+from quality, dates, or analysis text. An unknown persisted value is
+upstream contract drift, not a user-facing comparison state. It raises
+`UnknownPhysiqueComparability`; `GET /api/progress/physique` returns the
+generic 500. The value is never mapped to `comparable`, `limited`,
+`not_comparable`, or a local `unknown` token.
 
 Presentation:
 
@@ -131,7 +134,7 @@ Presentation:
   observed / stable / focus items, next-check guidance.
 - **limited** — same facts, but the limitation is explicit and prominent
   (`Limited comparison`). Limitations are not footer-sized.
-- **not_comparable** / **unknown** — no visual-change claims.
+- **not_comparable** — no visual-change claims.
   "We couldn't make a reliable comparison from these two checks."
   Reasons / limitations / next-check guidance may still show.
 

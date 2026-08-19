@@ -1,0 +1,3873 @@
+{
+  "schema_version": "1.0.0",
+  "pr": "progress-redesign-pr4-physique-progress",
+  "engine": "chromium",
+  "hermetic": true,
+  "audit_day": "2026-07-20",
+  "seed_summary": {
+    "users": 12,
+    "training_plans": 7,
+    "meal_logs": 6,
+    "workout_logs": 1,
+    "coach_messages": 2,
+    "wearable_connections": 1,
+    "physique_rows": {
+      "empty": 0,
+      "legacy_only": 1,
+      "single_check": 1,
+      "history_only": 3,
+      "comparable": 3,
+      "limited": 3,
+      "not_comparable": 3,
+      "stale_comparison": 4
+    }
+  },
+  "observed_states": {
+    "empty": {
+      "scenario": "social-empty",
+      "state": "empty",
+      "legacy": false,
+      "comparability": null,
+      "current_is_latest": null,
+      "region_count": 0,
+      "check_count": 0
+    },
+    "legacy_only": {
+      "scenario": "active-rest-day",
+      "state": "empty",
+      "legacy": true,
+      "comparability": null,
+      "current_is_latest": null,
+      "region_count": 0,
+      "check_count": 0
+    },
+    "single_check": {
+      "scenario": "coach-history",
+      "state": "single_check",
+      "legacy": false,
+      "comparability": null,
+      "current_is_latest": null,
+      "region_count": 1,
+      "check_count": 1
+    },
+    "history_only": {
+      "scenario": "wearable-connected",
+      "state": "history_only",
+      "legacy": false,
+      "comparability": null,
+      "current_is_latest": null,
+      "region_count": 2,
+      "check_count": 2
+    },
+    "comparable": {
+      "scenario": "active-workout",
+      "state": "comparison_available",
+      "legacy": false,
+      "comparability": "comparable",
+      "current_is_latest": true,
+      "region_count": 2,
+      "check_count": 2
+    },
+    "limited": {
+      "scenario": "wearable-disconnected",
+      "state": "comparison_available",
+      "legacy": false,
+      "comparability": "limited",
+      "current_is_latest": true,
+      "region_count": 2,
+      "check_count": 2
+    },
+    "not_comparable": {
+      "scenario": "progress-history",
+      "state": "comparison_available",
+      "legacy": false,
+      "comparability": "not_comparable",
+      "current_is_latest": true,
+      "region_count": 2,
+      "check_count": 2
+    },
+    "stale_comparison": {
+      "scenario": "completed-workout",
+      "state": "comparison_available",
+      "legacy": false,
+      "comparability": "comparable",
+      "current_is_latest": false,
+      "region_count": 2,
+      "check_count": 2
+    }
+  },
+  "seed_drift": {},
+  "viewports": {
+    "390": {
+      "width": 390,
+      "height": 844
+    },
+    "768": {
+      "width": 768,
+      "height": 1024
+    },
+    "1280": {
+      "width": 1280,
+      "height": 800
+    },
+    "1440": {
+      "width": 1440,
+      "height": 900
+    }
+  },
+  "totals": {
+    "cells": 36,
+    "passed": 36,
+    "failed": 0,
+    "blocked": 0
+  },
+  "failed_ids": [],
+  "blocked_ids": [],
+  "cells": [
+    {
+      "id": "physique-progress__empty__390",
+      "state": "empty",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "social-empty",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "empty",
+        "physique_region": null,
+        "physique_text": "Henüz Pump Check yokGörsel ilerlemeyi oluşturmaya başlamak için bir Pump Check ekle.Pump Check ekle",
+        "physique_text_len": 99,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [],
+        "image_count": 0,
+        "images_loaded": 0,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__empty__390.png"
+    },
+    {
+      "id": "physique-progress__empty__768",
+      "state": "empty",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "social-empty",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1193347900.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=6&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938465~115938469~118897920~118897930~119367802~119367810~120213116~120315470~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=5672&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1193347900.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=6&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938465~115938469~118897920~118897930~119367802~119367810~120213116~120315470~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=5672&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "empty",
+        "physique_region": null,
+        "physique_text": "Henüz Pump Check yokGörsel ilerlemeyi oluşturmaya başlamak için bir Pump Check ekle.Pump Check ekle",
+        "physique_text_len": 99,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [],
+        "image_count": 0,
+        "images_loaded": 0,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__empty__1280",
+      "state": "empty",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "social-empty",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "empty",
+        "physique_region": null,
+        "physique_text": "Henüz Pump Check yokGörsel ilerlemeyi oluşturmaya başlamak için bir Pump Check ekle.Pump Check ekle",
+        "physique_text_len": 99,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [],
+        "image_count": 0,
+        "images_loaded": 0,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__empty__1440",
+      "state": "empty",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "social-empty",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68i0h2v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=35274333.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=8&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~119381664~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=4792&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68i0h2v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=35274333.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=8&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~119381664~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=4792&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/workout/status",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/last-session",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "empty",
+        "physique_region": null,
+        "physique_text": "Henüz Pump Check yokGörsel ilerlemeyi oluşturmaya başlamak için bir Pump Check ekle.Pump Check ekle",
+        "physique_text_len": 99,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [],
+        "image_count": 0,
+        "images_loaded": 0,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__empty__1440.png"
+    },
+    {
+      "id": "physique-progress__legacy_only__390",
+      "state": "legacy_only",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "active-rest-day",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "empty",
+        "physique_region": null,
+        "physique_text": "Henüz Pump Check yokGörsel ilerlemeyi oluşturmaya başlamak için bir Pump Check ekle.Eski Pump Check'lerin galeride hâlâ duruyor.Pump Check ekle",
+        "physique_text_len": 143,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": true,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [],
+        "image_count": 0,
+        "images_loaded": 0,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__legacy_only__390.png"
+    },
+    {
+      "id": "physique-progress__legacy_only__768",
+      "state": "legacy_only",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "active-rest-day",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=822157091.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=18&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115616985~115938466~115938469~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=4084&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=822157091.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=18&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115616985~115938466~115938469~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=4084&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "empty",
+        "physique_region": null,
+        "physique_text": "Henüz Pump Check yokGörsel ilerlemeyi oluşturmaya başlamak için bir Pump Check ekle.Eski Pump Check'lerin galeride hâlâ duruyor.Pump Check ekle",
+        "physique_text_len": 143,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": true,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [],
+        "image_count": 0,
+        "images_loaded": 0,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__legacy_only__1280",
+      "state": "legacy_only",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "active-rest-day",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "empty",
+        "physique_region": null,
+        "physique_text": "Henüz Pump Check yokGörsel ilerlemeyi oluşturmaya başlamak için bir Pump Check ekle.Eski Pump Check'lerin galeride hâlâ duruyor.Pump Check ekle",
+        "physique_text_len": 143,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": true,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [],
+        "image_count": 0,
+        "images_loaded": 0,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__legacy_only__1440",
+      "state": "legacy_only",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "active-rest-day",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "empty",
+        "physique_region": null,
+        "physique_text": "Henüz Pump Check yokGörsel ilerlemeyi oluşturmaya başlamak için bir Pump Check ekle.Eski Pump Check'lerin galeride hâlâ duruyor.Pump Check ekle",
+        "physique_text_len": 143,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": true,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [],
+        "image_count": 0,
+        "images_loaded": 0,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__legacy_only__1440.png"
+    },
+    {
+      "id": "physique-progress__single_check__390",
+      "state": "single_check",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "coach-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/workout/status",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "single_check",
+        "physique_region": "upper_body",
+        "physique_text": "Bölge: Üst vücutBu bölgede bir Pump Check varGörsel bir karşılaştırma oluşması için aynı bölgede karşılaştırılabilir bir Pump Check daha gerekir.10 Tem 2026Pump Check ekle",
+        "physique_text_len": 171,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "10 Tem 2026 tarihli Üst vücut Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 356,
+            "height": 475,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 1,
+        "images_loaded": 1,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__single_check__390.png"
+    },
+    {
+      "id": "physique-progress__single_check__768",
+      "state": "single_check",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "coach-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "single_check",
+        "physique_region": "upper_body",
+        "physique_text": "Bölge: Üst vücutBu bölgede bir Pump Check varGörsel bir karşılaştırma oluşması için aynı bölgede karşılaştırılabilir bir Pump Check daha gerekir.10 Tem 2026Pump Check ekle",
+        "physique_text_len": 171,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "10 Tem 2026 tarihli Üst vücut Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 352,
+            "height": 470,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 1,
+        "images_loaded": 1,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__single_check__1280",
+      "state": "single_check",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "coach-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "single_check",
+        "physique_region": "upper_body",
+        "physique_text": "Bölge: Üst vücutBu bölgede bir Pump Check varGörsel bir karşılaştırma oluşması için aynı bölgede karşılaştırılabilir bir Pump Check daha gerekir.10 Tem 2026Pump Check ekle",
+        "physique_text_len": 171,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "10 Tem 2026 tarihli Üst vücut Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 608,
+            "height": 811,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 1,
+        "images_loaded": 1,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__single_check__1440",
+      "state": "single_check",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "coach-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "single_check",
+        "physique_region": "upper_body",
+        "physique_text": "Bölge: Üst vücutBu bölgede bir Pump Check varGörsel bir karşılaştırma oluşması için aynı bölgede karşılaştırılabilir bir Pump Check daha gerekir.10 Tem 2026Pump Check ekle",
+        "physique_text_len": 171,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "10 Tem 2026 tarihli Üst vücut Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 608,
+            "height": 811,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 1,
+        "images_loaded": 1,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__single_check__1440.png"
+    },
+    {
+      "id": "physique-progress__history_only__390",
+      "state": "history_only",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "wearable-connected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "history_only",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKayıtlı karşılaştırma yokBu bölgede birden fazla Pump Check var ama henüz kayıtlı bir karşılaştırma yok.12 Tem 20261 Tem 2026Tüm Pump Check'leri gör",
+        "physique_text_len": 179,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli Üst vücut Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 356,
+            "height": 475,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli Üst vücut Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 356,
+            "height": 475,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__history_only__390.png"
+    },
+    {
+      "id": "physique-progress__history_only__768",
+      "state": "history_only",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "wearable-connected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=411889988.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=2&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938469~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=7007&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=411889988.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=2&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938469~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=7007&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/workout/status",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/last-session",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "history_only",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKayıtlı karşılaştırma yokBu bölgede birden fazla Pump Check var ama henüz kayıtlı bir karşılaştırma yok.12 Tem 20261 Tem 2026Tüm Pump Check'leri gör",
+        "physique_text_len": 179,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli Üst vücut Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 352,
+            "height": 470,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli Üst vücut Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 352,
+            "height": 470,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__history_only__1280",
+      "state": "history_only",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "wearable-connected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "history_only",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKayıtlı karşılaştırma yokBu bölgede birden fazla Pump Check var ama henüz kayıtlı bir karşılaştırma yok.12 Tem 20261 Tem 2026Tüm Pump Check'leri gör",
+        "physique_text_len": 179,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli Üst vücut Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 608,
+            "height": 811,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli Üst vücut Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 608,
+            "height": 811,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__history_only__1440",
+      "state": "history_only",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "wearable-connected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "history_only",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKayıtlı karşılaştırma yokBu bölgede birden fazla Pump Check var ama henüz kayıtlı bir karşılaştırma yok.12 Tem 20261 Tem 2026Tüm Pump Check'leri gör",
+        "physique_text_len": 179,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli Üst vücut Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 608,
+            "height": 811,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli Üst vücut Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 608,
+            "height": 811,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__history_only__1440.png"
+    },
+    {
+      "id": "physique-progress__comparable__390",
+      "state": "comparable",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "active-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:43517/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKarşılaştırılabilirBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Lighting and camera height match closely enough to treat the two frames as a cautious visual comparison, although the long unspaced token AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA must stay inside the PHYSIQUE PROGRESS column without expanding the page.Gözlenen değişikliklerUpper chest outline looks a little fuller in the later frame.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASabit kalan alanlarWaist line looks similar.Odak alanlarıKeep the same camera height.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 690,
+        "comparability": "comparable",
+        "reliability_text": "Karşılaştırılabilir",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "358px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:43517/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 356,
+            "height": 475,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:43517/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 356,
+            "height": 475,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__comparable__390.png",
+      "retried_after_navigation_timeout": true
+    },
+    {
+      "id": "physique-progress__comparable__768",
+      "state": "comparable",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "active-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKarşılaştırılabilirBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Lighting and camera height match closely enough to treat the two frames as a cautious visual comparison, although the long unspaced token AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA must stay inside the PHYSIQUE PROGRESS column without expanding the page.Gözlenen değişikliklerUpper chest outline looks a little fuller in the later frame.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASabit kalan alanlarWaist line looks similar.Odak alanlarıKeep the same camera height.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 690,
+        "comparability": "comparable",
+        "reliability_text": "Karşılaştırılabilir",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "354px 354px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 352,
+            "height": 470,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 352,
+            "height": 470,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__comparable__1280",
+      "state": "comparable",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "active-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKarşılaştırılabilirBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Lighting and camera height match closely enough to treat the two frames as a cautious visual comparison, although the long unspaced token AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA must stay inside the PHYSIQUE PROGRESS column without expanding the page.Gözlenen değişikliklerUpper chest outline looks a little fuller in the later frame.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASabit kalan alanlarWaist line looks similar.Odak alanlarıKeep the same camera height.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 690,
+        "comparability": "comparable",
+        "reliability_text": "Karşılaştırılabilir",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "610px 610px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 608,
+            "height": 811,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 608,
+            "height": 811,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__comparable__1440",
+      "state": "comparable",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "active-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1296181515.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=5&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938465~115938468~118897920~118897930~119367802~119367810~120213116~120315470~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=6434&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1296181515.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=5&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938465~115938468~118897920~118897930~119367802~119367810~120213116~120315470~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=6434&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/workout/status",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/last-session",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKarşılaştırılabilirBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Lighting and camera height match closely enough to treat the two frames as a cautious visual comparison, although the long unspaced token AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA must stay inside the PHYSIQUE PROGRESS column without expanding the page.Gözlenen değişikliklerUpper chest outline looks a little fuller in the later frame.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASabit kalan alanlarWaist line looks similar.Odak alanlarıKeep the same camera height.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 690,
+        "comparability": "comparable",
+        "reliability_text": "Karşılaştırılabilir",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "610px 610px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 608,
+            "height": 811,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 608,
+            "height": 811,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__comparable__1440.png"
+    },
+    {
+      "id": "physique-progress__limited__390",
+      "state": "limited",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "wearable-disconnected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutSınırlı karşılaştırmaBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Sınırlı karşılaştırmaLighting and camera height match closely enough to treat the two frames as a cautious visual comparison, although the long unspaced token AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA must stay inside the PHYSIQUE PROGRESS column without expanding the page.Bu karşılaştırmanın sınırıLighting still differs slightly between the two frames.Both frames show the same pose and crop.Gözlenen değişikliklerUpper chest outline looks a little fuller in the later frame.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASabit kalan alanlarWaist line looks similar.Odak alanlarıKeep the same camera height.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 834,
+        "comparability": "limited",
+        "reliability_text": "Sınırlı karşılaştırma",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "340px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 338,
+            "height": 451,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 338,
+            "height": 451,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__limited__390.png"
+    },
+    {
+      "id": "physique-progress__limited__768",
+      "state": "limited",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "wearable-disconnected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutSınırlı karşılaştırmaBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Sınırlı karşılaştırmaLighting and camera height match closely enough to treat the two frames as a cautious visual comparison, although the long unspaced token AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA must stay inside the PHYSIQUE PROGRESS column without expanding the page.Bu karşılaştırmanın sınırıLighting still differs slightly between the two frames.Both frames show the same pose and crop.Gözlenen değişikliklerUpper chest outline looks a little fuller in the later frame.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASabit kalan alanlarWaist line looks similar.Odak alanlarıKeep the same camera height.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 834,
+        "comparability": "limited",
+        "reliability_text": "Sınırlı karşılaştırma",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "345px 345px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 343,
+            "height": 458,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 343,
+            "height": 458,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__limited__1280",
+      "state": "limited",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "wearable-disconnected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutSınırlı karşılaştırmaBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Sınırlı karşılaştırmaLighting and camera height match closely enough to treat the two frames as a cautious visual comparison, although the long unspaced token AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA must stay inside the PHYSIQUE PROGRESS column without expanding the page.Bu karşılaştırmanın sınırıLighting still differs slightly between the two frames.Both frames show the same pose and crop.Gözlenen değişikliklerUpper chest outline looks a little fuller in the later frame.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASabit kalan alanlarWaist line looks similar.Odak alanlarıKeep the same camera height.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 834,
+        "comparability": "limited",
+        "reliability_text": "Sınırlı karşılaştırma",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "601px 601px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 599,
+            "height": 799,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 599,
+            "height": 799,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__limited__1440",
+      "state": "limited",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "wearable-disconnected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1748830606.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=5&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938465~115938469~118897920~118897930~119367802~119367810~120213116~120315471~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=4540&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1748830606.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=5&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938465~115938469~118897920~118897930~119367802~119367810~120213116~120315471~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=4540&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/last-session",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/workout/status",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutSınırlı karşılaştırmaBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Sınırlı karşılaştırmaLighting and camera height match closely enough to treat the two frames as a cautious visual comparison, although the long unspaced token AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA must stay inside the PHYSIQUE PROGRESS column without expanding the page.Bu karşılaştırmanın sınırıLighting still differs slightly between the two frames.Both frames show the same pose and crop.Gözlenen değişikliklerUpper chest outline looks a little fuller in the later frame.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASabit kalan alanlarWaist line looks similar.Odak alanlarıKeep the same camera height.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 834,
+        "comparability": "limited",
+        "reliability_text": "Sınırlı karşılaştırma",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "601px 601px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 599,
+            "height": 799,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 599,
+            "height": 799,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__limited__1440.png"
+    },
+    {
+      "id": "physique-progress__not_comparable__390",
+      "state": "not_comparable",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "progress-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKarşılaştırılamazBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Bu iki kayıttan güvenilir bir karşılaştırma yapılamadı.Kayıtlı karşılaştırma, görsel değişiklikleri ilerleme olarak ele alacak kadar güvenilir değil.Bu karşılaştırmanın sınırıThe later frame is cropped much tighter than the first.Lighting still differs slightly between the two frames.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 457,
+        "comparability": "not_comparable",
+        "reliability_text": "Karşılaştırılamaz",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "340px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 338,
+            "height": 451,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 338,
+            "height": 451,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__not_comparable__390.png"
+    },
+    {
+      "id": "physique-progress__not_comparable__768",
+      "state": "not_comparable",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "progress-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1658177954.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=19&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938465~115938469~118012008~118897920~118897930~119367802~119367810~120213116~120315471~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=6266&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1658177954.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=19&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938465~115938469~118012008~118897920~118897930~119367802~119367810~120213116~120315471~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=6266&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/workout/status",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKarşılaştırılamazBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Bu iki kayıttan güvenilir bir karşılaştırma yapılamadı.Kayıtlı karşılaştırma, görsel değişiklikleri ilerleme olarak ele alacak kadar güvenilir değil.Bu karşılaştırmanın sınırıThe later frame is cropped much tighter than the first.Lighting still differs slightly between the two frames.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 457,
+        "comparability": "not_comparable",
+        "reliability_text": "Karşılaştırılamaz",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "345px 345px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 343,
+            "height": 458,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 343,
+            "height": 458,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__not_comparable__1280",
+      "state": "not_comparable",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "progress-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=2129591943.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=8&sr=1280x800&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938465~115938469~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=4055&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=2129591943.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=8&sr=1280x800&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938465~115938469~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=4055&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/last-session",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/workout/status",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKarşılaştırılamazBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Bu iki kayıttan güvenilir bir karşılaştırma yapılamadı.Kayıtlı karşılaştırma, görsel değişiklikleri ilerleme olarak ele alacak kadar güvenilir değil.Bu karşılaştırmanın sınırıThe later frame is cropped much tighter than the first.Lighting still differs slightly between the two frames.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 457,
+        "comparability": "not_comparable",
+        "reliability_text": "Karşılaştırılamaz",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "601px 601px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 599,
+            "height": 799,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 599,
+            "height": 799,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__not_comparable__1440",
+      "state": "not_comparable",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "progress-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=380304464.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=12&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938468~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3809&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=380304464.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=12&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938468~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3809&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/last-session",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/workout/status",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/water",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKarşılaştırılamazBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Bu iki kayıttan güvenilir bir karşılaştırma yapılamadı.Kayıtlı karşılaştırma, görsel değişiklikleri ilerleme olarak ele alacak kadar güvenilir değil.Bu karşılaştırmanın sınırıThe later frame is cropped much tighter than the first.Lighting still differs slightly between the two frames.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 457,
+        "comparability": "not_comparable",
+        "reliability_text": "Karşılaştırılamaz",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "601px 601px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 599,
+            "height": 799,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 599,
+            "height": 799,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__not_comparable__1440.png"
+    },
+    {
+      "id": "physique-progress__stale_comparison__390",
+      "state": "stale_comparison",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "completed-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKarşılaştırılabilirSon kaydedilen karşılaştırmaBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Lighting and camera height match closely enough to treat the two frames as a cautious visual comparison, although the long unspaced token AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA must stay inside the PHYSIQUE PROGRESS column without expanding the page.Gözlenen değişikliklerUpper chest outline looks a little fuller in the later frame.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASabit kalan alanlarWaist line looks similar.Odak alanlarıKeep the same camera height.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 718,
+        "comparability": "comparable",
+        "reliability_text": "Karşılaştırılabilir",
+        "stale_note": true,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "358px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 356,
+            "height": 475,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 356,
+            "height": 475,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__stale_comparison__390.png"
+    },
+    {
+      "id": "physique-progress__stale_comparison__768",
+      "state": "stale_comparison",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "completed-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKarşılaştırılabilirSon kaydedilen karşılaştırmaBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Lighting and camera height match closely enough to treat the two frames as a cautious visual comparison, although the long unspaced token AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA must stay inside the PHYSIQUE PROGRESS column without expanding the page.Gözlenen değişikliklerUpper chest outline looks a little fuller in the later frame.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASabit kalan alanlarWaist line looks similar.Odak alanlarıKeep the same camera height.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 718,
+        "comparability": "comparable",
+        "reliability_text": "Karşılaştırılabilir",
+        "stale_note": true,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "354px 354px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 352,
+            "height": 470,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 352,
+            "height": 470,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__stale_comparison__1280",
+      "state": "stale_comparison",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "completed-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKarşılaştırılabilirSon kaydedilen karşılaştırmaBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Lighting and camera height match closely enough to treat the two frames as a cautious visual comparison, although the long unspaced token AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA must stay inside the PHYSIQUE PROGRESS column without expanding the page.Gözlenen değişikliklerUpper chest outline looks a little fuller in the later frame.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASabit kalan alanlarWaist line looks similar.Odak alanlarıKeep the same camera height.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 718,
+        "comparability": "comparable",
+        "reliability_text": "Karşılaştırılabilir",
+        "stale_note": true,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "610px 610px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 608,
+            "height": 811,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 608,
+            "height": 811,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__stale_comparison__1440",
+      "state": "stale_comparison",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "completed-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px",
+        "selected": "upper_body"
+      },
+      "keyboard": {
+        "moved": true,
+        "errors": [],
+        "from": "upper_body",
+        "to": "arms"
+      },
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": "comparison_available",
+        "physique_region": "upper_body",
+        "physique_text": "Üst vücutKollarBölge: Üst vücutKarşılaştırılabilirSon kaydedilen karşılaştırmaBaşlangıç · 1 Tem 2026Güncel · 12 Tem 2026Lighting and camera height match closely enough to treat the two frames as a cautious visual comparison, although the long unspaced token AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA must stay inside the PHYSIQUE PROGRESS column without expanding the page.Gözlenen değişikliklerUpper chest outline looks a little fuller in the later frame.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASabit kalan alanlarWaist line looks similar.Odak alanlarıKeep the same camera height.Sonraki kayıtMatch the first photo's lighting and distance.Tüm Pump Check'leri gör",
+        "physique_text_len": 718,
+        "comparability": "comparable",
+        "reliability_text": "Karşılaştırılabilir",
+        "stale_note": true,
+        "legacy_note": false,
+        "unavailable": false,
+        "compare_present": true,
+        "pair_present": true,
+        "pair_columns": "610px 610px",
+        "pair_figures": 2,
+        "images": [
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "1 Tem 2026 tarihli başlangıç Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 608,
+            "height": 811,
+            "overflow": false,
+            "display": "block"
+          },
+          {
+            "src": "http://127.0.0.1:36867/__audit__/physique-image",
+            "alt": "12 Tem 2026 tarihli güncel Pump Check",
+            "complete": true,
+            "natural_width": 1,
+            "loaded": true,
+            "width": 608,
+            "height": 811,
+            "overflow": false,
+            "display": "block"
+          }
+        ],
+        "image_count": 2,
+        "images_loaded": 2,
+        "chips": [
+          {
+            "region": "upper_body",
+            "label": "Üst vücut",
+            "checked": true,
+            "tabindex": "0",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "region": "arms",
+            "label": "Kollar",
+            "checked": false,
+            "tabindex": "-1",
+            "role": "radio",
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "chip_count": 2,
+        "radiogroup": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__stale_comparison__1440.png"
+    },
+    {
+      "id": "physique-progress__endpoint_failure__390",
+      "state": "endpoint_failure",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "social-empty",
+      "injected_failure": true,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68i0h2v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1993075812.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=11&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938469~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=4632&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68i0h2v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1993075812.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=11&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938469~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=4632&gaf=1. Refused to connect because it violates the document's Content Security Policy.",
+        "Failed to load resource: the server responded with a status of 500 (INTERNAL SERVER ERROR)"
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [
+        {
+          "url": "http://127.0.0.1:36867/api/progress/physique",
+          "status": 500
+        }
+      ],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/workout/status",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/last-session",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": null,
+        "physique_region": null,
+        "physique_text": "Fizik gelişimi yüklenemedi. Birazdan tekrar dene.",
+        "physique_text_len": 49,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": true,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [],
+        "image_count": 0,
+        "images_loaded": 0,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__endpoint_failure__390.png"
+    },
+    {
+      "id": "physique-progress__endpoint_failure__768",
+      "state": "endpoint_failure",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "social-empty",
+      "injected_failure": true,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=710928098.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=14&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115616985~115938465~115938469~118897920~118897930~119367802~119367810~120213116~120315470~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=5410&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=710928098.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=14&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115616985~115938465~115938469~118897920~118897930~119367802~119367810~120213116~120315470~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=5410&gaf=1. Refused to connect because it violates the document's Content Security Policy.",
+        "Failed to load resource: the server responded with a status of 500 (INTERNAL SERVER ERROR)"
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [
+        {
+          "url": "http://127.0.0.1:36867/api/progress/physique",
+          "status": 500
+        }
+      ],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": null,
+        "physique_region": null,
+        "physique_text": "Fizik gelişimi yüklenemedi. Birazdan tekrar dene.",
+        "physique_text_len": 49,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": true,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [],
+        "image_count": 0,
+        "images_loaded": 0,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__endpoint_failure__1280",
+      "state": "endpoint_failure",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "social-empty",
+      "injected_failure": true,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Failed to load resource: the server responded with a status of 500 (INTERNAL SERVER ERROR)"
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [
+        {
+          "url": "http://127.0.0.1:36867/api/progress/physique",
+          "status": 500
+        }
+      ],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": null,
+        "physique_region": null,
+        "physique_text": "Fizik gelişimi yüklenemedi. Birazdan tekrar dene.",
+        "physique_text_len": 49,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": true,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [],
+        "image_count": 0,
+        "images_loaded": 0,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "physique-progress__endpoint_failure__1440",
+      "state": "endpoint_failure",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "social-empty",
+      "injected_failure": true,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Failed to load resource: the server responded with a status of 500 (INTERNAL SERVER ERROR)"
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [
+        {
+          "url": "http://127.0.0.1:36867/api/progress/physique",
+          "status": 500
+        }
+      ],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:36867/checkin-history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:36867/coach/history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "physique_state": null,
+        "physique_region": null,
+        "physique_text": "Fizik gelişimi yüklenemedi. Birazdan tekrar dene.",
+        "physique_text_len": 49,
+        "comparability": null,
+        "reliability_text": "",
+        "stale_note": false,
+        "legacy_note": false,
+        "unavailable": true,
+        "compare_present": false,
+        "pair_present": false,
+        "pair_columns": null,
+        "pair_figures": 0,
+        "images": [],
+        "image_count": 0,
+        "images_loaded": 0,
+        "chips": [],
+        "chip_count": 0,
+        "radiogroup": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "axis_watch_status": "insufficient_data",
+        "axis_next_status": "available",
+        "history_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/physique-progress__endpoint_failure__1440.png"
+    }
+  ],
+  "retry_note": "comparable@390 initially blocked on a 20s progress-page navigation timeout; same hermetic cell passed on retry with a 30s goto budget."
+}

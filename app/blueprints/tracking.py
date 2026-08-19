@@ -22,6 +22,7 @@ from app.services.progress_insights import (UnknownCanonicalVocabulary,
                                             build_progress_insights,
                                             progress_insights_payload)
 from app.services.progress_physique import (InvalidProgressPhysiqueRegion,
+                                            UnknownPhysiqueComparability,
                                             build_progress_physique,
                                             progress_physique_payload)
 from app.services.progress_summary import (UnknownProgressionSignal, build_progress_summary,
@@ -62,7 +63,11 @@ def _progress_summary_error_class(error):
     ``UnknownProgressionSignal`` — an upstream contract moved — so it buckets
     the same way rather than inventing a competing observability vocabulary.
     """
-    if isinstance(error, (UnknownProgressionSignal, UnknownCanonicalVocabulary)):
+    if isinstance(error, (
+            UnknownProgressionSignal,
+            UnknownCanonicalVocabulary,
+            UnknownPhysiqueComparability,
+    )):
         return "contract_drift"
     if isinstance(error, SQLAlchemyError):
         return "upstream_error"
