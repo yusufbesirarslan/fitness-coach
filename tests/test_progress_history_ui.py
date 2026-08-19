@@ -178,3 +178,13 @@ def test_xss_payload_cannot_become_html(app, client, make_user, login):
     assert "innerHTML" not in js
     assert "insertAdjacentHTML" not in js
     assert "document.write" not in js
+
+
+def test_history_asof_copy_is_calendar_day_not_timestamp():
+    """Drilldown copy is day-granular. It must not imply a timestamp cutoff."""
+    en = _CATALOG["en"]["progress.history_asof"]
+    tr = _CATALOG["tr"]["progress.history_asof"]
+    assert en == "Based on your data through this check-in day"
+    assert "up to this check-in" not in en
+    assert tr == "Bu check-in gününe kadarki verine göre"
+    assert "check-in'e kadarki" not in tr

@@ -35,12 +35,13 @@ END_DAY = date(2026, 7, 15)
 W0, W1, W2, W3 = weekly_windows(END_DAY, SUMMARY_WEEKS)
 
 
-def _add_workout(user_id, day, volume=100.0, sets=3, reps=5, weight=50.0):
+def _add_workout(user_id, day, volume=100.0, sets=3, reps=5, weight=50.0,
+                 created_at=None):
     db.session.add(WorkoutLog(
         user_id=user_id,
         exercise_name="Squat",
         sets=sets, reps=reps, weight_kg=weight, volume=volume,
-        created_at=datetime(day.year, day.month, day.day, 12),
+        created_at=created_at or datetime(day.year, day.month, day.day, 12),
     ))
 
 
@@ -265,10 +266,44 @@ def test_unknown_progression_signal_fails_closed(make_user, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Future-data isolation
+# Temporal granularity (Istanbul calendar day, not check-in timestamp)
 # ---------------------------------------------------------------------------
 
-def test_future_data_does_not_change_a_past_entry(make_user):
+def test_historical_training_reconstruction_is_day_granular(make_user):
+    """V1 contract: training reconstruction evaluates the full Istanbul day.
+
+    A qualifying check-in earlier on day D, then a workout later on the SAME
+    Istanbul day, is included in that history row. PR5 does not cut off at
+    the check-in timestamp. Do not rewrite this as same-day isolation.
+    """
+    user = make_user("phdaygran")
+    early_utc = datetime(END_DAY.year, END_DAY.month, END_DAY.day, 5, 0, 0)
+    later_utc = datetime(END_DAY.year, END_DAY.month, END_DAY.day, 18, 0, 0)
+    assert app_date_of(early_utc) == END_DAY
+    assert app_date_of(later_utc) == END_DAY
+    assert later_utc > early_utc
+
+    _add_checkin(user.id, END_DAY, 78.4, created_at=early_utc)
+    db.session.commit()
+
+    before = build_progress_history(user.id).entries[0]
+    assert before.analysis_day == END_DAY
+    before_sessions = before.consistency.sessions
+
+    _add_workout(user.id, END_DAY, volume=400, weight=80, created_at=later_utc)
+    db.session.commit()
+
+    after = build_progress_history(user.id).entries[0]
+    assert after.analysis_day == END_DAY
+    assert after.consistency.sessions == before_sessions + 1
+
+
+def test_data_after_the_analysis_day_does_not_change_a_past_entry(make_user):
+    """Data on a later Istanbul day must not leak backward into day D.
+
+    This is calendar-day isolation, not timestamp isolation. Same-day later
+    events are covered by the day-granular contract test above.
+    """
     user = make_user("phiso", weight=70.0, target_weight=65.0)
     _progressing(user.id, END_DAY)
     _add_checkin(user.id, END_DAY, 78.4)

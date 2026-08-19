@@ -5089,23 +5089,26 @@ no mutation is possible.
 
 Branch `feat/progress-redesign-pr5-history-convergence`, worktree
 `.worktrees/progress-redesign-pr5`, based on `origin/main`
-`f2887e5e524383ac8f50239f73cbd001abf83eee`. PR1 (#212), PR2 (#215), PR3 (#216)
-and PR4 (#219) are ancestors. **Not merged, not deployed, no production
-config touched.**
+`f2887e5e524383ac8f50239f73cbd001abf83eee`, later restacked onto
+`49a8af0` (#221, coach plan tools; not a Progress History change).
+PR1 (#212), PR2 (#215), PR3 (#216) and PR4 (#219) are ancestors.
+**Not merged, not deployed, no production config touched.**
 
 Full architecture: **docs/PROGRESS_HISTORY.md**.
 
 PR5 replaces the Progress page's legacy `/checkin-history` consumer
 (browser-side newest-first sort, weight delta and 12-row cap) with a
-server-owned reconstructed read model. A row means "your Progress state for
-this check-in, based on data up to that day" — not a persisted AxisAI
-decision from that moment. `build_progress_summary` is not reused wholesale:
-its body/profile read is current-state. Historical training uses
+server-owned reconstructed read model. A row means "your Progress state
+through this check-in day" — not a persisted AxisAI decision from that
+timestamp. Reconstruction is Istanbul-day-granular: `end_day=D` evaluates
+the full calendar day, so a workout later on the same Istanbul day may be
+included. `build_progress_summary` is not reused wholesale: its
+body/profile read is current-state. Historical training uses
 `training_progression(..., end_day=D)` plus PR2's pure mappings. Historical
 weight comes from the anchored qualifying WeeklyCheckIn
 (`yogunluk IS NOT NULL`); delta is against the previous qualifying row.
-Future workouts/check-ins and live profile/target changes cannot rewrite a
-past row.
+Workouts, check-ins, and live profile/target changes on a later Istanbul
+day cannot rewrite a past row.
 
 New package `app/services/progress_history/` (`models` / `queries` /
 `payload` / `build_progress_history`). New `GET /api/progress/history`
@@ -5138,4 +5141,13 @@ Command:
 
 Rollback: revert the commit. No schema, no migration, no flag, no cache, no
 provider cleanup.
+
+A later same-branch semantic-precision fix: Progress History copy and
+docs now say reconstruction is through the Istanbul check-in *day*.
+`end_day=D` already evaluated the full calendar day; "up to this
+check-in" over-claimed timestamp isolation. A same-day later workout is
+in V1 scope. Isolation means data after the analysis day does not leak
+backward. No `training_progression`, snapshot, or query change. The
+prior 36-cell hermetic matrix was not rerun: localized drilldown copy
+only.
 

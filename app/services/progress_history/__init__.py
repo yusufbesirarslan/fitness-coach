@@ -2,8 +2,9 @@
 
 The single server-owned authority for "how has my Progress state evolved?".
 It is a **reconstructed** read model: each row is the current canonical
-Progress algorithms applied to historical facts as-of that check-in's Istanbul
-day. It is not a persisted snapshot of what AxisAI displayed at the time.
+Progress algorithms applied to historical facts through that check-in's
+Istanbul calendar day. V1 is day-granular, not timestamp-granular. It is
+not a persisted snapshot of what AxisAI displayed at the check-in time.
 
 Layering (mirrors ``progress_summary`` / ``progress_physique``):
 
@@ -88,7 +89,7 @@ def _historical_body(row, previous):
 
 
 def _reconstruct_entry(user_id, row, previous) -> HistoryEntry:
-    """One history row: historical training as-of D + historical check-in body."""
+    """One history row: historical training through Istanbul day D + body."""
     analysis_day = app_date_of(row.created_at)
     report = build_progression_report(
         user_id, weeks=SUMMARY_WEEKS, end_day=analysis_day)

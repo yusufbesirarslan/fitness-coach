@@ -4,8 +4,9 @@ This layer owns no Progress algorithm. Trajectory, performance and consistency
 are the Progress Summary mappings of a historical training report. Body facts
 are the anchored qualifying WeeklyCheckIn and the previous one.
 
-A history row is a reconstructed read of canonical facts as-of the check-in's
-Istanbul day. It is not a persisted snapshot of what AxisAI displayed then.
+A history row is a reconstructed read of canonical facts through the
+check-in's Istanbul calendar day. V1 is day-granular, not timestamp-granular.
+It is not a persisted snapshot of what AxisAI displayed then.
 """
 from dataclasses import dataclass
 from datetime import date, datetime

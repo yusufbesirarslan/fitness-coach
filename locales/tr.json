@@ -840,7 +840,7 @@
   "progress.history_no_delta": "Karşılaştırılacak önceki check-in yok",
   "progress.history_has_more": "Bu son 12 kaydın ötesinde daha eski check-in'ler var.",
   "progress.history_unavailable": "Progress geçmişi yüklenemedi. Kısa süre sonra tekrar dene.",
-  "progress.history_asof": "Bu check-in'e kadarki verine göre",
+  "progress.history_asof": "Bu check-in gününe kadarki verine göre",
   "progress.history_expand": "{date} ayrıntılarını göster",
   "progress.history_performance": "Performans",
   "progress.history_consistency": "Tutarlılık",

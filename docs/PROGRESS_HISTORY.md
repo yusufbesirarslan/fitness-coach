@@ -10,14 +10,16 @@ It answers two questions and nothing more:
 
 A row is **reconstructed**, not archived:
 
-> Based on your data up to this check-in
+> Based on your data through this check-in day
 
 It is **not**:
 
 > AxisAI told you this on August 3
 
 There is no persisted historical decision. Current canonical Progress
-algorithms interpret historical facts as-of that check-in's Istanbul day.
+algorithms interpret historical facts through that check-in's Istanbul
+calendar day. PR5 V1 is day-granular, not timestamp-granular: a workout
+later on the same Istanbul day may be included.
 
 ---
 
@@ -95,9 +97,11 @@ PR5 V1 is a reconstructed read model.
 
 For a historical check-in anchored on date D:
 
-- historical training facts are evaluated as-of D (`end_day=D`);
+- historical training facts are evaluated through the full Istanbul
+  calendar day D (`end_day=D`);
 - the **current** canonical Progress algorithms interpret those facts;
-- future data must not leak backward into D;
+- data after the analysis day must not leak backward into D;
+- a workout later on the same Istanbul day D is in scope for V1;
 - no stored snapshot is created.
 
 There is no `ProgressHistory` table, no snapshot JSON, no cache, no
@@ -164,6 +168,9 @@ performance = summarize_performance(report)
 consistency = summarize_consistency(report)
 ```
 
+`end_day=D` is the full Istanbul calendar day, not a cut-off at
+`checkin.created_at`. A session logged later on day D is included.
+
 The window is the Progress Summary constant (`SUMMARY_WEEKS = 4`), not a
 caller-controlled range. Unknown progression vocabulary fails closed
 (`UnknownProgressionSignal` → generic HTTP 500). It is never mapped to
@@ -192,12 +199,16 @@ remains training-led.
 
 ---
 
-## 9. Future-data isolation
+## 9. Isolation of data after the analysis day
 
-A history entry anchored at D must not change merely because data **after**
-D exists, except when the underlying historical facts themselves are edited.
+A history entry anchored at D must not change merely because data on a
+**later Istanbul day** exists, except when the underlying historical facts
+themselves are edited.
 
-In particular, adding after D:
+This is calendar-day isolation, not timestamp isolation. It does **not**
+mean every event after the exact check-in timestamp is excluded.
+
+In particular, adding on a later Istanbul day:
 
 - a workout;
 - a later check-in;
@@ -207,8 +218,9 @@ In particular, adding after D:
 must leave that past row's trajectory, performance, consistency, weight and
 weight delta semantically unchanged.
 
-`training_progression` already isolates workouts by `end_day`. Body facts
-are taken from the anchored rows, not the live profile.
+`training_progression` already isolates workouts by `end_day` (the full
+Istanbul day D). Body facts are taken from the anchored rows, not the live
+profile.
 
 ---
 
@@ -372,6 +384,7 @@ does not rename, resort, strip `coach_feedback`, or delete the route.
 ## 15. Tests
 
 - `tests/test_progress_history.py`
+  (includes the day-granular V1 contract and later-day isolation)
 - `tests/test_progress_history_api.py`
 - `tests/test_progress_history_ui.py`
 - hermetic browser matrix: `scripts/frontend_audit/progress_pr5_matrix.py`

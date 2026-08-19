@@ -840,7 +840,7 @@
   "progress.history_no_delta": "No previous check-in to compare",
   "progress.history_has_more": "Older check-ins exist beyond these latest 12.",
   "progress.history_unavailable": "Progress history couldn't be loaded. Try again shortly.",
-  "progress.history_asof": "Based on your data up to this check-in",
+  "progress.history_asof": "Based on your data through this check-in day",
   "progress.history_expand": "Show details for {date}",
   "progress.history_performance": "Performance",
   "progress.history_consistency": "Consistency",
