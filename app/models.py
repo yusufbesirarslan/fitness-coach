@@ -476,6 +476,84 @@ class PlanMutationRecord(db.Model):
         return f"<PlanMutationRecord {self.operation_kind} {self.outcome}>"
 
 
+def _new_plan_confirmation_public_id():
+    """Opaque identity for one pending plan-confirmation proposal.
+
+    Its own generator so a change to journal or lineage tokens cannot silently
+    redefine confirmation identity (and the mutation operation key derived
+    from it).
+    """
+    return secrets.token_urlsafe(32)
+
+
+PLAN_CONFIRMATION_PENDING = "pending"
+PLAN_CONFIRMATION_APPLIED = "applied"
+PLAN_CONFIRMATION_CANCELLED = "cancelled"
+PLAN_CONFIRMATION_STALE = "stale"
+PLAN_CONFIRMATION_SUPERSEDED = "superseded"
+PLAN_CONFIRMATION_STATUSES = (
+    PLAN_CONFIRMATION_PENDING,
+    PLAN_CONFIRMATION_APPLIED,
+    PLAN_CONFIRMATION_CANCELLED,
+    PLAN_CONFIRMATION_STALE,
+    PLAN_CONFIRMATION_SUPERSEDED,
+)
+
+
+class TrainingPlanConfirmationProposal(db.Model):
+    """One durable, user-scoped training-plan confirmation proposal (PR4).
+
+    A pending proposal is NOT a PlanMutationRecord: it records an intent the
+    user has not yet structurally confirmed. Creating a row must not touch
+    ``TrainingPlan.plan_data``, ``mutation_version``, or the mutation journal.
+
+    One PENDING row per authenticated user (partial unique index). The model
+    never supplies ``public_id``; the server mints it and derives the later
+    mutation operation key from it.
+    """
+    __tablename__ = "training_plan_confirmation_proposal"
+
+    id = db.Column(db.Integer, primary_key=True)
+    public_id = db.Column(
+        db.String(64), nullable=False, default=_new_plan_confirmation_public_id)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    plan_lineage_id = db.Column(db.String(64), nullable=False)
+    base_mutation_version = db.Column(db.Integer, nullable=False)
+    base_snapshot_fingerprint = db.Column(db.String(64), nullable=False)
+    command_type = db.Column(db.String(60), nullable=False)
+    # Bounded typed fields only — never a raw prompt, never a provider payload.
+    command_payload = db.Column(db.JSON, nullable=False)
+    command_fingerprint = db.Column(db.String(64), nullable=False)
+    reason_codes = db.Column(db.JSON, nullable=False)
+    summary = db.Column(db.String(240), nullable=False)
+    status = db.Column(db.String(20), nullable=False,
+                       default=PLAN_CONFIRMATION_PENDING)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    resolved_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "public_id", name="uq_plan_confirmation_public_id"),
+        db.Index(
+            "uq_plan_confirmation_one_pending_per_user",
+            "user_id", unique=True,
+            sqlite_where=text("status = 'pending'"),
+            postgresql_where=text("status = 'pending'"),
+        ),
+        db.CheckConstraint(
+            "status IN ('pending', 'applied', 'cancelled', 'stale', "
+            "'superseded')",
+            name="ck_plan_confirmation_status",
+        ),
+    )
+
+    def __repr__(self):
+        return f"<TrainingPlanConfirmationProposal {self.status}>"
+
+
 class MealLog(db.Model):
     id         = db.Column(db.Integer, primary_key=True)
     user_id    = db.Column(db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
