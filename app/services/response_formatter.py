@@ -16,12 +16,20 @@ COACH_FALLBACKS = {
            "tool": "İşlemi tamamlayamadım, tekrar dener misin?",
            "tool_plan_saved": ("Plan değişikliğin kaydedildi, ama yanıtı "
                                "tamamlayamadım. Tekrar istemene gerek yok — "
-                               "planına bakabilirsin.")},
+                               "planına bakabilirsin."),
+           "tool_plan_confirmation_pending": (
+               "Planın henüz değişmedi. Onay bekleyen bir değişiklik var; "
+               "yanıtı tamamlayamadım. Onaylamak veya iptal etmek için "
+               "yazabilirsin.")},
     "en": {"error": "Something went wrong — could you try again?",
            "tool": "I couldn't complete that — could you try again?",
            "tool_plan_saved": ("Your plan change was saved, but I couldn't "
                                "finish my reply. No need to ask again — you "
-                               "can check your plan.")},
+                               "can check your plan."),
+           "tool_plan_confirmation_pending": (
+               "Your plan has not changed yet. A change is waiting for your "
+               "confirmation; I couldn't finish my reply. You can confirm or "
+               "cancel it.")},
 }
 
 _ALL_FALLBACKS = {t for d in COACH_FALLBACKS.values() for t in d.values()}

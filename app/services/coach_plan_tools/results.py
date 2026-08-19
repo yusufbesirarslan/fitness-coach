@@ -48,6 +48,8 @@ from app.services.plan_mutation.journal import OUTCOME_APPLIED, OUTCOME_NO_OP
 STATUS_APPLIED = "applied"
 STATUS_NO_OP = "no_op"
 STATUS_REPLAYED = "replayed"
+STATUS_CONFIRMATION_REQUIRED = "confirmation_required"
+STATUS_CANCELLED = "cancelled"
 STATUS_ERROR = "error"
 
 #: Bounded error vocabulary. One entry per way this can honestly fail; the
@@ -68,6 +70,11 @@ ERROR_MUTATION_BUDGET_EXHAUSTED = "MUTATION_BUDGET_EXHAUSTED"
 ERROR_CAPABILITY_DISABLED = "CAPABILITY_DISABLED"
 ERROR_TURN_IDENTITY_UNAVAILABLE = "TURN_IDENTITY_UNAVAILABLE"
 ERROR_INTERNAL = "INTERNAL_ERROR"
+ERROR_CONFIRMATION_NOT_AUTHORIZED = "CONFIRMATION_NOT_AUTHORIZED"
+ERROR_NO_PENDING_CONFIRMATION = "NO_PENDING_CONFIRMATION"
+ERROR_PENDING_CONFIRMATION_STALE = "PENDING_CONFIRMATION_STALE"
+ERROR_PENDING_CONFIRMATION_EXISTS = "PENDING_CONFIRMATION_EXISTS"
+ERROR_UNSUPPORTED_IMPACT = "UNSUPPORTED_IMPACT"
 
 #: Domain exception → error code. Ordered most-specific first, because several
 #: of these share a base class. Mapping the CLASS rather than the message is
@@ -141,6 +148,22 @@ _ERROR_MESSAGES = {
     ERROR_INTERNAL: (
         "Plan değişikliği şu anda yapılamadı. Değişiklik yapıldığını SÖYLEME; "
         "kullanıcıdan daha sonra tekrar denemesini iste."),
+    ERROR_CONFIRMATION_NOT_AUTHORIZED: (
+        "Kullanıcı bu turda bekleyen plan değişikliğini onaylamadı. "
+        "Onayladığını SÖYLEME; onay veya iptal iste."),
+    ERROR_NO_PENDING_CONFIRMATION: (
+        "Onaylanacak bekleyen bir plan değişikliği yok. Bir değişiklik "
+        "yaptığını SÖYLEME."),
+    ERROR_PENDING_CONFIRMATION_STALE: (
+        "Bekleyen plan değişikliği artık geçerli değil çünkü plan o "
+        "tekliften sonra değişti. Eski teklifi uygulama; kullanıcıdan "
+        "isteğini yeniden söylemesini iste."),
+    ERROR_PENDING_CONFIRMATION_EXISTS: (
+        "Bekleyen bir plan değişikliği var. Yeni bir plan aracı çağırma; "
+        "kullanıcıdan önce onay veya iptal iste."),
+    ERROR_UNSUPPORTED_IMPACT: (
+        "Bu değişiklik güvenle değerlendirilemedi. Uyguladığını SÖYLEME; "
+        "kullanıcıya yapılamadığını söyle."),
 }
 
 #: Free-text length ceiling for any value echoed back. The targets came from
@@ -290,6 +313,66 @@ def mutation_result(command, result):
     else:
         payload["note"] = _STALE_CONTEXT_NOTE
     return payload
+
+
+def confirmation_required_result(command, reason_codes):
+    """Bounded result when the server requires a structural confirmation.
+
+    No proposal id, lineage, version, operation key or snapshot.
+    """
+    from app.services.coach_plan_policy import UNDO_LAST_CHANGE
+
+    if command is UNDO_LAST_CHANGE:
+        operation = UNDO_COMMAND_TYPE
+        change = {}
+        summary = "Plandaki son değişiklik geri alınacak. Kullanıcıdan onay iste."
+    else:
+        operation = command_type(command)
+        change = _change_of(command)
+        summary = _pending_summary_of(command)
+    return {
+        "status": STATUS_CONFIRMATION_REQUIRED,
+        "operation": operation,
+        "change": change,
+        "summary": summary,
+        "reason_codes": list(reason_codes),
+        "note": (
+            "Plan HENÜZ değişmedi. Kullanıcıya neyin onay beklediğini anlat; "
+            "uygulandığını SÖYLEME. Onay bir SONRAKİ mesajdır; sen onaylama."),
+    }
+
+
+def cancelled_pending_result():
+    return {
+        "status": STATUS_CANCELLED,
+        "operation": "cancel_pending",
+        "change": {},
+        "summary": "Bekleyen plan değişikliği iptal edildi; plan aynı kaldı.",
+        "note": "Plan değişmedi. İptal edildiğini söyle; bir şey uyguladığını SÖYLEME.",
+    }
+
+
+def _pending_summary_of(command):
+    if isinstance(command, ReplaceExerciseCommand):
+        return (f"{command.day} gününde {command.exercise} yerine "
+                f"{command.replacement} konacak.")
+    if isinstance(command, AddExerciseCommand):
+        return (f"{command.day} gününe {command.exercise} eklenecek "
+                f"({command.sets}x{command.reps}).")
+    if isinstance(command, RemoveExerciseCommand):
+        return f"{command.day} gününden {command.exercise} çıkarılacak."
+    if isinstance(command, UpdateExercisePrescriptionCommand):
+        parts = []
+        if command.sets is not None:
+            parts.append(f"set {command.sets}")
+        if command.reps is not None:
+            parts.append(f"tekrar {command.reps}")
+        detail = ", ".join(parts)
+        return f"{command.day} gününde {command.exercise} {detail} olacak."
+    if isinstance(command, MoveTrainingDayCommand):
+        return (f"{command.day} gününün içeriği {command.target_day} ile "
+                f"yer değiştirecek.")
+    return "Plan değişikliği onay bekliyor."
 
 
 def undo_result(result):

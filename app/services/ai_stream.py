@@ -65,11 +65,17 @@ def _bedrock_work_error(parts, tools_ran):
     from app.services import ai_coach
 
     plan_saved = ai_coach.coach_plan_tools.plan_changed_this_turn()
+    pending = ai_coach.coach_plan_tools.proposal_created_this_turn()
+    if plan_saved:
+        key = "coach.reply_failed_plan_saved"
+    elif pending:
+        key = "coach.reply_failed_plan_confirmation_pending"
+    else:
+        key = "coach.reply_failed"
     return {
         "type": "error",
-        "key": ("coach.reply_failed_plan_saved" if plan_saved
-                else "coach.reply_failed"),
-        "work_performed": bool(parts or tools_ran or plan_saved),
+        "key": key,
+        "work_performed": bool(parts or tools_ran or plan_saved or pending),
         "partial_text": "".join(parts).strip(),
     }
 
@@ -127,7 +133,7 @@ def stream_coach_answer(user_id, question, context, history, language="tr"):
     delta gönderilmemişken mümkündür."""
     from app.services import ai_coach
 
-    ai_coach._begin_coach_turn()  # S1: tur-içi stage→confirm kilidini sıfırla
+    ai_coach._begin_coach_turn(question)
     deadline = ai_coach._coach_turn_deadline()
 
     if ai_coach.BEDROCK_ENABLED and ai_coach._anthropic is not None:
@@ -160,7 +166,7 @@ def _stream_bedrock(user_id, question, context, history, language,
     if deadline is None:
         deadline = ai_coach._coach_turn_deadline()
     system = ai_coach._build_bedrock_system(context, language)
-    tools = ai_coach._anthropic_tools_for_call()
+    tools = ai_coach._anthropic_tools_for_call(user_id)
     convo = prompt_builder.build_anthropic_messages(history, question)
     max_tokens = min(_COACH_MAX_TOKENS, BEDROCK_MAX_TOKENS)
 

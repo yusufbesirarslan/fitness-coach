@@ -106,6 +106,24 @@ def mutation_operation_key(command):
                 semantic_fingerprint(command))
 
 
+CONFIRMATION_KEY_DOMAIN = "axisai/coach-plan-confirmation/v1"
+
+
+def confirmation_operation_key(proposal_public_id):
+    """Stable mutation identity derived from a durable proposal.
+
+    Independent of the HTTP turn, the provider tool_call_id, and the raw
+    user message: a crash after PlanMutationService commits still retries
+    with the same key, so PR2 replays instead of mutating twice.
+    """
+    if not isinstance(proposal_public_id, str) or not proposal_public_id:
+        raise TurnIdentityUnavailable("no proposal identity")
+    digest = hashlib.sha256(
+        "\0".join((CONFIRMATION_KEY_DOMAIN, proposal_public_id)).encode("utf-8")
+    ).hexdigest()[:_DIGEST_CHARS]
+    return f"{KEY_PREFIX}:c:{digest}"
+
+
 def undo_operation_key():
     """The durable operation key for an undo in this turn.
 

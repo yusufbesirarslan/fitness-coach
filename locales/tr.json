@@ -951,6 +951,7 @@
   "coach.chat_quota_reached": "Bu haftaki ücretsiz AI koç sohbeti hakkın doldu. Sınırsız sohbet için Premium'a geç.",
   "coach.reply_failed": "Yanıt şu an alınamadı, lütfen tekrar dene.",
   "coach.reply_failed_plan_saved": "Plan değişikliğin kaydedildi, ama yanıtı tamamlayamadım. Tekrar istemene gerek yok — planına bakabilirsin.",
+  "coach.reply_failed_plan_confirmation_pending": "Planın henüz değişmedi. Onay bekleyen bir değişiklik var; yanıtı tamamlayamadım. Onaylamak veya iptal etmek için yazabilirsin.",
   "coach.cooldown": "AI koç şu an geçici olarak yoğun. Lütfen biraz sonra tekrar dene.",
 
   "quest.login.title": "Günlük Giriş",

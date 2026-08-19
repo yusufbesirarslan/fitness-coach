@@ -42,21 +42,40 @@ from .executor import (
     FLAG_KEY,
     MAX_PLAN_OPERATIONS_PER_TURN,
     begin_turn,
+    current_confirmation_intent,
     execute_plan_tool,
     invalid_arguments_result,
     plan_changed_this_turn,
     plan_mutation_tools_enabled,
+    proposal_created_this_turn,
+    published_plan_tool_defs,
 )
-from .schemas import PLAN_MUTATION_TOOL_DEFS, PLAN_MUTATION_TOOL_NAMES
+from .schemas import (
+    CANCEL_PENDING_TOOL,
+    CONFIRM_TOOL,
+    CONFIRMATION_TOOL_DEFS,
+    CONFIRMATION_TOOL_NAMES,
+    PLAN_MUTATION_TOOL_DEFS,
+    PLAN_MUTATION_TOOL_NAMES,
+    PLAN_WRITE_TOOL_NAMES,
+)
 
 __all__ = [
+    "CANCEL_PENDING_TOOL",
+    "CONFIRM_TOOL",
+    "CONFIRMATION_TOOL_DEFS",
+    "CONFIRMATION_TOOL_NAMES",
     "FLAG_KEY",
     "MAX_PLAN_OPERATIONS_PER_TURN",
     "PLAN_MUTATION_TOOL_DEFS",
     "PLAN_MUTATION_TOOL_NAMES",
+    "PLAN_WRITE_TOOL_NAMES",
     "begin_turn",
+    "current_confirmation_intent",
     "execute_plan_tool",
     "invalid_arguments_result",
     "plan_changed_this_turn",
     "plan_mutation_tools_enabled",
+    "proposal_created_this_turn",
+    "published_plan_tool_defs",
 ]

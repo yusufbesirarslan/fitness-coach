@@ -249,12 +249,13 @@ def test_two_different_commands_in_one_turn_are_two_changes(
     first = call(planned_user.id, ADD,
                  {"day": "Pazartesi", "exercise": "Cable Fly",
                   "sets": 3, "reps": "12"})
-    second = call(planned_user.id, REMOVE,
-                  {"day": "Pazartesi", "exercise": "Shoulder Press"})
+    second = call(planned_user.id, PRESCRIBE,
+                  {"day": "Cuma", "exercise": "Squat", "sets": 4})
 
     assert first["status"] == results.STATUS_APPLIED
     assert second["status"] == results.STATUS_APPLIED
-    assert names(planned_user.id) == ["Bench Press", "Cable Fly"]
+    assert names(planned_user.id) == ["Bench Press", "Shoulder Press", "Cable Fly"]
+    assert day_exercises(planned_user.id, "Cuma") == [("Squat", 4, "5")]
     keys = {entry.idempotency_key for entry in journal(planned_user.id)}
     assert len(keys) == 2
     assert plan_version(planned_user.id) == 2
@@ -270,14 +271,15 @@ def test_a_third_distinct_change_in_one_turn_is_refused(
     """
     call(planned_user.id, ADD, {"day": "Pazartesi", "exercise": "Cable Fly",
                                 "sets": 3, "reps": "12"})
-    call(planned_user.id, REMOVE, {"day": "Pazartesi",
-                                   "exercise": "Shoulder Press"})
-    third = call(planned_user.id, PRESCRIBE,
-                 {"day": "Cuma", "exercise": "Squat", "sets": 4})
+    call(planned_user.id, PRESCRIBE,
+         {"day": "Cuma", "exercise": "Squat", "sets": 4})
+    third = call(planned_user.id, REPLACE,
+                 {"day": "Pazartesi", "exercise": "Bench Press",
+                  "replacement": "Machine Press"})
 
     assert third["error"] == results.ERROR_MUTATION_BUDGET_EXHAUSTED
-    assert names(planned_user.id) == ["Bench Press", "Cable Fly"]
-    assert day_exercises(planned_user.id, "Cuma") == [("Squat", 5, "5")]
+    assert names(planned_user.id) == ["Bench Press", "Shoulder Press", "Cable Fly"]
+    assert day_exercises(planned_user.id, "Cuma") == [("Squat", 4, "5")]
     assert len(journal(planned_user.id)) == 2
 
 
@@ -293,8 +295,8 @@ def test_a_repeat_of_an_earlier_change_does_not_spend_budget(
     call(planned_user.id, ADD, dict(first))
     call(planned_user.id, ADD, dict(first))       # replay, costs nothing
     call(planned_user.id, ADD, dict(first))       # still a replay
-    second = call(planned_user.id, REMOVE,
-                  {"day": "Pazartesi", "exercise": "Shoulder Press"})
+    second = call(planned_user.id, PRESCRIBE,
+                  {"day": "Cuma", "exercise": "Squat", "sets": 4})
 
     assert second["status"] == results.STATUS_APPLIED
     assert len(journal(planned_user.id)) == 2
@@ -900,8 +902,9 @@ def test_a_lost_write_race_is_reported_not_narrated(
         "app.services.coach_plan_tools.executor.apply_plan_mutation",
         _conflict)
 
-    result = call(planned_user.id, REMOVE,
-                  {"day": "Pazartesi", "exercise": "Bench Press"})
+    result = call(planned_user.id, REPLACE,
+                  {"day": "Pazartesi", "exercise": "Bench Press",
+                   "replacement": "Machine Press"})
 
     assert result["error"] == results.ERROR_PLAN_STATE_CONFLICT
     assert "Zorla" in result["message"]
@@ -918,8 +921,9 @@ def test_an_unexpected_failure_is_never_dressed_up_as_user_error(
     monkeypatch.setattr(
         "app.services.coach_plan_tools.executor.apply_plan_mutation", _boom)
 
-    result = call(planned_user.id, REMOVE,
-                  {"day": "Pazartesi", "exercise": "Bench Press"})
+    result = call(planned_user.id, REPLACE,
+                  {"day": "Pazartesi", "exercise": "Bench Press",
+                   "replacement": "Machine Press"})
 
     assert result["error"] == results.ERROR_INTERNAL
     assert "something internal" not in json.dumps(result, ensure_ascii=False)
@@ -942,8 +946,9 @@ def test_an_unexpected_failure_does_not_log_the_exception_it_swallowed(
         "app.services.coach_plan_tools.executor.apply_plan_mutation", _boom)
 
     with caplog.at_level("WARNING"):
-        call(planned_user.id, REMOVE,
-             {"day": "Pazartesi", "exercise": "Bench Press"})
+        call(planned_user.id, REPLACE,
+             {"day": "Pazartesi", "exercise": "Bench Press",
+              "replacement": "Machine Press"})
 
     emitted = "\n".join(
         record.getMessage() + (record.exc_text or "")
@@ -1044,8 +1049,9 @@ def test_a_no_op_is_reported_as_a_no_op(app, planned_user, tools_on, turn):
 def test_an_applied_result_flags_the_stale_context_block(
         app, planned_user, tools_on, turn):
     """The plan block in the prompt predates the tool call (§33)."""
-    result = call(planned_user.id, REMOVE,
-                  {"day": "Pazartesi", "exercise": "Shoulder Press"})
+    result = call(planned_user.id, REPLACE,
+                  {"day": "Pazartesi", "exercise": "Bench Press",
+                   "replacement": "Machine Press"})
     assert result["status"] == results.STATUS_APPLIED
     assert "bu sonucu esas al" in result["note"]
 
@@ -1078,9 +1084,8 @@ def test_a_coach_edit_does_not_touch_the_workout_session_or_history(
                       session_row.planned_training_plan_id)
     before_log = (log.exercise_name, log.sets, log.reps, log.volume)
 
-    call(planned_user.id, REPLACE,
-         {"day": "Pazartesi", "exercise": "Bench Press",
-          "replacement": "Machine Press"})
+    call(planned_user.id, PRESCRIBE,
+         {"day": "Cuma", "exercise": "Squat", "sets": 4})
     call(planned_user.id, UNDO)
 
     db.session.expire_all()
