@@ -4741,3 +4741,37 @@ PR4 (Pump Check / physique comparison) and PR5 (Progress History) are untouched.
 Nutrition, recovery and hydration insight domains, body verdicts, gamification
 signals, insight persistence/caching and any mobile/Flutter surface are excluded
 from PR3 on purpose — see docs/PROGRESS_INSIGHTS.md §7 and §13.
+
+# Progress Redesign PR4 — Canonical Physique Progress Integration
+
+Branch `feat/progress-redesign-pr4-physique-progress`, worktree
+`.worktrees/progress-redesign-pr4`, based on `origin/main`
+`264d98f00120d8f6baaad34cc5bfcacfe5383b02`. PR1 (#212), PR2 (#215), PR3 (#216),
+canonical Pump Checks (#207), comparisons (#213) and history (#218) are
+ancestors. **Not merged, not deployed, no production config touched, no
+rollout flag added or changed.**
+
+Full architecture: **docs/PROGRESS_PHYSIQUE.md**.
+
+PR4 replaces the thumbnail-only PHYSIQUE PROGRESS shell with a read-only
+projection of canonical Pump Check history and any persisted
+`PumpCheckComparison`. Page load creates nothing: no comparison, no Bedrock
+call, no analysis retry. If a completed comparison exists it is shown; if not,
+the section says so. Comparison creation stays on the existing mobile command
+(`POST /api/v1/pump-check-comparisons`); this PR does not add a second web
+creation workflow.
+
+New package `app/services/progress_physique/` (`models` / `queries` / `payload`
+/ `build_progress_physique`). New `GET /api/progress/physique`
+(`@require_auth`, optional `?region=`, `Cache-Control: private, no-store`).
+New client module `static/progress_physique.js`. `static/progress.js` only
+calls `FitXPhysiqueProgress.load()`.
+
+Chronology is `captured_at`. Legacy `captured_at IS NULL` rows stay in the
+gallery. Comparability is the persisted value. Unknown comparability fails
+closed. Images are short-lived owner-scoped URLs minted only for the rows the
+section renders.
+
+Rollback: revert the commit. No schema, no migration, no flag, no cache, no
+provider cleanup.
+

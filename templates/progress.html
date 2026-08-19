@@ -122,10 +122,11 @@
     </section>
 
     <!-- ══ 4 · PHYSIQUE PROGRESS ══
-         Shell for the future Pump Check → Progress integration (PR4). PR1
-         only LINKS existing Pump Check data through the unchanged
-         /pump-check-gallery/data contract — no comparison, no body-region
-         detection, no assessment. -->
+         PR4: a read-only projection of canonical Pump Check history and any
+         persisted PumpCheckComparison. GET /api/progress/physique owns the
+         facts; static/progress_physique.js only renders them. No comparison
+         is created on page load, and the browser never decides whether the
+         physique improved. -->
     <section class="prog-section" aria-labelledby="pp-h">
         <h2 class="sec-label" id="pp-h">{{ t('progress.physique_label') }}</h2>
         <div id="physique-body" aria-live="polite">
@@ -238,6 +239,7 @@
    server-side. The check-in field still pre-fills from `current_weight`
    above — that is a form default, not a Progress signal. #}
 <script src="/static/progress_insights.js?v={{ _v }}"></script>
+<script src="/static/progress_physique.js?v={{ _v }}"></script>
 <script src="/static/progress.js?v={{ _v }}"></script>
 <script src="/static/coach_widget.js?v={{ _v }}"></script>
 <script src="/static/actions.js?v={{ _v }}"></script>
