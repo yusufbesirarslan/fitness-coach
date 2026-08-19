@@ -91,9 +91,9 @@ It is **not** computer-vision detection. This layer must never imply
 The vocabulary is imported from `mobile_pump_checks.service.BODY_REGIONS`.
 It is not copied into a third constants file.
 
-`?region=` is a view selector. An invalid value is `400`, never silently
-another region. If omitted, the selected region is the body area of the
-owner's most recent canonical Pump Check.
+`?region=` is a view selector. An omitted parameter selects the body area
+of the owner's most recent canonical Pump Check. A supplied empty,
+whitespace-only, or unknown value is `400`, never silently another region.
 
 ## 6. Comparison selection
 

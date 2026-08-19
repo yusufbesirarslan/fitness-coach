@@ -122,15 +122,61 @@ def test_empty_contract(app, client, make_user, login):
     assert d["comparison"] is None
 
 
+def _assert_invalid_region_400(response, *, leaked_region):
+    assert response.status_code == 400
+    payload = response.get_json()
+    raw = response.get_data(as_text=True)
+    assert payload.get("error")
+    assert "state" not in payload
+    assert "selected_region" not in payload
+    assert "recent_checks" not in payload
+    assert leaked_region not in raw
+
+
+def test_omitted_region_uses_latest_canonical_area(
+        app, client, make_user, login):
+    user = _login(make_user, login, "ppapidef")
+    _check(user, token=_token("d", 1), captured_at=datetime(2026, 8, 1, 8),
+           region="arms")
+    _check(user, token=_token("d", 2), captured_at=datetime(2026, 8, 12, 8),
+           region="back")
+    db.session.commit()
+    r = client.get(PHYSIQUE_URL)
+    assert r.status_code == 200
+    d = r.get_json()
+    assert d["selected_region"] == "back"
+    assert d["recent_checks"][0]["body_region"] == "back"
+
+
+def test_empty_supplied_region_is_400_not_omitted(
+        app, client, make_user, login):
+    user = _login(make_user, login, "ppapiemptyreg")
+    _check(user, token=_token("e", 1), captured_at=datetime(2026, 8, 1, 8),
+           region="upper_body")
+    db.session.commit()
+    _assert_invalid_region_400(
+        client.get(f"{PHYSIQUE_URL}?region="), leaked_region="upper_body")
+
+
+def test_whitespace_supplied_region_is_400_not_omitted(
+        app, client, make_user, login):
+    user = _login(make_user, login, "ppapiwsreg")
+    _check(user, token=_token("w", 1), captured_at=datetime(2026, 8, 1, 8),
+           region="upper_body")
+    db.session.commit()
+    _assert_invalid_region_400(
+        client.get(f"{PHYSIQUE_URL}?region=%20%20%20"),
+        leaked_region="upper_body")
+
+
 def test_invalid_region_is_400_not_a_silent_fallback(
         app, client, make_user, login):
     user = _login(make_user, login, "ppapibad")
     _check(user, token=_token("b", 1), captured_at=datetime(2026, 8, 1, 8))
     db.session.commit()
-    r = client.get(f"{PHYSIQUE_URL}?region=shoulders")
-    assert r.status_code == 400
-    assert r.get_json().get("state") is None
-    assert "upper_body" not in r.get_data(as_text=True)
+    _assert_invalid_region_400(
+        client.get(f"{PHYSIQUE_URL}?region=shoulders"),
+        leaked_region="upper_body")
 
 
 def test_valid_region_query_is_honoured(app, client, make_user, login):
@@ -140,7 +186,9 @@ def test_valid_region_query_is_honoured(app, client, make_user, login):
     _check(user, token=_token("r", 2), captured_at=datetime(2026, 8, 1, 8),
            region="arms")
     db.session.commit()
-    d = client.get(f"{PHYSIQUE_URL}?region=arms").get_json()
+    r = client.get(f"{PHYSIQUE_URL}?region=arms")
+    assert r.status_code == 200
+    d = r.get_json()
     assert d["selected_region"] == "arms"
     assert d["recent_checks"][0]["body_region"] == "arms"
 

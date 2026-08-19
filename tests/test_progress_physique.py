@@ -228,6 +228,28 @@ def test_invalid_region_is_refused_not_remapped(make_user):
     raise AssertionError("invalid region must not be accepted")
 
 
+def test_empty_region_is_refused_not_treated_as_omitted(make_user):
+    user = make_user("ppemptystr")
+    _check(user, token=_token("s", 1), captured_at=datetime(2026, 8, 1, 8))
+    db.session.commit()
+    try:
+        build_progress_physique(user.id, region="")
+    except InvalidProgressPhysiqueRegion:
+        return
+    raise AssertionError("empty region must not be accepted")
+
+
+def test_whitespace_region_is_refused_not_treated_as_omitted(make_user):
+    user = make_user("ppwsreg")
+    _check(user, token=_token("w", 1), captured_at=datetime(2026, 8, 1, 8))
+    db.session.commit()
+    try:
+        build_progress_physique(user.id, region="   ")
+    except InvalidProgressPhysiqueRegion:
+        return
+    raise AssertionError("whitespace region must not be accepted")
+
+
 def test_valid_region_with_no_checks_is_empty_not_another_region(make_user):
     user = make_user("ppemptyreg")
     _check(user, token=_token("v", 1), captured_at=datetime(2026, 8, 1, 8),

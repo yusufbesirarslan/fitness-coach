@@ -4815,3 +4815,10 @@ Merge-readiness follow-up (same branch, not merged):
 Rollback: revert the commit. No schema, no migration, no flag, no cache, no
 provider cleanup.
 
+A later same-branch contract fix: `GET /api/progress/physique?region=` (and
+whitespace-only `region`) is invalid HTTP 400. The route no longer remaps an
+empty supplied region to omitted/default. Omitted `region` still selects the
+latest canonical area. No frontend, schema, or Pump Check domain change.
+The prior 36-cell hermetic matrix was not rerun: this is HTTP validation
+only and does not change Progress rendering.
+

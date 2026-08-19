@@ -766,7 +766,8 @@ def progress_physique_read():
     ``user_id`` query argument is ignored, never honoured.
 
     ``?region=`` is a view selector over the canonical body-region vocabulary.
-    An invalid value is refused (400) rather than remapped to another area.
+    An omitted parameter selects the default region. A supplied empty,
+    whitespace-only, or unknown value is refused (400) rather than remapped.
 
     Failures surface as the blueprint's generic JSON 500. An empty physique
     section is a legitimate user state and is never used as the failure
@@ -774,8 +775,6 @@ def progress_physique_read():
     carry short-lived owner-private image URLs.
     """
     raw_region = request.args.get("region", None)
-    if raw_region is not None and raw_region == "":
-        raw_region = None
     try:
         physique = build_progress_physique(
             current_user.id, region=raw_region)
