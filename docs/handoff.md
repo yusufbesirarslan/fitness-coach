@@ -5085,3 +5085,69 @@ itself holds — the reviewer probe proved it with two). Also unchanged: with th
 flag OFF a plan-tool name carrying malformed JSON answers `INVALID_ARGUMENTS`
 rather than `CAPABILITY_DISABLED`; the executor is never reached either way, so
 no mutation is possible.
+# Progress Redesign PR5 — Canonical Progress History & Final Convergence
+
+Branch `feat/progress-redesign-pr5-history-convergence`, worktree
+`.worktrees/progress-redesign-pr5`, based on `origin/main`
+`f2887e5e524383ac8f50239f73cbd001abf83eee`, later restacked onto
+`49a8af0` (#221, coach plan tools; not a Progress History change).
+PR1 (#212), PR2 (#215), PR3 (#216) and PR4 (#219) are ancestors.
+**Not merged, not deployed, no production config touched.**
+
+Full architecture: **docs/PROGRESS_HISTORY.md**.
+
+PR5 replaces the Progress page's legacy `/checkin-history` consumer
+(browser-side newest-first sort, weight delta and 12-row cap) with a
+server-owned reconstructed read model. A row means "your Progress state
+through this check-in day" — not a persisted AxisAI decision from that
+timestamp. Reconstruction is Istanbul-day-granular: `end_day=D` evaluates
+the full calendar day, so a workout later on the same Istanbul day may be
+included. `build_progress_summary` is not reused wholesale: its
+body/profile read is current-state. Historical training uses
+`training_progression(..., end_day=D)` plus PR2's pure mappings. Historical
+weight comes from the anchored qualifying WeeklyCheckIn
+(`yogunluk IS NOT NULL`); delta is against the previous qualifying row.
+Workouts, check-ins, and live profile/target changes on a later Istanbul
+day cannot rewrite a past row.
+
+New package `app/services/progress_history/` (`models` / `queries` /
+`payload` / `build_progress_history`). New `GET /api/progress/history`
+(`@require_auth`, no range input, `Cache-Control: private, no-store`,
+visible bound 12 + one context row for oldest delta / `has_more`). New
+client module `static/progress_history.js`. `static/progress.js` only calls
+`FitXProgressHistory.load()`. Legacy `GET /checkin-history` is unchanged
+(Today and Home still consume it). No schema, snapshot, cache, provider or
+historical Axis Insights.
+
+Hermetic Chromium matrix (WSL Ubuntu, Sprint-0 venv +
+`PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/axisai-sprint0-playwright`):
+9 states × 4 viewports = **36/36 pass**, seed drift empty.
+Evidence: `docs/frontend-readiness/progress-pr5/validation-manifest.json`
+plus 18 curated screenshots (390 and 1440 for every state).
+Command:
+`python -m scripts.frontend_audit.progress_pr5_matrix --output docs/frontend-readiness/progress-pr5`
+
+| State | 390 | 768 | 1280 | 1440 |
+|---|---|---|---|---|
+| empty | pass | pass | pass | pass |
+| sparse_only | pass | pass | pass | pass |
+| one_baseline | pass | pass | pass | pass |
+| mixed | pass | pass | pass | pass |
+| on_track_expanded | pass | pass | pass | pass |
+| needs_attention_expanded | pass | pass | pass | pass |
+| missing_weight | pass | pass | pass | pass |
+| bounded_has_more | pass | pass | pass | pass |
+| endpoint_failure | pass | pass | pass | pass |
+
+Rollback: revert the commit. No schema, no migration, no flag, no cache, no
+provider cleanup.
+
+A later same-branch semantic-precision fix: Progress History copy and
+docs now say reconstruction is through the Istanbul check-in *day*.
+`end_day=D` already evaluated the full calendar day; "up to this
+check-in" over-claimed timestamp isolation. A same-day later workout is
+in V1 scope. Isolation means data after the analysis day does not leak
+backward. No `training_progression`, snapshot, or query change. The
+prior 36-cell hermetic matrix was not rerun: localized drilldown copy
+only.
+

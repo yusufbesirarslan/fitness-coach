@@ -242,6 +242,7 @@ def test_summary_failure_does_not_break_the_other_progress_endpoints(
 
     assert client.get(SUMMARY_URL).status_code == 500
     assert client.get("/api/progress/insights").status_code == 200
+    assert client.get("/api/progress/history").status_code == 200
     assert client.get("/checkin-history").status_code == 200
     assert client.get("/api/progress/achievements").status_code == 200
     assert client.get("/api/progress/workout?range=month").status_code == 200

@@ -171,13 +171,6 @@ function _fillCard(id, value, sub) {
   if (s) s.textContent = sub;
 }
 
-// Renders a components.css `.empty-state` block — used wherever a section has
-// nothing truthful to show.
-function _emptyState(title, desc) {
-  return '<div class="empty-state"><div class="empty-title">' + escapeHTML(title) +
-    '</div><p class="empty-desc">' + escapeHTML(desc) + '</p></div>';
-}
-
 // A section that fails to load says so plainly instead of showing a stale or
 // invented value; one failing fetch must not take the page down.
 function _sectionError(container) {
@@ -207,6 +200,10 @@ function loadProgress() {
   loadAxisInsights();
   loadPhysique();
 }
+
+// PROGRESS HISTORY lives in its own module (static/progress_history.js).
+// This file only hands off so a failure to load that script degrades only
+// this section, exactly like a failing fetch does.
 
 // PHYSIQUE PROGRESS lives in its own module (static/progress_physique.js).
 // This file only hands off so a failure to load that script degrades only
@@ -398,62 +395,15 @@ function renderConsistencyCard(cons) {
 }
 
 // ── PROGRESS HISTORY ─────────────────────────────────────────────────
-// Unchanged surface, unchanged source: the existing /checkin-history rows.
+// Delegates to static/progress_history.js. This file must not fetch
+// /checkin-history, compute a weight delta, or classify a historical row.
 function loadHistory() {
-  _getJSON('/checkin-history')
-    .then(function (rows) { renderHistory(Array.isArray(rows) ? rows : []); })
-    .catch(function () { _sectionError(_el('history-list')); });
-}
-
-// HISTORY = one row per existing weekly check-in, newest first. The only
-// derived number is the weight delta against the previous check-in. No week
-// is labelled On Track / Needs Attention — that classification does not
-// exist canonically (PR5 converges history semantics).
-var HISTORY_LIMIT = 12;
-function renderHistory(rows) {
-  var box = _el('history-list');
-  if (!box) return;
-
-  if (!rows.length) {
-    box.innerHTML = _emptyState(__t('progress.history_empty_title'), __t('progress.history_empty_desc'));
+  var mod = window.FitXProgressHistory;
+  if (mod && typeof mod.load === 'function') {
+    mod.load();
     return;
   }
-
-  // rows arrive oldest-first; walk backwards so each row can see the check-in
-  // that preceded it.
-  var items = [];
-  for (var i = rows.length - 1; i >= 0 && items.length < HISTORY_LIMIT; i--) {
-    var cur = rows[i];
-    var prev = rows[i - 1];
-    var weightTxt = (typeof cur.kilo === 'number' && cur.kilo > 0)
-      ? cur.kilo.toFixed(1) + ' ' + __t('progress.unit_kg')
-      : __t('progress.history_no_weight');
-
-    var deltaTxt = '';
-    if (prev && typeof cur.kilo === 'number' && typeof prev.kilo === 'number' &&
-        cur.kilo > 0 && prev.kilo > 0) {
-      var d = cur.kilo - prev.kilo;
-      deltaTxt = Math.abs(d) < 0.05 ? '±0.0' : _signed(d);
-      deltaTxt += ' ' + __t('progress.unit_kg');
-    }
-
-    items.push(
-      '<li class="hist-row">' +
-        '<span class="hist-date">' + escapeHTML(cur.tarih || '') + '</span>' +
-        '<span class="hist-weight">' + escapeHTML(weightTxt) + '</span>' +
-        (deltaTxt ? '<span class="hist-delta">' + escapeHTML(deltaTxt) + '</span>' : '') +
-      '</li>'
-    );
-  }
-
-  var html = '<ul class="hist-list">' + items.join('') + '</ul>';
-  // Never truncate silently: say what is being shown when the list is capped.
-  if (rows.length > HISTORY_LIMIT) {
-    html += '<p class="prog-note">' +
-      escapeHTML(__t('progress.history_showing', { shown: HISTORY_LIMIT, total: rows.length })) +
-      '</p>';
-  }
-  box.innerHTML = html;
+  _sectionError(_el('history-list'));
 }
 
 // ── PHYSIQUE PROGRESS ────────────────────────────────────────────────

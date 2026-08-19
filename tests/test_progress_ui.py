@@ -284,11 +284,11 @@ def test_client_never_fabricates_a_trajectory(app, client, make_user, login):
     for banned in ("* 100", "/ 100", "score", "adherence", "percent"):
         assert banned not in code, banned
     # The only fractional comparison the file is allowed to make is the display
-    # epsilon that decides "+0.0 kg" vs "no change" — a rounding tie-break, not
-    # a verdict. It occurs twice (BODY card, and the history rows PR1 already
-    # rendered); what matters is that no *other* threshold exists.
+    # epsilon that decides "+0.0 kg" vs "no change" on the BODY card — a
+    # rounding tie-break, not a verdict. Historical deltas are server-owned.
     comparisons = set(re.findall(r"[<>]=?\s*0?\.\d+", code))
     assert comparisons == {"< 0.05"}, comparisons
+    assert "/checkin-history" not in code
 
 
 def test_summary_failure_does_not_read_as_insufficient_data(
