@@ -5025,6 +5025,27 @@ tools · proactive or scheduled editing · plateau/fatigue/adherence detection �
 Pump Check or Weekly Check-in driven mutation · nutrition mutation · push
 notification · production flag activation.
 
+---
+
+# Adaptive Coaching Sprint 1 PR4 — impact, durable proposals, structural confirmation
+
+PR3's explicit intent remains prompt-policy. PR4 adds a different guarantee:
+confirmation-required mutations get a server-owned impact decision, a durable
+user-scoped plan-state-bound proposal, and a structural CONFIRM/CANCEL/NONE
+gate derived from the raw current user turn. The model cannot choose impact,
+cannot supply a proposal id, and cannot self-confirm.
+
+Packages: `app/services/coach_plan_policy` (pure decision + parser),
+`app/services/plan_confirmation` (pending row only — not a second plan writer),
+`coach_plan_tools` still the only Coach bridge to `PlanMutationService`.
+
+Migration `c2d3e4f5a6b7` (additive). Flag unchanged:
+`AI_COACH_PLAN_MUTATION_TOOLS_ENABLED`, default OFF. No public route, no
+Flutter, no nutrition mutation, no proactive adaptation.
+
+Confirmed writes reuse PR2 idempotency keyed from the proposal public id so a
+crash between mutation commit and proposal bookkeeping cannot double-apply.
+
 
 ## Adaptive Coaching Sprint 1 PR3 — independent review fix (local, 2026-08-16)
 
