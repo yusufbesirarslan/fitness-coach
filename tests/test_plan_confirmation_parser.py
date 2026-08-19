@@ -22,9 +22,19 @@ def test_bounded_cancel_forms():
 def test_mixed_intent_is_not_confirmation():
     for message in (
         "yes but make it 8 reps",
+        "yes, and remove squats",
         "do it, and also remove squats",
         "evet ama 8 tekrar yap",
         "onayla ve squat'ı çıkar",
+        "maybe yes",
+        "I guess yes",
+        "do not confirm",
+        "onaylama",
+        "uygulama",
+        "olur mu?",
+        "tamam ama...",
+        "cancel? no",
+        "hayır, uygula",
     ):
         assert parse_confirmation_intent(message) == NONE, message
 

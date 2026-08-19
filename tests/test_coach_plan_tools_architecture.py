@@ -68,6 +68,7 @@ SERVER_OWNED = (
     "snapshot", "before", "after", "fingerprint", "digest",
     "token", "auth", "authorization", "principal", "session",
     "proposal", "proposal_id", "confirmation_id", "confirmation_token",
+    "impact", "risk", "requires_confirmation", "reason_codes", "verdict",
 )
 
 _ALL_PLAN_TOOL_DEFS = (

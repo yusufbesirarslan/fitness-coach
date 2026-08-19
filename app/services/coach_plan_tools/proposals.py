@@ -189,4 +189,3 @@ def session_impact_facts(user_id, command):
     except Exception:
         return ImpactFacts(
             touches_active_session=False, impact_undeterminable=True)
-

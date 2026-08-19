@@ -115,6 +115,7 @@ _BUDGET_ATTR = "_coach_plan_operation_keys"
 #: lifetime as the budget: on ``g``, so it dies with the request.
 _CHANGED_ATTR = "_coach_plan_change_applied"
 _PROPOSAL_ATTR = "_coach_plan_proposal_created"
+_NEW_PROPOSAL_ATTR = "_coach_plan_new_proposal_created"
 _INTENT_ATTR = "_coach_plan_confirmation_intent"
 
 
@@ -134,6 +135,7 @@ def begin_turn(user_message=""):
         setattr(g, _BUDGET_ATTR, [])
         setattr(g, _CHANGED_ATTR, False)
         setattr(g, _PROPOSAL_ATTR, False)
+        setattr(g, _NEW_PROPOSAL_ATTR, False)
         setattr(g, _INTENT_ATTR, parse_confirmation_intent(user_message))
     except RuntimeError:
         pass
@@ -155,6 +157,19 @@ def proposal_created_this_turn():
         return False
 
 
+def new_proposal_created_this_turn():
+    """Whether this turn inserted a NEW pending proposal (not a reuse).
+
+    A confirm-form user message is not license to stage a confirmation-required
+    mutation and then apply it in the same turn: the user has not yet seen the
+    durable proposal on a later request.
+    """
+    try:
+        return bool(getattr(g, _NEW_PROPOSAL_ATTR, False))
+    except RuntimeError:
+        return False
+
+
 def published_plan_tool_defs(user_id=None):
     """The plan-write tools published to the provider for this turn.
 
@@ -171,6 +186,10 @@ def published_plan_tool_defs(user_id=None):
         return ()
     if pending is None:
         return PLAN_MUTATION_TOOL_DEFS
+    if new_proposal_created_this_turn():
+        # Staged this turn: the user has not seen it yet. Confirm/cancel
+        # belong to a later authenticated turn.
+        return ()
     intent = current_confirmation_intent()
     if intent == CONFIRM:
         return (CONFIRMATION_TOOL_DEFS[0],)
@@ -497,7 +516,7 @@ def _stage_proposal(user_id, plan, command, decision):
     kind, payload, fingerprint = encode_command(command)
     binding = plan_binding(plan)
     try:
-        create_or_reuse_pending(
+        _row, reused = create_or_reuse_pending(
             user_id,
             lineage_id=binding.lineage_id,
             mutation_version=binding.mutation_version,
@@ -511,6 +530,11 @@ def _stage_proposal(user_id, plan, command, decision):
         )
     except PendingConfirmationConflict:
         return results.error_result(results.ERROR_PENDING_CONFIRMATION_EXISTS)
+    if not reused:
+        try:
+            setattr(g, _NEW_PROPOSAL_ATTR, True)
+        except RuntimeError:
+            pass
     return results.confirmation_required_result(command, decision.reason_codes)
 
 
@@ -527,6 +551,8 @@ def _execute_confirmation_tool(user_id, name, arguments):
 def _confirm_pending(user_id):
     if current_confirmation_intent() != CONFIRM:
         return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
+    if new_proposal_created_this_turn():
+        return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
     pending = get_pending(user_id)
     if pending is None:
         return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
@@ -541,6 +567,28 @@ def _confirm_pending(user_id):
         return results.error_result(results.ERROR_PENDING_CONFIRMATION_STALE)
     if not _charge_budget(key):
         return results.error_result(results.ERROR_MUTATION_BUDGET_EXHAUSTED)
+    return _apply_confirmed(user_id, pending)
+
+
+def _cancel_pending(user_id):
+    if current_confirmation_intent() != CANCEL:
+        return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
+    pending = get_pending(user_id)
+    if pending is None:
+        return results.cancelled_pending_result()
+    key = confirmation_operation_key(pending.public_id)
+    already = find_by_key(user_id, key)
+    if already is not None:
+        # Crash window: PlanMutationService committed, proposal still PENDING.
+        # Cancelling would tell the user the plan was unchanged. Reconcile.
+        return _apply_confirmed(user_id, pending)
+    cancel_pending(user_id)
+    return results.cancelled_pending_result()
+
+
+def _apply_confirmed(user_id, pending):
+    """Apply or replay the stored command, then mark the proposal APPLIED."""
+    key = confirmation_operation_key(pending.public_id)
     command = decode_command(pending.command_type, pending.command_payload)
     if command is UNDO_LAST_CHANGE:
         result = undo_last_change(user_id, _context(key))
@@ -550,13 +598,6 @@ def _confirm_pending(user_id):
         payload = results.mutation_result(command, result)
     mark_applied(user_id, pending.public_id)
     return payload
-
-
-def _cancel_pending(user_id):
-    if current_confirmation_intent() != CANCEL:
-        return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
-    cancel_pending(user_id)
-    return results.cancelled_pending_result()
 
 
 def build_undo_arguments(arguments):

@@ -119,6 +119,31 @@ def test_model_cannot_self_confirm(app, planned_user, tools_on, turn):
     assert plan_confirmation.get_pending(planned_user.id) is not None
 
 
+def test_same_turn_cannot_confirm_a_proposal_just_created(
+        app, planned_user, tools_on):
+    """A confirm-form user turn is not license to stage AND apply.
+
+    Publication at turn start has no pending, so the six command tools are
+    advertised. After the server stages a proposal, OpenAI would otherwise
+    re-publish confirm on the same 'evet' and the executor would apply —
+    the user never saw the durable proposal on a later turn.
+    """
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app, "evet")
+        staged = call(planned_user.id, REMOVE,
+                      {"day": "Pazartesi", "exercise": "Bench Press"})
+        published = [t["name"] for t in
+                     coach_plan_tools.published_plan_tool_defs(planned_user.id)]
+        result = call(planned_user.id, CONFIRM)
+
+    assert staged["status"] == results.STATUS_CONFIRMATION_REQUIRED
+    assert CONFIRM not in published
+    assert result["error"] == results.ERROR_CONFIRMATION_NOT_AUTHORIZED
+    assert names(planned_user.id) == ["Bench Press", "Shoulder Press"]
+    assert journal(planned_user.id) == []
+    assert plan_confirmation.get_pending(planned_user.id) is not None
+
+
 def test_real_confirmation_applies_the_stored_mutation(
         app, planned_user, tools_on):
     with app.test_request_context("/ask", method="POST"):
@@ -243,6 +268,31 @@ def test_crash_window_replays_instead_of_mutating_twice(
         _new_turn(app, "evet")
         result = call(planned_user.id, CONFIRM)
     assert result["status"] == results.STATUS_REPLAYED
+    assert len(journal(planned_user.id)) == 1
+    assert plan_confirmation.get_pending(planned_user.id) is None
+
+
+def test_cancel_after_crash_window_does_not_claim_plan_unchanged(
+        app, planned_user, tools_on):
+    """Mutation committed, proposal still PENDING: cancel must not lie."""
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app)
+        call(planned_user.id, REMOVE,
+             {"day": "Pazartesi", "exercise": "Bench Press"})
+        pending = plan_confirmation.get_pending(planned_user.id)
+        key = identity.confirmation_operation_key(pending.public_id)
+        apply_plan_mutation(
+            planned_user.id,
+            RemoveExerciseCommand(day="Pazartesi", exercise="Bench Press"),
+            MutationContext(idempotency_key=key, actor=ACTOR_AI_COACH))
+        assert plan_confirmation.get_pending(planned_user.id) is not None
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app, "iptal")
+        result = call(planned_user.id, CANCEL)
+
+    assert result["status"] == results.STATUS_REPLAYED
+    assert "aynı kaldı" not in result.get("summary", "").lower()
+    assert names(planned_user.id).count("Bench Press") == 0
     assert len(journal(planned_user.id)) == 1
     assert plan_confirmation.get_pending(planned_user.id) is None
 
