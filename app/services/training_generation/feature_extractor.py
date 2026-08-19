@@ -1,37 +1,11 @@
 from app.services import injury_constraints
 from app.services.training_generation.models import PerformanceHistory, TrainingPreferences, UserTrainingFeatures
+from app.services.training_generation.preference_contract import parse_canonical_preferences
 from app.services.training_generation.time_series_model import build_performance_history
 
 
-def _to_int(value, default, low=None, high=None):
-    try:
-        out = int(value)
-    except (TypeError, ValueError):
-        out = default
-    if low is not None:
-        out = max(low, out)
-    if high is not None:
-        out = min(high, out)
-    return out
-
-
-def parse_preferences(data: dict, stored_injuries: str = "") -> TrainingPreferences:
-    prefs = TrainingPreferences(
-        gun_sayisi=_to_int(data.get("gun_sayisi", 3), 3, 1, 6),
-        ekipman=data.get("ekipman", "spor_salonu"),
-        odak=data.get("odak", "tum_vucut"),
-        sure=_to_int(data.get("sure", 45), 45, 15, 120),
-        kardiyo_tipi=data.get("kardiyo_tipi", "yok"),
-        kardiyo_gun=_to_int(data.get("kardiyo_gun", 0), 0, 0, 6),
-        kardiyo_sure=_to_int(data.get("kardiyo_sure", 20), 20, 5, 90),
-        kardiyo_yogunluk=data.get("kardiyo_yogunluk", "orta"),
-        antrenman_tarzi=data.get("antrenman_tarzi", "genel"),
-        odak_hedef=data.get("odak_hedef", "genel"),
-        injuries=(data.get("injuries") or stored_injuries or "").strip(),
-    )
-    if prefs.kardiyo_tipi == "yok":
-        return TrainingPreferences(**{**prefs.__dict__, "kardiyo_gun": 0})
-    return prefs
+def parse_preferences(data, stored_injuries: str = "") -> TrainingPreferences:
+    return parse_canonical_preferences(data, stored_injuries=stored_injuries)
 
 
 def infer_movement_competency(last_session, preferences: TrainingPreferences) -> dict[str, int]:

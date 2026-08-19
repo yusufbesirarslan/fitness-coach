@@ -981,6 +981,10 @@
 
   "plan.no_session": "First create your plan from the home page.",
   "plan.gen_failed": "Couldn't generate the plan, please try again.",
+  "plan.contract.invalid_preference": "That training preference is not valid. Check your selections and try again.",
+  "plan.contract.unsupported_configuration": "This training preference combination is not supported.",
+  "plan.contract.conflicting_preferences": "Those training preferences cannot be combined in a 7-day week.",
+  "plan.create.capability_note": "Some style and equipment combinations are not available yet. If a combination cannot be generated, your selections are kept.",
   "nutrition.plan.pick_one": "Pick at least one food from each category.",
   "pump.not_found": "Pump Check not found.",
   "pump.visibility_invalid": "Choose where to share this Pump Check.",

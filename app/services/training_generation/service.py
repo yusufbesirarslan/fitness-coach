@@ -3,6 +3,7 @@ import json
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.extensions import db
+from app.services.training_generation.capability import require_supported
 from app.services.training_generation.classifier_service import classify_user
 from app.services.training_generation.feature_extractor import build_features, parse_preferences
 from app.services.training_generation.program_generator import build_program_context
@@ -52,9 +53,23 @@ def _request_and_validate_plan(
 
 
 def generate_training_plan_payload(user, last_session, request_data, chat_fn, language="tr", logger=None):
-    persist_posted_injuries(user, request_data.get("injuries"), logger=logger)
     stored = (getattr(user, "user_metadata", None) or {}).get("injuries") or ""
     preferences = parse_preferences(request_data, stored_injuries=stored)
+    require_supported(preferences)
+    persist_posted_injuries(user, request_data.get("injuries"), logger=logger)
+    log_info = getattr(logger, "info", None) if logger else None
+    if callable(log_info):
+        log_info(
+            "[TRAINING] generation_started style=%s days=%s duration=%s "
+            "equipment=%s focus=%s cardio_type=%s cardio_days=%s provider_invoked=1",
+            preferences.antrenman_tarzi,
+            preferences.gun_sayisi,
+            preferences.sure,
+            preferences.ekipman,
+            preferences.odak_hedef,
+            preferences.kardiyo_tipi,
+            preferences.kardiyo_gun,
+        )
     features = build_features(user, last_session, preferences)
     classification = classify_user(features)
     context = build_program_context(features, preferences, classification)

@@ -1,3 +1,18 @@
+# Sprint 11 PR2 — Canonical Training Preference Contract
+
+Date: 2026-08-19
+
+`POST /training-plan` now rejects invalid, unsupported, and conflicting
+preferences **before** Bedrock/OpenAI. Unknown styles no longer become General.
+`odak_hedef` is wired into the generation prompt via `goals.json`. CrossFit is
+unsupported (schema cannot express WOD). Powerlifting requires gym equipment.
+`gun_sayisi + kardiyo_gun > 7` is conflicting. Typed `{error, code, retryable}`
+bodies: `TRAINING_PLAN_INVALID_PREFERENCE` /
+`UNSUPPORTED_CONFIGURATION` / `CONFLICTING_PREFERENCES` (422, non-retryable).
+Provider models, Adaptive Coaching undo, save/lineage, exercise catalog, and
+mobile generate are unchanged. Canonical doc: `docs/TRAINING_GENERATOR.md`.
+Tests: `tests/test_sprint11_training_preference_contract.py`.
+
 # Sprint 9 PR3A - Backend Diary Mutation Reliability
 
 Date: 2026-08-11

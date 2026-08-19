@@ -981,6 +981,10 @@
 
   "plan.no_session": "Önce ana sayfadan planını oluştur.",
   "plan.gen_failed": "Plan oluşturulamadı, tekrar dene.",
+  "plan.contract.invalid_preference": "Bu antrenman tercihi geçerli değil. Seçimlerini kontrol edip tekrar dene.",
+  "plan.contract.unsupported_configuration": "Bu antrenman tercihi birleşimi şu anda desteklenmiyor.",
+  "plan.contract.conflicting_preferences": "Bu tercihler 7 günlük bir haftada bir arada karşılanamaz.",
+  "plan.create.capability_note": "Bazı stil ve ekipman birleşimleri henüz üretilemiyor. Desteklenmeyen bir seçim reddedilirse mevcut seçimlerin korunur.",
   "nutrition.plan.pick_one": "Her kategoriden en az bir gıda seç.",
   "pump.not_found": "Pump Check bulunamadı.",
   "pump.visibility_invalid": "Bu Pump Check'i nerede paylaşacağını seç.",

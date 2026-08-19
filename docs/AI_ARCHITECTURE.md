@@ -45,6 +45,7 @@ route (driven by the `is_error_fallback` flag).
 | `response_formatter` | Fallback detection, `COACH_FALLBACKS`. |
 | `premium` | Weekly AI quota (free vs premium-unlimited). |
 | `ai_gate` | Process-local concurrency semaphores (AI=4). |
+| `training_generation` | Weekly training-plan generator. Preference allow-lists + capability matrix run **before** `_heavy_chat`. See [TRAINING_GENERATOR.md](TRAINING_GENERATOR.md). |
 
 Prompt templates live in `app/prompts/` (pure strings, no logic). Background jobs
 live in `app/jobs/` (see [DEPLOYMENT.md](DEPLOYMENT.md)).

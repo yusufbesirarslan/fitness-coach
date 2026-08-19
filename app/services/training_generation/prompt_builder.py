@@ -1,6 +1,7 @@
 from app.services import injury_constraints
 from app.services.training_generation.models import ClassificationResult, ProgramContext, TrainingPreferences, UserTrainingFeatures
-from app.services.training_generation.program_generator import load_few_shot
+from app.services.training_generation.preference_contract import load_focus_directive
+from app.services.training_generation.program_generator import canonical_style, load_few_shot
 
 
 def build_system_prompt(language: str = "tr") -> str:
@@ -27,7 +28,8 @@ def build_training_prompt(
 ) -> str:
     few_shot = load_few_shot(preferences.antrenman_tarzi)
     injury_text = injury_constraints.build_injury_directive(preferences.injuries)
-    dinlenme_gun = 7 - preferences.gun_sayisi
+    cardio_days = preferences.kardiyo_gun if preferences.kardiyo_tipi != "yok" else 0
+    dinlenme_gun = 7 - preferences.gun_sayisi - cardio_days
     if language == "en":
         lang_rule = "İçerik dili: ENGLISH; ama gun ve tip kanonik Türkçe kalacak."
     else:
@@ -46,6 +48,17 @@ def build_training_prompt(
         "yok": "kardiyo yok",
     }
     cardio_label = cardio_labels.get(preferences.kardiyo_tipi, preferences.kardiyo_tipi)
+    style_key = canonical_style(preferences.antrenman_tarzi)
+    focus_directive = load_focus_directive(preferences.odak_hedef)
+    if preferences.kardiyo_tipi != "yok":
+        cardio_block = (
+            f"- Kardiyo türü: {cardio_label}\n"
+            f"- Haftada {preferences.kardiyo_gun} gün kardiyo\n"
+            f"- Cardio: {cardio_label}, {preferences.kardiyo_gun} gün, "
+            f"{preferences.kardiyo_sure} dk, {preferences.kardiyo_yogunluk}"
+        )
+    else:
+        cardio_block = "- Cardio: none (no dedicated cardio-day allocation)"
     return f"""
 PROGRAM GENERATION CONTRACT
 - LLM sınıflandırma yapmayacak; sınıflandırma deterministik olarak önceden yapıldı.
@@ -59,9 +72,11 @@ PROGRAM GENERATION CONTRACT
 - Progression: {context.progression_guideline}
 - Deload: {context.deload_guideline}
 - Style directive: {context.style_directive}
+- Canonical program style: {style_key} ({preferences.antrenman_tarzi})
 
 USER PROFILE
-- Goal: {features.goal}
+- Profile goal (body/composition context): {features.goal}
+- Program focus (odak_hedef={preferences.odak_hedef}): {focus_directive}
 - Self-reported level: {features.self_reported_level}
 - Current activity: {features.current_activity}
 - Age: {features.age or 'unknown'}
@@ -70,9 +85,7 @@ USER PROFILE
 - Equipment: {preferences.ekipman}
 - Focus: {preferences.odak}
 - Session duration: {preferences.sure} dk
-- Kardiyo türü: {cardio_label}
-- Haftada {preferences.kardiyo_gun} gün kardiyo
-- Cardio: {cardio_label}, {preferences.kardiyo_gun} gün, {preferences.kardiyo_sure} dk, {preferences.kardiyo_yogunluk}
+{cardio_block}
 
 MOVEMENT COVERAGE REQUIRED
 {', '.join(context.movement_coverage)}
@@ -83,7 +96,7 @@ STYLE FEW-SHOT REFERENCE
 {injury_text}
 
 PROGRAM RULES
-1. Haftanın tam 7 günü için plan yap: {preferences.gun_sayisi} antrenman günü + {dinlenme_gun} dinlenme/aktif toparlanma günü.
+1. Haftanın tam 7 günü için plan yap: {preferences.gun_sayisi} antrenman günü + {cardio_days} kardiyo günü + {dinlenme_gun} dinlenme/aktif toparlanma günü.
 2. "gun" alanı sadece şu değerlerden biri olsun: Pazartesi, Salı, Çarşamba, Perşembe, Cuma, Cumartesi, Pazar.
 3. "tip" alanı sadece antrenman, dinlenme veya kardiyo olsun.
 4. Aynı ağır pattern iki gün üst üste gelmesin; recovery factor düşükse hacim ve RPE azalt.
