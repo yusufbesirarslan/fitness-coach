@@ -497,7 +497,11 @@ def test_a_provider_fallback_does_not_repeat_a_change_that_already_ran(
             planned_user.id, "bench yerine machine press", "",
             client_history=[], language="tr")
 
-    assert answer == ai_coach._COACH_FALLBACKS["tr"]["tool"]
+    # The degraded turn must not say "I couldn't complete that": the change IS
+    # committed, and that sentence asks the user to retry — a new request, a
+    # new turn identity, a new operation key, the same exercise added twice.
+    assert answer == ai_coach._COACH_FALLBACKS["tr"]["tool_plan_saved"]
+    assert answer != ai_coach._COACH_FALLBACKS["tr"]["tool"]
     assert openai.calls == []                     # no second provider ran
     assert names(planned_user.id) == ["Machine Press", "Shoulder Press"]
     entries = journal(planned_user.id)
@@ -540,6 +544,138 @@ def test_a_fallback_before_any_tool_ran_applies_the_change_once(
     assert answer == "tamam"
     assert names(planned_user.id).count("Cable Fly") == 1
     assert len(journal(planned_user.id)) == 1
+
+
+def test_a_degraded_turn_without_a_plan_change_keeps_the_old_wording(
+        app, planned_user, tools_on, monkeypatch):
+    """The plan-saved wording must not leak into ordinary tool failures.
+
+    A read-only tool ran and the provider then died. Nothing was written, so
+    telling the user their plan was saved would be the mirror-image lie.
+    """
+    from types import SimpleNamespace
+
+    from app.observability import assign_request_id
+
+    block = SimpleNamespace(
+        type="tool_use", name="query_fitx_metrics", id="t1",
+        input={"metric_type": "calories", "date_range": "today"})
+    responses = [SimpleNamespace(stop_reason="tool_use", content=[block])]
+
+    class _Messages:
+        def create(self, **kwargs):
+            if responses:
+                return responses.pop(0)
+            raise RuntimeError("bedrock down after a read-only tool")
+
+    monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", True)
+    monkeypatch.setattr(ai_coach, "_anthropic", object())
+    monkeypatch.setattr(ai_coach, "bedrock_client",
+                        SimpleNamespace(messages=_Messages()))
+
+    with app.test_request_context("/ask", method="POST"):
+        assign_request_id()
+        ai_coach._begin_coach_turn()
+        answer = ai_coach._run_coach_conversation_bedrock(
+            planned_user.id, "kaç kalori aldım?", "", [], "tr")
+
+    assert answer == ai_coach._COACH_FALLBACKS["tr"]["tool"]
+    assert journal(planned_user.id) == []
+
+
+def test_a_no_op_is_not_reported_as_a_saved_plan_change(
+        app, planned_user, tools_on, turn):
+    """`no_op` moved nothing, so the degraded turn keeps the plain wording."""
+    result = call(planned_user.id, REPLACE,
+                  {"day": "Pazartesi", "exercise": "Bench Press",
+                   "replacement": "Bench Press"})
+
+    assert result["status"] == results.STATUS_NO_OP
+    assert coach_plan_tools.plan_changed_this_turn() is False
+    assert ai_coach._coach_tool_fallback("tr") == \
+        ai_coach._COACH_FALLBACKS["tr"]["tool"]
+
+
+def test_a_refused_plan_tool_is_not_reported_as_a_saved_plan_change(
+        app, planned_user, tools_on, turn):
+    refused = call(planned_user.id, REPLACE,
+                   {"day": "Pazartesi", "exercise": "Deadlift",
+                    "replacement": "X"})
+
+    assert refused["error"] == results.ERROR_TARGET_NOT_FOUND
+    assert coach_plan_tools.plan_changed_this_turn() is False
+
+
+def test_the_plan_saved_wording_is_still_an_error_fallback(app):
+    """Quota refund and the B16 do-not-persist rule must not change with it."""
+    from app.services.response_formatter import is_coach_error_fallback
+
+    for language in ("tr", "en"):
+        text = ai_coach._COACH_FALLBACKS[language]["tool_plan_saved"]
+        assert is_coach_error_fallback(text) is True
+
+
+def test_the_streaming_path_reports_a_saved_plan_change_too(
+        app, planned_user, tools_on, monkeypatch):
+    """§40 parity: the honest wording cannot exist only in blocking mode."""
+    from types import SimpleNamespace
+
+    from app.observability import assign_request_id
+    from app.services import ai_stream
+
+    block = SimpleNamespace(
+        type="tool_use", name=ADD, id="t1",
+        input={"day": "Pazartesi", "exercise": "Cable Fly", "sets": 3,
+               "reps": "12"})
+    final = SimpleNamespace(stop_reason="tool_use", content=[block],
+                            usage=None)
+    state = {"n": 0}
+
+    class _Stream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        text_stream = ()
+
+        def get_final_message(self):
+            return final
+
+    class _Messages:
+        def stream(self, **_kwargs):
+            state["n"] += 1
+            if state["n"] == 1:
+                return _Stream()
+            raise RuntimeError("bedrock stream died after the tool ran")
+
+    monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", True)
+    monkeypatch.setattr(ai_coach, "_anthropic", object())
+    monkeypatch.setattr(ai_coach, "bedrock_client",
+                        SimpleNamespace(messages=_Messages()))
+
+    with app.test_request_context("/ask/stream", method="POST"):
+        assign_request_id()
+        events = list(ai_stream.stream_coach_answer(
+            planned_user.id, "cable fly ekle", "", [], "tr"))
+
+    error = [e for e in events if e["type"] == "error"]
+    assert error, events
+    assert error[-1]["key"] == "coach.reply_failed_plan_saved"
+    assert error[-1]["work_performed"] is True
+    assert names(planned_user.id).count("Cable Fly") == 1
+    assert len(journal(planned_user.id)) == 1
+
+
+def test_both_locales_carry_the_saved_plan_message():
+    import io
+    import json
+
+    for language in ("tr", "en"):
+        with io.open(f"locales/{language}.json", encoding="utf-8") as handle:
+            catalogue = json.load(handle)
+        assert catalogue["coach.reply_failed_plan_saved"].strip()
 
 
 def test_an_unknown_tool_name_never_reaches_the_mutation_boundary(

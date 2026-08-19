@@ -777,6 +777,21 @@ turn against a plan that has already changed and has no way to know it. The turn
 degrades to a soft error and **the mutation stays committed** — a failed
 continuation is not a reason to reverse a change the user asked for.
 
+**What that soft error says matters.** The generic text is "I couldn't complete
+that — could you try again?", and after a committed mutation it is both false
+and actively harmful: acting on it means a new HTTP request, a new
+`request_id`, a new operation key, and the same exercise added a second time —
+the cross-request scope in §22 is honest, but only a truthful message keeps the
+user from walking into it. So a turn that moved persisted plan state degrades to
+a different sentence ("your plan change was saved, but I couldn't finish my
+reply"), on **both** paths: `ai_coach._coach_tool_fallback()` for the blocking
+loop and the `coach.reply_failed_plan_saved` SSE key for the stream. The marker
+is request-scoped on `g` next to the budget, set only for `applied`/`replayed`
+— a `no_op` moved nothing and keeps the old wording, and so does every refusal.
+The new text is still an error fallback, so the quota refund and the B16
+"do not persist a fallback into history" rule are unchanged; only the sentence
+is.
+
 `executor._settle_transaction()` guarantees no transaction is held across the
 provider call that follows a tool. It rolls back only a *provably read-only*
 residual (in a transaction, nothing new/dirty/deleted); anything pending is left

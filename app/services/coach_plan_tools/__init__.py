@@ -44,6 +44,7 @@ from .executor import (
     begin_turn,
     execute_plan_tool,
     invalid_arguments_result,
+    plan_changed_this_turn,
     plan_mutation_tools_enabled,
 )
 from .schemas import PLAN_MUTATION_TOOL_DEFS, PLAN_MUTATION_TOOL_NAMES
@@ -56,5 +57,6 @@ __all__ = [
     "begin_turn",
     "execute_plan_tool",
     "invalid_arguments_result",
+    "plan_changed_this_turn",
     "plan_mutation_tools_enabled",
 ]

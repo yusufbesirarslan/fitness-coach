@@ -4417,3 +4417,64 @@ full-plan regeneration, frequency/goal/split mutation and deload through these
 tools · proactive or scheduled editing · plateau/fatigue/adherence detection ·
 Pump Check or Weekly Check-in driven mutation · nutrition mutation · push
 notification · production flag activation.
+
+
+## Adaptive Coaching Sprint 1 PR3 — independent review fix (local, 2026-08-16)
+
+**Finding (Important).** After a plan tool committed a mutation, every degraded
+exit of the turn returned the generic soft error — `"İşlemi tamamlayamadım,
+tekrar dener misin?"` on the blocking loop, the `coach.reply_failed` SSE key on
+the stream. Three reachable exits each: a provider/parse failure after the tool
+(the B-rule path this PR relies on), the tool-loop cap, and the turn deadline.
+
+Two problems, one sentence. The change **is** committed, so the message is
+false; and it tells the user to try again, which is a new HTTP request → a new
+`request_id` → a new operation key → the same exercise added a **second** time.
+The cross-request scope documented in ADAPTIVE_COACHING §22 is correct and
+deliberate ("two messages = two intents"); what was missing was a message that
+does not push the user across that boundary by mistake. A duplicated exercise
+name in one day then makes every later targeted edit on it `AMBIGUOUS_TARGET`.
+`is_coach_error_fallback` was already true for that text, so the turn was not
+persisted either — the conversation carried no trace of a change that happened.
+
+**Fix.** `coach_plan_tools` records, request-scoped on `g` beside the mutation
+budget, whether this turn moved persisted plan state (`applied`/`replayed` only
+— `no_op` and every refusal do not count, and the getter fails safe to False).
+`ai_coach._coach_tool_fallback(language, kind)` and the stream's
+`_bedrock_work_error` consult it and switch to a new text /
+`coach.reply_failed_plan_saved` key. Both providers, both transports, one
+decision. Deliberately NOT changed: the new text is still an error fallback, so
+the AI-chat quota refund and the B16 do-not-persist rule behave exactly as
+before. Only the sentence the user reads is different.
+
+**Reviewer verification (this pass, all reviewer-rerun).**
+
+```
+independent falsification probe   77 assertions, all passing, then deleted
+                                  (duplicate add/undo state, flag OFF + fail-closed,
+                                  budget, 17 smuggled fields, type traps, identity,
+                                  transaction residuals, privacy, session/history)
+architecture-guard mutation test  3 planted defects → 6 distinct guards failed → reverted
+focused PR3 suite                 208 passed
+adjacent suites (+ test_i18n)     423 passed
+full non-load suite               see below
+PostgreSQL concurrency (CI job)   15 passed on real postgres:16
+  incl. tests/test_plan_mutation_history_pg.py   5 passed
+PostgreSQL schema drift           flask db check → "No new upgrade operations
+                                  detected", single head b3c4d5e6f7a8
+```
+
+The two PostgreSQL gates were listed as "not runnable locally" in the
+implementation report. They are now closed locally as well as in CI, which
+mattered because PR3 changed `plan_mutation/service.py`.
+
+**Still not fixed (reported, not touched).** Three Minor items: the registry
+capability text says "the first flag of the eight" while the header now reads
+nine; `test_undo_reverses_the_newest_change_and_only_on_request` never tests
+"only on request" (nothing server-side enforces it — it is prompt policy);
+`test_a_repeated_undo_in_one_turn_does_not_reach_further_back` seeds a single
+prior mutation, so it cannot observe the reach-back it names (the guarantee
+itself holds — the reviewer probe proved it with two). Also unchanged: with the
+flag OFF a plan-tool name carrying malformed JSON answers `INVALID_ARGUMENTS`
+rather than `CAPABILITY_DISABLED`; the executor is never reached either way, so
+no mutation is possible.

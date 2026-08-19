@@ -3,11 +3,25 @@
 from app.prompts.system import coach_lang
 
 # Sağlayıcı hatasında gösterilen dostça yedek metinler (dile göre).
+# `tool_plan_saved`, `tool`in plan DEĞİŞTİKTEN sonraki karşılığıdır (Adaptive
+# Coaching S1 PR3). Bir plan aracı kalıcı yazma yaptıktan SONRA sağlayıcı
+# devamı düşerse B-kuralı sağlayıcı değiştirmez ve tur bu yumuşak metne iner —
+# ama o anda "tamamlayamadım" YANLIŞTIR: değişiklik commit'lidir. Dahası metin
+# kullanıcıyı tekrar denemeye çağırır; yeni istek = yeni request_id = yeni
+# işlem kimliği, yani aynı egzersiz İKİNCİ kez eklenirdi. Bu metin hâlâ bir
+# hata-yedeğidir (_ALL_FALLBACKS'e girer) → kota iadesi ve B16 geçmişe-yazmama
+# davranışı DEĞİŞMEZ; değişen yalnızca kullanıcıya söylenen doğru.
 COACH_FALLBACKS = {
     "tr": {"error": "Bir şeyler ters gitti, tekrar dener misin?",
-           "tool": "İşlemi tamamlayamadım, tekrar dener misin?"},
+           "tool": "İşlemi tamamlayamadım, tekrar dener misin?",
+           "tool_plan_saved": ("Plan değişikliğin kaydedildi, ama yanıtı "
+                               "tamamlayamadım. Tekrar istemene gerek yok — "
+                               "planına bakabilirsin.")},
     "en": {"error": "Something went wrong — could you try again?",
-           "tool": "I couldn't complete that — could you try again?"},
+           "tool": "I couldn't complete that — could you try again?",
+           "tool_plan_saved": ("Your plan change was saved, but I couldn't "
+                               "finish my reply. No need to ask again — you "
+                               "can check your plan.")},
 }
 
 _ALL_FALLBACKS = {t for d in COACH_FALLBACKS.values() for t in d.values()}

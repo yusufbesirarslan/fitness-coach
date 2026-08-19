@@ -67,9 +67,18 @@ MAX_PLAN_OPERATIONS_PER_TURN = 2
 #: turn. On ``g``, so it dies with the request and can never leak between users.
 _BUDGET_ATTR = "_coach_plan_operation_keys"
 
+#: Request-scoped flag: did this turn move persisted plan state?
+#:
+#: Read by the Coach when a turn degrades to its soft error text. That text
+#: ("I couldn't complete that, could you try again?") is a lie once a mutation
+#: has committed, and acting on it — asking again in a NEW request, with a new
+#: turn identity — applies the same edit a second time. Same placement and
+#: lifetime as the budget: on ``g``, so it dies with the request.
+_CHANGED_ATTR = "_coach_plan_change_applied"
+
 
 def begin_turn():
-    """Reset the per-turn mutation budget.
+    """Reset the per-turn mutation budget and the plan-changed marker.
 
     Called from the Coach's own turn setup, so blocking and streaming share one
     definition of "a turn" instead of each inventing one. Outside a request
@@ -79,8 +88,26 @@ def begin_turn():
     """
     try:
         setattr(g, _BUDGET_ATTR, [])
+        setattr(g, _CHANGED_ATTR, False)
     except RuntimeError:
         pass
+
+
+def plan_changed_this_turn():
+    """Whether a plan tool moved persisted state during this turn.
+
+    ``replayed`` counts: it means this turn's own key already applied the
+    change, so the plan on disk differs from the one the turn started with.
+    ``no_op`` does not — nothing moved — and neither does any error.
+
+    Fail-safe FALSE. A wrong ``True`` would tell a user their plan changed when
+    it did not, which is the worse of the two mistakes; the caller only ever
+    uses this to choose between two honest sentences.
+    """
+    try:
+        return bool(getattr(g, _CHANGED_ATTR, False))
+    except RuntimeError:
+        return False
 
 
 def _attempted_keys():
@@ -211,8 +238,24 @@ def execute_plan_tool(user_id, name, arguments):
     """
     payload = _execute(user_id, name, arguments)
     _settle_transaction()
+    _mark_plan_changed(payload)
     _log(name, _outcome_of(payload))
     return payload
+
+
+def _mark_plan_changed(payload):
+    """Record that persisted plan state moved, for the degraded-turn wording.
+
+    Derived from the bounded result rather than from "the domain call did not
+    raise": ``no_op`` also returns without raising and must NOT count.
+    """
+    if payload.get("status") not in (results.STATUS_APPLIED,
+                                     results.STATUS_REPLAYED):
+        return
+    try:
+        setattr(g, _CHANGED_ATTR, True)
+    except RuntimeError:
+        pass
 
 
 def _execute(user_id, name, arguments):

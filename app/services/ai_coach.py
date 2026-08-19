@@ -989,6 +989,24 @@ def _remaining_coach_turn_seconds(deadline):
     return max(0.0, deadline - time.monotonic())
 
 
+def _coach_tool_fallback(language, kind="tool"):
+    """Turun yumuşak hata metni — bu turda plan DEĞİŞTİYSE farklı bir doğru.
+
+    Jenerik metin ("İşlemi tamamlayamadım, tekrar dener misin?") bir plan aracı
+    kalıcı yazma yaptıktan sonra YANLIŞTIR: B-kuralı gereği sağlayıcı
+    değiştirilmez ve tur buraya iner, ama mutasyon COMMIT'Lİdir. Kullanıcıyı
+    tekrar denemeye çağırmak daha da kötüsüdür — yeni istek yeni `request_id`,
+    yani yeni işlem kimliği demektir ve aynı düzenleme İKİNCİ kez uygulanır
+    (tur-içi replay bunu yalnızca TEK sunucu turu boyunca engeller).
+
+    Yalnızca metin değişir: yeni metin de bir hata-yedeğidir, dolayısıyla kota
+    iadesi ve geçmişe-yazmama (B16) davranışı aynen korunur."""
+    texts = _COACH_FALLBACKS[_coach_lang(language)]
+    if coach_plan_tools.plan_changed_this_turn():
+        return texts["tool_plan_saved"]
+    return texts[kind]
+
+
 class _BedrockFallback(Exception):
     """Bedrock döngüsü İLK çağrıda (henüz hiçbir araç çalışmadan) hata verdiğinde
     fırlatılır → OpenAI'ya güvenle düşülebilir. Bir araç YAN ETKİ ürettikten sonra
@@ -1041,7 +1059,7 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
         if _remaining_coach_turn_seconds(deadline) <= 0:
             current_app.logger.warning(
                 "[COACH] turn budget exhausted before OpenAI fallback")
-            final_text = _COACH_FALLBACKS[_coach_lang(language)]["tool"]
+            final_text = _coach_tool_fallback(language)
         else:
             final_text = _run_coach_conversation_openai(
                 user_id, question, context, history, language,
@@ -1080,15 +1098,14 @@ def _run_coach_conversation_openai(user_id, question, context, history,
         remaining = _remaining_coach_turn_seconds(deadline)
         if remaining <= 0:
             current_app.logger.warning("[COACH] OpenAI turn budget exhausted")
-            return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
+            return _coach_tool_fallback(language)
         try:
             with model_concurrency_slot("openai", deadline=deadline):
                 remaining = _remaining_coach_turn_seconds(deadline)
                 if remaining <= 0:
                     current_app.logger.warning(
                         "[COACH] OpenAI turn budget exhausted after model gate")
-                    return _COACH_FALLBACKS[
-                        _coach_lang(language)]["tool"]
+                    return _coach_tool_fallback(language)
                 resp = openai_client.chat.completions.create(
                     model=OPENAI_MODEL,
                     messages=messages,
@@ -1102,9 +1119,11 @@ def _run_coach_conversation_openai(user_id, question, context, history,
             if _remaining_coach_turn_seconds(deadline) <= 0:
                 current_app.logger.warning(
                     "[COACH] OpenAI turn budget exhausted during model gate")
-                return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
+                return _coach_tool_fallback(language)
             current_app.logger.warning("[COACH] OpenAI çağrısı başarısız: %s", type(e).__name__)
-            return _COACH_FALLBACKS[_coach_lang(language)]["error"]
+            # Bu tur bir plan aracı koşturduysa "bir şeyler ters gitti" de aynı
+            # yalandır: değişiklik commit'lidir. Aksi halde metin AYNEN eskisi.
+            return _coach_tool_fallback(language, "error")
         if not resp.choices:
             # İçerik filtresi boş choices döndürebilir; ham IndexError yerine
             # boş final_text ile çık (çağıran yönlendirici dostça mesaja düşer).
@@ -1133,7 +1152,7 @@ def _run_coach_conversation_openai(user_id, question, context, history,
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
         # Döngü başa döner: model araç sonuçlarıyla final metni üretir ya da zincirler.
     else:
-        final_text = _COACH_FALLBACKS[_coach_lang(language)]["tool"]
+        final_text = _coach_tool_fallback(language)
     return final_text
 
 
@@ -1199,7 +1218,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
         remaining = _remaining_coach_turn_seconds(deadline)
         if remaining <= 0:
             current_app.logger.warning("[COACH][Bedrock] turn budget exhausted")
-            return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
+            return _coach_tool_fallback(language)
         # B4: create() YANINDA yanıt ayrıştırma da korunmalı — `resp.content` None
         # (→ TypeError) gibi create sonrası hatalar önceden _BedrockFallback DIŞINDA
         # kaçıp yönlendiricinin OpenAI yedeğini atlayarak koçu 500'lüyordu. Aynı
@@ -1211,8 +1230,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
                 if remaining <= 0:
                     current_app.logger.warning(
                         "[COACH][Bedrock] turn budget exhausted after model gate")
-                    return _COACH_FALLBACKS[
-                        _coach_lang(language)]["tool"]
+                    return _coach_tool_fallback(language)
                 resp = bedrock_client.messages.create(
                     model=BEDROCK_MODEL,
                     max_tokens=max_tokens,
@@ -1232,7 +1250,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
                     raise _BedrockFallback("boş Bedrock yanıtı (metin bloğu yok)")
                 # C3: hard-coded TR metin yerine dile göre yedek — EN kullanıcı
                 # Türkçe hata görmesin.
-                return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
+                return _coach_tool_fallback(language)
 
             # Araç isteyen assistant turunu (tool_use bloklarıyla) olduğu gibi ekle.
             convo.append({"role": "assistant", "content": resp.content})
@@ -1249,14 +1267,14 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
             if _remaining_coach_turn_seconds(deadline) <= 0:
                 current_app.logger.warning(
                     "[COACH][Bedrock] turn budget exhausted during provider call")
-                return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
+                return _coach_tool_fallback(language)
             if tools_ran == 0:
                 raise _BedrockFallback(f"{type(e).__name__}: {e}")
             current_app.logger.warning("[COACH][Bedrock] araç sonrası çağrı/ayrıştırma hatası: %s", e)
-            return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
+            return _coach_tool_fallback(language)
         # Döngü başa döner: model araç sonuçlarıyla final metni üretir ya da zincirler.
 
-    return _COACH_FALLBACKS[_coach_lang(language)]["tool"]
+    return _coach_tool_fallback(language)
 
 
 def generate_coach_reply(name, age, gender, weight, height,
