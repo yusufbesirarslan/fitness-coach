@@ -4,7 +4,7 @@ from app.services.training_generation.preference_contract import parse_canonical
 from app.services.training_generation.time_series_model import build_performance_history
 
 
-def parse_preferences(data: dict, stored_injuries: str = "") -> TrainingPreferences:
+def parse_preferences(data, stored_injuries: str = "") -> TrainingPreferences:
     return parse_canonical_preferences(data, stored_injuries=stored_injuries)
 
 

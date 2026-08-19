@@ -41,8 +41,6 @@
       }
       selections[key] = value;
     });
-    // Mirror the canonical rule: no cardio type → zero cardio days.
-    if (selections.kardiyo_tipi === "yok") selections.kardiyo_gun = 0;
     return selections;
   }
 

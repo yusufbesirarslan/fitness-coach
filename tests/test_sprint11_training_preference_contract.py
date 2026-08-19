@@ -207,6 +207,29 @@ def test_unknown_style_is_invalid_not_general():
         canonical_style("olympic_weightlifting")
 
 
+@pytest.mark.parametrize("payload", [[], "oops", 3, 0, False])
+def test_non_object_payload_is_invalid_not_default_general(payload):
+    with pytest.raises(PreferenceContractError) as exc:
+        parse_preferences(payload)
+    assert exc.value.public_code == CODE_INVALID
+    assert exc.value.reason == "INVALID_PAYLOAD"
+    assert exc.value.retryable is False
+
+
+def test_present_float_day_count_is_invalid_not_truncated():
+    with pytest.raises(PreferenceContractError) as exc:
+        parse_preferences({"gun_sayisi": 6.9, "sure": 45})
+    assert exc.value.public_code == CODE_INVALID
+    with pytest.raises(PreferenceContractError):
+        parse_preferences({"gun_sayisi": 3.0, "sure": 45})
+
+
+def test_present_float_duration_is_invalid_not_truncated():
+    with pytest.raises(PreferenceContractError) as exc:
+        parse_preferences({"gun_sayisi": 3, "sure": 45.9})
+    assert exc.value.public_code == CODE_INVALID
+
+
 def test_empty_style_is_invalid_not_general():
     with pytest.raises(PreferenceContractError) as exc:
         parse_preferences({"antrenman_tarzi": "", "gun_sayisi": 3, "sure": 45})
@@ -395,10 +418,16 @@ def test_six_training_plus_five_cardio_is_conflicting():
 
 
 def test_cardio_days_without_type_is_conflicting():
-    prefs = TrainingPreferences(
-        gun_sayisi=3, sure=45, kardiyo_tipi="yok", kardiyo_gun=3,
-        antrenman_tarzi="genel", ekipman="spor_salonu",
-    )
+    prefs = parse_preferences({
+        "antrenman_tarzi": "genel",
+        "ekipman": "spor_salonu",
+        "gun_sayisi": 3,
+        "sure": 45,
+        "kardiyo_tipi": "yok",
+        "kardiyo_gun": 3,
+    })
+    assert prefs.kardiyo_tipi == "yok"
+    assert prefs.kardiyo_gun == 3
     result = evaluate_capability(prefs)
     assert result.status == STATUS_CONFLICTING
     assert result.reason == "CARDIO_DAYS_WITHOUT_TYPE"
@@ -472,6 +501,40 @@ def test_overfull_week_invokes_zero_provider_calls(client, auth_user, monkeypatc
         "antrenman_tarzi": "genel",
         "kardiyo_tipi": "kosu",
         "kardiyo_gun": 5,
+    })
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_CONFLICTING
+    assert called == []
+
+
+def test_non_object_json_body_invokes_zero_provider_calls(
+        client, auth_user, monkeypatch):
+    _session(auth_user)
+    called = []
+    monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: called.append(kwargs) or "{}")
+    response = client.post(
+        "/training-plan",
+        data="[]",
+        content_type="application/json",
+    )
+    assert response.status_code == 422
+    body = response.get_json()
+    assert body["code"] == CODE_INVALID
+    assert body["retryable"] is False
+    assert called == []
+
+
+def test_cardio_days_without_type_invokes_zero_provider_calls(
+        client, auth_user, monkeypatch):
+    _session(auth_user)
+    called = []
+    monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: called.append(kwargs) or "{}")
+    response = client.post("/training-plan", json={
+        "gun_sayisi": 3, "sure": 45,
+        "antrenman_tarzi": "genel",
+        "ekipman": "spor_salonu",
+        "kardiyo_tipi": "yok",
+        "kardiyo_gun": 3,
     })
     assert response.status_code == 422
     assert response.get_json()["code"] == CODE_CONFLICTING
@@ -682,6 +745,39 @@ def test_program_context_does_not_fallback_unknown_style_to_general():
     prefs = TrainingPreferences(gun_sayisi=3, antrenman_tarzi="banana_program", sure=45)
     with pytest.raises(PreferenceContractError):
         build_program_context(_features(), prefs, classify_user(_features()))
+
+
+def test_program_generator_source_has_no_style_rules_general_fallback():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "app" / "services" / "training_generation" / "program_generator.py"
+    ).read_text(encoding="utf-8")
+    assert "_style_rules()[style]" in source
+    for snippet in (
+        "_style_rules().get(style",
+        ".get(style, _style_rules()",
+        'get(style, "general_fitness")',
+        "get(style, 'general_fitness')",
+        '.get(style, "general_fitness")',
+    ):
+        assert snippet not in source, snippet
+
+
+def test_canonical_style_source_has_no_general_default():
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "app" / "services" / "training_generation" / "preference_contract.py"
+    ).read_text(encoding="utf-8")
+    assert "STYLE_INPUT_ALIASES.get(key)" in source
+    assert "STYLE_INPUT_ALIASES.get(key," not in source
+    assert '.get(key, "general_fitness")' not in source
+
+
+def test_plan_v2_does_not_zero_cardio_days_when_type_is_yok():
+    source = (
+        Path(__file__).resolve().parents[1] / "static" / "plan_create.js"
+    ).read_text(encoding="utf-8")
+    assert "selections.kardiyo_gun = 0" not in source
 
 
 def test_service_evaluates_capability_before_provider(monkeypatch):

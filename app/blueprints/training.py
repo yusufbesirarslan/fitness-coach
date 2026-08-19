@@ -169,7 +169,9 @@ def training():
 @premium_ai_plan_gate("training")  # non-premium: haftada 1 üretim
 @ai_concurrency_gate  # A1: bloklayıcı AI çağrıları tüm thread'leri doldurmasın
 def training_plan_generate():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
 
     last = UserSession.query.filter_by(user_id=current_user.id)\
         .order_by(UserSession.created_at.desc())\

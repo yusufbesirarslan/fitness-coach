@@ -171,22 +171,29 @@ def _require_int_choice(data: dict, field: str, allowed: frozenset[int], default
     if _missing(data, field):
         return default
     raw = data.get(field)
-    if isinstance(raw, bool):
-        raise PreferenceContractError.invalid(f"INVALID_{field.upper()}")
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        raise PreferenceContractError.invalid(f"INVALID_{field.upper()}") from None
-    if isinstance(raw, str) and str(value) != raw.strip():
-        raise PreferenceContractError.invalid(f"INVALID_{field.upper()}")
-    if value not in allowed:
-        raise PreferenceContractError.invalid(f"INVALID_{field.upper()}")
-    return value
+    if type(raw) is int:
+        if raw not in allowed:
+            raise PreferenceContractError.invalid(f"INVALID_{field.upper()}")
+        return raw
+    if isinstance(raw, str):
+        token = raw.strip()
+        try:
+            value = int(token)
+        except ValueError:
+            raise PreferenceContractError.invalid(f"INVALID_{field.upper()}") from None
+        if str(value) != token:
+            raise PreferenceContractError.invalid(f"INVALID_{field.upper()}")
+        if value not in allowed:
+            raise PreferenceContractError.invalid(f"INVALID_{field.upper()}")
+        return value
+    raise PreferenceContractError.invalid(f"INVALID_{field.upper()}")
 
 
-def parse_canonical_preferences(data: dict, stored_injuries: str = "") -> TrainingPreferences:
+def parse_canonical_preferences(data, stored_injuries: str = "") -> TrainingPreferences:
     """Allow-list parse. Does not evaluate capability."""
-    payload = data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        raise PreferenceContractError.invalid("INVALID_PAYLOAD")
+    payload = data
     return TrainingPreferences(
         gun_sayisi=_require_int_choice(payload, "gun_sayisi", DAY_COUNTS, 3),
         ekipman=_require_token(payload, "ekipman", EQUIPMENT_VALUES, "spor_salonu"),

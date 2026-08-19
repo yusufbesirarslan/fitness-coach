@@ -11,9 +11,11 @@ not connected and is out of scope.
 ## Accepted preference fields
 
 The HTTP body is parsed by `parse_canonical_preferences` in
-`app/services/training_generation/preference_contract.py`. Missing fields take
-the documented default. Present-but-unknown values are **rejected** — they are
-never clamped, coerced, or mapped to General.
+`app/services/training_generation/preference_contract.py`. A missing or empty
+object uses documented defaults. A non-object body (`[]`, string, number,
+boolean) is **rejected** as `INVALID_PAYLOAD`. Present-but-unknown values are
+**rejected** — they are never clamped, coerced (including JSON floats such as
+`6.9` → `6`), or mapped to General.
 
 | Field | Canonical values | Default |
 | --- | --- | --- |
