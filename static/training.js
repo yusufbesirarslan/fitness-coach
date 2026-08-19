@@ -1017,6 +1017,11 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
         loading.classList.add("active");
 
         try {
+            if (selections.kardiyo_tipi !== "yok"
+                    && (Number(selections.gun_sayisi) + Number(selections.kardiyo_gun)) > 7) {
+                showToast(__t('plan.contract.conflicting_preferences'), 'error');
+                return;
+            }
             const res  = await fetch("/training-plan", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },

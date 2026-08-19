@@ -20,6 +20,15 @@ from app.services.premium import premium_ai_plan_gate
 from app.plan_presenter import build_plan_view
 from app.services.plan_facts import gather_plan_facts
 from app.services.today_facts import get_active_plan
+from app.services.training_generation.preference_contract import (
+    CODE_GENERATION_INVALID,
+    CODE_GENERATION_UNAVAILABLE,
+    CODE_NO_SESSION,
+    I18N_GENERATION_INVALID,
+    I18N_GENERATION_UNAVAILABLE,
+    I18N_NO_SESSION,
+    PreferenceContractError,
+)
 from app.services.training_generation.response_validator import PlanValidationError
 from app.services.training_generation.service import generate_training_plan_payload
 from app.services.validators import validate_pump_check_image
@@ -167,7 +176,11 @@ def training_plan_generate():
         .first()
 
     if not last:
-        return jsonify({"error": t("plan.no_session")}), 400
+        return jsonify({
+            "error": t(I18N_NO_SESSION),
+            "code": CODE_NO_SESSION,
+            "retryable": False,
+        }), 400
 
     try:
         return jsonify(generate_training_plan_payload(
@@ -178,11 +191,25 @@ def training_plan_generate():
             language=current_locale(),
             logger=current_app.logger,
         ))
+    except PreferenceContractError as exc:
+        current_app.logger.info(
+            "[TRAINING] generation_rejected code=%s reason=%s provider_invoked=0 request_id=%s",
+            exc.public_code, exc.reason, current_request_id(),
+        )
+        return jsonify(exc.to_body(t)), exc.http_status
     except (json.JSONDecodeError, PlanValidationError):
-        return jsonify({"error": t("plan.gen_failed")}), 500
+        return jsonify({
+            "error": t(I18N_GENERATION_INVALID),
+            "code": CODE_GENERATION_INVALID,
+            "retryable": True,
+        }), 500
     except Exception:
         current_app.logger.exception("Plan oluşturma hatası")
-        return jsonify({"error": t("route.plan_failed")}), 500
+        return jsonify({
+            "error": t(I18N_GENERATION_UNAVAILABLE),
+            "code": CODE_GENERATION_UNAVAILABLE,
+            "retryable": True,
+        }), 500
 
 
 @bp.route("/training-plan/save", methods=["POST"])
