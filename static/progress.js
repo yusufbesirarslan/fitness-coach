@@ -208,6 +208,10 @@ function loadProgress() {
   loadPhysique();
 }
 
+// PHYSIQUE PROGRESS lives in its own module (static/progress_physique.js).
+// This file only hands off so a failure to load that script degrades only
+// this section, exactly like a failing fetch does.
+
 // AXIS INSIGHTS lives in its own module (static/progress_insights.js) — this
 // file hands off rather than rendering it, so the three-slot contract has one
 // owner. Guarded because a failure to load that script must degrade only its
@@ -453,29 +457,13 @@ function renderHistory(rows) {
 }
 
 // ── PHYSIQUE PROGRESS ────────────────────────────────────────────────
-// Presentational shell for PR4. Reads the EXISTING
-// /pump-check-gallery/data contract (unchanged) purely to link recent Pump
-// Checks; it does not compare images, detect body regions, or assess
-// physique change.
-var PHYSIQUE_THUMBS = 3;
+// Delegates to static/progress_physique.js. This file must not fetch
+// physique data, compare images, or decide whether a physique improved.
 function loadPhysique() {
-  var box = _el('physique-body');
-  _getJSON('/pump-check-gallery/data?per_page=' + PHYSIQUE_THUMBS).then(function (d) {
-    if (!box) return;
-    var items = ((d && d.items) || []).filter(function (x) { return x && x.imageUrl; });
-    if (!items.length) {
-      box.innerHTML = _emptyState(__t('progress.physique_empty_title'), __t('progress.physique_empty_desc'));
-      return;
-    }
-    box.innerHTML =
-      '<p class="prog-note">' + escapeHTML(__t('progress.physique_recent')) + '</p>' +
-      '<div class="pp-strip">' + items.map(function (it) {
-        var when = it.timePosted || '';
-        return '<a class="pp-thumb" href="/pump-check-gallery">' +
-          '<img src="' + escapeHTML(it.imageUrl) + '" loading="lazy" alt="' +
-          escapeHTML(__t('progress.physique_alt', { date: when })) + '">' +
-        '</a>';
-      }).join('') + '</div>' +
-      '<a class="pp-link" href="/pump-check-gallery">' + escapeHTML(__t('progress.physique_view_all')) + '</a>';
-  }).catch(function () { _sectionError(box); });
+  var mod = window.FitXPhysiqueProgress;
+  if (mod && typeof mod.load === 'function') {
+    mod.load();
+    return;
+  }
+  _sectionError(_el('physique-body'));
 }

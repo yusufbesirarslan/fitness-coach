@@ -4742,6 +4742,86 @@ Nutrition, recovery and hydration insight domains, body verdicts, gamification
 signals, insight persistence/caching and any mobile/Flutter surface are excluded
 from PR3 on purpose — see docs/PROGRESS_INSIGHTS.md §7 and §13.
 
+# Progress Redesign PR4 — Canonical Physique Progress Integration
+
+Branch `feat/progress-redesign-pr4-physique-progress`, worktree
+`.worktrees/progress-redesign-pr4`, based on `origin/main`
+`264d98f00120d8f6baaad34cc5bfcacfe5383b02`. PR1 (#212), PR2 (#215), PR3 (#216),
+canonical Pump Checks (#207), comparisons (#213) and history (#218) are
+ancestors. **Not merged, not deployed, no production config touched, no
+rollout flag added or changed.**
+
+Full architecture: **docs/PROGRESS_PHYSIQUE.md**.
+
+PR4 replaces the thumbnail-only PHYSIQUE PROGRESS shell with a read-only
+projection of canonical Pump Check history and any persisted
+`PumpCheckComparison`. Page load creates nothing: no comparison, no Bedrock
+call, no analysis retry. If a completed comparison exists it is shown; if not,
+the section says so. Comparison creation stays on the existing mobile command
+(`POST /api/v1/pump-check-comparisons`); this PR does not add a second web
+creation workflow.
+
+New package `app/services/progress_physique/` (`models` / `queries` / `payload`
+/ `build_progress_physique`). New `GET /api/progress/physique`
+(`@require_auth`, optional `?region=`, `Cache-Control: private, no-store`).
+New client module `static/progress_physique.js`. `static/progress.js` only
+calls `FitXPhysiqueProgress.load()`.
+
+Chronology is `captured_at`. Legacy `captured_at IS NULL` rows stay in the
+gallery. Comparability is the persisted canonical value
+(`comparable` / `limited` / `not_comparable`). An unknown persisted token
+raises `UnknownPhysiqueComparability` and `GET /api/progress/physique`
+returns the generic 500. It is **not** remapped to a local `unknown` wire
+value and is **not** rendered as `not_comparable` / `comparison_available`
+content. Images are short-lived owner-scoped URLs minted only for the rows
+the section renders.
+
+Merge-readiness follow-up (same branch, not merged):
+
+- Unknown canonical comparability is contract drift: dedicated exception,
+  generic 500, isolated PHYSIQUE PROGRESS unavailable state, no raw value
+  leak. `COMPARABILITY_UNKNOWN` removed from the Physique Progress wire
+  vocabulary. The Pump Check comparison domain and its DB CHECK are
+  unchanged.
+- Hermetic Chromium matrix (WSL Ubuntu-24.04, Sprint-0 venv +
+  `PLAYWRIGHT_BROWSERS_PATH=$HOME/.cache/axisai-sprint0-playwright`):
+  9 states × 4 viewports = **36/36 pass**, seed drift empty.
+  Evidence: `docs/frontend-readiness/progress-pr4/validation-manifest.json`
+  plus 18 curated screenshots (390 and 1440 for every state).
+  Command:
+  `python -m scripts.frontend_audit.progress_pr4_matrix --output docs/frontend-readiness/progress-pr4`
+
+  | State | 390 | 768 | 1280 | 1440 |
+  |---|---|---|---|---|
+  | empty | pass | pass | pass | pass |
+  | legacy_only | pass | pass | pass | pass |
+  | single_check | pass | pass | pass | pass |
+  | history_only | pass | pass | pass | pass |
+  | comparable | pass | pass | pass | pass |
+  | limited | pass | pass | pass | pass |
+  | not_comparable | pass | pass | pass | pass |
+  | stale_comparison | pass | pass | pass | pass |
+  | endpoint_failure | pass | pass | pass | pass |
+
+  Every cell recorded: correct render, no horizontal page overflow,
+  region-chip behaviour, baseline/current image layout, image load,
+  long-text containment, console/page errors, and the other four
+  Progress sections still rendering. Keyboard chip operation, visible
+  focus, meaningful image alt, and non-colour-only comparability were
+  asserted on the comparison/history cells. `comparable@390` first
+  blocked on a 20s `/progress-page` navigation timeout; the same
+  hermetic cell passed on retry.
+
+Rollback: revert the commit. No schema, no migration, no flag, no cache, no
+provider cleanup.
+
+A later same-branch contract fix: `GET /api/progress/physique?region=` (and
+whitespace-only `region`) is invalid HTTP 400. The route no longer remaps an
+empty supplied region to omitted/default. Omitted `region` still selects the
+latest canonical area. No frontend, schema, or Pump Check domain change.
+The prior 36-cell hermetic matrix was not rerun: this is HTTP validation
+only and does not change Progress rendering.
+
 # Adaptive Coaching Sprint 1 PR3 — AI Coach Training-Plan Tool Integration (local, 2026-08-16)
 
 Branch `adaptive-coaching-s1-pr3-ai-coach-plan-tools`, worktree

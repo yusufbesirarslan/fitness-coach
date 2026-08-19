@@ -21,6 +21,10 @@ from app.services.gamification import complete_quest_for_user, get_level, level_
 from app.services.progress_insights import (UnknownCanonicalVocabulary,
                                             build_progress_insights,
                                             progress_insights_payload)
+from app.services.progress_physique import (InvalidProgressPhysiqueRegion,
+                                            UnknownPhysiqueComparability,
+                                            build_progress_physique,
+                                            progress_physique_payload)
 from app.services.progress_summary import (UnknownProgressionSignal, build_progress_summary,
                                            progress_summary_payload)
 from app.services.training_history import fetch_workout_entries
@@ -32,11 +36,15 @@ from app.timeutil import app_date_of, app_today, display_dt, utc_day_bounds
 
 bp = Blueprint("tracking", __name__)
 
-# Canonical Progress read-model endpoints (Progress Redesign PR2 + PR3).
+# Canonical Progress read-model endpoints (Progress Redesign PR2 + PR3 + PR4).
 _PROGRESS_SUMMARY_PATH = "/api/progress/summary"
 _PROGRESS_AXIS_INSIGHTS_PATH = "/api/progress/axis-insights"
-_PROGRESS_PRIVATE_PATHS = frozenset(
-    {_PROGRESS_SUMMARY_PATH, _PROGRESS_AXIS_INSIGHTS_PATH})
+_PROGRESS_PHYSIQUE_PATH = "/api/progress/physique"
+_PROGRESS_PRIVATE_PATHS = frozenset({
+    _PROGRESS_SUMMARY_PATH,
+    _PROGRESS_AXIS_INSIGHTS_PATH,
+    _PROGRESS_PHYSIQUE_PATH,
+})
 
 
 @bp.after_request
@@ -55,7 +63,11 @@ def _progress_summary_error_class(error):
     ``UnknownProgressionSignal`` — an upstream contract moved — so it buckets
     the same way rather than inventing a competing observability vocabulary.
     """
-    if isinstance(error, (UnknownProgressionSignal, UnknownCanonicalVocabulary)):
+    if isinstance(error, (
+            UnknownProgressionSignal,
+            UnknownCanonicalVocabulary,
+            UnknownPhysiqueComparability,
+    )):
         return "contract_drift"
     if isinstance(error, SQLAlchemyError):
         return "upstream_error"
@@ -741,6 +753,43 @@ def progress_axis_insights_read():
         current_request_id(), insights.working.status, insights.watch.status,
         insights.next_move.code)
     return jsonify(progress_insights_payload(insights))
+
+
+@bp.route("/api/progress/physique")
+@require_auth
+def progress_physique_read():
+    """The canonical Physique Progress projection for the signed-in user (PR4).
+
+    A read-only composition of canonical Pump Check history and any persisted
+    PumpCheckComparison. The route creates nothing: no comparison, no analysis
+    retry, no provider call. The owner is the authenticated user — a
+    ``user_id`` query argument is ignored, never honoured.
+
+    ``?region=`` is a view selector over the canonical body-region vocabulary.
+    An omitted parameter selects the default region. A supplied empty,
+    whitespace-only, or unknown value is refused (400) rather than remapped.
+
+    Failures surface as the blueprint's generic JSON 500. An empty physique
+    section is a legitimate user state and is never used as the failure
+    payload. The private/no-store header is required because the response may
+    carry short-lived owner-private image URLs.
+    """
+    raw_region = request.args.get("region", None)
+    try:
+        physique = build_progress_physique(
+            current_user.id, region=raw_region)
+    except InvalidProgressPhysiqueRegion:
+        return jsonify({"error": t("route.generic_error_retry")}), 400
+    except Exception as e:
+        current_app.logger.warning(
+            "[PROGRESS][PHYSIQUE] request_id=%s state=error error_class=%s",
+            current_request_id(), _progress_summary_error_class(e))
+        return jsonify({"error": t("route.generic_error_retry")}), 500
+
+    current_app.logger.info(
+        "[PROGRESS][PHYSIQUE] request_id=%s state=%s region=%s",
+        current_request_id(), physique.state, physique.selected_region)
+    return jsonify(progress_physique_payload(physique))
 
 
 @bp.route("/api/progress/heatmap")
