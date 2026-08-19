@@ -26,17 +26,24 @@
     </div>
 
     <!-- ══ 1 · YOUR PROGRESS ══
-         Primary above-the-fold surface. PR1 deliberately shows a NEUTRAL
-         overview: no On Track / Needs Attention classification exists
-         canonically in the product yet, so none is invented here (PR2 owns
-         the trajectory read-model and will replace .ps-state in place). -->
+         Primary above-the-fold surface. The trajectory is decided by the
+         server (GET /api/progress/summary → app/services/progress_summary)
+         and only LOCALIZED here; the markup ships the same neutral copy PR1
+         used, which is what a reader sees before the summary resolves and
+         what stays on screen if it fails. The client never classifies.
+
+         data-state on .ps-card drives the accent only — the state is always
+         spelled out in #ps-state text as well, so it is never carried by
+         colour alone (WCAG 1.4.1). -->
     <section class="prog-section" aria-labelledby="ps-h">
         <h2 class="sec-label" id="ps-h">{{ t('progress.summary_label') }}</h2>
 
-        <div class="ps-card">
-            <p class="ps-state">{{ t('progress.summary_state') }}</p>
-            <p class="ps-lede">{{ t('progress.summary_lede') }}</p>
-            <p class="ps-meta" id="ps-meta" aria-live="polite">{{ t('progress.loading') }}</p>
+        <div class="ps-card" id="ps-card">
+            <div role="status" aria-live="polite">
+                <p class="ps-state" id="ps-state">{{ t('progress.summary_state') }}</p>
+                <p class="ps-lede" id="ps-lede">{{ t('progress.summary_lede') }}</p>
+                <p class="ps-meta" id="ps-meta">{{ t('progress.loading') }}</p>
+            </div>
 
             <div class="ps-actions">
                 <button type="button" class="btn-ghost" data-action="openCheckin">
@@ -50,9 +57,10 @@
     </section>
 
     <!-- ══ 2 · WHAT CHANGED ══
-         Exactly three cards, one primary signal each, all from existing
-         endpoints. Each renders its own neutral state when its signal is
-         unavailable — a missing card never blanks the others. -->
+         Exactly three cards, one primary signal each. All three now read the
+         SAME canonical summary as YOUR PROGRESS, so the page cannot show a
+         card that disagrees with its own headline. Each renders its own
+         neutral state when its signal is unavailable. -->
     <section class="prog-section" aria-labelledby="wc-h">
         <h2 class="sec-label" id="wc-h">{{ t('progress.changed_label') }}</h2>
 
@@ -78,15 +86,38 @@
     </section>
 
     <!-- ══ 3 · AXIS INSIGHTS ══
-         Presentational foundation only. It renders the EXISTING deterministic
-         /api/progress/insights payload (no LLM, no new heuristics) as a
-         readable list. The What's Working / Watch This / Next Move grouping
-         is intentionally NOT implemented — that classification does not exist
-         yet and PR3 owns it. -->
+         PR3: exactly three semantic slots, server-selected. The three <article>
+         elements and their headings are STRUCTURAL — they ship in the markup
+         rather than being generated, so the section is always three labelled
+         slots (no list, no carousel, no ranking) whatever the payload says and
+         whether or not the fetch succeeds.
+
+         GET /api/progress/axis-insights decides which canonical signal earns
+         which slot; static/progress_insights.js only translates the codes it is
+         handed. data-status on each slot drives the accent ONLY — the state is
+         always spelled out in the slot's own text as well, so it is never
+         carried by colour alone (WCAG 1.4.1). -->
     <section class="prog-section" aria-labelledby="ai-h">
         <h2 class="sec-label" id="ai-h">{{ t('progress.insights_label') }}</h2>
-        <div class="insight-list" id="insight-list" aria-live="polite">
-            <p class="prog-loading">{{ t('progress.loading') }}</p>
+
+        <div class="ax-slots" id="insight-list" aria-live="polite">
+            <article class="ax-slot" id="ax-working" aria-labelledby="ax-working-h">
+                <h3 class="ax-slot-label" id="ax-working-h">{{ t('progress.axis_working_label') }}</h3>
+                <p class="ax-headline" data-slot="headline">{{ t('progress.loading') }}</p>
+                <p class="ax-detail" data-slot="detail" hidden></p>
+            </article>
+
+            <article class="ax-slot" id="ax-watch" aria-labelledby="ax-watch-h">
+                <h3 class="ax-slot-label" id="ax-watch-h">{{ t('progress.axis_watch_label') }}</h3>
+                <p class="ax-headline" data-slot="headline">{{ t('progress.loading') }}</p>
+                <p class="ax-detail" data-slot="detail" hidden></p>
+            </article>
+
+            <article class="ax-slot" id="ax-next" aria-labelledby="ax-next-h">
+                <h3 class="ax-slot-label" id="ax-next-h">{{ t('progress.axis_next_label') }}</h3>
+                <p class="ax-headline" data-slot="headline">{{ t('progress.loading') }}</p>
+                <p class="ax-detail" data-slot="detail" hidden></p>
+            </article>
         </div>
     </section>
 
@@ -202,7 +233,11 @@
 <!-- ── TOAST ── -->
 <div class="toast-wrap" id="toast-wrap"></div>
 
-<script nonce="{{ csp_nonce }}">window.__PROGRESS = { current_weight: {{ current_weight|tojson }}, height_cm: {{ (height or 0)|tojson }}, goal_weight: {{ (goal_weight or 0)|tojson }} };</script>
+{# window.__PROGRESS is gone with PR2: its only consumer was the BODY card's
+   client-side weight/goal arithmetic, which the canonical summary now owns
+   server-side. The check-in field still pre-fills from `current_weight`
+   above — that is a form default, not a Progress signal. #}
+<script src="/static/progress_insights.js?v={{ _v }}"></script>
 <script src="/static/progress.js?v={{ _v }}"></script>
 <script src="/static/coach_widget.js?v={{ _v }}"></script>
 <script src="/static/actions.js?v={{ _v }}"></script>

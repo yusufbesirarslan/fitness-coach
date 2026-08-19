@@ -658,12 +658,116 @@ class PumpCheck(db.Model):
         # Feed V2 birincil kaynak sorgusu: user_id IN (arkadaslar) + ORDER BY
         # created_at DESC. Tek-kolon user_id indeksi siralamayi karsilamiyordu.
         db.Index("ix_pump_check_user_created", "user_id", "created_at"),
+        # Sprint 10 PR4A kanonik mobil gecmis sorgusu: user_id = ? + ORDER BY
+        # captured_at DESC, id DESC. captured_at'i siralayabilen indeks YOKTU;
+        # her sayfa kullanicinin tum satirlarini gecici b-tree'de siraliyordu.
+        # Iki anahtar da DESC oldugu icin ASC indeks geriye taranarak yeter.
+        db.Index("ix_pump_check_user_captured", "user_id", "captured_at", "id"),
     )
 
     user = db.relationship("User", backref=db.backref("pump_checks", passive_deletes=True))
 
     def __repr__(self):
         return f"<PumpCheck {self.user_id} - {self.created_at}>"
+
+
+STATUS_CHECK_SQL = (
+    "status IN ('pending', 'analyzing', 'completed', 'failed')"
+)
+COMPARABILITY_CHECK_SQL = (
+    "comparability IS NULL OR comparability IN "
+    "('comparable', 'limited', 'not_comparable')"
+)
+TERMINAL_COHERENCE_SQL = (
+    "(status = 'completed' AND analysis IS NOT NULL AND "
+    "comparability IS NOT NULL) OR (status <> 'completed' AND "
+    "analysis IS NULL AND comparability IS NULL)"
+)
+
+
+class PumpCheckComparison(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    baseline_pump_check_id = db.Column(
+        db.Integer, db.ForeignKey("pump_check.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    current_pump_check_id = db.Column(
+        db.Integer, db.ForeignKey("pump_check.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    public_id = db.Column(db.String(24), nullable=False)
+    status = db.Column(
+        db.String(20), nullable=False,
+        default="pending", server_default="pending")
+    comparability = db.Column(db.String(20), nullable=True)
+    analysis = db.Column(
+        JSONB().with_variant(db.JSON(), "sqlite"), nullable=True)
+    analysis_version = db.Column(db.String(50), nullable=False)
+    analysis_started_at = db.Column(db.DateTime, nullable=True)
+    analysis_attempt = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0")
+    analysis_failure_kind = db.Column(db.String(24), nullable=True)
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id", "baseline_pump_check_id",
+            "current_pump_check_id", "analysis_version",
+            name="uq_pump_comparison_pair_version"),
+        db.UniqueConstraint(
+            "user_id", "public_id",
+            name="uq_pump_comparison_user_public_id"),
+        db.CheckConstraint(
+            "baseline_pump_check_id <> current_pump_check_id",
+            name="ck_pump_comparison_distinct_sources"),
+        db.CheckConstraint(
+            STATUS_CHECK_SQL, name="ck_pump_comparison_status"),
+        db.CheckConstraint(
+            COMPARABILITY_CHECK_SQL,
+            name="ck_pump_comparison_comparability"),
+        db.CheckConstraint(
+            TERMINAL_COHERENCE_SQL,
+            name="ck_pump_comparison_terminal_fields"),
+    )
+
+    user = db.relationship(
+        "User",
+        backref=db.backref(
+            "pump_check_comparisons", passive_deletes=True))
+    baseline_pump_check = db.relationship(
+        "PumpCheck", foreign_keys=[baseline_pump_check_id],
+        backref=db.backref("baseline_comparisons", passive_deletes=True))
+    current_pump_check = db.relationship(
+        "PumpCheck", foreign_keys=[current_pump_check_id],
+        backref=db.backref("current_comparisons", passive_deletes=True))
+
+
+class PumpCheckComparisonRequest(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    idempotency_key = db.Column(db.String(64), nullable=False)
+    fingerprint = db.Column(db.String(64), nullable=False)
+    comparison_id = db.Column(
+        db.Integer,
+        db.ForeignKey("pump_check_comparison.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    created_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint(
+        "user_id", "idempotency_key",
+        name="uq_pump_comparison_request_user_key"),)
+
+    user = db.relationship(
+        "User",
+        backref=db.backref(
+            "pump_check_comparison_requests", passive_deletes=True))
+    comparison = db.relationship(
+        "PumpCheckComparison",
+        backref=db.backref("requests", passive_deletes=True))
 
 
 class PumpCheckLike(db.Model):

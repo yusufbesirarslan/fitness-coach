@@ -17,8 +17,12 @@ def test_one_pump_check_persistence_authority_and_no_future_routes():
         table for table in PumpCheck.metadata.tables
         if "pump" in table.lower() and "check" in table.lower()
     ]
+    # Sprint 10 PR3 added the comparison result and its request ledger. They
+    # are a SEPARATE authority: the single-check tables above still own every
+    # single-image analysis, and neither gained a comparison column.
     assert set(pump_tables) == {
-        "pump_check", "pump_check_comment", "pump_check_like"}
+        "pump_check", "pump_check_comment", "pump_check_like",
+        "pump_check_comparison", "pump_check_comparison_request"}
     rules = {rule.rule for rule in app.url_map.iter_rules()}
     assert "/api/v1/pump-checks" in rules
     assert "/api/v1/pump-checks/<pump_check_token>" in rules

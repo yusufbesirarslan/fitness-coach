@@ -1,15 +1,17 @@
 /* ══════════════════════════════════════════════════════════════════════
-   progress.js — Progress redesign PR1 (information architecture + shell)
+   progress.js — Progress redesign PR1 (shell) + PR2 (canonical summary)
 
    showToast / escapeHTML / selectOverload / submitCheckin / openCheckin /
    closeCheckin / activateOnEnter are preserved VERBATIM — the weekly
    Check-In POST flow must keep working unchanged.
 
-   Everything below the check-in block renders the redesigned sections. Hard
-   rule for this file: every user-visible number comes from an existing
-   endpoint or an existing canonical calculation. Nothing here classifies a
-   trajectory, scores adherence, or assesses a physique — when a signal is
-   missing the section degrades to a neutral state instead of inventing one.
+   Hard rule for this file: it TRANSLATES, it does not decide. YOUR PROGRESS,
+   BODY, PERFORMANCE and CONSISTENCY all render one canonical server payload
+   (GET /api/progress/summary); there is no `sessions >= 3 → on track`,
+   no `weight dropped → good`, no streak-as-consistency, and no threshold of
+   any kind below. Every state arrives as a bounded enum and is looked up in
+   a table — an enum this file does not know renders the neutral state rather
+   than a guess, exactly like a missing signal.
 
    No IIFE: functions must resolve as window.<name> for actions.js's
    data-action dispatcher (see static/actions.js).
@@ -200,11 +202,19 @@ function initProgress() {
   loadProgress();
 }
 function loadProgress() {
-  loadSummaryAndPerformance();
-  loadBodyAndHistory();
-  loadConsistency();
-  loadInsights();
+  loadSummary();
+  loadHistory();
+  loadAxisInsights();
   loadPhysique();
+}
+
+// AXIS INSIGHTS lives in its own module (static/progress_insights.js) — this
+// file hands off rather than rendering it, so the three-slot contract has one
+// owner. Guarded because a failure to load that script must degrade only its
+// own section, exactly like a failing fetch does.
+function loadAxisInsights() {
+  var mod = window.FitXAxisInsights;
+  if (mod && typeof mod.load === 'function') mod.load();
 }
 document.addEventListener('DOMContentLoaded', initProgress);
 
@@ -213,70 +223,182 @@ function askAxis() {
   if (window.CW && typeof window.CW.toggle === 'function') window.CW.toggle();
 }
 
-// ── YOUR PROGRESS + PERFORMANCE ──────────────────────────────────────
-// Both read the SAME existing endpoint (/api/progress/workout?range=month),
-// so they are fetched once. `totals.sessions` is the endpoint's own count of
-// distinct days with a workout in the last 30 days — no new aggregation.
-function loadSummaryAndPerformance() {
-  var meta = _el('ps-meta');
-  _getJSON('/api/progress/workout?range=month').then(function (d) {
-    var sessions = (d && d.totals && d.totals.sessions) || 0;
-    if (meta) meta.textContent = __t('progress.summary_meta', { workouts: sessions });
-    _fillCard('wc-perf', String(sessions), __t('progress.perf_sub'));
-  }).catch(function () {
-    if (meta) meta.textContent = __t('progress.summary_meta_none');
-    _fillCard('wc-perf', '—', __t('progress.card_nodata'));
-  });
+/* ── THE CANONICAL SUMMARY ────────────────────────────────────────────
+   One fetch of /api/progress/summary drives YOUR PROGRESS and all three
+   WHAT CHANGED cards, so they can never contradict each other. The server
+   owns every state below; these tables are pure enum → i18n key lookups.
+   A value missing from a table is treated exactly like a missing signal. */
+
+var TRAJECTORY_LABEL = {
+  building_baseline: 'progress.traj_building_baseline',
+  on_track: 'progress.traj_on_track',
+  needs_attention: 'progress.traj_needs_attention'
+};
+
+// Keyed by trajectory.reason — the canonical training signal. One line per
+// signal, deterministic, bounded. Richer interpretation belongs to PR3.
+var TRAJECTORY_LEDE = {
+  insufficient_data: 'progress.traj_lede_insufficient_data',
+  progressing: 'progress.traj_lede_progressing',
+  keep_pushing: 'progress.traj_lede_keep_pushing',
+  build_consistency: 'progress.traj_lede_build_consistency',
+  plateau: 'progress.traj_lede_plateau',
+  deload: 'progress.traj_lede_deload'
+};
+
+var PERFORMANCE_LABEL = {
+  building_baseline: 'progress.perf_state_building_baseline',
+  progressing: 'progress.perf_state_progressing',
+  steady: 'progress.perf_state_steady',
+  building_consistency: 'progress.perf_state_building_consistency',
+  plateau: 'progress.perf_state_plateau',
+  deload: 'progress.perf_state_deload'
+};
+
+var CONSISTENCY_LABEL = {
+  consistent: 'progress.cons_state_consistent',
+  inconsistent: 'progress.cons_state_inconsistent',
+  insufficient_data: 'progress.cons_state_insufficient_data'
+};
+
+var TREND_LABEL = {
+  up: 'progress.trend_up',
+  flat: 'progress.trend_flat',
+  down: 'progress.trend_down'
+};
+
+// Translate an enum through a table, or return null when the server sent
+// something this build does not know. Null always degrades to the neutral
+// state — never to a plausible-looking default.
+function _label(table, value) {
+  return (typeof value === 'string' && table[value]) ? __t(table[value]) : null;
 }
 
-// ── BODY CARD + PROGRESS HISTORY ─────────────────────────────────────
-// Both are built from the existing /checkin-history payload (ascending by
-// date), so they share one fetch.
-function loadBodyAndHistory() {
-  _getJSON('/checkin-history').then(function (rows) {
-    renderBodyCard(Array.isArray(rows) ? rows : []);
-    renderHistory(Array.isArray(rows) ? rows : []);
-  }).catch(function () {
-    _fillCard('wc-body', '—', __t('progress.card_nodata'));
-    _sectionError(_el('history-list'));
-  });
+function _isNumber(v) { return typeof v === 'number' && isFinite(v); }
+
+function loadSummary() {
+  _getJSON('/api/progress/summary')
+    .then(renderSummary)
+    .catch(summaryUnavailable);
 }
 
-// BODY = current weight + the delta against the PREVIOUS check-in. That
-// two-point delta is the same calculation /api/progress/insights already
-// performs canonically — nothing new is derived here. Falls back to the
-// profile weight (window.__PROGRESS.current_weight, written by the same
-// canonical source the dashboard uses) when there are no check-ins yet.
-function renderBodyCard(rows) {
-  var p = window.__PROGRESS || {};
-  var weighed = rows.filter(function (r) { return typeof r.kilo === 'number' && r.kilo > 0; });
-  var latest = weighed.length ? weighed[weighed.length - 1].kilo
-             : (typeof p.current_weight === 'number' && p.current_weight > 0 ? p.current_weight : null);
+function renderSummary(d) {
+  if (!d || !d.trajectory) { summaryUnavailable(); return; }
+  renderTrajectory(d);
+  renderBodyCard(d.body);
+  renderPerformanceCard(d.performance);
+  renderConsistencyCard(d.consistency);
+}
 
-  if (latest == null) {
+// A failed summary must NOT read as "building baseline": that is a truthful
+// statement about the user's history, and the request failing says nothing
+// about their history at all.
+function summaryUnavailable() {
+  _setTrajectory('', __t('progress.traj_unavailable'), __t('progress.load_error'), '');
+  _fillCard('wc-body', '—', __t('progress.card_nodata'));
+  _fillCard('wc-perf', '—', __t('progress.card_nodata'));
+  _fillCard('wc-cons', '—', __t('progress.card_nodata'));
+}
+
+function _setTrajectory(state, label, lede, meta) {
+  var card = _el('ps-card');
+  var stateEl = _el('ps-state');
+  var ledeEl = _el('ps-lede');
+  var metaEl = _el('ps-meta');
+  // The accent is decoration; the label carries the meaning either way.
+  if (card) card.setAttribute('data-state', state || '');
+  if (stateEl) stateEl.textContent = label;
+  if (ledeEl) ledeEl.textContent = lede;
+  if (metaEl) metaEl.textContent = meta;
+}
+
+function renderTrajectory(d) {
+  var label = _label(TRAJECTORY_LABEL, d.trajectory.state);
+  var lede = _label(TRAJECTORY_LEDE, d.trajectory.reason);
+  if (!label || !lede) { summaryUnavailable(); return; }
+  _setTrajectory(d.trajectory.state, label, lede, _summaryMeta(d));
+}
+
+// "Last 4 weeks · 12 sessions · CONSISTENT". Each part is dropped rather
+// than faked when the server did not send it; no percentage is derived.
+function _summaryMeta(d) {
+  var parts = [];
+  var w = d.window || {};
+  var c = d.consistency || {};
+  if (_isNumber(w.weeks)) parts.push(__t('progress.meta_window', { weeks: w.weeks }));
+  if (_isNumber(c.sessions)) parts.push(__t('progress.meta_sessions', { n: c.sessions }));
+  var cons = _label(CONSISTENCY_LABEL, c.state);
+  if (cons) parts.push(cons);
+  return parts.join(' · ');
+}
+
+// BODY — reported, never judged. The card shows the canonical current weight
+// and ONE piece of context, in order of how directly it was observed:
+// a two-check-in delta, else distance to a configured target, else nothing.
+// No delta is classified as success or failure.
+function renderBodyCard(body) {
+  if (!body || !_isNumber(body.current_weight_kg)) {
     _fillCard('wc-body', '—', __t('progress.body_sub_none'));
     return;
   }
 
-  var value = latest.toFixed(1) + ' ' + __t('progress.unit_kg');
+  var value = body.current_weight_kg.toFixed(1) + ' ' + __t('progress.unit_kg');
   var sub;
-  if (weighed.length >= 2) {
-    var delta = latest - weighed[weighed.length - 2].kilo;
-    sub = Math.abs(delta) < 0.05
+  if (_isNumber(body.weight_delta_kg)) {
+    sub = Math.abs(body.weight_delta_kg) < 0.05
       ? __t('progress.body_sub_flat')
-      : __t('progress.body_sub_delta', { delta: _signed(delta) });
-  } else if (p.goal_weight > 0) {
-    // Nothing to compare against, but the profile carries a goal weight —
-    // distance to goal is a plain subtraction of two stored values.
-    sub = __t('progress.body_sub_goal', { delta: _signed(latest - p.goal_weight) });
-  } else if (weighed.length === 1) {
-    sub = __t('progress.body_sub_first');
+      : __t('progress.body_sub_delta', { delta: _signed(body.weight_delta_kg) });
+  } else if (_isNumber(body.distance_to_target_kg)) {
+    // Absolute distance; the server deliberately does not say which side of
+    // the target the user is on, because that is not a verdict it can make.
+    sub = __t('progress.body_sub_target', {
+      distance: body.distance_to_target_kg.toFixed(1)
+    });
   } else {
-    // The weight came from the profile, not from a check-in — say so rather
-    // than implying a check-in exists.
-    sub = __t('progress.body_sub_profile');
+    sub = __t('progress.body_sub_partial');
   }
   _fillCard('wc-body', value, sub);
+}
+
+// PERFORMANCE — the canonical training state, plus at most one compact
+// canonical trend. No volume number, no session count, no chart.
+function renderPerformanceCard(perf) {
+  var label = perf ? _label(PERFORMANCE_LABEL, perf.state) : null;
+  if (!label) {
+    _fillCard('wc-perf', '—', __t('progress.card_nodata'));
+    return;
+  }
+  var trend = _label(TREND_LABEL, perf.volume_trend);
+  _fillCard('wc-perf', label,
+    trend ? __t('progress.perf_sub_volume', { trend: trend }) : '');
+}
+
+// CONSISTENCY — canonical training consistency, explained by the counts the
+// server sent. The gamification streak is deliberately no longer used here:
+// logging in is not training.
+function renderConsistencyCard(cons) {
+  var label = cons ? _label(CONSISTENCY_LABEL, cons.state) : null;
+  if (!label) {
+    _fillCard('wc-cons', '—', __t('progress.card_nodata'));
+    return;
+  }
+  // Both counts or neither: they are one sentence, and a half-known one
+  // ("of the last — weeks") says less than the state label already did. No
+  // threshold on either number — the server sizes the window, not this file.
+  var sub = '';
+  if (_isNumber(cons.active_weeks) && _isNumber(cons.analyzed_weeks)) {
+    sub = __t('progress.cons_active_weeks',
+              { active: cons.active_weeks, total: cons.analyzed_weeks });
+  }
+  _fillCard('wc-cons', label, sub);
+}
+
+// ── PROGRESS HISTORY ─────────────────────────────────────────────────
+// Unchanged surface, unchanged source: the existing /checkin-history rows.
+function loadHistory() {
+  _getJSON('/checkin-history')
+    .then(function (rows) { renderHistory(Array.isArray(rows) ? rows : []); })
+    .catch(function () { _sectionError(_el('history-list')); });
 }
 
 // HISTORY = one row per existing weekly check-in, newest first. The only
@@ -328,46 +450,6 @@ function renderHistory(rows) {
       '</p>';
   }
   box.innerHTML = html;
-}
-
-// ── CONSISTENCY CARD ─────────────────────────────────────────────────
-// streak_count is the product's existing canonical consistency counter
-// (surfaced by /api/progress/achievements). It is NOT re-derived here, and
-// the retired Level/XP hero strip is not reinstated — only this one signal.
-function loadConsistency() {
-  _getJSON('/api/progress/achievements').then(function (a) {
-    var streak = (a && a.streak) || 0;
-    _fillCard('wc-cons', String(streak) + ' ' + __t('progress.unit_day'), __t('progress.cons_sub'));
-  }).catch(function () {
-    _fillCard('wc-cons', '—', __t('progress.card_nodata'));
-  });
-}
-
-// ── AXIS INSIGHTS ────────────────────────────────────────────────────
-// Renders the existing deterministic insight payload. `tone` is the
-// endpoint's own field; it drives the accent AND a visible text label so the
-// signal is never carried by colour alone.
-function loadInsights() {
-  var box = _el('insight-list');
-  _getJSON('/api/progress/insights').then(function (d) {
-    var list = (d && d.insights) || [];
-    if (!box) return;
-    if (!list.length) {
-      box.innerHTML = _emptyState(__t('progress.insights_empty_title'), __t('progress.insights_empty_desc'));
-      return;
-    }
-    box.innerHTML = list.map(function (n) {
-      var tone = (n.tone === 'success' || n.tone === 'warning') ? n.tone : 'info';
-      return '<article class="insight-card" data-tone="' + tone + '">' +
-        '<div class="ic-head">' +
-          '<span class="ic-icon" aria-hidden="true">' + escapeHTML(n.icon || '💡') + '</span>' +
-          '<h3 class="ic-title">' + escapeHTML(n.title) + '</h3>' +
-          '<span class="ic-tone tone-' + tone + '">' + escapeHTML(__t('progress.tone_' + tone)) + '</span>' +
-        '</div>' +
-        '<p class="ic-body">' + escapeHTML(n.body) + '</p>' +
-      '</article>';
-    }).join('');
-  }).catch(function () { _sectionError(box); });
 }
 
 // ── PHYSIQUE PROGRESS ────────────────────────────────────────────────

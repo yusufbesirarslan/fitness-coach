@@ -117,7 +117,10 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             ("/api/v1/nutrition/logs/<entry_token>", ("PATCH",)),
             ("/api/v1/nutrition/logs/<entry_token>", ("DELETE",)),
             ("/api/v1/pump-checks", ("POST",)),
+            ("/api/v1/pump-checks", ("GET",)),
             ("/api/v1/pump-checks/<pump_check_token>", ("GET",)),
+            ("/api/v1/pump-check-comparisons", ("POST",)),
+            ("/api/v1/pump-check-comparisons/<comparison_id>", ("GET",)),
         }
 
 

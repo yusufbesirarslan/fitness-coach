@@ -8,7 +8,7 @@ from app.mobile_auth_middleware import require_mobile_auth
 from app.observability import current_request_id
 from app.services.ai_gate import mobile_ai_concurrency_gate
 from app.services import meal_idempotency
-from app.services.mobile_pump_checks import service
+from app.services.mobile_pump_checks import history, service
 from app.services.validators import validate_uploaded_pump_check_image
 
 
@@ -74,6 +74,34 @@ def create_pump_check():
             code = "PUMP_CHECK_PROVIDER_UNAVAILABLE"
         return mobile_error(
             code, "Pump Check is temporarily unavailable.", 503, True)
+
+
+@bp.get("/pump-checks")
+@require_mobile_auth
+def list_pump_checks():
+    """Owner-private paginated Pump Check history.
+
+    Scope comes from the authenticated principal only. Neither the query string
+    nor the cursor can name an owner.
+    """
+    try:
+        limit = history.parse_page_size(request.args.get("limit"))
+    except history.InvalidPageSize:
+        return mobile_error(
+            "INVALID_PAGE_SIZE",
+            f"limit must be an integer between 1 and {history.MAX_PAGE_SIZE}.",
+            400, False)
+    try:
+        page = history.list_history(
+            g.mobile_user.id,
+            current_app.config["SECRET_KEY"],
+            limit=limit,
+            cursor=request.args.get("cursor"),
+        )
+    except history.InvalidCursor:
+        return mobile_error(
+            "INVALID_PAGE_CURSOR", "The page cursor is not usable.", 400, False)
+    return jsonify(page)
 
 
 @bp.get("/pump-checks/<pump_check_token>")

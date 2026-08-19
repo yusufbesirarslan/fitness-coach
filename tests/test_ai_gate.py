@@ -288,6 +288,9 @@ EXPECTED_GATED_ENDPOINTS = {
     "training.training_plan_generate",    # antrenman planı (Sonnet)
     "training.complete_workout",          # pump-check görü doğrulama (N1)
     "mobile_api.create_pump_check",       # canonical mobile pump-check analysis
+    # iki görselli Pump Check karşılaştırması (Sprint 10 PR3) — tek Bedrock
+    # çağrısı, tıpkı tekil pump-check gibi bloklayıcı ağır-AI yüzeyi
+    "mobile_api.create_pump_check_comparison",
     "tracking.checkin",                   # haftalık check-in geri bildirimi (N2)
 }
 

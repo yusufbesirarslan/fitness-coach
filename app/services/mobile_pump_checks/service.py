@@ -167,12 +167,19 @@ def _claim_row(user_id, key, command):
 
 
 def create_or_replay(user_id, key, command):
+    """Return the canonical row and whether THIS call inserted it.
+
+    Concurrent calls race twice — for the row and for the analysis lease — and
+    the two winners are independent. Only `_claim_row` decides `created`; losing
+    the lease means another caller finishes the analysis, never that this caller
+    did not create the row.
+    """
     row, created = _claim_row(user_id, key, command)
     row_id = row.id
     db.session.rollback()
     attempt = _claim_analysis(row_id, user_id)
     if attempt is None:
-        return db.session.get(PumpCheck, row_id), False
+        return db.session.get(PumpCheck, row_id), created
     image_key = db.session.query(PumpCheck.image_key).filter_by(
         id=row_id, user_id=user_id).scalar()
     db.session.rollback()
@@ -193,7 +200,7 @@ def create_or_replay(user_id, key, command):
             ).update({PumpCheck.image_key: image_key}, synchronize_session=False)
             db.session.commit()
         if not _owns_attempt(row_id, user_id, attempt):
-            return db.session.get(PumpCheck, row_id), False
+            return db.session.get(PumpCheck, row_id), created
         analysis = analyze_image(
             command.image_bytes,
             command.media_type,
@@ -203,8 +210,7 @@ def create_or_replay(user_id, key, command):
                 "description": command.description,
             },
         )
-        if not _finalize_success(row_id, user_id, attempt, analysis):
-            return db.session.get(PumpCheck, row_id), False
+        _finalize_success(row_id, user_id, attempt, analysis)
         return db.session.get(PumpCheck, row_id), created
     except PersistenceFinalizationUncertain as exc:
         db.session.rollback()

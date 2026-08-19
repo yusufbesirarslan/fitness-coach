@@ -17,6 +17,14 @@ ADAPTIVE_PLAN_IMPORT_ALLOWLIST = {
     # the serializer-ownership guard below still leaves exactly one prompt contract.
     Path("app/services/weekly_program/__init__.py"),
     Path("app/services/weekly_program/analysis.py"),
+    # Progress Redesign PR3 — the Axis Insights consumer. Same standard as the
+    # weekly-program entry above: read-only, no planning decision of its own
+    # (NEXT MOVE is a 1:1 projection of AdaptivePlan.week_focus and the
+    # quantified adjustment is copied verbatim), and it emits frozen value
+    # objects rather than a prompt, so the serializer-ownership guard below
+    # still leaves exactly one prompt contract.
+    Path("app/services/progress_insights/__init__.py"),
+    Path("app/services/progress_insights/analysis.py"),
 }
 TRAINING_LAYERS = {
     "history": Path("app/services/training_history"),

@@ -4214,6 +4214,533 @@ proactive coaching, plateau/fatigue/adherence detection, nutrition-plan mutation
 One trap for whoever wires the transport: **the operation key must be stable
 across the retries of one logical user request.** A key minted per HTTP attempt
 provides no protection at all.
+# Sprint 10 PR3 Pump Check Comparison Intelligence (local, 2026-08-14)
+
+## Baseline validation finding (NOT a PR3 production change)
+
+Commit `a69c958 test: isolate audit app database configuration` fixed a
+deterministic pre-existing test-harness isolation defect discovered during
+mandatory baseline validation before any Sprint 10 PR3 production changes.
+`tests/test_frontend_audit_app.py` built an app whose SQLAlchemy configuration
+leaked into the process, so a later test in the same session
+(`tests/test_gamification_routes.py::test_leaderboard_orders_by_xp_then_streak`)
+failed depending on file order. The defect existed on the branch point; it is
+not caused by, and does not belong to, the comparison feature. It is listed
+separately from the PR3 commits in the implementation report and must be
+reviewed as a test-harness fix, not as feature work.
+
+Regression guard (re-run at PR3 HEAD):
+`python -m pytest -q tests/test_frontend_audit_app.py tests/test_gamification_routes.py::test_leaderboard_orders_by_xp_then_streak`
+then the single-test form — both PASS.
+
+## What shipped
+
+- Comparison is a SEPARATE owner-private authority over an explicitly ordered
+  PAIR of canonical PR1 Pump Checks. PR1 routes, payloads, prompt, schema, and
+  `pump_check` columns are byte-identical; no comparison field was added there.
+- Surface: `POST /api/v1/pump-check-comparisons` (create/replay/converge) and
+  owner-only read `GET /api/v1/pump-check-comparisons/<comparison_id>` on the
+  existing `mobile_api` blueprint (one `/api/v1` surface, one no-store, one 429,
+  the same `MOBILE_AUTH_ENABLED` gate).
+- The pair is DIRECTIONAL and never sorted; `baseline.captured_at` must precede
+  `current.captured_at`. Seven deterministic eligibility rules all finish before
+  any S3 read or Bedrock call, and a failure creates neither a comparison row
+  nor a ledger row.
+- Analysis contract `pump-check-comparison-analysis/v1`. `comparability` is
+  promoted out of the JSON into its own column so there is exactly one public
+  authority. `not_comparable` is a legitimate COMPLETED answer, never an error.
+  A `limited` source CAPS the result at `limited` — provider output claiming
+  `comparable` over a limited source is rejected as invalid output.
+- One bounded two-image Bedrock call. Each image is normalized IN MEMORY to at
+  most 1,500,000 bytes and a 1,600-pixel longest edge; the stored S3 object is
+  read but never modified, replaced, or re-uploaded. Stored PR1 narratives are
+  an ELIGIBILITY signal only and are never forwarded, so interpretations do not
+  compound.
+- The create route consumes the shared heavy-AI concurrency gate, exactly like
+  the single pump-check route, and is declared in
+  `tests/test_ai_gate.py::EXPECTED_GATED_ENDPOINTS` so the thread-reserve
+  invariant counts it.
+- Privacy: comparison IDs are owner-bound 144-bit URL-safe HMAC tokens
+  (`axisai/mobile-pump-check-comparison/id/v1`). Responses carry no image URL,
+  S3 key, internal ID, idempotency key, fingerprint, prompt, provider response,
+  model metadata, lease field, or failure internals. Account erasure removes
+  comparison rows and their ledger rows (`tests/test_cascade_delete.py`).
+
+## Convergence, leases, and the one accepted artifact
+
+Uniqueness on `(owner, baseline, current, analysis_version)` means two different
+Idempotency-Keys for the same directional pair CONVERGE on one row and one model
+call. Work is claimed by atomically moving `pending`, a reclaimable `failed`, or
+an EXPIRED `analyzing` lease (900 s) to `analyzing` with an incremented attempt
+generation; finalization is conditional on owner, id, status, and attempt, so a
+stale generation can never overwrite a newer result. An unexpired lease held by
+another worker returns that canonical `analyzing` representation with HTTP 200 —
+not an error. No transaction or row lock spans S3 or Bedrock I/O.
+
+Accepted, documented artifact: an idempotency conflict detected at
+ledger-attach time can leave an orphan `pending` comparison row, because the
+ledger's FK to `comparison_id` is NOT NULL and the row must exist before the
+ledger insert can be attempted. The pair unique constraint makes a later
+legitimate request CONVERGE onto that same row, so there is no duplicate model
+spend and no duplicate canonical comparison. Cleanup of orphan `pending` rows is
+PR4 retention work, not a correctness gap here.
+
+## Migration fa1b2c3d4e5f (sole head)
+
+Additive, no backfill, and VERIFY-OR-CREATE + re-runnable, because
+`app/db_init.py` runs `db.create_all()` BEFORE Alembic on a fresh database — so
+this table-creating migration also runs against a schema `create_all` already
+built. When the tables exist it does not blanket-skip: it reflects columns,
+types, indexes, and CHECK constraints and FAILS CLOSED on drift.
+
+Dialect-aware check verification was the one real production defect found and
+fixed on this branch (`425e657`). SQLAlchemy's inspector does NOT return
+PostgreSQL's `pg_get_constraintdef` text: it strips redundant parentheses around
+AND-groups and renders membership as `= ANY (ARRAY[...])` with a single opening
+paren. The verifier now canonicalizes both spellings — literals are masked, casts
+dropped, `ANY (ARRAY[...])` rewritten to an IN-list, and the predicate rebuilt
+through an explicit AND/OR tree — and it FAILS CLOSED (returns the input
+unchanged) if any token does not parse. Tolerating the spelling does not tolerate
+a wrong value: `tests/test_pump_check_comparison_migration.py` asserts the exact
+inspector reflection strings captured verbatim from real PostgreSQL 16 and real
+SQLite, and asserts that adding one unexpected enum member to the inspector's
+`ANY (ARRAY[...])` form still raises. The earlier tests only used
+`pg_get_constraintdef` forms, which is exactly why CI stayed green while a
+`create_all`-then-upgrade boot failed on PostgreSQL.
+
+## Verification (all local; nothing pushed)
+
+Executed at branch HEAD `3b3e131`:
+
+- Disposable PostgreSQL 16: `create_all` → `db stamp e9f0a1b2c3d4` → `db upgrade`
+  exits 0 (the production fresh-DB boot path, previously broken).
+- Full `db upgrade` from an EMPTY PostgreSQL 16 database exits 0.
+- `flask --app starter db heads` → `fa1b2c3d4e5f (head)` only.
+- `flask --app starter db check` → "No new upgrade operations detected", exit 0
+  (zero model/migration drift).
+- Focused 13-module PR3 + adjacent suite: 338 passed.
+- Migration module alone: 36 passed.
+- All 8 authoritative modulo-8 file shards over 178 test files:
+  3654 passed, 9 skipped, 3 deselected, ZERO failures.
+  `pytest --collect-only -q` → 3658 collected / 3 deselected, exit 0.
+- Real opt-in PostgreSQL race suite (the exact CI command, 5 modules,
+  `FITX_PG_CONCURRENCY_TEST=1`): 17 passed — including comparison convergence on
+  one key, convergence across two keys, one-winner-one-conflict on a reused key
+  with different semantics, reversed-pair ineligibility BEFORE idempotency is
+  consulted, cross-user independence, stale-generation rejection, and
+  expired-lease reclamation by exactly one contender.
+
+Rollout: no new feature flag. The routes live behind the existing
+`MOBILE_AUTH_ENABLED` gate; rollback is the ordinary code rollback, and the
+migration is additive so it is safe to leave applied.
+
+Excluded from PR3 and still deferred: history, automatic previous-check
+selection, image URLs, Flutter/mobile client work, progress scores, heatmaps,
+body-fat estimates, numeric deltas, program rewrites, social behavior, a second
+provider, and all PR4 retention work.
+
+## Integration with an advanced `main` + shipping review (local, 2026-08-15)
+
+The section above was executed at `3b3e131`, before `main` advanced. Everything
+below supersedes it. Branch HEAD is now `62c26f1`, 23 ahead of `origin/main`
+(`9bc2998`) and 0 behind.
+
+**Alembic head divergence, resolved.** While this branch was open, `main` gained
+two children of `e9f0a1b2c3d4` — `f0a1b2c3d4e5` (water funnel marker) and
+`b3c4d5e6f7a8` (Adaptive Coaching S1 PR2). `fa1b2c3d4e5f` was a third sibling,
+which would have left the graph with **two heads** and forced boot's automatic
+`db upgrade` to pick one. It now chains off `b3c4d5e6f7a8`. `main` was merged in
+rather than rebased onto, because the brief and the committed reports both cite
+`a69c958` and `05cbb1f` by SHA and a rebase would rewrite them.
+
+**Two bounded review fixes** (neither changes the comparison architecture):
+
+- `c0d036a` — the shared safety validator passed two claim spellings in **all
+  seven** text fields of **both** the single-image and comparison contracts: a
+  bare growth/gain/hypertrophy **rate** (a quantified progress claim carrying no
+  digit, so the numeric patterns never saw it) and `skeletal disorder` /
+  `pathology` / `condition` (the diagnosis the medical pattern already blocked,
+  under a different noun; only "skeletal abnormality" was listed). An
+  adversarial probe pushing every §19/§20 string through the real parser in
+  every field went from **14 leaks to 0**.
+- `62c26f1` — `menu_ocr._extract_text_from_image` caught only
+  `ImageTooLargeError` from the shared preparer, but the preparer raises the
+  parent `ImagePreparationError` for an undecodable image. `app/blueprints/
+  menu.py:110` calls that path with no `try/except`, so an oversized *and*
+  undecodable upload produced a **500** where it used to produce the friendly
+  "could not read the menu" answer. Reproduced concretely, then fixed by
+  catching the parent class.
+
+### Verification — all re-executed at HEAD `62c26f1`
+
+Local interpreter Python 3.14.3; CI is authoritative on 3.11.
+
+PostgreSQL 16 (disposable container, every database recreated for the run):
+
+- full `db upgrade` from an **empty** database — exit 0; the chain ends
+  `b3c4d5e6f7a8 -> fa1b2c3d4e5f`.
+- `flask --app starter db heads` → **`fa1b2c3d4e5f (head)`**, sole head.
+- `flask --app starter db check` → **"No new upgrade operations detected"**,
+  exit 0 — zero model/migration drift.
+- real fresh-DB boot path (`create_all` → automatic stamp → automatic upgrade) →
+  `alembic_version = ['fa1b2c3d4e5f']`, with `pump_check`, `pump_check_comment`,
+  `pump_check_comparison`, `pump_check_comparison_request`, `pump_check_like`
+  and `plan_mutation_record` all present.
+- incremental upgrade from `main`'s head (`b3c4d5e6f7a8`) to this branch's head —
+  exit 0; comparison tables **0 before, 2 after**.
+- schema-drift probe, **9/9 as designed**: `compatible_untouched` ACCEPTED,
+  `missing_request_table` ACCEPTED (recreated), and REJECTED with an explicit
+  message for `missing_column`, `widened_comparability_check`,
+  `analysis_json_not_jsonb`, `timezone_aware_created_at`, `dropped_pair_unique`,
+  `dropped_ledger_unique`, `nullable_analysis_version`.
+- real opt-in race suite, the **exact CI command** (6 modules, `-m
+  pg_concurrency`, `FITX_PG_CONCURRENCY_TEST=1`) — **22 passed**.
+
+Full local suite, 8 deterministic modulo-8 shards over 181 test files, every
+shard exit 0:
+
+| Shard | Result |
+|---|---|
+| 0 | 721 passed, 1 skipped |
+| 1 | 415 passed, 4 skipped |
+| 2 | 443 passed |
+| 3 | 467 passed |
+| 4 | 506 passed, 1 skipped |
+| 5 | 417 passed |
+| 6 | 395 passed, 2 skipped |
+| 7 | 477 passed, 2 skipped |
+| **Total** | **3841 passed, 10 skipped, ZERO failures** |
+
+Collection reconciles exactly: `pytest --collect-only -q` over `tests/` reports
+**3845/3848 collected (3 deselected**, the `-m "not load"` load tests), and the
+same 8 shard file groups collect 721/418/443/467/506/417/396/477 = **3845**. The
+run reports 3841 passed + 10 skipped = 3851 outcome lines; the 6-line difference
+is the six `pg_concurrency` modules, which call
+`pytest.skip(..., allow_module_level=True)` at **collection** time — one skip
+line each, zero collected items each. 3845 = 3841 passed + 4 in-run skips.
+
+# Progress Redesign PR2 — Canonical Progress Summary & Trajectory Read Model (local, 2026-08-15)
+
+Branch `feat/progress-redesign-pr2-summary`, worktree
+`.worktrees/progress-redesign-pr2`, based on `origin/main` `9bc2998`. PR1 (#212,
+`336a420`) is an ancestor. **Not merged, not deployed, no production config
+touched.**
+
+Full architecture: **docs/PROGRESS_SUMMARY.md**.
+
+## What shipped
+
+PR1 built the Progress information architecture and deliberately left the
+trajectory neutral, because no authority existed to fill it. PR2 builds that
+authority: one server-owned, deterministic read model behind
+`GET /api/progress/summary`, and YOUR PROGRESS / BODY / PERFORMANCE /
+CONSISTENCY all render it. The page can no longer show a card that disagrees
+with its own headline, because there is only one answer to disagree with.
+
+New package `app/services/progress_summary/`, layered exactly like
+`training_progression`: `models.py` (frozen value objects + every bounded state
+constant) · `analysis.py` (pure mappings, no DB/Flask/clock) · `queries.py` (the
+only impure reads: `User.weight` / `User.target_weight` / qualifying
+`WeeklyCheckIn` rows) · `payload.py` (explicit wire projection) · `__init__.py`
+(`build_progress_summary` orchestrator).
+
+Three trajectory states — `building_baseline`, `on_track`, `needs_attention`.
+No `off_track`. No score of any kind.
+
+**No schema change, no migration, no persistence, no cache, no LLM call.** The
+summary is recomputed per request. Every pre-existing endpoint
+(`/api/progress/workout`, `/api/progress/achievements`, `/checkin-history`,
+`/api/progress/insights`, `/api/progress/heatmap`, Pump Check) is untouched and
+keeps its other consumers.
+
+## Decisions worth not re-litigating
+
+- **The trajectory is training-led, and body does not vote.**
+  `training_progression` is the only domain with a validated, documented
+  longitudinal authority, and it already resolves its own overlapping booleans
+  into one `next_signal` with a fixed precedence. This layer consumes that
+  resolution and maps it — it does not build a second precedence chain out of
+  `is_plateau` / `deload_due`, which would put two disagreeing authorities in
+  one product. Deciding whether a weight movement is "good" would require
+  inventing rate thresholds the repo has no authority to create, so BODY is
+  context only. `test_body_does_not_override_the_training_trajectory` proves it
+  in both directions — a 4 kg gain and a 4 kg loss leave the state
+  byte-identical.
+
+- **An unknown `next_signal` raises; it does not degrade to a state.**
+  `UnknownProgressionSignal` → generic 500. Mapping unknown → `on_track` would
+  invent success; mapping it → `building_baseline` would report a *contract
+  drift* (a system fault) as "you haven't logged enough yet", which is a lie
+  about the user. Infrastructure failure and insufficient evidence are different
+  states and stay visibly different, on the client too: a failed fetch renders
+  `progress.traj_unavailable`, never a trajectory.
+
+- **`end_day` is resolved once, in the orchestrator.** Letting
+  `build_progression_report` default its own `end_day` while the window builder
+  read the clock again would let a request straddling Istanbul midnight report a
+  window the signals were not computed over. `start` also comes from
+  `weekly_windows(end_day, 4)[0]` — the same call the report makes — rather than
+  parallel date arithmetic that could drift.
+
+- **Sparse `/update-weight` rows are not check-ins, and the two concepts stay
+  separate.** "Qualifying" means `yogunluk IS NOT NULL`, the exact filter
+  `/checkin-history` and `/api/progress/insights` already use (BUG-5). A sparse
+  row is a perfectly good answer to *what does this user weigh* — so it feeds
+  the current-weight fallback — and not an answer to *is this a Progress
+  observation* — so it never produces a delta.
+
+- **Missing is not zero.** No target weight (or a stored non-positive one) →
+  `null`, matching the mobile nutrition boundary's non-positive calorie goal.
+  Fewer than two qualifying check-ins → `weight_delta_kg: null`, not `0.0`. But
+  four analyzed weeks with nothing trained → `sessions: 0`, a real measured
+  zero.
+
+- **Stored weights are echoed unrounded; only derived values round** (delta and
+  distance, 1 dp), matching `/api/progress/insights`.
+
+- **The client translates, it never decides.** Every state arrives as a bounded
+  enum and is looked up in an explicit table; an enum the build does not know
+  renders the neutral state rather than a guess.
+  `test_client_never_fabricates_a_trajectory` scans the file structurally and
+  rejects any threshold on a summary field. It has already earned its keep: it
+  caught an `analyzed_weeks > 0` display guard, which was removed rather than
+  exempted.
+
+- **The gamification streak is no longer a Progress consistency signal.**
+  Logging in is not training. `/api/progress/achievements` is unchanged and
+  still serves its other consumers.
+
+- **Trajectory is never carried by colour alone.** `#ps-state` always spells the
+  state out, and `data-state` (which tints only the card's left rule — no filled
+  red/green verdict background) is written by the same function that writes the
+  label.
+
+## Known interaction (documented, unchanged on purpose)
+
+`app/hooks.py::update_streak` is an app-wide `before_request` hook that writes
+`streak_count` on the first *authenticated* request of the day — including a
+`GET /api/progress/summary` that happens to be first. That is not this
+endpoint's write, and `test_summary_read_performs_no_write` isolates it with a
+warm-up request before capturing its baseline. Worth knowing before anyone reads
+a streak change on a read endpoint as a bug in this package.
+
+## Deferred to PR3 / PR4
+
+**PR3 — AXIS INSIGHTS intelligence:** What's Working / Watch This / Next Move,
+cross-domain narrative, recommendations. PR2 answers *how am I doing* and *why*
+at a bounded deterministic level; it does not answer *what should I do next*.
+**PR4 — Physique Progress:** Pump Check comparison, visual progression,
+body-region change. A future body-trajectory authority is recorded in
+docs/PROGRESS_SUMMARY.md §12, not implemented. Nutrition and recovery are
+excluded from V1 classification on purpose — the weekly check-in carries
+sleep/fatigue data but nothing validates it as a Progress authority, and using
+it would create exactly the hidden scoring model the design forbids.
+
+# Progress Redesign PR3 — Canonical Axis Insights & Next-Action Intelligence (local, 2026-08-16)
+
+Branch `feat/progress-redesign-pr3-axis-insights`, worktree
+`.worktrees/progress-redesign-pr3-axis-insights`, based on `origin/main`
+`d3fa061`. PR1 (#212, `336a420`) and PR2 (#215, `d3fa061`) are ancestors.
+**Not merged, not deployed, no production config touched, no rollout flag added
+or changed.**
+
+Full architecture: **docs/PROGRESS_INSIGHTS.md**.
+
+## Baseline
+
+`origin/main` = `d3fa0611989f3309de1d9e8ca5855ba66c60a128` at branch time, which
+matches the SHA the brief expected. `app/services/progress_summary/` and
+`GET /api/progress/summary` are present, so PR2 is really in the base. No open
+PR touches the Progress Insights surface. `AdaptivePlan` exists and is stable
+(`app/services/training_planning`), so the next-action authority PR3 requires
+was already there to project.
+
+## What shipped
+
+PR2 made Progress *truthful* — one server-owned answer to "how am I doing".
+PR3 makes it *useful without making it speculative*, in exactly three slots:
+
+```
+WHAT'S WORKING   the one positive signal worth saying out loud
+WATCH THIS       the one concern that outranks the others
+NEXT MOVE        the canonical next training action
+```
+
+New package `app/services/progress_insights/`, layered like `progress_summary`
+minus one module: `models.py` (frozen value objects + every bounded vocabulary
+constant) · `analysis.py` (pure slot selection, no DB/Flask/clock) · `payload.py`
+(explicit wire projection) · `__init__.py` (`build_progress_insights`).
+
+New read-only endpoint `GET /api/progress/axis-insights` (`@require_auth`, no
+input at all, `Cache-Control: private, no-store`), a new client module
+`static/progress_insights.js`, the AXIS INSIGHTS markup in `templates/progress.html`
+rebuilt as three labelled slots, and 26 additive keys in each of
+`locales/en.json` / `locales/tr.json`.
+
+**No schema change, no migration, no persistence, no cache, no LLM/provider
+call, no prompt, no feature flag.** The insights are recomputed per request.
+
+## Ownership map (what this layer does and does not own)
+
+| Concept | Owner |
+|---|---|
+| Which canonical signal earns which slot | `progress_insights` (**new**) |
+| Trajectory / performance / consistency / body | `progress_summary` (unchanged) |
+| `week_focus`, volume & intensity action, `volume_delta_pct` | `training_planning` (unchanged) |
+| Trend / plateau / deload / `next_signal` | `training_progression` (unchanged) |
+| History, week geometry, marker semantics | `training_history` (unchanged) |
+
+`progress_insights → {progress_summary, training_planning} → training_progression
+→ training_history`. One-way, no cycles, pinned by
+`test_dependency_direction_is_one_way`.
+
+## Decisions worth not re-litigating
+
+- **This layer measures nothing.** Not one threshold, count, percentage or trend
+  is computed in it. That is what lets a third Progress module exist without
+  becoming a third progress authority. A structural test rejects numeric module
+  constants in `analysis.py`.
+- **NEXT MOVE comes from `AdaptivePlan.week_focus` and from nothing else.**
+  Sessions, volume trend, strength trend, consistency counts, trajectory and
+  body change are evidence the planner already weighed; re-deriving a move from
+  them here would be a second planning engine able to contradict the AI Coach,
+  the weekly program surface and the plan page — all of which read the same
+  planner. The quantified adjustment is copied verbatim, and a test compares the
+  published fraction against `VOLUME_INCREASE_STEP` / `DELOAD_VOLUME_CUT`.
+- **WATCH THIS walks the planner's own `reason_codes` order.** Position 0 is the
+  planner's primary cause; re-sorting here would be the duplicated authority the
+  brief forbids. The attention-worthy codes and the explicitly-not-a-concern
+  codes (`insufficient_history`, `progressing`, `steady_state`) *partition* the
+  planner's whole vocabulary, so an unrecognised code is unambiguously new and
+  raises instead of degrading into an all-clear.
+- **A secondary reason still surfaces under a non-attention primary.** When the
+  planner emits `["steady_state", "volume_trend_down"]` it has chosen not to
+  *act* on the down-trend while still recording it. Surfacing that recorded code
+  is not an invented warning — it is the planner's own.
+- **Consistency can be praised while the trajectory is `needs_attention`.** A
+  user with a plateau or a due deload has still trained consistently, and saying
+  so is true. Its copy describes consistency and nothing else, so it cannot read
+  as "everything is fine". This is the invariant WHAT'S WORKING exists for.
+- **`plateau` / `deload` / `building_consistency` map to no positive code.**
+  None of them is a positive claim; manufacturing one is exactly what that slot
+  must not do.
+- **NEXT MOVE is always `available`.** With no history the planner still emits a
+  real canonical decision (`insufficient_data` → `build_baseline`) — "log some
+  training so there is something to coach on" is a genuine next move, not a
+  filled-in blank.
+- **`empty` ≠ `insufficient_data` ≠ failure.** "Nothing needs your attention" is
+  a finding, "we cannot tell yet" is an evidence gap, and an outage is a generic
+  500 the client renders as `unavailable`. A failure is never shown as an empty
+  insight. All three are pinned by tests and audited in the browser matrix.
+- **Unknown canonical vocabulary fails closed** (`UnknownCanonicalVocabulary` →
+  generic 500), following PR2's `UnknownProgressionSignal` precedent. Both
+  plausible fallbacks would publish something nobody decided.
+- **There is deliberately no `queries.py`.** A read of its own would make this
+  layer the owner of a fact nobody else owns — the second authority PR3 exists
+  to prevent. Everything is composed from existing *public pure* functions over
+  a **single** `build_progression_report` call, and
+  `test_history_is_read_exactly_once` pins that count at one. No refactor of
+  `progress_summary` or `training_planning` was needed: both pure functions were
+  already exported.
+- **The window is imported, not re-declared.** `INSIGHTS_WEEKS = SUMMARY_WEEKS`,
+  and a test asserts the two endpoints publish an identical window — the two
+  sections cannot describe different periods. `end_day` is resolved once, so a
+  request straddling Istanbul midnight cannot split the two branches.
+- **The body is not judged, and nutrition/recovery/hydration are excluded.** No
+  validated rate-of-change authority exists for any of them in this build.
+  `DOMAINS = ("training",)` is a single-element tuple and the contract already
+  carries `domain`, so a future domain arrives additively.
+- **The client translates, it does not decide.** One endpoint, an explicit
+  code→locale table, unknown code degrades to neutral copy, and structural tests
+  reject thresholds, scores, percentage arithmetic and any numeric comparison.
+  The only number rendered is `volume_delta_pct`, *formatted* by
+  `Intl.NumberFormat`, never computed. It lives in its own module rather than in
+  `progress.js` so PR2's "client never fabricates a trajectory" guard stayed
+  exactly as strict as it was.
+
+## Contract
+
+```
+GET /api/progress/axis-insights   →   { contract_version, window,
+                                        working, watch, next_move }
+```
+
+Each slot always carries the same five keys (`status`, `code`, `domain`,
+`evidence`, `action`), so a client never branches on key existence. No lists, no
+prose, no ids, no ORM serialization, no free text. `status` ∈ {`available`,
+`empty`, `insufficient_data`}. `null` means unavailable; `0` means a measured
+zero.
+
+Decision tables (all exhaustive over the upstream vocabulary, all asserted):
+
+| `week_focus` → NEXT MOVE | | planner reason → WATCH | | performance/consistency → WORKING |
+|---|---|---|---|---|
+| `insufficient_data` → `build_baseline` | | `inconsistent_training` → `build_consistency` | | `progressing` → `training_progressing` |
+| `build_consistency` → `prioritize_consistency` | | `deload_due` → `deload_due` | | `steady` → `training_steady` |
+| `deload` → `deload` | | `plateau_detected` → `plateau_detected` | | consistency `consistent` → `training_consistent` |
+| `maintenance` → `maintain_and_consolidate` | | `volume_trend_down` → `volume_trend_down` | | `building_baseline` → *insufficient_data* |
+| `overload` → `progress_training` | | `strength_trend_down` → `strength_trend_down` | | otherwise → *empty* |
+| `steady` → `maintain_current_training` | | (3 codes explicitly not a concern) | | |
+
+## Verification
+
+- `tests/test_progress_insights.py` (43) — decision tables vs the upstream
+  tables, reachability of every published code, per-signal decision matrix,
+  fail-closed params, verbatim action projection, bounded evidence, window
+  equality, determinism, user isolation, no-write, exactly one history read, one
+  clock read, dependency direction, no ORM/Flask import, no provider words.
+- `tests/test_progress_insights_api.py` (18) — auth, `?user_id=` ignored, window
+  pinned and not query-driven, versioned bounded contract, no lists, action
+  fraction, no identifier/prose leak, `private, no-store`, empty-user baseline
+  move, failure ≠ empty, contract drift → 500, failure isolation, legacy
+  byte-shape preserved, routes independent.
+- `tests/test_progress_insights_ui.py` (17) — three labelled slots in order,
+  H2/H3 semantics, structural without JS, no carousel/tabs/chart, client reads
+  only the new endpoint, **no decision threshold in the client**, three-way
+  locale symmetry, all statuses handled, unknown code degrades, EN/TR symmetry,
+  non-judgemental copy, failure ≠ empty, status not colour-only, `progress.js`
+  hand-off, script order, check-in refresh.
+- Browser evidence: `scripts/frontend_audit/progress_pr3_matrix.py` →
+  `docs/frontend-readiness/progress-pr3/validation-manifest.json`. Hermetic
+  Chromium via the Sprint-0 harness, fixed Istanbul clock (2026-07-20), **28/28
+  cells passed, 0 failed, 0 blocked, `seed_drift: {}`** — 6 canonical states plus
+  the endpoint-failure state × 4 viewports (390 / 768 / 1280 / 1440), 14 curated
+  screenshots. Seeds are verified against the *service's* own output before any
+  capture, so a drifting seed fails loudly instead of auditing the wrong state.
+  Run it from WSL (the Windows host is hard-gated unsupported by
+  `preflight.classify_environment`).
+
+Two harness-only fixes came out of the first run and are worth knowing: the
+matrix now waits for all three slots to carry a `data-status` instead of a fixed
+timeout (the async read was being raced), and the console-error gate filters the
+analytics tag's offline CSP noise plus the failure cells' own injected 500 —
+both are recorded in the manifest either way (`console_errors` vs
+`own_console_errors`), so nothing is hidden.
+
+## Conflict risk
+
+Low and confined. `app/blueprints/tracking.py` gains an import block, one path
+constant, one route, and `_progress_summary_error_class` now buckets
+`UnknownCanonicalVocabulary` alongside `UnknownProgressionSignal` (the helper
+name is unchanged because `tests/test_progress_summary_api.py` references it).
+`templates/progress.html` and `static/progress.css` change only inside the AXIS
+INSIGHTS region — `id="insight-list"` and `aria-live="polite"` are kept because
+PR1 asserts them. `static/progress.js` loses `loadInsights()` and calls
+`loadAxisInsights()` instead. Locale files are **purely additive** (+26 / +26,
+zero deletions, no reformatting).
+
+## Rollback
+
+Revert the commit. There is no flag, no migration, no persisted state, and no
+production config to unwind. The legacy `GET /api/progress/insights` route was
+never touched, so a revert restores the old section by itself.
+
+## Deferred
+
+PR4 (Pump Check / physique comparison) and PR5 (Progress History) are untouched.
+Nutrition, recovery and hydration insight domains, body verdicts, gamification
+signals, insight persistence/caching and any mobile/Flutter surface are excluded
+from PR3 on purpose — see docs/PROGRESS_INSIGHTS.md §7 and §13.
 
 # Adaptive Coaching Sprint 1 PR3 — AI Coach Training-Plan Tool Integration (local, 2026-08-16)
 
