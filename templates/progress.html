@@ -135,10 +135,10 @@
     </section>
 
     <!-- ══ 5 · PROGRESS HISTORY ══
-         Rows, not charts. Each row is one existing weekly check-in; the only
-         derived number is the weight delta against the PREVIOUS check-in,
-         which the product already computes canonically in
-         /api/progress/insights. No week is classified. -->
+         PR5: reconstructed historical Progress state, server-owned.
+         GET /api/progress/history decides the rows; static/progress_history.js
+         only translates them. The browser never classifies a period and never
+         computes a weight delta. -->
     <section class="prog-section" aria-labelledby="ph-h">
         <h2 class="sec-label" id="ph-h">{{ t('progress.history_label') }}</h2>
         <div id="history-list" aria-live="polite">
@@ -240,6 +240,7 @@
    above — that is a form default, not a Progress signal. #}
 <script src="/static/progress_insights.js?v={{ _v }}"></script>
 <script src="/static/progress_physique.js?v={{ _v }}"></script>
+<script src="/static/progress_history.js?v={{ _v }}"></script>
 <script src="/static/progress.js?v={{ _v }}"></script>
 <script src="/static/coach_widget.js?v={{ _v }}"></script>
 <script src="/static/actions.js?v={{ _v }}"></script>

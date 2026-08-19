@@ -1,0 +1,3646 @@
+{
+  "schema_version": "1.0.0",
+  "pr": "progress-redesign-pr5-history-convergence",
+  "engine": "chromium",
+  "hermetic": true,
+  "audit_day": "2026-07-20",
+  "seed_summary": {
+    "users": 12,
+    "training_plans": 7,
+    "meal_logs": 6,
+    "workout_logs": 1,
+    "coach_messages": 2,
+    "wearable_connections": 1,
+    "history_rows": {
+      "empty": 0,
+      "sparse_only": 2,
+      "one_baseline": 1,
+      "mixed": 2,
+      "on_track_expanded": 1,
+      "needs_attention_expanded": 1,
+      "missing_weight": 1,
+      "bounded_has_more": 13
+    }
+  },
+  "observed_states": {
+    "empty": {
+      "scenario": "social-empty",
+      "state": "empty",
+      "entry_count": 0,
+      "has_more": false,
+      "trajectories": [],
+      "newest_weight": null
+    },
+    "sparse_only": {
+      "scenario": "active-rest-day",
+      "state": "empty",
+      "entry_count": 0,
+      "has_more": false,
+      "trajectories": [],
+      "newest_weight": null
+    },
+    "one_baseline": {
+      "scenario": "coach-history",
+      "state": "available",
+      "entry_count": 1,
+      "has_more": false,
+      "trajectories": [
+        "building_baseline"
+      ],
+      "newest_weight": 78.4
+    },
+    "mixed": {
+      "scenario": "wearable-connected",
+      "state": "available",
+      "entry_count": 2,
+      "has_more": false,
+      "trajectories": [
+        "on_track",
+        "building_baseline"
+      ],
+      "newest_weight": 78.4
+    },
+    "on_track_expanded": {
+      "scenario": "active-workout",
+      "state": "available",
+      "entry_count": 1,
+      "has_more": false,
+      "trajectories": [
+        "on_track"
+      ],
+      "newest_weight": 78.4
+    },
+    "needs_attention_expanded": {
+      "scenario": "wearable-disconnected",
+      "state": "available",
+      "entry_count": 1,
+      "has_more": false,
+      "trajectories": [
+        "needs_attention"
+      ],
+      "newest_weight": 80.0
+    },
+    "missing_weight": {
+      "scenario": "progress-history",
+      "state": "available",
+      "entry_count": 1,
+      "has_more": false,
+      "trajectories": [
+        "building_baseline"
+      ],
+      "newest_weight": null
+    },
+    "bounded_has_more": {
+      "scenario": "completed-workout",
+      "state": "available",
+      "entry_count": 12,
+      "has_more": true,
+      "trajectories": [
+        "building_baseline",
+        "building_baseline",
+        "building_baseline",
+        "building_baseline",
+        "building_baseline",
+        "building_baseline",
+        "building_baseline",
+        "building_baseline",
+        "building_baseline",
+        "building_baseline",
+        "building_baseline",
+        "building_baseline"
+      ],
+      "newest_weight": 82.0
+    }
+  },
+  "seed_drift": {},
+  "viewports": {
+    "390": {
+      "width": 390,
+      "height": 844
+    },
+    "768": {
+      "width": 768,
+      "height": 1024
+    },
+    "1280": {
+      "width": 1280,
+      "height": 800
+    },
+    "1440": {
+      "width": 1440,
+      "height": 900
+    }
+  },
+  "totals": {
+    "cells": 36,
+    "passed": 36,
+    "failed": 0,
+    "blocked": 0
+  },
+  "failed_ids": [],
+  "blocked_ids": [],
+  "cells": [
+    {
+      "id": "progress-history__empty__390",
+      "state": "empty",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "social-empty",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1519870696.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=9&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~119381663~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=5459&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1519870696.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=9&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~119381663~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=5459&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "empty",
+        "history_status": null,
+        "history_text": "Henüz check-in yokİlk haftalık check-in'ini yaptığında Progress geçmişin burada listelenecek.",
+        "history_text_len": 93,
+        "item_count": 0,
+        "items": [],
+        "has_more": false,
+        "empty": true,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__empty__390.png"
+    },
+    {
+      "id": "progress-history__empty__768",
+      "state": "empty",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "social-empty",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1715871786.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=15&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938468~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3752&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1715871786.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=15&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938468~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3752&gaf=1. Refused to connect because it violates the document's Content Security Policy.",
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1715871786.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=15&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938465~115938468~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=3945&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1715871786.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=15&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938465~115938468~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=3945&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/workout/status",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "empty",
+        "history_status": null,
+        "history_text": "Henüz check-in yokİlk haftalık check-in'ini yaptığında Progress geçmişin burada listelenecek.",
+        "history_text_len": 93,
+        "item_count": 0,
+        "items": [],
+        "has_more": false,
+        "empty": true,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__empty__1280",
+      "state": "empty",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "social-empty",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "empty",
+        "history_status": null,
+        "history_text": "Henüz check-in yokİlk haftalık check-in'ini yaptığında Progress geçmişin burada listelenecek.",
+        "history_text_len": 93,
+        "item_count": 0,
+        "items": [],
+        "has_more": false,
+        "empty": true,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__empty__1440",
+      "state": "empty",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "social-empty",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "empty",
+        "history_status": null,
+        "history_text": "Henüz check-in yokİlk haftalık check-in'ini yaptığında Progress geçmişin burada listelenecek.",
+        "history_text_len": 93,
+        "item_count": 0,
+        "items": [],
+        "has_more": false,
+        "empty": true,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__empty__1440.png"
+    },
+    {
+      "id": "progress-history__sparse_only__390",
+      "state": "sparse_only",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "active-rest-day",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=379480872.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938469~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2756&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=379480872.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938469~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2756&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "empty",
+        "history_status": null,
+        "history_text": "Henüz check-in yokİlk haftalık check-in'ini yaptığında Progress geçmişin burada listelenecek.",
+        "history_text_len": 93,
+        "item_count": 0,
+        "items": [],
+        "has_more": false,
+        "empty": true,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__sparse_only__390.png"
+    },
+    {
+      "id": "progress-history__sparse_only__768",
+      "state": "sparse_only",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "active-rest-day",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=2136512368.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=5&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938465~115938469~118897920~118897930~119367802~119367810~119793972~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2799&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=2136512368.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=5&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938465~115938469~118897920~118897930~119367802~119367810~119793972~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2799&gaf=1. Refused to connect because it violates the document's Content Security Policy.",
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=2136512368.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=5&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115616985~115938465~115938469~118897920~118897930~119367802~119367810~119793972~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=3079&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=2136512368.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=5&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115616985~115938465~115938469~118897920~118897930~119367802~119367810~119793972~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=3079&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/workout/status",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "empty",
+        "history_status": null,
+        "history_text": "Henüz check-in yokİlk haftalık check-in'ini yaptığında Progress geçmişin burada listelenecek.",
+        "history_text_len": 93,
+        "item_count": 0,
+        "items": [],
+        "has_more": false,
+        "empty": true,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__sparse_only__1280",
+      "state": "sparse_only",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "active-rest-day",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1736843359.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=5&sr=1280x800&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3194&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1736843359.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=5&sr=1280x800&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3194&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "empty",
+        "history_status": null,
+        "history_text": "Henüz check-in yokİlk haftalık check-in'ini yaptığında Progress geçmişin burada listelenecek.",
+        "history_text_len": 93,
+        "item_count": 0,
+        "items": [],
+        "has_more": false,
+        "empty": true,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__sparse_only__1440",
+      "state": "sparse_only",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "active-rest-day",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "empty",
+        "history_status": null,
+        "history_text": "Henüz check-in yokİlk haftalık check-in'ini yaptığında Progress geçmişin burada listelenecek.",
+        "history_text_len": 93,
+        "item_count": 0,
+        "items": [],
+        "has_more": false,
+        "empty": true,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__sparse_only__1440.png"
+    },
+    {
+      "id": "progress-history__one_baseline__390",
+      "state": "one_baseline",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "coach-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR78.4 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut78.4 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 295,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "20 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "78.4 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__one_baseline__390.png"
+    },
+    {
+      "id": "progress-history__one_baseline__768",
+      "state": "one_baseline",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "coach-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=469800110.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=14&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938465~115938469~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3826&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=469800110.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=14&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938465~115938469~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3826&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/last-session",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/workout/status",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR78.4 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut78.4 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 295,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "20 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "78.4 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__one_baseline__1280",
+      "state": "one_baseline",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "coach-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1907457999.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=1280x800&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3328&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1907457999.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=1280x800&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3328&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR78.4 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut78.4 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 295,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "20 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "78.4 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__one_baseline__1440",
+      "state": "one_baseline",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "coach-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=929991985.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=8&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3490&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=929991985.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=8&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3490&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR78.4 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut78.4 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 295,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "20 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "78.4 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__one_baseline__1440.png"
+    },
+    {
+      "id": "progress-history__mixed__390",
+      "state": "mixed",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "wearable-connected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68i0h2v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=55498754.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=1&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3322&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68i0h2v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=55498754.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=1&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3322&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/last-session",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/workout/status",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026YOLUNDAİlerliyor · SÜREKLİ78.4 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026Performansİlerliyor · Hacim yükseliyorTutarlılıkSÜREKLİ · 4 seans · Son 4 haftanın 4 tanesi aktifVücut78.4 kg · -3.6 kg22 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR82.0 kgBu check-in'e kadarki verine göre4 haftalık pencere26 May 2026 – 22 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut82.0 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 534,
+        "item_count": 2,
+        "items": [
+          {
+            "state": "on_track",
+            "traj": "YOLUNDA",
+            "date": "20 Tem 2026",
+            "meta": "İlerliyor · SÜREKLİ",
+            "weight": "78.4 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "22 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "82.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-1",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "YOLUNDA",
+        "what_changed_cards": 3,
+        "axis_working_status": "available",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__mixed__390.png"
+    },
+    {
+      "id": "progress-history__mixed__768",
+      "state": "mixed",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "wearable-connected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=253971462.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=19&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938468~118897920~118897930~119367802~119367810~120213116~120315471~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=4252&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=253971462.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=19&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938468~118897920~118897930~119367802~119367810~120213116~120315471~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=4252&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/workout/status",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/last-session",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/water",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026YOLUNDAİlerliyor · SÜREKLİ78.4 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026Performansİlerliyor · Hacim yükseliyorTutarlılıkSÜREKLİ · 4 seans · Son 4 haftanın 4 tanesi aktifVücut78.4 kg · -3.6 kg22 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR82.0 kgBu check-in'e kadarki verine göre4 haftalık pencere26 May 2026 – 22 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut82.0 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 534,
+        "item_count": 2,
+        "items": [
+          {
+            "state": "on_track",
+            "traj": "YOLUNDA",
+            "date": "20 Tem 2026",
+            "meta": "İlerliyor · SÜREKLİ",
+            "weight": "78.4 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "22 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "82.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-1",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "YOLUNDA",
+        "what_changed_cards": 3,
+        "axis_working_status": "available",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__mixed__1280",
+      "state": "mixed",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "wearable-connected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1714661590.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=14&sr=1280x800&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3466&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1714661590.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=14&sr=1280x800&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3466&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/workout/status",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026YOLUNDAİlerliyor · SÜREKLİ78.4 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026Performansİlerliyor · Hacim yükseliyorTutarlılıkSÜREKLİ · 4 seans · Son 4 haftanın 4 tanesi aktifVücut78.4 kg · -3.6 kg22 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR82.0 kgBu check-in'e kadarki verine göre4 haftalık pencere26 May 2026 – 22 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut82.0 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 534,
+        "item_count": 2,
+        "items": [
+          {
+            "state": "on_track",
+            "traj": "YOLUNDA",
+            "date": "20 Tem 2026",
+            "meta": "İlerliyor · SÜREKLİ",
+            "weight": "78.4 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "22 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "82.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-1",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "YOLUNDA",
+        "what_changed_cards": 3,
+        "axis_working_status": "available",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__mixed__1440",
+      "state": "mixed",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "wearable-connected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1896257158.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=9&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3179&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1896257158.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=9&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3179&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/workout/status",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/last-session",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026YOLUNDAİlerliyor · SÜREKLİ78.4 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026Performansİlerliyor · Hacim yükseliyorTutarlılıkSÜREKLİ · 4 seans · Son 4 haftanın 4 tanesi aktifVücut78.4 kg · -3.6 kg22 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR82.0 kgBu check-in'e kadarki verine göre4 haftalık pencere26 May 2026 – 22 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut82.0 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 534,
+        "item_count": 2,
+        "items": [
+          {
+            "state": "on_track",
+            "traj": "YOLUNDA",
+            "date": "20 Tem 2026",
+            "meta": "İlerliyor · SÜREKLİ",
+            "weight": "78.4 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "22 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "82.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-1",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "YOLUNDA",
+        "what_changed_cards": 3,
+        "axis_working_status": "available",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__mixed__1440.png"
+    },
+    {
+      "id": "progress-history__on_track_expanded__390",
+      "state": "on_track_expanded",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "active-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=790561902.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=18&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3185&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=790561902.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=18&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3185&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/workout/status",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026YOLUNDAİlerliyor · SÜREKLİ78.4 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026Performansİlerliyor · Hacim yükseliyorTutarlılıkSÜREKLİ · 4 seans · Son 4 haftanın 4 tanesi aktifVücut78.4 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 269,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "on_track",
+            "traj": "YOLUNDA",
+            "date": "20 Tem 2026",
+            "meta": "İlerliyor · SÜREKLİ",
+            "weight": "78.4 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "YOLUNDA",
+        "what_changed_cards": 3,
+        "axis_working_status": "available",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__on_track_expanded__390.png"
+    },
+    {
+      "id": "progress-history__on_track_expanded__768",
+      "state": "on_track_expanded",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "active-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68i0h2v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=496473352.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=1&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=3860&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68i0h2v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=496473352.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=1&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=3860&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026YOLUNDAİlerliyor · SÜREKLİ78.4 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026Performansİlerliyor · Hacim yükseliyorTutarlılıkSÜREKLİ · 4 seans · Son 4 haftanın 4 tanesi aktifVücut78.4 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 269,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "on_track",
+            "traj": "YOLUNDA",
+            "date": "20 Tem 2026",
+            "meta": "İlerliyor · SÜREKLİ",
+            "weight": "78.4 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "YOLUNDA",
+        "what_changed_cards": 3,
+        "axis_working_status": "available",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__on_track_expanded__1280",
+      "state": "on_track_expanded",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "active-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=171920862.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=2&sr=1280x800&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938465~115938468~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3059&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=171920862.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=2&sr=1280x800&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938465~115938468~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3059&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026YOLUNDAİlerliyor · SÜREKLİ78.4 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026Performansİlerliyor · Hacim yükseliyorTutarlılıkSÜREKLİ · 4 seans · Son 4 haftanın 4 tanesi aktifVücut78.4 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 269,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "on_track",
+            "traj": "YOLUNDA",
+            "date": "20 Tem 2026",
+            "meta": "İlerliyor · SÜREKLİ",
+            "weight": "78.4 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "YOLUNDA",
+        "what_changed_cards": 3,
+        "axis_working_status": "available",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__on_track_expanded__1440",
+      "state": "on_track_expanded",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "active-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=681219107.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=17&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2867&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=681219107.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=17&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=2867&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/last-session",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/workout/status",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026YOLUNDAİlerliyor · SÜREKLİ78.4 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026Performansİlerliyor · Hacim yükseliyorTutarlılıkSÜREKLİ · 4 seans · Son 4 haftanın 4 tanesi aktifVücut78.4 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 269,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "on_track",
+            "traj": "YOLUNDA",
+            "date": "20 Tem 2026",
+            "meta": "İlerliyor · SÜREKLİ",
+            "weight": "78.4 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "YOLUNDA",
+        "what_changed_cards": 3,
+        "axis_working_status": "available",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__on_track_expanded__1440.png"
+    },
+    {
+      "id": "progress-history__needs_attention_expanded__390",
+      "state": "needs_attention_expanded",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "wearable-disconnected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=52030933.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385423~120420414&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3696&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=52030933.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385423~120420414&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3696&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026DİKKAT GEREKİYORSüreklilik kuruluyor · SÜREKLİLİK GEREKLİ80.0 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansSüreklilik kuruluyor · Hacim sabitTutarlılıkSÜREKLİLİK GEREKLİ · 2 seans · Son 4 haftanın 2 tanesi aktifVücut80.0 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 317,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "needs_attention",
+            "traj": "DİKKAT GEREKİYOR",
+            "date": "20 Tem 2026",
+            "meta": "Süreklilik kuruluyor · SÜREKLİLİK GEREKLİ",
+            "weight": "80.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "DİKKAT GEREKİYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "empty",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__needs_attention_expanded__390.png"
+    },
+    {
+      "id": "progress-history__needs_attention_expanded__768",
+      "state": "needs_attention_expanded",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "wearable-disconnected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1828854130.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115616986~115938465~115938469~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=3951&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1828854130.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115616986~115938465~115938469~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=3951&gaf=1. Refused to connect because it violates the document's Content Security Policy.",
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1828854130.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938465~115938469~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3700&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1828854130.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938465~115938469~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3700&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/workout/status",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/coach/history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026DİKKAT GEREKİYORSüreklilik kuruluyor · SÜREKLİLİK GEREKLİ80.0 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansSüreklilik kuruluyor · Hacim sabitTutarlılıkSÜREKLİLİK GEREKLİ · 2 seans · Son 4 haftanın 2 tanesi aktifVücut80.0 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 317,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "needs_attention",
+            "traj": "DİKKAT GEREKİYOR",
+            "date": "20 Tem 2026",
+            "meta": "Süreklilik kuruluyor · SÜREKLİLİK GEREKLİ",
+            "weight": "80.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "DİKKAT GEREKİYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "empty",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__needs_attention_expanded__1280",
+      "state": "needs_attention_expanded",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "wearable-disconnected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=641471371.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=7&sr=1280x800&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938465~115938468~118897920~118897930~119367802~119367810~120213116~120315471~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3750&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=641471371.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=7&sr=1280x800&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616986~115938465~115938468~118897920~118897930~119367802~119367810~120213116~120315471~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3750&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026DİKKAT GEREKİYORSüreklilik kuruluyor · SÜREKLİLİK GEREKLİ80.0 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansSüreklilik kuruluyor · Hacim sabitTutarlılıkSÜREKLİLİK GEREKLİ · 2 seans · Son 4 haftanın 2 tanesi aktifVücut80.0 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 317,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "needs_attention",
+            "traj": "DİKKAT GEREKİYOR",
+            "date": "20 Tem 2026",
+            "meta": "Süreklilik kuruluyor · SÜREKLİLİK GEREKLİ",
+            "weight": "80.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "DİKKAT GEREKİYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "empty",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__needs_attention_expanded__1440",
+      "state": "needs_attention_expanded",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "wearable-disconnected",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=994532341.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=9&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3522&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=994532341.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=9&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3522&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026DİKKAT GEREKİYORSüreklilik kuruluyor · SÜREKLİLİK GEREKLİ80.0 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansSüreklilik kuruluyor · Hacim sabitTutarlılıkSÜREKLİLİK GEREKLİ · 2 seans · Son 4 haftanın 2 tanesi aktifVücut80.0 kg · Karşılaştırılacak önceki check-in yok",
+        "history_text_len": 317,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "needs_attention",
+            "traj": "DİKKAT GEREKİYOR",
+            "date": "20 Tem 2026",
+            "meta": "Süreklilik kuruluyor · SÜREKLİLİK GEREKLİ",
+            "weight": "80.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "DİKKAT GEREKİYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "empty",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__needs_attention_expanded__1440.png"
+    },
+    {
+      "id": "progress-history__missing_weight__390",
+      "state": "missing_weight",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "progress-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1313069916.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=10&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938468~118897920~118897930~119367802~119367810~119793974~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3327&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1313069916.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=10&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938468~118897920~118897930~119367802~119367810~119793974~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3327&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYORBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücutKilo kaydı yok",
+        "history_text_len": 255,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "20 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__missing_weight__390.png"
+    },
+    {
+      "id": "progress-history__missing_weight__768",
+      "state": "missing_weight",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "progress-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1812437410.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=7&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=4063&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1812437410.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=7&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=4063&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYORBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücutKilo kaydı yok",
+        "history_text_len": 255,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "20 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__missing_weight__1280",
+      "state": "missing_weight",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "progress-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYORBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücutKilo kaydı yok",
+        "history_text_len": 255,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "20 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__missing_weight__1440",
+      "state": "missing_weight",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "progress-history",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=2069459109.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=3&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938468~118897920~118897930~119367802~119367810~120213116~120315471~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3595&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=2069459109.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=3&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938468~118897920~118897930~119367802~119367810~120213116~120315471~120385422&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3595&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYORBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücutKilo kaydı yok",
+        "history_text_len": 255,
+        "item_count": 1,
+        "items": [
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "20 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": false,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__missing_weight__1440.png"
+    },
+    {
+      "id": "progress-history__bounded_has_more__390",
+      "state": "bounded_has_more",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "completed-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784563200000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=767141837.1784563200&frm=0&ngs=1&pscdl=noapi&rcb=10&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784563200&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3285&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784563200000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=767141837.1784563200&frm=0&ngs=1&pscdl=noapi&rcb=10&sr=390x844&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938468~118897920~118897930~119367802~119367810~120213116~120385422&sid=1784563200&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3285&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/coach/history",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/workout/status",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/last-session",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR82.0 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut82.0 kg · +1.0 kg13 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR81.0 kgBu check-in'e kadarki verine göre4 haftalık pencere16 Haz 2026 – 13 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut81.0 kg · +1.0 kg6 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR80.0 kgBu check-in'e kadarki verine göre4 haftalık pencere9 Haz 2026 – 6 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut80.0 kg · +1.0 kg29 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR79.0 kgBu check-in'e kadarki verine göre4 haftalık pencere2 Haz 2026 – 29 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut79.0 kg · +1.0 kg22 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR78.0 kgBu check-in'e kadarki verine göre4 haftalık pencere26 May 2026 – 22 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut78.0 kg · +1.0 kg15 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR77.0 kgBu check-in'e kadarki verine göre4 haftalık pencere19 May 2026 – 15 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut77.0 kg · +1.0 kg8 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR76.0 kgBu check-in'e kadarki verine göre4 haftalık pencere12 May 2026 – 8 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut76.0 kg · +1.0 kg1 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR75.0 kgBu check-in'e kadarki verine göre4 haftalık pencere5 May 2026 – 1 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut75.0 kg · +1.0 kg25 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR74.0 kgBu check-in'e kadarki verine göre4 haftalık pencere28 Nis 2026 – 25 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut74.0 kg · +1.0 kg18 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR73.0 kgBu check-in'e kadarki verine göre4 haftalık pencere21 Nis 2026 – 18 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut73.0 kg · +1.0 kg11 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR72.0 kgBu check-in'e kadarki verine göre4 haftalık pencere14 Nis 2026 – 11 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut72.0 kg · +1.0 kg4 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR71.0 kgBu check-in'e kadarki verine göre4 haftalık pencere7 Nis 2026 – 4 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut71.0 kg · +1.0 kgBu son 12 kaydın ötesinde daha eski check-in'ler var.",
+        "history_text_len": 3221,
+        "item_count": 12,
+        "items": [
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "20 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "82.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "13 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "81.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-1",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "6 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "80.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-2",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "29 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "79.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-3",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "22 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "78.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-4",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "15 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "77.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-5",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "8 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "76.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-6",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "1 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "75.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-7",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "25 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "74.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-8",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "18 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "73.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-9",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "11 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "72.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-10",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "4 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "71.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-11",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": true,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__bounded_has_more__390.png"
+    },
+    {
+      "id": "progress-history__bounded_has_more__768",
+      "state": "bounded_has_more",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "completed-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784563200000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1745541696.1784563200&frm=0&ngs=1&pscdl=noapi&rcb=19&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938469~118012007~118897920~118897930~119367802~119367810~120213116~120315470~120385422&sid=1784563200&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3138&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784563200000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1745541696.1784563200&frm=0&ngs=1&pscdl=noapi&rcb=19&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938469~118012007~118897920~118897930~119367802~119367810~120213116~120315470~120385422&sid=1784563200&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3138&gaf=1. Refused to connect because it violates the document's Content Security Policy.",
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784563200000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1745541696.1784563200&frm=0&ngs=1&pscdl=noapi&rcb=19&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938465~115938469~118012007~118897920~118897930~119367802~119367810~120213116~120315470~120385422&sid=1784563200&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=3359&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784563200000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=1745541696.1784563200&frm=0&ngs=1&pscdl=noapi&rcb=19&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938465~115938469~118012007~118897920~118897930~119367802~119367810~120213116~120315470~120385422&sid=1784563200&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=3359&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR82.0 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut82.0 kg · +1.0 kg13 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR81.0 kgBu check-in'e kadarki verine göre4 haftalık pencere16 Haz 2026 – 13 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut81.0 kg · +1.0 kg6 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR80.0 kgBu check-in'e kadarki verine göre4 haftalık pencere9 Haz 2026 – 6 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut80.0 kg · +1.0 kg29 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR79.0 kgBu check-in'e kadarki verine göre4 haftalık pencere2 Haz 2026 – 29 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut79.0 kg · +1.0 kg22 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR78.0 kgBu check-in'e kadarki verine göre4 haftalık pencere26 May 2026 – 22 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut78.0 kg · +1.0 kg15 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR77.0 kgBu check-in'e kadarki verine göre4 haftalık pencere19 May 2026 – 15 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut77.0 kg · +1.0 kg8 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR76.0 kgBu check-in'e kadarki verine göre4 haftalık pencere12 May 2026 – 8 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut76.0 kg · +1.0 kg1 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR75.0 kgBu check-in'e kadarki verine göre4 haftalık pencere5 May 2026 – 1 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut75.0 kg · +1.0 kg25 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR74.0 kgBu check-in'e kadarki verine göre4 haftalık pencere28 Nis 2026 – 25 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut74.0 kg · +1.0 kg18 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR73.0 kgBu check-in'e kadarki verine göre4 haftalık pencere21 Nis 2026 – 18 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut73.0 kg · +1.0 kg11 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR72.0 kgBu check-in'e kadarki verine göre4 haftalık pencere14 Nis 2026 – 11 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut72.0 kg · +1.0 kg4 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR71.0 kgBu check-in'e kadarki verine göre4 haftalık pencere7 Nis 2026 – 4 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut71.0 kg · +1.0 kgBu son 12 kaydın ötesinde daha eski check-in'ler var.",
+        "history_text_len": 3221,
+        "item_count": 12,
+        "items": [
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "20 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "82.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "13 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "81.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-1",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "6 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "80.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-2",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "29 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "79.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-3",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "22 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "78.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-4",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "15 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "77.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-5",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "8 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "76.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-6",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "1 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "75.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-7",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "25 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "74.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-8",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "18 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "73.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-9",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "11 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "72.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-10",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "4 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "71.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-11",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": true,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__bounded_has_more__1280",
+      "state": "bounded_has_more",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "completed-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68i0h2v9251835945za200zd9251835945&_p=1784563200000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1897375597.1784563200&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=1280x800&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938469~118897920~118897930~119367802~119367810~120213116~120315470~120385423&sid=1784563200&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3145&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68i0h2v9251835945za200zd9251835945&_p=1784563200000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1897375597.1784563200&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=1280x800&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115616985~115938466~115938469~118897920~118897930~119367802~119367810~120213116~120315470~120385423&sid=1784563200&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3145&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR82.0 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut82.0 kg · +1.0 kg13 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR81.0 kgBu check-in'e kadarki verine göre4 haftalık pencere16 Haz 2026 – 13 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut81.0 kg · +1.0 kg6 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR80.0 kgBu check-in'e kadarki verine göre4 haftalık pencere9 Haz 2026 – 6 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut80.0 kg · +1.0 kg29 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR79.0 kgBu check-in'e kadarki verine göre4 haftalık pencere2 Haz 2026 – 29 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut79.0 kg · +1.0 kg22 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR78.0 kgBu check-in'e kadarki verine göre4 haftalık pencere26 May 2026 – 22 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut78.0 kg · +1.0 kg15 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR77.0 kgBu check-in'e kadarki verine göre4 haftalık pencere19 May 2026 – 15 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut77.0 kg · +1.0 kg8 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR76.0 kgBu check-in'e kadarki verine göre4 haftalık pencere12 May 2026 – 8 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut76.0 kg · +1.0 kg1 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR75.0 kgBu check-in'e kadarki verine göre4 haftalık pencere5 May 2026 – 1 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut75.0 kg · +1.0 kg25 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR74.0 kgBu check-in'e kadarki verine göre4 haftalık pencere28 Nis 2026 – 25 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut74.0 kg · +1.0 kg18 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR73.0 kgBu check-in'e kadarki verine göre4 haftalık pencere21 Nis 2026 – 18 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut73.0 kg · +1.0 kg11 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR72.0 kgBu check-in'e kadarki verine göre4 haftalık pencere14 Nis 2026 – 11 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut72.0 kg · +1.0 kg4 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR71.0 kgBu check-in'e kadarki verine göre4 haftalık pencere7 Nis 2026 – 4 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut71.0 kg · +1.0 kgBu son 12 kaydın ötesinde daha eski check-in'ler var.",
+        "history_text_len": 3221,
+        "item_count": 12,
+        "items": [
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "20 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "82.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "13 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "81.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-1",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "6 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "80.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-2",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "29 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "79.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-3",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "22 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "78.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-4",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "15 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "77.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-5",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "8 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "76.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-6",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "1 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "75.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-7",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "25 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "74.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-8",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "18 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "73.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-9",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "11 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "72.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-10",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "4 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "71.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-11",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": true,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__bounded_has_more__1440",
+      "state": "bounded_has_more",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "completed-workout",
+      "injected_failure": false,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784563200000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1265927024.1784563200&frm=0&ngs=1&pscdl=noapi&rcb=9&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938468~118012007~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784563200&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3196&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784563200000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=1265927024.1784563200&frm=0&ngs=1&pscdl=noapi&rcb=9&sr=1440x900&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938465~115938468~118012007~118897920~118897930~119367802~119367810~120213116~120385423&sid=1784563200&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3196&gaf=1. Refused to connect because it violates the document's Content Security Policy."
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": true,
+        "tag": "BUTTON",
+        "expanded": "false",
+        "focusable": true,
+        "outline": "solid 2px",
+        "box_shadow": "rgba(61, 139, 255, 0.07) 0px 0px 0px 3px"
+      },
+      "keyboard": {
+        "expanded_after": "true",
+        "errors": []
+      },
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": "available",
+        "history_status": null,
+        "history_text": "20 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR82.0 kgBu check-in'e kadarki verine göre4 haftalık pencere23 Haz 2026 – 20 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut82.0 kg · +1.0 kg13 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR81.0 kgBu check-in'e kadarki verine göre4 haftalık pencere16 Haz 2026 – 13 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut81.0 kg · +1.0 kg6 Tem 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR80.0 kgBu check-in'e kadarki verine göre4 haftalık pencere9 Haz 2026 – 6 Tem 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut80.0 kg · +1.0 kg29 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR79.0 kgBu check-in'e kadarki verine göre4 haftalık pencere2 Haz 2026 – 29 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut79.0 kg · +1.0 kg22 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR78.0 kgBu check-in'e kadarki verine göre4 haftalık pencere26 May 2026 – 22 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut78.0 kg · +1.0 kg15 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR77.0 kgBu check-in'e kadarki verine göre4 haftalık pencere19 May 2026 – 15 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut77.0 kg · +1.0 kg8 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR76.0 kgBu check-in'e kadarki verine göre4 haftalık pencere12 May 2026 – 8 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut76.0 kg · +1.0 kg1 Haz 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR75.0 kgBu check-in'e kadarki verine göre4 haftalık pencere5 May 2026 – 1 Haz 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut75.0 kg · +1.0 kg25 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR74.0 kgBu check-in'e kadarki verine göre4 haftalık pencere28 Nis 2026 – 25 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut74.0 kg · +1.0 kg18 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR73.0 kgBu check-in'e kadarki verine göre4 haftalık pencere21 Nis 2026 – 18 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut73.0 kg · +1.0 kg11 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR72.0 kgBu check-in'e kadarki verine göre4 haftalık pencere14 Nis 2026 – 11 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut72.0 kg · +1.0 kg4 May 2026TEMEL OLUŞUYORTemel oluşuyor · TEMEL OLUŞUYOR71.0 kgBu check-in'e kadarki verine göre4 haftalık pencere7 Nis 2026 – 4 May 2026PerformansTemel oluşuyor · Hacim sabitTutarlılıkTEMEL OLUŞUYOR · 0 seans · Son 4 haftanın 0 tanesi aktifVücut71.0 kg · +1.0 kgBu son 12 kaydın ötesinde daha eski check-in'ler var.",
+        "history_text_len": 3221,
+        "item_count": 12,
+        "items": [
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "20 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "82.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "true",
+            "controls": "hist-detail-0",
+            "detail_hidden": false,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "13 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "81.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-1",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "6 Tem 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "80.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-2",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "29 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "79.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-3",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "22 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "78.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-4",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "15 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "77.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-5",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "8 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "76.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-6",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "1 Haz 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "75.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-7",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "25 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "74.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-8",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "18 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "73.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-9",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "11 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "72.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-10",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          },
+          {
+            "state": "building_baseline",
+            "traj": "TEMEL OLUŞUYOR",
+            "date": "4 May 2026",
+            "meta": "Temel oluşuyor · TEMEL OLUŞUYOR",
+            "weight": "71.0 kg",
+            "tag": "BUTTON",
+            "type": "button",
+            "expanded": "false",
+            "controls": "hist-detail-11",
+            "detail_hidden": true,
+            "overflow": false,
+            "visible": true
+          }
+        ],
+        "has_more": true,
+        "empty": false,
+        "unavailable": false,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__bounded_has_more__1440.png"
+    },
+    {
+      "id": "progress-history__endpoint_failure__390",
+      "state": "endpoint_failure",
+      "viewport": "390",
+      "viewport_px": {
+        "width": 390,
+        "height": 844
+      },
+      "scenario": "social-empty",
+      "injected_failure": true,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Failed to load resource: the server responded with a status of 500 (INTERNAL SERVER ERROR)"
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [
+        {
+          "url": "http://127.0.0.1:37213/api/progress/history",
+          "status": 500
+        }
+      ],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 390,
+        "doc_client_width": 390,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": null,
+        "history_status": "unavailable",
+        "history_text": "Progress geçmişi yüklenemedi. Kısa süre sonra tekrar dene.",
+        "history_text_len": 58,
+        "item_count": 0,
+        "items": [],
+        "has_more": false,
+        "empty": false,
+        "unavailable": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__endpoint_failure__390.png"
+    },
+    {
+      "id": "progress-history__endpoint_failure__768",
+      "state": "endpoint_failure",
+      "viewport": "768",
+      "viewport_px": {
+        "width": 768,
+        "height": 1024
+      },
+      "scenario": "social-empty",
+      "injected_failure": true,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=929774811.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~119793974~120213116~120315471~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3731&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&are=1&cid=929774811.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=1&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~119793974~120213116~120315471~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=page_view&_fv=1&_nsi=1&_ss=1&_ee=1&tfd=3731&gaf=1. Refused to connect because it violates the document's Content Security Policy.",
+        "Connecting to 'https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=929774811.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~119793974~120213116~120315471~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=3921&gaf=1' violates the following Content Security Policy directive: \"connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com\". The action has been blocked.",
+        "Fetch API cannot load https://www.google.com/g/collect?v=2&tid=G-YXSGLN7C7Y&gtm=45je68h1v9251835945za200zd9251835945&_p=1784529000000&gcd=13l3l3l3l1l1&npa=0&dma=0&_eu=AEAAAAQ&ae=a&are=1&cid=929774811.1784529000&frm=0&ngs=1&pscdl=noapi&rcb=16&sr=768x1024&uaa=x86&uab=64&uafvl=HeadlessChrome%3B149.0.7827.55%7CChromium%3B149.0.7827.55%7CNot)A%253BBrand%3B24.0.0.0&uam=&uamb=0&uap=Linux&uapv=&uaw=0&ul=en-us&_s=2&tag_exp=115938466~115938469~118897920~118897930~119367802~119367810~119793974~120213116~120315471~120385423&sid=1784529000&sct=1&seg=0&dl=http%3A%2F%2F127.0.0.1%2F&dt=AxisAI%20%E2%80%94%20Dashboard&en=scroll&epn.percent_scrolled=90&tfd=3921&gaf=1. Refused to connect because it violates the document's Content Security Policy.",
+        "Failed to load resource: the server responded with a status of 500 (INTERNAL SERVER ERROR)"
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [
+        {
+          "url": "http://127.0.0.1:37213/api/progress/history",
+          "status": 500
+        }
+      ],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/water",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/workout/status",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/meal-log/today",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/leaderboard/reward-check",
+          "error": "net::ERR_ABORTED"
+        },
+        {
+          "url": "http://127.0.0.1:37213/coach/history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 768,
+        "doc_client_width": 768,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": null,
+        "history_status": "unavailable",
+        "history_text": "Progress geçmişi yüklenemedi. Kısa süre sonra tekrar dene.",
+        "history_text_len": 58,
+        "item_count": 0,
+        "items": [],
+        "has_more": false,
+        "empty": false,
+        "unavailable": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__endpoint_failure__1280",
+      "state": "endpoint_failure",
+      "viewport": "1280",
+      "viewport_px": {
+        "width": 1280,
+        "height": 800
+      },
+      "scenario": "social-empty",
+      "injected_failure": true,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Failed to load resource: the server responded with a status of 500 (INTERNAL SERVER ERROR)"
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [
+        {
+          "url": "http://127.0.0.1:37213/api/progress/history",
+          "status": 500
+        }
+      ],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 1280,
+        "doc_client_width": 1280,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": null,
+        "history_status": "unavailable",
+        "history_text": "Progress geçmişi yüklenemedi. Kısa süre sonra tekrar dene.",
+        "history_text_len": 58,
+        "item_count": 0,
+        "items": [],
+        "has_more": false,
+        "empty": false,
+        "unavailable": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": null
+    },
+    {
+      "id": "progress-history__endpoint_failure__1440",
+      "state": "endpoint_failure",
+      "viewport": "1440",
+      "viewport_px": {
+        "width": 1440,
+        "height": 900
+      },
+      "scenario": "social-empty",
+      "injected_failure": true,
+      "status_code": 200,
+      "verdict": "pass",
+      "reasons": [],
+      "console_errors": [
+        "Failed to load resource: the server responded with a status of 500 (INTERNAL SERVER ERROR)"
+      ],
+      "own_console_errors": [],
+      "page_errors": [],
+      "server_errors": [
+        {
+          "url": "http://127.0.0.1:37213/api/progress/history",
+          "status": 500
+        }
+      ],
+      "failed_requests": [
+        {
+          "url": "http://127.0.0.1:37213/checkin-history",
+          "error": "net::ERR_ABORTED"
+        }
+      ],
+      "focus": {
+        "present": false,
+        "focusable": false,
+        "outline": null
+      },
+      "keyboard": null,
+      "measurements": {
+        "doc_scroll_width": 1440,
+        "doc_client_width": 1440,
+        "doc_horizontal_overflow": false,
+        "section_present": true,
+        "section_heading_tag": "H2",
+        "section_overflow": false,
+        "history_state": null,
+        "history_status": "unavailable",
+        "history_text": "Progress geçmişi yüklenemedi. Kısa süre sonra tekrar dene.",
+        "history_text_len": 58,
+        "item_count": 0,
+        "items": [],
+        "has_more": false,
+        "empty": false,
+        "unavailable": true,
+        "long_text_overflow": [],
+        "your_progress_state": "TEMEL OLUŞUYOR",
+        "what_changed_cards": 3,
+        "axis_working_status": "insufficient_data",
+        "physique_filled": true,
+        "raw_key_leak": [],
+        "horizontal_scrollers": [],
+        "html_lang": "tr"
+      },
+      "screenshot": "screenshots/progress-history__endpoint_failure__1440.png"
+    }
+  ]
+}

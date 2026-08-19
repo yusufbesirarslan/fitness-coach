@@ -18,6 +18,8 @@ from app.services.ai_coach import generate_checkin_feedback
 from app.services.ai_gate import ai_concurrency_gate
 from app.services.calculations import MET_CONFIG, calculate_activity_calories, calculate_bmr, calculate_target, calculate_tdee
 from app.services.gamification import complete_quest_for_user, get_level, level_title
+from app.services.progress_history import (build_progress_history,
+                                           progress_history_payload)
 from app.services.progress_insights import (UnknownCanonicalVocabulary,
                                             build_progress_insights,
                                             progress_insights_payload)
@@ -36,14 +38,16 @@ from app.timeutil import app_date_of, app_today, display_dt, utc_day_bounds
 
 bp = Blueprint("tracking", __name__)
 
-# Canonical Progress read-model endpoints (Progress Redesign PR2 + PR3 + PR4).
+# Canonical Progress read-model endpoints (Progress Redesign PR2–PR5).
 _PROGRESS_SUMMARY_PATH = "/api/progress/summary"
 _PROGRESS_AXIS_INSIGHTS_PATH = "/api/progress/axis-insights"
 _PROGRESS_PHYSIQUE_PATH = "/api/progress/physique"
+_PROGRESS_HISTORY_PATH = "/api/progress/history"
 _PROGRESS_PRIVATE_PATHS = frozenset({
     _PROGRESS_SUMMARY_PATH,
     _PROGRESS_AXIS_INSIGHTS_PATH,
     _PROGRESS_PHYSIQUE_PATH,
+    _PROGRESS_HISTORY_PATH,
 })
 
 
@@ -790,6 +794,39 @@ def progress_physique_read():
         "[PROGRESS][PHYSIQUE] request_id=%s state=%s region=%s",
         current_request_id(), physique.state, physique.selected_region)
     return jsonify(progress_physique_payload(physique))
+
+
+@bp.route("/api/progress/history")
+@require_auth
+def progress_history_read():
+    """The canonical Progress History for the signed-in user (PR5).
+
+    Reconstructed historical Progress state, newest first, bounded to a
+    server-owned 12-entry window. The route is deliberately thin: one service
+    call, one pure projection, no decision of its own.
+
+    There is **no** input. The owner is the authenticated user (no ``user_id``
+    parameter can express another one), and the analysis window is pinned to
+    each check-in's Istanbul day rather than read off the query string. A
+    caller who can re-window historical state until it looks better owns the
+    history, and the server is supposed to (``docs/PROGRESS_HISTORY.md``).
+
+    Empty history is a legitimate product state (no qualifying check-ins).
+    Infrastructure or contract failure is a generic JSON 500 — never ``empty``.
+    """
+    try:
+        history = build_progress_history(current_user.id)
+    except Exception as e:
+        current_app.logger.warning(
+            "[PROGRESS][HISTORY] request_id=%s state=error error_class=%s",
+            current_request_id(), _progress_summary_error_class(e))
+        return jsonify({"error": t("route.generic_error_retry")}), 500
+
+    current_app.logger.info(
+        "[PROGRESS][HISTORY] request_id=%s state=%s entry_count=%s has_more=%s",
+        current_request_id(), history.state, len(history.entries),
+        history.has_more)
+    return jsonify(progress_history_payload(history))
 
 
 @bp.route("/api/progress/heatmap")

@@ -255,20 +255,79 @@
   .pp-pair, .pp-strip { grid-template-columns: 1fr; }
 }
 
-/* ── 6 · PROGRESS HISTORY (rows, not charts) ────────────────────────── */
-.hist-list { list-style: none; margin: 0; padding: 0; }
-.hist-row {
-  display: flex; align-items: baseline; gap: var(--space-3); flex-wrap: wrap;
-  padding: var(--space-4) 0;
+/* ── 6 · PROGRESS HISTORY (rows + compact drilldown) ───────────────── */
+.hist-list { list-style: none; margin: 0; padding: 0; min-width: 0; }
+.hist-item {
+  min-width: 0; overflow: hidden;
   border-bottom: var(--border-w-1) solid var(--color-border-1);
 }
-.hist-row:last-child { border-bottom: none; }
-.hist-date {
-  font-family: var(--font-display); font-size: var(--text-base);
-  letter-spacing: 1px; color: var(--color-primary); min-width: 68px;
+.hist-item:last-child { border-bottom: none; }
+.hist-item[data-state="on_track"] { border-left: 3px solid var(--color-success); }
+.hist-item[data-state="needs_attention"] { border-left: 3px solid var(--color-warning); }
+.hist-item[data-state="building_baseline"] { border-left: 3px solid var(--color-border-2); }
+.hist-trigger {
+  display: block; width: 100%; max-width: 100%;
+  margin: 0; padding: var(--space-4) 0 var(--space-4) var(--space-3);
+  background: transparent; border: 0; cursor: pointer;
+  text-align: left; color: inherit; font: inherit;
+  min-height: 44px;
 }
-.hist-weight { font-size: var(--text-base); color: var(--color-text-1); font-weight: var(--weight-medium); }
-.hist-delta { margin-left: auto; font-size: var(--text-sm); color: var(--color-text-3); }
+.hist-trigger:focus,
+.hist-trigger:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  box-shadow: var(--focus-ring);
+}
+.hist-summary {
+  display: grid; grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  grid-template-areas: "date traj" "date meta" "date weight";
+  column-gap: var(--space-3); row-gap: 2px; align-items: baseline;
+  min-width: 0;
+}
+.hist-date {
+  grid-area: date;
+  font-family: var(--font-display); font-size: var(--text-base);
+  letter-spacing: 1px; color: var(--color-primary);
+  white-space: nowrap;
+}
+.hist-traj {
+  grid-area: traj;
+  font-family: var(--font-display); font-size: var(--text-base);
+  letter-spacing: 1px; color: var(--color-text-1);
+  overflow-wrap: anywhere; min-width: 0;
+}
+.hist-meta {
+  grid-area: meta;
+  font-size: var(--text-sm); color: var(--color-text-2);
+  overflow-wrap: anywhere; min-width: 0;
+}
+.hist-weight {
+  grid-area: weight;
+  font-size: var(--text-sm); color: var(--color-text-3);
+  overflow-wrap: anywhere; min-width: 0;
+}
+.hist-detail {
+  padding: 0 var(--space-3) var(--space-4) var(--space-3);
+  min-width: 0;
+}
+.hist-asof {
+  margin: 0 0 var(--space-3); font-size: var(--text-sm);
+  color: var(--color-text-3); overflow-wrap: anywhere;
+}
+.hist-facts { margin: 0; min-width: 0; }
+.hist-fact {
+  display: grid; grid-template-columns: minmax(0, 1fr);
+  gap: 2px; padding: var(--space-2) 0;
+}
+.hist-fact-term {
+  font-size: var(--text-2xs); font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-label); text-transform: uppercase;
+  color: var(--color-text-3);
+}
+.hist-fact-value {
+  margin: 0; font-size: var(--text-sm); color: var(--color-text-1);
+  overflow-wrap: anywhere; min-width: 0;
+}
 
 /* ── 7 · CHECK-IN FORM (carried over unchanged) ─────────────────────── */
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: var(--space-5); }
@@ -362,9 +421,6 @@ input[type="range"]:focus-visible {
   .form-grid { grid-template-columns: 1fr; }
   .ps-card { padding: var(--space-5); }
   .ps-state { font-size: var(--text-xl); }
-  /* Keep the delta on the same line as the weight instead of letting
-     margin-left:auto strand it on a wrapped row. */
-  .hist-delta { margin-left: 0; }
 }
 
 /* ── 13 · REDUCED MOTION ─────────────────────────────────────────────── */
