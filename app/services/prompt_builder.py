@@ -11,13 +11,15 @@ from app.prompts.system import build_coach_system  # noqa: F401  (kanonik giriş
 
 
 def build_bedrock_system(context, language="tr", prompt_cache=False,
-                         adaptive_plan_context=False):
+                         adaptive_plan_context=False,
+                         plan_mutation_tools=False):
     """Bedrock `system` parametresini kur. Caching açıkken dile özgü sistem
     promptunu ephemeral cache breakpoint ile işaretle; DEĞİŞKEN [KULLANICI VERİSİ]
     daima önbelleğe-alınan bloğun SONRASINA gelir (asla içine gömülmez — sessiz
     invalidasyon). Caching kapalıyken düz string yeterli."""
     system_prompt = build_coach_system(
-        language, adaptive_plan_context=adaptive_plan_context)
+        language, adaptive_plan_context=adaptive_plan_context,
+        plan_mutation_tools=plan_mutation_tools)
     if prompt_cache:
         blocks = [{"type": "text", "text": system_prompt,
                    "cache_control": {"type": "ephemeral"}}]
@@ -42,13 +44,15 @@ def anthropic_tools_for_call(tools_anthropic, prompt_cache=False):
 
 
 def build_openai_messages(language, context, history, question,
-                          adaptive_plan_context=False):
+                          adaptive_plan_context=False,
+                          plan_mutation_tools=False):
     """OpenAI function-calling döngüsünün açılış mesaj dizisi:
     system → [KULLANICI VERİSİ] → geçmiş → güncel soru."""
     messages = [{
         "role": "system",
         "content": build_coach_system(
-            language, adaptive_plan_context=adaptive_plan_context),
+            language, adaptive_plan_context=adaptive_plan_context,
+            plan_mutation_tools=plan_mutation_tools),
     }]
     if context:
         messages.append({"role": "system", "content": f"[KULLANICI VERİSİ]\n{context}"})

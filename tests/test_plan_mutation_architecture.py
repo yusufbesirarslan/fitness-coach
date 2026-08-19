@@ -58,15 +58,27 @@ def test_plan_mutation_never_imports_ai_provider_or_transport():
     assert not violations, f"plan_mutation reaches upward/outward: {violations}"
 
 
-def test_no_coach_module_imports_the_mutation_domain_yet():
-    """PR1 establishes the boundary; wiring the AI Coach to it is later work
-    (brief §18). If a future PR connects them, it must update this guard
-    deliberately rather than inherit write authority by accident."""
+def test_the_coach_reaches_the_mutation_domain_through_exactly_one_bridge():
+    """PR1 wrote this as "no Coach module imports the domain **yet**", and named
+    the update as the deliberate act a later PR would have to perform. Sprint 1
+    PR3 performs it — and narrows it rather than removing it.
+
+    The Coach now has plan write authority, but only by asking
+    ``coach_plan_tools``. Everything the tool boundary owns — the rollout flag,
+    the strict argument parser, the server-minted operation key, ``actor``, the
+    per-turn budget, the bounded result vocabulary, the transaction settle —
+    lives on that one path. A direct ``plan_mutation`` import from a provider
+    loop would run a mutation with none of it, and would look perfectly
+    reasonable in review, which is exactly why this is a test and not a
+    convention.
+    """
     coach_modules = [
         Path("app/services/ai_coach.py"),
         Path("app/services/ai_pipeline.py"),
         Path("app/services/ai_stream.py"),
         Path("app/services/context_builder.py"),
+        Path("app/services/prompt_builder.py"),
+        Path("app/services/adaptive_plan_context.py"),
     ]
     violations = []
     for path in coach_modules:
@@ -76,7 +88,35 @@ def test_no_coach_module_imports_the_mutation_domain_yet():
             if _module_matches(imported, "app.services.plan_mutation"):
                 violations.append(f"{path}:{lineno} -> {imported}")
 
-    assert not violations, f"AI Coach already holds plan write authority: {violations}"
+    assert not violations, (
+        "a Coach module reaches the mutation domain directly, bypassing "
+        f"coach_plan_tools: {violations}")
+
+
+def test_the_bridge_package_is_the_only_new_consumer_of_the_domain():
+    """Who may import ``plan_mutation`` at all, stated in one place.
+
+    Kept as an explicit allow-list because the interesting failure is a *new*
+    consumer appearing quietly — a blueprint, a job, a second AI surface — each
+    of which would need its own authorization, identity and idempotency story.
+    Adding a name here is cheap; the point is that it has to be a decision.
+    """
+    approved = {
+        Path("app/services/coach_plan_tools/executor.py"),
+        Path("app/services/coach_plan_tools/parser.py"),
+        Path("app/services/coach_plan_tools/results.py"),
+        Path("app/services/coach_plan_tools/schemas.py"),
+        Path("app/services/coach_plan_tools/identity.py"),
+    }
+    consumers = set()
+    for path in APP_ROOT.rglob("*.py"):
+        if path in approved or MUTATION_ROOT in path.parents:
+            continue
+        for imported, _lineno in _python_imports(path):
+            if _module_matches(imported, "app.services.plan_mutation"):
+                consumers.add(str(path))
+
+    assert not consumers, f"unapproved plan_mutation consumers: {sorted(consumers)}"
 
 
 def test_pure_document_layer_stays_free_of_orm_and_flask():

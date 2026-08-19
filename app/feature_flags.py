@@ -126,7 +126,7 @@ def _rollback(key):
     return _ENV_ROLLBACK.format(key=key)
 
 
-# ── The eight backend rollout flags ────────────────────────────────────────
+# ── The nine backend rollout flags ─────────────────────────────────────────
 # Order is the recommended staged activation order (see docs/ROLLOUT.md); it is
 # documentation, not an enforcement mechanism.
 ROLLOUT_FLAGS = (
@@ -397,6 +397,69 @@ ROLLOUT_FLAGS = (
         lifecycle=LIFECYCLE_STAGING_ONLY,
         review_by="2026-11-01",
         decision=DECISION_RETAIN_EXPERIMENTAL,
+    ),
+    FeatureFlag(
+        key="AI_COACH_PLAN_MUTATION_TOOLS_ENABLED",
+        capability=(
+            "Publishes six narrow plan-editing tools (replace/add/remove an "
+            "exercise, update a prescription, move a day, undo the last change) "
+            "to BOTH coach providers and lets the Coach execute them through "
+            "app/services/coach_plan_tools. This is the first flag of the eight "
+            "that lets the AI cause a DURABLE WRITE to user data: every other "
+            "one changes presentation, context or attack surface. OFF removes "
+            "the tools from both provider schemas AND refuses execution."),
+        owner=_OWNER,
+        default=False,
+        depends_on=("AI_ADAPTIVE_PLAN_CONTEXT",),
+        observability=(
+            "[COACH][PLAN_TOOL] request_id=... tool=... outcome={applied|no_op|"
+            "replayed|<bounded error code>} — one PII-free line per tool call "
+            "(no arguments, plan, snapshot, reason or operation key). The "
+            "durable PlanMutationRecord journal is the authoritative record of "
+            "what actually changed, queryable by user and lineage. Existing "
+            "FitX/AI turn + token metrics cover the provider side."),
+        prerequisites=(
+            "migration b3c4d5e6f7a8 applied — the journal, mutation_version and "
+            "lineage_id are what make replay, undo and the audit trail work; "
+            "enabling without them is unsafe",
+            "staging exercise of the full matrix on a real provider: explicit "
+            "request, advice-only ('should I swap X?'), ambiguous target, "
+            "repeat delivery in one turn, undo, and a provider fallback after "
+            "a tool has run",
+            "RUNTIME_METRICS_ENABLED=1 with an AI provider baseline",
+            "a decision on AI_ADAPTIVE_PLAN_CONTEXT first — it owns which "
+            "system prompt the Coach runs, and the plan-mutation policy block "
+            "is appended to whichever one is active, so activating both in one "
+            "window makes a bad answer impossible to attribute",
+        ),
+        success_signals=(
+            "no MUTATION_BUDGET_EXHAUSTED or IDEMPOTENCY_CONFLICT outcomes — "
+            "either means the model is calling the tools more than once per "
+            "intent",
+            "PLAN_STATE_CONFLICT and UNDO_CONFLICT at zero",
+            "journal rows with actor='ai_coach' each traceable to a user "
+            "message that explicitly asked for that change",
+            "AI error/retry rate and coach latency unchanged",
+        ),
+        abort_signals=(
+            "ANY plan change with actor='ai_coach' the user did not explicitly "
+            "ask for — proactive edits, advice acted on as instruction, or a "
+            "single request applied as several mutations",
+            "a mutation applied while the Coach's answer claims none was",
+            "undo reversing something other than the newest change",
+            "AMBIGUOUS_TARGET followed by a mutation in the same turn (the "
+            "model guessed instead of asking)",
+        ),
+        rollback=(
+            "set AI_COACH_PLAN_MUTATION_TOOLS_ENABLED=0 in the host .env and "
+            "`docker compose up -d`; the tools vanish from both provider "
+            "schemas and execution is refused. Already-applied mutations are "
+            "NOT reverted — they are ordinary versioned plan history and the "
+            "user can undo them from the plan surface. Rolling back stops new "
+            "AI writes; it does not rewrite past ones."),
+        lifecycle=LIFECYCLE_STAGING_ONLY,
+        review_by="2026-11-01",
+        decision=DECISION_ENABLE,
     ),
     FeatureFlag(
         key="MOBILE_AUTH_ENABLED",

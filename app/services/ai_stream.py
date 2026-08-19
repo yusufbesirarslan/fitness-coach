@@ -55,10 +55,21 @@ def _chunks(text):
 
 
 def _bedrock_work_error(parts, tools_ran):
+    """Araç koştuktan SONRA gelen akış arızasının kullanıcıya giden çerçevesi.
+
+    Bir plan aracı kalıcı yazma yaptıysa i18n anahtarı değişir: "yanıt
+    alınamadı, tekrar dene" o durumda hem YANLIŞ (mutasyon commit'li) hem de
+    ZARARLIdır (yeni istek = yeni işlem kimliği = ikinci kez uygulanan aynı
+    düzenleme). Bloklayıcı yoldaki `_coach_tool_fallback` ile aynı karar.
+    """
+    from app.services import ai_coach
+
+    plan_saved = ai_coach.coach_plan_tools.plan_changed_this_turn()
     return {
         "type": "error",
-        "key": "coach.reply_failed",
-        "work_performed": bool(parts or tools_ran),
+        "key": ("coach.reply_failed_plan_saved" if plan_saved
+                else "coach.reply_failed"),
+        "work_performed": bool(parts or tools_ran or plan_saved),
         "partial_text": "".join(parts).strip(),
     }
 
@@ -162,9 +173,8 @@ def _stream_bedrock(user_id, question, context, history, language,
         if remaining <= 0:
             current_app.logger.warning(
                 "[COACH][stream] Bedrock turn budget exhausted")
-            yield from _emit_text(ai_coach._COACH_FALLBACKS[
-                ai_coach._coach_lang(language)]["tool"],
-                provider="bedrock", usage=usage)
+            yield from _emit_text(ai_coach._coach_tool_fallback(language),
+                                  provider="bedrock", usage=usage)
             return
         call_kwargs = {
             "model": BEDROCK_MODEL,
@@ -186,8 +196,8 @@ def _stream_bedrock(user_id, question, context, history, language,
                 elif message["kind"] == "deadline_exhausted":
                     current_app.logger.warning(
                         "[COACH][stream] Bedrock turn budget exhausted after model gate")
-                    yield from _emit_text(ai_coach._COACH_FALLBACKS[
-                        ai_coach._coach_lang(language)]["tool"],
+                    yield from _emit_text(
+                        ai_coach._coach_tool_fallback(language),
                         provider="bedrock", usage=usage)
                     return
                 else:
@@ -196,8 +206,8 @@ def _stream_bedrock(user_id, question, context, history, language,
             if ai_coach._remaining_coach_turn_seconds(deadline) <= 0:
                 current_app.logger.warning(
                     "[COACH][stream] Bedrock turn budget exhausted during provider call")
-                yield from _emit_text(ai_coach._COACH_FALLBACKS[
-                    ai_coach._coach_lang(language)]["tool"],
+                yield from _emit_text(
+                    ai_coach._coach_tool_fallback(language),
                     provider="bedrock", usage=usage)
                 return
             # Yedek YALNIZCA hiçbir şey yayınlanmamış VE hiçbir araç yan etki
@@ -242,8 +252,8 @@ def _stream_bedrock(user_id, question, context, history, language,
             return
 
     # Araç döngüsü tavana dayandı — dostça yedek metni akıt (yanıtsız bırakma).
-    yield from _emit_text(ai_coach._COACH_FALLBACKS[
-        ai_coach._coach_lang(language)]["tool"], provider="bedrock", usage=usage)
+    yield from _emit_text(ai_coach._coach_tool_fallback(language),
+                          provider="bedrock", usage=usage)
 
 
 def _stream_openai_fallback(user_id, question, context, history, language,
@@ -260,10 +270,8 @@ def _stream_openai_fallback(user_id, question, context, history, language,
     if ai_coach._remaining_coach_turn_seconds(deadline) <= 0:
         current_app.logger.warning(
             "[COACH][stream] turn budget exhausted before OpenAI fallback")
-        yield from _emit_text(
-            ai_coach._COACH_FALLBACKS[
-                ai_coach._coach_lang(language)]["tool"],
-            provider="openai", usage=None)
+        yield from _emit_text(ai_coach._coach_tool_fallback(language),
+                              provider="openai", usage=None)
         return
 
     try:
@@ -272,12 +280,11 @@ def _stream_openai_fallback(user_id, question, context, history, language,
             deadline=deadline)
     except Exception:
         current_app.logger.warning("[COACH][stream] OpenAI fallback failed before work")
-        yield {
-            "type": "error",
-            "key": "coach.reply_failed",
-            "work_performed": False,
-            "partial_text": "",
-        }
+        # "before work" normalde doğrudur (B-kuralı buraya ancak hiç araç
+        # koşmadan gelinmesine izin verir), ama OpenAI döngüsünün İÇİNDE bir
+        # plan aracı koşup sonrasında beklenmedik bir istisna kaçarsa mutasyon
+        # commit'lidir — o durumda kullanıcıya kaydedildiğini söyle.
+        yield _bedrock_work_error([], 0)
         return
 
     yield from _emit_text(text or "", provider="openai", usage=None)

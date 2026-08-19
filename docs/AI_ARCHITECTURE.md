@@ -35,6 +35,7 @@ route (driven by the `is_error_fallback` flag).
 | `memory_manager` | Persistent memory: conversation window, `estimate_tokens`, summarize, `record_turn`. See [MEMORY.md](MEMORY.md). |
 | `prompt_builder` | System prompt + language directive + Bedrock prompt-cache block; `adaptive_plan_context=` selects the AdaptivePlan-authority prompt (flag-driven, from `ai_coach`). See [TRAINING_PLANNING.md](TRAINING_PLANNING.md). |
 | `ai_coach` | Provider tool loops (Bedrock/OpenAI), staging→commit, tools. Re-exports legacy names. |
+| `coach_plan_tools` | The **only** route from the Coach to the training-plan mutation domain: six narrow tool schemas, a strict argument parser, the server-minted operation key, `actor`, the per-turn write budget and the bounded result vocabulary. Default OFF. See [ADAPTIVE_COACHING.md](ADAPTIVE_COACHING.md) §§19-30. |
 | `ai_stream` | Real Bedrock streaming tool loop (`messages.stream()`). See [STREAMING.md](STREAMING.md). |
 | `ai` | `_heavy_chat` router (Bedrock→OpenAI) + recovery ladder. |
 | `ai_recovery` | WS9: `TransientAIError` retry → last-good → friendly; failure cooldown. See [RATE_LIMITING.md](RATE_LIMITING.md). |
@@ -48,6 +49,31 @@ route (driven by the `is_error_fallback` flag).
 Prompt templates live in `app/prompts/` (pure strings, no logic). Background jobs
 live in `app/jobs/` (see [DEPLOYMENT.md](DEPLOYMENT.md)).
 
+## Tools
+
+Tool definitions are provider-neutral dicts built once and adapted per provider
+(`_to_openai_tool` / `_to_anthropic_tool`), so the two schemas cannot drift.
+
+**Always available (8).** `fetch_nutrition_and_stage_log`,
+`confirm_and_commit_meal_log`, `stage_workout_log`, `confirm_and_commit_workout_log`,
+`cancel_pending_log`, `manage_user_memory`, `query_fitx_metrics`,
+`analyze_gym_photo`.
+
+**Plan mutation (6, flag-gated).** `replace_training_plan_exercise`,
+`add_training_plan_exercise`, `remove_training_plan_exercise`,
+`update_training_plan_prescription`, `move_training_plan_day`,
+`undo_last_training_plan_change` — published **and** executable only when
+`AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` is on (default OFF, `staging_only`). These
+are the first tools in the app whose effect is a durable write to plan data, so
+they do not go through `_dispatch_coach_tool`'s ordinary path: they are handed to
+`coach_plan_tools.execute_plan_tool`, which owns the flag check, the strict
+parser, the operation key, `actor="ai_coach"`, the two-writes-per-turn budget and
+the bounded result payload. Malformed tool-call JSON is refused for these tools
+rather than defaulted to `{}` — an argument-less undo must never be the fallback
+for an unreadable argument blob. Rules the model is given live in one place
+(`app/prompts/system.py::PLAN_MUTATION_POLICY`) and are emitted only when the
+flag is on. Full design: [ADAPTIVE_COACHING.md](ADAPTIVE_COACHING.md) §§19-30.
+
 ## Providers
 
 - **Primary heavy path:** Bedrock / Claude Sonnet 4.5 via the AnthropicBedrock SDK
@@ -56,6 +82,9 @@ live in `app/jobs/` (see [DEPLOYMENT.md](DEPLOYMENT.md)).
 - **Fallback / light path:** OpenAI `gpt-4o-mini`.
 - **Provider-switch rule (B-rule):** Bedrock→OpenAI only *before* the first delta
   reaches the client *and* before any tool side effect. See [STREAMING.md](STREAMING.md).
+  Since PR3 this also guards a durable plan write: once a plan tool has run the
+  turn degrades to a soft error instead of replaying against a plan that has
+  already changed, and the mutation stays committed.
 
 ## Cross-cutting invariants
 
