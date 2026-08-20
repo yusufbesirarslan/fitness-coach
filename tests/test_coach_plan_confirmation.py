@@ -1,6 +1,8 @@
 """PR4 confirmation scenarios: impact, durable proposal, structural gate."""
 import json
 
+import pytest
+
 from app.extensions import db
 from app.models import (
     PlanMutationRecord,
@@ -415,6 +417,45 @@ def test_cancel_of_resolved_applied_never_calls_mutation_authority(
         replayed = call(planned_user.id, CANCEL)
 
     assert replayed["status"] == results.STATUS_REPLAYED
+    assert names(planned_user.id) == ["Shoulder Press"]
+    assert plan_version(planned_user.id) == 1
+    assert len(journal(planned_user.id)) == 1
+
+
+@pytest.mark.parametrize(("field", "wrong_value"), [
+    ("command_type", "add_exercise"),
+    ("command_fingerprint", "0" * 64),
+    ("operation_kind", "undo"),
+    ("outcome", "no_op"),
+    ("before_version", 99),
+    ("before_fingerprint", "0" * 64),
+])
+def test_resolved_applied_requires_exact_journal_evidence(
+        app, planned_user, tools_on, field, wrong_value):
+    """A journal row that does not exactly describe the proposal cannot replay."""
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app)
+        call(planned_user.id, REMOVE,
+             {"day": "Pazartesi", "exercise": "Bench Press"})
+        proposal = plan_confirmation.get_pending(planned_user.id)
+        key = identity.confirmation_operation_key(proposal.public_id)
+        apply_plan_mutation(
+            planned_user.id,
+            RemoveExerciseCommand(day="Pazartesi", exercise="Bench Press"),
+            MutationContext(idempotency_key=key, actor=ACTOR_AI_COACH))
+
+    record = PlanMutationRecord.query.filter_by(
+        user_id=planned_user.id, idempotency_key=key).one()
+    setattr(record, field, wrong_value)
+    proposal.status = plan_confirmation.STATUS_APPLIED
+    db.session.commit()
+
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app, "iptal")
+        result = call(planned_user.id, CANCEL)
+
+    assert result["status"] == results.STATUS_CANCELLED
+    assert result["operation"] == "cancel_pending"
     assert names(planned_user.id) == ["Shoulder Press"]
     assert plan_version(planned_user.id) == 1
     assert len(journal(planned_user.id)) == 1

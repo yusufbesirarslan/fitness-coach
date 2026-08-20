@@ -61,7 +61,13 @@ from app.services.plan_mutation import (
     apply_plan_mutation,
     undo_last_change,
 )
-from app.services.plan_mutation.journal import find_by_key
+from app.services.plan_mutation.fingerprint import UNDO_COMMAND_TYPE
+from app.services.plan_mutation.journal import (
+    KIND_MUTATION,
+    KIND_UNDO,
+    OUTCOME_APPLIED,
+    find_by_key,
+)
 from app.services.today_facts import get_active_plan
 
 from . import results
@@ -577,6 +583,7 @@ def _confirm_pending(user_id):
     if row.status != STATUS_PENDING:
         if (row.status == STATUS_APPLIED
                 and already is not None
+                and _record_matches_proposal(row, already)
                 and _record_matches_current_plan(user_id, already)):
             return _resolved_replay_result(row, already)
         db.session.rollback()
@@ -606,6 +613,25 @@ def _record_matches_current_plan(user_id, record):
         binding.lineage_id == record.plan_lineage_id
         and binding.mutation_version == record.after_version
         and binding.snapshot_fingerprint == record.after_fingerprint
+    )
+
+
+def _record_matches_proposal(proposal, record):
+    """Whether the journal row is exact durable evidence for this proposal."""
+    expected_kind = (
+        KIND_UNDO
+        if proposal.command_type == UNDO_COMMAND_TYPE
+        else KIND_MUTATION
+    )
+    return (
+        record.operation_kind == expected_kind
+        and record.command_type == proposal.command_type
+        and record.command_fingerprint == proposal.command_fingerprint
+        and record.outcome == OUTCOME_APPLIED
+        and record.plan_lineage_id == proposal.plan_lineage_id
+        and record.before_version == proposal.base_mutation_version
+        and record.after_version == proposal.base_mutation_version + 1
+        and record.before_fingerprint == proposal.base_snapshot_fingerprint
     )
 
 
@@ -641,7 +667,8 @@ def _cancel_pending(user_id):
     key = confirmation_operation_key(row.public_id)
     already = find_by_key(user_id, key)
     if already is not None:
-        if _record_matches_current_plan(user_id, already):
+        if (_record_matches_proposal(row, already)
+                and _record_matches_current_plan(user_id, already)):
             if row.status == STATUS_PENDING:
                 # Crash window: reconcile and finish proposal bookkeeping.
                 return _apply_confirmed(user_id, row)
