@@ -250,6 +250,48 @@ def test_duplicate_confirmation_converges(app, planned_user, tools_on):
     assert len(journal(planned_user.id)) == 1
 
 
+def test_confirm_never_reexecutes_proposal_resolved_while_locking(
+        app, planned_user, tools_on, monkeypatch):
+    """A row resolved after the pending read is evidence-only."""
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app)
+        call(planned_user.id, REMOVE,
+             {"day": "Pazartesi", "exercise": "Bench Press"})
+        pending = plan_confirmation.get_pending(planned_user.id)
+        key = identity.confirmation_operation_key(pending.public_id)
+        apply_plan_mutation(
+            planned_user.id,
+            RemoveExerciseCommand(day="Pazartesi", exercise="Bench Press"),
+            MutationContext(idempotency_key=key, actor=ACTOR_AI_COACH))
+
+    def resolve_before_lock(_user_id, public_id):
+        row = TrainingPlanConfirmationProposal.query.filter_by(
+            user_id=planned_user.id, public_id=public_id).one()
+        row.status = plan_confirmation.STATUS_APPLIED
+        db.session.commit()
+        return row
+
+    def unexpected_mutation(*_args, **_kwargs):
+        raise AssertionError("resolved confirmation reached mutation authority")
+
+    monkeypatch.setattr(
+        "app.services.coach_plan_tools.executor.lock_proposal",
+        resolve_before_lock,
+    )
+    monkeypatch.setattr(
+        "app.services.coach_plan_tools.executor.apply_plan_mutation",
+        unexpected_mutation,
+    )
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app, "evet")
+        replayed = call(planned_user.id, CONFIRM)
+
+    assert replayed["status"] == results.STATUS_REPLAYED
+    assert names(planned_user.id) == ["Shoulder Press"]
+    assert plan_version(planned_user.id) == 1
+    assert len(journal(planned_user.id)) == 1
+
+
 def test_crash_window_replays_instead_of_mutating_twice(
         app, planned_user, tools_on):
     with app.test_request_context("/ask", method="POST"):

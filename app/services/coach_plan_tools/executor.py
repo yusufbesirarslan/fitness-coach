@@ -575,8 +575,10 @@ def _confirm_pending(user_id):
     key = confirmation_operation_key(row.public_id)
     already = find_by_key(user_id, key)
     if row.status != STATUS_PENDING:
-        if already is not None or row.status == STATUS_APPLIED:
-            return _apply_confirmed(user_id, row)
+        if (row.status == STATUS_APPLIED
+                and already is not None
+                and _record_matches_current_plan(user_id, already)):
+            return _resolved_replay_result(row, already)
         db.session.rollback()
         if row.status == STATUS_STALE:
             return results.error_result(results.ERROR_PENDING_CONFIRMATION_STALE)
