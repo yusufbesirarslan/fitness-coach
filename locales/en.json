@@ -981,6 +981,11 @@
 
   "plan.no_session": "First create your plan from the home page.",
   "plan.gen_failed": "Couldn't generate the plan, please try again.",
+  "plan.gen_parse_failed": "Couldn't read the generated plan. Please try again.",
+  "plan.gen_truncated": "The generated plan was cut off. Please try again.",
+  "plan.gen_schema_invalid": "The generated plan was not a valid weekly program. Please try again.",
+  "plan.gen_semantic_invalid": "The generated plan did not match your training selections. Please try again.",
+  "plan.save_invalid": "That plan can't be saved because it isn't a valid weekly program.",
   "plan.contract.invalid_preference": "That training preference is not valid. Check your selections and try again.",
   "plan.contract.unsupported_configuration": "This training preference combination is not supported.",
   "plan.contract.conflicting_preferences": "Those training preferences cannot be combined in a 7-day week.",

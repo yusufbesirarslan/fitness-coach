@@ -981,6 +981,11 @@
 
   "plan.no_session": "Önce ana sayfadan planını oluştur.",
   "plan.gen_failed": "Plan oluşturulamadı, tekrar dene.",
+  "plan.gen_parse_failed": "Üretilen plan okunamadı. Lütfen tekrar dene.",
+  "plan.gen_truncated": "Üretilen plan yarıda kesildi. Lütfen tekrar dene.",
+  "plan.gen_schema_invalid": "Üretilen plan geçerli bir haftalık program değil. Lütfen tekrar dene.",
+  "plan.gen_semantic_invalid": "Üretilen plan seçtiğin antrenman tercihlerine uymadı. Lütfen tekrar dene.",
+  "plan.save_invalid": "Bu plan geçerli bir haftalık program olmadığı için kaydedilemez.",
   "plan.contract.invalid_preference": "Bu antrenman tercihi geçerli değil. Seçimlerini kontrol edip tekrar dene.",
   "plan.contract.unsupported_configuration": "Bu antrenman tercihi birleşimi şu anda desteklenmiyor.",
   "plan.contract.conflicting_preferences": "Bu tercihler 7 günlük bir haftada bir arada karşılanamaz.",

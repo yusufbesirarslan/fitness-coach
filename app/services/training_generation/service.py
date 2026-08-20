@@ -1,17 +1,39 @@
-import json
-
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.extensions import db
 from app.services.training_generation.capability import require_supported
 from app.services.training_generation.classifier_service import classify_user
+from app.services.training_generation.extractor import extract_plan_object
 from app.services.training_generation.feature_extractor import build_features, parse_preferences
+from app.services.training_generation.output_errors import (
+    GenerationOutputError,
+    GenerationUnavailableError,
+    ParseFailedError,
+    PlanValidationError,
+    SaveInvalidError,
+    SchemaInvalidError,
+    SemanticInvalidError,
+    TruncatedError,
+)
+from app.services.training_generation.plan_schema import (
+    MAX_PROVIDER_COMPLETIONS,
+    PRIMARY_MAX_TOKENS,
+    REPAIR_MAX_TOKENS,
+)
 from app.services.training_generation.program_generator import build_program_context
 from app.services.training_generation.prompt_builder import build_system_prompt, build_training_prompt
-from app.services.training_generation.response_validator import PlanValidationError, validate_generated_plan
+from app.services.training_generation.response_validator import (
+    validate_generated_plan,
+    validate_plan_structure,
+)
+from app.services.training_generation.semantic_validator import validate_plan_semantics
 
 
-_COMPACT_JSON_RETRY_SUFFIX = "Yanıtı kısa tut ve yalnızca eksiksiz JSON döndür."
+_REPAIR_JSON_SUFFIX = (
+    "REPAIR: previous output was not one valid canonical JSON object. "
+    "Return ONLY the complete JSON object. No markdown, no code fences, "
+    "no commentary."
+)
 
 
 def persist_posted_injuries(user, posted_injuries, logger=None):
@@ -31,25 +53,75 @@ def persist_posted_injuries(user, posted_injuries, logger=None):
             logger.warning("[TRAINING] injury persistence failed", exc_info=True)
 
 
-def _extract_json(raw: str) -> dict:
-    cleaned = (raw or "").replace("```json", "").replace("```", "").strip()
-    start = cleaned.find("{")
-    end = cleaned.rfind("}") + 1
-    if start != -1 and end > start:
-        cleaned = cleaned[start:end]
-    return json.loads(cleaned)
+def _log(logger, event, **fields):
+    log_info = getattr(logger, "info", None) if logger else None
+    if not callable(log_info):
+        return
+    parts = " ".join(f"{key}={value}" for key, value in fields.items())
+    log_info("[TRAINING] %s %s", event, parts)
 
 
-def _request_and_validate_plan(
-        chat_fn, prompt, system_prompt, preferences, max_tokens):
-    raw = chat_fn(
-        messages=[{"role": "user", "content": prompt}],
-        system_prompt=system_prompt,
-        max_tokens=max_tokens,
-        temperature=0.35,
-    )
+def _normalize_completion(raw):
+    if raw is None:
+        return "", False, None
+    text = getattr(raw, "text", None)
+    if isinstance(text, str) or text is not None:
+        return (
+            "" if text is None else str(text),
+            bool(getattr(raw, "truncated", False)),
+            getattr(raw, "finish_reason", None),
+        )
+    return str(raw), False, None
+
+
+class _CompletionBudget:
+    """Hard cap on generation-layer provider completions. Max 2."""
+
+    def __init__(self, chat_fn, max_calls=MAX_PROVIDER_COMPLETIONS):
+        self.chat_fn = chat_fn
+        self.max_calls = max_calls
+        self.calls = []
+
+    def complete(self, *, prompt, system_prompt, max_tokens, temperature):
+        if len(self.calls) >= self.max_calls:
+            raise GenerationUnavailableError("provider completion budget exhausted")
+        kwargs = dict(
+            messages=[{"role": "user", "content": prompt}],
+            system_prompt=system_prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        try:
+            raw = self.chat_fn(**kwargs)
+        except GenerationOutputError:
+            raise
+        except Exception as exc:
+            raise GenerationUnavailableError("provider unavailable") from exc
+        text, truncated, finish_reason = _normalize_completion(raw)
+        record = {
+            "max_tokens": max_tokens,
+            "truncated": truncated,
+            "finish_reason": finish_reason,
+            "messages": kwargs["messages"],
+        }
+        self.calls.append(record)
+        return text, truncated
+
+
+def _parse_and_validate(text, truncated, preferences):
+    parsed = extract_plan_object(text, truncated=truncated)
     return validate_generated_plan(
-        _extract_json(raw), preferences, injuries=preferences.injuries)
+        parsed, preferences, injuries=preferences.injuries)
+
+
+def validate_plan_for_save(plan, preferences=None):
+    """Canonical save-time re-validation. Runs before any delete/insert."""
+    try:
+        structured = validate_plan_structure(plan, require_ozet=False)
+        validate_plan_semantics(structured, preferences)
+    except (SchemaInvalidError, SemanticInvalidError, PlanValidationError) as exc:
+        raise SaveInvalidError(str(exc)) from exc
+    return structured
 
 
 def generate_training_plan_payload(user, last_session, request_data, chat_fn, language="tr", logger=None):
@@ -57,36 +129,61 @@ def generate_training_plan_payload(user, last_session, request_data, chat_fn, la
     preferences = parse_preferences(request_data, stored_injuries=stored)
     require_supported(preferences)
     persist_posted_injuries(user, request_data.get("injuries"), logger=logger)
-    log_info = getattr(logger, "info", None) if logger else None
-    if callable(log_info):
-        log_info(
-            "[TRAINING] generation_started style=%s days=%s duration=%s "
-            "equipment=%s focus=%s cardio_type=%s cardio_days=%s provider_invoked=1",
-            preferences.antrenman_tarzi,
-            preferences.gun_sayisi,
-            preferences.sure,
-            preferences.ekipman,
-            preferences.odak_hedef,
-            preferences.kardiyo_tipi,
-            preferences.kardiyo_gun,
-        )
+    _log(
+        logger, "generation_started",
+        style=preferences.antrenman_tarzi,
+        days=preferences.gun_sayisi,
+        duration=preferences.sure,
+        equipment=preferences.ekipman,
+        focus=preferences.odak_hedef,
+        cardio_type=preferences.kardiyo_tipi,
+        cardio_days=preferences.kardiyo_gun,
+        provider_invoked=1,
+    )
     features = build_features(user, last_session, preferences)
     classification = classify_user(features)
     context = build_program_context(features, preferences, classification)
-    prompt = build_training_prompt(features, preferences, classification, context, language=language)
+    prompt = build_training_prompt(
+        features, preferences, classification, context, language=language)
     system_prompt = build_system_prompt(language)
+    budget = _CompletionBudget(chat_fn)
+
     try:
-        plan, injury_warnings = _request_and_validate_plan(
-            chat_fn, prompt, system_prompt, preferences, max_tokens=4000)
-    except (json.JSONDecodeError, PlanValidationError) as exc:
-        if logger:
-            logger.warning(
-                "[TRAINING] invalid model response; retrying once (%s)",
-                type(exc).__name__,
+        text, truncated = budget.complete(
+            prompt=prompt, system_prompt=system_prompt,
+            max_tokens=PRIMARY_MAX_TOKENS, temperature=0.35)
+        try:
+            plan, injury_warnings = _parse_and_validate(text, truncated, preferences)
+        except (SchemaInvalidError, SemanticInvalidError):
+            # Provider said it stopped at the token cap. A closed-but-short
+            # object is still truncation, not a semantic command miss.
+            if truncated:
+                raise TruncatedError(
+                    "provider truncated a closed JSON object")
+            raise
+    except (ParseFailedError, TruncatedError) as exc:
+        category = "truncated" if isinstance(exc, TruncatedError) else "parse_failed"
+        _log(logger, category, repair_eligible=1, calls=len(budget.calls))
+        _log(logger, "repair_attempted", reason=type(exc).__name__, calls=len(budget.calls))
+        repair_tokens = REPAIR_MAX_TOKENS if isinstance(exc, TruncatedError) else PRIMARY_MAX_TOKENS
+        try:
+            text, truncated = budget.complete(
+                prompt=f"{prompt}\n\n{_REPAIR_JSON_SUFFIX}",
+                system_prompt=system_prompt,
+                max_tokens=repair_tokens,
+                temperature=0.35,
             )
-        retry_prompt = f"{prompt}\n\n{_COMPACT_JSON_RETRY_SUFFIX}"
-        plan, injury_warnings = _request_and_validate_plan(
-            chat_fn, retry_prompt, system_prompt, preferences, max_tokens=7000)
+            plan, injury_warnings = _parse_and_validate(text, truncated, preferences)
+        except (ParseFailedError, TruncatedError, SchemaInvalidError, SemanticInvalidError):
+            _log(logger, "repair_failed", calls=len(budget.calls))
+            raise
+    except SchemaInvalidError:
+        _log(logger, "schema_invalid", calls=len(budget.calls), repair_eligible=0)
+        raise
+    except SemanticInvalidError:
+        _log(logger, "semantic_invalid", calls=len(budget.calls), repair_eligible=0)
+        raise
+
     ozet = plan.get("haftalik_ozet", {})
     yogunluk = ozet.get("yogunluk_skoru") or 7
     denge = ozet.get("denge_skoru") or 7

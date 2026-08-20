@@ -195,7 +195,9 @@ def test_response_validator_rejects_invalid_tip_and_wrong_training_day_count():
     wrong_count = {
         "program": [
             {"gun": "Pazartesi", "tip": "antrenman", "odak": "Full", "sure_dk": 45,
-             "tahmini_kalori": 300, "egzersizler": [{"isim": "Squat"}]},
+             "tahmini_kalori": 300,
+             "egzersizler": [{"isim": "Squat", "set": 3, "tekrar": "8-12",
+                              "dinlenme": "90 sn", "not": ""}]},
             {"gun": "Salı", "tip": "dinlenme", "odak": "Aktif Toparlanma", "sure_dk": 0,
              "tahmini_kalori": 0, "egzersizler": []},
             {"gun": "Çarşamba", "tip": "dinlenme", "odak": "Aktif Toparlanma", "sure_dk": 0,
@@ -243,23 +245,22 @@ def test_response_validator_rejects_duplicate_days():
         validate_generated_plan(plan, prefs, injuries="")
 
 
-def test_response_validator_parses_messy_numeric_fields():
-    # B9: "3-4" / "45 dk" / "~300" gibi değerler bare ValueError yerine
-    # savunmacı ayrıştırılmalı (generic 500'e düşmeden).
+def test_response_validator_rejects_messy_numeric_fields():
     prefs = TrainingPreferences(gun_sayisi=1, sure=45)
     plan = {"program": [
         {"gun": "Pazartesi", "tip": "antrenman", "odak": "Full",
          "sure_dk": "45 dk", "tahmini_kalori": "~300",
-         "egzersizler": [{"isim": "Squat", "set": "3-4", "tekrar": "8-12"}]},
+         "egzersizler": [{"isim": "Squat", "set": "3-4", "tekrar": "8-12",
+                          "dinlenme": "90 sn", "not": ""}]},
     ] + [_rest_day(g) for g in ["Salı", "Çarşamba", "Perşembe", "Cuma",
                                  "Cumartesi", "Pazar"]],
-        "haftalik_ozet": {"yogunluk_skoru": "~8"}}
-    result, _warnings = validate_generated_plan(plan, prefs, injuries="")
-    day0 = result["program"][0]
-    assert day0["sure_dk"] == 45
-    assert day0["tahmini_kalori"] == 300
-    assert day0["egzersizler"][0]["set"] == 3
-    assert result["haftalik_ozet"]["yogunluk_skoru"] == 8
+        "haftalik_ozet": {"yogunluk_skoru": 7, "denge_skoru": 7, "uygunluk_skoru": 7}}
+    with pytest.raises(PlanValidationError):
+        validate_generated_plan(plan, prefs, injuries="")
+
+
+def _valid_exercise():
+    return {"isim": "Squat", "set": 3, "tekrar": "8-12", "dinlenme": "90 sn", "not": ""}
 
 
 def _valid_generated_plan():
@@ -271,7 +272,7 @@ def _valid_generated_plan():
                 "odak": "Full Body" if index == 0 else "Aktif Toparlanma",
                 "sure_dk": 45 if index == 0 else 0,
                 "tahmini_kalori": 300 if index == 0 else 0,
-                "egzersizler": [{"isim": "Squat"}] if index == 0 else [],
+                "egzersizler": [_valid_exercise()] if index == 0 else [],
             }
             for index, day in enumerate(WEEKDAYS)
         ],
@@ -283,40 +284,48 @@ def _valid_generated_plan():
     }
 
 
-@pytest.mark.parametrize("raw, expected", [
-    (-1, 0), (0, 0), (1440, 1440), (1441, 1440),
-])
-def test_generated_day_duration_is_clamped_before_serialization(raw, expected):
+@pytest.mark.parametrize("raw", [-1, 1441])
+def test_generated_day_duration_out_of_bounds_is_rejected(raw):
     preferences = TrainingPreferences(gun_sayisi=1, sure=45)
     generated = _valid_generated_plan()
     generated["program"][0]["sure_dk"] = raw
-    generated["program"][0]["egzersizler"][0]["set"] = 3
 
-    validated, _ = validate_generated_plan(generated, preferences)
-    serialized = serialize_plan(validated)
-
-    assert validated["program"][0]["sure_dk"] == expected
-    assert validated["program"][0]["egzersizler"][0]["set"] == 3
-    assert serialized["program"][0]["sure_dk"] == expected
-    assert serialized["program"][0]["egzersizler"][0]["set"] == 3
+    with pytest.raises(PlanValidationError):
+        validate_generated_plan(generated, preferences)
 
 
-@pytest.mark.parametrize("raw, expected", [
-    (0, 1), (1, 1), (100, 100), (101, 100),
-])
-def test_generated_exercise_sets_are_clamped_before_serialization(raw, expected):
+def test_generated_day_duration_in_bounds_is_preserved():
     preferences = TrainingPreferences(gun_sayisi=1, sure=45)
     generated = _valid_generated_plan()
     generated["program"][0]["sure_dk"] = 45
-    generated["program"][0]["egzersizler"][0]["set"] = raw
 
     validated, _ = validate_generated_plan(generated, preferences)
     serialized = serialize_plan(validated)
 
     assert validated["program"][0]["sure_dk"] == 45
-    assert validated["program"][0]["egzersizler"][0]["set"] == expected
     assert serialized["program"][0]["sure_dk"] == 45
-    assert serialized["program"][0]["egzersizler"][0]["set"] == expected
+
+
+@pytest.mark.parametrize("raw", [0, 101])
+def test_generated_exercise_sets_out_of_bounds_are_rejected(raw):
+    preferences = TrainingPreferences(gun_sayisi=1, sure=45)
+    generated = _valid_generated_plan()
+    generated["program"][0]["egzersizler"][0]["set"] = raw
+
+    with pytest.raises(PlanValidationError):
+        validate_generated_plan(generated, preferences)
+
+
+def test_generated_exercise_sets_in_bounds_are_preserved():
+    preferences = TrainingPreferences(gun_sayisi=1, sure=45)
+    generated = _valid_generated_plan()
+    generated["program"][0]["egzersizler"][0]["set"] = 3
+
+    validated, _ = validate_generated_plan(generated, preferences)
+    serialized = serialize_plan(validated)
+
+    assert validated["program"][0]["egzersizler"][0]["set"] == 3
+    assert serialized["program"][0]["egzersizler"][0]["set"] == 3
 
 
 def _stub_generation_pipeline(monkeypatch):
@@ -349,11 +358,14 @@ def _generate_with_chat(monkeypatch, chat_fn, logger=None):
     )
 
 
-def test_generation_retries_truncated_response_with_larger_compact_request(monkeypatch):
+def test_generation_retries_truncated_response_with_repair_request(monkeypatch):
     calls = []
-    warnings = []
+    events = []
     responses = iter(("{\"program\": [", json.dumps(_valid_generated_plan())))
-    logger = SimpleNamespace(warning=lambda *args, **kwargs: warnings.append((args, kwargs)))
+    logger = SimpleNamespace(
+        warning=lambda *args, **kwargs: events.append(("warn", args)),
+        info=lambda *args, **kwargs: events.append(("info", args)),
+    )
 
     def fake_chat(**kwargs):
         calls.append(kwargs)
@@ -362,26 +374,23 @@ def test_generation_retries_truncated_response_with_larger_compact_request(monke
     result = _generate_with_chat(monkeypatch, fake_chat, logger=logger)
 
     assert result["program"][0]["tip"] == "antrenman"
-    assert [call["max_tokens"] for call in calls] == [4000, 7000]
+    assert [call["max_tokens"] for call in calls] == [4000, 4000]
     assert calls[0]["messages"][0]["content"] == "base prompt"
-    assert calls[1]["messages"][0]["content"].endswith(
-        "Yanıtı kısa tut ve yalnızca eksiksiz JSON döndür."
-    )
-    assert len(warnings) == 1
-    assert "{\"program\": [" not in repr(warnings)
+    assert "REPAIR:" in calls[1]["messages"][0]["content"]
+    assert "{\"program\": [" not in repr(events)
 
 
-def test_generation_retries_validation_error_once(monkeypatch):
+def test_generation_does_not_retry_schema_invalid_output(monkeypatch):
     calls = []
-    responses = iter((json.dumps({}), json.dumps(_valid_generated_plan())))
 
     def fake_chat(**kwargs):
         calls.append(kwargs)
-        return next(responses)
+        return json.dumps({})
 
-    _generate_with_chat(monkeypatch, fake_chat)
+    with pytest.raises(PlanValidationError):
+        _generate_with_chat(monkeypatch, fake_chat)
 
-    assert [call["max_tokens"] for call in calls] == [4000, 7000]
+    assert [call["max_tokens"] for call in calls] == [4000]
 
 
 def test_generation_does_not_retry_valid_first_response(monkeypatch):
@@ -397,13 +406,14 @@ def test_generation_does_not_retry_valid_first_response(monkeypatch):
 
 
 def test_generation_raises_parse_error_after_single_retry(monkeypatch):
+    from app.services.training_generation.output_errors import ParseFailedError
     calls = []
 
     def fake_chat(**kwargs):
         calls.append(kwargs)
         return "not json"
 
-    with pytest.raises(json.JSONDecodeError):
+    with pytest.raises(ParseFailedError):
         _generate_with_chat(monkeypatch, fake_chat)
 
-    assert [call["max_tokens"] for call in calls] == [4000, 7000]
+    assert [call["max_tokens"] for call in calls] == [4000, 4000]

@@ -219,18 +219,33 @@ def test_training_bootstrap_projects_full_week_onto_closed_public_schema(
         assert sentinel not in raw
 
 
-@pytest.mark.parametrize(("raw_duration", "raw_sets", "duration", "sets"), [
-    (-1, 0, 0, 1),
-    (1441, 101, 1440, 100),
-])
-def test_training_bootstrap_serves_validator_bounded_generated_plan(
-        client, auth_user, monkeypatch,
-        raw_duration, raw_sets, duration, sets):
+@pytest.mark.parametrize(("raw_duration", "raw_sets"), [(-1, 0), (1441, 101)])
+def test_generated_plan_rejects_out_of_bounds_before_bootstrap(
+        raw_duration, raw_sets):
+    from app.services.training_generation.response_validator import PlanValidationError
     program = _program()
     program[0]["sure_dk"] = raw_duration
-    program[0]["egzersizler"][0]["set"] = raw_sets
-    generated = {"program": program, "haftalik_ozet": {}}
+    for exercise in program[0]["egzersizler"]:
+        exercise.pop("internal_id", None)
+        exercise["set"] = raw_sets
+    generated = {
+        "program": program,
+        "haftalik_ozet": {"yogunluk_skoru": 7, "denge_skoru": 7, "uygunluk_skoru": 7},
+    }
+    with pytest.raises(PlanValidationError):
+        validate_generated_plan(generated, TrainingPreferences(gun_sayisi=1, sure=45))
 
+
+def test_training_bootstrap_serves_validator_accepted_generated_plan(
+        client, auth_user, monkeypatch):
+    program = _program()
+    for day in program:
+        for exercise in day.get("egzersizler") or []:
+            exercise.pop("internal_id", None)
+    generated = {
+        "program": program,
+        "haftalik_ozet": {"yogunluk_skoru": 7, "denge_skoru": 7, "uygunluk_skoru": 7},
+    }
     validated, _ = validate_generated_plan(
         generated, TrainingPreferences(gun_sayisi=1, sure=45))
     db.session.add(TrainingPlan(
@@ -244,8 +259,8 @@ def test_training_bootstrap_serves_validator_bounded_generated_plan(
     response = client.get("/training/bootstrap")
 
     assert response.status_code == 200
-    assert response.get_json()["today_plan"]["sure_dk"] == duration
-    assert response.get_json()["today_plan"]["egzersizler"][0]["set"] == sets
+    assert response.get_json()["today_plan"]["sure_dk"] == 45
+    assert response.get_json()["today_plan"]["egzersizler"][0]["set"] == 3
 
 def test_training_bootstrap_fails_closed_without_partial_payload(
         client, auth_user, monkeypatch):
@@ -292,7 +307,24 @@ def test_bootstrap_supports_legacy_top_level_program_saved_by_training_ui(
     from app.blueprints import training as training_bp
 
     monkeypatch.setattr(training_bp, "app_today", lambda: MONDAY)
-    saved = client.post("/training-plan/save", json={"plan": _program(), "score": 7})
+    saveable = []
+    for index, row in enumerate(_program()):
+        exercises = [
+            {key: value for key, value in ex.items() if key != "internal_id"}
+            for ex in row.get("egzersizler", [])
+        ]
+        if index < 3:
+            if not exercises:
+                exercises = [{"isim": "Row", "set": 3, "tekrar": "10-12",
+                              "dinlenme": "75 sn", "not": "Kontrollü"}]
+            saveable.append({
+                **row, "tip": "antrenman", "sure_dk": 45, "egzersizler": exercises,
+            })
+        else:
+            saveable.append({
+                **row, "tip": "dinlenme", "sure_dk": 0, "egzersizler": [],
+            })
+    saved = client.post("/training-plan/save", json={"plan": saveable, "score": 7})
     assert saved.status_code == 200
 
     body = client.get("/training/bootstrap").get_json()
@@ -373,10 +405,17 @@ def test_flag_on_legacy_program_creates_resumable_persisted_session(
         app, client, auth_user):
     app.config["FITX_WORKOUT_SESSIONS_ENABLED"] = True
     program = _program()
-    for day in program:
-        day["tip"] = "antrenman"
-        day["egzersizler"] = [{"isim": "Row", "set": 3, "tekrar": "10",
-                                "dinlenme": "60 sn", "not": ""}]
+    for index, day in enumerate(program):
+        day.pop("internal_id", None)
+        if index < 6:
+            day["tip"] = "antrenman"
+            day["sure_dk"] = 45
+            day["egzersizler"] = [{"isim": "Row", "set": 3, "tekrar": "10",
+                                    "dinlenme": "60 sn", "not": ""}]
+        else:
+            day["tip"] = "dinlenme"
+            day["sure_dk"] = 0
+            day["egzersizler"] = []
     assert client.post(
         "/training-plan/save", json={"plan": program, "score": 7}).status_code == 200
     assert client.post("/workout/session/start").status_code == 201

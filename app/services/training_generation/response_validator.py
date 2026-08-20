@@ -1,106 +1,203 @@
-import re
+"""Fail-closed structural validation of a generated training plan.
+
+Parse validity is not semantic validity. This module answers: is the object
+the canonical 7-day shape? Semantic checks live in semantic_validator.py.
+Numeric clamps and weekday backfill are gone — malformed values are rejected.
+"""
+from __future__ import annotations
 
 from app.services import injury_constraints
-from app.services.training_generation.models import TrainingPreferences
+from app.services.training_generation.output_errors import (
+    PlanValidationError,
+    SchemaInvalidError,
+)
+from app.services.training_generation.plan_schema import (
+    CALORIE_MAX,
+    CALORIE_MIN,
+    DAY_KEYS,
+    DURATION_MAX,
+    DURATION_MIN,
+    EXERCISE_KEYS,
+    FOCUS_MAX,
+    NAME_MAX,
+    NOTE_MAX,
+    OZET_KEYS,
+    OZET_REQUIRED_KEYS,
+    PLAN_KEYS,
+    REPS_MAX,
+    REST_MAX,
+    SCORE_MAX,
+    SCORE_MIN,
+    SET_MAX,
+    SET_MIN,
+    VALID_TIPS,
+    WEEKDAYS,
+)
 
 
-class PlanValidationError(ValueError):
-    pass
+def _forbid_unknown(mapping: dict, allowed: frozenset, label: str) -> None:
+    extra = set(mapping) - allowed
+    if extra:
+        raise SchemaInvalidError(f"{label} contains unknown keys")
 
 
-WEEKDAYS = ["Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar"]
-VALID_TIPS = {"antrenman", "dinlenme", "kardiyo"}
+def _require_mapping(value, label: str) -> dict:
+    if not isinstance(value, dict) or isinstance(value, bool):
+        raise SchemaInvalidError(f"{label} must be an object")
+    return value
 
 
-def _to_int(value, default):
-    """B9: LLM sayı alanlarını savunmacı ayrıştır. "3-4", "45 dk", "~300" gibi
-    değerler düz int() ile bare ValueError fırlatıp çağıranın
-    (JSONDecodeError, PlanValidationError) yakalamasından kaçıp generic 500
-    üretiyordu. Baştaki tamsayıyı çek; bulunamazsa default."""
-    if isinstance(value, bool):
-        return default
-    if isinstance(value, (int, float)):
-        return int(value)
-    m = re.search(r"-?\d+", str(value if value is not None else ""))
-    return int(m.group()) if m else default
+def _require_str(value, label: str, max_len: int, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str):
+        raise SchemaInvalidError(f"{label} must be a string")
+    if any(ord(char) < 32 and char not in "\t\n\r" for char in value) or "\x00" in value:
+        raise SchemaInvalidError(f"{label} contains forbidden characters")
+    cleaned = value.strip()
+    if not cleaned and not allow_empty:
+        raise SchemaInvalidError(f"{label} must be non-empty")
+    if len(cleaned) > max_len:
+        raise SchemaInvalidError(f"{label} exceeds {max_len} characters")
+    return cleaned
 
 
-def _bounded_int(value, default, low, high):
-    return max(low, min(high, _to_int(value, default)))
+def _require_int(value, label: str, low: int, high: int) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise SchemaInvalidError(f"{label} must be an integer")
+    if value < low or value > high:
+        raise SchemaInvalidError(f"{label} is out of bounds")
+    return value
 
 
-def _clamp_score(value):
-    parsed = _to_int(value, 7)
-    if parsed == 0:
-        return 7
-    return max(1, min(10, parsed))
+def _validate_exercise(raw) -> dict:
+    ex = _require_mapping(raw, "egzersiz")
+    _forbid_unknown(ex, EXERCISE_KEYS, "egzersiz")
+    for key in ("isim", "set", "tekrar", "dinlenme"):
+        if key not in ex:
+            raise SchemaInvalidError(f"egzersiz missing {key}")
+    note = ex["not"] if "not" in ex else ""
+    return {
+        "isim": _require_str(ex["isim"], "egzersiz isim", NAME_MAX),
+        "set": _require_int(ex["set"], "set", SET_MIN, SET_MAX),
+        "tekrar": _require_str(ex["tekrar"], "tekrar", REPS_MAX),
+        "dinlenme": _require_str(ex["dinlenme"], "dinlenme", REST_MAX),
+        "not": _require_str(note, "not", NOTE_MAX, allow_empty=True),
+    }
 
 
-def validate_generated_plan(plan: dict, preferences: TrainingPreferences, injuries: str = "") -> tuple[dict, list[dict]]:
-    if not isinstance(plan, dict):
-        raise PlanValidationError("plan JSON object olmalı")
-    program = plan.get("program")
-    if not isinstance(program, list) or len(program) != 7:
-        raise PlanValidationError("program tam 7 gün içermeli")
+def _validate_day(raw) -> dict:
+    day = _require_mapping(raw, "gün")
+    _forbid_unknown(day, DAY_KEYS, "gün")
+    for key in DAY_KEYS:
+        if key not in day:
+            raise SchemaInvalidError(f"gün missing {key}")
+    gun = _require_str(day["gun"], "gun", 32)
+    if gun not in WEEKDAYS:
+        raise SchemaInvalidError("gun alanı kanonik Türkçe hafta günü olmalı")
+    tip = _require_str(day["tip"], "tip", 32)
+    if tip not in VALID_TIPS:
+        raise SchemaInvalidError("tip alanı antrenman/dinlenme/kardiyo olmalı")
+    exercises_raw = day["egzersizler"]
+    if not isinstance(exercises_raw, list):
+        raise SchemaInvalidError("egzersizler liste olmalı")
+    exercises = [_validate_exercise(item) for item in exercises_raw]
+    if tip == "antrenman" and len(exercises) < 1:
+        raise SchemaInvalidError("antrenman günü en az bir egzersiz içermeli")
+    if tip == "kardiyo" and len(exercises) < 1:
+        raise SchemaInvalidError("kardiyo günü en az bir egzersiz içermeli")
+    if tip == "dinlenme" and exercises:
+        raise SchemaInvalidError("dinlenme günü egzersiz içeremez")
+    return {
+        "gun": gun,
+        "tip": tip,
+        "odak": _require_str(day["odak"], "odak", FOCUS_MAX),
+        "sure_dk": _require_int(day["sure_dk"], "sure_dk", DURATION_MIN, DURATION_MAX),
+        "tahmini_kalori": _require_int(
+            day["tahmini_kalori"], "tahmini_kalori", CALORIE_MIN, CALORIE_MAX),
+        "egzersizler": exercises,
+    }
 
-    injury_warnings: list[dict] = []
-    training_days = 0
-    seen_days: set[str] = set()
-    for index, day in enumerate(program):
-        if not isinstance(day, dict):
-            raise PlanValidationError("her gün object olmalı")
-        day["gun"] = day.get("gun") or WEEKDAYS[index]
-        if day["gun"] not in WEEKDAYS:
-            raise PlanValidationError("gun alanı kanonik Türkçe hafta günü olmalı")
-        # B8: gün adları benzersiz olmalı — LLM aynı günü (7× "Pazartesi") tekrar
-        # üretirse takvim bozulurdu.
-        if day["gun"] in seen_days:
-            raise PlanValidationError("gun alanları benzersiz olmalı (tekrar eden gün)")
-        seen_days.add(day["gun"])
-        tip = day.get("tip")
-        if tip not in VALID_TIPS:
-            raise PlanValidationError("tip alanı antrenman/dinlenme/kardiyo olmalı")
-        if tip == "antrenman":
-            training_days += 1
-        day["odak"] = str(day.get("odak") or ("Aktif Toparlanma" if tip == "dinlenme" else "Antrenman"))[:120]
-        default_duration = 0 if tip == "dinlenme" else preferences.sure
-        day["sure_dk"] = _bounded_int(
-            day.get("sure_dk"), default_duration, 0, 1440)
-        day["tahmini_kalori"] = max(0, min(900, _to_int(day.get("tahmini_kalori"), 0)))
-        exercises = day.get("egzersizler") or []
-        if not isinstance(exercises, list):
-            raise PlanValidationError("egzersizler liste olmalı")
-        # B7: antrenman günü en az bir egzersiz içermeli — boş egzersiz listesiyle
-        # "antrenman" günü anlamsız (kullanıcıya boş program).
-        if tip == "antrenman" and len(exercises) < 1:
-            raise PlanValidationError("antrenman günü en az bir egzersiz içermeli")
-        for ex in exercises:
-            if not isinstance(ex, dict):
-                raise PlanValidationError("egzersiz object olmalı")
-            ex["isim"] = str(ex.get("isim") or "").strip()[:120]
-            if not ex["isim"]:
-                raise PlanValidationError("egzersiz isim alanı boş olamaz")
-            ex["set"] = _bounded_int(ex.get("set"), 1, 1, 100)
-            ex["tekrar"] = str(ex.get("tekrar") or "8-12")[:40]
-            ex["dinlenme"] = str(ex.get("dinlenme") or "60-90 sn")[:40]
+
+def _validate_ozet(raw) -> dict:
+    ozet = _require_mapping(raw, "haftalik_ozet")
+    _forbid_unknown(ozet, OZET_KEYS, "haftalik_ozet")
+    for key in OZET_REQUIRED_KEYS:
+        if key not in ozet:
+            raise SchemaInvalidError(f"haftalik_ozet missing {key}")
+    scores = {
+        key: _require_int(ozet[key], key, SCORE_MIN, SCORE_MAX)
+        for key in OZET_REQUIRED_KEYS
+    }
+    result = dict(scores)
+    for key in ("toplam_antrenman_gun", "toplam_tahmini_kalori"):
+        if key in ozet:
+            result[key] = _require_int(ozet[key], key, 0, 100_000)
+    return result
+
+
+def coerce_plan_document(raw) -> dict:
+    """Accept the generate object or the persisted program-array save shape."""
+    if isinstance(raw, list):
+        return {"program": raw}
+    if isinstance(raw, dict) and "program" in raw:
+        return raw
+    raise SchemaInvalidError("plan JSON object olmalı")
+
+
+def validate_plan_structure(plan, *, require_ozet: bool = False) -> dict:
+    document = coerce_plan_document(plan)
+    extra_top = set(document) - PLAN_KEYS
+    if extra_top:
+        raise SchemaInvalidError("plan contains unknown keys")
+    program_raw = document.get("program")
+    if not isinstance(program_raw, list) or len(program_raw) != 7:
+        raise SchemaInvalidError("program tam 7 gün içermeli")
+    days = [_validate_day(item) for item in program_raw]
+    seen = [day["gun"] for day in days]
+    if len(set(seen)) != 7:
+        raise SchemaInvalidError("gun alanları benzersiz olmalı (tekrar eden gün)")
+    if set(seen) != set(WEEKDAYS):
+        raise SchemaInvalidError("program kanonik 7 hafta gününü içermeli")
+    if "haftalik_ozet" in document:
+        ozet = _validate_ozet(document["haftalik_ozet"])
+    elif require_ozet:
+        raise SchemaInvalidError("haftalik_ozet object olmalı")
+    else:
+        ozet = {
+            "yogunluk_skoru": 7,
+            "denge_skoru": 7,
+            "uygunluk_skoru": 7,
+        }
+    training_days = sum(1 for day in days if day["tip"] == "antrenman")
+    ozet["toplam_antrenman_gun"] = training_days
+    ozet["toplam_tahmini_kalori"] = sum(day["tahmini_kalori"] for day in days)
+    return {"program": days, "haftalik_ozet": ozet}
+
+
+def annotate_injuries(plan: dict, injuries: str = "") -> list[dict]:
+    """Warn-only injury overlay. Not catalog authority and not a repair."""
+    warnings: list[dict] = []
+    if not injuries:
+        return warnings
+    for day in plan["program"]:
+        for ex in day["egzersizler"]:
             hit = injury_constraints.find_contraindicated(ex["isim"], injuries)
             if hit:
                 warn = f"⚠️ SAKATLIK RİSKİ ({hit}) - güvenli alternatifle değiştir"
-                note = str(ex.get("not") or "").strip()
-                ex["not"] = f"{warn}. {note}".strip()
-                injury_warnings.append({"gun": day.get("gun"), "egzersiz": ex["isim"], "neden": hit})
-            else:
-                ex["not"] = str(ex.get("not") or "")[:240]
+                note = ex.get("not") or ""
+                ex["not"] = f"{warn}. {note}".strip()[:NOTE_MAX]
+                warnings.append({
+                    "gun": day.get("gun"), "egzersiz": ex["isim"], "neden": hit,
+                })
+    return warnings
 
-    if training_days != preferences.gun_sayisi:
-        raise PlanValidationError(f"toplam antrenman günü {preferences.gun_sayisi} olmalı")
 
-    ozet = plan.setdefault("haftalik_ozet", {})
-    if not isinstance(ozet, dict):
-        raise PlanValidationError("haftalik_ozet object olmalı")
-    ozet["toplam_antrenman_gun"] = training_days
-    ozet["toplam_tahmini_kalori"] = sum(day.get("tahmini_kalori", 0) for day in program)
-    ozet["yogunluk_skoru"] = _clamp_score(ozet.get("yogunluk_skoru"))
-    ozet["denge_skoru"] = _clamp_score(ozet.get("denge_skoru"))
-    ozet["uygunluk_skoru"] = _clamp_score(ozet.get("uygunluk_skoru"))
-    return plan, injury_warnings
+def validate_generated_plan(plan: dict, preferences, injuries: str = "") -> tuple[dict, list[dict]]:
+    """Structural + semantic validation used by generate and tests."""
+    from app.services.training_generation.semantic_validator import (
+        validate_plan_semantics,
+    )
+
+    structured = validate_plan_structure(plan, require_ozet=True)
+    validate_plan_semantics(structured, preferences)
+    warnings = annotate_injuries(structured, injuries)
+    return structured, warnings
