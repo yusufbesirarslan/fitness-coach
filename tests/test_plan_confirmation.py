@@ -88,6 +88,7 @@ def test_user_b_cannot_see_or_cancel_user_a_pending(
     assert plan_confirmation.get_pending(other.id) is None
     assert plan_confirmation.cancel_pending(other.id) is None
     assert plan_confirmation.lock_proposal(other.id, created.public_id) is None
+    assert plan_confirmation.lock_latest_proposal(other.id) is None
     assert plan_confirmation.get_pending(planned_user.id).public_id == \
         created.public_id
 

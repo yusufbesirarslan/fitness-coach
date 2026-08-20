@@ -71,6 +71,26 @@ def lock_proposal(user_id, public_id):
     )
 
 
+def lock_latest_proposal(user_id):
+    """Lock the owner's latest proposal, including a resolved one.
+
+    Cancel has no model/user-supplied proposal identity. Selecting the latest
+    durable owner-scoped row lets a cancel that starts after confirm completed
+    observe APPLIED and replay that exact proposal instead of claiming the plan
+    stayed unchanged.
+    """
+    if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
+        return None
+    return (
+        TrainingPlanConfirmationProposal.query
+        .filter_by(user_id=user_id)
+        .order_by(TrainingPlanConfirmationProposal.id.desc())
+        .populate_existing()
+        .with_for_update()
+        .first()
+    )
+
+
 def create_or_reuse_pending(
         user_id, *, lineage_id, mutation_version, snapshot_fingerprint,
         command_type, command_payload, command_fingerprint, reason_codes,

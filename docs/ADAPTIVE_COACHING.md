@@ -919,6 +919,9 @@ that commits while the row is still pending is the linearization point: that
 proposal cannot afterwards create a new plan mutation. If the exact
 proposal-derived journal identity already exists, cancel reconciles to the
 applied/replayed result and must not claim the plan was unchanged.
+Cancel selects the owner's latest durable proposal, including a resolved row,
+so a cancel that starts only after confirmation completed still reports the
+applied/replayed result rather than claiming the plan stayed unchanged.
 
 **Active-session impact** is evaluated from canonical session facts at
 decision time. PR4 does not take a session lock, and it does not write

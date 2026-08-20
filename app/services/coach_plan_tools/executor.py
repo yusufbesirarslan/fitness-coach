@@ -49,6 +49,7 @@ from app.services.plan_confirmation import (
     create_or_reuse_pending,
     get_pending,
     lock_proposal,
+    lock_latest_proposal,
     mark_applied,
     mark_stale,
 )
@@ -602,10 +603,7 @@ def _cancel_pending(user_id):
     """
     if current_confirmation_intent() != CANCEL:
         return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
-    pending = get_pending(user_id)
-    if pending is None:
-        return results.cancelled_pending_result()
-    row = lock_proposal(user_id, pending.public_id)
+    row = lock_latest_proposal(user_id)
     if row is None:
         return results.cancelled_pending_result()
     key = confirmation_operation_key(row.public_id)

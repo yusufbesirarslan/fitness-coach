@@ -5051,6 +5051,9 @@ lock order: proposal, then plan). A still-pending cancellation cannot be
 followed by that proposal's mutation. Cancel of an already-committed
 proposal-derived journal identity reconciles; it does not claim the plan
 was unchanged. Active-session impact is a snapshot at evaluation time.
+A cancel that starts after confirmation has fully resolved selects the
+owner-scoped latest durable proposal and replays APPLIED semantics; it cannot
+fall through to the no-pending "plan unchanged" response.
 
 
 ## Adaptive Coaching Sprint 1 PR3 — independent review fix (local, 2026-08-16)

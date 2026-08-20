@@ -260,27 +260,23 @@ def test_cancel_winning_the_proposal_lock_blocks_later_mutation(
     from app.services.coach_plan_tools import executor
 
     cancel_holds_lock = threading.Event()
-    original_lock = executor.lock_proposal
-    owner = threading.local()
+    original_confirm_lock = executor.lock_proposal
+    original_cancel_lock = executor.lock_latest_proposal
 
-    def gated_lock(locked_user_id, public_id):
-        if getattr(owner, "role", None) == "confirm":
-            assert cancel_holds_lock.wait(timeout=10)
-            return original_lock(locked_user_id, public_id)
-        row = original_lock(locked_user_id, public_id)
+    def gated_confirm_lock(locked_user_id, public_id):
+        assert cancel_holds_lock.wait(timeout=10)
+        return original_confirm_lock(locked_user_id, public_id)
+
+    def gated_cancel_lock(locked_user_id):
+        row = original_cancel_lock(locked_user_id)
         cancel_holds_lock.set()
         return row
 
-    monkeypatch.setattr(executor, "lock_proposal", gated_lock)
+    monkeypatch.setattr(executor, "lock_proposal", gated_confirm_lock)
+    monkeypatch.setattr(
+        executor, "lock_latest_proposal", gated_cancel_lock)
 
-    def mark_confirm():
-        owner.role = "confirm"
-
-    def mark_cancel():
-        owner.role = "cancel"
-
-    payloads = _confirm_cancel_workers(
-        app, user_id, before_confirm=mark_confirm, before_cancel=mark_cancel)
+    payloads = _confirm_cancel_workers(app, user_id)
     _assert_linearizable_confirm_cancel(app, user_id, payloads)
     assert payloads["cancel"]["status"] == "cancelled"
     assert payloads["confirm"].get("status") != "applied"
@@ -295,28 +291,52 @@ def test_confirm_winning_then_cancel_does_not_claim_plan_unchanged(
     from app.services.coach_plan_tools import executor
 
     confirm_holds_lock = threading.Event()
-    original_lock = executor.lock_proposal
-    owner = threading.local()
+    original_confirm_lock = executor.lock_proposal
+    original_cancel_lock = executor.lock_latest_proposal
 
-    def gated_lock(locked_user_id, public_id):
-        if getattr(owner, "role", None) == "cancel":
-            assert confirm_holds_lock.wait(timeout=10)
-            return original_lock(locked_user_id, public_id)
-        row = original_lock(locked_user_id, public_id)
+    def gated_confirm_lock(locked_user_id, public_id):
+        row = original_confirm_lock(locked_user_id, public_id)
         confirm_holds_lock.set()
         return row
 
-    monkeypatch.setattr(executor, "lock_proposal", gated_lock)
+    def gated_cancel_lock(locked_user_id):
+        assert confirm_holds_lock.wait(timeout=10)
+        return original_cancel_lock(locked_user_id)
 
-    def mark_confirm():
-        owner.role = "confirm"
+    monkeypatch.setattr(executor, "lock_proposal", gated_confirm_lock)
+    monkeypatch.setattr(
+        executor, "lock_latest_proposal", gated_cancel_lock)
 
-    def mark_cancel():
-        owner.role = "cancel"
-
-    payloads = _confirm_cancel_workers(
-        app, user_id, before_confirm=mark_confirm, before_cancel=mark_cancel)
+    payloads = _confirm_cancel_workers(app, user_id)
     _assert_linearizable_confirm_cancel(app, user_id, payloads)
     assert payloads["confirm"]["status"] in ("applied", "replayed")
     assert payloads["cancel"]["status"] in ("applied", "replayed")
     assert "aynı kaldı" not in payloads["cancel"].get("summary", "").lower()
+
+
+def test_cancel_started_after_confirm_completed_reports_applied(pg_confirm_app):
+    """A later cancel must not claim an already-mutated plan stayed unchanged."""
+    app, user_id = pg_confirm_app
+    _stage_remove(app, user_id)
+
+    from app.observability import assign_request_id
+    from app.services import coach_plan_tools
+    from app.models import PlanMutationRecord, TrainingPlan
+
+    with app.test_request_context("/ask", method="POST"):
+        assign_request_id()
+        coach_plan_tools.begin_turn("evet")
+        confirm = coach_plan_tools.execute_plan_tool(
+            user_id, coach_plan_tools.CONFIRM_TOOL, {})
+
+    with app.test_request_context("/ask", method="POST"):
+        assign_request_id()
+        coach_plan_tools.begin_turn("iptal")
+        cancel = coach_plan_tools.execute_plan_tool(
+            user_id, coach_plan_tools.CANCEL_PENDING_TOOL, {})
+
+    assert confirm["status"] in ("applied", "replayed")
+    assert cancel["status"] in ("applied", "replayed")
+    assert "ayn\u0131 kald\u0131" not in cancel.get("summary", "").lower()
+    with app.app_context():
+        assert PlanMutationRecord.query.filter_by(user_id=user_id).count() == 1
