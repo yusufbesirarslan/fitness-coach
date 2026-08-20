@@ -350,6 +350,34 @@ def test_cancel_cannot_execute_applied_proposal_without_journal(
     assert journal(planned_user.id) == []
 
 
+def test_cancel_of_resolved_applied_never_calls_mutation_authority(
+        app, planned_user, tools_on, monkeypatch):
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app)
+        call(planned_user.id, REMOVE,
+             {"day": "Pazartesi", "exercise": "Bench Press"})
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app, "evet")
+        applied = call(planned_user.id, CONFIRM)
+    assert applied["status"] == results.STATUS_APPLIED
+
+    def unexpected_mutation(*_args, **_kwargs):
+        raise AssertionError("resolved cancellation reached mutation authority")
+
+    monkeypatch.setattr(
+        "app.services.coach_plan_tools.executor.apply_plan_mutation",
+        unexpected_mutation,
+    )
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app, "iptal")
+        replayed = call(planned_user.id, CANCEL)
+
+    assert replayed["status"] == results.STATUS_REPLAYED
+    assert names(planned_user.id) == ["Shoulder Press"]
+    assert plan_version(planned_user.id) == 1
+    assert len(journal(planned_user.id)) == 1
+
+
 def test_flag_off_creates_no_proposal(app, planned_user, turn):
     result = call(planned_user.id, REMOVE,
                   {"day": "Pazartesi", "exercise": "Bench Press"})

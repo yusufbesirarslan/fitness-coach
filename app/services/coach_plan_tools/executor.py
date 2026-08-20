@@ -56,6 +56,7 @@ from app.services.plan_confirmation import (
 from app.services.plan_mutation import (
     ACTOR_AI_COACH,
     MutationContext,
+    PlanMutationResult,
     PlanMutationError,
     apply_plan_mutation,
     undo_last_change,
@@ -606,6 +607,22 @@ def _record_matches_current_plan(user_id, record):
     )
 
 
+def _resolved_replay_result(proposal, record):
+    """Build a replay response from journal evidence without mutation calls."""
+    command = decode_command(proposal.command_type, proposal.command_payload)
+    replayed = PlanMutationResult(
+        outcome=record.outcome,
+        plan=None,
+        plan_version=record.after_version,
+        mutation_id=record.public_id,
+        replayed=True,
+    )
+    db.session.rollback()
+    if command is UNDO_LAST_CHANGE:
+        return results.undo_result(replayed)
+    return results.mutation_result(command, replayed)
+
+
 def _cancel_pending(user_id):
     """Cancel a pending proposal, or converge if its mutation already committed.
 
@@ -623,8 +640,15 @@ def _cancel_pending(user_id):
     already = find_by_key(user_id, key)
     if already is not None:
         if _record_matches_current_plan(user_id, already):
-            # Crash window, or confirm already committed: reconcile.
-            return _apply_confirmed(user_id, row)
+            if row.status == STATUS_PENDING:
+                # Crash window: reconcile and finish proposal bookkeeping.
+                return _apply_confirmed(user_id, row)
+            if row.status == STATUS_APPLIED:
+                # Historical reconciliation is evidence-only. A resolved
+                # proposal is never executable, even through idempotent PMS.
+                return _resolved_replay_result(row, already)
+            db.session.rollback()
+            return results.cancelled_pending_result()
         if row.status == STATUS_PENDING:
             mark_applied(user_id, row.public_id)
         else:
