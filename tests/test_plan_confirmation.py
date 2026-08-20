@@ -87,8 +87,18 @@ def test_user_b_cannot_see_or_cancel_user_a_pending(
 
     assert plan_confirmation.get_pending(other.id) is None
     assert plan_confirmation.cancel_pending(other.id) is None
+    assert plan_confirmation.lock_proposal(other.id, created.public_id) is None
     assert plan_confirmation.get_pending(planned_user.id).public_id == \
         created.public_id
+
+
+def test_lock_proposal_is_owner_scoped_and_re_reads(app, planned_user):
+    created, _ = _create(planned_user)
+    locked = plan_confirmation.lock_proposal(planned_user.id, created.public_id)
+    assert locked is not None
+    assert locked.public_id == created.public_id
+    assert locked.user_id == planned_user.id
+    db.session.rollback()
 
 
 def test_cancel_is_idempotent_and_does_not_touch_the_plan(

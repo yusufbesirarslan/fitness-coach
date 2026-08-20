@@ -41,10 +41,14 @@ from app.services.coach_plan_policy import (
     parse_confirmation_intent,
 )
 from app.services.plan_confirmation import (
+    STATUS_APPLIED,
+    STATUS_PENDING,
+    STATUS_STALE,
     PendingConfirmationConflict,
     cancel_pending,
     create_or_reuse_pending,
     get_pending,
+    lock_proposal,
     mark_applied,
     mark_stale,
 )
@@ -549,6 +553,13 @@ def _execute_confirmation_tool(user_id, name, arguments):
 
 
 def _confirm_pending(user_id):
+    """Apply a pending proposal, serialized on the proposal row.
+
+    Lock order: the proposal row, then PlanMutationService's plan row.
+    The proposal lock is released when PlanMutationService commits — that
+    commit also inserts the journal row, so a waiter re-checks the journal
+    under its own proposal lock and cannot claim a still-pending cancel.
+    """
     if current_confirmation_intent() != CONFIRM:
         return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
     if new_proposal_created_this_turn():
@@ -556,32 +567,55 @@ def _confirm_pending(user_id):
     pending = get_pending(user_id)
     if pending is None:
         return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
-    key = confirmation_operation_key(pending.public_id)
+    row = lock_proposal(user_id, pending.public_id)
+    if row is None:
+        return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
+    key = confirmation_operation_key(row.public_id)
     already = find_by_key(user_id, key)
+    if row.status != STATUS_PENDING:
+        if already is not None or row.status == STATUS_APPLIED:
+            return _apply_confirmed(user_id, row)
+        db.session.rollback()
+        if row.status == STATUS_STALE:
+            return results.error_result(results.ERROR_PENDING_CONFIRMATION_STALE)
+        return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
     plan = get_active_plan(user_id)
     if already is None and (
             plan is None
-            or plan.lineage_id != pending.plan_lineage_id
-            or not binding_matches(pending, plan)):
-        mark_stale(user_id, pending.public_id)
+            or plan.lineage_id != row.plan_lineage_id
+            or not binding_matches(row, plan)):
+        mark_stale(user_id, row.public_id)
         return results.error_result(results.ERROR_PENDING_CONFIRMATION_STALE)
     if not _charge_budget(key):
+        db.session.rollback()
         return results.error_result(results.ERROR_MUTATION_BUDGET_EXHAUSTED)
-    return _apply_confirmed(user_id, pending)
+    return _apply_confirmed(user_id, row)
 
 
 def _cancel_pending(user_id):
+    """Cancel a pending proposal, or converge if its mutation already committed.
+
+    Same proposal-row lock as confirm. Linearization is the status transition
+    (PENDING → CANCELLED) or the journal insert from PlanMutationService,
+    whichever commits first. A cancel that observes an already-applied
+    mutation must not claim the plan was unchanged.
+    """
     if current_confirmation_intent() != CANCEL:
         return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
     pending = get_pending(user_id)
     if pending is None:
         return results.cancelled_pending_result()
-    key = confirmation_operation_key(pending.public_id)
+    row = lock_proposal(user_id, pending.public_id)
+    if row is None:
+        return results.cancelled_pending_result()
+    key = confirmation_operation_key(row.public_id)
     already = find_by_key(user_id, key)
-    if already is not None:
-        # Crash window: PlanMutationService committed, proposal still PENDING.
-        # Cancelling would tell the user the plan was unchanged. Reconcile.
-        return _apply_confirmed(user_id, pending)
+    if already is not None or row.status == STATUS_APPLIED:
+        # Crash window, or confirm already committed: reconcile.
+        return _apply_confirmed(user_id, row)
+    if row.status != STATUS_PENDING:
+        db.session.rollback()
+        return results.cancelled_pending_result()
     cancel_pending(user_id)
     return results.cancelled_pending_result()
 

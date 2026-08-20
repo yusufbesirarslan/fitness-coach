@@ -121,3 +121,202 @@ def test_two_workers_confirming_the_same_proposal_mutate_once(pg_confirm_app):
         plan = TrainingPlan.query.filter_by(user_id=user_id).one()
         assert "Bench Press" not in plan.plan_data
         assert plan_confirmation.get_pending(user_id) is None
+
+
+def _stage_remove(app, user_id):
+    from app.observability import assign_request_id
+    from app.services import coach_plan_tools
+
+    with app.test_request_context("/ask", method="POST"):
+        assign_request_id()
+        coach_plan_tools.begin_turn()
+        staged = coach_plan_tools.execute_plan_tool(
+            user_id, "remove_training_plan_exercise",
+            {"day": "Pazartesi", "exercise": "Bench Press"})
+        assert staged["status"] == "confirmation_required"
+
+
+def _confirm_cancel_workers(app, user_id, before_confirm=None, before_cancel=None):
+    """Run confirm and cancel against the same pending proposal.
+
+    Linearization point: the proposal-row lock. Allowed outcomes:
+
+    A. CONFIRM wins — mutation committed once, proposal APPLIED, cancel does
+       not claim the plan was unchanged.
+    B. CANCEL wins — proposal CANCELLED, plan unchanged, confirm does not
+       later mutate.
+
+    ``before_confirm`` / ``before_cancel`` run inside each worker after
+    ``begin_turn`` and before the tool call, so a test can force lock order
+    without sleeps.
+    """
+    from app.observability import assign_request_id
+    from app.services import coach_plan_tools
+
+    start = threading.Barrier(2)
+    payloads = {}
+    errors = []
+
+    def confirm_worker():
+        try:
+            with app.test_request_context("/ask", method="POST"):
+                assign_request_id()
+                coach_plan_tools.begin_turn("evet")
+                start.wait(timeout=10)
+                if before_confirm is not None:
+                    before_confirm()
+                payloads["confirm"] = coach_plan_tools.execute_plan_tool(
+                    user_id, coach_plan_tools.CONFIRM_TOOL, {})
+        except Exception as exc:  # noqa: BLE001
+            errors.append(("confirm", exc))
+
+    def cancel_worker():
+        try:
+            with app.test_request_context("/ask", method="POST"):
+                assign_request_id()
+                coach_plan_tools.begin_turn("iptal")
+                start.wait(timeout=10)
+                if before_cancel is not None:
+                    before_cancel()
+                payloads["cancel"] = coach_plan_tools.execute_plan_tool(
+                    user_id, coach_plan_tools.CANCEL_PENDING_TOOL, {})
+        except Exception as exc:  # noqa: BLE001
+            errors.append(("cancel", exc))
+
+    threads = [
+        threading.Thread(target=confirm_worker, daemon=True),
+        threading.Thread(target=cancel_worker, daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert not any(thread.is_alive() for thread in threads), payloads
+    assert not errors, errors
+    return payloads
+
+
+def _assert_linearizable_confirm_cancel(app, user_id, payloads):
+    from app.models import PlanMutationRecord, TrainingPlan
+    from app.models import TrainingPlanConfirmationProposal
+    from app.services import plan_confirmation
+
+    confirm = payloads["confirm"]
+    cancel = payloads["cancel"]
+    assert confirm is not None and cancel is not None
+    assert "IntegrityError" not in str(confirm) and "IntegrityError" not in str(cancel)
+
+    with app.app_context():
+        mutations = PlanMutationRecord.query.filter_by(user_id=user_id).count()
+        plan = TrainingPlan.query.filter_by(user_id=user_id).one()
+        pending = plan_confirmation.get_pending(user_id)
+        row = (
+            TrainingPlanConfirmationProposal.query
+            .filter_by(user_id=user_id)
+            .order_by(TrainingPlanConfirmationProposal.id.desc())
+            .one()
+        )
+        bench_present = "Bench Press" in plan.plan_data
+
+        assert pending is None
+        assert mutations in (0, 1)
+
+        if row.status == plan_confirmation.STATUS_CANCELLED:
+            # CANCEL linearized first: no subsequent mutation.
+            assert mutations == 0
+            assert bench_present
+            assert cancel["status"] == "cancelled"
+            assert "aynı kaldı" in cancel.get("summary", "").lower()
+            assert confirm.get("status") != "applied"
+            assert confirm.get("error") in (
+                "NO_PENDING_CONFIRMATION", "CONFIRMATION_NOT_AUTHORIZED",
+                "PENDING_CONFIRMATION_STALE") or confirm.get("status") == "error"
+        elif row.status == plan_confirmation.STATUS_APPLIED:
+            # CONFIRM linearized first: mutation once, cancel must not lie.
+            assert mutations == 1
+            assert not bench_present
+            assert confirm["status"] in ("applied", "replayed")
+            assert cancel["status"] in ("applied", "replayed")
+            assert "aynı kaldı" not in cancel.get("summary", "").lower()
+        else:
+            raise AssertionError(
+                f"unexpected proposal status {row.status!r} payloads={payloads}")
+
+
+def test_confirm_vs_cancel_is_linearizable(pg_confirm_app):
+    """Natural start-barrier race: one authoritative outcome, never both."""
+    app, user_id = pg_confirm_app
+    _stage_remove(app, user_id)
+    payloads = _confirm_cancel_workers(app, user_id)
+    _assert_linearizable_confirm_cancel(app, user_id, payloads)
+
+
+def test_cancel_winning_the_proposal_lock_blocks_later_mutation(
+        pg_confirm_app, monkeypatch):
+    """CANCEL acquires the proposal lock first; confirm must not mutate after."""
+    app, user_id = pg_confirm_app
+    _stage_remove(app, user_id)
+
+    from app.services.coach_plan_tools import executor
+
+    cancel_holds_lock = threading.Event()
+    original_lock = executor.lock_proposal
+    owner = threading.local()
+
+    def gated_lock(locked_user_id, public_id):
+        if getattr(owner, "role", None) == "confirm":
+            assert cancel_holds_lock.wait(timeout=10)
+            return original_lock(locked_user_id, public_id)
+        row = original_lock(locked_user_id, public_id)
+        cancel_holds_lock.set()
+        return row
+
+    monkeypatch.setattr(executor, "lock_proposal", gated_lock)
+
+    def mark_confirm():
+        owner.role = "confirm"
+
+    def mark_cancel():
+        owner.role = "cancel"
+
+    payloads = _confirm_cancel_workers(
+        app, user_id, before_confirm=mark_confirm, before_cancel=mark_cancel)
+    _assert_linearizable_confirm_cancel(app, user_id, payloads)
+    assert payloads["cancel"]["status"] == "cancelled"
+    assert payloads["confirm"].get("status") != "applied"
+
+
+def test_confirm_winning_then_cancel_does_not_claim_plan_unchanged(
+        pg_confirm_app, monkeypatch):
+    """CONFIRM acquires the lock first; cancel converges, never lies."""
+    app, user_id = pg_confirm_app
+    _stage_remove(app, user_id)
+
+    from app.services.coach_plan_tools import executor
+
+    confirm_holds_lock = threading.Event()
+    original_lock = executor.lock_proposal
+    owner = threading.local()
+
+    def gated_lock(locked_user_id, public_id):
+        if getattr(owner, "role", None) == "cancel":
+            assert confirm_holds_lock.wait(timeout=10)
+            return original_lock(locked_user_id, public_id)
+        row = original_lock(locked_user_id, public_id)
+        confirm_holds_lock.set()
+        return row
+
+    monkeypatch.setattr(executor, "lock_proposal", gated_lock)
+
+    def mark_confirm():
+        owner.role = "confirm"
+
+    def mark_cancel():
+        owner.role = "cancel"
+
+    payloads = _confirm_cancel_workers(
+        app, user_id, before_confirm=mark_confirm, before_cancel=mark_cancel)
+    _assert_linearizable_confirm_cancel(app, user_id, payloads)
+    assert payloads["confirm"]["status"] in ("applied", "replayed")
+    assert payloads["cancel"]["status"] in ("applied", "replayed")
+    assert "aynı kaldı" not in payloads["cancel"].get("summary", "").lower()

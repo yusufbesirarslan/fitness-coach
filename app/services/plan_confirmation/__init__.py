@@ -15,6 +15,7 @@ from .service import (
     cancel_pending,
     create_or_reuse_pending,
     get_pending,
+    lock_proposal,
     mark_applied,
     mark_stale,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "cancel_pending",
     "create_or_reuse_pending",
     "get_pending",
+    "lock_proposal",
     "mark_applied",
     "mark_stale",
 ]

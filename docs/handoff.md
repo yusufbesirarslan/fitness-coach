@@ -5046,6 +5046,12 @@ Flutter, no nutrition mutation, no proactive adaptation.
 Confirmed writes reuse PR2 idempotency keyed from the proposal public id so a
 crash between mutation commit and proposal bookkeeping cannot double-apply.
 
+Confirm and cancel serialize on the proposal row (`SELECT … FOR UPDATE`;
+lock order: proposal, then plan). A still-pending cancellation cannot be
+followed by that proposal's mutation. Cancel of an already-committed
+proposal-derived journal identity reconciles; it does not claim the plan
+was unchanged. Active-session impact is a snapshot at evaluation time.
+
 
 ## Adaptive Coaching Sprint 1 PR3 — independent review fix (local, 2026-08-16)
 

@@ -47,6 +47,30 @@ def get_pending(user_id):
     )
 
 
+def lock_proposal(user_id, public_id):
+    """Owner-scoped ``SELECT … FOR UPDATE`` of one proposal by public id.
+
+    Confirm and cancel both serialize here so a successful cancellation of a
+    still-pending row cannot be followed by a new plan mutation of that same
+    proposal. ``populate_existing`` re-reads columns under the lock — the
+    identity-map footgun documented on ``PlanMutationService._locked_active_plan``.
+
+    Lock order when a confirmed write also needs the plan row: proposal, then
+    plan. Nothing in this package locks a plan row.
+    """
+    if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
+        return None
+    if not isinstance(public_id, str) or not public_id:
+        return None
+    return (
+        TrainingPlanConfirmationProposal.query
+        .filter_by(user_id=user_id, public_id=public_id)
+        .populate_existing()
+        .with_for_update()
+        .one_or_none()
+    )
+
+
 def create_or_reuse_pending(
         user_id, *, lineage_id, mutation_version, snapshot_fingerprint,
         command_type, command_payload, command_fingerprint, reason_codes,
@@ -98,15 +122,25 @@ def create_or_reuse_pending(
 
 
 def cancel_pending(user_id):
-    """Cancel the user's pending proposal. Idempotent. Never mutates the plan."""
+    """Cancel the user's pending proposal. Idempotent. Never mutates the plan.
+
+    Takes the proposal row lock before the status transition so a confirmer
+    that already observed the same pending row cannot apply after this
+    cancellation commits.
+    """
     pending = get_pending(user_id)
     if pending is None:
         return None
-    pending.status = STATUS_CANCELLED
-    pending.resolved_at = datetime.utcnow()
+    row = lock_proposal(user_id, pending.public_id)
+    if row is None or row.status != STATUS_PENDING:
+        if row is not None:
+            db.session.rollback()
+        return None
+    row.status = STATUS_CANCELLED
+    row.resolved_at = datetime.utcnow()
     db.session.commit()
     _settle()
-    return pending
+    return row
 
 
 def mark_applied(user_id, public_id):

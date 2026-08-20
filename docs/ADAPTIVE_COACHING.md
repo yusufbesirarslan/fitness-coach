@@ -913,6 +913,19 @@ cancel tools take no arguments. The mutation operation key for a confirmed
 write is derived from the server-minted proposal public id, so a crash after
 `PlanMutationService` commits still retries as a PR2 replay.
 
+**Confirm vs cancel.** Both operations lock the proposal row (`SELECT … FOR
+UPDATE`) before deciding. Lock order is proposal, then plan. A cancellation
+that commits while the row is still pending is the linearization point: that
+proposal cannot afterwards create a new plan mutation. If the exact
+proposal-derived journal identity already exists, cancel reconciles to the
+applied/replayed result and must not claim the plan was unchanged.
+
+**Active-session impact** is evaluated from canonical session facts at
+decision time. PR4 does not take a session lock, and it does not write
+`WorkoutSession`. A session that starts after that snapshot is classified
+stale by the existing workout-session recovery path, not by a second
+cross-domain transaction.
+
 **Structural gate.** `CONFIRM` / `CANCEL` / `NONE` is parsed from the raw
 current user turn (`question`). The executor rechecks that fact. A
 misbehaving model calling `confirm_pending_training_plan_change` on
