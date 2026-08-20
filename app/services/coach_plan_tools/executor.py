@@ -593,6 +593,19 @@ def _confirm_pending(user_id):
     return _apply_confirmed(user_id, row)
 
 
+def _record_matches_current_plan(user_id, record):
+    """Whether replay still describes the owner's canonical plan exactly."""
+    plan = get_active_plan(user_id)
+    if plan is None:
+        return False
+    binding = plan_binding(plan)
+    return (
+        binding.lineage_id == record.plan_lineage_id
+        and binding.mutation_version == record.after_version
+        and binding.snapshot_fingerprint == record.after_fingerprint
+    )
+
+
 def _cancel_pending(user_id):
     """Cancel a pending proposal, or converge if its mutation already committed.
 
@@ -608,9 +621,15 @@ def _cancel_pending(user_id):
         return results.cancelled_pending_result()
     key = confirmation_operation_key(row.public_id)
     already = find_by_key(user_id, key)
-    if already is not None or row.status == STATUS_APPLIED:
-        # Crash window, or confirm already committed: reconcile.
-        return _apply_confirmed(user_id, row)
+    if already is not None:
+        if _record_matches_current_plan(user_id, already):
+            # Crash window, or confirm already committed: reconcile.
+            return _apply_confirmed(user_id, row)
+        if row.status == STATUS_PENDING:
+            mark_applied(user_id, row.public_id)
+        else:
+            db.session.rollback()
+        return results.cancelled_pending_result()
     if row.status != STATUS_PENDING:
         db.session.rollback()
         return results.cancelled_pending_result()

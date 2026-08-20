@@ -297,6 +297,59 @@ def test_cancel_after_crash_window_does_not_claim_plan_unchanged(
     assert plan_confirmation.get_pending(planned_user.id) is None
 
 
+def test_cancel_does_not_rebind_applied_proposal_after_lineage_replacement(
+        app, planned_user, tools_on):
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app)
+        call(planned_user.id, REMOVE,
+             {"day": "Pazartesi", "exercise": "Bench Press"})
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app, "evet")
+        applied = call(planned_user.id, CONFIRM)
+    assert applied["status"] == results.STATUS_APPLIED
+
+    old_plan = TrainingPlan.query.filter_by(user_id=planned_user.id).one()
+    db.session.delete(old_plan)
+    db.session.add(TrainingPlan(
+        user_id=planned_user.id, score=8,
+        plan_data=json.dumps(_program(), ensure_ascii=False)))
+    db.session.commit()
+
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app, "iptal")
+        cancelled = call(planned_user.id, CANCEL)
+
+    assert cancelled["status"] == results.STATUS_CANCELLED
+    assert cancelled["operation"] == "cancel_pending"
+    assert names(planned_user.id) == ["Bench Press", "Shoulder Press"]
+    assert plan_version(planned_user.id) == 0
+    assert len(journal(planned_user.id)) == 1
+    proposal = TrainingPlanConfirmationProposal.query.filter_by(
+        user_id=planned_user.id).one()
+    assert proposal.status == plan_confirmation.STATUS_APPLIED
+
+
+def test_cancel_cannot_execute_applied_proposal_without_journal(
+        app, planned_user, tools_on):
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app)
+        call(planned_user.id, REMOVE,
+             {"day": "Pazartesi", "exercise": "Bench Press"})
+    proposal = plan_confirmation.get_pending(planned_user.id)
+    proposal.status = plan_confirmation.STATUS_APPLIED
+    db.session.commit()
+
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app, "iptal")
+        cancelled = call(planned_user.id, CANCEL)
+
+    assert cancelled["status"] == results.STATUS_CANCELLED
+    assert cancelled["operation"] == "cancel_pending"
+    assert names(planned_user.id) == ["Bench Press", "Shoulder Press"]
+    assert plan_version(planned_user.id) == 0
+    assert journal(planned_user.id) == []
+
+
 def test_flag_off_creates_no_proposal(app, planned_user, turn):
     result = call(planned_user.id, REMOVE,
                   {"day": "Pazartesi", "exercise": "Bench Press"})
