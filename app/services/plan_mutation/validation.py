@@ -1,31 +1,33 @@
 """Canonical prescription bounds, reused rather than redefined (brief §12).
 
-The generator's ``response_validator`` is already the repository's authority on
-what a legal exercise looks like. It cannot be called directly here — it
-validates a *whole generated plan* against ``TrainingPreferences`` (7 days, a
-required training-day count, injury screening), none of which a targeted
-mutation should re-run. So this module reuses its *bounds and helper*, and
+``plan_schema`` is the repository's authority on what a legal exercise looks
+like. The generator's ``response_validator`` cannot be called directly here —
+it validates a *whole generated plan* against ``TrainingPreferences`` (7 days,
+a required training-day count, injury screening), none of which a targeted
+mutation should re-run. This module reuses the schema bounds, and
 tests/test_plan_mutation.py pins the two together so they cannot drift.
 
-The difference in posture is deliberate. The generator **clamps** LLM output
-(``_bounded_int``) because a slightly-wrong number from a model is better
-repaired than rejected. A mutation boundary **rejects** instead: a caller asking
-for 999 sets has made an error, and silently storing 100 would tell them their
-request succeeded when it did not.
+Both generate and mutation **reject** out-of-range values. Generate no longer
+clamps LLM output; a caller asking for 999 sets has made an error, and silently
+storing 100 would tell them their request succeeded when it did not.
 """
-from app.services.training_generation.response_validator import (
+from app.services.training_generation.plan_schema import (
+    NAME_MAX,
+    REPS_MAX,
+    SET_MAX,
+    SET_MIN,
     VALID_TIPS,
     WEEKDAYS,
 )
 
 
-#: Sets bounds — identical to the generator's ``_bounded_int(..., 1, 100)``.
-MIN_SETS = 1
-MAX_SETS = 100
+#: Sets bounds — identical to ``plan_schema.SET_MIN`` / ``SET_MAX``.
+MIN_SETS = SET_MIN
+MAX_SETS = SET_MAX
 
-#: Column-backed length ceilings, from the same validator.
-MAX_EXERCISE_NAME_CHARS = 120
-MAX_REPS_CHARS = 40
+#: Column-backed length ceilings, from the same schema.
+MAX_EXERCISE_NAME_CHARS = NAME_MAX
+MAX_REPS_CHARS = REPS_MAX
 
 #: The canonical rest marker. A rest day holding exercises is not a valid plan.
 REST_TIP = "dinlenme"

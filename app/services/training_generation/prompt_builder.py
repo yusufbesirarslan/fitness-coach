@@ -7,13 +7,15 @@ from app.services.training_generation.program_generator import canonical_style, 
 def build_system_prompt(language: str = "tr") -> str:
     if language == "en":
         return (
-            "You are an experienced personal trainer. Return ONLY valid JSON. "
+            "You are an experienced personal trainer. Return ONLY one valid "
+            "JSON object. No markdown, no code fences, no commentary. "
             "Keep gun as Turkish weekday names and tip as antrenman/dinlenme/kardiyo."
         )
     # Prompt gövdesi (contract + few-shot) İngilizce-ağırlıklı; tek satırlık
     # zayıf yönerge modeli İngilizce içeriğe kaydırabiliyor → direktif vurgulu.
     return (
-        "Sen deneyimli bir kişisel antrenörsün. SADECE geçerli JSON döndür. "
+        "Sen deneyimli bir kişisel antrenörsün. SADECE tek bir geçerli JSON "
+        "nesnesi döndür. Markdown, kod çiti veya açıklama yok. "
         "odak, not ve tüm görünen metin alanlarını TÜRKÇE yaz — talimat ve "
         "örnekler İngilizce olsa bile."
     )
@@ -102,7 +104,10 @@ PROGRAM RULES
 4. Aynı ağır pattern iki gün üst üste gelmesin; recovery factor düşükse hacim ve RPE azalt.
 5. Her antrenman gününde gerçekçi egzersiz, set, tekrar, dinlenme ve kısa teknik not yaz.
 6. {lang_rule}
-7. SADECE JSON döndür.
+7. SADECE tek bir JSON nesnesi döndür. Markdown/kod çiti/yorum yok.
+8. Yalnızca şemadaki anahtarları kullan; ekstra anahtar ekleme.
+9. Egzersiz nesnesi tam olarak isim, set, tekrar, dinlenme, not içersin.
+10. set bir tamsayı olsun; sure_dk ve tahmini_kalori tamsayı olsun.
 
 JSON FORMAT
 {{"program":[{{"gun":"Pazartesi","tip":"antrenman","odak":"Full Body","sure_dk":45,"tahmini_kalori":320,"egzersizler":[{{"isim":"Goblet Squat","set":3,"tekrar":"8-12","dinlenme":"90 sn","not":"RPE 7, kontrollü tempo"}}]}}],"haftalik_ozet":{{"toplam_antrenman_gun":{preferences.gun_sayisi},"toplam_tahmini_kalori":1400,"yogunluk_skoru":7,"denge_skoru":8,"uygunluk_skoru":8}}}}

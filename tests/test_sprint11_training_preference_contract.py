@@ -25,7 +25,8 @@ from app.services.training_generation.models import (
 )
 from app.services.training_generation.preference_contract import (
     CODE_CONFLICTING,
-    CODE_GENERATION_INVALID,
+    CODE_GENERATION_PARSE_FAILED,
+    CODE_GENERATION_SEMANTICALLY_INVALID,
     CODE_INVALID,
     CODE_NO_SESSION,
     CODE_UNSUPPORTED,
@@ -117,13 +118,16 @@ def _seven_day_plan(training_days=3, exercise_name="Invented Laser Squat 9000"):
                 "odak": "Full Body",
                 "sure_dk": 45,
                 "tahmini_kalori": 300,
-                "egzersizler": [{
-                    "isim": exercise_name,
-                    "set": 3,
-                    "tekrar": "8-12",
-                    "dinlenme": "90 sn",
-                    "not": "",
-                }],
+                "egzersizler": [
+                    {
+                        "isim": exercise_name if n == 0 else f"{exercise_name} {n}",
+                        "set": 3,
+                        "tekrar": "8-12",
+                        "dinlenme": "90 sn",
+                        "not": "",
+                    }
+                    for n in range(4)
+                ],
             })
         else:
             program.append({
@@ -661,11 +665,11 @@ def test_malformed_provider_output_is_typed_generation_invalid(
     response = client.post("/training-plan", json={"gun_sayisi": 3, "sure": 45})
     assert response.status_code == 500
     body = response.get_json()
-    assert body["code"] == CODE_GENERATION_INVALID
+    assert body["code"] == CODE_GENERATION_PARSE_FAILED
     assert "error" in body
 
 
-def test_day_count_mismatch_still_retries_once_then_typed_500(
+def test_day_count_mismatch_does_not_retry_and_is_semantic(
         client, auth_user, monkeypatch):
     _session(auth_user)
     calls = []
@@ -678,9 +682,8 @@ def test_day_count_mismatch_still_retries_once_then_typed_500(
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
     response = client.post("/training-plan", json={"gun_sayisi": 4, "sure": 45})
     assert response.status_code == 500
-    assert response.get_json()["code"] == CODE_GENERATION_INVALID
-    assert len(calls) == 2
-    assert calls[1]["max_tokens"] == 7000
+    assert response.get_json()["code"] == CODE_GENERATION_SEMANTICALLY_INVALID
+    assert len(calls) == 1
 
 
 # ── Persistence / Adaptive Coaching unchanged ────────────────────────────────

@@ -27,7 +27,11 @@ PLAN_JSON = {
 def _seven_day_program(first_exercise="Lat Pulldown", include_safe_leg_press=False):
     first_exercises = [
         {"isim": first_exercise, "set": 3, "tekrar": "10-12",
-         "dinlenme": "75 sn", "not": "kontrollü"}
+         "dinlenme": "75 sn", "not": "kontrollü"},
+        {"isim": "Seated Row", "set": 3, "tekrar": "10-12",
+         "dinlenme": "75 sn", "not": "kontrollü"},
+        {"isim": "Push-up", "set": 3, "tekrar": "8-12",
+         "dinlenme": "60 sn", "not": "kontrollü"},
     ]
     if include_safe_leg_press:
         first_exercises.append(
@@ -41,14 +45,26 @@ def _seven_day_program(first_exercise="Lat Pulldown", include_safe_leg_press=Fal
          "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
         {"gun": "Çarşamba", "tip": "antrenman", "odak": "Full Body",
          "sure_dk": 45, "tahmini_kalori": 360,
-         "egzersizler": [{"isim": "Goblet Squat", "set": 3, "tekrar": "8-12",
-                          "dinlenme": "90 sn", "not": "RPE 7"}]},
+         "egzersizler": [
+             {"isim": "Goblet Squat", "set": 3, "tekrar": "8-12",
+              "dinlenme": "90 sn", "not": "RPE 7"},
+             {"isim": "Hip Hinge", "set": 3, "tekrar": "8-12",
+              "dinlenme": "90 sn", "not": "RPE 7"},
+             {"isim": "Walking Lunge", "set": 3, "tekrar": "10",
+              "dinlenme": "75 sn", "not": "kontrollü"},
+         ]},
         {"gun": "Perşembe", "tip": "dinlenme", "odak": "Aktif Toparlanma",
          "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
         {"gun": "Cuma", "tip": "antrenman", "odak": "Push Pull",
          "sure_dk": 45, "tahmini_kalori": 370,
-         "egzersizler": [{"isim": "Seated Row", "set": 3, "tekrar": "10-12",
-                          "dinlenme": "75 sn", "not": "omuzları düşür"}]},
+         "egzersizler": [
+             {"isim": "Seated Row", "set": 3, "tekrar": "10-12",
+              "dinlenme": "75 sn", "not": "omuzları düşür"},
+             {"isim": "Overhead Press", "set": 3, "tekrar": "8-10",
+              "dinlenme": "90 sn", "not": "kontrollü"},
+             {"isim": "Lat Pulldown", "set": 3, "tekrar": "10-12",
+              "dinlenme": "75 sn", "not": "kontrollü"},
+         ]},
         {"gun": "Cumartesi", "tip": "dinlenme", "odak": "Aktif Toparlanma",
          "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
         {"gun": "Pazar", "tip": "dinlenme", "odak": "Aktif Toparlanma",
@@ -89,14 +105,14 @@ def test_plan_parses_fenced_json_and_scores(client, with_session, monkeypatch):
     assert body["score_label"] == "İyi"
 
 
-def test_plan_zero_scores_default_to_seven(client, with_session, monkeypatch):
+def test_plan_zero_scores_are_schema_invalid(client, with_session, monkeypatch):
     plan = dict(PLAN_JSON, haftalik_ozet={"yogunluk_skoru": 0, "denge_skoru": 0,
                                           "uygunluk_skoru": 0})
     monkeypatch.setattr(training_bp, "_heavy_chat",
                         lambda **kwargs: json.dumps(plan, ensure_ascii=False))
-    body = client.post("/training-plan", json={}).get_json()
-    assert body["overall_score"] == 7.0
-    assert body["score_label"] == "Orta"
+    response = client.post("/training-plan", json={})
+    assert response.status_code == 500
+    assert response.get_json()["code"] == "TRAINING_PLAN_GENERATION_SCHEMA_INVALID"
 
 
 def test_plan_invalid_llm_output_returns_500(client, with_session, monkeypatch):
@@ -106,10 +122,33 @@ def test_plan_invalid_llm_output_returns_500(client, with_session, monkeypatch):
 
 def test_plan_prompt_includes_cardio_preferences(client, with_session, monkeypatch):
     captured = {}
+    lift = [{"isim": "Goblet Squat", "set": 3, "tekrar": "8-12",
+             "dinlenme": "90 sn", "not": "RPE 7"}]
+    run = [{"isim": "Easy Run", "set": 1, "tekrar": "20 dk",
+            "dinlenme": "—", "not": ""}]
+    rest = {"tip": "dinlenme", "odak": "Aktif Toparlanma",
+            "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []}
+    cardio_plan = {
+        "program": [
+            {"gun": "Pazartesi", "tip": "antrenman", "odak": "Full Body",
+             "sure_dk": 45, "tahmini_kalori": 300, "egzersizler": lift},
+            {"gun": "Salı", "tip": "antrenman", "odak": "Full Body",
+             "sure_dk": 45, "tahmini_kalori": 300, "egzersizler": lift},
+            {"gun": "Çarşamba", "tip": "antrenman", "odak": "Full Body",
+             "sure_dk": 45, "tahmini_kalori": 300, "egzersizler": lift},
+            {"gun": "Perşembe", "tip": "kardiyo", "odak": "Kondisyon",
+             "sure_dk": 20, "tahmini_kalori": 180, "egzersizler": run},
+            {"gun": "Cuma", "tip": "kardiyo", "odak": "Kondisyon",
+             "sure_dk": 20, "tahmini_kalori": 180, "egzersizler": run},
+            {"gun": "Cumartesi", **rest},
+            {"gun": "Pazar", **rest},
+        ],
+        "haftalik_ozet": {"yogunluk_skoru": 7, "denge_skoru": 7, "uygunluk_skoru": 7},
+    }
 
     def fake_chat(**kwargs):
         captured["prompt"] = kwargs["messages"][0]["content"]
-        return json.dumps(PLAN_JSON, ensure_ascii=False)
+        return json.dumps(cardio_plan, ensure_ascii=False)
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
 
     client.post("/training-plan", json={"kardiyo_tipi": "kosu", "kardiyo_gun": 2})
@@ -217,19 +256,22 @@ def test_plan_hicbiri_clears_stored_injuries(client, with_session, auth_user, mo
 def test_save_plan_replaces_previous(client, auth_user):
     assert client.post("/training-plan/save", json={}).status_code == 400
 
-    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 7.0})
-    client.post("/training-plan/save", json={"plan": {"v": 2}, "score": 8.0})
+    first = _seven_day_program("Squat")
+    second = _seven_day_program("Deadlift")
+    client.post("/training-plan/save", json={"plan": first, "score": 7.0})
+    client.post("/training-plan/save", json={"plan": second, "score": 8.0})
     plans = TrainingPlan.query.filter_by(user_id=auth_user.id).all()
     assert len(plans) == 1
-    assert json.loads(plans[0].plan_data) == {"v": 2}
+    assert json.loads(plans[0].plan_data) == second
 
 
 def test_active_plan_roundtrip(client, auth_user):
     assert client.get("/training-plan/active").get_json() == {"exists": False}
-    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 7.5})
+    program = _seven_day_program()
+    client.post("/training-plan/save", json={"plan": program, "score": 7.5})
     body = client.get("/training-plan/active").get_json()
     assert body["exists"] is True
-    assert body["plan"] == {"v": 1}
+    assert body["plan"] == program
     assert body["score"] == 7.5
 
 
@@ -239,7 +281,7 @@ def test_active_plan_roundtrip(client, auth_user):
 
 @pytest.fixture
 def workout_ready(client, auth_user):
-    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 7.0})
+    client.post("/training-plan/save", json={"plan": _seven_day_program(), "score": 7.0})
     db.session.add(DailyQuest(title="Log a Workout", points_reward=50,
                               quest_type="workout_logged"))
     db.session.commit()
@@ -561,7 +603,7 @@ def test_session_routes_are_404_when_flag_off(client, auth_user, method, path):
 
 
 def test_complete_ignores_session_id_when_flag_off(client, with_session, monkeypatch):
-    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 7.0})
+    client.post("/training-plan/save", json={"plan": _seven_day_program(), "score": 7.0})
     monkeypatch.setattr(training_bp, "validate_pump_check_image",
                         lambda *a, **k: (b"jpeg", "image/jpeg", None))
     monkeypatch.setattr(training_bp, "validate_pump_check",
