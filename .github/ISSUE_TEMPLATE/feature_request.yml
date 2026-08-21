@@ -2,61 +2,59 @@ name: Feature request
 description: Suggest an improvement to AxisAI
 title: "[Feature]: "
 labels:
-
-* enhancement
+  - enhancement
 
 body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem would this solve?
+      placeholder: Describe the problem rather than only the proposed implementation.
+    validations:
+      required: true
 
-* type: textarea
-  id: problem
-  attributes:
-  label: Problem
-  description: What user problem would this solve?
-  placeholder: Describe the problem rather than only the proposed implementation.
-  validations:
-  required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How do you think AxisAI should address it?
+    validations:
+      required: true
 
-* type: textarea
-  id: proposal
-  attributes:
-  label: Proposed solution
-  description: How do you think AxisAI should address it?
-  validations:
-  required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Product area
+      options:
+        - AI Coach
+        - Training
+        - Nutrition
+        - Progress
+        - Pump Check / Physique
+        - Authentication
+        - Mobile
+        - Web application
+        - Other
+    validations:
+      required: true
 
-* type: dropdown
-  id: surface
-  attributes:
-  label: Product area
-  options:
-  - AI Coach
-  - Training
-  - Nutrition
-  - Progress
-  - Pump Check / Physique
-  - Authentication
-  - Mobile
-  - Web application
-  - Other
-  validations:
-  required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Expected user outcome
+      description: What should become easier, faster, safer, or more useful for the user?
+    validations:
+      required: true
 
-* type: textarea
-  id: outcome
-  attributes:
-  label: Expected user outcome
-  description: What should become easier, faster, safer, or more useful for the user?
-  validations:
-  required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Optional. Are there simpler ways to solve the same problem?
 
-* type: textarea
-  id: alternatives
-  attributes:
-  label: Alternatives considered
-  description: Optional. Are there simpler ways to solve the same problem?
-
-* type: textarea
-  id: context
-  attributes:
-  label: Additional context
-  description: Add any relevant examples, screenshots, or product context.
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add any relevant examples, screenshots, or product context.
