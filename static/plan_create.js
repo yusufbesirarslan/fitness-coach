@@ -41,8 +41,6 @@
       }
       selections[key] = value;
     });
-    // Mirror the canonical rule: no cardio type → zero cardio days.
-    if (selections.kardiyo_tipi === "yok") selections.kardiyo_gun = 0;
     return selections;
   }
 
@@ -90,12 +88,12 @@
         // A 400 from this endpoint uniquely means "no profile session yet" — the
         // one honest recovery is the canonical /setup wizard (a route, not a
         // self-link to /training).
-        if (res.status === 400) {
+        if (res.status === 400 && (!data.code || data.code === "TRAINING_PLAN_NO_SESSION")) {
           showMessage(root, tr("plan.create.need_setup", "Complete your profile first."), true, true);
           throw { handled: true };
         }
         if (!res.ok || data.error) {
-          throw { message: data.error };
+          throw { message: data.error || tr("plan.create.error", "Couldn't create the plan. Please try again.") };
         }
         return data;
       });

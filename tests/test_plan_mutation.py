@@ -171,15 +171,24 @@ class TestCanonicalPlanCharacterization:
     def test_canonical_prescription_bounds_are_reused_not_redefined(self):
         """The mutation boundary must not introduce a second bounds authority."""
         from app.services.plan_mutation import validation
-        from app.services.training_generation import response_validator
+        from app.services.training_generation.output_errors import SchemaInvalidError
+        from app.services.training_generation.plan_schema import (
+            NAME_MAX,
+            REPS_MAX,
+            SET_MAX,
+            SET_MIN,
+        )
+        from app.services.training_generation.response_validator import _require_int
 
-        assert validation.MAX_SETS == 100
-        assert validation.MIN_SETS == 1
-        # Same clamp the generator applies, exercised through the generator's own
-        # helper so the two can never silently drift apart.
-        assert response_validator._bounded_int(
-            validation.MAX_SETS + 1, 1, validation.MIN_SETS,
-            validation.MAX_SETS) == validation.MAX_SETS
+        assert validation.MIN_SETS == SET_MIN == 1
+        assert validation.MAX_SETS == SET_MAX == 100
+        assert validation.MAX_EXERCISE_NAME_CHARS == NAME_MAX
+        assert validation.MAX_REPS_CHARS == REPS_MAX
+        # Generate and mutation both reject; they share plan_schema bounds.
+        with pytest.raises(SchemaInvalidError):
+            _require_int(SET_MAX + 1, "set", SET_MIN, SET_MAX)
+        with pytest.raises(InvalidPrescription):
+            validation.validate_sets(SET_MAX + 1)
 
 
 # ── Ownership ────────────────────────────────────────────────────────────────

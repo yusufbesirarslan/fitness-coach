@@ -10,7 +10,7 @@ from app.blueprints import social as social_bp
 from app.extensions import db
 from app.blueprints import training as training_bp
 from app.i18n import t
-from app.models import Friendship, Message, PumpCheck, PumpCheckComment, PumpCheckLike
+from app.models import Friendship, Message, PumpCheck, PumpCheckComment, PumpCheckLike, TrainingPlan
 from app.services import feed as feed_service
 from app.services import pump_checks as pump_check_service
 from app.services.pump_checks import (
@@ -143,8 +143,15 @@ def test_serialize_pump_check_card_includes_workout_score_when_available(client,
     assert data["workoutScore"] == 8.0
 
 
+def _seed_plan(user, payload, score):
+    TrainingPlan.query.filter_by(user_id=user.id).delete()
+    db.session.add(TrainingPlan(
+        user_id=user.id, plan_data=json.dumps(payload, ensure_ascii=False), score=score))
+    db.session.commit()
+
+
 def test_workout_complete_persists_score_after_later_training_plan_replacement(client, auth_user, monkeypatch):
-    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 8.0})
+    _seed_plan(auth_user, {"v": 1}, 8.0)
     monkeypatch.setattr(training_bp, "validate_pump_check", lambda *a: {"valid": True, "fallback": False})
 
     res = client.post("/workout/complete", json={"image": _image_data_url("JPEG"), "location_type": "Gym"})
@@ -153,15 +160,13 @@ def test_workout_complete_persists_score_after_later_training_plan_replacement(c
     check = PumpCheck.query.filter_by(user_id=auth_user.id).one()
     assert check.workout_score == 8.0
 
-    replace = client.post("/training-plan/save", json={"plan": {"v": 2}, "score": 5.0})
-
-    assert replace.status_code == 200
+    _seed_plan(auth_user, {"v": 2}, 5.0)
     body = client.get("/feed/data").get_json()
     assert body["items"][0]["workoutScore"] == 8.0
 
 
 def _ready_for_workout(client, user):
-    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 8.0})
+    _seed_plan(user, {"v": 1}, 8.0)
 
 
 def test_workout_complete_defaults_to_feed_visibility(client, auth_user, monkeypatch):

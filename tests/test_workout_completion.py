@@ -24,6 +24,7 @@ from app.models import (
     WORKOUT_SESSION_ABANDONED,
     WORKOUT_SESSION_ACTIVE,
     WORKOUT_SESSION_COMPLETED,
+    TrainingPlan,
     WorkoutLog,
     WorkoutSession,
 )
@@ -310,7 +311,9 @@ def test_pr1_resolver_unchanged_after_failed_completion(app, make_user, monkeypa
 # ---------------------------------------------------------------------------
 
 def test_route_replay_skips_pump_check_validation(app, client, auth_user, monkeypatch):
-    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 7.0})
+    db.session.add(TrainingPlan(
+        user_id=auth_user.id, plan_data='{"v": 1}', score=7.0))
+    db.session.commit()
     monkeypatch.setattr(training_bp, "validate_pump_check_image",
                         lambda *a, **k: (b"jpeg", "image/jpeg", None))
     calls = {"n": 0}
@@ -553,7 +556,9 @@ def test_route_rejects_previous_day_session_without_any_mutation(
     """The route's authoritative completion day rejects yesterday's linkage
     before completion artifacts, XP, activity, or lifecycle writes can occur."""
     app.config["FITX_WORKOUT_SESSIONS_ENABLED"] = True
-    client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 7.0})
+    db.session.add(TrainingPlan(
+        user_id=auth_user.id, plan_data='{"v": 1}', score=7.0))
+    db.session.commit()
     today = app_today()
     session = _mk_active_session(
         auth_user.id, workout_date=(today - timedelta(days=1)).isoformat())

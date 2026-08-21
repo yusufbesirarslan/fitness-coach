@@ -11,7 +11,7 @@ from app.extensions import _user_or_ip_key, auth_write_limit, db, limiter
 from app.i18n import current_locale, t
 from app.observability import current_request_id
 from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
-from app.services.ai import _heavy_chat
+from app.services.ai import _heavy_complete as _heavy_chat
 from app.services.ai_gate import ai_concurrency_gate
 from app.services.gamification import complete_quest_for_user
 from app.services.menu_extract import validate_pump_check
@@ -20,8 +20,18 @@ from app.services.premium import premium_ai_plan_gate
 from app.plan_presenter import build_plan_view
 from app.services.plan_facts import gather_plan_facts
 from app.services.today_facts import get_active_plan
-from app.services.training_generation.response_validator import PlanValidationError
-from app.services.training_generation.service import generate_training_plan_payload
+from app.services.training_generation.output_errors import GenerationOutputError
+from app.services.training_generation.preference_contract import (
+    CODE_GENERATION_UNAVAILABLE,
+    CODE_NO_SESSION,
+    I18N_GENERATION_UNAVAILABLE,
+    I18N_NO_SESSION,
+    PreferenceContractError,
+)
+from app.services.training_generation.service import (
+    generate_training_plan_payload,
+    validate_plan_for_save,
+)
 from app.services.validators import validate_pump_check_image
 from app.services.weekly_program import build_weekly_program, weekly_program_payload
 from app.services.workout_completion import (
@@ -160,14 +170,20 @@ def training():
 @premium_ai_plan_gate("training")  # non-premium: haftada 1 üretim
 @ai_concurrency_gate  # A1: bloklayıcı AI çağrıları tüm thread'leri doldurmasın
 def training_plan_generate():
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
 
     last = UserSession.query.filter_by(user_id=current_user.id)\
         .order_by(UserSession.created_at.desc())\
         .first()
 
     if not last:
-        return jsonify({"error": t("plan.no_session")}), 400
+        return jsonify({
+            "error": t(I18N_NO_SESSION),
+            "code": CODE_NO_SESSION,
+            "retryable": False,
+        }), 400
 
     try:
         return jsonify(generate_training_plan_payload(
@@ -178,11 +194,25 @@ def training_plan_generate():
             language=current_locale(),
             logger=current_app.logger,
         ))
-    except (json.JSONDecodeError, PlanValidationError):
-        return jsonify({"error": t("plan.gen_failed")}), 500
+    except PreferenceContractError as exc:
+        current_app.logger.info(
+            "[TRAINING] generation_rejected code=%s reason=%s provider_invoked=0 request_id=%s",
+            exc.public_code, exc.reason, current_request_id(),
+        )
+        return jsonify(exc.to_body(t)), exc.http_status
+    except GenerationOutputError as exc:
+        current_app.logger.info(
+            "[TRAINING] generation_output_failed code=%s retryable=%s request_id=%s",
+            exc.public_code, exc.retryable, current_request_id(),
+        )
+        return jsonify(exc.to_body(t)), exc.http_status
     except Exception:
         current_app.logger.exception("Plan oluşturma hatası")
-        return jsonify({"error": t("route.plan_failed")}), 500
+        return jsonify({
+            "error": t(I18N_GENERATION_UNAVAILABLE),
+            "code": CODE_GENERATION_UNAVAILABLE,
+            "retryable": True,
+        }), 500
 
 
 @bp.route("/training-plan/save", methods=["POST"])
@@ -195,11 +225,21 @@ def save_training_plan():
     if not plan:
         return jsonify({"error": t("route.plan_data_missing")}), 400
 
+    try:
+        validated_plan = validate_plan_for_save(plan)
+    except GenerationOutputError as exc:
+        current_app.logger.info(
+            "[TRAINING] save_validation_rejected code=%s request_id=%s",
+            exc.public_code, current_request_id(),
+        )
+        return jsonify(exc.to_body(t)), exc.http_status
+
+    canonical_plan = validated_plan["program"] if isinstance(plan, list) else validated_plan
     TrainingPlan.query.filter_by(user_id=current_user.id).delete()
 
     new_plan = TrainingPlan(
         user_id   = current_user.id,
-        plan_data = json.dumps(plan, ensure_ascii=False), 
+        plan_data = json.dumps(canonical_plan, ensure_ascii=False),
         score     = score
     )
     db.session.add(new_plan)

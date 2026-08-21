@@ -4,22 +4,21 @@ from pathlib import Path
 
 from app.services.training_generation.exercise_knowledge_base import REQUIRED_MOVEMENT_COVERAGE
 from app.services.training_generation.models import ClassificationResult, ProgramContext, TrainingPreferences, UserTrainingFeatures
+from app.services.training_generation.preference_contract import (
+    STYLE_INPUT_ALIASES,
+    STYLE_RULE_KEYS,
+    canonical_style,
+)
 from app.services.training_generation.recovery_model import recovery_capacity_factor
 
 
 ASSET_ROOT = Path(__file__).resolve().parents[1] / "training_assets"
 
-
+# UI token → style-rules key. Declared aliases only; unknown styles do not
+# fall through to general_fitness (see canonical_style).
 STYLE_ALIASES = {
-    "genel": "general_fitness",
-    "general": "general_fitness",
-    "general_fitness": "general_fitness",
-    "fonksiyonel": "functional",
-    "functional": "functional",
-    "bodybuilding": "bodybuilding",
-    "powerlifting": "powerlifting",
-    "crossfit": "crossfit",
-    "calisthenics": "calisthenics",
+    **{alias: STYLE_RULE_KEYS[ui] for alias, ui in STYLE_INPUT_ALIASES.items()},
+    **STYLE_RULE_KEYS,
 }
 
 
@@ -27,10 +26,6 @@ STYLE_ALIASES = {
 def _style_rules() -> dict:
     with (ASSET_ROOT / "rules" / "style_rules.json").open(encoding="utf-8") as fh:
         return json.load(fh)
-
-
-def canonical_style(style: str) -> str:
-    return STYLE_ALIASES.get((style or "genel").lower(), "general_fitness")
 
 
 def load_few_shot(style: str) -> str:
@@ -47,7 +42,7 @@ def build_program_context(
     classification: ClassificationResult,
 ) -> ProgramContext:
     style = canonical_style(preferences.antrenman_tarzi)
-    rules = _style_rules().get(style, _style_rules()["general_fitness"])
+    rules = _style_rules()[style]
     recovery = recovery_capacity_factor(features)
     level_key = classification.level.lower()
     volume = rules["volume"].get(level_key, rules["volume"]["beginner"])
