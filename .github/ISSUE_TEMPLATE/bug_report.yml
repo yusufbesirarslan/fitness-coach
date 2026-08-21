@@ -1,0 +1,94 @@
+name: Bug report
+description: Report reproducible incorrect behavior in AxisAI
+title: "[Bug]: "
+labels:
+
+* bug
+
+body:
+
+* type: markdown
+  attributes:
+  value: |
+  Thanks for reporting a bug.
+
+  ```
+  Do not include passwords, authentication tokens, private user data,
+  API keys, or other sensitive information.
+
+  Security vulnerabilities should be reported according to SECURITY.md,
+  not through a public issue.
+  ```
+
+* type: textarea
+  id: summary
+  attributes:
+  label: What happened?
+  description: Briefly describe the problem.
+  placeholder: Describe the incorrect behavior.
+  validations:
+  required: true
+
+* type: textarea
+  id: expected
+  attributes:
+  label: Expected behavior
+  placeholder: What did you expect to happen?
+  validations:
+  required: true
+
+* type: textarea
+  id: reproduction
+  attributes:
+  label: Steps to reproduce
+  description: Provide the smallest reliable reproduction you can.
+  placeholder: |
+  1. Go to ...
+  2. Select ...
+  3. Submit ...
+  4. Observe ...
+  validations:
+  required: true
+
+* type: dropdown
+  id: surface
+  attributes:
+  label: Product area
+  options:
+  - AI Coach
+  - Training
+  - Nutrition
+  - Progress
+  - Pump Check / Physique
+  - Authentication
+  - Mobile API
+  - Web application
+  - Other
+  validations:
+  required: true
+
+* type: textarea
+  id: environment
+  attributes:
+  label: Environment
+  description: Include browser, device, platform, or version where relevant.
+  placeholder: |
+  Platform:
+  Browser / app:
+  Version or commit if known:
+
+* type: textarea
+  id: additional
+  attributes:
+  label: Additional context
+  description: Screenshots or non-sensitive logs may be included here.
+
+* type: checkboxes
+  id: confirmation
+  attributes:
+  label: Confirmation
+  options:
+  - label: I have not included credentials, tokens, private user data, or other sensitive information.
+  required: true
+  - label: This is not a security vulnerability requiring private disclosure.
+  required: true
