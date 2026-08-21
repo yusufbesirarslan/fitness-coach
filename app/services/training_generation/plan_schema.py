@@ -14,6 +14,12 @@ DAY_KEYS = frozenset({
     "gun", "tip", "odak", "sure_dk", "tahmini_kalori", "egzersizler",
 })
 EXERCISE_KEYS = frozenset({"isim", "set", "tekrar", "dinlenme", "not"})
+# Sprint 11 PR4 Task 3: the canonical exercise-identity key generation-time
+# canonicalization (exercise_resolution.py) writes onto an accepted plan.
+# Not part of EXERCISE_KEYS and not consumed by validate_plan_structure here
+# — Task 4 is the one place that widens save-time structural validation to
+# accept it.
+EXERCISE_ID_KEY = "exercise_id"
 OZET_REQUIRED_KEYS = frozenset({
     "yogunluk_skoru", "denge_skoru", "uygunluk_skoru",
 })

@@ -48,7 +48,7 @@ def _seven_day_program(first_exercise="Lat Pulldown", include_safe_leg_press=Fal
          "egzersizler": [
              {"isim": "Goblet Squat", "set": 3, "tekrar": "8-12",
               "dinlenme": "90 sn", "not": "RPE 7"},
-             {"isim": "Hip Hinge", "set": 3, "tekrar": "8-12",
+             {"isim": "Hip Hinge Drill", "set": 3, "tekrar": "8-12",
               "dinlenme": "90 sn", "not": "RPE 7"},
              {"isim": "Walking Lunge", "set": 3, "tekrar": "10",
               "dinlenme": "75 sn", "not": "kontrollü"},
@@ -60,7 +60,7 @@ def _seven_day_program(first_exercise="Lat Pulldown", include_safe_leg_press=Fal
          "egzersizler": [
              {"isim": "Seated Row", "set": 3, "tekrar": "10-12",
               "dinlenme": "75 sn", "not": "omuzları düşür"},
-             {"isim": "Overhead Press", "set": 3, "tekrar": "8-10",
+             {"isim": "Shoulder Press", "set": 3, "tekrar": "8-10",
               "dinlenme": "90 sn", "not": "kontrollü"},
              {"isim": "Lat Pulldown", "set": 3, "tekrar": "10-12",
               "dinlenme": "75 sn", "not": "kontrollü"},
@@ -74,6 +74,28 @@ def _seven_day_program(first_exercise="Lat Pulldown", include_safe_leg_press=Fal
 
 PLAN_JSON["program"] = _seven_day_program()
 PLAN_JSON["haftalik_ozet"]["toplam_tahmini_kalori"] = 1110
+
+
+def _expect_canonicalized(program):
+    """Sprint 11 PR4 Task 3: /training-plan now canonicalizes every generated
+    exercise reference against the server-owned catalog before returning it —
+    isim becomes the catalog's canonical display name and exercise_id is
+    added. Uses the same resolver the production code uses (already covered
+    exhaustively in tests/test_sprint11_exercise_authority.py) as the oracle,
+    so this stays a real regression check on the full generate pipeline
+    rather than a restatement of canonicalize_plan_exercises's own logic."""
+    from app.services.exercise_catalog import resolve_exercise
+
+    canonical = []
+    for day in program:
+        exercises = []
+        for ex in day["egzersizler"]:
+            resolved = resolve_exercise(name=ex["isim"])
+            exercises.append({
+                **ex, "isim": resolved.canonical_name, "exercise_id": resolved.exercise_id,
+            })
+        canonical.append({**day, "egzersizler": exercises})
+    return canonical
 
 
 @pytest.fixture
@@ -100,7 +122,7 @@ def test_plan_parses_fenced_json_and_scores(client, with_session, monkeypatch):
     monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: raw)
 
     body = client.post("/training-plan", json={"gun_sayisi": 3}).get_json()
-    assert body["program"] == PLAN_JSON["program"]
+    assert body["program"] == _expect_canonicalized(PLAN_JSON["program"])
     assert body["overall_score"] == 8.3      # (8+8+9)/3
     assert body["score_label"] == "İyi"
 
@@ -124,7 +146,7 @@ def test_plan_prompt_includes_cardio_preferences(client, with_session, monkeypat
     captured = {}
     lift = [{"isim": "Goblet Squat", "set": 3, "tekrar": "8-12",
              "dinlenme": "90 sn", "not": "RPE 7"}]
-    run = [{"isim": "Easy Run", "set": 1, "tekrar": "20 dk",
+    run = [{"isim": "Run", "set": 1, "tekrar": "20 dk",
             "dinlenme": "—", "not": ""}]
     rest = {"tip": "dinlenme", "odak": "Aktif Toparlanma",
             "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []}
@@ -516,7 +538,7 @@ def test_plan_prompt_includes_deterministic_classification_and_style(client, wit
         "antrenman_tarzi": "powerlifting",
     }).get_json()
 
-    assert body["program"] == PLAN_JSON["program"]
+    assert body["program"] == _expect_canonicalized(PLAN_JSON["program"])
     assert body["classification"]["level"] in {"Beginner", "Intermediate", "Advanced"}
     assert "Final classified level" in captured["prompt"]
     assert "LLM sınıflandırma yapmayacak" in captured["prompt"]

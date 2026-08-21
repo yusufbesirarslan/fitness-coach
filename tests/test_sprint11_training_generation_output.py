@@ -11,12 +11,21 @@ import pytest
 from app.blueprints import training as training_bp
 from app.extensions import db
 from app.models import TrainingPlan, UserSession
+from app.services.exercise_catalog import ExerciseAmbiguous, ExerciseContext
+from app.services.training_generation.exercise_resolution import (
+    canonicalize_plan_exercises,
+)
+from app.services.training_generation import exercise_resolution
 from app.services.training_generation.extractor import (
     extract_plan_object,
     json_structure_incomplete,
 )
 from app.services.training_generation.models import TrainingPreferences
 from app.services.training_generation.output_errors import (
+    GenerationExerciseAmbiguousError,
+    GenerationExerciseIdentityInvalidError,
+    GenerationExerciseIncompatibleError,
+    GenerationExerciseUnresolvedError,
     ParseFailedError,
     SaveInvalidError,
     SchemaInvalidError,
@@ -30,6 +39,10 @@ from app.services.training_generation.plan_schema import (
     WEEKDAYS,
 )
 from app.services.training_generation.preference_contract import (
+    CODE_GENERATION_EXERCISE_AMBIGUOUS,
+    CODE_GENERATION_EXERCISE_IDENTITY_INVALID,
+    CODE_GENERATION_EXERCISE_INCOMPATIBLE,
+    CODE_GENERATION_EXERCISE_UNRESOLVED,
     CODE_GENERATION_PARSE_FAILED,
     CODE_GENERATION_SEMANTICALLY_INVALID,
     CODE_GENERATION_TRUNCATED,
@@ -450,6 +463,221 @@ def test_completion_budget_never_exceeds_two(monkeypatch):
     assert len(calls) <= MAX_PROVIDER_COMPLETIONS
 
 
+# ── Exercise canonicalization (Sprint 11 PR4 Task 3) ────────────────────────
+
+
+def test_pr3_valid_aliases_become_canonical_ids():
+    plan = _week(exercises=[_exercise("Back Squat")])
+    validated, _ = validate_generated_plan(plan, _prefs())
+
+    canonical = canonicalize_plan_exercises(
+        validated, ExerciseContext(equipment_context="spor_salonu"))
+
+    ex = canonical["program"][0]["egzersizler"][0]
+    assert ex["exercise_id"] == "ex_barbell_back_squat"
+    assert ex["isim"] == "Barbell Back Squat"
+
+
+def test_duplicate_exercise_references_resolve_to_the_same_stable_id():
+    """Different aliases of the same lift must converge on one exercise_id."""
+    plan = _week(exercises=[
+        _exercise("Squat"), _exercise("Back Squat"), _exercise("Barbell Squat"),
+    ])
+    validated, _ = validate_generated_plan(plan, _prefs())
+
+    canonical = canonicalize_plan_exercises(
+        validated, ExerciseContext(equipment_context="spor_salonu"))
+
+    ids = {
+        ex["exercise_id"]
+        for day in canonical["program"] if day["tip"] == "antrenman"
+        for ex in day["egzersizler"]
+    }
+    assert ids == {"ex_barbell_back_squat"}
+
+
+def test_canonicalization_dedupes_repeated_lookups_and_loads_catalog_once(monkeypatch):
+    """Perf property: N occurrences of the same name cost one resolve call."""
+    plan = _week(exercises=[
+        _exercise("Back Squat"), _exercise("Back Squat"), _exercise("Row"),
+    ])
+    validated, _ = validate_generated_plan(plan, _prefs())
+
+    catalog_loads = []
+    real_load = exercise_resolution.load_exercise_catalog
+
+    def counting_load():
+        catalog_loads.append(1)
+        return real_load()
+
+    resolve_calls = []
+    real_resolve = exercise_resolution.resolve_exercise
+
+    def counting_resolve(*, name, catalog=None):
+        resolve_calls.append(name)
+        return real_resolve(name=name, catalog=catalog)
+
+    monkeypatch.setattr(exercise_resolution, "load_exercise_catalog", counting_load)
+    monkeypatch.setattr(exercise_resolution, "resolve_exercise", counting_resolve)
+
+    canonical = canonicalize_plan_exercises(
+        validated, ExerciseContext(equipment_context="spor_salonu"))
+
+    # 3 training days * 3 exercises = 9 occurrences, only 2 distinct names.
+    assert len(catalog_loads) == 1
+    assert sorted(resolve_calls) == sorted(["Back Squat", "Row"])
+    ids = {
+        ex["exercise_id"]
+        for day in canonical["program"] if day["tip"] == "antrenman"
+        for ex in day["egzersizler"]
+    }
+    assert ids == {"ex_barbell_back_squat", "ex_barbell_row"}
+
+
+def test_canonicalization_preserves_prescription_fields_and_adds_only_identity():
+    plan = _week(exercises=[_exercise("Back Squat", sets=5)])
+    validated, _ = validate_generated_plan(plan, _prefs())
+
+    canonical = canonicalize_plan_exercises(
+        validated, ExerciseContext(equipment_context="spor_salonu"))
+
+    ex = canonical["program"][0]["egzersizler"][0]
+    assert ex["set"] == 5
+    assert ex["tekrar"] == "8-12"
+    assert ex["dinlenme"] == "90 sn"
+    assert ex["not"] == "kontrollü"
+    assert set(ex) == {"isim", "set", "tekrar", "dinlenme", "not", "exercise_id"}
+
+
+def test_unresolved_provider_name_is_typed_and_not_repaired(monkeypatch):
+    calls = []
+
+    def fake(**kwargs):
+        calls.append(kwargs)
+        return json.dumps(_week(exercises=[_exercise("Invented Laser Row")]))
+
+    with pytest.raises(GenerationExerciseUnresolvedError):
+        _generate(monkeypatch, fake)
+    assert len(calls) == 1
+
+
+def test_ambiguous_generated_exercise_is_typed(monkeypatch):
+    def fake_resolve(*, name, catalog=None):
+        raise ExerciseAmbiguous("ambiguous")
+
+    monkeypatch.setattr(exercise_resolution, "resolve_exercise", fake_resolve)
+    plan, _ = validate_generated_plan(_week(), _prefs())
+
+    with pytest.raises(GenerationExerciseAmbiguousError):
+        canonicalize_plan_exercises(
+            plan, ExerciseContext(equipment_context="spor_salonu"))
+
+
+def test_id_looking_generated_name_is_identity_invalid():
+    plan, _ = validate_generated_plan(
+        _week(exercises=[_exercise("ex_fake_exercise")]), _prefs())
+
+    with pytest.raises(GenerationExerciseIdentityInvalidError):
+        canonicalize_plan_exercises(
+            plan, ExerciseContext(equipment_context="spor_salonu"))
+
+
+def test_equipment_incompatible_generated_exercise_is_typed():
+    """An 'ev' (home/bodyweight-only) plan containing a barbell squat fails closed."""
+    plan, _ = validate_generated_plan(
+        _week(exercises=[_exercise("Back Squat")]), _prefs())
+
+    with pytest.raises(GenerationExerciseIncompatibleError):
+        canonicalize_plan_exercises(plan, ExerciseContext(equipment_context="ev"))
+
+
+def test_generation_pipeline_rejects_incompatible_equipment(monkeypatch):
+    """Proves the real request-derived ExerciseContext (not just the unit-level
+    context) is what canonicalization checks against."""
+    calls = []
+
+    def fake(**kwargs):
+        calls.append(kwargs)
+        return json.dumps(_week(exercises=[_exercise("Back Squat")]))
+
+    with pytest.raises(GenerationExerciseIncompatibleError):
+        _generate(monkeypatch, fake, preferences=_prefs(ekipman="ev"))
+    assert len(calls) == 1
+
+
+def test_http_typed_exercise_unresolved(client, auth_user, monkeypatch):
+    _session(auth_user)
+    monkeypatch.setattr(
+        training_bp, "_heavy_chat",
+        lambda **kwargs: json.dumps(_week(exercises=[_exercise("Invented Laser Row")])),
+    )
+
+    response = client.post("/training-plan", json={"gun_sayisi": 3, "sure": 45})
+
+    assert response.status_code == 500
+    body = response.get_json()
+    assert body["code"] == CODE_GENERATION_EXERCISE_UNRESOLVED
+    assert body["retryable"] is True
+    assert "Invented Laser Row" not in body["error"]
+
+
+# ── Architecture guards: canonicalization boundary ───────────────────────────
+
+
+def test_canonicalization_runs_after_the_full_try_except_not_inside_repair():
+    source = Path(training_service.__file__).read_text(encoding="utf-8")
+    entry_repair_catch = "except (ParseFailedError, TruncatedError) as exc:"
+    ozet_line = 'ozet = plan.get("haftalik_ozet", {})'
+    canonicalize_call = "plan = canonicalize_plan_exercises(plan, exercise_context)"
+
+    assert entry_repair_catch in source
+    assert canonicalize_call in source
+    assert ozet_line in source
+    assert source.index(entry_repair_catch) < source.index(canonicalize_call)
+    assert source.index(canonicalize_call) < source.index(ozet_line)
+
+    # The repair boundary's own try/except body must not gain exercise-error
+    # handling — canonicalization must never be reachable from inside it.
+    repair_block = source.split(entry_repair_catch)[1].split(
+        "except SchemaInvalidError:")[0]
+    assert "canonicalize_plan_exercises" not in repair_block
+    assert "GenerationExercise" not in repair_block
+
+
+def test_repair_catches_remain_exactly_parse_and_truncation_errors():
+    source = Path(training_service.__file__).read_text(encoding="utf-8")
+    assert source.count(
+        "except (ParseFailedError, TruncatedError) as exc:") == 1
+    assert (
+        "except (ParseFailedError, TruncatedError, SchemaInvalidError, "
+        "SemanticInvalidError):"
+    ) in source
+
+
+def test_provider_call_budget_stays_two():
+    assert MAX_PROVIDER_COMPLETIONS == 2
+
+
+def test_generated_exercise_id_key_is_not_yet_accepted_by_save(client, auth_user, monkeypatch):
+    """Known Task 3->Task 4 gap: generate now emits exercise_id, but save-time
+    structural validation does not accept it yet (Task 4 widens EXERCISE_KEYS
+    using plan_schema.EXERCISE_ID_KEY). This documents the gap rather than
+    hiding it; Task 4 closes it."""
+    _session(auth_user)
+    monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: json.dumps(_week()))
+
+    generated = client.post("/training-plan", json={"gun_sayisi": 3, "sure": 45})
+    assert generated.status_code == 200
+    body = generated.get_json()
+    assert body["program"][0]["egzersizler"][0]["exercise_id"].startswith("ex_")
+
+    saved = client.post("/training-plan/save", json={
+        "plan": body["program"], "score": body["overall_score"],
+    })
+    assert saved.status_code == 422
+    assert saved.get_json()["code"] == CODE_SAVE_INVALID
+
+
 # ── HTTP typed output errors ─────────────────────────────────────────────────
 
 
@@ -587,8 +815,24 @@ def test_generate_then_save_mocked_path(client, auth_user, monkeypatch):
     generated = client.post("/training-plan", json={"gun_sayisi": 3, "sure": 45})
     assert generated.status_code == 200
     body = generated.get_json()
+    assert body["program"][0]["egzersizler"][0]["exercise_id"].startswith("ex_")
+
+    # Task 3 canonicalizes generate-time output with exercise_id; save-time
+    # structural validation is widened to accept it in Task 4 (known gap,
+    # see test_generated_exercise_id_key_is_not_yet_accepted_by_save). A
+    # client saving today still submits the name-only shape.
+    name_only_program = [
+        {
+            **day,
+            "egzersizler": [
+                {k: v for k, v in ex.items() if k != "exercise_id"}
+                for ex in day["egzersizler"]
+            ],
+        }
+        for day in body["program"]
+    ]
     saved = client.post("/training-plan/save", json={
-        "plan": body["program"], "score": body["overall_score"],
+        "plan": name_only_program, "score": body["overall_score"],
     })
     assert saved.status_code == 200
     row = TrainingPlan.query.filter_by(user_id=auth_user.id).one()

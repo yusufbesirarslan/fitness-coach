@@ -4,6 +4,9 @@ from app.extensions import db
 from app.services.exercise_catalog import ExerciseContext
 from app.services.training_generation.capability import require_supported
 from app.services.training_generation.classifier_service import classify_user
+from app.services.training_generation.exercise_resolution import (
+    canonicalize_plan_exercises,
+)
 from app.services.training_generation.extractor import extract_plan_object
 from app.services.training_generation.feature_extractor import build_features, parse_preferences
 from app.services.training_generation.output_errors import (
@@ -195,6 +198,13 @@ def generate_training_plan_payload(user, last_session, request_data, chat_fn, la
     except SemanticInvalidError:
         _log(logger, "semantic_invalid", calls=len(budget.calls), repair_eligible=0)
         raise
+
+    # Sprint 11 PR4 Task 3: canonicalize exercise identity exactly once, on the
+    # final accepted candidate, strictly OUTSIDE the try/except above. Never
+    # move this inside the repair except clauses — the repair path re-enters
+    # _parse_and_validate, so an exercise-authority failure canonicalized
+    # there would be misclassified as a parse/truncation-repairable outcome.
+    plan = canonicalize_plan_exercises(plan, exercise_context)
 
     ozet = plan.get("haftalik_ozet", {})
     yogunluk = ozet.get("yogunluk_skoru") or 7

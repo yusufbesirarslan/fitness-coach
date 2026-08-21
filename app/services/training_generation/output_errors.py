@@ -7,12 +7,20 @@ has been sent to a provider, or when a client tries to persist a plan.
 from __future__ import annotations
 
 from app.services.training_generation.preference_contract import (
+    CODE_GENERATION_EXERCISE_AMBIGUOUS,
+    CODE_GENERATION_EXERCISE_IDENTITY_INVALID,
+    CODE_GENERATION_EXERCISE_INCOMPATIBLE,
+    CODE_GENERATION_EXERCISE_UNRESOLVED,
     CODE_GENERATION_PARSE_FAILED,
     CODE_GENERATION_SCHEMA_INVALID,
     CODE_GENERATION_SEMANTICALLY_INVALID,
     CODE_GENERATION_TRUNCATED,
     CODE_GENERATION_UNAVAILABLE,
     CODE_SAVE_INVALID,
+    I18N_GENERATION_EXERCISE_AMBIGUOUS,
+    I18N_GENERATION_EXERCISE_IDENTITY_INVALID,
+    I18N_GENERATION_EXERCISE_INCOMPATIBLE,
+    I18N_GENERATION_EXERCISE_UNRESOLVED,
     I18N_GENERATION_PARSE_FAILED,
     I18N_GENERATION_SCHEMA_INVALID,
     I18N_GENERATION_SEMANTICALLY_INVALID,
@@ -68,6 +76,55 @@ class SemanticInvalidError(PlanValidationError):
 
     public_code = CODE_GENERATION_SEMANTICALLY_INVALID
     i18n_key = I18N_GENERATION_SEMANTICALLY_INVALID
+
+
+class GenerationExerciseUnresolvedError(GenerationOutputError):
+    """A generated exercise reference does not match any active catalog entry.
+
+    Sprint 11 PR4 Task 3: raised by exercise_resolution.canonicalize_plan_exercises
+    after PR3 has already accepted the plan's shape. Not parse-repairable —
+    the provider produced a well-formed plan outside the constrained catalog
+    vocabulary, which is a closed authority failure, not a malformed response.
+    """
+
+    public_code = CODE_GENERATION_EXERCISE_UNRESOLVED
+    i18n_key = I18N_GENERATION_EXERCISE_UNRESOLVED
+    repairable = False
+
+
+class GenerationExerciseAmbiguousError(GenerationOutputError):
+    """A generated exercise name matches more than one catalog entry.
+
+    Unreachable against the real catalog (which rejects normalized-name
+    collisions at load time) but kept as its own closed category for any
+    catalog asset and for direct unit coverage of the mapping.
+    """
+
+    public_code = CODE_GENERATION_EXERCISE_AMBIGUOUS
+    i18n_key = I18N_GENERATION_EXERCISE_AMBIGUOUS
+    repairable = False
+
+
+class GenerationExerciseIdentityInvalidError(GenerationOutputError):
+    """A generated exercise reference is not usable as catalog identity.
+
+    Providers are only ever prompted with display names (PR3/Task 2), never
+    IDs. A generated name shaped like a catalog ID is never authoritative —
+    it is rejected outright rather than silently falling through to
+    "unresolved" for an unrelated reason.
+    """
+
+    public_code = CODE_GENERATION_EXERCISE_IDENTITY_INVALID
+    i18n_key = I18N_GENERATION_EXERCISE_IDENTITY_INVALID
+    repairable = False
+
+
+class GenerationExerciseIncompatibleError(GenerationOutputError):
+    """A generated exercise resolves, but not to the accepted equipment context."""
+
+    public_code = CODE_GENERATION_EXERCISE_INCOMPATIBLE
+    i18n_key = I18N_GENERATION_EXERCISE_INCOMPATIBLE
+    repairable = False
 
 
 class GenerationUnavailableError(GenerationOutputError):
