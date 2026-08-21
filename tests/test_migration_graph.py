@@ -36,12 +36,9 @@ def test_alembic_migrations_have_single_head():
 
     heads = sorted(set(revisions) - down_revisions)
 
-    # Sprint 10 PR4A adds the canonical Pump Check history index as the sole new
-    # head, chained off PR3's fa1b2c3d4e5f (comparison result + request ledger)
-    # rather than off their shared ancestor b3c4d5e6f7a8 — a sibling would leave
-    # two heads and boot's automatic upgrade would have to choose. One head only,
-    # no branching.
-    assert heads == ["c1d2e3f4a5b6"]
+    # Adaptive Coaching S1 PR4 adds the confirmation-proposal table as the sole
+    # new head, chained off Sprint 10 PR4A's c1d2e3f4a5b6. One head only.
+    assert heads == ["c2d3e4f5a6b7"]
 
 
 def test_meal_idempotency_fingerprint_migration_round_trips_only_nullable_column(

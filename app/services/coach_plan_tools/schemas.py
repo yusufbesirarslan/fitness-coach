@@ -42,6 +42,8 @@ REMOVE_EXERCISE_TOOL = "remove_training_plan_exercise"
 UPDATE_PRESCRIPTION_TOOL = "update_training_plan_prescription"
 MOVE_DAY_TOOL = "move_training_plan_day"
 UNDO_TOOL = "undo_last_training_plan_change"
+CONFIRM_TOOL = "confirm_pending_training_plan_change"
+CANCEL_PENDING_TOOL = "cancel_pending_training_plan_change"
 
 
 _ONLY_ON_EXPLICIT_REQUEST = (
@@ -200,3 +202,39 @@ PLAN_MUTATION_TOOL_DEFS = (
 
 PLAN_MUTATION_TOOL_NAMES = frozenset(
     definition["name"] for definition in PLAN_MUTATION_TOOL_DEFS)
+
+CONFIRMATION_TOOL_DEFS = (
+    {
+        "name": CONFIRM_TOOL,
+        "description": (
+            "Bekleyen antrenman-planı değişikliğini uygular. YALNIZCA "
+            "kullanıcının bu turdaki mesajı sunucunun onay olarak tanıdığı "
+            "kısa bir onay ise çağır. Argüman alma. Teklif kimliği, plan "
+            "sürümü veya kullanıcı kimliği gönderme — sunucu kendi bekleyen "
+            "teklifini çözer. Onay yoksa ÇAĞIRMA."),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    },
+    {
+        "name": CANCEL_PENDING_TOOL,
+        "description": (
+            "Bekleyen antrenman-planı değişikliğini iptal eder. YALNIZCA "
+            "kullanıcı bu turda iptal ettiğinde çağır. Planı DEĞİŞTİRMEZ. "
+            "Argüman alma."),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    },
+)
+
+CONFIRMATION_TOOL_NAMES = frozenset(
+    definition["name"] for definition in CONFIRMATION_TOOL_DEFS)
+assert CONFIRMATION_TOOL_DEFS[0]["name"] == CONFIRM_TOOL
+assert CONFIRMATION_TOOL_DEFS[1]["name"] == CANCEL_PENDING_TOOL
+
+PLAN_WRITE_TOOL_NAMES = PLAN_MUTATION_TOOL_NAMES | CONFIRMATION_TOOL_NAMES

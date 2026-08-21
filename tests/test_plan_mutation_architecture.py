@@ -107,6 +107,8 @@ def test_the_bridge_package_is_the_only_new_consumer_of_the_domain():
         Path("app/services/coach_plan_tools/results.py"),
         Path("app/services/coach_plan_tools/schemas.py"),
         Path("app/services/coach_plan_tools/identity.py"),
+        Path("app/services/coach_plan_tools/proposals.py"),
+        Path("app/services/coach_plan_policy/decisions.py"),
     }
     consumers = set()
     for path in APP_ROOT.rglob("*.py"):

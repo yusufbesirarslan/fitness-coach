@@ -67,6 +67,12 @@ SERVER_OWNED = (
     "actor", "reason", "idempotency_key", "operation_key", "key",
     "snapshot", "before", "after", "fingerprint", "digest",
     "token", "auth", "authorization", "principal", "session",
+    "proposal", "proposal_id", "confirmation_id", "confirmation_token",
+    "impact", "risk", "requires_confirmation", "reason_codes", "verdict",
+)
+
+_ALL_PLAN_TOOL_DEFS = (
+    list(schemas.PLAN_MUTATION_TOOL_DEFS) + list(schemas.CONFIRMATION_TOOL_DEFS)
 )
 
 #: A generic escape hatch is the other way the boundary dies: one tool with an
@@ -77,7 +83,7 @@ GENERIC_SHAPES = ("operation", "op", "action", "command", "payload", "patch",
                   "data", "json", "query", "sql", "expression")
 
 
-@pytest.mark.parametrize("definition", schemas.PLAN_MUTATION_TOOL_DEFS,
+@pytest.mark.parametrize("definition", _ALL_PLAN_TOOL_DEFS,
                          ids=lambda d: d["name"])
 def test_no_tool_property_names_a_server_owned_concept(definition):
     named = [
@@ -89,7 +95,7 @@ def test_no_tool_property_names_a_server_owned_concept(definition):
     assert not named, f"{definition['name']} exposes server-owned: {named}"
 
 
-@pytest.mark.parametrize("definition", schemas.PLAN_MUTATION_TOOL_DEFS,
+@pytest.mark.parametrize("definition", _ALL_PLAN_TOOL_DEFS,
                          ids=lambda d: d["name"])
 def test_no_tool_offers_a_generic_mutation_language(definition):
     generic = [
@@ -101,7 +107,7 @@ def test_no_tool_offers_a_generic_mutation_language(definition):
     assert not generic, f"{definition['name']} is not narrow: {generic}"
 
 
-@pytest.mark.parametrize("definition", schemas.PLAN_MUTATION_TOOL_DEFS,
+@pytest.mark.parametrize("definition", _ALL_PLAN_TOOL_DEFS,
                          ids=lambda d: d["name"])
 def test_every_schema_is_closed_and_internally_consistent(definition):
     parameters = definition["parameters"]
@@ -126,11 +132,12 @@ def test_the_published_schema_and_the_parser_agree_field_for_field():
     accepts. Two hand-maintained lists is how "the model keeps sending an
     argument that gets rejected" happens, and it is invisible in a diff.
     """
-    for definition in schemas.PLAN_MUTATION_TOOL_DEFS:
+    for definition in _ALL_PLAN_TOOL_DEFS:
         name = definition["name"]
         properties = set(definition["parameters"].get("properties") or {})
         required = set(definition["parameters"].get("required", []))
-        if name == schemas.UNDO_TOOL:
+        if name in {schemas.UNDO_TOOL, schemas.CONFIRM_TOOL,
+                    schemas.CANCEL_PENDING_TOOL}:
             assert properties == set()
             assert name not in parser.TOOL_ARGUMENTS
             continue
@@ -153,6 +160,7 @@ def test_the_tool_names_do_not_collide_with_the_existing_coach_tools():
     existing = {t["name"] for t in ai_coach._COACH_TOOL_DEFS}
 
     assert not existing & coach_plan_tools.PLAN_MUTATION_TOOL_NAMES
+    assert not existing & coach_plan_tools.CONFIRMATION_TOOL_NAMES
     assert len(coach_plan_tools.PLAN_MUTATION_TOOL_NAMES) == \
         len(schemas.PLAN_MUTATION_TOOL_DEFS)
 
@@ -387,7 +395,7 @@ def test_the_result_shape_is_a_closed_set_of_keys():
     """Whatever appears here is billed on the next model call and can be
     paraphrased to the user; the set of things that may appear is fixed."""
     allowed = {"status", "operation", "plan_version", "change", "summary",
-               "note", "error", "message", "detail"}
+               "note", "error", "message", "detail", "reason_codes"}
     literal_keys = set()
     for path in (PACKAGE_ROOT / "results.py", PACKAGE_ROOT / "executor.py"):
         for node in ast.walk(_tree(path)):

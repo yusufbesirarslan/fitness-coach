@@ -96,7 +96,7 @@ def test_the_repository_still_has_exactly_one_alembic_head():
             parents.update(
                 re.findall(r"""["']([0-9a-zA-Z_]+)["']""", down.group(1)))
 
-    assert [r for r in revisions if r not in parents] == ["c1d2e3f4a5b6"]
+    assert [r for r in revisions if r not in parents] == ["c2d3e4f5a6b7"]
 
 
 def test_the_migration_descends_from_the_merged_comparison_head():

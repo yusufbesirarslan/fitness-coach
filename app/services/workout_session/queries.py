@@ -122,6 +122,18 @@ def compute_plan_snapshot(user_id: int, today: date) -> PlanSnapshot:
     return PlanSnapshot(weekday, SOURCE_UNSCHEDULED, plan.id, None)
 
 
+def fingerprint_for_program(program: Optional[list], weekday_name: str) -> Optional[str]:
+    """Canonical exercise-name fingerprint for ``weekday_name`` in ``program``.
+
+    Reuses ``_weekday_workout`` + ``compute_fingerprint`` so impact policy never
+    invents a second digest algorithm. ``None`` when the slot is not a workout.
+    """
+    if not program or not weekday_name:
+        return None
+    is_workout, names = _weekday_workout(program, weekday_name)
+    return compute_fingerprint(names) if is_workout else None
+
+
 def current_plan_facts(user_id: int, weekday_slot: Optional[str]) -> CurrentPlanFacts:
     """Load the CURRENT newest-plan facts for classifying an existing session."""
     plan = _newest_plan(user_id)

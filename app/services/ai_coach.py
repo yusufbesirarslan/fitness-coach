@@ -175,11 +175,12 @@ def _today_workout_totals(user_id):
 # gönderdiği sonraki turda mümkündür. İşaret g'de yaşar (istek-kapsamlı; koç
 # araç döngüsü tek HTTP isteğinde koşar).
 
-def _begin_coach_turn():
+def _begin_coach_turn(user_message=""):
     g._coach_staged_ids = set()
     # PR3: the plan-mutation budget is per turn, and "a turn" is defined here so
     # the blocking and streaming paths cannot drift into two different answers.
-    coach_plan_tools.begin_turn()
+    # PR4: confirmation intent is derived from the raw current user turn.
+    coach_plan_tools.begin_turn(user_message)
 
 
 def _mark_staged_this_turn(pending_id):
@@ -885,21 +886,22 @@ COACH_TOOLS = [_to_openai_tool(t) for t in _COACH_TOOL_DEFS]
 COACH_TOOLS_ANTHROPIC = [_to_anthropic_tool(t) for t in _COACH_TOOL_DEFS]
 
 
-def _coach_tool_defs_for_call():
+def _coach_tool_defs_for_call(user_id=None):
     """Bu istekte modele sunulacak kanonik araç tanımları.
 
     Plan düzenleme araçları bayrak AÇIKken TEK kanonik tanımdan (coach_plan_tools
-    .PLAN_MUTATION_TOOL_DEFS) eklenir — iki sağlayıcı biçimi de aşağıda BU
-    listeden türetilir, yani bir sağlayıcının şeması diğerinden ayrışamaz
-    (brief §41). Bayrak KAPALIYKEN liste, PR3 öncesiyle AYNI nesnedir: ek kopya,
-    ek alan, ek boşluk yok.
+    .PLAN_MUTATION_TOOL_DEFS / confirmation defs) eklenir — iki sağlayıcı biçimi
+    de aşağıda BU listeden türetilir, yani bir sağlayıcının şeması diğerinden
+    ayrışamaz (brief §41). Bayrak KAPALIYKEN liste, PR3 öncesiyle AYNI nesnedir:
+    ek kopya, ek alan, ek boşluk yok.
     """
     if not coach_plan_tools.plan_mutation_tools_enabled():
         return _COACH_TOOL_DEFS
-    return _COACH_TOOL_DEFS + list(coach_plan_tools.PLAN_MUTATION_TOOL_DEFS)
+    return _COACH_TOOL_DEFS + list(
+        coach_plan_tools.published_plan_tool_defs(user_id))
 
 
-def _openai_tools_for_call():
+def _openai_tools_for_call(user_id=None):
     """COACH_TOOLS'un çağrı-zamanı karşılığı (bayrak KAPALIYKEN aynı içerik).
 
     Bayrak bir istek özelliğidir (`current_app.config`), modül import'u değil —
@@ -909,7 +911,7 @@ def _openai_tools_for_call():
     """
     if not coach_plan_tools.plan_mutation_tools_enabled():
         return COACH_TOOLS
-    return [_to_openai_tool(t) for t in _coach_tool_defs_for_call()]
+    return [_to_openai_tool(t) for t in _coach_tool_defs_for_call(user_id)]
 
 
 def _dispatch_coach_tool(user_id, name, arguments_json):
@@ -928,7 +930,7 @@ def _dispatch_coach_tool(user_id, name, arguments_json):
     # için bozuk JSON'u boş nesneye katlamak, model hiç göndermediği bir çağrıyı
     # başarıyla yürütmek olurdu (brief §37/§38). Mevcut sekiz araç eski
     # davranışını (bozuk JSON → boş args) aynen korur.
-    if name in coach_plan_tools.PLAN_MUTATION_TOOL_NAMES:
+    if name in coach_plan_tools.PLAN_WRITE_TOOL_NAMES:
         if not arguments_parsed:
             return json.dumps(
                 coach_plan_tools.invalid_arguments_result(
@@ -1004,6 +1006,8 @@ def _coach_tool_fallback(language, kind="tool"):
     texts = _COACH_FALLBACKS[_coach_lang(language)]
     if coach_plan_tools.plan_changed_this_turn():
         return texts["tool_plan_saved"]
+    if coach_plan_tools.proposal_created_this_turn():
+        return texts["tool_plan_confirmation_pending"]
     return texts[kind]
 
 
@@ -1028,7 +1032,7 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
     3) session cookie — en eski davranış.
     Asıl 'staged' veri DB'deki PendingAction'da yaşar.
     """
-    _begin_coach_turn()  # S1: tur-içi stage→confirm kilidini sıfırla
+    _begin_coach_turn(question)  # S1 stage lock + PR4 confirmation intent
     if prepared_history is not None:
         history = list(prepared_history)
         use_client = True  # session'a yazma (kalıcılık DB'de)
@@ -1109,7 +1113,7 @@ def _run_coach_conversation_openai(user_id, question, context, history,
                 resp = openai_client.chat.completions.create(
                     model=OPENAI_MODEL,
                     messages=messages,
-                    tools=_openai_tools_for_call(),
+                    tools=_openai_tools_for_call(user_id),
                     tool_choice="auto",
                     max_tokens=700,
                     temperature=0.6,
@@ -1174,7 +1178,7 @@ def _build_bedrock_system(context, language="tr"):
         plan_mutation_tools=coach_plan_tools.plan_mutation_tools_enabled())
 
 
-def _anthropic_tools_for_call():
+def _anthropic_tools_for_call(user_id=None):
     """COACH_TOOLS_ANTHROPIC'in çağrı-zamanı kopyası (mantık:
     prompt_builder.anthropic_tools_for_call). Modül-global BEDROCK_PROMPT_CACHE
     çağrı anında okunur — testler bu globali monkeypatch'ler.
@@ -1185,7 +1189,7 @@ def _anthropic_tools_for_call():
     if not coach_plan_tools.plan_mutation_tools_enabled():
         tools = COACH_TOOLS_ANTHROPIC
     else:
-        tools = [_to_anthropic_tool(t) for t in _coach_tool_defs_for_call()]
+        tools = [_to_anthropic_tool(t) for t in _coach_tool_defs_for_call(user_id)]
     return prompt_builder.anthropic_tools_for_call(
         tools, prompt_cache=BEDROCK_PROMPT_CACHE)
 
@@ -1209,7 +1213,7 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
     if deadline is None:
         deadline = _coach_turn_deadline()
     system = _build_bedrock_system(context, language)
-    tools = _anthropic_tools_for_call()
+    tools = _anthropic_tools_for_call(user_id)
     convo = prompt_builder.build_anthropic_messages(history, question)
     max_tokens = min(700, BEDROCK_MAX_TOKENS)
 

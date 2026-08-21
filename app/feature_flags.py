@@ -404,10 +404,11 @@ ROLLOUT_FLAGS = (
             "Publishes six narrow plan-editing tools (replace/add/remove an "
             "exercise, update a prescription, move a day, undo the last change) "
             "to BOTH coach providers and lets the Coach execute them through "
-            "app/services/coach_plan_tools. This is the first flag of the eight "
-            "that lets the AI cause a DURABLE WRITE to user data: every other "
-            "one changes presentation, context or attack surface. OFF removes "
-            "the tools from both provider schemas AND refuses execution."),
+            "app/services/coach_plan_tools, with PR4's server-owned impact "
+            "policy and structural confirmation gate. Destructive/schedule/"
+            "session-impact writes require confirmation. OFF removes the "
+            "command tools, confirmation tools AND refuses execution and "
+            "proposal writes."),
         owner=_OWNER,
         default=False,
         depends_on=("AI_ADAPTIVE_PLAN_CONTEXT",),

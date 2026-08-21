@@ -29,22 +29,73 @@ from flask import current_app, g
 
 from app.extensions import db
 from app.observability import current_request_id
+from app.services.coach_plan_policy import (
+    APPLY_NOW,
+    CANCEL,
+    CONFIRM,
+    NONE,
+    REFUSE_UNSUPPORTED,
+    REQUIRE_CONFIRMATION,
+    UNDO_LAST_CHANGE,
+    decide_plan_mutation_impact,
+    parse_confirmation_intent,
+)
+from app.services.plan_confirmation import (
+    STATUS_APPLIED,
+    STATUS_PENDING,
+    STATUS_STALE,
+    PendingConfirmationConflict,
+    cancel_pending,
+    create_or_reuse_pending,
+    get_pending,
+    lock_proposal,
+    lock_latest_proposal,
+    mark_applied,
+    mark_stale,
+)
 from app.services.plan_mutation import (
     ACTOR_AI_COACH,
     MutationContext,
+    PlanMutationResult,
     PlanMutationError,
     apply_plan_mutation,
     undo_last_change,
 )
+from app.services.plan_mutation.fingerprint import UNDO_COMMAND_TYPE
+from app.services.plan_mutation.journal import (
+    KIND_MUTATION,
+    KIND_UNDO,
+    OUTCOME_APPLIED,
+    find_by_key,
+)
+from app.services.today_facts import get_active_plan
 
 from . import results
 from .identity import (
     TurnIdentityUnavailable,
+    confirmation_operation_key,
     mutation_operation_key,
     undo_operation_key,
 )
 from .parser import ToolArgumentError, build_command
-from .schemas import PLAN_MUTATION_TOOL_NAMES, UNDO_TOOL
+from .proposals import (
+    binding_matches,
+    decode_command,
+    encode_command,
+    plan_binding,
+    preview_command,
+    session_impact_facts,
+)
+from .schemas import (
+    CANCEL_PENDING_TOOL,
+    CONFIRM_TOOL,
+    CONFIRMATION_TOOL_DEFS,
+    CONFIRMATION_TOOL_NAMES,
+    PLAN_MUTATION_TOOL_DEFS,
+    PLAN_MUTATION_TOOL_NAMES,
+    PLAN_WRITE_TOOL_NAMES,
+    UNDO_TOOL,
+)
 
 
 #: How many DISTINCT plan operations one Coach turn may attempt.
@@ -75,22 +126,88 @@ _BUDGET_ATTR = "_coach_plan_operation_keys"
 #: turn identity — applies the same edit a second time. Same placement and
 #: lifetime as the budget: on ``g``, so it dies with the request.
 _CHANGED_ATTR = "_coach_plan_change_applied"
+_PROPOSAL_ATTR = "_coach_plan_proposal_created"
+_NEW_PROPOSAL_ATTR = "_coach_plan_new_proposal_created"
+_INTENT_ATTR = "_coach_plan_confirmation_intent"
 
 
-def begin_turn():
-    """Reset the per-turn mutation budget and the plan-changed marker.
+def begin_turn(user_message=""):
+    """Reset the per-turn mutation budget, markers and confirmation intent.
 
     Called from the Coach's own turn setup, so blocking and streaming share one
     definition of "a turn" instead of each inventing one. Outside a request
     context there is no turn and nothing to reset — plan tools cannot run there
     either (``current_turn_id`` refuses), so this is a no-op rather than an
     error.
+
+    ``user_message`` is the raw current user turn. Confirmation authority is
+    derived from it here, not from the model.
     """
     try:
         setattr(g, _BUDGET_ATTR, [])
         setattr(g, _CHANGED_ATTR, False)
+        setattr(g, _PROPOSAL_ATTR, False)
+        setattr(g, _NEW_PROPOSAL_ATTR, False)
+        setattr(g, _INTENT_ATTR, parse_confirmation_intent(user_message))
     except RuntimeError:
         pass
+
+
+def current_confirmation_intent():
+    """CONFIRM / CANCEL / NONE for this turn. Fail-safe NONE."""
+    try:
+        return getattr(g, _INTENT_ATTR, None) or NONE
+    except RuntimeError:
+        return NONE
+
+
+def proposal_created_this_turn():
+    """Whether this turn persisted a confirmation-required proposal."""
+    try:
+        return bool(getattr(g, _PROPOSAL_ATTR, False))
+    except RuntimeError:
+        return False
+
+
+def new_proposal_created_this_turn():
+    """Whether this turn inserted a NEW pending proposal (not a reuse).
+
+    A confirm-form user message is not license to stage a confirmation-required
+    mutation and then apply it in the same turn: the user has not yet seen the
+    durable proposal on a later request.
+    """
+    try:
+        return bool(getattr(g, _NEW_PROPOSAL_ATTR, False))
+    except RuntimeError:
+        return False
+
+
+def published_plan_tool_defs(user_id=None):
+    """The plan-write tools published to the provider for this turn.
+
+    Fail-closed around a pending proposal: CONFIRM exposes only confirm,
+    CANCEL only cancel, NONE none of the plan-write family. No pending
+    restores the original six command tools. Confirmation tools are never
+    published when there is nothing to confirm.
+    """
+    if not plan_mutation_tools_enabled():
+        return ()
+    try:
+        pending = get_pending(user_id) if user_id else None
+    except Exception:
+        return ()
+    if pending is None:
+        return PLAN_MUTATION_TOOL_DEFS
+    if new_proposal_created_this_turn():
+        # Staged this turn: the user has not seen it yet. Confirm/cancel
+        # belong to a later authenticated turn.
+        return ()
+    intent = current_confirmation_intent()
+    if intent == CONFIRM:
+        return (CONFIRMATION_TOOL_DEFS[0],)
+    if intent == CANCEL:
+        return (CONFIRMATION_TOOL_DEFS[1],)
+    return ()
 
 
 def plan_changed_this_turn():
@@ -239,6 +356,7 @@ def execute_plan_tool(user_id, name, arguments):
     payload = _execute(user_id, name, arguments)
     _settle_transaction()
     _mark_plan_changed(payload)
+    _mark_proposal_created(payload)
     _log(name, _outcome_of(payload))
     return payload
 
@@ -258,6 +376,15 @@ def _mark_plan_changed(payload):
         pass
 
 
+def _mark_proposal_created(payload):
+    if payload.get("status") != results.STATUS_CONFIRMATION_REQUIRED:
+        return
+    try:
+        setattr(g, _PROPOSAL_ATTR, True)
+    except RuntimeError:
+        pass
+
+
 def _execute(user_id, name, arguments):
     if not plan_mutation_tools_enabled():
         # Defence in depth. When the flag is OFF these tools are absent from
@@ -266,7 +393,7 @@ def _execute(user_id, name, arguments):
         # that forgot the gate. Either way: refuse, do not mutate.
         return results.error_result(results.ERROR_CAPABILITY_DISABLED)
 
-    if name not in PLAN_MUTATION_TOOL_NAMES:
+    if name not in PLAN_WRITE_TOOL_NAMES:
         return results.error_result(
             results.ERROR_INVALID_ARGUMENTS, "bilinmeyen plan aracı")
 
@@ -280,6 +407,11 @@ def _execute(user_id, name, arguments):
         return results.error_result(results.ERROR_INTERNAL)
 
     try:
+        if name in CONFIRMATION_TOOL_NAMES:
+            return _execute_confirmation_tool(user_id, name, arguments)
+        pending = get_pending(user_id)
+        if pending is not None:
+            return _reuse_or_block_pending(pending, name, arguments)
         if name == UNDO_TOOL:
             return _execute_undo(user_id, arguments)
         return _execute_mutation(user_id, name, arguments)
@@ -327,11 +459,18 @@ def _context(operation_key):
 
 def _execute_mutation(user_id, name, arguments):
     command = build_command(name, arguments)
-    operation_key = mutation_operation_key(command)
-    if not _charge_budget(operation_key):
-        return results.error_result(results.ERROR_MUTATION_BUDGET_EXHAUSTED)
-    result = apply_plan_mutation(user_id, command, _context(operation_key))
-    return results.mutation_result(command, result)
+    plan, _document, changed = preview_command(user_id, command)
+    if not changed:
+        return _apply_typed(user_id, command)
+    facts = session_impact_facts(user_id, command)
+    decision = decide_plan_mutation_impact(command, facts)
+    if decision.verdict == REFUSE_UNSUPPORTED:
+        return results.error_result(results.ERROR_UNSUPPORTED_IMPACT)
+    if decision.verdict == REQUIRE_CONFIRMATION:
+        return _stage_proposal(user_id, plan, command, decision)
+    if decision.verdict != APPLY_NOW:
+        return results.error_result(results.ERROR_UNSUPPORTED_IMPACT)
+    return _apply_typed(user_id, command)
 
 
 def _execute_undo(user_id, arguments):
@@ -339,11 +478,230 @@ def _execute_undo(user_id, arguments):
     # ignored, because a model that thinks it can pass "which change" needs to
     # learn it cannot (brief §31).
     build_undo_arguments(arguments)
+    facts = session_impact_facts(user_id, UNDO_LAST_CHANGE)
+    decision = decide_plan_mutation_impact(UNDO_LAST_CHANGE, facts)
+    if decision.verdict == REFUSE_UNSUPPORTED:
+        return results.error_result(results.ERROR_UNSUPPORTED_IMPACT)
+    if decision.verdict == REQUIRE_CONFIRMATION:
+        plan = get_active_plan(user_id)
+        from app.services.plan_mutation.errors import PlanNotFound
+        from app.services.plan_mutation.journal import latest_reversible
+        if plan is None:
+            raise PlanNotFound("no active training plan")
+        if latest_reversible(user_id, plan.lineage_id) is None:
+            return _apply_undo(user_id)
+        return _stage_proposal(user_id, plan, UNDO_LAST_CHANGE, decision)
+    return _apply_undo(user_id)
+
+
+def _apply_typed(user_id, command):
+    operation_key = mutation_operation_key(command)
+    if not _charge_budget(operation_key):
+        return results.error_result(results.ERROR_MUTATION_BUDGET_EXHAUSTED)
+    result = apply_plan_mutation(user_id, command, _context(operation_key))
+    return results.mutation_result(command, result)
+
+
+def _apply_undo(user_id):
     operation_key = undo_operation_key()
     if not _charge_budget(operation_key):
         return results.error_result(results.ERROR_MUTATION_BUDGET_EXHAUSTED)
     result = undo_last_change(user_id, _context(operation_key))
     return results.undo_result(result)
+
+
+def _reuse_or_block_pending(pending, name, arguments):
+    """Same still-valid command reuses the proposal; anything else is blocked."""
+    if name == UNDO_TOOL:
+        build_undo_arguments(arguments)
+        command = UNDO_LAST_CHANGE
+    else:
+        command = build_command(name, arguments)
+    _kind, _payload, fingerprint = encode_command(command)
+    if pending.command_fingerprint == fingerprint:
+        return results.confirmation_required_result(
+            command, tuple(pending.reason_codes or ()))
+    return results.error_result(results.ERROR_PENDING_CONFIRMATION_EXISTS)
+
+
+def _stage_proposal(user_id, plan, command, decision):
+    kind, payload, fingerprint = encode_command(command)
+    binding = plan_binding(plan)
+    try:
+        _row, reused = create_or_reuse_pending(
+            user_id,
+            lineage_id=binding.lineage_id,
+            mutation_version=binding.mutation_version,
+            snapshot_fingerprint=binding.snapshot_fingerprint,
+            command_type=kind,
+            command_payload=payload,
+            command_fingerprint=fingerprint,
+            reason_codes=decision.reason_codes,
+            summary=results.confirmation_required_result(
+                command, decision.reason_codes)["summary"],
+        )
+    except PendingConfirmationConflict:
+        return results.error_result(results.ERROR_PENDING_CONFIRMATION_EXISTS)
+    if not reused:
+        try:
+            setattr(g, _NEW_PROPOSAL_ATTR, True)
+        except RuntimeError:
+            pass
+    return results.confirmation_required_result(command, decision.reason_codes)
+
+
+def _execute_confirmation_tool(user_id, name, arguments):
+    build_undo_arguments(arguments)
+    if name == CONFIRM_TOOL:
+        return _confirm_pending(user_id)
+    if name == CANCEL_PENDING_TOOL:
+        return _cancel_pending(user_id)
+    return results.error_result(
+        results.ERROR_INVALID_ARGUMENTS, "bilinmeyen plan aracı")
+
+
+def _confirm_pending(user_id):
+    """Apply a pending proposal, serialized on the proposal row.
+
+    Lock order: the proposal row, then PlanMutationService's plan row.
+    The proposal lock is released when PlanMutationService commits — that
+    commit also inserts the journal row, so a waiter re-checks the journal
+    under its own proposal lock and cannot claim a still-pending cancel.
+    """
+    if current_confirmation_intent() != CONFIRM:
+        return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
+    if new_proposal_created_this_turn():
+        return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
+    pending = get_pending(user_id)
+    if pending is None:
+        return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
+    row = lock_proposal(user_id, pending.public_id)
+    if row is None:
+        return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
+    key = confirmation_operation_key(row.public_id)
+    already = find_by_key(user_id, key)
+    if row.status != STATUS_PENDING:
+        if (row.status == STATUS_APPLIED
+                and already is not None
+                and _record_matches_proposal(row, already)
+                and _record_matches_current_plan(user_id, already)):
+            return _resolved_replay_result(row, already)
+        db.session.rollback()
+        if row.status == STATUS_STALE:
+            return results.error_result(results.ERROR_PENDING_CONFIRMATION_STALE)
+        return results.error_result(results.ERROR_NO_PENDING_CONFIRMATION)
+    plan = get_active_plan(user_id)
+    if already is None and (
+            plan is None
+            or plan.lineage_id != row.plan_lineage_id
+            or not binding_matches(row, plan)):
+        mark_stale(user_id, row.public_id)
+        return results.error_result(results.ERROR_PENDING_CONFIRMATION_STALE)
+    if not _charge_budget(key):
+        db.session.rollback()
+        return results.error_result(results.ERROR_MUTATION_BUDGET_EXHAUSTED)
+    return _apply_confirmed(user_id, row)
+
+
+def _record_matches_current_plan(user_id, record):
+    """Whether replay still describes the owner's canonical plan exactly."""
+    plan = get_active_plan(user_id)
+    if plan is None:
+        return False
+    binding = plan_binding(plan)
+    return (
+        binding.lineage_id == record.plan_lineage_id
+        and binding.mutation_version == record.after_version
+        and binding.snapshot_fingerprint == record.after_fingerprint
+    )
+
+
+def _record_matches_proposal(proposal, record):
+    """Whether the journal row is exact durable evidence for this proposal."""
+    expected_kind = (
+        KIND_UNDO
+        if proposal.command_type == UNDO_COMMAND_TYPE
+        else KIND_MUTATION
+    )
+    return (
+        record.operation_kind == expected_kind
+        and record.command_type == proposal.command_type
+        and record.command_fingerprint == proposal.command_fingerprint
+        and record.outcome == OUTCOME_APPLIED
+        and record.plan_lineage_id == proposal.plan_lineage_id
+        and record.before_version == proposal.base_mutation_version
+        and record.after_version == proposal.base_mutation_version + 1
+        and record.before_fingerprint == proposal.base_snapshot_fingerprint
+    )
+
+
+def _resolved_replay_result(proposal, record):
+    """Build a replay response from journal evidence without mutation calls."""
+    command = decode_command(proposal.command_type, proposal.command_payload)
+    replayed = PlanMutationResult(
+        outcome=record.outcome,
+        plan=None,
+        plan_version=record.after_version,
+        mutation_id=record.public_id,
+        replayed=True,
+    )
+    db.session.rollback()
+    if command is UNDO_LAST_CHANGE:
+        return results.undo_result(replayed)
+    return results.mutation_result(command, replayed)
+
+
+def _cancel_pending(user_id):
+    """Cancel a pending proposal, or converge if its mutation already committed.
+
+    Same proposal-row lock as confirm. Linearization is the status transition
+    (PENDING → CANCELLED) or the journal insert from PlanMutationService,
+    whichever commits first. A cancel that observes an already-applied
+    mutation must not claim the plan was unchanged.
+    """
+    if current_confirmation_intent() != CANCEL:
+        return results.error_result(results.ERROR_CONFIRMATION_NOT_AUTHORIZED)
+    row = lock_latest_proposal(user_id)
+    if row is None:
+        return results.cancelled_pending_result()
+    key = confirmation_operation_key(row.public_id)
+    already = find_by_key(user_id, key)
+    if already is not None:
+        if (_record_matches_proposal(row, already)
+                and _record_matches_current_plan(user_id, already)):
+            if row.status == STATUS_PENDING:
+                # Crash window: reconcile and finish proposal bookkeeping.
+                return _apply_confirmed(user_id, row)
+            if row.status == STATUS_APPLIED:
+                # Historical reconciliation is evidence-only. A resolved
+                # proposal is never executable, even through idempotent PMS.
+                return _resolved_replay_result(row, already)
+            db.session.rollback()
+            return results.cancelled_pending_result()
+        if row.status == STATUS_PENDING:
+            mark_applied(user_id, row.public_id)
+        else:
+            db.session.rollback()
+        return results.cancelled_pending_result()
+    if row.status != STATUS_PENDING:
+        db.session.rollback()
+        return results.cancelled_pending_result()
+    cancel_pending(user_id)
+    return results.cancelled_pending_result()
+
+
+def _apply_confirmed(user_id, pending):
+    """Apply or replay the stored command, then mark the proposal APPLIED."""
+    key = confirmation_operation_key(pending.public_id)
+    command = decode_command(pending.command_type, pending.command_payload)
+    if command is UNDO_LAST_CHANGE:
+        result = undo_last_change(user_id, _context(key))
+        payload = results.undo_result(result)
+    else:
+        result = apply_plan_mutation(user_id, command, _context(key))
+        payload = results.mutation_result(command, result)
+    mark_applied(user_id, pending.public_id)
+    return payload
 
 
 def build_undo_arguments(arguments):

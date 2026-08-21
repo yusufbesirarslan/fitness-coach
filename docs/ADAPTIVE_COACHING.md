@@ -876,3 +876,74 @@ mutation · no push notification · no migration (Alembic head unchanged at
 `b3c4d5e6f7a8`) · no deployment and no production flag activation.
 
 `POST /training-plan/save` is still a separate, untouched whole-plan path.
+
+## 31. Sprint 1 PR4 — server-owned impact and structural confirmation
+
+PR3 left explicit user intent as prompt-policy. PR4 does not turn that into a
+general natural-language classifier. It adds a narrower guarantee:
+
+If server policy says a mutation requires confirmation, the model cannot
+bypass that requirement by emitting another tool call, and it cannot
+self-confirm a pending proposal.
+
+**Decision authority** is `app/services/coach_plan_policy`. The model never
+scores impact. Verdicts are `APPLY_NOW`, `REQUIRE_CONFIRMATION`,
+`REFUSE_UNSUPPORTED`. Unknown impact never becomes `APPLY_NOW`.
+
+Baseline confirmation:
+
+- `remove_exercise`
+- `move_training_day`
+- any mutation that would change the canonical ACTIVE-session exercise-name
+  fingerprint (read from `workout_session`, never rewritten here)
+
+Replace / add / prescription updates apply immediately when no confirmation
+reason applies. Undo is not confirmation-required unless it would stale an
+ACTIVE session.
+
+**Pending state** is `training_plan_confirmation_proposal` — not a
+`PlanMutationRecord`. Creating a proposal does not change `plan_data`,
+`mutation_version`, or the journal. One PENDING row per user. Bound to
+lineage + mutation version + snapshot fingerprint + command fingerprint.
+Duplicate same intent reuses the row; a different intent is blocked until
+the user cancels.
+
+**Confirmation identity.** The model cannot supply a proposal id. Confirm and
+cancel tools take no arguments. The mutation operation key for a confirmed
+write is derived from the server-minted proposal public id, so a crash after
+`PlanMutationService` commits still retries as a PR2 replay.
+
+**Confirm vs cancel.** Both operations lock the proposal row (`SELECT … FOR
+UPDATE`) before deciding. Lock order is proposal, then plan. A cancellation
+that commits while the row is still pending is the linearization point: that
+proposal cannot afterwards create a new plan mutation. If the exact
+proposal-derived journal identity exists and its durable after-state still
+exactly matches the current canonical plan, cancel reconciles to the
+applied/replayed result and must not claim the plan was unchanged. Cancel
+selects the owner's latest durable proposal, including a resolved row, so a
+cancel that starts only after confirmation completed still reports the
+applied/replayed result. If the plan lineage, version, or snapshot has since
+moved, or an APPLIED row has no journal evidence, cancel returns the bounded
+no-pending response and never executes the historical proposal.
+
+**Active-session impact** is evaluated from canonical session facts at
+decision time. PR4 does not take a session lock, and it does not write
+`WorkoutSession`. A session that starts after that snapshot is classified
+stale by the existing workout-session recovery path, not by a second
+cross-domain transaction.
+
+**Structural gate.** `CONFIRM` / `CANCEL` / `NONE` is parsed from the raw
+current user turn (`question`). The executor rechecks that fact. A
+misbehaving model calling `confirm_pending_training_plan_change` on
+"I'm not sure" does not write.
+
+**Publication.** No pending → the original six command tools. Pending +
+CONFIRM → only confirm. Pending + CANCEL → only cancel. Pending + NONE → no
+plan-write tools.
+
+**Flag.** Still `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED`, default OFF. OFF
+removes command tools, confirmation tools, and proposal writes.
+
+**Not in PR4:** public confirmation API, Flutter buttons, nutrition mutation,
+full-program redesign, proactive adaptation, a second feature flag, a
+wall-clock TTL (plan-state invalidation is the authority).
