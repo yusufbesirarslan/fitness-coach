@@ -23,6 +23,7 @@ from app.services.exercise_catalog import (
     normalize_exercise_lookup,
     resolve_exercise,
 )
+from app.services.training_generation.prompt_builder import canonical_exercise_vocabulary
 
 
 EXPECTED_EQUIPMENT = frozenset({
@@ -523,3 +524,56 @@ def test_compatible_exercises_excludes_inactive_entries(catalog_asset_path):
     }
 
     assert compatible_ids == {"ex_test_squat"}
+
+
+# ── canonical_exercise_vocabulary (prompt-side hint, not an authority) ──────
+
+
+def test_prompt_vocabulary_is_bounded():
+    names = canonical_exercise_vocabulary(
+        ExerciseContext(equipment_context="spor_salonu")
+    )
+    assert len("\n".join(names)) <= 8000
+
+
+def test_prompt_vocabulary_is_sorted_and_deduplicated():
+    names = canonical_exercise_vocabulary(ExerciseContext(equipment_context="ev"))
+    assert names == tuple(sorted(names))
+    assert len(names) == len(set(names))
+
+
+def test_prompt_vocabulary_excludes_aliases_ids_and_equipment_metadata():
+    context = ExerciseContext(equipment_context="spor_salonu")
+    names = canonical_exercise_vocabulary(context)
+
+    for exercise in compatible_exercises(context):
+        assert exercise.canonical_name in names
+        for alias in exercise.aliases:
+            if alias != exercise.canonical_name:
+                assert alias not in names
+        assert exercise.exercise_id not in names
+    for equipment_item in EXPECTED_EQUIPMENT:
+        assert equipment_item not in names
+
+
+def test_prompt_vocabulary_filters_by_equipment_context(catalog_asset_path):
+    asset = _valid_asset()
+    barbell_only = dict(asset["exercises"][0])
+    barbell_only.update({
+        "exercise_id": "ex_fixture_barbell_row",
+        "canonical_name": "Fixture Barbell Row",
+        "aliases": [],
+        "equipment": ["barbell"],
+    })
+    asset["exercises"].append(barbell_only)
+    _write_asset(catalog_asset_path, asset)
+
+    home_names = canonical_exercise_vocabulary(ExerciseContext(equipment_context="ev"))
+    gym_names = canonical_exercise_vocabulary(
+        ExerciseContext(equipment_context="spor_salonu")
+    )
+
+    assert "Test Squat" in home_names
+    assert "Fixture Barbell Row" not in home_names
+    assert "Test Squat" in gym_names
+    assert "Fixture Barbell Row" in gym_names

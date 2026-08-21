@@ -623,6 +623,65 @@ def test_days_duration_equipment_survive_normalization():
     assert "yag_yakimi" in prompt
 
 
+# ── Equipment-filtered prompt vocabulary (PR4 Task 2) ────────────────────────
+
+
+def _captured_supported_prompt(client, auth_user, monkeypatch, **overrides):
+    """POST a guaranteed-supported request and capture the provider prompt."""
+    _session(auth_user)
+    captured = {}
+
+    def fake_chat(**kwargs):
+        captured["prompt"] = kwargs["messages"][0]["content"]
+        return __import__("json").dumps(_seven_day_plan(overrides.get("gun_sayisi", 3)))
+
+    monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
+    payload = {
+        "gun_sayisi": 3,
+        "sure": 45,
+        "ekipman": "spor_salonu",
+        "antrenman_tarzi": "genel",
+        "odak_hedef": "genel",
+        "odak": "tum_vucut",
+    }
+    payload.update(overrides)
+    response = client.post("/training-plan", json=payload)
+    assert response.status_code == 200, response.get_json()
+    return captured["prompt"]
+
+
+def test_home_prompt_lists_bodyweight_but_not_barbell_exercises(
+        client, auth_user, monkeypatch):
+    prompt = _captured_supported_prompt(client, auth_user, monkeypatch, ekipman="ev")
+    assert "Push-Up" in prompt
+    assert "Barbell Back Squat" not in prompt
+
+
+def test_minimal_prompt_lists_dumbbell_and_band_but_not_machine(
+        client, auth_user, monkeypatch):
+    # NOTE: "Goblet Squat" is deliberately avoided here — it also appears in
+    # prompt_builder's static JSON FORMAT example, which would make the
+    # assertion pass even without the vocabulary block.
+    prompt = _captured_supported_prompt(client, auth_user, monkeypatch, ekipman="minimal")
+    assert "Dumbbell Row" in prompt
+    assert "Lat Pulldown" not in prompt
+
+
+def test_gym_prompt_lists_every_equipment_tier(client, auth_user, monkeypatch):
+    prompt = _captured_supported_prompt(client, auth_user, monkeypatch, ekipman="spor_salonu")
+    assert "Push-Up" in prompt
+    assert "Goblet Squat" in prompt
+    assert "Barbell Back Squat" in prompt
+    assert "Lat Pulldown" in prompt
+
+
+def test_direct_prompt_builder_call_without_vocabulary_omits_exercise_section():
+    """Callers that don't pass exercise_vocabulary (app/prompts/workout.py,
+    tests/test_i18n.py, ...) must see byte-identical prompts to before Task 2."""
+    prompt, _prefs, _context = _prompt_for("genel", ekipman="ev")
+    assert "EXERCISE VOCABULARY" not in prompt
+
+
 # ── odak_hedef cannot be accepted and ignored ────────────────────────────────
 
 

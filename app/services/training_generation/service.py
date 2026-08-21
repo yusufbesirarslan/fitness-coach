@@ -1,6 +1,7 @@
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.extensions import db
+from app.services.exercise_catalog import ExerciseContext
 from app.services.training_generation.capability import require_supported
 from app.services.training_generation.classifier_service import classify_user
 from app.services.training_generation.extractor import extract_plan_object
@@ -21,7 +22,11 @@ from app.services.training_generation.plan_schema import (
     REPAIR_MAX_TOKENS,
 )
 from app.services.training_generation.program_generator import build_program_context
-from app.services.training_generation.prompt_builder import build_system_prompt, build_training_prompt
+from app.services.training_generation.prompt_builder import (
+    build_system_prompt,
+    build_training_prompt,
+    canonical_exercise_vocabulary,
+)
 from app.services.training_generation.response_validator import (
     validate_generated_plan,
     validate_plan_structure,
@@ -143,8 +148,15 @@ def generate_training_plan_payload(user, last_session, request_data, chat_fn, la
     features = build_features(user, last_session, preferences)
     classification = classify_user(features)
     context = build_program_context(features, preferences, classification)
+    exercise_context = ExerciseContext(
+        equipment_context=preferences.ekipman,
+        cardio_type=preferences.kardiyo_tipi,
+        style=preferences.antrenman_tarzi,
+    )
+    exercise_vocabulary = canonical_exercise_vocabulary(exercise_context)
     prompt = build_training_prompt(
-        features, preferences, classification, context, language=language)
+        features, preferences, classification, context, language=language,
+        exercise_vocabulary=exercise_vocabulary)
     system_prompt = build_system_prompt(language)
     budget = _CompletionBudget(chat_fn)
 
