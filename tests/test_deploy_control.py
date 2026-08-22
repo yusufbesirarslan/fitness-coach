@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from scripts.deploy_control import (
+    AWS_CLI_CALL_TIMEOUT_SECONDS,
     AwsCliError,
     ConfigError,
     DELIVERY_TIMEOUT_SECONDS,
@@ -23,8 +24,11 @@ from scripts.deploy_control import (
     POLL_HORIZON_SECONDS,
     PreflightError,
     build_remote_command,
+    main,
     preflight,
     read_invocation,
+    run_aws_json,
+    run_deploy,
     send_command,
     validate_candidate,
     wait_for_invocation,
@@ -389,6 +393,22 @@ printf '%s\\0' "$@" > "$HARNESS_DIR/id-args"
 printf '%s\n' chown >> "$HARNESS_DIR/events"
 printf '%s\\0' "$@" > "$HARNESS_DIR/chown-args"
 """)
+    _write_shell_stub(stubs, "nginx", """
+printf '%s\n' nginx >> "$HARNESS_DIR/events"
+test "$1" = '-t'
+""")
+    _write_shell_stub(stubs, "systemctl", """
+printf '%s\n' systemctl >> "$HARNESS_DIR/events"
+case "$1" in
+  is-active) exit 0 ;;
+  reload) exit 0 ;;
+  *) exit 64 ;;
+esac
+""")
+    _write_shell_stub(stubs, "ss", """
+printf '%s\n' ss >> "$HARNESS_DIR/events"
+printf '%s\n' 'LISTEN 0 128 127.0.0.1:3000 0.0.0.0:*'
+""")
     _write_shell_stub(stubs, "sudo", """
 printf '%s\n' sudo >> "$HARNESS_DIR/events"
 printf '%s\\0' "$@" > "$HARNESS_DIR/sudo-args"
@@ -434,7 +454,8 @@ exit "$REMOTE_EXIT_CODE"
 
     assert completed.returncode == remote_exit_code, completed.stderr
     assert (harness / "events").read_text(encoding="utf-8").splitlines() == [
-        "mktemp", "chmod", "id", "chown", "sudo",
+        "mktemp", "chmod", "id", "chown", "nginx", "systemctl",
+        "systemctl", "ss", "ss", "sudo",
     ]
     assert _read_null_arguments(harness / "mktemp-args") == ["/tmp/fitx-deploy.XXXXXX"]
     assert _read_null_arguments(harness / "chmod-args") == ["0700", bash_remote_script]
@@ -643,3 +664,268 @@ def test_final_poll_sleep_is_clipped_to_remaining_horizon(fake_clock):
 
     assert fake_clock.sleeps == [4]
     assert fake_clock.now == POLL_HORIZON_SECONDS
+
+
+class FakeAwsCompletedProcess:
+    def __init__(self, *, returncode=0, stdout="{}", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def test_aws_json_runner_decodes_one_json_object_with_bounded_cli_arguments():
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        return FakeAwsCompletedProcess(stdout='{"Reservations": []}')
+
+    result = run_aws_json(["ec2", "describe-instances"], run=run)
+
+    assert result == {"Reservations": []}
+    assert calls == [([
+        "aws", "ec2", "describe-instances", "--output", "json", "--no-cli-pager",
+    ], {
+        "capture_output": True,
+        "check": False,
+        "text": True,
+        "timeout": AWS_CLI_CALL_TIMEOUT_SECONDS,
+    })]
+    assert 0 < AWS_CLI_CALL_TIMEOUT_SECONDS < POLL_HORIZON_SECONDS
+
+
+def test_every_invocation_status_cli_call_has_the_exact_30_second_timeout():
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        return FakeAwsCompletedProcess(stdout=json.dumps(invocation_response("Pending")))
+
+    run_aws_json([
+        "ssm", "get-command-invocation", "--command-id", "command-id",
+        "--instance-id", VALID_ENV["EC2_INSTANCE_ID"],
+    ], run=run)
+
+    assert calls[0][1]["timeout"] == INVOCATION_CALL_TIMEOUT_SECONDS == 30
+
+
+@pytest.mark.parametrize("args", [
+    ["ec2", "describe-instances"],
+    ["ssm", "describe-instance-information"],
+    ["ssm", "send-command"],
+])
+def test_every_non_polling_aws_cli_call_is_bounded(args):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(kwargs)
+        return FakeAwsCompletedProcess()
+
+    run_aws_json(args, run=run)
+
+    assert calls[0]["timeout"] == AWS_CLI_CALL_TIMEOUT_SECONDS
+
+
+@pytest.mark.parametrize("completed,error_pattern", [
+    (FakeAwsCompletedProcess(returncode=7, stderr="denied"), "failed with exit code 7"),
+    (FakeAwsCompletedProcess(stdout="not-json"), "invalid JSON"),
+    (FakeAwsCompletedProcess(stdout="[]"), "JSON object"),
+])
+def test_aws_json_runner_fails_closed_on_cli_and_json_errors(completed, error_pattern):
+    with pytest.raises(AwsCliError, match=error_pattern):
+        run_aws_json(["ec2", "describe-instances"], run=lambda args, **kwargs: completed)
+
+
+def test_aws_json_runner_converts_process_timeout_to_typed_failure():
+    def run(args, **kwargs):
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    with pytest.raises(AwsCliError, match="timed out after 30 seconds"):
+        run_aws_json(["ssm", "get-command-invocation"], run=run)
+
+
+def test_aws_json_runner_converts_process_start_failure_to_typed_failure():
+    def run(args, **kwargs):
+        raise FileNotFoundError("aws")
+
+    with pytest.raises(AwsCliError, match="could not start"):
+        run_aws_json(["ec2", "describe-instances"], run=run)
+
+
+def _write_integration_host_script(repo_path, content=b"#!/bin/sh\necho exact helper\n"):
+    scripts = repo_path / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    host_script = scripts / "production_deploy.sh"
+    host_script.write_bytes(content)
+    return content
+
+
+def test_run_deploy_orders_validation_preflight_exact_script_send_and_poll(
+        workspace_tmp_dir, fake_clock):
+    exact_script = _write_integration_host_script(
+        workspace_tmp_dir,
+        b"#!/bin/sh\nprintf 'exact checked-out helper\\n'\n",
+    )
+    events = []
+    sent_parameters = []
+    now = datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc)
+
+    def run_git(args):
+        operation = args[3]
+        events.append(f"git:{operation}")
+        if operation == "rev-parse":
+            return VALID_ENV["DEPLOY_SHA"]
+        return ""
+
+    def aws(args):
+        operation = ":".join(args[:2])
+        events.append(f"aws:{operation}")
+        if args[:2] == ["ec2", "describe-instances"]:
+            return {"Reservations": [{"Instances": [{
+                "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+                "State": {"Name": "running"},
+            }]}]}
+        if args[:2] == ["ssm", "describe-instance-information"]:
+            return {"InstanceInformationList": [{
+                "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+                "PingStatus": "Online",
+                "LastPingDateTime": "2026-08-22T17:58:00+00:00",
+            }]}
+        if args[:2] == ["ssm", "send-command"]:
+            sent_parameters.append(json.loads(args[args.index("--parameters") + 1]))
+            return {"Command": {
+                "CommandId": "11111111-1111-1111-1111-111111111111",
+            }}
+        if args[:2] == ["ssm", "get-command-invocation"]:
+            return invocation_response(
+                "Success", response_code=0,
+                stdout="exact deploy complete\n", stderr="bounded warning\n",
+            )
+        raise AssertionError(f"unexpected AWS call: {args}")
+
+    messages = []
+    result = run_deploy(
+        VALID_ENV, workspace_tmp_dir, aws, now,
+        fake_clock.monotonic, fake_clock.sleep, messages.append,
+        run_git=run_git,
+    )
+
+    assert result.status_details == "Success"
+    assert events == [
+        "git:fetch", "git:cat-file", "git:rev-parse",
+        "aws:ec2:describe-instances",
+        "aws:ssm:describe-instance-information",
+        "aws:ssm:send-command",
+        "aws:ssm:get-command-invocation",
+    ]
+    remote_command = sent_parameters[0]["commands"][0]
+    assert base64.b64encode(exact_script).decode("ascii") in remote_command
+    assert (
+        f"sudo -u '{VALID_ENV['DEPLOY_USER']}' -- \"$script_path\" "
+        f"'{VALID_ENV['DEPLOY_SHA']}' \"$deploy_dir\" \"$public_health_url\""
+    ) in remote_command
+    assert messages[-5:] == [
+        "SSM status: Success",
+        "SSM stdout:",
+        "exact deploy complete",
+        "SSM stderr:",
+        "bounded warning",
+    ]
+
+
+def test_run_deploy_rejects_stale_candidate_before_any_aws_call(
+        workspace_tmp_dir, fake_clock):
+    _write_integration_host_script(workspace_tmp_dir)
+    aws_calls = []
+
+    with pytest.raises(ConfigError, match="stale"):
+        run_deploy(
+            VALID_ENV, workspace_tmp_dir, lambda args: aws_calls.append(args),
+            datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            fake_clock.monotonic, fake_clock.sleep, lambda message: None,
+            run_git=fake_git_returning("b" * 40),
+        )
+
+    assert aws_calls == []
+
+
+def test_run_deploy_rejects_failed_preflight_before_loading_or_sending_script(
+        workspace_tmp_dir, fake_clock):
+    aws_calls = []
+
+    def aws(args):
+        aws_calls.append(args)
+        if args[:2] == ["ec2", "describe-instances"]:
+            return {"Reservations": [{"Instances": [{
+                "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+                "State": {"Name": "stopped"},
+            }]}]}
+        raise AssertionError("preflight failure must stop later AWS calls")
+
+    with pytest.raises(PreflightError, match="not running"):
+        run_deploy(
+            VALID_ENV, workspace_tmp_dir, aws,
+            datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            fake_clock.monotonic, fake_clock.sleep, lambda message: None,
+            run_git=fake_git_returning(VALID_ENV["DEPLOY_SHA"]),
+        )
+
+    assert [call[:2] for call in aws_calls] == [["ec2", "describe-instances"]]
+
+
+def test_run_deploy_requires_exact_host_script_after_preflight_before_send(
+        workspace_tmp_dir, fake_clock):
+    aws_calls = []
+    responses = iter([
+        {"Reservations": [{"Instances": [{
+            "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+            "State": {"Name": "running"},
+        }]}]},
+        {"InstanceInformationList": [{
+            "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+            "PingStatus": "Online",
+            "LastPingDateTime": "2026-08-22T17:58:00+00:00",
+        }]},
+    ])
+
+    def aws(args):
+        aws_calls.append(args)
+        return next(responses)
+
+    with pytest.raises(ConfigError, match="production_deploy.sh"):
+        run_deploy(
+            VALID_ENV, workspace_tmp_dir, aws,
+            datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            fake_clock.monotonic, fake_clock.sleep, lambda message: None,
+            run_git=fake_git_returning(VALID_ENV["DEPLOY_SHA"]),
+        )
+
+    assert [call[:2] for call in aws_calls] == [
+        ["ec2", "describe-instances"],
+        ["ssm", "describe-instance-information"],
+    ]
+
+
+def test_main_returns_nonzero_when_bounded_aws_call_times_out(
+        workspace_tmp_dir, fake_clock):
+    _write_integration_host_script(workspace_tmp_dir)
+    messages = []
+
+    def aws(args):
+        raise AwsCliError("aws ec2 describe-instances timed out after 60 seconds")
+
+    exit_code = main(
+        environ=VALID_ENV,
+        repo_path=workspace_tmp_dir,
+        aws=aws,
+        now=datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+        monotonic=fake_clock.monotonic,
+        sleep=fake_clock.sleep,
+        log=messages.append,
+        run_git=fake_git_returning(VALID_ENV["DEPLOY_SHA"]),
+    )
+
+    assert exit_code != 0
+    assert messages == [
+        "deployment failed: aws ec2 describe-instances timed out after 60 seconds",
+    ]

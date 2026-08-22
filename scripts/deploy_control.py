@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import subprocess
+import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlsplit
@@ -25,6 +27,7 @@ AWS_EXPIRY_SECONDS = 1860
 POLL_HORIZON_SECONDS = 2100
 POLL_INTERVAL_SECONDS = 10
 INVOCATION_CALL_TIMEOUT_SECONDS = 30
+AWS_CLI_CALL_TIMEOUT_SECONDS = 60
 
 WAITING_STATES = frozenset({"Pending", "Delayed", "InProgress"})
 FAILURE_STATES = frozenset({
@@ -150,6 +153,46 @@ def _run_git(args: list[str]) -> str:
     return completed.stdout.rstrip("\r\n")
 
 
+def run_aws_json(
+    args: list[str],
+    *,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> dict[str, Any]:
+    """Run one bounded AWS CLI operation and require one JSON object."""
+    if len(args) < 2:
+        raise AwsCliError("AWS CLI operation must include a service and command")
+
+    timeout = (
+        INVOCATION_CALL_TIMEOUT_SECONDS
+        if args[:2] == ["ssm", "get-command-invocation"]
+        else AWS_CLI_CALL_TIMEOUT_SECONDS
+    )
+    operation = f"aws {args[0]} {args[1]}"
+    command = ["aws", *args, "--output", "json", "--no-cli-pager"]
+    try:
+        completed = run(
+            command,
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise AwsCliError(f"{operation} timed out after {timeout} seconds") from error
+    except (OSError, UnicodeError) as error:
+        raise AwsCliError(f"{operation} could not start") from error
+
+    if completed.returncode != 0:
+        raise AwsCliError(f"{operation} failed with exit code {completed.returncode}")
+    try:
+        response = json.loads(completed.stdout)
+    except (json.JSONDecodeError, TypeError) as error:
+        raise AwsCliError(f"{operation} returned invalid JSON") from error
+    if not isinstance(response, dict):
+        raise AwsCliError(f"{operation} must return one JSON object")
+    return response
+
+
 def validate_candidate(repo_path: Path, deploy_sha: str, run_git: GitRunner = _run_git) -> None:
     """Confirm the requested commit remains the current candidate on origin/main."""
     if not SHA_RE.fullmatch(deploy_sha):
@@ -261,6 +304,50 @@ fi
 chown -- '{deploy_user}' "$script_path"
 deploy_dir="$(printf '%s' '{encoded_dir}' | base64 --decode)"
 public_health_url="$(printf '%s' '{encoded_url}' | base64 --decode)"
+
+nginx_site=/etc/nginx/sites-available/fitx
+if [ -f "$nginx_site" ] && grep -q 'add_header Content-Security-Policy' "$nginx_site"; then
+  echo 'ERROR: nginx site config still contains add_header Content-Security-Policy' >&2
+  exit 1
+fi
+if nginx -t; then
+  if systemctl is-active --quiet nginx; then
+    systemctl reload nginx
+    echo 'nginx: configuration validated and reloaded'
+  else
+    systemctl enable --now nginx
+    echo 'nginx: configuration validated and enabled'
+  fi
+else
+  echo 'ERROR: nginx configuration test failed' >&2
+  exit 1
+fi
+if listeners="$(ss -ltnp 2>&1)"; then
+  printf '%s\n' "$listeners" | grep -E ':(80|443) ' >/dev/null || \
+    echo 'WARNING: no listener found on port 80 or 443'
+else
+  echo 'WARNING: unable to inspect port 80/443 listeners'
+fi
+
+env_file="$deploy_dir/.env"
+if [ -f "$env_file" ]; then
+  env_permissions="$(stat -c %a "$env_file")"
+  if [ "$env_permissions" != 600 ]; then
+    echo "WARNING: correcting .env permissions from $env_permissions to 600"
+    chmod 600 "$env_file"
+  else
+    echo '.env permissions: 600'
+  fi
+else
+  echo 'CRITICAL: deployment .env file is missing'
+fi
+
+if listeners="$(ss -ltn 2>&1)" && printf '%s\n' "$listeners" | grep -q '127.0.0.1:3000'; then
+  echo 'fatsecret proxy: 127.0.0.1:3000 is listening'
+else
+  echo 'WARNING: fatsecret proxy is not listening on 127.0.0.1:3000'
+fi
+
 sudo -u '{deploy_user}' -- "$script_path" '{deploy_sha}' "$deploy_dir" "$public_health_url"
 """
 
@@ -388,3 +475,91 @@ def wait_for_invocation(
         if comparison_status not in WAITING_STATES:
             raise InvocationProtocolError(result.status_details)
         sleep(min(POLL_INTERVAL_SECONDS, remaining))
+
+
+def _load_host_script(repo_path: Path) -> bytes:
+    script_path = repo_path / "scripts" / "production_deploy.sh"
+    try:
+        return script_path.read_bytes()
+    except OSError as error:
+        raise ConfigError(f"unable to load exact host helper: {script_path}") from error
+
+
+def _emit_invocation_output(
+    result: InvocationResult,
+    log: Callable[[str], None],
+) -> None:
+    log("SSM stdout:")
+    if result.stdout:
+        log(result.stdout.rstrip("\r\n"))
+    log("SSM stderr:")
+    if result.stderr:
+        log(result.stderr.rstrip("\r\n"))
+
+
+def run_deploy(
+    environ: Mapping[str, str],
+    repo_path: Path,
+    aws: AwsJsonRunner,
+    now: datetime,
+    monotonic: Callable[[], float],
+    sleep: Callable[[float], None],
+    log: Callable[[str], None],
+    *,
+    run_git: GitRunner = _run_git,
+) -> InvocationResult:
+    """Run the single validated production deployment lifecycle in order."""
+    config = DeployConfig.from_environ(environ)
+    validate_candidate(repo_path, config.deploy_sha, run_git=run_git)
+    preflight(config, aws, now)
+    script = _load_host_script(repo_path)
+    command_id = send_command(config, script, aws)
+    try:
+        result = wait_for_invocation(
+            config, command_id, aws, monotonic, sleep, log,
+        )
+    except InvocationFailed as error:
+        _emit_invocation_output(error.result, log)
+        raise
+    _emit_invocation_output(result, log)
+    return result
+
+
+def main(
+    *,
+    environ: Mapping[str, str] | None = None,
+    repo_path: Path | None = None,
+    aws: AwsJsonRunner | None = None,
+    now: datetime | None = None,
+    monotonic: Callable[[], float] | None = None,
+    sleep: Callable[[float], None] | None = None,
+    log: Callable[[str], None] = print,
+    run_git: GitRunner = _run_git,
+) -> int:
+    """CLI entrypoint returning non-zero for every typed deployment failure."""
+    try:
+        run_deploy(
+            os.environ if environ is None else environ,
+            Path.cwd() if repo_path is None else repo_path,
+            run_aws_json if aws is None else aws,
+            datetime.now(timezone.utc) if now is None else now,
+            time.monotonic if monotonic is None else monotonic,
+            time.sleep if sleep is None else sleep,
+            log,
+            run_git=run_git,
+        )
+    except (
+        AwsCliError,
+        ConfigError,
+        InvocationFailed,
+        InvocationPollingTimeout,
+        InvocationProtocolError,
+        PreflightError,
+    ) as error:
+        log(f"deployment failed: {error}")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

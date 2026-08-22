@@ -27,10 +27,14 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 40
     # CI basarisizsa deploy hic calismaz.
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event == 'push' }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+          fetch-depth: 0
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v6
@@ -87,52 +91,11 @@ jobs:
             --query "DBSnapshot.DBSnapshotIdentifier" --output text
           echo "Snapshot baslatildi (arka planda tamamlanir): $SNAP_ID"
 
-      - name: Execute Deploy Commands via AWS SSM
-        run: |
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
-            --document-name "AWS-RunShellScript" \
-            --parameters '{"commands":[
-              "NGINX_SITE=/etc/nginx/sites-available/fitx; if [ -f \"$NGINX_SITE\" ] && grep -q \"add_header Content-Security-Policy\" \"$NGINX_SITE\"; then echo \"ERROR: nginx site config still contains add_header Content-Security-Policy; remove it or render the repo config before deploy\"; exit 1; else echo \"nginx: CSP add_header yok (CSP Flask tarafindan uretiliyor)\"; fi",
-              "if nginx -t; then if systemctl is-active --quiet nginx; then systemctl reload nginx && echo \"nginx: reload edildi\"; else echo \"nginx: servis aktif degil, baslatiliyor ve boot icin enable ediliyor\"; systemctl enable --now nginx; echo \"nginx servis durumu: $(systemctl is-active nginx)\"; fi; else echo \"ERROR: nginx -t CONFIG TESTI BASARISIZ - deploy durduruluyor (public site kirik config servis edebilir)\"; exit 1; fi",
-              "echo \"80/443 dinleyenler:\"; ss -ltnp 2>/dev/null | grep -E \":(80|443) \" || echo \"UYARI: 80/443 portunu dinleyen yok - site disaridan erisilemez\"",
-              "ENV_FILE=${{ secrets.DEPLOY_DIR }}/.env; if [ -f \"$ENV_FILE\" ]; then PERM=$(stat -c %a \"$ENV_FILE\"); if [ \"$PERM\" != \"600\" ]; then echo \"UYARI: .env izinleri $PERM (grup/dunya okunabilir) - 600 olarak duzeltiliyor. Icerik: SECRET_KEY, RDS kimlik bilgileri, COGNITO_TOKEN_ENC_KEY, RESEND_API_KEY, OPENAI_API_KEY\"; chmod 600 \"$ENV_FILE\"; else echo \".env izinleri: 600 (dogru)\"; fi; else echo \"KRITIK: .env bulunamadi: $ENV_FILE - uygulama yapilandirmasiz baslar\"; fi",
-              "if ss -ltn 2>/dev/null | grep -q \"127.0.0.1:3000\"; then echo \"fatsecret proxy: 127.0.0.1:3000 dinliyor\"; else echo \"UYARI: FatSecret proxy (127.0.0.1:3000) DINLEMIYOR - besin aramalari 502 olur, makro cozumu LLM tahminine duser. Proxy nginx site blogudur; sites-enabled/fatsecret-proxy ve nginx durumunu kontrol edin (bkz deploy/fatsecret-proxy.md) - deploy bloklanmadi\"; fi",
-              "sudo -u ${{ secrets.DEPLOY_USER }} bash -lc '\''set -euo pipefail; cd ${{ secrets.DEPLOY_DIR }}; PREV_COMMIT=$(git rev-parse HEAD); echo \"PREV_COMMIT=$PREV_COMMIT\"; git fetch --all --prune; git reset --hard origin/main; docker compose build; docker compose up -d; HEALTH_OK=0; for i in $(seq 1 30); do CODE=$(curl -s -o /dev/null -w \"%{http_code}\" \"http://127.0.0.1:5000/health?deep=1\" || true); echo \"deep health attempt $i: $CODE\"; if [ \"$CODE\" = \"200\" ]; then HEALTH_OK=1; break; fi; sleep 5; done; if [ \"$HEALTH_OK\" != \"1\" ]; then echo \"ROLLBACK: health gate failed, returning to $PREV_COMMIT\"; docker compose logs --no-color --tail 80 web || true; git reset --hard \"${PREV_COMMIT:?rollback target missing}\"; docker compose up -d --build; RB_OK=0; for j in $(seq 1 30); do RCODE=$(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:5000/health || true); echo \"rollback health attempt $j: $RCODE\"; if [ \"$RCODE\" = \"200\" ]; then RB_OK=1; break; fi; sleep 5; done; if [ \"$RB_OK\" = \"1\" ]; then echo \"ROLLBACK OK: onceki surum saglikli\"; else echo \"CRITICAL: ROLLBACK DA SAGLIKSIZ - elle mudahale gerekli (muhtemel sema drift, bkz A2)\"; fi; exit 1; fi; PUB_URL=\"${{ vars.PUBLIC_HEALTH_URL }}\"; if [ -n \"$PUB_URL\" ]; then PUB_OK=0; for k in $(seq 1 12); do PCODE=$(curl -s -o /dev/null -w \"%{http_code}\" \"$PUB_URL\" || true); echo \"public health attempt $k: $PCODE\"; if [ \"$PCODE\" = \"200\" ]; then PUB_OK=1; break; fi; sleep 5; done; if [ \"$PUB_OK\" != \"1\" ]; then echo \"ROLLBACK: public health ($PUB_URL) gate failed, returning to $PREV_COMMIT\"; git reset --hard \"${PREV_COMMIT:?rollback target missing}\"; docker compose up -d --build; echo \"CRITICAL: public probe sonrasi rollback yapildi - nginx/DNS/TLS kontrol et\"; exit 1; fi; else echo \"public health probe atlandi (vars.PUBLIC_HEALTH_URL tanimli degil)\"; fi; docker image prune -f; docker compose ps; docker compose logs --no-color --tail 40 web'\''"
-            ], "executionTimeout":["900"]}' \
-            --query "Command.CommandId" \
-            --output text)
-          
-          echo "SSM Command ID: $COMMAND_ID"
-          echo "Sunucuda komutlar başlatıldı, durum kontrol ediliyor..."
-          
-          # Dökümandaki poll döngüsü: 110 kez döner, her adımda 10 saniye bekler (~18 dakika max)
-          STATUS="Pending"
-          for i in {1..110}; do
-            INVOCATION=$(aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" \
-              --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
-              2>/dev/null || true)
-            
-            STATUS=$(echo "$INVOCATION" | jq -r '.Status' 2>/dev/null || echo "Pending")
-            
-            if [ "$STATUS" = "Success" ] || [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
-              break
-            fi
-            
-            echo "Güncel Durum: $STATUS... 10 saniye sonra tekrar kontrol edilecek..."
-            sleep 10
-          done
-          
-          echo "=================== SUNUCU ÇIKTILARI (STDOUT) ==================="
-          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "${{ secrets.EC2_INSTANCE_ID }}" --query "StandardOutputContent" --output text
-          
-          echo "=================== SUNUCU HATALARI (STDERR) ==================="
-          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "${{ secrets.EC2_INSTANCE_ID }}" --query "StandardErrorContent" --output text
-          
-          if [ "$STATUS" != "Success" ]; then
-            echo "Deploy başarısız oldu! Durum: $STATUS"
-            exit 1
-          fi
-          
-          echo "Deploy başarıyla tamamlandı! FitX yayında! 🎉"
+      - name: Deploy exact CI-approved revision via AWS SSM
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+          EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+          PUBLIC_HEALTH_URL: ${{ vars.PUBLIC_HEALTH_URL }}
+        run: python scripts/deploy_control.py
