@@ -1,5 +1,10 @@
 import base64
 import json
+import os
+import shlex
+import shutil
+import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,6 +16,7 @@ from scripts.deploy_control import (
     DELIVERY_TIMEOUT_SECONDS,
     DeployConfig,
     EXECUTION_TIMEOUT_SECONDS,
+    INVOCATION_CALL_TIMEOUT_SECONDS,
     InvocationFailed,
     InvocationPollingTimeout,
     InvocationProtocolError,
@@ -51,6 +57,15 @@ class FakeClock:
 @pytest.fixture
 def fake_clock():
     return FakeClock()
+
+
+@pytest.fixture
+def workspace_tmp_dir():
+    path = Path(tempfile.mkdtemp(prefix="deploy-control-test-", dir=Path.cwd()))
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path)
 
 
 def invocation_response(status, *, response_code=-1, stdout="", stderr=""):
@@ -319,6 +334,125 @@ def test_remote_command_encodes_script_and_untrusted_positional_values():
     assert base64.b64encode(public_url.encode()).decode("ascii") in command
 
 
+def _write_shell_stub(directory, name, body):
+    path = directory / name
+    path.write_text(f"#!/bin/sh\nset -eu\n{body}", encoding="utf-8", newline="\n")
+    path.chmod(0o755)
+
+
+def _read_null_arguments(path):
+    payload = path.read_bytes()
+    assert payload.endswith(b"\0")
+    return payload[:-1].decode("utf-8").split("\0")
+
+
+def _git_bash_path(path):
+    windows_path = path.resolve().as_posix()
+    drive, remainder = windows_path.split(":", 1)
+    return f"/{drive.lower()}{remainder}"
+
+
+@pytest.mark.parametrize("remote_exit_code", [0, 23])
+def test_bootstrap_executes_decoded_script_as_user_and_always_cleans_up(
+    workspace_tmp_dir,
+    remote_exit_code,
+):
+    git = shutil.which("git")
+    if git is None:
+        pytest.skip("Git Bash is unavailable")
+    git_bash = Path(git).parent.parent / "bin" / "bash.exe"
+    if not git_bash.is_file():
+        pytest.skip("Git Bash is unavailable")
+
+    harness = workspace_tmp_dir / "bootstrap harness"
+    stubs = harness / "bin"
+    stubs.mkdir(parents=True)
+    remote_script = harness / "decoded-script"
+    bash_harness = _git_bash_path(harness)
+    bash_stubs = _git_bash_path(stubs)
+    bash_remote_script = f"{bash_harness}/decoded-script"
+
+    _write_shell_stub(stubs, "mktemp", """
+printf '%s\n' mktemp >> "$HARNESS_DIR/events"
+printf '%s\\0' "$@" > "$HARNESS_DIR/mktemp-args"
+printf '%s\n' "$HARNESS_DIR/decoded-script"
+""")
+    _write_shell_stub(stubs, "chmod", """
+printf '%s\n' chmod >> "$HARNESS_DIR/events"
+printf '%s\\0' "$@" > "$HARNESS_DIR/chmod-args"
+""")
+    _write_shell_stub(stubs, "id", """
+printf '%s\n' id >> "$HARNESS_DIR/events"
+printf '%s\\0' "$@" > "$HARNESS_DIR/id-args"
+""")
+    _write_shell_stub(stubs, "chown", """
+printf '%s\n' chown >> "$HARNESS_DIR/events"
+printf '%s\\0' "$@" > "$HARNESS_DIR/chown-args"
+""")
+    _write_shell_stub(stubs, "sudo", """
+printf '%s\n' sudo >> "$HARNESS_DIR/events"
+printf '%s\\0' "$@" > "$HARNESS_DIR/sudo-args"
+test "$1" = '-u'
+shift
+user="$1"
+shift
+test "$1" = '--'
+shift
+script_path="$1"
+shift
+printf '%s' "$user" > "$HARNESS_DIR/sudo-user"
+sh "$script_path" "$@"
+""")
+
+    deploy_dir = "/srv/axis ai/'$(touch nope)"
+    public_url = "https://fitness.example/health?probe='$(touch%20nope)"
+    config = DeployConfig.from_environ({
+        **VALID_ENV,
+        "DEPLOY_DIR": deploy_dir,
+        "PUBLIC_HEALTH_URL": public_url,
+    })
+    script = b"""#!/bin/sh
+printf '%s\\0' "$@" > "$HARNESS_DIR/script-args"
+exit "$REMOTE_EXIT_CODE"
+"""
+    harness_setup = (
+        f"export HARNESS_DIR={shlex.quote(bash_harness)}\n"
+        f"export REMOTE_EXIT_CODE={remote_exit_code}\n"
+        f"export PATH={shlex.quote(f'{bash_stubs}:/usr/bin:/bin')}\n"
+    )
+
+    completed = subprocess.run(
+        [
+            str(git_bash), "--noprofile", "--norc", "-c",
+            harness_setup + build_remote_command(config, script),
+        ],
+        capture_output=True,
+        text=True,
+        env=os.environ.copy(),
+        check=False,
+    )
+
+    assert completed.returncode == remote_exit_code, completed.stderr
+    assert (harness / "events").read_text(encoding="utf-8").splitlines() == [
+        "mktemp", "chmod", "id", "chown", "sudo",
+    ]
+    assert _read_null_arguments(harness / "mktemp-args") == ["/tmp/fitx-deploy.XXXXXX"]
+    assert _read_null_arguments(harness / "chmod-args") == ["0700", bash_remote_script]
+    assert _read_null_arguments(harness / "id-args") == ["-u", VALID_ENV["DEPLOY_USER"]]
+    assert _read_null_arguments(harness / "chown-args") == [
+        "--", VALID_ENV["DEPLOY_USER"], bash_remote_script,
+    ]
+    assert (harness / "sudo-user").read_text(encoding="utf-8") == VALID_ENV["DEPLOY_USER"]
+    assert _read_null_arguments(harness / "sudo-args") == [
+        "-u", VALID_ENV["DEPLOY_USER"], "--", bash_remote_script,
+        VALID_ENV["DEPLOY_SHA"], deploy_dir, public_url,
+    ]
+    assert _read_null_arguments(harness / "script-args") == [
+        VALID_ENV["DEPLOY_SHA"], deploy_dir, public_url,
+    ]
+    assert not remote_script.exists()
+
+
 @pytest.mark.parametrize("response", [
     None,
     [],
@@ -447,6 +581,25 @@ def test_aws_runner_failure_is_not_converted_to_pending(fake_clock):
     assert messages == []
 
 
+def test_invocation_runner_timeout_propagates_closed(fake_clock):
+    messages = []
+
+    def aws(args):
+        fake_clock.now += INVOCATION_CALL_TIMEOUT_SECONDS
+        raise AwsCliError(
+            f"aws cli timed out after {INVOCATION_CALL_TIMEOUT_SECONDS} seconds",
+        )
+
+    with pytest.raises(AwsCliError, match="timed out after 30 seconds"):
+        wait_for_invocation(
+            DeployConfig.from_environ(VALID_ENV), "command-id", aws,
+            fake_clock.monotonic, fake_clock.sleep, messages.append,
+        )
+
+    assert fake_clock.now == 30
+    assert messages == []
+
+
 def test_pending_is_polled_through_the_complete_horizon(fake_clock):
     calls = 0
 
@@ -463,3 +616,30 @@ def test_pending_is_polled_through_the_complete_horizon(fake_clock):
 
     assert fake_clock.now == POLL_HORIZON_SECONDS == 2100
     assert calls == POLL_HORIZON_SECONDS // 10
+
+
+def test_success_returned_after_polling_deadline_is_rejected(fake_clock):
+    def aws(args):
+        fake_clock.now += POLL_HORIZON_SECONDS + 1
+        return invocation_response("Success", response_code=0)
+
+    with pytest.raises(InvocationPollingTimeout, match="command-id"):
+        wait_for_invocation(
+            DeployConfig.from_environ(VALID_ENV), "command-id", aws,
+            fake_clock.monotonic, fake_clock.sleep, lambda message: None,
+        )
+
+
+def test_final_poll_sleep_is_clipped_to_remaining_horizon(fake_clock):
+    def aws(args):
+        fake_clock.now += POLL_HORIZON_SECONDS - 4
+        return invocation_response("Pending")
+
+    with pytest.raises(InvocationPollingTimeout, match="command-id"):
+        wait_for_invocation(
+            DeployConfig.from_environ(VALID_ENV), "command-id", aws,
+            fake_clock.monotonic, fake_clock.sleep, lambda message: None,
+        )
+
+    assert fake_clock.sleeps == [4]
+    assert fake_clock.now == POLL_HORIZON_SECONDS

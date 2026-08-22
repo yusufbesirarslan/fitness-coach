@@ -24,6 +24,7 @@ EXECUTION_TIMEOUT_SECONDS = 1800
 AWS_EXPIRY_SECONDS = 1860
 POLL_HORIZON_SECONDS = 2100
 POLL_INTERVAL_SECONDS = 10
+INVOCATION_CALL_TIMEOUT_SECONDS = 30
 
 WAITING_STATES = frozenset({"Pending", "Delayed", "InProgress"})
 FAILURE_STATES = frozenset({
@@ -62,6 +63,10 @@ class InvocationPollingTimeout(RuntimeError):
     """Raised when an invocation remains non-terminal beyond the polling horizon."""
 
 
+# Injected runner contract: a runner used for invocation polling must return or
+# raise AwsCliError within INVOCATION_CALL_TIMEOUT_SECONDS. Task 6's concrete
+# subprocess runner owns that process-level timeout; this callable signature
+# remains compatible with the read-only preflight and SendCommand interfaces.
 AwsJsonRunner = Callable[[list[str]], dict[str, Any]]
 GitRunner = Callable[[list[str]], str]
 
@@ -356,11 +361,21 @@ def wait_for_invocation(
     sleep: Callable[[float], None],
     log: Callable[[str], None],
 ) -> InvocationResult:
-    """Poll until success, a typed closed failure, or the bounded horizon."""
+    """Poll within a hard horizon using an AWS runner with bounded calls.
+
+    The injected runner must return or raise ``AwsCliError`` within
+    ``INVOCATION_CALL_TIMEOUT_SECONDS`` so a hung process cannot bypass the
+    controller's wall-clock horizon.
+    """
     deadline = monotonic() + POLL_HORIZON_SECONDS
     execution_reported = False
-    while monotonic() < deadline:
+    while True:
+        if monotonic() >= deadline:
+            raise InvocationPollingTimeout(command_id)
         result = read_invocation(config, command_id, aws)
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            raise InvocationPollingTimeout(command_id)
         log(f"SSM status: {result.status_details}")
         comparison_status = _comparison_status(result.status_details)
         if comparison_status == "InProgress" and not execution_reported:
@@ -372,5 +387,4 @@ def wait_for_invocation(
             raise InvocationFailed(result)
         if comparison_status not in WAITING_STATES:
             raise InvocationProtocolError(result.status_details)
-        sleep(POLL_INTERVAL_SECONDS)
-    raise InvocationPollingTimeout(command_id)
+        sleep(min(POLL_INTERVAL_SECONDS, remaining))
