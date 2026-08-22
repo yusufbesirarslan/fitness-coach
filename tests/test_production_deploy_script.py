@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import os
+import queue
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -28,8 +32,22 @@ def _run(command: list[str], cwd: Path | None = None) -> str:
         text=True,
         capture_output=True,
         check=True,
+        timeout=120,
     )
     return result.stdout.strip()
+
+
+def _readline_with_timeout(stream, timeout: int = 300) -> str:
+    lines: queue.Queue[str] = queue.Queue(maxsize=1)
+    threading.Thread(target=lambda: lines.put(stream.readline()), daemon=True).start()
+    try:
+        return lines.get(timeout=timeout)
+    except queue.Empty as error:
+        raise AssertionError(f"subprocess produced no line within {timeout} seconds") from error
+
+
+def _trace_command_count(trace: str, command: str) -> int:
+    return trace.splitlines().count(command)
 
 
 def _write_executable(path: Path, body: str) -> None:
@@ -91,6 +109,7 @@ class HostFixture:
             capture_output=True,
             check=False,
             env={**self.environment, **environment},
+            timeout=600,
         )
 
 
@@ -116,6 +135,8 @@ def host_fixture(tmp_path: Path):
         fail_candidate_docker_command: str = "",
         fail_rollback_docker_command: str = "",
         fail_prune: bool = False,
+        timeout_hang_phase: str = "",
+        timeout_hang_command: str = "",
     ) -> HostFixture:
         origin = tmp_path / "origin.git"
         source = tmp_path / "source"
@@ -126,8 +147,10 @@ def host_fixture(tmp_path: Path):
         candidate_health_count = tmp_path / "candidate-health-count"
         rollback_health_count = tmp_path / "rollback-health-count"
         public_health_count = tmp_path / "public-health-count"
+        fake_clock = tmp_path / "fake-clock"
         fake_bin.mkdir()
         trace.write_text("", encoding="utf-8")
+        fake_clock.write_text("1000", encoding="utf-8")
 
         _run(["git", "init", "--bare", str(origin)])
         _run(["git", "init", "-b", "main", str(source)])
@@ -295,6 +318,50 @@ printf '\n' >> "$TRACE_FILE"
 exit 0
 """,
         )
+        _write_executable(
+            fake_bin / "date",
+            r"""#!/usr/bin/env bash
+cat "$FAKE_CLOCK_FILE"
+""",
+        )
+        _write_executable(
+            fake_bin / "timeout",
+            r"""#!/usr/bin/env bash
+printf 'timeout phase=%s' "${CURRENT_PHASE:-none}" >> "$TRACE_FILE"
+printf ' %s' "$@" >> "$TRACE_FILE"
+printf '\n' >> "$TRACE_FILE"
+while [[ "${1:-}" == --* ]]; do shift; done
+duration="${1%s}"
+shift
+command_name="$1"
+shift
+operation="$command_name"
+if [[ "$command_name" == docker ]]; then
+  if [[ " $* " == *' build '* ]]; then operation='docker:build'; fi
+  if [[ " $* " == *' up -d '* ]]; then operation='docker:up'; fi
+  if [[ " $* " == *' ps '* ]]; then operation='docker:ps'; fi
+  if [[ " $* " == *' logs '* ]]; then operation='docker:logs'; fi
+  if [[ " $* " == *' image prune '* ]]; then operation='docker:prune'; fi
+elif [[ "$command_name" == git ]]; then
+  operation="git:${1:-unknown}"
+fi
+if [[ "${CURRENT_PHASE:-}" == "$FAKE_TIMEOUT_HANG_PHASE" && "$operation" == "$FAKE_TIMEOUT_HANG_COMMAND" ]]; then
+  now="$(cat "$FAKE_CLOCK_FILE")"
+  printf '%s' "$((now + duration))" > "$FAKE_CLOCK_FILE"
+  printf 'TIMEOUT_HANG phase=%s operation=%s\n' "$CURRENT_PHASE" "$operation" >> "$TRACE_FILE"
+  exit 124
+fi
+case "$command_name" in
+  curl) source "$FAKE_BIN/curl" "$@" ;;
+  date) source "$FAKE_BIN/date" "$@" ;;
+  docker) source "$FAKE_BIN/docker" "$@" ;;
+  git) source "$FAKE_BIN/git" "$@" ;;
+  python) "$REAL_PYTHON" "$@" ;;
+  sleep) source "$FAKE_BIN/sleep" "$@" ;;
+  *) "$command_name" "$@" ;;
+esac
+""",
+        )
         # Git for Windows resolves its bundled curl ahead of an extensionless
         # PATH shim. BASH_ENV keeps the test hermetic by delegating that command
         # name to the executable fake; Linux still uses the same fake bytes.
@@ -304,6 +371,7 @@ exit 0
                 'curl() { "$FAKE_BIN/curl" "$@"; }\n'
                 'git() { "$FAKE_BIN/git" "$@"; }\n'
                 'sleep() { "$FAKE_BIN/sleep" "$@"; }\n'
+                'timeout() { "$FAKE_BIN/timeout" "$@"; }\n'
             ),
         )
 
@@ -315,6 +383,7 @@ exit 0
                 "BASH_ENV": _bash_path(fake_bin / "bash-env"),
                 "TRACE_FILE": _bash_path(trace),
                 "REAL_GIT": Path(real_git).resolve().as_posix(),
+                "REAL_PYTHON": Path(sys.executable).resolve().as_posix(),
                 "FLOCK_EXIT": str(flock_exit),
                 "DOCKER_STATE_FILE": _bash_path(docker_state),
                 "FAKE_CANDIDATE_CONTAINER_REVISION": container_revision,
@@ -345,6 +414,9 @@ exit 0
                 "FAKE_FAIL_CANDIDATE_DOCKER_COMMAND": fail_candidate_docker_command,
                 "FAKE_FAIL_ROLLBACK_DOCKER_COMMAND": fail_rollback_docker_command,
                 "FAKE_FAIL_PRUNE": "1" if fail_prune else "0",
+                "FAKE_CLOCK_FILE": _bash_path(fake_clock),
+                "FAKE_TIMEOUT_HANG_PHASE": timeout_hang_phase,
+                "FAKE_TIMEOUT_HANG_COMMAND": timeout_hang_command,
             }
         )
         return HostFixture(
@@ -365,6 +437,7 @@ def test_host_script_is_valid_bash(bash_executable):
         text=True,
         capture_output=True,
         check=False,
+        timeout=120,
     )
     assert result.returncode == 0, result.stderr
 
@@ -387,6 +460,110 @@ def test_invalid_sha_fails_after_lock_without_git_or_docker(bash_executable, hos
     assert fixture.trace.read_text(encoding="utf-8") == "flock -w 60 9\n"
 
 
+def test_host_transaction_budget_preserves_ssm_margin_and_rollback_reserve(
+    bash_executable, host_fixture
+):
+    fixture = host_fixture()
+    result = fixture.run(bash_executable)
+
+    assert result.returncode == 0, result.stderr
+    budget = re.search(
+        r"host transaction budget: limit=(\d+) worst_case=(\d+) lock=(\d+) clock=(\d+) "
+        r"preflight=(\d+) candidate=(\d+) diagnostics=(\d+) rollback=(\d+) "
+        r"post_lock=(\d+) timeout_grace=(\d+) cleanup=(\d+) ssm_margin=(\d+)",
+        result.stderr,
+    )
+    assert budget is not None
+    (
+        limit,
+        worst_case,
+        lock,
+        clock,
+        preflight,
+        candidate,
+        diagnostics,
+        rollback,
+        post_lock,
+        grace,
+        cleanup,
+        margin,
+    ) = map(int, budget.groups())
+    assert limit + margin == 1800
+    assert preflight + candidate + diagnostics + rollback == post_lock
+    assert lock + clock + post_lock + grace + cleanup == worst_case < limit
+    assert rollback >= (30 * 5) + (29 * 5)
+    assert candidate >= (30 * 5) + (29 * 5) + (12 * 5) + (11 * 5)
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert "timeout phase=preflight" in trace
+    assert "timeout phase=candidate" in trace
+
+
+def test_preflight_hang_times_out_before_candidate_mutation(bash_executable, host_fixture):
+    fixture = host_fixture(
+        timeout_hang_phase="preflight",
+        timeout_hang_command="git:fetch",
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert "TIMEOUT_HANG phase=preflight operation=git:fetch" in trace
+    assert "timeout phase=preflight --signal=TERM --kill-after=2s 100s git fetch" in trace
+    assert "git reset --hard" not in trace
+    assert "docker " not in trace
+
+
+def test_candidate_deadline_hang_transitions_to_exactly_one_rollback(
+    bash_executable, host_fixture
+):
+    fixture = host_fixture(
+        timeout_hang_phase="candidate",
+        timeout_hang_command="docker:build",
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace.count("TIMEOUT_HANG phase=candidate operation=docker:build") == 1
+    assert "timeout phase=candidate --signal=TERM --kill-after=2s 820s docker" in trace
+    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
+    assert "rollback verified" in result.stderr
+
+
+def test_diagnostic_hang_cannot_consume_rollback_reserve(bash_executable, host_fixture):
+    fixture = host_fixture(
+        fail_candidate_docker_command="build",
+        timeout_hang_phase="diagnostics",
+        timeout_hang_command="docker:ps",
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace.count("TIMEOUT_HANG phase=diagnostics operation=docker:ps") == 1
+    assert "timeout phase=diagnostics --signal=TERM --kill-after=2s 60s docker" in trace
+    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
+    assert "rollback verified" in result.stderr
+
+
+def test_rollback_operation_hang_is_bounded_and_reported(bash_executable, host_fixture):
+    fixture = host_fixture(
+        container_revision="b" * 40,
+        timeout_hang_phase="rollback",
+        timeout_hang_command="docker:build",
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace.count("TIMEOUT_HANG phase=rollback operation=docker:build") == 1
+    assert "timeout phase=rollback --signal=TERM --kill-after=2s 620s docker" in trace
+    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
+    assert "rollback failed verification" in result.stderr
+    assert "rollback verified" not in result.stderr
+    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
+
+
 def test_success_deploys_exact_candidate_and_verifies_revision(bash_executable, host_fixture):
     fixture = host_fixture()
     result = fixture.run(bash_executable)
@@ -403,7 +580,13 @@ def test_success_deploys_exact_candidate_and_verifies_revision(bash_executable, 
     expected_prefix = f"docker compose -f {_bash_path(fixture.deploy_dir / 'docker-compose.yml')} -f "
     assert compose_lines
     assert all(line.startswith(expected_prefix) for line in compose_lines)
-    assert trace.rstrip().endswith("docker image prune -f")
+    trace_lines = trace.splitlines()
+    prune_index = trace_lines.index("docker image prune -f")
+    cleanup_indices = [
+        index for index, line in enumerate(trace_lines) if " 5s rm -f -- " in line
+    ]
+    assert cleanup_indices
+    assert prune_index < cleanup_indices[-1]
 
 
 def test_stale_candidate_fails_before_checkout_or_docker(bash_executable, host_fixture):
@@ -496,7 +679,7 @@ def test_hung_candidate_health_exhausts_bound_then_rolls_back_once(
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
     assert trace.count(f"CURL_REVISION={fixture.candidate_commit}") == 30
-    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
+    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
     assert "rollback verified" in result.stderr
     assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
 
@@ -514,7 +697,7 @@ def test_rollback_health_retries_bounded_calls_until_delayed_success(
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
     assert trace.count(f"CURL_REVISION={fixture.prev_commit}") == 3
-    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
+    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
     assert "rollback verified" in result.stderr
 
 
@@ -531,7 +714,7 @@ def test_hung_rollback_health_exhausts_bound_and_reports_failure(
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
     assert trace.count(f"CURL_REVISION={fixture.prev_commit}") == 30
-    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
+    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
     assert "rollback failed verification" in result.stderr
     assert "rollback verified" not in result.stderr
     assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
@@ -591,7 +774,7 @@ def test_hardened_rollback_cannot_use_missing_revision_compatibility(
     assert "deep health revision is missing" in result.stderr
     assert "rollback failed verification" in result.stderr
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
+    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
 
 
 @pytest.mark.parametrize("operation", ["build", "up", "ps"])
@@ -603,7 +786,7 @@ def test_candidate_compose_failure_rolls_back_exactly_once(
 
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
+    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
     assert "rollback verified" in result.stderr
     assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
 
@@ -614,8 +797,8 @@ def test_prune_failure_rolls_back_exactly_once(bash_executable, host_fixture):
 
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.count("docker image prune -f") == 1
-    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
+    assert _trace_command_count(trace, "docker image prune -f") == 1
+    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
     assert "rollback verified" in result.stderr
 
 
@@ -630,7 +813,7 @@ def test_failed_rollback_revision_is_reported_without_second_attempt(
 
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
+    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
     assert "running web container revision mismatch" in result.stderr
     assert "rollback failed verification" in result.stderr
     assert "rollback verified" not in result.stderr
@@ -648,16 +831,23 @@ def test_public_health_runs_after_internal_gate_and_failure_rolls_back(
 
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.index("http://127.0.0.1:5000/health?deep=1") < trace.index(
-        "https://fitness.example/health"
+    curl_calls = [line for line in trace.splitlines() if line.startswith("curl ")]
+    internal_call_index = next(
+        index for index, line in enumerate(curl_calls)
+        if "http://127.0.0.1:5000/health?deep=1" in line
     )
+    public_call_index = next(
+        index for index, line in enumerate(curl_calls)
+        if "https://fitness.example/health" in line
+    )
+    assert internal_call_index < public_call_index
     public_calls = [
-        line for line in trace.splitlines()
+        line for line in curl_calls
         if line.startswith("curl ") and "https://fitness.example/health" in line
     ]
     assert len(public_calls) == 12
     assert all("--connect-timeout 2 --max-time 5" in line for line in public_calls)
-    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
+    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
 
 
 def test_rapid_candidate_second_invocation_cannot_mutate_while_lock_is_held(
@@ -689,17 +879,24 @@ def test_rapid_candidate_second_invocation_cannot_mutate_while_lock_is_held(
         stderr=subprocess.PIPE,
         env=first_environment,
     )
-    assert first.stdout is not None
-    assert first.stdout.readline().strip() == "FAKE_LOCK_READY"
-    assert ready_file.exists()
+    try:
+        assert first.stdout is not None
+        assert _readline_with_timeout(first.stdout).strip() == "FAKE_LOCK_READY"
+        assert ready_file.exists()
 
-    second = fixture.run(
-        bash_executable,
-        TRACE_FILE=_bash_path(second_trace),
-        **shared,
-    )
-    hold_file.unlink()
-    first_stdout, first_stderr = first.communicate()
+        second = fixture.run(
+            bash_executable,
+            TRACE_FILE=_bash_path(second_trace),
+            **shared,
+        )
+    finally:
+        hold_file.unlink(missing_ok=True)
+        try:
+            first_stdout, first_stderr = first.communicate(timeout=600)
+        except subprocess.TimeoutExpired:
+            first.kill()
+            first.communicate()
+            raise AssertionError("first deployment did not finish within 600 seconds")
 
     assert first.returncode == 0, (first_stdout, first_stderr)
     assert second.returncode == 73
