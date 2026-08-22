@@ -10,19 +10,24 @@ readonly HOST_TRANSACTION_LIMIT_SECONDS=1680
 readonly SSM_BOOTSTRAP_MARGIN_SECONDS=120
 readonly LOCK_WAIT_SECONDS=60
 readonly CLOCK_START_TIMEOUT_SECONDS=2
-readonly POST_LOCK_BUDGET_SECONDS=1600
-readonly PREFLIGHT_PHASE_SECONDS=100
+readonly CLOCK_STATE_SETUP_TIMEOUT_SECONDS=5
+readonly POST_LOCK_BUDGET_SECONDS=1590
+readonly PREFLIGHT_PHASE_SECONDS=90
 readonly CANDIDATE_PHASE_SECONDS=820
 readonly DIAGNOSTIC_PHASE_SECONDS=60
 readonly ROLLBACK_PHASE_SECONDS=620
+readonly ROLLBACK_RESET_TIMEOUT_SECONDS=5
 readonly COMMAND_KILL_GRACE_SECONDS=2
 readonly CLEANUP_TIMEOUT_SECONDS=5
 readonly CLOCK_START_MAX_SECONDS=$((CLOCK_START_TIMEOUT_SECONDS + COMMAND_KILL_GRACE_SECONDS))
+readonly CLOCK_STATE_SETUP_MAX_SECONDS=$((CLOCK_STATE_SETUP_TIMEOUT_SECONDS + COMMAND_KILL_GRACE_SECONDS))
+readonly ROLLBACK_RESET_MAX_SECONDS=$((ROLLBACK_RESET_TIMEOUT_SECONDS + COMMAND_KILL_GRACE_SECONDS))
 readonly CLEANUP_MAX_SECONDS=$((CLEANUP_TIMEOUT_SECONDS + COMMAND_KILL_GRACE_SECONDS))
 readonly HOST_WORST_CASE_SECONDS=$((
-  LOCK_WAIT_SECONDS + CLOCK_START_MAX_SECONDS + POST_LOCK_BUDGET_SECONDS +
-  COMMAND_KILL_GRACE_SECONDS + CLEANUP_MAX_SECONDS
+  LOCK_WAIT_SECONDS + CLOCK_START_MAX_SECONDS + CLOCK_STATE_SETUP_MAX_SECONDS +
+  POST_LOCK_BUDGET_SECONDS + COMMAND_KILL_GRACE_SECONDS + CLEANUP_MAX_SECONDS
 ))
+readonly MONOTONIC_CLOCK_CODE='import time; print(time.monotonic_ns() // 1_000_000_000)'
 readonly INTERNAL_HEALTH_ATTEMPTS=30
 readonly PUBLIC_HEALTH_ATTEMPTS=12
 readonly HEALTH_CONNECT_TIMEOUT_SECONDS=2
@@ -30,8 +35,32 @@ readonly HEALTH_MAX_TIME_SECONDS=5
 readonly HEALTH_RETRY_DELAY_SECONDS=5
 
 clock_now() {
-  timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
-    "${CLOCK_START_TIMEOUT_SECONDS}s" date +%s
+  local destination="$1" reading previous
+  if ! reading="$(timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
+    "${CLOCK_START_TIMEOUT_SECONDS}s" python -c "$MONOTONIC_CLOCK_CODE")"; then
+    echo "bounded monotonic clock helper failed" >&2
+    return 1
+  fi
+  if [[ ! "$reading" =~ ^[0-9]+$ ]]; then
+    echo "monotonic clock returned an invalid reading" >&2
+    return 1
+  fi
+  if [[ -s "$MONOTONIC_STATE_FILE" ]]; then
+    if ! IFS= read -r previous < "$MONOTONIC_STATE_FILE" ||
+       [[ ! "$previous" =~ ^[0-9]+$ ]]; then
+      echo "monotonic clock state is invalid" >&2
+      return 1
+    fi
+    if ((reading < previous)); then
+      echo "monotonic clock moved backward" >&2
+      return 1
+    fi
+  fi
+  if ! printf '%s\n' "$reading" > "$MONOTONIC_STATE_FILE"; then
+    echo "monotonic clock state could not be recorded" >&2
+    return 1
+  fi
+  printf -v "$destination" '%s' "$reading"
 }
 
 enter_phase() {
@@ -42,7 +71,7 @@ enter_phase() {
 
 run_external() {
   local now remaining status
-  now="$(clock_now)" || return 1
+  clock_now now || return 1
   remaining=$((CURRENT_PHASE_DEADLINE - now))
   if ((remaining <= 0)); then
     echo "$CURRENT_PHASE phase deadline exhausted" >&2
@@ -78,20 +107,56 @@ fi
 
 if ((PREFLIGHT_PHASE_SECONDS + CANDIDATE_PHASE_SECONDS +
      DIAGNOSTIC_PHASE_SECONDS + ROLLBACK_PHASE_SECONDS != POST_LOCK_BUDGET_SECONDS ||
+     ROLLBACK_RESET_MAX_SECONDS +
+       INTERNAL_HEALTH_ATTEMPTS * HEALTH_MAX_TIME_SECONDS +
+       (INTERNAL_HEALTH_ATTEMPTS - 1) * HEALTH_RETRY_DELAY_SECONDS > ROLLBACK_PHASE_SECONDS ||
      HOST_WORST_CASE_SECONDS > HOST_TRANSACTION_LIMIT_SECONDS ||
      HOST_TRANSACTION_LIMIT_SECONDS + SSM_BOOTSTRAP_MARGIN_SECONDS != SSM_EXECUTION_TIMEOUT_SECONDS)); then
   echo "invalid host transaction budget" >&2
   exit 70
 fi
 
-TRANSACTION_EPOCH="$(clock_now)"
+OVERRIDE_FILE=""
+HEALTH_BODY=""
+MONOTONIC_STATE_FILE=""
+cleanup() {
+  local -a cleanup_files=()
+  if [[ -n "$OVERRIDE_FILE" ]]; then
+    cleanup_files+=("$OVERRIDE_FILE")
+  fi
+  if [[ -n "$HEALTH_BODY" ]]; then
+    cleanup_files+=("$HEALTH_BODY")
+  fi
+  if [[ -n "$MONOTONIC_STATE_FILE" ]]; then
+    cleanup_files+=("$MONOTONIC_STATE_FILE")
+  fi
+  if ((${#cleanup_files[@]} > 0)); then
+    timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
+      "${CLEANUP_TIMEOUT_SECONDS}s" rm -f -- "${cleanup_files[@]}" || true
+  fi
+}
+trap cleanup EXIT
+
+if ! MONOTONIC_STATE_FILE="$(timeout --signal=TERM \
+  --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
+  "${CLOCK_STATE_SETUP_TIMEOUT_SECONDS}s" \
+  mktemp "$DEPLOY_DIR/.axisai-monotonic-clock.XXXXXX")"; then
+  echo "monotonic clock state unavailable before deployment mutation" >&2
+  exit 70
+fi
+readonly MONOTONIC_STATE_FILE
+
+if ! clock_now TRANSACTION_EPOCH; then
+  echo "monotonic clock unavailable before deployment mutation" >&2
+  exit 70
+fi
 readonly TRANSACTION_EPOCH
 readonly PREFLIGHT_DEADLINE=$((TRANSACTION_EPOCH + PREFLIGHT_PHASE_SECONDS))
 readonly CANDIDATE_CUTOFF=$((PREFLIGHT_DEADLINE + CANDIDATE_PHASE_SECONDS))
 readonly DIAGNOSTIC_CUTOFF=$((CANDIDATE_CUTOFF + DIAGNOSTIC_PHASE_SECONDS))
 readonly ROLLBACK_CUTOFF=$((DIAGNOSTIC_CUTOFF + ROLLBACK_PHASE_SECONDS))
 enter_phase preflight "$PREFLIGHT_DEADLINE"
-echo "host transaction budget: limit=$HOST_TRANSACTION_LIMIT_SECONDS worst_case=$HOST_WORST_CASE_SECONDS lock=$LOCK_WAIT_SECONDS clock=$CLOCK_START_MAX_SECONDS preflight=$PREFLIGHT_PHASE_SECONDS candidate=$CANDIDATE_PHASE_SECONDS diagnostics=$DIAGNOSTIC_PHASE_SECONDS rollback=$ROLLBACK_PHASE_SECONDS post_lock=$POST_LOCK_BUDGET_SECONDS timeout_grace=$COMMAND_KILL_GRACE_SECONDS cleanup=$CLEANUP_MAX_SECONDS ssm_margin=$SSM_BOOTSTRAP_MARGIN_SECONDS" >&2
+echo "host transaction budget: limit=$HOST_TRANSACTION_LIMIT_SECONDS worst_case=$HOST_WORST_CASE_SECONDS lock=$LOCK_WAIT_SECONDS clock=$CLOCK_START_MAX_SECONDS clock_state=$CLOCK_STATE_SETUP_MAX_SECONDS rollback_reset=$ROLLBACK_RESET_MAX_SECONDS preflight=$PREFLIGHT_PHASE_SECONDS candidate=$CANDIDATE_PHASE_SECONDS diagnostics=$DIAGNOSTIC_PHASE_SECONDS rollback=$ROLLBACK_PHASE_SECONDS post_lock=$POST_LOCK_BUDGET_SECONDS timeout_grace=$COMMAND_KILL_GRACE_SECONDS cleanup=$CLEANUP_MAX_SECONDS ssm_margin=$SSM_BOOTSTRAP_MARGIN_SECONDS" >&2
 
 if [[ -n "$PUBLIC_HEALTH_URL" ]]; then
   run_external python - "$PUBLIC_HEALTH_URL" <<'PY'
@@ -149,24 +214,7 @@ else
 fi
 readonly LEGACY_ROLLBACK_ALLOWED
 
-OVERRIDE_FILE=""
-HEALTH_BODY=""
-cleanup() {
-  local -a cleanup_files=()
-  if [[ -n "$OVERRIDE_FILE" ]]; then
-    cleanup_files+=("$OVERRIDE_FILE")
-  fi
-  if [[ -n "$HEALTH_BODY" ]]; then
-    cleanup_files+=("$HEALTH_BODY")
-  fi
-  if ((${#cleanup_files[@]} > 0)); then
-    timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
-      "${CLEANUP_TIMEOUT_SECONDS}s" rm -f -- "${cleanup_files[@]}" || true
-  fi
-}
-trap cleanup EXIT
-
-CANDIDATE_STARTED_AT="$(clock_now)"
+clock_now CANDIDATE_STARTED_AT
 readonly CANDIDATE_STARTED_AT
 CANDIDATE_PHASE_DEADLINE=$((CANDIDATE_STARTED_AT + CANDIDATE_PHASE_SECONDS))
 if ((CANDIDATE_PHASE_DEADLINE > CANDIDATE_CUTOFF)); then
@@ -313,16 +361,27 @@ start_and_verify_release() {
 }
 
 rollback_release() {
-  local restored_head rollback_started_at rollback_phase_deadline
+  local restored_head rollback_started_at rollback_phase_deadline status
 
-  rollback_started_at="$(clock_now)" || return 1
+  enter_phase rollback "$ROLLBACK_CUTOFF"
+  echo "rolling back to $PREV_COMMIT" >&2
+  if timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
+    "${ROLLBACK_RESET_TIMEOUT_SECONDS}s" git reset --hard "$PREV_COMMIT"; then
+    :
+  else
+    status="$?"
+    echo "bounded exact rollback reset failed" >&2
+    return "$status"
+  fi
+  if ! clock_now rollback_started_at; then
+    echo "exact rollback reset attempted but monotonic verification clock is unavailable" >&2
+    return 1
+  fi
   rollback_phase_deadline=$((rollback_started_at + ROLLBACK_PHASE_SECONDS))
   if ((rollback_phase_deadline > ROLLBACK_CUTOFF)); then
     rollback_phase_deadline="$ROLLBACK_CUTOFF"
   fi
   enter_phase rollback "$rollback_phase_deadline"
-  echo "rolling back to $PREV_COMMIT" >&2
-  run_external git reset --hard "$PREV_COMMIT" || return 1
   restored_head="$(run_external git rev-parse --verify HEAD^{commit})" || return 1
   if [[ "$restored_head" != "$PREV_COMMIT" ]]; then
     echo "rollback checkout revision mismatch" >&2
@@ -339,7 +398,7 @@ on_deploy_error() {
   if [[ "$failure_status" -eq 0 ]]; then
     failure_status=1
   fi
-  if now="$(clock_now)"; then
+  if clock_now now; then
     diagnostic_deadline=$((now + DIAGNOSTIC_PHASE_SECONDS))
     if ((diagnostic_deadline > DIAGNOSTIC_CUTOFF)); then
       diagnostic_deadline="$DIAGNOSTIC_CUTOFF"

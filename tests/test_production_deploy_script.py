@@ -137,6 +137,9 @@ def host_fixture(tmp_path: Path):
         fail_prune: bool = False,
         timeout_hang_phase: str = "",
         timeout_hang_command: str = "",
+        clock_readings: tuple[int, ...] = (),
+        initial_clock_mode: str = "",
+        post_checkout_clock_mode: str = "",
     ) -> HostFixture:
         origin = tmp_path / "origin.git"
         source = tmp_path / "source"
@@ -148,9 +151,17 @@ def host_fixture(tmp_path: Path):
         rollback_health_count = tmp_path / "rollback-health-count"
         public_health_count = tmp_path / "public-health-count"
         fake_clock = tmp_path / "fake-clock"
+        fake_clock_count = tmp_path / "fake-clock-count"
+        fake_clock_readings = tmp_path / "fake-clock-readings"
+        fake_clock_latch = tmp_path / "fake-clock-latch"
         fake_bin.mkdir()
         trace.write_text("", encoding="utf-8")
         fake_clock.write_text("1000", encoding="utf-8")
+        fake_clock_count.write_text("0", encoding="utf-8")
+        fake_clock_readings.write_text(
+            "\n".join(str(reading) for reading in clock_readings),
+            encoding="utf-8",
+        )
 
         _run(["git", "init", "--bare", str(origin)])
         _run(["git", "init", "-b", "main", str(source)])
@@ -344,6 +355,42 @@ if [[ "$command_name" == docker ]]; then
   if [[ " $* " == *' image prune '* ]]; then operation='docker:prune'; fi
 elif [[ "$command_name" == git ]]; then
   operation="git:${1:-unknown}"
+elif [[ "$command_name" == python && "${1:-}" == -c && "${2:-}" == *monotonic_ns* ]]; then
+  operation=clock
+fi
+if [[ "$operation" == clock ]]; then
+  clock_count="$(cat "$FAKE_CLOCK_COUNT_FILE")"
+  clock_count=$((clock_count + 1))
+  printf '%s' "$clock_count" > "$FAKE_CLOCK_COUNT_FILE"
+  clock_mode=''
+  if [[ "$clock_count" == 1 && -n "$FAKE_INITIAL_CLOCK_MODE" ]]; then
+    clock_mode="$FAKE_INITIAL_CLOCK_MODE"
+  elif [[ -n "$FAKE_POST_CHECKOUT_CLOCK_MODE" ]]; then
+    if [[ -f "$FAKE_CLOCK_LATCH_FILE" ]]; then
+      clock_mode="$FAKE_POST_CHECKOUT_CLOCK_MODE"
+    elif [[ "$("$REAL_GIT" -C "$FAKE_DEPLOY_DIR" rev-parse HEAD)" == "$FAKE_CANDIDATE_SHA" ]]; then
+      : > "$FAKE_CLOCK_LATCH_FILE"
+      clock_mode="$FAKE_POST_CHECKOUT_CLOCK_MODE"
+    fi
+  fi
+  if [[ "$clock_mode" == fail ]]; then
+    printf 'CLOCK_FAILURE phase=%s count=%s\n' "${CURRENT_PHASE:-none}" "$clock_count" >> "$TRACE_FILE"
+    exit 45
+  elif [[ "$clock_mode" == hang ]]; then
+    printf 'TIMEOUT_HANG phase=%s operation=clock\n' "${CURRENT_PHASE:-none}" >> "$TRACE_FILE"
+    exit 124
+  fi
+  mapfile -t scripted_readings < "$FAKE_CLOCK_READINGS_FILE"
+  if ((${#scripted_readings[@]} > 0)); then
+    reading_index=$((clock_count - 1))
+    if ((reading_index >= ${#scripted_readings[@]})); then
+      reading_index=$((${#scripted_readings[@]} - 1))
+    fi
+    printf '%s\n' "${scripted_readings[$reading_index]}"
+  else
+    cat "$FAKE_CLOCK_FILE"
+  fi
+  exit 0
 fi
 if [[ "${CURRENT_PHASE:-}" == "$FAKE_TIMEOUT_HANG_PHASE" && "$operation" == "$FAKE_TIMEOUT_HANG_COMMAND" ]]; then
   now="$(cat "$FAKE_CLOCK_FILE")"
@@ -415,6 +462,12 @@ esac
                 "FAKE_FAIL_ROLLBACK_DOCKER_COMMAND": fail_rollback_docker_command,
                 "FAKE_FAIL_PRUNE": "1" if fail_prune else "0",
                 "FAKE_CLOCK_FILE": _bash_path(fake_clock),
+                "FAKE_CLOCK_COUNT_FILE": _bash_path(fake_clock_count),
+                "FAKE_CLOCK_READINGS_FILE": _bash_path(fake_clock_readings),
+                "FAKE_CLOCK_LATCH_FILE": _bash_path(fake_clock_latch),
+                "FAKE_INITIAL_CLOCK_MODE": initial_clock_mode,
+                "FAKE_POST_CHECKOUT_CLOCK_MODE": post_checkout_clock_mode,
+                "FAKE_DEPLOY_DIR": _bash_path(deploy_dir),
                 "FAKE_TIMEOUT_HANG_PHASE": timeout_hang_phase,
                 "FAKE_TIMEOUT_HANG_COMMAND": timeout_hang_command,
             }
@@ -469,6 +522,7 @@ def test_host_transaction_budget_preserves_ssm_margin_and_rollback_reserve(
     assert result.returncode == 0, result.stderr
     budget = re.search(
         r"host transaction budget: limit=(\d+) worst_case=(\d+) lock=(\d+) clock=(\d+) "
+        r"clock_state=(\d+) rollback_reset=(\d+) "
         r"preflight=(\d+) candidate=(\d+) diagnostics=(\d+) rollback=(\d+) "
         r"post_lock=(\d+) timeout_grace=(\d+) cleanup=(\d+) ssm_margin=(\d+)",
         result.stderr,
@@ -479,6 +533,8 @@ def test_host_transaction_budget_preserves_ssm_margin_and_rollback_reserve(
         worst_case,
         lock,
         clock,
+        clock_state,
+        rollback_reset,
         preflight,
         candidate,
         diagnostics,
@@ -490,12 +546,67 @@ def test_host_transaction_budget_preserves_ssm_margin_and_rollback_reserve(
     ) = map(int, budget.groups())
     assert limit + margin == 1800
     assert preflight + candidate + diagnostics + rollback == post_lock
-    assert lock + clock + post_lock + grace + cleanup == worst_case < limit
-    assert rollback >= (30 * 5) + (29 * 5)
+    assert lock + clock + clock_state + post_lock + grace + cleanup == worst_case < limit
+    assert rollback >= rollback_reset + (30 * 5) + (29 * 5)
     assert candidate >= (30 * 5) + (29 * 5) + (12 * 5) + (11 * 5)
     trace = fixture.trace.read_text(encoding="utf-8")
     assert "timeout phase=preflight" in trace
     assert "timeout phase=candidate" in trace
+    assert "monotonic_ns" in trace
+    assert " date +%s" not in trace
+    phase_limits = {"preflight": preflight, "candidate": candidate}
+    phase_grants = re.findall(
+        r"timeout phase=(preflight|candidate) --signal=TERM --kill-after=2s (\d+)s ",
+        trace,
+    )
+    assert phase_grants
+    assert all(int(grant) <= phase_limits[phase] for phase, grant in phase_grants)
+
+
+@pytest.mark.parametrize("clock_mode", ["fail", "hang"])
+def test_initial_monotonic_clock_failure_is_closed_before_mutation(
+    bash_executable, host_fixture, clock_mode
+):
+    fixture = host_fixture(initial_clock_mode=clock_mode)
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    assert "monotonic clock unavailable before deployment mutation" in result.stderr
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert "git " not in trace
+    assert "docker " not in trace
+
+
+@pytest.mark.parametrize("clock_mode", ["fail", "hang"])
+def test_post_checkout_clock_failure_still_attempts_one_bounded_exact_reset(
+    bash_executable, host_fixture, clock_mode
+):
+    fixture = host_fixture(post_checkout_clock_mode=clock_mode)
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
+    assert (
+        f"timeout phase=rollback --signal=TERM --kill-after=2s 5s "
+        f"git reset --hard {fixture.prev_commit}"
+    ) in trace
+    assert "rollback failed verification" in result.stderr
+    assert "rollback verified" not in result.stderr
+    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
+
+
+def test_decreasing_monotonic_reading_fails_closed_without_mutation(
+    bash_executable, host_fixture
+):
+    fixture = host_fixture(clock_readings=(1000, 1001, 999))
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    assert "monotonic clock moved backward" in result.stderr
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert "git reset --hard" not in trace
+    assert "docker " not in trace
 
 
 def test_preflight_hang_times_out_before_candidate_mutation(bash_executable, host_fixture):
@@ -508,7 +619,7 @@ def test_preflight_hang_times_out_before_candidate_mutation(bash_executable, hos
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
     assert "TIMEOUT_HANG phase=preflight operation=git:fetch" in trace
-    assert "timeout phase=preflight --signal=TERM --kill-after=2s 100s git fetch" in trace
+    assert "timeout phase=preflight --signal=TERM --kill-after=2s 90s git fetch" in trace
     assert "git reset --hard" not in trace
     assert "docker " not in trace
 
