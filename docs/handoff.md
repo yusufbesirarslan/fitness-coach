@@ -5198,3 +5198,105 @@ backward. No `training_progression`, snapshot, or query change. The
 prior 36-cell hermetic matrix was not rerun: localized drilldown copy
 only.
 
+
+---
+
+# Sprint 11 PR4 — Canonical Exercise Authority (local, 2026-08-22)
+
+Branch `sprint11-pr4-canonical-exercise-authority`, based on PR3 (`95fb056`).
+**Not merged, not pushed, not deployed.** Full architecture:
+**docs/TRAINING_GENERATOR.md** → "Exercise identity — the canonical catalog";
+the Adaptive Coaching door is **docs/ADAPTIVE_COACHING.md** §§2, 7, 16.
+This section is the handoff only — it does not restate the architecture.
+
+## What shipped
+
+Before PR4 an exercise was whatever string the provider wrote, and nothing in
+the app could say what that string meant. PR4 makes a **server-owned catalog the
+single authority on exercise identity** and enforces it at both plan-write
+doors: `POST /training-plan/save` and the Adaptive Coaching mutation boundary.
+
+- `app/services/exercise_catalog.py` + `training_assets/exercises.json` —
+  **catalog version 1, 73 exercises**, 60 aliases, 133 normalized lookup keys.
+  Stable IDs (`^ex_[a-z0-9_]+$`), closed equipment / movement / region
+  vocabularies, exact resolution, no fuzzy matching anywhere.
+- Provider vocabulary is constrained to canonical display names for the accepted
+  context; `exercise_id` is not a generation schema key.
+- `training_generation/exercise_resolution.py` canonicalizes a validated plan
+  once, outside the repair boundary.
+- `training_generation/exercise_context_token.py` — HMAC-signed, user-bound
+  `exercise_context_token` minted at generate and required at save.
+- `plan_mutation/` resolves canonical plans through the same catalog; legacy
+  name-only plans keep their old behaviour and are never upgraded.
+- Task 6 removed the last duplicate authority: `exercise_knowledge_base.py` is
+  **deleted**. Its only live symbol moved verbatim to
+  `training_generation/movement_coverage.py`; its unwired `EXERCISE_KB` table of
+  risk/difficulty/progression opinions was dropped, not migrated.
+
+## Deployment and rollback
+
+**No migration, no table, no backfill, no feature flag.** The catalog ships as
+code, so there is nothing in the database to undo. Rollback is reverting the
+commits. `tests/test_migration_graph.py` asserts the Alembic head is still
+`c1d2e3f4a5b6` across 36 revision files and that PR4 added none.
+
+> Note for whoever merges: `origin/main` has moved ahead (it now asserts
+> `c2d3e4f5a6b7`, from the Adaptive Coaching PR4 confirmation migration).
+> Reconciling that literal is the merge's job. This branch is correct as it
+> stands — `c2d3e4f5a6b7` does not exist in its history.
+
+## Legacy compatibility — what deliberately did NOT change
+
+Most stored rows are still pre-PR4. Nothing was migrated, so this had to be
+proved rather than assumed:
+
+- Bare-list and `{"program": …}` legacy plans still load through the presenter,
+  workout state, workout-session fingerprinting, Adaptive Coaching context and
+  training history.
+- The session fingerprint hashes ordered `isim` values only — re-saving the
+  same week canonically does **not** stale a running session. (A week whose
+  exercises actually changed still does.)
+- `exercise_id` never reaches a client: the bounded public day projection emits
+  exactly `isim` / `set` / `tekrar` / `dinlenme` / `not`.
+- An ambiguous legacy name is refused, never resolved by position and never
+  given a fabricated ID.
+
+**The legacy logging gap is real and was left open on purpose.**
+`WorkoutLog.exercise_name` is a name, not an `exercise_id`. Historical logs
+cannot be joined to catalog identity, and renaming a catalog entry does not
+retroactively rename what is already logged. Filtering history through the
+catalog would silently delete part of a user's past; migrating it would be an
+irreversible reinterpretation of rows written before the catalog existed. If a
+later PR wants the join, it needs its own design — not a backfill bolted onto
+this one.
+
+## Verification
+
+Task 6 command (all green):
+
+```
+python -m pytest -q tests/test_sprint11_exercise_authority.py \
+  tests/test_training_history.py tests/test_workout_session.py \
+  tests/test_workout_state.py tests/test_adaptive_plan_context.py \
+  tests/test_migration_graph.py tests/test_plan_mutation_architecture.py \
+  tests/test_coach_plan_tools_architecture.py
+```
+
+Architecture guards live in `tests/test_sprint11_exercise_authority.py`: no
+legacy KB and no fuzzy/`difflib`/`rapidfuzz` path (scanned over the *executable*
+text of a file set derived from the package directories, so a new module cannot
+escape it), zero SQL for a full week of resolution (engine event listener, not a
+mock), provider schema never accepts `exercise_id` at the generation call site,
+catalog never persists, save validates before `delete()`, provider budget stays
+2 completions / 1 repair, generation never imports the mutation journal.
+
+Every guard was neuter-tested — the guarded behaviour broken in production code,
+the guard confirmed to fail, then restored. Details in the Task 6 report under
+`.superpowers/sdd/2026-08-21-sprint11-pr4-canonical-exercise-authority/`.
+
+## Deferred
+
+Automatic substitution · a `WorkoutLog` → catalog join or history backfill ·
+mobile generate contract · typed replace on save · generate idempotency ·
+per-exercise progression or risk metadata (the deleted `EXERCISE_KB` fields were
+never reviewed and are not product truth).

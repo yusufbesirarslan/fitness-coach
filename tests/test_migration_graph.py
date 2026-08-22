@@ -41,6 +41,35 @@ def test_alembic_migrations_have_single_head():
     assert heads == ["c2d3e4f5a6b7"]
 
 
+def test_pr4_canonical_exercise_authority_adds_no_migration():
+    """The exercise catalog is bundled data, not a table.
+
+    Sprint 11 PR4 makes a server-owned catalog the single authority on exercise
+    identity and stores nothing new: no exercise table, no ``exercise_id``
+    column on ``WorkoutLog``, no backfill of historical rows. Identity lives in
+    the reviewed, version-controlled JSON asset and inside the plan document
+    that already existed. That is what makes the whole PR deployable with an
+    unchanged Alembic graph — and it is a claim worth failing on rather than
+    a sentence in a document, because "we added one small table" is exactly
+    how a no-migration PR stops being one.
+    """
+    versions_dir = Path(__file__).resolve().parents[1] / "migrations" / "versions"
+    revision_files = sorted(path.name for path in versions_dir.glob("*.py"))
+
+    assert len(revision_files) == 36
+    assert not any("exercise" in name for name in revision_files)
+
+    catalog_path = (
+        Path(__file__).resolve().parents[1]
+        / "app" / "services" / "training_assets" / "exercises.json"
+    )
+    assert catalog_path.is_file()
+
+    from app.models import WorkoutLog
+
+    assert "exercise_id" not in WorkoutLog.__table__.columns
+
+
 def test_meal_idempotency_fingerprint_migration_round_trips_only_nullable_column(
         tmp_path):
     migration_path = (

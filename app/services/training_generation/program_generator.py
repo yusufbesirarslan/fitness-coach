@@ -2,7 +2,7 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
-from app.services.training_generation.exercise_knowledge_base import REQUIRED_MOVEMENT_COVERAGE
+from app.services.training_generation.movement_coverage import REQUIRED_MOVEMENT_COVERAGE
 from app.services.training_generation.models import ClassificationResult, ProgramContext, TrainingPreferences, UserTrainingFeatures
 from app.services.training_generation.preference_contract import (
     STYLE_INPUT_ALIASES,

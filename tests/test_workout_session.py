@@ -821,3 +821,102 @@ def test_migration_downgrade_drops_table(tmp_path):
     _run(engine, mig.downgrade)
     assert not sa.inspect(engine).has_table("workout_session")
     engine.dispose()
+
+
+# ── Sprint 11 PR4: catalog identity does not disturb session fingerprints ────
+def _canonical_program(workout_weekday, pairs):
+    """The same week as ``_program`` but saved through the PR4 boundary shape.
+
+    ``pairs`` is ``(isim, exercise_id)``; the document also carries the verified
+    ``exercise_context`` block ``POST /training-plan/save`` now writes.
+    """
+    days = []
+    for name in WEEKDAYS:
+        if name == workout_weekday:
+            days.append({"gun": name, "tip": "antrenman", "egzersizler": [
+                {"isim": isim, "exercise_id": exercise_id}
+                for isim, exercise_id in pairs
+            ]})
+        else:
+            days.append({"gun": name, "tip": "dinlenme", "egzersizler": []})
+    return {
+        "program": days,
+        "haftalik_ozet": {},
+        "exercise_context": {
+            "equipment_context": "spor_salonu", "cardio_type": "yok",
+            "style": "general_fitness", "catalog_version": 1,
+        },
+    }
+
+
+def test_fingerprint_ignores_exercise_id_so_legacy_sessions_stay_attached(
+        app, make_user):
+    """Adding catalog identity to a plan must not orphan a running session.
+
+    The fingerprint is built from ordered ``isim`` values only. If it hashed
+    ``exercise_id`` too, the first save through the PR4 boundary would change
+    every fingerprint and every ACTIVE session would read as
+    ``plan_regenerated_or_replaced`` — a mass false staleness caused by a
+    storage detail, not by anything the user's workout did.
+    """
+    weekday = _today_weekday()
+    legacy = _program(weekday, ("Barbell Back Squat", "Barbell Bench Press"))
+    canonical = _canonical_program(weekday, (
+        ("Barbell Back Squat", "ex_barbell_back_squat"),
+        ("Barbell Bench Press", "ex_barbell_bench_press"),
+    ))
+
+    user = make_user("fp_legacy")
+    _save_plan(user.id, raw=json.dumps(legacy))
+    legacy_facts = wq.current_plan_facts(user.id, weekday)
+
+    other = make_user("fp_canonical")
+    _save_plan(other.id, raw=json.dumps(canonical))
+    canonical_facts = wq.current_plan_facts(other.id, weekday)
+
+    assert legacy_facts.current_fingerprint == canonical_facts.current_fingerprint
+    assert legacy_facts.current_fingerprint.startswith(f"{FINGERPRINT_VERSION}:")
+
+
+def test_active_session_started_on_a_legacy_plan_survives_canonicalization(
+        app, make_user):
+    """End to end: start on the legacy row, re-save canonically, still resumable."""
+    user = make_user("fp_migrate")
+    weekday = _today_weekday()
+    _save_plan(user.id, raw=json.dumps(
+        _program(weekday, ("Barbell Back Squat", "Barbell Bench Press"))))
+    started = start_session(user.id)
+    assert started.outcome is SessionOutcome.CREATED
+
+    # The user regenerates and saves; the same week now carries catalog identity.
+    _save_plan(user.id, raw=json.dumps(_canonical_program(weekday, (
+        ("Barbell Back Squat", "ex_barbell_back_squat"),
+        ("Barbell Bench Press", "ex_barbell_bench_press"),
+    ))), created_at=datetime.utcnow() + timedelta(minutes=5))
+
+    resumed = resume_session(user.id, started.session.public_id)
+    assert resumed.outcome is SessionOutcome.RESUMED
+    assert resumed.session.relationship == sm.REL_MATCHES_CURRENT_PLAN
+    assert resumed.session.resumable is True
+
+
+def test_reordering_or_renaming_exercises_still_stales_a_session(app, make_user):
+    """The neutrality above is about the ID key, not about content.
+
+    A plan whose exercises actually changed must still stale its session —
+    otherwise the previous test would be proving the fingerprint is inert.
+    """
+    user = make_user("fp_changed")
+    weekday = _today_weekday()
+    _save_plan(user.id, raw=json.dumps(
+        _program(weekday, ("Barbell Back Squat", "Barbell Bench Press"))))
+    started = start_session(user.id)
+
+    _save_plan(user.id, raw=json.dumps(_canonical_program(weekday, (
+        ("Barbell Bench Press", "ex_barbell_bench_press"),
+        ("Barbell Back Squat", "ex_barbell_back_squat"),
+    ))), created_at=datetime.utcnow() + timedelta(minutes=5))
+
+    resumed = resume_session(user.id, started.session.public_id)
+    assert resumed.outcome is SessionOutcome.STALE_SESSION_REQUIRES_RESOLUTION
+    assert resumed.session.stale_reason == sm.STALE_PLAN_REGENERATED
