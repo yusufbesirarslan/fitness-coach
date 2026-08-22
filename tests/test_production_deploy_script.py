@@ -4,7 +4,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -101,11 +100,22 @@ def host_fixture(tmp_path: Path):
         *,
         flock_exit: int = 0,
         container_revision: str = "",
+        rollback_container_revision: str = "",
         health_code: int = 200,
         health_status: str = "ok",
         health_revision: str = "",
+        candidate_health_failures: int | None = None,
+        candidate_curl_exit: int = 0,
         public_health_code: int = 200,
+        public_health_failures: int | None = None,
+        public_curl_exit: int = 0,
         rollback_health_has_revision: bool = True,
+        rollback_health_failures: int = 0,
+        rollback_curl_exit: int = 0,
+        previous_has_hardened_marker: bool = False,
+        fail_candidate_docker_command: str = "",
+        fail_rollback_docker_command: str = "",
+        fail_prune: bool = False,
     ) -> HostFixture:
         origin = tmp_path / "origin.git"
         source = tmp_path / "source"
@@ -113,7 +123,9 @@ def host_fixture(tmp_path: Path):
         fake_bin = tmp_path / "fake-bin"
         trace = tmp_path / "trace.log"
         docker_state = tmp_path / "docker-revision"
-        docker_exec_count = tmp_path / "docker-exec-count"
+        candidate_health_count = tmp_path / "candidate-health-count"
+        rollback_health_count = tmp_path / "rollback-health-count"
+        public_health_count = tmp_path / "public-health-count"
         fake_bin.mkdir()
         trace.write_text("", encoding="utf-8")
 
@@ -122,7 +134,11 @@ def host_fixture(tmp_path: Path):
         _run(["git", "-C", str(source), "config", "user.email", "deploy-test@example.com"])
         _run(["git", "-C", str(source), "config", "user.name", "Deploy Test"])
         (source / "release.txt").write_text("previous\n", encoding="utf-8")
-        _run(["git", "-C", str(source), "add", "release.txt"])
+        if previous_has_hardened_marker:
+            marker = source / "scripts" / "production_deploy.sh"
+            marker.parent.mkdir()
+            marker.write_text("# hardened revision-health contract\n", encoding="utf-8")
+        _run(["git", "-C", str(source), "add", "."])
         _run(["git", "-C", str(source), "commit", "-m", "previous"])
         prev_commit = _run(["git", "-C", str(source), "rev-parse", "HEAD"])
         _run(["git", "-C", str(source), "remote", "add", "origin", str(origin)])
@@ -157,9 +173,10 @@ if [[ -n "${FLOCK_STATE_DIR:-}" ]]; then
   fi
   if [[ -n "${FLOCK_READY_FILE:-}" ]]; then
     : > "$FLOCK_READY_FILE"
+    printf 'FAKE_LOCK_READY\n'
   fi
   while [[ -n "${FLOCK_HOLD_FILE:-}" && -e "$FLOCK_HOLD_FILE" ]]; do
-    sleep 0.05
+    /usr/bin/sleep 0.05
   done
   rmdir "$FLOCK_STATE_DIR"
 fi
@@ -183,20 +200,29 @@ revision=''
 if [[ -n "$override" && -f "$override" ]]; then
   revision="$(grep -m1 'APP_REVISION:' "$override" | cut -d "'" -f 2)"
 fi
-if [[ " $* " == *' build '* || " $* " == *' up '* ]]; then
+operation=''
+if [[ " $* " == *' build '* ]]; then operation=build; fi
+if [[ " $* " == *' up -d '* ]]; then operation=up; fi
+if [[ " $* " == *' ps '* ]]; then operation=ps; fi
+if [[ " $* " == *' image prune '* ]]; then operation=prune; fi
+if [[ "$operation" == prune && "$FAKE_FAIL_PRUNE" == 1 ]]; then exit 41; fi
+if [[ -n "$FAKE_FAIL_CANDIDATE_DOCKER_COMMAND" && "$revision" == "$FAKE_CANDIDATE_SHA" && "$operation" == "$FAKE_FAIL_CANDIDATE_DOCKER_COMMAND" ]]; then
+  exit 42
+fi
+if [[ -n "$FAKE_FAIL_ROLLBACK_DOCKER_COMMAND" && "$revision" != "$FAKE_CANDIDATE_SHA" && "$operation" == "$FAKE_FAIL_ROLLBACK_DOCKER_COMMAND" ]]; then
+  exit 43
+fi
+if [[ "$operation" == build || "$operation" == up ]]; then
   printf '%s' "$revision" > "$DOCKER_STATE_FILE"
   printf 'APP_REVISION=%s\n' "$revision" >> "$TRACE_FILE"
 fi
 if [[ " $* " == *' exec -T web printenv APP_REVISION '* ]]; then
-  count=0
-  [[ -f "$DOCKER_EXEC_COUNT_FILE" ]] && count="$(cat "$DOCKER_EXEC_COUNT_FILE")"
-  count=$((count + 1))
-  printf '%s' "$count" > "$DOCKER_EXEC_COUNT_FILE"
-  if [[ "$count" -eq 1 && -n "${FAKE_CANDIDATE_CONTAINER_REVISION:-}" ]]; then
+  if [[ "$revision" == "$FAKE_CANDIDATE_SHA" && -n "${FAKE_CANDIDATE_CONTAINER_REVISION:-}" ]]; then
     printf '%s\n' "$FAKE_CANDIDATE_CONTAINER_REVISION"
+  elif [[ "$revision" != "$FAKE_CANDIDATE_SHA" && -n "${FAKE_ROLLBACK_CONTAINER_REVISION:-}" ]]; then
+    printf '%s\n' "$FAKE_ROLLBACK_CONTAINER_REVISION"
   else
-    cat "$DOCKER_STATE_FILE"
-    printf '\n'
+    printf '%s\n' "$revision"
   fi
 fi
 exit 0
@@ -219,14 +245,35 @@ revision="$(cat "$DOCKER_STATE_FILE")"
 code=200
 status=ok
 include_revision=1
+exit_code=0
+counter_file=''
+failures=0
 if [[ "$url" == https://* ]]; then
+  counter_file="$PUBLIC_HEALTH_COUNT_FILE"
+  failures="$FAKE_PUBLIC_HEALTH_FAILURES"
   code="$FAKE_PUBLIC_HEALTH_CODE"
+  exit_code="$FAKE_PUBLIC_CURL_EXIT"
 elif [[ "$revision" == "$FAKE_CANDIDATE_SHA" ]]; then
+  counter_file="$CANDIDATE_HEALTH_COUNT_FILE"
+  failures="$FAKE_CANDIDATE_HEALTH_FAILURES"
   code="$FAKE_CANDIDATE_HEALTH_CODE"
   status="$FAKE_CANDIDATE_HEALTH_STATUS"
   [[ -n "$FAKE_CANDIDATE_HEALTH_REVISION" ]] && revision="$FAKE_CANDIDATE_HEALTH_REVISION"
+  exit_code="$FAKE_CANDIDATE_CURL_EXIT"
 else
+  counter_file="$ROLLBACK_HEALTH_COUNT_FILE"
+  failures="$FAKE_ROLLBACK_HEALTH_FAILURES"
   include_revision="$FAKE_ROLLBACK_HEALTH_HAS_REVISION"
+  exit_code="$FAKE_ROLLBACK_CURL_EXIT"
+fi
+attempt=0
+[[ -f "$counter_file" ]] && attempt="$(cat "$counter_file")"
+attempt=$((attempt + 1))
+printf '%s' "$attempt" > "$counter_file"
+printf 'CURL_REVISION=%s ATTEMPT=%s\n' "$revision" "$attempt" >> "$TRACE_FILE"
+if [[ "$attempt" -gt "$failures" ]]; then
+  code=200
+  exit_code=0
 fi
 if [[ -n "$output" ]]; then
   if [[ "$include_revision" == 1 ]]; then
@@ -236,6 +283,16 @@ if [[ -n "$output" ]]; then
   fi
 fi
 printf '%s' "$code"
+exit "$exit_code"
+""",
+        )
+        _write_executable(
+            fake_bin / "sleep",
+            r"""#!/usr/bin/env bash
+printf 'sleep' >> "$TRACE_FILE"
+printf ' %s' "$@" >> "$TRACE_FILE"
+printf '\n' >> "$TRACE_FILE"
+exit 0
 """,
         )
         # Git for Windows resolves its bundled curl ahead of an extensionless
@@ -246,6 +303,7 @@ printf '%s' "$code"
             (
                 'curl() { "$FAKE_BIN/curl" "$@"; }\n'
                 'git() { "$FAKE_BIN/git" "$@"; }\n'
+                'sleep() { "$FAKE_BIN/sleep" "$@"; }\n'
             ),
         )
 
@@ -259,14 +317,34 @@ printf '%s' "$code"
                 "REAL_GIT": Path(real_git).resolve().as_posix(),
                 "FLOCK_EXIT": str(flock_exit),
                 "DOCKER_STATE_FILE": _bash_path(docker_state),
-                "DOCKER_EXEC_COUNT_FILE": _bash_path(docker_exec_count),
                 "FAKE_CANDIDATE_CONTAINER_REVISION": container_revision,
+                "FAKE_ROLLBACK_CONTAINER_REVISION": rollback_container_revision,
                 "FAKE_CANDIDATE_SHA": candidate_commit,
                 "FAKE_CANDIDATE_HEALTH_CODE": str(health_code),
                 "FAKE_CANDIDATE_HEALTH_STATUS": health_status,
                 "FAKE_CANDIDATE_HEALTH_REVISION": health_revision,
+                "FAKE_CANDIDATE_HEALTH_FAILURES": str(
+                    candidate_health_failures
+                    if candidate_health_failures is not None
+                    else (0 if health_code == 200 else 999)
+                ),
+                "FAKE_CANDIDATE_CURL_EXIT": str(candidate_curl_exit),
                 "FAKE_PUBLIC_HEALTH_CODE": str(public_health_code),
+                "FAKE_PUBLIC_HEALTH_FAILURES": str(
+                    public_health_failures
+                    if public_health_failures is not None
+                    else (0 if public_health_code == 200 else 999)
+                ),
+                "FAKE_PUBLIC_CURL_EXIT": str(public_curl_exit),
                 "FAKE_ROLLBACK_HEALTH_HAS_REVISION": "1" if rollback_health_has_revision else "0",
+                "FAKE_ROLLBACK_HEALTH_FAILURES": str(rollback_health_failures),
+                "FAKE_ROLLBACK_CURL_EXIT": str(rollback_curl_exit),
+                "CANDIDATE_HEALTH_COUNT_FILE": _bash_path(candidate_health_count),
+                "ROLLBACK_HEALTH_COUNT_FILE": _bash_path(rollback_health_count),
+                "PUBLIC_HEALTH_COUNT_FILE": _bash_path(public_health_count),
+                "FAKE_FAIL_CANDIDATE_DOCKER_COMMAND": fail_candidate_docker_command,
+                "FAKE_FAIL_ROLLBACK_DOCKER_COMMAND": fail_rollback_docker_command,
+                "FAKE_FAIL_PRUNE": "1" if fail_prune else "0",
             }
         )
         return HostFixture(
@@ -382,6 +460,107 @@ def test_wrong_deep_health_revision_rolls_back(bash_executable, host_fixture):
     assert "deep health revision mismatch" in result.stderr
 
 
+def test_candidate_health_retries_bounded_calls_until_delayed_success(
+    bash_executable, host_fixture
+):
+    fixture = host_fixture(
+        health_code=503,
+        candidate_health_failures=2,
+        candidate_curl_exit=28,
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode == 0, result.stderr
+    trace = fixture.trace.read_text(encoding="utf-8")
+    candidate_attempts = [
+        line for line in trace.splitlines()
+        if line.startswith(f"CURL_REVISION={fixture.candidate_commit}")
+    ]
+    assert len(candidate_attempts) == 3
+    curl_lines = [line for line in trace.splitlines() if line.startswith("curl ")]
+    assert curl_lines
+    assert all("--connect-timeout 2 --max-time 5" in line for line in curl_lines)
+    assert f"git reset --hard {fixture.prev_commit}" not in trace
+
+
+def test_hung_candidate_health_exhausts_bound_then_rolls_back_once(
+    bash_executable, host_fixture
+):
+    fixture = host_fixture(
+        health_code=503,
+        candidate_health_failures=999,
+        candidate_curl_exit=28,
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace.count(f"CURL_REVISION={fixture.candidate_commit}") == 30
+    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
+    assert "rollback verified" in result.stderr
+    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
+
+
+def test_rollback_health_retries_bounded_calls_until_delayed_success(
+    bash_executable, host_fixture
+):
+    fixture = host_fixture(
+        container_revision="b" * 40,
+        rollback_health_failures=2,
+        rollback_curl_exit=28,
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace.count(f"CURL_REVISION={fixture.prev_commit}") == 3
+    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
+    assert "rollback verified" in result.stderr
+
+
+def test_hung_rollback_health_exhausts_bound_and_reports_failure(
+    bash_executable, host_fixture
+):
+    fixture = host_fixture(
+        container_revision="b" * 40,
+        rollback_health_failures=999,
+        rollback_curl_exit=28,
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace.count(f"CURL_REVISION={fixture.prev_commit}") == 30
+    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
+    assert "rollback failed verification" in result.stderr
+    assert "rollback verified" not in result.stderr
+    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
+
+
+def test_public_health_retries_bounded_calls_until_delayed_success(
+    bash_executable, host_fixture
+):
+    fixture = host_fixture(
+        public_health_code=503,
+        public_health_failures=2,
+        public_curl_exit=28,
+    )
+    result = fixture.run(
+        bash_executable,
+        public_health_url="https://fitness.example/health",
+    )
+
+    assert result.returncode == 0, result.stderr
+    trace = fixture.trace.read_text(encoding="utf-8")
+    public_calls = [
+        line for line in trace.splitlines()
+        if line.startswith("curl ") and "https://fitness.example/health" in line
+    ]
+    assert len(public_calls) == 3
+    assert all("--connect-timeout 2 --max-time 5" in line for line in public_calls)
+    assert f"git reset --hard {fixture.prev_commit}" not in trace
+
+
 def test_old_rollback_without_health_revision_uses_compatibility_proof(
     bash_executable, host_fixture
 ):
@@ -397,14 +576,74 @@ def test_old_rollback_without_health_revision_uses_compatibility_proof(
     assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
 
 
+def test_hardened_rollback_cannot_use_missing_revision_compatibility(
+    bash_executable, host_fixture
+):
+    fixture = host_fixture(
+        container_revision="b" * 40,
+        rollback_health_has_revision=False,
+        previous_has_hardened_marker=True,
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    assert "rollback compatibility proof accepted" not in result.stderr
+    assert "deep health revision is missing" in result.stderr
+    assert "rollback failed verification" in result.stderr
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
+
+
+@pytest.mark.parametrize("operation", ["build", "up", "ps"])
+def test_candidate_compose_failure_rolls_back_exactly_once(
+    bash_executable, host_fixture, operation
+):
+    fixture = host_fixture(fail_candidate_docker_command=operation)
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
+    assert "rollback verified" in result.stderr
+    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
+
+
+def test_prune_failure_rolls_back_exactly_once(bash_executable, host_fixture):
+    fixture = host_fixture(fail_prune=True)
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace.count("docker image prune -f") == 1
+    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
+    assert "rollback verified" in result.stderr
+
+
+def test_failed_rollback_revision_is_reported_without_second_attempt(
+    bash_executable, host_fixture
+):
+    fixture = host_fixture(
+        container_revision="b" * 40,
+        rollback_container_revision="d" * 40,
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
+    assert "running web container revision mismatch" in result.stderr
+    assert "rollback failed verification" in result.stderr
+    assert "rollback verified" not in result.stderr
+    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
+
+
 def test_public_health_runs_after_internal_gate_and_failure_rolls_back(
     bash_executable, host_fixture
 ):
-    fixture = host_fixture()
+    fixture = host_fixture(public_health_code=503)
     result = fixture.run(
         bash_executable,
         public_health_url="https://fitness.example/health",
-        FAKE_PUBLIC_HEALTH_CODE="503",
     )
 
     assert result.returncode != 0
@@ -412,7 +651,13 @@ def test_public_health_runs_after_internal_gate_and_failure_rolls_back(
     assert trace.index("http://127.0.0.1:5000/health?deep=1") < trace.index(
         "https://fitness.example/health"
     )
-    assert f"git reset --hard {fixture.prev_commit}" in trace
+    public_calls = [
+        line for line in trace.splitlines()
+        if line.startswith("curl ") and "https://fitness.example/health" in line
+    ]
+    assert len(public_calls) == 12
+    assert all("--connect-timeout 2 --max-time 5" in line for line in public_calls)
+    assert trace.count(f"git reset --hard {fixture.prev_commit}") == 1
 
 
 def test_rapid_candidate_second_invocation_cannot_mutate_while_lock_is_held(
@@ -444,10 +689,9 @@ def test_rapid_candidate_second_invocation_cannot_mutate_while_lock_is_held(
         stderr=subprocess.PIPE,
         env=first_environment,
     )
-    deadline = time.monotonic() + 5
-    while not ready_file.exists() and time.monotonic() < deadline:
-        time.sleep(0.02)
-    assert ready_file.exists(), "first deployment did not enter the fake lock"
+    assert first.stdout is not None
+    assert first.stdout.readline().strip() == "FAKE_LOCK_READY"
+    assert ready_file.exists()
 
     second = fixture.run(
         bash_executable,
@@ -455,7 +699,7 @@ def test_rapid_candidate_second_invocation_cannot_mutate_while_lock_is_held(
         **shared,
     )
     hold_file.unlink()
-    first_stdout, first_stderr = first.communicate(timeout=10)
+    first_stdout, first_stderr = first.communicate()
 
     assert first.returncode == 0, (first_stdout, first_stderr)
     assert second.returncode == 73

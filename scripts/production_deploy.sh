@@ -5,6 +5,11 @@ readonly DEPLOY_SHA="${1:-}"
 readonly DEPLOY_DIR="${2:-}"
 readonly PUBLIC_HEALTH_URL="${3:-}"
 readonly LOCK_PATH="$DEPLOY_DIR/.axisai-production-deploy.lock"
+readonly INTERNAL_HEALTH_ATTEMPTS=30
+readonly PUBLIC_HEALTH_ATTEMPTS=12
+readonly HEALTH_CONNECT_TIMEOUT_SECONDS=2
+readonly HEALTH_MAX_TIME_SECONDS=5
+readonly HEALTH_RETRY_DELAY_SECONDS=5
 
 exec 9>"$LOCK_PATH"
 if ! flock -w 60 9; then
@@ -67,6 +72,18 @@ if ! git merge-base --is-ancestor "$PREV_COMMIT" "$DEPLOY_SHA"; then
   echo "deployment candidate is older than or divergent from production" >&2
   exit 1
 fi
+PREV_DEPLOY_MARKER="$(git ls-tree --name-only \
+  "$PREV_COMMIT" -- scripts/production_deploy.sh)"
+readonly PREV_DEPLOY_MARKER
+if [[ "$PREV_DEPLOY_MARKER" == "scripts/production_deploy.sh" ]]; then
+  LEGACY_ROLLBACK_ALLOWED=0
+else
+  # The host helper itself is the durable revision-health contract marker.
+  # It enters production with the revision-aware health contract, so only its
+  # immediate predecessor can use the missing-revision compatibility proof.
+  LEGACY_ROLLBACK_ALLOWED=1
+fi
+readonly LEGACY_ROLLBACK_ALLOWED
 
 OVERRIDE_FILE=""
 HEALTH_BODY=""
@@ -98,12 +115,14 @@ write_override() {
     "      APP_REVISION: '$revision'" > "$OVERRIDE_FILE" || return 1
 }
 
-probe_internal_health() {
+probe_internal_health_once() {
   local expected_revision="$1"
   local allow_missing_revision="$2"
   local health_code health_fields health_status has_revision health_revision
 
   health_code="$(curl --silent --show-error \
+    --connect-timeout "$HEALTH_CONNECT_TIMEOUT_SECONDS" \
+    --max-time "$HEALTH_MAX_TIME_SECONDS" \
     --output "$HEALTH_BODY" \
     --write-out '%{http_code}' \
     'http://127.0.0.1:5000/health?deep=1')" || return 1
@@ -145,9 +164,30 @@ PY
   fi
 }
 
-verify_public_health() {
+probe_internal_health() {
+  local expected_revision="$1"
+  local allow_missing_revision="$2"
+  local attempt
+
+  for ((attempt = 1; attempt <= INTERNAL_HEALTH_ATTEMPTS; attempt++)); do
+    if probe_internal_health_once "$expected_revision" "$allow_missing_revision"; then
+      echo "deep health verified on attempt $attempt" >&2
+      return 0
+    fi
+    echo "deep health not ready on attempt $attempt/$INTERNAL_HEALTH_ATTEMPTS" >&2
+    if ((attempt < INTERNAL_HEALTH_ATTEMPTS)); then
+      sleep "$HEALTH_RETRY_DELAY_SECONDS" || return 1
+    fi
+  done
+  echo "deep health readiness exhausted after $INTERNAL_HEALTH_ATTEMPTS attempts" >&2
+  return 1
+}
+
+verify_public_health_once() {
   local health_code
   health_code="$(curl --silent --show-error \
+    --connect-timeout "$HEALTH_CONNECT_TIMEOUT_SECONDS" \
+    --max-time "$HEALTH_MAX_TIME_SECONDS" \
     --output "$HEALTH_BODY" \
     --write-out '%{http_code}' \
     "$PUBLIC_HEALTH_URL")" || return 1
@@ -155,6 +195,23 @@ verify_public_health() {
     echo "public health returned HTTP $health_code" >&2
     return 1
   fi
+}
+
+verify_public_health() {
+  local attempt
+
+  for ((attempt = 1; attempt <= PUBLIC_HEALTH_ATTEMPTS; attempt++)); do
+    if verify_public_health_once; then
+      echo "public health verified on attempt $attempt" >&2
+      return 0
+    fi
+    echo "public health not ready on attempt $attempt/$PUBLIC_HEALTH_ATTEMPTS" >&2
+    if ((attempt < PUBLIC_HEALTH_ATTEMPTS)); then
+      sleep "$HEALTH_RETRY_DELAY_SECONDS" || return 1
+    fi
+  done
+  echo "public health readiness exhausted after $PUBLIC_HEALTH_ATTEMPTS attempts" >&2
+  return 1
 }
 
 start_and_verify_release() {
@@ -188,7 +245,7 @@ rollback_release() {
     echo "rollback checkout revision mismatch" >&2
     return 1
   fi
-  start_and_verify_release "$PREV_COMMIT" 1 0 || return 1
+  start_and_verify_release "$PREV_COMMIT" "$LEGACY_ROLLBACK_ALLOWED" 0 || return 1
   echo "rollback verified at $PREV_COMMIT" >&2
 }
 
