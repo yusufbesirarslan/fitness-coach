@@ -128,7 +128,7 @@ class GenerationExerciseIncompatibleError(GenerationOutputError):
 
     Two ways to earn this: the entry's equipment is outside the accepted
     equipment context, or it is a cardio movement placed on a day whose
-    ``tip`` is not ``kardiyo`` (see ``exercise_resolution._check_placement``).
+    ``tip`` is not ``kardiyo`` (see ``exercise_resolution.check_placement``).
     Both are the same answer to the caller on purpose.
     """
 

@@ -390,10 +390,18 @@ def test_exercise_identity_is_never_written_without_its_canonical_name():
     ``exercise_id`` behind. Any function that can touch ``FIELD_EXERCISE_ID``
     must therefore also be a function that touches ``FIELD_NAME`` — a helper
     that writes identity on its own is the shape of the bug coming back.
+
+    ``_document_carries_exercise_identity`` (Task 5 fix round 1, F2) is the one
+    deliberate exception: a read-only structural scan that never assigns
+    ``FIELD_EXERCISE_ID`` anywhere — it only asks whether the field is present,
+    to decide whether a document with no context block is legacy or unusable.
+    A function with nothing to write has no companion write to pair it with.
     """
+    approved_readers = {"_document_carries_exercise_identity"}
     offenders = [
         node.name for node in _function_defs(MUTATION_ROOT / "document.py")
-        if "FIELD_EXERCISE_ID" in _names_referenced_in(node)
+        if node.name not in approved_readers
+        and "FIELD_EXERCISE_ID" in _names_referenced_in(node)
         and "FIELD_NAME" not in _names_referenced_in(node)
     ]
 
@@ -423,12 +431,23 @@ def test_the_cardio_placement_rule_has_a_single_definition():
     ``training_generation.exercise_resolution``. This boundary reuses that
     function instead of restating the predicate, because two copies of an
     authority rule on two write doors is precisely how the first hole opened.
+
+    Anchored on the parsed import and a real call, not on raw source text: a
+    docstring mentioning the name would satisfy a plain substring check
+    without the reuse it claims to prove.
     """
     from app.services.training_generation import exercise_resolution
 
-    source = (MUTATION_ROOT / "document.py").read_text(encoding="utf-8")
+    document_path = MUTATION_ROOT / "document.py"
+    imported_names = {name for name, _ in _python_imports(document_path)}
+    call_sites = _calls_named(document_path, "check_placement")
+    source = document_path.read_text(encoding="utf-8")
 
-    assert "_check_placement" in source
+    assert (
+        "app.services.training_generation.exercise_resolution.check_placement"
+        in imported_names
+    ), "document.py must import check_placement, not merely mention it"
+    assert call_sites, "document.py must call check_placement, not merely import it"
     assert "CARDIO_MOVEMENT" not in source
     assert "CARDIO_TIP" not in source
-    assert callable(exercise_resolution._check_placement)
+    assert callable(exercise_resolution.check_placement)

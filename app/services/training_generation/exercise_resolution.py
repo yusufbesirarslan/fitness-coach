@@ -135,7 +135,7 @@ def _resolve_plan_exercise(
     return _resolve_generated_name(exercise["isim"], catalog, cache)
 
 
-def _check_placement(exercise: ExerciseDefinition, day: dict) -> None:
+def check_placement(exercise: ExerciseDefinition, day: dict) -> None:
     """Bind a cardio-movement entry to a cardio day, fail-closed otherwise.
 
     ``is_exercise_compatible`` deliberately gates cardio by the declared
@@ -172,7 +172,7 @@ def canonicalize_plan_exercises(plan: dict, context: ExerciseContext) -> dict:
     exercise reference that does not resolve to exactly one active,
     ``context``-compatible catalog entry, or that is a cardio-movement entry
     placed on a day whose ``tip`` is not ``kardiyo`` (see
-    ``_check_placement``). No automatic substitution.
+    ``check_placement``). No automatic substitution.
     """
     catalog = load_exercise_catalog()
     cache: dict[str, ExerciseDefinition] = {}
@@ -185,7 +185,7 @@ def canonicalize_plan_exercises(plan: dict, context: ExerciseContext) -> dict:
                 raise GenerationExerciseIncompatibleError(
                     "generated exercise is not compatible with the accepted "
                     "equipment context")
-            _check_placement(resolved, day)
+            check_placement(resolved, day)
             canonical_exercises.append({
                 **exercise,
                 "isim": resolved.canonical_name,

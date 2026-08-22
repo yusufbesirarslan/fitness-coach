@@ -1161,6 +1161,74 @@ class TestCanonicalExerciseAuthority:
             apply_command(document, MoveTrainingDayCommand(
                 day="Pazartesi", target_day="Salı"))
 
+    @pytest.mark.parametrize("command", [
+        ReplaceExerciseCommand(day="Pazartesi", exercise="Dumbbell Row",
+                               replacement="Push-Up"),
+        AddExerciseCommand(day="Çarşamba", exercise="Push-Up", sets=3,
+                           reps="10"),
+        RemoveExerciseCommand(day="Pazartesi", exercise="Push-Up"),
+        UpdateExercisePrescriptionCommand(
+            day="Pazartesi", exercise="Dumbbell Row", sets=5),
+        MoveTrainingDayCommand(day="Pazartesi", target_day="Salı"),
+    ], ids=["replace", "add", "remove", "update", "move"])
+    def test_a_document_with_exercise_ids_but_no_context_refuses_every_command(
+            self, command):
+        """F2. A document that carries catalog identity but no context to
+        prove which context authorized it is not legacy, it is unusable —
+        the same fail-closed posture as a malformed block, applied to a
+        missing one. Parametrized over every command because the authority
+        resolves before command dispatch, so this must hold even for a move,
+        which resolves no exercise at all."""
+        document = canonical_document(equipment_context="minimal")
+        del document["exercise_context"]
+
+        with pytest.raises(InvalidMutation):
+            apply_command(document, command)
+
+    def test_a_stray_exercise_id_anywhere_in_the_program_is_enough_to_refuse(
+            self):
+        """F2. The scan is over the WHOLE program, not the targeted day: a
+        legacy document is untouched except for one buried ``exercise_id`` on
+        a day the command never looks at, and that alone is enough to
+        refuse."""
+        document = _legacy_document()
+        _day(document, "Cumartesi")["egzersizler"][0]["exercise_id"] = (
+            "ex_treadmill")
+
+        with pytest.raises(InvalidMutation):
+            apply_command(document, ReplaceExerciseCommand(
+                day="Pazartesi", exercise="Bench Press",
+                replacement="Machine Chest Press"))
+
+    def test_a_genuine_legacy_document_still_mutates_in_both_shapes(self):
+        """F2's converse: a document with NO ``exercise_id`` anywhere must
+        keep mutating exactly as before — wrapped and bare-list — and must
+        still gain no identity. The full entry dict is asserted so a future
+        change to the guard cannot quietly start dropping or adding fields on
+        the legacy path."""
+        wrapped = _legacy_document()
+
+        mutated, changed = apply_command(wrapped, ReplaceExerciseCommand(
+            day="Pazartesi", exercise="Bench Press",
+            replacement="Machine Chest Press"))
+
+        assert changed is True
+        assert _entry(mutated, "Pazartesi") == {
+            "isim": "Machine Chest Press", "set": 3, "tekrar": "8-12",
+            "dinlenme": "90 sn", "not": "kontrollü in", "tempo": "3-1-1"}
+
+        bare = _legacy_document()["program"]
+
+        mutated_bare, changed_bare = apply_command(
+            bare, ReplaceExerciseCommand(
+                day="Pazartesi", exercise="Bench Press",
+                replacement="Machine Chest Press"))
+
+        assert changed_bare is True
+        assert mutated_bare[0]["egzersizler"][0] == {
+            "isim": "Machine Chest Press", "set": 3, "tekrar": "8-12",
+            "dinlenme": "90 sn", "not": "kontrollü in", "tempo": "3-1-1"}
+
     def test_the_catalog_is_loaded_exactly_once_per_canonical_command(
             self, monkeypatch):
         """Zero database queries and one catalog load per mutation. A load per

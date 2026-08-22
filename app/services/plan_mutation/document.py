@@ -52,7 +52,7 @@ from app.services.exercise_catalog import (
     resolve_exercise,
 )
 from app.services.training_generation.exercise_resolution import (
-    _check_placement,
+    check_placement,
 )
 from app.services.training_generation.output_errors import (
     GenerationExerciseIncompatibleError,
@@ -184,16 +184,53 @@ def _exercises_of(day):
     return exercises
 
 
+def _document_carries_exercise_identity(document):
+    """A pure structural walk: does any exercise anywhere carry an ``exercise_id``?
+
+    No parsing assumptions beyond ``dict``/``list`` — a bare list, a dict
+    without ``program``, a day that is not a dict, or a day without
+    ``egzersizler`` must not raise here, they must simply contribute no IDs.
+    This is a structural check only: it never loads the catalog and never
+    resolves a name, so it costs nothing beyond the walk itself.
+    """
+    if isinstance(document, list):
+        program = document
+    elif isinstance(document, dict):
+        program = document.get("program")
+    else:
+        return False
+    if not isinstance(program, list):
+        return False
+    for day in program:
+        if not isinstance(day, dict):
+            continue
+        exercises = day.get(FIELD_EXERCISES)
+        if not isinstance(exercises, list):
+            continue
+        for entry in exercises:
+            if isinstance(entry, dict) and FIELD_EXERCISE_ID in entry:
+                return True
+    return False
+
+
 def _exercise_authority(document):
     """The catalog authority for this document, or ``None`` for a legacy plan.
 
     Present  — a dict document carrying an ``exercise_context`` block.
-    Absent   — a bare-list legacy document, or a dict without that key.
-    Unusable — the key is there but the block is not one the save boundary
-               could have written: ``InvalidMutation``, never a quiet fall
-               back to legacy name matching. Degrading silently would mean
-               one corrupt byte in the context block is enough to take a
-               canonical plan out from under the catalog's authority.
+    Absent   — a bare-list legacy document, or a dict without that key —
+               PROVIDED no exercise anywhere in it carries an ``exercise_id``.
+               A document that bears catalog identity but no context to prove
+               who authorized it is not legacy, it is unusable: see Unusable.
+    Unusable — either the key is there but the block is not one the save
+               boundary could have written, or the key is missing while some
+               exercise still carries an ``exercise_id``. Both raise
+               ``InvalidMutation``, never a quiet fall back to legacy name
+               matching. Degrading silently would mean one corrupt byte in
+               the context block — or one write that dropped the block
+               entirely — is enough to take a canonical plan out from under
+               the catalog's authority, reopening the exact defect (P1-4)
+               this task closed: a stray ``exercise_id`` surviving a
+               legacy-mode name rewrite it no longer matches.
 
     This is the only place ``load_exercise_catalog`` is called, and it runs
     once per command. The loader is ``lru_cache``d over a bundled data file,
@@ -202,6 +239,8 @@ def _exercise_authority(document):
     tests/test_plan_mutation_architecture.py pins the single call site.
     """
     if not isinstance(document, dict) or FIELD_EXERCISE_CONTEXT not in document:
+        if _document_carries_exercise_identity(document):
+            raise InvalidMutation("stored exercise context is not canonical")
         return None
     context = validate_exercise_context(document[FIELD_EXERCISE_CONTEXT])
     return _ExerciseAuthority(catalog=load_exercise_catalog(), context=context)
@@ -235,7 +274,7 @@ def _resolve_placeable_exercise(authority, name, day) -> ExerciseDefinition:
 
     * ``is_exercise_compatible`` against the plan's verified context, so the
       Coach cannot put a barbell into a bodyweight plan;
-    * ``_check_placement``, the generation path's cardio-vs-day rule, reused
+    * ``check_placement``, the generation path's cardio-vs-day rule, reused
       rather than copied. ``is_exercise_compatible`` deliberately gates cardio
       by ``cardio_type`` instead of by equipment (a home user who runs
       outdoors is a real case), which is only sound while a cardio movement
@@ -253,7 +292,7 @@ def _resolve_placeable_exercise(authority, name, day) -> ExerciseDefinition:
         raise InvalidMutation(
             "exercise is not compatible with the plan's equipment context")
     try:
-        _check_placement(exercise, day)
+        check_placement(exercise, day)
     except GenerationExerciseIncompatibleError as exc:
         raise InvalidMutation(
             "cardio exercise cannot be placed on a non-cardio day") from exc
