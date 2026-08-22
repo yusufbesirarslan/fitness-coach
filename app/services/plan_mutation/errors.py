@@ -42,9 +42,17 @@ class ExerciseNotFound(PlanMutationError):
 class AmbiguousExerciseTarget(PlanMutationError):
     """The named exercise matches more than one entry in the target day.
 
-    Exercise identity in the canonical plan is the name (``isim``) alone — there
-    are no exercise IDs. Rather than silently picking an occurrence the caller
-    did not identify, an ambiguous target is refused and the plan is unchanged.
+    What "matches" means depends on the plan. On a CANONICAL plan (one carrying
+    the verified ``exercise_context`` the save boundary persists) identity is
+    the catalog's ``exercise_id``: the named exercise is resolved to a catalog
+    entry and the day is searched for that stable ID, so two differently-worded
+    entries that resolve to the same entry are the same exercise twice. On a
+    LEGACY name-only plan identity is still the name (``isim``) alone — those
+    documents predate exercise IDs and are never silently upgraded.
+
+    The behaviour itself is unchanged either way: rather than silently picking
+    an occurrence the caller did not identify, an ambiguous target is refused
+    and the plan is left exactly as it was.
     """
 
 

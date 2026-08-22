@@ -332,3 +332,103 @@ def test_the_fingerprint_layer_is_pure_and_deterministic():
     ]
 
     assert not violations, f"fingerprints are not reproducible: {violations}"
+
+
+# ── Sprint 11 PR4 Task 5: exercise authority inside the pure engine ──────────
+
+def _names_referenced_in(node):
+    return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+
+
+def _function_defs(path):
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return [n for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+
+def test_the_exercise_catalog_is_loaded_once_per_mutation():
+    """One catalog load per command, pinned structurally.
+
+    ``document.py`` is the pure engine and ``load_exercise_catalog`` is
+    ``lru_cache``d over a bundled asset, so calling it is not the I/O this layer
+    forbids. Calling it per *exercise* would be a different thing: an unbounded
+    number of lookups where the design promises one, and the possibility of two
+    differently-loaded catalogs deciding identity inside a single command.
+    """
+    call_sites = _calls_named(MUTATION_ROOT / "document.py",
+                              "load_exercise_catalog")
+
+    assert len(call_sites) == 1, (
+        f"document.py loads the catalog {len(call_sites)} times: {call_sites}")
+
+
+def test_only_the_pure_engine_resolves_exercise_identity():
+    """Exercise identity has one interpreter in this domain.
+
+    The service, the journal and the fingerprint layer must keep treating the
+    plan as opaque text. A second module resolving names would be a second
+    opinion about what a plan means, reachable on a path with no document copy
+    and no fail-closed context check.
+    """
+    approved = {MUTATION_ROOT / "document.py",
+                MUTATION_ROOT / "validation.py"}
+    violations = []
+    for path in _mutation_modules():
+        if path in approved:
+            continue
+        for imported, lineno in _python_imports(path):
+            if _module_matches(imported, "app.services.exercise_catalog"):
+                violations.append(f"{path}:{lineno} -> {imported}")
+
+    assert not violations, f"a second exercise-identity reader: {violations}"
+
+
+def test_exercise_identity_is_never_written_without_its_canonical_name():
+    """P1-4, as a structural companion to the behavioural proof.
+
+    The defect this task closes was a write that moved ``isim`` and left
+    ``exercise_id`` behind. Any function that can touch ``FIELD_EXERCISE_ID``
+    must therefore also be a function that touches ``FIELD_NAME`` — a helper
+    that writes identity on its own is the shape of the bug coming back.
+    """
+    offenders = [
+        node.name for node in _function_defs(MUTATION_ROOT / "document.py")
+        if "FIELD_EXERCISE_ID" in _names_referenced_in(node)
+        and "FIELD_NAME" not in _names_referenced_in(node)
+    ]
+
+    assert not offenders, (
+        f"these write exercise identity without its name: {offenders}")
+
+
+def test_the_identity_guard_detects_a_lone_identity_write(tmp_path):
+    """The guard above only means something if it can actually fail."""
+    competitor = tmp_path / "competitor.py"
+    competitor.write_text(
+        "def rewrite(entry, value):\n"
+        "    entry[FIELD_EXERCISE_ID] = value\n", encoding="utf-8")
+
+    offenders = [
+        node.name for node in _function_defs(competitor)
+        if "FIELD_EXERCISE_ID" in _names_referenced_in(node)
+        and "FIELD_NAME" not in _names_referenced_in(node)
+    ]
+
+    assert offenders == ["rewrite"]
+
+
+def test_the_cardio_placement_rule_has_a_single_definition():
+    """Addendum §B. Task 4 closed a confirmed P1 — a cardio movement on a
+    non-cardio day bypasses the equipment gate entirely — with one rule in
+    ``training_generation.exercise_resolution``. This boundary reuses that
+    function instead of restating the predicate, because two copies of an
+    authority rule on two write doors is precisely how the first hole opened.
+    """
+    from app.services.training_generation import exercise_resolution
+
+    source = (MUTATION_ROOT / "document.py").read_text(encoding="utf-8")
+
+    assert "_check_placement" in source
+    assert "CARDIO_MOVEMENT" not in source
+    assert "CARDIO_TIP" not in source
+    assert callable(exercise_resolution._check_placement)
