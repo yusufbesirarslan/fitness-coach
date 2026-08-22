@@ -17,9 +17,11 @@ exercises are still resolved from scratch.
 Deliberately narrow: standard-library crypto only (``hmac``/``hashlib``/
 ``base64``), no expiry or replay store, no transport concerns, no user-facing
 copy, no diagnostics. The one failure type is ``ExerciseContextInvalid``; the
-save layer is what turns it into an answer over the wire. Nothing here ever
-emits the token or the decoded payload — a rejected token is simply rejected,
-with no echo.
+save layer is what turns it into an answer over the wire — so every rejection
+path here, including a malformed charset, must raise that one type and never
+an incidental ``UnicodeEncodeError``/``TypeError`` the save layer would not
+catch. Nothing here ever emits the token or the decoded payload — a rejected
+token is simply rejected, with no echo.
 """
 from __future__ import annotations
 
@@ -77,12 +79,25 @@ def _b64encode(raw: bytes) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
+def _checked_b64url(segment: str) -> str:
+    """Reject anything that is not base64url before it is used at all.
+
+    Charset-checking is the gate in front of BOTH decoding and signing: a
+    non-ASCII character reaching ``_signature``'s strict ASCII encode would
+    raise ``UnicodeEncodeError`` — a ``ValueError``, but not an
+    ``ExerciseContextInvalid``, so it would escape the typed contract as a
+    500 and put the raw token into the error store's frame locals.
+    """
+    if not isinstance(segment, str) or not _B64URL.fullmatch(segment):
+        raise ExerciseContextInvalid("token segment is not base64url")
+    return segment
+
+
 def _b64decode(segment: str) -> bytes:
     # Character-checked before decoding: base64 is lenient about junk, and a
     # "successfully decoded" malformed segment is a parsing surface we do not
     # want behind the signature check.
-    if not _B64URL.fullmatch(segment):
-        raise ExerciseContextInvalid("token segment is not base64url")
+    _checked_b64url(segment)
     padded = segment + "=" * (-len(segment) % 4)
     try:
         return base64.urlsafe_b64decode(padded.encode("ascii"))
@@ -156,10 +171,12 @@ def sign_exercise_context(context: ExerciseContext, secret_key, user_id) -> str:
 def verify_exercise_context(token, secret_key, user_id) -> ExerciseContext:
     """Return the context this server signed for this user, or fail closed.
 
-    Order matters: shape and version are settled before any decoding, the
-    signature is settled before any payload is interpreted, and the payload
-    is re-checked against the closed vocabulary even after the signature
-    passed — a token signed under an older vocabulary is still not authority.
+    Order matters: shape and version are settled before anything else, both
+    remaining segments are charset-checked before the signature is computed
+    over them, the signature is settled before any payload is decoded or
+    interpreted, and the payload is re-checked against the closed vocabulary
+    even after the signature passed — a token signed under an older
+    vocabulary is still not authority.
     """
     if not isinstance(token, str):
         raise ExerciseContextInvalid("token is not a string")
@@ -174,6 +191,12 @@ def verify_exercise_context(token, secret_key, user_id) -> ExerciseContext:
     # tries to interpret bytes written under rules it does not know.
     if version_segment != str(TOKEN_VERSION):
         raise ExerciseContextInvalid("unsupported token version")
+
+    # Charset before signature: ``_signature`` encodes the payload segment as
+    # strict ASCII, so a non-ASCII character has to be refused HERE or it
+    # leaves this module as an untyped UnicodeEncodeError.
+    _checked_b64url(payload_segment)
+    _checked_b64url(signature_segment)
 
     expected = _b64decode(_signature(secret_key, version_segment, payload_segment))
     provided = _b64decode(signature_segment)

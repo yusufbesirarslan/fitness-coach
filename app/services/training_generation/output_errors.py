@@ -124,7 +124,13 @@ class GenerationExerciseIdentityInvalidError(GenerationOutputError):
 
 
 class GenerationExerciseIncompatibleError(GenerationOutputError):
-    """A generated exercise resolves, but not to the accepted equipment context."""
+    """A generated exercise resolves, but not to a place the context allows.
+
+    Two ways to earn this: the entry's equipment is outside the accepted
+    equipment context, or it is a cardio movement placed on a day whose
+    ``tip`` is not ``kardiyo`` (see ``exercise_resolution._check_placement``).
+    Both are the same answer to the caller on purpose.
+    """
 
     public_code = CODE_GENERATION_EXERCISE_INCOMPATIBLE
     i18n_key = I18N_GENERATION_EXERCISE_INCOMPATIBLE

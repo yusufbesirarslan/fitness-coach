@@ -28,6 +28,11 @@ MOVEMENT_VOCABULARY = frozenset({
     "horizontal_push", "lunge", "mobility", "squat", "vertical_pull",
     "vertical_push",
 })
+# The one movement value that is a cardio *modality* rather than a resistance
+# pattern. Named here, in the vocabulary's own module, so callers that need to
+# reason about cardio placement do not grow a second movement vocabulary.
+CARDIO_MOVEMENT = "cardio"
+
 REGION_VOCABULARY = frozenset({
     "arms", "back", "calves", "cardio", "chest", "core", "full_body",
     "lower_body", "mobility", "shoulders",

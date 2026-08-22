@@ -37,6 +37,7 @@ from app.services.training_generation.output_errors import (
     GenerationExerciseIncompatibleError,
     GenerationExerciseUnresolvedError,
     ParseFailedError,
+    SaveContextInvalidError,
     SaveInvalidError,
     SchemaInvalidError,
     SemanticInvalidError,
@@ -81,8 +82,10 @@ def _exercise(name="Goblet Squat", sets=3):
     }
 
 
-def _week(training_days=3, cardio_days=0, exercises=None, duration=45, cardio_duration=20):
+def _week(training_days=3, cardio_days=0, exercises=None, duration=45,
+          cardio_duration=20, cardio_exercises=None):
     exercises = exercises or [_exercise(), _exercise("Row"), _exercise("Push-up")]
+    cardio_exercises = cardio_exercises or [_exercise("Easy Run", 1)]
     program = []
     training_left = training_days
     cardio_left = cardio_days
@@ -98,7 +101,7 @@ def _week(training_days=3, cardio_days=0, exercises=None, duration=45, cardio_du
             program.append({
                 "gun": day, "tip": "kardiyo", "odak": "Kondisyon",
                 "sure_dk": cardio_duration, "tahmini_kalori": 200,
-                "egzersizler": [_exercise("Easy Run", 1)],
+                "egzersizler": [dict(item) for item in cardio_exercises],
             })
             cardio_left -= 1
         else:
@@ -1077,6 +1080,37 @@ def test_save_refuses_a_context_token_signed_with_another_key(
     assert TrainingPlan.query.count() == 0
 
 
+@pytest.mark.parametrize("token", [
+    "1.ab\u00fccd.AAAA",       # Latin-1 accented, payload segment
+    "1.\U0001f600AAA.AAAA",    # emoji, payload segment
+    "1.\ud800AAA.AAAA",        # lone surrogate, payload segment
+    "1.AAAA.ab\u00fccd",       # Latin-1 accented, signature segment
+    "\u0661.AAAA.AAAA",        # Arabic-Indic digit one, version segment
+])
+def test_save_with_a_non_ascii_context_token_is_refused_not_a_server_error(
+        client, auth_user, save_token, token):
+    """A non-ASCII segment is a rejected token, never an unhandled 500.
+
+    Regression: the signature used to be computed over the raw payload
+    segment before anything charset-checked it, so a non-ASCII character
+    raised UnicodeEncodeError. That is a ValueError but not an
+    ExerciseContextInvalid, so it escaped the typed contract, returned 500,
+    and handed the error store a frame whose locals are the whole token and
+    the signing key.
+    """
+    assert _post_save(client, _week()["program"], save_token()).status_code == 200
+    before = _stored_document(auth_user.id)
+
+    response = _post_save(
+        client, _week(exercises=[_exercise("Barbell Deadlift")])["program"],
+        token, score=9)
+
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_SAVE_CONTEXT_INVALID
+    assert response.get_json()["retryable"] is False
+    assert _stored_document(auth_user.id) == before
+
+
 def test_rejected_context_token_never_echoes_any_part_of_itself(
         client, auth_user, save_token):
     token = save_token(user_id=auth_user.id + 1)
@@ -1190,6 +1224,118 @@ def test_minimal_context_allows_dumbbell_and_band_but_not_machines(
     assert refused.get_json()["code"] == CODE_SAVE_EXERCISE_INVALID
 
 
+# ── Cardio placement: the equipment gate must not be bypassable by placement ─
+
+
+def test_a_cardio_exercise_cannot_be_saved_onto_a_training_day(
+        client, auth_user, monkeypatch):
+    """The full exploit, through the real routes and with nothing forged.
+
+    ``is_exercise_compatible`` gates a cardio movement on the declared
+    ``cardio_type`` and NOT on ``equipment_context`` — deliberately, because a
+    home user who runs outdoors is a real product case. That carve-out is only
+    sound while a cardio entry can only land on a ``kardiyo`` day. Without the
+    placement rule, generating with ekipman="ev"/kardiyo_tipi="karisik"/
+    kardiyo_gun=0 and then saving Swimming and Stationary Cycling into an
+    "antrenman" day stored a server-blessed plan that prescribes a pool and a
+    stationary bike under ``equipment_context: "ev"``.
+    """
+    _session(auth_user)
+    monkeypatch.setattr(
+        training_bp, "_heavy_chat",
+        lambda **kwargs: json.dumps(_week(exercises=[_exercise("Push-Up")])))
+
+    generated = client.post("/training-plan", json={
+        "gun_sayisi": 3, "sure": 45, "ekipman": "ev",
+        "kardiyo_tipi": "karisik", "kardiyo_gun": 0,
+    })
+    assert generated.status_code == 200, generated.get_json()
+    token = generated.get_json()["exercise_context_token"]
+
+    smuggled = _week(exercises=[_exercise("Swimming"),
+                                _exercise("Stationary Cycling")])["program"]
+    assert smuggled[0]["tip"] == "antrenman"
+
+    response = _post_save(client, smuggled, token)
+
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_SAVE_EXERCISE_INVALID
+    assert TrainingPlan.query.count() == 0
+
+
+def test_a_cardio_exercise_still_saves_on_a_genuine_cardio_day(
+        client, auth_user, save_token):
+    plan = _week(training_days=3, cardio_days=1,
+                 exercises=[_exercise("Push-Up")],
+                 cardio_exercises=[_exercise("Swimming", 1)])["program"]
+    assert plan[3]["tip"] == "kardiyo"
+
+    response = _post_save(
+        client, plan, save_token(equipment="ev", cardio_type="karisik"))
+
+    assert response.status_code == 200, response.get_json()
+    stored = _stored_document(auth_user.id)["program"][3]["egzersizler"][0]
+    assert stored["isim"] == "Swimming"
+    assert stored["exercise_id"] == "ex_swimming"
+
+
+def test_cardio_type_yok_still_refuses_a_cardio_exercise_on_a_cardio_day(
+        client, auth_user, save_token):
+    """The placement rule is additive: the cardio_type gate is still the gate."""
+    plan = _week(training_days=3, cardio_days=1,
+                 exercises=[_exercise("Push-Up")],
+                 cardio_exercises=[_exercise("Swimming", 1)])["program"]
+
+    response = _post_save(
+        client, plan, save_token(equipment="ev", cardio_type="yok"))
+
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_SAVE_EXERCISE_INVALID
+    assert TrainingPlan.query.count() == 0
+
+
+def test_generation_fails_closed_when_the_provider_puts_cardio_on_a_training_day(
+        client, auth_user, monkeypatch):
+    _session(auth_user)
+    monkeypatch.setattr(
+        training_bp, "_heavy_chat",
+        lambda **kwargs: json.dumps(
+            _week(exercises=[_exercise("Push-Up"), _exercise("Brisk Walk")])))
+
+    response = client.post("/training-plan", json={
+        "gun_sayisi": 3, "sure": 45, "ekipman": "ev",
+        "kardiyo_tipi": "yuruyus", "kardiyo_gun": 0,
+    })
+
+    assert response.status_code == 500
+    assert response.get_json()["code"] == CODE_GENERATION_EXERCISE_INCOMPATIBLE
+    assert TrainingPlan.query.count() == 0
+
+
+def test_canonicalization_refuses_a_cardio_movement_outside_a_cardio_day():
+    plan = _week(exercises=[_exercise("Jump Rope")])
+    context = ExerciseContext(equipment_context="ev", cardio_type="ip_atlama")
+
+    with pytest.raises(GenerationExerciseIncompatibleError):
+        canonicalize_plan_exercises(plan, context)
+
+
+def test_canonicalization_allows_a_non_cardio_exercise_on_a_cardio_day():
+    """One-directional on purpose.
+
+    Forbidding a strength lift on a kardiyo day is a plan-quality opinion,
+    not an authority question, so this boundary does not answer it.
+    """
+    plan = _week(training_days=3, cardio_days=1,
+                 exercises=[_exercise("Push-Up")],
+                 cardio_exercises=[_exercise("Push-Up", 1)])
+    context = ExerciseContext(equipment_context="ev", cardio_type="karisik")
+
+    canonical = canonicalize_plan_exercises(plan, context)
+
+    assert canonical["program"][3]["egzersizler"][0]["isim"] == "Push-Up"
+
+
 def test_persisted_exercise_context_comes_only_from_the_verified_token(
         client, auth_user, save_token):
     plan = _week(exercises=[_exercise("Push-Up")])["program"]
@@ -1263,12 +1409,20 @@ def test_a_client_declared_context_cannot_widen_the_signed_one(
 
 def test_save_preserves_a_weekly_summary_the_client_supplied(
         client, auth_user, save_token):
-    assert _post_save(client, _week(), save_token()).status_code == 200
+    # Deliberately NOT 7/7/7. That is byte-identical to the summary the
+    # server synthesises when none is supplied, so a 7/7/7 fixture would pass
+    # even with preservation removed and the default fabricated instead.
+    plan = _week()
+    plan["haftalik_ozet"] = {
+        "yogunluk_skoru": 3, "denge_skoru": 4, "uygunluk_skoru": 5,
+    }
+
+    assert _post_save(client, plan, save_token()).status_code == 200
 
     ozet = _stored_document(auth_user.id)["haftalik_ozet"]
-    assert ozet["yogunluk_skoru"] == 7
-    assert ozet["denge_skoru"] == 7
-    assert ozet["uygunluk_skoru"] == 7
+    assert ozet["yogunluk_skoru"] == 3
+    assert ozet["denge_skoru"] == 4
+    assert ozet["uygunluk_skoru"] == 5
 
 
 def test_save_omits_the_weekly_summary_the_client_did_not_send(
@@ -1348,10 +1502,25 @@ def test_generate_route_always_returns_a_context_token(
     assert "ekipman" not in json.dumps(body)
 
 
-def test_generate_route_binds_the_token_factory_to_the_signed_in_user():
-    source = Path(training_bp.__file__).read_text(encoding="utf-8")
-    assert "context_token_factory=" in source
-    assert "sign_exercise_context" in source
+def test_generate_route_binds_the_token_factory_to_the_signed_in_user(
+        client, auth_user, app, monkeypatch):
+    """Behavioural, not a source grep: a factory closed over a hard-coded id
+    would satisfy any "the right strings appear in the route" assertion."""
+    _session(auth_user)
+    monkeypatch.setattr(
+        training_bp, "_heavy_chat", lambda **kwargs: json.dumps(_week()))
+
+    token = client.post("/training-plan", json={
+        "gun_sayisi": 3, "sure": 45,
+    }).get_json()["exercise_context_token"]
+
+    minted_for = resolve_save_exercise_context(
+        token, app.config["SECRET_KEY"], auth_user.id)
+    assert minted_for.equipment_context == "spor_salonu"
+
+    with pytest.raises(SaveContextInvalidError):
+        resolve_save_exercise_context(
+            token, app.config["SECRET_KEY"], auth_user.id + 1)
 
 
 def test_generation_payload_omits_the_token_without_a_factory(monkeypatch):

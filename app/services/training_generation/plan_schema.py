@@ -8,6 +8,8 @@ WEEKDAYS = [
     "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar",
 ]
 VALID_TIPS = frozenset({"antrenman", "dinlenme", "kardiyo"})
+# The only day type a cardio-movement catalog entry may be placed on.
+CARDIO_TIP = "kardiyo"
 
 PLAN_KEYS = frozenset({"program", "haftalik_ozet"})
 DAY_KEYS = frozenset({

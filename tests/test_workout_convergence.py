@@ -324,8 +324,15 @@ def test_bootstrap_supports_legacy_top_level_program_saved_by_training_ui(
             saveable.append({
                 **row, "tip": "dinlenme", "sure_dk": 0, "egzersizler": [],
             })
-    saved = client.post("/training-plan/save", json={"plan": saveable, "score": 7})
-    assert saved.status_code == 200
+    # Seeded directly, NOT through /training-plan/save. Sprint 11 PR4 Task 4
+    # made save persist a canonical document, so routing this through save
+    # would store the new dict shape and quietly delete the branch's only
+    # end-to-end coverage that a legacy BARE-LIST plan_data row still
+    # bootstraps — which is the entire subject of this test.
+    db.session.add(TrainingPlan(
+        user_id=auth_user.id,
+        plan_data=json.dumps(saveable, ensure_ascii=False), score=7))
+    db.session.commit()
 
     body = client.get("/training/bootstrap").get_json()
     assert body["today_plan"]["gun"] == "Pazartesi"
@@ -416,8 +423,14 @@ def test_flag_on_legacy_program_creates_resumable_persisted_session(
             day["tip"] = "dinlenme"
             day["sure_dk"] = 0
             day["egzersizler"] = []
-    assert client.post(
-        "/training-plan/save", json={"plan": program, "score": 7}).status_code == 200
+    # Same reasoning as the bootstrap legacy test above: the subject here is
+    # the session flag over a LEGACY bare-list program, so the row is seeded
+    # directly rather than round-tripped through the now-canonicalizing save
+    # route (which would store a dict document and change the shape under test).
+    db.session.add(TrainingPlan(
+        user_id=auth_user.id,
+        plan_data=json.dumps(program, ensure_ascii=False), score=7))
+    db.session.commit()
     assert client.post("/workout/session/start").status_code == 201
 
     state = client.get("/training/bootstrap").get_json()["workout"]["state"]

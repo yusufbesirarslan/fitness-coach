@@ -704,10 +704,44 @@ def test_context_token_rejects_oversized_tokens():
 @pytest.mark.parametrize("token", [
     "", ".", "1", "1.abc", "1.abc.def.ghi", "1..abc", "1.abc.",
     "1.not base64.AAAA", "1.AAAA.not base64", "1.AAAA.AAAA",
+    # Non-ASCII, in every segment. These used to reach _signature's strict
+    # ASCII encode and escape as UnicodeEncodeError - a ValueError, but not
+    # an ExerciseContextInvalid, so the save layer let it out as a 500 and
+    # the error store captured the raw token from the frame locals.
+    "1.ab\u00fccd.AAAA",            # Latin-1 accented, payload segment
+    "1.\U0001f600AAA.AAAA",         # emoji, payload segment
+    "1.\ud800AAA.AAAA",             # lone surrogate, payload segment
+    "1.AAAA.ab\u00fccd",            # Latin-1 accented, signature segment
+    "1.AAAA.\U0001f600AAA",         # emoji, signature segment
+    "1.AAAA.\ud800AAA",             # lone surrogate, signature segment
+    "\u0661.AAAA.AAAA",             # Arabic-Indic digit one, version segment
+    "\U0001f600.AAAA.AAAA",         # emoji, version segment
+    "\ud800.AAAA.AAAA",             # lone surrogate, version segment
 ])
 def test_context_token_rejects_malformed_tokens(token):
     with pytest.raises(ExerciseContextInvalid):
         verify_exercise_context(token, "secret", user_id=1)
+
+
+@pytest.mark.parametrize("token", [
+    "1.ab\u00fccd.AAAA", "1.\U0001f600AAA.AAAA", "1.\ud800AAA.AAAA",
+    "1.AAAA.ab\u00fccd", "\u0661.AAAA.AAAA",
+])
+def test_context_token_never_raises_an_untyped_error_for_non_ascii(token):
+    """The typed contract is the whole point: exactly one exception type out.
+
+    Anything else escapes ``resolve_save_exercise_context``'s
+    ``except ExerciseContextInvalid`` and becomes a 500 with the raw token in
+    the operator's error store.
+    """
+    try:
+        verify_exercise_context(token, "secret", user_id=1)
+    except ExerciseContextInvalid:
+        return
+    except BaseException as exc:  # pragma: no cover - the regression itself
+        raise AssertionError(
+            "non-ASCII token escaped as " + type(exc).__name__) from exc
+    raise AssertionError("non-ASCII token was accepted")
 
 
 def test_context_token_rejects_an_unknown_version_even_when_correctly_signed():

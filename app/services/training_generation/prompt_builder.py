@@ -137,6 +137,7 @@ PROGRAM RULES
 8. Yalnızca şemadaki anahtarları kullan; ekstra anahtar ekleme.
 9. Egzersiz nesnesi tam olarak isim, set, tekrar, dinlenme, not içersin.
 10. set bir tamsayı olsun; sure_dk ve tahmini_kalori tamsayı olsun.
+11. Kardiyo egzersizleri (koşu, yürüyüş, ip atlama, bisiklet, yüzme) SADECE tip="kardiyo" günlerine yazılsın; tip="antrenman" gününe kardiyo egzersizi koyma.
 
 JSON FORMAT
 {{"program":[{{"gun":"Pazartesi","tip":"antrenman","odak":"Full Body","sure_dk":45,"tahmini_kalori":320,"egzersizler":[{{"isim":"Goblet Squat","set":3,"tekrar":"8-12","dinlenme":"90 sn","not":"RPE 7, kontrollü tempo"}}]}}],"haftalik_ozet":{{"toplam_antrenman_gun":{preferences.gun_sayisi},"toplam_tahmini_kalori":1400,"yogunluk_skoru":7,"denge_skoru":8,"uygunluk_skoru":8}}}}

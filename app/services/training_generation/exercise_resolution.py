@@ -21,6 +21,7 @@ repair path.
 from __future__ import annotations
 
 from app.services.exercise_catalog import (
+    CARDIO_MOVEMENT,
     ExerciseAmbiguous,
     ExerciseContext,
     ExerciseDefinition,
@@ -40,7 +41,7 @@ from app.services.training_generation.output_errors import (
     GenerationExerciseIncompatibleError,
     GenerationExerciseUnresolvedError,
 )
-from app.services.training_generation.plan_schema import EXERCISE_ID_KEY
+from app.services.training_generation.plan_schema import CARDIO_TIP, EXERCISE_ID_KEY
 
 
 def _resolve_generated_name(
@@ -134,6 +135,26 @@ def _resolve_plan_exercise(
     return _resolve_generated_name(exercise["isim"], catalog, cache)
 
 
+def _check_placement(exercise: ExerciseDefinition, day: dict) -> None:
+    """Bind a cardio-movement entry to a cardio day, fail-closed otherwise.
+
+    ``is_exercise_compatible`` deliberately gates cardio by the declared
+    ``cardio_type`` and not by ``equipment_context`` — a home user who runs
+    outdoors is a real product case. That carve-out is only sound while a
+    cardio entry can only land on a ``kardiyo`` day: without this rule a
+    ``ekipman="ev"`` plan could prescribe swimming inside a strength day and
+    still persist under ``equipment_context: "ev"``, i.e. the equipment gate
+    would be bypassable purely by placement.
+
+    Deliberately one-directional. Forbidding a non-cardio exercise on a
+    cardio day is a plan-quality opinion, not an authority question, and this
+    boundary only answers authority questions.
+    """
+    if exercise.movement == CARDIO_MOVEMENT and day.get("tip") != CARDIO_TIP:
+        raise GenerationExerciseIncompatibleError(
+            "cardio exercise is placed on a day that is not a cardio day")
+
+
 def canonicalize_plan_exercises(plan: dict, context: ExerciseContext) -> dict:
     """Resolve every generated exercise reference to catalog-owned identity.
 
@@ -149,7 +170,9 @@ def canonicalize_plan_exercises(plan: dict, context: ExerciseContext) -> dict:
 
     Fails closed (raises a ``GenerationOutputError`` subclass) on the first
     exercise reference that does not resolve to exactly one active,
-    ``context``-compatible catalog entry. No automatic substitution.
+    ``context``-compatible catalog entry, or that is a cardio-movement entry
+    placed on a day whose ``tip`` is not ``kardiyo`` (see
+    ``_check_placement``). No automatic substitution.
     """
     catalog = load_exercise_catalog()
     cache: dict[str, ExerciseDefinition] = {}
@@ -162,6 +185,7 @@ def canonicalize_plan_exercises(plan: dict, context: ExerciseContext) -> dict:
                 raise GenerationExerciseIncompatibleError(
                     "generated exercise is not compatible with the accepted "
                     "equipment context")
+            _check_placement(resolved, day)
             canonical_exercises.append({
                 **exercise,
                 "isim": resolved.canonical_name,
