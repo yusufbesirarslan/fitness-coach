@@ -991,6 +991,8 @@
   "plan.gen_exercise_identity_invalid": "The generated plan referenced an exercise in an unsupported way. Please try again.",
   "plan.gen_exercise_incompatible": "The generated plan included an exercise that isn't available for your selected equipment. Please try again.",
   "plan.save_invalid": "That plan can't be saved because it isn't a valid weekly program.",
+  "plan.save_context_invalid": "That plan can't be saved because its equipment context couldn't be confirmed. Please create the plan again.",
+  "plan.save_exercise_invalid": "That plan can't be saved because it includes an exercise we can't confirm for your selected equipment. Please create the plan again.",
   "plan.contract.invalid_preference": "That training preference is not valid. Check your selections and try again.",
   "plan.contract.unsupported_configuration": "This training preference combination is not supported.",
   "plan.contract.conflicting_preferences": "Those training preferences cannot be combined in a 7-day week.",

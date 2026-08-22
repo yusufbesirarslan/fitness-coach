@@ -2,16 +2,26 @@
 
 Hermetic: no live Bedrock/OpenAI. Provider invocation is always a spy.
 """
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
 import json
 import pytest
+from sqlalchemy import event
 
 from app.blueprints import training as training_bp
 from app.extensions import db
 from app.models import TrainingPlan, UserSession
-from app.services.exercise_catalog import ExerciseAmbiguous, ExerciseContext
+from app.services import exercise_catalog
+from app.services.exercise_catalog import (
+    ExerciseAmbiguous,
+    ExerciseContext,
+    load_exercise_catalog,
+)
+from app.services.training_generation.exercise_context_token import (
+    sign_exercise_context,
+)
 from app.services.training_generation.exercise_resolution import (
     canonicalize_plan_exercises,
 )
@@ -46,12 +56,15 @@ from app.services.training_generation.preference_contract import (
     CODE_GENERATION_PARSE_FAILED,
     CODE_GENERATION_SEMANTICALLY_INVALID,
     CODE_GENERATION_TRUNCATED,
+    CODE_SAVE_CONTEXT_INVALID,
+    CODE_SAVE_EXERCISE_INVALID,
     CODE_SAVE_INVALID,
     CODE_UNSUPPORTED,
 )
 from app.services.training_generation.response_validator import validate_generated_plan
 from app.services.training_generation.service import (
     generate_training_plan_payload,
+    resolve_save_exercise_context,
     validate_plan_for_save,
 )
 from app.services.training_generation import service as training_service
@@ -109,6 +122,84 @@ def _prefs(**overrides):
     )
     data.update(overrides)
     return TrainingPreferences(**data)
+
+
+@pytest.fixture
+def save_token(app, auth_user):
+    """Mint the signed exercise context the save boundary demands.
+
+    Tests must go through the real signer with the real app secret: a
+    hand-rolled token here would test a fixture, not the boundary.
+    """
+    def _make(equipment="spor_salonu", cardio_type="yok", style="genel",
+              user_id=None):
+        return sign_exercise_context(
+            ExerciseContext(equipment_context=equipment, cardio_type=cardio_type,
+                            style=style),
+            app.config["SECRET_KEY"],
+            auth_user.id if user_id is None else user_id,
+        )
+    return _make
+
+
+def _post_save(client, plan, token, score=7.0):
+    return client.post("/training-plan/save", json={
+        "plan": plan, "score": score, "exercise_context_token": token,
+    })
+
+
+def _stored_document(user_id):
+    return json.loads(
+        TrainingPlan.query.filter_by(user_id=user_id).one().plan_data)
+
+
+@contextmanager
+def delete_spy():
+    """Record the DELETEs the database really executes against training_plan.
+
+    Spying on the statement rather than on a patched query object keeps this
+    honest: it observes the destructive act itself, so no refactor of the
+    route can make the ordering guarantee silently untested.
+    """
+    statements = []
+
+    def _record(conn, cursor, statement, parameters, context, executemany):
+        text = statement.lstrip().upper()
+        if text.startswith("DELETE") and "TRAINING_PLAN" in text:
+            statements.append(statement)
+
+    engine = db.engine
+    event.listen(engine, "before_cursor_execute", _record)
+    try:
+        yield statements
+    finally:
+        event.remove(engine, "before_cursor_execute", _record)
+
+
+@pytest.fixture
+def fixture_catalog(tmp_path, monkeypatch):
+    """Swap in a tiny code-owned catalog that actually has a retired entry.
+
+    Nothing has been retired from the shipped catalog yet, so "inactive" is
+    otherwise untestable at the save boundary — and it is precisely the case
+    that must fail closed the first time a product decision retires a lift.
+    """
+    def _entry(exercise_id, name, active=True):
+        return {
+            "exercise_id": exercise_id, "canonical_name": name, "aliases": [],
+            "equipment": ["bodyweight"], "movement": "squat",
+            "primary_region": "lower_body", "active": active,
+        }
+
+    path = tmp_path / "exercises.json"
+    path.write_text(json.dumps({"version": 1, "exercises": [
+        _entry("ex_fixture_active", "Fixture Active"),
+        _entry("ex_fixture_retired", "Fixture Retired", active=False),
+    ]}), encoding="utf-8")
+    monkeypatch.setattr(exercise_catalog, "CATALOG_PATH", path)
+    load_exercise_catalog.cache_clear()
+    yield
+    load_exercise_catalog.cache_clear()
 
 
 def _session(user):
@@ -658,11 +749,10 @@ def test_provider_call_budget_stays_two():
     assert MAX_PROVIDER_COMPLETIONS == 2
 
 
-def test_generated_exercise_id_key_is_not_yet_accepted_by_save(client, auth_user, monkeypatch):
-    """Known Task 3->Task 4 gap: generate now emits exercise_id, but save-time
-    structural validation does not accept it yet (Task 4 widens EXERCISE_KEYS
-    using plan_schema.EXERCISE_ID_KEY). This documents the gap rather than
-    hiding it; Task 4 closes it."""
+def test_generated_exercise_id_is_accepted_by_save(client, auth_user, monkeypatch):
+    """Task 4 closes the Task 3 gap: a generated plan carries exercise_id and
+    a signed exercise context, and both survive the round trip into save. This
+    test replaces the transient-gap test that asserted the opposite."""
     _session(auth_user)
     monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: json.dumps(_week()))
 
@@ -673,9 +763,11 @@ def test_generated_exercise_id_key_is_not_yet_accepted_by_save(client, auth_user
 
     saved = client.post("/training-plan/save", json={
         "plan": body["program"], "score": body["overall_score"],
+        "exercise_context_token": body["exercise_context_token"],
     })
-    assert saved.status_code == 422
-    assert saved.get_json()["code"] == CODE_SAVE_INVALID
+    assert saved.status_code == 200
+    stored = _stored_document(auth_user.id)
+    assert stored["program"][0]["egzersizler"][0]["exercise_id"].startswith("ex_")
 
 
 # ── HTTP typed output errors ─────────────────────────────────────────────────
@@ -722,87 +814,89 @@ def test_truncated_output_is_typed_after_failed_repair(client, auth_user, monkey
 # ── Save-time re-validation ──────────────────────────────────────────────────
 
 
-def test_generated_valid_plan_saves(client, auth_user):
-    response = client.post("/training-plan/save", json={
-        "plan": _week()["program"], "score": 7.0,
-    })
+def test_generated_valid_plan_saves(client, auth_user, save_token):
+    response = _post_save(client, _week()["program"], save_token())
     assert response.status_code == 200
     assert TrainingPlan.query.filter_by(user_id=auth_user.id).count() == 1
 
 
-def test_save_persists_canonicalized_plan_in_the_original_list_shape(client, auth_user):
-    seeded = client.post("/training-plan/save", json={
-        "plan": _week()["program"], "score": 6.0,
-    })
+def test_save_persists_the_canonicalized_plan_as_a_canonical_document(
+        client, auth_user, save_token):
+    """Sprint 11 PR4 Task 4 changes the persisted SHAPE: the row is now the
+    canonical document (program + the server-created exercise_context), not
+    the bare list the client posted. Equipment truth has to be stored with
+    the plan it applies to, and a client-shaped row cannot carry it. Legacy
+    bare-list rows stay readable — every reader branches on
+    isinstance(data, list) — so there is no backfill and no migration.
+
+    The original assertion is preserved verbatim in meaning: a submitted
+    " Pazartesi " is persisted normalized to "Pazartesi"."""
+    seeded = _post_save(client, _week()["program"], save_token(), score=6.0)
     assert seeded.status_code == 200
 
     submitted = _week()["program"]
     submitted[0]["gun"] = " Pazartesi "
-    replaced = client.post("/training-plan/save", json={
-        "plan": submitted, "score": 7.0,
-    })
+    replaced = _post_save(client, submitted, save_token(), score=7.0)
 
     assert replaced.status_code == 200
-    row = TrainingPlan.query.filter_by(user_id=auth_user.id).one()
-    stored = json.loads(row.plan_data)
-    assert isinstance(stored, list)
-    assert stored[0]["gun"] == "Pazartesi"
+    stored = _stored_document(auth_user.id)
+    assert isinstance(stored, dict)
+    assert stored["program"][0]["gun"] == "Pazartesi"
+    assert stored["exercise_context"]["equipment_context"] == "spor_salonu"
 
 
-def test_client_mutated_invalid_plan_does_not_save(client, auth_user):
-    client.post("/training-plan/save", json={"plan": _week()["program"], "score": 7.0})
+def test_client_mutated_invalid_plan_does_not_save(client, auth_user, save_token):
+    _post_save(client, _week()["program"], save_token())
     original = TrainingPlan.query.filter_by(user_id=auth_user.id).one().plan_data
     mutated = _week()["program"]
     mutated[0]["egzersizler"] = []
-    rejected = client.post("/training-plan/save", json={"plan": mutated, "score": 1})
+    rejected = _post_save(client, mutated, save_token(), score=1)
     assert rejected.status_code == 422
     assert rejected.get_json()["code"] == CODE_SAVE_INVALID
     assert TrainingPlan.query.filter_by(user_id=auth_user.id).one().plan_data == original
 
 
-def test_malformed_handcrafted_plan_does_not_save(client, auth_user):
-    response = client.post("/training-plan/save", json={"plan": {"v": 1}, "score": 7.0})
+def test_malformed_handcrafted_plan_does_not_save(client, auth_user, save_token):
+    response = _post_save(client, {"v": 1}, save_token())
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_SAVE_INVALID
+    assert TrainingPlan.query.filter_by(user_id=auth_user.id).count() == 0
+
+
+def test_wrong_training_day_count_does_not_save(client, auth_user, save_token):
+    response = _post_save(client, _week(training_days=1)["program"], save_token())
     assert response.status_code == 422
     assert TrainingPlan.query.filter_by(user_id=auth_user.id).count() == 0
 
 
-def test_wrong_training_day_count_does_not_save(client, auth_user):
-    response = client.post("/training-plan/save", json={
-        "plan": _week(training_days=1)["program"], "score": 7.0,
-    })
+def test_seven_training_days_does_not_save(client, auth_user, save_token):
+    response = _post_save(client, _week(training_days=7)["program"], save_token())
     assert response.status_code == 422
     assert TrainingPlan.query.filter_by(user_id=auth_user.id).count() == 0
 
 
-def test_seven_training_days_does_not_save(client, auth_user):
-    response = client.post("/training-plan/save", json={
-        "plan": _week(training_days=7)["program"], "score": 7.0,
-    })
+def test_wrong_weekday_count_does_not_save(client, auth_user, save_token):
+    response = _post_save(client, _week()["program"][:3], save_token())
     assert response.status_code == 422
     assert TrainingPlan.query.filter_by(user_id=auth_user.id).count() == 0
 
 
-def test_wrong_weekday_count_does_not_save(client, auth_user):
-    plan = _week()["program"][:3]
-    response = client.post("/training-plan/save", json={"plan": plan, "score": 7.0})
-    assert response.status_code == 422
-    assert TrainingPlan.query.filter_by(user_id=auth_user.id).count() == 0
-
-
-def test_save_rejection_happens_before_delete(client, auth_user):
-    first = client.post("/training-plan/save", json={
-        "plan": _week(exercises=[_exercise("Keep Me")])["program"], "score": 7.0,
-    })
+def test_save_rejection_happens_before_delete(client, auth_user, save_token):
+    # "Keep Me" is no longer expressible: exercise identity is the catalog's.
+    # A declared alias plays the same role — it is recognisable in the stored
+    # row, and it proves the surviving plan is the canonicalized one.
+    first = _post_save(client, _week(exercises=[_exercise("Bench")])["program"],
+                       save_token())
     assert first.status_code == 200
-    rejected = client.post("/training-plan/save", json={"plan": {"v": 9}, "score": 1})
+    rejected = _post_save(client, {"v": 9}, save_token(), score=1)
     assert rejected.status_code == 422
-    stored = json.loads(TrainingPlan.query.filter_by(user_id=auth_user.id).one().plan_data)
-    assert stored[0]["egzersizler"][0]["isim"] == "Keep Me"
+    stored = _stored_document(auth_user.id)
+    assert stored["program"][0]["egzersizler"][0]["isim"] == "Barbell Bench Press"
 
 
 def test_validate_plan_for_save_rejects_schema_errors():
     with pytest.raises(SaveInvalidError):
-        validate_plan_for_save({"v": 1})
+        validate_plan_for_save({"v": 1}, ExerciseContext("spor_salonu"))
 
 
 # ── Full mocked path ─────────────────────────────────────────────────────────
@@ -817,10 +911,8 @@ def test_generate_then_save_mocked_path(client, auth_user, monkeypatch):
     body = generated.get_json()
     assert body["program"][0]["egzersizler"][0]["exercise_id"].startswith("ex_")
 
-    # Task 3 canonicalizes generate-time output with exercise_id; save-time
-    # structural validation is widened to accept it in Task 4 (known gap,
-    # see test_generated_exercise_id_key_is_not_yet_accepted_by_save). A
-    # client saving today still submits the name-only shape.
+    # Both shapes reach save through the same boundary: the ID-bearing document
+    # generation produced, and the name-only shape a client may still submit.
     name_only_program = [
         {
             **day,
@@ -831,13 +923,16 @@ def test_generate_then_save_mocked_path(client, auth_user, monkeypatch):
         }
         for day in body["program"]
     ]
-    saved = client.post("/training-plan/save", json={
-        "plan": name_only_program, "score": body["overall_score"],
-    })
-    assert saved.status_code == 200
-    row = TrainingPlan.query.filter_by(user_id=auth_user.id).one()
-    stored = json.loads(row.plan_data)
-    assert len(stored) == 7
+    for program in (body["program"], name_only_program):
+        saved = client.post("/training-plan/save", json={
+            "plan": program, "score": body["overall_score"],
+            "exercise_context_token": body["exercise_context_token"],
+        })
+        assert saved.status_code == 200
+        stored = _stored_document(auth_user.id)
+        assert len(stored["program"]) == 7
+        assert stored["exercise_context"]["catalog_version"] == \
+            load_exercise_catalog().version
 
 
 # ── Architecture guards ──────────────────────────────────────────────────────
@@ -900,3 +995,401 @@ def test_representative_plan_fits_primary_token_budget():
     encoded = json.dumps(bulky, ensure_ascii=False)
     # 4 chars/token is a conservative overestimate of serialized JSON.
     assert len(encoded) / 4 < PRIMARY_MAX_TOKENS
+
+
+# ── Save-time exercise authority (Task 4) ────────────────────────────────────
+#
+# /training-plan/save is the only destructive TrainingPlan path in the app. It
+# now proves catalog exercise authority — against the equipment context the
+# SERVER accepted at generation time, carried in a signed token — before it
+# deletes anything. Every test below is either "the authoritative thing is
+# what got stored" or "the unauthoritative thing changed nothing".
+
+
+def test_valid_id_with_tampered_name_persists_catalog_name(
+        client, auth_user, save_token):
+    token = save_token(equipment="spor_salonu")
+    plan = _week()["program"]
+    plan[0]["egzersizler"][0].update(
+        exercise_id="ex_barbell_bench_press", isim="Magic Chest Exercise")
+
+    assert _post_save(client, plan, token, score=8).status_code == 200
+
+    persisted = _stored_document(auth_user.id)["program"][0]["egzersizler"][0]
+    assert persisted["isim"] == "Barbell Bench Press"
+    assert persisted["exercise_id"] == "ex_barbell_bench_press"
+
+
+def test_invalid_exercise_save_does_not_delete_existing_plan(
+        client, auth_user, save_token):
+    assert _post_save(client, _week()["program"], save_token()).status_code == 200
+    existing = TrainingPlan.query.filter_by(user_id=auth_user.id).one()
+    before = existing.plan_data
+
+    broken = _week()["program"]
+    broken[0]["egzersizler"][0]["exercise_id"] = "ex_fake"
+    response = _post_save(client, broken, save_token(), score=9)
+
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_SAVE_EXERCISE_INVALID
+    assert db.session.get(TrainingPlan, existing.id).plan_data == before
+
+
+# ── Context token at the route boundary ─────────────────────────────────────
+
+
+@pytest.mark.parametrize("token", [
+    None, "", "not-a-token", "1.AAAA.AAAA", "2.AAAA.AAAA", 42, {"v": 1},
+])
+def test_save_without_a_verifiable_context_token_is_refused(
+        client, auth_user, token):
+    body = {"plan": _week()["program"], "score": 7.0}
+    if token is not None:
+        body["exercise_context_token"] = token
+
+    response = client.post("/training-plan/save", json=body)
+
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_SAVE_CONTEXT_INVALID
+    assert response.get_json()["retryable"] is False
+    assert TrainingPlan.query.count() == 0
+
+
+def test_save_refuses_a_context_token_minted_for_another_user(
+        client, auth_user, save_token):
+    response = _post_save(
+        client, _week()["program"], save_token(user_id=auth_user.id + 1))
+
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_SAVE_CONTEXT_INVALID
+    assert TrainingPlan.query.count() == 0
+
+
+def test_save_refuses_a_context_token_signed_with_another_key(
+        client, auth_user):
+    forged = sign_exercise_context(
+        ExerciseContext("spor_salonu"), "not-the-app-secret", auth_user.id)
+
+    response = _post_save(client, _week()["program"], forged)
+
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_SAVE_CONTEXT_INVALID
+    assert TrainingPlan.query.count() == 0
+
+
+def test_rejected_context_token_never_echoes_any_part_of_itself(
+        client, auth_user, save_token):
+    token = save_token(user_id=auth_user.id + 1)
+    body = _post_save(client, _week()["program"], token).get_json()
+
+    assert set(body) == {"error", "code", "retryable"}
+    for segment in token.split("."):
+        assert segment not in body["error"]
+    assert token not in json.dumps(body)
+
+
+# ── Exercise identity at the route boundary ─────────────────────────────────
+
+
+@pytest.mark.parametrize("exercise_id", [
+    "ex_fake", "ex_not_a_real_lift", "EX_BARBELL_BENCH_PRESS",
+    "barbell_bench_press", "ex_barbell_bench_press ",
+])
+def test_save_refuses_an_exercise_id_the_catalog_does_not_own(
+        client, auth_user, save_token, exercise_id):
+    plan = _week()["program"]
+    plan[0]["egzersizler"][0]["exercise_id"] = exercise_id
+
+    response = _post_save(client, plan, save_token())
+
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_SAVE_EXERCISE_INVALID
+    assert TrainingPlan.query.count() == 0
+
+
+def test_save_refuses_a_retired_exercise_by_name_and_by_id(
+        client, auth_user, save_token, fixture_catalog):
+    token = save_token(equipment="ev")
+    assert _post_save(
+        client, _week(exercises=[_exercise("Fixture Active")])["program"],
+        token).status_code == 200
+    survivor = _stored_document(auth_user.id)
+
+    by_name = _week(exercises=[_exercise("Fixture Retired")])["program"]
+    by_id = _week(exercises=[_exercise("Fixture Active")])["program"]
+    by_id[0]["egzersizler"][0]["exercise_id"] = "ex_fixture_retired"
+
+    for plan in (by_name, by_id):
+        response = _post_save(client, plan, token, score=9)
+        assert response.status_code == 422
+        assert response.get_json()["code"] == CODE_SAVE_EXERCISE_INVALID
+    assert _stored_document(auth_user.id) == survivor
+
+
+def test_save_refuses_a_name_only_exercise_the_catalog_cannot_resolve(
+        client, auth_user, save_token):
+    plan = _week(exercises=[_exercise("Invented Laser Row")])["program"]
+
+    response = _post_save(client, plan, save_token())
+
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_SAVE_EXERCISE_INVALID
+    assert "Invented Laser Row" not in response.get_json()["error"]
+    assert TrainingPlan.query.count() == 0
+
+
+def test_save_accepts_a_declared_alias_and_stores_the_canonical_name(
+        client, auth_user, save_token):
+    plan = _week(exercises=[_exercise("Bench-Press")])["program"]
+
+    assert _post_save(client, plan, save_token()).status_code == 200
+
+    persisted = _stored_document(auth_user.id)["program"][0]["egzersizler"][0]
+    assert persisted["isim"] == "Barbell Bench Press"
+    assert persisted["exercise_id"] == "ex_barbell_bench_press"
+    # Prescription fields are carried through untouched — the catalog owns
+    # identity, not the dose.
+    assert persisted["set"] == 3
+    assert persisted["tekrar"] == "8-12"
+    assert persisted["dinlenme"] == "90 sn"
+
+
+# ── Equipment truth at the route boundary ───────────────────────────────────
+
+
+def test_home_context_refuses_a_barbell_exercise_the_gym_context_allows(
+        client, auth_user, save_token):
+    bodyweight = _week(exercises=[_exercise("Push-Up")])["program"]
+    barbell = _week(exercises=[_exercise("Barbell Back Squat")])["program"]
+
+    assert _post_save(
+        client, bodyweight, save_token(equipment="ev")).status_code == 200
+
+    rejected = _post_save(client, barbell, save_token(equipment="ev"), score=9)
+    assert rejected.status_code == 422
+    assert rejected.get_json()["code"] == CODE_SAVE_EXERCISE_INVALID
+    assert _stored_document(auth_user.id)["program"][0]["egzersizler"][0]["isim"] \
+        == "Push-Up"
+
+    # Same plan, honest context — the refusal was about equipment, not the lift.
+    assert _post_save(
+        client, barbell, save_token(equipment="spor_salonu"), score=9,
+    ).status_code == 200
+
+
+def test_minimal_context_allows_dumbbell_and_band_but_not_machines(
+        client, auth_user, save_token):
+    token = save_token(equipment="minimal")
+    allowed = _week(exercises=[_exercise("Goblet Squat"),
+                               _exercise("Band Row")])["program"]
+    machine = _week(exercises=[_exercise("Leg Press")])["program"]
+
+    assert _post_save(client, allowed, token).status_code == 200
+    refused = _post_save(client, machine, token, score=9)
+    assert refused.status_code == 422
+    assert refused.get_json()["code"] == CODE_SAVE_EXERCISE_INVALID
+
+
+def test_persisted_exercise_context_comes_only_from_the_verified_token(
+        client, auth_user, save_token):
+    plan = _week(exercises=[_exercise("Push-Up")])["program"]
+    token = save_token(equipment="ev", cardio_type="kosu", style="calisthenics")
+
+    assert _post_save(client, plan, token).status_code == 200
+
+    assert _stored_document(auth_user.id)["exercise_context"] == {
+        "equipment_context": "ev",
+        "cardio_type": "kosu",
+        "style": "calisthenics",
+        "catalog_version": load_exercise_catalog().version,
+    }
+
+
+# ── Client-authored authority keys are refused, never absorbed ──────────────
+
+
+@pytest.mark.parametrize("authority_key", [
+    "exercise_context", "equipment", "ekipman", "catalog_version",
+    "exercise_context_token",
+])
+def test_save_refuses_client_authored_authority_keys_on_the_document(
+        client, auth_user, save_token, authority_key):
+    document = {
+        "program": _week()["program"],
+        authority_key: {"equipment_context": "spor_salonu"},
+    }
+
+    response = _post_save(client, document, save_token())
+
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_SAVE_INVALID
+    assert TrainingPlan.query.count() == 0
+
+
+@pytest.mark.parametrize("authority_key", [
+    "equipment", "movement", "primary_region", "active", "canonical_name",
+])
+def test_save_refuses_client_authored_catalog_metadata_on_an_exercise(
+        client, auth_user, save_token, authority_key):
+    plan = _week()["program"]
+    plan[0]["egzersizler"][0][authority_key] = "bodyweight"
+
+    response = _post_save(client, plan, save_token())
+
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_SAVE_INVALID
+    assert TrainingPlan.query.count() == 0
+
+
+def test_a_client_declared_context_cannot_widen_the_signed_one(
+        client, auth_user, save_token):
+    """The forbidden move, spelled out: post a home token but ask for a gym."""
+    plan = _week(exercises=[_exercise("Barbell Back Squat")])["program"]
+
+    response = client.post("/training-plan/save", json={
+        "plan": plan, "score": 7.0,
+        "exercise_context_token": save_token(equipment="ev"),
+        "exercise_context": {"equipment_context": "spor_salonu"},
+        "ekipman": "spor_salonu",
+    })
+
+    assert response.status_code == 422
+    assert response.get_json()["code"] == CODE_SAVE_EXERCISE_INVALID
+    assert TrainingPlan.query.count() == 0
+
+
+# ── The weekly summary is preserved, never fabricated ───────────────────────
+
+
+def test_save_preserves_a_weekly_summary_the_client_supplied(
+        client, auth_user, save_token):
+    assert _post_save(client, _week(), save_token()).status_code == 200
+
+    ozet = _stored_document(auth_user.id)["haftalik_ozet"]
+    assert ozet["yogunluk_skoru"] == 7
+    assert ozet["denge_skoru"] == 7
+    assert ozet["uygunluk_skoru"] == 7
+
+
+def test_save_omits_the_weekly_summary_the_client_did_not_send(
+        client, auth_user, save_token):
+    assert _post_save(client, _week()["program"], save_token()).status_code == 200
+
+    stored = _stored_document(auth_user.id)
+    assert "haftalik_ozet" not in stored
+    assert set(stored) == {"program", "exercise_context"}
+
+
+# ── Ordering: nothing is destroyed until everything has passed ──────────────
+
+
+def test_every_check_runs_before_the_destructive_delete(
+        client, auth_user, save_token):
+    """Delete spy over the whole rejection surface.
+
+    Token, structure, semantics, exercise resolution and equipment
+    compatibility each get a submission that fails only on them; none may
+    reach the DELETE. The final valid save proves the spy can see a delete
+    at all, so an empty list is evidence and not a broken probe.
+    """
+    assert _post_save(client, _week()["program"], save_token()).status_code == 200
+    seeded = _stored_document(auth_user.id)
+
+    rejections = {
+        "token": {"plan": _week()["program"], "score": 1},
+        "structure": {"plan": {"v": 9}, "score": 1,
+                      "exercise_context_token": save_token()},
+        "semantics": {"plan": _week(training_days=1)["program"], "score": 1,
+                      "exercise_context_token": save_token()},
+        "resolution": {
+            "plan": _week(exercises=[_exercise("Invented Laser Row")])["program"],
+            "score": 1, "exercise_context_token": save_token()},
+        "equipment": {
+            "plan": _week(exercises=[_exercise("Barbell Back Squat")])["program"],
+            "score": 1, "exercise_context_token": save_token(equipment="ev")},
+    }
+
+    with delete_spy() as deletes:
+        for label, body in rejections.items():
+            response = client.post("/training-plan/save", json=body)
+            assert response.status_code == 422, label
+            assert deletes == [], label
+        assert _post_save(
+            client, _week()["program"], save_token(), score=9).status_code == 200
+        assert len(deletes) == 1
+
+    assert _stored_document(auth_user.id)["program"] == seeded["program"]
+
+
+def test_save_route_verifies_context_before_it_validates_or_deletes():
+    source = Path(training_bp.__file__).read_text(encoding="utf-8")
+    verify = source.index("resolve_save_exercise_context(")
+    validate = source.index("validate_plan_for_save(")
+    delete = source.index("TrainingPlan.query.filter_by(user_id=current_user.id).delete()")
+
+    assert verify < validate < delete
+
+
+# ── Generation emits the token; unit callers may opt out ────────────────────
+
+
+def test_generate_route_always_returns_a_context_token(
+        client, auth_user, monkeypatch):
+    _session(auth_user)
+    monkeypatch.setattr(training_bp, "_heavy_chat", lambda **kwargs: json.dumps(_week()))
+
+    body = client.post("/training-plan", json={"gun_sayisi": 3, "sure": 45}).get_json()
+
+    token = body["exercise_context_token"]
+    assert isinstance(token, str) and token
+    # The payload never restates the context in the clear: the token is the
+    # only carrier, so a client cannot read (or edit) what it is asserting.
+    assert "exercise_context" not in body
+    assert "ekipman" not in json.dumps(body)
+
+
+def test_generate_route_binds_the_token_factory_to_the_signed_in_user():
+    source = Path(training_bp.__file__).read_text(encoding="utf-8")
+    assert "context_token_factory=" in source
+    assert "sign_exercise_context" in source
+
+
+def test_generation_payload_omits_the_token_without_a_factory(monkeypatch):
+    payload = _generate(monkeypatch, lambda **kwargs: json.dumps(_week()))
+    assert "exercise_context_token" not in payload
+
+
+def test_generated_token_matches_the_accepted_equipment_context(
+        client, auth_user, app, monkeypatch):
+    _session(auth_user)
+    monkeypatch.setattr(
+        training_bp, "_heavy_chat",
+        lambda **kwargs: json.dumps(_week(exercises=[_exercise("Push-Up")])))
+
+    body = client.post("/training-plan", json={
+        "gun_sayisi": 3, "sure": 45, "ekipman": "ev",
+    }).get_json()
+
+    context = resolve_save_exercise_context(
+        body["exercise_context_token"], app.config["SECRET_KEY"], auth_user.id)
+    assert context.equipment_context == "ev"
+
+
+# ── Structural validation opts in to exercise_id only where save asks ───────
+
+
+def test_generation_structural_validation_still_rejects_provider_authored_ids():
+    plan = _week()
+    plan["program"][0]["egzersizler"][0]["exercise_id"] = "ex_barbell_bench_press"
+    with pytest.raises(SchemaInvalidError):
+        validate_generated_plan(plan, _prefs())
+
+
+def test_only_one_resolution_path_exists_for_plan_exercises():
+    """Save must reuse the generation canonicalizer, not fork a second one."""
+    gen_root = Path(training_service.__file__).resolve().parent
+    resolvers = [
+        path.name for path in gen_root.glob("*.py")
+        if "resolve_exercise(" in path.read_text(encoding="utf-8")
+    ]
+    assert resolvers == ["exercise_resolution.py"]

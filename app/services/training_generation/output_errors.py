@@ -16,6 +16,8 @@ from app.services.training_generation.preference_contract import (
     CODE_GENERATION_SEMANTICALLY_INVALID,
     CODE_GENERATION_TRUNCATED,
     CODE_GENERATION_UNAVAILABLE,
+    CODE_SAVE_CONTEXT_INVALID,
+    CODE_SAVE_EXERCISE_INVALID,
     CODE_SAVE_INVALID,
     I18N_GENERATION_EXERCISE_AMBIGUOUS,
     I18N_GENERATION_EXERCISE_IDENTITY_INVALID,
@@ -26,6 +28,8 @@ from app.services.training_generation.preference_contract import (
     I18N_GENERATION_SEMANTICALLY_INVALID,
     I18N_GENERATION_TRUNCATED,
     I18N_GENERATION_UNAVAILABLE,
+    I18N_SAVE_CONTEXT_INVALID,
+    I18N_SAVE_EXERCISE_INVALID,
     I18N_SAVE_INVALID,
 )
 
@@ -138,6 +142,39 @@ class SaveInvalidError(GenerationOutputError):
 
     public_code = CODE_SAVE_INVALID
     i18n_key = I18N_SAVE_INVALID
+    http_status = 422
+    retryable = False
+    repairable = False
+
+
+class SaveContextInvalidError(GenerationOutputError):
+    """The signed exercise context a save relies on could not be trusted.
+
+    Sprint 11 PR4 Task 4. The equipment context is server-owned truth carried
+    from generation in a signed token; if it cannot be verified for THIS user,
+    there is no context to validate the plan against and the save is refused
+    before anything is read from the plan. Distinct from SaveExerciseInvalid:
+    the honest recovery is "generate the plan again", not "edit the plan".
+    Never retryable: replaying the same unverifiable token cannot succeed.
+    """
+
+    public_code = CODE_SAVE_CONTEXT_INVALID
+    i18n_key = I18N_SAVE_CONTEXT_INVALID
+    http_status = 422
+    retryable = False
+    repairable = False
+
+
+class SaveExerciseInvalidError(GenerationOutputError):
+    """A plan being saved names an exercise the catalog will not authorize.
+
+    Deliberately ONE code for unknown, ambiguous, inactive, fake-ID and
+    equipment-incompatible alike: telling a client which of those it hit
+    turns the save endpoint into a catalog oracle it was never given.
+    """
+
+    public_code = CODE_SAVE_EXERCISE_INVALID
+    i18n_key = I18N_SAVE_EXERCISE_INVALID
     http_status = 422
     retryable = False
     repairable = False

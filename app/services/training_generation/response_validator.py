@@ -17,7 +17,10 @@ from app.services.training_generation.plan_schema import (
     DAY_KEYS,
     DURATION_MAX,
     DURATION_MIN,
+    EXERCISE_ID_MAX,
+    EXERCISE_ID_KEY,
     EXERCISE_KEYS,
+    EXERCISE_KEYS_WITH_ID,
     FOCUS_MAX,
     NAME_MAX,
     NOTE_MAX,
@@ -68,23 +71,39 @@ def _require_int(value, label: str, low: int, high: int) -> int:
     return value
 
 
-def _validate_exercise(raw) -> dict:
+def _validate_exercise(raw, *, allow_exercise_id: bool = False) -> dict:
     ex = _require_mapping(raw, "egzersiz")
-    _forbid_unknown(ex, EXERCISE_KEYS, "egzersiz")
+    _forbid_unknown(
+        ex,
+        EXERCISE_KEYS_WITH_ID if allow_exercise_id else EXERCISE_KEYS,
+        "egzersiz",
+    )
     for key in ("isim", "set", "tekrar", "dinlenme"):
         if key not in ex:
             raise SchemaInvalidError(f"egzersiz missing {key}")
     note = ex["not"] if "not" in ex else ""
-    return {
+    validated = {
         "isim": _require_str(ex["isim"], "egzersiz isim", NAME_MAX),
         "set": _require_int(ex["set"], "set", SET_MIN, SET_MAX),
         "tekrar": _require_str(ex["tekrar"], "tekrar", REPS_MAX),
         "dinlenme": _require_str(ex["dinlenme"], "dinlenme", REST_MAX),
         "not": _require_str(note, "not", NOTE_MAX, allow_empty=True),
     }
+    # Shape only. Whether this string is real, active and allowed by the
+    # accepted equipment context is the catalog's call, made afterwards in
+    # exercise_resolution — structure never confers identity. Deliberately
+    # passed through unstripped, unlike every display string above: an ID is
+    # round-tripped verbatim, so surrounding whitespace means it was edited,
+    # and ID_PATTERN must be the gate rather than a lenient normalizer.
+    if allow_exercise_id and EXERCISE_ID_KEY in ex:
+        raw_id = ex[EXERCISE_ID_KEY]
+        if not isinstance(raw_id, str) or not raw_id or len(raw_id) > EXERCISE_ID_MAX:
+            raise SchemaInvalidError("exercise_id must be a bounded string")
+        validated[EXERCISE_ID_KEY] = raw_id
+    return validated
 
 
-def _validate_day(raw) -> dict:
+def _validate_day(raw, *, allow_exercise_id: bool = False) -> dict:
     day = _require_mapping(raw, "gün")
     _forbid_unknown(day, DAY_KEYS, "gün")
     for key in DAY_KEYS:
@@ -99,7 +118,10 @@ def _validate_day(raw) -> dict:
     exercises_raw = day["egzersizler"]
     if not isinstance(exercises_raw, list):
         raise SchemaInvalidError("egzersizler liste olmalı")
-    exercises = [_validate_exercise(item) for item in exercises_raw]
+    exercises = [
+        _validate_exercise(item, allow_exercise_id=allow_exercise_id)
+        for item in exercises_raw
+    ]
     if tip == "antrenman" and len(exercises) < 1:
         raise SchemaInvalidError("antrenman günü en az bir egzersiz içermeli")
     if tip == "kardiyo" and len(exercises) < 1:
@@ -143,7 +165,23 @@ def coerce_plan_document(raw) -> dict:
     raise SchemaInvalidError("plan JSON object olmalı")
 
 
-def validate_plan_structure(plan, *, require_ozet: bool = False) -> dict:
+def validate_plan_structure(
+    plan,
+    *,
+    require_ozet: bool = False,
+    allow_exercise_id: bool = False,
+) -> dict:
+    """Validate the canonical 7-day shape of a CLIENT- or provider-authored plan.
+
+    ``allow_exercise_id`` is off by default so provider generation keeps
+    rejecting a provider-authored ``exercise_id``: providers are prompted with
+    display names only, and an ID they invented is not identity. Save opts in
+    — a client legitimately hands back the ID canonicalization gave it — but
+    the top-level allow-list is NOT widened for either caller: ``PLAN_KEYS``
+    must keep rejecting ``exercise_context`` and every other authority key, so
+    a caller cannot declare its own equipment truth. The server attaches that
+    block after validation, from the verified token alone.
+    """
     document = coerce_plan_document(plan)
     extra_top = set(document) - PLAN_KEYS
     if extra_top:
@@ -151,7 +189,10 @@ def validate_plan_structure(plan, *, require_ozet: bool = False) -> dict:
     program_raw = document.get("program")
     if not isinstance(program_raw, list) or len(program_raw) != 7:
         raise SchemaInvalidError("program tam 7 gün içermeli")
-    days = [_validate_day(item) for item in program_raw]
+    days = [
+        _validate_day(item, allow_exercise_id=allow_exercise_id)
+        for item in program_raw
+    ]
     seen = [day["gun"] for day in days]
     if len(set(seen)) != 7:
         raise SchemaInvalidError("gun alanları benzersiz olmalı (tekrar eden gün)")

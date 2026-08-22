@@ -90,7 +90,10 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
         kardiyo_yogunluk: "orta", antrenman_tarzi: "genel", odak_hedef: "genel",
         injuries: (window.__TRAINING && window.__TRAINING.injuries) || ""   // kayıtlı sakatlık (varsa) ile ön-doldurulur
     };
-    let currentPlan = null, currentScore = null;
+    // currentContextToken: the server-signed equipment context from generate,
+    // held in memory beside the candidate ONLY to hand back on save. Never
+    // parsed, displayed, edited, stored, or put in a URL — it is opaque here.
+    let currentPlan = null, currentScore = null, currentContextToken = null;
 
     // ── TOAST ──
     function showToast(msg, type = 'info') {
@@ -1031,6 +1034,7 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
             if (data.error) { showToast(data.error, 'error'); return; }
             currentPlan  = data.program;
             currentScore = data.overall_score;
+            currentContextToken = data.exercise_context_token;
             renderResults(data);
         } catch (err) {
             showToast(__t('training.error_prefix') + err.message, 'error');
@@ -1117,7 +1121,11 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
             const result = await workoutStateClient.mutate("/training-plan/save", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ plan: currentPlan, score: currentScore })
+                body: JSON.stringify({
+                    plan: currentPlan,
+                    score: currentScore,
+                    exercise_context_token: currentContextToken
+                })
             });
             if (!result || !result.ok) {
                 const detail = result && result.body && result.body.error;

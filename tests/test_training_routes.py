@@ -13,6 +13,10 @@ import pytest
 from app.blueprints import training as training_bp
 from app.extensions import db
 from app.models import DailyQuest, PumpCheck, TrainingPlan, UserQuestProgress, UserSession, WaterLog, WorkoutLog
+from app.services.exercise_catalog import ExerciseContext, load_exercise_catalog
+from app.services.training_generation.exercise_context_token import (
+    sign_exercise_context,
+)
 from tests.test_validators import _image_data_url
 from tests.test_workout_state import assert_valid_state_contract
 
@@ -96,6 +100,40 @@ def _expect_canonicalized(program):
             })
         canonical.append({**day, "egzersizler": exercises})
     return canonical
+
+
+@pytest.fixture
+def plan_save_token(app):
+    """Sprint 11 PR4 Task 4: saving a plan now requires the signed equipment
+    context that the generate call handed the client."""
+    def _make(user_id, equipment="spor_salonu"):
+        return sign_exercise_context(
+            ExerciseContext(equipment_context=equipment),
+            app.config["SECRET_KEY"], user_id)
+    return _make
+
+
+def _save_program(client, token, program=None, score=7.0):
+    return client.post("/training-plan/save", json={
+        "plan": _seven_day_program() if program is None else program,
+        "score": score,
+        "exercise_context_token": token,
+    })
+
+
+def _expect_saved_document(program, equipment="spor_salonu"):
+    """The canonical row the save route now persists: program + the
+    server-created exercise_context block (no haftalik_ozet, because a bare
+    program list does not carry one and save never fabricates scores)."""
+    return {
+        "program": _expect_canonicalized(program),
+        "exercise_context": {
+            "equipment_context": equipment,
+            "cardio_type": "yok",
+            "style": "general_fitness",
+            "catalog_version": load_exercise_catalog().version,
+        },
+    }
 
 
 @pytest.fixture
@@ -275,25 +313,29 @@ def test_plan_hicbiri_clears_stored_injuries(client, with_session, auth_user, mo
 # Plan kaydet / aktif plan
 # ---------------------------------------------------------------------------
 
-def test_save_plan_replaces_previous(client, auth_user):
+def test_save_plan_replaces_previous(client, auth_user, plan_save_token):
     assert client.post("/training-plan/save", json={}).status_code == 400
 
+    token = plan_save_token(auth_user.id)
     first = _seven_day_program("Squat")
     second = _seven_day_program("Deadlift")
-    client.post("/training-plan/save", json={"plan": first, "score": 7.0})
-    client.post("/training-plan/save", json={"plan": second, "score": 8.0})
+    assert _save_program(client, token, first, 7.0).status_code == 200
+    assert _save_program(client, token, second, 8.0).status_code == 200
     plans = TrainingPlan.query.filter_by(user_id=auth_user.id).all()
     assert len(plans) == 1
-    assert json.loads(plans[0].plan_data) == second
+    # Sprint 11 PR4 Task 4: the row is the canonical document now, and the
+    # submitted names are the catalog's ("Deadlift" -> "Barbell Deadlift").
+    assert json.loads(plans[0].plan_data) == _expect_saved_document(second)
 
 
-def test_active_plan_roundtrip(client, auth_user):
+def test_active_plan_roundtrip(client, auth_user, plan_save_token):
     assert client.get("/training-plan/active").get_json() == {"exists": False}
     program = _seven_day_program()
-    client.post("/training-plan/save", json={"plan": program, "score": 7.5})
+    assert _save_program(
+        client, plan_save_token(auth_user.id), program, 7.5).status_code == 200
     body = client.get("/training-plan/active").get_json()
     assert body["exists"] is True
-    assert body["plan"] == program
+    assert body["plan"] == _expect_saved_document(program)
     assert body["score"] == 7.5
 
 
@@ -302,8 +344,8 @@ def test_active_plan_roundtrip(client, auth_user):
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def workout_ready(client, auth_user):
-    client.post("/training-plan/save", json={"plan": _seven_day_program(), "score": 7.0})
+def workout_ready(client, auth_user, plan_save_token):
+    _save_program(client, plan_save_token(auth_user.id))
     db.session.add(DailyQuest(title="Log a Workout", points_reward=50,
                               quest_type="workout_logged"))
     db.session.commit()
@@ -624,8 +666,9 @@ def test_session_routes_are_404_when_flag_off(client, auth_user, method, path):
     assert WorkoutSession.query.count() == 0
 
 
-def test_complete_ignores_session_id_when_flag_off(client, with_session, monkeypatch):
-    client.post("/training-plan/save", json={"plan": _seven_day_program(), "score": 7.0})
+def test_complete_ignores_session_id_when_flag_off(
+        client, with_session, monkeypatch, plan_save_token):
+    _save_program(client, plan_save_token(with_session.id))
     monkeypatch.setattr(training_bp, "validate_pump_check_image",
                         lambda *a, **k: (b"jpeg", "image/jpeg", None))
     monkeypatch.setattr(training_bp, "validate_pump_check",

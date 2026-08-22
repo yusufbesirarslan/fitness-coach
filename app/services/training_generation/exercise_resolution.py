@@ -40,6 +40,7 @@ from app.services.training_generation.output_errors import (
     GenerationExerciseIncompatibleError,
     GenerationExerciseUnresolvedError,
 )
+from app.services.training_generation.plan_schema import EXERCISE_ID_KEY
 
 
 def _resolve_generated_name(
@@ -94,16 +95,57 @@ def _resolve_generated_name(
     return exercise
 
 
+def _resolve_declared_id(exercise_id: str, catalog) -> ExerciseDefinition:
+    """Resolve a client-declared ``exercise_id`` — untrusted until it resolves.
+
+    An ID arriving on a save is only ever a *claim*: it looks like identity,
+    which is exactly why it gets no benefit of the doubt. It is re-resolved
+    against the same catalog on every submission, so a retired or renamed
+    entry stops being savable the moment the product retires it.
+    """
+    try:
+        return resolve_exercise(exercise_id=exercise_id, catalog=catalog)
+    except ExerciseIdentityInvalid as exc:
+        raise GenerationExerciseIdentityInvalidError(
+            "declared exercise ID is not valid catalog identity") from exc
+    except ExerciseInactive as exc:
+        raise GenerationExerciseUnresolvedError(
+            "declared exercise ID is not an active catalog entry") from exc
+    except ExerciseResolutionError as exc:  # pragma: no cover - defensive
+        raise GenerationExerciseUnresolvedError(
+            "declared exercise ID could not be resolved") from exc
+
+
+def _resolve_plan_exercise(
+    exercise: dict,
+    catalog,
+    cache: dict[str, ExerciseDefinition],
+) -> ExerciseDefinition:
+    """Resolve one plan entry, ID-bearing or name-only, through one path.
+
+    Generated plans arrive name-only (structural validation rejects a
+    provider-authored ID); saved plans may carry the ID canonicalization
+    already wrote. Both land here rather than in a second resolver, because
+    two resolution paths are two places for exercise authority to drift.
+    """
+    declared_id = exercise.get(EXERCISE_ID_KEY)
+    if declared_id is not None:
+        return _resolve_declared_id(declared_id, catalog)
+    return _resolve_generated_name(exercise["isim"], catalog, cache)
+
+
 def canonicalize_plan_exercises(plan: dict, context: ExerciseContext) -> dict:
     """Resolve every generated exercise reference to catalog-owned identity.
 
     Must run after PR3 structural + semantic validation has already accepted
-    ``plan`` (``validate_generated_plan``). For each exercise entry this
-    writes only ``exercise_id`` (the catalog's stable identity) and replaces
-    ``isim`` with the catalog's canonical display name; every prescription
-    field (``set``/``tekrar``/``dinlenme``/``not``) is carried over
-    unchanged. Never adds catalog metadata (equipment/movement/region) to the
-    plan — those stay server-side.
+    ``plan`` (``validate_generated_plan``, or ``validate_plan_for_save`` on
+    the save path). For each exercise entry this writes only ``exercise_id``
+    (the catalog's stable identity) and replaces ``isim`` with the catalog's
+    canonical display name — a supplied display name is never preserved, so a
+    valid ID plus a fabricated name still persists the catalog's name; every
+    prescription field (``set``/``tekrar``/``dinlenme``/``not``) is carried
+    over unchanged. Never adds catalog metadata (equipment/movement/region)
+    to the plan — those stay server-side.
 
     Fails closed (raises a ``GenerationOutputError`` subclass) on the first
     exercise reference that does not resolve to exactly one active,
@@ -115,7 +157,7 @@ def canonicalize_plan_exercises(plan: dict, context: ExerciseContext) -> dict:
     for day in plan["program"]:
         canonical_exercises = []
         for exercise in day["egzersizler"]:
-            resolved = _resolve_generated_name(exercise["isim"], catalog, cache)
+            resolved = _resolve_plan_exercise(exercise, catalog, cache)
             if not is_exercise_compatible(resolved, context):
                 raise GenerationExerciseIncompatibleError(
                     "generated exercise is not compatible with the accepted "

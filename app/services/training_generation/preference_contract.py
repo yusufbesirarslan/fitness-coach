@@ -31,6 +31,14 @@ CODE_GENERATION_EXERCISE_AMBIGUOUS = "TRAINING_PLAN_GENERATION_EXERCISE_AMBIGUOU
 CODE_GENERATION_EXERCISE_IDENTITY_INVALID = "TRAINING_PLAN_GENERATION_EXERCISE_IDENTITY_INVALID"
 CODE_GENERATION_EXERCISE_INCOMPATIBLE = "TRAINING_PLAN_GENERATION_EXERCISE_INCOMPATIBLE"
 CODE_SAVE_INVALID = "TRAINING_PLAN_SAVE_INVALID"
+# Sprint 11 PR4 Task 4: the two save-time authority failures, kept as
+# DISTINCT closed codes. "Your signed equipment context is not usable"
+# and "this plan asks for an exercise the catalog will not authorize"
+# are different client situations and must not collapse into one. Each
+# stays coarse inside itself: a client learning WHICH exercise, or WHY
+# a token failed, would be probing the catalog and the signature.
+CODE_SAVE_CONTEXT_INVALID = "TRAINING_PLAN_SAVE_CONTEXT_INVALID"
+CODE_SAVE_EXERCISE_INVALID = "TRAINING_PLAN_SAVE_EXERCISE_INVALID"
 CODE_NO_SESSION = "TRAINING_PLAN_NO_SESSION"
 
 I18N_INVALID = "plan.contract.invalid_preference"
@@ -48,6 +56,8 @@ I18N_GENERATION_EXERCISE_AMBIGUOUS = "plan.gen_exercise_ambiguous"
 I18N_GENERATION_EXERCISE_IDENTITY_INVALID = "plan.gen_exercise_identity_invalid"
 I18N_GENERATION_EXERCISE_INCOMPATIBLE = "plan.gen_exercise_incompatible"
 I18N_SAVE_INVALID = "plan.save_invalid"
+I18N_SAVE_CONTEXT_INVALID = "plan.save_context_invalid"
+I18N_SAVE_EXERCISE_INVALID = "plan.save_exercise_invalid"
 
 # UI tokens the product actually exposes. Aliases map onto these, never onto
 # a silent General fallback.

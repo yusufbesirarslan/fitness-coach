@@ -10,6 +10,7 @@ is toggled with app.config["UIUX_PLAN_V2_ENABLED"] (training() reads it at reque
 time); the weekly section is gated independently by WEEKLY_PROGRAM_UI_ENABLED.
 """
 import json
+from pathlib import Path
 import re
 
 import pytest
@@ -379,3 +380,28 @@ def test_new_plan_copy_is_axisai_only():
         for key, val in _CATALOG[loc].items():
             if key.startswith("plan."):
                 assert "fitx" not in val.lower(), f"{loc}:{key}"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# G. SIGNED EXERCISE-CONTEXT TOKEN FORWARDING (Sprint 11 PR4 Task 4)
+# ══════════════════════════════════════════════════════════════════════════
+
+def test_plan_create_forwards_the_context_token_from_generate_into_save():
+    """plan_create.js is a submitter, not a second authority — and that holds
+    for the signed equipment context too: it forwards the token from the
+    generate response straight into the save body without parsing it,
+    rendering it, editing it, or persisting it anywhere."""
+    source = (Path(__file__).resolve().parents[1]
+              / "static" / "plan_create.js").read_text(encoding="utf-8")
+
+    assert "exercise_context_token: data.exercise_context_token" in source
+    token_lines = [
+        line for line in source.splitlines() if "exercise_context_token" in line
+    ]
+    assert len(token_lines) == 1
+    for forbidden in ("localStorage", "sessionStorage", "textContent",
+                      "innerHTML", "location", "atob", "JSON.parse",
+                      "searchParams", "split"):
+        assert forbidden not in token_lines[0], forbidden
+    # The client never invents an equipment context of its own.
+    assert "exercise_context" not in source.replace("exercise_context_token", "")

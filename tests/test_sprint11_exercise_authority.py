@@ -2,6 +2,7 @@
 
 from dataclasses import FrozenInstanceError, replace
 import json
+from pathlib import Path
 import re
 from types import MappingProxyType
 
@@ -22,6 +23,12 @@ from app.services.exercise_catalog import (
     load_exercise_catalog,
     normalize_exercise_lookup,
     resolve_exercise,
+)
+from app.services.training_generation import exercise_context_token
+from app.services.training_generation.exercise_context_token import (
+    ExerciseContextInvalid,
+    sign_exercise_context,
+    verify_exercise_context,
 )
 from app.services.training_generation.prompt_builder import canonical_exercise_vocabulary
 
@@ -577,3 +584,215 @@ def test_prompt_vocabulary_filters_by_equipment_context(catalog_asset_path):
     assert "Fixture Barbell Row" not in home_names
     assert "Test Squat" in gym_names
     assert "Fixture Barbell Row" in gym_names
+
+
+# ── Signed exercise-context token (Task 4) ─────────────────────────────────
+#
+# The token is the ONLY way the server-accepted equipment truth survives the
+# round trip from POST /training-plan to POST /training-plan/save. It is a
+# transport integrity device, not a capability grant: everything it carries is
+# re-validated against the catalog on arrival. These tests pin the closed
+# rejection surface, because every hole in it is a way for a client to declare
+# its own equipment context.
+
+
+def _mint(payload, secret="test-secret-key", version=None):
+    """Forge a correctly SIGNED token around an arbitrary payload.
+
+    Signing here (rather than mutating a real token) is deliberate: it proves
+    the payload checks are real checks and not side effects of the signature
+    already failing.
+    """
+    version_segment = str(
+        exercise_context_token.TOKEN_VERSION if version is None else version)
+    body = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    encoded = exercise_context_token._b64encode(body.encode("utf-8"))
+    signature = exercise_context_token._signature(secret, version_segment, encoded)
+    return f"{version_segment}.{encoded}.{signature}"
+
+
+def _valid_payload(user_id=7, **overrides):
+    payload = {
+        "v": exercise_context_token.TOKEN_VERSION,
+        "uid": user_id,
+        "eq": "minimal",
+        "cardio": "yok",
+        "style": "functional",
+        "catalog": load_exercise_catalog().version,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _tamper(segment):
+    """Swap one base64url character for a different, still-legal one."""
+    return ("B" if segment[0] != "B" else "C") + segment[1:]
+
+
+def test_context_token_round_trip_is_user_bound():
+    context = ExerciseContext("minimal", cardio_type="yok", style="functional")
+    token = sign_exercise_context(context, "secret", user_id=7)
+    assert verify_exercise_context(token, "secret", user_id=7) == context
+    with pytest.raises(ExerciseContextInvalid):
+        verify_exercise_context(token, "secret", user_id=8)
+
+
+@pytest.mark.parametrize("mutation", ["payload", "signature", "version"])
+def test_context_token_tampering_fails_closed(mutation):
+    context = ExerciseContext("spor_salonu", cardio_type="kosu", style="genel")
+    version, payload, signature = sign_exercise_context(
+        context, "secret", user_id=11).split(".")
+    if mutation == "payload":
+        payload = _tamper(payload)
+    elif mutation == "signature":
+        signature = _tamper(signature)
+    else:
+        version = "2"
+
+    with pytest.raises(ExerciseContextInvalid):
+        verify_exercise_context(
+            f"{version}.{payload}.{signature}", "secret", user_id=11)
+
+
+def test_context_token_round_trip_preserves_every_context_field():
+    context = ExerciseContext(
+        "ev", cardio_type="ip_atlama", style="calisthenics", catalog_version=1)
+    restored = verify_exercise_context(
+        sign_exercise_context(context, "secret", user_id=3), "secret", user_id=3)
+
+    assert restored.equipment_context == "ev"
+    assert restored.cardio_type == "ip_atlama"
+    assert restored.style == "calisthenics"
+    assert restored.catalog_version == load_exercise_catalog().version
+
+
+def test_context_token_payload_carries_exactly_the_declared_keys():
+    token = sign_exercise_context(ExerciseContext("ev"), "secret", user_id=4)
+    _, payload, _ = token.split(".")
+    decoded = json.loads(exercise_context_token._b64decode(payload))
+
+    assert set(decoded) == {"v", "uid", "eq", "cardio", "style", "catalog"}
+    assert exercise_context_token.PAYLOAD_KEYS == frozenset(decoded)
+
+
+def test_context_token_is_deterministic_for_the_same_inputs():
+    context = ExerciseContext("minimal")
+    assert (
+        sign_exercise_context(context, "secret", user_id=5)
+        == sign_exercise_context(context, "secret", user_id=5)
+    )
+
+
+def test_context_token_rejects_a_different_secret_key():
+    token = sign_exercise_context(ExerciseContext("ev"), "secret-a", user_id=6)
+    with pytest.raises(ExerciseContextInvalid):
+        verify_exercise_context(token, "secret-b", user_id=6)
+
+
+@pytest.mark.parametrize("token", [None, 7, b"1.abc.def", ["1", "a", "b"], {}, True])
+def test_context_token_rejects_non_string_tokens(token):
+    with pytest.raises(ExerciseContextInvalid):
+        verify_exercise_context(token, "secret", user_id=1)
+
+
+def test_context_token_rejects_oversized_tokens():
+    oversized = "1." + ("A" * exercise_context_token.MAX_TOKEN_CHARS) + ".AAAA"
+    with pytest.raises(ExerciseContextInvalid):
+        verify_exercise_context(oversized, "secret", user_id=1)
+
+
+@pytest.mark.parametrize("token", [
+    "", ".", "1", "1.abc", "1.abc.def.ghi", "1..abc", "1.abc.",
+    "1.not base64.AAAA", "1.AAAA.not base64", "1.AAAA.AAAA",
+])
+def test_context_token_rejects_malformed_tokens(token):
+    with pytest.raises(ExerciseContextInvalid):
+        verify_exercise_context(token, "secret", user_id=1)
+
+
+def test_context_token_rejects_an_unknown_version_even_when_correctly_signed():
+    with pytest.raises(ExerciseContextInvalid):
+        verify_exercise_context(
+            _mint(_valid_payload(v=99), version=99), "test-secret-key", user_id=7)
+
+
+@pytest.mark.parametrize("payload", [
+    _valid_payload(extra="x"),
+    {key: value for key, value in _valid_payload().items() if key != "style"},
+])
+def test_context_token_rejects_unknown_or_missing_payload_keys(payload):
+    with pytest.raises(ExerciseContextInvalid):
+        verify_exercise_context(_mint(payload), "test-secret-key", user_id=7)
+
+
+@pytest.mark.parametrize("overrides", [
+    {"eq": "hotel_gym"},
+    {"eq": ""},
+    {"eq": 1},
+    {"cardio": "rowing_erg"},
+    {"cardio": None},
+    {"style": "yoga"},
+    {"style": 3},
+])
+def test_context_token_rejects_unknown_vocabulary(overrides):
+    with pytest.raises(ExerciseContextInvalid):
+        verify_exercise_context(
+            _mint(_valid_payload(**overrides)), "test-secret-key", user_id=7)
+
+
+def test_context_token_rejects_a_catalog_version_mismatch():
+    with pytest.raises(ExerciseContextInvalid):
+        verify_exercise_context(
+            _mint(_valid_payload(catalog=load_exercise_catalog().version + 1)),
+            "test-secret-key", user_id=7)
+
+
+@pytest.mark.parametrize("uid", [8, "7", True, None, 7.0])
+def test_context_token_rejects_a_uid_that_is_not_this_exact_user(uid):
+    with pytest.raises(ExerciseContextInvalid):
+        verify_exercise_context(
+            _mint(_valid_payload(uid=uid)), "test-secret-key", user_id=7)
+
+
+@pytest.mark.parametrize("user_id", ["7", None, True, 7.0])
+def test_context_token_rejects_a_caller_identity_that_is_not_an_int(user_id):
+    token = _mint(_valid_payload())
+    with pytest.raises(ExerciseContextInvalid):
+        verify_exercise_context(token, "test-secret-key", user_id=user_id)
+
+
+@pytest.mark.parametrize("secret", [None, "", b"", 5])
+def test_context_token_rejects_an_unusable_secret_key(secret):
+    with pytest.raises(ExerciseContextInvalid):
+        verify_exercise_context(_mint(_valid_payload()), secret, user_id=7)
+    with pytest.raises(ExerciseContextInvalid):
+        sign_exercise_context(ExerciseContext("ev"), secret, user_id=7)
+
+
+@pytest.mark.parametrize("context", [
+    ExerciseContext("hotel_gym"),
+    ExerciseContext("ev", cardio_type="rowing_erg"),
+    ExerciseContext("ev", style="yoga"),
+    ExerciseContext("ev", catalog_version=99),
+])
+def test_context_token_refuses_to_sign_a_context_it_could_never_verify(context):
+    with pytest.raises(ExerciseContextInvalid):
+        sign_exercise_context(context, "secret", user_id=7)
+
+
+def test_context_token_module_is_stdlib_crypto_and_knows_nothing_about_http():
+    source = Path(exercise_context_token.__file__).read_text(encoding="utf-8")
+    for forbidden in (
+        "flask", "Flask", "current_app", "request", "jsonify",
+        "http_status", "i18n", "GenerationOutputError", "translate",
+    ):
+        assert forbidden not in source, forbidden
+    for required in ("import hmac", "import hashlib", "import base64",
+                     "hmac.compare_digest", "hashlib.sha256"):
+        assert required in source, required
+
+
+def test_context_token_module_never_logs():
+    source = Path(exercise_context_token.__file__).read_text(encoding="utf-8")
+    for forbidden in ("logger", "logging", "print(", "warnings"):
+        assert forbidden not in source, forbidden
