@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import yaml
+
 
 DOCKERIGNORE = Path(".dockerignore")
 
@@ -9,6 +11,32 @@ WORKFLOW = Path(".github/workflows/deploy.yml")
 
 def _deploy_yaml():
     return WORKFLOW.read_text(encoding="utf-8")
+
+
+def _workflow_doc():
+    return yaml.load(_deploy_yaml(), Loader=yaml.BaseLoader)
+
+
+def test_deploy_has_only_ci_workflow_run_authority():
+    trigger = _workflow_doc()["on"]
+    assert set(trigger) == {"workflow_run"}
+    assert trigger["workflow_run"]["workflows"] == ["CI"]
+    assert trigger["workflow_run"]["branches"] == ["main"]
+    assert trigger["workflow_run"]["types"] == ["completed"]
+    body = _deploy_yaml()
+    assert "github.event.workflow_run.head_sha" in body
+    assert "github.event.workflow_run.head_branch == 'main'" in body
+    assert "github.event.workflow_run.event == 'push'" in body
+    assert "workflow_dispatch" not in body
+
+
+def test_production_deploys_are_coalesced_without_cancelling_running_work():
+    concurrency = _workflow_doc()["concurrency"]
+    assert concurrency == {
+        "group": "production-deploy",
+        "cancel-in-progress": "false",
+        "queue": "single",
+    }
 
 
 def test_production_build_context_excludes_development_and_backups():
@@ -63,6 +91,8 @@ def test_deploy_is_gated_on_ci_success():
     assert "workflow_run:" in body
     assert 'workflows: ["CI"]' in body
     assert "github.event.workflow_run.conclusion == 'success'" in body
+    assert "github.event.workflow_run.head_branch == 'main'" in body
+    assert "github.event.workflow_run.event == 'push'" in body
     # Ham `push:` tetikleyicisi GİTMİŞ olmalı — yoksa gate baypas edilir.
     assert "\n  push:\n" not in body
 
