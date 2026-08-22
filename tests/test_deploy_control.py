@@ -1,3 +1,5 @@
+import base64
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -6,10 +8,20 @@ import pytest
 from scripts.deploy_control import (
     AwsCliError,
     ConfigError,
+    DELIVERY_TIMEOUT_SECONDS,
     DeployConfig,
+    EXECUTION_TIMEOUT_SECONDS,
+    InvocationFailed,
+    InvocationPollingTimeout,
+    InvocationProtocolError,
+    POLL_HORIZON_SECONDS,
     PreflightError,
+    build_remote_command,
     preflight,
+    read_invocation,
+    send_command,
     validate_candidate,
+    wait_for_invocation,
 )
 
 
@@ -21,6 +33,45 @@ VALID_ENV = {
     "DEPLOY_DIR": "/srv/axisai",
     "PUBLIC_HEALTH_URL": "https://fitness.example/health",
 }
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 0
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+@pytest.fixture
+def fake_clock():
+    return FakeClock()
+
+
+def invocation_response(status, *, response_code=-1, stdout="", stderr=""):
+    return {
+        "CommandId": "11111111-1111-1111-1111-111111111111",
+        "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+        "Status": status.replace(" ", ""),
+        "StatusDetails": status,
+        "ResponseCode": response_code,
+        "StandardOutputContent": stdout,
+        "StandardErrorContent": stderr,
+    }
+
+
+def invocation_sequence(*statuses):
+    responses = iter(invocation_response(status) for status in statuses)
+
+    def aws(args):
+        return next(responses)
+
+    return aws
 
 
 def fake_git_returning(sha):
@@ -228,3 +279,187 @@ def test_preflight_rejects_future_heartbeat_beyond_one_minute():
             lambda args: next(responses),
             datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
         )
+
+
+def test_send_payload_separates_delivery_and_execution_timeout():
+    calls = []
+
+    def aws(args):
+        calls.append(args)
+        return {"Command": {"CommandId": "11111111-1111-1111-1111-111111111111"}}
+
+    command_id = send_command(DeployConfig.from_environ(VALID_ENV), b"echo safe", aws)
+
+    assert command_id == "11111111-1111-1111-1111-111111111111"
+    args = calls[0]
+    assert args[args.index("--timeout-seconds") + 1] == str(DELIVERY_TIMEOUT_SECONDS) == "60"
+    parameters = json.loads(args[args.index("--parameters") + 1])
+    assert parameters["executionTimeout"] == [str(EXECUTION_TIMEOUT_SECONDS)] == ["1800"]
+    assert args[:2] == ["ssm", "send-command"]
+    assert args[args.index("--instance-ids") + 1] == VALID_ENV["EC2_INSTANCE_ID"]
+
+
+def test_remote_command_encodes_script_and_untrusted_positional_values():
+    script = b"#!/bin/sh\nprintf '%s\\n' \"$1\""
+    deploy_dir = "/srv/axis ai/'$(touch nope)"
+    public_url = "https://fitness.example/health?probe='$(touch%20nope)"
+    config = DeployConfig.from_environ({
+        **VALID_ENV,
+        "DEPLOY_DIR": deploy_dir,
+        "PUBLIC_HEALTH_URL": public_url,
+    })
+
+    command = build_remote_command(config, script)
+
+    assert script.decode() not in command
+    assert deploy_dir not in command
+    assert public_url not in command
+    assert base64.b64encode(script).decode("ascii") in command
+    assert base64.b64encode(deploy_dir.encode()).decode("ascii") in command
+    assert base64.b64encode(public_url.encode()).decode("ascii") in command
+
+
+@pytest.mark.parametrize("response", [
+    None,
+    [],
+    {},
+    {"Command": {}},
+    {"Command": {"CommandId": None}},
+    {"Command": {"CommandId": "command-id"}},
+])
+def test_send_command_requires_exactly_one_uuid_command_id(response):
+    with pytest.raises(InvocationProtocolError):
+        send_command(DeployConfig.from_environ(VALID_ENV), b"echo safe", lambda args: response)
+
+
+def test_read_invocation_builds_argument_array_and_preserves_aws_fields():
+    calls = []
+
+    def aws(args):
+        calls.append(args)
+        return invocation_response(
+            "Success", response_code=0, stdout="deploy complete\n", stderr="warning\n",
+        )
+
+    result = read_invocation(DeployConfig.from_environ(VALID_ENV), "command-id", aws)
+
+    assert result.status_details == "Success"
+    assert result.response_code == 0
+    assert result.stdout == "deploy complete\n"
+    assert result.stderr == "warning\n"
+    assert calls == [[
+        "ssm", "get-command-invocation", "--region", VALID_ENV["AWS_REGION"],
+        "--command-id", "command-id", "--instance-id", VALID_ENV["EC2_INSTANCE_ID"],
+    ]]
+
+
+@pytest.mark.parametrize("field,value", [
+    ("StatusDetails", None),
+    ("ResponseCode", "0"),
+    ("ResponseCode", True),
+    ("StandardOutputContent", None),
+    ("StandardErrorContent", []),
+])
+def test_read_invocation_rejects_wrong_required_field_types(field, value):
+    response = invocation_response("Success", response_code=0)
+    response[field] = value
+
+    with pytest.raises(InvocationProtocolError, match=field):
+        read_invocation(DeployConfig.from_environ(VALID_ENV), "command-id", lambda args: response)
+
+
+def test_in_progress_is_first_execution_proof(fake_clock):
+    aws = invocation_sequence("Pending", "Delayed", "InProgress", "Success")
+    messages = []
+
+    result = wait_for_invocation(
+        DeployConfig.from_environ(VALID_ENV), "command-id", aws,
+        fake_clock.monotonic, fake_clock.sleep, messages.append,
+    )
+
+    assert result.status_details == "Success"
+    assert sum("host execution started" in message for message in messages) == 1
+    assert messages.index("host execution started") > messages.index("SSM status: Delayed")
+
+
+def test_spaced_status_is_normalized_only_for_comparison(fake_clock):
+    messages = []
+
+    result = wait_for_invocation(
+        DeployConfig.from_environ(VALID_ENV), "command-id",
+        invocation_sequence("In Progress", "Success"),
+        fake_clock.monotonic, fake_clock.sleep, messages.append,
+    )
+
+    assert result.status_details == "Success"
+    assert messages[:2] == ["SSM status: In Progress", "host execution started"]
+
+
+@pytest.mark.parametrize("status", [
+    "Failed",
+    "DeliveryTimedOut",
+    "ExecutionTimedOut",
+    "Undeliverable",
+    "Cancelled",
+    "Terminated",
+    "Delivery Timed Out",
+    "Execution Timed Out",
+])
+def test_terminal_failure_states_fail_closed_with_full_result(status, fake_clock):
+    response = invocation_response(status, response_code=1, stderr="deploy failed")
+
+    with pytest.raises(InvocationFailed) as captured:
+        wait_for_invocation(
+            DeployConfig.from_environ(VALID_ENV), "command-id", lambda args: response,
+            fake_clock.monotonic, fake_clock.sleep, lambda message: None,
+        )
+
+    assert captured.value.result.status_details == status
+    assert captured.value.result.response_code == 1
+    assert captured.value.result.stderr == "deploy failed"
+
+
+def test_unknown_status_is_a_visible_protocol_failure(fake_clock):
+    messages = []
+
+    with pytest.raises(InvocationProtocolError, match="Mystery"):
+        wait_for_invocation(
+            DeployConfig.from_environ(VALID_ENV), "command-id",
+            invocation_sequence("Mystery"),
+            fake_clock.monotonic, fake_clock.sleep, messages.append,
+        )
+
+    assert messages == ["SSM status: Mystery"]
+
+
+def test_aws_runner_failure_is_not_converted_to_pending(fake_clock):
+    messages = []
+
+    def aws(args):
+        raise AwsCliError("get-command-invocation failed")
+
+    with pytest.raises(AwsCliError, match="get-command-invocation failed"):
+        wait_for_invocation(
+            DeployConfig.from_environ(VALID_ENV), "command-id", aws,
+            fake_clock.monotonic, fake_clock.sleep, messages.append,
+        )
+
+    assert messages == []
+
+
+def test_pending_is_polled_through_the_complete_horizon(fake_clock):
+    calls = 0
+
+    def aws(args):
+        nonlocal calls
+        calls += 1
+        return invocation_response("Pending")
+
+    with pytest.raises(InvocationPollingTimeout, match="command-id"):
+        wait_for_invocation(
+            DeployConfig.from_environ(VALID_ENV), "command-id", aws,
+            fake_clock.monotonic, fake_clock.sleep, lambda message: None,
+        )
+
+    assert fake_clock.now == POLL_HORIZON_SECONDS == 2100
+    assert calls == POLL_HORIZON_SECONDS // 10

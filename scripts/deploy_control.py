@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import re
 import subprocess
 from collections.abc import Callable, Mapping
@@ -10,11 +12,34 @@ from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any
 from urllib.parse import urlsplit
+from uuid import UUID
 
 
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 INSTANCE_RE = re.compile(r"i-[0-9a-f]{8}(?:[0-9a-f]{9})?")
 USER_RE = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
+
+DELIVERY_TIMEOUT_SECONDS = 60
+EXECUTION_TIMEOUT_SECONDS = 1800
+AWS_EXPIRY_SECONDS = 1860
+POLL_HORIZON_SECONDS = 2100
+POLL_INTERVAL_SECONDS = 10
+
+WAITING_STATES = frozenset({"Pending", "Delayed", "InProgress"})
+FAILURE_STATES = frozenset({
+    "Failed",
+    "DeliveryTimedOut",
+    "ExecutionTimedOut",
+    "Undeliverable",
+    "Cancelled",
+    "Terminated",
+})
+
+_STATUS_COMPARISON_NAMES = {
+    "In Progress": "InProgress",
+    "Delivery Timed Out": "DeliveryTimedOut",
+    "Execution Timed Out": "ExecutionTimedOut",
+}
 
 
 class ConfigError(RuntimeError):
@@ -27,6 +52,14 @@ class PreflightError(RuntimeError):
 
 class AwsCliError(RuntimeError):
     """Raised by an AWS JSON runner when the AWS CLI command fails."""
+
+
+class InvocationProtocolError(RuntimeError):
+    """Raised when AWS returns an unknown state or a malformed response."""
+
+
+class InvocationPollingTimeout(RuntimeError):
+    """Raised when an invocation remains non-terminal beyond the polling horizon."""
 
 
 AwsJsonRunner = Callable[[list[str]], dict[str, Any]]
@@ -69,6 +102,22 @@ class DeployConfig:
 class ManagedInstance:
     instance_id: str
     last_ping: datetime
+
+
+@dataclass(frozen=True)
+class InvocationResult:
+    status_details: str
+    response_code: int
+    stdout: str
+    stderr: str
+
+
+class InvocationFailed(RuntimeError):
+    """Raised when SSM reports a terminal invocation failure."""
+
+    def __init__(self, result: InvocationResult):
+        super().__init__(f"SSM invocation failed: {result.status_details}")
+        self.result = result
 
 
 def validate_public_health_url(public_health_url: str | None) -> None:
@@ -178,3 +227,150 @@ def preflight(config: DeployConfig, aws: AwsJsonRunner, now: datetime) -> Manage
         f"Key=InstanceIds,Values={config.instance_id}", "--region", config.region,
     ])
     return validate_managed_instance(ssm, config.instance_id, now)
+
+
+def render_bootstrap(
+    encoded_script: str,
+    deploy_sha: str,
+    encoded_dir: str,
+    deploy_user: str,
+    encoded_url: str,
+) -> str:
+    """Render a fixed root bootstrap from validated and base64-encoded values."""
+    return f"""set -eu
+umask 077
+script_path="$(mktemp /tmp/fitx-deploy.XXXXXX)"
+cleanup() {{
+  rm -f -- "$script_path"
+}}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+printf '%s' '{encoded_script}' | base64 --decode > "$script_path"
+chmod 0700 "$script_path"
+if ! id -u '{deploy_user}' >/dev/null 2>&1; then
+  echo 'configured deploy user does not exist' >&2
+  exit 1
+fi
+chown -- '{deploy_user}' "$script_path"
+deploy_dir="$(printf '%s' '{encoded_dir}' | base64 --decode)"
+public_health_url="$(printf '%s' '{encoded_url}' | base64 --decode)"
+sudo -u '{deploy_user}' -- "$script_path" '{deploy_sha}' "$deploy_dir" "$public_health_url"
+"""
+
+
+def build_remote_command(config: DeployConfig, script: bytes) -> str:
+    """Encode immutable deploy inputs for the fixed remote bootstrap."""
+    encoded_script = base64.b64encode(script).decode("ascii")
+    encoded_dir = base64.b64encode(config.deploy_dir.encode()).decode("ascii")
+    encoded_url = base64.b64encode((config.public_health_url or "").encode()).decode("ascii")
+    return render_bootstrap(
+        encoded_script,
+        config.deploy_sha,
+        encoded_dir,
+        config.deploy_user,
+        encoded_url,
+    )
+
+
+def require_command_id(response: object) -> str:
+    """Extract one canonical UUID command ID from a SendCommand response."""
+    if not isinstance(response, Mapping):
+        raise InvocationProtocolError("SendCommand response must be an object")
+    command = response.get("Command")
+    if not isinstance(command, Mapping):
+        raise InvocationProtocolError("SendCommand response has no Command object")
+    command_id = command.get("CommandId")
+    if not isinstance(command_id, str):
+        raise InvocationProtocolError("SendCommand response has no command UUID")
+    try:
+        parsed = UUID(command_id)
+    except ValueError as error:
+        raise InvocationProtocolError("SendCommand response has an invalid command UUID") from error
+    if str(parsed) != command_id:
+        raise InvocationProtocolError("SendCommand response has a noncanonical command UUID")
+    return command_id
+
+
+def send_command(config: DeployConfig, script: bytes, aws: AwsJsonRunner) -> str:
+    """Deliver the encoded host script with separate delivery and execution bounds."""
+    parameters = {
+        "commands": [build_remote_command(config, script)],
+        "executionTimeout": [str(EXECUTION_TIMEOUT_SECONDS)],
+    }
+    response = aws([
+        "ssm", "send-command",
+        "--region", config.region,
+        "--instance-ids", config.instance_id,
+        "--document-name", "AWS-RunShellScript",
+        "--timeout-seconds", str(DELIVERY_TIMEOUT_SECONDS),
+        "--parameters", json.dumps(parameters, separators=(",", ":")),
+    ])
+    return require_command_id(response)
+
+
+def read_invocation(
+    config: DeployConfig,
+    command_id: str,
+    aws: AwsJsonRunner,
+) -> InvocationResult:
+    """Read and type-check the detailed SSM invocation response."""
+    response = aws([
+        "ssm", "get-command-invocation",
+        "--region", config.region,
+        "--command-id", command_id,
+        "--instance-id", config.instance_id,
+    ])
+    if not isinstance(response, Mapping):
+        raise InvocationProtocolError("get-command-invocation response must be an object")
+
+    required_types = {
+        "StatusDetails": str,
+        "ResponseCode": int,
+        "StandardOutputContent": str,
+        "StandardErrorContent": str,
+    }
+    for field, expected_type in required_types.items():
+        value = response.get(field)
+        if type(value) is not expected_type:
+            raise InvocationProtocolError(f"get-command-invocation field {field} has wrong type")
+
+    return InvocationResult(
+        status_details=response["StatusDetails"],
+        response_code=response["ResponseCode"],
+        stdout=response["StandardOutputContent"],
+        stderr=response["StandardErrorContent"],
+    )
+
+
+def _comparison_status(status_details: str) -> str:
+    return _STATUS_COMPARISON_NAMES.get(status_details, status_details)
+
+
+def wait_for_invocation(
+    config: DeployConfig,
+    command_id: str,
+    aws: AwsJsonRunner,
+    monotonic: Callable[[], float],
+    sleep: Callable[[float], None],
+    log: Callable[[str], None],
+) -> InvocationResult:
+    """Poll until success, a typed closed failure, or the bounded horizon."""
+    deadline = monotonic() + POLL_HORIZON_SECONDS
+    execution_reported = False
+    while monotonic() < deadline:
+        result = read_invocation(config, command_id, aws)
+        log(f"SSM status: {result.status_details}")
+        comparison_status = _comparison_status(result.status_details)
+        if comparison_status == "InProgress" and not execution_reported:
+            log("host execution started")
+            execution_reported = True
+        if comparison_status == "Success":
+            return result
+        if comparison_status in FAILURE_STATES:
+            raise InvocationFailed(result)
+        if comparison_status not in WAITING_STATES:
+            raise InvocationProtocolError(result.status_details)
+        sleep(POLL_INTERVAL_SECONDS)
+    raise InvocationPollingTimeout(command_id)
