@@ -49,7 +49,7 @@ class DeployConfig:
         instance_id = env.get("EC2_INSTANCE_ID", "")
         deploy_user = env.get("DEPLOY_USER", "")
         deploy_dir = env.get("DEPLOY_DIR", "")
-        public_url = env.get("PUBLIC_HEALTH_URL", "").strip() or None
+        public_url = env.get("PUBLIC_HEALTH_URL", "") or None
 
         if not SHA_RE.fullmatch(deploy_sha):
             raise ConfigError("DEPLOY_SHA must be lowercase 40-hex")
@@ -75,6 +75,11 @@ def validate_public_health_url(public_health_url: str | None) -> None:
     """Require an optional public health endpoint to be an origin-safe HTTPS URL."""
     if public_health_url is None:
         return
+    if public_health_url != public_health_url.strip() or any(
+        ord(character) < 32 or ord(character) == 127
+        for character in public_health_url
+    ):
+        raise ConfigError("PUBLIC_HEALTH_URL must not contain whitespace padding or controls")
 
     parsed = urlsplit(public_health_url)
     if (

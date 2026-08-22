@@ -74,7 +74,16 @@ def test_config_rejects_nonabsolute_or_multiline_deploy_dir(deploy_dir):
         DeployConfig.from_environ({**VALID_ENV, "DEPLOY_DIR": deploy_dir})
 
 
-@pytest.mark.parametrize("url", ["http://fitness.example/health", "https://", "https://deploy@fitness.example/health", "https://:secret@fitness.example/health"])
+@pytest.mark.parametrize("url", [
+    "http://fitness.example/health",
+    "https://",
+    "https://deploy@fitness.example/health",
+    "https://:secret@fitness.example/health",
+    "https://fitne\nss.example/health",
+    "https://fitne\tss.example/health",
+    " https://fitness.example/health",
+    "https://fitness.example/health ",
+])
 def test_config_rejects_non_https_or_credentialed_health_url(url):
     with pytest.raises(ConfigError):
         DeployConfig.from_environ({**VALID_ENV, "PUBLIC_HEALTH_URL": url})
