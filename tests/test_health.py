@@ -12,7 +12,7 @@ import pytest
 from flask import request, url_for
 
 _DEEP_KEYS = ("redis", "login", "bedrock", "fatsecret_proxy", "worker",
-              "flags", "capacity")
+              "flags", "capacity", "revision")
 
 
 @pytest.fixture(autouse=True)
@@ -24,6 +24,31 @@ def _no_outbound(monkeypatch):
         status_code = 404  # canlı proxy auth'suz istekte 4xx döner
 
     monkeypatch.setattr(requests, "get", lambda *a, **kw: _Resp())
+
+
+def _health_app_with_revision(monkeypatch, revision):
+    """Create the app after setting its boot-time revision environment."""
+    if revision is None:
+        monkeypatch.delenv("APP_REVISION", raising=False)
+    else:
+        monkeypatch.setenv("APP_REVISION", revision)
+
+    from app import create_app
+
+    app = create_app()
+    app.config["TESTING"] = True
+    return app
+
+
+def _deep_health_body(app, path="/health?deep=1", headers=None):
+    with app.test_request_context(
+        path,
+        environ_base={"REMOTE_ADDR": "127.0.0.1"},
+        headers=headers,
+    ):
+        body, status = app.view_functions["health"]()
+    assert status == 200
+    return body
 
 
 def test_shallow_health_is_public(client):
@@ -43,6 +68,43 @@ def test_deep_health_allowed_from_loopback(client):
     body = resp.get_json()
     for key in _DEEP_KEYS:
         assert key in body
+
+
+def test_deep_health_reports_server_owned_revision(monkeypatch):
+    app = _health_app_with_revision(monkeypatch, "a" * 40)
+
+    body = _deep_health_body(app)
+
+    assert body["revision"] == "a" * 40
+
+
+def test_deep_health_uses_unknown_revision_when_unset(monkeypatch):
+    app = _health_app_with_revision(monkeypatch, None)
+
+    body = _deep_health_body(app)
+
+    assert body["revision"] == "unknown"
+
+
+def test_deep_health_revision_ignores_request_values(monkeypatch):
+    app = _health_app_with_revision(monkeypatch, "a" * 40)
+
+    body = _deep_health_body(
+        app,
+        "/health?deep=1&revision=attacker",
+        headers={"APP_REVISION": "attacker", "X-App-Revision": "attacker"},
+    )
+
+    assert body["revision"] == "a" * 40
+
+
+def test_shallow_health_hides_revision(monkeypatch):
+    app = _health_app_with_revision(monkeypatch, "a" * 40)
+
+    with app.test_request_context("/health", environ_base={"REMOTE_ADDR": "127.0.0.1"}):
+        body, status = app.view_functions["health"]()
+    assert status == 200
+    assert "revision" not in body
 
 
 def test_deep_health_allowed_from_configured_gateway(client, monkeypatch):

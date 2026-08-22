@@ -298,6 +298,7 @@ def configure_app(app):
     _is_dev = (os.environ.get("FLASK_DEBUG") == "1"
                or os.environ.get("FLASK_ENV") == "development")
     app.config["FITX_IS_DEV"] = _is_dev
+    app.config["APP_REVISION"] = os.environ.get("APP_REVISION", "unknown")
     # Genel istek-gövdesi tavanı. Flask varsayılanı SINIRSIZDIR: her route kendi
     # alan-başı kapısına (avatar 500 KB, pump-check 8 MB data-URL, menü metni
     # 40 KB) güveniyordu ve bu kapılara ULAŞMADAN önce gövde zaten tamamen
