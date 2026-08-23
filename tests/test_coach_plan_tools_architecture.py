@@ -120,7 +120,7 @@ def test_no_tool_property_names_a_catalog_owned_concept(definition):
     assert not named, f"{definition['name']} exposes catalog-owned: {named}"
 
 
-@pytest.mark.parametrize("definition", schemas.PLAN_MUTATION_TOOL_DEFS,
+@pytest.mark.parametrize("definition", _ALL_PLAN_TOOL_DEFS,
                          ids=lambda d: d["name"])
 def test_no_tool_offers_a_generic_mutation_language(definition):
     generic = [

@@ -56,7 +56,10 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     versions_dir = Path(__file__).resolve().parents[1] / "migrations" / "versions"
     revision_files = sorted(path.name for path in versions_dir.glob("*.py"))
 
-    assert len(revision_files) == 36
+    # 37 = the integrated origin/main baseline (Adaptive Coaching S1 PR4's
+    # c2d3e4f5a6b7 is the newest). PR4 contributes none of them; the literal is
+    # the tripwire that makes "we added one small table" fail here first.
+    assert len(revision_files) == 37
     assert not any("exercise" in name for name in revision_files)
 
     catalog_path = (
