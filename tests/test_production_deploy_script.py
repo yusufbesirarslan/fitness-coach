@@ -16,6 +16,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 HOST_SCRIPT = ROOT / "scripts" / "production_deploy.sh"
+OUTER_LOCK_PATH = "/run/lock/axisai-production/production.lock"
 
 
 def _bash_path(path: Path) -> str:
@@ -112,42 +113,19 @@ class HostFixture:
             timeout=600,
         )
 
-    def run_with_preheld_lock(
+    def run_with_workflow_outer_lock(
         self,
         bash_executable: str,
         *,
-        acquire: bool = True,
-        preheld_path: Path | None = None,
+        held: bool = True,
+        marker: str = OUTER_LOCK_PATH,
         **environment: str,
     ) -> subprocess.CompletedProcess[str]:
-        wrapper = (
-            'exec 9>"$1"; shift; '
-            'if [[ "$WRAPPER_ACQUIRE_LOCK" == 1 ]]; then '
-            'flock -w 60 9 || exit 73; fi; '
-            'script_path="$1"; shift; '
-            'AXISAI_DEPLOY_LOCK_FD=0 source "$script_path" "$@" <&9'
-        )
-        return subprocess.run(
-            [
-                bash_executable, "--noprofile", "--norc", "-c", wrapper,
-                "preheld-wrapper",
-                _bash_path(preheld_path or (
-                    self.deploy_dir / ".axisai-production-deploy.lock"
-                )),
-                _bash_path(HOST_SCRIPT),
-                self.candidate_commit,
-                _bash_path(self.deploy_dir),
-                "",
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-            env={
-                **self.environment,
-                "WRAPPER_ACQUIRE_LOCK": "1" if acquire else "0",
-                **environment,
-            },
-            timeout=600,
+        return self.run(
+            bash_executable,
+            AXISAI_OUTER_LOCK_PATH=marker,
+            FAKE_OUTER_LOCK_HELD="1" if held else "0",
+            **environment,
         )
 
 
@@ -239,9 +217,18 @@ exec "$REAL_GIT" "$@"
 printf 'flock' >> "$TRACE_FILE"
 printf ' %s' "$@" >> "$TRACE_FILE"
 printf '\n' >> "$TRACE_FILE"
-if [[ -n "${FLOCK_STATE_DIR:-}" ]]; then
-  if ! mkdir "$FLOCK_STATE_DIR" 2>/dev/null; then
-    exit 1
+if [[ " $* " == *" $EXPECTED_OUTER_LOCK_PATH "* && " $* " == *' -n '* ]]; then
+  if [[ "${FAKE_OUTER_LOCK_HELD:-0}" == 1 ]]; then exit 73; fi
+  exit 0
+fi
+if [[ " $* " == *" $EXPECTED_OUTER_LOCK_PATH "* ]]; then
+  if [[ "${FLOCK_EXIT:-0}" != 0 ]]; then exit 73; fi
+  lock_state_created=0
+  if [[ -n "${FLOCK_STATE_DIR:-}" ]]; then
+    if ! mkdir "$FLOCK_STATE_DIR" 2>/dev/null; then
+      exit 73
+    fi
+    lock_state_created=1
   fi
   if [[ -n "${FLOCK_READY_FILE:-}" ]]; then
     : > "$FLOCK_READY_FILE"
@@ -250,13 +237,17 @@ if [[ -n "${FLOCK_STATE_DIR:-}" ]]; then
   while [[ -n "${FLOCK_HOLD_FILE:-}" && -e "$FLOCK_HOLD_FILE" ]]; do
     /usr/bin/sleep 0.05
   done
-  rmdir "$FLOCK_STATE_DIR"
+  shift 6
+  FAKE_OUTER_LOCK_HELD=1 "$@"
+  child_status="$?"
+  if [[ "$lock_state_created" == 1 ]]; then rmdir "$FLOCK_STATE_DIR"; fi
+  exit "$child_status"
 fi
-if [[ " $* " == ' -n 8 ' ]]; then
-  if [[ "${FAKE_PREHELD_LOCK_HELD:-0}" == 1 ]]; then exit 1; fi
+if [[ " $* " == ' -n -E 73 9 ' ]]; then
+  if [[ "${FAKE_INNER_LOCK_CONTENDED:-0}" == 1 ]]; then exit 73; fi
   exit 0
 fi
-exit "${FLOCK_EXIT:-0}"
+exit 64
 """,
         )
         _write_executable(
@@ -268,8 +259,8 @@ printf '\n' >> "$TRACE_FILE"
 last=''
 for argument in "$@"; do last="$argument"; done
 case "$last" in
-  /proc/self/fd/0) printf '%s\n' "${FAKE_INHERITED_LOCK_ID:-stdin}" ;;
-  *.axisai-production-deploy.lock) printf '%s\n' stable ;;
+  /run/lock/axisai-production) printf '%s\n' "$FAKE_OUTER_DIR_METADATA" ;;
+  /run/lock/axisai-production/production.lock) printf '%s\n' "$FAKE_OUTER_FILE_METADATA" ;;
   *) exit 65 ;;
 esac
 """,
@@ -490,6 +481,9 @@ esac
                 "REAL_GIT": Path(real_git).resolve().as_posix(),
                 "REAL_PYTHON": Path(sys.executable).resolve().as_posix(),
                 "FLOCK_EXIT": str(flock_exit),
+                "EXPECTED_OUTER_LOCK_PATH": OUTER_LOCK_PATH,
+                "FAKE_OUTER_DIR_METADATA": "0:directory:755",
+                "FAKE_OUTER_FILE_METADATA": "0:regular empty file:644:1",
                 "DOCKER_STATE_FILE": _bash_path(docker_state),
                 "FAKE_CANDIDATE_CONTAINER_REVISION": container_revision,
                 "FAKE_ROLLBACK_CONTAINER_REVISION": rollback_container_revision,
@@ -559,87 +553,130 @@ def test_lock_contention_fails_before_git_or_docker(bash_executable, host_fixtur
 
     assert result.returncode == 73
     assert "deployment lock unavailable" in result.stderr
-    assert fixture.trace.read_text(encoding="utf-8") == "flock -w 60 9\n"
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace == (
+        "stat -c %u:%F:%a -- /run/lock/axisai-production\n"
+        f"stat -c %u:%F:%a:%h -- {OUTER_LOCK_PATH}\n"
+        "flock -x -w 60 -E 73 "
+        f"{OUTER_LOCK_PATH} env AXISAI_OUTER_LOCK_PATH={OUTER_LOCK_PATH} "
+        f"{_bash_path(HOST_SCRIPT)} {fixture.candidate_commit} "
+        f"{_bash_path(fixture.deploy_dir)} \n"
+    )
 
 
-def test_inherited_lock_reuses_verified_stdin_fd_without_reacquire_gap(
+def test_workflow_outer_lock_marker_proves_held_lock_then_acquires_inner_lock(
         bash_executable, host_fixture):
     fixture = host_fixture()
 
-    result = fixture.run_with_preheld_lock(
-        bash_executable,
-        FAKE_INHERITED_LOCK_ID="stable",
-        FAKE_PREHELD_LOCK_HELD="1",
-    )
+    result = fixture.run_with_workflow_outer_lock(bash_executable)
 
     assert result.returncode == 0, result.stderr
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.splitlines()[:5] == [
-        "flock -w 60 9",
-        "stat -Lc %d:%i -- /proc/self/fd/0",
-        f"stat -Lc %d:%i -- {_bash_path(fixture.deploy_dir)}/.axisai-production-deploy.lock",
-        "flock -n 8",
-        "flock -n 0",
+    assert trace.splitlines()[:4] == [
+        "stat -c %u:%F:%a -- /run/lock/axisai-production",
+        f"stat -c %u:%F:%a:%h -- {OUTER_LOCK_PATH}",
+        f"flock -n -E 73 {OUTER_LOCK_PATH} true",
+        "flock -n -E 73 9",
     ]
-    assert trace.count("flock -w 60 9\n") == 1
+    assert "flock -w" not in trace
 
 
-def test_inherited_lock_marker_with_wrong_inode_fails_before_git_or_docker(
-        bash_executable, host_fixture, tmp_path):
-    fixture = host_fixture()
-    wrong_lock = tmp_path / "wrong-lock"
-
-    result = fixture.run_with_preheld_lock(
-        bash_executable,
-        preheld_path=wrong_lock,
-        FAKE_INHERITED_LOCK_ID="wrong",
-    )
-
-    assert result.returncode == 73
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert "git " not in trace
-    assert "docker " not in trace
-    assert "flock -n 0" not in trace
-
-
-def test_inherited_correct_inode_without_preheld_lock_fails_before_mutation(
+def test_direct_invocation_acquires_outer_then_inner_with_one_bounded_wait(
         bash_executable, host_fixture):
     fixture = host_fixture()
 
-    result = fixture.run_with_preheld_lock(
-        bash_executable,
-        acquire=False,
-        FAKE_INHERITED_LOCK_ID="stable",
-        FAKE_PREHELD_LOCK_HELD="0",
-    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode == 0, result.stderr
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace.splitlines()[:7] == [
+        "stat -c %u:%F:%a -- /run/lock/axisai-production",
+        f"stat -c %u:%F:%a:%h -- {OUTER_LOCK_PATH}",
+        "flock -x -w 60 -E 73 "
+        f"{OUTER_LOCK_PATH} env AXISAI_OUTER_LOCK_PATH={OUTER_LOCK_PATH} "
+        f"{_bash_path(HOST_SCRIPT)} {fixture.candidate_commit} "
+        f"{_bash_path(fixture.deploy_dir)} ",
+        "stat -c %u:%F:%a -- /run/lock/axisai-production",
+        f"stat -c %u:%F:%a:%h -- {OUTER_LOCK_PATH}",
+        f"flock -n -E 73 {OUTER_LOCK_PATH} true",
+        "flock -n -E 73 9",
+    ]
+    assert trace.count(" -w 60 ") == 1
+
+
+def test_outer_lock_marker_without_held_lock_fails_before_inner_or_mutation(
+        bash_executable, host_fixture):
+    fixture = host_fixture()
+
+    result = fixture.run_with_workflow_outer_lock(bash_executable, held=False)
 
     assert result.returncode == 73
     trace = fixture.trace.read_text(encoding="utf-8")
     assert trace.splitlines()[:3] == [
-        "stat -Lc %d:%i -- /proc/self/fd/0",
-        f"stat -Lc %d:%i -- {_bash_path(fixture.deploy_dir)}/.axisai-production-deploy.lock",
-        "flock -n 8",
+        "stat -c %u:%F:%a -- /run/lock/axisai-production",
+        f"stat -c %u:%F:%a:%h -- {OUTER_LOCK_PATH}",
+        f"flock -n -E 73 {OUTER_LOCK_PATH} true",
     ]
-    assert "flock -n 0" not in trace
+    assert "flock -n -E 73 9" not in trace
     assert "git " not in trace
     assert "docker " not in trace
 
 
-def test_inherited_lock_marker_alone_cannot_bypass_normal_locking(
+def test_inner_lock_contention_after_outer_proof_fails_before_mutation(
         bash_executable, host_fixture):
     fixture = host_fixture()
 
-    result = fixture.run(
-        bash_executable,
-        AXISAI_DEPLOY_LOCK_FD="0",
-        FAKE_INHERITED_LOCK_ID="stdin",
+    result = fixture.run_with_workflow_outer_lock(
+        bash_executable, FAKE_INNER_LOCK_CONTENDED="1",
     )
 
     assert result.returncode == 73
     trace = fixture.trace.read_text(encoding="utf-8")
+    assert f"flock -n -E 73 {OUTER_LOCK_PATH} true" in trace
+    assert "flock -n -E 73 9" in trace
     assert "git " not in trace
     assert "docker " not in trace
-    assert "flock -n 0" not in trace
+
+
+def test_arbitrary_outer_lock_marker_is_rejected_before_lock_or_mutation(
+        bash_executable, host_fixture):
+    fixture = host_fixture()
+
+    result = fixture.run_with_workflow_outer_lock(
+        bash_executable, marker="/tmp/caller-selected.lock",
+    )
+
+    assert result.returncode == 73
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace == ""
+    assert "git " not in trace
+    assert "docker " not in trace
+
+
+@pytest.mark.parametrize(
+    ("metadata_name", "metadata"),
+    [
+        ("FAKE_OUTER_DIR_METADATA", "1000:directory:755"),
+        ("FAKE_OUTER_DIR_METADATA", "0:directory:775"),
+        ("FAKE_OUTER_FILE_METADATA", "0:symbolic link:777:1"),
+        ("FAKE_OUTER_FILE_METADATA", "1000:regular empty file:644:1"),
+        ("FAKE_OUTER_FILE_METADATA", "0:regular empty file:666:1"),
+        ("FAKE_OUTER_FILE_METADATA", "0:regular empty file:644:2"),
+    ],
+)
+def test_unsafe_outer_lock_prerequisite_fails_before_probe_or_mutation(
+        bash_executable, host_fixture, metadata_name, metadata):
+    fixture = host_fixture()
+
+    result = fixture.run_with_workflow_outer_lock(
+        bash_executable, **{metadata_name: metadata},
+    )
+
+    assert result.returncode == 73
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert f"flock -n -E 73 {OUTER_LOCK_PATH}" not in trace
+    assert "git " not in trace
+    assert "docker " not in trace
 
 
 def test_invalid_sha_fails_after_lock_without_git_or_docker(bash_executable, host_fixture):
@@ -648,7 +685,11 @@ def test_invalid_sha_fails_after_lock_without_git_or_docker(bash_executable, hos
 
     assert result.returncode == 64
     assert "DEPLOY_SHA must be lowercase 40-hex" in result.stderr
-    assert fixture.trace.read_text(encoding="utf-8") == "flock -w 60 9\n"
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace.count(" -w 60 ") == 1
+    assert "flock -n -E 73 9" in trace
+    assert "git " not in trace
+    assert "docker " not in trace
 
 
 def test_host_transaction_budget_preserves_ssm_margin_and_rollback_reserve(
@@ -1149,4 +1190,11 @@ def test_rapid_candidate_second_invocation_cannot_mutate_while_lock_is_held(
 
     assert first.returncode == 0, (first_stdout, first_stderr)
     assert second.returncode == 73
-    assert second_trace.read_text(encoding="utf-8") == "flock -w 60 9\n"
+    assert second_trace.read_text(encoding="utf-8") == (
+        "stat -c %u:%F:%a -- /run/lock/axisai-production\n"
+        f"stat -c %u:%F:%a:%h -- {OUTER_LOCK_PATH}\n"
+        "flock -x -w 60 -E 73 "
+        f"{OUTER_LOCK_PATH} env AXISAI_OUTER_LOCK_PATH={OUTER_LOCK_PATH} "
+        f"{_bash_path(HOST_SCRIPT)} {fixture.candidate_commit} "
+        f"{_bash_path(fixture.deploy_dir)} \n"
+    )

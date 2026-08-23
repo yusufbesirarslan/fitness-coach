@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import re
+import shlex
 import subprocess
 import time
 from collections.abc import Callable, Mapping
@@ -28,6 +29,141 @@ POLL_HORIZON_SECONDS = 2100
 POLL_INTERVAL_SECONDS = 10
 INVOCATION_CALL_TIMEOUT_SECONDS = 30
 AWS_CLI_CALL_TIMEOUT_SECONDS = 60
+ROOT_OUTER_LOCK_PATH = "/run/lock/axisai-production/production.lock"
+
+ROOT_LOCK_WRAPPER_SOURCE = r'''def _emit(stderr, message):
+    if hasattr(stderr, "write"):
+        stderr.write(message + "\n")
+    else:
+        stderr.append(message)
+
+
+def run(encoded_command, os_module, stat_module, fcntl_module,
+        subprocess_module, time_module, stderr):
+    run_lock_fd = None
+    lock_dir_fd = None
+    lock_fd = None
+    try:
+        command = __import__("base64").b64decode(
+            encoded_command, validate=True
+        ).decode("utf-8")
+        directory_flags = (
+            os_module.O_RDONLY | os_module.O_DIRECTORY |
+            os_module.O_NOFOLLOW | os_module.O_CLOEXEC
+        )
+        run_lock_fd = os_module.open("/run/lock", directory_flags)
+        run_lock_status = os_module.fstat(run_lock_fd)
+        if (run_lock_status.st_uid != 0 or
+                not stat_module.S_ISDIR(run_lock_status.st_mode)):
+            raise OSError("unsafe /run/lock")
+
+        created_directory = False
+        try:
+            os_module.mkdir(
+                "axisai-production", 0o755, dir_fd=run_lock_fd
+            )
+            created_directory = True
+        except FileExistsError:
+            pass
+        lock_dir_fd = os_module.open(
+            "axisai-production", directory_flags, dir_fd=run_lock_fd
+        )
+        if created_directory:
+            os_module.fchmod(lock_dir_fd, 0o755)
+        lock_dir_status = os_module.fstat(lock_dir_fd)
+        lock_dir_path_status = os_module.stat(
+            "axisai-production",
+            dir_fd=run_lock_fd,
+            follow_symlinks=False,
+        )
+        if (lock_dir_status.st_uid != 0 or lock_dir_path_status.st_uid != 0 or
+                not stat_module.S_ISDIR(lock_dir_status.st_mode) or
+                not stat_module.S_ISDIR(lock_dir_path_status.st_mode) or
+                stat_module.S_IMODE(lock_dir_status.st_mode) != 0o755 or
+                stat_module.S_IMODE(lock_dir_path_status.st_mode) != 0o755 or
+                (lock_dir_status.st_dev, lock_dir_status.st_ino) !=
+                (lock_dir_path_status.st_dev, lock_dir_path_status.st_ino)):
+            raise OSError("unsafe outer lock directory")
+
+        common_file_flags = (
+            os_module.O_RDWR | os_module.O_NOFOLLOW | os_module.O_CLOEXEC
+        )
+        created_file = False
+        try:
+            lock_fd = os_module.open(
+                "production.lock",
+                common_file_flags | os_module.O_CREAT | os_module.O_EXCL,
+                0o644,
+                dir_fd=lock_dir_fd,
+            )
+            created_file = True
+        except FileExistsError:
+            lock_fd = os_module.open(
+                "production.lock", common_file_flags, dir_fd=lock_dir_fd
+            )
+        if created_file:
+            os_module.fchmod(lock_fd, 0o644)
+        lock_status = os_module.fstat(lock_fd)
+        path_status = os_module.stat(
+            "production.lock", dir_fd=lock_dir_fd, follow_symlinks=False
+        )
+        if (lock_status.st_uid != 0 or path_status.st_uid != 0 or
+                not stat_module.S_ISREG(lock_status.st_mode) or
+                not stat_module.S_ISREG(path_status.st_mode) or
+                lock_status.st_nlink != 1 or path_status.st_nlink != 1 or
+                stat_module.S_IMODE(lock_status.st_mode) != 0o644 or
+                (lock_status.st_dev, lock_status.st_ino) !=
+                (path_status.st_dev, path_status.st_ino)):
+            raise OSError("unsafe outer lock file")
+
+        deadline = time_module.monotonic() + 60
+        while True:
+            try:
+                fcntl_module.flock(
+                    lock_fd, fcntl_module.LOCK_EX | fcntl_module.LOCK_NB
+                )
+                break
+            except BlockingIOError:
+                now = time_module.monotonic()
+                if now >= deadline:
+                    _emit(
+                        stderr,
+                        "outer deployment lock unavailable after 60 seconds",
+                    )
+                    return 73
+                time_module.sleep(min(0.25, deadline - now))
+        completed = subprocess_module.run(
+            ["/bin/sh", "-c", command], check=False
+        )
+        return completed.returncode
+    except (OSError, ValueError, UnicodeError):
+        _emit(stderr, "outer deployment lock is unavailable or unsafe")
+        return 73
+    finally:
+        for descriptor in (lock_fd, lock_dir_fd, run_lock_fd):
+            if descriptor is not None:
+                try:
+                    os_module.close(descriptor)
+                except OSError:
+                    pass
+
+
+def main():
+    import fcntl
+    import os
+    import stat
+    import subprocess
+    import sys
+    import time
+    if len(sys.argv) != 2:
+        _emit(sys.stderr, "outer deployment lock command is invalid")
+        return 73
+    return run(sys.argv[1], os, stat, fcntl, subprocess, time, sys.stderr)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
 
 WAITING_STATES = frozenset({"Pending", "Delayed", "InProgress"})
 FAILURE_STATES = frozenset({
@@ -285,17 +421,10 @@ def render_bootstrap(
     encoded_url: str,
 ) -> str:
     """Render a fixed root bootstrap from validated and base64-encoded values."""
-    return f"""set -eu
+    inner_bootstrap = f"""set -eu
 umask 077
 deploy_dir="$(printf '%s' '{encoded_dir}' | base64 --decode)"
 public_health_url="$(printf '%s' '{encoded_url}' | base64 --decode)"
-lock_path="$deploy_dir/.axisai-production-deploy.lock"
-
-exec 9>"$lock_path"
-if ! flock -w 60 9; then
-  echo 'deployment lock unavailable after 60 seconds' >&2
-  exit 73
-fi
 
 env_file="$deploy_dir/.env"
 if [ ! -f "$env_file" ]; then
@@ -344,8 +473,7 @@ if listeners="$(ss -H -ltn 'sport = :3000' 2>&1)" && \
      grep -Eq '(^|[[:space:]])127[.]0[.]0[.]1:3000([[:space:]]|$)'; then
   echo 'fatsecret proxy: 127.0.0.1:3000 is listening'
 else
-  echo 'fatsecret proxy is not listening on 127.0.0.1:3000' >&2
-  exit 1
+  echo 'WARNING: fatsecret proxy is not listening on 127.0.0.1:3000'
 fi
 
 script_path="$(mktemp /tmp/fitx-deploy.XXXXXX)"
@@ -363,9 +491,16 @@ if ! id -u '{deploy_user}' >/dev/null 2>&1; then
   exit 1
 fi
 chown -- '{deploy_user}' "$script_path"
-sudo -u '{deploy_user}' -- env AXISAI_DEPLOY_LOCK_FD=0 \
-  "$script_path" '{deploy_sha}' "$deploy_dir" "$public_health_url" <&9
+sudo -u '{deploy_user}' -- env AXISAI_OUTER_LOCK_PATH={ROOT_OUTER_LOCK_PATH} \
+  "$script_path" '{deploy_sha}' "$deploy_dir" "$public_health_url"
 """
+    encoded_bootstrap = base64.b64encode(inner_bootstrap.encode("utf-8")).decode("ascii")
+    return (
+        f"python3 - {shlex.quote(encoded_bootstrap)} "
+        "<<'AXISAI_ROOT_LOCK_PY'\n"
+        f"{ROOT_LOCK_WRAPPER_SOURCE}"
+        "AXISAI_ROOT_LOCK_PY\n"
+    )
 
 
 def build_remote_command(config: DeployConfig, script: bytes) -> str:

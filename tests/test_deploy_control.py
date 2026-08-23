@@ -3,11 +3,13 @@ import json
 import os
 import shlex
 import shutil
+import stat
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -331,13 +333,21 @@ def test_remote_command_encodes_script_and_untrusted_positional_values():
     })
 
     command = build_remote_command(config, script)
+    command_lines = command.splitlines()
+    arguments = shlex.split(command_lines[0].split(" <<", 1)[0])
+    assert arguments[:2] == ["python3", "-"]
+    assert "\n".join(command_lines[1:-1]) + "\n" == (
+        deploy_control.ROOT_LOCK_WRAPPER_SOURCE
+    )
+    assert command_lines[-1] == "AXISAI_ROOT_LOCK_PY"
+    inner_bootstrap = base64.b64decode(arguments[2], validate=True).decode("utf-8")
 
     assert script.decode() not in command
     assert deploy_dir not in command
     assert public_url not in command
-    assert base64.b64encode(script).decode("ascii") in command
-    assert base64.b64encode(deploy_dir.encode()).decode("ascii") in command
-    assert base64.b64encode(public_url.encode()).decode("ascii") in command
+    assert base64.b64encode(script).decode("ascii") in inner_bootstrap
+    assert base64.b64encode(deploy_dir.encode()).decode("ascii") in inner_bootstrap
+    assert base64.b64encode(public_url.encode()).decode("ascii") in inner_bootstrap
 
 
 def _write_shell_stub(directory, name, body):
@@ -358,6 +368,236 @@ def _git_bash_path(path):
     return f"/{drive.lower()}{remainder}"
 
 
+class FakeRootLockOs:
+    O_RDONLY = 1
+    O_RDWR = 2
+    O_CREAT = 4
+    O_DIRECTORY = 8
+    O_NOFOLLOW = 16
+    O_CLOEXEC = 32
+    O_EXCL = 64
+
+    def __init__(
+        self,
+        *,
+        directory_uid=0,
+        file_uid=0,
+        existing_directory=True,
+        symlink_directory=False,
+        symlink_lock=False,
+        existing_file=False,
+        file_permissions=0o600,
+    ):
+        self.directory_uid = directory_uid
+        self.file_uid = file_uid
+        self.existing_directory = existing_directory
+        self.symlink_directory = symlink_directory
+        self.symlink_lock = symlink_lock
+        self.existing_file = existing_file
+        self.directory_mode = stat.S_IFDIR | 0o755
+        self.file_mode = stat.S_IFREG | file_permissions
+        self.open_calls = []
+        self.mkdir_calls = []
+        self.closed = []
+
+    def open(self, path, flags, mode=0o777, *, dir_fd=None):
+        self.open_calls.append((path, flags, mode, dir_fd))
+        if path == "/run/lock":
+            return 10
+        if path == "axisai-production":
+            return 11
+        if path == "production.lock":
+            if self.symlink_lock:
+                raise OSError("refusing symbolic link")
+            if flags & self.O_EXCL and self.existing_file:
+                raise FileExistsError(path)
+            return 12
+        raise AssertionError(path)
+
+    def mkdir(self, path, mode=0o777, *, dir_fd=None):
+        self.mkdir_calls.append((path, mode, dir_fd))
+        if self.existing_directory:
+            raise FileExistsError(path)
+        self.existing_directory = True
+        self.directory_mode = stat.S_IFDIR | 0o700
+
+    def fstat(self, fd):
+        if fd in (10, 11):
+            uid = 0 if fd == 10 else self.directory_uid
+            return SimpleNamespace(
+                st_uid=uid,
+                st_mode=self.directory_mode,
+                st_nlink=2,
+                st_dev=1,
+                st_ino=fd,
+            )
+        if fd == 12:
+            return SimpleNamespace(
+                st_uid=self.file_uid,
+                st_mode=self.file_mode,
+                st_nlink=1,
+                st_dev=1,
+                st_ino=12,
+            )
+        raise AssertionError(fd)
+
+    def stat(self, path, *, dir_fd=None, follow_symlinks=True):
+        assert follow_symlinks is False
+        if path == "axisai-production":
+            assert dir_fd == 10
+            mode = (
+                stat.S_IFLNK | 0o777
+                if self.symlink_directory
+                else self.directory_mode
+            )
+            return SimpleNamespace(
+                st_uid=self.directory_uid,
+                st_mode=mode,
+                st_nlink=2,
+                st_dev=1,
+                st_ino=11,
+            )
+        assert path == "production.lock"
+        assert dir_fd == 11
+        if self.symlink_lock:
+            mode = stat.S_IFLNK | 0o777
+        else:
+            mode = self.file_mode
+        return SimpleNamespace(
+            st_uid=self.file_uid,
+            st_mode=mode,
+            st_nlink=1,
+            st_dev=1,
+            st_ino=12,
+        )
+
+    def fchmod(self, fd, mode):
+        if fd == 11:
+            self.directory_mode = stat.S_IFDIR | mode
+        elif fd == 12:
+            self.file_mode = stat.S_IFREG | mode
+        else:
+            raise AssertionError(fd)
+
+    def close(self, fd):
+        self.closed.append(fd)
+
+
+class FakeRootLockFcntl:
+    LOCK_EX = 1
+    LOCK_NB = 2
+
+    def __init__(self, *, contended=False):
+        self.contended = contended
+        self.calls = []
+
+    def flock(self, fd, operation):
+        self.calls.append((fd, operation))
+        if self.contended:
+            raise BlockingIOError
+
+
+def _load_root_lock_runner():
+    namespace = {"__name__": "root_lock_test"}
+    exec(deploy_control.ROOT_LOCK_WRAPPER_SOURCE, namespace)
+    return namespace["run"]
+
+
+def test_root_lock_wrapper_provisions_root_owned_nonwritable_directory_and_readable_file():
+    fake_os = FakeRootLockOs(existing_directory=False)
+    fake_fcntl = FakeRootLockFcntl()
+    child_calls = []
+    fake_subprocess = SimpleNamespace(
+        run=lambda args, **kwargs: child_calls.append((args, kwargs))
+        or SimpleNamespace(returncode=23),
+    )
+    fake_time = SimpleNamespace(monotonic=lambda: 0, sleep=lambda _delay: None)
+
+    status = _load_root_lock_runner()(
+        base64.b64encode(b"printf safe").decode("ascii"),
+        fake_os,
+        stat,
+        fake_fcntl,
+        fake_subprocess,
+        fake_time,
+        [],
+    )
+
+    assert status == 23
+    assert fake_os.directory_mode & 0o022 == 0
+    assert fake_os.file_mode & 0o777 == 0o644
+    assert fake_os.mkdir_calls == [("axisai-production", 0o755, 10)]
+    assert fake_os.open_calls == [
+        ("/run/lock", 1 | 8 | 16 | 32, 0o777, None),
+        ("axisai-production", 1 | 8 | 16 | 32, 0o777, 10),
+        ("production.lock", 2 | 4 | 16 | 32 | 64, 0o644, 11),
+    ]
+    assert child_calls == [(["/bin/sh", "-c", "printf safe"], {"check": False})]
+    assert fake_fcntl.calls == [(12, 1 | 2)]
+    assert fake_os.closed == [12, 11, 10]
+
+
+@pytest.mark.parametrize(
+    ("os_kwargs", "expected_error"),
+    [
+        ({"symlink_lock": True}, "outer deployment lock is unavailable or unsafe"),
+        ({"symlink_directory": True}, "outer deployment lock is unavailable or unsafe"),
+        ({"directory_uid": 1000}, "outer deployment lock is unavailable or unsafe"),
+        ({"file_uid": 1000}, "outer deployment lock is unavailable or unsafe"),
+        (
+            {"existing_file": True, "file_permissions": 0o666},
+            "outer deployment lock is unavailable or unsafe",
+        ),
+    ],
+)
+def test_root_lock_wrapper_rejects_symlink_or_nonroot_ownership_before_child(
+        os_kwargs, expected_error):
+    fake_os = FakeRootLockOs(**os_kwargs)
+    child_calls = []
+    errors = []
+
+    status = _load_root_lock_runner()(
+        base64.b64encode(b"exit 0").decode("ascii"),
+        fake_os,
+        stat,
+        FakeRootLockFcntl(),
+        SimpleNamespace(
+            run=lambda *args, **kwargs: child_calls.append(args)
+            or SimpleNamespace(returncode=0),
+        ),
+        SimpleNamespace(monotonic=lambda: 0, sleep=lambda _delay: None),
+        errors,
+    )
+
+    assert status == 73
+    assert child_calls == []
+    assert errors == [expected_error]
+
+
+def test_root_lock_wrapper_contention_exits_73_before_child():
+    child_calls = []
+    errors = []
+    readings = iter((100, 159, 160))
+    sleeps = []
+    fake_fcntl = FakeRootLockFcntl(contended=True)
+
+    status = _load_root_lock_runner()(
+        base64.b64encode(b"exit 0").decode("ascii"),
+        FakeRootLockOs(),
+        stat,
+        fake_fcntl,
+        SimpleNamespace(run=lambda *args, **kwargs: child_calls.append(args)),
+        SimpleNamespace(monotonic=lambda: next(readings), sleep=sleeps.append),
+        errors,
+    )
+
+    assert status == 73
+    assert child_calls == []
+    assert fake_fcntl.calls == [(12, 1 | 2), (12, 1 | 2)]
+    assert sleeps == [0.25]
+    assert errors == ["outer deployment lock unavailable after 60 seconds"]
+
+
 @dataclass
 class BootstrapHarness:
     bash: Path
@@ -374,7 +614,7 @@ class BootstrapHarness:
     def run(
         self,
         *,
-        flock_exit=0,
+        outer_lock_mode="success",
         env_exists=True,
         env_permissions="600",
         env_chmod_exit=0,
@@ -396,7 +636,7 @@ class BootstrapHarness:
             **os.environ,
             "HARNESS_DIR": bash_root,
             "PATH": f"{bash_stubs}:/usr/bin:/bin",
-            "FLOCK_EXIT": str(flock_exit),
+            "OUTER_LOCK_MODE": outer_lock_mode,
             "ENV_FILE": _git_bash_path(self.env_file),
             "ENV_PERMISSIONS": env_permissions,
             "ENV_CHMOD_EXIT": str(env_chmod_exit),
@@ -441,10 +681,18 @@ def bootstrap_harness(workspace_tmp_dir):
     remote_script = harness / "decoded-script"
     bash_harness = _git_bash_path(harness)
 
-    _write_shell_stub(stubs, "flock", """
-printf '%s\n' flock >> "$HARNESS_DIR/events"
-printf '%s\\0' "$@" > "$HARNESS_DIR/flock-args"
-exit "$FLOCK_EXIT"
+    _write_shell_stub(stubs, "python3", """
+printf '%s\n' outer-lock >> "$HARNESS_DIR/events"
+printf '%s\\0' "$@" > "$HARNESS_DIR/python3-args"
+case "$OUTER_LOCK_MODE" in
+  success) ;;
+  contended|unsafe|symlink) exit 73 ;;
+  *) exit 64 ;;
+esac
+test "$1" = '-'
+shift
+cat > "$HARNESS_DIR/root-lock-source"
+printf '%s' "$1" | base64 --decode | /bin/sh
 """)
 
     _write_shell_stub(stubs, "mktemp", """
@@ -555,10 +803,9 @@ def test_bootstrap_holds_lock_through_safeguards_and_helper_cleanup(
 
     assert completed.returncode == remote_exit_code, completed.stderr
     assert (harness / "events").read_text(encoding="utf-8").splitlines() == [
-        "flock", "stat", "nginx", "systemctl", "systemctl", "ss", "ss",
+        "outer-lock", "stat", "nginx", "systemctl", "systemctl", "ss", "ss",
         "mktemp", "chmod", "id", "chown", "sudo",
     ]
-    assert _read_null_arguments(harness / "flock-args") == ["-w", "60", "9"]
     assert _read_null_arguments(harness / "mktemp-args") == ["/tmp/fitx-deploy.XXXXXX"]
     assert _read_null_arguments(harness / "chmod-args") == ["0700", bash_remote_script]
     assert _read_null_arguments(harness / "id-args") == ["-u", VALID_ENV["DEPLOY_USER"]]
@@ -568,7 +815,8 @@ def test_bootstrap_holds_lock_through_safeguards_and_helper_cleanup(
     assert (harness / "sudo-user").read_text(encoding="utf-8") == VALID_ENV["DEPLOY_USER"]
     assert _read_null_arguments(harness / "sudo-args") == [
         "-u", VALID_ENV["DEPLOY_USER"], "--", "env",
-        "AXISAI_DEPLOY_LOCK_FD=0", bash_remote_script,
+        "AXISAI_OUTER_LOCK_PATH=/run/lock/axisai-production/production.lock",
+        bash_remote_script,
         VALID_ENV["DEPLOY_SHA"], deploy_dir, public_url,
     ]
     assert _read_null_arguments(harness / "script-args") == [
@@ -579,11 +827,24 @@ def test_bootstrap_holds_lock_through_safeguards_and_helper_cleanup(
 
 def test_bootstrap_contention_exits_73_before_any_host_side_effect(
         bootstrap_harness):
-    completed = bootstrap_harness.run(flock_exit=1)
+    completed = bootstrap_harness.run(outer_lock_mode="contended")
 
     assert completed.returncode == 73
-    assert "deployment lock unavailable after 60 seconds" in completed.stderr
-    assert bootstrap_harness.events.read_text(encoding="utf-8").splitlines() == ["flock"]
+    assert bootstrap_harness.events.read_text(encoding="utf-8").splitlines() == [
+        "outer-lock",
+    ]
+    assert not bootstrap_harness.remote_script.exists()
+
+
+@pytest.mark.parametrize("outer_lock_mode", ["unsafe", "symlink"])
+def test_bootstrap_rejects_unsafe_outer_lock_before_any_host_side_effect(
+        bootstrap_harness, outer_lock_mode):
+    completed = bootstrap_harness.run(outer_lock_mode=outer_lock_mode)
+
+    assert completed.returncode == 73
+    assert bootstrap_harness.events.read_text(encoding="utf-8").splitlines() == [
+        "outer-lock",
+    ]
     assert not bootstrap_harness.remote_script.exists()
 
 
@@ -593,7 +854,7 @@ def test_bootstrap_missing_env_fails_before_nginx_or_helper(bootstrap_harness):
 
     assert completed.returncode != 0
     assert "deployment .env file is missing" in completed.stderr
-    assert events == ["flock"]
+    assert events == ["outer-lock"]
 
 
 def test_bootstrap_repairs_and_rechecks_env_permissions_before_helper(
@@ -602,7 +863,7 @@ def test_bootstrap_repairs_and_rechecks_env_permissions_before_helper(
     events = bootstrap_harness.events.read_text(encoding="utf-8").splitlines()
 
     assert completed.returncode == 0, completed.stderr
-    assert events[:4] == ["flock", "stat", "chmod", "stat"]
+    assert events[:4] == ["outer-lock", "stat", "chmod", "stat"]
     assert "sudo" in events
 
 
@@ -626,16 +887,16 @@ def test_bootstrap_nginx_failure_stops_before_systemctl_and_helper(bootstrap_har
     assert "sudo" not in events
 
 
-def test_bootstrap_rejects_port_30000_as_not_exact_fatsecret_listener(
+def test_bootstrap_warns_for_port_30000_without_treating_it_as_fatsecret(
         bootstrap_harness):
     completed = bootstrap_harness.run(
         fatsecret_listener="LISTEN 0 128 127.0.0.1:30000 0.0.0.0:*",
     )
     events = bootstrap_harness.events.read_text(encoding="utf-8").splitlines()
 
-    assert completed.returncode != 0
-    assert "fatsecret proxy is not listening on 127.0.0.1:3000" in completed.stderr
-    assert "sudo" not in events
+    assert completed.returncode == 0, completed.stderr
+    assert "WARNING: fatsecret proxy is not listening on 127.0.0.1:3000" in completed.stdout
+    assert "sudo" in events
 
 
 @pytest.mark.parametrize("response", [
@@ -983,14 +1244,21 @@ def test_run_deploy_orders_validation_preflight_exact_script_send_and_poll(
         "aws:ssm:get-command-invocation",
     ]
     remote_command = sent_parameters[0]["commands"][0]
-    assert base64.b64encode(exact_script).decode("ascii") in remote_command
+    remote_lines = remote_command.splitlines()
+    remote_arguments = shlex.split(remote_lines[0].split(" <<", 1)[0])
+    assert remote_arguments[:2] == ["python3", "-"]
+    inner_bootstrap = base64.b64decode(
+        remote_arguments[2], validate=True,
+    ).decode("utf-8")
+    assert base64.b64encode(exact_script).decode("ascii") in inner_bootstrap
     assert (
-        f"sudo -u '{VALID_ENV['DEPLOY_USER']}' -- env AXISAI_DEPLOY_LOCK_FD=0"
-    ) in remote_command
+        f"sudo -u '{VALID_ENV['DEPLOY_USER']}' -- env "
+        "AXISAI_OUTER_LOCK_PATH=/run/lock/axisai-production/production.lock"
+    ) in inner_bootstrap
     assert (
         "\"$script_path\" "
         f"'{VALID_ENV['DEPLOY_SHA']}' \"$deploy_dir\" \"$public_health_url\""
-    ) in remote_command
+    ) in inner_bootstrap
     assert messages[-5:] == [
         "SSM status: Success",
         "SSM stdout:",

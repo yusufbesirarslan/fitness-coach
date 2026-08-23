@@ -5,7 +5,9 @@ readonly DEPLOY_SHA="${1:-}"
 readonly DEPLOY_DIR="${2:-}"
 readonly PUBLIC_HEALTH_URL="${3:-}"
 readonly LOCK_PATH="$DEPLOY_DIR/.axisai-production-deploy.lock"
-readonly INHERITED_LOCK_FD="${AXISAI_DEPLOY_LOCK_FD:-}"
+readonly OUTER_LOCK_DIR="/run/lock/axisai-production"
+readonly OUTER_LOCK_PATH="$OUTER_LOCK_DIR/production.lock"
+readonly OUTER_LOCK_MARKER="${AXISAI_OUTER_LOCK_PATH:-}"
 readonly SSM_EXECUTION_TIMEOUT_SECONDS=1800
 readonly HOST_TRANSACTION_LIMIT_SECONDS=1680
 readonly SSM_BOOTSTRAP_MARGIN_SECONDS=120
@@ -87,35 +89,54 @@ run_external() {
   fi
 }
 
-# The root SSM bootstrap holds the stable lock on fd 9 and duplicates the same
-# open file description onto this process's stdin.  The marker alone is never a
-# bypass: the inherited fd must identify the exact stable lock inode and prove
-# nonblocking ownership.  Direct invocations retain the normal bounded acquire.
-if [[ -n "$INHERITED_LOCK_FD" ]]; then
-  if [[ "$INHERITED_LOCK_FD" != 0 ]] ||
-     ! inherited_lock_identity="$(stat -Lc '%d:%i' -- /proc/self/fd/0)" ||
-     ! stable_lock_identity="$(stat -Lc '%d:%i' -- "$LOCK_PATH")" ||
-     [[ "$inherited_lock_identity" != "$stable_lock_identity" ]]; then
-    echo "deployment lock unavailable after 60 seconds" >&2
-    exit 73
+# The root bootstrap owns this root-controlled lock while workflow safeguards
+# and this helper run.  A marker names only the one allowed path; the separate
+# nonblocking probe below proves the wrapper actually holds it.  Marker-free
+# direct calls enter through flock once, then recurse through the same proof.
+# Thus workflow and direct paths each consume at most one 60-second lock wait;
+# the deploy-directory lock is nonblocking after the outer serialization gate.
+if [[ -n "$OUTER_LOCK_MARKER" && "$OUTER_LOCK_MARKER" != "$OUTER_LOCK_PATH" ]]; then
+  echo "outer deployment lock is unavailable or unsafe" >&2
+  exit 73
+fi
+if ! outer_dir_metadata="$(
+       LC_ALL=C stat -c '%u:%F:%a' -- "$OUTER_LOCK_DIR"
+     )" ||
+   ! outer_file_metadata="$(
+       LC_ALL=C stat -c '%u:%F:%a:%h' -- "$OUTER_LOCK_PATH"
+     )" ||
+   [[ "$outer_dir_metadata" != "0:directory:755" ]] ||
+   [[ "$outer_file_metadata" != "0:regular file:644:1" &&
+      "$outer_file_metadata" != "0:regular empty file:644:1" ]]; then
+  echo "outer deployment lock is unavailable or unsafe" >&2
+  exit 73
+fi
+
+if [[ -z "$OUTER_LOCK_MARKER" ]]; then
+  set +e
+  flock -x -w "$LOCK_WAIT_SECONDS" -E 73 "$OUTER_LOCK_PATH" \
+    env AXISAI_OUTER_LOCK_PATH="$OUTER_LOCK_PATH" "$0" "$@"
+  direct_status="$?"
+  set -e
+  if [[ "$direct_status" == 73 ]]; then
+    echo "outer deployment lock unavailable after 60 seconds" >&2
   fi
-  exec 8>"$LOCK_PATH"
-  if flock -n 8; then
-    exec 8>&-
-    echo "deployment lock unavailable after 60 seconds" >&2
-    exit 73
-  fi
-  exec 8>&-
-  if ! flock -n 0; then
-    echo "deployment lock unavailable after 60 seconds" >&2
-    exit 73
-  fi
-else
-  exec 9>"$LOCK_PATH"
-  if ! flock -w "$LOCK_WAIT_SECONDS" 9; then
-    echo "deployment lock unavailable after 60 seconds" >&2
-    exit 73
-  fi
+  exit "$direct_status"
+fi
+
+set +e
+flock -n -E 73 "$OUTER_LOCK_PATH" true
+outer_probe_status="$?"
+set -e
+if [[ "$outer_probe_status" != 73 ]]; then
+  echo "outer deployment lock is not held by the deployment wrapper" >&2
+  exit 73
+fi
+
+exec 9>"$LOCK_PATH"
+if ! flock -n -E 73 9; then
+  echo "deployment lock unavailable after outer lock acquisition" >&2
+  exit 73
 fi
 
 if [[ "$#" -lt 2 || "$#" -gt 3 ]]; then
