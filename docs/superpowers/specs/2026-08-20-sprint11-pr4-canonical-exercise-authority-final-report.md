@@ -932,7 +932,7 @@ flask --app starter db current         -> c2d3e4f5a6b7 (head)
 flask --app starter db check           -> PostgreSQL CI gate; see Migration impact
 
 git diff --check                       -> clean (exit 0)
-git diff --check origin/main...HEAD    -> 4 findings (exit 2), see below
+git diff --check origin/main...HEAD    -> 7 lines / 4 findings (exit 2)
 conflict-marker scan (tracked files)   -> none
 ```
 
@@ -975,7 +975,7 @@ The thirteen previously accepted P2s are unchanged.
 Not clean, and reported exactly rather than silently "fixed".
 
 ```
-git diff --check origin/main...HEAD          → exit 2, 4 findings
+git diff --check origin/main...HEAD          → exit 2, 7 lines / 4 findings
   docs/superpowers/plans/…-authority.md:814   new blank line at EOF
   docs/superpowers/specs/…-design.md:3        trailing whitespace   "Date: 2026-08-20  "
   docs/superpowers/specs/…-design.md:4        trailing whitespace   "Status: approved design; implementation pending  "
@@ -983,10 +983,14 @@ git diff --check origin/main...HEAD          → exit 2, 4 findings
 git diff --check                (worktree)   → clean
 ```
 
-Two corrections to the previous disclosure. The count is **4, not 7**; and only
-**3** of the 4 are Markdown hard breaks — the fourth is a trailing blank line at
-end of file, which renders identically either way. All four are in design/plan
-documentation; no production, test, template, locale or static file is flagged.
+One clarification to the previous disclosure. `git diff --check` prints **7
+lines**, which is the number the earlier report and the brief quote — but those
+7 lines describe **4 findings**, because each trailing-whitespace finding is
+followed by the offending line itself. And only **3** of the 4 are Markdown hard
+breaks; the fourth is a trailing blank line at end of file, which renders
+identically either way, so "seven Markdown hard-break lines" overstates both the
+count and the kind. All four are in design/plan documentation; no production,
+test, template, locale or static file is flagged.
 
 **CI does not gate on this.** `.github/workflows/ci.yml` has exactly three jobs
 — `pytest`, `schema-drift guard` (`flask db upgrade` + `flask db check`) and
@@ -1110,10 +1114,11 @@ is provably zero.
 warn-only after integration; `injury_warnings` gates nothing and main's
 confirmation surface never invokes injury screening.
 
-**23. Is `git diff --check` clean?** No — 4 findings on `origin/main...HEAD`,
-all in two design/plan Markdown documents: 3 intentional hard breaks plus 1
-blank line at EOF. CI does not run `git diff --check`, so per the brief they are
-disclosed, not rewritten. (The previous report's "7 lines" was an overcount.)
+**23. Is `git diff --check` clean?** No — it exits 2 with 7 output lines
+describing 4 findings, all in two design/plan Markdown documents: 3 intentional
+hard breaks plus 1 blank line at EOF. CI does not run `git diff --check`
+anywhere, so per the brief they are disclosed rather than rewritten. The
+worktree itself is clean.
 
 **24. What remains for PR5?** Unchanged from the previous report — catalog
 coverage, identity-keyed injury screening (P2-16), the Coach alias-wording
@@ -1138,8 +1143,8 @@ migration graph is a single head with PR4 adding nothing; legacy plans remain
 readable; and Adaptive Coaching undo semantics are unchanged.
 
 The only non-green signal is `git diff --check` on the branch range, which is
-disclosed above: 4 findings, all in two design/plan Markdown documents, and
-not gated by any CI job. It is a documentation-formatting disclosure, not a
+disclosed above: 4 findings across 7 output lines, all in two design/plan
+Markdown documents, and not gated by any CI job. It is a documentation-formatting disclosure, not a
 ship blocker.
 
 The branch remains local: not pushed, no pull request, not merged, not
