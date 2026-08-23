@@ -118,13 +118,15 @@ class HostFixture:
         bash_executable: str,
         *,
         held: bool = True,
-        marker: str = OUTER_LOCK_PATH,
+        marker: str = "7",
+        capability_locked: bool = True,
         **environment: str,
     ) -> subprocess.CompletedProcess[str]:
         return self.run(
             bash_executable,
-            AXISAI_OUTER_LOCK_PATH=marker,
+            AXISAI_OUTER_LOCK_FD=marker,
             FAKE_OUTER_LOCK_HELD="1" if held else "0",
+            FAKE_OUTER_CAPABILITY_LOCKED="1" if capability_locked else "0",
             **environment,
         )
 
@@ -221,6 +223,10 @@ if [[ " $* " == *" $EXPECTED_OUTER_LOCK_PATH "* && " $* " == *' -n '* ]]; then
   if [[ "${FAKE_OUTER_LOCK_HELD:-0}" == 1 ]]; then exit 73; fi
   exit 0
 fi
+if [[ " $* " == ' -n -E 73 7 ' ]]; then
+  if [[ "${FAKE_OUTER_CAPABILITY_LOCKED:-0}" == 1 ]]; then exit 0; fi
+  exit 73
+fi
 if [[ " $* " == *" $EXPECTED_OUTER_LOCK_PATH "* ]]; then
   if [[ "${FLOCK_EXIT:-0}" != 0 ]]; then exit 73; fi
   lock_state_created=0
@@ -261,8 +267,44 @@ for argument in "$@"; do last="$argument"; done
 case "$last" in
   /run/lock/axisai-production) printf '%s\n' "$FAKE_OUTER_DIR_METADATA" ;;
   /run/lock/axisai-production/production.lock) printf '%s\n' "$FAKE_OUTER_FILE_METADATA" ;;
+  /proc/self/fd/7) printf '%s\n' "$FAKE_OUTER_FD_METADATA" ;;
   *) exit 65 ;;
 esac
+""",
+        )
+        _write_executable(
+            fake_bin / "python3",
+            r"""#!/usr/bin/env bash
+printf 'direct-outer-lock -w60\n' >> "$TRACE_FILE"
+if [[ "${FLOCK_EXIT:-0}" != 0 ]]; then
+  echo 'outer deployment lock unavailable after 60 seconds' >&2
+  exit 73
+fi
+lock_state_created=0
+if [[ -n "${FLOCK_STATE_DIR:-}" ]]; then
+  if ! mkdir "$FLOCK_STATE_DIR" 2>/dev/null; then
+    echo 'outer deployment lock unavailable after 60 seconds' >&2
+    exit 73
+  fi
+  lock_state_created=1
+fi
+if [[ -n "${FLOCK_READY_FILE:-}" ]]; then
+  : > "$FLOCK_READY_FILE"
+  printf 'FAKE_LOCK_READY\n'
+fi
+while [[ -n "${FLOCK_HOLD_FILE:-}" && -e "$FLOCK_HOLD_FILE" ]]; do
+  /usr/bin/sleep 0.05
+done
+test "$1" = -
+shift
+helper="$1"
+shift
+cat >/dev/null
+AXISAI_OUTER_LOCK_FD=7 FAKE_OUTER_LOCK_HELD=1 \
+  FAKE_OUTER_CAPABILITY_LOCKED=1 "$helper" "$@"
+status="$?"
+if [[ "$lock_state_created" == 1 ]]; then rmdir "$FLOCK_STATE_DIR"; fi
+exit "$status"
 """,
         )
         _write_executable(
@@ -483,7 +525,8 @@ esac
                 "FLOCK_EXIT": str(flock_exit),
                 "EXPECTED_OUTER_LOCK_PATH": OUTER_LOCK_PATH,
                 "FAKE_OUTER_DIR_METADATA": "0:directory:755",
-                "FAKE_OUTER_FILE_METADATA": "0:regular empty file:644:1",
+                "FAKE_OUTER_FILE_METADATA": "11:22:0:regular empty file:644:1",
+                "FAKE_OUTER_FD_METADATA": "11:22:0:regular empty file:644:1",
                 "DOCKER_STATE_FILE": _bash_path(docker_state),
                 "FAKE_CANDIDATE_CONTAINER_REVISION": container_revision,
                 "FAKE_ROLLBACK_CONTAINER_REVISION": rollback_container_revision,
@@ -556,11 +599,8 @@ def test_lock_contention_fails_before_git_or_docker(bash_executable, host_fixtur
     trace = fixture.trace.read_text(encoding="utf-8")
     assert trace == (
         "stat -c %u:%F:%a -- /run/lock/axisai-production\n"
-        f"stat -c %u:%F:%a:%h -- {OUTER_LOCK_PATH}\n"
-        "flock -x -w 60 -E 73 "
-        f"{OUTER_LOCK_PATH} env AXISAI_OUTER_LOCK_PATH={OUTER_LOCK_PATH} "
-        f"{_bash_path(HOST_SCRIPT)} {fixture.candidate_commit} "
-        f"{_bash_path(fixture.deploy_dir)} \n"
+        f"stat -c %d:%i:%u:%F:%a:%h -- {OUTER_LOCK_PATH}\n"
+        "direct-outer-lock -w60\n"
     )
 
 
@@ -572,10 +612,12 @@ def test_workflow_outer_lock_marker_proves_held_lock_then_acquires_inner_lock(
 
     assert result.returncode == 0, result.stderr
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.splitlines()[:4] == [
+    assert trace.splitlines()[:6] == [
         "stat -c %u:%F:%a -- /run/lock/axisai-production",
-        f"stat -c %u:%F:%a:%h -- {OUTER_LOCK_PATH}",
+        f"stat -c %d:%i:%u:%F:%a:%h -- {OUTER_LOCK_PATH}",
+        "stat -c %d:%i:%u:%F:%a:%h -- /proc/self/fd/7",
         f"flock -n -E 73 {OUTER_LOCK_PATH} true",
+        "flock -n -E 73 7",
         "flock -n -E 73 9",
     ]
     assert "flock -w" not in trace
@@ -589,19 +631,18 @@ def test_direct_invocation_acquires_outer_then_inner_with_one_bounded_wait(
 
     assert result.returncode == 0, result.stderr
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.splitlines()[:7] == [
+    assert trace.splitlines()[:9] == [
         "stat -c %u:%F:%a -- /run/lock/axisai-production",
-        f"stat -c %u:%F:%a:%h -- {OUTER_LOCK_PATH}",
-        "flock -x -w 60 -E 73 "
-        f"{OUTER_LOCK_PATH} env AXISAI_OUTER_LOCK_PATH={OUTER_LOCK_PATH} "
-        f"{_bash_path(HOST_SCRIPT)} {fixture.candidate_commit} "
-        f"{_bash_path(fixture.deploy_dir)} ",
+        f"stat -c %d:%i:%u:%F:%a:%h -- {OUTER_LOCK_PATH}",
+        "direct-outer-lock -w60",
         "stat -c %u:%F:%a -- /run/lock/axisai-production",
-        f"stat -c %u:%F:%a:%h -- {OUTER_LOCK_PATH}",
+        f"stat -c %d:%i:%u:%F:%a:%h -- {OUTER_LOCK_PATH}",
+        "stat -c %d:%i:%u:%F:%a:%h -- /proc/self/fd/7",
         f"flock -n -E 73 {OUTER_LOCK_PATH} true",
+        "flock -n -E 73 7",
         "flock -n -E 73 9",
     ]
-    assert trace.count(" -w 60 ") == 1
+    assert trace.count("direct-outer-lock -w60") == 1
 
 
 def test_outer_lock_marker_without_held_lock_fails_before_inner_or_mutation(
@@ -612,9 +653,10 @@ def test_outer_lock_marker_without_held_lock_fails_before_inner_or_mutation(
 
     assert result.returncode == 73
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.splitlines()[:3] == [
+    assert trace.splitlines()[:4] == [
         "stat -c %u:%F:%a -- /run/lock/axisai-production",
-        f"stat -c %u:%F:%a:%h -- {OUTER_LOCK_PATH}",
+        f"stat -c %d:%i:%u:%F:%a:%h -- {OUTER_LOCK_PATH}",
+        "stat -c %d:%i:%u:%F:%a:%h -- /proc/self/fd/7",
         f"flock -n -E 73 {OUTER_LOCK_PATH} true",
     ]
     assert "flock -n -E 73 9" not in trace
@@ -638,12 +680,92 @@ def test_inner_lock_contention_after_outer_proof_fails_before_mutation(
     assert "docker " not in trace
 
 
+def test_unrelated_holder_with_unlocked_exact_inode_fd_is_rejected_before_inner(
+        bash_executable, host_fixture):
+    fixture = host_fixture()
+    result = fixture.run_with_workflow_outer_lock(
+        bash_executable, held=True, capability_locked=False,
+    )
+    assert result.returncode == 73
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert f"flock -n -E 73 {OUTER_LOCK_PATH} true" in trace
+    assert "flock -n -E 73 7" in trace
+    assert "flock -n -E 73 9" not in trace
+    assert "git " not in trace and "docker " not in trace
+
+
+@pytest.mark.skipif(os.name != "posix", reason="real flock OFD race requires Linux")
+def test_real_flock_unrelated_holder_cannot_forge_inherited_ofd_before_inner(
+        bash_executable, host_fixture):
+    import stat
+
+    if os.geteuid() != 0 or shutil.which("flock") is None:
+        pytest.skip("safe fixed root-lock provisioning requires root and util-linux flock")
+    fixture = host_fixture()
+    lock_dir = Path(OUTER_LOCK_PATH).parent
+    lock_path = Path(OUTER_LOCK_PATH)
+    created_dir = False
+    created_file = False
+    holder = None
+    caller_fd = None
+    try:
+        if not lock_dir.exists():
+            lock_dir.mkdir(mode=0o755)
+            created_dir = True
+        directory_status = lock_dir.lstat()
+        if (not stat.S_ISDIR(directory_status.st_mode) or
+                directory_status.st_uid != 0 or
+                stat.S_IMODE(directory_status.st_mode) != 0o755):
+            pytest.skip("fixed root lock directory already exists with incompatible policy")
+        flags = os.O_RDWR | os.O_NOFOLLOW
+        if not lock_path.exists():
+            created_file = True
+            provision_fd = os.open(lock_path, flags | os.O_CREAT | os.O_EXCL, 0o644)
+            os.close(provision_fd)
+        lock_status = lock_path.lstat()
+        if (not stat.S_ISREG(lock_status.st_mode) or lock_status.st_uid != 0 or
+                stat.S_IMODE(lock_status.st_mode) != 0o644 or lock_status.st_nlink != 1):
+            pytest.skip("fixed root lock file already exists with incompatible policy")
+        holder = subprocess.Popen(
+            [sys.executable, "-c", (
+                "import fcntl,os,sys,time; "
+                "f=os.open(sys.argv[1],os.O_RDWR|os.O_NOFOLLOW); "
+                "fcntl.flock(f,fcntl.LOCK_EX); print('ready',flush=True); time.sleep(30)"
+            ), OUTER_LOCK_PATH],
+            stdout=subprocess.PIPE, text=True,
+        )
+        assert _readline_with_timeout(holder.stdout, timeout=10).strip() == "ready"
+        caller_fd = os.open(lock_path, flags)  # Exact inode, deliberately unlocked OFD.
+        environment = fixture.environment.copy()
+        environment.pop("BASH_ENV", None)
+        environment["PATH"] = os.environ.get("PATH", "")
+        environment["AXISAI_OUTER_LOCK_FD"] = "7"
+        result = subprocess.run(
+            fixture.command(bash_executable, "not-a-sha"),
+            text=True, capture_output=True, check=False, env=environment, timeout=30,
+            pass_fds=(caller_fd,), preexec_fn=lambda: os.dup2(caller_fd, 7),
+        )
+        assert result.returncode == 73
+        assert not (fixture.deploy_dir / ".axisai-production-deploy.lock").exists()
+        assert fixture.trace.read_text(encoding="utf-8") == ""
+    finally:
+        if caller_fd is not None:
+            os.close(caller_fd)
+        if holder is not None:
+            holder.terminate()
+            holder.wait(timeout=10)
+        if created_file:
+            lock_path.unlink(missing_ok=True)
+        if created_dir:
+            lock_dir.rmdir()
+
+
 def test_arbitrary_outer_lock_marker_is_rejected_before_lock_or_mutation(
         bash_executable, host_fixture):
     fixture = host_fixture()
 
     result = fixture.run_with_workflow_outer_lock(
-        bash_executable, marker="/tmp/caller-selected.lock",
+        bash_executable, marker="8",
     )
 
     assert result.returncode == 73
@@ -658,10 +780,11 @@ def test_arbitrary_outer_lock_marker_is_rejected_before_lock_or_mutation(
     [
         ("FAKE_OUTER_DIR_METADATA", "1000:directory:755"),
         ("FAKE_OUTER_DIR_METADATA", "0:directory:775"),
-        ("FAKE_OUTER_FILE_METADATA", "0:symbolic link:777:1"),
-        ("FAKE_OUTER_FILE_METADATA", "1000:regular empty file:644:1"),
-        ("FAKE_OUTER_FILE_METADATA", "0:regular empty file:666:1"),
-        ("FAKE_OUTER_FILE_METADATA", "0:regular empty file:644:2"),
+        ("FAKE_OUTER_FILE_METADATA", "11:22:0:symbolic link:777:1"),
+        ("FAKE_OUTER_FILE_METADATA", "11:22:1000:regular empty file:644:1"),
+        ("FAKE_OUTER_FILE_METADATA", "11:22:0:regular empty file:666:1"),
+        ("FAKE_OUTER_FILE_METADATA", "11:22:0:regular empty file:644:2"),
+        ("FAKE_OUTER_FD_METADATA", "11:99:0:regular empty file:644:1"),
     ],
 )
 def test_unsafe_outer_lock_prerequisite_fails_before_probe_or_mutation(
@@ -686,7 +809,7 @@ def test_invalid_sha_fails_after_lock_without_git_or_docker(bash_executable, hos
     assert result.returncode == 64
     assert "DEPLOY_SHA must be lowercase 40-hex" in result.stderr
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.count(" -w 60 ") == 1
+    assert trace.count("direct-outer-lock -w60") == 1
     assert "flock -n -E 73 9" in trace
     assert "git " not in trace
     assert "docker " not in trace
@@ -815,7 +938,7 @@ def test_candidate_deadline_hang_transitions_to_exactly_one_rollback(
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
     assert trace.count("TIMEOUT_HANG phase=candidate operation=docker:build") == 1
-    assert "timeout phase=candidate --signal=TERM --kill-after=2s 820s docker" in trace
+    assert "timeout phase=candidate --signal=TERM --kill-after=2s 790s docker" in trace
     assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
     assert "rollback verified" in result.stderr
 
@@ -1192,9 +1315,6 @@ def test_rapid_candidate_second_invocation_cannot_mutate_while_lock_is_held(
     assert second.returncode == 73
     assert second_trace.read_text(encoding="utf-8") == (
         "stat -c %u:%F:%a -- /run/lock/axisai-production\n"
-        f"stat -c %u:%F:%a:%h -- {OUTER_LOCK_PATH}\n"
-        "flock -x -w 60 -E 73 "
-        f"{OUTER_LOCK_PATH} env AXISAI_OUTER_LOCK_PATH={OUTER_LOCK_PATH} "
-        f"{_bash_path(HOST_SCRIPT)} {fixture.candidate_commit} "
-        f"{_bash_path(fixture.deploy_dir)} \n"
+        f"stat -c %d:%i:%u:%F:%a:%h -- {OUTER_LOCK_PATH}\n"
+        "direct-outer-lock -w60\n"
     )

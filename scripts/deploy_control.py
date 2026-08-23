@@ -30,6 +30,22 @@ POLL_INTERVAL_SECONDS = 10
 INVOCATION_CALL_TIMEOUT_SECONDS = 30
 AWS_CLI_CALL_TIMEOUT_SECONDS = 60
 ROOT_OUTER_LOCK_PATH = "/run/lock/axisai-production/production.lock"
+OUTER_LOCK_CAPABILITY_FD = 7
+# AWS-RunShellScript does not publish a commands-element maximum.  This is a
+# deliberately conservative local growth guard for our generated bootstrap.
+LOCAL_RUN_SHELL_COMMAND_MAX_CHARS = 65_536
+ROOT_OUTER_LOCK_WAIT_SECONDS = 60
+ROOT_EXTERNAL_CALL_COUNT = 16
+ROOT_EXTERNAL_CALL_MAX_SECONDS = 5  # 4-second timeout plus 1-second kill grace.
+PRIVILEGE_DROP_MAX_SECONDS = 5
+ROOT_BOOTSTRAP_WORST_CASE_SECONDS = (
+    ROOT_OUTER_LOCK_WAIT_SECONDS
+    + ROOT_EXTERNAL_CALL_COUNT * ROOT_EXTERNAL_CALL_MAX_SECONDS
+    + PRIVILEGE_DROP_MAX_SECONDS
+)
+# Workflow calls inherit the already-held outer lock, so the helper's 60-second
+# direct-entry wait is not part of this path: 4 + 7 + 1560 + 2 + 7.
+WORKFLOW_HELPER_WORST_CASE_SECONDS = 1580
 
 ROOT_LOCK_WRAPPER_SOURCE = r'''def _emit(stderr, message):
     if hasattr(stderr, "write"):
@@ -43,6 +59,7 @@ def run(encoded_command, os_module, stat_module, fcntl_module,
     run_lock_fd = None
     lock_dir_fd = None
     lock_fd = None
+    capability_fd = None
     try:
         command = __import__("base64").b64decode(
             encoded_command, validate=True
@@ -132,15 +149,23 @@ def run(encoded_command, os_module, stat_module, fcntl_module,
                     )
                     return 73
                 time_module.sleep(min(0.25, deadline - now))
+        os_module.dup2(lock_fd, 7, inheritable=True)
+        capability_fd = 7
         completed = subprocess_module.run(
-            ["/bin/sh", "-c", command], check=False
+            ["/bin/sh", "-c", command],
+            check=False,
+            pass_fds=(7,),
+            env={
+                "PATH": "/usr/local/bin:/usr/bin:/bin",
+                "AXISAI_ROOT_LOCK_FD": "7",
+            },
         )
         return completed.returncode
     except (OSError, ValueError, UnicodeError):
         _emit(stderr, "outer deployment lock is unavailable or unsafe")
         return 73
     finally:
-        for descriptor in (lock_fd, lock_dir_fd, run_lock_fd):
+        for descriptor in (capability_fd, lock_fd, lock_dir_fd, run_lock_fd):
             if descriptor is not None:
                 try:
                     os_module.close(descriptor)
@@ -159,6 +184,68 @@ def main():
         _emit(sys.stderr, "outer deployment lock command is invalid")
         return 73
     return run(sys.argv[1], os, stat, fcntl, subprocess, time, sys.stderr)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+
+PRIVILEGE_DROP_SOURCE = r'''def _emit(stderr, message):
+    if hasattr(stderr, "write"):
+        stderr.write(message + "\n")
+    else:
+        stderr.append(message)
+
+
+def run(user_name, helper_path, deploy_sha, deploy_dir, public_url, fd_text,
+        os_module, pwd_module, signal_module, stderr):
+    try:
+        if fd_text != "7":
+            raise ValueError("invalid capability descriptor")
+        account = pwd_module.getpwnam(user_name)
+        if (account.pw_name != user_name or account.pw_uid <= 0 or
+                account.pw_gid <= 0):
+            _emit(stderr, "configured deploy user is invalid")
+            return 70
+        os_module.initgroups(account.pw_name, account.pw_gid)
+        os_module.setgid(account.pw_gid)
+        os_module.setuid(account.pw_uid)
+        if (os_module.getuid(), os_module.geteuid()) != (
+                account.pw_uid, account.pw_uid
+        ) or (os_module.getgid(), os_module.getegid()) != (
+                account.pw_gid, account.pw_gid
+        ):
+            raise OSError("privilege drop identity mismatch")
+        os_module.set_inheritable(7, True)
+        signal_module.alarm(0)
+        os_module.execve(
+            helper_path,
+            [helper_path, deploy_sha, deploy_dir, public_url],
+            {
+                "PATH": "/usr/local/bin:/usr/bin:/bin",
+                "AXISAI_OUTER_LOCK_FD": "7",
+            },
+        )
+    except (KeyError, OSError, ValueError):
+        _emit(stderr, "privilege drop or helper launch failed")
+        return 70
+    _emit(stderr, "privilege drop helper unexpectedly returned from execve")
+    return 70
+
+
+def main():
+    import os
+    import pwd
+    import signal
+    import sys
+    if len(sys.argv) != 7:
+        _emit(sys.stderr, "privilege drop arguments are invalid")
+        return 70
+    signal.alarm(5)
+    try:
+        return run(*sys.argv[1:], os, pwd, signal, sys.stderr)
+    finally:
+        signal.alarm(0)
 
 
 if __name__ == "__main__":
@@ -423,19 +510,27 @@ def render_bootstrap(
     """Render a fixed root bootstrap from validated and base64-encoded values."""
     inner_bootstrap = f"""set -eu
 umask 077
-deploy_dir="$(printf '%s' '{encoded_dir}' | base64 --decode)"
-public_health_url="$(printf '%s' '{encoded_url}' | base64 --decode)"
+root_external() {{
+  timeout --signal=TERM --kill-after=1s 4s "$@"
+}}
+deploy_dir="$(printf '%s' '{encoded_dir}' | root_external base64 --decode)"
+public_health_url="$(printf '%s' '{encoded_url}' | root_external base64 --decode)"
+
+if [ "${{AXISAI_ROOT_LOCK_FD:-}}" != '{OUTER_LOCK_CAPABILITY_FD}' ]; then
+  echo 'outer deployment lock capability is unavailable' >&2
+  exit 73
+fi
 
 env_file="$deploy_dir/.env"
 if [ ! -f "$env_file" ]; then
   echo 'deployment .env file is missing' >&2
   exit 1
 fi
-env_permissions="$(stat -c %a -- "$env_file")"
+env_permissions="$(root_external stat -c %a -- "$env_file")"
 if [ "$env_permissions" != 600 ]; then
   echo "WARNING: correcting .env permissions from $env_permissions to 600"
-  chmod 600 -- "$env_file"
-  env_permissions="$(stat -c %a -- "$env_file")"
+  root_external chmod 600 -- "$env_file"
+  env_permissions="$(root_external stat -c %a -- "$env_file")"
   if [ "$env_permissions" != 600 ]; then
     echo 'deployment .env permissions remain unsafe' >&2
     exit 1
@@ -445,30 +540,30 @@ else
 fi
 
 nginx_site=/etc/nginx/sites-available/fitx
-if [ -f "$nginx_site" ] && grep -q 'add_header Content-Security-Policy' "$nginx_site"; then
+if [ -f "$nginx_site" ] && root_external grep -q 'add_header Content-Security-Policy' "$nginx_site"; then
   echo 'ERROR: nginx site config still contains add_header Content-Security-Policy' >&2
   exit 1
 fi
-if nginx -t; then
-  if systemctl is-active --quiet nginx; then
-    systemctl reload nginx
+if root_external nginx -t; then
+  if root_external systemctl is-active --quiet nginx; then
+    root_external systemctl reload nginx
     echo 'nginx: configuration validated and reloaded'
   else
-    systemctl enable --now nginx
+    root_external systemctl enable --now nginx
     echo 'nginx: configuration validated and enabled'
   fi
 else
   echo 'ERROR: nginx configuration test failed' >&2
   exit 1
 fi
-if listeners="$(ss -ltnp 2>&1)"; then
+if listeners="$(root_external ss -ltnp 2>&1)"; then
   printf '%s\n' "$listeners" | grep -E ':(80|443) ' >/dev/null || \
     echo 'WARNING: no listener found on port 80 or 443'
 else
   echo 'WARNING: unable to inspect port 80/443 listeners'
 fi
 
-if listeners="$(ss -H -ltn 'sport = :3000' 2>&1)" && \
+if listeners="$(root_external ss -H -ltn 'sport = :3000' 2>&1)" && \
    printf '%s\n' "$listeners" | \
      grep -Eq '(^|[[:space:]])127[.]0[.]0[.]1:3000([[:space:]]|$)'; then
   echo 'fatsecret proxy: 127.0.0.1:3000 is listening'
@@ -476,23 +571,20 @@ else
   echo 'WARNING: fatsecret proxy is not listening on 127.0.0.1:3000'
 fi
 
-script_path="$(mktemp /tmp/fitx-deploy.XXXXXX)"
+script_path="$(root_external mktemp /tmp/fitx-deploy.XXXXXX)"
 cleanup() {{
-  rm -f -- "$script_path"
+  root_external rm -f -- "$script_path" || true
 }}
 trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
-printf '%s' '{encoded_script}' | base64 --decode > "$script_path"
-chmod 0700 "$script_path"
-if ! id -u '{deploy_user}' >/dev/null 2>&1; then
-  echo 'configured deploy user does not exist' >&2
-  exit 1
-fi
-chown -- '{deploy_user}' "$script_path"
-sudo -u '{deploy_user}' -- env AXISAI_OUTER_LOCK_PATH={ROOT_OUTER_LOCK_PATH} \
-  "$script_path" '{deploy_sha}' "$deploy_dir" "$public_health_url"
+printf '%s' '{encoded_script}' | root_external base64 --decode > "$script_path"
+root_external chmod 0700 "$script_path"
+root_external chown -- '{deploy_user}' "$script_path"
+python3 - '{deploy_user}' "$script_path" '{deploy_sha}' "$deploy_dir" \
+  "$public_health_url" '{OUTER_LOCK_CAPABILITY_FD}' <<'AXISAI_PRIVILEGE_DROP_PY'
+{PRIVILEGE_DROP_SOURCE}AXISAI_PRIVILEGE_DROP_PY
 """
     encoded_bootstrap = base64.b64encode(inner_bootstrap.encode("utf-8")).decode("ascii")
     return (
@@ -538,8 +630,14 @@ def require_command_id(response: object) -> str:
 
 def send_command(config: DeployConfig, script: bytes, aws: AwsJsonRunner) -> str:
     """Deliver the encoded host script with separate delivery and execution bounds."""
+    remote_command = build_remote_command(config, script)
+    if len(remote_command) > LOCAL_RUN_SHELL_COMMAND_MAX_CHARS:
+        raise ConfigError(
+            "generated RunShellScript command exceeds the local 65536-character "
+            "growth guard"
+        )
     parameters = {
-        "commands": [build_remote_command(config, script)],
+        "commands": [remote_command],
         "executionTimeout": [str(EXECUTION_TIMEOUT_SECONDS)],
     }
     response = aws([

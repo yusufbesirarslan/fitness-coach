@@ -322,6 +322,40 @@ def test_send_payload_separates_delivery_and_execution_timeout():
     assert args[args.index("--instance-ids") + 1] == VALID_ENV["EC2_INSTANCE_ID"]
 
 
+def test_generated_command_stays_below_local_growth_guard():
+    command = build_remote_command(
+        DeployConfig.from_environ(VALID_ENV), b"#!/bin/sh\nexit 0\n",
+    )
+    assert len(command) < deploy_control.LOCAL_RUN_SHELL_COMMAND_MAX_CHARS
+
+
+def test_root_bootstrap_and_workflow_helper_fit_strictly_inside_ssm_budget():
+    assert deploy_control.ROOT_EXTERNAL_CALL_COUNT == 16
+    assert "timeout --signal=TERM --kill-after=1s 4s" in build_remote_command(
+        DeployConfig.from_environ(VALID_ENV), b"exit 0\n",
+    ) or "timeout --signal=TERM --kill-after=1s 4s" in base64.b64decode(
+        shlex.split(build_remote_command(
+            DeployConfig.from_environ(VALID_ENV), b"exit 0\n",
+        ).splitlines()[0].split(" <<", 1)[0])[2], validate=True,
+    ).decode("utf-8")
+    assert (
+        deploy_control.ROOT_BOOTSTRAP_WORST_CASE_SECONDS
+        + deploy_control.WORKFLOW_HELPER_WORST_CASE_SECONDS
+        < EXECUTION_TIMEOUT_SECONDS
+    )
+
+
+def test_send_command_rejects_oversized_local_payload_before_aws():
+    calls = []
+    oversized = b"x" * deploy_control.LOCAL_RUN_SHELL_COMMAND_MAX_CHARS
+    with pytest.raises(ConfigError, match="local .*growth guard"):
+        send_command(
+            DeployConfig.from_environ(VALID_ENV), oversized,
+            lambda args: calls.append(args),
+        )
+    assert calls == []
+
+
 def test_remote_command_encodes_script_and_untrusted_positional_values():
     script = b"#!/bin/sh\nprintf '%s\\n' \"$1\""
     deploy_dir = "/srv/axis ai/'$(touch nope)"
@@ -399,6 +433,9 @@ class FakeRootLockOs:
         self.open_calls = []
         self.mkdir_calls = []
         self.closed = []
+        self.dup2_calls = []
+        self.inheritable_calls = []
+        self.environ = {"PATH": "/unsafe/caller/path"}
 
     def open(self, path, flags, mode=0o777, *, dir_fd=None):
         self.open_calls.append((path, flags, mode, dir_fd))
@@ -482,6 +519,12 @@ class FakeRootLockOs:
     def close(self, fd):
         self.closed.append(fd)
 
+    def dup2(self, source, destination, inheritable=False):
+        self.dup2_calls.append((source, destination, inheritable))
+
+    def set_inheritable(self, fd, inheritable):
+        self.inheritable_calls.append((fd, inheritable))
+
 
 class FakeRootLockFcntl:
     LOCK_EX = 1
@@ -532,9 +575,84 @@ def test_root_lock_wrapper_provisions_root_owned_nonwritable_directory_and_reada
         ("axisai-production", 1 | 8 | 16 | 32, 0o777, 10),
         ("production.lock", 2 | 4 | 16 | 32 | 64, 0o644, 11),
     ]
-    assert child_calls == [(["/bin/sh", "-c", "printf safe"], {"check": False})]
+    assert child_calls == [([
+        "/bin/sh", "-c", "printf safe",
+    ], {
+        "check": False,
+        "pass_fds": (deploy_control.OUTER_LOCK_CAPABILITY_FD,),
+        "env": {
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "AXISAI_ROOT_LOCK_FD": str(deploy_control.OUTER_LOCK_CAPABILITY_FD),
+        },
+    })]
+    assert fake_os.dup2_calls == [(12, deploy_control.OUTER_LOCK_CAPABILITY_FD, True)]
     assert fake_fcntl.calls == [(12, 1 | 2)]
-    assert fake_os.closed == [12, 11, 10]
+    assert fake_os.closed == [deploy_control.OUTER_LOCK_CAPABILITY_FD, 12, 11, 10]
+
+
+def _load_privilege_drop_runner():
+    namespace = {"__name__": "privilege_drop_test"}
+    exec(deploy_control.PRIVILEGE_DROP_SOURCE, namespace)
+    return namespace["run"]
+
+
+def test_privilege_drop_validates_user_drops_groups_then_execs_exact_helper():
+    events = []
+    user = SimpleNamespace(pw_name="deploy", pw_uid=1000, pw_gid=1001)
+
+    class FakeOs:
+        environ = {"SECRET": "must-not-leak", "PATH": "/caller/path"}
+
+        def initgroups(self, name, gid): events.append(("initgroups", name, gid))
+        def setgid(self, gid): events.append(("setgid", gid))
+        def setuid(self, uid): events.append(("setuid", uid))
+        def getuid(self): return 1000
+        def geteuid(self): return 1000
+        def getgid(self): return 1001
+        def getegid(self): return 1001
+        def set_inheritable(self, fd, value): events.append(("inheritable", fd, value))
+        def execve(self, path, argv, env): events.append(("execve", path, argv, env))
+
+    status = _load_privilege_drop_runner()(
+        "deploy", "/tmp/helper", "a" * 40, "/srv/axisai",
+        "https://example.test/health", "7", FakeOs(),
+        SimpleNamespace(getpwnam=lambda name: user),
+        SimpleNamespace(alarm=lambda seconds: events.append(("alarm", seconds))), [],
+    )
+
+    assert status == 70  # A real execve never returns.
+    assert events == [
+        ("initgroups", "deploy", 1001),
+        ("setgid", 1001),
+        ("setuid", 1000),
+        ("inheritable", 7, True),
+        ("alarm", 0),
+        ("execve", "/tmp/helper", [
+            "/tmp/helper", "a" * 40, "/srv/axisai", "https://example.test/health",
+        ], {
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "AXISAI_OUTER_LOCK_FD": "7",
+        }),
+    ]
+
+
+@pytest.mark.parametrize("uid", [0, -1])
+def test_privilege_drop_rejects_root_or_invalid_user_before_mutation(uid):
+    events = []
+    fake_os = SimpleNamespace(initgroups=lambda *args: events.append(args))
+    errors = []
+    status = _load_privilege_drop_runner()(
+        "deploy", "/tmp/helper", "a" * 40, "/srv/axisai", "", "7",
+        fake_os,
+        SimpleNamespace(getpwnam=lambda name: SimpleNamespace(
+            pw_name=name, pw_uid=uid, pw_gid=1000,
+        )),
+        SimpleNamespace(alarm=lambda seconds: events.append(("alarm", seconds))),
+        errors,
+    )
+    assert status == 70
+    assert events == []
+    assert errors == ["configured deploy user is invalid"]
 
 
 @pytest.mark.parametrize(
@@ -682,17 +800,27 @@ def bootstrap_harness(workspace_tmp_dir):
     bash_harness = _git_bash_path(harness)
 
     _write_shell_stub(stubs, "python3", """
-printf '%s\n' outer-lock >> "$HARNESS_DIR/events"
-printf '%s\\0' "$@" > "$HARNESS_DIR/python3-args"
-case "$OUTER_LOCK_MODE" in
-  success) ;;
-  contended|unsafe|symlink) exit 73 ;;
-  *) exit 64 ;;
-esac
 test "$1" = '-'
-shift
-cat > "$HARNESS_DIR/root-lock-source"
-printf '%s' "$1" | base64 --decode | /bin/sh
+if [ "$#" = 2 ]; then
+  printf '%s\n' outer-lock >> "$HARNESS_DIR/events"
+  printf '%s\\0' "$@" > "$HARNESS_DIR/python3-args"
+  case "$OUTER_LOCK_MODE" in
+    success) ;;
+    contended|unsafe|symlink) exit 73 ;;
+    *) exit 64 ;;
+  esac
+  shift
+  cat > "$HARNESS_DIR/root-lock-source"
+  printf '%s' "$1" | base64 --decode | AXISAI_ROOT_LOCK_FD=7 /bin/sh
+else
+  printf '%s\n' privilege-drop >> "$HARNESS_DIR/events"
+  shift
+  user="$1"; script_path="$2"; sha="$3"; deploy_dir="$4"; url="$5"; fd="$6"
+  test "$user" = deploy
+  test "$fd" = 7
+  cat > "$HARNESS_DIR/privilege-drop-source"
+  AXISAI_OUTER_LOCK_FD=7 sh "$script_path" "$sha" "$deploy_dir" "$url"
+fi
 """)
 
     _write_shell_stub(stubs, "mktemp", """
@@ -776,6 +904,7 @@ sh "$script_path" "$@"
     })
     script = b"""#!/bin/sh
 printf '%s\\0' "$@" > "$HARNESS_DIR/script-args"
+printf '%s' "${AXISAI_OUTER_LOCK_FD:-}" > "$HARNESS_DIR/script-lock-fd"
 exit "$REMOTE_EXIT_CODE"
 """
     return BootstrapHarness(
@@ -804,24 +933,18 @@ def test_bootstrap_holds_lock_through_safeguards_and_helper_cleanup(
     assert completed.returncode == remote_exit_code, completed.stderr
     assert (harness / "events").read_text(encoding="utf-8").splitlines() == [
         "outer-lock", "stat", "nginx", "systemctl", "systemctl", "ss", "ss",
-        "mktemp", "chmod", "id", "chown", "sudo",
+        "mktemp", "chmod", "chown", "privilege-drop",
     ]
     assert _read_null_arguments(harness / "mktemp-args") == ["/tmp/fitx-deploy.XXXXXX"]
     assert _read_null_arguments(harness / "chmod-args") == ["0700", bash_remote_script]
-    assert _read_null_arguments(harness / "id-args") == ["-u", VALID_ENV["DEPLOY_USER"]]
     assert _read_null_arguments(harness / "chown-args") == [
         "--", VALID_ENV["DEPLOY_USER"], bash_remote_script,
-    ]
-    assert (harness / "sudo-user").read_text(encoding="utf-8") == VALID_ENV["DEPLOY_USER"]
-    assert _read_null_arguments(harness / "sudo-args") == [
-        "-u", VALID_ENV["DEPLOY_USER"], "--", "env",
-        "AXISAI_OUTER_LOCK_PATH=/run/lock/axisai-production/production.lock",
-        bash_remote_script,
-        VALID_ENV["DEPLOY_SHA"], deploy_dir, public_url,
     ]
     assert _read_null_arguments(harness / "script-args") == [
         VALID_ENV["DEPLOY_SHA"], deploy_dir, public_url,
     ]
+    assert (harness / "script-lock-fd").read_text(encoding="utf-8") == "7"
+    assert "sudo" not in (harness / "privilege-drop-source").read_text(encoding="utf-8")
     assert not bootstrap_harness.remote_script.exists()
 
 
@@ -864,7 +987,7 @@ def test_bootstrap_repairs_and_rechecks_env_permissions_before_helper(
 
     assert completed.returncode == 0, completed.stderr
     assert events[:4] == ["outer-lock", "stat", "chmod", "stat"]
-    assert "sudo" in events
+    assert "privilege-drop" in events
 
 
 def test_bootstrap_unrepairable_env_permissions_fail_before_helper(
@@ -873,7 +996,7 @@ def test_bootstrap_unrepairable_env_permissions_fail_before_helper(
     events = bootstrap_harness.events.read_text(encoding="utf-8").splitlines()
 
     assert completed.returncode != 0
-    assert "sudo" not in events
+    assert "privilege-drop" not in events
     assert "nginx" not in events
 
 
@@ -884,7 +1007,7 @@ def test_bootstrap_nginx_failure_stops_before_systemctl_and_helper(bootstrap_har
     assert completed.returncode != 0
     assert "nginx configuration test failed" in completed.stderr
     assert "systemctl" not in events
-    assert "sudo" not in events
+    assert "privilege-drop" not in events
 
 
 def test_bootstrap_warns_for_port_30000_without_treating_it_as_fatsecret(
@@ -896,7 +1019,7 @@ def test_bootstrap_warns_for_port_30000_without_treating_it_as_fatsecret(
 
     assert completed.returncode == 0, completed.stderr
     assert "WARNING: fatsecret proxy is not listening on 127.0.0.1:3000" in completed.stdout
-    assert "sudo" in events
+    assert "privilege-drop" in events
 
 
 @pytest.mark.parametrize("response", [
@@ -1251,13 +1374,13 @@ def test_run_deploy_orders_validation_preflight_exact_script_send_and_poll(
         remote_arguments[2], validate=True,
     ).decode("utf-8")
     assert base64.b64encode(exact_script).decode("ascii") in inner_bootstrap
+    assert "sudo" not in inner_bootstrap
+    assert deploy_control.PRIVILEGE_DROP_SOURCE in inner_bootstrap
+    assert f"'{VALID_ENV['DEPLOY_USER']}' \"$script_path\"" in inner_bootstrap
+    assert "\"$public_health_url\" '7'" in inner_bootstrap
     assert (
-        f"sudo -u '{VALID_ENV['DEPLOY_USER']}' -- env "
-        "AXISAI_OUTER_LOCK_PATH=/run/lock/axisai-production/production.lock"
-    ) in inner_bootstrap
-    assert (
-        "\"$script_path\" "
-        f"'{VALID_ENV['DEPLOY_SHA']}' \"$deploy_dir\" \"$public_health_url\""
+        f"python3 - '{VALID_ENV['DEPLOY_USER']}' \"$script_path\" "
+        f"'{VALID_ENV['DEPLOY_SHA']}' \"$deploy_dir\""
     ) in inner_bootstrap
     assert messages[-5:] == [
         "SSM status: Success",

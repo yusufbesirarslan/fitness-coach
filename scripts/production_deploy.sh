@@ -7,16 +7,16 @@ readonly PUBLIC_HEALTH_URL="${3:-}"
 readonly LOCK_PATH="$DEPLOY_DIR/.axisai-production-deploy.lock"
 readonly OUTER_LOCK_DIR="/run/lock/axisai-production"
 readonly OUTER_LOCK_PATH="$OUTER_LOCK_DIR/production.lock"
-readonly OUTER_LOCK_MARKER="${AXISAI_OUTER_LOCK_PATH:-}"
+readonly OUTER_LOCK_CAPABILITY_FD="${AXISAI_OUTER_LOCK_FD:-}"
 readonly SSM_EXECUTION_TIMEOUT_SECONDS=1800
 readonly HOST_TRANSACTION_LIMIT_SECONDS=1680
 readonly SSM_BOOTSTRAP_MARGIN_SECONDS=120
 readonly LOCK_WAIT_SECONDS=60
 readonly CLOCK_START_TIMEOUT_SECONDS=2
 readonly CLOCK_STATE_SETUP_TIMEOUT_SECONDS=5
-readonly POST_LOCK_BUDGET_SECONDS=1590
+readonly POST_LOCK_BUDGET_SECONDS=1560
 readonly PREFLIGHT_PHASE_SECONDS=90
-readonly CANDIDATE_PHASE_SECONDS=820
+readonly CANDIDATE_PHASE_SECONDS=790
 readonly DIAGNOSTIC_PHASE_SECONDS=60
 readonly ROLLBACK_PHASE_SECONDS=620
 readonly ROLLBACK_RESET_TIMEOUT_SECONDS=5
@@ -89,13 +89,11 @@ run_external() {
   fi
 }
 
-# The root bootstrap owns this root-controlled lock while workflow safeguards
-# and this helper run.  A marker names only the one allowed path; the separate
-# nonblocking probe below proves the wrapper actually holds it.  Marker-free
-# direct calls enter through flock once, then recurse through the same proof.
-# Thus workflow and direct paths each consume at most one 60-second lock wait;
-# the deploy-directory lock is nonblocking after the outer serialization gate.
-if [[ -n "$OUTER_LOCK_MARKER" && "$OUTER_LOCK_MARKER" != "$OUTER_LOCK_PATH" ]]; then
+# The root wrapper passes descriptor 7 for the exact locked open-file
+# description.  The path probe proves some holder exists; flocking fd 7 proves
+# this process inherited that same locked OFD.  Both checks are required, so an
+# unrelated holder plus a caller-opened unlocked descriptor cannot forge proof.
+if [[ -n "$OUTER_LOCK_CAPABILITY_FD" && "$OUTER_LOCK_CAPABILITY_FD" != 7 ]]; then
   echo "outer deployment lock is unavailable or unsafe" >&2
   exit 73
 fi
@@ -103,25 +101,57 @@ if ! outer_dir_metadata="$(
        LC_ALL=C stat -c '%u:%F:%a' -- "$OUTER_LOCK_DIR"
      )" ||
    ! outer_file_metadata="$(
-       LC_ALL=C stat -c '%u:%F:%a:%h' -- "$OUTER_LOCK_PATH"
+       LC_ALL=C stat -c '%d:%i:%u:%F:%a:%h' -- "$OUTER_LOCK_PATH"
      )" ||
    [[ "$outer_dir_metadata" != "0:directory:755" ]] ||
-   [[ "$outer_file_metadata" != "0:regular file:644:1" &&
-      "$outer_file_metadata" != "0:regular empty file:644:1" ]]; then
+   [[ "$outer_file_metadata" != *":0:regular file:644:1" &&
+      "$outer_file_metadata" != *":0:regular empty file:644:1" ]]; then
   echo "outer deployment lock is unavailable or unsafe" >&2
   exit 73
 fi
 
-if [[ -z "$OUTER_LOCK_MARKER" ]]; then
-  set +e
-  flock -x -w "$LOCK_WAIT_SECONDS" -E 73 "$OUTER_LOCK_PATH" \
-    env AXISAI_OUTER_LOCK_PATH="$OUTER_LOCK_PATH" "$0" "$@"
-  direct_status="$?"
-  set -e
-  if [[ "$direct_status" == 73 ]]; then
-    echo "outer deployment lock unavailable after 60 seconds" >&2
-  fi
-  exit "$direct_status"
+if [[ -z "$OUTER_LOCK_CAPABILITY_FD" ]]; then
+  exec python3 - "$0" "$@" <<'PY'
+import fcntl
+import os
+import stat
+import sys
+import time
+
+path = "/run/lock/axisai-production/production.lock"
+fd = None
+try:
+    fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC)
+    opened = os.fstat(fd)
+    named = os.lstat(path)
+    if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0 or
+            stat.S_IMODE(opened.st_mode) != 0o644 or opened.st_nlink != 1 or
+            (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
+        raise OSError("unsafe outer lock")
+    deadline = time.monotonic() + 60
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("outer lock contention")
+            time.sleep(min(0.25, remaining))
+    os.dup2(fd, 7, inheritable=True)
+    os.environ["AXISAI_OUTER_LOCK_FD"] = "7"
+    os.execve(sys.argv[1], sys.argv[1:], os.environ)
+except (OSError, TimeoutError, ValueError):
+    print("outer deployment lock unavailable after 60 seconds", file=sys.stderr)
+    raise SystemExit(73)
+PY
+fi
+
+if ! outer_fd_metadata="$(
+       LC_ALL=C stat -c '%d:%i:%u:%F:%a:%h' -- /proc/self/fd/7
+     )" || [[ "$outer_fd_metadata" != "$outer_file_metadata" ]]; then
+  echo "outer deployment lock capability is unavailable or unsafe" >&2
+  exit 73
 fi
 
 set +e
@@ -130,6 +160,10 @@ outer_probe_status="$?"
 set -e
 if [[ "$outer_probe_status" != 73 ]]; then
   echo "outer deployment lock is not held by the deployment wrapper" >&2
+  exit 73
+fi
+if ! flock -n -E 73 7; then
+  echo "outer deployment lock capability is not held" >&2
   exit 73
 fi
 
