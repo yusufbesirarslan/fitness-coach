@@ -417,6 +417,39 @@ def test_streaming_proceed_skips_provider(app, auth_user, monkeypatch):
     assert llm.calls == []
 
 
+def test_ask_stream_route_proceed_returns_success_after_memory_commit(
+        client, auth_user, app, monkeypatch):
+    """Widget path: POST /ask/stream commits memory before confirm.
+
+    Direct ``stream_coach_answer`` (test above) can keep ``User`` in the
+    identity map. The route also runs ``memory_manager`` which commits first,
+    so ``after_commit`` leaderboard sync must not emit SQL on the expired
+    session. Live main persisted the WorkoutLog then returned an SSE error.
+    """
+    from tests.test_coach_routes import _parse_sse
+
+    monkeypatch.setattr(ai_coach, "openai_client", _ScriptedLLM([]))
+    monkeypatch.setattr(ai_coach, "BEDROCK_ENABLED", False)
+    with app.test_request_context("/ask", method="POST"):
+        _new_turn(app)
+        _stage_workout(auth_user)
+
+    resp = client.post("/ask/stream", json={"question": "proceed"})
+    raw = resp.get_data(as_text=True)
+    frames = _parse_sse(raw)
+    resp.close()
+
+    kinds = [kind for kind, _payload in frames]
+    assert resp.status_code == 200
+    assert "error" not in kinds
+    done = [payload for kind, payload in frames if kind == "done"]
+    assert done
+    text = (done[-1].get("text") or "").lower()
+    assert "logged" in text or "kaydedildi" in text
+    assert len(_workout_logs(auth_user)) == 1
+    assert _pending_logs(auth_user) == []
+
+
 def test_streaming_confirmation_proposal_does_not_emit_premature_success(
         app, planned_user, tools_on, monkeypatch):
     from app.observability import assign_request_id
