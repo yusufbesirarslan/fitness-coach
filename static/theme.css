@@ -133,7 +133,10 @@ body {
   word-break: keep-all;
   hyphens: none;
 }
-.page-hdr h1 span { color: var(--color-primary); }
+.page-hdr h1 span {
+  color: var(--color-primary);
+  white-space: nowrap;
+}
 .page-hdr p {
   margin-top: var(--space-2);
   color: var(--text-2);
