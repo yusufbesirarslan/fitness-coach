@@ -121,7 +121,7 @@ import time
 path = "/run/lock/axisai-production/production.lock"
 fd = None
 try:
-    fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW | os.O_CLOEXEC)
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
     opened = os.fstat(fd)
     named = os.lstat(path)
     if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0 or
@@ -148,7 +148,7 @@ PY
 fi
 
 if ! outer_fd_metadata="$(
-       LC_ALL=C stat -c '%d:%i:%u:%F:%a:%h' -- /proc/self/fd/7
+       LC_ALL=C stat -L -c '%d:%i:%u:%F:%a:%h' -- /proc/self/fd/7
      )" || [[ "$outer_fd_metadata" != "$outer_file_metadata" ]]; then
   echo "outer deployment lock capability is unavailable or unsafe" >&2
   exit 73

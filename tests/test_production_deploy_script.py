@@ -267,7 +267,13 @@ for argument in "$@"; do last="$argument"; done
 case "$last" in
   /run/lock/axisai-production) printf '%s\n' "$FAKE_OUTER_DIR_METADATA" ;;
   /run/lock/axisai-production/production.lock) printf '%s\n' "$FAKE_OUTER_FILE_METADATA" ;;
-  /proc/self/fd/7) printf '%s\n' "$FAKE_OUTER_FD_METADATA" ;;
+  /proc/self/fd/7)
+    if [[ " $* " != *' -L '* ]]; then
+      printf '%s\n' '11:77:0:symbolic link:777:1'
+      exit 0
+    fi
+    printf '%s\n' "$FAKE_OUTER_FD_METADATA"
+    ;;
   *) exit 65 ;;
 esac
 """,
@@ -299,7 +305,12 @@ test "$1" = -
 shift
 helper="$1"
 shift
-cat >/dev/null
+direct_source="$(cat)"
+if [[ "$direct_source" != *'os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC'* ||
+      "$direct_source" == *'os.O_RDWR'* ]]; then
+  echo 'direct outer lock must be opened read-only' >&2
+  exit 74
+fi
 AXISAI_OUTER_LOCK_FD=7 FAKE_OUTER_LOCK_HELD=1 \
   FAKE_OUTER_CAPABILITY_LOCKED=1 "$helper" "$@"
 status="$?"
@@ -615,7 +626,7 @@ def test_workflow_outer_lock_marker_proves_held_lock_then_acquires_inner_lock(
     assert trace.splitlines()[:6] == [
         "stat -c %u:%F:%a -- /run/lock/axisai-production",
         f"stat -c %d:%i:%u:%F:%a:%h -- {OUTER_LOCK_PATH}",
-        "stat -c %d:%i:%u:%F:%a:%h -- /proc/self/fd/7",
+        "stat -L -c %d:%i:%u:%F:%a:%h -- /proc/self/fd/7",
         f"flock -n -E 73 {OUTER_LOCK_PATH} true",
         "flock -n -E 73 7",
         "flock -n -E 73 9",
@@ -637,7 +648,7 @@ def test_direct_invocation_acquires_outer_then_inner_with_one_bounded_wait(
         "direct-outer-lock -w60",
         "stat -c %u:%F:%a -- /run/lock/axisai-production",
         f"stat -c %d:%i:%u:%F:%a:%h -- {OUTER_LOCK_PATH}",
-        "stat -c %d:%i:%u:%F:%a:%h -- /proc/self/fd/7",
+        "stat -L -c %d:%i:%u:%F:%a:%h -- /proc/self/fd/7",
         f"flock -n -E 73 {OUTER_LOCK_PATH} true",
         "flock -n -E 73 7",
         "flock -n -E 73 9",
@@ -656,7 +667,7 @@ def test_outer_lock_marker_without_held_lock_fails_before_inner_or_mutation(
     assert trace.splitlines()[:4] == [
         "stat -c %u:%F:%a -- /run/lock/axisai-production",
         f"stat -c %d:%i:%u:%F:%a:%h -- {OUTER_LOCK_PATH}",
-        "stat -c %d:%i:%u:%F:%a:%h -- /proc/self/fd/7",
+        "stat -L -c %d:%i:%u:%F:%a:%h -- /proc/self/fd/7",
         f"flock -n -E 73 {OUTER_LOCK_PATH} true",
     ]
     assert "flock -n -E 73 9" not in trace
@@ -687,6 +698,7 @@ def test_unrelated_holder_with_unlocked_exact_inode_fd_is_rejected_before_inner(
         bash_executable, held=True, capability_locked=False,
     )
     assert result.returncode == 73
+    assert "outer deployment lock capability is not held" in result.stderr
     trace = fixture.trace.read_text(encoding="utf-8")
     assert f"flock -n -E 73 {OUTER_LOCK_PATH} true" in trace
     assert "flock -n -E 73 7" in trace
@@ -746,6 +758,8 @@ def test_real_flock_unrelated_holder_cannot_forge_inherited_ofd_before_inner(
             pass_fds=(caller_fd,), preexec_fn=lambda: os.dup2(caller_fd, 7),
         )
         assert result.returncode == 73
+        assert "outer deployment lock capability is not held" in result.stderr
+        assert "unavailable or unsafe" not in result.stderr
         assert not (fixture.deploy_dir / ".axisai-production-deploy.lock").exists()
         assert fixture.trace.read_text(encoding="utf-8") == ""
     finally:
@@ -758,6 +772,123 @@ def test_real_flock_unrelated_holder_cannot_forge_inherited_ofd_before_inner(
             lock_path.unlink(missing_ok=True)
         if created_dir:
             lock_dir.rmdir()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="real inherited OFD requires Linux")
+def test_real_locked_inherited_ofd_reaches_inner_helper_validation(
+        bash_executable, host_fixture):
+    import fcntl
+    import stat
+
+    if os.geteuid() != 0 or shutil.which("flock") is None:
+        pytest.skip("safe fixed root-lock provisioning requires root and util-linux flock")
+    fixture = host_fixture()
+    lock_dir = Path(OUTER_LOCK_PATH).parent
+    lock_path = Path(OUTER_LOCK_PATH)
+    created_dir = False
+    created_file = False
+    inherited_fd = None
+    try:
+        if not lock_dir.exists():
+            lock_dir.mkdir(mode=0o755)
+            created_dir = True
+        directory_status = lock_dir.lstat()
+        if (not stat.S_ISDIR(directory_status.st_mode) or directory_status.st_uid != 0 or
+                stat.S_IMODE(directory_status.st_mode) != 0o755):
+            pytest.skip("fixed root lock directory already exists with incompatible policy")
+        if not lock_path.exists():
+            created_file = True
+            created_fd = os.open(
+                lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CREAT | os.O_EXCL, 0o644,
+            )
+            os.close(created_fd)
+        lock_status = lock_path.lstat()
+        if (not stat.S_ISREG(lock_status.st_mode) or lock_status.st_uid != 0 or
+                stat.S_IMODE(lock_status.st_mode) != 0o644 or lock_status.st_nlink != 1):
+            pytest.skip("fixed root lock file already exists with incompatible policy")
+        inherited_fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW)
+        fcntl.flock(inherited_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        environment = fixture.environment.copy()
+        environment.pop("BASH_ENV", None)
+        environment["PATH"] = os.environ.get("PATH", "")
+        environment["AXISAI_OUTER_LOCK_FD"] = "7"
+        result = subprocess.run(
+            fixture.command(bash_executable, "not-a-sha"),
+            text=True, capture_output=True, check=False, env=environment, timeout=30,
+            pass_fds=(inherited_fd,), preexec_fn=lambda: os.dup2(inherited_fd, 7),
+        )
+        assert result.returncode == 64, result.stderr
+        assert "DEPLOY_SHA must be lowercase 40-hex" in result.stderr
+        assert (fixture.deploy_dir / ".axisai-production-deploy.lock").exists()
+    finally:
+        if inherited_fd is not None:
+            os.close(inherited_fd)
+        if created_file:
+            lock_path.unlink(missing_ok=True)
+        if created_dir:
+            lock_dir.rmdir()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="nonroot direct lock requires Linux")
+def test_nonroot_direct_invocation_can_open_root_owned_0644_outer_lock_read_only(
+        bash_executable):
+    import pwd
+    import stat
+
+    if os.geteuid() != 0 or shutil.which("flock") is None:
+        pytest.skip("privilege-neutral direct lock model requires root Linux test runner")
+    try:
+        account = pwd.getpwnam("nobody")
+    except KeyError:
+        pytest.skip("nobody account is unavailable")
+    direct_root = Path(tempfile.mkdtemp(prefix="axisai-nonroot-", dir="/tmp"))
+    direct_root.chmod(0o755)
+    direct_deploy_dir = direct_root / "production"
+    direct_deploy_dir.mkdir(mode=0o777)
+    direct_deploy_dir.chmod(0o777)
+    direct_helper = direct_root / "production_deploy.sh"
+    shutil.copy2(HOST_SCRIPT, direct_helper)
+    direct_helper.chmod(0o755)
+    lock_dir = Path(OUTER_LOCK_PATH).parent
+    lock_path = Path(OUTER_LOCK_PATH)
+    created_dir = False
+    created_file = False
+    try:
+        if not lock_dir.exists():
+            lock_dir.mkdir(mode=0o755)
+            created_dir = True
+        directory_status = lock_dir.lstat()
+        if (not stat.S_ISDIR(directory_status.st_mode) or directory_status.st_uid != 0 or
+                stat.S_IMODE(directory_status.st_mode) != 0o755):
+            pytest.skip("fixed root lock directory already exists with incompatible policy")
+        if not lock_path.exists():
+            created_file = True
+            created_fd = os.open(
+                lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CREAT | os.O_EXCL, 0o644,
+            )
+            os.close(created_fd)
+        environment = os.environ.copy()
+        environment["PATH"] = os.environ.get("PATH", "")
+
+        def drop_to_nonroot():
+            os.setgroups([])
+            os.setgid(account.pw_gid)
+            os.setuid(account.pw_uid)
+
+        result = subprocess.run(
+            [bash_executable, str(direct_helper), "not-a-sha", str(direct_deploy_dir), ""],
+            text=True, capture_output=True, check=False, env=environment, timeout=30,
+            preexec_fn=drop_to_nonroot,
+        )
+        assert result.returncode == 64, result.stderr
+        assert "DEPLOY_SHA must be lowercase 40-hex" in result.stderr
+        assert (direct_deploy_dir / ".axisai-production-deploy.lock").exists()
+    finally:
+        if created_file:
+            lock_path.unlink(missing_ok=True)
+        if created_dir:
+            lock_dir.rmdir()
+        shutil.rmtree(direct_root, ignore_errors=True)
 
 
 def test_arbitrary_outer_lock_marker_is_rejected_before_lock_or_mutation(
