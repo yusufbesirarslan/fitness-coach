@@ -1011,7 +1011,7 @@ disclosed rather than rewritten to `<br>`: stripping the three would collapse
 | Integration strategy | rebase onto `origin/main`, zero conflicts |
 | Rebased HEAD | `7990b53` |
 | Integration fix commit | `37d2829` |
-| **Final HEAD** | **``37d2829b195a219ef47ebc2110242c4f3a4e54ad` - the final **code** SHA, where every result above was produced. The branch HEAD is this documentation commit on top of it, which changes no code, test or asset.`** |
+| **Final HEAD** | **``37d2829b195a219ef47ebc2110242c4f3a4e54ad` - the final **code** SHA, where every result above was produced. Everything committed above it is this report; `git diff --stat 37d2829..HEAD` touches this file and nothing else.`** |
 | Position vs `origin/main` | **13 ahead, 0 behind** |
 | Diff vs `origin/main` | 45 files, +7953 / −217 |
 | Working tree | clean (`-uall`) |
@@ -1036,7 +1036,7 @@ disclosed rather than rewritten to `<br>`: stripping the three would collapse
 
 **1. Latest integrated `origin/main` SHA?** `7a5b2a7cd4dacd782f7932760e151037ee1b4662`.
 
-**2. Final PR4 HEAD SHA?** ``37d2829b195a219ef47ebc2110242c4f3a4e54ad` - the final **code** SHA, where every result above was produced. The branch HEAD is this documentation commit on top of it, which changes no code, test or asset.`.
+**2. Final PR4 HEAD SHA?** ``37d2829b195a219ef47ebc2110242c4f3a4e54ad` - the final **code** SHA, where every result above was produced. Everything committed above it is this report; `git diff --stat 37d2829..HEAD` touches this file and nothing else.`.
 
 **3. Ahead/behind?** 13 ahead, 0 behind.
 
