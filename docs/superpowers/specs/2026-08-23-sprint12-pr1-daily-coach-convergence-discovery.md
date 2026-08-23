@@ -84,7 +84,13 @@ classification (§38).
 
 **Worktree:** `.worktrees/sprint12-pr1-daily-coach-convergence-discovery`
 **Branch:** `sprint12-pr1-daily-coach-convergence-discovery`
-**Base:** `7707d75`
+**Discovery base:** `7707d75` (#236)
+**Integration base:** `cea77b4` — this branch was rebased onto the then-latest
+`origin/main` before shipping. The three intervening commits (#237, #238, #239)
+touched the Coach confirmation pipeline, web CSS/templates and gamification;
+none touched a Today authority, `workout_state`, `app/feature_flags.py`,
+`app/__init__.py`, mobile auth, or `TrainingPlan`. The one place the drift
+reaches this report is F5's consumer count (§13).
 
 ### Why `fitness-coach` is the primary repository
 
@@ -113,9 +119,11 @@ it as open; it landed since.)
 
 Both repositories carry many active unrelated worktrees (28 in `fitness-coach`,
 13 in `axisai_mobile`). None was touched. In particular the `fitness-coach`
-primary checkout is dirty on `fix/pr1-ui-layout-typography-stabilization` — that
-work is untouched, which is precisely why a dedicated worktree was created off
-`origin/main` rather than working in place.
+primary checkout was, at discovery, dirty on
+`fix/pr1-ui-layout-typography-stabilization` — that work was untouched, which is
+precisely why a dedicated worktree was created off `origin/main` rather than
+working in place. (That branch has since merged as #238 and been pruned; it is
+one of the three integration-base commits above.)
 
 **The mobile repository was not modified, branched, or checked out.** All mobile
 evidence in this report comes from `git show origin/main:<path>` / `git ls-tree`
@@ -128,7 +136,7 @@ evidence in this report comes from `git show origin/main:<path>` / `git ls-tree`
 
 | Prerequisite | Status | Evidence |
 |---|---|---|
-| Sprint 11 PR4 merged | ✅ | `origin/main` = `7707d75` (#236) |
+| Sprint 11 PR4 merged | ✅ | `7707d75` (#236), reachable from `origin/main` |
 | Canonical exercise catalog exists | ✅ | `app/services/exercise_catalog.py`, `app/services/training_assets/exercises.json` |
 | Generation resolves exercises canonically | ✅ | `app/services/training_generation/exercise_resolution.py` |
 | Save enforces canonical identity | ✅ | `validate_plan_for_save(...)` → `canonicalize_plan_exercises` |
@@ -675,9 +683,15 @@ AI-assisted item above is an existing feature Today merely links to.
 Shipped and solid — and completely invisible outside a Coach conversation.
 
 - **How a pending proposal surfaces today:** only as text inside an AI Coach
-  turn. `get_pending` has exactly one consumer in the whole application,
-  `coach_plan_tools/executor.py` (proved by
-  `test_pending_plan_confirmation_is_reachable_only_from_coach_plan_tools`).
+  turn. `get_pending` has two consumers in the whole application, both of them
+  Coach-turn machinery: `coach_plan_tools/executor.py`, and — since #237
+  (`849eb0f`), which this branch integrated — `coach_confirmation.py`, which
+  resolves a pending confirmation before the provider loop runs. Neither is a
+  route, a Today authority, or a non-Coach service, so the finding is unchanged:
+  no read path outside a Coach conversation can answer "is a plan change waiting
+  for me?" (proved by
+  `test_pending_plan_confirmation_is_reachable_only_from_the_coach_turn`, which
+  pins the boundary rather than the count).
 - **Confirmation / cancellation:** `coach_plan_policy/confirmation.py`, a narrow
   structural CONFIRM/CANCEL/NONE parser over the user's next chat message. Fail
   closed: negation or hedging never confirms. No LLM. Owner-scoped
@@ -1285,7 +1299,7 @@ tabulated after the findings table below.
 | F2 | `test_today_facts_delegates_completion_and_owns_no_query_of_its_own`, `test_today_presenter_is_pure` (AST import analysis) |
 | F3 | `test_web_today_states_and_workout_state_vocabulary_do_not_match` |
 | F4 | `test_today_plan_projection_publishes_names_not_canonical_ids` |
-| F5 | `test_pending_plan_confirmation_is_reachable_only_from_coach_plan_tools`, `test_no_blueprint_reads_the_plan_mutation_journal` |
+| F5 | `test_pending_plan_confirmation_is_reachable_only_from_the_coach_turn`, `test_no_blueprint_reads_the_plan_mutation_journal` |
 | P2-16 | `test_injury_annotation_precedes_canonical_exercise_resolution` (source-line ordering), `test_injury_warning_text_persists_into_the_stored_plan` |
 | F7 | `test_today_signals_take_their_day_from_the_istanbul_authority` (×4 modules), `test_mobile_nutrition_publishes_the_zone_that_resolved_the_day` |
 | F8 | `test_workout_completion_is_gated_behind_the_ai_concurrency_gate` |
@@ -1636,7 +1650,7 @@ question.
 | 1 | What does AxisAI currently consider "today"? | The calendar date in `Europe/Istanbul`, from `app_today()`. Server-owned, hardcoded, consistent across workout state, nutrition, streaks and check-ins. Naive-UTC `created_at` columns are windowed with `utc_day_bounds`. |
 | 2 | Can it reliably identify today's workout? | **Yes.** `serialize_today_plan(plan_data, app_today())` selects today's weekday row from the newest `TrainingPlan`. It publishes names, not canonical ids (F4). |
 | 3 | Can it know whether that workout is complete? | **Yes.** `workout_state.completed_today` — today's `PumpCheck` — the same signal `/workout/status` returns. It also distinguishes *execution evidence* from *confirmed completion*. |
-| 4 | Can it know whether a plan change is pending? | **Yes in the database, no in practice.** `plan_confirmation.get_pending` exists but has exactly one consumer, inside a Coach turn. No read path (F5). And at the repository default for `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED`, no proposals are created at all — which is why C3 makes this optional capability state rather than a Today prerequisite. |
+| 4 | Can it know whether a plan change is pending? | **Yes in the database, no in practice.** `plan_confirmation.get_pending` exists but every consumer is inside a Coach turn (§13). No read path (F5). And at the repository default for `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED`, no proposals are created at all — which is why C3 makes this optional capability state rather than a Today prerequisite. |
 | 5 | Can it explain an applied plan change from canonical evidence? | **Yes in the database, no in practice.** `PlanMutationRecord` holds typed commands, lineage, actor and outcome. No blueprint reads it (F5). |
 | 6 | Can it determine nutrition status today? | **Yes**, and it is the best contract in the codebase: `GET /api/v1/nutrition/diary/today` — entries, server-authoritative totals, goal-or-null, explicit day + timezone. Already live on mobile. |
 | 7 | Is there a canonical recovery/readiness state? | **No.** Nothing publishes one (F9). The nearest signals are a nudge heuristic over the last check-in and the planner's `deload` week focus. Do not invent one. |
@@ -1774,32 +1788,35 @@ has been pushed, merged or deployed (§42).
 | Secondary repository inspected | `axisai_mobile` (read-only; **not modified, not branched, not checked out** — the decision closure inspected nothing new) |
 | Worktree | `.worktrees/sprint12-pr1-daily-coach-convergence-discovery` |
 | Branch | `sprint12-pr1-daily-coach-convergence-discovery` |
-| Base SHA (backend) | `7707d750a241171e090a681fc398fb659f5d387d` |
+| Discovery base (backend) | `7707d750a241171e090a681fc398fb659f5d387d` — Sprint 11 PR4 (#236) |
+| Integration base (backend) | `cea77b4b3d101f8a95f18a636ea57dc55420cf00` — `origin/main` at ship time, three commits ahead of the discovery base (#237, #238, #239) |
 | Base SHA (mobile, read) | `e6aab4d594ecb5a0e24ac606c328d46ea2a3855e` |
-| HEAD before the decision closure | `e3611f3b2c4676306a70b5875f891afe5e8e0029` (2 commits) |
-| Decision-closure commit | `714154d` — `docs(sprint12): finalize daily coach architecture decisions` (C1/C2/C3, resequence, closure guards) |
-| Final HEAD | recorded by the follow-up commit that writes this row — a commit cannot contain its own SHA. Branch total: **4 commits** ahead of `7707d75`. |
+| Integration | rebased onto `cea77b4`, **zero conflicts**, **0 behind** `origin/main`. The rebase rewrote every commit SHA on this branch, so no pre-integration SHA is quoted here — the shipped SHAs are the ones on the pull request. |
+| Integration correction | one. Latest main added a second `get_pending` consumer, so F5's *count* was wrong while its *boundary* held; §13 and one characterization test were updated to pin the boundary. No finding, decision, priority or sequence changed. |
 | Working tree | clean · no untracked files |
-| Discovery + closure tests | `tests/test_sprint12_daily_coach_discovery.py` — **38 passed** (128.5 s cold, 49.5 s on the final re-run after the last report edit). Baseline before the closure was 24 passed; the 14 added cases are the C1/C2/C3 guards in §31. **No discovery test was rewritten or removed.** |
-| Related characterization tests | `tests/test_mobile_auth_feature_gate.py` + `tests/test_feature_flag_registry.py` + `tests/test_feature_flags.py` — **141 passed** (150.5 s), run because the closure touched flag/auth claims. No production flag value changed. |
-| Whitespace | `git diff --check` — clean |
-| Findings | P0: 1 · P1: 7 · P2: 7, all dispositioned (§38). Post-decision review pass: **0 new P0 · 0 new P1 · 0 new P2**. |
+| Discovery + closure tests | `tests/test_sprint12_daily_coach_discovery.py` — **38 passed** (23.9 s) on the integrated tree. Baseline before the closure was 24 passed; the 14 added cases are the C1/C2/C3 guards in §31. **No discovery test was rewritten or removed**, and the one test the integration touched kept its finding. |
+| Related characterization tests | `tests/test_mobile_auth_feature_gate.py` + `tests/test_feature_flag_registry.py` + `tests/test_feature_flags.py` — **141 passed** (33.4 s), run because this PR touches flag/auth claims. Same count as before integration: latest main added no test here. No production flag value changed. |
+| Drift-targeted tests | `tests/test_coach_plan_tools.py` + `tests/test_coach_plan_tools_architecture.py` + `tests/test_coach_confirmation_lifecycle.py` + `tests/test_plan_confirmation_parser.py` + `tests/test_ai_stream.py` — **174 passed** (107.3 s), run because the integrated commits touch the Adaptive Coaching confirmation pipeline. |
+| Whitespace | `git diff --check origin/main...HEAD` — clean |
+| Findings | P0: 1 · P1: 7 · P2: 7, all dispositioned (§38). Post-decision review pass: **0 new P0 · 0 new P1 · 0 new P2**. Post-integration review pass: **0 new P0 · 0 new P1 · 0 new P2**. |
 | Flags changed | **none.** `MOBILE_AUTH_ENABLED`, `AXISAI_NATIVE_AUTH_ENABLED`, `AI_ADAPTIVE_PLAN_CONTEXT` and `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` are untouched, and `app/feature_flags.py` is unmodified |
 | Production config | **untouched.** No `.env` was read, written, or deployed |
-| Push status | **not pushed** |
-| PR status | **not opened** |
-| Merge status | **not merged** |
-| Deploy status | **not deployed** |
+| Ship state | recorded on the pull request, not backfilled here — a commit cannot describe the push, review and merge that follow it |
+| Deployment | **no deployment was initiated by this work.** PR1 changes no application code, so nothing in it alters what a normal post-merge pipeline would deploy |
 
-**Files changed by the decision closure:** this report and
+**Files changed by PR1:** this report and
 `tests/test_sprint12_daily_coach_discovery.py`. No application code was
-modified — the closure is architecture and evidence, not implementation.
+modified — discovery, the decision closure and the integration are all
+architecture and evidence, not implementation.
 
 ---
 
 ## 43. Files inspected
 
-**Backend — `fitness-coach` @ `7707d75`**
+**Backend — `fitness-coach` @ `7707d75`** (the discovery base; the integration
+rebase onto `cea77b4` changed exactly one file in this list,
+`coach_plan_tools/executor.py`, and the effect on this report is recorded in
+§13)
 
 `app/__init__.py` · `app/config.py` · `app/feature_flags.py` · `app/models.py` ·
 `app/nav.py` · `app/plan_presenter.py` · `app/timeutil.py` ·

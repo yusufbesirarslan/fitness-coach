@@ -237,8 +237,21 @@ def test_today_plan_projection_publishes_names_not_canonical_ids():
 # Coach turn. No HTTP route, and no non-Coach service, can answer "is a plan
 # change waiting for me?" - so Today cannot surface one today.
 
-def test_pending_plan_confirmation_is_reachable_only_from_coach_plan_tools():
-    """F5 - `get_pending` has exactly one consumer outside its own package."""
+def test_pending_plan_confirmation_is_reachable_only_from_the_coach_turn():
+    """F5 - every `get_pending` consumer lives inside the AI Coach turn.
+
+    Integration note: this branch was written against `7707d75`, where
+    `get_pending` had exactly one consumer. Integrating the latest main added a
+    second, `app/services/coach_confirmation.py` (#237, `849eb0f`), which
+    resolves a pending confirmation before the provider loop runs.
+
+    That changes the count, not the boundary. Both consumers are Coach-turn
+    machinery, so F5's finding is unchanged: a pending proposal is still
+    observable only from inside an AI Coach conversation, and Today still has
+    no way to surface one. The invariant is asserted first, because it is the
+    fact the report depends on; the exact set is asserted second, so that a
+    third consumer has to be read before it is accepted.
+    """
     consumers = set()
     for path in (REPO_ROOT / "app").rglob("*.py"):
         relative = path.relative_to(REPO_ROOT).as_posix()
@@ -246,8 +259,17 @@ def test_pending_plan_confirmation_is_reachable_only_from_coach_plan_tools():
             continue
         if "get_pending" in path.read_text(encoding="utf-8"):
             consumers.add(relative)
-    assert consumers == {"app/services/coach_plan_tools/executor.py"}, (
-        "pending-proposal readers changed: %s" % sorted(consumers))
+
+    outside = sorted(c for c in consumers
+                     if not c.startswith("app/services/coach"))
+    assert outside == [], (
+        "a pending proposal became readable outside the Coach turn: %s"
+        % outside)
+
+    assert consumers == {
+        "app/services/coach_confirmation.py",
+        "app/services/coach_plan_tools/executor.py",
+    }, ("pending-proposal readers changed: %s" % sorted(consumers))
 
 
 def test_no_blueprint_reads_the_plan_mutation_journal():
