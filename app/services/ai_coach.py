@@ -38,7 +38,7 @@ from app.services.ai_nutrition import _food_search_llm, _is_relevant_food, _norm
 # module deliberately does not import app.services.plan_mutation itself —
 # tests/test_plan_mutation_architecture.py fails the build if it ever does, so
 # "the AI cannot reach plan persistence directly" is structural, not a promise.
-from app.services import coach_plan_tools
+from app.services import coach_confirmation, coach_plan_tools
 from app.services.context_builder import (  # noqa: F401 (re-export)
     assert_principal as _assert_principal,
     fetch_coach_context as _fetch_coach_context,
@@ -201,9 +201,19 @@ _SAME_TURN_CONFIRM_MSG = (
     "kullanıcı mesajıyla gelirse confirm aracını tekrar çağır.")
 
 
+def _staging_refusal(user_id):
+    if not coach_confirmation.should_refuse_new_staging(user_id):
+        return None
+    return json.dumps(
+        coach_confirmation.staging_refusal_payload(), ensure_ascii=False)
+
+
 def _tool_fetch_nutrition_and_stage_log(user_id, food_query):
     """TOOL (staging): FatSecret'tan makro çek → PendingAction'a yaz → LLM'e döndür.
     KALICI KAYIT YAPMAZ. Durum geçişi: (yok) → staged."""
+    refusal = _staging_refusal(user_id)
+    if refusal is not None:
+        return refusal
     food_query = (food_query or "").strip()
     if not food_query:
         return json.dumps({"status": "error", "message": "Yiyecek sorgusu boş."}, ensure_ascii=False)
@@ -375,6 +385,10 @@ def _tool_stage_workout_log(user_id, exercise_name, sets, reps, weight_kg):
         reps = 10
     if weight < 0:
         weight = 0.0
+
+    refusal = _staging_refusal(user_id)
+    if refusal is not None:
+        return refusal
 
     payload = {
         "exercise_name": exercise_name[:120],
@@ -895,9 +909,10 @@ def _coach_tool_defs_for_call(user_id=None):
     ayrışamaz (brief §41). Bayrak KAPALIYKEN liste, PR3 öncesiyle AYNI nesnedir:
     ek kopya, ek alan, ek boşluk yok.
     """
+    defs = coach_confirmation.filter_coach_tool_defs(_COACH_TOOL_DEFS, user_id)
     if not coach_plan_tools.plan_mutation_tools_enabled():
-        return _COACH_TOOL_DEFS
-    return _COACH_TOOL_DEFS + list(
+        return defs
+    return defs + list(
         coach_plan_tools.published_plan_tool_defs(user_id))
 
 
@@ -909,8 +924,6 @@ def _openai_tools_for_call(user_id=None):
     kalır: mevcut testler ve import yolları onu sekiz aracın kanonik OpenAI
     projeksiyonu olarak kullanmayı sürdürür.
     """
-    if not coach_plan_tools.plan_mutation_tools_enabled():
-        return COACH_TOOLS
     return [_to_openai_tool(t) for t in _coach_tool_defs_for_call(user_id)]
 
 
@@ -935,6 +948,11 @@ def _dispatch_coach_tool(user_id, name, arguments_json):
             return json.dumps(
                 coach_plan_tools.invalid_arguments_result(
                     "araç argümanları okunamadı"),
+                ensure_ascii=False)
+        if (name in coach_plan_tools.PLAN_MUTATION_TOOL_NAMES
+                and coach_confirmation.should_block_plan_mutation(user_id)):
+            return json.dumps(
+                coach_confirmation.blocked_plan_mutation_payload(),
                 ensure_ascii=False)
         return json.dumps(
             coach_plan_tools.execute_plan_tool(user_id, name, args),
@@ -1033,6 +1051,16 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
     Asıl 'staged' veri DB'deki PendingAction'da yaşar.
     """
     _begin_coach_turn(question)  # S1 stage lock + PR4 confirmation intent
+    resolved = coach_confirmation.resolve_pending_turn(user_id, language)
+    if resolved is not None:
+        if prepared_history is None and client_history is None:
+            history = list(session.get("coach_history", []))
+            new_history = history + [
+                {"role": "user", "content": question[:COACH_HISTORY_CHAR_CAP]},
+                {"role": "assistant", "content": resolved[:COACH_HISTORY_CHAR_CAP]},
+            ]
+            session["coach_history"] = new_history[-COACH_HISTORY_LIMIT:]
+        return resolved
     if prepared_history is not None:
         history = list(prepared_history)
         use_client = True  # session'a yazma (kalıcılık DB'de)
@@ -1151,9 +1179,16 @@ def _run_coach_conversation_openai(user_id, question, context, history,
             ],
         })
         # Her tool_call_id için tam olarak bir 'tool' yanıtı ekle (API zorunluluğu).
+        payloads = []
         for tc in tool_calls:
             result = _dispatch_coach_tool(user_id, tc.function.name, tc.function.arguments)
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": result})
+            parsed = _tool_payload(result)
+            if parsed is not None:
+                payloads.append(parsed)
+        owned = coach_confirmation.reply_after_tools(user_id, language, payloads)
+        if owned:
+            return owned
         # Döngü başa döner: model araç sonuçlarıyla final metni üretir ya da zincirler.
     else:
         final_text = _coach_tool_fallback(language)
@@ -1186,12 +1221,17 @@ def _anthropic_tools_for_call(user_id=None):
     PR3: plan araçları bayrak AÇIKken _coach_tool_defs_for_call() üzerinden
     eklenir; cache breakpoint yine SON araca konur, yani bayrak durumu değişmediği
     sürece sıra sabit ve önbellek stabildir."""
-    if not coach_plan_tools.plan_mutation_tools_enabled():
-        tools = COACH_TOOLS_ANTHROPIC
-    else:
-        tools = [_to_anthropic_tool(t) for t in _coach_tool_defs_for_call(user_id)]
+    tools = [_to_anthropic_tool(t) for t in _coach_tool_defs_for_call(user_id)]
     return prompt_builder.anthropic_tools_for_call(
         tools, prompt_cache=BEDROCK_PROMPT_CACHE)
+
+
+def _tool_payload(raw):
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _first_text_block(resp):
@@ -1259,12 +1299,19 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
             # Araç isteyen assistant turunu (tool_use bloklarıyla) olduğu gibi ekle.
             convo.append({"role": "assistant", "content": resp.content})
             tool_results = []
+            payloads = []
             for block in resp.content:
                 if getattr(block, "type", None) == "tool_use":
                     out = _dispatch_coach_tool(user_id, block.name, json.dumps(block.input or {}))
                     tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": out})
                     tools_ran += 1
+                    parsed = _tool_payload(out)
+                    if parsed is not None:
+                        payloads.append(parsed)
             convo.append({"role": "user", "content": tool_results})
+            owned = coach_confirmation.reply_after_tools(user_id, language, payloads)
+            if owned:
+                return owned
         except _BedrockFallback:
             raise
         except Exception as e:

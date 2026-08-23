@@ -433,7 +433,9 @@ def test_the_openai_loop_applies_one_change_for_one_intent(
             planned_user.id, "Pazartesi bench yerine machine press koy",
             "", client_history=[])
 
-    assert answer == "tamam"
+    assert "machine press" in answer.lower()
+    assert "bench press" in answer.lower()
+    assert "confirm" not in answer.lower()
     assert names(planned_user.id) == ["Machine Press", "Shoulder Press"]
     assert len(journal(planned_user.id)) == 1
 
@@ -499,10 +501,10 @@ def test_a_provider_fallback_does_not_repeat_a_change_that_already_ran(
             planned_user.id, "bench yerine machine press", "",
             client_history=[], language="tr")
 
-    # The degraded turn must not say "I couldn't complete that": the change IS
-    # committed, and that sentence asks the user to retry — a new request, a
-    # new turn identity, a new operation key, the same exercise added twice.
-    assert answer == ai_coach._COACH_FALLBACKS["tr"]["tool_plan_saved"]
+    # APPLY_NOW short-circuits on the tool result: the user hears that the
+    # change is already saved, the next provider call never runs, and a
+    # "try again" fallback cannot ask them to repeat the same mutation.
+    assert "machine press" in answer.lower()
     assert answer != ai_coach._COACH_FALLBACKS["tr"]["tool"]
     assert openai.calls == []                     # no second provider ran
     assert names(planned_user.id) == ["Machine Press", "Shoulder Press"]
@@ -543,7 +545,8 @@ def test_a_fallback_before_any_tool_ran_applies_the_change_once(
         answer = ai_coach._run_coach_conversation(
             planned_user.id, "cable fly ekle", "", client_history=[])
 
-    assert answer == "tamam"
+    assert "cable fly" in answer.lower()
+    assert "confirm" not in answer.lower()
     assert names(planned_user.id).count("Cable Fly") == 1
     assert len(journal(planned_user.id)) == 1
 
@@ -619,7 +622,7 @@ def test_the_plan_saved_wording_is_still_an_error_fallback(app):
 
 def test_the_streaming_path_reports_a_saved_plan_change_too(
         app, planned_user, tools_on, monkeypatch):
-    """§40 parity: the honest wording cannot exist only in blocking mode."""
+    """§40 parity: streaming reports the saved APPLY_NOW change, not a retry."""
     from types import SimpleNamespace
 
     from app.observability import assign_request_id
@@ -663,9 +666,11 @@ def test_the_streaming_path_reports_a_saved_plan_change_too(
             planned_user.id, "cable fly ekle", "", [], "tr"))
 
     error = [e for e in events if e["type"] == "error"]
-    assert error, events
-    assert error[-1]["key"] == "coach.reply_failed_plan_saved"
-    assert error[-1]["work_performed"] is True
+    assert error == []
+    done = [e for e in events if e["type"] == "done"]
+    assert done
+    assert "cable fly" in done[-1]["text"].lower()
+    assert done[-1]["provider"] == "bedrock"
     assert names(planned_user.id).count("Cable Fly") == 1
     assert len(journal(planned_user.id)) == 1
 

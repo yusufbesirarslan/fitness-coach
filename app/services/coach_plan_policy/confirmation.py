@@ -16,11 +16,19 @@ NONE = "NONE"
 # vocabulary (prompts/system.py) plus the PR4 brief's unambiguous set.
 _CONFIRM_FORMS = frozenset({
     "yes",
+    "yeah",
+    "yep",
     "confirm",
+    "confirmed",
+    "proceed",
+    "go ahead",
     "do it",
     "evet",
     "onayla",
     "uygula",
+    "olur",
+    "kaydet",
+    "tabii",
 })
 
 _CANCEL_FORMS = frozenset({
@@ -29,6 +37,8 @@ _CANCEL_FORMS = frozenset({
     "don't",
     "dont",
     "do not",
+    "never mind",
+    "nevermind",
     "hayır",
     "hayir",
     "iptal",
