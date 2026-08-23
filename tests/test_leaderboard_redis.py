@@ -294,6 +294,24 @@ def test_award_xp_syncs_redis_after_commit(app, make_user, monkeypatch):
     assert fake.zmscore(LB_ALLTIME_KEY, [user.id]) == [float(gam._lb_score(50, 0))]
 
 
+def test_mark_lb_dirty_snapshots_loaded_user_without_session_get(
+        app, make_user, monkeypatch):
+    """Streak/XP hooks must not Session.get when User is already loaded.
+
+    Pump-check like/comment tests stub session.get for PumpCheck; a User
+    lookup in update_streak would steal that stub and 500 the route.
+    """
+    user = make_user("loaded", rank_points=10, weekly_xp=4, streak_count=2)
+
+    def boom(*args, **kwargs):
+        raise AssertionError("session.get must not run when User is already loaded")
+
+    monkeypatch.setattr(db.session, "get", boom)
+    gam._mark_lb_dirty(user.id)
+    payload = db.session.info["lb_dirty"][user.id]
+    assert payload == {"rank_points": 10, "weekly_xp": 4, "streak_count": 2}
+
+
 def test_after_commit_sync_does_not_query_expired_user(app, make_user, monkeypatch):
     """after_commit must not emit SQL — expire_on_commit leaves User stale.
 

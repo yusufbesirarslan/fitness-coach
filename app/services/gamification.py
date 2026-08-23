@@ -62,7 +62,25 @@ def lb_rebuild(batch_size=500):
         pass
 
 
-def _mark_lb_dirty(user_id):
+def _loaded_user(user_id, user=None):
+    """Prefer an already-loaded User. session.get is last-resort only.
+
+    after_commit cannot emit SQL (expire_on_commit + SQLAlchemy 2 committed
+    state). Snapshot scores here, before commit. Do not Session.get when the
+    User is already in the identity map — request hooks share session.get with
+    unrelated routes that stub it (pump-check like/comment).
+    """
+    if user is not None:
+        return user
+    if user_id is None:
+        return None
+    loaded = db.session.identity_map.get(db.session.identity_key(User, user_id))
+    if loaded is not None:
+        return loaded
+    return db.session.get(User, user_id)
+
+
+def _mark_lb_dirty(user_id, user=None):
     """Kullanıcıyı 'commit sonrası Redis sync gerekli' olarak işaretle. Eski davranış
     (award_xp içinde anında lb_sync_user) commit ÖNCESI yazıyordu; rollback olunca
     liderlik tablosu yukarı sürükleniyordu (H1-Redis). Artık sync after_commit'te.
@@ -74,7 +92,7 @@ def _mark_lb_dirty(user_id):
     """
     if user_id is None:
         return
-    user = db.session.get(User, user_id)
+    user = _loaded_user(user_id, user)
     db.session.info.setdefault("lb_dirty", {})[user_id] = {
         "rank_points": (getattr(user, "rank_points", 0) if user else 0) or 0,
         "weekly_xp": (getattr(user, "weekly_xp", 0) if user else 0) or 0,
@@ -137,7 +155,7 @@ def award_xp(user_id, amount, count_challenge_xp=True):
         user = db.session.get(User, user_id)  # kilit bizde; identity map'ten gelir
         user.rank_points = new_points
         user.weekly_xp = (row[1] or 0) + amount
-        _mark_lb_dirty(user_id)  # Redis sync commit BAŞARILI olduktan sonra (after_commit)
+        _mark_lb_dirty(user_id, user)  # Redis sync commit BAŞARILI olduktan sonra (after_commit)
         # 500-puan seviye sınırı geçildiyse feed'e level_up aktivitesi düş. Daha önce
         # hiç üretilmiyordu — ACTIVITY_ICONS["level_up"] tanımlıydı ama ölü config'di (#14).
         new_level = get_level(new_points)
