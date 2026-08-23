@@ -54,6 +54,31 @@ def _chunks(text):
         yield text[i:i + CHUNK_CHARS]
 
 
+def _flush_buffered(buffered, parts):
+    """Release held provider text to the client and to the visible accumulator."""
+    for text in buffered:
+        if not text:
+            continue
+        parts.append(text)
+        yield {"type": "delta", "text": text}
+
+
+def _tool_use_names(message):
+    names = []
+    for block in getattr(message, "content", None) or []:
+        if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None):
+            names.append(block.name)
+    return names
+
+
+def _tool_payload(raw):
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _bedrock_work_error(parts, tools_ran):
     """Araç koştuktan SONRA gelen akış arızasının kullanıcıya giden çerçevesi.
 
@@ -131,9 +156,13 @@ def stream_coach_answer(user_id, question, context, history, language="tr"):
 
     ai_coach'ın araç ekosistemini kullanır; sağlayıcı yedeği yalnızca HİÇBİR
     delta gönderilmemişken mümkündür."""
-    from app.services import ai_coach
+    from app.services import ai_coach, coach_confirmation
 
     ai_coach._begin_coach_turn(question)
+    resolved = coach_confirmation.resolve_pending_turn(user_id, language)
+    if resolved is not None:
+        yield from _emit_text(resolved, provider="server")
+        return
     deadline = ai_coach._coach_turn_deadline()
 
     if ai_coach.BEDROCK_ENABLED and ai_coach._anthropic is not None:
@@ -157,11 +186,12 @@ def _stream_bedrock(user_id, question, context, history, language,
                     deadline=None):
     """Bedrock (Anthropic Messages) akışlı araç-kullanım döngüsü.
 
-    Her tur AKITILIR: model araç çağırmadan önce bir giriş cümlesi yazarsa
-    ("Öğünlerine bakıyorum...") kullanıcı onu anında görür; araç turları
-    çalışır ve final tur cevabı aynı akışta devam eder. Yayınlanan tüm metin
-    parçaları birleşip kalıcılaşan yanıtı oluşturur."""
-    from app.services import ai_coach
+    Metin önce tamponlanır. Mutasyon/kayıt araçları varsa öndeki düzyazı
+    yayımlanmaz — "I've added" persistence'tan önce gidemez. Salt-okunur
+    araçlarda ("Öğünlerine bakıyorum...") ve araçsız yanıtlarda tampon
+    sonuç belli olunca akıtılır. Yayınlanan metin parçaları birleşip
+    kalıcılaşan yanıtı oluşturur."""
+    from app.services import ai_coach, coach_confirmation
 
     if deadline is None:
         deadline = ai_coach._coach_turn_deadline()
@@ -189,14 +219,16 @@ def _stream_bedrock(user_id, question, context, history, language,
             "messages": convo,
             "tools": tools,
         }
+        buffered = []
+        final = None
         try:
             for message in _stream_bedrock_turn(
                     ai_coach.bedrock_client.messages, call_kwargs,
                     deadline=deadline):
                 if message["kind"] == "delta":
                     text = message["text"]
-                    parts.append(text)
-                    yield {"type": "delta", "text": text}
+                    if text:
+                        buffered.append(text)
                 elif message["kind"] == "final":
                     final = message["message"]
                 elif message["kind"] == "deadline_exhausted":
@@ -217,8 +249,9 @@ def _stream_bedrock(user_id, question, context, history, language,
                     provider="bedrock", usage=usage)
                 return
             # Yedek YALNIZCA hiçbir şey yayınlanmamış VE hiçbir araç yan etki
-            # üretmemişken güvenlidir; aksi halde sağlayıcı değiştirmek
-            # kullanıcının gördüğü metni bozar / yan etkiyi tekrarlar.
+            # üretmemişken güvenlidir. Yayımlanmamış tampon metin istemciye
+            # gitmiş sayılmaz — aksi halde sağlayıcı değiştirmek görülen
+            # metni bozar / yan etkiyi tekrarlar.
             if not parts and tools_ran == 0:
                 raise ai_coach._BedrockFallback(f"{type(e).__name__}: {e}")
             current_app.logger.warning(
@@ -230,6 +263,7 @@ def _stream_bedrock(user_id, question, context, history, language,
             usage = _usage_of(final) or usage
 
             if getattr(final, "stop_reason", None) != "tool_use":
+                yield from _flush_buffered(buffered, parts)
                 text = "".join(parts)
                 if not text and tools_ran == 0:
                     # Hiç metin yok ve hiç araç çalışmadı → soru cevaplanabilirdi,
@@ -239,8 +273,13 @@ def _stream_bedrock(user_id, question, context, history, language,
                        "provider": "bedrock"}
                 return
 
+            if not coach_confirmation.holds_stream_preamble(
+                    _tool_use_names(final)):
+                yield from _flush_buffered(buffered, parts)
+
             convo.append({"role": "assistant", "content": final.content})
             tool_results = []
+            payloads = []
             for block in final.content:
                 if getattr(block, "type", None) == "tool_use":
                     out = ai_coach._dispatch_coach_tool(
@@ -248,7 +287,16 @@ def _stream_bedrock(user_id, question, context, history, language,
                     tools_ran += 1
                     tool_results.append({"type": "tool_result",
                                          "tool_use_id": block.id, "content": out})
+                    parsed = _tool_payload(out)
+                    if parsed is not None:
+                        payloads.append(parsed)
             convo.append({"role": "user", "content": tool_results})
+            owned = coach_confirmation.reply_after_tools(
+                user_id, language, payloads)
+            if owned:
+                yield from _emit_text(
+                    owned, provider="bedrock", usage=usage)
+                return
         except Exception as e:
             if not parts and tools_ran == 0:
                 raise ai_coach._BedrockFallback(f"{type(e).__name__}: {e}")

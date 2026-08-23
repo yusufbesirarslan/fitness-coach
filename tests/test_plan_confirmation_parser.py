@@ -9,12 +9,15 @@ from app.services.coach_plan_policy import (
 
 def test_bounded_confirm_forms():
     for message in ("yes", "Yes", "YES", "confirm", "do it",
-                    "evet", "Evet", "onayla", "uygula", "  evet  "):
+                    "yeah", "yep", "confirmed", "proceed", "go ahead",
+                    "evet", "Evet", "onayla", "uygula", "  evet  ",
+                    "olur", "kaydet", "tabii"):
         assert parse_confirmation_intent(message) == CONFIRM, message
 
 
 def test_bounded_cancel_forms():
     for message in ("no", "cancel", "don't", "dont", "do not",
+                    "never mind", "nevermind",
                     "hayır", "hayir", "iptal", "vazgeç", "vazgec"):
         assert parse_confirmation_intent(message) == CANCEL, message
 
