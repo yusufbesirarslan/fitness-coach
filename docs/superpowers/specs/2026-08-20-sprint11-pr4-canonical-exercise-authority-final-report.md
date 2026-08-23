@@ -24,9 +24,9 @@ repair ceilings are untouched, and no migration ships.
 | Branch | `sprint11-pr4-canonical-exercise-authority` (local only, never pushed) |
 | Base | `95fb056` — PR3, `#223` |
 | Last implementation commit | `ba4a7ea` |
-| Final HEAD | this report's commit, on top of `ba4a7ea` |
+| Final HEAD | **superseded** - see Latest main integration |
 | Commits ahead of base | 12 (11 implementation + this report) |
-| Position vs `origin/main` | 12 ahead, 11 behind — no rebase, no merge |
+| Position vs `origin/main` | **superseded** - rebased onto `7a5b2a7`; now 13 ahead, 0 behind (see Latest main integration) |
 | Diff vs base | 45 files, +7939 / −217 (including this report) |
 
 ## PR3 prerequisites verified
@@ -316,14 +316,14 @@ spelling is resolved once: 5 references across 3 entries and 4 spellings produce
 ## Migration and seeding strategy
 
 No migration, and no seeding, because there is nothing to seed. The catalog is
-bundled data, not a table: `migrations/versions/` still holds 36 files and
-`tests/test_migration_graph.py` still pins the single head `c1d2e3f4a5b6` on
-this branch. No boot-time insert, no admin surface — deployment requires no data
-step, and rollback is a code revert.
+bundled data, not a table. No boot-time insert, no admin surface — deployment
+requires no data step, and rollback is a code revert.
 
-Disclosure: `origin/main` has since moved its head to `c2d3e4f5a6b7` via PR
-`#224`, which this branch is not based on. Reconciling the two is the merge's
-job, not PR4's.
+Updated after the latest-main integration: `migrations/versions/` now holds 37
+files and `tests/test_migration_graph.py` pins the single head `c2d3e4f5a6b7`,
+both of which come from `origin/main`'s `#224`. PR4 itself still adds no
+migration. The reconciliation this paragraph used to defer is done — see
+"Latest main integration and ship validation".
 
 ## Security / privacy
 
@@ -486,13 +486,13 @@ The remaining thirteen are accepted, each with a stated reason:
 | Task 5 commits | `86213df`, fix round `9eaa065`, controller guard rewrite `3afd5fb` |
 | Task 6 commit | `ba4a7ea` |
 | Task 7 commit | this report |
-| Final HEAD | this report's commit (SHA recorded in the ship handoff) |
-| Commits ahead of `origin/main` | 12 ahead, 11 behind (never rebased) |
+| Final HEAD | **superseded** - final code SHA `37d2829`, see Latest main integration |
+| Commits ahead of `origin/main` | **superseded** - 13 ahead, 0 behind after the rebase onto `7a5b2a7` |
 | Working tree state | clean |
 | Untracked files | none outside the git-ignored `.superpowers/` workspace |
 | Focused test totals | 883 passed, 0 failed (5m34s) |
 | Full suite totals | 4836 passed, 11 skipped, 3 deselected, 0 failed (1h02m39s) |
-| Migration validation | 36 revision files, single head `c1d2e3f4a5b6`, no PR4 migration |
+| Migration validation | **superseded** - 37 revision files, single head `c2d3e4f5a6b7`, still no PR4 migration |
 | P0 | 0 |
 | P1 | 0 |
 | Accepted P2 | 13 (P2-1, P2-3, P2-8 closed) |
@@ -600,8 +600,9 @@ operation keys, journal records, transaction order, mutation versions and
 snapshot format are untouched; undo restores the prior snapshot byte for byte
 and never re-resolves.
 
-**16. Was a migration added?** No. 36 revision files, single head
-`c1d2e3f4a5b6`, no `exercise_id` column on `WorkoutLog`.
+**16. Was a migration added?** No. After the latest-main integration: 37
+revision files, single head `c2d3e4f5a6b7` (both from `origin/main`), no
+`exercise_id` column on `WorkoutLog`, and no migration authored by PR4.
 
 **17. How is catalog seeding handled?** There is none, because the catalog is
 bundled data rather than a table. No rows, no boot-time insert, no admin
@@ -612,6 +613,534 @@ catalog coverage first, then identity-keyed injury screening (P2-16), the Coach
 wording decision (P2-11), the legacy logging gap, and proving PR4's authority
 over main's new confirmation surface after the merge.
 
-## Final verdict
+## Final verdict (pre-integration)
+
+**READY TO SHIP** - earned at `c129606`, 12 ahead and 11 behind `origin/main`.
+Superseded by the latest-main integration below, which re-proved it on the
+integrated SHA rather than carrying it over.
+
+## Latest main integration and ship validation
+
+Added 2026-08-23. The verdict above was earned at `c129606`, when the branch was
+12 ahead and **11 behind** `origin/main`. That verdict is superseded by this
+section: it was re-proven on the integrated SHA, not carried over.
+
+### Drift review before integrating
+
+`origin/main` moved from `95fb056` to **`7a5b2a7`** — eleven commits. Ten of
+them (`8160f32`, `403011d`, `3c754ab`, `f7d182c`, `9fae230`, `c5eb27d`,
+`dfe62ad`, `118781b`, `d5fbe98`, `7a5b2a7`) touch only `README.md`,
+`SECURITY.md` and `.github/` issue/PR templates — zero application impact
+against every category the drift review screens for.
+
+The eleventh, **`5d898b2`** (Adaptive Coaching S1 PR4, `#224`, "server-owned
+training plan mutation confirmation"), is the only code commit and lands
+squarely on PR4's surface: 36 files, `app/models.py`, the new
+`coach_plan_policy/` and `plan_confirmation/` packages, a 376-line rewrite of
+`coach_plan_tools/executor.py`, and a new Alembic revision `c2d3e4f5a6b7`.
+
+| Category screened | Touched by main drift |
+| --- | --- |
+| Training generator | no |
+| Plan validation (structural/semantic) | no |
+| Plan save/persistence | no |
+| Exercise domain | no |
+| Migrations | **yes** — `c2d3e4f5a6b7`, new single head |
+| Adaptive Coaching | **yes** — proposal → confirm → apply flow added |
+| Workout logging/history | `workout_session/queries.py` (+12, read-only helper) |
+| Shared utilities used by PR4 | `app/models.py`, `locales/*.json` |
+| Test architecture | **yes** — `_ALL_PLAN_TOOL_DEFS`, migration-graph head pin |
+
+Eight files are touched by both sides: `docs/ADAPTIVE_COACHING.md`,
+`docs/handoff.md`, `locales/en.json`, `locales/tr.json`,
+`tests/test_coach_plan_tools.py`, `tests/test_coach_plan_tools_architecture.py`,
+`tests/test_migration_graph.py`, `tests/test_plan_mutation_architecture.py`.
+
+### Integration strategy
+
+**Rebase onto `origin/main` (`7a5b2a7`).** The branch is local-only
+(`git ls-remote --heads origin 'sprint11-pr4*'` is empty), so no published
+history is rewritten, and recent `main` is squash-merged and linear — a merge
+commit here would be the anomaly. All twelve commits replayed; **git reported
+zero conflicts**.
+
+Zero textual conflicts is not the same as a correct integration, so the replay
+was verified rather than assumed:
+
+- the file set of PR4's delta is identical before and after
+  (`95fb056..c129606` vs `7a5b2a7..7990b53`, 45 files both sides);
+- 37 of those 45 file deltas are **byte-identical** pre/post rebase;
+- for the 8 overlapping files, PR4's added/removed lines are unchanged (context
+  shift only), and `main`'s added/removed lines all landed intact;
+- `git diff c129606..7990b53` contains **exactly** the eleven main commits'
+  content and nothing else.
+
+That check found the one thing the clean merge hid — see the next section.
+
+### Conflicts and resolutions
+
+No merge conflict was raised. Two defects were introduced *by* the silent
+auto-merge and fixed in `37d2829`; both are test-side, and **no production
+semantics were changed during integration**.
+
+**1 — `tests/test_coach_plan_tools_architecture.py`: a main guard silently
+narrowed.** `5d898b2` introduced `_ALL_PLAN_TOOL_DEFS`
+(`PLAN_MUTATION_TOOL_DEFS + CONFIRMATION_TOOL_DEFS`) and widened its three
+parametrized boundary guards onto it. PR4 had inserted a fourth guard
+(`test_no_tool_property_names_a_catalog_owned_concept`, Task 5) into the middle
+of that block, all four still on `PLAN_MUTATION_TOOL_DEFS`. The three-way merge
+aligned PR4's inserted decorator against
+`test_no_tool_offers_a_generic_mutation_language` and kept PR4's narrower
+argument there — so main's new confirmation tools quietly stopped being checked
+for a generic mutation language. Resolved by restoring `_ALL_PLAN_TOOL_DEFS`,
+i.e. main's intent. Both sides are preserved and neither is weakened: PR4's own
+catalog-owned guard merged onto `_ALL_PLAN_TOOL_DEFS`, so main's confirmation
+tools are now covered by PR4's exercise-authority guard as well.
+
+**2 — `tests/test_migration_graph.py`: a hard-coded baseline count.** PR4's
+`test_pr4_canonical_exercise_authority_adds_no_migration` asserted
+`len(revision_files) == 36`. Main's `c2d3e4f5a6b7` made it 37. PR4 still adds no
+migration; only the baseline the tripwire counts against moved. Bumped to 37
+with the reason recorded in the test. The assertion keeps exactly its previous
+strength — a PR4-added migration still fails here first.
+
+### Migration impact
+
+**PR4 introduces no migration** (`git diff 7a5b2a7..HEAD -- migrations/` is
+empty), and it changes no model (`-- app/models.py` is empty). The graph after
+integration is main's:
+
+```
+flask --app starter db heads              →  c2d3e4f5a6b7 (head)   exit 0
+flask --app starter db upgrade  (fresh)   →  base → c2d3e4f5a6b7   exit 0   (37 revisions)
+flask --app starter db upgrade  (incr.)   →  c1d2e3f4a5b6 → c2d3e4f5a6b7   exit 0
+```
+
+Both the fresh and the incremental path apply cleanly, and
+`tests/test_migration_graph.py` (10 passed) pins the single head
+`c2d3e4f5a6b7`, chained off Sprint 10 PR4A's `c1d2e3f4a5b6`.
+
+`flask --app starter db check` **cannot be run authoritatively here**: no local
+PostgreSQL is reachable and the repository's schema-drift guard is a
+PostgreSQL-16 CI job. Run against SQLite it exits 1 with 80 autogenerate
+operations — JSONB columns, `ondelete` cascades and index reflection that SQLite
+cannot represent. That is an environment artifact, and it was proven to be one
+rather than asserted: the identical command on **unmodified `origin/main`**
+produces the *same* 80 operations, and after normalizing memory addresses the
+two operation lists are equal element for element. **PR4 contributes zero schema
+drift**, which follows independently from its touching neither `app/models.py`
+nor `migrations/`.
+
+### Canonical exercise authority re-proven on the integrated branch
+
+| Invariant | Where it is enforced | Status |
+| --- | --- | --- |
+| One canonical authority | `app/services/exercise_catalog.py` + `training_assets/exercises.json`; the only `load_exercise_catalog()` callers are the generation resolver and `plan_mutation/document.py` | holds |
+| Provider names are not identity | `_resolve_generated_name` resolves exact canonical name/declared alias only | holds |
+| Stable IDs authoritative | `ID_PATTERN` + `catalog.by_id`; `canonicalize_plan_exercises` always overwrites `exercise_id` | holds |
+| Exact names resolve | `normalize_exercise_lookup` (NFKC, hyphen unification, casefold, whitespace collapse) | holds |
+| Aliases resolve deterministically | alias index built at load; a normalized collision is a `CatalogConfigurationError` at load time, so ambiguity cannot exist at runtime | holds |
+| Unknown fails closed | `ExerciseUnresolved` → `GenerationExerciseUnresolvedError` / `InvalidMutation` | holds |
+| Ambiguous fails closed | `len(matches) != 1` → `ExerciseAmbiguous`; `_find_exercise_index` refuses two matches rather than picking one | holds |
+| No dynamic catalog entries | catalog module imports no `flask`/`sqlalchemy`/`app.*`; guarded by `test_architecture_catalog_never_persists` | holds |
+| No fuzzy authorization | `FORBIDDEN_RESOLUTION_TECHNIQUES` scan over dynamically derived sources | holds |
+| Client cannot override metadata | `_forbid_unknown` rebuilds a closed-key dict; `isim` is replaced by `resolved.canonical_name` unconditionally | holds |
+| Equipment compatibility server-owned | `is_exercise_compatible` + `check_placement` against the HMAC-verified context | holds |
+
+### PR3 invariants re-proven
+
+`MAX_PROVIDER_COMPLETIONS == 2`, enforced by `_CompletionBudget.complete`, which
+raises once `len(self.calls) >= max_calls` — a ceiling, not a convention.
+Exactly one repair: a single `except (ParseFailedError, TruncatedError)` block
+with one retry whose own handler re-raises. `SchemaInvalidError` and
+`SemanticInvalidError` are logged `repair_eligible=0` and re-raised without a
+provider call. Strict JSON extraction, structural validation and semantic
+validation are unchanged. `canonicalize_plan_exercises` runs strictly **outside**
+that try/except, so an exercise-authority failure can never be laundered into a
+repairable parse failure — pinned by
+`test_canonicalization_runs_after_the_full_try_except_not_inside_repair`.
+Provider and model selection are untouched: PR4's diff against `7a5b2a7` does
+not reach `ai_coach.py`, `ai_stream.py`, `bedrock_client.py` or `config.py`.
+
+### PR2 invariants re-proven
+
+Unknown program style raises `PreferenceContractError.invalid("UNKNOWN_PROGRAM_STYLE")`
+and never becomes `general_fitness`. `parse_preferences` and `require_supported`
+both run before `_CompletionBudget` is constructed, so a rejected request costs
+**zero provider calls** structurally, not by assertion. Supported preferences
+survive canonical normalization. 147 lines of PR4 additions to
+`tests/test_sprint11_training_preference_contract.py` still pass.
+
+### Save safety re-proven
+
+There are exactly **three** paths that can write `TrainingPlan.plan_data`, and
+all three are covered:
+
+1. `POST /training-plan/save` — `resolve_save_exercise_context` (HMAC, bound to
+   `user_id`) → `validate_plan_for_save` (structure → semantics → catalog
+   identity → equipment compatibility) → **only then**
+   `TrainingPlan.query…delete()`. The ordering is asserted from the AST by
+   `test_architecture_save_validates_before_delete`. What is persisted is
+   `canonical["program"]`, not the client's payload, and the `exercise_context`
+   block is rebuilt from the *verified* context — a tampered display name is
+   overwritten with `resolved.canonical_name`, and a fabricated `exercise_id` is
+   re-resolved against the live catalog before it means anything.
+2. `plan_mutation/service.py:295` (apply) — `after_snapshot` comes from
+   `apply_command`, which runs PR4's `_exercise_authority`,
+   `_resolve_placeable_exercise` and `check_placement`.
+3. `plan_mutation/service.py:407` (undo) — restores the journal's
+   `before_snapshot` byte for byte. No new identity is authored.
+
+`app/blueprints/nutrition/plan.py` writes `NutritionPlan`, a different model.
+No fourth path exists. Catalog failure codes are deliberately collapsed at the
+save boundary so the client cannot use it as a catalog oracle.
+
+### Main's new confirmation surface is under PR4's authority
+
+This was the integration's real risk: `5d898b2` turned a plan mutation into
+*propose now, apply later*, and a durable proposal that stored a pre-computed
+document would have escaped the catalog. It does not. `encode_command` stores
+only the bounded typed-command fields (`day`, `exercise`, `replacement`,
+`sets`, `reps`) — never a plan document. Every execution path re-enters the
+authority:
+
+- `preview_command` → `apply_command` (PR4 authority);
+- `session_impact_facts` → `apply_command` (PR4 authority), read-only;
+- `_apply_confirmed` → `apply_plan_mutation` → `apply_command` (PR4 authority).
+
+So an entry retired from the catalog between proposal and confirmation fails at
+confirmation. `binding_matches` additionally requires lineage, mutation version
+and `snapshot_fingerprint` to be unchanged, and `snapshot_fingerprint` covers
+the stored `exercise_context` block — a context change makes the proposal
+`STALE` rather than applicable. `_resolved_replay_result` returns journal
+evidence and performs no mutation call.
+
+Adaptive Coaching undo semantics are unchanged: PR4's diff against `7a5b2a7`
+touches only `document.py`, `errors.py` and `validation.py` inside
+`plan_mutation/`, and reaches neither `journal.py` nor `service.py`.
+
+### No duplicate exercise authority
+
+`app/services/training_generation/exercise_knowledge_base.py` remains deleted.
+No module in the integrated tree holds a second exercise identity map: main's
+new `coach_plan_policy/`, `plan_confirmation/`, `proposals.py` and `results.py`
+carry exercise *names* as command fields and presentation strings, never a
+catalog. The remaining hardcoded exercise-name lists are
+`app/services/injury_constraints.py` (P2-16, below) and the movement-pattern
+names in `contradiction_engine` / `feature_extractor` / `rule_engine` /
+`scoring_engine`, which are `MOVEMENT_VOCABULARY` values, not exercise
+identities. `WorkoutLog` stays name-only — the explicitly documented,
+namespace-free scope boundary from the design's §9, not a second authority.
+
+### Architecture mutation battery (non-vacuity, integrated SHA)
+
+Re-proven at `37d2829`. The driver is preserved this time
+(`scratchpad/mutation_battery.py`) and each case is reproducible from the table
+below: it backs up the file, applies the mutation, runs the guard, restores in a
+`finally`, and asserts `git status` is clean at the end (it was).
+
+| # | Mutation | Guard required to fire | Result |
+| --- | --- | --- | --- |
+| 1 | Delete the `canonicalize_plan_exercises(...)` call site in `service.py` | `test_canonicalization_runs_after_the_full_try_except_not_inside_repair`, `test_generated_exercise_id_is_accepted_by_save` | 2 failed → **detected** |
+| 2 | `_resolve_generated_name` fabricates an `ExerciseDefinition` instead of raising | `test_semantically_distinct_name_is_not_fuzzy_matched`, `test_http_typed_exercise_unresolved` | 1 failed → **detected** |
+| 3 | `difflib.get_close_matches` fallback added to the resolver | `test_no_legacy_exercise_kb_or_fuzzy_persistence_path` | 1 failed → **detected** |
+| 4 | Move `TrainingPlan…delete()` above the validation block | `test_architecture_save_validates_before_delete` | 1 failed → **detected** |
+| 5 | Add a **new** module `training_generation/exercise_matcher.py` with a fuzzy `match()` | `test_no_legacy_exercise_kb_or_fuzzy_persistence_path` | 1 failed → **detected** |
+| 6 | Drop the `is_exercise_compatible` gate in `canonicalize_plan_exercises` | `test_equipment_incompatible_generated_exercise_is_typed`, `test_generation_pipeline_rejects_incompatible_equipment` | 2 failed → **detected** |
+
+**6 / 6 mutations detected.** Case 5 is the one that matters most for §14's
+"must derive files dynamically": the guard's file set comes from
+`GENERATION_PACKAGE.rglob("*.py")` with a ten-module floor
+(`REQUIRED_SCANNED_MODULES`), so a brand-new module cannot evade it and a glob
+that stopped matching cannot make it vacuous.
+
+An honest note on method: case 1 initially reported *not detected* because its
+first two targets (`test_pr3_valid_aliases_become_canonical_ids`,
+`test_duplicate_exercise_references_resolve_to_the_same_stable_id`) call
+`canonicalize_plan_exercises` **directly** and therefore never traverse the call
+site the mutation removes. That was a bad target choice, not a vacuous guard;
+retargeting to the two tests that do traverse it made the mutation fire. It is
+recorded here because a battery that quietly re-picks its targets until they go
+green proves nothing.
+
+### Focused validation
+
+27 suites covering PR2, PR3, PR4 and every adjacent system the drift review
+flagged — preference contract, capability matrix and zero-provider-call
+rejections; parser/schema, semantic validation, repair bounds, truncation,
+provider-call bounds and save-time validation; the exercise catalog, stable IDs,
+aliases, normalization, the resolver, unknown/ambiguous failure, equipment
+compatibility, legacy compatibility, save-time exercise authority and the
+architecture guards; plus Adaptive Coaching (including main's new
+confirmation/policy suites), workout logging/history, plan-mutation history and
+the migration graph.
+
+```
+python -m pytest -q <27 suites>
+  1 failed, 1143 passed, 3514 warnings in 392.33s (0:06:32)
+```
+
+The single failure was
+`test_migration_graph.py::test_pr4_canonical_exercise_authority_adds_no_migration`
+— the hard-coded `36` described above. It is a genuine latest-main integration
+regression, reproduced independently, and fixed in `37d2829` rather than
+deleted. After the fix, `tests/test_migration_graph.py` is 10 passed.
+
+### Full suite
+
+```
+python -m pytest -q            # pytest.ini: addopts = -m "not load"
+  4900 passed, 12 skipped, 3 deselected, 0 failed, 0 errors, 16352 warnings in 1727.46s (0:28:47)
+  exit code 0
+```
+
+Zero failures and zero errors. Against the pre-integration baseline (4836
+passed / 11 skipped / 3 deselected at `ba4a7ea`) the suite gained **64 tests**
+and one skip - main's `#224` confirmation suites
+(`test_coach_plan_confirmation.py`, `test_coach_plan_policy.py`,
+`test_plan_confirmation.py`, `test_plan_confirmation_parser.py`,
+`test_plan_confirmation_pg.py`), whose PostgreSQL race case skips without
+`FITX_PG_CONCURRENCY_TEST`. The 3 deselections are `pytest.ini`'s
+`addopts = -m "not load"`, so this run is the authoritative full non-load
+suite. Warnings are the repository's existing `datetime.utcnow()` noise.
+
+### Exact-SHA validation
+
+Everything below was rerun on the committed final SHA **`37d2829`**, after
+the integration fixes, with a clean working tree.
+
+```
+git rev-parse HEAD                    -> 37d2829b195a219ef47ebc2110242c4f3a4e54ad
+git status --porcelain -uall          -> clean
+git rev-list --left-right --count       -> 0 behind, 13 ahead of origin/main
+
+python -m compileall -q app tests      -> exit 0
+
+python -m pytest -q <27 focused suites>
+  1144 passed, 0 failed, 3514 warnings in 383.33s (0:06:23)   exit 0
+    - PR2 zero-provider-call guards ....... included
+    - PR3 repair / provider-call bounds ... included
+    - PR4 authority + resolver suite ...... included
+    - invalid-save / no-mutation tests .... included
+    - architecture guard tests ............ included
+
+architecture mutation battery          -> 6/6 detected, tree clean
+
+flask --app starter db heads           -> c2d3e4f5a6b7 (head)      exit 0
+flask --app starter db upgrade (fresh) -> 37 revisions applied     exit 0
+flask --app starter db current         -> c2d3e4f5a6b7 (head)
+flask --app starter db check           -> PostgreSQL CI gate; see Migration impact
+
+git diff --check                       -> clean (exit 0)
+git diff --check origin/main...HEAD    -> 4 findings (exit 2), see below
+conflict-marker scan (tracked files)   -> none
+```
+
+### Fresh independent integration review of `origin/main...HEAD`
+
+One new review, scoped to latest-main interaction rather than re-reviewing
+already-accepted PR4 internals.
+
+**P0: 0. P1: 0.**
+
+Two defects were found, both introduced by the auto-merge and both **fixed** in
+`37d2829` (they are not carried as accepted P2s):
+
+| ID | Finding | Severity | Disposition |
+| --- | --- | --- | --- |
+| I-1 | `test_no_tool_offers_a_generic_mutation_language` silently narrowed from main's `_ALL_PLAN_TOOL_DEFS` back to `PLAN_MUTATION_TOOL_DEFS`, dropping main's new confirmation tools from that guard | P2 (test coverage; no production behaviour changed, and the widened guard passes) | fixed |
+| I-2 | `test_pr4_canonical_exercise_authority_adds_no_migration` pinned `len(revision_files) == 36`; main's `c2d3e4f5a6b7` made it 37 | P2 (brittle baseline literal) | fixed |
+
+Screened and clean: duplicate exercise authority, unstable exercise identity,
+alias ambiguity, unsafe normalization, fuzzy authorization, unknown-name bypass,
+equipment-compatibility bypass, client tampering, save-validation bypass,
+destructive save ordering, provider-call amplification, repair-loop regression,
+migration drift, legacy-plan breakage, workout-logging breakage, Adaptive
+Coaching coupling, and N+1 resolution.
+
+**P2-16 disposition — unchanged, still routed to PR5.** The escalation test was
+run rather than assumed. `injury_constraints.py` is touched by neither side of
+the integration. `find_contraindicated(ex["isim"], injuries)` still runs in
+`response_validator.py:224`, i.e. before `canonicalize_plan_exercises` in
+`service.py`, so aliases of the same lift can still attach different warnings.
+It stays P2 because `injury_warnings` has exactly three references in the whole
+tree — two assignments in `service.py` and one payload key — and gates nothing;
+main's new confirmation surface never invokes injury screening at all, so the
+integration does not amplify it. Per the brief it is not pulled into PR4.
+
+The thirteen previously accepted P2s are unchanged.
+
+### `git diff --check`
+
+Not clean, and reported exactly rather than silently "fixed".
+
+```
+git diff --check origin/main...HEAD          → exit 2, 4 findings
+  docs/superpowers/plans/…-authority.md:814   new blank line at EOF
+  docs/superpowers/specs/…-design.md:3        trailing whitespace   "Date: 2026-08-20  "
+  docs/superpowers/specs/…-design.md:4        trailing whitespace   "Status: approved design; implementation pending  "
+  docs/superpowers/specs/…-design.md:5        trailing whitespace   "Repository: `yusufbesirarslan/fitness-coach`  "
+git diff --check                (worktree)   → clean
+```
+
+Two corrections to the previous disclosure. The count is **4, not 7**; and only
+**3** of the 4 are Markdown hard breaks — the fourth is a trailing blank line at
+end of file, which renders identically either way. All four are in design/plan
+documentation; no production, test, template, locale or static file is flagged.
+
+**CI does not gate on this.** `.github/workflows/ci.yml` has exactly three jobs
+— `pytest`, `schema-drift guard` (`flask db upgrade` + `flask db check`) and
+`PostgreSQL concurrency` — and `git diff --check` appears nowhere in `.github/`.
+Per the brief's §4 condition, the hard breaks are therefore left intact and
+disclosed rather than rewritten to `<br>`: stripping the three would collapse
+`Date:` / `Status:` / `Repository:` onto one rendered line.
+
+### Final repository state after integration
+
+| Field | Value |
+| --- | --- |
+| Repository | `yusufbesirarslan/fitness-coach` |
+| Worktree | `C:\Users\yusuf\fitness-coach\.worktrees\sprint11-pr4-canonical-exercise-authority` |
+| Branch | `sprint11-pr4-canonical-exercise-authority` (local only) |
+| Previous local HEAD | `c129606` (12 ahead, 11 behind) |
+| Integrated `origin/main` | `7a5b2a7cd4dacd782f7932760e151037ee1b4662` |
+| Integration strategy | rebase onto `origin/main`, zero conflicts |
+| Rebased HEAD | `7990b53` |
+| Integration fix commit | `37d2829` |
+| **Final HEAD** | **``37d2829b195a219ef47ebc2110242c4f3a4e54ad` - the final **code** SHA, where every result above was produced. The branch HEAD is this documentation commit on top of it, which changes no code, test or asset.`** |
+| Position vs `origin/main` | **13 ahead, 0 behind** |
+| Diff vs `origin/main` | 45 files, +7953 / −217 |
+| Working tree | clean (`-uall`) |
+| Backup of pre-integration HEAD | tag `pr4-preintegration-backup` → `c129606` |
+| Alembic | single head `c2d3e4f5a6b7`, 37 revisions, PR4 adds none |
+| Focused suites | 1144 passed, 0 failed (6m23s) |
+| Full suite | 4900 passed, 12 skipped, 3 deselected, 0 failed, 0 errors, 16352 warnings in 1727.46s (0:28:47) |
+| Mutation battery | 6 / 6 detected |
+| `compileall` | exit 0 |
+| P0 | 0 |
+| P1 | 0 |
+| P2 | 13 accepted (unchanged) + 2 integration defects found and fixed |
+| Provider-call max | 2 (unchanged) |
+| Repair max | 1 (unchanged) |
+| Push status | not pushed |
+| PR status | none opened |
+| Merge status | not merged |
+| Deploy status | not deployed; no flag changed |
+| PR5 | not started |
+
+### Answers to the latest-main integration questions
+
+**1. Latest integrated `origin/main` SHA?** `7a5b2a7cd4dacd782f7932760e151037ee1b4662`.
+
+**2. Final PR4 HEAD SHA?** ``37d2829b195a219ef47ebc2110242c4f3a4e54ad` - the final **code** SHA, where every result above was produced. The branch HEAD is this documentation commit on top of it, which changes no code, test or asset.`.
+
+**3. Ahead/behind?** 13 ahead, 0 behind.
+
+**4. Integration strategy?** Rebase onto `origin/main`. The branch is local-only
+so nothing published was rewritten, and recent `main` is squash-merged linear.
+
+**5. Conflicts?** None raised by git. Verification of the replay found two
+defects the clean merge hid; both fixed in `37d2829`.
+
+**6. Were production semantics changed during conflict resolution?** No. Both
+fixes are in test files; no production file was touched during integration.
+
+**7. Canonical exercise authority?** `app/services/exercise_catalog.py` over the
+version-controlled asset `app/services/training_assets/exercises.json`. One
+logical domain; `exercise_knowledge_base.py` stays deleted and no equivalent
+returned.
+
+**8. Can arbitrary provider exercise names persist?** No. Only an exact
+normalized canonical name or a declared alias resolves, and the persisted `isim`
+is always overwritten with `resolved.canonical_name`.
+
+**9. Can fuzzy matching authorize persistence?** No. No fuzzy library or
+technique exists in the derived source set, and the guard fires when one is
+introduced (battery cases 3 and 5).
+
+**10. What happens to unknown exercises?** Fail closed —
+`GenerationExerciseUnresolvedError` on generation/save, `InvalidMutation` on the
+Coach path. No substitution, no repair, no dynamic catalog entry.
+
+**11. How is equipment compatibility enforced?** Server-side only, by
+`is_exercise_compatible` plus `check_placement`, against the HMAC-signed
+`ExerciseContext` bound to the user id. The client supplies a token, never a
+context.
+
+**12. Can a client-tampered exercise payload bypass save validation?** No. Keys
+are closed and the dict is rebuilt; a fabricated `exercise_id` is re-resolved;
+a fabricated display name is discarded; the equipment context comes from the
+verified token.
+
+**13. Can an invalid save alter the current plan?** No. Every validator runs
+before `TrainingPlan.query…delete()`, asserted from the AST and covered by
+`test_invalid_exercise_save_does_not_delete_existing_plan`.
+
+**14. Can any persistence path bypass canonical validation?** No. Exactly three
+paths write `TrainingPlan.plan_data` — save route, mutation apply, undo restore
+— and all three are accounted for. Main's new propose→confirm flow re-enters
+`apply_command` at execution time; it stores typed command fields, never a
+document.
+
+**15. Final maximum provider-call count?** 2, unchanged.
+
+**16. Final maximum repair count?** 1, unchanged, parse/truncation only.
+
+**17. Did provider/model selection change?** No. PR4 does not touch
+`ai_coach.py`, `ai_stream.py`, `bedrock_client.py` or `config.py`.
+
+**18. Did Adaptive Coaching undo semantics change?** No. PR4 reaches neither
+`plan_mutation/journal.py` nor `plan_mutation/service.py`; undo still restores
+the prior snapshot byte for byte.
+
+**19. Are legacy plans readable?** Yes. Legacy name-only documents keep loading
+through the presenter, are never silently upgraded, and an ambiguous legacy name
+is refused rather than backfilled.
+
+**20. Is the migration graph clean?** Yes. Single head `c2d3e4f5a6b7`, 37
+revisions, both fresh and incremental upgrade paths exit 0, and PR4 adds no
+migration. `flask db check` is a PostgreSQL CI gate; under SQLite it emits the
+same 80 reflection artifacts on unmodified `origin/main`, so PR4's schema drift
+is provably zero.
+
+**21. P0 / P1 / P2 counts?** P0 = 0, P1 = 0. P2 = 13 accepted (unchanged), plus
+2 integration defects found and fixed.
+
+**22. What happened to P2-16?** Unchanged and still routed to PR5. Verified
+warn-only after integration; `injury_warnings` gates nothing and main's
+confirmation surface never invokes injury screening.
+
+**23. Is `git diff --check` clean?** No — 4 findings on `origin/main...HEAD`,
+all in two design/plan Markdown documents: 3 intentional hard breaks plus 1
+blank line at EOF. CI does not run `git diff --check`, so per the brief they are
+disclosed, not rewritten. (The previous report's "7 lines" was an overcount.)
+
+**24. What remains for PR5?** Unchanged from the previous report — catalog
+coverage, identity-keyed injury screening (P2-16), the Coach alias-wording
+product decision (P2-11), and the legacy `WorkoutLog` identity gap. The one item
+that section listed as pending is now **done**: PR4's authority over main's new
+confirmation surface is proven above.
+
+## Final verdict after latest-main integration
 
 **READY TO SHIP.**
+
+Every gate in the acceptance criteria is met on the integrated SHA:
+integrated with latest `origin/main` (`7a5b2a7`) at 0 behind; no unresolved
+merge conflict; full suite green (4900 passed, 0 failed); focused suites green
+(1144 passed, 0 failed); exact-SHA critical validation green; P0 = 0; P1 = 0;
+one canonical exercise authority; arbitrary provider names cannot persist;
+unknown and ambiguous exercises fail closed; equipment compatibility is
+enforced server-side under a signed context; no save-path bypass; an invalid
+save cannot mutate the current plan; PR2's pre-provider guards are preserved;
+PR3's provider-call ceiling stays 2 and its repair ceiling stays 1; the
+migration graph is a single head with PR4 adding nothing; legacy plans remain
+readable; and Adaptive Coaching undo semantics are unchanged.
+
+The only non-green signal is `git diff --check` on the branch range, which is
+disclosed above: 4 findings, all in two design/plan Markdown documents, and
+not gated by any CI job. It is a documentation-formatting disclosure, not a
+ship blocker.
+
+The branch remains local: not pushed, no pull request, not merged, not
+deployed, no feature flag changed, PR5 not started.
