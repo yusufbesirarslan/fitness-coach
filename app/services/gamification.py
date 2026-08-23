@@ -65,23 +65,50 @@ def lb_rebuild(batch_size=500):
 def _mark_lb_dirty(user_id):
     """Kullanıcıyı 'commit sonrası Redis sync gerekli' olarak işaretle. Eski davranış
     (award_xp içinde anında lb_sync_user) commit ÖNCESI yazıyordu; rollback olunca
-    liderlik tablosu yukarı sürükleniyordu (H1-Redis). Artık sync after_commit'te."""
+    liderlik tablosu yukarı sürükleniyordu (H1-Redis). Artık sync after_commit'te.
+
+    Skorlar BURADA (commit ÖNCESI) okunur. after_commit içinde Session.get
+    expire_on_commit yüzünden SQL yenilemesi yapar ve SQLAlchemy 2 'committed'
+    durumunda InvalidRequestError yükseltir — /ask/stream onay turu WorkoutLog
+    yazıp istemciye SSE hatası dönüyordu.
+    """
     if user_id is None:
         return
-    db.session.info.setdefault("lb_dirty", set()).add(user_id)
+    user = db.session.get(User, user_id)
+    db.session.info.setdefault("lb_dirty", {})[user_id] = {
+        "rank_points": (getattr(user, "rank_points", 0) if user else 0) or 0,
+        "weekly_xp": (getattr(user, "weekly_xp", 0) if user else 0) or 0,
+        "streak_count": (getattr(user, "streak_count", 0) if user else 0) or 0,
+    }
+
+
+def _sync_leaderboard_snapshot(user_id, payload):
+    """Write one pre-commit snapshot to Redis. No Session access."""
+    if not redis_client or not payload:
+        return
+    try:
+        uid = str(user_id)
+        streak = payload.get("streak_count") or 0
+        redis_client.zadd(
+            LB_ALLTIME_KEY,
+            {uid: _lb_score(payload.get("rank_points"), streak)})
+        redis_client.zadd(
+            LB_WEEKLY_KEY,
+            {uid: _lb_score(payload.get("weekly_xp"), streak)})
+    except Exception:
+        pass
 
 
 @event.listens_for(db.session, "after_commit")
 def _flush_lb_dirty(session):
     """Commit BAŞARILI olduktan sonra işaretli kullanıcıları Redis'e yaz (H1-Redis).
-    Redis yoksa lb_sync_user zaten sessizce geçer."""
+    Redis yoksa sessizce geçer. SQL YOK — oturum committed durumda."""
     dirty = session.info.pop("lb_dirty", None)
     if not dirty:
         return
-    for uid in dirty:
-        u = db.session.get(User, uid)
-        if u:
-            lb_sync_user(u)
+    items = dirty.items() if hasattr(dirty, "items") else ((uid, None) for uid in dirty)
+    for uid, payload in items:
+        _sync_leaderboard_snapshot(uid, payload)
 
 
 @event.listens_for(db.session, "after_rollback")

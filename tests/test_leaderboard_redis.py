@@ -294,6 +294,26 @@ def test_award_xp_syncs_redis_after_commit(app, make_user, monkeypatch):
     assert fake.zmscore(LB_ALLTIME_KEY, [user.id]) == [float(gam._lb_score(50, 0))]
 
 
+def test_after_commit_sync_does_not_query_expired_user(app, make_user, monkeypatch):
+    """after_commit must not emit SQL — expire_on_commit leaves User stale.
+
+    /ask/stream confirms a workout after memory_manager already committed, so
+    the identity-map User is expired. Session.get then tries to refresh inside
+    after_commit and raises InvalidRequestError on SQLAlchemy 2.
+    """
+    user = make_user("expired", rank_points=0, weekly_xp=0, streak_count=3)
+    fake = FakeRedis()
+    monkeypatch.setattr(gam, "redis_client", fake)
+
+    gam.award_xp(user.id, 50)
+    db.session.expire(user)
+    db.session.commit()
+    assert fake.zmscore(LB_ALLTIME_KEY, [user.id]) == [
+        float(gam._lb_score(50, 3))]
+    assert fake.zmscore(LB_WEEKLY_KEY, [user.id]) == [
+        float(gam._lb_score(50, 3))]
+
+
 def test_rollback_drops_dirty_no_redis_write(app, make_user, monkeypatch):
     user = make_user("roller", rank_points=0)
     fake = FakeRedis()
