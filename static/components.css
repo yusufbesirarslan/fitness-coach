@@ -355,11 +355,15 @@ textarea.fc-input { resize: vertical; min-height: 84px; line-height: var(--leadi
 
 /* ── SECTION HEADER ───────────────────────────────── */
 .sec-label {
-  font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-label);
+  font-size: var(--text-xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-label);
   text-transform: uppercase; color: var(--color-text-3);
-  display: flex; align-items: center; gap: 10px; margin-bottom: 14px;
+  display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3);
+  min-width: 0; white-space: nowrap;
 }
-.sec-label::after { content:''; flex:1; height:1px; background: var(--color-border-1); }
+.sec-label::after {
+  content:''; flex: 1 1 auto; min-width: var(--space-4);
+  height: 1px; background: var(--color-border-1);
+}
 
 .cat-label {
   font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: 0.14em;

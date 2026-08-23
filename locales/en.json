@@ -274,8 +274,8 @@
   "index.reward_body": "You finished last week in <b>{place}</b> place on the leaderboard and earned <span class=\"reward-xp\">{xp} XP</span>.",
 
   "nutrition.page_title": "Nutrition — AxisAI",
-  "nutrition.h1_a": "NUT",
-  "nutrition.h1_b": "RITION",
+  "nutrition.h1_a": "NUTRITION",
+  "nutrition.h1_b": "PLAN",
   "nutrition.page_sub": "Track your daily meals and build a nutrition plan.",
   "nutrition.calculating": "Calculating...",
   "nutrition.water_title": "LOG WATER",
@@ -535,8 +535,8 @@
   "training.sets": "Sets",
 
   "quests.page_title": "Quests — AxisAI",
-  "quests.h1_a": "QUE",
-  "quests.h1_b": "STS",
+  "quests.h1_a": "DAILY",
+  "quests.h1_b": "QUESTS",
   "quests.page_sub": "Complete your daily quests, earn points and climb the rankings.",
   "quests.level_label": "Level",
   "quests.pending": "Pending",
@@ -553,8 +553,8 @@
   "premium.interest_saved": "Your interest is saved — we'll let you know when Premium is ready!",
 
   "friends.page_title": "Friends — AxisAI",
-  "friends.h1_a": "FRIEN",
-  "friends.h1_b": "DS",
+  "friends.h1_a": "YOUR",
+  "friends.h1_b": "FRIENDS",
   "friends.page_sub": "Add friends, manage requests, start a chat.",
   "friends.search_ph": "Search by username...",
   "friends.invite_title": "INVITE A FRIEND",
@@ -688,8 +688,8 @@
   "setup.coach_waiting": "Your coach is waiting for you!",
 
   "progress.page_title": "Progress — AxisAI",
-  "progress.h1_a": "PROG",
-  "progress.h1_b": "RESS",
+  "progress.h1_a": "PROGRESS",
+  "progress.h1_b": "TRACKING",
   "progress.page_sub": "Understand what's changing — and what matters next.",
   "progress.tab_charts": "Charts",
   "progress.tab_history": "History",

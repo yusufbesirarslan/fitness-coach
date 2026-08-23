@@ -274,8 +274,8 @@
   "index.reward_body": "Geçen haftayı liderlik tablosunda <b>{place}</b> sırada tamamladın ve <span class=\"reward-xp\">{xp} XP</span> kazandın.",
 
   "nutrition.page_title": "Beslenme — AxisAI",
-  "nutrition.h1_a": "BES",
-  "nutrition.h1_b": "LENME",
+  "nutrition.h1_a": "BESLENME",
+  "nutrition.h1_b": "PLANI",
   "nutrition.page_sub": "Günlük öğünlerini takip et, beslenme planı oluştur.",
   "nutrition.calculating": "Hesaplanıyor...",
   "nutrition.water_title": "SU KAYDET",
@@ -535,8 +535,8 @@
   "training.sets": "Set",
 
   "quests.page_title": "Görevler — AxisAI",
-  "quests.h1_a": "GÖREV",
-  "quests.h1_b": "LER",
+  "quests.h1_a": "GÜNLÜK",
+  "quests.h1_b": "GÖREVLER",
   "quests.page_sub": "Günlük görevlerini tamamla, puan kazan ve sıralamalarda yüksel.",
   "quests.level_label": "Seviye",
   "quests.pending": "Bekliyor",
@@ -553,8 +553,8 @@
   "premium.interest_saved": "İlgin kaydedildi — Premium hazır olunca haber vereceğiz!",
 
   "friends.page_title": "Arkadaşlar — AxisAI",
-  "friends.h1_a": "ARKADAŞLAR",
-  "friends.h1_b": "IN",
+  "friends.h1_a": "ARKADAŞ",
+  "friends.h1_b": "LİSTESİ",
   "friends.page_sub": "Arkadaş ekle, istekleri yönet, sohbet başlat.",
   "friends.search_ph": "Kullanıcı adı ara...",
   "friends.invite_title": "ARKADAŞINI DAVET ET",
