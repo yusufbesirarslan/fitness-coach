@@ -1777,7 +1777,8 @@ has been pushed, merged or deployed (§42).
 | Base SHA (backend) | `7707d750a241171e090a681fc398fb659f5d387d` |
 | Base SHA (mobile, read) | `e6aab4d594ecb5a0e24ac606c328d46ea2a3855e` |
 | HEAD before the decision closure | `e3611f3b2c4676306a70b5875f891afe5e8e0029` (2 commits) |
-| Final HEAD | *(recorded by the follow-up commit — a commit cannot contain its own SHA)* |
+| Decision-closure commit | `714154d` — `docs(sprint12): finalize daily coach architecture decisions` (C1/C2/C3, resequence, closure guards) |
+| Final HEAD | recorded by the follow-up commit that writes this row — a commit cannot contain its own SHA. Branch total: **4 commits** ahead of `7707d75`. |
 | Working tree | clean · no untracked files |
 | Discovery + closure tests | `tests/test_sprint12_daily_coach_discovery.py` — **38 passed** (128.5 s cold, 49.5 s on the final re-run after the last report edit). Baseline before the closure was 24 passed; the 14 added cases are the C1/C2/C3 guards in §31. **No discovery test was rewritten or removed.** |
 | Related characterization tests | `tests/test_mobile_auth_feature_gate.py` + `tests/test_feature_flag_registry.py` + `tests/test_feature_flags.py` — **141 passed** (150.5 s), run because the closure touched flag/auth claims. No production flag value changed. |
