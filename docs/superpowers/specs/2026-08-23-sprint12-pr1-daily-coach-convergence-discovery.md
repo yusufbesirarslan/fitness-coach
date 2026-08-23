@@ -1420,8 +1420,8 @@ has laid the evidence out for.
 | Branch | `sprint12-pr1-daily-coach-convergence-discovery` |
 | Base SHA (backend) | `7707d750a241171e090a681fc398fb659f5d387d` |
 | Base SHA (mobile, read) | `e6aab4d594ecb5a0e24ac606c328d46ea2a3855e` |
-| Final HEAD | *(see the PR summary — commit created after this file)* |
-| Working tree | clean apart from this PR's two files |
+| Final HEAD | `052c1e1cd0a8d23dc9dc9e21f8ed6ce6479b06ed` (1 commit: `docs(sprint12): discover Daily Coach convergence architecture`) |
+| Working tree | clean · no untracked files |
 | Tests run | `tests/test_sprint12_daily_coach_discovery.py` — **24 passed** (58.2 s); baseline `tests/test_mobile_auth_feature_gate.py` — **11 passed** |
 | Findings | P0: 1 · P1: 7 · P2: 7 — all dispositioned (§38) |
 | Push status | **not pushed** |
