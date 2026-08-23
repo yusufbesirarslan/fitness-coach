@@ -9,7 +9,7 @@
 
 ## 1. Executive verdict
 
-**READY WITH CONDITIONS.**
+**READY FOR IMPLEMENTATION.**
 
 The hard part is in better shape than expected. AxisAI already owns a genuinely
 canonical daily-state authority — `app/services/workout_state` — that answers
@@ -20,25 +20,33 @@ must not rebuild them.
 
 What is missing is not intelligence. It is **wiring and truthfulness**:
 
-1. **The mobile app has no Daily Coach backend at all.** `/api/v1` publishes
+1. **The mobile Today screen renders fabricated data in release builds.**
+   `AppComposition.configured` wires `FixtureTodayRepository` — together with
+   fixture Plan, Progress, Workout-detail and Workout-session repositories —
+   unconditionally, including when native auth is enabled, and `pubspec.yaml`
+   bundles `fixtures/` as a release asset. A production user sees a hardcoded
+   "Upper Body Strength / Start workout" card dated 2026-07-28 (F10).
+   **Fabricated release data is the highest-priority Sprint 12 implementation
+   defect** (§9 *"The P0, stated explicitly"*, P0-1), and it is why **PR2A**
+   precedes every other implementation PR (§36).
+2. **The mobile app has no Daily Coach backend contract.** `/api/v1` publishes
    auth, nutrition and Pump Check. There is no training, workout-state,
-   progress, check-in or Coach endpoint a native client can call. Today cannot
-   be composed from existing mobile endpoints, because the endpoints do not
-   exist (F1).
-2. **The mobile Today screen currently renders fabricated data in release
-   builds.** `AppComposition.configured` wires `FixtureTodayRepository` —
-   together with fixture Plan, Progress, Workout-detail and Workout-session
-   repositories — unconditionally, including when native auth is enabled, and
-   `pubspec.yaml` bundles `fixtures/` as a release asset. A production user sees
-   a hardcoded "Upper Body Strength / Start workout" card dated 2026-07-28
-   (F10). This is the single most serious finding in this report.
+   progress, check-in or Coach endpoint a native client can call — and the
+   blueprint's registration is itself gated on `MOBILE_AUTH_ENABLED` (§7). Today
+   cannot be composed from existing mobile endpoints, because the endpoints do
+   not exist (F1).
 3. **Three different vocabularies already describe "today"** (F3), and four
    different things already call themselves a primary/next action (F11). Sprint
    12's real job is to collapse these, not to add a fifth.
 
-Neither blocker is an ambiguity about ownership or state semantics — those are
-well understood and documented below. The conditions in §41 are decisions and
-one prerequisite fix, not further discovery.
+None of the three is an ambiguity about ownership or state semantics — those are
+well understood and documented below. The three owner decisions that previously
+held this report at `READY WITH CONDITIONS` have now been made and are recorded
+in §41: mobile auth is **eligible for controlled staged rollout** rather than
+permanently blocked (C1); today's workout is identified by a **typed context
+tuple**, not a minted id (C2); and **Adaptive Coaching rollout is not a
+prerequisite for core Today** (C3). What remains is implementation, in the order
+§36 sets out.
 
 ### Findings index
 
@@ -58,7 +66,7 @@ classification (§38).
 | F7 | "Today" is a single server-owned `Europe/Istanbul` day, used consistently | §20 |
 | F8 | Workout completion is a Pump Check — an AI-gated, photo-bound write | §7 |
 | F9 | No canonical recovery/readiness state, and no check-in due model | §7 |
-| F10 | Mobile ships fixture Today/Plan/Progress/Workout data in release builds | §9 (M1, M2) |
+| F10 | Mobile ships fixture Today/Plan/Progress/Workout data in release builds — **the sprint P0** | §9 (M1, M2) |
 | F11 | Four different notions already call themselves a primary/next action | §8 |
 | F12 | Pump Check "next check due" exists only as AI free text | §7 |
 | F13 | `get_nudges` + `/dashboard-nudges` is a second "what should you do" engine | §8 |
@@ -349,24 +357,53 @@ mobile Coach client and no `/api/v1/coach/*` endpoint.
 
 ### Feature-flag reality check
 
-Every rollout flag is **default OFF** and none is set in the deployed `.env`:
+Every rollout flag's **repository default is OFF**, and no committed file sets
+any of them — the repository ships `.env.example` only, and the deployed host's
+`.env` is not in version control.
 
-| Flag | Default | Lifecycle | Consequence for Sprint 12 |
+**What the repository can prove, and what it cannot.** It proves each flag's
+declared default (`app/feature_flags.py`) and the code path each flag gates. It
+**cannot** prove any value on the deployed host. Every "not registered" / "does
+not occur" statement below is therefore a statement about the **repository
+default**, and describes the deployed runtime only where the host has not
+explicitly set the flag.
+
+| Flag | Repo default | Lifecycle | Consequence for Sprint 12 (at the repository default) |
 |---|---|---|---|
-| `MOBILE_AUTH_ENABLED` | False | **blocked** | `/api/v1` blueprint **is not registered**; the mobile app has no backend |
-| `AXISAI_NATIVE_AUTH_ENABLED` | — | **blocked** | mobile builds no auth graph, no live repositories |
+| `MOBILE_AUTH_ENABLED` | False | `blocked` in the registry — **superseded by C1: eligible for controlled staged rollout** | `/api/v1` blueprint registration is **gated on this flag**; at the default it is not registered and the mobile client has no backend contract |
+| `AXISAI_NATIVE_AUTH_ENABLED` | — (compile-time) | blocked — **stays behind `MOBILE_AUTH_ENABLED`** | mobile builds no auth graph, no live repositories |
 | `UIUX_TODAY_V2_ENABLED` | False | shipped dark | web Today V2 is not live |
-| `FITX_WORKOUT_SESSIONS_ENABLED` | False | staging only | `in_progress`/`resume` are **not producible in production** |
+| `FITX_WORKOUT_SESSIONS_ENABLED` | False | staging only | `in_progress`/`resume` are **not producible at the default** |
 | `AI_ADAPTIVE_PLAN_CONTEXT` | False | staging only | no adaptive block in Coach prompts |
-| `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` | False | staging only | **no plan mutations occur in production at all** |
+| `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` | False | staging only | **no plan mutations or proposals are created at the default** |
 
-`app/__init__.py:335` gates blueprint registration on `MOBILE_AUTH_ENABLED`.
+`app/__init__.py:336` gates blueprint registration on `MOBILE_AUTH_ENABLED`:
 
-**Stale registry entry (P1-1):** `MOBILE_AUTH_ENABLED` is marked
-`LIFECYCLE_BLOCKED` on the prerequisite "PR4 (capacity hardening) merged".
-Hardening PR4 **is** merged (`34f8dc7`, #200), and `app/services/mobile_auth.py`
-now imports the `ai_gate` blocking-concurrency slot. The blocker is satisfied;
-the registry has not been updated.
+> `/api/v1` registration is gated by `MOBILE_AUTH_ENABLED`; the repository
+> default is OFF, and the deployed runtime must explicitly enable the flag for
+> the blueprint to exist. **The repository cannot prove the current host `.env`
+> value**, because host rollout flags are not committed.
+
+This distinction matters for sequencing: PR3's endpoint is only *operationally*
+useful once the host has the flag on, but its correctness does not depend on
+knowing today's host value, and PR2A's P0 fix does not depend on the flag at all.
+
+**Registry lifecycle drift — resolved as a decision, recorded as a follow-up
+(P1-1, C1).** `MOBILE_AUTH_ENABLED` is still marked `LIFECYCLE_BLOCKED` in
+`app/feature_flags.py:507` on the prerequisite "PR4 (capacity hardening)
+merged". Hardening PR4 **is** merged
+(`34f8dc79be746f233974461bf0465e4bf32eb72d`, #200), and it added the shared
+blocking-concurrency slot and thread-reserve/capacity accounting that the
+prerequisite named. **The recorded blocker is satisfied** (owner decision C1,
+§41), so the flag is eligible for controlled staged rollout.
+
+The registry text has *not* been changed by this PR, deliberately: PR1 ships
+architecture, not feature-flag implementation, and no PR1 characterization test
+depends on the stale wording. What PR1 does is record the drift as a bounded
+follow-up — see §41 *"Follow-ups owned by a later PR"*. The rollout **order** is
+unchanged and non-negotiable: `MOBILE_AUTH_ENABLED` on the backend first, then
+`AXISAI_NATIVE_AUTH_ENABLED` in the Flutter build only after backend
+verification.
 
 ---
 
@@ -454,6 +491,56 @@ Every issue as *current behaviour → consequence → required ownership*.
 daily decision*, not a grid of equal-weight cards. Sprint 12 should keep the
 layout and replace the data behind it.
 
+### The P0, stated explicitly — fabricated production fitness state
+
+> **Fabricated release data is the highest-priority Sprint 12 implementation
+> defect.** Release/mobile production composition can present fabricated
+> Today/Plan/Progress/Workout state as if it were the signed-in user's own.
+
+This is M1 + M2 + F10 + P0-1, restated in one place because every later decision
+in this report depends on it and it must not be quietly downgraded.
+
+Why it outranks everything else in the sprint, including the missing backend:
+
+1. **It violates the canonical-state architecture this whole report is built
+   on.** Every other section insists that exactly one authority owns each
+   signal and that unsupported state stays unrepresented (§7, §10, §35). A
+   client that can choose a fixture repository is a second, unowned authority
+   for *user-specific* facts — the worst possible kind.
+2. **It can misrepresent a real user's workout state.** Not a placeholder, not
+   a demo mode: a specific fabricated workout ("Upper Body Strength", 55 min,
+   6 exercises, dated 2026-07-28) presented as this user's plan for today. A
+   user who trains what the app shows is training something nobody prescribed.
+3. **It undermines every later Daily Coach feature.** Priority ranking, Coach
+   handoff, invalidation, notifications and Progress all read Today's state. A
+   surface that may be fictional makes all of them unverifiable.
+4. **Backend Today work cannot be trusted while release UI can still choose
+   fake repositories.** PR3 could ship a perfectly correct `GET /api/v1/today`
+   and a release build would still be free to ignore it. Fixing the composition
+   first is what makes every subsequent PR *checkable*.
+
+**Required fallback hierarchy — in order, with no fifth option:**
+
+| # | State | Acceptable in production? |
+|---|---|---|
+| 1 | Real canonical data | ✅ the goal |
+| 2 | Truthful loading state | ✅ |
+| 3 | Truthful empty state ("you have no plan yet") | ✅ |
+| 4 | Truthful degraded / unavailable state ("we can't load this right now") | ✅ |
+| 5 | **Fabricated production fitness state** | ❌ **never** |
+
+The desired invariant, stated as an acceptance criterion for PR2A:
+
+> Production may show real, empty, unavailable, or degraded state — **never
+> fabricated user-specific fitness state.**
+
+Fixtures remain entirely legitimate in tests, in local development, and in any
+build that cannot reach a real user's data — the defect is that the *release*
+composition path can select them. Exact scope (which repositories, which
+composition branches, what happens to the bundled `fixtures/` asset, and what
+architecture test enforces it) is **PR2A's** to derive from §9 and §35; it is
+not implemented here.
+
 ---
 
 ## 10. Proposed Daily Coach state model
@@ -469,7 +556,8 @@ TodayReadModel
     training     : SectionState<TrainingToday>
     nutrition    : SectionState<NutritionToday>
     onboarding   : SectionState<OnboardingToday>
-    plan_change  : SectionState<PlanChangeToday>        ← Sprint 12 PR5, flag-conditional
+    plan_change  : SectionState<PlanChangeToday>        ← optional capability
+                                                          state; PR5, conditional
   primary        : Action | null                        ← at most one, server-decided
   secondary      : Action[]
 ```
@@ -489,6 +577,16 @@ Client-only states, never on the wire: `loading`, `offline_stale`.
 `completed_today`, `anomaly`, `contract_version`. Sprint 12 introduces **no new
 training state names**. Web Today V2's four-state vocabulary is retired in
 favour of it (that is the F3 convergence).
+
+`TrainingToday` also carries the **daily workout context identity** decided in
+C2 — `(plan_lineage, mutation_version, canonical_local_date)`, §18 — as typed
+context for the "open today's workout" CTA. It is a context key, not an entity
+id: nothing persists it and nothing may treat it as a durable handle.
+
+`plan_change` is **optional capability state** (C3, §13). Core Today is complete
+and correct when that section is `empty`, which is what it always is while the
+Adaptive Coaching flags are off. No section may be promoted to a prerequisite
+just because a future rollout might fill it.
 
 Why not one enum: a Progress or plan-change failure must never blank the
 training decision, and the nutrition card already proves independent degradation
@@ -511,9 +609,12 @@ Rationale, from evidence rather than taste:
   from evidence the planner already weighed. A third, client-side ranking would
   contradict both.
 - A future notification system needs the same decision without a client (§29).
-- `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` is off in production, so most of the
+- `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` is off by default, so most of the
   interesting priority interactions are currently empty — the policy must be
-  data-driven, not hardcoded to states that never occur.
+  data-driven, not hardcoded to states that never occur. Per C3 (§13), rank 2
+  below is **evaluated from data and simply never fires** while the Adaptive
+  Coaching flags are off; the policy is not conditioned on the flags, and no
+  rank above or below it changes.
 
 **Deterministic priority policy** (proposed; every rule maps to a signal proved
 available in §6):
@@ -600,7 +701,37 @@ the Coach to perform a confirmation.
 
 **Production caveat:** with `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` off, no
 proposals are ever created. A pending-proposal surface would be permanently
-empty. This is why PR5 is flag-conditional and sequenced late.
+empty. This is why PR5 is flag-conditional and sequenced last.
+
+### Owner decision C3 — Adaptive Coaching is not a Today prerequisite
+
+> **Sprint 12's core Today architecture must not depend on Adaptive Coaching
+> rollout flags being enabled.**
+
+`AI_ADAPTIVE_PLAN_CONTEXT` and `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` remain
+staged/experimental capabilities. Neither is activated by PR1, and neither may
+be activated merely to populate a Today card. Concretely, this binds the
+architecture as follows:
+
+- **Core Today must be correct with both flags OFF.** That is the *default*
+  design target, not a degraded mode. Ranks 0–1 and 3–10 of the §11 policy are
+  fully reachable without either flag; rank 2 simply never fires.
+- **Pending-proposal state is optional capability state, not a core Today
+  prerequisite.** `plan_change` is a `SectionState` like any other (§10); when
+  no proposal source is active it is `empty`, and an `empty` optional section is
+  a normal, shippable outcome.
+- **"Why did my plan change?" is never fabricated.** If `PlanMutationRecord`
+  evidence is unavailable — because no mutation happened, or because the read
+  failed — Today says nothing about a plan change. It does not infer one from a
+  plan-content diff, a `mutation_version` bump alone, or a Coach transcript.
+- **No permanently empty Adaptive Coaching UI ships** merely because a rollout
+  may happen later. §37's rule applies: a surface with no possible content is
+  not shipped.
+
+If Adaptive Coaching rollout is approved later, it is integrated in a dedicated
+**conditional** Sprint 12 PR (**PR5**, §36) *after* its own rollout
+prerequisites are proven — not folded into PR3 or PR4. If the flags stay off,
+PR5 is deferred out of the sprint and nothing in PR2A–PR4 needs to change.
 
 ---
 
@@ -620,8 +751,8 @@ empty. This is why PR5 is flag-conditional and sequenced late.
   `workoutReady` card — i.e. they are told they *have* a plan. Once M1 is fixed
   they would correctly see `no_plan`, whose only CTA is currently a dead end.
 
-**Recommendation: mobile Create Plan is *not* PR2, and probably not Sprint 12
-at all.** It carries its own dependency chain — mobile profile setup
+**Recommendation: mobile Create Plan is *not* in the Sprint 12 core sequence,
+and probably not Sprint 12 at all.** It carries its own dependency chain — mobile profile setup
 (`UserSession`), the premium gate, the two-step generate/save round-trip with a
 signed context token, and long AI latency on a mobile connection. That is a
 sprint, not a PR. **Sprint 12 scope: Today must render the `no_plan` state
@@ -691,8 +822,17 @@ writes into `ex["not"]`, and `not` is a persisted plan-schema key
 | Should it be fixed before Daily Coach consumes injury warnings? | **Yes.** Today's exercise projection carries `not`. |
 | Should Today consume that warning at all? | **Not as free text.** Today should render at most a typed "has warnings" affordance and route to the plan/workout surface for detail. Free-text safety copy on a decision surface is a product risk. |
 
-**Owner: backend (Training). Sequenced as PR2a, before the Today read model
-publishes exercise notes.** Not implemented in PR1.
+**Owner: backend (Training). Sequenced as PR2B** — after the P0 fixture
+elimination (PR2A) and before the Today read model (PR3) republishes persisted
+workout exercise notes more broadly. Not implemented in PR1.
+
+**Bounded closure, not a new capability.** The desired direction is exactly one
+reordering: **canonicalize exercise identity first, then apply the supported
+warning annotation against the canonical identity/name.** PR2B must preserve
+warn-only semantics; it introduces no medical inference engine, no diagnosis or
+contraindication behaviour, and no broadening of the existing injury rules
+beyond the logic already supported. It closes a Sprint 11 defect; it does not
+open a Health domain.
 
 ---
 
@@ -748,18 +888,63 @@ participation and restorability.
 | View Progress | `/progress` | ✅ | route ✅ / data fixture |
 | Open Coach with context | `/coach` | ✅ | route ✅ / screen placeholder |
 
-**The workout-identity problem (must be settled before PR2 is specified).**
+**The workout-identity problem (settled by owner decision C2, below).**
 `/workout/detail` and `/workout/session` are deliberately not deep-link eligible
 because *no public workout identifier exists*. And none can be minted from the
 data: `TrainingPlan.plan_data` is a 7-day array keyed by Turkish weekday name;
 a "workout" has no id, no stable key, and no row of its own. The mobile fixtures
 invent `workout_example_001`, which is exactly the fabrication to avoid.
 
-**Recommendation: do not mint a workout id.** Identify today's workout by the
-tuple the system already owns — `(plan lineage, plan mutation_version, ISO
-date)` — and keep the route non-deep-linkable, passing that typed context
-in-memory exactly as the Pump Check routes already do for private records. This
-preserves the registry's invariants and adds no new identity authority.
+### Owner decision C2 — the daily workout context identity
+
+**Accepted: do not mint a workout id.** Today's workout is identified by a typed
+**daily workout context identity**:
+
+```
+DailyWorkoutContext = (plan_lineage, mutation_version, canonical_local_date)
+```
+
+This is **not** a new permanent or public Workout ID. It is an in-memory / API
+*context* identity whose only job is to distinguish three things the system
+already knows:
+
+| Component | Answers | Canonical source | Proof it exists |
+|---|---|---|---|
+| `plan_lineage` | which plan lineage owns this workout | `TrainingPlan.lineage_id` — opaque `secrets.token_urlsafe(32)`, unique index `uq_training_plan_lineage_id`, regenerated whenever `POST /training-plan/save` replaces the plan | `app/models.py:372` |
+| `mutation_version` | which mutation version produced this projection | `TrainingPlan.mutation_version` — server-authoritative history position, +1 per persisted transition including an undo; **not** a content hash | `app/models.py:374` |
+| `canonical_local_date` | which canonical calendar day is represented | `app_today()` / `app_date_of()` — the fixed `Europe/Istanbul` authority (§20) | `app/timeutil.py` |
+
+**Binding requirements:**
+
+- `plan_lineage` **must** come from canonical plan authority (`TrainingPlan`),
+  never from a client and never re-derived from plan contents.
+- `mutation_version` **must** come from canonical plan/version authority. The
+  pairing matters: lineage alone cannot tell two mutation states apart, and
+  version alone is meaningless across a regenerated plan (a fresh row gets a
+  fresh lineage, so version restarts).
+- The date **must** use backend canonical date/timezone semantics. The mobile
+  client **must not** independently derive identity from `DateTime.now()` — that
+  would reintroduce client clock-based workout selection, which §9 forbids.
+- **Do not hash the tuple and treat the digest as a durable entity ID.** A hash
+  would look like an id, would be quoted like an id, and would silently become
+  one.
+- **Do not create a new DB table** solely to persist this identity. Nothing
+  about it is persistent; all three components are already stored or derived.
+- **Do not mint a fake public workout UUID.** The mobile fixtures' invented
+  `workout_example_001` is precisely the fabrication this decision exists to
+  prevent.
+
+**Explicitly supersedable.** If a canonical *persisted* `WorkoutSession`
+identity later becomes authoritative — `WorkoutSession.public_id`
+(`app/models.py:1150`) already exists behind `FITX_WORKOUT_SESSIONS_ENABLED` —
+this context key can and should be
+superseded by it. That is a normal contract evolution, not a migration of a
+public identifier, precisely because nothing durable ever referenced the tuple.
+
+**Routing consequence, unchanged:** `/workout/detail` and `/workout/session`
+stay non-deep-link-eligible. The typed context is passed in-memory exactly as
+the Pump Check routes already do for private records, so the navigation
+registry's invariants hold and no new identity authority is created.
 
 ---
 
@@ -938,7 +1123,7 @@ not fetched by any Today surface.
 | Progress fails | Section hidden or `unavailable`; never blocks Today |
 | Coach unavailable | Contextual handoff CTA hidden; Today unaffected (no dependency by construction, §17) |
 
-The governing rule is already in the codebase and should be quoted in the PR2
+The governing rule is already in the codebase and should be quoted in the PR3
 brief: `today_facts` treats a resolver `resolution_error` as `read_ok=False`
 specifically so the presenter renders an honest error "rather than a fabricated
 'not completed'". Sprint 12 extends that discipline per section.
@@ -1084,9 +1269,15 @@ future job reuses it directly.
 
 ## 31. Tests / evidence produced by this PR
 
-`tests/test_sprint12_daily_coach_discovery.py` — **24 tests, all passing**
-(58.2 s). These are characterization tests: they pin what *is*, so any later PR
-that changes one of these facts must say so.
+`tests/test_sprint12_daily_coach_discovery.py` — **38 tests, all passing.**
+These are characterization tests: they pin what *is*, so any later PR that
+changes one of these facts must say so.
+
+The module has two halves. **Discovery (24 tests, unchanged)** pins the findings
+F1–F9 and P2-16 that this report is built on; the decision closure rewrote none
+of them. **Decision closure (9 functions, 14 collected cases, added when
+C1/C2/C3 were made)** pins the facts the finalized architecture leans on —
+tabulated after the findings table below.
 
 | Finding | Test |
 |---|---|
@@ -1100,10 +1291,28 @@ that changes one of these facts must say so.
 | F8 | `test_workout_completion_is_gated_behind_the_ai_concurrency_gate` |
 | F9 | `test_no_module_publishes_a_recovery_or_readiness_score`, `test_check_in_has_no_due_read_model` |
 
+**Decision-closure guards (added by the C1/C2/C3 closure):**
+
+| Decision | Test | Pins |
+|---|---|---|
+| C1 | `test_mobile_api_registration_remains_feature_gated` | `MOBILE_AUTH_ENABLED` default is still `False` **and** both the mobile blueprint import and its registration are still inside the gate. The rollout is unblocked; nothing is enabled. |
+| C1 | `test_mobile_auth_registry_lifecycle_is_still_the_stale_blocked_record` | The registry still says `LIFECYCLE_BLOCKED` on "PR4 (capacity hardening) merged", **and** `mobile_auth.py` really does import `blocking_concurrency_slot` from `ai_gate` — i.e. the prerequisite is satisfied while the record is stale. The follow-up PR (§41) cannot correct the registry without updating this test out loud. |
+| C2 | `test_workout_context_identity_components_are_canonical_plan_columns` | `TrainingPlan.lineage_id` and `TrainingPlan.mutation_version` remain the canonical sources for two thirds of the context tuple. |
+| C2 | `test_no_durable_workout_identity_is_minted_on_the_training_plan` | No `workout_id` / `workout_public_id` / `context_key`-style column has appeared — the context key has not become an entity id. |
+| C3 | `test_core_today_composition_does_not_depend_on_adaptive_coaching` (×6 modules) | No Today authority — `today_facts`, `today_presenter`, or any `workout_state` module — references an AC flag, `plan_confirmation`, `plan_mutation` or `get_pending`. Core Today is independent by construction, not by luck. |
+| C3 | `test_adaptive_coaching_flags_are_still_default_off` | PR1 changed neither AC flag. |
+| §34 | `test_no_second_daily_state_authority_has_been_created` | No `daily_coach*` module exists in `app/services/` yet. PR3 may add orchestration; it may not add a second authority. |
+| P0 | `test_report_keeps_the_fixture_p0_first_and_undowngraded` | The report still carries `READY FOR IMPLEMENTATION`, the "highest-priority Sprint 12 implementation defect" wording, the PR2A next-PR line, and the fallback hierarchy's forbidden fifth option. |
+| §7 | `test_report_does_not_claim_to_know_the_deployed_flag_value` | The two pre-decision overstatements are gone, the precise gating sentence is present, and `.env` really is uncommitted — so the hedge is honest rather than decorative. |
+
+The last two read the report itself. That is deliberate: the report *is* this
+PR's deliverable, and the P0's priority plus the deployment-state wording are
+the two claims a later editor is most likely to soften without noticing.
+
 No snapshot tests were added. No mobile test was added — the mobile repository
 was kept read-only (§2); the equivalent Dart architecture test
 (`FixtureTodayRepository` must not appear in `AppComposition.configured`) is
-specified as an acceptance criterion for the mobile PR instead.
+specified as an acceptance criterion for **PR2A** instead.
 
 **Baseline:** `tests/test_mobile_auth_feature_gate.py` — 11 passed, before any
 change.
@@ -1123,8 +1332,8 @@ change.
 | 5 | Rest day | Recovery day | *none* (or Log a meal if nutrition empty) | View plan | `is_rest_day` | — |
 | 6 | Execution recorded, not completed | You logged training today | Finish today's workout | View plan | `execution_state=execution_recorded` | — |
 | 7 | Session active/resumable *(flag on)* | Workout in progress | Resume workout | Abandon (existing authority) | `session_state=active_resumable` | flag off → state impossible |
-| 8 | Pending Adaptive Coaching proposal *(PR5)* | A plan change is waiting | Review plan change | Ask Axis why | `plan_confirmation.get_pending` | read fails → hide section, do not guess |
-| 9 | Plan change recently applied *(PR5)* | Your plan changed | *inherits rank 3–6* | See what changed | `PlanMutationRecord` | — |
+| 8 | Pending Adaptive Coaching proposal *(PR5, conditional)* | A plan change is waiting | Review plan change | Ask Axis why | `plan_confirmation.get_pending` | read fails → hide section, do not guess; **never fabricated** (C3) |
+| 9 | Plan change recently applied *(PR5, conditional)* | Your plan changed | *inherits rank 3–6* | See what changed | `PlanMutationRecord` | no canonical journal evidence → say nothing (C3) |
 | 10 | Nutrition empty | *inherits training message* | ranks 7–8 only if training is settled | Log a meal | `diary/today.meals == []` | nutrition `unavailable` → hide card |
 | 11 | Nutrition partially logged | — | — | diary card shows totals vs goal | same | — |
 | 12 | Check-in due | **not represented** — no due model | — | — | — | F9 |
@@ -1201,6 +1410,22 @@ pure projection — mirroring the split the repository already uses for
 `workout_state` (queries/resolver/serialization) and for `today_facts` +
 `today_presenter`.
 
+**Existing authority stays the authority.** `app/services/workout_state` is
+already the canonical daily workout-state owner, and `today_facts` +
+`today_presenter` already compose canonical Today behaviour for web. Sprint 12
+must therefore **not** introduce any of the following, in any PR:
+
+| Forbidden | Because |
+|---|---|
+| a `daily_coach_state.py` that duplicates the resolver's rules | that is a second daily-state authority — the exact failure §35 exists to prevent |
+| a mobile-only workout-state algorithm | the client would own a rule the server already owns, and the two would drift |
+| a second "today workout" calculator anywhere | `serialize_today_plan` is the one selection rule |
+| client clock-based workout selection | violates the single server-owned `Europe/Istanbul` day (§20) and C2 |
+| client rest-day inference | `is_rest_day` is resolver output, not a client derivation |
+
+Any new API layer **orchestrates and projects** existing authority. It does not
+re-decide anything the authority already decided.
+
 Rules carried over verbatim from existing code, because they already work:
 
 - The policy module is **pure** and unit-testable without a DB or Flask (like
@@ -1218,7 +1443,7 @@ Rules carried over verbatim from existing code, because they already work:
 
 ## 35. Avoiding a mega-service — explicit guards
 
-For the PR2 brief and its review checklist:
+For the PR3 brief and its review checklist:
 
 1. `app/services/daily_coach/` may **import** domain services; it may not
    contain a domain rule.
@@ -1232,6 +1457,9 @@ For the PR2 brief and its review checklist:
    no ORM, no Flask, no clock.
 6. A structural test enforces 1/4/5, in the style of
    `tests/test_coach_plan_tools_architecture.py`.
+7. It is **not conditioned on the Adaptive Coaching flags** (C3). The
+   `plan_change` section resolves to `empty` when no proposal source is active;
+   the composition does not branch on a flag to decide whether Today works.
 
 ---
 
@@ -1240,22 +1468,56 @@ For the PR2 brief and its review checklist:
 Derived from the dependency graph, not assumed. Each PR is independently
 reviewable and shippable.
 
+**This sequence supersedes the pre-decision proposal.** The earlier draft opened
+with `P2-16 fix → GET /api/v1/today`. That ordering was wrong: discovery
+identified a more urgent P0 — release mobile composition can use fabricated
+fixture repositories and present false workout/plan/progress state to production
+users (§9). Truthfulness of the shipped surface outranks both the backend
+contract and a Sprint 11 annotation defect, so **fixture elimination moves to
+the front**.
+
 | PR | Title | Owner | Depends on | Why here |
 |---|---|---|---|---|
-| **PR1** | Daily Coach convergence discovery & architecture *(this PR)* | backend | — | — |
-| **PR2a** | Resolve injury annotation against canonical exercises (P2-16) | backend | PR1 | Tiny, isolated Training fix. Must land before any surface republishes `not` text (§16). |
-| **PR2** | Daily Coach read model — `GET /api/v1/today` | **backend** | PR2a | The whole sprint is blocked on it. Composes existing authorities; adds `exercise_id` to today's exercise projection (fixes F4 at the boundary); per-section degradation; server-owned priority policy; **no** prose. |
-| **PR3** | Mobile Today: live data, fixture removal, truthful states | **mobile** | PR2 | Fixes M1/M2/M4/M5 — the P0. Removes every `Fixture*Repository` from `AppComposition.configured`; sections degrade independently; unwired domains render honest `unavailable` instead of fake data. |
-| **PR4** | Today ↔ Training convergence: today's workout detail + completion | **both** (backend first) | PR3 | Makes the primary CTA actually open *today's* workout via the date-scoped typed context (§18); wires completion invalidation (§21). |
-| **PR5** | Adaptive Coaching surfacing: pending proposal + change explanation | **both** (backend first) | PR4 | **Flag-conditional** — deferrable if the AC flags stay off (§13). Read-only endpoints over `plan_confirmation` + the journal; Today routes to the existing confirmation authority and never mutates. |
-| **PR6** | Coach contextual handoff + mobile Coach client | **both** (backend first) | PR3 | Independent of PR4/PR5; can run in parallel after PR3. Largest unknown — mobile Coach is a placeholder. |
-| **PR7** | Today closure: completed-day behaviour, accessibility, visual hierarchy, instrumentation | **mobile** + backend logging | PR4 | §19, §26, §27, §28. |
+| **PR1** | Daily Coach convergence discovery & architecture *(this PR)* | backend | — | Decisions and architecture only. No implementation. |
+| **PR2A** | **Mobile production fixture elimination — P0** | **mobile** (`axisai_mobile`) | PR1 | **The first implementation PR.** Ensure release/production composition cannot use fabricated Today/Plan/Progress/Workout fixtures. `AppComposition.configured` wires fixture repositories in production/release paths and `pubspec.yaml` bundles `fixtures/`. Invariant: production may show real, empty, unavailable or degraded state — **never fabricated user-specific fitness state** (§9). Exact scope derives from §9 and §35. |
+| **PR2B** | Canonical injury annotation ordering (closes Sprint 11 P2-16) | backend | PR1 | Bounded backend closure, before Today republishes persisted workout exercise notes more broadly. Canonicalize exercise identity **first**, then annotate against canonical identity/name. Warn-only semantics preserved; no medical inference, no new diagnosis or contraindication behaviour, no broadened injury rules (§16). |
+| **PR3** | Canonical mobile `GET /api/v1/today` | **backend** | PR2B | Expose mobile-safe Today state by **composing existing canonical authorities** — `app/services/workout_state`, `today_facts`, `today_presenter`. **Do not create a second daily-state authority** (§34, §35). A typed read *projection*, not rebuilt Today business logic. Adds `exercise_id` to today's exercise projection (F4); per-section degradation; server-owned priority policy; **no prose**; **no LLM**. |
+| **PR4** | Mobile Today real-data convergence | **mobile** (backend support first) | PR3 | Replace production fixture Today behaviour with the real mobile Today repository/read model: typed Today repository · real backend consumption · loading · truthful empty · partial/degraded · actionable state · canonical CTA navigation · invalidation after relevant actions · typed workout context `(plan_lineage, mutation_version, canonical_local_date)` (§18). **No fake fallback data.** |
+| **PR5** | Adaptive Coaching Today integration — **CONDITIONAL** | **both** (backend first) | PR4 | Execute **only** if Adaptive Coaching rollout is explicitly approved and its flags are intended to become active. Possible scope: pending plan proposal visibility · applied plan-change explanation · canonical mutation journal evidence · contextual Coach handoff. If the flags remain OFF, **do not ship PR5 against permanently empty state** — defer it outside Sprint 12 (C3, §13). |
 
-**Critical path:** PR2a → PR2 → PR3 → PR4 → PR7. PR5 and PR6 branch off and may
-slip out of the sprint without breaking the loop.
+**Critical path:** PR2A → PR2B → PR3 → PR4. PR5 branches off the end and may be
+cut entirely without breaking the loop.
+
+**Ordering rationale, stated once:** PR2A is first because backend Today work
+cannot be trusted while release UI can still choose fake repositories (§9).
+PR2B precedes PR3 because PR3's projection republishes the persisted `not`
+warning that P2-16 corrupts (§16). PR3 precedes PR4 because PR4 has nothing
+truthful to render until the endpoint exists. PR2A does **not** depend on PR2B
+or PR3 — it can start immediately, and it is independent of every rollout flag.
+
+**Mobile auth is a rollout dependency, not a sequencing dependency.** PR3's
+endpoint is only *operationally* useful once `MOBILE_AUTH_ENABLED` is on for the
+host (§7, C1). That gates when PR3 and PR4 can be verified end-to-end against a
+deployed environment; it does not gate when they can be written, reviewed, or
+tested. The rollout order stays `MOBILE_AUTH_ENABLED` → verify backend →
+`AXISAI_NATIVE_AUTH_ENABLED` in the Flutter build.
+
+### Later Sprint 12 closure — deliberately unnumbered
+
+Once the core data flow is real, the remaining work is:
+
+- Today UX hierarchy / retention hardening (§27, M11)
+- contextual Coach handoff + a real mobile Coach client (§17)
+- performance / freshness polish (§21, §23)
+- accessibility (§26)
+- analytics / instrumentation, **if justified** (§28)
+
+**No PR number is assigned to these yet.** Their dependency graph is not settled
+— the Coach client in particular is the largest unknown in either repository —
+and numbering them now would imply an ordering this report cannot yet justify.
 
 **Web convergence** (re-pointing Today V2 at the shared policy, §34) folds into
-PR2 as a follow-on commit — it is the same service and the same flag.
+PR3 as a follow-on commit — it is the same service and the same flag.
 
 ---
 
@@ -1280,30 +1542,30 @@ brief's checklist.
 
 | id | Finding | Disposition |
 |---|---|---|
-| **P0-1** | **Mobile ships fabricated Today/Plan/Progress/Workout data in release builds.** `AppComposition.configured` wires all five `Fixture*Repository` instances unconditionally; `pubspec.yaml` bundles `fixtures/` as an asset. A production user is shown a workout they do not have. Violates "a missing truth should render as missing". | **PR3.** If `AXISAI_NATIVE_AUTH_ENABLED` is enabled before PR3 lands, this becomes user-visible immediately — so PR3 gates the rollout, not the other way round. |
+| **P0-1** | **Mobile ships fabricated Today/Plan/Progress/Workout data in release builds.** `AppComposition.configured` wires all five `Fixture*Repository` instances unconditionally; `pubspec.yaml` bundles `fixtures/` as an asset. A production user is shown a workout they do not have. Violates "a missing truth should render as missing". **This is the highest-priority Sprint 12 implementation defect** (§9). | **PR2A — the first implementation PR.** If `AXISAI_NATIVE_AUTH_ENABLED` is enabled before PR2A lands, this becomes user-visible immediately — so PR2A gates the rollout, not the other way round. Deliberately *not* downgraded and *not* deferred behind the backend contract. |
 
 ### P1
 
 | id | Finding | Disposition |
 |---|---|---|
-| **P1-1** | Feature-flag registry drift: `MOBILE_AUTH_ENABLED` is `LIFECYCLE_BLOCKED` on "PR4 capacity hardening merged", which merged as `34f8dc7` (#200); `mobile_auth.py` now uses the `ai_gate` blocking slot. Stale gate documentation blocks a decision it no longer needs to block. | Registry correction — small backend change, fold into PR2. |
-| **P1-2** | **Frontend-owned business logic risk.** Mobile's `TodayController._stateFor` currently maps a status enum to a view state — a client rule. If the priority ranking is not server-owned (§11/§22), it will be duplicated in Dart and again in any notification job. | Prevented by design in PR2 + an architecture test in PR3. |
-| **P1-3** | **Stale-state hazard on mobile.** Today loads once per app session; `indexedStack` keeps it alive and resume does not refresh. Combined with a fixed Istanbul day boundary, a long-lived app shows the wrong day (M10, §20.3). | PR3: day-key comparison on resume + event-driven invalidation. |
-| **P1-4** | **Duplicate authority risk.** Four "primary action" notions (F11) and three "today" vocabularies (F3) already exist. Adding a fifth/fourth would make convergence permanently impossible. | PR2 reuses `workout_state`'s vocabulary and retires the web four-state set; §35 guard 3. |
-| **P1-5** | **P2-16's inconsistent injury warning is durable in `plan_data`** and is republished by today's projection. Higher severity than "annotation inconsistency". | PR2a, before PR2. |
-| **P1-6** | Canonical exercise identity does not reach today's wire projection (F4) — a Today surface built on `/training/bootstrap` reintroduces name-based identity. | PR2 publishes `exercise_id`. |
+| **P1-1** | Feature-flag registry drift: `MOBILE_AUTH_ENABLED` is `LIFECYCLE_BLOCKED` on "PR4 capacity hardening merged", which merged as `34f8dc7` (#200); `mobile_auth.py` now uses the `ai_gate` blocking slot. Stale lifecycle documentation describes a blocker that no longer exists. | **Decision made (C1, §41): the prerequisite has landed and the flag is eligible for controlled staged rollout.** Correcting the registry text itself is a bounded documentation follow-up owned by the rollout PR, not by PR1 (§7, §41). No PR1 test depends on the stale wording. |
+| **P1-2** | **Frontend-owned business logic risk.** Mobile's `TodayController._stateFor` currently maps a status enum to a view state — a client rule. If the priority ranking is not server-owned (§11/§22), it will be duplicated in Dart and again in any notification job. | Prevented by design in PR3 + an architecture test in PR4. |
+| **P1-3** | **Stale-state hazard on mobile.** Today loads once per app session; `indexedStack` keeps it alive and resume does not refresh. Combined with a fixed Istanbul day boundary, a long-lived app shows the wrong day (M10, §20.3). | PR4: day-key comparison on resume + event-driven invalidation. |
+| **P1-4** | **Duplicate authority risk.** Four "primary action" notions (F11) and three "today" vocabularies (F3) already exist. Adding a fifth/fourth would make convergence permanently impossible. | PR3 reuses `workout_state`'s vocabulary and retires the web four-state set; §35 guard 3. |
+| **P1-5** | **P2-16's inconsistent injury warning is durable in `plan_data`** and is republished by today's projection. Higher severity than "annotation inconsistency". | PR2B, before PR3. |
+| **P1-6** | Canonical exercise identity does not reach today's wire projection (F4) — a Today surface built on `/training/bootstrap` reintroduces name-based identity. | PR3 publishes `exercise_id`. |
 | **P1-7** | `/training/bootstrap` fails closed as a whole (single 500). Copying that pattern into Today would turn a partial outage into a blank screen, violating §24. | Explicitly designed against in §22; per-section boundaries. |
 
 ### P2
 
 | id | Finding | Disposition |
 |---|---|---|
-| **P2-1** | Development copy ships to users ("Preparing your local daily direction", "The local development data could not be read"). | PR3 |
+| **P2-1** | Development copy ships to users ("Preparing your local daily direction", "The local development data could not be read"). | PR2A/PR4 |
 | **P2-2** | Two "what should you do" engines (`get_nudges` vs Today). Not a defect yet; would be if Today started consuming the nudge strings. | Documented decision (§8): Today ignores it; nudges stay Coach-prompt context. |
-| **P2-3** | `Today.timezone` is parsed and never used; the day is rendered without its zone (M9). | PR3 |
-| **P2-4** | Layout composition differs between the populated Today branch and the loading/empty/error branches (M11). | PR7 |
-| **P2-5** | Status conveyed by accent-bar colour alone (§26.7). | PR7 |
-| **P2-6** | `/training/bootstrap` returns the entire 7-day plan where today's day would do — over-broad payload for a Today consumer. | PR2 bounds its own payload; the existing endpoint is left alone. |
+| **P2-3** | `Today.timezone` is parsed and never used; the day is rendered without its zone (M9). | PR4 |
+| **P2-4** | Layout composition differs between the populated Today branch and the loading/empty/error branches (M11). | Later closure (§36) |
+| **P2-5** | Status conveyed by accent-bar colour alone (§26.7). | Later closure (§36) |
+| **P2-6** | `/training/bootstrap` returns the entire 7-day plan where today's day would do — over-broad payload for a Today consumer. | PR3 bounds its own payload; the existing endpoint is left alone. |
 | **P2-7** | The single fixed `Europe/Istanbul` day boundary is a product limitation for non-Turkish users. | Out of scope; inherited and published honestly (§20.4). |
 
 ### Checks that came back clean
@@ -1326,19 +1588,43 @@ brief's checklist.
 a named PR, and a design decision recorded here. None is an unresolved ambiguity
 about ownership or state semantics.
 
+### Post-decision consistency review (fresh pass)
+
+A second read-only architecture review was run over the finalized report,
+hunting specifically for contradictions introduced by C1/C2/C3 and the
+resequence.
+
+| Checked for a contradiction in | Result |
+|---|---|
+| Mobile fixture P0 priority | **Consistent.** P0 in §1, §9, §36 (PR2A first), §38, §44. Nowhere deferred behind PR2B or PR3, nowhere softened below P0. |
+| `MOBILE_AUTH_ENABLED` | **Consistent.** Eligible for staged rollout (C1), default stays OFF, not activated by PR1, ordered before `AXISAI_NATIVE_AUTH_ENABLED` in §7, §36 and §41. No section claims the flag is on, or that the repository can prove the host value. |
+| Backend vs mobile ownership | **Consistent.** Priority policy backend-owned (§11, §22, P1-2); PR2A and PR4 mobile-owned; PR2B and PR3 backend-owned. No section gives the client a ranking rule. |
+| Workout identity | **Consistent.** §10, §18 and §36/PR4 name the same tuple; no section mints an id, hashes the tuple, or adds a table. §18 records the supersession path. |
+| Today authority | **Consistent.** §7, §22, §34, §35 and §36/PR3 all say *compose* `workout_state` + `today_facts` + `today_presenter`. No `daily_coach_state.py`, no mobile-only algorithm, no second calculator, no client clock or client rest-day inference. |
+| Adaptive Coaching flags | **Consistent.** Optional everywhere: §10 `plan_change` optional, §11 rank 2 data-driven, §13 C3, §32 rows 8–9 conditional, §35 guard 7, §36 PR5 conditional. Core Today never depends on them. |
+| P2-16 | **Consistent.** One disposition (§16), one PR (PR2B), one ordering claim, warn-only semantics preserved. |
+| PR numbering | **Consistent.** PR1 · PR2A · PR2B · PR3 · PR4 · PR5. The old PR6/PR7 retired into unnumbered closure work (§36). No stale `PR2a` or bare-`PR2` reference survives. |
+| API sequencing | **Consistent.** Exactly one new endpoint, in PR3, after PR2B and before PR4. Rollout dependency is separated from sequencing dependency (§36). |
+| Release semantics | **Consistent.** The fallback hierarchy in §9 is the one §24, §25 and §32 describe; "fabricated" is never an acceptable production state anywhere in the report. |
+
+**New findings from this pass: P0 — 0 · P1 — 0 · P2 — 0.** No new architectural
+ambiguity appeared, so the verdict in §41 is not being forced green over an open
+question.
+
 ---
 
 ## 39. Risks
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| `MOBILE_AUTH_ENABLED` stays off, so no mobile PR can be verified against production | High | Sprint unverifiable end-to-end | §41 condition C1 — decide before PR3 |
-| P0-1 becomes user-visible if native auth is enabled before PR3 | Medium | Users shown fabricated training data | Sequence PR3 before any mobile rollout; treat as a release gate |
-| Adaptive Coaching flags stay off, making PR5 permanently empty | High | PR5 ships dead code | PR5 is flag-conditional and last on its branch; defer if the flags stay off |
+| `MOBILE_AUTH_ENABLED` stays off on the host, so PR3/PR4 cannot be verified end-to-end against a deployed environment | Medium | PR3/PR4 verifiable only in staging/local until rollout | **C1 resolved** the blocker; rollout is now an ops decision with a known order (§7). PR2A and PR2B are unaffected — neither touches the flag. |
+| P0-1 becomes user-visible if native auth is enabled before PR2A | Medium | Users shown fabricated training data | Sequence **PR2A first** and treat it as a release gate for any mobile rollout (§9, §36) |
+| Adaptive Coaching flags stay off, making PR5 permanently empty | High | PR5 would ship dead code | **C3**: PR5 is conditional and last; if the flags stay off it is deferred out of the sprint, and PR2A–PR4 need no change |
+| The registry's stale `MOBILE_AUTH_ENABLED` lifecycle is read as still-blocking after C1 | Medium | A rollout is delayed by documentation, or run without updated abort criteria | Recorded as an explicit bounded follow-up owned by the rollout PR (§41), and pinned by a characterization test so it cannot drift silently |
 | `FITX_WORKOUT_SESSIONS_ENABLED` stays off, so `resume`/`in_progress` never occur | High | Rank 4 unreachable | Policy is data-driven; the rank simply never fires. No dead UI shipped. |
-| The Today endpoint accretes domain logic over PRs | Medium | The mega-service §35 forbids | Structural test in PR2 |
+| The Today endpoint accretes domain logic over PRs | Medium | The mega-service §35 forbids | Structural test in PR3 |
 | Mobile Create Plan pulled into scope mid-sprint | Medium | PR3/PR4 slip | §14: explicitly Sprint 13 |
-| Workout identity pressure to mint a public id | Medium | A new identity authority nobody owns | §18: date-scoped typed context, decided in advance |
+| Workout identity pressure to mint a public id | Medium | A new identity authority nobody owns | **C2 settled it**: §18's typed context tuple, with an explicit supersession path if a persisted `WorkoutSession` identity later becomes authoritative |
 | Backend/mobile contract drift across repos | Medium | Silent breakage | Additive `contract_version`; mobile parser rejects unknown required fields, tolerates unknown optional ones (the pattern nutrition already uses) |
 
 ---
@@ -1350,7 +1636,7 @@ about ownership or state semantics.
 | 1 | What does AxisAI currently consider "today"? | The calendar date in `Europe/Istanbul`, from `app_today()`. Server-owned, hardcoded, consistent across workout state, nutrition, streaks and check-ins. Naive-UTC `created_at` columns are windowed with `utc_day_bounds`. |
 | 2 | Can it reliably identify today's workout? | **Yes.** `serialize_today_plan(plan_data, app_today())` selects today's weekday row from the newest `TrainingPlan`. It publishes names, not canonical ids (F4). |
 | 3 | Can it know whether that workout is complete? | **Yes.** `workout_state.completed_today` — today's `PumpCheck` — the same signal `/workout/status` returns. It also distinguishes *execution evidence* from *confirmed completion*. |
-| 4 | Can it know whether a plan change is pending? | **Yes in the database, no in practice.** `plan_confirmation.get_pending` exists but has exactly one consumer, inside a Coach turn. No read path (F5). And with `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` off, no proposals exist in production. |
+| 4 | Can it know whether a plan change is pending? | **Yes in the database, no in practice.** `plan_confirmation.get_pending` exists but has exactly one consumer, inside a Coach turn. No read path (F5). And at the repository default for `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED`, no proposals are created at all — which is why C3 makes this optional capability state rather than a Today prerequisite. |
 | 5 | Can it explain an applied plan change from canonical evidence? | **Yes in the database, no in practice.** `PlanMutationRecord` holds typed commands, lineage, actor and outcome. No blueprint reads it (F5). |
 | 6 | Can it determine nutrition status today? | **Yes**, and it is the best contract in the codebase: `GET /api/v1/nutrition/diary/today` — entries, server-authoritative totals, goal-or-null, explicit day + timezone. Already live on mobile. |
 | 7 | Is there a canonical recovery/readiness state? | **No.** Nothing publishes one (F9). The nearest signals are a nudge heuristic over the last check-in and the planner's `deload` week focus. Do not invent one. |
@@ -1366,47 +1652,117 @@ about ownership or state semantics.
 | 17 | Which actions require immediate invalidation? | Workout completion, Pump Check creation, any nutrition log mutation, plan-confirmation resolution, plan mutation applied, app resume with a changed day key. |
 | 18 | Does any Today behaviour genuinely require an LLM? | **No.** Every proposed Today behaviour is deterministic or a templated explanation (§12). The AI-assisted features Today links to (Pump Check analysis, check-in feedback, Coach) already exist and stay where they are. |
 | 19 | Is Mobile Create Plan part of Sprint 12? | **No.** It carries mobile profile setup, the premium gate, and a two-step generate/save round-trip with a signed exercise-context token (§14). Sprint 12 renders `no_plan` honestly; getting a first plan onto a phone is Sprint 13. |
-| 20 | Where should P2-16 be fixed? | Backend, in `training_generation` — reorder `annotate_injuries` after `canonicalize_plan_exercises` and match on the resolved catalog entry. As **PR2a**, before the Today read model republishes exercise notes (§16). |
-| 21 | What exact PR should implementation begin with? | **PR2a** (the one-file P2-16 reorder), immediately followed by **PR2** — the backend `GET /api/v1/today` Daily Coach read model. Not mobile: PR3 has nothing truthful to render until PR2 exists. |
+| 20 | Where should P2-16 be fixed? | Backend, in `training_generation` — canonicalize exercise identity first, then annotate against the resolved catalog entry. As **PR2B**, after the P0 fixture elimination and before the Today read model republishes exercise notes (§16). |
+| 21 | What exact PR should implementation begin with? | **PR2A — Mobile Production Fixture Elimination.** The P0 outranks both the Sprint 11 annotation defect and the backend contract: backend Today work cannot be trusted while release UI can still choose fake repositories (§9). Then **PR2B**, then **PR3** (`GET /api/v1/today`), then **PR4**. |
 
 ---
 
-## 41. Final verdict
+## 41. Owner decisions and final verdict
 
-# READY WITH CONDITIONS
+### The three conditions, now resolved
 
-The Daily Coach state model, the canonical authorities, API ownership, the
-mobile architecture and the PR decomposition **are** sufficiently understood —
-§7 maps every signal to an owner, §11 fixes the priority policy, §22 settles API
-ownership with a justification rather than a preference, §34–§36 give a concrete
-architecture and a dependency-ordered PR sequence, and every P0/P1 in §38 has a
-named owner and a named PR.
+This report previously stood at `READY WITH CONDITIONS` for exactly three
+reasons, all of them decisions rather than open discovery. All three have been
+made.
 
-Implementation should not begin before these three are resolved, because each
-one changes what gets built or whether it can be verified:
+**C1 — Mobile auth is no longer conceptually blocked.**
+The blocker recorded in the rollout registry and runbook was the pre-auth
+blocking-Cognito / thread-exhaustion risk: `/api/v1/auth/login` and `/refresh`
+make blocking Cognito calls with no concurrency gate and no thread-reserve
+accounting, reachable pre-auth. **Hardening PR4 merged as
+`34f8dc79be746f233974461bf0465e4bf32eb72d` (#200)** and added the shared
+blocking-concurrency and thread-reserve/capacity protections that prerequisite
+named. Sprint 12 architecture therefore treats `MOBILE_AUTH_ENABLED` as
+**eligible for controlled staged rollout**, not permanently blocked.
 
-**C1 — Decide `MOBILE_AUTH_ENABLED` / `AXISAI_NATIVE_AUTH_ENABLED`.**
-`/api/v1` is not registered in the deployed environment, so the mobile client
-has no backend at all. Its documented blocker (Hardening PR4) has merged and the
-registry entry is stale (P1-1). Without a decision, PR2 ships an endpoint
-nothing can call and PR3 cannot be verified end-to-end. *This is an operational
-decision, not further discovery.*
+What this decision does **not** do, in this PR or any PR1 change:
 
-**C2 — Confirm the workout-identity rule before PR2 is specified.**
-No public workout identifier exists and none can be derived from `plan_data`.
-§18 proposes identifying today's workout by `(plan lineage, mutation_version,
-ISO date)` and keeping the workout routes non-deep-linkable with typed in-memory
-context. This constrains PR2, PR3 and PR4, and the alternative — minting a
-workout id — would create a new identity authority. It needs an explicit yes.
+- it does **not** change the `MOBILE_AUTH_ENABLED` default to ON;
+- it does **not** activate the flag anywhere;
+- it does **not** modify a production `.env`;
+- it does **not** enable native auth;
+- it does **not** perform any rollout work.
 
-**C3 — Decide whether the Adaptive Coaching flags will be on during Sprint 12.**
-`AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` and `AI_ADAPTIVE_PLAN_CONTEXT` are both
-off, so no plan proposals or mutations occur in production. If they stay off,
-**PR5 should be cut from the sprint** rather than shipped against a permanently
-empty state, and priority rank 2 becomes unreachable dead policy.
+The backend rollout dependency is unchanged and non-negotiable:
+**`MOBILE_AUTH_ENABLED` first**, then — only after backend verification —
+`AXISAI_NATIVE_AUTH_ENABLED` in the Flutter build. That order is not reversible:
+the Dart flag is a compile-time constant with no server-side rollback (§7).
 
-None of the three requires more investigation — each is a decision this report
-has laid the evidence out for.
+**C2 — Today's workout is identified by a typed daily context, not a new id.**
+Accepted as specified in §18:
+`(plan_lineage, mutation_version, canonical_local_date)`, sourced from
+`TrainingPlan.lineage_id`, `TrainingPlan.mutation_version` and the canonical
+`Europe/Istanbul` day authority. It is an in-memory / API **context identity**,
+not a permanent or public Workout ID: it is not hashed into a pseudo-id, gets no
+DB table of its own, and no fake public workout UUID is minted. The mobile
+client must not derive it from `DateTime.now()`. If a canonical persisted
+`WorkoutSession` identity later becomes authoritative, this context key is
+**explicitly supersedable** by it.
+
+**C3 — Adaptive Coaching rollout is not a Sprint 12 core dependency.**
+Core Today must work correctly with `AI_ADAPTIVE_PLAN_CONTEXT` and
+`AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` both OFF, and neither is activated to
+populate Today. Pending-proposal state is optional capability state; "why did my
+plan change?" is never fabricated when canonical evidence is unavailable; and no
+permanently empty Adaptive Coaching UI ships against a rollout that may never
+happen. If the rollout is approved later, it lands as the dedicated conditional
+**PR5** after its own prerequisites are proven (§13).
+
+### Follow-ups owned by a later PR — not by PR1
+
+**Mobile auth lifecycle documentation.** The feature-flag inventory and runbook
+still describe `MOBILE_AUTH_ENABLED` as `LIFECYCLE_BLOCKED` pending "PR4
+(capacity hardening) merged". That prerequisite has now landed (C1), so the
+lifecycle record is stale. A future implementation/rollout PR should update:
+
+- the **registry lifecycle** state in `app/feature_flags.py`;
+- the recorded **prerequisites**;
+- the **rollout documentation** / runbook;
+- the **success and abort evidence** an operator watches during the rollout.
+
+**PR1 deliberately does not perform that activation or that registry edit.** It
+would be feature-flag implementation, not architecture, and no PR1
+characterization test depends on the stale wording — the test suite pins the
+drift as a *current fact* precisely so the follow-up has to change it out loud.
+This report itself has been corrected where the stale wording made it untruthful
+(§7, §38 P1-1), which is the only correction PR1 owns.
+
+### Final verdict
+
+# READY FOR IMPLEMENTATION
+
+Meaning, specifically:
+
+- **architecture is settled** — §10 state model, §11 priority policy, §22 API
+  ownership, §34–§35 target shape and mega-service guards;
+- **authorities are settled** — §7 maps every Today signal to exactly one
+  owner, and §34 holds the line: `workout_state` stays the canonical daily
+  workout-state authority, `today_facts` + `today_presenter` stay the canonical
+  Today composition, and Sprint 12 introduces no second daily-state authority,
+  no mobile-only workout-state algorithm, no second "today workout" calculator,
+  no client clock-based workout selection and no client rest-day inference;
+- **the unsupported stays unsupported** — no canonical readiness score and no
+  check-in-due model exist (F9), and neither is invented to fill a Today card;
+  rows 12–13 of §32 stay deliberately empty;
+- **priority is deterministic product logic, not LLM reasoning** — §11 and §12;
+  no Today behaviour requires an LLM, and primary-action ownership lives in
+  exactly one place, the backend (§22, P1-2), never in a client;
+- **rollout dependency is understood** — C1, with its order and its separation
+  from sequencing (§36);
+- **workout context identity is decided** — C2;
+- **Adaptive Coaching dependency is decided** — C3;
+- **PR ordering is settled** — §36, P0 first.
+
+The fresh post-decision review (§38) found **zero new P0 and zero new P1**
+report-level ambiguities, which is the bar this verdict requires.
+
+**This does not mean production is ready.** It means Sprint 12 implementation
+can begin. The P0 in §9 is still live in release builds, `/api/v1` registration
+still depends on a host flag this repository cannot read, and nothing in this PR
+has been pushed, merged or deployed (§42).
+
+> **Next implementation PR: Sprint 12 PR2A — Mobile Production Fixture
+> Elimination.**
 
 ---
 
@@ -1415,19 +1771,28 @@ has laid the evidence out for.
 | | |
 |---|---|
 | Primary repository | `fitness-coach` |
-| Secondary repository inspected | `axisai_mobile` (read-only; **not modified, not branched, not checked out**) |
+| Secondary repository inspected | `axisai_mobile` (read-only; **not modified, not branched, not checked out** — the decision closure inspected nothing new) |
 | Worktree | `.worktrees/sprint12-pr1-daily-coach-convergence-discovery` |
 | Branch | `sprint12-pr1-daily-coach-convergence-discovery` |
 | Base SHA (backend) | `7707d750a241171e090a681fc398fb659f5d387d` |
 | Base SHA (mobile, read) | `e6aab4d594ecb5a0e24ac606c328d46ea2a3855e` |
-| Final HEAD | `052c1e1cd0a8d23dc9dc9e21f8ed6ce6479b06ed` (1 commit: `docs(sprint12): discover Daily Coach convergence architecture`) |
+| HEAD before the decision closure | `e3611f3b2c4676306a70b5875f891afe5e8e0029` (2 commits) |
+| Final HEAD | *(recorded by the follow-up commit — a commit cannot contain its own SHA)* |
 | Working tree | clean · no untracked files |
-| Tests run | `tests/test_sprint12_daily_coach_discovery.py` — **24 passed** (58.2 s); baseline `tests/test_mobile_auth_feature_gate.py` — **11 passed** |
-| Findings | P0: 1 · P1: 7 · P2: 7 — all dispositioned (§38) |
+| Discovery + closure tests | `tests/test_sprint12_daily_coach_discovery.py` — **38 passed** (128.5 s cold, 49.5 s on the final re-run after the last report edit). Baseline before the closure was 24 passed; the 14 added cases are the C1/C2/C3 guards in §31. **No discovery test was rewritten or removed.** |
+| Related characterization tests | `tests/test_mobile_auth_feature_gate.py` + `tests/test_feature_flag_registry.py` + `tests/test_feature_flags.py` — **141 passed** (150.5 s), run because the closure touched flag/auth claims. No production flag value changed. |
+| Whitespace | `git diff --check` — clean |
+| Findings | P0: 1 · P1: 7 · P2: 7, all dispositioned (§38). Post-decision review pass: **0 new P0 · 0 new P1 · 0 new P2**. |
+| Flags changed | **none.** `MOBILE_AUTH_ENABLED`, `AXISAI_NATIVE_AUTH_ENABLED`, `AI_ADAPTIVE_PLAN_CONTEXT` and `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` are untouched, and `app/feature_flags.py` is unmodified |
+| Production config | **untouched.** No `.env` was read, written, or deployed |
 | Push status | **not pushed** |
 | PR status | **not opened** |
 | Merge status | **not merged** |
 | Deploy status | **not deployed** |
+
+**Files changed by the decision closure:** this report and
+`tests/test_sprint12_daily_coach_discovery.py`. No application code was
+modified — the closure is architecture and evidence, not implementation.
 
 ---
 
@@ -1474,24 +1839,39 @@ has laid the evidence out for.
 
 ## 44. Final recommendation
 
-Sprint 12 does not need new intelligence. It needs one honest pipe and one
-deletion.
+Sprint 12 does not need new intelligence. It needs one deletion and one honest
+pipe — **in that order.**
 
-**Begin with PR2a** — a one-file reorder that makes injury annotation resolve
-against canonical exercises before a Today surface can republish the note.
+**Begin with PR2A** — make it impossible for release/production mobile
+composition to select a fabricated repository. Production may show real, empty,
+unavailable or degraded state; never fabricated user-specific fitness state.
+This is the sprint's P0 and it is independent of every flag, every endpoint and
+every other PR, so nothing justifies sequencing it second.
 
-**Then PR2** — `GET /api/v1/today`: a thin composition over
+**Then PR2B** — the bounded Sprint 11 closure: canonicalize exercise identity
+before annotating injuries, so a Today surface cannot republish a warning that
+differs between two aliases of the same exercise. Warn-only semantics preserved;
+no medical inference added.
+
+**Then PR3** — `GET /api/v1/today`: a thin composition over
 `resolve_workout_state`, `get_active_plan`, `serialize_today_plan` (plus
 `exercise_id`) and `build_diary_day`, with a pure server-owned priority policy,
-per-section degradation, state codes instead of prose, and an explicit
-`day: {date, timezone}`.
+per-section degradation, state codes instead of prose, an explicit
+`day: {date, timezone}`, and **no second daily-state authority**.
 
-**Then PR3** — delete every `Fixture*Repository` from the production mobile
-composition and render truth, including the truth that some domains are not
-connected yet.
+**Then PR4** — replace fixture Today behaviour with the real repository against
+that contract: loading, truthful empty, partial/degraded, actionable, canonical
+CTA navigation, invalidation after relevant actions, and the typed workout
+context `(plan_lineage, mutation_version, canonical_local_date)`. No fake
+fallback data.
 
-Everything after that is convergence work with a real contract underneath it.
+**PR5 only if Adaptive Coaching rollout is approved.** Otherwise it is deferred
+out of the sprint, and nothing above changes.
 
-The single most important line in this report: **the mobile app currently tells
-every production user they have a workout called "Upper Body Strength" scheduled
-on 2026-07-28.** Whatever else Sprint 12 does, it should stop doing that first.
+Everything after that is convergence work with a real contract underneath it —
+UX hierarchy, Coach handoff, freshness, accessibility, instrumentation —
+deliberately unnumbered until the dependency graph earns it.
+
+The single most important line in this report: **release mobile builds can tell
+a production user they have a workout called "Upper Body Strength" scheduled on
+2026-07-28.** Whatever else Sprint 12 does, it should stop doing that first.

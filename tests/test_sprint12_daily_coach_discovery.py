@@ -391,3 +391,207 @@ def test_check_in_has_no_due_read_model():
     source = _source("app/blueprints/tracking.py")
     for token in ("checkin_due", "check_in_due", "next_checkin", "is_due"):
         assert token not in source
+
+
+# ===========================================================================
+# Finalized architecture decisions (Sprint 12 PR1 closure)
+# ===========================================================================
+# The nine test functions below (14 collected cases) were added when owner
+# decisions C1/C2/C3 were made.
+# They are still characterization tests - they pin facts, not aspirations - but
+# the facts they pin are the ones the finalized architecture leans on. Nothing
+# here tests behaviour that does not exist yet; a guard for unwritten code would
+# be a failing future-implementation test, which this PR does not ship.
+
+REPORT = REPO_ROOT / (
+    "docs/superpowers/specs/"
+    "2026-08-23-sprint12-pr1-daily-coach-convergence-discovery.md")
+
+
+def _report():
+    return REPORT.read_text(encoding="utf-8")
+
+
+def _flag(key):
+    from app.feature_flags import ROLLOUT_FLAGS
+
+    return next(flag for flag in ROLLOUT_FLAGS if flag.key == key)
+
+
+# -- C1: mobile API registration stays feature-gated ------------------------
+# The decision unblocks a *rollout*; it does not enable anything. Two facts
+# have to stay true for that distinction to survive: the flag's default is OFF,
+# and blueprint registration is still gated on it. If either changes, PR1's
+# architecture claims - and §7's careful "the repository cannot prove the host
+# value" wording - need re-reading, not silent inheritance.
+
+def test_mobile_api_registration_remains_feature_gated():
+    """C1 - `/api/v1` still exists only when MOBILE_AUTH_ENABLED is on."""
+    assert _flag("MOBILE_AUTH_ENABLED").default is False, (
+        "MOBILE_AUTH_ENABLED's repository default changed; PR1 decided the "
+        "flag becomes eligible for staged rollout, NOT that it defaults on")
+
+    source = _source("app/__init__.py")
+    gate = 'if app.config["MOBILE_AUTH_ENABLED"]:'
+    assert gate in source
+    # The import and the registration must both live inside the gate, or the
+    # blueprint would be reachable with the flag off.
+    guarded = source[source.index(gate):source.index(gate) + 400]
+    assert "from app.blueprints.mobile_api import bp as mobile_api_bp" in guarded
+    assert "blueprints.append(mobile_api_bp)" in guarded
+
+
+def test_mobile_auth_registry_lifecycle_is_still_the_stale_blocked_record():
+    """C1 - pins the drift so the rollout PR has to correct it out loud.
+
+    Hardening PR4 (`34f8dc7`, #200) merged and added the shared blocking-
+    concurrency slot this prerequisite named - `app/services/mobile_auth.py`
+    imports `blocking_concurrency_slot` from `app.services.ai_gate`. The
+    registry still records the flag as blocked on that prerequisite.
+
+    PR1 deliberately does NOT edit the registry: that is feature-flag
+    implementation, not architecture. This test exists so the stale record
+    cannot quietly outlive the decision - the follow-up PR that updates the
+    lifecycle, prerequisites and rollout evidence must update this test too.
+    """
+    from app.feature_flags import LIFECYCLE_BLOCKED
+
+    flag = _flag("MOBILE_AUTH_ENABLED")
+    assert flag.lifecycle == LIFECYCLE_BLOCKED
+    assert any("PR4 (capacity hardening) merged" in p
+               for p in flag.prerequisites), (
+        "the recorded prerequisite changed; if the registry has been corrected "
+        "this test has served its purpose and should be replaced by one "
+        "asserting the new lifecycle")
+
+    # ...and the prerequisite it names really is satisfied in the code.
+    mobile_auth = _source("app/services/mobile_auth.py")
+    assert "from app.services.ai_gate import (" in mobile_auth
+    assert "blocking_concurrency_slot" in mobile_auth
+
+
+# -- C2: the workout context identity claims no durable identity ------------
+# `(plan_lineage, mutation_version, canonical_local_date)` is an in-memory
+# context key. Its first two components must come from canonical plan
+# authority, and none of the three may acquire a persisted home of its own.
+
+def test_workout_context_identity_components_are_canonical_plan_columns():
+    """C2 - lineage and mutation version are server-owned TrainingPlan state."""
+    from app.models import TrainingPlan
+
+    columns = {c.name for c in TrainingPlan.__table__.columns}
+    assert {"lineage_id", "mutation_version"} <= columns, (
+        "the workout context identity's canonical source columns changed: %s"
+        % sorted(columns))
+
+
+def test_no_durable_workout_identity_is_minted_on_the_training_plan():
+    """C2 - the context tuple has not become a persisted entity id.
+
+    A workout has no row of its own: `plan_data` is a 7-day array keyed by
+    Turkish weekday name. If a workout/context id column appears here, someone
+    has turned the context key into an identity authority and §18's decision
+    needs revisiting.
+    """
+    from app.models import TrainingPlan
+
+    columns = {c.name for c in TrainingPlan.__table__.columns}
+    forbidden = {
+        "workout_id", "workout_public_id", "daily_workout_id",
+        "workout_context_id", "today_workout_id", "context_key",
+    }
+    assert columns & forbidden == set(), (
+        "a durable workout identity appeared on TrainingPlan: %s"
+        % sorted(columns & forbidden))
+
+
+# -- C3: Adaptive Coaching is optional to core Today ------------------------
+# Core Today must be correct with both AC flags OFF. That is already true by
+# construction - the canonical Today composition does not know the Adaptive
+# Coaching surfaces exist - and this test keeps it that way.
+
+@pytest.mark.parametrize("module", [
+    "app/services/today_facts.py",
+    "app/today_presenter.py",
+    "app/services/workout_state/__init__.py",
+    "app/services/workout_state/queries.py",
+    "app/services/workout_state/resolver.py",
+    "app/services/workout_state/serialization.py",
+])
+def test_core_today_composition_does_not_depend_on_adaptive_coaching(module):
+    """C3 - no Today authority references a proposal, a journal, or an AC flag."""
+    source = _source(module)
+    for token in ("AI_ADAPTIVE_PLAN_CONTEXT",
+                  "AI_COACH_PLAN_MUTATION_TOOLS_ENABLED",
+                  "plan_confirmation", "plan_mutation", "get_pending"):
+        assert token not in source, (
+            "%s now depends on Adaptive Coaching state (%r); core Today must "
+            "stay correct with both AC flags off" % (module, token))
+
+
+def test_adaptive_coaching_flags_are_still_default_off():
+    """C3 - PR1 changed neither flag, and neither may be enabled to fill Today."""
+    for key in ("AI_ADAPTIVE_PLAN_CONTEXT",
+                "AI_COACH_PLAN_MUTATION_TOOLS_ENABLED"):
+        assert _flag(key).default is False, (
+            "%s's default changed; PR1 decided Today must not depend on the "
+            "Adaptive Coaching rollout, and does not activate it" % key)
+
+
+# -- Today authority: no second daily-state owner exists yet ----------------
+
+def test_no_second_daily_state_authority_has_been_created():
+    """`workout_state` is still the only daily workout-state owner.
+
+    §34 forbids a `daily_coach_state.py` that duplicates the resolver's rules.
+    PR3 may add an orchestration package; it may not add a second authority.
+    This pins the current state: no such module exists at all.
+    """
+    services = REPO_ROOT / "app" / "services"
+    offenders = sorted(
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in services.rglob("daily_coach*")
+    )
+    assert offenders == [], (
+        "a daily-coach state module appeared; verify it orchestrates "
+        "workout_state rather than replacing it: %s" % offenders)
+
+
+# -- Report-level guards: the decisions must stay stated --------------------
+# These read the discovery report itself. The report IS this PR's deliverable,
+# and two of its claims are load-bearing for the whole sprint: the P0's
+# priority, and the deliberately careful wording about deployment state.
+
+def test_report_keeps_the_fixture_p0_first_and_undowngraded():
+    """The mobile fixture finding stays P0, and PR2A stays the first PR."""
+    report = _report()
+    assert "READY FOR IMPLEMENTATION" in report
+    assert "highest-priority Sprint 12 implementation defect" in report
+    assert ("**Next implementation PR: Sprint 12 PR2A — Mobile Production "
+            "Fixture") in report
+    # The fallback hierarchy, and its forbidden fifth option.
+    assert "fabricated user-specific fitness state" in report
+    assert "Fabricated production fitness state" in report
+
+
+def test_report_does_not_claim_to_know_the_deployed_flag_value():
+    """§7 - repository state cannot prove the host `.env`, and must not say so.
+
+    The pre-decision report asserted "none is set in the deployed `.env`" and
+    "`/api/v1` is not registered in the deployed environment". Only
+    `.env.example` is committed, so neither claim was provable from the
+    repository.
+    """
+    report = _report()
+    assert "none is set in the deployed `.env`" not in report
+    assert "is not registered in the deployed environment" not in report
+    assert "cannot prove the current host `.env`" in report
+    assert "`/api/v1` registration is gated by `MOBILE_AUTH_ENABLED`" in report
+
+    # ...and the repository really does commit only the example file, which is
+    # exactly why the host's flag values are unknowable from here.
+    assert (REPO_ROOT / ".env.example").exists()
+    ignored = _source(".gitignore").splitlines()
+    assert ".env" in ignored, (
+        "`.env` is no longer gitignored; if host flag values became committed, "
+        "the report's deliberately hedged wording can be tightened")
