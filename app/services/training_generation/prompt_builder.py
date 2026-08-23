@@ -1,4 +1,7 @@
+from typing import Sequence
+
 from app.services import injury_constraints
+from app.services.exercise_catalog import ExerciseContext, compatible_exercises
 from app.services.training_generation.models import ClassificationResult, ProgramContext, TrainingPreferences, UserTrainingFeatures
 from app.services.training_generation.preference_contract import load_focus_directive
 from app.services.training_generation.program_generator import canonical_style, load_few_shot
@@ -21,12 +24,26 @@ def build_system_prompt(language: str = "tr") -> str:
     )
 
 
+def canonical_exercise_vocabulary(context: ExerciseContext) -> tuple[str, ...]:
+    """Deduplicated, sorted canonical display names compatible with context.
+
+    This is a prompt-side hint only, not an authority — it narrows what the
+    LLM is told it may use. It never carries aliases, exercise IDs, or
+    equipment metadata; server-side resolution (against the same catalog)
+    remains the sole authority over what an "isim" value actually means.
+    """
+    names = {exercise.canonical_name for exercise in compatible_exercises(context)}
+    return tuple(sorted(names))
+
+
 def build_training_prompt(
     features: UserTrainingFeatures,
     preferences: TrainingPreferences,
     classification: ClassificationResult,
     context: ProgramContext,
     language: str = "tr",
+    *,
+    exercise_vocabulary: Sequence[str] = (),
 ) -> str:
     few_shot = load_few_shot(preferences.antrenman_tarzi)
     injury_text = injury_constraints.build_injury_directive(preferences.injuries)
@@ -61,6 +78,18 @@ def build_training_prompt(
         )
     else:
         cardio_block = "- Cardio: none (no dedicated cardio-day allocation)"
+    if exercise_vocabulary:
+        vocabulary_lines = "\n".join(f"- {name}" for name in exercise_vocabulary)
+        exercise_vocabulary_block = (
+            "\nEXERCISE VOCABULARY (kapalı liste)\n"
+            "\"isim\" alanı SADECE aşağıdaki kanonik listeden seçilecek; listede "
+            "olmayan veya uydurma egzersiz adı yazma. Sunucu döndürdüğün her "
+            "\"isim\" değerini bu kanonik kataloğa göre yeniden çözümleyecek; "
+            "listede olmayan adlar kabul edilmeyebilir.\n"
+            f"{vocabulary_lines}\n"
+        )
+    else:
+        exercise_vocabulary_block = ""
     return f"""
 PROGRAM GENERATION CONTRACT
 - LLM sınıflandırma yapmayacak; sınıflandırma deterministik olarak önceden yapıldı.
@@ -91,7 +120,7 @@ USER PROFILE
 
 MOVEMENT COVERAGE REQUIRED
 {', '.join(context.movement_coverage)}
-
+{exercise_vocabulary_block}
 STYLE FEW-SHOT REFERENCE
 {few_shot[:2500]}
 
@@ -108,6 +137,7 @@ PROGRAM RULES
 8. Yalnızca şemadaki anahtarları kullan; ekstra anahtar ekleme.
 9. Egzersiz nesnesi tam olarak isim, set, tekrar, dinlenme, not içersin.
 10. set bir tamsayı olsun; sure_dk ve tahmini_kalori tamsayı olsun.
+11. Kardiyo egzersizleri (koşu, yürüyüş, ip atlama, bisiklet, yüzme) SADECE tip="kardiyo" günlerine yazılsın; tip="antrenman" gününe kardiyo egzersizi koyma.
 
 JSON FORMAT
 {{"program":[{{"gun":"Pazartesi","tip":"antrenman","odak":"Full Body","sure_dk":45,"tahmini_kalori":320,"egzersizler":[{{"isim":"Goblet Squat","set":3,"tekrar":"8-12","dinlenme":"90 sn","not":"RPE 7, kontrollü tempo"}}]}}],"haftalik_ozet":{{"toplam_antrenman_gun":{preferences.gun_sayisi},"toplam_tahmini_kalori":1400,"yogunluk_skoru":7,"denge_skoru":8,"uygunluk_skoru":8}}}}

@@ -332,3 +332,154 @@ def test_the_fingerprint_layer_is_pure_and_deterministic():
     ]
 
     assert not violations, f"fingerprints are not reproducible: {violations}"
+
+
+# ── Sprint 11 PR4 Task 5: exercise authority inside the pure engine ──────────
+
+def _function_defs(path):
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return [n for n in ast.walk(tree)
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+
+
+def _keys_written_in(node):
+    """The plan-entry field constants a function actually WRITES.
+
+    Two shapes count, because the engine uses both: a subscript store
+    (``entry[FIELD_EXERCISE_ID] = ...``) and a dict-literal key
+    (``{FIELD_NAME: replacement}``, which ``_apply_replace`` builds before
+    updating the entry with it).
+
+    Reads are deliberately excluded. ``entry.get(FIELD_EXERCISE_ID)`` and
+    ``FIELD_EXERCISE_ID in entry`` are how the engine finds and classifies
+    entries, and a guard that cannot tell a read from a write has to be handed
+    an allowlist of readers — a hole that grows one entry at a time in the
+    guard whose whole job is to stop P1-4 coming back.
+    """
+    written = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Subscript) and isinstance(child.ctx, ast.Store):
+            if isinstance(child.slice, ast.Name):
+                written.add(child.slice.id)
+        elif isinstance(child, ast.Dict):
+            written.update(key.id for key in child.keys
+                           if isinstance(key, ast.Name))
+    return written
+
+
+def _lone_identity_writers(path):
+    """Functions that write ``exercise_id`` without writing ``isim`` too."""
+    return [node.name for node in _function_defs(path)
+            if "FIELD_EXERCISE_ID" in _keys_written_in(node)
+            and "FIELD_NAME" not in _keys_written_in(node)]
+
+
+def test_the_exercise_catalog_is_loaded_once_per_mutation():
+    """One catalog load per command, pinned structurally.
+
+    ``document.py`` is the pure engine and ``load_exercise_catalog`` is
+    ``lru_cache``d over a bundled asset, so calling it is not the I/O this layer
+    forbids. Calling it per *exercise* would be a different thing: an unbounded
+    number of lookups where the design promises one, and the possibility of two
+    differently-loaded catalogs deciding identity inside a single command.
+    """
+    call_sites = _calls_named(MUTATION_ROOT / "document.py",
+                              "load_exercise_catalog")
+
+    assert len(call_sites) == 1, (
+        f"document.py loads the catalog {len(call_sites)} times: {call_sites}")
+
+
+def test_only_the_pure_engine_resolves_exercise_identity():
+    """Exercise identity has one interpreter in this domain.
+
+    The service, the journal and the fingerprint layer must keep treating the
+    plan as opaque text. A second module resolving names would be a second
+    opinion about what a plan means, reachable on a path with no document copy
+    and no fail-closed context check.
+    """
+    approved = {MUTATION_ROOT / "document.py",
+                MUTATION_ROOT / "validation.py"}
+    violations = []
+    for path in _mutation_modules():
+        if path in approved:
+            continue
+        for imported, lineno in _python_imports(path):
+            if _module_matches(imported, "app.services.exercise_catalog"):
+                violations.append(f"{path}:{lineno} -> {imported}")
+
+    assert not violations, f"a second exercise-identity reader: {violations}"
+
+
+def test_exercise_identity_is_never_written_without_its_canonical_name():
+    """P1-4, as a structural companion to the behavioural proof.
+
+    The defect this task closes was a write that moved ``isim`` and left
+    ``exercise_id`` behind. Any function that writes ``FIELD_EXERCISE_ID``
+    must therefore also write ``FIELD_NAME`` — a helper that writes identity
+    on its own is the shape of the bug coming back.
+
+    Anchored on writes, not on mentions. Legitimate readers of the field exist
+    and are multiplying: ``_find_exercise_index`` matches on it, and
+    ``_document_carries_exercise_identity`` (fix round 1, F2) asks only whether
+    it is present at all. A mention-based guard has to be handed an allowlist
+    of those, and an allowlist inside a regression guard is a hole that grows
+    one entry at a time.
+    """
+    offenders = _lone_identity_writers(MUTATION_ROOT / "document.py")
+
+    assert not offenders, (
+        f"these write exercise identity without its name: {offenders}")
+
+
+def test_the_identity_guard_detects_a_lone_identity_write(tmp_path):
+    """The guard above only means something if it can actually fail.
+
+    Three functions: one that writes identity alone (the regression shape), one
+    that writes both fields (legitimate), and one that only READS identity —
+    the shape the engine's own lookup and the F2 presence-scan take. Exactly
+    the first may be reported, or the guard is blind at one end or unusable at
+    the other.
+    """
+    competitor = tmp_path / "competitor.py"
+    competitor.write_text(
+        "def rewrite(entry, value):\n"
+        "    entry[FIELD_EXERCISE_ID] = value\n"
+        "\n"
+        "def rewrite_both(entry, value, name):\n"
+        "    entry[FIELD_EXERCISE_ID] = value\n"
+        "    entry[FIELD_NAME] = name\n"
+        "\n"
+        "def only_reads(entry):\n"
+        "    return FIELD_EXERCISE_ID in entry and entry.get(FIELD_EXERCISE_ID)\n",
+        encoding="utf-8")
+
+    assert _lone_identity_writers(competitor) == ["rewrite"]
+
+
+def test_the_cardio_placement_rule_has_a_single_definition():
+    """Addendum §B. Task 4 closed a confirmed P1 — a cardio movement on a
+    non-cardio day bypasses the equipment gate entirely — with one rule in
+    ``training_generation.exercise_resolution``. This boundary reuses that
+    function instead of restating the predicate, because two copies of an
+    authority rule on two write doors is precisely how the first hole opened.
+
+    Anchored on the parsed import and a real call, not on raw source text: a
+    docstring mentioning the name would satisfy a plain substring check
+    without the reuse it claims to prove.
+    """
+    from app.services.training_generation import exercise_resolution
+
+    document_path = MUTATION_ROOT / "document.py"
+    imported_names = {name for name, _ in _python_imports(document_path)}
+    call_sites = _calls_named(document_path, "check_placement")
+    source = document_path.read_text(encoding="utf-8")
+
+    assert (
+        "app.services.training_generation.exercise_resolution.check_placement"
+        in imported_names
+    ), "document.py must import check_placement, not merely mention it"
+    assert call_sites, "document.py must call check_placement, not merely import it"
+    assert "CARDIO_MOVEMENT" not in source
+    assert "CARDIO_TIP" not in source
+    assert callable(exercise_resolution.check_placement)

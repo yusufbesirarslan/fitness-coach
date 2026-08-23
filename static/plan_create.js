@@ -98,10 +98,16 @@
         return data;
       });
     }).then(function (data) {
+      // The server-signed equipment context is forwarded straight through from
+      // generate to save: never parsed, displayed, edited, or persisted here.
       return fetch("/training-plan/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: data.program, score: data.overall_score })
+        body: JSON.stringify({
+          plan: data.program,
+          score: data.overall_score,
+          exercise_context_token: data.exercise_context_token
+        })
       }).then(function (res) {
         return res.json().catch(function () { return {}; }).then(function (saved) {
           if (!res.ok || saved.error) throw { message: saved.error };

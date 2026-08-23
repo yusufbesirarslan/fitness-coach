@@ -212,3 +212,74 @@ def test_summary_is_deterministic(make_user):
     a = build_training_history_summary(user.id, weeks=4, end_day=END_DAY)
     b = build_training_history_summary(user.id, weeks=4, end_day=END_DAY)
     assert a == b
+
+
+# ---------------------------------------------------------------------------
+# Sprint 11 PR4 — the legacy logging gap, stated as executable evidence
+# ---------------------------------------------------------------------------
+# WorkoutLog identifies an exercise by NAME. PR4 gave plans catalog identity and
+# deliberately did not migrate history: no column, no backfill, no join. These
+# tests pin the consequence so nobody later reads catalog identity into a log
+# row that never had it.
+
+def test_workout_log_identifies_an_exercise_by_name_only():
+    """No ``exercise_id`` column exists on history, by design.
+
+    Adding one would be an irreversible interpretation of every historical
+    row: a log written before the catalog existed does not become an entry in
+    it just because the strings look alike.
+    """
+    columns = set(WorkoutLog.__table__.columns.keys())
+
+    assert "exercise_name" in columns
+    assert "exercise_id" not in columns
+    assert WorkoutLog.__table__.columns["exercise_name"].nullable is False
+    assert WorkoutLog.__table__.columns["exercise_name"].type.length == 120
+
+
+def test_history_reads_free_text_names_the_catalog_never_authorized(make_user):
+    """Rows the catalog would refuse today still aggregate correctly.
+
+    History is a record of what happened, not a claim about what was
+    authorized. Filtering it through the catalog would silently delete a
+    user's past.
+    """
+    user = make_user("legacy_names")
+    for name in ("Squat", "gogus presi", "Bench Press (eski isim)"):
+        db.session.add(WorkoutLog(
+            user_id=user.id, exercise_name=name,
+            sets=3, reps=10, weight_kg=50, volume=100.0,
+            created_at=datetime(2026, 7, 15, 12)))
+    db.session.commit()
+
+    entries = fetch_workout_entries(user.id, date(2026, 7, 9), END_DAY)
+    assert [entry.exercise_name for entry in entries] == [
+        "Squat", "gogus presi", "Bench Press (eski isim)"]
+    assert build_training_history_summary(
+        user.id, weeks=4, end_day=END_DAY).total_volume == 300.0
+
+
+def test_renaming_a_catalog_entry_does_not_rewrite_logged_history(make_user):
+    """The consequence, spelled out: history cannot be joined to catalog identity.
+
+    ``exercise_name`` is a snapshot of the string at log time. A later catalog
+    rename produces a canonical name that no longer matches it, and nothing in
+    the read path repairs that — which is precisely why this is documented as
+    a gap rather than presented as a working join.
+    """
+    from app.services.exercise_catalog import load_exercise_catalog
+
+    user = make_user("legacy_rename")
+    logged_name = "Back Squat"  # a catalog ALIAS, not the canonical name
+    db.session.add(WorkoutLog(
+        user_id=user.id, exercise_name=logged_name,
+        sets=3, reps=10, weight_kg=100, volume=3000.0,
+        created_at=datetime(2026, 7, 15, 12)))
+    db.session.commit()
+
+    canonical = load_exercise_catalog().by_id["ex_barbell_back_squat"]
+    assert canonical.canonical_name == "Barbell Back Squat"
+    assert canonical.canonical_name != logged_name
+
+    entries = fetch_workout_entries(user.id, date(2026, 7, 9), END_DAY)
+    assert [entry.exercise_name for entry in entries] == [logged_name]

@@ -975,3 +975,214 @@ class TestMoveDay:
 
         undo_last_change(user.id, _ctx("m-move-0002"))
         assert _text(user.id) == original
+
+
+# ── Sprint 11 PR4 Task 5: canonical plans keep PR2's history semantics ───────
+#
+# Task 5 changes what an exercise *is* inside a mutation. It must change nothing
+# about versioning, the journal, replay or undo — so these are the same
+# guarantees asserted above, re-run against a plan whose identity is
+# catalog-owned. A canonical plan that mutated correctly but journaled or undid
+# differently would be a silent regression in the one subsystem the PR is
+# forbidden to touch.
+
+def _canonical_program():
+    """A plan in the exact shape the Task 4 save boundary persists.
+
+    Carries ``exercise_id`` on every entry, the server-written
+    ``exercise_context`` block, and — as above — an unknown per-exercise field
+    (``tempo``), so "the snapshot is the exact persisted text" is proven against
+    a document nothing in this domain can reconstruct.
+    """
+    return {
+        "program": [
+            {"gun": "Pazartesi", "tip": "antrenman", "odak": "Üst Vücut",
+             "sure_dk": 45, "tahmini_kalori": 320, "egzersizler": [
+                 {"isim": "Dumbbell Row", "set": 3, "tekrar": "8-12",
+                  "dinlenme": "90 sn", "not": "kontrollü çek", "tempo": "3-1-1",
+                  "exercise_id": "ex_dumbbell_row"},
+                 {"isim": "Push-Up", "set": 3, "tekrar": "10-15",
+                  "dinlenme": "60 sn", "not": "",
+                  "exercise_id": "ex_push_up"}]},
+            {"gun": "Salı", "tip": "dinlenme", "odak": "Aktif Toparlanma",
+             "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+            {"gun": "Çarşamba", "tip": "antrenman", "odak": "Alt Vücut",
+             "sure_dk": 40, "tahmini_kalori": 300, "egzersizler": [
+                 {"isim": "Bodyweight Squat", "set": 4, "tekrar": "12-15",
+                  "dinlenme": "60 sn", "not": "",
+                  "exercise_id": "ex_bodyweight_squat"}]},
+            {"gun": "Perşembe", "tip": "dinlenme", "odak": "Aktif Toparlanma",
+             "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+            {"gun": "Cuma", "tip": "antrenman", "odak": "Merkez", "sure_dk": 30,
+             "tahmini_kalori": 200, "egzersizler": [
+                 {"isim": "Plank", "set": 3, "tekrar": "45 sn",
+                  "dinlenme": "45 sn", "not": "", "exercise_id": "ex_plank"}]},
+            {"gun": "Cumartesi", "tip": "kardiyo", "odak": "Tempolu Yürüyüş",
+             "sure_dk": 30, "tahmini_kalori": 250, "egzersizler": [
+                 {"isim": "Brisk Walk", "set": 1, "tekrar": "30 dk",
+                  "dinlenme": "-", "not": "",
+                  "exercise_id": "ex_brisk_walk"}]},
+            {"gun": "Pazar", "tip": "dinlenme", "odak": "Aktif Toparlanma",
+             "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+        ],
+        "haftalik_ozet": {"toplam_antrenman_gun": 4, "yogunluk_skoru": 6},
+        "exercise_context": {
+            "equipment_context": "minimal",
+            "cardio_type": "yuruyus",
+            "style": "general_fitness",
+            "catalog_version": 1,
+        },
+    }
+
+
+def _swap_row(replacement="Band Row"):
+    """Replace the day-one row by naming an ALIAS of the entry in the slot."""
+    return ReplaceExerciseCommand(
+        day="Pazartesi", exercise="One-Arm Dumbbell Row",
+        replacement=replacement)
+
+
+def _identities(text, gun="Pazartesi"):
+    document = json.loads(text)
+    day = next(d for d in document["program"] if d["gun"] == gun)
+    return [(e["isim"], e.get("exercise_id")) for e in day["egzersizler"]]
+
+
+class TestCanonicalPlansKeepHistorySemantics:
+
+    def test_a_canonical_mutation_bumps_the_version_once_and_journals_once(
+            self, app, make_user, seed_plan):
+        user = make_user("canonhistory")
+        seed_plan(user.id, _canonical_program())
+
+        result = apply_plan_mutation(user.id, _swap_row(), _ctx("canon-0001"))
+
+        assert result.outcome == OUTCOME_APPLIED
+        assert result.plan_version == 1
+        assert _version(user.id) == 1
+        records = _records(user.id)
+        assert len(records) == 1
+        assert records[0].outcome == OUTCOME_APPLIED
+        assert _identities(_text(user.id)) == [
+            ("Resistance Band Row", "ex_band_row"), ("Push-Up", "ex_push_up")]
+
+    def test_replaying_a_canonical_operation_key_mutates_only_once(
+            self, app, make_user, seed_plan):
+        """Exactly-once must not depend on how identity is resolved."""
+        user = make_user("canonreplay")
+        seed_plan(user.id, _canonical_program())
+        context = _ctx("canon-0002")
+
+        first = apply_plan_mutation(user.id, _swap_row(), context)
+        second = apply_plan_mutation(user.id, _swap_row(), context)
+
+        assert first.replayed is False
+        assert second.replayed is True
+        assert second.plan_version == first.plan_version == 1
+        assert _version(user.id) == 1
+        assert len(_records(user.id)) == 1
+        assert _identities(_text(user.id)) == [
+            ("Resistance Band Row", "ex_band_row"), ("Push-Up", "ex_push_up")]
+
+    def test_undo_restores_the_exact_canonical_snapshot(
+            self, app, make_user, seed_plan):
+        """Snapshots are the stored plan TEXT, so exercise IDs and the context
+        block ride along for free — but "for free" is a claim, so it is proven
+        byte for byte rather than assumed."""
+        user = make_user("canonundo")
+        original = seed_plan(user.id, _canonical_program())
+        apply_plan_mutation(user.id, _swap_row(), _ctx("canon-0003"))
+        assert _text(user.id) != original
+
+        result = undo_last_change(user.id, _ctx("canon-0004"))
+
+        assert result.outcome == OUTCOME_APPLIED
+        assert _text(user.id) == original
+        restored = json.loads(_text(user.id))
+        assert _identities(_text(user.id)) == [
+            ("Dumbbell Row", "ex_dumbbell_row"), ("Push-Up", "ex_push_up")]
+        assert restored["exercise_context"] == {
+            "equipment_context": "minimal", "cardio_type": "yuruyus",
+            "style": "general_fitness", "catalog_version": 1}
+        # Undo is a forward step in history, never a rewind of the counter.
+        assert _version(user.id) == 2
+        assert [r.outcome for r in _records(user.id)] == [
+            OUTCOME_APPLIED, OUTCOME_APPLIED]
+
+    def test_an_undone_canonical_plan_is_mutable_again(
+            self, app, make_user, seed_plan):
+        """The restored bytes must still be a canonical plan, not merely equal
+        text — a restore that lost the context block would only show up on the
+        next mutation."""
+        user = make_user("canonundoagain")
+        seed_plan(user.id, _canonical_program())
+        apply_plan_mutation(user.id, _swap_row(), _ctx("canon-0005"))
+        undo_last_change(user.id, _ctx("canon-0006"))
+
+        apply_plan_mutation(user.id, _swap_row("Inverted Row"),
+                            _ctx("canon-0007"))
+
+        assert _identities(_text(user.id)) == [
+            ("Inverted Row", "ex_inverted_row"), ("Push-Up", "ex_push_up")]
+
+    @pytest.mark.parametrize("command", [
+        ReplaceExerciseCommand(day="Pazartesi", exercise="Dumbbell Row",
+                               replacement="Machine Chest Press"),
+        ReplaceExerciseCommand(day="Pazartesi", exercise="Dumbbell Row",
+                               replacement="Barbell Back Squat"),
+        AddExerciseCommand(day="Cuma", exercise="Brisk Walk", sets=1,
+                           reps="30 dk"),
+    ])
+    def test_a_refused_resolution_writes_no_journal_row_and_no_plan_bytes(
+            self, app, make_user, seed_plan, command):
+        """Unresolvable, incompatible and misplaced-cardio alike: a rejection
+        happens before anything is inserted, so it consumes no operation
+        identity and leaves no "accepted mutation" that never happened."""
+        user = make_user("canonrefused-%s" % abs(hash(str(command))))
+        original = seed_plan(user.id, _canonical_program())
+
+        with pytest.raises(InvalidMutation):
+            apply_plan_mutation(user.id, command, _ctx("canon-0008"))
+
+        db.session.expire_all()
+        assert _text(user.id) == original
+        assert _version(user.id) == 0
+        assert _records(user.id) == []
+
+    def test_a_canonical_no_op_is_still_journaled_without_a_version_bump(
+            self, app, make_user, seed_plan):
+        """Replacing an exercise with an alias of itself. The plan text must not
+        churn, and the accepted no-op must still leave a durable trace."""
+        user = make_user("canonnoop")
+        original = seed_plan(user.id, _canonical_program())
+
+        result = apply_plan_mutation(
+            user.id, _swap_row("Dumbbell Row"), _ctx("canon-0009"))
+
+        assert result.outcome == OUTCOME_NO_OP
+        assert _text(user.id) == original
+        assert _version(user.id) == 0
+        assert [r.outcome for r in _records(user.id)] == [OUTCOME_NO_OP]
+
+    def test_legacy_mutation_history_remains_readable(
+            self, app, make_user, seed_plan):
+        """A name-only plan keeps the whole PR2 story: mutate, journal, undo,
+        exact bytes back — and never acquires an ``exercise_id`` on the way."""
+        user = make_user("legacyhistory")
+        original = seed_plan(user.id)
+
+        applied = apply_plan_mutation(user.id, _swap_bench(), _ctx("legacy-01"))
+        undone = undo_last_change(user.id, _ctx("legacy-02"))
+
+        assert applied.outcome == OUTCOME_APPLIED
+        assert undone.outcome == OUTCOME_APPLIED
+        assert _text(user.id) == original
+        assert _names(_text(user.id), "Pazartesi") == [
+            "Bench Press", "Shoulder Press"]
+        assert _identities(_text(user.id)) == [
+            ("Bench Press", None), ("Shoulder Press", None)]
+        assert _version(user.id) == 2
+        records = _records(user.id)
+        assert len(records) == 2
+        assert records[1].reverts_mutation_id == records[0].id
+        assert json.loads(records[0].before_snapshot) == json.loads(original)

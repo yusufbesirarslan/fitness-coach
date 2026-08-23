@@ -20,6 +20,9 @@ from app.services.premium import premium_ai_plan_gate
 from app.plan_presenter import build_plan_view
 from app.services.plan_facts import gather_plan_facts
 from app.services.today_facts import get_active_plan
+from app.services.training_generation.exercise_context_token import (
+    sign_exercise_context,
+)
 from app.services.training_generation.output_errors import GenerationOutputError
 from app.services.training_generation.preference_contract import (
     CODE_GENERATION_UNAVAILABLE,
@@ -30,6 +33,7 @@ from app.services.training_generation.preference_contract import (
 )
 from app.services.training_generation.service import (
     generate_training_plan_payload,
+    resolve_save_exercise_context,
     validate_plan_for_save,
 )
 from app.services.validators import validate_pump_check_image
@@ -185,6 +189,13 @@ def training_plan_generate():
             "retryable": False,
         }), 400
 
+    # Sprint 11 PR4 Task 4: bind the signer to THIS user and THIS app secret
+    # here, eagerly, so the generator can hand back the accepted equipment
+    # context without ever seeing request state — and so no successful
+    # candidate can leave this route unsigned.
+    secret_key = current_app.config["SECRET_KEY"]
+    user_id = current_user.id
+
     try:
         return jsonify(generate_training_plan_payload(
             current_user,
@@ -193,6 +204,8 @@ def training_plan_generate():
             chat_fn=_heavy_chat,
             language=current_locale(),
             logger=current_app.logger,
+            context_token_factory=lambda context: sign_exercise_context(
+                context, secret_key, user_id),
         ))
     except PreferenceContractError as exc:
         current_app.logger.info(
@@ -225,21 +238,31 @@ def save_training_plan():
     if not plan:
         return jsonify({"error": t("route.plan_data_missing")}), 400
 
+    # Sprint 11 PR4 Task 4. This is the only destructive TrainingPlan path in
+    # the app, so the order below is the guarantee: verify the signed context
+    # → structure → semantics → catalog exercise resolution → equipment
+    # compatibility, and only then delete. Anything that fails leaves the
+    # user's current plan exactly as it was.
     try:
-        validated_plan = validate_plan_for_save(plan)
+        exercise_context = resolve_save_exercise_context(
+            data.get("exercise_context_token"),
+            current_app.config["SECRET_KEY"],
+            current_user.id,
+        )
+        validated_document = validate_plan_for_save(plan, exercise_context)
     except GenerationOutputError as exc:
+        # Code only. Never the token, the payload, or an exercise name.
         current_app.logger.info(
             "[TRAINING] save_validation_rejected code=%s request_id=%s",
             exc.public_code, current_request_id(),
         )
         return jsonify(exc.to_body(t)), exc.http_status
 
-    canonical_plan = validated_plan["program"] if isinstance(plan, list) else validated_plan
     TrainingPlan.query.filter_by(user_id=current_user.id).delete()
 
     new_plan = TrainingPlan(
         user_id   = current_user.id,
-        plan_data = json.dumps(canonical_plan, ensure_ascii=False),
+        plan_data = json.dumps(validated_document, ensure_ascii=False),
         score     = score
     )
     db.session.add(new_plan)
