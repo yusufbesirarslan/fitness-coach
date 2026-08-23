@@ -287,23 +287,33 @@ def render_bootstrap(
     """Render a fixed root bootstrap from validated and base64-encoded values."""
     return f"""set -eu
 umask 077
-script_path="$(mktemp /tmp/fitx-deploy.XXXXXX)"
-cleanup() {{
-  rm -f -- "$script_path"
-}}
-trap cleanup EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
-printf '%s' '{encoded_script}' | base64 --decode > "$script_path"
-chmod 0700 "$script_path"
-if ! id -u '{deploy_user}' >/dev/null 2>&1; then
-  echo 'configured deploy user does not exist' >&2
-  exit 1
-fi
-chown -- '{deploy_user}' "$script_path"
 deploy_dir="$(printf '%s' '{encoded_dir}' | base64 --decode)"
 public_health_url="$(printf '%s' '{encoded_url}' | base64 --decode)"
+lock_path="$deploy_dir/.axisai-production-deploy.lock"
+
+exec 9>"$lock_path"
+if ! flock -w 60 9; then
+  echo 'deployment lock unavailable after 60 seconds' >&2
+  exit 73
+fi
+
+env_file="$deploy_dir/.env"
+if [ ! -f "$env_file" ]; then
+  echo 'deployment .env file is missing' >&2
+  exit 1
+fi
+env_permissions="$(stat -c %a -- "$env_file")"
+if [ "$env_permissions" != 600 ]; then
+  echo "WARNING: correcting .env permissions from $env_permissions to 600"
+  chmod 600 -- "$env_file"
+  env_permissions="$(stat -c %a -- "$env_file")"
+  if [ "$env_permissions" != 600 ]; then
+    echo 'deployment .env permissions remain unsafe' >&2
+    exit 1
+  fi
+else
+  echo '.env permissions: 600'
+fi
 
 nginx_site=/etc/nginx/sites-available/fitx
 if [ -f "$nginx_site" ] && grep -q 'add_header Content-Security-Policy' "$nginx_site"; then
@@ -329,26 +339,32 @@ else
   echo 'WARNING: unable to inspect port 80/443 listeners'
 fi
 
-env_file="$deploy_dir/.env"
-if [ -f "$env_file" ]; then
-  env_permissions="$(stat -c %a "$env_file")"
-  if [ "$env_permissions" != 600 ]; then
-    echo "WARNING: correcting .env permissions from $env_permissions to 600"
-    chmod 600 "$env_file"
-  else
-    echo '.env permissions: 600'
-  fi
-else
-  echo 'CRITICAL: deployment .env file is missing'
-fi
-
-if listeners="$(ss -ltn 2>&1)" && printf '%s\n' "$listeners" | grep -q '127.0.0.1:3000'; then
+if listeners="$(ss -H -ltn 'sport = :3000' 2>&1)" && \
+   printf '%s\n' "$listeners" | \
+     grep -Eq '(^|[[:space:]])127[.]0[.]0[.]1:3000([[:space:]]|$)'; then
   echo 'fatsecret proxy: 127.0.0.1:3000 is listening'
 else
-  echo 'WARNING: fatsecret proxy is not listening on 127.0.0.1:3000'
+  echo 'fatsecret proxy is not listening on 127.0.0.1:3000' >&2
+  exit 1
 fi
 
-sudo -u '{deploy_user}' -- "$script_path" '{deploy_sha}' "$deploy_dir" "$public_health_url"
+script_path="$(mktemp /tmp/fitx-deploy.XXXXXX)"
+cleanup() {{
+  rm -f -- "$script_path"
+}}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+printf '%s' '{encoded_script}' | base64 --decode > "$script_path"
+chmod 0700 "$script_path"
+if ! id -u '{deploy_user}' >/dev/null 2>&1; then
+  echo 'configured deploy user does not exist' >&2
+  exit 1
+fi
+chown -- '{deploy_user}' "$script_path"
+sudo -u '{deploy_user}' -- env AXISAI_DEPLOY_LOCK_FD=0 \
+  "$script_path" '{deploy_sha}' "$deploy_dir" "$public_health_url" <&9
 """
 
 

@@ -5,11 +5,13 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
+import scripts.deploy_control as deploy_control
 from scripts.deploy_control import (
     AWS_CLI_CALL_TIMEOUT_SECONDS,
     AwsCliError,
@@ -356,11 +358,70 @@ def _git_bash_path(path):
     return f"/{drive.lower()}{remainder}"
 
 
-@pytest.mark.parametrize("remote_exit_code", [0, 23])
-def test_bootstrap_executes_decoded_script_as_user_and_always_cleans_up(
-    workspace_tmp_dir,
-    remote_exit_code,
-):
+@dataclass
+class BootstrapHarness:
+    bash: Path
+    root: Path
+    stubs: Path
+    deploy_dir: Path
+    remote_script: Path
+    events: Path
+    env_file: Path
+    env_chmod_marker: Path
+    config: DeployConfig
+    script: bytes
+
+    def run(
+        self,
+        *,
+        flock_exit=0,
+        env_exists=True,
+        env_permissions="600",
+        env_chmod_exit=0,
+        nginx_exit=0,
+        systemctl_active_exit=0,
+        systemctl_action_exit=0,
+        fatsecret_listener="LISTEN 0 128 127.0.0.1:3000 0.0.0.0:*",
+        remote_exit_code=0,
+    ):
+        self.events.write_text("", encoding="utf-8")
+        self.env_chmod_marker.unlink(missing_ok=True)
+        if env_exists:
+            self.env_file.write_text("test-only-placeholder\n", encoding="utf-8")
+        else:
+            self.env_file.unlink(missing_ok=True)
+        bash_root = _git_bash_path(self.root)
+        bash_stubs = _git_bash_path(self.stubs)
+        environment = {
+            **os.environ,
+            "HARNESS_DIR": bash_root,
+            "PATH": f"{bash_stubs}:/usr/bin:/bin",
+            "FLOCK_EXIT": str(flock_exit),
+            "ENV_FILE": _git_bash_path(self.env_file),
+            "ENV_PERMISSIONS": env_permissions,
+            "ENV_CHMOD_EXIT": str(env_chmod_exit),
+            "ENV_CHMOD_MARKER": _git_bash_path(self.env_chmod_marker),
+            "NGINX_EXIT": str(nginx_exit),
+            "SYSTEMCTL_ACTIVE_EXIT": str(systemctl_active_exit),
+            "SYSTEMCTL_ACTION_EXIT": str(systemctl_action_exit),
+            "FATSECRET_LISTENER": fatsecret_listener,
+            "REMOTE_EXIT_CODE": str(remote_exit_code),
+        }
+        return subprocess.run(
+            [
+                str(self.bash), "--noprofile", "--norc", "-c",
+                f"export PATH={shlex.quote(f'{bash_stubs}:/usr/bin:/bin')}\n"
+                + build_remote_command(self.config, self.script),
+            ],
+            capture_output=True,
+            text=True,
+            env=environment,
+            check=False,
+        )
+
+
+@pytest.fixture
+def bootstrap_harness(workspace_tmp_dir):
     git = shutil.which("git")
     if git is None:
         pytest.skip("Git Bash is unavailable")
@@ -371,10 +432,20 @@ def test_bootstrap_executes_decoded_script_as_user_and_always_cleans_up(
     harness = workspace_tmp_dir / "bootstrap harness"
     stubs = harness / "bin"
     stubs.mkdir(parents=True)
+    deploy_dir_path = harness / "deploy '$(touch nope)"
+    deploy_dir_path.mkdir()
+    env_file = deploy_dir_path / ".env"
+    env_chmod_marker = harness / "env-chmod-complete"
+    events = harness / "events"
+    events.write_text("", encoding="utf-8")
     remote_script = harness / "decoded-script"
     bash_harness = _git_bash_path(harness)
-    bash_stubs = _git_bash_path(stubs)
-    bash_remote_script = f"{bash_harness}/decoded-script"
+
+    _write_shell_stub(stubs, "flock", """
+printf '%s\n' flock >> "$HARNESS_DIR/events"
+printf '%s\\0' "$@" > "$HARNESS_DIR/flock-args"
+exit "$FLOCK_EXIT"
+""")
 
     _write_shell_stub(stubs, "mktemp", """
 printf '%s\n' mktemp >> "$HARNESS_DIR/events"
@@ -384,6 +455,12 @@ printf '%s\n' "$HARNESS_DIR/decoded-script"
     _write_shell_stub(stubs, "chmod", """
 printf '%s\n' chmod >> "$HARNESS_DIR/events"
 printf '%s\\0' "$@" > "$HARNESS_DIR/chmod-args"
+last=''
+for argument in "$@"; do last="$argument"; done
+if [ "$last" = "$ENV_FILE" ]; then
+  if [ "$ENV_CHMOD_EXIT" != 0 ]; then exit "$ENV_CHMOD_EXIT"; fi
+  : > "$ENV_CHMOD_MARKER"
+fi
 """)
     _write_shell_stub(stubs, "id", """
 printf '%s\n' id >> "$HARNESS_DIR/events"
@@ -396,18 +473,31 @@ printf '%s\\0' "$@" > "$HARNESS_DIR/chown-args"
     _write_shell_stub(stubs, "nginx", """
 printf '%s\n' nginx >> "$HARNESS_DIR/events"
 test "$1" = '-t'
+exit "$NGINX_EXIT"
 """)
     _write_shell_stub(stubs, "systemctl", """
 printf '%s\n' systemctl >> "$HARNESS_DIR/events"
 case "$1" in
-  is-active) exit 0 ;;
-  reload) exit 0 ;;
+  is-active) exit "$SYSTEMCTL_ACTIVE_EXIT" ;;
+  reload) exit "$SYSTEMCTL_ACTION_EXIT" ;;
+  enable) exit "$SYSTEMCTL_ACTION_EXIT" ;;
   *) exit 64 ;;
 esac
 """)
     _write_shell_stub(stubs, "ss", """
 printf '%s\n' ss >> "$HARNESS_DIR/events"
-printf '%s\n' 'LISTEN 0 128 127.0.0.1:3000 0.0.0.0:*'
+case " $* " in
+  *' -ltnp '*) printf '%s\n' 'LISTEN 0 128 0.0.0.0:443 0.0.0.0:*' ;;
+  *) printf '%s\n' "$FATSECRET_LISTENER" ;;
+esac
+""")
+    _write_shell_stub(stubs, "stat", """
+printf '%s\n' stat >> "$HARNESS_DIR/events"
+if [ -e "$ENV_CHMOD_MARKER" ]; then
+  printf '%s\n' 600
+else
+  printf '%s\n' "$ENV_PERMISSIONS"
+fi
 """)
     _write_shell_stub(stubs, "sudo", """
 printf '%s\n' sudo >> "$HARNESS_DIR/events"
@@ -418,13 +508,18 @@ user="$1"
 shift
 test "$1" = '--'
 shift
+if [ "$1" = 'env' ]; then
+  shift
+  export "$1"
+  shift
+fi
 script_path="$1"
 shift
 printf '%s' "$user" > "$HARNESS_DIR/sudo-user"
 sh "$script_path" "$@"
 """)
 
-    deploy_dir = "/srv/axis ai/'$(touch nope)"
+    deploy_dir = _git_bash_path(deploy_dir_path)
     public_url = "https://fitness.example/health?probe='$(touch%20nope)"
     config = DeployConfig.from_environ({
         **VALID_ENV,
@@ -435,28 +530,35 @@ sh "$script_path" "$@"
 printf '%s\\0' "$@" > "$HARNESS_DIR/script-args"
 exit "$REMOTE_EXIT_CODE"
 """
-    harness_setup = (
-        f"export HARNESS_DIR={shlex.quote(bash_harness)}\n"
-        f"export REMOTE_EXIT_CODE={remote_exit_code}\n"
-        f"export PATH={shlex.quote(f'{bash_stubs}:/usr/bin:/bin')}\n"
+    return BootstrapHarness(
+        bash=git_bash,
+        root=harness,
+        stubs=stubs,
+        deploy_dir=deploy_dir_path,
+        remote_script=remote_script,
+        events=events,
+        env_file=env_file,
+        env_chmod_marker=env_chmod_marker,
+        config=config,
+        script=script,
     )
 
-    completed = subprocess.run(
-        [
-            str(git_bash), "--noprofile", "--norc", "-c",
-            harness_setup + build_remote_command(config, script),
-        ],
-        capture_output=True,
-        text=True,
-        env=os.environ.copy(),
-        check=False,
-    )
+
+@pytest.mark.parametrize("remote_exit_code", [0, 23])
+def test_bootstrap_holds_lock_through_safeguards_and_helper_cleanup(
+        bootstrap_harness, remote_exit_code):
+    completed = bootstrap_harness.run(remote_exit_code=remote_exit_code)
+    harness = bootstrap_harness.root
+    bash_remote_script = f"{_git_bash_path(harness)}/decoded-script"
+    deploy_dir = _git_bash_path(bootstrap_harness.deploy_dir)
+    public_url = bootstrap_harness.config.public_health_url
 
     assert completed.returncode == remote_exit_code, completed.stderr
     assert (harness / "events").read_text(encoding="utf-8").splitlines() == [
-        "mktemp", "chmod", "id", "chown", "nginx", "systemctl",
-        "systemctl", "ss", "ss", "sudo",
+        "flock", "stat", "nginx", "systemctl", "systemctl", "ss", "ss",
+        "mktemp", "chmod", "id", "chown", "sudo",
     ]
+    assert _read_null_arguments(harness / "flock-args") == ["-w", "60", "9"]
     assert _read_null_arguments(harness / "mktemp-args") == ["/tmp/fitx-deploy.XXXXXX"]
     assert _read_null_arguments(harness / "chmod-args") == ["0700", bash_remote_script]
     assert _read_null_arguments(harness / "id-args") == ["-u", VALID_ENV["DEPLOY_USER"]]
@@ -465,13 +567,75 @@ exit "$REMOTE_EXIT_CODE"
     ]
     assert (harness / "sudo-user").read_text(encoding="utf-8") == VALID_ENV["DEPLOY_USER"]
     assert _read_null_arguments(harness / "sudo-args") == [
-        "-u", VALID_ENV["DEPLOY_USER"], "--", bash_remote_script,
+        "-u", VALID_ENV["DEPLOY_USER"], "--", "env",
+        "AXISAI_DEPLOY_LOCK_FD=0", bash_remote_script,
         VALID_ENV["DEPLOY_SHA"], deploy_dir, public_url,
     ]
     assert _read_null_arguments(harness / "script-args") == [
         VALID_ENV["DEPLOY_SHA"], deploy_dir, public_url,
     ]
-    assert not remote_script.exists()
+    assert not bootstrap_harness.remote_script.exists()
+
+
+def test_bootstrap_contention_exits_73_before_any_host_side_effect(
+        bootstrap_harness):
+    completed = bootstrap_harness.run(flock_exit=1)
+
+    assert completed.returncode == 73
+    assert "deployment lock unavailable after 60 seconds" in completed.stderr
+    assert bootstrap_harness.events.read_text(encoding="utf-8").splitlines() == ["flock"]
+    assert not bootstrap_harness.remote_script.exists()
+
+
+def test_bootstrap_missing_env_fails_before_nginx_or_helper(bootstrap_harness):
+    completed = bootstrap_harness.run(env_exists=False)
+    events = bootstrap_harness.events.read_text(encoding="utf-8").splitlines()
+
+    assert completed.returncode != 0
+    assert "deployment .env file is missing" in completed.stderr
+    assert events == ["flock"]
+
+
+def test_bootstrap_repairs_and_rechecks_env_permissions_before_helper(
+        bootstrap_harness):
+    completed = bootstrap_harness.run(env_permissions="644")
+    events = bootstrap_harness.events.read_text(encoding="utf-8").splitlines()
+
+    assert completed.returncode == 0, completed.stderr
+    assert events[:4] == ["flock", "stat", "chmod", "stat"]
+    assert "sudo" in events
+
+
+def test_bootstrap_unrepairable_env_permissions_fail_before_helper(
+        bootstrap_harness):
+    completed = bootstrap_harness.run(env_permissions="644", env_chmod_exit=5)
+    events = bootstrap_harness.events.read_text(encoding="utf-8").splitlines()
+
+    assert completed.returncode != 0
+    assert "sudo" not in events
+    assert "nginx" not in events
+
+
+def test_bootstrap_nginx_failure_stops_before_systemctl_and_helper(bootstrap_harness):
+    completed = bootstrap_harness.run(nginx_exit=1)
+    events = bootstrap_harness.events.read_text(encoding="utf-8").splitlines()
+
+    assert completed.returncode != 0
+    assert "nginx configuration test failed" in completed.stderr
+    assert "systemctl" not in events
+    assert "sudo" not in events
+
+
+def test_bootstrap_rejects_port_30000_as_not_exact_fatsecret_listener(
+        bootstrap_harness):
+    completed = bootstrap_harness.run(
+        fatsecret_listener="LISTEN 0 128 127.0.0.1:30000 0.0.0.0:*",
+    )
+    events = bootstrap_harness.events.read_text(encoding="utf-8").splitlines()
+
+    assert completed.returncode != 0
+    assert "fatsecret proxy is not listening on 127.0.0.1:3000" in completed.stderr
+    assert "sudo" not in events
 
 
 @pytest.mark.parametrize("response", [
@@ -821,7 +985,10 @@ def test_run_deploy_orders_validation_preflight_exact_script_send_and_poll(
     remote_command = sent_parameters[0]["commands"][0]
     assert base64.b64encode(exact_script).decode("ascii") in remote_command
     assert (
-        f"sudo -u '{VALID_ENV['DEPLOY_USER']}' -- \"$script_path\" "
+        f"sudo -u '{VALID_ENV['DEPLOY_USER']}' -- env AXISAI_DEPLOY_LOCK_FD=0"
+    ) in remote_command
+    assert (
+        "\"$script_path\" "
         f"'{VALID_ENV['DEPLOY_SHA']}' \"$deploy_dir\" \"$public_health_url\""
     ) in remote_command
     assert messages[-5:] == [
@@ -929,3 +1096,17 @@ def test_main_returns_nonzero_when_bounded_aws_call_times_out(
     assert messages == [
         "deployment failed: aws ec2 describe-instances timed out after 60 seconds",
     ]
+
+
+def test_main_defaults_to_the_concrete_bounded_aws_json_runner(monkeypatch):
+    captured = {}
+
+    def fake_run_deploy(environ, repo_path, aws, *args, **kwargs):
+        captured["aws"] = aws
+
+    monkeypatch.setattr(deploy_control, "run_deploy", fake_run_deploy)
+
+    exit_code = main(environ=VALID_ENV, repo_path=Path("checked-out-repository"))
+
+    assert exit_code == 0
+    assert captured["aws"] is deploy_control.run_aws_json

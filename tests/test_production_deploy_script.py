@@ -112,6 +112,44 @@ class HostFixture:
             timeout=600,
         )
 
+    def run_with_preheld_lock(
+        self,
+        bash_executable: str,
+        *,
+        acquire: bool = True,
+        preheld_path: Path | None = None,
+        **environment: str,
+    ) -> subprocess.CompletedProcess[str]:
+        wrapper = (
+            'exec 9>"$1"; shift; '
+            'if [[ "$WRAPPER_ACQUIRE_LOCK" == 1 ]]; then '
+            'flock -w 60 9 || exit 73; fi; '
+            'script_path="$1"; shift; '
+            'AXISAI_DEPLOY_LOCK_FD=0 source "$script_path" "$@" <&9'
+        )
+        return subprocess.run(
+            [
+                bash_executable, "--noprofile", "--norc", "-c", wrapper,
+                "preheld-wrapper",
+                _bash_path(preheld_path or (
+                    self.deploy_dir / ".axisai-production-deploy.lock"
+                )),
+                _bash_path(HOST_SCRIPT),
+                self.candidate_commit,
+                _bash_path(self.deploy_dir),
+                "",
+            ],
+            text=True,
+            capture_output=True,
+            check=False,
+            env={
+                **self.environment,
+                "WRAPPER_ACQUIRE_LOCK": "1" if acquire else "0",
+                **environment,
+            },
+            timeout=600,
+        )
+
 
 @pytest.fixture
 def host_fixture(tmp_path: Path):
@@ -214,7 +252,26 @@ if [[ -n "${FLOCK_STATE_DIR:-}" ]]; then
   done
   rmdir "$FLOCK_STATE_DIR"
 fi
+if [[ " $* " == ' -n 8 ' ]]; then
+  if [[ "${FAKE_PREHELD_LOCK_HELD:-0}" == 1 ]]; then exit 1; fi
+  exit 0
+fi
 exit "${FLOCK_EXIT:-0}"
+""",
+        )
+        _write_executable(
+            fake_bin / "stat",
+            r"""#!/usr/bin/env bash
+printf 'stat' >> "$TRACE_FILE"
+printf ' %s' "$@" >> "$TRACE_FILE"
+printf '\n' >> "$TRACE_FILE"
+last=''
+for argument in "$@"; do last="$argument"; done
+case "$last" in
+  /proc/self/fd/0) printf '%s\n' "${FAKE_INHERITED_LOCK_ID:-stdin}" ;;
+  *.axisai-production-deploy.lock) printf '%s\n' stable ;;
+  *) exit 65 ;;
+esac
 """,
         )
         _write_executable(
@@ -418,6 +475,7 @@ esac
                 'curl() { "$FAKE_BIN/curl" "$@"; }\n'
                 'git() { "$FAKE_BIN/git" "$@"; }\n'
                 'sleep() { "$FAKE_BIN/sleep" "$@"; }\n'
+                'stat() { "$FAKE_BIN/stat" "$@"; }\n'
                 'timeout() { "$FAKE_BIN/timeout" "$@"; }\n'
             ),
         )
@@ -502,6 +560,86 @@ def test_lock_contention_fails_before_git_or_docker(bash_executable, host_fixtur
     assert result.returncode == 73
     assert "deployment lock unavailable" in result.stderr
     assert fixture.trace.read_text(encoding="utf-8") == "flock -w 60 9\n"
+
+
+def test_inherited_lock_reuses_verified_stdin_fd_without_reacquire_gap(
+        bash_executable, host_fixture):
+    fixture = host_fixture()
+
+    result = fixture.run_with_preheld_lock(
+        bash_executable,
+        FAKE_INHERITED_LOCK_ID="stable",
+        FAKE_PREHELD_LOCK_HELD="1",
+    )
+
+    assert result.returncode == 0, result.stderr
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace.splitlines()[:5] == [
+        "flock -w 60 9",
+        "stat -Lc %d:%i -- /proc/self/fd/0",
+        f"stat -Lc %d:%i -- {_bash_path(fixture.deploy_dir)}/.axisai-production-deploy.lock",
+        "flock -n 8",
+        "flock -n 0",
+    ]
+    assert trace.count("flock -w 60 9\n") == 1
+
+
+def test_inherited_lock_marker_with_wrong_inode_fails_before_git_or_docker(
+        bash_executable, host_fixture, tmp_path):
+    fixture = host_fixture()
+    wrong_lock = tmp_path / "wrong-lock"
+
+    result = fixture.run_with_preheld_lock(
+        bash_executable,
+        preheld_path=wrong_lock,
+        FAKE_INHERITED_LOCK_ID="wrong",
+    )
+
+    assert result.returncode == 73
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert "git " not in trace
+    assert "docker " not in trace
+    assert "flock -n 0" not in trace
+
+
+def test_inherited_correct_inode_without_preheld_lock_fails_before_mutation(
+        bash_executable, host_fixture):
+    fixture = host_fixture()
+
+    result = fixture.run_with_preheld_lock(
+        bash_executable,
+        acquire=False,
+        FAKE_INHERITED_LOCK_ID="stable",
+        FAKE_PREHELD_LOCK_HELD="0",
+    )
+
+    assert result.returncode == 73
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert trace.splitlines()[:3] == [
+        "stat -Lc %d:%i -- /proc/self/fd/0",
+        f"stat -Lc %d:%i -- {_bash_path(fixture.deploy_dir)}/.axisai-production-deploy.lock",
+        "flock -n 8",
+    ]
+    assert "flock -n 0" not in trace
+    assert "git " not in trace
+    assert "docker " not in trace
+
+
+def test_inherited_lock_marker_alone_cannot_bypass_normal_locking(
+        bash_executable, host_fixture):
+    fixture = host_fixture()
+
+    result = fixture.run(
+        bash_executable,
+        AXISAI_DEPLOY_LOCK_FD="0",
+        FAKE_INHERITED_LOCK_ID="stdin",
+    )
+
+    assert result.returncode == 73
+    trace = fixture.trace.read_text(encoding="utf-8")
+    assert "git " not in trace
+    assert "docker " not in trace
+    assert "flock -n 0" not in trace
 
 
 def test_invalid_sha_fails_after_lock_without_git_or_docker(bash_executable, host_fixture):

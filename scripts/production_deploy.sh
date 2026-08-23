@@ -5,6 +5,7 @@ readonly DEPLOY_SHA="${1:-}"
 readonly DEPLOY_DIR="${2:-}"
 readonly PUBLIC_HEALTH_URL="${3:-}"
 readonly LOCK_PATH="$DEPLOY_DIR/.axisai-production-deploy.lock"
+readonly INHERITED_LOCK_FD="${AXISAI_DEPLOY_LOCK_FD:-}"
 readonly SSM_EXECUTION_TIMEOUT_SECONDS=1800
 readonly HOST_TRANSACTION_LIMIT_SECONDS=1680
 readonly SSM_BOOTSTRAP_MARGIN_SECONDS=120
@@ -86,10 +87,35 @@ run_external() {
   fi
 }
 
-exec 9>"$LOCK_PATH"
-if ! flock -w "$LOCK_WAIT_SECONDS" 9; then
-  echo "deployment lock unavailable after 60 seconds" >&2
-  exit 73
+# The root SSM bootstrap holds the stable lock on fd 9 and duplicates the same
+# open file description onto this process's stdin.  The marker alone is never a
+# bypass: the inherited fd must identify the exact stable lock inode and prove
+# nonblocking ownership.  Direct invocations retain the normal bounded acquire.
+if [[ -n "$INHERITED_LOCK_FD" ]]; then
+  if [[ "$INHERITED_LOCK_FD" != 0 ]] ||
+     ! inherited_lock_identity="$(stat -Lc '%d:%i' -- /proc/self/fd/0)" ||
+     ! stable_lock_identity="$(stat -Lc '%d:%i' -- "$LOCK_PATH")" ||
+     [[ "$inherited_lock_identity" != "$stable_lock_identity" ]]; then
+    echo "deployment lock unavailable after 60 seconds" >&2
+    exit 73
+  fi
+  exec 8>"$LOCK_PATH"
+  if flock -n 8; then
+    exec 8>&-
+    echo "deployment lock unavailable after 60 seconds" >&2
+    exit 73
+  fi
+  exec 8>&-
+  if ! flock -n 0; then
+    echo "deployment lock unavailable after 60 seconds" >&2
+    exit 73
+  fi
+else
+  exec 9>"$LOCK_PATH"
+  if ! flock -w "$LOCK_WAIT_SECONDS" 9; then
+    echo "deployment lock unavailable after 60 seconds" >&2
+    exit 73
+  fi
 fi
 
 if [[ "$#" -lt 2 || "$#" -gt 3 ]]; then
