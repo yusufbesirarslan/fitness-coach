@@ -32,17 +32,26 @@
 
 /* ── 2 · MEAL TIMELINE ────────────────────────────────────────────── */
 .meal-timeline { display: flex; flex-direction: column; gap: var(--space-4); }
-.meal-slot { }
+.meal-slot { display: flex; flex-direction: column; align-items: stretch; min-width: 0; }
 .slot-head {
   display: flex; align-items: center; gap: var(--space-2);
-  margin-bottom: var(--space-2);
+  margin-bottom: var(--space-2); min-width: 0;
 }
-.slot-emoji { font-size: 18px; line-height: 1; }
+.slot-ic {
+  width: var(--icon-md); height: var(--icon-md); flex-shrink: 0;
+  color: var(--color-primary); display: inline-flex; align-items: center; justify-content: center;
+}
+.slot-ic svg { width: 100%; height: 100%; }
 .slot-name {
-  font-family: var(--font-display); letter-spacing: 1.5px;
-  color: var(--color-text-1); font-size: var(--text-md);
+  font-family: var(--font-display); letter-spacing: var(--tracking-wide);
+  color: var(--color-text-1); font-size: var(--text-lg);
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  overflow-wrap: normal; word-break: keep-all;
 }
-.slot-kcal { margin-left: auto; color: var(--color-text-3); font-size: var(--text-sm); }
+.slot-kcal {
+  margin-left: auto; flex-shrink: 0; color: var(--color-text-3);
+  font-size: var(--text-sm); white-space: nowrap; font-variant-numeric: tabular-nums;
+}
 
 .meal-card {
   display: flex; gap: var(--space-3); align-items: stretch;
@@ -85,15 +94,22 @@
 .mc-edit:hover { color: var(--color-primary); background: var(--overlay-4); }
 
 .slot-empty {
-  display: flex; align-items: center; gap: var(--space-2);
-  padding: var(--space-3); min-height: 44px;
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: var(--space-2); align-self: start;
+  padding: var(--space-2) var(--space-4); min-height: 44px;
+  max-width: 100%;
   border: var(--border-w-1) dashed var(--color-border-2);
-  border-radius: var(--radius-lg); color: var(--color-text-3);
-  font-size: var(--text-sm); cursor: pointer;
+  border-radius: var(--radius-md); color: var(--color-text-3);
+  background: transparent; font-family: var(--font-body);
+  font-size: var(--text-sm); font-weight: var(--weight-medium);
+  line-height: var(--leading-snug); white-space: nowrap;
+  cursor: pointer;
   transition: border-color var(--duration-fast) var(--ease-standard),
-              color var(--duration-fast) var(--ease-standard);
+              color var(--duration-fast) var(--ease-standard),
+              background var(--duration-fast) var(--ease-standard);
 }
-.slot-empty:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.slot-empty:hover { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-soft); }
+.slot-empty:focus-visible { outline: none; box-shadow: var(--focus-ring); border-color: var(--color-primary); }
 
 @keyframes nut-card-in {
   from { opacity: 0; transform: translateY(6px); }

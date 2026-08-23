@@ -210,11 +210,17 @@ function mealScore(m) {
 }
 
 /* ── MEAL TIMELINE ── */
+var _SLOT_ICONS = {
+  breakfast: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg>',
+  lunch: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c4.4 0 8 2.7 8 6v2H4V9c0-3.3 3.6-6 8-6z"/><path d="M4 11h16v2a6 6 0 0 1-6 6h-4a6 6 0 0 1-6-6v-2z"/><path d="M8 19v2M16 19v2"/></svg>',
+  dinner: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h.5V22M6 2v9M9 2v9M9 2v7c0 1.1-.9 2-2 2"/><path d="M18 2c-1.7 0-3 2-3 5.5S16 13 18 13s3-2 3-5.5S19.7 2 18 2zM18 13v9"/></svg>',
+  snack: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c.6 2.2 2.2 3.4 2.2 3.4S12.8 7.6 12 9"/><path d="M12 22c-4.2 0-7-3.8-7-8.2C5 9.2 8 6 12 6s7 3.2 7 7.8C19 18.2 16.2 22 12 22z"/></svg>'
+};
 var SLOTS = [
-  { key: 'Kahvaltı', emoji: '🍳' },
-  { key: 'Öğle',     emoji: '🥗' },
-  { key: 'Akşam',    emoji: '🍽️' },
-  { key: 'Ara Öğün', emoji: '🥜' },
+  { key: 'Kahvaltı', icon: _SLOT_ICONS.breakfast },
+  { key: 'Öğle',     icon: _SLOT_ICONS.lunch },
+  { key: 'Akşam',    icon: _SLOT_ICONS.dinner },
+  { key: 'Ara Öğün', icon: _SLOT_ICONS.snack },
 ];
 
 function fmtTime(iso) {
@@ -261,13 +267,13 @@ function renderTimeline(meals) {
   box.innerHTML = SLOTS.map(function (slot) {
     var items = bySlot[slot.key] || [];
     var kcal = items.reduce(function (a, m) { return a + (m.kalori || 0); }, 0);
-    var head = '<div class="slot-head"><span class="slot-emoji">' + slot.emoji +
+    var head = '<div class="slot-head"><span class="slot-ic" aria-hidden="true">' + (slot.icon || '') +
       '</span><span class="slot-name">' + esc(mealLabel(slot.key)) + '</span>' +
       '<span class="slot-kcal">' + Math.round(kcal) + ' kcal</span></div>';
     var body = items.length
       ? items.map(mealCardHTML).join('')
-      : '<div class="slot-empty" data-action="logManualSlot" data-args=\'["' + esc(slot.key) +
-          '"]\'>+ ' + __t('nutrition.add_to_meal') + '</div>';
+      : '<button type="button" class="slot-empty" data-action="logManualSlot" data-args=\'["' + esc(slot.key) +
+          '"]\'>+ ' + __t('nutrition.add_to_meal') + '</button>';
     return '<div class="meal-slot">' + head + body + '</div>';
   }).join('');
 }

@@ -688,8 +688,8 @@
   "setup.coach_waiting": "Your coach is waiting for you!",
 
   "progress.page_title": "Progress — AxisAI",
-  "progress.h1_a": "PROG",
-  "progress.h1_b": "RESS",
+  "progress.h1_a": "PROGRESS",
+  "progress.h1_b": "TRACKING",
   "progress.page_sub": "Understand what's changing — and what matters next.",
   "progress.tab_charts": "Charts",
   "progress.tab_history": "History",

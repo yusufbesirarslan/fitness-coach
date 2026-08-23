@@ -362,9 +362,11 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
             const isRest = gun.tip === 'dinlenme', isCardio = gun.tip === 'kardiyo';
             const cls = 'week-chip' + (gun.gun === todayName ? ' is-today' : '') +
                 (isRest ? ' is-rest' : '') + (isCardio ? ' is-cardio' : '');
-            const focus = isRest ? __t('training.off') :
-                esc(gun.odak || (gun.egzersizler && gun.egzersizler[0] && gun.egzersizler[0].isim) || '');
-            return '<div class="' + cls + '" data-action="previewDay" data-args=\'["' + esc(gun.gun) + '"]\'>' +
+            const focusRaw = isRest ? __t('training.off') :
+                (gun.odak || (gun.egzersizler && gun.egzersizler[0] && gun.egzersizler[0].isim) || '');
+            const focus = esc(focusRaw);
+            const focusTitle = focus.replace(/"/g, '&quot;');
+            return '<div class="' + cls + '" data-action="previewDay" data-args=\'["' + esc(gun.gun) + '"]\' title="' + focusTitle + '">' +
                 '<div class="wc-day">' + esc(dayLabel(gun.gun)).slice(0, 3) + '</div>' +
                 '<div class="wc-focus">' + focus + '</div></div>';
         }).join('');
