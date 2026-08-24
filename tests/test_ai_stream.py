@@ -567,8 +567,9 @@ def test_bedrock_error_before_first_delta_falls_back_to_openai(
 
 def test_bedrock_error_after_first_delta_emits_error_no_fallback(
         app, bedrock_on, monkeypatch):
-    # İlk delta İSTEMCİYE GİTTİKTEN sonra patlarsa sağlayıcı DEĞİŞTİRİLMEZ
-    # (görülen metni bozardı / yan etkiyi tekrarlardı) — dostça hata çerçevesi.
+    # İlk delta İSTEMCİYE GİTTİKTEN sonra patlarsa sağlayıcı DEĞİŞTİRİLMEZ.
+    # Yayımlanmamış tampon metin istemciye gitmiş sayılmaz — B-kuralı görünür
+    # delta içindir. Tampon tutulurken patlarsa OpenAI yedeği hâlâ güvenlidir.
     bedrock_on(_RaisingStream(pre_chunks=["yarım cümle"]))
     called = {"openai": False}
     monkeypatch.setattr(ai_coach, "_run_coach_conversation_openai",
@@ -577,14 +578,33 @@ def test_bedrock_error_after_first_delta_emits_error_no_fallback(
     with app.app_context():
         events = _collect(1, "soru")
 
-    assert [e["text"] for e in events if e["type"] == "delta"] == ["yarım cümle"]
-    assert events[-1] == {
-        "type": "error",
-        "key": "coach.reply_failed",
-        "work_performed": True,
-        "partial_text": "yar\u0131m c\u00fcmle",
-    }
-    assert called["openai"] is False  # yan etki tekrarı YOK
+    assert "yarım cümle" not in "".join(
+        e.get("text") or "" for e in events if e.get("type") == "delta")
+    assert called["openai"] is True
+    assert events[-1]["type"] == "done"
+    assert events[-1]["provider"] == "openai"
+    assert events[-1]["text"] == "X"
+
+
+def test_read_only_tool_preamble_still_streams(app, bedrock_on, monkeypatch):
+    monkeypatch.setattr(ai_coach, "_dispatch_coach_tool",
+                        lambda *a, **k: "araç sonucu")
+    tool_turn = _FakeStream(
+        ["Öğünlerine bakıyorum..."],
+        _final(stop_reason="tool_use",
+               content=[_text_block("Öğünlerine bakıyorum..."),
+                        _tool_use_block("query_fitx_metrics", "t1",
+                                        {"metric_type": "nutrition"})]))
+    final_turn = _FakeStream(
+        [" Bugün 1800 kcal."],
+        _final(content=[_text_block(" Bugün 1800 kcal.")]))
+    bedrock_on(tool_turn, final_turn)
+
+    with app.app_context():
+        events = _collect(1, "bugün ne yedim?")
+
+    assert [e["text"] for e in events if e["type"] == "delta"] == [
+        "Öğünlerine bakıyorum...", " Bugün 1800 kcal."]
 
 
 def test_bedrock_error_after_tool_side_effect_no_fallback(

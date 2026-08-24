@@ -1,15 +1,29 @@
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.extensions import db
+from app.services.exercise_catalog import ExerciseContext
 from app.services.training_generation.capability import require_supported
 from app.services.training_generation.classifier_service import classify_user
+from app.services.training_generation.exercise_context_token import (
+    ExerciseContextInvalid,
+    verify_exercise_context,
+)
+from app.services.training_generation.exercise_resolution import (
+    canonicalize_plan_exercises,
+)
 from app.services.training_generation.extractor import extract_plan_object
 from app.services.training_generation.feature_extractor import build_features, parse_preferences
 from app.services.training_generation.output_errors import (
+    GenerationExerciseAmbiguousError,
+    GenerationExerciseIdentityInvalidError,
+    GenerationExerciseIncompatibleError,
+    GenerationExerciseUnresolvedError,
     GenerationOutputError,
     GenerationUnavailableError,
     ParseFailedError,
     PlanValidationError,
+    SaveContextInvalidError,
+    SaveExerciseInvalidError,
     SaveInvalidError,
     SchemaInvalidError,
     SemanticInvalidError,
@@ -21,8 +35,13 @@ from app.services.training_generation.plan_schema import (
     REPAIR_MAX_TOKENS,
 )
 from app.services.training_generation.program_generator import build_program_context
-from app.services.training_generation.prompt_builder import build_system_prompt, build_training_prompt
+from app.services.training_generation.prompt_builder import (
+    build_system_prompt,
+    build_training_prompt,
+    canonical_exercise_vocabulary,
+)
 from app.services.training_generation.response_validator import (
+    coerce_plan_document,
     validate_generated_plan,
     validate_plan_structure,
 )
@@ -114,17 +133,81 @@ def _parse_and_validate(text, truncated, preferences):
         parsed, preferences, injuries=preferences.injuries)
 
 
-def validate_plan_for_save(plan, preferences=None):
-    """Canonical save-time re-validation. Runs before any delete/insert."""
+def resolve_save_exercise_context(token, secret_key, user_id):
+    """Turn the carried token back into the accepted context, or refuse the save.
+
+    The one translation point between the transport-integrity layer (which
+    knows nothing about the wire) and the save boundary. The domain exception
+    carries no client text and neither does the typed error raised here.
+    """
     try:
-        structured = validate_plan_structure(plan, require_ozet=False)
-        validate_plan_semantics(structured, preferences)
+        return verify_exercise_context(token, secret_key, user_id)
+    except ExerciseContextInvalid as exc:
+        raise SaveContextInvalidError(
+            "exercise context token could not be verified") from exc
+
+
+def validate_plan_for_save(plan, exercise_context):
+    """Canonical save-time re-validation. Runs before any delete/insert.
+
+    Accepts either shape a client can honestly hold: the provider-style
+    name-only program, or the ID/name pairs canonicalization produced at
+    generation time. Both are re-validated from scratch — structure, then
+    semantics, then catalog identity and equipment compatibility against the
+    VERIFIED ``exercise_context``, never anything the payload claims.
+
+    Returns the canonical document to persist: ``program``, the client's
+    ``haftalik_ozet`` when (and only when) it supplied one, and a
+    server-created ``exercise_context`` block. Scores are preserved, never
+    fabricated — a save is not a planning decision.
+    """
+    try:
+        document = coerce_plan_document(plan)
+        supplied_ozet = "haftalik_ozet" in document
+        structured = validate_plan_structure(
+            document, require_ozet=False, allow_exercise_id=True)
+        validate_plan_semantics(structured, None)
     except (SchemaInvalidError, SemanticInvalidError, PlanValidationError) as exc:
         raise SaveInvalidError(str(exc)) from exc
-    return structured
+
+    try:
+        canonical = canonicalize_plan_exercises(structured, exercise_context)
+    except (
+        GenerationExerciseAmbiguousError,
+        GenerationExerciseIdentityInvalidError,
+        GenerationExerciseIncompatibleError,
+        GenerationExerciseUnresolvedError,
+    ) as exc:
+        # Collapsed on purpose: at the save boundary the client must not be
+        # able to tell "no such exercise" from "retired" from "not allowed by
+        # your equipment" — that difference is a catalog oracle.
+        raise SaveExerciseInvalidError(
+            "plan references an exercise the catalog will not authorize") from exc
+
+    saved = {"program": canonical["program"]}
+    if supplied_ozet:
+        saved["haftalik_ozet"] = canonical["haftalik_ozet"]
+    saved["exercise_context"] = {
+        "equipment_context": exercise_context.equipment_context,
+        "cardio_type": exercise_context.cardio_type,
+        "style": exercise_context.style,
+        "catalog_version": exercise_context.catalog_version,
+    }
+    return saved
 
 
-def generate_training_plan_payload(user, last_session, request_data, chat_fn, language="tr", logger=None):
+def generate_training_plan_payload(
+    user, last_session, request_data, chat_fn, language="tr", logger=None,
+    *, context_token_factory=None,
+):
+    """Generate one accepted candidate plan for ``user``.
+
+    ``context_token_factory`` (``Callable[[ExerciseContext], str]``) is how the
+    accepted equipment context reaches the later save call. It is optional so
+    unit callers can generate without transport signing, but the HTTP route
+    must always supply one — a candidate returned over the wire without its
+    token is a plan the user could never save.
+    """
     stored = (getattr(user, "user_metadata", None) or {}).get("injuries") or ""
     preferences = parse_preferences(request_data, stored_injuries=stored)
     require_supported(preferences)
@@ -143,8 +226,15 @@ def generate_training_plan_payload(user, last_session, request_data, chat_fn, la
     features = build_features(user, last_session, preferences)
     classification = classify_user(features)
     context = build_program_context(features, preferences, classification)
+    exercise_context = ExerciseContext(
+        equipment_context=preferences.ekipman,
+        cardio_type=preferences.kardiyo_tipi,
+        style=preferences.antrenman_tarzi,
+    )
+    exercise_vocabulary = canonical_exercise_vocabulary(exercise_context)
     prompt = build_training_prompt(
-        features, preferences, classification, context, language=language)
+        features, preferences, classification, context, language=language,
+        exercise_vocabulary=exercise_vocabulary)
     system_prompt = build_system_prompt(language)
     budget = _CompletionBudget(chat_fn)
 
@@ -184,6 +274,13 @@ def generate_training_plan_payload(user, last_session, request_data, chat_fn, la
         _log(logger, "semantic_invalid", calls=len(budget.calls), repair_eligible=0)
         raise
 
+    # Sprint 11 PR4 Task 3: canonicalize exercise identity exactly once, on the
+    # final accepted candidate, strictly OUTSIDE the try/except above. Never
+    # move this inside the repair except clauses — the repair path re-enters
+    # _parse_and_validate, so an exercise-authority failure canonicalized
+    # there would be misclassified as a parse/truncation-repairable outcome.
+    plan = canonicalize_plan_exercises(plan, exercise_context)
+
     ozet = plan.get("haftalik_ozet", {})
     yogunluk = ozet.get("yogunluk_skoru") or 7
     denge = ozet.get("denge_skoru") or 7
@@ -195,7 +292,7 @@ def generate_training_plan_payload(user, last_session, request_data, chat_fn, la
         score_label = "Orta"
     else:
         score_label = "Kötü"
-    return {
+    payload = {
         "program": plan["program"],
         "haftalik_ozet": ozet,
         "overall_score": overall,
@@ -209,3 +306,9 @@ def generate_training_plan_payload(user, last_session, request_data, chat_fn, la
         "risk_flags": classification.risk_flags,
         "constraints_applied": classification.constraints_applied,
     }
+    if context_token_factory is not None:
+        # The context itself is never echoed in the clear: the opaque token is
+        # the only carrier, so a client cannot read what it is asserting, let
+        # alone edit it.
+        payload["exercise_context_token"] = context_token_factory(exercise_context)
+    return payload

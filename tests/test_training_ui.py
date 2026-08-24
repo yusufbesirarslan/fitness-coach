@@ -153,6 +153,7 @@ function makeButton() {{
   const showToast = (message, type) => toasts.push({{ message, type }});
   let currentPlan = [{{ gun: 'Pazartesi', egzersizler: [] }}];
   let currentScore = 8;
+  let currentContextToken = '1.PAYLOAD.SIGNATURE';
   let workoutStateClient;
   {save_source}
 
@@ -187,7 +188,8 @@ function makeButton() {{
   assert.equal(calls[0].init.method, 'POST');
   assert.deepEqual(calls[0].init.headers, {{ 'Content-Type': 'application/json' }});
   assert.deepEqual(JSON.parse(calls[0].init.body), {{
-    plan: [{{ gun: 'Pazartesi', egzersizler: [] }}], score: 8
+    plan: [{{ gun: 'Pazartesi', egzersizler: [] }}], score: 8,
+    exercise_context_token: '1.PAYLOAD.SIGNATURE'
   }});
   assert.equal(button.textContent, 'training.saved');
   assert.equal(button.hasClass('saved'), true);
@@ -324,3 +326,39 @@ let workoutStateClient = null;
         check=False,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+# ── Signed exercise-context token forwarding (Sprint 11 PR4 Task 4) ─────────
+
+
+def test_legacy_client_carries_the_context_token_from_generate_into_save():
+    """The token is a carrier, not client state.
+
+    Legacy training.js must store the generate response's token beside the
+    in-memory candidate and post it back on save — and must not parse it,
+    render it, edit it, put it in a URL, or persist it anywhere the candidate
+    itself does not live.
+    """
+    source = TRAINING_SCRIPT.read_text(encoding="utf-8")
+
+    assert "currentContextToken = data.exercise_context_token" in source
+    assert "exercise_context_token: currentContextToken" in source
+    # Declared beside the rest of the in-memory candidate, so it dies with it.
+    assert re.search(
+        r"let currentPlan = null, currentScore = null, currentContextToken = null;",
+        source)
+    for forbidden in (
+        "currentContextToken.split", "currentContextToken.slice",
+        "atob(", "JSON.parse(currentContextToken)",
+        "localStorage.setItem('exercise_context_token'",
+        "textContent = currentContextToken",
+    ):
+        assert forbidden not in source, forbidden
+    # Never persisted or shipped in a URL.
+    token_lines = [
+        line for line in source.splitlines() if "ContextToken" in line
+    ]
+    for line in token_lines:
+        for forbidden in ("localStorage", "sessionStorage", "location",
+                          "innerHTML", "searchParams"):
+            assert forbidden not in line, line

@@ -80,7 +80,7 @@
 
   <!-- Page Header -->
   <div class="page-hdr">
-    <h1>{{ t('nutrition.h1_a') }}<span>{{ t('nutrition.h1_b') }}</span></h1>
+    <h1>{{ t('nutrition.h1_a') }} <span>{{ t('nutrition.h1_b') }}</span></h1>
     <p>{{ t('nutrition.page_sub') }}</p>
   </div>
 
@@ -136,7 +136,7 @@
           <div class="nut-hero-target">
             {{ t('nutrition.target_label') }} <span id="ring-target">—</span> kcal
           </div>
-          <div class="nut-macros" style="grid-template-columns:1fr;gap:14px;">
+          <div class="nut-macros nut-macros-hero">
             <!-- Protein -->
             <div class="nut-macro">
               <div class="nut-macro-hdr">
@@ -187,7 +187,7 @@
         <div class="fc-divider-line"></div>
       </div>
       <button class="qab" id="qab-water" data-action="quickAddWater" type="button" style="margin-bottom:8px;">
-        <span class="qab-icon">💧</span>
+        <span class="qab-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/></svg></span>
         <div class="qab-info">
           <div class="qab-title">{{ t('nutrition.water_1cup_btn') }}</div>
           <div class="qab-sub" id="qab-water-sub">{{ t('nutrition.water_progress', n=0, goal=8) }}</div>
@@ -372,10 +372,10 @@
     <div class="sheet-title">{{ t('nutrition.log_manual') }}</div>
 
     <div class="meal-type-grid" id="meal-type-grid">
-      <div class="meal-type-opt selected" data-action="selectMealType" data-args='["Kahvaltı"]'><span class="emoji">🍳</span>{{ t('nutrition.meal_breakfast') }}</div>
-      <div class="meal-type-opt" data-action="selectMealType" data-args='["Öğle"]'><span class="emoji">🥗</span>{{ t('nutrition.meal_lunch') }}</div>
-      <div class="meal-type-opt" data-action="selectMealType" data-args='["Akşam"]'><span class="emoji">🍽️</span>{{ t('nutrition.meal_dinner') }}</div>
-      <div class="meal-type-opt" data-action="selectMealType" data-args='["Ara Öğün"]'><span class="emoji">🥜</span>{{ t('nutrition.meal_snack') }}</div>
+      <div class="meal-type-opt selected" data-action="selectMealType" data-args='["Kahvaltı"]'><span class="meal-type-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg></span>{{ t('nutrition.meal_breakfast') }}</div>
+      <div class="meal-type-opt" data-action="selectMealType" data-args='["Öğle"]'><span class="meal-type-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3c4.4 0 8 2.7 8 6v2H4V9c0-3.3 3.6-6 8-6z"/><path d="M4 11h16v2a6 6 0 0 1-6 6h-4a6 6 0 0 1-6-6v-2z"/><path d="M8 19v2M16 19v2"/></svg></span>{{ t('nutrition.meal_lunch') }}</div>
+      <div class="meal-type-opt" data-action="selectMealType" data-args='["Akşam"]'><span class="meal-type-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 2v7c0 1.1.9 2 2 2h.5V22M6 2v9M9 2v9M9 2v7c0 1.1-.9 2-2 2"/><path d="M18 2c-1.7 0-3 2-3 5.5S16 13 18 13s3-2 3-5.5S19.7 2 18 2zM18 13v9"/></svg></span>{{ t('nutrition.meal_dinner') }}</div>
+      <div class="meal-type-opt" data-action="selectMealType" data-args='["Ara Öğün"]'><span class="meal-type-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3c.6 2.2 2.2 3.4 2.2 3.4S12.8 7.6 12 9"/><path d="M12 22c-4.2 0-7-3.8-7-8.2C5 9.2 8 6 12 6s7 3.2 7 7.8C19 18.2 16.2 22 12 22z"/></svg></span>{{ t('nutrition.meal_snack') }}</div>
     </div>
 
     <div style="position:relative;margin-bottom:12px;">
@@ -439,10 +439,10 @@
     <div class="modal-title">{{ t('nutrition.log_photo') }}</div>
     <img id="photo-preview" class="photo-preview" src="" alt="">
     <div class="meal-type-grid" id="photo-meal-type-grid">
-      <div class="meal-type-opt selected" data-action="selectPhotoMealType" data-args='["Kahvaltı"]'><span class="emoji">🍳</span>{{ t('nutrition.meal_breakfast') }}</div>
-      <div class="meal-type-opt" data-action="selectPhotoMealType" data-args='["Öğle"]'><span class="emoji">🥗</span>{{ t('nutrition.meal_lunch') }}</div>
-      <div class="meal-type-opt" data-action="selectPhotoMealType" data-args='["Akşam"]'><span class="emoji">🍽️</span>{{ t('nutrition.meal_dinner') }}</div>
-      <div class="meal-type-opt" data-action="selectPhotoMealType" data-args='["Ara Öğün"]'><span class="emoji">🥜</span>{{ t('nutrition.meal_snack') }}</div>
+      <div class="meal-type-opt selected" data-action="selectPhotoMealType" data-args='["Kahvaltı"]'><span class="meal-type-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/></svg></span>{{ t('nutrition.meal_breakfast') }}</div>
+      <div class="meal-type-opt" data-action="selectPhotoMealType" data-args='["Öğle"]'><span class="meal-type-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3c4.4 0 8 2.7 8 6v2H4V9c0-3.3 3.6-6 8-6z"/><path d="M4 11h16v2a6 6 0 0 1-6 6h-4a6 6 0 0 1-6-6v-2z"/><path d="M8 19v2M16 19v2"/></svg></span>{{ t('nutrition.meal_lunch') }}</div>
+      <div class="meal-type-opt" data-action="selectPhotoMealType" data-args='["Akşam"]'><span class="meal-type-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 2v7c0 1.1.9 2 2 2h.5V22M6 2v9M9 2v9M9 2v7c0 1.1-.9 2-2 2"/><path d="M18 2c-1.7 0-3 2-3 5.5S16 13 18 13s3-2 3-5.5S19.7 2 18 2zM18 13v9"/></svg></span>{{ t('nutrition.meal_dinner') }}</div>
+      <div class="meal-type-opt" data-action="selectPhotoMealType" data-args='["Ara Öğün"]'><span class="meal-type-ic" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3c.6 2.2 2.2 3.4 2.2 3.4S12.8 7.6 12 9"/><path d="M12 22c-4.2 0-7-3.8-7-8.2C5 9.2 8 6 12 6s7 3.2 7 7.8C19 18.2 16.2 22 12 22z"/></svg></span>{{ t('nutrition.meal_snack') }}</div>
     </div>
     <textarea class="fc-input" id="photo-note-input" placeholder="{{ t('nutrition.photo_note_ph') }}"></textarea>
     <button class="btn-volt w-full" style="margin-top:12px;" id="photo-confirm-btn" data-action="submitPhotoMeal">{{ t('nutrition.log_meal') }}</button>

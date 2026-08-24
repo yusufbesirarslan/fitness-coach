@@ -641,3 +641,68 @@ def test_prompt_authority_is_flag_driven_on_both_providers(app, monkeypatch):
 
         assert (authority in seen[-1]) is enabled
         assert (authority in bedrock_system) is enabled
+
+
+# ---------------------------------------------------------------------------
+# Sprint 11 PR4 — Adaptive Coaching context is unaffected by catalog identity
+# ---------------------------------------------------------------------------
+
+def test_adaptive_plan_context_is_derived_from_logged_names_not_catalog_identity(
+    app, make_user, monkeypatch
+):
+    """The coach's plan contract reads ``WorkoutLog``, which has no identity.
+
+    PR4 made plans catalog-owned; it did not touch history. So the AdaptivePlan
+    contract a user with only free-text legacy log names gets is byte-identical
+    to the one a user with canonical catalog names gets, given the same
+    volumes. If it were not, the coach's planning signal would have quietly
+    become a function of how an exercise happened to be spelled.
+    """
+    from datetime import date, datetime
+
+    from app.extensions import db
+    from app.models import WorkoutLog
+    from app.services import adaptive_plan_context as adapter
+    from app.services.training_planning import build_adaptive_plan
+
+    def _log(user_id, name, day, volume):
+        db.session.add(WorkoutLog(
+            user_id=user_id, exercise_name=name,
+            sets=3, reps=10, weight_kg=50, volume=volume,
+            created_at=datetime(day.year, day.month, day.day, 12)))
+
+    legacy = make_user("adaptive-legacy-names")
+    canonical = make_user("adaptive-canonical-names")
+    for day, volume in ((date(2026, 7, 2), 300.0), (date(2026, 7, 9), 400.0)):
+        _log(legacy.id, "gogus presi (eski)", day, volume)
+        _log(canonical.id, "Barbell Bench Press", day, volume)
+    db.session.commit()
+
+    end_day = date(2026, 7, 15)
+    monkeypatch.setattr(
+        adapter, "build_adaptive_plan",
+        lambda user_id: build_adaptive_plan(user_id, weeks=4, end_day=end_day))
+
+    legacy_context = adapter.build_adaptive_plan_context(legacy.id)
+    canonical_context = adapter.build_adaptive_plan_context(canonical.id)
+
+    assert legacy_context == canonical_context
+    assert '"has_data":true' in legacy_context
+    assert "exercise_id" not in legacy_context
+
+
+def test_adaptive_plan_contract_never_carries_exercise_identity():
+    """The serialized contract has no exercise field at all, canonical or not.
+
+    Naming an exercise here would put a second, prompt-shaped description of
+    the plan into the context window beside the plan block the coach already
+    reads — and it would be stale the moment the plan is edited.
+    """
+    from app.services.adaptive_plan_context import serialize_adaptive_plan
+
+    payload = json.loads(serialize_adaptive_plan(_overload_plan()))
+
+    assert set(payload) == {"schema_version", "source", "plan", "progression"}
+    flattened = json.dumps(payload)
+    for forbidden in ("exercise_id", "isim", "egzersizler", "ex_"):
+        assert forbidden not in flattened, forbidden

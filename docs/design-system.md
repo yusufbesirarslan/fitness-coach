@@ -56,7 +56,7 @@ da** değer ver.
 | `--color-surface-1` | `#1A1A1A` | `#EEEDE8` | Alçak yüzey (input zemini dark'ta) |
 | `--color-surface-2` | `#1E1E1E` | `#FFFFFF` | Kart yüzeyi |
 | `--color-surface-3` | `#252525` | `#E5E4DF` | Yükseltilmiş/iç yüzey |
-| `--color-text-1..4` | `#F4F4F4 #A6A6A6 #808080 #4D4D4D` | `#1A1A1A #5C5C5C #808080 #A3A3A3` | Metin hiyerarşisi |
+| `--color-text-1..4` | `#F4F4F4 #A6A6A6 #909090 #4D4D4D` | `#1A1A1A #5C5C5C #676767 #A3A3A3` | Metin hiyerarşisi (text-3 AA normal text on card surfaces) |
 | `--color-success(-soft)` | `#00C48C` | aynı | Başarı |
 | `--color-warning(-soft)` | `#FFB020` | `#C89800` | Uyarı |
 | `--color-danger(-soft)` | `#FF4D4D` | `#DD4444` | Hata/yıkıcı eylem |
@@ -77,6 +77,14 @@ renkli dolgu üstünde tema'dan bağımsız koyu metin → `var(--gray-950)`).
   Inter ağırlıkları 300–800 yüklü (_head.html Google Fonts).
 - Boyutlar: `--text-2xs..--text-3xl` → 10 / 11 / 12 / 13 / 14 / 15 / 17 / 20 / 24 px;
   akışkan display: `--text-display-sm/md/lg` → clamp 28-36 / 32-44 / 38-52 px.
+- **Metrik ölçeği (PR2)**: `--text-metric-sm/md/lg` → clamp 22-26 / 28-34 /
+  34-44 px. Veri-öncelikli yüzeylerde BİRİNCİL sayı/sonuç bu üç rolden birini
+  seçer — sayfa tek-seferlik `36px`/`20px` değeri UYDURMAZ:
+  `lg` = yüzeyin tek hakim sayısı (`.stat-value`), `md` = bölüm düzeyi başlık
+  metrik (`.ps-state`, `.wh-focus`, `.hero-num`), `sm` = kart düzeyi metrik
+  (`.wc-value`, `.wt-big`, `.ach-title`).
+  Hiyerarşi merdiveni: `--text-display-*` > `--text-metric-*` > bölüm başlığı >
+  gövde > metadata.
 - Ağırlıklar: `--weight-light..--weight-extrabold` → 300–800.
 - Satır yüksekliği: `--leading-none/tight/snug/normal/relaxed` → 1 / 1.2 / 1.4 / 1.6 / 1.75.
 - Harf aralığı: `--tracking-wide/wider/widest/label` → .04 / .08 / .12 / .16 em
@@ -117,7 +125,13 @@ eklemeden önce bu skalaya oturt. (`--z-drawer*` ve `--drawer-w` Phase 2'de
 ### Layout & Breakpoint'ler
 
 `--content-max` 1280 px · `--header-h` 56 · `--action-bar-h` 68 · `--drawer-w` 280
-· `--fab-size` 58 · `--fab-protrude` 22.
+· `--fab-btn` 56 · `--fab-protrude` 22 · `--fab-size` = `var(--fab-btn)` (legacy alias).
+- **Yüzen FAB rayı (PR2)**: `--fab-btn` 56 · `--fab-rail-inset` 15 (≥1024px'te
+  36) · `--fab-rail-h` = ikisinin toplamı. Koç FAB'ı (`#cw-root`) ve beslenme
+  log FAB'ı konumlarını bu inset'ten alır ve boyutlarını `--fab-btn`'den
+  türetir; `.page-body` (nav.css) sayfa dibinde `--fab-rail-h` kadar yer
+  AYIRIR — yoksa sayfanın son satırı butonun altında kalır. Yeni yüzen kontrol
+  eklerken üçünü de bu token'lardan türet.
 
 | Breakpoint | Değer | Kullanım |
 |---|---|---|
@@ -138,7 +152,7 @@ Mevcut sınıf adları kamu API'sidir — yeniden adlandırma yok. Kullanım ör
 |---|---|---|
 | Button | `.btn-volt` (primary), `.btn-ghost`, `.btn-danger`, mod: `.w-full`, `.loading` | `<button class="btn-volt">KAYDET</button>` |
 | Input | `.fc-input` (+ `.field` > `.field-label`) | `<div class="field"><label class="field-label">AD</label><input class="fc-input"></div>` |
-| Card | `.card`, hover için ek `.card-hover` | `<div class="card card-hover">…</div>` |
+| Card | `.card` (kendi `--space-5` padding'ini TAŞIR), hover için ek `.card-hover`, padding'i kendi yöneten kartlar için `.card-flush` | `<div class="card card-hover">…</div>` |
 | Modal | `.modal-backdrop.open` > `.modal` > `.modal-header/-title/-close/-body/-footer` | JS: backdrop'a `.open` ekle/çıkar |
 | Bottom Sheet | `.sheet-backdrop.open` > `.sheet` > `.sheet-handle` + `.sheet-title` | mobilde alttan, ≥768px ortalanır |
 | Badge | `.badge` + `.badge-primary/-success/-warning/-danger/-neutral` | `<span class="badge badge-success">AKTİF</span>` |
@@ -148,6 +162,7 @@ Mevcut sınıf adları kamu API'sidir — yeniden adlandırma yok. Kullanım ör
 | Progress Bar | `.pbar-track` > `.pbar-fill` | genişlik JS ile |
 | Navigation Item | `.tab-bar` > `.tab-btn(.active)`, panel: `.tab-panel(.active)` | sayfa içi sekmeler (uygulama kabuğu gezinmesi nav.css'te — aşağıdaki bölüm) |
 | FAB | `.quick-add-wrap` > `.quick-add-btn(.open)` + `.quick-add-actions` > `.fab-row` > `.fab-sub` + `.fab-lbl` | global hızlı ekleme |
+| Icon Tile | `.icon-tile` (+ `.icon-tile-sm`, `.icon-tile-accent`, `.icon-tile-soft`) > `<svg>`; metin hizasındaki ikon için `.icon-inline` | arayüz ikonunun TEK kutusu — emoji KULLANMA |
 | Empty State | `.empty-state` > `.empty-icon` + `.empty-title` + `.empty-sub` | boş liste durumu |
 | Loading Skeleton | `.skeleton` (+ `.skeleton-text`, `.skeleton-circle`) | boyutu yerinde ver |
 | Stat Card | `.stat-card` > `.stat-label` + `.stat-value` + `.stat-unit` | metrik kartı |

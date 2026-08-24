@@ -54,9 +54,21 @@ PR1 owns the boundary. It does **not** connect the AI Coach to it.
 ```
 
 **Identity.** A training day is identified by `gun` — a canonical Turkish
-weekday, validated unique across exactly seven days. An exercise is identified by
-`isim` **only: there are no exercise IDs anywhere in the plan.** PR1 does not
-invent a production exercise catalog to fix that (see §7).
+weekday, validated unique across exactly seven days.
+
+Exercise identity depends on **which document you are holding**, and Sprint 11
+PR4 is where that split appears:
+
+- A **canonical** plan — one saved through `POST /training-plan/save` after PR4
+  — carries a server-written `exercise_context` block and an `exercise_id` on
+  every exercise. Identity is that stable catalog ID; `isim` is presentation.
+- A **legacy** plan — anything stored before PR4 — is a bare list (or
+  `{"program": …}`) with no `exercise_id` and no `exercise_context`. Identity is
+  still `isim` alone. PR4 adds **no migration and no backfill**: legacy rows are
+  never silently upgraded (see §7 and `docs/TRAINING_GENERATOR.md`).
+
+PR1 itself did not invent a production exercise catalog; PR4's catalog
+(`app/services/exercise_catalog.py`) is the one this boundary now consults.
 
 ---
 
@@ -183,14 +195,60 @@ a command · protected plan fields cannot be mass-assigned (there is no field-na
 input at all) · completed history is unreachable through this boundary · the
 resulting plan stays structurally valid.
 
-### Known identity limitation
+### Exercise identity — two documents, one engine (Sprint 11 PR4)
 
-Exercise identity is the name. Matching is case- and whitespace-insensitive, and
-**a name that matches more than once in the target day is refused**
-(`AmbiguousExerciseTarget`) rather than resolved by position. That is the honest
-consequence of name-only identity: the caller did not identify a unique thing, so
-the boundary refuses to guess. Building an exercise catalog with stable IDs is
-out of scope for PR1 and is the correct long-term fix.
+PR1 shipped with name-only identity and recorded "building an exercise catalog
+with stable IDs is the correct long-term fix". Sprint 11 PR4 built it, and this
+boundary is one of the two doors it is enforced at (the other is
+`POST /training-plan/save`). The catalog is
+`app/services/exercise_catalog.py`; the full contract lives in
+`docs/TRAINING_GENERATOR.md`.
+
+`document._exercise_authority(document)` resolves, once per command, into one of
+three outcomes:
+
+| Document | Behaviour |
+| --- | --- |
+| **Canonical** — carries a readable `exercise_context` block | The catalog is the authority. The command's target name is resolved to a catalog entry (exact canonical name or declared alias after normalization) and the day is searched for that stable `exercise_id`. An added or replacing exercise is written as catalog identity — `exercise_id` plus the catalog's canonical `isim` — or not written at all. |
+| **Legacy** — no context block *and* no `exercise_id` anywhere | Behaves exactly as before PR4: casefold `isim` matching, the caller's free-form name written through, and **no `exercise_id` is ever introduced**. |
+| **Unusable** — a context block that the save boundary could not have written, *or* a missing block while some exercise still carries an `exercise_id` | `InvalidMutation`. |
+
+The third row is the one that matters. A canonical plan is **never silently
+downgraded** to legacy name matching: one corrupt byte in the context block, or
+one write that dropped it, would otherwise be enough to take a plan out from
+under the catalog's authority — and a stray `exercise_id` surviving a
+legacy-mode name rewrite it no longer matches is exactly the defect that
+downgrade produces.
+
+Bounds are still reused, not redefined: `validate_exercise_context` imports the
+equipment, cardio and style vocabularies from the signed-token module rather
+than restating them, so there is no second opinion about what a legal context
+is. `catalog_version` must be a real positive integer but is deliberately **not**
+required to equal the loaded catalog's version — provenance is what it records,
+while authority is settled by re-resolving against the *live* catalog on every
+mutation. Demanding equality would make every stored plan unmutable the moment
+the catalog version is bumped.
+
+A write also passes the catalog's own two gates, imported rather than copied:
+`is_exercise_compatible` against the plan's verified context (the Coach cannot
+put a barbell into a bodyweight plan), and `check_placement` — the generation
+path's public cardio-vs-day rule. Reimplementing either here is how two doors
+drift apart.
+
+**Ambiguity still fails closed, on both documents.** On a canonical plan two
+differently-worded entries that resolve to the same catalog entry are the same
+exercise twice; on a legacy plan two entries with the same `isim` are. Either
+way the target is refused with `AmbiguousExerciseTarget` rather than resolved by
+position — and, on a legacy plan, it is refused rather than disambiguated by
+quietly stamping catalog identity onto it. The caller did not identify a unique
+thing; the boundary does not guess, and it does not upgrade a document in order
+to be able to guess.
+
+**No substitution, ever.** Resolution is exact. A name the catalog does not
+declare is not an exercise, and choosing the nearest one would be the
+substitution PR4 forbids. Every `ExerciseResolutionError` becomes
+`InvalidMutation` at this boundary — `errors.py` gains no new class, and a raw
+domain `ValueError` never escapes the pure layer.
 
 ---
 
@@ -494,6 +552,26 @@ this lineage), `UndoConflict` (a precondition failed), `PlanStateConflict` (the
 authoritative row moved between the locked read and the write). They are internal
 outcomes, deliberately **not** HTTP codes — there is no transport layer to map
 them onto yet.
+
+### Sprint 11 PR4 changed nothing here
+
+Undo is **untouched** by the exercise catalog, and deliberately so.
+
+- The precondition is still bytes. Snapshots are the canonical `plan_data`
+  *text*, so a canonical plan's snapshot already contains its `exercise_id`
+  values and its `exercise_context` block; restoring it restores them exactly.
+  No re-resolution happens on the undo path, and none should: the catalog
+  decides what may be *written*, while undo puts back what the user already had.
+- A legacy plan undoes to legacy bytes. Reversing a mutation never adds an
+  `exercise_id`, and never removes one either.
+- The journal is unchanged: no new column, no new outcome, no new error class.
+  `errors.py` gained nothing — a catalog rejection surfaces as the existing
+  `InvalidMutation` (§7).
+- Retiring a catalog entry does not retroactively make a stored plan
+  un-undoable. It stops that entry being *written* on the next mutation, which
+  is the check that actually protects the user.
+- PR4 adds no migration. The Alembic head this document describes is unchanged
+  by it.
 
 ## 17. Schema and migration
 

@@ -25,50 +25,70 @@
 .id-hello { font-size: var(--text-sm); color: var(--color-text-2); }
 .id-name { font-family: var(--font-display); font-size: var(--text-2xl); letter-spacing: 1px; color: var(--color-text-1); line-height: 1.1; }
 .id-meta { display: flex; gap: var(--space-2); margin-left: auto; flex-wrap: wrap; }
-.id-chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: var(--radius-full); font-size: var(--text-xs); font-weight: var(--weight-bold); font-variant-numeric: tabular-nums; }
+.id-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: var(--radius-full); font-size: var(--text-xs); font-weight: var(--weight-bold); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .id-chip.xp { color: var(--color-primary); background: var(--color-primary-soft); }
 .id-chip.streak { color: var(--color-warning); background: var(--color-warning-soft); }
 
 /* ── 2. Hero (calorie) ───────────────────────────────── */
+/* The remaining-calorie number is the dashboard's single dominant metric, so
+   it takes the metric scale; everything beside it (goal name, consumed/target)
+   is deliberately kept at supporting weight instead of competing with it. */
 .hero { display: flex; align-items: center; gap: var(--space-5); }
 .hero-ring { flex-shrink: 0; }
-.hero-num { font-family: var(--font-display); font-size: var(--text-3xl); letter-spacing: 1px; color: var(--color-text-1); line-height: 1; font-variant-numeric: tabular-nums; }
+.hero-num { font-family: var(--font-display); font-size: var(--text-metric-md); letter-spacing: 1px; color: var(--color-text-1); line-height: 1; font-variant-numeric: tabular-nums; }
 .hero-cap { font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-label); text-transform: uppercase; color: var(--color-text-3); }
 .hero-body { flex: 1; min-width: 0; }
-.hero-goal { font-size: var(--text-md); font-weight: var(--weight-semibold); color: var(--color-text-1); margin-bottom: 4px; }
+.hero-goal { font-size: var(--text-lg); font-weight: var(--weight-semibold); color: var(--color-text-1); margin: var(--space-1) 0 var(--space-2); }
 .hero-sub { font-size: var(--text-sm); color: var(--color-text-2); font-variant-numeric: tabular-nums; }
 
 /* ── 3. AI Next Action (accent) ──────────────────────── */
+/* The one primary call to action on the page. Everything else on Home is a
+   surface-2 card with a hairline border; this one keeps the primary tint so
+   there is never more than one obvious "do this next". */
 .next { display: flex; align-items: center; gap: var(--space-4); border: var(--border-w-1) solid var(--color-primary-glow); background: var(--color-primary-soft); }
-.next-icon { flex-shrink: 0; width: 46px; height: 46px; border-radius: var(--radius-md); display: flex; align-items: center; justify-content: center; font-size: 24px; background: var(--color-primary); }
 .next-body { flex: 1; min-width: 0; }
-.next-title { font-size: var(--text-md); font-weight: var(--weight-bold); color: var(--color-text-1); }
+.next-title { font-size: var(--text-lg); font-weight: var(--weight-bold); color: var(--color-text-1); }
 .next-sub { font-size: var(--text-sm); color: var(--color-text-2); margin-top: 2px; }
 .next-cta { flex-shrink: 0; }
 
 /* ── 4. Quick actions ────────────────────────────────── */
-.qa-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--space-3); }
-.qa-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 88px; padding: var(--space-4) var(--space-3); border-radius: var(--radius-md); border: var(--border-w-1) solid var(--color-border-1); background: var(--color-surface-1); color: var(--color-text-1); text-decoration: none; cursor: pointer; font-family: var(--font-body); transition: border-color var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-standard), background var(--duration-fast) var(--ease-standard); }
+.qa-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.qa-tile { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-2); min-height: 88px; min-width: 0; padding: var(--space-4) var(--space-3); border-radius: var(--radius-md); border: var(--border-w-1) solid var(--color-border-1); background: var(--color-surface-1); color: var(--color-text-1); text-decoration: none; cursor: pointer; font-family: var(--font-body); transition: border-color var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-standard), background var(--duration-fast) var(--ease-standard); }
 .qa-tile:hover { border-color: var(--color-border-2); transform: translateY(-2px); }
 .qa-tile:active { transform: scale(0.97); }
-.qa-ic { width: var(--icon-lg); height: var(--icon-lg); color: var(--color-primary); }
+.qa-tile:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.qa-ic { width: var(--icon-lg); height: var(--icon-lg); color: var(--color-primary); flex-shrink: 0; }
 .qa-ic svg { width: 100%; height: 100%; }
-.qa-lbl { font-size: var(--text-xs); font-weight: var(--weight-semibold); text-align: center; }
+/* --text-sm (12px), not --text-xs (11px): these are the labels a user reads to
+   choose an action, and 11px sat under the readable floor for a tap target. */
+.qa-lbl { font-size: var(--text-sm); font-weight: var(--weight-semibold); text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .qa-tile.disabled { cursor: default; opacity: var(--opacity-disabled); }
 .qa-tile.disabled:hover { border-color: var(--color-border-1); transform: none; }
 .qa-tile.disabled .qa-ic { color: var(--color-text-3); }
 .qa-soon { font-size: var(--text-2xs); font-weight: var(--weight-bold); letter-spacing: var(--tracking-wide); text-transform: uppercase; color: var(--color-text-3); }
 
 /* ── 5. Nutrition summary rings ──────────────────────── */
-.nutri-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-3); }
-.nutri-cell { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.nutri-val { font-size: var(--text-2xs); font-weight: var(--weight-bold); color: var(--color-text-1); font-variant-numeric: tabular-nums; }
-.nutri-lbl { font-size: var(--text-2xs); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-wide); text-transform: uppercase; color: var(--color-text-3); }
+/* Bento rows stretch every card to the tallest in the row, so the shorter of a
+   pair used to pin its content to the top and leave a tall empty band under it.
+   These two cards distribute instead: the caption stays at the top, the content
+   centres in whatever height the row hands them. */
+.qa-card, .nutri-card { display: flex; flex-direction: column; }
+.qa-card .qa-grid, .nutri-card .nutri-grid { flex: 1; align-content: center; }
+.nutri-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--space-3); }
+.nutri-cell { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); min-width: 0; }
+/* The macro numbers ARE the content of this card; 10px made the only data in
+   the block the smallest text on the page. The uppercase caption below stays
+   at 10px — it is a label, and the contrast between the two is the hierarchy. */
+.nutri-val { font-size: var(--text-sm); font-weight: var(--weight-bold); color: var(--color-text-1); font-variant-numeric: tabular-nums; }
+.nutri-lbl { font-size: var(--text-2xs); font-weight: var(--weight-semibold); letter-spacing: var(--tracking-wide); text-transform: uppercase; color: var(--color-text-3); text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 520px) {
+  .nutri-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 /* ── 6. Weight card ──────────────────────────────────── */
 .wt { display: flex; flex-direction: column; }
 .wt-display { display: flex; align-items: baseline; gap: 6px; }
-.wt-big { font-family: var(--font-display); font-size: var(--text-3xl); letter-spacing: 1px; color: var(--color-primary); line-height: 1; font-variant-numeric: tabular-nums; }
+.wt-big { font-family: var(--font-display); font-size: var(--text-metric-sm); letter-spacing: 1px; color: var(--color-primary); line-height: 1; font-variant-numeric: tabular-nums; }
 .wt-unit { font-size: var(--text-xl); color: var(--color-text-3); font-weight: var(--weight-light); }
 .wt-delta { font-size: var(--text-sm); font-weight: var(--weight-semibold); margin-top: 4px; min-height: 18px; display: flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .wt-delta.goal-ok { color: var(--color-primary); } .wt-delta.goal-warn { color: var(--color-danger); } .wt-delta.eq { color: var(--color-text-3); }
@@ -93,31 +113,45 @@
 .wm-val { font-family: var(--font-display); font-size: var(--text-xl); color: var(--color-primary); letter-spacing: 1px; margin-top: 3px; font-variant-numeric: tabular-nums; }
 
 /* ── 7. Achievements ─────────────────────────────────── */
-.ach { display: flex; flex-direction: column; gap: var(--space-3); }
-.ach-top { display: flex; align-items: center; gap: var(--space-3); }
-.ach-emblem { width: 48px; height: 48px; border-radius: var(--radius-md); flex-shrink: 0; background: linear-gradient(135deg, var(--color-primary), var(--color-primary-strong)); display: flex; align-items: center; justify-content: center; font-size: 24px; }
+.ach { display: flex; flex-direction: column; gap: var(--space-3); height: 100%; }
+.ach-top { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+/* Box comes from .icon-tile (components.css); the gradient is dropped — a
+   two-stop gradient behind a monochrome glyph added no information and made
+   this the only gradient-filled surface on the dashboard. */
+.ach-emblem { width: 48px; height: 48px; }
 .ach-body { flex: 1; min-width: 0; }
-.ach-title { font-family: var(--font-display); font-size: var(--text-xl); color: var(--color-primary); letter-spacing: 1px; line-height: 1; }
-.ach-xp { font-size: var(--text-sm); color: var(--color-text-2); margin-top: 4px; font-variant-numeric: tabular-nums; }
-.ach-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-.ach-streak { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--color-warning); font-variant-numeric: tabular-nums; }
-.ach-link { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--color-primary); text-decoration: none; }
+.ach-title { font-family: var(--font-display); font-size: var(--text-metric-sm); color: var(--color-primary); letter-spacing: 1px; line-height: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ach-xp { font-size: var(--text-sm); color: var(--color-text-2); margin-top: var(--space-2); font-variant-numeric: tabular-nums; }
+.ach-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: auto; padding-top: var(--space-1); min-width: 0; }
+.ach-streak { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--color-warning); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ach-link { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--color-primary); text-decoration: none; white-space: nowrap; }
 .ach-link:hover { color: var(--color-primary-strong); }
 .ach-xp .bonus-active { color: var(--color-warning); font-weight: var(--weight-bold); }
 
 /* ── 8. AI Tip ───────────────────────────────────────── */
 .tip { display: flex; flex-direction: column; }
-.tip-icon { font-size: 28px; line-height: 1; display: block; margin-bottom: var(--space-3); }
-.tip-text { font-size: var(--text-md); color: var(--color-text-2); line-height: var(--leading-relaxed); flex: 1; }
+/* Box comes from .icon-tile.icon-tile-soft; the tip is context, not an action,
+   so the tile is tinted rather than filled. */
+.tip-icon { margin-bottom: var(--space-3); }
+.tip-text { font-size: var(--text-base); color: var(--color-text-2); line-height: var(--leading-relaxed); flex: 1; max-width: 65ch; }
 .tip-text strong { color: var(--color-primary); font-weight: var(--weight-semibold); }
-.tip-src { font-size: var(--text-xs); color: var(--color-text-3); display: flex; align-items: center; gap: 8px; margin-top: var(--space-3); }
+.tip-src { font-size: var(--text-xs); color: var(--color-text-3); display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
 .tip-src::before { content: ''; width: 18px; height: 1px; background: var(--color-border-2); }
 .tip-nav { display: flex; align-items: center; justify-content: space-between; padding-top: var(--space-3); margin-top: auto; }
-.tip-btn { background: none; border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-sm); padding: 6px 13px; font-size: var(--text-xs); color: var(--color-text-2); cursor: pointer; transition: color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard); font-family: var(--font-body); }
-.tip-btn:hover { color: var(--color-primary); border-color: var(--color-primary-glow); }
-.tip-dots { display: flex; gap: 5px; }
-.tip-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--color-border-2); transition: background var(--duration-fast), transform var(--duration-fast); cursor: pointer; }
-.tip-dot.on { background: var(--color-primary); transform: scale(1.3); }
+/* min-height 44px: these are the tip carousel's only controls and they were
+   ~27px tall — below the platform touch minimum on the surface most likely to
+   be used on a phone. */
+.tip-btn { display: inline-flex; align-items: center; min-height: 44px; background: none; border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-sm); padding: 0 var(--space-4); font-size: var(--text-sm); font-weight: var(--weight-medium); color: var(--color-text-2); cursor: pointer; transition: color var(--duration-fast) var(--ease-standard), border-color var(--duration-fast) var(--ease-standard), background var(--duration-fast) var(--ease-standard); font-family: var(--font-body); }
+.tip-btn:hover { color: var(--color-primary); border-color: var(--color-primary-glow); background: var(--color-primary-soft); }
+.tip-btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.tip-dots { display: flex; gap: 2px; }
+/* Visible mark stays 5px (::after). The button is 44×44 so it meets the
+   platform touch minimum; negative margin keeps flex occupancy at the previous
+   24px so five dots still fit between the prev/next controls on a 390px card. */
+.tip-dot { position: relative; width: 44px; height: 44px; margin: -10px; padding: 0; border: 0; background: none; cursor: pointer; appearance: none; -webkit-appearance: none; flex-shrink: 0; }
+.tip-dot:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -10px; border-radius: 50%; }
+.tip-dot::after { content: ''; position: absolute; top: 50%; left: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: var(--color-border-2); transition: background var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-standard); }
+.tip-dot.on::after { background: var(--color-primary); transform: scale(1.4); }
 #tip-body { min-height: 88px; overflow: hidden; position: relative; }
 .tip-slide { will-change: transform; }
 .tip-progress { height: 2px; background: var(--color-surface-3); border-radius: 1px; margin-top: var(--space-3); overflow: hidden; }
@@ -130,6 +164,23 @@
 @media (min-width: 768px) {
   .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-5); }
   .dash-id, .hero, .next, .tip { grid-column: span 2; }
+  .hero { gap: var(--space-6); }
+  .tip-slide {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--space-4);
+    align-items: start;
+  }
+  .tip-icon { grid-row: 1 / span 2; margin-bottom: 0; }
+}
+
+/* ── Responsive: ≥1024px pairs the metric with the action ─────────────── */
+/* Above 1024px both the calorie hero and the next-action card were full-width
+   bands with a mostly empty right half, and stacking them pushed everything
+   below the fold. Side by side they read as one top band: "where you are" next
+   to "what to do", which is the order the page is meant to be read in. */
+@media (min-width: 1024px) {
+  .hero, .next { grid-column: span 1; }
 }
 
 /* ── Reduced motion ──────────────────────────────────── */

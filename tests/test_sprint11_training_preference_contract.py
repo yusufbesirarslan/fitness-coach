@@ -16,6 +16,7 @@ from app.services.training_generation.capability import (
     STATUS_UNSUPPORTED,
     evaluate_capability,
 )
+from app.services.exercise_catalog import ExerciseContext
 from app.services.training_generation.classifier_service import classify_user
 from app.services.training_generation.feature_extractor import parse_preferences
 from app.services.training_generation.models import (
@@ -36,6 +37,9 @@ from app.services.training_generation.program_generator import (
     STYLE_ALIASES,
     build_program_context,
     canonical_style,
+)
+from app.services.training_generation.exercise_context_token import (
+    sign_exercise_context,
 )
 from app.services.training_generation.prompt_builder import build_training_prompt
 from app.services.training_generation.response_validator import (
@@ -73,6 +77,18 @@ OFFICIAL_UI_DAYS = (3, 4, 5, 6)
 OFFICIAL_UI_DURATIONS = (30, 45, 60, 90)
 
 
+@pytest.fixture
+def plan_save_token(app):
+    """Sprint 11 PR4 Task 4: saving a plan now requires the signed equipment
+    context the generate call handed the client. Same idiom as
+    tests/test_training_routes.py::plan_save_token."""
+    def _make(user_id, equipment="spor_salonu"):
+        return sign_exercise_context(
+            ExerciseContext(equipment_context=equipment),
+            app.config["SECRET_KEY"], user_id)
+    return _make
+
+
 def _features(**overrides):
     data = dict(
         age=30,
@@ -108,10 +124,44 @@ def _features(**overrides):
     return UserTrainingFeatures(**data)
 
 
-def _seven_day_plan(training_days=3, exercise_name="Invented Laser Squat 9000"):
+INVENTED_EXERCISE_NAME = "Invented Laser Squat 9000"
+# Every one of these is an active catalog entry whose only equipment is
+# "bodyweight", so the same fill set is compatible with "ev", "minimal" AND
+# "spor_salonu" — one set serves every equipment context, and none of them is
+# a cardio movement, so none of them is constrained to a kardiyo day.
+CANONICAL_FILL_EXERCISES = ("Push-Up", "Bodyweight Squat", "Plank", "Inverted Row")
+
+
+def _canonical_exercise_names(exercise_name):
+    """Four real catalog names, keeping a deliberately-chosen first name."""
+    chosen = None if exercise_name == INVENTED_EXERCISE_NAME else exercise_name
+    fills = [name for name in CANONICAL_FILL_EXERCISES if name != chosen]
+    names = ([chosen] if chosen else []) + fills
+    return names[:4]
+
+
+def _seven_day_plan(
+        training_days=3, exercise_name=INVENTED_EXERCISE_NAME, *, canonical=False):
+    """Seven-day plan fixture, invented-name by default.
+
+    The default ``exercise_name`` is deliberately NOT a catalog name, and the
+    numbered variants it fills the day with are not catalog names either:
+    several tests in this file exist to prove an unknown name is rejected, or
+    that it never reaches exercise resolution at all, and they depend on that.
+
+    ``canonical=True`` is the opt-in for tests whose subject is something
+    else entirely (prompt content, persistence, journal semantics) and that
+    therefore need a plan generation and save will actually accept. It builds
+    the day from real catalog names, keeping a deliberately-chosen
+    ``exercise_name`` in the first slot.
+    """
     program = []
     for index, day in enumerate(WEEKDAYS):
         if index < training_days:
+            if canonical:
+                names = _canonical_exercise_names(exercise_name)
+            else:
+                names = [exercise_name] + [f"{exercise_name} {n}" for n in (1, 2, 3)]
             program.append({
                 "gun": day,
                 "tip": "antrenman",
@@ -120,13 +170,13 @@ def _seven_day_plan(training_days=3, exercise_name="Invented Laser Squat 9000"):
                 "tahmini_kalori": 300,
                 "egzersizler": [
                     {
-                        "isim": exercise_name if n == 0 else f"{exercise_name} {n}",
+                        "isim": name,
                         "set": 3,
                         "tekrar": "8-12",
                         "dinlenme": "90 sn",
                         "not": "",
                     }
-                    for n in range(4)
+                    for name in names
                 ],
             })
         else:
@@ -565,7 +615,7 @@ def test_supported_request_sends_canonical_style_and_focus_to_prompt(
 
     def fake_chat(**kwargs):
         captured["prompt"] = kwargs["messages"][0]["content"]
-        return __import__("json").dumps(_seven_day_plan(3, "Goblet Squat"))
+        return __import__("json").dumps(_seven_day_plan(3, "Goblet Squat", canonical=True))
 
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
     response = client.post("/training-plan", json={
@@ -594,7 +644,7 @@ def test_supported_powerlifting_reaches_generation(client, auth_user, monkeypatc
 
     def fake_chat(**kwargs):
         captured["prompt"] = kwargs["messages"][0]["content"]
-        return __import__("json").dumps(_seven_day_plan(3, "Back Squat"))
+        return __import__("json").dumps(_seven_day_plan(3, "Back Squat", canonical=True))
 
     monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
     body = client.post("/training-plan", json={
@@ -621,6 +671,76 @@ def test_days_duration_equipment_survive_normalization():
     assert "90" in prompt
     assert "minimal" in prompt
     assert "yag_yakimi" in prompt
+
+
+# ── Equipment-filtered prompt vocabulary (PR4 Task 2) ────────────────────────
+
+
+def _captured_supported_prompt(client, auth_user, monkeypatch, **overrides):
+    """POST a guaranteed-supported request and capture the provider prompt."""
+    _session(auth_user)
+    captured = {}
+
+    def fake_chat(**kwargs):
+        captured["prompt"] = kwargs["messages"][0]["content"]
+        return __import__("json").dumps(_seven_day_plan(overrides.get("gun_sayisi", 3), canonical=True))
+
+    monkeypatch.setattr(training_bp, "_heavy_chat", fake_chat)
+    payload = {
+        "gun_sayisi": 3,
+        "sure": 45,
+        "ekipman": "spor_salonu",
+        "antrenman_tarzi": "genel",
+        "odak_hedef": "genel",
+        "odak": "tum_vucut",
+    }
+    payload.update(overrides)
+    response = client.post("/training-plan", json=payload)
+    assert response.status_code == 200, response.get_json()
+    return captured["prompt"]
+
+
+def test_home_prompt_lists_bodyweight_but_not_barbell_exercises(
+        client, auth_user, monkeypatch):
+    prompt = _captured_supported_prompt(client, auth_user, monkeypatch, ekipman="ev")
+    assert "Push-Up" in prompt
+    assert "Barbell Back Squat" not in prompt
+
+
+def test_minimal_prompt_lists_dumbbell_and_band_but_not_machine(
+        client, auth_user, monkeypatch):
+    # NOTE: "Goblet Squat" is deliberately avoided here — it also appears in
+    # prompt_builder's static JSON FORMAT example, which would make the
+    # assertion pass even without the vocabulary block.
+    prompt = _captured_supported_prompt(client, auth_user, monkeypatch, ekipman="minimal")
+    assert "Dumbbell Row" in prompt
+    assert "Lat Pulldown" not in prompt
+
+
+def test_gym_prompt_lists_every_equipment_tier(client, auth_user, monkeypatch):
+    prompt = _captured_supported_prompt(client, auth_user, monkeypatch, ekipman="spor_salonu")
+    assert "Push-Up" in prompt
+    assert "Goblet Squat" in prompt
+    assert "Barbell Back Squat" in prompt
+    assert "Lat Pulldown" in prompt
+
+
+def test_prompt_tells_the_provider_cardio_belongs_only_on_kardiyo_days(
+        client, auth_user, monkeypatch):
+    """The vocabulary block hands the provider cardio names mixed in with
+    everything else. Since canonicalization now fails a plan closed when a
+    cardio-movement entry lands on a non-kardiyo day, the rule the provider
+    is judged against has to be stated in the prompt."""
+    prompt = _captured_supported_prompt(client, auth_user, monkeypatch, ekipman="ev")
+    assert 'tip="kardiyo"' in prompt
+    assert "Kardiyo egzersizleri" in prompt
+
+
+def test_direct_prompt_builder_call_without_vocabulary_omits_exercise_section():
+    """Callers that don't pass exercise_vocabulary (app/prompts/workout.py,
+    tests/test_i18n.py, ...) must see byte-identical prompts to before Task 2."""
+    prompt, _prefs, _context = _prompt_for("genel", ekipman="ev")
+    assert "EXERCISE VOCABULARY" not in prompt
 
 
 # ── odak_hedef cannot be accepted and ignored ────────────────────────────────
@@ -690,27 +810,32 @@ def test_day_count_mismatch_does_not_retry_and_is_semantic(
 
 
 def test_save_replaces_plan_without_journal_or_typed_generation_command(
-        client, auth_user):
+        client, auth_user, plan_save_token):
+    token = plan_save_token(auth_user.id)
     first = client.post("/training-plan/save", json={
-        "plan": _seven_day_plan(3, "Squat")["program"],
+        "plan": _seven_day_plan(3, "Squat", canonical=True)["program"],
         "score": 7.0,
+        "exercise_context_token": token,
     })
-    assert first.status_code == 200
+    assert first.status_code == 200, first.get_json()
     first_row = TrainingPlan.query.filter_by(user_id=auth_user.id).one()
     first_lineage = first_row.lineage_id
     assert first_row.mutation_version == 0
 
     second = client.post("/training-plan/save", json={
-        "plan": _seven_day_plan(3, "Deadlift")["program"],
+        "plan": _seven_day_plan(3, "Deadlift", canonical=True)["program"],
         "score": 8.0,
+        "exercise_context_token": token,
     })
-    assert second.status_code == 200
+    assert second.status_code == 200, second.get_json()
     rows = TrainingPlan.query.filter_by(user_id=auth_user.id).all()
     assert len(rows) == 1
     assert rows[0].lineage_id != first_lineage
     assert rows[0].mutation_version == 0
     assert PlanMutationRecord.query.filter_by(user_id=auth_user.id).count() == 0
-    assert "Deadlift" in rows[0].plan_data
+    # "Deadlift" is a declared alias; canonicalization persists the catalog's
+    # canonical name, which still contains it as a substring.
+    assert "Barbell Deadlift" in rows[0].plan_data
 
 
 def test_rejected_generate_cannot_be_saved_as_success(client, auth_user, monkeypatch):

@@ -187,7 +187,9 @@ def published_plan_tool_defs(user_id=None):
 
     Fail-closed around a pending proposal: CONFIRM exposes only confirm,
     CANCEL only cancel, NONE none of the plan-write family. No pending
-    restores the original six command tools. Confirmation tools are never
+    restores the original six command tools, except a bare confirm/cancel
+    turn with nothing pending publishes none of them — a later "yes"
+    must not start a new mutation. Confirmation tools are never
     published when there is nothing to confirm.
     """
     if not plan_mutation_tools_enabled():
@@ -197,6 +199,9 @@ def published_plan_tool_defs(user_id=None):
     except Exception:
         return ()
     if pending is None:
+        intent = current_confirmation_intent()
+        if intent in (CONFIRM, CANCEL):
+            return ()
         return PLAN_MUTATION_TOOL_DEFS
     if new_proposal_created_this_turn():
         # Staged this turn: the user has not seen it yet. Confirm/cancel

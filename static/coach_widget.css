@@ -5,8 +5,8 @@
    style-src-elem nonce zorunlu kılınınca (app/hooks.py) nonce'suz inline <style>
    bloklandığı için widget stilsiz kalıp sayfa dibine düşüyordu. */
 
-#cw-root{position:fixed;bottom:calc(var(--action-bar-h,68px) + 15px);right:20px;z-index:9998;display:flex;flex-direction:column;align-items:flex-end;gap:12px;pointer-events:none}
-@media(min-width:1024px){#cw-root{bottom:36px;right:36px}}
+#cw-root{position:fixed;bottom:calc(var(--action-bar-h,68px) + var(--fab-rail-inset,15px));right:20px;z-index:9998;display:flex;flex-direction:column;align-items:flex-end;gap:12px;pointer-events:none}
+@media(min-width:1024px){#cw-root{bottom:var(--fab-rail-inset,36px);right:36px}}
 
 #cw-window{position:relative;width:360px;height:500px;background:var(--surface-2);border:1px solid var(--color-border-solid);border-radius:16px;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 25px 60px var(--shadow-color-4),0 0 0 1px var(--color-primary-a06);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);pointer-events:none;opacity:0;transform:translateY(14px) scale(.96);transition:opacity .22s cubic-bezier(.4,0,.2,1),transform .22s cubic-bezier(.4,0,.2,1)}
 #cw-window.cw-open{opacity:1;transform:translateY(0) scale(1);pointer-events:all}
@@ -14,7 +14,10 @@
 
 #cw-header{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--color-border-solid);flex-shrink:0;background:var(--surface-2)}
 #cw-hleft{display:flex;align-items:center;gap:10px}
-#cw-avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--color-primary),var(--color-chat-avatar-accent));display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;box-shadow:0 0 12px var(--color-primary-glow)}
+#cw-avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,var(--color-primary),var(--color-chat-avatar-accent));display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 0 12px var(--color-primary-glow)}
+/* PR2: the avatar was a 🏋️ emoji — the last full-colour glyph acting as an
+   interface icon on the four core surfaces. Same stroke family as the rest. */
+#cw-avatar svg{width:var(--icon-md);height:var(--icon-md);stroke:var(--color-on-primary);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 #cw-htitle{font-family:var(--font-body);font-size:14px;font-weight:600;color:var(--color-text-1);line-height:1}
 #cw-close{width:30px;height:30px;border-radius:8px;background:var(--overlay-4);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background .15s;color:var(--color-text-3);flex-shrink:0}
 #cw-close:hover{background:var(--overlay-10);color:var(--color-text-1)}
@@ -110,7 +113,7 @@
 #cw-scan-hint{font-family:var(--font-body);font-size:12px;color:var(--color-text-3);text-align:center;margin-top:12px}
 #cw-scan-status{font-family:var(--font-body);font-size:12px;text-align:center;margin-top:8px;color:var(--color-primary);min-height:16px}
 
-#cw-fab{width:56px;height:56px;border-radius:50%;background:var(--color-primary);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px var(--color-primary-a38),0 2px 8px var(--shadow-color-2);transition:transform .2s ease,box-shadow .2s ease,opacity .2s ease;position:relative;flex-shrink:0;pointer-events:all}
+#cw-fab{width:var(--fab-btn);height:var(--fab-btn);border-radius:50%;background:var(--color-primary);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px var(--color-primary-a38),0 2px 8px var(--shadow-color-2);transition:transform .2s ease,box-shadow .2s ease,opacity .2s ease;position:relative;flex-shrink:0;pointer-events:all}
 #cw-fab:hover{transform:scale(1.08);box-shadow:0 6px 28px var(--color-primary-a50),0 4px 12px var(--shadow-color-1)}
 #cw-fab svg{width:24px;height:24px;color:var(--color-on-primary)}
 #cw-fab.cw-hidden{opacity:0;pointer-events:none;transform:scale(.8)}
@@ -120,6 +123,7 @@
 
 #cw-notify{position:fixed;bottom:calc(var(--action-bar-h,68px) + 75px);right:20px;background:var(--surface-2);border:1px solid var(--color-primary-a20);border-radius:10px;padding:10px 15px;font-family:var(--font-body);font-size:13px;color:var(--color-text-1);box-shadow:0 4px 20px var(--shadow-color-2);z-index:9999;opacity:0;transform:translateY(8px);transition:opacity .25s ease,transform .25s ease;pointer-events:none;display:flex;align-items:center;gap:9px;max-width:250px}
 #cw-notify.cw-show{opacity:1;transform:translateY(0)}
+#cw-notify .cw-notify-ic{width:var(--icon-sm);height:var(--icon-sm);flex-shrink:0;stroke:var(--color-primary);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 @media(min-width:1024px){#cw-notify{bottom:96px;right:36px}}
 
 /* ── WS2/WS10: akış (streaming) UI ── */

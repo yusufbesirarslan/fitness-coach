@@ -82,6 +82,19 @@ GENERIC_SHAPES = ("operation", "op", "action", "command", "payload", "patch",
                   "path", "pointer", "field", "column", "attribute", "value",
                   "data", "json", "query", "sql", "expression")
 
+#: Sprint 11 PR4 Task 5. Exercise IDENTITY is the catalog's, and the catalog is
+#: the server's. The model may name an exercise the way a user would — that is
+#: what ``exercise``/``replacement`` are for — but a property that let it supply
+#: a catalog ID, an equipment context or a catalog version would let it declare
+#: the very facts this PR exists to take away from it. ``exercise_id`` in
+#: particular would be a claim the boundary would then have to re-verify, which
+#: is a strictly worse contract than never accepting it.
+CATALOG_OWNED = (
+    "exercise_id", "exerciseid", "catalog", "catalog_version",
+    "equipment", "equipment_context", "exercise_context",
+    "cardio_type", "movement", "canonical_name", "alias", "aliases",
+)
+
 
 @pytest.mark.parametrize("definition", _ALL_PLAN_TOOL_DEFS,
                          ids=lambda d: d["name"])
@@ -93,6 +106,18 @@ def test_no_tool_property_names_a_server_owned_concept(definition):
     ]
 
     assert not named, f"{definition['name']} exposes server-owned: {named}"
+
+
+@pytest.mark.parametrize("definition", _ALL_PLAN_TOOL_DEFS,
+                         ids=lambda d: d["name"])
+def test_no_tool_property_names_a_catalog_owned_concept(definition):
+    named = [
+        dotted for dotted, name, _sub
+        in _walk_properties(definition["parameters"])
+        if name.lower() in CATALOG_OWNED
+    ]
+
+    assert not named, f"{definition['name']} exposes catalog-owned: {named}"
 
 
 @pytest.mark.parametrize("definition", _ALL_PLAN_TOOL_DEFS,

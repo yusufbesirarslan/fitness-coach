@@ -14,21 +14,52 @@ def _naive_utc(value: str) -> datetime:
     return datetime.fromisoformat(value).astimezone(UTC).replace(tzinfo=None)
 
 
+def _exercise(name: str, sets: int, reps: str, rest: str = "90 sn") -> dict:
+    return {"isim": name, "set": sets, "tekrar": reps, "dinlenme": rest, "not": ""}
+
+
+def _day(gun: str, tip: str, odak: str, sure_dk: int, kcal: int, exercises: list[dict]) -> dict:
+    return {
+        "gun": gun, "tip": tip, "odak": odak, "sure_dk": sure_dk,
+        "tahmini_kalori": kcal, "egzersizler": exercises,
+    }
+
+
 def _training_program(rest_day: bool = False) -> list[dict]:
-    monday = (
-        {"gun": "Pazartesi", "tip": "dinlenme", "odak": "Aktif dinlenme", "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []}
-        if rest_day else
-        {"gun": "Pazartesi", "tip": "kuvvet", "odak": "Üst Vücut", "sure_dk": 50, "tahmini_kalori": 360, "egzersizler": [{"isim": "Bench Press", "set": 4, "tekrar": "8"}, {"isim": "Row", "set": 4, "tekrar": "10"}]}
+    """Canonical 7-day program: VALID_TIPS + required exercise keys.
+
+    Validated through production ``validate_plan_structure`` so the audit
+    fixture cannot drift back to the pre-contract vocabulary (``kuvvet``,
+    missing ``dinlenme``/``not``) that made ``/training/bootstrap`` 500.
+    """
+    from app.services.training_generation.response_validator import (
+        validate_plan_structure,
     )
-    return [
+
+    monday = (
+        _day("Pazartesi", "dinlenme", "Aktif dinlenme", 0, 0, [])
+        if rest_day else
+        _day("Pazartesi", "antrenman", "Üst Vücut", 50, 360, [
+            _exercise("Bench Press", 4, "8"),
+            _exercise("Row", 4, "10"),
+        ])
+    )
+    program = [
         monday,
-        {"gun": "Salı", "tip": "dinlenme", "odak": "Dinlenme", "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
-        {"gun": "Çarşamba", "tip": "kuvvet", "odak": "Alt Vücut", "sure_dk": 55, "tahmini_kalori": 410, "egzersizler": [{"isim": "Squat", "set": 4, "tekrar": "8"}]},
-        {"gun": "Perşembe", "tip": "dinlenme", "odak": "Dinlenme", "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
-        {"gun": "Cuma", "tip": "kuvvet", "odak": "Tüm Vücut", "sure_dk": 45, "tahmini_kalori": 330, "egzersizler": [{"isim": "Deadlift", "set": 3, "tekrar": "5"}]},
-        {"gun": "Cumartesi", "tip": "kardiyo", "odak": "Kardiyo", "sure_dk": 30, "tahmini_kalori": 280, "egzersizler": [{"isim": "Koşu", "set": 1, "tekrar": "30 dk"}]},
-        {"gun": "Pazar", "tip": "dinlenme", "odak": "Dinlenme", "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+        _day("Salı", "dinlenme", "Dinlenme", 0, 0, []),
+        _day("Çarşamba", "antrenman", "Alt Vücut", 55, 410, [
+            _exercise("Squat", 4, "8"),
+        ]),
+        _day("Perşembe", "dinlenme", "Dinlenme", 0, 0, []),
+        _day("Cuma", "antrenman", "Tüm Vücut", 45, 330, [
+            _exercise("Deadlift", 3, "5"),
+        ]),
+        _day("Cumartesi", "kardiyo", "Kardiyo", 30, 280, [
+            _exercise("Koşu", 1, "30 dk", rest="60 sn"),
+        ]),
+        _day("Pazar", "dinlenme", "Dinlenme", 0, 0, []),
     ]
+    return validate_plan_structure(program)["program"]
 
 
 def seed_all(app) -> dict[str, int]:

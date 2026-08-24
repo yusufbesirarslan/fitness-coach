@@ -346,7 +346,7 @@ def update_streak():
         award_xp(user.id, streak * 2)
     # streak tiebreak'i değişti → commit sonrası Redis sync (after_commit).
     # Milestone yoksa award_xp dirty işaretlemez; burada elle işaretliyoruz.
-    _mark_lb_dirty(user.id)
+    _mark_lb_dirty(user.id, user)
     # Savunma derinliği (triage #2): çıplak commit'i koru. record_event savepoint
     # ile poison'ı önler ama başka bir nadir DB arızası (kilit çakışması) burada
     # PendingRollbackError verirse, çıplak commit istek için 500 üretirdi. Her

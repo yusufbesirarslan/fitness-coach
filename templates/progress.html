@@ -21,7 +21,7 @@
 <main class="main-content">
 
     <div class="page-hdr">
-        <h1>{{ t('progress.h1_a') }}<br><span>{{ t('progress.h1_b') }}</span></h1>
+        <h1>{{ t('progress.h1_a') }} <span>{{ t('progress.h1_b') }}</span></h1>
         <p>{{ t('progress.page_sub') }}</p>
     </div>
 
@@ -221,7 +221,7 @@
 
         <div class="feedback-card" id="feedback-card">
             <div class="feedback-header">
-                <div class="feedback-avatar">🏋️</div>
+                <div class="feedback-avatar" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6.5 6.5h11M6.5 17.5h11M4 9v6M20 9v6M8 8v8M16 8v8"/></svg></div>
                 <div class="feedback-title">{{ t('progress.coach_feedback') }}</div>
             </div>
             <div class="feedback-text" id="feedback-text"></div>

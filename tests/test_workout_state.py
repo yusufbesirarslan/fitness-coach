@@ -572,3 +572,95 @@ def test_api_status_stable_across_feature_flags(client, auth_user, monkeypatch, 
     body = client.get("/workout/status").get_json()
     assert body["completed"] is True
     assert body["state"]["primary_state"] == m.PRIMARY_COMPLETED
+
+
+# ── Sprint 11 PR4: legacy plans keep resolving; identity never reaches clients ─
+def _pr4_program(today, exercises):
+    """Today's week saved through the PR4 boundary: IDs plus the context block."""
+    today_name = WEEKDAYS[today.weekday()]
+    days = []
+    for name in WEEKDAYS:
+        if name == today_name:
+            days.append({
+                "gun": name, "tip": "antrenman", "odak": "Full Body",
+                "sure_dk": 45, "tahmini_kalori": 320,
+                "egzersizler": [
+                    {"isim": isim, "set": 3, "tekrar": "8-12",
+                     "dinlenme": "90 sn", "not": "", "exercise_id": exercise_id}
+                    for isim, exercise_id in exercises
+                ],
+            })
+        else:
+            days.append({"gun": name, "tip": "dinlenme", "odak": "",
+                         "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []})
+    return {
+        "program": days,
+        "haftalik_ozet": {},
+        "exercise_context": {
+            "equipment_context": "spor_salonu", "cardio_type": "yok",
+            "style": "general_fitness", "catalog_version": 1,
+        },
+    }
+
+
+@pytest.mark.parametrize("wrap", [True, False])
+def test_legacy_name_only_plan_still_resolves_workout_state(app, make_user, wrap):
+    """Bare-list and wrapped pre-PR4 rows both keep producing a real state.
+
+    PR4 adds no migration and no backfill, so most stored rows are still
+    name-only. A reader that needed ``exercise_id`` would turn every one of
+    them into ``needs_attention`` on deploy day.
+    """
+    program = _program(TODAY, "antrenman")["program"]
+    payload = {"program": program, "haftalik_ozet": {}} if wrap else program
+
+    user = make_user(f"legacy_state_{wrap}")
+    _save_plan(user.id, raw=json.dumps(payload, ensure_ascii=False))
+
+    snap = resolve_workout_state(user.id, today=TODAY)
+    assert snap.primary_state == m.PRIMARY_SCHEDULED_NOT_STARTED
+    assert snap.action == m.ACTION_START
+    assert snap.anomaly is None
+
+
+def test_canonical_plan_resolves_to_the_same_state_as_its_legacy_twin(
+        app, make_user):
+    """Storing identity changed the row, not the state contract."""
+    legacy_user = make_user("state_legacy_twin")
+    _save_plan(legacy_user.id, "antrenman")
+
+    canonical_user = make_user("state_canonical_twin")
+    _save_plan(canonical_user.id, raw=json.dumps(
+        _pr4_program(TODAY, (("Barbell Back Squat", "ex_barbell_back_squat"),)),
+        ensure_ascii=False))
+
+    legacy = resolve_workout_state(legacy_user.id, today=TODAY).to_dict()
+    canonical = resolve_workout_state(canonical_user.id, today=TODAY).to_dict()
+    assert legacy == canonical
+
+
+def test_status_endpoint_never_emits_exercise_id(client, auth_user):
+    """``exercise_id`` is server-side authority, not a client-visible field."""
+    _save_plan(auth_user.id, raw=json.dumps(
+        _pr4_program(app_today(), (("Barbell Back Squat", "ex_barbell_back_squat"),)),
+        ensure_ascii=False))
+
+    body = client.get("/workout/status").get_json()
+    assert body["state"]["primary_state"] == m.PRIMARY_SCHEDULED_NOT_STARTED
+    assert "exercise_id" not in json.dumps(body)
+    assert "exercise_context" not in json.dumps(body)
+
+
+def test_bootstrap_today_plan_projects_a_canonical_plan_without_identity(
+        client, auth_user):
+    """The bounded ``/training/bootstrap`` day content also omits identity."""
+    _save_plan(auth_user.id, raw=json.dumps(
+        _pr4_program(app_today(), (("Barbell Back Squat", "ex_barbell_back_squat"),)),
+        ensure_ascii=False))
+
+    body = client.get("/training/bootstrap").get_json()
+    today_plan = body["today_plan"]
+    assert today_plan is not None
+    assert [ex["isim"] for ex in today_plan["egzersizler"]] == ["Barbell Back Squat"]
+    assert all(set(ex) == {"isim", "set", "tekrar", "dinlenme", "not"}
+               for ex in today_plan["egzersizler"])

@@ -433,7 +433,9 @@ def test_the_openai_loop_applies_one_change_for_one_intent(
             planned_user.id, "Pazartesi bench yerine machine press koy",
             "", client_history=[])
 
-    assert answer == "tamam"
+    assert "machine press" in answer.lower()
+    assert "bench press" in answer.lower()
+    assert "confirm" not in answer.lower()
     assert names(planned_user.id) == ["Machine Press", "Shoulder Press"]
     assert len(journal(planned_user.id)) == 1
 
@@ -499,10 +501,10 @@ def test_a_provider_fallback_does_not_repeat_a_change_that_already_ran(
             planned_user.id, "bench yerine machine press", "",
             client_history=[], language="tr")
 
-    # The degraded turn must not say "I couldn't complete that": the change IS
-    # committed, and that sentence asks the user to retry — a new request, a
-    # new turn identity, a new operation key, the same exercise added twice.
-    assert answer == ai_coach._COACH_FALLBACKS["tr"]["tool_plan_saved"]
+    # APPLY_NOW short-circuits on the tool result: the user hears that the
+    # change is already saved, the next provider call never runs, and a
+    # "try again" fallback cannot ask them to repeat the same mutation.
+    assert "machine press" in answer.lower()
     assert answer != ai_coach._COACH_FALLBACKS["tr"]["tool"]
     assert openai.calls == []                     # no second provider ran
     assert names(planned_user.id) == ["Machine Press", "Shoulder Press"]
@@ -543,7 +545,8 @@ def test_a_fallback_before_any_tool_ran_applies_the_change_once(
         answer = ai_coach._run_coach_conversation(
             planned_user.id, "cable fly ekle", "", client_history=[])
 
-    assert answer == "tamam"
+    assert "cable fly" in answer.lower()
+    assert "confirm" not in answer.lower()
     assert names(planned_user.id).count("Cable Fly") == 1
     assert len(journal(planned_user.id)) == 1
 
@@ -619,7 +622,7 @@ def test_the_plan_saved_wording_is_still_an_error_fallback(app):
 
 def test_the_streaming_path_reports_a_saved_plan_change_too(
         app, planned_user, tools_on, monkeypatch):
-    """§40 parity: the honest wording cannot exist only in blocking mode."""
+    """§40 parity: streaming reports the saved APPLY_NOW change, not a retry."""
     from types import SimpleNamespace
 
     from app.observability import assign_request_id
@@ -663,9 +666,11 @@ def test_the_streaming_path_reports_a_saved_plan_change_too(
             planned_user.id, "cable fly ekle", "", [], "tr"))
 
     error = [e for e in events if e["type"] == "error"]
-    assert error, events
-    assert error[-1]["key"] == "coach.reply_failed_plan_saved"
-    assert error[-1]["work_performed"] is True
+    assert error == []
+    done = [e for e in events if e["type"] == "done"]
+    assert done
+    assert "cable fly" in done[-1]["text"].lower()
+    assert done[-1]["provider"] == "bedrock"
     assert names(planned_user.id).count("Cable Fly") == 1
     assert len(journal(planned_user.id)) == 1
 
@@ -1111,3 +1116,197 @@ def test_the_existing_coach_tools_are_unaffected_by_the_flag(
         json.dumps({"food_query": "100g tavuk"})))
 
     assert staged["status"] == "staged"
+
+
+# ── Sprint 11 PR4 Task 5: the Coach door obeys the catalog too ───────────────
+#
+# The whole claim of PR4 is that the catalog is the single authority on exercise
+# identity *no matter which door a write comes through*. Task 4 shut the save
+# door. These tests drive the Adaptive Coaching door the way production drives
+# it — the real executor, the real flag, the real turn identity — and check the
+# database afterwards, not the domain layer's return value.
+
+def _canonical_program():
+    """A plan carrying the ``exercise_context`` the Task 4 save boundary writes."""
+    return {
+        "program": [
+            {"gun": "Pazartesi", "tip": "antrenman", "odak": "Üst Vücut",
+             "sure_dk": 45, "tahmini_kalori": 320, "egzersizler": [
+                 {"isim": "Dumbbell Row", "set": 3, "tekrar": "8-12",
+                  "dinlenme": "90 sn", "not": "",
+                  "exercise_id": "ex_dumbbell_row"},
+                 {"isim": "Push-Up", "set": 3, "tekrar": "10-15",
+                  "dinlenme": "60 sn", "not": "",
+                  "exercise_id": "ex_push_up"}]},
+            {"gun": "Salı", "tip": "dinlenme", "odak": "Aktif Toparlanma",
+             "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+            {"gun": "Çarşamba", "tip": "antrenman", "odak": "Alt Vücut",
+             "sure_dk": 40, "tahmini_kalori": 300, "egzersizler": [
+                 {"isim": "Bodyweight Squat", "set": 4, "tekrar": "12-15",
+                  "dinlenme": "60 sn", "not": "",
+                  "exercise_id": "ex_bodyweight_squat"}]},
+            {"gun": "Perşembe", "tip": "dinlenme", "odak": "Aktif Toparlanma",
+             "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+            {"gun": "Cuma", "tip": "antrenman", "odak": "Merkez", "sure_dk": 30,
+             "tahmini_kalori": 200, "egzersizler": [
+                 {"isim": "Plank", "set": 3, "tekrar": "45 sn",
+                  "dinlenme": "45 sn", "not": "", "exercise_id": "ex_plank"}]},
+            {"gun": "Cumartesi", "tip": "kardiyo", "odak": "Yürüyüş",
+             "sure_dk": 30, "tahmini_kalori": 250, "egzersizler": [
+                 {"isim": "Brisk Walk", "set": 1, "tekrar": "30 dk",
+                  "dinlenme": "-", "not": "",
+                  "exercise_id": "ex_brisk_walk"}]},
+            {"gun": "Pazar", "tip": "dinlenme", "odak": "Aktif Toparlanma",
+             "sure_dk": 0, "tahmini_kalori": 0, "egzersizler": []},
+        ],
+        "haftalik_ozet": {"toplam_antrenman_gun": 4, "yogunluk_skoru": 6},
+        "exercise_context": {
+            "equipment_context": "minimal", "cardio_type": "yuruyus",
+            "style": "general_fitness", "catalog_version": 1},
+    }
+
+
+@pytest.fixture
+def canonical_user(app, make_user):
+    """A user holding one canonical, catalog-owned active plan."""
+    user = make_user("canonicalcoach")
+    seed_plan(user.id, _canonical_program())
+    return user
+
+
+def identities(user_id, day="Pazartesi"):
+    from app.services.today_facts import get_active_plan
+
+    db.session.expire_all()
+    document = json.loads(get_active_plan(user_id).plan_data)
+    entry = next(d for d in document["program"] if d["gun"] == day)
+    return [(e["isim"], e.get("exercise_id")) for e in entry["egzersizler"]]
+
+
+def test_a_coach_edit_on_a_canonical_plan_persists_catalog_identity(
+        app, canonical_user, tools_on, turn):
+    """The model names an alias; the plan stores the catalog's answer, ID and
+    canonical name together."""
+    result = call(canonical_user.id, REPLACE, {
+        "day": "Pazartesi", "exercise": "One-Arm Dumbbell Row",
+        "replacement": "Band Row"})
+
+    assert result["status"] == results.STATUS_APPLIED
+    assert identities(canonical_user.id) == [
+        ("Resistance Band Row", "ex_band_row"), ("Push-Up", "ex_push_up")]
+
+
+def test_a_coach_added_exercise_on_a_canonical_plan_carries_identity(
+        app, canonical_user, tools_on, turn):
+    result = call(canonical_user.id, ADD, {
+        "day": "Çarşamba", "exercise": "Band Row", "sets": 3, "reps": "10-12"})
+
+    assert result["status"] == results.STATUS_APPLIED
+    assert identities(canonical_user.id, "Çarşamba")[-1] == (
+        "Resistance Band Row", "ex_band_row")
+
+
+def test_the_coach_cannot_invent_an_exercise_on_a_canonical_plan(
+        app, canonical_user, tools_on, turn):
+    """A plausible-sounding name the catalog does not declare is not an
+    exercise. No fuzzy match, no nearest neighbour, no substitution."""
+    result = call(canonical_user.id, REPLACE, {
+        "day": "Pazartesi", "exercise": "Dumbbell Row",
+        "replacement": "Machine Chest Press"})
+
+    assert result["error"] == results.ERROR_INVALID_MUTATION
+    assert identities(canonical_user.id) == [
+        ("Dumbbell Row", "ex_dumbbell_row"), ("Push-Up", "ex_push_up")]
+    assert journal(canonical_user.id) == []
+    assert plan_version(canonical_user.id) == 0
+
+
+def test_the_coach_cannot_prescribe_equipment_the_plan_does_not_have(
+        app, canonical_user, tools_on, turn):
+    """``minimal`` is bodyweight, dumbbell and bands. A barbell squat is a real
+    catalog entry and still must not reach this user's plan."""
+    result = call(canonical_user.id, REPLACE, {
+        "day": "Pazartesi", "exercise": "Dumbbell Row",
+        "replacement": "Barbell Back Squat"})
+
+    assert result["error"] == results.ERROR_INVALID_MUTATION
+    assert identities(canonical_user.id) == [
+        ("Dumbbell Row", "ex_dumbbell_row"), ("Push-Up", "ex_push_up")]
+    assert journal(canonical_user.id) == []
+
+
+def test_the_coach_cannot_put_cardio_on_a_strength_day(
+        app, canonical_user, tools_on, turn):
+    """Addendum §B, at the second door. ``is_exercise_compatible`` gates cardio
+    by ``cardio_type`` rather than by equipment, so a cardio movement dropped
+    into a strength day would clear the equipment gate on placement alone —
+    exactly the P1 Task 4 closed on the save path. If Adaptive Coaching left it
+    open, PR4's single-authority claim would be false."""
+    result = call(canonical_user.id, ADD, {
+        "day": "Cuma", "exercise": "Brisk Walk", "sets": 1, "reps": "30 dk"})
+
+    assert result["error"] == results.ERROR_INVALID_MUTATION
+    assert names(canonical_user.id, "Cuma") == ["Plank"]
+    assert journal(canonical_user.id) == []
+
+
+def test_the_same_cardio_exercise_is_accepted_on_the_cardio_day(
+        app, make_user, tools_on, turn):
+    """The paired control, so the refusal above is placement and not a blanket
+    ban on cardio edits."""
+    program = _canonical_program()
+    program["exercise_context"]["cardio_type"] = "karisik"
+    user = make_user("canonicalcardio")
+    seed_plan(user.id, program)
+
+    result = call(user.id, ADD, {
+        "day": "Cumartesi", "exercise": "Jump Rope", "sets": 1,
+        "reps": "10 dk"})
+
+    assert result["status"] == results.STATUS_APPLIED
+    assert identities(user.id, "Cumartesi")[-1] == ("Jump Rope", "ex_jump_rope")
+
+
+def test_a_coach_edit_leaves_a_legacy_plan_name_only(
+        app, planned_user, tools_on, turn):
+    """The Coach must not upgrade a pre-PR4 plan on the way past. ``Machine
+    Press`` is not in the catalog and stays perfectly writable here."""
+    result = call(planned_user.id, REPLACE, {
+        "day": "Pazartesi", "exercise": "Bench Press",
+        "replacement": "Machine Press"})
+
+    from app.services.today_facts import get_active_plan
+    db.session.expire_all()
+    document = json.loads(get_active_plan(planned_user.id).plan_data)
+
+    assert result["status"] == results.STATUS_APPLIED
+    assert "exercise_context" not in document
+    assert all(
+        "exercise_id" not in exercise
+        for day in document["program"] for exercise in day["egzersizler"])
+
+
+def test_no_canonical_tool_result_leaks_catalog_identity_to_the_model(
+        app, canonical_user, tools_on, turn):
+    """A tool result is the next model call's input and can be paraphrased to
+    the user. Catalog identity must not ride out on either path.
+
+    The applied case is the one that can realistically regress: the result
+    echoes the targets the caller named, and "helpfully" adding the resolved
+    ``exercise_id`` next to them would put ``ex_*`` strings in the context
+    window and hand the model an identifier it cannot use but can repeat.
+    """
+    applied = call(canonical_user.id, REPLACE, {
+        "day": "Pazartesi", "exercise": "One-Arm Dumbbell Row",
+        "replacement": "Band Row"})
+    refused = call(canonical_user.id, REPLACE, {
+        "day": "Pazartesi", "exercise": "Band Row",
+        "replacement": "Barbell Back Squat"})
+
+    assert applied["status"] == results.STATUS_APPLIED
+    assert refused["error"] == results.ERROR_INVALID_MUTATION
+    for blob in (json.dumps(applied, ensure_ascii=False),
+                 json.dumps(refused, ensure_ascii=False)):
+        assert "ex_" not in blob
+        assert "catalog" not in blob.lower()
+        assert "equipment_context" not in blob
