@@ -41,13 +41,33 @@
     document.head.appendChild(cwLink);
   }
 
+  /* Notification glyphs. Emoji (✅ / ⚠️ / 💬) rendered here in a
+     different colour, weight and optical size than every other icon in the
+     widget and could not follow the theme; these are the same stroke family. */
+  var CW_ICONS = {
+    success: '<svg class="cw-notify-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+    error:   '<svg class="cw-notify-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+    info:    '<svg class="cw-notify-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>'
+  };
+
+  /* One writer for the notification bubble: the glyph is a trusted constant
+     (innerHTML), the message is untrusted (textContent). hasOwnProperty guards
+     the lookup so an unexpected `type` cannot reach Object.prototype. */
+  function cwSetNotify(node, type, message) {
+    var key = Object.prototype.hasOwnProperty.call(CW_ICONS, type) ? type : 'info';
+    node.innerHTML = CW_ICONS[key];
+    var label = document.createElement('span');
+    label.textContent = message == null ? '' : String(message);
+    node.appendChild(label);
+  }
+
   /* ── 2. Inject HTML ── */
   var html = '<div id="cw-root">' +
 
     '<div id="cw-window" role="dialog" aria-label="AI Fitness Coach">' +
       '<div id="cw-header">' +
         '<div id="cw-hleft">' +
-          '<div id="cw-avatar">🏋️</div>' +
+          '<div id="cw-avatar" aria-hidden="true">' + '<svg viewBox="0 0 24 24"><path d="M6.5 6.5h11M6.5 17.5h11M4 9v6M20 9v6M8 8v8M16 8v8"/></svg>' + '</div>' +
           '<div>' +
             '<div id="cw-htitle">AI Fitness Coach</div>' +
           '</div>' +
@@ -866,8 +886,7 @@
     _toast: function (msg, type) {
       var n = document.getElementById('cw-notify');
       if (!n) return;
-      var icon = type === 'success' ? '✅' : type === 'error' ? '⚠️' : '💬';
-      n.innerHTML = '<span style="font-size:15px">' + icon + '</span>' + this._esc(msg);
+      cwSetNotify(n, type, msg);
       n.classList.add('cw-show');
       clearTimeout(this._toastT);
       this._toastT = setTimeout(function () { n.classList.remove('cw-show'); }, 3500);
@@ -876,7 +895,7 @@
     _showNotify: function () {
       var n = document.getElementById('cw-notify');
       if (!n) return;
-      n.innerHTML = '<span style="font-size:15px">💬</span>' + t('coach.new_message');
+      cwSetNotify(n, 'info', t('coach.new_message'));
       n.classList.add('cw-show');
       clearTimeout(this._toastT);
       this._toastT = setTimeout(function () { n.classList.remove('cw-show'); }, 5000);
