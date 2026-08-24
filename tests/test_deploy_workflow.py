@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 import yaml
 
@@ -9,6 +10,7 @@ DOCKERIGNORE = Path(".dockerignore")
 WORKFLOW = Path(".github/workflows/deploy.yml")
 CONTROLLER = Path("scripts/deploy_control.py")
 HOST_SCRIPT = Path("scripts/production_deploy.sh")
+DEPLOYMENT_GUIDE = Path("docs/DEPLOYMENT.md")
 
 
 def _deploy_yaml():
@@ -25,6 +27,10 @@ def _controller_source():
 
 def _host_script():
     return HOST_SCRIPT.read_text(encoding="utf-8")
+
+
+def _deployment_guide():
+    return DEPLOYMENT_GUIDE.read_text(encoding="utf-8")
 
 
 def test_deploy_has_only_ci_workflow_run_authority():
@@ -192,3 +198,72 @@ def test_deploy_enforces_env_file_permissions():
     body = _controller_source()
     assert "chmod 600" in body
     assert ".env" in body
+
+
+def test_deployment_runbook_defines_the_immutable_operational_contract():
+    guide = _deployment_guide()
+
+    required_contract_text = {
+        "`A` — `.github/workflows/deploy.yml`",
+        "`B` — `scripts/deploy_control.py`",
+        "`C` — `scripts/production_deploy.sh`",
+        "`DEPLOY_SHA` is the sole deployment authority",
+        "`AWS-RunShellScript`",
+        "`production-deploy`",
+        "`cancel-in-progress: false`",
+        "`queue: single`",
+        "SSM may still complete C on the host",
+        "`PingStatus` must be `Online`",
+        "`LastPingDateTime` must be no more than five minutes old",
+        "Delivery timeout | 60 seconds",
+        "Execution timeout | 1,800 seconds",
+        "AWS expiry | 1,860 seconds",
+        "Polling horizon | 2,100 seconds",
+        "`/run/lock/axisai-production/production.lock`",
+        "retry after lock contention",
+        "`origin/main` differs from `DEPLOY_SHA`",
+        "resets only to `DEPLOY_SHA`",
+        "server-owned `revision` equals the expected SHA",
+        "exact `PREV_COMMIT`",
+        "Rollback resets exactly to `PREV_COMMIT`",
+        "Code rollback does not roll back database migrations",
+        "`Pending`, `Delayed`, and `In Progress` mean the command is waiting",
+        "`Success` is the only successful terminal `StatusDetails` value",
+        "`Failed`, `DeliveryTimedOut`, `ExecutionTimedOut`, `Undeliverable`, `Cancelled`, and `Terminated` are terminal failures",
+        "optional `PUBLIC_HEALTH_URL` is HTTPS",
+        "CloudWatch and S3 retention are deferred operations work",
+        "SSM-agent upgrades are separate host hygiene work",
+    }
+
+    normalized_guide = " ".join(guide.split())
+    assert all(text in normalized_guide for text in required_contract_text)
+
+
+def test_deploy_sources_cannot_expose_secrets_change_flags_or_reset_mutable_main():
+    deploy_sources = "\n".join((_deploy_yaml(), _controller_source(), _host_script()))
+
+    assert not re.search(
+        r"(?m)^\s*(?:export\s+)?(?:FITX_[A-Z0-9_]+|[A-Z0-9_]*FEATURE[A-Z0-9_]*)\s*=",
+        deploy_sources,
+    )
+    assert not re.search(
+        r"(?im)\b(?:cat|sed|awk|grep|head|tail)\b[^\n]*\.env\b",
+        deploy_sources,
+    )
+    assert "set -x" not in deploy_sources
+    assert not re.search(
+        r"(?im)^\s*(?:echo|printf)\b[^\n]*(?:AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN)",
+        deploy_sources,
+    )
+    assert all(
+        credential not in deploy_sources
+        for credential in (
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+        )
+    )
+    assert not re.search(
+        r"git\s+reset\s+--hard\s+(?:origin/main|refs/remotes/origin/main)",
+        deploy_sources,
+    )

@@ -1,93 +1,104 @@
-# Deployment (Sprint 4)
+# Production deployment operations
 
-FitX runs on a single AWS EC2 host via Docker Compose behind host nginx. Database
-is external AWS RDS PostgreSQL (`DATABASE_URL`). Redis is a compose service.
+This runbook is the production deploy contract. It is intentionally narrow: a
+successful CI run for `main` may deploy one immutable revision to the one
+configured EC2 instance. No manual workflow dispatch, branch-tip deployment,
+or host-side feature-flag change is part of this contract.
 
-## Pipeline
+## Authorities and hand-off
 
-```
-push to main
-  → ci.yml (pytest + schema-drift `flask db check` on Postgres 16)  MUST be green
-  → deploy.yml (workflow_run-gated) via AWS SSM on the EC2 host:
-        git reset --hard origin/main
-        docker compose build
-        docker compose up -d
-  → curl /health?deep=1 gate; on failure → rollback to previous commit
-```
+- `A` — `.github/workflows/deploy.yml`
+- `B` — `scripts/deploy_control.py`
+- `C` — `scripts/production_deploy.sh`
 
-If CI is red, deploy never starts. The `/health?deep=1` gate is available to
-loopback and explicitly trusted source CIDRs only. Its default
-`DEEP_HEALTH_TRUSTED_CIDRS=172.17.0.1/32` admits the Docker bridge gateway used
-by the gate's own curl. Set comma-separated CIDRs only when another trusted
-network needs the deep status; do not widen this to an entire RFC1918 range.
+`DEPLOY_SHA` is the sole deployment authority. It is the SHA from the completed
+successful CI `workflow_run` event, not whatever `main` contains later. A checks
+out that exact SHA with full history and invokes B once. B reads C from that
+exact checkout, validates the candidate and target, and sends C through the
+`AWS-RunShellScript` SSM document. C performs the one host transaction.
 
-## Services (`docker-compose.yml`)
+GitHub serializes this work with the `production-deploy` concurrency group:
+`cancel-in-progress: false` and `queue: single`. A new CI result coalesces
+behind the current deploy; it never cancels a transaction that has already
+started. If the GitHub runner is lost after SendCommand accepts the request, SSM
+may still complete C on the host. Do not issue a second deploy to compensate:
+recover the command ID and host outcome first, then allow the serialized queue
+to continue.
 
-| Service | Purpose | Notes |
-|---|---|---|
-| `web` | gunicorn (1 worker × 8 threads) | `mem_limit` 1g, loopback-only, log rotation. |
-| `redis` | cache / limiter / queue | 200mb `allkeys-lru`, loopback-only. |
-| `worker` | RQ background jobs (WS8) | same image, `python worker.py`, `mem_limit` 512m, log rotation, `depends_on: redis`. |
+## Controller preflight and SSM lifecycle
 
-Adding the `worker` service is automatic on deploy (`docker compose up -d` builds
-and starts it). Budget the host RAM: web (1g) + redis (256m) + worker (512m).
+B accepts only the configured running EC2 instance. Its SSM managed-instance
+record must be unique and match the configured ID: `PingStatus` must be `Online`
+and `LastPingDateTime` must be no more than five minutes old (nor more than one
+minute in the future). Failure is fail-closed; correct the instance or SSM
+registration before retrying.
 
-## Background jobs (WS8)
+The controller uses the following independent bounds.
 
-- `app/jobs/` — `get_queue()` (None-safe), `enqueue_or_run(func, ...)` (enqueue if
-  a worker/Redis exists, else run inline), worker heartbeat, dead-letter helpers.
-- `worker.py` — RQ worker entrypoint. Linux/prod uses `rq.Worker` (fork);
-  Windows/dev uses `rq.SimpleWorker` (`RQ_SIMPLE_WORKER=1`, auto on win32). A daemon
-  thread refreshes the `fitx:worker:alive` heartbeat every `WORKER_HEARTBEAT_TTL/2`.
-- **Worker is optional.** If it's down or `rq` is missing, jobs fall back to inline
-  execution — the app keeps working. `/health?deep=1` reports `worker: alive|down|
-  unknown` as **informational only** (it does **not** gate the deploy).
-- Wired task today: `summarize_conversation` (see [MEMORY.md](MEMORY.md)). Add more
-  by writing a top-level function in `app/jobs/tasks.py` and calling
-  `enqueue_or_run` from the producer.
-- Dead-letter (RQ `FailedJobRegistry`): `flask --app starter rq-failed` lists
-  exhausted jobs; `flask --app starter rq-requeue <job_id>` requeues one. Retry
-  policy: `Retry(max=3, interval=[10, 60, 300])`.
+| Limit | Value |
+|---|---:|
+| Delivery timeout | 60 seconds |
+| Execution timeout | 1,800 seconds |
+| AWS expiry | 1,860 seconds |
+| Polling horizon | 2,100 seconds |
+| Poll interval | 10 seconds |
 
-## Migrations — expand/contract (load-bearing)
+After SendCommand, B polls detailed invocation output and preserves the raw
+`StatusDetails` in its logs. `Pending`, `Delayed`, and `In Progress` mean the
+command is waiting; `In Progress` also means host execution has started.
+`Success` is the only successful terminal `StatusDetails` value. `Failed`,
+`DeliveryTimedOut`, `ExecutionTimedOut`, `Undeliverable`, `Cancelled`, and
+`Terminated` are terminal failures. AWS's spaced spellings (`Delivery Timed Out`
+and `Execution Timed Out`) have the same failure meaning. An unknown value,
+malformed response, CLI failure, or exhausted polling horizon is also a failed
+deployment.
 
-Rollback restores **code but not the DB** (migrations auto-apply on boot). Write
-migrations expand/contract (backward-compatible): no DROP/RENAME unless the old
-code ran without it through at least one successful deploy. For an unavoidable
-destructive change: take an RDS snapshot, set `FITX_DB_AUTO_UPGRADE=0`, and run
-`flask db upgrade` as a separate one-off step. Boot migration failure is fatal
-(health gate rolls back); escape hatch `FITX_DB_UPGRADE_FAIL_OPEN=1`.
+## Host transaction
 
-Sprint 4 PR5 adds **no** migration (the `CoachMessage` token columns already exist).
+C holds the root-controlled outer lock at
+`/run/lock/axisai-production/production.lock` and a deploy-directory lock for
+the whole transaction. A lock timeout exits with status 73. Treat this as
+contention, not a safe concurrent deploy: retry after lock contention only once
+the prior deployment has finished.
 
-## New env vars (all safe-defaulted — no `.env` edit needed for first deploy)
+Before it changes the checkout, C fetches `origin/main`, proves the candidate
+and current production commits exist, requires that `origin/main` differs from
+`DEPLOY_SHA` **never** (they must be equal), and rejects a candidate older than
+or divergent from production. It records the current production SHA as exact
+`PREV_COMMIT`, resets only to `DEPLOY_SHA`, then rereads `HEAD`. This revision
+equality check prevents a mutable-main checkout.
 
-```
-# WS8 background jobs
-WORKER_MEM_LIMIT=512m
-WORKER_HEARTBEAT_TTL=120
-RQ_SIMPLE_WORKER=0
-# WS6 observability (turn on AFTER granting IAM permission)
-AI_METRICS_ENABLED=0
-AI_METRICS_NAMESPACE=FitX/AI
-```
+C builds and starts the Compose release with `APP_REVISION` set to the exact
+candidate SHA. It requires all of the following before accepting the release:
 
-See `.env.example` for the full WS5/WS7/WS9 set. The worker requires `REDIS_URL`
-(prod already sets it).
+1. the running `web` container reports the expected `APP_REVISION`;
+2. loopback `/health?deep=1` returns HTTP 200 and JSON `status: ok`;
+3. deep health's server-owned `revision` equals the expected SHA.
 
-## IAM
+A revision mismatch, missing revision, failed build/start, health failure, or
+post-start failure enters rollback while the locks remain held. An optional
+`PUBLIC_HEALTH_URL` is HTTPS, has no credentials, and is checked only after the
+internal deep-health gate. Its failure also rolls the candidate back.
 
-- Bedrock: `bedrock:InvokeModel` on the instance role.
-- S3 avatars/meal images: existing instance-role policy.
-- CloudWatch metrics (WS6, optional): `cloudwatch:PutMetricData`. Grant this
-  **before** flipping `AI_METRICS_ENABLED=1`.
+Rollback resets exactly to `PREV_COMMIT`, rereads `HEAD`, rebuilds/restarts with
+that same revision, and repeats container plus deep-health verification. A
+rollback is reported verified only after those checks succeed. The only legacy
+exception is the immediate predecessor of the revision-aware helper: its
+missing deep-health revision may serve as a one-time compatibility proof; any
+present rollback revision must still match exactly.
 
-## Verification checklist
+## Database and operational boundaries
 
-1. `python -m pytest -q` green (load tests excluded by default; run with
-   `-m load`).
-2. Local smoke without Redis/boto3: cache, queue, metrics, cooldown all no-op.
-3. With local Redis: `enqueue_or_run` enqueues; `python worker.py`
-   (`RQ_SIMPLE_WORKER=1` on Windows) drains the queue; heartbeat visible in
-   `/health?deep=1`.
-4. `curl -N /ask/stream` → `meta/delta/done` frames, first token <1s.
+Code rollback does not roll back database migrations. Migrations run at
+application boot, so migrations must follow expand/contract discipline and be
+backward-compatible with the preceding release. For a destructive migration,
+take and verify an RDS snapshot and execute the migration as a separately
+planned operation; do not expect the deploy rollback to restore database state.
+
+The deploy path does not print `.env` contents or AWS credentials, and it does
+not assign feature flags. Host `.env` permission repair and nginx validation are
+separate safeguards within the locked bootstrap, not configuration management.
+
+CloudWatch and S3 retention are deferred operations work. SSM-agent upgrades
+are separate host hygiene work. Plan, authorize, and verify each of those
+changes outside this immutable deploy transaction.
