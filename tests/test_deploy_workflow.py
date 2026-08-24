@@ -272,8 +272,19 @@ def _deploy_source_violations(source):
             if line.strip() not in canonical_env_lines:
                 violations.append(".env content output")
 
-    for target in re.findall(r"git\s+reset\s+--hard\s+([^\s;|&]+)", source):
-        if target not in {'"$DEPLOY_SHA"', '"$PREV_COMMIT"'}:
+    allowed_reset_lines = {
+        'run_external git reset --hard "$DEPLOY_SHA"',
+        '"${ROLLBACK_RESET_TIMEOUT_SECONDS}s" git reset --hard "$PREV_COMMIT"; then',
+    }
+    for line in source.splitlines():
+        stripped = line.strip()
+        if not re.search(r"(?<![A-Za-z0-9_])reset(?![A-Za-z0-9_])", stripped):
+            continue
+        if stripped in allowed_reset_lines:
+            continue
+        if stripped.startswith(("#", "echo ")):
+            continue
+        if "reset" in stripped:
             violations.append("mutable-main reset")
 
     if re.search(r"(?m)^\s*set\s+-[^\n]*x", source):
@@ -340,6 +351,8 @@ def test_deploy_sources_cannot_expose_secrets_change_flags_or_reset_mutable_main
             'git reset --hard "$ref"',
             "mutable-main reset",
         ),
+        ('git -C "$DEPLOY_DIR" reset --hard "$ref"', "mutable-main reset"),
+        ('alias reset="git reset --hard \'$DEPLOY_SHA\'"', "mutable-main reset"),
     ],
 )
 def test_deploy_source_guard_rejects_structural_bypasses(
