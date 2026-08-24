@@ -95,8 +95,8 @@
   overflow-wrap: anywhere;
   font-variant-numeric: tabular-nums;
 }
-/* --color-text-2, not -3: text-3 measures 4.22:1 on surface-2, under the 4.5:1
-   floor for 12px body copy. Hierarchy here comes from size and weight. */
+/* --color-text-2, not -3: this line is supporting copy under the value, not a
+   metadata label. Hierarchy here comes from size and weight. */
 .wc-sub {
   margin-top: var(--space-2);
   font-size: var(--text-sm); color: var(--color-text-2);

@@ -118,25 +118,6 @@ def _set_language(app, scenario: str, locale: str) -> None:
         db.session.commit()
 
 
-def _normalize_seed_plans(app) -> None:
-    """Adapt the older Sprint-0 fixture to the canonical plan vocabulary."""
-    from app.extensions import db
-    from app.models import TrainingPlan
-
-    with app.app_context():
-        for plan in TrainingPlan.query.all():
-            payload = json.loads(plan.plan_data)
-            program = payload if isinstance(payload, list) else payload.get("program", [])
-            for day in program:
-                if day.get("tip") == "kuvvet":
-                    day["tip"] = "antrenman"
-                for exercise in day.get("egzersizler", []):
-                    exercise.setdefault("dinlenme", "")
-                    exercise.setdefault("not", "")
-            plan.plan_data = json.dumps(payload, ensure_ascii=False)
-        db.session.commit()
-
-
 def _install_consumer_probe(app) -> None:
     """Audit-only authenticated route; never registered by the production app."""
     from flask import jsonify
@@ -765,7 +746,6 @@ def run(output_dir: Path) -> dict:
     app = create_audit_app(db_path)
     app.config["FITX_WORKOUT_SESSIONS_ENABLED"] = False
     seed_summary = seed_all(app)
-    _normalize_seed_plans(app)
     _install_consumer_probe(app)
     clocks = app.extensions["frontend_audit"]["scenario_clocks"]
 

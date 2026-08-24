@@ -1283,12 +1283,12 @@ function renderDiary(data) {
       } else {
         unitHtml = `<input type="number" class="diary-gram-input" value="${item.grams}" min="1" step="10"
             data-action-change="fxUpdateDiaryGrams" data-item-id="${item.id}" ${isLogged ? 'disabled' : ''}>
-          <span style="font-size:11px;color:var(--text-3);">g</span>`;
+          <span class="diary-unit">g</span>`;
       }
       return `<div class="diary-food-row" data-item-id="${item.id}">
-        <div style="flex:1;min-width:0;">
-          <div style="font-size:13px;color:var(--text);">${esc(item.food_name)}</div>
-          <div style="font-size:11px;color:var(--text-3);">${Math.round(item.calories)} kcal · ${MA.p}:${Math.round(item.protein)}g ${MA.k}:${Math.round(item.carbs)}g ${MA.y}:${Math.round(item.fat)}g</div>
+        <div class="diary-food-info">
+          <div class="diary-food-name">${esc(item.food_name)}</div>
+          <div class="diary-food-macros">${Math.round(item.calories)} kcal · ${MA.p}:${Math.round(item.protein)}g ${MA.k}:${Math.round(item.carbs)}g ${MA.y}:${Math.round(item.fat)}g</div>
         </div>
         ${unitHtml}
         ${!isLogged ? '<button class="sf-remove" data-action="deleteDiaryItem" data-args="[' + item.id + ']">✕</button>' : ''}
@@ -1296,24 +1296,24 @@ function renderDiary(data) {
     }).join('');
 
     return `
-      <div class="card diary-meal-card" style="padding:20px;margin-bottom:12px;" data-meal-name="${dm.key}" data-meal-id="${mealId}">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
-          <div style="display:flex;align-items:center;gap:10px;">
+      <div class="card diary-meal-card" data-meal-name="${dm.key}" data-meal-id="${mealId}">
+        <div class="diary-meal-hdr">
+          <div class="diary-meal-title">
             <span class="dm-icon" aria-hidden="true">${dm.icon}</span>
-            <span style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1.5px;color:var(--text);">${mealLabel(dm.key)}</span>
+            <span class="diary-meal-name">${mealLabel(dm.key)}</span>
           </div>
-          <span style="font-family:'Bebas Neue';font-size:16px;color:var(--color-primary);">${Math.round(totals.calories)} kcal</span>
+          <span class="diary-meal-kcal">${Math.round(totals.calories)} kcal</span>
         </div>
         <div class="diary-items-list">${itemsHtml}</div>
         ${!isLogged ? `
-        <div style="position:relative;margin-top:10px;">
+        <div class="diary-search-wrap">
           <input class="fc-input diary-food-search" placeholder="${__t('nutrition.search_short')}"
             data-action-input="fxDiaryFoodSearch" data-meal="${dm.key}" autocomplete="off">
           <div class="autocomplete-dropdown diary-ac" style="display:none;"></div>
         </div>
-        <button class="btn-volt w-full" style="margin-top:10px;" data-action="logDiaryMeal" data-args='["${dm.key}"]'>${__t('nutrition.log_this_meal')}</button>
+        <button class="btn-volt w-full diary-log-btn" data-action="logDiaryMeal" data-args='["${dm.key}"]'>${__t('nutrition.log_this_meal')}</button>
         ` : `
-        <div style="text-align:center;padding:8px;color:#00C48C;font-size:12px;font-weight:600;letter-spacing:0.1em;">${__t('nutrition.logged')}</div>
+        <div class="diary-logged">${__t('nutrition.logged')}</div>
         `}
       </div>`;
   }).join('');

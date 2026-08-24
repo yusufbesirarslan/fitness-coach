@@ -297,6 +297,49 @@ def test_page_shell_reserves_the_floating_fab_rail():
         )
 
 
+def test_fab_size_is_one_canonical_token():
+    """The rail reserved --fab-btn (56px) while Nutrition's log FAB still
+    read --fab-size (58px). Same control class, so one size."""
+    tokens = _css("tokens.css")
+    assert re.search(r"--fab-btn:\s*56px", tokens)
+    size = re.search(r"--fab-size:\s*([^;]+);", tokens)
+    assert size, "--fab-size remains as a legacy alias"
+    assert "var(--fab-btn)" in size.group(1), (
+        "--fab-size must alias --fab-btn, not carry a second literal"
+    )
+    body = _rule(_css("nutrition.css"), ".log-fab")
+    assert "var(--fab-btn)" in body
+    assert "--fab-size" not in body
+    coach = _rule(_css("coach_widget.css"), "#cw-fab")
+    assert "var(--fab-btn)" in coach
+    assert not re.search(r"width:\s*\d+px", coach)
+
+
+def test_nutrition_diary_typography_uses_design_system_roles():
+    """The diary tab hardcoded Bebas Neue + px sizes, bypassing PR1/PR2 roles."""
+    js = _read(STATIC / "nutrition.js")
+    start = js.index("function renderDiary")
+    end = js.index("function diaryFoodSearch")
+    diary = js[start:end]
+    assert "Bebas Neue" not in diary
+    assert not re.search(r"font-size:\s*\d+px", diary)
+    assert "font-family:" not in diary
+    css = _css("nutrition.css")
+    diary_css = css.split("DIARY BUILDER")[1].split("Serving modal")[0]
+    assert "Bebas Neue" not in diary_css
+    assert not re.search(r"font-size:\s*\d+px", diary_css)
+    name = _rule(css, ".diary-meal-name")
+    kcal = _rule(css, ".diary-meal-kcal")
+    assert "var(--font-display)" in name
+    assert re.search(r"font-size:\s*var\(--text-", name)
+    assert "var(--font-display)" in kcal
+    assert re.search(r"font-size:\s*var\(--text-", kcal)
+    food = _rule(css, ".diary-food-name")
+    macros = _rule(css, ".diary-food-macros")
+    assert "var(--text-md)" in food or "var(--text-sm)" in food
+    assert "var(--text-xs)" in macros or "var(--text-sm)" in macros
+
+
 # ── Cross-surface guards ──────────────────────────────────────────────────
 
 
