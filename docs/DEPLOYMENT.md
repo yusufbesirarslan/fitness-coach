@@ -37,6 +37,7 @@ The controller uses the following independent bounds.
 
 | Limit | Value |
 |---|---:|
+| Workflow job timeout | 40 minutes |
 | Delivery timeout | 60 seconds |
 | Execution timeout | 1,800 seconds |
 | AWS expiry | 1,860 seconds |

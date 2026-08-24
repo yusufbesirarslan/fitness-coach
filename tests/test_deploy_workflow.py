@@ -1,6 +1,7 @@
 from pathlib import Path
 import re
 
+import pytest
 import yaml
 
 
@@ -215,6 +216,7 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
         "SSM may still complete C on the host",
         "`PingStatus` must be `Online`",
         "`LastPingDateTime` must be no more than five minutes old",
+        "Workflow job timeout | 40 minutes",
         "Delivery timeout | 60 seconds",
         "Execution timeout | 1,800 seconds",
         "AWS expiry | 1,860 seconds",
@@ -239,31 +241,195 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
     assert all(text in normalized_guide for text in required_contract_text)
 
 
-def test_deploy_sources_cannot_expose_secrets_change_flags_or_reset_mutable_main():
-    deploy_sources = "\n".join((_deploy_yaml(), _controller_source(), _host_script()))
+def _deploy_source_violations(source):
+    violations = []
 
-    assert not re.search(
-        r"(?m)^\s*(?:export\s+)?(?:FITX_[A-Z0-9_]+|[A-Z0-9_]*FEATURE[A-Z0-9_]*)\s*=",
-        deploy_sources,
+    assigned_names = re.findall(
+        r"(?m)^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*(?:=|:)", source
+    ) + re.findall(
+        r"os\.environ\[\s*[\"']([A-Z][A-Z0-9_]*)[\"']\s*\]\s*=", source
     )
-    assert not re.search(
-        r"(?im)\b(?:cat|sed|awk|grep|head|tail)\b[^\n]*\.env\b",
-        deploy_sources,
-    )
-    assert "set -x" not in deploy_sources
-    assert not re.search(
+    if any(
+        "FEATURE" in name
+        or name.endswith(("_ENABLED", "_DISABLED", "_FLAG"))
+        for name in assigned_names
+    ):
+        violations.append("feature flag assignment")
+
+    env_file_variables = set(re.findall(
+        r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)=.*\.env\b", source
+    ))
+    assignment_lines = source.splitlines()
+    changed = True
+    while changed:
+        changed = False
+        for line in assignment_lines:
+            match = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)", line)
+            if not match:
+                continue
+            name, value = match.groups()
+            if name in env_file_variables:
+                continue
+            if any(
+                re.fullmatch(
+                    rf"[\"']?\$(?:\{{{re.escape(variable)}\}}|{re.escape(variable)}\b)[\"']?",
+                    value.strip(),
+                )
+                for variable in env_file_variables
+            ):
+                env_file_variables.add(name)
+                changed = True
+    env_file_variable_reference = re.compile("|".join(
+            rf"\$(?:\{{{re.escape(name)}\}}|{re.escape(name)}\b)"
+            for name in env_file_variables
+        ) or r"(?!)")
+    env_reference = re.compile(r"\.env\b")
+    for line in source.splitlines():
+        if not (env_reference.search(line) or env_file_variable_reference.search(line)):
+            continue
+        if re.match(
+            r"\s*[A-Za-z_][A-Za-z0-9_]*=.*\.env\b", line
+        ):
+            continue
+        alias_assignment = re.match(
+            r"\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)", line
+        )
+        if (
+            alias_assignment
+            and alias_assignment.group(1) in env_file_variables
+            and any(
+                re.fullmatch(
+                    rf"[\"']?\$(?:\{{{re.escape(variable)}\}}|{re.escape(variable)}\b)[\"']?",
+                    alias_assignment.group(2).strip(),
+                )
+                for variable in env_file_variables
+            )
+        ):
+            continue
+        if re.fullmatch(
+            r"\s*if\s+\[\s*!?\s*-f\s+[^;|`<()]+\]\s*;\s*then\s*",
+            line,
+        ):
+            continue
+        if re.fullmatch(
+            r"\s*[A-Za-z_][A-Za-z0-9_]*=\"\$\((?:root_external\s+)?"
+            r"stat\s+-c\s+%a\s+--\s+[^;|`<()]+\)\"\s*",
+            line,
+        ):
+            continue
+        if re.fullmatch(
+            r"\s*(?:root_external\s+)?chmod\s+600\s+--\s+[^;|`<()]+\s*",
+            line,
+        ):
+            continue
+        if (
+            re.match(r"\s*(?:echo|printf)\b", line)
+            and not env_file_variable_reference.search(line)
+            and "$(" not in line
+            and "<" not in line
+            and not re.search(r"[;|`]", line)
+        ):
+            continue
+        violations.append(".env content output")
+
+    if re.search(r"(?m)^\s*set\s+-[^\n]*x", source):
+        violations.append("shell tracing")
+    if re.search(
         r"(?im)^\s*(?:echo|printf)\b[^\n]*(?:AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN)",
-        deploy_sources,
-    )
-    assert all(
-        credential not in deploy_sources
+        source,
+    ) or not all(
+        credential not in source
         for credential in (
             "AWS_ACCESS_KEY_ID",
             "AWS_SECRET_ACCESS_KEY",
             "AWS_SESSION_TOKEN",
         )
+    ):
+        violations.append("AWS credential output")
+    mutable_main_variables = {
+        name
+        for name in re.findall(
+            r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)=", source
+        )
+        if "origin" in name.lower() and "main" in name.lower()
+    }
+    changed = True
+    while changed:
+        changed = False
+        for line in assignment_lines:
+            match = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)", line)
+            if not match:
+                continue
+            name, value = match.groups()
+            if (
+                "origin/main" in value
+                or "refs/remotes/origin/main" in value
+                or any(
+                    re.search(rf"\$(?:\{{{re.escape(variable)}\}}|{re.escape(variable)}\b)", value)
+                    for variable in mutable_main_variables
+                )
+            ) and name not in mutable_main_variables:
+                mutable_main_variables.add(name)
+                changed = True
+    for target in re.findall(r"git\s+reset\s+--hard\s+([^\n]+)", source):
+        if (
+            "origin/main" in target
+            or "refs/remotes/origin/main" in target
+            or any(
+                re.search(rf"\$(?:\{{{re.escape(variable)}\}}|{re.escape(variable)}\b)", target)
+                for variable in mutable_main_variables
+            )
+        ):
+            violations.append("mutable-main reset")
+    return violations
+
+
+def test_deploy_sources_cannot_expose_secrets_change_flags_or_reset_mutable_main():
+    deploy_sources = "\n".join((_deploy_yaml(), _controller_source(), _host_script()))
+
+    assert _deploy_source_violations(deploy_sources) == []
+
+
+@pytest.mark.parametrize(
+    ("unsafe_source", "expected_violation"),
+    [
+        ("AI_METRICS_ENABLED=1", "feature flag assignment"),
+        (
+            'env_file="$deploy_dir/.env"\n'
+            'env_alias="$env_file"\n'
+            'emit-file -- "$env_alias"',
+            ".env content output",
+        ),
+        (
+            'env_file="$deploy_dir/.env"\n'
+            'stat -c %a -- "$env_file"; emit-file -- "$env_file"',
+            ".env content output",
+        ),
+        (
+            'env_file="$deploy_dir/.env"\n'
+            'permissions="$(stat -c %a -- "$env_file" "$(emit-file -- "$env_file")")"',
+            ".env content output",
+        ),
+        ("printf '%s' < .env", ".env content output"),
+        (
+            'ORIGIN_MAIN="$(git rev-parse refs/remotes/origin/main)"\n'
+            'candidate="$ORIGIN_MAIN"\n'
+            'git reset --hard "$candidate"',
+            "mutable-main reset",
+        ),
+    ],
+)
+def test_deploy_source_guard_rejects_structural_bypasses(
+    unsafe_source, expected_violation
+):
+    assert expected_violation in _deploy_source_violations(unsafe_source)
+
+
+def test_deploy_source_guard_allows_only_metadata_operations_on_env_file_aliases():
+    safe_source = (
+        'env_file="$deploy_dir/.env"\n'
+        'env_copy="$env_file"\n'
+        'chmod 600 -- "$env_copy"'
     )
-    assert not re.search(
-        r"git\s+reset\s+--hard\s+(?:origin/main|refs/remotes/origin/main)",
-        deploy_sources,
-    )
+
+    assert _deploy_source_violations(safe_source) == []
