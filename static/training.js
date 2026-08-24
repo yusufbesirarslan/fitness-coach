@@ -10,6 +10,15 @@ function injuryLabel(v) { return (_EN && INJURY_LABELS_EN[v]) ? INJURY_LABELS_EN
 /* Gün adı backend'den gelir; yalnızca görünen etiket EN'e çevrilir. */
 var DAY_LABELS_EN = { 'Pazartesi':'Monday','Salı':'Tuesday','Çarşamba':'Wednesday','Perşembe':'Thursday','Cuma':'Friday','Cumartesi':'Saturday','Pazar':'Sunday' };
 function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; }
+/* Week-strip abbreviations. Truncating the full name to three characters
+   ("Cuma" and "Cumartesi" both → "CUM") made two chips in the same row
+   indistinguishable; these are the conventional short forms instead. */
+var DAY_SHORT_TR = { 'Pazartesi':'Pzt','Salı':'Sal','Çarşamba':'Çar','Perşembe':'Per','Cuma':'Cum','Cumartesi':'Cmt','Pazar':'Paz' };
+var DAY_SHORT_EN = { 'Pazartesi':'Mon','Salı':'Tue','Çarşamba':'Wed','Perşembe':'Thu','Cuma':'Fri','Cumartesi':'Sat','Pazar':'Sun' };
+function dayShort(v) {
+    var map = _EN ? DAY_SHORT_EN : DAY_SHORT_TR;
+    return map[v] || dayLabel(v).slice(0, 3);
+}
     // ── OPTIONS DATA ──
     const OPTIONS = {
         gun: [
@@ -291,6 +300,12 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
     // 0 (not done) or 100 (done) — renderHero() decides which to pass.
     const WH_RING_R = 48;
     const WH_RING_C = 2 * Math.PI * WH_RING_R;
+    // Rest-day glyph inside the hero ring. An SVG on currentColor, not the 😴
+    // emoji it replaced: the emoji rendered in a different colour, weight and
+    // optical size than every other icon on the page and could not be themed.
+    const WH_REST_ICON =
+        '<svg class="wh-ring-icon" viewBox="0 0 24 24" aria-hidden="true">' +
+        '<path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11z"/></svg>';
     function updateHeroRing(pct) {
         const el = document.getElementById('wh-ring');
         if (el) el.setAttribute('data-pct', pct);  // ring-fill stroke set by shared ring helper
@@ -324,8 +339,7 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
             focusEl.textContent = __t('training.rest_day');
             metaEl.textContent  = __t('training.active_recovery');
             cta.innerHTML = '';
-            if (ringLabel) ringLabel.innerHTML =
-                '<div style="font-size:22px;line-height:1;">😴</div>';
+            if (ringLabel) ringLabel.innerHTML = WH_REST_ICON;
         } else {
             const exs = day.egzersizler || [];
             focusEl.textContent = (day.odak || exs[0] && exs[0].isim || __t('training.workout')).toUpperCase();
@@ -365,10 +379,23 @@ function dayLabel(v) { return (_EN && DAY_LABELS_EN[v]) ? DAY_LABELS_EN[v] : v; 
             const focusRaw = isRest ? __t('training.off') :
                 (gun.odak || (gun.egzersizler && gun.egzersizler[0] && gun.egzersizler[0].isim) || '');
             const focus = esc(focusRaw);
-            const focusTitle = focus.replace(/"/g, '&quot;');
-            return '<div class="' + cls + '" data-action="previewDay" data-args=\'["' + esc(gun.gun) + '"]\' title="' + focusTitle + '">' +
-                '<div class="wc-day">' + esc(dayLabel(gun.gun)).slice(0, 3) + '</div>' +
-                '<div class="wc-focus">' + focus + '</div></div>';
+            // The chip shows a 3-letter abbreviation, so the tooltip carries the
+            // full day name alongside the (already escaped) focus text.
+            const focusTitle = esc(dayLabel(gun.gun) + ' — ' + focusRaw).replace(/"/g, '&quot;');
+            // A chip that opens the day preview is a <button>: it was a click-
+            // handled <div>, so it could not be tabbed to or activated from the
+            // keyboard and announced as plain text. Rest chips do nothing on
+            // click (previewDay returns early), so they stay a plain <div>
+            // rather than advertising an action that never happens.
+            // <span>, not <div>: a <button> only accepts phrasing content.
+            const body = '<span class="wc-day">' + esc(dayShort(gun.gun)) + '</span>' +
+                '<span class="wc-focus">' + focus + '</span>';
+            if (isRest) {
+                return '<div class="' + cls + '" title="' + focusTitle + '">' + body + '</div>';
+            }
+            return '<button type="button" class="' + cls + '" data-action="previewDay" ' +
+                'data-args=\'["' + esc(gun.gun) + '"]\' title="' + focusTitle + '">' +
+                body + '</button>';
         }).join('');
     }
 

@@ -155,6 +155,19 @@
   --text-display-md: clamp(32px, 5vw, 44px);
   --text-display-lg: clamp(38px, 6vw, 52px);
 
+  /* Metrik ölçeği (PR2) — veri-öncelikli yüzeylerde BİRİNCİL sayı/sonuç.
+     Amaç tek bir hiyerarşi merdiveni: sayfa başlığı (--text-display-*) >
+     metrik (--text-metric-*) > bölüm başlığı > gövde > metadata. Sayfalar
+     kendi tek-seferlik 36px/20px değerlerini uydurmak yerine bu üç rolden
+     birini seçer:
+       lg → yüzeyin tek hakim sayısı  (Home kalori halkası, Training haftalık istatistik)
+       md → bölüm düzeyi başlık metrik (Progress "İlerlemen" durumu)
+       sm → kart düzeyi metrik         (Progress "Ne değişti", Home kilo/BMR)
+     Akışkan: 390px'te taşmaz, 1440px'te kartın içinde baskın kalır. */
+  --text-metric-sm: clamp(22px, 2.4vw, 26px);
+  --text-metric-md: clamp(28px, 3.2vw, 34px);
+  --text-metric-lg: clamp(34px, 4.2vw, 44px);
+
   --weight-light:     300;
   --weight-regular:   400;
   --weight-medium:    500;
@@ -250,6 +263,15 @@
   --drawer-w:     280px;
   --fab-size:     58px;
   --fab-protrude: 22px;
+  /* Floating FAB rail (PR2). The coach FAB (#cw-root, coach_widget.css) and the
+     nutrition log FAB both sit on this rail, and `.page-body` (nav.css) reserves
+     `--fab-rail-h` at the foot of every page so the last line of content is
+     never underneath them. Offsets and button size live here rather than as
+     three copies of `15px`/`36px`/`56px`, so the reservation cannot drift away
+     from what it is reserving. */
+  --fab-btn:         56px;
+  --fab-rail-inset:  15px;   /* above the bottom action bar */
+  --fab-rail-h:      calc(var(--fab-rail-inset) + var(--fab-btn));
   /* Breakpoint referansları — CSS var'ları @media içinde ÇALIŞMAZ;
      media query yazarken bu değerlerle (docs/design-system.md tablosu)
      senkron kal. JS getComputedStyle ile okuyabilir. */
@@ -360,4 +382,11 @@
   /* Legacy istisna: input zemini dark'ta surface-1, light'ta surface-2
      (style.css'in tarihsel davranışı — beyaz input kartı). */
   --input-bg: var(--color-surface-2);
+}
+
+/* Desktop FAB rail. The bottom action bar is gone above 1024px, so both FABs
+   sit 36px off the viewport edge; redefining the inset here keeps the button
+   positions and `.page-body`'s reservation derived from one number. */
+@media (min-width: 1024px) {
+  :root { --fab-rail-inset: 36px; }
 }

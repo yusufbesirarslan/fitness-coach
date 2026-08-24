@@ -187,12 +187,18 @@
 }
 
 /* ── 4. PAGE SHELL ───────────────────────────────────── */
+/* PR2: the reservation now includes the floating FAB rail, not just the action
+   bar. The coach FAB is on every page and stands ~71px tall above the bar, but
+   only 24px was reserved — so the last line of a page that filled its viewport
+   (proven on /training at 390px: the plan provenance row) sat underneath it. */
 .page-body {
   padding-top: var(--header-h);
-  padding-bottom: calc(var(--action-bar-h) + var(--space-6) + env(safe-area-inset-bottom, 0));
+  padding-bottom: calc(var(--action-bar-h) + var(--fab-rail-h) + var(--space-4)
+                       + env(safe-area-inset-bottom, 0));
 }
 @media (min-width: 1024px) {
-  .page-body { padding-bottom: var(--space-8); }
+  /* No action bar above 1024px; --fab-rail-inset is 36px there (tokens.css). */
+  .page-body { padding-bottom: calc(var(--fab-rail-h) + var(--space-4)); }
 }
 
 /* Sayfa girişi — kabuk sabit kalır, içerik yumuşak girer. */

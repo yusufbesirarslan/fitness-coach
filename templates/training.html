@@ -124,7 +124,7 @@
                                     stroke-dasharray="301.6" stroke-dashoffset="301.6"/>
                         </svg>
                         <div class="ring-label" id="wh-ring-label">
-                            <div style="font-family:var(--font-display);font-size:20px;color:var(--color-primary);line-height:1;">🏋</div>
+                            <svg class="wh-ring-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.5 6.5h11M6.5 17.5h11M4 9v6M20 9v6M8 8v8M16 8v8"/></svg>
                         </div>
                     </div>
                 </div>
@@ -199,9 +199,12 @@
 
         <!-- Plan meta + reset -->
         <div class="apv-meta-row">
-            <span id="apv-meta"></span>
             <span class="badge badge-primary" id="apv-score">—</span>
-            <button class="btn-ghost" data-action="resetPlan">↺ {{ t('training.reset_plan') }}</button>
+            <span id="apv-meta"></span>
+            <button class="btn-ghost apv-reset" data-action="resetPlan">
+                <svg class="icon-inline" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 9 8 9"/></svg>
+                {{ t('training.reset_plan') }}
+            </button>
         </div>
 
     </div>

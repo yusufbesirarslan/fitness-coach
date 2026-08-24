@@ -395,7 +395,7 @@ async function submitPhotoMeal() {
     if (d.error) { showToast(d.error, 'error'); return; }
     showToast(__t('nutrition.meal_saved'), 'success');
     if (window.fxActivation) fxActivation('meal');
-    if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
+    if (d.quest_awarded) showToast('+' + d.quest_awarded.xp + ' XP!', 'success');
     closePhotoConfirm();
     loadTodayData();
   } catch (e) {
@@ -541,7 +541,7 @@ async function logMeal() {
       renderSelectedFoods();
       input.value = '';
       showToast(__t('nutrition.meal_saved'), 'success');
-      if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
+      if (d.quest_awarded) showToast('+' + d.quest_awarded.xp + ' XP!', 'success');
       closeManualSheet();
       loadTodayData();
     } catch (e) {
@@ -570,7 +570,7 @@ async function logMeal() {
     // Funnel/aktivasyon: ilk öğün kaydı.
     if (window.fxTrackOnce) fxTrackOnce('first_meal_logged');
     if (window.fxActivation) fxActivation('meal');
-    if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
+    if (d.quest_awarded) showToast('+' + d.quest_awarded.xp + ' XP!', 'success');
     closeManualSheet();
     loadTodayData();
   } catch (e) {
@@ -848,10 +848,10 @@ async function loadActivePlan() {
 
 function renderActivePlanDetail(plan, score, createdAt) {
   const meals = [
-    { key: 'kahvalti', label: __t('nutrition.meal_breakfast'), icon: '🍳' },
-    { key: 'ogle',     label: __t('nutrition.meal_lunch'),     icon: '🥗' },
-    { key: 'aksam',    label: __t('nutrition.meal_dinner'),    icon: '🍽️' },
-    { key: 'ara_ogun', label: __t('nutrition.meal_snack'),     icon: '🥜' }
+    { key: 'kahvalti', label: __t('nutrition.meal_breakfast'), icon: _SLOT_ICONS.breakfast },
+    { key: 'ogle',     label: __t('nutrition.meal_lunch'),     icon: _SLOT_ICONS.lunch },
+    { key: 'aksam',    label: __t('nutrition.meal_dinner'),    icon: _SLOT_ICONS.dinner },
+    { key: 'ara_ogun', label: __t('nutrition.meal_snack'),     icon: _SLOT_ICONS.snack }
   ];
 
   const mealsHtml = meals.map(m => {
@@ -861,7 +861,7 @@ function renderActivePlanDetail(plan, score, createdAt) {
     return `
       <div class="apd-meal">
         <div class="apd-meal-hdr">
-          <span class="apd-meal-icon">${m.icon}</span>
+          <span class="apd-meal-icon" aria-hidden="true">${m.icon}</span>
           <span class="apd-meal-name">${m.label}</span>
           <span class="apd-meal-kcal">${ml.kalori ?? '—'} kcal</span>
         </div>
@@ -920,10 +920,10 @@ async function loadQuickAddSection() {
     }
 
     const MEALS = [
-      { key: 'kahvalti', label: __t('nutrition.meal_breakfast'), icon: '🍳' },
-      { key: 'ogle',     label: __t('nutrition.meal_lunch'),     icon: '🥗' },
-      { key: 'aksam',    label: __t('nutrition.meal_dinner'),    icon: '🍽️' },
-      { key: 'ara_ogun', label: __t('nutrition.meal_snack'),     icon: '🥜' }
+      { key: 'kahvalti', label: __t('nutrition.meal_breakfast'), icon: _SLOT_ICONS.breakfast },
+      { key: 'ogle',     label: __t('nutrition.meal_lunch'),     icon: _SLOT_ICONS.lunch },
+      { key: 'aksam',    label: __t('nutrition.meal_dinner'),    icon: _SLOT_ICONS.dinner },
+      { key: 'ara_ogun', label: __t('nutrition.meal_snack'),     icon: _SLOT_ICONS.snack }
     ];
 
     container.innerHTML = MEALS.map(m => {
@@ -933,7 +933,7 @@ async function loadQuickAddSection() {
       return `
         <button class="qab" id="qab-${m.key}"
           data-action="quickAddMeal" data-args='["${m.key}","${m.label}"]' type="button">
-          <span class="qab-icon">${m.icon}</span>
+          <span class="qab-icon" aria-hidden="true">${m.icon}</span>
           <div class="qab-info">
             <div class="qab-title">${m.label} — ${esc(d.plan.isim || 'Aktif Plan')}</div>
             <div class="qab-sub">${sub}</div>
@@ -1091,14 +1091,14 @@ function addWater() {
 
 /* "Hızlı Ekle" su butonu ("Bugün" sekmesi) */
 async function quickAddWater(btn) {
-  if (waterCount >= WATER_GOAL_N) { showToast(__t('nutrition.water_goal_reached') + ' 🎉', 'success'); return; }
+  if (waterCount >= WATER_GOAL_N) { showToast(__t('nutrition.water_goal_reached'), 'success'); return; }
   const next = waterCount + 1;
   saveWaterCount(next);
   renderWater(next);
   btn.querySelector('.qab-plus').style.display = 'none';
   btn.querySelector('.qab-check').style.display = '';
-  if (next >= WATER_GOAL_N) showToast(__t('nutrition.water_goal_reached') + ' 🎉', 'success');
-  else showToast(__t('nutrition.cup_drunk', { n: next }) + ' 💧', 'info');
+  if (next >= WATER_GOAL_N) showToast(__t('nutrition.water_goal_reached'), 'success');
+  else showToast(__t('nutrition.cup_drunk', { n: next }), 'info');
   setTimeout(() => {
     btn.querySelector('.qab-plus').style.display = '';
     btn.querySelector('.qab-check').style.display = 'none';
@@ -1231,11 +1231,14 @@ async function fetchServings(foodIdOrName) {
 }
 
 /* ── DIARY BUILDER ── */
+/* Same four meal slots as the timeline above, so they take the same icons —
+   the diary tab used to render full-colour emoji next to the timeline's
+   stroked SVGs, which read as two different products on one page. */
 const DIARY_MEALS = [
-  { key: 'Kahvaltı', icon: '\u{1F373}' },
-  { key: 'Öğle',     icon: '\u{1F957}' },
-  { key: 'Akşam',    icon: '\u{1F37D}\u{FE0F}' },
-  { key: 'Ara Öğün', icon: '\u{1F95C}' }
+  { key: 'Kahvaltı', icon: _SLOT_ICONS.breakfast },
+  { key: 'Öğle',     icon: _SLOT_ICONS.lunch },
+  { key: 'Akşam',    icon: _SLOT_ICONS.dinner },
+  { key: 'Ara Öğün', icon: _SLOT_ICONS.snack }
 ];
 
 async function loadDiary() {
@@ -1296,7 +1299,7 @@ function renderDiary(data) {
       <div class="card diary-meal-card" style="padding:20px;margin-bottom:12px;" data-meal-name="${dm.key}" data-meal-id="${mealId}">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
           <div style="display:flex;align-items:center;gap:10px;">
-            <span style="font-size:20px;">${dm.icon}</span>
+            <span class="dm-icon" aria-hidden="true">${dm.icon}</span>
             <span style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1.5px;color:var(--text);">${mealLabel(dm.key)}</span>
           </div>
           <span style="font-family:'Bebas Neue';font-size:16px;color:var(--color-primary);">${Math.round(totals.calories)} kcal</span>
@@ -1507,7 +1510,7 @@ async function confirmServingModal() {
       const d = await res.json();
       if (d.error) { showToast(d.error, 'error'); return; }
       showToast(__t('nutrition.meal_saved'), 'success');
-      if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
+      if (d.quest_awarded) showToast('+' + d.quest_awarded.xp + ' XP!', 'success');
       closeServingModal();
       loadTodayData();
     } catch (e) {
@@ -1674,7 +1677,7 @@ async function logDiaryMeal(mealName) {
     showToast(__t('nutrition.meal_saved_named', { meal: mealLabel(mealName) }), 'success');
     if (window.fxTrackOnce) fxTrackOnce('first_meal_logged');
     if (window.fxActivation) fxActivation('meal');
-    if (d.quest_awarded) showToast('\u{1F3AF} +' + d.quest_awarded.xp + ' XP!', 'success');
+    if (d.quest_awarded) showToast('+' + d.quest_awarded.xp + ' XP!', 'success');
     loadDiary();
   } catch (e) { showToast(__t('nutrition.save_error'), 'error'); }
 }
@@ -1690,6 +1693,54 @@ document.addEventListener('click', e => {
   const name = document.getElementById('sb-name')?.textContent?.trim() || '';
   const av   = document.getElementById('sb-avatar');
   if (av && name) av.textContent = name[0].toUpperCase();
+})();
+
+/* ── LOG FAB: yield to the meal list while scrolling ──
+   The FAB moved to the left rail (nutrition.css) because on the right it sat
+   exactly on top of each meal card's score badge and quick-edit button —
+   confirmed in a rendered 390px viewport. A floating button still overlays the
+   list wherever it rests, though, so it also steps aside while the list is
+   being read.
+
+   It therefore tucks away while the user is reading down the list and
+   returns as soon as they stop or scroll back, which is the standard behaviour
+   for a floating action button over a scrolling list. It is purely presentational:
+   `.is-tucked` only translates and fades, so the control keeps its DOM position,
+   its accessible name and its keyboard reachability, and it is restored on any
+   upward scroll, on rest, and whenever the log sheet opens. Reduced-motion is
+   honoured by the transition rule in nutrition.css (the state still applies —
+   an occluding control must still move out of the way). */
+(function initLogFabScrollBehaviour() {
+  var fab = document.getElementById('log-fab');
+  if (!fab) return;
+  var lastY = window.scrollY, ticking = false, restTimer = null;
+  var HIDE_AFTER_PX = 12;   // ignore sub-pixel / rubber-band jitter
+  var REST_MS = 700;        // "the user stopped scrolling"
+
+  function show() { fab.classList.remove('is-tucked'); }
+
+  function onFrame() {
+    ticking = false;
+    var y = window.scrollY;
+    var dy = y - lastY;
+    if (Math.abs(dy) < HIDE_AFTER_PX) return;
+    lastY = y;
+    // Never tuck at the very top: there is no list under the FAB to protect.
+    if (dy > 0 && y > 120) fab.classList.add('is-tucked');
+    else show();
+    if (restTimer) clearTimeout(restTimer);
+    restTimer = setTimeout(show, REST_MS);
+  }
+
+  window.addEventListener('scroll', function () {
+    if (ticking) return;
+    ticking = true;
+    window.requestAnimationFrame(onFrame);
+  }, { passive: true });
+
+  // Opening the sheet from anywhere must not leave the trigger tucked away.
+  fab.addEventListener('focus', show);
+  document.addEventListener('keydown', function (e) { if (e.key === 'Tab') show(); });
 })();
 
 /* ── INIT ── */

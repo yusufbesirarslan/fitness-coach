@@ -61,7 +61,13 @@ body {
 .meal-type-opt:hover    { border-color: rgba(var(--color-primary-rgb),0.3); }
 .meal-type-opt:active   { transform: scale(0.96); }
 .meal-type-opt.selected { background: var(--color-primary-soft); border-color: rgba(var(--color-primary-rgb),0.5); color: var(--color-primary); }
-.meal-type-opt .emoji   { font-size: 22px; line-height: var(--leading-none); }
+/* Meal-type marker. Was an emoji at 22px; now the same stroke SVG the meal
+   timeline already uses, so picking a meal type and reading the logged
+   timeline show the identical icon for the identical concept. */
+.meal-type-ic { width: var(--icon-lg); height: var(--icon-lg); display: inline-flex;
+  align-items: center; justify-content: center; color: currentColor; }
+.meal-type-ic svg { width: 100%; height: 100%; stroke: currentColor; fill: none;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ── 4. PLAN CARDS ────────────────────────────────── */
 .plan-card {

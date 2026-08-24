@@ -2,45 +2,101 @@
    Page-scoped rules only; shared primitives come from components.css. */
 
 /* ── 1 · Today's Workout Hero ─────────────────────────────────────── */
-.workout-hero { display: grid; grid-template-columns: auto 1fr; gap: var(--space-4);
-  align-items: center; background: var(--color-surface-2);
-  border: var(--border-w-1) solid var(--color-border-1);
-  border-radius: var(--radius-lg); padding: var(--space-5); position: relative;
-  overflow: hidden; }
+/* The hero is the CONTENT of the surrounding `.card`, not a second card:
+   it used to repeat the same background + border + radius + padding inside
+   one, which rendered as a visible card-within-a-card once `.card` gained its
+   own padding (PR2). Layout only now — the surface comes from the wrapper. */
+.workout-hero { display: grid; grid-template-columns: auto 1fr;
+  gap: var(--space-2) var(--space-5);
+  align-items: center; position: relative; }
 .workout-hero.is-rest { grid-template-columns: 1fr; text-align: center; }
 .wh-ring { grid-row: span 2; }
 .wh-focus { font-family: var(--font-display); letter-spacing: var(--tracking-wide);
-  color: var(--color-primary); font-size: var(--text-2xl);
+  color: var(--color-primary); font-size: var(--text-metric-md);
+  line-height: var(--leading-none);
   overflow-wrap: normal; word-break: keep-all; }
 .wh-meta { display: flex; gap: var(--space-4); color: var(--color-text-3);
-  font-size: var(--text-sm); margin-top: var(--space-1); flex-wrap: wrap; }
-.wh-cta { grid-column: 1 / -1; }        /* full-width Start button */
+  font-size: var(--text-sm); margin-top: var(--space-2); flex-wrap: wrap;
+  font-variant-numeric: tabular-nums; }
+/* Full-width Start button. `:empty` guard: renderHero() leaves the CTA empty
+   whenever the state offers no action (rest day, no session action), and an
+   empty grid row still consumed a full row of height — a dead band inside the
+   hero card at every width. */
+.wh-cta { grid-column: 1 / -1; margin-top: var(--space-2); }
+.wh-cta:empty { display: none; }
 .workout-hero.is-done .wh-cta { display: none; }
 .wh-done-badge { display: inline-flex; align-items: center; gap: var(--space-1); }
 @media (max-width: 560px) { .workout-hero { grid-template-columns: 1fr;
   justify-items: center; text-align: center; } .wh-ring { grid-row: auto; } }
+/* From tablet up the Start action moves onto the same line as the metric it
+   belongs to. As a full-width row underneath, it left the right two thirds of
+   a 1280px hero empty and pushed the action away from its context. */
+@media (min-width: 768px) {
+  .workout-hero { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .wh-cta { grid-column: 3; grid-row: 1 / span 2; align-self: center;
+    margin-top: 0; }
+  /* renderHero() emits `btn-volt w-full`; name both classes so this wins on
+     specificity rather than on stylesheet order. */
+  .wh-cta .btn-volt.w-full { width: auto; }
+}
+
+/* Section rhythm on the active-plan view: hero → this week → stats → meta.
+   `.sec-label` only carries a bottom margin, so without this the "BU HAFTA"
+   caption sat flush against the hero card's border with no breathing room. */
+#active-plan-view > .card { margin-bottom: var(--space-6); }
 
 /* ── 2 · This-week strip ──────────────────────────────────────────── */
+/* "Seven identical boxes" was the whole problem: today, a cardio day and a
+   strength day differed only by which blue the 1px border used, and rest days
+   only by opacity. The state now reads from three stacked signals — a type bar
+   at the top of the chip, the surface, and the label weight — so today is
+   unmistakable at a glance and type is legible without relying on hue alone
+   (WCAG 1.4.1: the type is also spelled out in .wc-focus and the title). */
 .week-strip { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: var(--space-1); min-width: 0; }
-.week-chip { border: var(--border-w-1) solid var(--color-border-1);
-  border-radius: var(--radius-md); padding: var(--space-2) var(--space-1);
-  text-align: center; cursor: pointer; min-height: 44px; min-width: 0;
+/* Workout/cardio chips render as <button>, rest chips as <div> (training.js) —
+   `font`/`color: inherit` and the appearance reset keep the two identical. */
+.week-chip { position: relative; border: var(--border-w-1) solid var(--color-border-1);
+  border-radius: var(--radius-md); padding: 10px var(--space-1) var(--space-2);
+  text-align: center; cursor: pointer; min-height: 52px; min-width: 0;
+  font: inherit; color: inherit; appearance: none; -webkit-appearance: none;
   overflow: hidden; background: var(--color-surface-2);
   transition: border-color var(--duration-fast) var(--ease-standard),
+    background var(--duration-fast) var(--ease-standard),
     transform var(--duration-fast) var(--ease-standard); }
-.week-chip:hover { border-color: var(--color-border-2); }
+/* Type bar — 3px rule pinned to the chip's top edge. */
+.week-chip::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+  background: var(--color-primary);
+}
+/* Cardio is a dashed bar, not just a different blue: --color-info and
+   --color-primary are two shades of the same hue and were indistinguishable
+   side by side, and hue alone must not be the only carrier anyway. */
+.week-chip.is-cardio::before {
+  background: repeating-linear-gradient(90deg,
+    var(--color-info) 0 7px, transparent 7px 12px);
+}
+.week-chip.is-rest::before   { background: var(--color-border-2); }
+.week-chip:hover { border-color: var(--color-border-2); background: var(--color-surface-3); }
 .week-chip:active { transform: scale(0.97); }
+.week-chip:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+/* Today: filled tint + primary border + a heavier label. The three together
+   survive both a colour-blind reader and a glance from arm's length. */
 .week-chip.is-today { border-color: var(--color-primary);
-  box-shadow: var(--shadow-primary); }
-.week-chip.is-rest { opacity: var(--opacity-muted); cursor: default; }
-.week-chip.is-rest:hover { border-color: var(--color-border-1); }
-.week-chip.is-cardio { border-color: var(--color-info); }
-.wc-day { font-family: var(--font-display); letter-spacing: var(--tracking-wide);
-  font-size: var(--text-xs); color: var(--color-text-2);
+  background: var(--color-primary-soft); box-shadow: var(--shadow-primary); }
+.week-chip.is-today .wc-day { color: var(--color-primary); }
+.week-chip.is-today .wc-focus { color: var(--color-text-2); }
+/* Rest: recedes without disappearing — a quieter surface, not a dimmed one.
+   `opacity` also faded the text below the 3:1 floor for secondary text. */
+.week-chip.is-rest { background: var(--overlay-2); cursor: default;
+  border-color: var(--color-border-1); }
+.week-chip.is-rest:hover { border-color: var(--color-border-1); background: var(--overlay-2); }
+.week-chip.is-rest .wc-day { color: var(--color-text-2); }
+.wc-day { display: block; font-family: var(--font-display); letter-spacing: var(--tracking-wide);
+  font-size: var(--text-md); color: var(--color-text-1);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wc-focus { font-size: var(--text-2xs); color: var(--color-text-3);
-  margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+.wc-focus { display: block; font-size: var(--text-2xs); color: var(--color-text-3);
+  margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   overflow-wrap: normal; }
 @media (max-width: 420px) { .week-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
@@ -55,13 +111,26 @@
   .wstats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-/* ── 4 · Plan meta row (meta text + score badge + reset button) ──── */
+/* ── 4 · Plan meta row (score badge + meta text + reset button) ──── */
+/* Plan provenance is supporting information, so it now reads as one quiet
+   strip (hairline top rule, muted text) instead of three loose items floating
+   under the stats. The reset action is pushed to the far end — a destructive-ish
+   control must not sit next to the metadata it would discard. */
 .apv-meta-row { display: flex; align-items: center; gap: var(--space-3);
-  flex-wrap: wrap; margin-top: var(--space-4); min-width: 0; }
+  flex-wrap: wrap; margin-top: var(--space-6); padding-top: var(--space-4);
+  border-top: var(--border-w-1) solid var(--color-border-1); min-width: 0; }
 #apv-meta {
+  /* text-2, not -3: text-3 is 4.22:1 on this surface — below AA for 12px. */
   min-width: 0; font-size: var(--text-sm); color: var(--color-text-2);
   font-weight: var(--weight-regular); line-height: var(--leading-snug);
+  font-variant-numeric: tabular-nums;
 }
+.apv-reset { margin-left: auto; }
+@media (max-width: 520px) { .apv-reset { margin-left: 0; } }
+
+/* Hero ring glyph — shares the app's single stroke language (see .icon-tile). */
+.wh-ring-icon { width: 26px; height: 26px; stroke: var(--color-primary);
+  fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 /* ── 5 · Session player overlay ────────────────────────────────────── */
 .session-view { position: fixed; inset: 0; z-index: var(--z-overlay);
