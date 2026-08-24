@@ -259,6 +259,25 @@ def test_progress_empty_state_action_is_a_control_not_a_bare_link():
     assert "border" in body and "background" in body
 
 
+def test_tip_dot_hit_area_meets_touch_minimum_without_growing_the_row():
+    """The visible mark is a 5px ::after; the button itself must be 44×44.
+    Negative margin keeps flex occupancy at 24px so the carousel row does
+    not spread between the prev/next controls."""
+    body = _rule(_css("dashboard.css"), ".tip-dot")
+    assert re.search(r"width:\s*44px", body), (
+        ".tip-dot hit area must meet the 44px touch minimum"
+    )
+    assert re.search(r"height:\s*44px", body), (
+        ".tip-dot hit area must meet the 44px touch minimum"
+    )
+    assert re.search(r"margin:\s*-10px", body), (
+        "negative margin keeps five dots at the previous 24px occupancy"
+    )
+    after = _rule(_css("dashboard.css"), ".tip-dot::after")
+    assert re.search(r"width:\s*5px", after)
+    assert re.search(r"height:\s*5px", after)
+
+
 def test_page_shell_reserves_the_floating_fab_rail():
     """Measured at the document end on all four surfaces: the coach FAB covered
     trailing content on 15 of 16 viewport cells (including Nutrition's "day

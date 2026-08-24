@@ -145,10 +145,11 @@
 .tip-btn:hover { color: var(--color-primary); border-color: var(--color-primary-glow); background: var(--color-primary-soft); }
 .tip-btn:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .tip-dots { display: flex; gap: 2px; }
-/* The visible dot stays 5px; the tap target around it is 24px. Growing the dot
-   itself would turn a position indicator into a row of buttons. */
-.tip-dot { position: relative; width: 24px; height: 24px; padding: 0; border: 0; background: none; cursor: pointer; appearance: none; -webkit-appearance: none; }
-.tip-dot:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -2px; border-radius: 50%; }
+/* Visible mark stays 5px (::after). The button is 44×44 so it meets the
+   platform touch minimum; negative margin keeps flex occupancy at the previous
+   24px so five dots still fit between the prev/next controls on a 390px card. */
+.tip-dot { position: relative; width: 44px; height: 44px; margin: -10px; padding: 0; border: 0; background: none; cursor: pointer; appearance: none; -webkit-appearance: none; flex-shrink: 0; }
+.tip-dot:focus-visible { outline: 2px solid var(--color-primary); outline-offset: -10px; border-radius: 50%; }
 .tip-dot::after { content: ''; position: absolute; top: 50%; left: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; background: var(--color-border-2); transition: background var(--duration-fast) var(--ease-standard), transform var(--duration-fast) var(--ease-standard); }
 .tip-dot.on::after { background: var(--color-primary); transform: scale(1.4); }
 #tip-body { min-height: 88px; overflow: hidden; position: relative; }
