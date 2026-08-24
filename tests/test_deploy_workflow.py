@@ -70,6 +70,33 @@ def test_deploy_checks_out_only_the_ci_approved_sha_with_full_history():
     }
 
 
+def test_privileged_deploy_job_requires_default_branch_execution_sha_to_equal_candidate():
+    job = _workflow_doc()["jobs"]["deploy"]
+
+    assert job["if"] == (
+        "${{ github.event.workflow_run.conclusion == 'success' && "
+        "github.event.workflow_run.head_branch == 'main' && "
+        "github.event.workflow_run.event == 'push' && "
+        "github.sha == github.event.workflow_run.head_sha }}"
+    )
+
+
+def test_workflow_identity_is_verified_before_checkout_or_oidc():
+    steps = _workflow_doc()["jobs"]["deploy"]["steps"]
+    identity_gate = steps[0]
+
+    assert identity_gate["env"] == {
+        "CANDIDATE_SHA": "${{ github.event.workflow_run.head_sha }}",
+        "WORKFLOW_SHA": "${{ job.workflow_sha }}",
+    }
+    assert identity_gate["run"] == (
+        'test -n "$WORKFLOW_SHA" && '
+        'test "$WORKFLOW_SHA" = "$CANDIDATE_SHA"'
+    )
+    assert steps[1]["uses"] == "actions/checkout@v7"
+    assert steps[2]["uses"] == "aws-actions/configure-aws-credentials@v6"
+
+
 def test_deploy_lifecycle_has_one_controller_entrypoint_and_named_inputs():
     steps = _workflow_doc()["jobs"]["deploy"]["steps"]
     controller_steps = [
@@ -209,6 +236,9 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
         "`B` — `scripts/deploy_control.py`",
         "`C` — `scripts/production_deploy.sh`",
         "`DEPLOY_SHA` is the sole deployment authority",
+        "default-branch execution SHA (`github.sha`) to equal the CI candidate SHA",
+        "workflow-file identity (`job.workflow_sha`) to equal that candidate",
+        "main branch protection or a repository ruleset",
         "`AWS-RunShellScript`",
         "`production-deploy`",
         "`cancel-in-progress: false`",
@@ -216,6 +246,7 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
         "SSM may still complete C on the host",
         "`PingStatus` must be `Online`",
         "`LastPingDateTime` must be no more than five minutes old",
+        "samples its UTC clock immediately after the SSM describe response",
         "Workflow job timeout | 40 minutes",
         "Delivery timeout | 60 seconds",
         "Execution timeout | 1,800 seconds",
@@ -229,7 +260,11 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
         "exact `PREV_COMMIT`",
         "Rollback resets exactly to `PREV_COMMIT`",
         "Code rollback does not roll back database migrations",
-        "`Pending`, `Delayed`, and `In Progress` mean the command is waiting",
+        "immediately logs the non-secret command ID",
+        "`InvocationDoesNotExist`",
+        "Only that structured error code is retried",
+        "`Pending`, `Delayed`, and `In Progress` are non-terminal SSM lifecycle states",
+        "not proof that the host helper process has started",
         "`Success` is the only successful terminal `StatusDetails` value",
         "`Failed`, `DeliveryTimedOut`, `ExecutionTimedOut`, `Undeliverable`, `Cancelled`, and `Terminated` are terminal failures",
         "optional `PUBLIC_HEALTH_URL` is HTTPS",

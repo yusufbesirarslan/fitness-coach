@@ -40,7 +40,7 @@ readonly HEALTH_RETRY_DELAY_SECONDS=5
 clock_now() {
   local destination="$1" reading previous
   if ! reading="$(timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
-    "${CLOCK_START_TIMEOUT_SECONDS}s" python -c "$MONOTONIC_CLOCK_CODE")"; then
+    "${CLOCK_START_TIMEOUT_SECONDS}s" python3 -c "$MONOTONIC_CLOCK_CODE")"; then
     echo "bounded monotonic clock helper failed" >&2
     return 1
   fi
@@ -240,7 +240,7 @@ enter_phase preflight "$PREFLIGHT_DEADLINE"
 echo "host transaction budget: limit=$HOST_TRANSACTION_LIMIT_SECONDS worst_case=$HOST_WORST_CASE_SECONDS lock=$LOCK_WAIT_SECONDS clock=$CLOCK_START_MAX_SECONDS clock_state=$CLOCK_STATE_SETUP_MAX_SECONDS rollback_reset=$ROLLBACK_RESET_MAX_SECONDS preflight=$PREFLIGHT_PHASE_SECONDS candidate=$CANDIDATE_PHASE_SECONDS diagnostics=$DIAGNOSTIC_PHASE_SECONDS rollback=$ROLLBACK_PHASE_SECONDS post_lock=$POST_LOCK_BUDGET_SECONDS timeout_grace=$COMMAND_KILL_GRACE_SECONDS cleanup=$CLEANUP_MAX_SECONDS ssm_margin=$SSM_BOOTSTRAP_MARGIN_SECONDS" >&2
 
 if [[ -n "$PUBLIC_HEALTH_URL" ]]; then
-  run_external python - "$PUBLIC_HEALTH_URL" <<'PY'
+  run_external python3 - "$PUBLIC_HEALTH_URL" <<'PY'
 import sys
 from urllib.parse import urlsplit
 
@@ -337,7 +337,7 @@ probe_internal_health_once() {
     return 1
   fi
 
-  health_fields="$(run_external python - "$HEALTH_BODY" <<'PY'
+  health_fields="$(run_external python3 - "$HEALTH_BODY" <<'PY'
 import json
 import sys
 

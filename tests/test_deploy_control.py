@@ -16,11 +16,14 @@ import pytest
 import scripts.deploy_control as deploy_control
 from scripts.deploy_control import (
     AWS_CLI_CALL_TIMEOUT_SECONDS,
+    AWS_EXPIRY_SECONDS,
     AwsCliError,
     ConfigError,
     DELIVERY_TIMEOUT_SECONDS,
     DeployConfig,
     EXECUTION_TIMEOUT_SECONDS,
+    GIT_CALL_TIMEOUT_SECONDS,
+    GitCliError,
     INVOCATION_CALL_TIMEOUT_SECONDS,
     InvocationFailed,
     InvocationPollingTimeout,
@@ -184,6 +187,22 @@ def test_validate_candidate_fetches_and_checks_the_current_origin_main():
     assert run_git.calls[2][-2:] == ["rev-parse", "refs/remotes/origin/main"]
 
 
+def test_git_runner_has_explicit_timeout_and_typed_diagnostic():
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append((args, kwargs))
+        raise subprocess.TimeoutExpired(args, kwargs["timeout"])
+
+    with pytest.raises(GitCliError, match="git fetch timed out after 60 seconds"):
+        deploy_control._run_git(
+            ["git", "-C", "/candidate", "fetch", "origin", "main", "--prune"],
+            run=run,
+        )
+
+    assert calls[0][1]["timeout"] == GIT_CALL_TIMEOUT_SECONDS == 60
+
+
 @pytest.fixture
 def aws_fixture():
     def make_aws(*, state, ping, heartbeat):
@@ -304,6 +323,49 @@ def test_preflight_rejects_future_heartbeat_beyond_one_minute():
         )
 
 
+def test_preflight_samples_utc_immediately_after_ssm_describe_response():
+    events = []
+
+    def aws(args):
+        if args[:2] == ["ec2", "describe-instances"]:
+            events.append("ec2-response")
+            return {"Reservations": [{"Instances": [{
+                "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+                "State": {"Name": "running"},
+            }]}]}
+        events.append("ssm-response")
+        return {"InstanceInformationList": [{
+            "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+            "PingStatus": "Online",
+            "LastPingDateTime": "2026-08-22T17:58:00+00:00",
+        }]}
+
+    def utc_now():
+        events.append("utc-now")
+        return datetime(2026, 8, 22, 18, 4, tzinfo=timezone.utc)
+
+    with pytest.raises(PreflightError, match="stale"):
+        preflight(DeployConfig.from_environ(VALID_ENV), aws, utc_now)
+
+    assert events == ["ec2-response", "ssm-response", "utc-now"]
+
+
+@pytest.mark.parametrize("state", [None, [], "running", {"Name": ["running"]}])
+def test_preflight_rejects_malformed_ec2_state_with_typed_error(state):
+    def aws(args):
+        return {"Reservations": [{"Instances": [{
+            "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+            "State": state,
+        }]}]}
+
+    with pytest.raises(PreflightError, match="state is malformed"):
+        preflight(
+            DeployConfig.from_environ(VALID_ENV),
+            aws,
+            lambda: datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+        )
+
+
 def test_send_payload_separates_delivery_and_execution_timeout():
     calls = []
 
@@ -320,6 +382,13 @@ def test_send_payload_separates_delivery_and_execution_timeout():
     assert parameters["executionTimeout"] == [str(EXECUTION_TIMEOUT_SECONDS)] == ["1800"]
     assert args[:2] == ["ssm", "send-command"]
     assert args[args.index("--instance-ids") + 1] == VALID_ENV["EC2_INSTANCE_ID"]
+
+
+def test_aws_expiry_is_derived_from_delivery_and_execution_timeouts():
+    assert AWS_EXPIRY_SECONDS == (
+        DELIVERY_TIMEOUT_SECONDS + EXECUTION_TIMEOUT_SECONDS
+    ) == 1860
+    assert AWS_EXPIRY_SECONDS < POLL_HORIZON_SECONDS
 
 
 def test_generated_command_stays_below_local_growth_guard():
@@ -1071,7 +1140,7 @@ def test_read_invocation_rejects_wrong_required_field_types(field, value):
         read_invocation(DeployConfig.from_environ(VALID_ENV), "command-id", lambda args: response)
 
 
-def test_in_progress_is_first_execution_proof(fake_clock):
+def test_in_progress_is_reported_without_claiming_host_process_start(fake_clock):
     aws = invocation_sequence("Pending", "Delayed", "InProgress", "Success")
     messages = []
 
@@ -1081,8 +1150,9 @@ def test_in_progress_is_first_execution_proof(fake_clock):
     )
 
     assert result.status_details == "Success"
-    assert sum("host execution started" in message for message in messages) == 1
-    assert messages.index("host execution started") > messages.index("SSM status: Delayed")
+    assert sum("SSM reports command InProgress" in message for message in messages) == 1
+    assert "host execution started" not in messages
+    assert messages.index("SSM reports command InProgress") > messages.index("SSM status: Delayed")
 
 
 def test_spaced_status_is_normalized_only_for_comparison(fake_clock):
@@ -1095,7 +1165,10 @@ def test_spaced_status_is_normalized_only_for_comparison(fake_clock):
     )
 
     assert result.status_details == "Success"
-    assert messages[:2] == ["SSM status: In Progress", "host execution started"]
+    assert messages[:2] == [
+        "SSM status: In Progress",
+        "SSM reports command InProgress",
+    ]
 
 
 @pytest.mark.parametrize("status", [
@@ -1148,6 +1221,78 @@ def test_aws_runner_failure_is_not_converted_to_pending(fake_clock):
         )
 
     assert messages == []
+
+
+def test_first_poll_not_visible_recovers_within_existing_horizon(fake_clock):
+    responses = iter([
+        AwsCliError(
+            "aws ssm get-command-invocation failed with exit code 254",
+            code="InvocationDoesNotExist",
+        ),
+        invocation_response("Success", response_code=0),
+    ])
+
+    def aws(args):
+        response = next(responses)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    messages = []
+    result = wait_for_invocation(
+        DeployConfig.from_environ(VALID_ENV), "command-id", aws,
+        fake_clock.monotonic, fake_clock.sleep, messages.append,
+    )
+
+    assert result.status_details == "Success"
+    assert fake_clock.sleeps == [10]
+    assert messages == [
+        "SSM invocation not visible yet",
+        "SSM status: Success",
+    ]
+
+
+def test_invocation_not_visible_is_bounded_by_polling_horizon(fake_clock):
+    calls = 0
+
+    def aws(args):
+        nonlocal calls
+        calls += 1
+        raise AwsCliError(
+            "aws ssm get-command-invocation failed with exit code 254",
+            code="InvocationDoesNotExist",
+        )
+
+    with pytest.raises(InvocationPollingTimeout, match="command-id"):
+        wait_for_invocation(
+            DeployConfig.from_environ(VALID_ENV), "command-id", aws,
+            fake_clock.monotonic, fake_clock.sleep, lambda message: None,
+        )
+
+    assert fake_clock.now == POLL_HORIZON_SECONDS
+    assert calls == POLL_HORIZON_SECONDS // 10
+
+
+def test_other_aws_error_codes_are_not_retried(fake_clock):
+    calls = 0
+
+    def aws(args):
+        nonlocal calls
+        calls += 1
+        raise AwsCliError(
+            "aws ssm get-command-invocation failed with exit code 254",
+            code="AccessDeniedException",
+        )
+
+    with pytest.raises(AwsCliError) as captured:
+        wait_for_invocation(
+            DeployConfig.from_environ(VALID_ENV), "command-id", aws,
+            fake_clock.monotonic, fake_clock.sleep, lambda message: None,
+        )
+
+    assert captured.value.code == "AccessDeniedException"
+    assert calls == 1
+    assert fake_clock.sleeps == []
 
 
 def test_invocation_runner_timeout_propagates_closed(fake_clock):
@@ -1284,6 +1429,25 @@ def test_aws_json_runner_fails_closed_on_cli_and_json_errors(completed, error_pa
         run_aws_json(["ec2", "describe-instances"], run=lambda args, **kwargs: completed)
 
 
+def test_aws_json_runner_exposes_only_structured_sanitized_error_code():
+    completed = FakeAwsCompletedProcess(
+        returncode=254,
+        stderr=(
+            "An error occurred (InvocationDoesNotExist) when calling the "
+            "GetCommandInvocation operation: secret-instance-detail"
+        ),
+    )
+
+    with pytest.raises(AwsCliError) as captured:
+        run_aws_json(
+            ["ssm", "get-command-invocation"],
+            run=lambda args, **kwargs: completed,
+        )
+
+    assert captured.value.code == "InvocationDoesNotExist"
+    assert "secret-instance-detail" not in str(captured.value)
+
+
 def test_aws_json_runner_converts_process_timeout_to_typed_failure():
     def run(args, **kwargs):
         raise subprocess.TimeoutExpired(args, kwargs["timeout"])
@@ -1359,6 +1523,9 @@ def test_run_deploy_orders_validation_preflight_exact_script_send_and_poll(
     )
 
     assert result.status_details == "Success"
+    assert messages[0] == (
+        "SSM command created: 11111111-1111-1111-1111-111111111111"
+    )
     assert events == [
         "git:fetch", "git:cat-file", "git:rev-parse",
         "aws:ec2:describe-instances",
@@ -1501,3 +1668,24 @@ def test_main_defaults_to_the_concrete_bounded_aws_json_runner(monkeypatch):
 
     assert exit_code == 0
     assert captured["aws"] is deploy_control.run_aws_json
+
+
+def test_main_passes_injected_utc_clock_without_sampling_it_early(monkeypatch):
+    captured = {}
+
+    def utc_now():
+        raise AssertionError("run_deploy owns the send-time clock sample")
+
+    def fake_run_deploy(environ, repo_path, aws, clock, *args, **kwargs):
+        captured["clock"] = clock
+
+    monkeypatch.setattr(deploy_control, "run_deploy", fake_run_deploy)
+
+    exit_code = main(
+        environ=VALID_ENV,
+        repo_path=Path("checked-out-repository"),
+        utc_now=utc_now,
+    )
+
+    assert exit_code == 0
+    assert captured["clock"] is utc_now

@@ -17,6 +17,15 @@ out that exact SHA with full history and invokes B once. B reads C from that
 exact checkout, validates the candidate and target, and sends C through the
 `AWS-RunShellScript` SSM document. C performs the one host transaction.
 
+GitHub loads a `workflow_run` workflow definition from the latest default-branch
+revision. Before the privileged job can start any step, its job-level gate
+therefore requires the default-branch execution SHA (`github.sha`) to equal the
+CI candidate SHA. The first unprivileged step also requires the workflow-file
+identity (`job.workflow_sha`) to equal that candidate before checkout or OIDC
+credential configuration. Protecting `.github/workflows/deploy.yml` with main
+branch protection or a repository ruleset that requires approval and CI is an
+external prerequisite; this repository change does not mutate GitHub settings.
+
 GitHub serializes this work with the `production-deploy` concurrency group:
 `cancel-in-progress: false` and `queue: single`. A new CI result coalesces
 behind the current deploy; it never cancels a transaction that has already
@@ -27,11 +36,14 @@ to continue.
 
 ## Controller preflight and SSM lifecycle
 
-B accepts only the configured running EC2 instance. Its SSM managed-instance
+B accepts only the configured running EC2 instance. Git candidate commands are
+individually bounded to 60 seconds. Its SSM managed-instance
 record must be unique and match the configured ID: `PingStatus` must be `Online`
 and `LastPingDateTime` must be no more than five minutes old (nor more than one
-minute in the future). Failure is fail-closed; correct the instance or SSM
-registration before retrying.
+minute in the future). The controller samples its UTC clock immediately after
+the SSM describe response, so the heartbeat decision is fresh at the send
+boundary. Failure is fail-closed; correct the instance or SSM registration
+before retrying.
 
 The controller uses the following independent bounds.
 
@@ -44,15 +56,25 @@ The controller uses the following independent bounds.
 | Polling horizon | 2,100 seconds |
 | Poll interval | 10 seconds |
 
-After SendCommand, B polls detailed invocation output and preserves the raw
-`StatusDetails` in its logs. `Pending`, `Delayed`, and `In Progress` mean the
-command is waiting; `In Progress` also means host execution has started.
+After SendCommand, B immediately logs the non-secret command ID, then polls
+detailed invocation output and preserves the raw `StatusDetails` in its logs.
+`GetCommandInvocation` can briefly return `InvocationDoesNotExist` while the
+accepted command becomes visible. Only that structured error code is retried,
+as an explicit "not visible yet" state, within the same 2,100-second monotonic
+horizon. Every other AWS error code, unknown error, malformed response, or CLI
+failure remains fail-closed. `Pending`, `Delayed`, and `In Progress` are
+non-terminal SSM lifecycle states. `In Progress` is an SSM control-plane state,
+not proof that the host helper process has started.
 `Success` is the only successful terminal `StatusDetails` value. `Failed`,
 `DeliveryTimedOut`, `ExecutionTimedOut`, `Undeliverable`, `Cancelled`, and
 `Terminated` are terminal failures. AWS's spaced spellings (`Delivery Timed Out`
 and `Execution Timed Out`) have the same failure meaning. An unknown value,
 malformed response, CLI failure, or exhausted polling horizon is also a failed
 deployment.
+
+The 1,860-second AWS expiry is derived from the 60-second delivery timeout plus
+the 1,800-second execution timeout; the 2,100-second polling horizon retains the
+240-second recovery margin from that expiry.
 
 ## Host transaction
 

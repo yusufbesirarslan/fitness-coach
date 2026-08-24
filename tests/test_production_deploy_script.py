@@ -456,7 +456,7 @@ if [[ "$command_name" == docker ]]; then
   if [[ " $* " == *' image prune '* ]]; then operation='docker:prune'; fi
 elif [[ "$command_name" == git ]]; then
   operation="git:${1:-unknown}"
-elif [[ "$command_name" == python && "${1:-}" == -c && "${2:-}" == *monotonic_ns* ]]; then
+elif [[ "$command_name" == python3 && "${1:-}" == -c && "${2:-}" == *monotonic_ns* ]]; then
   operation=clock
 fi
 if [[ "$operation" == clock ]]; then
@@ -504,7 +504,14 @@ case "$command_name" in
   date) source "$FAKE_BIN/date" "$@" ;;
   docker) source "$FAKE_BIN/docker" "$@" ;;
   git) source "$FAKE_BIN/git" "$@" ;;
-  python) "$REAL_PYTHON" "$@" ;;
+  python)
+    if [[ "${FORBID_PLAIN_PYTHON:-0}" == 1 ]]; then
+      printf 'PLAIN_PYTHON_REQUIRED\n' >> "$TRACE_FILE"
+      exit 127
+    fi
+    "$REAL_PYTHON" "$@"
+    ;;
+  python3) "$REAL_PYTHON" "$@" ;;
   sleep) source "$FAKE_BIN/sleep" "$@" ;;
   *) "$command_name" "$@" ;;
 esac
@@ -599,6 +606,20 @@ def test_host_script_is_valid_bash(bash_executable):
         timeout=120,
     )
     assert result.returncode == 0, result.stderr
+
+
+def test_host_helper_succeeds_when_plain_python_is_unavailable(
+        bash_executable, host_fixture):
+    fixture = host_fixture()
+
+    result = fixture.run_with_workflow_outer_lock(
+        bash_executable,
+        public_health_url="https://fitness.example/health",
+        FORBID_PLAIN_PYTHON="1",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "PLAIN_PYTHON_REQUIRED" not in fixture.trace.read_text(encoding="utf-8")
 
 
 def test_lock_contention_fails_before_git_or_docker(bash_executable, host_fixture):

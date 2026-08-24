@@ -21,14 +21,18 @@ from uuid import UUID
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 INSTANCE_RE = re.compile(r"i-[0-9a-f]{8}(?:[0-9a-f]{9})?")
 USER_RE = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
+AWS_ERROR_CODE_RE = re.compile(
+    r"An error occurred \(([A-Za-z][A-Za-z0-9]*)\) when calling"
+)
 
 DELIVERY_TIMEOUT_SECONDS = 60
 EXECUTION_TIMEOUT_SECONDS = 1800
-AWS_EXPIRY_SECONDS = 1860
+AWS_EXPIRY_SECONDS = DELIVERY_TIMEOUT_SECONDS + EXECUTION_TIMEOUT_SECONDS
 POLL_HORIZON_SECONDS = 2100
 POLL_INTERVAL_SECONDS = 10
 INVOCATION_CALL_TIMEOUT_SECONDS = 30
 AWS_CLI_CALL_TIMEOUT_SECONDS = 60
+GIT_CALL_TIMEOUT_SECONDS = 60
 ROOT_OUTER_LOCK_PATH = "/run/lock/axisai-production/production.lock"
 OUTER_LOCK_CAPABILITY_FD = 7
 # AWS-RunShellScript does not publish a commands-element maximum.  This is a
@@ -273,12 +277,20 @@ class ConfigError(RuntimeError):
     """Raised when deploy configuration or the checked-out candidate is unsafe."""
 
 
+class GitCliError(ConfigError):
+    """Raised when a bounded local Git validation command fails."""
+
+
 class PreflightError(RuntimeError):
     """Raised when the configured EC2/SSM target cannot receive a deploy."""
 
 
 class AwsCliError(RuntimeError):
     """Raised by an AWS JSON runner when the AWS CLI command fails."""
+
+    def __init__(self, message: str, *, code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 class InvocationProtocolError(RuntimeError):
@@ -295,6 +307,7 @@ class InvocationPollingTimeout(RuntimeError):
 # remains compatible with the read-only preflight and SendCommand interfaces.
 AwsJsonRunner = Callable[[list[str]], dict[str, Any]]
 GitRunner = Callable[[list[str]], str]
+UtcClock = Callable[[], datetime]
 
 
 @dataclass(frozen=True)
@@ -371,8 +384,30 @@ def validate_public_health_url(public_health_url: str | None) -> None:
         raise ConfigError("PUBLIC_HEALTH_URL must be HTTPS without credentials")
 
 
-def _run_git(args: list[str]) -> str:
-    completed = subprocess.run(args, check=True, capture_output=True, text=True)
+def _run_git(
+    args: list[str],
+    *,
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> str:
+    operation = args[3] if len(args) > 3 and args[:2] == ["git", "-C"] else "operation"
+    try:
+        completed = run(
+            args,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=GIT_CALL_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise GitCliError(
+            f"git {operation} timed out after {GIT_CALL_TIMEOUT_SECONDS} seconds"
+        ) from error
+    except subprocess.CalledProcessError as error:
+        raise GitCliError(
+            f"git {operation} failed with exit code {error.returncode}"
+        ) from error
+    except (OSError, UnicodeError) as error:
+        raise GitCliError(f"git {operation} could not start") from error
     return completed.stdout.rstrip("\r\n")
 
 
@@ -406,7 +441,15 @@ def run_aws_json(
         raise AwsCliError(f"{operation} could not start") from error
 
     if completed.returncode != 0:
-        raise AwsCliError(f"{operation} failed with exit code {completed.returncode}")
+        error_code = None
+        if isinstance(completed.stderr, str):
+            match = AWS_ERROR_CODE_RE.search(completed.stderr)
+            if match is not None:
+                error_code = match.group(1)
+        raise AwsCliError(
+            f"{operation} failed with exit code {completed.returncode}",
+            code=error_code,
+        )
     try:
         response = json.loads(completed.stdout)
     except (json.JSONDecodeError, TypeError) as error:
@@ -472,7 +515,11 @@ def validate_managed_instance(
     return ManagedInstance(instance_id=instance_id, last_ping=last_ping)
 
 
-def preflight(config: DeployConfig, aws: AwsJsonRunner, now: datetime) -> ManagedInstance:
+def preflight(
+    config: DeployConfig,
+    aws: AwsJsonRunner,
+    utc_now: UtcClock | datetime,
+) -> ManagedInstance:
     """Verify the configured instance is the sole running and fresh SSM target."""
     ec2 = aws([
         "ec2", "describe-instances", "--instance-ids", config.instance_id,
@@ -490,13 +537,19 @@ def preflight(config: DeployConfig, aws: AwsJsonRunner, now: datetime) -> Manage
     instance = instances[0]
     if not isinstance(instance, Mapping) or instance.get("InstanceId") != config.instance_id:
         raise PreflightError("expected exactly one EC2 target")
-    if instance.get("State", {}).get("Name") != "running":
+    state = instance.get("State")
+    if not isinstance(state, Mapping) or not isinstance(state.get("Name"), str):
+        raise PreflightError("EC2 target state is malformed")
+    if state["Name"] != "running":
         raise PreflightError("EC2 target is not running")
 
     ssm = aws([
         "ssm", "describe-instance-information", "--filters",
         f"Key=InstanceIds,Values={config.instance_id}", "--region", config.region,
     ])
+    now = utc_now() if callable(utc_now) else utc_now
+    if not isinstance(now, datetime):
+        raise PreflightError("preflight clock must return a datetime")
     return validate_managed_instance(ssm, config.instance_id, now)
 
 
@@ -708,14 +761,24 @@ def wait_for_invocation(
     while True:
         if monotonic() >= deadline:
             raise InvocationPollingTimeout(command_id)
-        result = read_invocation(config, command_id, aws)
+        try:
+            result = read_invocation(config, command_id, aws)
+        except AwsCliError as error:
+            if error.code != "InvocationDoesNotExist":
+                raise
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                raise InvocationPollingTimeout(command_id) from error
+            log("SSM invocation not visible yet")
+            sleep(min(POLL_INTERVAL_SECONDS, remaining))
+            continue
         remaining = deadline - monotonic()
         if remaining <= 0:
             raise InvocationPollingTimeout(command_id)
         log(f"SSM status: {result.status_details}")
         comparison_status = _comparison_status(result.status_details)
         if comparison_status == "InProgress" and not execution_reported:
-            log("host execution started")
+            log("SSM reports command InProgress")
             execution_reported = True
         if comparison_status == "Success":
             return result
@@ -750,7 +813,7 @@ def run_deploy(
     environ: Mapping[str, str],
     repo_path: Path,
     aws: AwsJsonRunner,
-    now: datetime,
+    utc_now: UtcClock | datetime,
     monotonic: Callable[[], float],
     sleep: Callable[[float], None],
     log: Callable[[str], None],
@@ -760,9 +823,10 @@ def run_deploy(
     """Run the single validated production deployment lifecycle in order."""
     config = DeployConfig.from_environ(environ)
     validate_candidate(repo_path, config.deploy_sha, run_git=run_git)
-    preflight(config, aws, now)
+    preflight(config, aws, utc_now)
     script = _load_host_script(repo_path)
     command_id = send_command(config, script, aws)
+    log(f"SSM command created: {command_id}")
     try:
         result = wait_for_invocation(
             config, command_id, aws, monotonic, sleep, log,
@@ -780,6 +844,7 @@ def main(
     repo_path: Path | None = None,
     aws: AwsJsonRunner | None = None,
     now: datetime | None = None,
+    utc_now: UtcClock | None = None,
     monotonic: Callable[[], float] | None = None,
     sleep: Callable[[float], None] | None = None,
     log: Callable[[str], None] = print,
@@ -787,11 +852,20 @@ def main(
 ) -> int:
     """CLI entrypoint returning non-zero for every typed deployment failure."""
     try:
+        if now is not None and utc_now is not None:
+            raise ConfigError("provide only one UTC clock override")
+        send_time_clock: UtcClock | datetime = (
+            utc_now
+            if utc_now is not None
+            else now
+            if now is not None
+            else lambda: datetime.now(timezone.utc)
+        )
         run_deploy(
             os.environ if environ is None else environ,
             Path.cwd() if repo_path is None else repo_path,
             run_aws_json if aws is None else aws,
-            datetime.now(timezone.utc) if now is None else now,
+            send_time_clock,
             time.monotonic if monotonic is None else monotonic,
             time.sleep if sleep is None else sleep,
             log,
