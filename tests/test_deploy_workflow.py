@@ -244,93 +244,37 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
 def _deploy_source_violations(source):
     violations = []
 
+    declaration = r"(?:readonly|declare(?:\s+-[A-Za-z]+)?|typeset(?:\s+-[A-Za-z]+)?|local|export)"
     assigned_names = re.findall(
-        r"(?m)^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*(?:=|:)", source
+        rf"(?m)^\s*(?:{declaration}\s+)*([A-Z][A-Z0-9_]*)\s*(?:=|:)",
+        source,
     ) + re.findall(
         r"os\.environ\[\s*[\"']([A-Z][A-Z0-9_]*)[\"']\s*\]\s*=", source
     )
     if any(
-        "FEATURE" in name
-        or name.endswith(("_ENABLED", "_DISABLED", "_FLAG"))
+        "FEATURE" in name or name.endswith(("_ENABLED", "_DISABLED", "_FLAG"))
         for name in assigned_names
     ):
         violations.append("feature flag assignment")
 
-    env_file_variables = set(re.findall(
-        r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)=.*\.env\b", source
-    ))
-    assignment_lines = source.splitlines()
-    changed = True
-    while changed:
-        changed = False
-        for line in assignment_lines:
-            match = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)", line)
-            if not match:
-                continue
-            name, value = match.groups()
-            if name in env_file_variables:
-                continue
-            if any(
-                re.fullmatch(
-                    rf"[\"']?\$(?:\{{{re.escape(variable)}\}}|{re.escape(variable)}\b)[\"']?",
-                    value.strip(),
-                )
-                for variable in env_file_variables
-            ):
-                env_file_variables.add(name)
-                changed = True
-    env_file_variable_reference = re.compile("|".join(
-            rf"\$(?:\{{{re.escape(name)}\}}|{re.escape(name)}\b)"
-            for name in env_file_variables
-        ) or r"(?!)")
-    env_reference = re.compile(r"\.env\b")
+    canonical_env_lines = {
+        'env_file="$deploy_dir/.env"',
+        'if [ ! -f "$env_file" ]; then',
+        'env_permissions="$(root_external stat -c %a -- "$env_file")"',
+        'root_external chmod 600 -- "$env_file"',
+        "echo 'deployment .env file is missing' >&2",
+        'echo "WARNING: correcting .env permissions from $env_permissions to 600"',
+        "echo 'deployment .env permissions remain unsafe' >&2",
+        "echo '.env permissions: 600'",
+    }
     for line in source.splitlines():
-        if not (env_reference.search(line) or env_file_variable_reference.search(line)):
-            continue
-        if re.match(
-            r"\s*[A-Za-z_][A-Za-z0-9_]*=.*\.env\b", line
-        ):
-            continue
-        alias_assignment = re.match(
-            r"\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)", line
-        )
-        if (
-            alias_assignment
-            and alias_assignment.group(1) in env_file_variables
-            and any(
-                re.fullmatch(
-                    rf"[\"']?\$(?:\{{{re.escape(variable)}\}}|{re.escape(variable)}\b)[\"']?",
-                    alias_assignment.group(2).strip(),
-                )
-                for variable in env_file_variables
-            )
-        ):
-            continue
-        if re.fullmatch(
-            r"\s*if\s+\[\s*!?\s*-f\s+[^;|`<()]+\]\s*;\s*then\s*",
-            line,
-        ):
-            continue
-        if re.fullmatch(
-            r"\s*[A-Za-z_][A-Za-z0-9_]*=\"\$\((?:root_external\s+)?"
-            r"stat\s+-c\s+%a\s+--\s+[^;|`<()]+\)\"\s*",
-            line,
-        ):
-            continue
-        if re.fullmatch(
-            r"\s*(?:root_external\s+)?chmod\s+600\s+--\s+[^;|`<()]+\s*",
-            line,
-        ):
-            continue
-        if (
-            re.match(r"\s*(?:echo|printf)\b", line)
-            and not env_file_variable_reference.search(line)
-            and "$(" not in line
-            and "<" not in line
-            and not re.search(r"[;|`]", line)
-        ):
-            continue
-        violations.append(".env content output")
+        if re.search(r"\.env\b", line) or "$env_file" in line or "${env_file}" in line:
+            if line.strip() not in canonical_env_lines:
+                violations.append(".env content output")
+
+    for target in re.findall(r"git\s+reset\s+--hard\s+([^\s;|&]+)", source):
+        if target not in {'"$DEPLOY_SHA"', '"$PREV_COMMIT"'}:
+            violations.append("mutable-main reset")
 
     if re.search(r"(?m)^\s*set\s+-[^\n]*x", source):
         violations.append("shell tracing")
@@ -346,41 +290,6 @@ def _deploy_source_violations(source):
         )
     ):
         violations.append("AWS credential output")
-    mutable_main_variables = {
-        name
-        for name in re.findall(
-            r"(?m)^\s*([A-Za-z_][A-Za-z0-9_]*)=", source
-        )
-        if "origin" in name.lower() and "main" in name.lower()
-    }
-    changed = True
-    while changed:
-        changed = False
-        for line in assignment_lines:
-            match = re.match(r"\s*([A-Za-z_][A-Za-z0-9_]*)=(.*)", line)
-            if not match:
-                continue
-            name, value = match.groups()
-            if (
-                "origin/main" in value
-                or "refs/remotes/origin/main" in value
-                or any(
-                    re.search(rf"\$(?:\{{{re.escape(variable)}\}}|{re.escape(variable)}\b)", value)
-                    for variable in mutable_main_variables
-                )
-            ) and name not in mutable_main_variables:
-                mutable_main_variables.add(name)
-                changed = True
-    for target in re.findall(r"git\s+reset\s+--hard\s+([^\n]+)", source):
-        if (
-            "origin/main" in target
-            or "refs/remotes/origin/main" in target
-            or any(
-                re.search(rf"\$(?:\{{{re.escape(variable)}\}}|{re.escape(variable)}\b)", target)
-                for variable in mutable_main_variables
-            )
-        ):
-            violations.append("mutable-main reset")
     return violations
 
 
@@ -394,6 +303,7 @@ def test_deploy_sources_cannot_expose_secrets_change_flags_or_reset_mutable_main
     ("unsafe_source", "expected_violation"),
     [
         ("AI_METRICS_ENABLED=1", "feature flag assignment"),
+        ("readonly AI_METRICS_ENABLED=1", "feature flag assignment"),
         (
             'env_file="$deploy_dir/.env"\n'
             'env_alias="$env_file"\n'
@@ -412,9 +322,22 @@ def test_deploy_sources_cannot_expose_secrets_change_flags_or_reset_mutable_main
         ),
         ("printf '%s' < .env", ".env content output"),
         (
+            'env_name=.env\n'
+            'env_file="$deploy_dir/$env_name"\n'
+            'base64 "$env_file"',
+            ".env content output",
+        ),
+        (
             'ORIGIN_MAIN="$(git rev-parse refs/remotes/origin/main)"\n'
             'candidate="$ORIGIN_MAIN"\n'
             'git reset --hard "$candidate"',
+            "mutable-main reset",
+        ),
+        (
+            'remote=origin\n'
+            'branch=main\n'
+            'ref="$remote/$branch"\n'
+            'git reset --hard "$ref"',
             "mutable-main reset",
         ),
     ],
@@ -425,11 +348,12 @@ def test_deploy_source_guard_rejects_structural_bypasses(
     assert expected_violation in _deploy_source_violations(unsafe_source)
 
 
-def test_deploy_source_guard_allows_only_metadata_operations_on_env_file_aliases():
+def test_deploy_source_guard_allows_the_canonical_env_file_metadata_forms():
     safe_source = (
         'env_file="$deploy_dir/.env"\n'
-        'env_copy="$env_file"\n'
-        'chmod 600 -- "$env_copy"'
+        'if [ ! -f "$env_file" ]; then\n'
+        'env_permissions="$(root_external stat -c %a -- "$env_file")"\n'
+        'root_external chmod 600 -- "$env_file"'
     )
 
     assert _deploy_source_violations(safe_source) == []
