@@ -56,7 +56,7 @@ da** değer ver.
 | `--color-surface-1` | `#1A1A1A` | `#EEEDE8` | Alçak yüzey (input zemini dark'ta) |
 | `--color-surface-2` | `#1E1E1E` | `#FFFFFF` | Kart yüzeyi |
 | `--color-surface-3` | `#252525` | `#E5E4DF` | Yükseltilmiş/iç yüzey |
-| `--color-text-1..4` | `#F4F4F4 #A6A6A6 #808080 #4D4D4D` | `#1A1A1A #5C5C5C #808080 #A3A3A3` | Metin hiyerarşisi |
+| `--color-text-1..4` | `#F4F4F4 #A6A6A6 #909090 #4D4D4D` | `#1A1A1A #5C5C5C #676767 #A3A3A3` | Metin hiyerarşisi (text-3 AA normal text on card surfaces) |
 | `--color-success(-soft)` | `#00C48C` | aynı | Başarı |
 | `--color-warning(-soft)` | `#FFB020` | `#C89800` | Uyarı |
 | `--color-danger(-soft)` | `#FF4D4D` | `#DD4444` | Hata/yıkıcı eylem |
@@ -125,12 +125,13 @@ eklemeden önce bu skalaya oturt. (`--z-drawer*` ve `--drawer-w` Phase 2'de
 ### Layout & Breakpoint'ler
 
 `--content-max` 1280 px · `--header-h` 56 · `--action-bar-h` 68 · `--drawer-w` 280
-· `--fab-size` 58 · `--fab-protrude` 22.
+· `--fab-btn` 56 · `--fab-protrude` 22 · `--fab-size` = `var(--fab-btn)` (legacy alias).
 - **Yüzen FAB rayı (PR2)**: `--fab-btn` 56 · `--fab-rail-inset` 15 (≥1024px'te
   36) · `--fab-rail-h` = ikisinin toplamı. Koç FAB'ı (`#cw-root`) ve beslenme
-  log FAB'ı konumlarını bu inset'ten alır; `.page-body` (nav.css) sayfa dibinde
-  `--fab-rail-h` kadar yer AYIRIR — yoksa sayfanın son satırı butonun altında
-  kalır. Yeni yüzen kontrol eklerken üçünü de bu token'lardan türet.
+  log FAB'ı konumlarını bu inset'ten alır ve boyutlarını `--fab-btn`'den
+  türetir; `.page-body` (nav.css) sayfa dibinde `--fab-rail-h` kadar yer
+  AYIRIR — yoksa sayfanın son satırı butonun altında kalır. Yeni yüzen kontrol
+  eklerken üçünü de bu token'lardan türet.
 
 | Breakpoint | Değer | Kullanım |
 |---|---|---|

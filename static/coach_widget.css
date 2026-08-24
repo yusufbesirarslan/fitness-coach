@@ -113,7 +113,7 @@
 #cw-scan-hint{font-family:var(--font-body);font-size:12px;color:var(--color-text-3);text-align:center;margin-top:12px}
 #cw-scan-status{font-family:var(--font-body);font-size:12px;text-align:center;margin-top:8px;color:var(--color-primary);min-height:16px}
 
-#cw-fab{width:56px;height:56px;border-radius:50%;background:var(--color-primary);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px var(--color-primary-a38),0 2px 8px var(--shadow-color-2);transition:transform .2s ease,box-shadow .2s ease,opacity .2s ease;position:relative;flex-shrink:0;pointer-events:all}
+#cw-fab{width:var(--fab-btn);height:var(--fab-btn);border-radius:50%;background:var(--color-primary);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px var(--color-primary-a38),0 2px 8px var(--shadow-color-2);transition:transform .2s ease,box-shadow .2s ease,opacity .2s ease;position:relative;flex-shrink:0;pointer-events:all}
 #cw-fab:hover{transform:scale(1.08);box-shadow:0 6px 28px var(--color-primary-a50),0 4px 12px var(--shadow-color-1)}
 #cw-fab svg{width:24px;height:24px;color:var(--color-on-primary)}
 #cw-fab.cw-hidden{opacity:0;pointer-events:none;transform:scale(.8)}

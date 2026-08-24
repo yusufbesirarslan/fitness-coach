@@ -118,3 +118,66 @@ def test_audit_validator_stub_rejects_anything_but_a_seeded_access_token():
                        ("not-an-audit-token", "access")):
         with pytest.raises(cognito_jwt.TokenValidationError):
             audit_validate_token(token, use)
+
+
+def test_audit_seed_training_plans_match_the_canonical_contract(tmp_path):
+    """The audit fixture must be valid by construction — production validation
+    is not relaxed to accept stale tip/exercise vocabulary."""
+    import json
+
+    from app.models import TrainingPlan
+    from app.services.training_generation.response_validator import (
+        VALID_TIPS, validate_plan_structure,
+    )
+    from app.services.workout_state.serialization import serialize_plan
+    from scripts.frontend_audit.app import create_audit_app
+    from scripts.frontend_audit.seed import seed_all
+
+    audit_app = create_audit_app(tmp_path / "audit.db")
+    seed_all(audit_app)
+    with audit_app.app_context():
+        plans = TrainingPlan.query.all()
+        assert plans
+        for plan in plans:
+            payload = json.loads(plan.plan_data)
+            validated = validate_plan_structure(payload)
+            serialize_plan(payload)
+            for day in validated["program"]:
+                assert day["tip"] in VALID_TIPS
+                for exercise in day["egzersizler"]:
+                    assert "dinlenme" in exercise
+                    assert "not" in exercise
+
+
+def test_seeded_training_bootstrap_succeeds_without_harness_repair(tmp_path):
+    """/training/bootstrap used to 500 on the stale seed unless the capture
+    harness rewrote kuvvet→antrenman and filled dinlenme/not."""
+    from scripts.frontend_audit.app import create_audit_app
+    from scripts.frontend_audit.seed import seed_all
+
+    audit_app = create_audit_app(tmp_path / "audit.db")
+    seed_all(audit_app)
+    client = audit_app.test_client()
+    for scenario in ("active-workout", "active-rest-day"):
+        login = client.get(f"/__audit__/login/{scenario}")
+        assert login.status_code == 302
+        response = client.get("/training/bootstrap")
+        assert response.status_code == 200, scenario
+        body = response.get_json()
+        assert body.get("code") != "bootstrap_unavailable", scenario
+        assert "workout" in body, scenario
+
+
+def test_workout_audit_harness_does_not_repair_the_seed():
+    from pathlib import Path
+
+    audit_dir = Path(__file__).resolve().parents[1] / "scripts" / "frontend_audit"
+    tree = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in audit_dir.glob("*.py")
+        if path.name != "seed.py"
+    )
+    assert "_normalize_seed_plans" not in tree
+    assert 'tip"] = "antrenman"' not in tree
+    assert 'tip": "kuvvet"' not in tree
+    assert 'setdefault("dinlenme"' not in tree
