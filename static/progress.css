@@ -42,8 +42,11 @@
 .ps-card[data-state="on_track"]        { border-left-color: var(--color-success); }
 .ps-card[data-state="needs_attention"] { border-left-color: var(--color-warning); }
 .ps-card[data-state="building_baseline"] { border-left-color: var(--color-border-2); }
+/* The page's loudest single line after the title. It shared --text-2xl with
+   .wc-value, so the primary verdict and the three subordinate cards carried
+   identical weight and nothing led the page. */
 .ps-state {
-  font-family: var(--font-display); font-size: var(--text-2xl);
+  font-family: var(--font-display); font-size: var(--text-metric-md);
   letter-spacing: 2px; color: var(--color-text-1);
   line-height: var(--leading-none); margin-bottom: var(--space-3);
 }
@@ -82,11 +85,18 @@
   letter-spacing: var(--tracking-label); text-transform: uppercase;
   color: var(--color-text-3); margin-bottom: var(--space-3);
 }
+/* The value is what the card exists to say: it now sits one full step above
+   its own supporting line (metric-sm vs --text-sm) and one step below the
+   page-level verdict (metric-md), so the three read as one ladder. */
 .wc-value {
-  font-family: var(--font-display); font-size: var(--text-2xl);
+  font-family: var(--font-display); font-size: var(--text-metric-sm);
+  letter-spacing: 1px;
   color: var(--color-text-1); line-height: var(--leading-none);
   overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
 }
+/* --color-text-2, not -3: text-3 measures 4.22:1 on surface-2, under the 4.5:1
+   floor for 12px body copy. Hierarchy here comes from size and weight. */
 .wc-sub {
   margin-top: var(--space-2);
   font-size: var(--text-sm); color: var(--color-text-2);
@@ -245,12 +255,23 @@
   display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-3); margin-bottom: var(--space-3);
 }
+/* The only call-to-action inside an empty state must not be a default
+   underlined text link: it read as body copy that happened to be blue, and it
+   was the smallest tap target on the page. Same visual grammar as .btn-ghost,
+   with the 44px minimum honoured. */
 .pp-link {
-  display: inline-block; margin-top: var(--space-3);
-  font-size: var(--text-sm); font-weight: var(--weight-semibold);
-  color: var(--color-primary);
+  display: inline-flex; align-items: center; justify-content: center;
+  margin-top: var(--space-4); min-height: 44px; padding: 0 var(--space-4);
+  font-size: var(--text-md); font-weight: var(--weight-semibold);
+  color: var(--color-primary); text-decoration: none;
+  background: var(--color-primary-soft);
+  border: var(--border-w-1) solid rgba(var(--color-primary-rgb), 0.28);
+  border-radius: var(--radius-sm);
+  transition: background var(--duration-fast) var(--ease-standard),
+              border-color var(--duration-fast) var(--ease-standard);
 }
-.pp-link:focus-visible { outline: var(--focus-ring, 2px solid var(--color-primary)); outline-offset: 2px; }
+.pp-link:hover { background: var(--color-primary-a12); border-color: var(--color-primary); }
+.pp-link:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 @media (max-width: 390px) {
   .pp-pair, .pp-strip { grid-template-columns: 1fr; }
 }
@@ -404,12 +425,35 @@ input[type="range"]:focus-visible {
 .feedback-card.visible { display: block; animation: slide-up 0.25s var(--ease-standard); }
 .feedback-header { display: flex; align-items: center; gap: 10px; margin-bottom: var(--space-3); }
 .feedback-avatar { width: 32px; height: 32px; border-radius: var(--radius-full); background: var(--color-primary);
-  display: flex; align-items: center; justify-content: center; font-size: var(--text-base); }
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.feedback-avatar svg { width: var(--icon-md); height: var(--icon-md); stroke: var(--color-on-primary);
+  fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .feedback-title { font-family: var(--font-display); font-size: 16px; letter-spacing: 2px; color: var(--color-primary); }
 .feedback-text { font-size: var(--text-base); color: var(--color-text-1); line-height: var(--leading-relaxed); font-weight: var(--weight-light); }
 
 /* ── 11 · SECTION SUB (used by the check-in sheet) ──────────────────── */
 .section-sub { font-size: var(--text-md); color: var(--color-text-2); margin-bottom: var(--space-4); font-weight: var(--weight-light); }
+
+/* ── 11b · EMPTY SECTIONS ────────────────────────────────────────────── */
+/* Physique and History render `.empty-state` straight onto the page
+   background while every other section on the page is a bordered surface, so
+   an empty section read as a rendering failure rather than as a state. Scoped
+   to .prog-section on purpose: `.empty-state` is shared with six other pages
+   whose empty states already sit inside their own containers. */
+.prog-section .empty-state {
+  background: var(--color-surface-2);
+  border: var(--border-w-1) solid var(--color-border-1);
+  border-radius: var(--radius-lg);
+  padding: var(--space-10) var(--space-6);
+  gap: var(--space-2);
+}
+/* Body font, not the display face: Bebas Neue has no lowercase, so an empty
+   state written as a friendly sentence would render as a shout. */
+.prog-section .empty-title {
+  font-size: var(--text-xl); font-weight: var(--weight-semibold);
+  color: var(--color-text-1);
+}
+.prog-section .empty-desc { max-width: 40ch; }
 
 /* ── 12 · RESPONSIVE ─────────────────────────────────────────────────── */
 /* ~768px tablet: three cards no longer fit comfortably side by side. */
@@ -420,7 +464,8 @@ input[type="range"]:focus-visible {
   .wc-grid { grid-template-columns: 1fr; }
   .form-grid { grid-template-columns: 1fr; }
   .ps-card { padding: var(--space-5); }
-  .ps-state { font-size: var(--text-xl); }
+  /* No .ps-state size override: --text-metric-md is fluid and already floors
+     at 28px, so a second hardcoded step here would only fight the token. */
 }
 
 /* ── 13 · REDUCED MOTION ─────────────────────────────────────────────── */

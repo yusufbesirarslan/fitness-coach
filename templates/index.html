@@ -29,8 +29,8 @@
       <div class="id-name">{{ username }}</div>
     </div>
     <div class="id-meta">
-      <span class="id-chip xp">⚡ {{ user_xp }} XP</span>
-      <span class="id-chip streak">🔥 {{ t('index.streak_days', n=streak_count|default(0)) }}</span>
+      <span class="id-chip xp"><svg class="icon-inline" viewBox="0 0 24 24" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>{{ user_xp }} XP</span>
+      <span class="id-chip streak"><svg class="icon-inline" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>{{ t('index.streak_days', n=streak_count|default(0)) }}</span>
     </div>
   </section>
 
@@ -56,7 +56,7 @@
 
   <!-- 3. AI NEXT ACTION -->
   <section class="card next" id="next-card">
-    <div class="next-icon" id="next-icon">🎯</div>
+    <div class="icon-tile icon-tile-accent" id="next-icon" aria-hidden="true"></div>
     <div class="next-body">
       <div class="hero-cap">{{ t('index.next_action_label') }}</div>
       <div class="next-title" id="next-title">…</div>
@@ -66,7 +66,7 @@
   </section>
 
   <!-- 4. QUICK ACTIONS -->
-  <section class="card">
+  <section class="card qa-card">
     <div class="sec-label">{{ t('index.quick_actions') }}</div>
     <div class="qa-grid">
       <a href="/nutrition" class="qa-tile">
@@ -90,7 +90,7 @@
   </section>
 
   <!-- 5. NUTRITION SUMMARY -->
-  <section class="card">
+  <section class="card nutri-card">
     <div class="sec-label">{{ t('index.nutrition_summary') }}</div>
     <div class="nutri-grid">
       <div class="nutri-cell">
@@ -149,7 +149,20 @@
   <section class="card ach">
     <div class="sec-label">{{ t('index.achievements') }}</div>
     <div class="ach-top">
-      <div class="ach-emblem">{% if user_level <= 5 %}🌱{% elif user_level <= 10 %}💪{% elif user_level <= 20 %}🔥{% else %}🏆{% endif %}</div>
+      {#- Level emblem. One stroke family, four glyphs — the tier is still read
+          from the title + level text next to it, so the icon is emphasis, never
+          the only carrier of the level (WCAG 1.4.1). -#}
+      <div class="icon-tile icon-tile-accent ach-emblem" aria-hidden="true">
+        {%- if user_level <= 5 -%}
+        <svg viewBox="0 0 24 24"><path d="M7 20h10"/><path d="M10 20c5.5-2.5.8-6.4 3-10"/><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"/><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.3-.6 4.3-1.4 1-1 1.6-2.3 1.7-4.6-2.7.1-4 1-4.9 2z"/></svg>
+        {%- elif user_level <= 10 -%}
+        <svg viewBox="0 0 24 24"><path d="M6.5 6.5h11M6.5 17.5h11M4 9v6M20 9v6M8 8v8M16 8v8"/></svg>
+        {%- elif user_level <= 20 -%}
+        <svg viewBox="0 0 24 24"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
+        {%- else -%}
+        <svg viewBox="0 0 24 24"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>
+        {%- endif -%}
+      </div>
       <div class="ach-body">
         <div class="ach-title">{{ user_title }}</div>
         <div class="ach-xp"><span id="ach-xp">{{ xp_in_level }} / {{ xp_for_next }}</span> XP · {{ t('index.level_label') }} {{ user_level }}</div>
@@ -157,7 +170,7 @@
     </div>
     <div class="pbar-track"><div class="pbar-fill" id="ach-bar" style="width:{{ (xp_in_level / xp_for_next * 100)|int }}%;background:linear-gradient(90deg,var(--color-primary),var(--color-primary-strong));"></div></div>
     <div class="ach-foot">
-      <span class="ach-streak">🔥 {{ t('index.streak_days', n=streak_count|default(0)) }}</span>
+      <span class="ach-streak"><svg class="icon-inline" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.07-2.14-.22-4.05 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.15.43-2.29 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>{{ t('index.streak_days', n=streak_count|default(0)) }}</span>
       <a class="ach-link" href="/quests">{{ t('index.view_quests') }} →</a>
     </div>
     <div class="ach-xp" id="jm-bonus" style="min-height:14px;"></div>
@@ -168,7 +181,7 @@
     <div class="sec-label">{{ t('index.tip_title') }}</div>
     <div id="tip-body">
       <div class="tip-slide" id="ins-slide">
-        <span class="tip-icon" id="ins-icon">⚡</span>
+        <span class="icon-tile icon-tile-soft tip-icon" id="ins-icon" aria-hidden="true"></span>
         <div class="tip-text" id="ins-text">{{ t('index.tip_loading') }}</div>
         <div class="tip-src" id="ins-src">{{ t('index.tip_src_default') }}</div>
       </div>
@@ -212,50 +225,79 @@ let currentConsumedCals = 0, currentTargetCals = 2000;
 let waterCount = 0, waterGoal = 8, workoutDone = false, mealsLogged = false;
 let nextAction = null;
 
+/* ═══ ICONS ═══
+   The dashboard's interface icons. Emoji used to fill these slots (next
+   action, achievement tier, daily tip), which meant a full-colour glyph in
+   whatever weight and optical size the host font shipped, sitting next to the
+   1.8px monochrome SVGs used everywhere else. One stroke family, one viewBox,
+   one currentColor — .icon-tile in components.css owns the box, this map owns
+   only the glyph. Keys are semantic, not decorative: each tip declares a
+   TOPIC, so twenty tips reuse eleven icons instead of inventing twenty. */
+const ICONS = {
+    breakfast: '<path d="M18 8h1a4 4 0 0 1 0 8h-1"/><path d="M2 8h16v9a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4V8z"/><line x1="6" y1="1" x2="6" y2="4"/><line x1="10" y1="1" x2="10" y2="4"/><line x1="14" y1="1" x2="14" y2="4"/>',
+    lunch:      '<path d="M12 3c4.4 0 8 2.7 8 6v2H4V9c0-3.3 3.6-6 8-6z"/><path d="M4 11h16v2a6 6 0 0 1-6 6h-4a6 6 0 0 1-6-6v-2z"/><path d="M8 19v2M16 19v2"/>',
+    nutrition:  '<path d="M3 2v7c0 1.1.9 2 2 2h.5V22M6 2v9M9 2v9M9 2v7c0 1.1-.9 2-2 2"/><path d="M18 2c-1.7 0-3 2-3 5.5S16 13 18 13s3-2 3-5.5S19.7 2 18 2zM18 13v9"/>',
+    hydration:  '<path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>',
+    training:   '<path d="M6.5 6.5h11M6.5 17.5h11M4 9v6M20 9v6M8 8v8M16 8v8"/>',
+    done:       '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>',
+    goal:       '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/>',
+    sleep:      '<path d="M20.5 14.5A8.5 8.5 0 1 1 9.5 3.5a7 7 0 0 0 11 11z"/>',
+    recovery:   '<polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>',
+    mind:       '<path d="M9 18h6"/><path d="M10 22h4"/><path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14"/>',
+    data:       '<line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/>',
+    supplement: '<path d="M10.5 20.5 3.5 13.5a5 5 0 0 1 7-7l7 7a5 5 0 0 1-7 7z"/><path d="m8.5 8.5 7 7"/>',
+    heart:      '<path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7z"/>',
+    breathing:  '<path d="M17.7 7.7a2.5 2.5 0 1 1 1.8 4.3H2"/><path d="M9.6 4.6A2 2 0 1 1 11 8H2"/><path d="M12.6 19.4A2 2 0 1 0 14 16H2"/>',
+};
+function iconSvg(name) {
+    const body = ICONS[name] || ICONS.goal;
+    return '<svg viewBox="0 0 24 24" aria-hidden="true">' + body + '</svg>';
+}
+
 const TIPS_TR = [
-    { icon:'📈', text:'<strong>Progressive Overload</strong> — Her hafta ağırlık veya tekrar sayını küçük artışlarla yükselt. Kas büyümesinin temel formülü budur.', src:'Spor Fizyolojisi' },
-    { icon:'💧', text:'Antrenman sırasında kaybettiğin her 1 kg için en az 1 litre su iç. <strong>Dehidrasyon</strong>, performansı %20\'ye kadar düşürebilir.', src:'Egzersiz Fizyolojisi' },
-    { icon:'🥩', text:'Kas gelişimi için günlük protein ihtiyacı vücut ağırlığının <strong>1.6–2.2 katı gram</strong> olmalıdır. Öğün başına max. 40 g sentezlenebilir.', src:'Spor Beslenmesi' },
-    { icon:'😴', text:'Uyku sırasında salgılanan <strong>büyüme hormonu</strong> kaslardaki mikro yırtıkları onarır. 7–9 saat uyku antrenmanın ayrılmaz parçasıdır.', src:'Uyku Bilimi' },
-    { icon:'🔥', text:'HIIT antrenmanları bitiş sonrası <strong>24–48 saat</strong> devam eden "afterburn" etkisiyle ek kalori yakmanı sağlar.', src:'Metabolizma Araştırmaları' },
-    { icon:'💊', text:'<strong>Magnezyum</strong> antrenman sonrası kas kramplarını azaltır ve toparlanmayı hızlandırır. Günlük 300–400 mg idealdir.', src:'Spor Beslenmesi' },
-    { icon:'🍌', text:'Antrenman öncesi <strong>1–2 saat</strong> önce alınan karbonhidrat + protein kombinasyonu performansı belirgin biçimde optimize eder.', src:'Spor Beslenmesi' },
-    { icon:'🧠', text:'Egzersiz beyinde <strong>BDNF</strong> üretimini artırır; bu da konsantrasyon, öğrenme ve hafızayı güçlendirir.', src:'Nörobilim' },
-    { icon:'🤸', text:'Antrenman öncesi <strong>10 dakikalık ısınma</strong> sakatlık riskini %50 oranında azaltır ve performansı görünür biçimde artırır.', src:'Spor Hekimliği' },
-    { icon:'🏋️', text:'<strong>Compound egzersizler</strong> (squat, deadlift, bench press) birden fazla kas grubunu çalıştırır ve anabolik hormon salgısını artırır.', src:'Egzersiz Bilimi' },
-    { icon:'🥛', text:'Antrenman sonrası ilk <strong>30–45 dakika</strong> "anabolik pencere"dir. Bu sürede protein alımı kas sentezini maksimize eder.', src:'Spor Beslenmesi' },
-    { icon:'🧊', text:'<strong>Soğuk duş</strong> antrenman sonrası kas iltihabını azaltır. 10–15°C\'de 10–15 dakika ideal toparlanma protokolüdür.', src:'Toparlanma Bilimi' },
-    { icon:'🎯', text:'<strong>Belirli ve ölçülebilir hedefler</strong> başarı oranını %42 artırır. "Daha fit olmak" yerine "8 haftada 4 kg vermek" daha etkilidir.', src:'Spor Psikolojisi' },
-    { icon:'📊', text:'<strong>Vücut yağ oranı</strong> kiloya kıyasla çok daha doğru bir ilerleme göstergesidir. Kas kitlesi artarken kilo sabit kalabilir.', src:'Vücut Kompozisyonu' },
-    { icon:'💪', text:'<strong>Kreatin monohidrat</strong> en çok araştırılmış takviyedir. 3–5 g/gün alım güç ve kas kütlesini %10–15 oranında artırabilir.', src:'Sporcu Takviyeleri' },
-    { icon:'📓', text:'<strong>Antrenman günlüğü</strong> tutmak egzersiz kalitesini ortalama %28 artırır. Veri olmadan iyileştirme olmaz.', src:'Spor Psikolojisi' },
-    { icon:'❤️', text:'Düzenli egzersizle <strong>dinlenme kalp atış hızın</strong> düşer. Bu, kardiyovasküler sağlığının güçlendiğinin en somut göstergesidir.', src:'Kardiyoloji' },
-    { icon:'🫁', text:'<strong>Diyafram solunumu</strong> egzersiz sırasında oksijen verimliliğini artırır ve kortizol düzeyini düşürür.', src:'Solunum Fizyolojisi' },
-    { icon:'🍚', text:'Antrenman sonrası karbonhidrat + protein kombinasyonu glikojen depolarını <strong>2× daha hızlı</strong> yeniler. 3:1 oranı önerilir.', src:'Spor Beslenmesi' },
-    { icon:'🧘', text:'Haftada <strong>3 kez 10 dakika</strong> stretching eklem hareket açıklığını artırır ve yaralanma riskini önemli ölçüde azaltır.', src:'Fiziksel Tedavi' },
+    { topic:'training', text:'<strong>Progressive Overload</strong> — Her hafta ağırlık veya tekrar sayını küçük artışlarla yükselt. Kas büyümesinin temel formülü budur.', src:'Spor Fizyolojisi' },
+    { topic:'hydration', text:'Antrenman sırasında kaybettiğin her 1 kg için en az 1 litre su iç. <strong>Dehidrasyon</strong>, performansı %20\'ye kadar düşürebilir.', src:'Egzersiz Fizyolojisi' },
+    { topic:'nutrition', text:'Kas gelişimi için günlük protein ihtiyacı vücut ağırlığının <strong>1.6–2.2 katı gram</strong> olmalıdır. Öğün başına max. 40 g sentezlenebilir.', src:'Spor Beslenmesi' },
+    { topic:'sleep', text:'Uyku sırasında salgılanan <strong>büyüme hormonu</strong> kaslardaki mikro yırtıkları onarır. 7–9 saat uyku antrenmanın ayrılmaz parçasıdır.', src:'Uyku Bilimi' },
+    { topic:'training', text:'HIIT antrenmanları bitiş sonrası <strong>24–48 saat</strong> devam eden "afterburn" etkisiyle ek kalori yakmanı sağlar.', src:'Metabolizma Araştırmaları' },
+    { topic:'supplement', text:'<strong>Magnezyum</strong> antrenman sonrası kas kramplarını azaltır ve toparlanmayı hızlandırır. Günlük 300–400 mg idealdir.', src:'Spor Beslenmesi' },
+    { topic:'nutrition', text:'Antrenman öncesi <strong>1–2 saat</strong> önce alınan karbonhidrat + protein kombinasyonu performansı belirgin biçimde optimize eder.', src:'Spor Beslenmesi' },
+    { topic:'mind', text:'Egzersiz beyinde <strong>BDNF</strong> üretimini artırır; bu da konsantrasyon, öğrenme ve hafızayı güçlendirir.', src:'Nörobilim' },
+    { topic:'recovery', text:'Antrenman öncesi <strong>10 dakikalık ısınma</strong> sakatlık riskini %50 oranında azaltır ve performansı görünür biçimde artırır.', src:'Spor Hekimliği' },
+    { topic:'training', text:'<strong>Compound egzersizler</strong> (squat, deadlift, bench press) birden fazla kas grubunu çalıştırır ve anabolik hormon salgısını artırır.', src:'Egzersiz Bilimi' },
+    { topic:'nutrition', text:'Antrenman sonrası ilk <strong>30–45 dakika</strong> "anabolik pencere"dir. Bu sürede protein alımı kas sentezini maksimize eder.', src:'Spor Beslenmesi' },
+    { topic:'recovery', text:'<strong>Soğuk duş</strong> antrenman sonrası kas iltihabını azaltır. 10–15°C\'de 10–15 dakika ideal toparlanma protokolüdür.', src:'Toparlanma Bilimi' },
+    { topic:'goal', text:'<strong>Belirli ve ölçülebilir hedefler</strong> başarı oranını %42 artırır. "Daha fit olmak" yerine "8 haftada 4 kg vermek" daha etkilidir.', src:'Spor Psikolojisi' },
+    { topic:'data', text:'<strong>Vücut yağ oranı</strong> kiloya kıyasla çok daha doğru bir ilerleme göstergesidir. Kas kitlesi artarken kilo sabit kalabilir.', src:'Vücut Kompozisyonu' },
+    { topic:'supplement', text:'<strong>Kreatin monohidrat</strong> en çok araştırılmış takviyedir. 3–5 g/gün alım güç ve kas kütlesini %10–15 oranında artırabilir.', src:'Sporcu Takviyeleri' },
+    { topic:'data', text:'<strong>Antrenman günlüğü</strong> tutmak egzersiz kalitesini ortalama %28 artırır. Veri olmadan iyileştirme olmaz.', src:'Spor Psikolojisi' },
+    { topic:'heart', text:'Düzenli egzersizle <strong>dinlenme kalp atış hızın</strong> düşer. Bu, kardiyovasküler sağlığının güçlendiğinin en somut göstergesidir.', src:'Kardiyoloji' },
+    { topic:'breathing', text:'<strong>Diyafram solunumu</strong> egzersiz sırasında oksijen verimliliğini artırır ve kortizol düzeyini düşürür.', src:'Solunum Fizyolojisi' },
+    { topic:'nutrition', text:'Antrenman sonrası karbonhidrat + protein kombinasyonu glikojen depolarını <strong>2× daha hızlı</strong> yeniler. 3:1 oranı önerilir.', src:'Spor Beslenmesi' },
+    { topic:'recovery', text:'Haftada <strong>3 kez 10 dakika</strong> stretching eklem hareket açıklığını artırır ve yaralanma riskini önemli ölçüde azaltır.', src:'Fiziksel Tedavi' },
 ];
 
 const TIPS_EN = [
-    { icon:'📈', text:'<strong>Progressive Overload</strong> — Increase your weight or reps in small steps each week. This is the core formula for muscle growth.', src:'Sports Physiology' },
-    { icon:'💧', text:'Drink at least 1 liter of water for every 1 kg you lose during training. <strong>Dehydration</strong> can cut performance by up to 20%.', src:'Exercise Physiology' },
-    { icon:'🥩', text:'For muscle growth, daily protein should be <strong>1.6–2.2 g per kg</strong> of body weight. About 40 g max can be synthesized per meal.', src:'Sports Nutrition' },
-    { icon:'😴', text:'The <strong>growth hormone</strong> released during sleep repairs micro-tears in muscle. 7–9 hours of sleep is an inseparable part of training.', src:'Sleep Science' },
-    { icon:'🔥', text:'HIIT workouts burn extra calories through an "afterburn" effect that lasts <strong>24–48 hours</strong> after you finish.', src:'Metabolism Research' },
-    { icon:'💊', text:'<strong>Magnesium</strong> reduces post-workout muscle cramps and speeds recovery. 300–400 mg per day is ideal.', src:'Sports Nutrition' },
-    { icon:'🍌', text:'A carb + protein combo taken <strong>1–2 hours</strong> before training noticeably optimizes performance.', src:'Sports Nutrition' },
-    { icon:'🧠', text:'Exercise increases <strong>BDNF</strong> production in the brain, which strengthens focus, learning and memory.', src:'Neuroscience' },
-    { icon:'🤸', text:'A <strong>10-minute warm-up</strong> before training cuts injury risk by 50% and visibly boosts performance.', src:'Sports Medicine' },
-    { icon:'🏋️', text:'<strong>Compound exercises</strong> (squat, deadlift, bench press) work multiple muscle groups and boost anabolic hormone release.', src:'Exercise Science' },
-    { icon:'🥛', text:'The first <strong>30–45 minutes</strong> after training is the "anabolic window." Protein in this period maximizes muscle synthesis.', src:'Sports Nutrition' },
-    { icon:'🧊', text:'A <strong>cold shower</strong> reduces post-workout muscle inflammation. 10–15 minutes at 10–15°C is an ideal recovery protocol.', src:'Recovery Science' },
-    { icon:'🎯', text:'<strong>Specific, measurable goals</strong> raise success rates by 42%. "Lose 4 kg in 8 weeks" beats "get fitter."', src:'Sports Psychology' },
-    { icon:'📊', text:'<strong>Body fat percentage</strong> is a far more accurate progress marker than weight. Weight can stay flat while muscle mass grows.', src:'Body Composition' },
-    { icon:'💪', text:'<strong>Creatine monohydrate</strong> is the most researched supplement. 3–5 g/day can raise strength and muscle mass by 10–15%.', src:'Sports Supplements' },
-    { icon:'📓', text:'Keeping a <strong>training log</strong> improves workout quality by about 28% on average. No data, no improvement.', src:'Sports Psychology' },
-    { icon:'❤️', text:'Regular exercise lowers your <strong>resting heart rate</strong> — the clearest sign your cardiovascular health is improving.', src:'Cardiology' },
-    { icon:'🫁', text:'<strong>Diaphragmatic breathing</strong> improves oxygen efficiency during exercise and lowers cortisol levels.', src:'Respiratory Physiology' },
-    { icon:'🍚', text:'Post-workout carb + protein refills glycogen stores <strong>2× faster</strong>. A 3:1 ratio is recommended.', src:'Sports Nutrition' },
-    { icon:'🧘', text:'<strong>10 minutes of stretching 3× a week</strong> increases joint range of motion and significantly reduces injury risk.', src:'Physical Therapy' },
+    { topic:'training', text:'<strong>Progressive Overload</strong> — Increase your weight or reps in small steps each week. This is the core formula for muscle growth.', src:'Sports Physiology' },
+    { topic:'hydration', text:'Drink at least 1 liter of water for every 1 kg you lose during training. <strong>Dehydration</strong> can cut performance by up to 20%.', src:'Exercise Physiology' },
+    { topic:'nutrition', text:'For muscle growth, daily protein should be <strong>1.6–2.2 g per kg</strong> of body weight. About 40 g max can be synthesized per meal.', src:'Sports Nutrition' },
+    { topic:'sleep', text:'The <strong>growth hormone</strong> released during sleep repairs micro-tears in muscle. 7–9 hours of sleep is an inseparable part of training.', src:'Sleep Science' },
+    { topic:'training', text:'HIIT workouts burn extra calories through an "afterburn" effect that lasts <strong>24–48 hours</strong> after you finish.', src:'Metabolism Research' },
+    { topic:'supplement', text:'<strong>Magnesium</strong> reduces post-workout muscle cramps and speeds recovery. 300–400 mg per day is ideal.', src:'Sports Nutrition' },
+    { topic:'nutrition', text:'A carb + protein combo taken <strong>1–2 hours</strong> before training noticeably optimizes performance.', src:'Sports Nutrition' },
+    { topic:'mind', text:'Exercise increases <strong>BDNF</strong> production in the brain, which strengthens focus, learning and memory.', src:'Neuroscience' },
+    { topic:'recovery', text:'A <strong>10-minute warm-up</strong> before training cuts injury risk by 50% and visibly boosts performance.', src:'Sports Medicine' },
+    { topic:'training', text:'<strong>Compound exercises</strong> (squat, deadlift, bench press) work multiple muscle groups and boost anabolic hormone release.', src:'Exercise Science' },
+    { topic:'nutrition', text:'The first <strong>30–45 minutes</strong> after training is the "anabolic window." Protein in this period maximizes muscle synthesis.', src:'Sports Nutrition' },
+    { topic:'recovery', text:'A <strong>cold shower</strong> reduces post-workout muscle inflammation. 10–15 minutes at 10–15°C is an ideal recovery protocol.', src:'Recovery Science' },
+    { topic:'goal', text:'<strong>Specific, measurable goals</strong> raise success rates by 42%. "Lose 4 kg in 8 weeks" beats "get fitter."', src:'Sports Psychology' },
+    { topic:'data', text:'<strong>Body fat percentage</strong> is a far more accurate progress marker than weight. Weight can stay flat while muscle mass grows.', src:'Body Composition' },
+    { topic:'supplement', text:'<strong>Creatine monohydrate</strong> is the most researched supplement. 3–5 g/day can raise strength and muscle mass by 10–15%.', src:'Sports Supplements' },
+    { topic:'data', text:'Keeping a <strong>training log</strong> improves workout quality by about 28% on average. No data, no improvement.', src:'Sports Psychology' },
+    { topic:'heart', text:'Regular exercise lowers your <strong>resting heart rate</strong> — the clearest sign your cardiovascular health is improving.', src:'Cardiology' },
+    { topic:'breathing', text:'<strong>Diaphragmatic breathing</strong> improves oxygen efficiency during exercise and lowers cortisol levels.', src:'Respiratory Physiology' },
+    { topic:'nutrition', text:'Post-workout carb + protein refills glycogen stores <strong>2× faster</strong>. A 3:1 ratio is recommended.', src:'Sports Nutrition' },
+    { topic:'recovery', text:'<strong>10 minutes of stretching 3× a week</strong> increases joint range of motion and significantly reduces injury risk.', src:'Physical Therapy' },
 ];
 
 const TIPS = (window.LOCALE === 'en') ? TIPS_EN : TIPS_TR;
@@ -263,7 +305,7 @@ const TIPS = (window.LOCALE === 'en') ? TIPS_EN : TIPS_TR;
 
 /* ═══ TOAST ═══ */
 function toast(msg, type = 'info') {
-    const icons = { success:'✓', error:'✗', info:'💧' };
+    const icons = { success:'✓', error:'✗', info:'ℹ' };
     const wrap = document.getElementById('toast-wrap');
     const el = document.createElement('div');
     el.className = `toast toast-${type}`;
@@ -338,20 +380,20 @@ function computeNextAction() {
     const consumed = currentConsumedCals, target = currentTargetCals || 2000;
     const set = (icon, title, sub, ctaLabel, kind) => ({ icon, title, sub, ctaLabel, kind });
     if (h >= 5 && h < 11 && !mealsLogged)
-        return set('🍳', t('index.na_breakfast_title'), t('index.na_breakfast_sub'), t('index.na_cta_log'), 'nutrition');
+        return set('breakfast', t('index.na_breakfast_title'), t('index.na_breakfast_sub'), t('index.na_cta_log'), 'nutrition');
     if (h >= 11 && h < 16 && consumed < 0.35 * target)
-        return set('🥗', t('index.na_lunch_title'), t('index.na_lunch_sub'), t('index.na_cta_log'), 'nutrition');
+        return set('lunch', t('index.na_lunch_title'), t('index.na_lunch_sub'), t('index.na_cta_log'), 'nutrition');
     if (h >= 16 && h < 22 && consumed < 0.75 * target)
-        return set('🍽️', t('index.na_dinner_title'), t('index.na_dinner_sub'), t('index.na_cta_log'), 'nutrition');
+        return set('nutrition', t('index.na_dinner_title'), t('index.na_dinner_sub'), t('index.na_cta_log'), 'nutrition');
     if (waterCount < waterGoal && h >= 12)
-        return set('💧', t('index.na_water_title'), t('index.na_water_sub', { n: waterCount }), t('index.na_cta_water'), 'water');
+        return set('hydration', t('index.na_water_title'), t('index.na_water_sub', { n: waterCount }), t('index.na_cta_water'), 'water');
     if (!workoutDone && h >= 8 && h < 22)
-        return set('🏋️', t('index.na_workout_title'), t('index.na_workout_sub'), t('index.na_cta_workout'), 'training');
-    return set('🎉', t('index.na_done_title'), t('index.na_done_sub'), t('index.na_cta_progress'), 'progress');
+        return set('training', t('index.na_workout_title'), t('index.na_workout_sub'), t('index.na_cta_workout'), 'training');
+    return set('done', t('index.na_done_title'), t('index.na_done_sub'), t('index.na_cta_progress'), 'progress');
 }
 function renderNextAction() {
     nextAction = computeNextAction();
-    document.getElementById('next-icon').textContent = nextAction.icon;
+    document.getElementById('next-icon').innerHTML = iconSvg(nextAction.icon);
     document.getElementById('next-title').textContent = nextAction.title;
     document.getElementById('next-sub').textContent = nextAction.sub;
     document.getElementById('next-cta').textContent = nextAction.ctaLabel;
@@ -548,8 +590,15 @@ function renderTip(i, animated, dir) {
     const end     = Math.min(start + VISIBLE, TIPS.length);
     dots.innerHTML = '';
     for (let d = start; d < end; d++) {
-        const dot = document.createElement('div');
+        // A real <button>: these carry a click handler and a 24px hit area, so
+        // they are controls and must be reachable and announced as such. The
+        // label is the position ("3/20") rather than a sentence, so it needs no
+        // locale string and reads correctly in both.
+        const dot = document.createElement('button');
+        dot.type = 'button';
         dot.className = 'tip-dot' + (d === i ? ' on' : '');
+        dot.setAttribute('aria-label', (d + 1) + '/' + TIPS.length);
+        if (d === i) dot.setAttribute('aria-current', 'true');
         (function(idx) { dot.addEventListener('click', function() { goToTip(idx); }); })(d);
         dots.appendChild(dot);
     }
@@ -562,7 +611,7 @@ function renderTip(i, animated, dir) {
     }
 
     function applyContent() {
-        document.getElementById('ins-icon').textContent = t.icon;
+        document.getElementById('ins-icon').innerHTML = iconSvg(t.topic);
         document.getElementById('ins-text').innerHTML   = t.text;
         document.getElementById('ins-src').textContent  = t.src;
         restartProgressBar();

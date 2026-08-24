@@ -25,7 +25,15 @@
   width: 100%;
 }
 @media (max-width: 420px) { .nut-macros { grid-template-columns: repeat(2, 1fr); } }
-.nut-macro { display: flex; flex-direction: column; gap: 5px; }
+/* Hero macro bars. One full-width column pushed each value ~1000px away from
+   its own label on a desktop viewport — the label and the number it belongs to
+   have to be readable in one glance. Three across from tablet up; still stacked
+   on phones, where a full-width bar is the readable arrangement. */
+.nut-macros-hero { grid-template-columns: 1fr; gap: 14px; }
+@media (min-width: 768px) {
+  .nut-macros-hero { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-5); }
+}
+.nut-macro { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .nut-macro-hdr { display: flex; justify-content: space-between; align-items: baseline; }
 .nut-macro-name { font-size: var(--text-xs); font-weight: var(--weight-semibold); color: var(--color-text-3); }
 .nut-macro-val  { font-size: var(--text-sm); font-weight: var(--weight-bold); color: var(--color-text-1); }
@@ -33,9 +41,13 @@
 /* ── 2 · MEAL TIMELINE ────────────────────────────────────────────── */
 .meal-timeline { display: flex; flex-direction: column; gap: var(--space-4); }
 .meal-slot { display: flex; flex-direction: column; align-items: stretch; min-width: 0; }
+/* The header and the cards under it are one meal, so the header now sits on
+   a hairline rule that spans the slot: previously it floated between two
+   equally-spaced blocks and it was ambiguous which cards belonged to it. */
 .slot-head {
   display: flex; align-items: center; gap: var(--space-2);
-  margin-bottom: var(--space-2); min-width: 0;
+  padding-bottom: var(--space-2); margin-bottom: var(--space-3); min-width: 0;
+  border-bottom: var(--border-w-1) solid var(--color-border-1);
 }
 .slot-ic {
   width: var(--icon-md); height: var(--icon-md); flex-shrink: 0;
@@ -54,13 +66,16 @@
 }
 
 .meal-card {
-  display: flex; gap: var(--space-3); align-items: stretch;
+  display: flex; gap: var(--space-4); align-items: stretch;
   background: var(--color-surface-2);
   border: var(--border-w-1) solid var(--color-border-1);
-  border-radius: var(--radius-lg); padding: var(--space-3);
+  border-radius: var(--radius-lg); padding: var(--space-4);
   margin-bottom: var(--space-2);
   animation: nut-card-in var(--duration-slow) var(--ease-out-quint);
+  transition: border-color var(--duration-fast) var(--ease-standard);
 }
+.meal-card:hover,
+.meal-card:focus-within { border-color: var(--color-border-2); }
 .mc-img {
   width: 64px; height: 64px; flex-shrink: 0; border-radius: var(--radius-md);
   object-fit: cover;
@@ -74,10 +89,13 @@
   font-size: var(--text-md); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .mc-macros {
-  display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: 4px;
+  display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-1);
   font-size: var(--text-sm); color: var(--color-text-3);
+  font-variant-numeric: tabular-nums;
 }
-.mc-macros strong { color: var(--color-text-2); font-weight: var(--weight-semibold); }
+.mc-macros strong { color: var(--color-text-1); font-weight: var(--weight-semibold); }
+/* The calorie figure is what the row is scanned for. */
+.mc-macros > span:first-child { color: var(--color-text-1); font-weight: var(--weight-semibold); }
 .mc-time { font-size: var(--text-xs); color: var(--color-text-4); margin-top: 3px; }
 .mc-side {
   display: flex; flex-direction: column; align-items: flex-end;
@@ -111,6 +129,19 @@
 .slot-empty:hover { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-primary-soft); }
 .slot-empty:focus-visible { outline: none; box-shadow: var(--focus-ring); border-color: var(--color-primary); }
 
+/* Desktop meal row. Stacked title/macros/time left a wide dead band across the
+   middle of a 1230px card and pushed the row's own controls a screen away from
+   the food they belong to. From 900px the row distributes instead: what was
+   eaten on the left, what it cost in the middle, when and the controls at the
+   end — one scannable line per meal. */
+@media (min-width: 900px) {
+  .mc-body { flex-direction: row; align-items: center; gap: var(--space-5); }
+  .mc-title { flex: 1 1 auto; min-width: 0; }
+  .mc-macros { margin-top: 0; flex: 0 0 auto; }
+  .mc-time { margin-top: 0; flex: 0 0 auto; }
+  .mc-side { flex-direction: row; align-items: center; justify-content: flex-end; }
+}
+
 @keyframes nut-card-in {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: none; }
@@ -121,26 +152,46 @@
 
 /* ── 3 · LOG FAB + BOTTOM SHEET ───────────────────────────────────── */
 .log-fab {
-  /* Coach sohbet FAB'ı (#cw-fab, coach_widget.css) da alt-sağda durur; ikisi
-     üst üste binmesin diye log FAB'ı onun ÜSTÜNE istifle. Coach FAB: bottom
-     = action-bar-h + 15px, yükseklik 56px, right 20px → log FAB bottom = onun
-     tepesi (action-bar-h + 71px) + 14px boşluk. z-fab (200) < coach penceresi
-     (9998), yani sohbet açılınca pencere log FAB'ı temizce kapatır. */
-  position: fixed; right: 20px;
-  bottom: calc(var(--action-bar-h, 68px) + 85px); z-index: var(--z-fab);
+  /* Left rail, not stacked above the coach FAB (#cw-fab, coach_widget.css).
+     Two 56px primary-blue circles in one right-hand column read as one
+     ambiguous control pair, and — confirmed in a rendered 390px viewport —
+     the upper one sat exactly on top of `.mc-side`, covering each meal card's
+     score badge and quick-edit button with an opaque, higher z-index button.
+     The left rail is where components.css already documents the app's
+     quick-add FAB, and the only thing under it in the meal list is the card's
+     photo thumbnail, never a control. Same bottom offset as the coach FAB so
+     the two read as one rail across the foot of the screen.
+     z-fab (200) < the coach window (9998), so opening the chat still covers
+     this button cleanly. */
+  position: fixed; left: 20px;
+  bottom: calc(var(--action-bar-h, 68px) + var(--fab-rail-inset, 15px)); z-index: var(--z-fab);
   width: var(--fab-size, 56px); height: var(--fab-size, 56px);
   border-radius: var(--radius-full); border: none; cursor: pointer;
   background: var(--color-primary); color: var(--color-on-primary);
   box-shadow: var(--elevation-3);
   display: flex; align-items: center; justify-content: center;
-  transition: transform var(--duration-fast) var(--ease-standard),
+  transition: transform var(--duration-slow) var(--ease-out-quint),
+              opacity var(--duration-base) var(--ease-standard),
               box-shadow var(--duration-base) var(--ease-standard);
 }
 .log-fab svg { width: 24px; height: 24px; stroke: currentColor; fill: none; stroke-width: 2.4; stroke-linecap: round; }
 .log-fab:hover  { box-shadow: var(--shadow-primary, var(--elevation-3)); transform: translateY(-1px); }
 .log-fab:active { transform: scale(0.94); }
-/* ≥1024px: coach FAB bottom 36px, right 36px → log FAB onun üstünde, aynı rayda. */
-@media (min-width: 1024px) { .log-fab { bottom: 106px; right: 36px; } }
+.log-fab:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 3px; }
+/* Tucked state (static/nutrition.js): the FAB slides off the left edge while
+   the user scrolls down the meal list, so nothing floats over the meals being
+   read. Transform + opacity only — no layout, no reflow of the list. */
+.log-fab.is-tucked {
+  transform: translateX(calc(-100% - var(--space-5))); opacity: 0; pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* The control still gets out of the way — only the travel is removed. */
+  .log-fab { transition: opacity var(--duration-fast) linear; }
+  .log-fab.is-tucked { transform: none; }
+}
+/* ≥1024px: the bottom action bar is gone and the coach FAB moves to
+   bottom 36px / right 36px — mirror it on the left so the rail stays level. */
+@media (min-width: 1024px) { .log-fab { bottom: var(--fab-rail-inset, 36px); left: 36px; } }
 
 .log-sheet-grid { display: flex; flex-direction: column; gap: var(--space-2); }
 .log-sheet-opt {
@@ -321,7 +372,13 @@
 .qab:hover:not(.qab-done) { border-color: var(--color-primary); transform: translateY(-1px); }
 .qab:active:not(.qab-done) { transform: translateY(0); }
 .qab.qab-done { border-color: var(--color-primary); cursor: default; }
-.qab-icon { font-size: 20px; flex-shrink: 0; }
+/* Icon slot, not a glyph slot: the box is fixed and only the SVG inside it
+   changes, so the meal/water markers line up with the rest of the page's
+   stroke icons instead of inheriting an emoji's own metrics. */
+.qab-icon { width: var(--icon-lg); height: var(--icon-lg); flex-shrink: 0; display: inline-flex;
+  align-items: center; justify-content: center; color: var(--color-primary); }
+.qab-icon svg { width: 100%; height: 100%; stroke: currentColor; fill: none;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .qab-info { flex: 1; min-width: 0; }
 .qab-title { font-family: var(--font-display); font-size: var(--text-md); letter-spacing: 1.2px; color: var(--color-text-1); line-height: 1.2; }
 .qab-sub { font-size: var(--text-xs); color: var(--color-text-3); margin-top: 3px; }
@@ -347,7 +404,12 @@
 .apd-macro-lbl, .total-lbl { font-size: 10px; color: var(--color-text-3); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 4px; }
 .apd-meal { background: var(--color-surface-2); border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-md); padding: var(--space-4); margin-bottom: 10px; }
 .apd-meal-hdr { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: var(--border-w-1) solid var(--color-border-1); }
-.apd-meal-icon { font-size: 20px; flex-shrink: 0; }
+/* `.dm-icon` (diary tab) shares this declaration rather than adding a third
+   copy of the same fixed-size SVG slot. */
+.apd-meal-icon, .dm-icon { width: var(--icon-md); height: var(--icon-md); flex-shrink: 0; display: inline-flex;
+  align-items: center; justify-content: center; color: var(--color-primary); }
+.apd-meal-icon svg, .dm-icon svg { width: 100%; height: 100%; stroke: currentColor; fill: none;
+  stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .apd-meal-name { font-family: var(--font-display); font-size: var(--text-md); letter-spacing: 1.5px; color: var(--color-text-1); flex: 1; }
 .apd-meal-kcal { font-family: var(--font-display); font-size: var(--text-lg); color: var(--color-primary); letter-spacing: 1px; }
 .apd-meal-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 7px; }
