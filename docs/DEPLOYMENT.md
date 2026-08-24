@@ -21,15 +21,20 @@ GitHub loads a `workflow_run` workflow definition from the latest default-branch
 revision. Before the privileged job can start any step, its job-level gate
 therefore requires the default-branch execution SHA (`github.sha`) to equal the
 CI candidate SHA. The first unprivileged step also requires the workflow-file
-identity (`job.workflow_sha`) to equal that candidate before checkout or OIDC
+identity (`github.workflow_sha`) to equal that candidate before checkout or OIDC
 credential configuration. Protecting `.github/workflows/deploy.yml` with main
-branch protection or a repository ruleset that requires approval and CI is an
-external prerequisite; this repository change does not mutate GitHub settings.
+branch protection or a repository ruleset is an external prerequisite; this
+repository change does not mutate GitHub settings. Before merge, require PRs,
+the full `CI` workflow, and CODEOWNER review for the privileged workflow and
+deployment helpers; disallow bypass, force-push, and deletion. Before deploy,
+protect the `production` environment with required reviewers and restrict the
+OIDC role trust policy to this repository, branch, workflow, and environment.
 
-GitHub serializes this work with the `production-deploy` concurrency group:
-`cancel-in-progress: false` and `queue: single`. A new CI result coalesces
-behind the current deploy; it never cancels a transaction that has already
-started. If the GitHub runner is lost after SendCommand accepts the request, SSM
+GitHub serializes this work with the `production-deploy` concurrency group and
+`cancel-in-progress: false`. GitHub keeps the running job and at most one pending
+job for that group; a newer pending job may replace an older pending job. It
+never cancels a transaction that has already started. If the GitHub runner is
+lost after SendCommand accepts the request, SSM
 may still complete C on the host. Do not issue a second deploy to compensate:
 recover the command ID and host outcome first, then allow the serialized queue
 to continue.
@@ -49,12 +54,19 @@ The controller uses the following independent bounds.
 
 | Limit | Value |
 |---|---:|
-| Workflow job timeout | 40 minutes |
+| Workflow job timeout | 65 minutes |
+| Controller step timeout | 46 minutes |
 | Delivery timeout | 60 seconds |
 | Execution timeout | 1,800 seconds |
 | AWS expiry | 1,860 seconds |
 | Polling horizon | 2,100 seconds |
 | Poll interval | 10 seconds |
+
+Before SendCommand, B reserves enough of its 46-minute budget for the bounded
+send, 2,100-second poll horizon, authorization, final invocation read, and
+authority cleanup. The 65-minute job budget also covers identity, checkout,
+credentials, drift checks, and snapshot initiation without terminating the
+controller first.
 
 After SendCommand, B immediately logs the non-secret command ID, then polls
 detailed invocation output and preserves the raw `StatusDetails` in its logs.
@@ -70,7 +82,15 @@ not proof that the host helper process has started.
 `Terminated` are terminal failures. AWS's spaced spellings (`Delivery Timed Out`
 and `Execution Timed Out`) have the same failure meaning. An unknown value,
 malformed response, CLI failure, or exhausted polling horizon is also a failed
-deployment.
+deployment. Immediately after SendCommand returns one canonical command ID, B
+writes a short-lived, per-command Parameter Store authority value before its
+first invocation poll. The host refuses to acquire the
+root lock or mutate anything until that value contains the exact `DEPLOY_SHA`
+and command ID. Therefore an ambiguous SendCommand response cannot authorize an
+unknown command. The instance profile needs `ssm:GetParameter` only for
+`/axisai/production-deploy-authority/*`; the deploy role needs narrowly scoped
+`ssm:PutParameter` and `ssm:DeleteParameter` on the same prefix. B deletes the
+authority value after the terminal result, with bounded best-effort cleanup.
 
 The 1,860-second AWS expiry is derived from the 60-second delivery timeout plus
 the 1,800-second execution timeout; the 2,100-second polling horizon retains the
@@ -79,8 +99,10 @@ the 1,800-second execution timeout; the 2,100-second polling horizon retains the
 ## Host transaction
 
 C holds the root-controlled outer lock at
-`/run/lock/axisai-production/production.lock` and a deploy-directory lock for
-the whole transaction. A lock timeout exits with status 73. Treat this as
+`/run/lock/axisai-production/production.lock` for the whole transaction. The
+helper can run only with inherited descriptor 7 proving that lock is held; it
+has no direct-entry fallback or deploy-directory lock. A lock timeout exits
+with status 73. Treat this as
 contention, not a safe concurrent deploy: retry after lock contention only once
 the prior deployment has finished.
 
@@ -91,11 +113,15 @@ or divergent from production. It records the current production SHA as exact
 `PREV_COMMIT`, resets only to `DEPLOY_SHA`, then rereads `HEAD`. This revision
 equality check prevents a mutable-main checkout.
 
-C builds and starts the Compose release with `APP_REVISION` set to the exact
-candidate SHA. It requires all of the following before accepting the release:
+C materializes each build context from `git archive` of the exact revision into
+a private temporary directory. Untracked or ignored host files therefore cannot
+enter an image build. C builds and starts the Compose release with
+`APP_REVISION` set to the exact candidate SHA. It requires all of the following
+before accepting the release:
 
 1. the running `web` container reports the expected `APP_REVISION`;
-2. loopback `/health?deep=1` returns HTTP 200 and JSON `status: ok`;
+2. `/health?deep=1`, probed inside the running `web` container, returns HTTP 200
+   and JSON `status: ok`;
 3. deep health's server-owned `revision` equals the expected SHA.
 
 A revision mismatch, missing revision, failed build/start, health failure, or

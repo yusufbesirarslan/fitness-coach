@@ -12,15 +12,16 @@ import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
-from uuid import UUID
+from uuid import UUID, uuid4
 
 
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 INSTANCE_RE = re.compile(r"i-[0-9a-f]{8}(?:[0-9a-f]{9})?")
 USER_RE = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
+DEPLOY_DIR_RE = re.compile(r"/(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+")
 AWS_ERROR_CODE_RE = re.compile(
     r"An error occurred \(([A-Za-z][A-Za-z0-9]*)\) when calling"
 )
@@ -33,7 +34,20 @@ POLL_INTERVAL_SECONDS = 10
 INVOCATION_CALL_TIMEOUT_SECONDS = 30
 AWS_CLI_CALL_TIMEOUT_SECONDS = 60
 GIT_CALL_TIMEOUT_SECONDS = 60
+CONTROLLER_BUDGET_SECONDS = 46 * 60
+AUTHORIZATION_CALL_TIMEOUT_SECONDS = AWS_CLI_CALL_TIMEOUT_SECONDS
+AUTHORITY_CLEANUP_RESERVE_SECONDS = AWS_CLI_CALL_TIMEOUT_SECONDS
+SEND_AND_MONITOR_RESERVE_SECONDS = (
+    AWS_CLI_CALL_TIMEOUT_SECONDS
+    + POLL_HORIZON_SECONDS
+    + INVOCATION_CALL_TIMEOUT_SECONDS
+    + AUTHORIZATION_CALL_TIMEOUT_SECONDS
+    + AUTHORITY_CLEANUP_RESERVE_SECONDS
+)
 ROOT_OUTER_LOCK_PATH = "/run/lock/axisai-production/production.lock"
+AUTHORITY_PARAMETER_PREFIX = "/axisai/production-deploy-authority/"
+AUTHORITY_WAIT_ATTEMPTS = 14
+AUTHORITY_GATE_WORST_CASE_SECONDS = AUTHORITY_WAIT_ATTEMPTS * 5
 OUTER_LOCK_CAPABILITY_FD = 7
 # AWS-RunShellScript does not publish a commands-element maximum.  This is a
 # deliberately conservative local growth guard for our generated bootstrap.
@@ -47,8 +61,7 @@ ROOT_BOOTSTRAP_WORST_CASE_SECONDS = (
     + ROOT_EXTERNAL_CALL_COUNT * ROOT_EXTERNAL_CALL_MAX_SECONDS
     + PRIVILEGE_DROP_MAX_SECONDS
 )
-# Workflow calls inherit the already-held outer lock, so the helper's 60-second
-# direct-entry wait is not part of this path: 4 + 7 + 1560 + 2 + 7.
+# The helper inherits the already-held outer lock: 4 + 7 + 1560 + 2 + 7.
 WORKFLOW_HELPER_WORST_CASE_SECONDS = 1580
 
 ROOT_LOCK_WRAPPER_SOURCE = r'''def _emit(stderr, message):
@@ -336,8 +349,11 @@ class DeployConfig:
             raise ConfigError("EC2_INSTANCE_ID must name one instance")
         if not USER_RE.fullmatch(deploy_user):
             raise ConfigError("DEPLOY_USER is unsafe")
-        if not PurePosixPath(deploy_dir).is_absolute() or "\n" in deploy_dir or "\r" in deploy_dir:
-            raise ConfigError("DEPLOY_DIR must be one absolute path")
+        if (
+            not DEPLOY_DIR_RE.fullmatch(deploy_dir)
+            or any(part in {".", ".."} for part in deploy_dir.split("/"))
+        ):
+            raise ConfigError("DEPLOY_DIR must be one canonical shell-safe absolute path")
         validate_public_health_url(public_url)
         return cls(deploy_sha, region, instance_id, deploy_user, deploy_dir, public_url)
 
@@ -427,14 +443,20 @@ def run_aws_json(
     )
     operation = f"aws {args[0]} {args[1]}"
     command = ["aws", *args, "--output", "json", "--no-cli-pager"]
+    run_options = {
+        "capture_output": True,
+        "check": False,
+        "text": True,
+        "timeout": timeout,
+    }
+    if args[:2] == ["ssm", "send-command"]:
+        run_options["env"] = {
+            **os.environ,
+            "AWS_MAX_ATTEMPTS": "1",
+            "AWS_RETRY_MODE": "standard",
+        }
     try:
-        completed = run(
-            command,
-            capture_output=True,
-            check=False,
-            text=True,
-            timeout=timeout,
-        )
+        completed = run(command, **run_options)
     except subprocess.TimeoutExpired as error:
         raise AwsCliError(f"{operation} timed out after {timeout} seconds") from error
     except (OSError, UnicodeError) as error:
@@ -559,6 +581,8 @@ def render_bootstrap(
     encoded_dir: str,
     deploy_user: str,
     encoded_url: str,
+    encoded_authority_parameter: str,
+    region: str,
 ) -> str:
     """Render a fixed root bootstrap from validated and base64-encoded values."""
     inner_bootstrap = f"""set -eu
@@ -574,23 +598,49 @@ if [ "${{AXISAI_ROOT_LOCK_FD:-}}" != '{OUTER_LOCK_CAPABILITY_FD}' ]; then
   exit 73
 fi
 
-env_file="$deploy_dir/.env"
-if [ ! -f "$env_file" ]; then
-  echo 'deployment .env file is missing' >&2
-  exit 1
-fi
-env_permissions="$(root_external stat -c %a -- "$env_file")"
-if [ "$env_permissions" != 600 ]; then
-  echo "WARNING: correcting .env permissions from $env_permissions to 600"
-  root_external chmod 600 -- "$env_file"
-  env_permissions="$(root_external stat -c %a -- "$env_file")"
-  if [ "$env_permissions" != 600 ]; then
-    echo 'deployment .env permissions remain unsafe' >&2
-    exit 1
-  fi
-else
-  echo '.env permissions: 600'
-fi
+root_external python3 - '{deploy_user}' "$deploy_dir" <<'AXISAI_ENV_GUARD_PY'
+import os
+import pwd
+import stat
+import sys
+
+deploy_user, deploy_dir = sys.argv[1:]
+account = pwd.getpwnam(deploy_user)
+directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+deploy_dir_fd = os.open(deploy_dir, directory_flags)
+env_fd = None
+try:
+    directory_status = os.fstat(deploy_dir_fd)
+    if (not stat.S_ISDIR(directory_status.st_mode) or
+            directory_status.st_uid not in {{0, account.pw_uid}} or
+            stat.S_IMODE(directory_status.st_mode) & 0o022):
+        raise OSError("unsafe deployment directory")
+    env_fd = os.open(
+        ".env",
+        os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK,
+        dir_fd=deploy_dir_fd,
+    )
+    env_status = os.fstat(env_fd)
+    env_path_status = os.stat(
+        ".env", dir_fd=deploy_dir_fd, follow_symlinks=False
+    )
+    if (not stat.S_ISREG(env_status.st_mode) or
+            not stat.S_ISREG(env_path_status.st_mode) or
+            env_status.st_uid not in {{0, account.pw_uid}} or
+            env_path_status.st_uid not in {{0, account.pw_uid}} or
+            env_status.st_nlink != 1 or env_path_status.st_nlink != 1 or
+            (env_status.st_dev, env_status.st_ino) !=
+            (env_path_status.st_dev, env_path_status.st_ino)):
+        raise OSError("unsafe deployment .env file")
+    os.fchmod(env_fd, 0o600)
+    if stat.S_IMODE(os.fstat(env_fd).st_mode) != 0o600:
+        raise OSError("deployment .env permissions remain unsafe")
+finally:
+    if env_fd is not None:
+        os.close(env_fd)
+    os.close(deploy_dir_fd)
+print('.env permissions: 600')
+AXISAI_ENV_GUARD_PY
 
 nginx_site=/etc/nginx/sites-available/fitx
 if [ -f "$nginx_site" ] && root_external grep -q 'add_header Content-Security-Policy' "$nginx_site"; then
@@ -640,25 +690,75 @@ python3 - '{deploy_user}' "$script_path" '{deploy_sha}' "$deploy_dir" \
 {PRIVILEGE_DROP_SOURCE}AXISAI_PRIVILEGE_DROP_PY
 """
     encoded_bootstrap = base64.b64encode(inner_bootstrap.encode("utf-8")).decode("ascii")
+    authority_gate = f"""set -eu
+authority_parameter="$(printf '%s' '{encoded_authority_parameter}' | base64 --decode)"
+authority_value=''
+authority_ready=0
+for authority_attempt in $(seq 1 {AUTHORITY_WAIT_ATTEMPTS}); do
+  authority_value="$(timeout --signal=TERM --kill-after=1s 4s \
+    aws ssm get-parameter --region '{region}' --name "$authority_parameter" \
+    --query Parameter.Value --output text --no-cli-pager 2>/dev/null || true)"
+  if python3 - "$authority_value" '{deploy_sha}' <<'AXISAI_AUTHORITY_VALUE_PY'
+import re
+import sys
+value, deploy_sha = sys.argv[1:]
+pattern = re.compile(
+    re.escape(deploy_sha) +
+    r":[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}"
+)
+raise SystemExit(0 if pattern.fullmatch(value) else 1)
+AXISAI_AUTHORITY_VALUE_PY
+  then
+    authority_ready=1
+    break
+  fi
+  sleep 1
+done
+if [ "$authority_ready" != 1 ]; then
+  echo 'deployment delivery was not authorized by the controller' >&2
+  exit 75
+fi
+"""
     return (
-        f"python3 - {shlex.quote(encoded_bootstrap)} "
+        authority_gate
+        + f"python3 - {shlex.quote(encoded_bootstrap)} "
         "<<'AXISAI_ROOT_LOCK_PY'\n"
         f"{ROOT_LOCK_WRAPPER_SOURCE}"
         "AXISAI_ROOT_LOCK_PY\n"
     )
 
 
-def build_remote_command(config: DeployConfig, script: bytes) -> str:
+def _authority_parameter(authority_token: str) -> str:
+    try:
+        parsed = UUID(authority_token)
+    except ValueError as error:
+        raise ConfigError("deployment authority token must be a canonical UUID") from error
+    if str(parsed) != authority_token:
+        raise ConfigError("deployment authority token must be a canonical UUID")
+    return f"{AUTHORITY_PARAMETER_PREFIX}{authority_token}"
+
+
+def build_remote_command(
+    config: DeployConfig,
+    script: bytes,
+    authority_token: str | None = None,
+) -> str:
     """Encode immutable deploy inputs for the fixed remote bootstrap."""
     encoded_script = base64.b64encode(script).decode("ascii")
     encoded_dir = base64.b64encode(config.deploy_dir.encode()).decode("ascii")
     encoded_url = base64.b64encode((config.public_health_url or "").encode()).decode("ascii")
+    token = str(uuid4()) if authority_token is None else authority_token
+    encoded_authority_parameter = base64.b64encode(
+        _authority_parameter(token).encode("ascii")
+    ).decode("ascii")
     return render_bootstrap(
         encoded_script,
         config.deploy_sha,
         encoded_dir,
         config.deploy_user,
         encoded_url,
+        encoded_authority_parameter,
+        config.region,
     )
 
 
@@ -681,9 +781,15 @@ def require_command_id(response: object) -> str:
     return command_id
 
 
-def send_command(config: DeployConfig, script: bytes, aws: AwsJsonRunner) -> str:
+def send_command(
+    config: DeployConfig,
+    script: bytes,
+    aws: AwsJsonRunner,
+    authority_token: str | None = None,
+) -> str:
     """Deliver the encoded host script with separate delivery and execution bounds."""
-    remote_command = build_remote_command(config, script)
+    token = str(uuid4()) if authority_token is None else authority_token
+    remote_command = build_remote_command(config, script, token)
     if len(remote_command) > LOCAL_RUN_SHELL_COMMAND_MAX_CHARS:
         raise ConfigError(
             "generated RunShellScript command exceeds the local 65536-character "
@@ -698,10 +804,40 @@ def send_command(config: DeployConfig, script: bytes, aws: AwsJsonRunner) -> str
         "--region", config.region,
         "--instance-ids", config.instance_id,
         "--document-name", "AWS-RunShellScript",
+        "--comment", f"axisai-deploy:{token}",
         "--timeout-seconds", str(DELIVERY_TIMEOUT_SECONDS),
         "--parameters", json.dumps(parameters, separators=(",", ":")),
     ])
     return require_command_id(response)
+
+
+def authorize_command(
+    config: DeployConfig,
+    authority_token: str,
+    command_id: str,
+    aws: AwsJsonRunner,
+) -> None:
+    value = f"{config.deploy_sha}:{command_id}"
+    aws([
+        "ssm", "put-parameter",
+        "--region", config.region,
+        "--name", _authority_parameter(authority_token),
+        "--type", "String",
+        "--value", value,
+        "--overwrite",
+    ])
+
+
+def delete_authority_parameter(
+    config: DeployConfig,
+    authority_token: str,
+    aws: AwsJsonRunner,
+) -> None:
+    aws([
+        "ssm", "delete-parameter",
+        "--region", config.region,
+        "--name", _authority_parameter(authority_token),
+    ])
 
 
 def read_invocation(
@@ -749,6 +885,8 @@ def wait_for_invocation(
     monotonic: Callable[[], float],
     sleep: Callable[[float], None],
     log: Callable[[str], None],
+    on_in_progress: Callable[[], None] | None = None,
+    outer_deadline: float | None = None,
 ) -> InvocationResult:
     """Poll within a hard horizon using an AWS runner with bounded calls.
 
@@ -757,6 +895,8 @@ def wait_for_invocation(
     controller's wall-clock horizon.
     """
     deadline = monotonic() + POLL_HORIZON_SECONDS
+    if outer_deadline is not None:
+        deadline = min(deadline, outer_deadline)
     execution_reported = False
     while True:
         if monotonic() >= deadline:
@@ -780,7 +920,13 @@ def wait_for_invocation(
         if comparison_status == "InProgress" and not execution_reported:
             log("SSM reports command InProgress")
             execution_reported = True
+            if on_in_progress is not None:
+                on_in_progress()
         if comparison_status == "Success":
+            if on_in_progress is not None and not execution_reported:
+                raise InvocationProtocolError(
+                    "command succeeded before delivery authorization"
+                )
             return result
         if comparison_status in FAILURE_STATES:
             raise InvocationFailed(result)
@@ -821,19 +967,39 @@ def run_deploy(
     run_git: GitRunner = _run_git,
 ) -> InvocationResult:
     """Run the single validated production deployment lifecycle in order."""
+    controller_deadline = monotonic() + CONTROLLER_BUDGET_SECONDS
     config = DeployConfig.from_environ(environ)
     validate_candidate(repo_path, config.deploy_sha, run_git=run_git)
     preflight(config, aws, utc_now)
     script = _load_host_script(repo_path)
-    command_id = send_command(config, script, aws)
+    if controller_deadline - monotonic() < SEND_AND_MONITOR_RESERVE_SECONDS:
+        raise ConfigError(
+            "insufficient controller time for SendCommand and terminal monitoring reserve"
+        )
+    authority_token = str(uuid4())
+    command_id = send_command(config, script, aws, authority_token)
     log(f"SSM command created: {command_id}")
+    try:
+        authorize_command(config, authority_token, command_id, aws)
+    except AwsCliError:
+        log("SSM delivery authorization response ambiguous; monitoring command ID")
+    else:
+        log("SSM command delivery authorized")
     try:
         result = wait_for_invocation(
             config, command_id, aws, monotonic, sleep, log,
+            outer_deadline=(
+                controller_deadline - AUTHORITY_CLEANUP_RESERVE_SECONDS
+            ),
         )
     except InvocationFailed as error:
         _emit_invocation_output(error.result, log)
         raise
+    finally:
+        try:
+            delete_authority_parameter(config, authority_token, aws)
+        except AwsCliError:
+            log("SSM delivery authority cleanup failed")
     _emit_invocation_output(result, log)
     return result
 

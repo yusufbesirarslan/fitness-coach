@@ -32,7 +32,10 @@ Deploy rolüne cognito-idp:DescribeUserPool + DescribeUserPoolClient eklendikten
 sonra continue-on-error kaldırılıp BLOKLAYICI yapılabilir.
 """
 import argparse
+import json
 import os
+import re
+import subprocess
 import sys
 
 MIN_PASSWORD_LENGTH = 8
@@ -103,12 +106,45 @@ def mobile_posture(client):
     }
 
 
-def _describe(pool_id, client_id):
-    import boto3
-    idp = boto3.client("cognito-idp")
-    pool = idp.describe_user_pool(UserPoolId=pool_id)["UserPool"]
-    client = idp.describe_user_pool_client(
-        UserPoolId=pool_id, ClientId=client_id)["UserPoolClient"]
+class AwsCliCheckError(RuntimeError):
+    def __init__(self, message, code=""):
+        super().__init__(message)
+        self.response = {"Error": {"Code": code}}
+
+
+def _aws_json(args, *, run=subprocess.run):
+    command = ["aws", *args, "--output", "json", "--no-cli-pager"]
+    try:
+        completed = run(
+            command, capture_output=True, text=True, check=False, timeout=60
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise AwsCliCheckError("bounded AWS CLI call failed") from error
+    if completed.returncode != 0:
+        match = re.search(
+            r"An error occurred \(([A-Za-z][A-Za-z0-9]*)\) when calling",
+            completed.stderr or "",
+        )
+        raise AwsCliCheckError(
+            "AWS CLI returned nonzero", match.group(1) if match else ""
+        )
+    try:
+        payload = json.loads(completed.stdout)
+    except (json.JSONDecodeError, TypeError) as error:
+        raise AwsCliCheckError("AWS CLI returned invalid JSON") from error
+    if not isinstance(payload, dict):
+        raise AwsCliCheckError("AWS CLI returned a non-object")
+    return payload
+
+
+def _describe(pool_id, client_id, *, run=subprocess.run):
+    pool = _aws_json([
+        "cognito-idp", "describe-user-pool", "--user-pool-id", pool_id,
+    ], run=run)["UserPool"]
+    client = _aws_json([
+        "cognito-idp", "describe-user-pool-client",
+        "--user-pool-id", pool_id, "--client-id", client_id,
+    ], run=run)["UserPoolClient"]
     return pool, client
 
 

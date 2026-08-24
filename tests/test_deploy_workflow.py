@@ -6,6 +6,7 @@ import yaml
 
 
 DOCKERIGNORE = Path(".dockerignore")
+CODEOWNERS = Path(".github/CODEOWNERS")
 
 
 WORKFLOW = Path(".github/workflows/deploy.yml")
@@ -52,7 +53,6 @@ def test_production_deploys_are_coalesced_without_cancelling_running_work():
     assert concurrency == {
         "group": "production-deploy",
         "cancel-in-progress": "false",
-        "queue": "single",
     }
 
 
@@ -60,13 +60,15 @@ def test_deploy_checks_out_only_the_ci_approved_sha_with_full_history():
     job = _workflow_doc()["jobs"]["deploy"]
     checkout = next(
         step for step in job["steps"]
-        if step.get("uses") == "actions/checkout@v7"
+        if step.get("uses") ==
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
     )
 
-    assert job["timeout-minutes"] == "40"
+    assert job["timeout-minutes"] == "65"
     assert checkout["with"] == {
         "ref": "${{ env.DEPLOY_SHA }}",
         "fetch-depth": "0",
+        "persist-credentials": "false",
     }
 
 
@@ -87,21 +89,74 @@ def test_workflow_identity_is_verified_before_checkout_or_oidc():
 
     assert identity_gate["env"] == {
         "CANDIDATE_SHA": "${{ github.event.workflow_run.head_sha }}",
-        "WORKFLOW_SHA": "${{ job.workflow_sha }}",
+        "WORKFLOW_SHA": "${{ github.workflow_sha }}",
     }
     assert identity_gate["run"] == (
         'test -n "$WORKFLOW_SHA" && '
         'test "$WORKFLOW_SHA" = "$CANDIDATE_SHA"'
     )
-    assert steps[1]["uses"] == "actions/checkout@v7"
-    assert steps[2]["uses"] == "aws-actions/configure-aws-credentials@v6"
+    assert steps[1]["uses"] == (
+        "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
+    )
+    assert steps[2]["uses"] == (
+        "aws-actions/configure-aws-credentials@"
+        "e6de054238d6b7531b4efff3b6587d9aade6a06c"
+    )
+
+
+def test_privileged_workflow_has_no_mutable_executable_dependencies():
+    workflow = _workflow_doc()
+    steps = workflow["jobs"]["deploy"]["steps"]
+
+    action_refs = [step["uses"] for step in steps if "uses" in step]
+    assert all(re.fullmatch(r"[^@]+@[0-9a-f]{40}", ref) for ref in action_refs)
+    assert "pip install" not in _deploy_yaml()
+    checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
+    assert checkout["with"]["persist-credentials"] == "false"
+
+
+def test_repository_variables_enter_privileged_shell_only_through_validated_env():
+    snapshot = next(
+        step for step in _workflow_doc()["jobs"]["deploy"]["steps"]
+        if step.get("name") == "Pre-deploy RDS snapshot (non-blocking)"
+    )
+
+    assert snapshot["env"] == {"RDS_INSTANCE_ID": "${{ vars.RDS_INSTANCE_ID }}"}
+    assert "${{ vars.RDS_INSTANCE_ID }}" not in snapshot["run"]
+    assert 'RDS_ID="$RDS_INSTANCE_ID"' in snapshot["run"]
+    assert "^[a-z][a-z0-9-]{0,62}$" in snapshot["run"]
+
+
+def test_governance_contract_has_codeowners_for_every_privileged_surface():
+    owners = CODEOWNERS.read_text(encoding="utf-8")
+
+    for protected_path in (
+        "/.github/CODEOWNERS",
+        "/.github/workflows/deploy.yml",
+        "/.github/workflows/ci.yml",
+        "/scripts/deploy_control.py",
+        "/scripts/production_deploy.sh",
+        "/docs/DEPLOYMENT.md",
+    ):
+        assert re.search(rf"(?m)^{re.escape(protected_path)}\s+@yusufbesirarslan$", owners)
+
+
+def test_ci_has_mandatory_root_linux_lock_job():
+    ci = yaml.load(Path(".github/workflows/ci.yml").read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    job = ci["jobs"]["linux-production-locks"]
+
+    assert job["runs-on"] == "ubuntu-latest"
+    run_steps = "\n".join(step.get("run", "") for step in job["steps"])
+    assert "sudo" in run_steps
+    assert "-m linux_lock" in run_steps
+    assert "--run-authoritative-linux-lock-tests" in run_steps
 
 
 def test_deploy_lifecycle_has_one_controller_entrypoint_and_named_inputs():
     steps = _workflow_doc()["jobs"]["deploy"]["steps"]
     controller_steps = [
         step for step in steps
-        if step.get("run") == "python scripts/deploy_control.py"
+        if step.get("run") == "python3 scripts/deploy_control.py"
     ]
 
     assert len(controller_steps) == 1
@@ -138,7 +193,7 @@ def test_existing_non_deploy_safeguards_remain_without_secret_output():
     assert "add_header Content-Security-Policy" in controller
     assert "nginx -t" in controller
     assert "127.0.0.1:3000" in controller
-    assert "chmod 600" in controller
+    assert "os.fchmod(env_fd, 0o600)" in controller
     assert all(
         "${{ secrets." not in line
         for line in workflow.splitlines()
@@ -151,6 +206,10 @@ def test_production_build_context_excludes_development_and_backups():
                if line.strip() and not line.lstrip().startswith("#")}
     assert {"*.bak", "tests/", ".github/", "*.md",
             "requirements-dev.txt", "requirements-mcp.txt"} <= ignored
+    host = _host_script()
+    assert 'git archive --format=tar "$revision"' in host
+    assert 'tar -xf "$BUILD_ARCHIVE" -C "$BUILD_CONTEXT_DIR"' in host
+    assert "build:" in host and "context:" in host
 
 
 def test_deploy_fails_on_live_nginx_csp_header_instead_of_sed_mutation():
@@ -184,7 +243,11 @@ def test_deploy_gate_uses_deep_health():
     # iken deploy "yeşil" geçmesin. (Rollback probe'u sığ kalır: kod geri
     # dönüşünü ölçer, Redis'i değil.)
     body = _host_script()
+    assert "docker compose" in body
+    assert "exec -T web python3" in body
+    assert "urllib.request.urlopen" in body
     assert "http://127.0.0.1:5000/health?deep=1" in body
+    assert "run_external curl" not in body.split("verify_public_health_once", 1)[0]
 
 
 def test_deploy_is_gated_on_ci_success():
@@ -224,8 +287,11 @@ def test_deploy_enforces_env_file_permissions():
     # M4: .env düz metin SECRET_KEY, RDS kimlik bilgileri, COGNITO_TOKEN_ENC_KEY,
     # RESEND_API_KEY ve OPENAI_API_KEY taşır — grup/dünya okunabilir OLMAMALI.
     body = _controller_source()
-    assert "chmod 600" in body
-    assert ".env" in body
+    assert "os.O_NOFOLLOW" in body
+    assert "os.fchmod(env_fd, 0o600)" in body
+    assert "env_status.st_nlink != 1" in body
+    assert "follow_symlinks=False" in body
+    assert "root_external chmod 600" not in body
 
 
 def test_deployment_runbook_defines_the_immutable_operational_contract():
@@ -237,22 +303,24 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
         "`C` — `scripts/production_deploy.sh`",
         "`DEPLOY_SHA` is the sole deployment authority",
         "default-branch execution SHA (`github.sha`) to equal the CI candidate SHA",
-        "workflow-file identity (`job.workflow_sha`) to equal that candidate",
+        "workflow-file identity (`github.workflow_sha`) to equal that candidate",
         "main branch protection or a repository ruleset",
         "`AWS-RunShellScript`",
         "`production-deploy`",
         "`cancel-in-progress: false`",
-        "`queue: single`",
+        "at most one pending job",
         "SSM may still complete C on the host",
         "`PingStatus` must be `Online`",
         "`LastPingDateTime` must be no more than five minutes old",
         "samples its UTC clock immediately after the SSM describe response",
-        "Workflow job timeout | 40 minutes",
+        "Workflow job timeout | 65 minutes",
+        "Controller step timeout | 46 minutes",
         "Delivery timeout | 60 seconds",
         "Execution timeout | 1,800 seconds",
         "AWS expiry | 1,860 seconds",
         "Polling horizon | 2,100 seconds",
         "`/run/lock/axisai-production/production.lock`",
+        "inherited descriptor 7",
         "retry after lock contention",
         "`origin/main` differs from `DEPLOY_SHA`",
         "resets only to `DEPLOY_SHA`",
@@ -261,6 +329,7 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
         "Rollback resets exactly to `PREV_COMMIT`",
         "Code rollback does not roll back database migrations",
         "immediately logs the non-secret command ID",
+        "ambiguous SendCommand response cannot authorize an unknown command",
         "`InvocationDoesNotExist`",
         "Only that structured error code is retried",
         "`Pending`, `Delayed`, and `In Progress` are non-terminal SSM lifecycle states",
@@ -268,6 +337,9 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
         "`Success` is the only successful terminal `StatusDetails` value",
         "`Failed`, `DeliveryTimedOut`, `ExecutionTimedOut`, `Undeliverable`, `Cancelled`, and `Terminated` are terminal failures",
         "optional `PUBLIC_HEALTH_URL` is HTTPS",
+        "materializes each build context from `git archive`",
+        "probed inside the running `web` container",
+        "protect the `production` environment with required reviewers",
         "CloudWatch and S3 retention are deferred operations work",
         "SSM-agent upgrades are separate host hygiene work",
     }
@@ -301,6 +373,11 @@ def _deploy_source_violations(source):
         'echo "WARNING: correcting .env permissions from $env_permissions to 600"',
         "echo 'deployment .env permissions remain unsafe' >&2",
         "echo '.env permissions: 600'",
+        '".env",',
+        '".env", dir_fd=deploy_dir_fd, follow_symlinks=False',
+        'raise OSError("unsafe deployment .env file")',
+        'raise OSError("deployment .env permissions remain unsafe")',
+        "print('.env permissions: 600')",
     }
     for line in source.splitlines():
         if re.search(r"\.env\b", line) or "$env_file" in line or "${env_file}" in line:

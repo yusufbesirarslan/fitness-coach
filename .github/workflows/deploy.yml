@@ -15,7 +15,6 @@ on:
 concurrency:
   group: production-deploy
   cancel-in-progress: false
-  queue: single
 
 env:
   DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
@@ -27,26 +26,32 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 65
+    environment: production
     # CI basarisizsa deploy hic calismaz.
     if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event == 'push' && github.sha == github.event.workflow_run.head_sha }}
     steps:
       - name: Verify privileged workflow identity
+        timeout-minutes: 1
         env:
           CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha }}
-          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: test -n "$WORKFLOW_SHA" && test "$WORKFLOW_SHA" = "$CANDIDATE_SHA"
 
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
         with:
           ref: ${{ env.DEPLOY_SHA }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v6
+        timeout-minutes: 3
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'eu-central-1' }}
+          role-session-name: axisai-${{ github.run_id }}
 
       # H4: havuz IaC'de degil (konsol-yonetimli). Uygulamanin kimlik saglayicisi
       # hakkindaki VARSAYIMLARINI (PreventUserExistenceErrors ACIK, MFA KAPALI,
@@ -55,12 +60,12 @@ jobs:
       # kaldirilip bloklayici yapilmali.
       - name: Cognito pool config drift check (non-blocking)
         continue-on-error: true
+        timeout-minutes: 2
         env:
           COGNITO_USER_POOL_ID: ${{ vars.COGNITO_USER_POOL_ID || 'eu-central-1_kaX0SORRK' }}
           COGNITO_APP_CLIENT_ID: ${{ vars.COGNITO_APP_CLIENT_ID || '3rdtrk3vl1dp0m1d19gdc3pqib' }}
         run: |
-          pip install --quiet boto3
-          python scripts/check_cognito_pool.py
+          python3 scripts/check_cognito_pool.py
 
       # 2026-07-13: `sam build` atlanarak deploy edilen Lambda bagimliliklari
       # VENDOR ETMEDI; handler istisnalari yuttugu icin Cognito trigger'i BASARILI
@@ -69,11 +74,11 @@ jobs:
       # lambda:GetFunction eklendikten sonra continue-on-error kaldirilmali.
       - name: CustomEmailSender Lambda package check (non-blocking)
         continue-on-error: true
+        timeout-minutes: 2
         env:
           COGNITO_EMAIL_LAMBDA_NAME: ${{ vars.COGNITO_EMAIL_LAMBDA_NAME || 'axisai-cognito-email-sender-EmailSenderFunction-hL04ENGVLu1E' }}
         run: |
-          pip install --quiet boto3
-          python scripts/check_email_lambda.py
+          python3 scripts/check_email_lambda.py
 
       # M5: rollback KODU geri alir ama boot'ta uygulanan DB migration'larini
       # GERI ALMAZ (bkz. CLAUDE.md A2). Gercek kullanici verisi varken bu,
@@ -82,12 +87,19 @@ jobs:
       # tanimli degilse ya da rolde rds:CreateDBSnapshot yoksa: uyar, gecme.
       - name: Pre-deploy RDS snapshot (non-blocking)
         continue-on-error: true
+        timeout-minutes: 2
+        env:
+          RDS_INSTANCE_ID: ${{ vars.RDS_INSTANCE_ID }}
         run: |
-          RDS_ID="${{ vars.RDS_INSTANCE_ID }}"
+          RDS_ID="$RDS_INSTANCE_ID"
           if [ -z "$RDS_ID" ]; then
             echo "UYARI: vars.RDS_INSTANCE_ID tanimli degil - deploy oncesi snapshot ATLANDI."
             echo "Yikici bir migration geri alinamaz (A2). Degiskeni tanimlayin ve deploy rolune rds:CreateDBSnapshot verin."
             exit 0
+          fi
+          if ! [[ "$RDS_ID" =~ ^[a-z][a-z0-9-]{0,62}$ ]]; then
+            echo "HATA: RDS_INSTANCE_ID gecersiz." >&2
+            exit 1
           fi
           SNAP_ID="predeploy-${RDS_ID}-$(date -u +%Y%m%d%H%M%S)"
           echo "RDS snapshot aliniyor: $SNAP_ID"
@@ -98,10 +110,11 @@ jobs:
           echo "Snapshot baslatildi (arka planda tamamlanir): $SNAP_ID"
 
       - name: Deploy exact CI-approved revision via AWS SSM
+        timeout-minutes: 46
         env:
           AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
           EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
           PUBLIC_HEALTH_URL: ${{ vars.PUBLIC_HEALTH_URL }}
-        run: python scripts/deploy_control.py
+        run: python3 scripts/deploy_control.py

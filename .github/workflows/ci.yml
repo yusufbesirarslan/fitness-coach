@@ -27,6 +27,25 @@ jobs:
         # REDIS_URL boş) → ek servise gerek yok.
         run: python -m pytest -q
 
+  linux-production-locks:
+    name: authoritative Linux production locks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Prove root Linux OFD contention and release
+        run: >-
+          sudo -E "$(command -v python)" -m pytest -o addopts= -q
+          -m linux_lock --run-authoritative-linux-lock-tests
+          tests/test_production_deploy_script.py
+
   migration-drift:
     name: schema-drift guard
     runs-on: ubuntu-latest

@@ -4,7 +4,6 @@ set -euo pipefail
 readonly DEPLOY_SHA="${1:-}"
 readonly DEPLOY_DIR="${2:-}"
 readonly PUBLIC_HEALTH_URL="${3:-}"
-readonly LOCK_PATH="$DEPLOY_DIR/.axisai-production-deploy.lock"
 readonly OUTER_LOCK_DIR="/run/lock/axisai-production"
 readonly OUTER_LOCK_PATH="$OUTER_LOCK_DIR/production.lock"
 readonly OUTER_LOCK_CAPABILITY_FD="${AXISAI_OUTER_LOCK_FD:-}"
@@ -93,7 +92,7 @@ run_external() {
 # description.  The path probe proves some holder exists; flocking fd 7 proves
 # this process inherited that same locked OFD.  Both checks are required, so an
 # unrelated holder plus a caller-opened unlocked descriptor cannot forge proof.
-if [[ -n "$OUTER_LOCK_CAPABILITY_FD" && "$OUTER_LOCK_CAPABILITY_FD" != 7 ]]; then
+if [[ "$OUTER_LOCK_CAPABILITY_FD" != 7 ]]; then
   echo "outer deployment lock is unavailable or unsafe" >&2
   exit 73
 fi
@@ -108,43 +107,6 @@ if ! outer_dir_metadata="$(
       "$outer_file_metadata" != *":0:regular empty file:644:1" ]]; then
   echo "outer deployment lock is unavailable or unsafe" >&2
   exit 73
-fi
-
-if [[ -z "$OUTER_LOCK_CAPABILITY_FD" ]]; then
-  exec python3 - "$0" "$@" <<'PY'
-import fcntl
-import os
-import stat
-import sys
-import time
-
-path = "/run/lock/axisai-production/production.lock"
-fd = None
-try:
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
-    opened = os.fstat(fd)
-    named = os.lstat(path)
-    if (not stat.S_ISREG(opened.st_mode) or opened.st_uid != 0 or
-            stat.S_IMODE(opened.st_mode) != 0o644 or opened.st_nlink != 1 or
-            (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
-        raise OSError("unsafe outer lock")
-    deadline = time.monotonic() + 60
-    while True:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            break
-        except BlockingIOError:
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError("outer lock contention")
-            time.sleep(min(0.25, remaining))
-    os.dup2(fd, 7, inheritable=True)
-    os.environ["AXISAI_OUTER_LOCK_FD"] = "7"
-    os.execve(sys.argv[1], sys.argv[1:], os.environ)
-except (OSError, TimeoutError, ValueError):
-    print("outer deployment lock unavailable after 60 seconds", file=sys.stderr)
-    raise SystemExit(73)
-PY
 fi
 
 if ! outer_fd_metadata="$(
@@ -164,12 +126,6 @@ if [[ "$outer_probe_status" != 73 ]]; then
 fi
 if ! flock -n -E 73 7; then
   echo "outer deployment lock capability is not held" >&2
-  exit 73
-fi
-
-exec 9>"$LOCK_PATH"
-if ! flock -n -E 73 9; then
-  echo "deployment lock unavailable after outer lock acquisition" >&2
   exit 73
 fi
 
@@ -200,6 +156,10 @@ fi
 OVERRIDE_FILE=""
 HEALTH_BODY=""
 MONOTONIC_STATE_FILE=""
+BUILD_CONTEXT_DIR=""
+BUILD_ARCHIVE=""
+declare -a BUILD_CONTEXT_DIRS=()
+declare -a BUILD_ARCHIVES=()
 cleanup() {
   local -a cleanup_files=()
   if [[ -n "$OVERRIDE_FILE" ]]; then
@@ -214,6 +174,14 @@ cleanup() {
   if ((${#cleanup_files[@]} > 0)); then
     timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
       "${CLEANUP_TIMEOUT_SECONDS}s" rm -f -- "${cleanup_files[@]}" || true
+  fi
+  if ((${#BUILD_ARCHIVES[@]} > 0)); then
+    timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
+      "${CLEANUP_TIMEOUT_SECONDS}s" rm -f -- "${BUILD_ARCHIVES[@]}" || true
+  fi
+  if ((${#BUILD_CONTEXT_DIRS[@]} > 0)); then
+    timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
+      "${CLEANUP_TIMEOUT_SECONDS}s" rm -r -- "${BUILD_CONTEXT_DIRS[@]}" || true
   fi
 }
 trap cleanup EXIT
@@ -308,15 +276,30 @@ HEALTH_BODY="$(run_external mktemp "$DEPLOY_DIR/.axisai-health.XXXXXX.json")"
 readonly OVERRIDE_FILE HEALTH_BODY
 readonly -a COMPOSE_FILES=(-f "$DEPLOY_DIR/docker-compose.yml" -f "$OVERRIDE_FILE")
 
+materialize_build_context() {
+  local revision="$1"
+  BUILD_CONTEXT_DIR="$(run_external mktemp -d "$DEPLOY_DIR/.axisai-build-context.XXXXXX")" || return 1
+  BUILD_ARCHIVE="$(run_external mktemp "$DEPLOY_DIR/.axisai-build-archive.XXXXXX.tar")" || return 1
+  BUILD_CONTEXT_DIRS+=("$BUILD_CONTEXT_DIR")
+  BUILD_ARCHIVES+=("$BUILD_ARCHIVE")
+  run_external git archive --format=tar "$revision" -o "$BUILD_ARCHIVE" || return 1
+  run_external tar -xf "$BUILD_ARCHIVE" -C "$BUILD_CONTEXT_DIR" || return 1
+}
+
 write_override() {
   local revision="$1"
+  local build_context="$2"
   umask 077
   printf '%s\n' \
     'services:' \
     '  web:' \
+    '    build:' \
+    "      context: '$build_context'" \
     '    environment:' \
     "      APP_REVISION: '$revision'" \
     '  worker:' \
+    '    build:' \
+    "      context: '$build_context'" \
     '    environment:' \
     "      APP_REVISION: '$revision'" > "$OVERRIDE_FILE" || return 1
 }
@@ -324,25 +307,19 @@ write_override() {
 probe_internal_health_once() {
   local expected_revision="$1"
   local allow_missing_revision="$2"
-  local health_code health_fields health_status has_revision health_revision
+  local health_fields health_status has_revision health_revision
 
-  health_code="$(run_external curl --silent --show-error \
-    --connect-timeout "$HEALTH_CONNECT_TIMEOUT_SECONDS" \
-    --max-time "$HEALTH_MAX_TIME_SECONDS" \
-    --output "$HEALTH_BODY" \
-    --write-out '%{http_code}' \
-    'http://127.0.0.1:5000/health?deep=1')" || return 1
-  if [[ "$health_code" != "200" ]]; then
-    echo "deep health returned HTTP $health_code" >&2
-    return 1
-  fi
-
-  health_fields="$(run_external python3 - "$HEALTH_BODY" <<'PY'
+  health_fields="$(run_external docker compose "${COMPOSE_FILES[@]}" \
+    exec -T web python3 - <<'PY'
 import json
-import sys
+import urllib.request
 
-with open(sys.argv[1], encoding="utf-8") as health_file:
-    payload = json.load(health_file)
+with urllib.request.urlopen(
+    'http://127.0.0.1:5000/health?deep=1', timeout=5
+) as response:
+    if response.status != 200:
+        raise SystemExit(f"deep health returned HTTP {response.status}")
+    payload = json.load(response)
 if not isinstance(payload, dict) or not isinstance(payload.get("status"), str):
     raise SystemExit("deep health JSON has no string status")
 revision_present = "revision" in payload
@@ -426,7 +403,8 @@ start_and_verify_release() {
   local check_public="$3"
   local running_revision
 
-  write_override "$revision" || return 1
+  materialize_build_context "$revision" || return 1
+  write_override "$revision" "$BUILD_CONTEXT_DIR" || return 1
   run_external docker compose "${COMPOSE_FILES[@]}" build || return 1
   run_external docker compose "${COMPOSE_FILES[@]}" up -d --remove-orphans || return 1
   run_external docker compose "${COMPOSE_FILES[@]}" ps || return 1

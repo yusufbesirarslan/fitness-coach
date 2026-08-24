@@ -104,12 +104,17 @@ class HostFixture:
     ) -> subprocess.CompletedProcess[str]:
         command = self.command(bash_executable, deploy_sha)
         command.append(public_health_url)
+        inherited_lock = {
+            "AXISAI_OUTER_LOCK_FD": "7",
+            "FAKE_OUTER_LOCK_HELD": "1",
+            "FAKE_OUTER_CAPABILITY_LOCKED": "1",
+        }
         return subprocess.run(
             command,
             text=True,
             capture_output=True,
             check=False,
-            env={**self.environment, **environment},
+            env={**self.environment, **inherited_lock, **environment},
             timeout=600,
         )
 
@@ -359,6 +364,37 @@ if [[ " $* " == *' exec -T web printenv APP_REVISION '* ]]; then
   else
     printf '%s\n' "$revision"
   fi
+fi
+if [[ " $* " == *' exec -T web python3 - '* ]]; then
+  health_revision="$revision"
+  health_status=ok
+  include_revision=1
+  health_code=200
+  health_exit=0
+  if [[ "$revision" == "$FAKE_CANDIDATE_SHA" ]]; then
+    counter_file="$CANDIDATE_HEALTH_COUNT_FILE"
+    failures="$FAKE_CANDIDATE_HEALTH_FAILURES"
+    health_code="$FAKE_CANDIDATE_HEALTH_CODE"
+    health_status="$FAKE_CANDIDATE_HEALTH_STATUS"
+    [[ -n "$FAKE_CANDIDATE_HEALTH_REVISION" ]] && health_revision="$FAKE_CANDIDATE_HEALTH_REVISION"
+    health_exit="$FAKE_CANDIDATE_CURL_EXIT"
+  else
+    counter_file="$ROLLBACK_HEALTH_COUNT_FILE"
+    failures="$FAKE_ROLLBACK_HEALTH_FAILURES"
+    include_revision="$FAKE_ROLLBACK_HEALTH_HAS_REVISION"
+    health_exit="$FAKE_ROLLBACK_CURL_EXIT"
+  fi
+  attempt=0
+  [[ -f "$counter_file" ]] && attempt="$(cat "$counter_file")"
+  attempt=$((attempt + 1))
+  printf '%s' "$attempt" > "$counter_file"
+  printf 'INTERNAL_HEALTH_REVISION=%s ATTEMPT=%s\n' "$health_revision" "$attempt" >> "$TRACE_FILE"
+  if [[ "$attempt" -gt "$failures" ]]; then
+    health_code=200
+    health_exit=0
+  fi
+  if [[ "$health_exit" != 0 || "$health_code" != 200 ]]; then exit 1; fi
+  printf '%s\t%s\t%s\n' "$health_status" "$include_revision" "$health_revision"
 fi
 exit 0
 """,
@@ -622,21 +658,7 @@ def test_host_helper_succeeds_when_plain_python_is_unavailable(
     assert "PLAIN_PYTHON_REQUIRED" not in fixture.trace.read_text(encoding="utf-8")
 
 
-def test_lock_contention_fails_before_git_or_docker(bash_executable, host_fixture):
-    fixture = host_fixture(flock_exit=1)
-    result = fixture.run(bash_executable)
-
-    assert result.returncode == 73
-    assert "deployment lock unavailable" in result.stderr
-    trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace == (
-        "stat -c %u:%F:%a -- /run/lock/axisai-production\n"
-        f"stat -c %d:%i:%u:%F:%a:%h -- {OUTER_LOCK_PATH}\n"
-        "direct-outer-lock -w60\n"
-    )
-
-
-def test_workflow_outer_lock_marker_proves_held_lock_then_acquires_inner_lock(
+def test_workflow_outer_lock_capability_proves_held_lock(
         bash_executable, host_fixture):
     fixture = host_fixture()
 
@@ -644,40 +666,32 @@ def test_workflow_outer_lock_marker_proves_held_lock_then_acquires_inner_lock(
 
     assert result.returncode == 0, result.stderr
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.splitlines()[:6] == [
+    assert trace.splitlines()[:5] == [
         "stat -c %u:%F:%a -- /run/lock/axisai-production",
         f"stat -c %d:%i:%u:%F:%a:%h -- {OUTER_LOCK_PATH}",
         "stat -L -c %d:%i:%u:%F:%a:%h -- /proc/self/fd/7",
         f"flock -n -E 73 {OUTER_LOCK_PATH} true",
         "flock -n -E 73 7",
-        "flock -n -E 73 9",
     ]
     assert "flock -w" not in trace
 
 
-def test_direct_invocation_acquires_outer_then_inner_with_one_bounded_wait(
+def test_direct_invocation_without_inherited_capability_cannot_mutate(
         bash_executable, host_fixture):
     fixture = host_fixture()
 
-    result = fixture.run(bash_executable)
+    result = fixture.run(bash_executable, AXISAI_OUTER_LOCK_FD="")
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 73
+    assert "outer deployment lock is unavailable or unsafe" in result.stderr
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.splitlines()[:9] == [
-        "stat -c %u:%F:%a -- /run/lock/axisai-production",
-        f"stat -c %d:%i:%u:%F:%a:%h -- {OUTER_LOCK_PATH}",
-        "direct-outer-lock -w60",
-        "stat -c %u:%F:%a -- /run/lock/axisai-production",
-        f"stat -c %d:%i:%u:%F:%a:%h -- {OUTER_LOCK_PATH}",
-        "stat -L -c %d:%i:%u:%F:%a:%h -- /proc/self/fd/7",
-        f"flock -n -E 73 {OUTER_LOCK_PATH} true",
-        "flock -n -E 73 7",
-        "flock -n -E 73 9",
-    ]
-    assert trace.count("direct-outer-lock -w60") == 1
+    assert "git " not in trace
+    assert "docker " not in trace
+    assert "direct-outer-lock" not in trace
+    assert not (fixture.deploy_dir / ".axisai-production-deploy.lock").exists()
 
 
-def test_outer_lock_marker_without_held_lock_fails_before_inner_or_mutation(
+def test_outer_lock_marker_without_held_lock_fails_before_mutation(
         bash_executable, host_fixture):
     fixture = host_fixture()
 
@@ -691,28 +705,24 @@ def test_outer_lock_marker_without_held_lock_fails_before_inner_or_mutation(
         "stat -L -c %d:%i:%u:%F:%a:%h -- /proc/self/fd/7",
         f"flock -n -E 73 {OUTER_LOCK_PATH} true",
     ]
-    assert "flock -n -E 73 9" not in trace
     assert "git " not in trace
     assert "docker " not in trace
 
 
-def test_inner_lock_contention_after_outer_proof_fails_before_mutation(
+def test_deploy_directory_lock_path_is_never_opened_or_created(
         bash_executable, host_fixture):
     fixture = host_fixture()
 
-    result = fixture.run_with_workflow_outer_lock(
-        bash_executable, FAKE_INNER_LOCK_CONTENDED="1",
-    )
+    result = fixture.run_with_workflow_outer_lock(bash_executable)
 
-    assert result.returncode == 73
+    assert result.returncode == 0, result.stderr
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert f"flock -n -E 73 {OUTER_LOCK_PATH} true" in trace
-    assert "flock -n -E 73 9" in trace
-    assert "git " not in trace
-    assert "docker " not in trace
+    assert "flock -n -E 73 9" not in trace
+    assert ".axisai-production-deploy.lock" not in trace
+    assert not (fixture.deploy_dir / ".axisai-production-deploy.lock").exists()
 
 
-def test_unrelated_holder_with_unlocked_exact_inode_fd_is_rejected_before_inner(
+def test_unrelated_holder_with_unlocked_exact_inode_fd_is_rejected(
         bash_executable, host_fixture):
     fixture = host_fixture()
     result = fixture.run_with_workflow_outer_lock(
@@ -723,17 +733,16 @@ def test_unrelated_holder_with_unlocked_exact_inode_fd_is_rejected_before_inner(
     trace = fixture.trace.read_text(encoding="utf-8")
     assert f"flock -n -E 73 {OUTER_LOCK_PATH} true" in trace
     assert "flock -n -E 73 7" in trace
-    assert "flock -n -E 73 9" not in trace
     assert "git " not in trace and "docker " not in trace
 
 
-@pytest.mark.skipif(os.name != "posix", reason="real flock OFD race requires Linux")
-def test_real_flock_unrelated_holder_cannot_forge_inherited_ofd_before_inner(
-        bash_executable, host_fixture):
+@pytest.mark.linux_lock
+def test_real_flock_unrelated_holder_cannot_forge_inherited_ofd(
+        bash_executable, host_fixture, request):
     import stat
 
-    if os.geteuid() != 0 or shutil.which("flock") is None:
-        pytest.skip("safe fixed root-lock provisioning requires root and util-linux flock")
+    assert request.config.getoption("--run-authoritative-linux-lock-tests")
+    assert os.name == "posix" and os.geteuid() == 0 and shutil.which("flock")
     fixture = host_fixture()
     lock_dir = Path(OUTER_LOCK_PATH).parent
     lock_path = Path(OUTER_LOCK_PATH)
@@ -749,7 +758,7 @@ def test_real_flock_unrelated_holder_cannot_forge_inherited_ofd_before_inner(
         if (not stat.S_ISDIR(directory_status.st_mode) or
                 directory_status.st_uid != 0 or
                 stat.S_IMODE(directory_status.st_mode) != 0o755):
-            pytest.skip("fixed root lock directory already exists with incompatible policy")
+            raise AssertionError("fixed root lock directory violates production policy")
         flags = os.O_RDWR | os.O_NOFOLLOW
         if not lock_path.exists():
             created_file = True
@@ -758,7 +767,7 @@ def test_real_flock_unrelated_holder_cannot_forge_inherited_ofd_before_inner(
         lock_status = lock_path.lstat()
         if (not stat.S_ISREG(lock_status.st_mode) or lock_status.st_uid != 0 or
                 stat.S_IMODE(lock_status.st_mode) != 0o644 or lock_status.st_nlink != 1):
-            pytest.skip("fixed root lock file already exists with incompatible policy")
+            raise AssertionError("fixed root lock file violates production policy")
         holder = subprocess.Popen(
             [sys.executable, "-c", (
                 "import fcntl,os,sys,time; "
@@ -795,14 +804,14 @@ def test_real_flock_unrelated_holder_cannot_forge_inherited_ofd_before_inner(
             lock_dir.rmdir()
 
 
-@pytest.mark.skipif(os.name != "posix", reason="real inherited OFD requires Linux")
-def test_real_locked_inherited_ofd_reaches_inner_helper_validation(
-        bash_executable, host_fixture):
+@pytest.mark.linux_lock
+def test_real_locked_inherited_ofd_reaches_helper_validation(
+        bash_executable, host_fixture, request):
     import fcntl
     import stat
 
-    if os.geteuid() != 0 or shutil.which("flock") is None:
-        pytest.skip("safe fixed root-lock provisioning requires root and util-linux flock")
+    assert request.config.getoption("--run-authoritative-linux-lock-tests")
+    assert os.name == "posix" and os.geteuid() == 0 and shutil.which("flock")
     fixture = host_fixture()
     lock_dir = Path(OUTER_LOCK_PATH).parent
     lock_path = Path(OUTER_LOCK_PATH)
@@ -816,7 +825,7 @@ def test_real_locked_inherited_ofd_reaches_inner_helper_validation(
         directory_status = lock_dir.lstat()
         if (not stat.S_ISDIR(directory_status.st_mode) or directory_status.st_uid != 0 or
                 stat.S_IMODE(directory_status.st_mode) != 0o755):
-            pytest.skip("fixed root lock directory already exists with incompatible policy")
+            raise AssertionError("fixed root lock directory violates production policy")
         if not lock_path.exists():
             created_file = True
             created_fd = os.open(
@@ -826,7 +835,7 @@ def test_real_locked_inherited_ofd_reaches_inner_helper_validation(
         lock_status = lock_path.lstat()
         if (not stat.S_ISREG(lock_status.st_mode) or lock_status.st_uid != 0 or
                 stat.S_IMODE(lock_status.st_mode) != 0o644 or lock_status.st_nlink != 1):
-            pytest.skip("fixed root lock file already exists with incompatible policy")
+            raise AssertionError("fixed root lock file violates production policy")
         inherited_fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW)
         fcntl.flock(inherited_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         environment = fixture.environment.copy()
@@ -840,7 +849,7 @@ def test_real_locked_inherited_ofd_reaches_inner_helper_validation(
         )
         assert result.returncode == 64, result.stderr
         assert "DEPLOY_SHA must be lowercase 40-hex" in result.stderr
-        assert (fixture.deploy_dir / ".axisai-production-deploy.lock").exists()
+        assert not (fixture.deploy_dir / ".axisai-production-deploy.lock").exists()
     finally:
         if inherited_fd is not None:
             os.close(inherited_fd)
@@ -850,30 +859,18 @@ def test_real_locked_inherited_ofd_reaches_inner_helper_validation(
             lock_dir.rmdir()
 
 
-@pytest.mark.skipif(os.name != "posix", reason="nonroot direct lock requires Linux")
-def test_nonroot_direct_invocation_can_open_root_owned_0644_outer_lock_read_only(
-        bash_executable):
-    import pwd
+@pytest.mark.linux_lock
+def test_real_outer_lock_release_allows_independent_reacquisition(request):
+    import fcntl
     import stat
 
-    if os.geteuid() != 0 or shutil.which("flock") is None:
-        pytest.skip("privilege-neutral direct lock model requires root Linux test runner")
-    try:
-        account = pwd.getpwnam("nobody")
-    except KeyError:
-        pytest.skip("nobody account is unavailable")
-    direct_root = Path(tempfile.mkdtemp(prefix="axisai-nonroot-", dir="/tmp"))
-    direct_root.chmod(0o755)
-    direct_deploy_dir = direct_root / "production"
-    direct_deploy_dir.mkdir(mode=0o777)
-    direct_deploy_dir.chmod(0o777)
-    direct_helper = direct_root / "production_deploy.sh"
-    shutil.copy2(HOST_SCRIPT, direct_helper)
-    direct_helper.chmod(0o755)
+    assert request.config.getoption("--run-authoritative-linux-lock-tests")
+    assert os.name == "posix" and os.geteuid() == 0 and shutil.which("flock")
     lock_dir = Path(OUTER_LOCK_PATH).parent
     lock_path = Path(OUTER_LOCK_PATH)
     created_dir = False
     created_file = False
+    holder_fd = None
     try:
         if not lock_dir.exists():
             lock_dir.mkdir(mode=0o755)
@@ -881,35 +878,32 @@ def test_nonroot_direct_invocation_can_open_root_owned_0644_outer_lock_read_only
         directory_status = lock_dir.lstat()
         if (not stat.S_ISDIR(directory_status.st_mode) or directory_status.st_uid != 0 or
                 stat.S_IMODE(directory_status.st_mode) != 0o755):
-            pytest.skip("fixed root lock directory already exists with incompatible policy")
+            raise AssertionError("fixed root lock directory violates production policy")
         if not lock_path.exists():
             created_file = True
             created_fd = os.open(
                 lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CREAT | os.O_EXCL, 0o644,
             )
             os.close(created_fd)
-        environment = os.environ.copy()
-        environment["PATH"] = os.environ.get("PATH", "")
-
-        def drop_to_nonroot():
-            os.setgroups([])
-            os.setgid(account.pw_gid)
-            os.setuid(account.pw_uid)
-
-        result = subprocess.run(
-            [bash_executable, str(direct_helper), "not-a-sha", str(direct_deploy_dir), ""],
-            text=True, capture_output=True, check=False, env=environment, timeout=30,
-            preexec_fn=drop_to_nonroot,
+        holder_fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW)
+        fcntl.flock(holder_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        contended = subprocess.run(
+            ["flock", "-n", "-E", "73", OUTER_LOCK_PATH, "true"], check=False,
         )
-        assert result.returncode == 64, result.stderr
-        assert "DEPLOY_SHA must be lowercase 40-hex" in result.stderr
-        assert (direct_deploy_dir / ".axisai-production-deploy.lock").exists()
+        assert contended.returncode == 73
+        os.close(holder_fd)
+        holder_fd = None
+        released = subprocess.run(
+            ["flock", "-n", "-E", "73", OUTER_LOCK_PATH, "true"], check=False,
+        )
+        assert released.returncode == 0
     finally:
+        if holder_fd is not None:
+            os.close(holder_fd)
         if created_file:
             lock_path.unlink(missing_ok=True)
         if created_dir:
             lock_dir.rmdir()
-        shutil.rmtree(direct_root, ignore_errors=True)
 
 
 def test_arbitrary_outer_lock_marker_is_rejected_before_lock_or_mutation(
@@ -961,8 +955,8 @@ def test_invalid_sha_fails_after_lock_without_git_or_docker(bash_executable, hos
     assert result.returncode == 64
     assert "DEPLOY_SHA must be lowercase 40-hex" in result.stderr
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.count("direct-outer-lock -w60") == 1
-    assert "flock -n -E 73 9" in trace
+    assert "direct-outer-lock" not in trace
+    assert "flock -n -E 73 7" in trace
     assert "git " not in trace
     assert "docker " not in trace
 
@@ -1140,7 +1134,9 @@ def test_success_deploys_exact_candidate_and_verifies_revision(bash_executable, 
     assert f"git reset --hard {fixture.candidate_commit}" in trace
     assert f"APP_REVISION={fixture.candidate_commit}" in trace
     assert "exec -T web printenv APP_REVISION" in trace
-    assert "http://127.0.0.1:5000/health?deep=1" in trace
+    assert "exec -T web python3 -" in trace
+    assert f"INTERNAL_HEALTH_REVISION={fixture.candidate_commit} ATTEMPT=1" in trace
+    assert f"git archive --format=tar {fixture.candidate_commit}" in trace
     compose_lines = [line for line in trace.splitlines() if line.startswith("docker compose ")]
     expected_prefix = f"docker compose -f {_bash_path(fixture.deploy_dir / 'docker-compose.yml')} -f "
     assert compose_lines
@@ -1222,12 +1218,9 @@ def test_candidate_health_retries_bounded_calls_until_delayed_success(
     trace = fixture.trace.read_text(encoding="utf-8")
     candidate_attempts = [
         line for line in trace.splitlines()
-        if line.startswith(f"CURL_REVISION={fixture.candidate_commit}")
+        if line.startswith(f"INTERNAL_HEALTH_REVISION={fixture.candidate_commit}")
     ]
     assert len(candidate_attempts) == 3
-    curl_lines = [line for line in trace.splitlines() if line.startswith("curl ")]
-    assert curl_lines
-    assert all("--connect-timeout 2 --max-time 5" in line for line in curl_lines)
     assert f"git reset --hard {fixture.prev_commit}" not in trace
 
 
@@ -1243,7 +1236,7 @@ def test_hung_candidate_health_exhausts_bound_then_rolls_back_once(
 
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.count(f"CURL_REVISION={fixture.candidate_commit}") == 30
+    assert trace.count(f"INTERNAL_HEALTH_REVISION={fixture.candidate_commit}") == 30
     assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
     assert "rollback verified" in result.stderr
     assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
@@ -1261,7 +1254,7 @@ def test_rollback_health_retries_bounded_calls_until_delayed_success(
 
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.count(f"CURL_REVISION={fixture.prev_commit}") == 3
+    assert trace.count(f"INTERNAL_HEALTH_REVISION={fixture.prev_commit}") == 3
     assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
     assert "rollback verified" in result.stderr
 
@@ -1278,7 +1271,7 @@ def test_hung_rollback_health_exhausts_bound_and_reports_failure(
 
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
-    assert trace.count(f"CURL_REVISION={fixture.prev_commit}") == 30
+    assert trace.count(f"INTERNAL_HEALTH_REVISION={fixture.prev_commit}") == 30
     assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
     assert "rollback failed verification" in result.stderr
     assert "rollback verified" not in result.stderr
@@ -1396,77 +1389,21 @@ def test_public_health_runs_after_internal_gate_and_failure_rolls_back(
 
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
-    curl_calls = [line for line in trace.splitlines() if line.startswith("curl ")]
+    trace_lines = trace.splitlines()
     internal_call_index = next(
-        index for index, line in enumerate(curl_calls)
-        if "http://127.0.0.1:5000/health?deep=1" in line
+        index for index, line in enumerate(trace_lines)
+        if line.startswith(f"INTERNAL_HEALTH_REVISION={fixture.candidate_commit}")
     )
     public_call_index = next(
-        index for index, line in enumerate(curl_calls)
-        if "https://fitness.example/health" in line
+        index for index, line in enumerate(trace_lines)
+        if line.startswith("curl ") and "https://fitness.example/health" in line
     )
     assert internal_call_index < public_call_index
     public_calls = [
-        line for line in curl_calls
+        line for line in trace_lines
         if line.startswith("curl ") and "https://fitness.example/health" in line
     ]
     assert len(public_calls) == 12
     assert all("--connect-timeout 2 --max-time 5" in line for line in public_calls)
     assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
-
-
-def test_rapid_candidate_second_invocation_cannot_mutate_while_lock_is_held(
-    bash_executable, host_fixture, tmp_path
-):
-    fixture = host_fixture()
-    hold_file = tmp_path / "hold-lock"
-    ready_file = tmp_path / "lock-ready"
-    state_dir = tmp_path / "fake-lock-state"
-    first_trace = tmp_path / "first-trace.log"
-    second_trace = tmp_path / "second-trace.log"
-    hold_file.write_text("hold", encoding="utf-8")
-    first_trace.write_text("", encoding="utf-8")
-    second_trace.write_text("", encoding="utf-8")
-    shared = {
-        "FLOCK_HOLD_FILE": _bash_path(hold_file),
-        "FLOCK_READY_FILE": _bash_path(ready_file),
-        "FLOCK_STATE_DIR": _bash_path(state_dir),
-    }
-    first_environment = {
-        **fixture.environment,
-        **shared,
-        "TRACE_FILE": _bash_path(first_trace),
-    }
-    first = subprocess.Popen(
-        fixture.command(bash_executable),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=first_environment,
-    )
-    try:
-        assert first.stdout is not None
-        assert _readline_with_timeout(first.stdout).strip() == "FAKE_LOCK_READY"
-        assert ready_file.exists()
-
-        second = fixture.run(
-            bash_executable,
-            TRACE_FILE=_bash_path(second_trace),
-            **shared,
-        )
-    finally:
-        hold_file.unlink(missing_ok=True)
-        try:
-            first_stdout, first_stderr = first.communicate(timeout=600)
-        except subprocess.TimeoutExpired:
-            first.kill()
-            first.communicate()
-            raise AssertionError("first deployment did not finish within 600 seconds")
-
-    assert first.returncode == 0, (first_stdout, first_stderr)
-    assert second.returncode == 73
-    assert second_trace.read_text(encoding="utf-8") == (
-        "stat -c %u:%F:%a -- /run/lock/axisai-production\n"
-        f"stat -c %d:%i:%u:%F:%a:%h -- {OUTER_LOCK_PATH}\n"
-        "direct-outer-lock -w60\n"
-    )
+    assert "public health readiness exhausted after 12 attempts" in result.stderr

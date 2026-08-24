@@ -1,0 +1,6 @@
+/.github/CODEOWNERS @yusufbesirarslan
+/.github/workflows/deploy.yml @yusufbesirarslan
+/.github/workflows/ci.yml @yusufbesirarslan
+/scripts/deploy_control.py @yusufbesirarslan
+/scripts/production_deploy.sh @yusufbesirarslan
+/docs/DEPLOYMENT.md @yusufbesirarslan

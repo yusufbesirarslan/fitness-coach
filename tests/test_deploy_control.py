@@ -19,6 +19,7 @@ from scripts.deploy_control import (
     AWS_EXPIRY_SECONDS,
     AwsCliError,
     ConfigError,
+    CONTROLLER_BUDGET_SECONDS,
     DELIVERY_TIMEOUT_SECONDS,
     DeployConfig,
     EXECUTION_TIMEOUT_SECONDS,
@@ -29,6 +30,7 @@ from scripts.deploy_control import (
     InvocationPollingTimeout,
     InvocationProtocolError,
     POLL_HORIZON_SECONDS,
+    SEND_AND_MONITOR_RESERVE_SECONDS,
     PreflightError,
     build_remote_command,
     main,
@@ -145,8 +147,18 @@ def test_config_rejects_unsafe_deploy_user(user):
         DeployConfig.from_environ({**VALID_ENV, "DEPLOY_USER": user})
 
 
-@pytest.mark.parametrize("deploy_dir", ["srv/axisai", "", "/srv/axisai\nother"])
-def test_config_rejects_nonabsolute_or_multiline_deploy_dir(deploy_dir):
+@pytest.mark.parametrize("deploy_dir", [
+    "srv/axisai",
+    "",
+    "/srv/axisai\nother",
+    "/srv/axis ai",
+    "/srv/axis'ai",
+    "/srv/axisai/../other",
+    "/srv//axisai",
+    "/srv/axisai/.",
+    "/srv/axisai/",
+])
+def test_config_rejects_noncanonical_or_shell_unsafe_deploy_dir(deploy_dir):
     with pytest.raises(ConfigError):
         DeployConfig.from_environ({**VALID_ENV, "DEPLOY_DIR": deploy_dir})
 
@@ -408,7 +420,8 @@ def test_root_bootstrap_and_workflow_helper_fit_strictly_inside_ssm_budget():
         ).splitlines()[0].split(" <<", 1)[0])[2], validate=True,
     ).decode("utf-8")
     assert (
-        deploy_control.ROOT_BOOTSTRAP_WORST_CASE_SECONDS
+        deploy_control.AUTHORITY_GATE_WORST_CASE_SECONDS
+        + deploy_control.ROOT_BOOTSTRAP_WORST_CASE_SECONDS
         + deploy_control.WORKFLOW_HELPER_WORST_CASE_SECONDS
         < EXECUTION_TIMEOUT_SECONDS
     )
@@ -425,9 +438,9 @@ def test_send_command_rejects_oversized_local_payload_before_aws():
     assert calls == []
 
 
-def test_remote_command_encodes_script_and_untrusted_positional_values():
+def test_remote_command_encodes_script_and_positional_values():
     script = b"#!/bin/sh\nprintf '%s\\n' \"$1\""
-    deploy_dir = "/srv/axis ai/'$(touch nope)"
+    deploy_dir = "/srv/axisai"
     public_url = "https://fitness.example/health?probe='$(touch%20nope)"
     config = DeployConfig.from_environ({
         **VALID_ENV,
@@ -437,11 +450,13 @@ def test_remote_command_encodes_script_and_untrusted_positional_values():
 
     command = build_remote_command(config, script)
     command_lines = command.splitlines()
-    arguments = shlex.split(command_lines[0].split(" <<", 1)[0])
-    assert arguments[:2] == ["python3", "-"]
-    assert "\n".join(command_lines[1:-1]) + "\n" == (
-        deploy_control.ROOT_LOCK_WRAPPER_SOURCE
+    root_wrapper_line = next(
+        line for line in command_lines if line.startswith("python3 - ")
     )
+    arguments = shlex.split(root_wrapper_line.split(" <<", 1)[0])
+    assert arguments[:2] == ["python3", "-"]
+    wrapper_start = command_lines.index(root_wrapper_line) + 1
+    assert "\n".join(command_lines[wrapper_start:-1]) + "\n" == deploy_control.ROOT_LOCK_WRAPPER_SOURCE
     assert command_lines[-1] == "AXISAI_ROOT_LOCK_PY"
     inner_bootstrap = base64.b64decode(arguments[2], validate=True).decode("utf-8")
 
@@ -822,6 +837,7 @@ class BootstrapHarness:
         environment = {
             **os.environ,
             "HARNESS_DIR": bash_root,
+            "DEPLOY_SHA": self.config.deploy_sha,
             "PATH": f"{bash_stubs}:/usr/bin:/bin",
             "OUTER_LOCK_MODE": outer_lock_mode,
             "ENV_FILE": _git_bash_path(self.env_file),
@@ -856,10 +872,10 @@ def bootstrap_harness(workspace_tmp_dir):
     if not git_bash.is_file():
         pytest.skip("Git Bash is unavailable")
 
-    harness = workspace_tmp_dir / "bootstrap harness"
+    harness = workspace_tmp_dir / "bootstrap-harness"
     stubs = harness / "bin"
     stubs.mkdir(parents=True)
-    deploy_dir_path = harness / "deploy '$(touch nope)"
+    deploy_dir_path = harness / "deploy-safe"
     deploy_dir_path.mkdir()
     env_file = deploy_dir_path / ".env"
     env_chmod_marker = harness / "env-chmod-complete"
@@ -881,6 +897,20 @@ if [ "$#" = 2 ]; then
   shift
   cat > "$HARNESS_DIR/root-lock-source"
   printf '%s' "$1" | base64 --decode | AXISAI_ROOT_LOCK_FD=7 /bin/sh
+elif [ "$#" = 3 ] && [ "${2#"$DEPLOY_SHA:"}" != "$2" ]; then
+  cat > "$HARNESS_DIR/authority-value-source"
+  exit 0
+elif [ "$#" = 3 ]; then
+  printf '%s\n' env-guard >> "$HARNESS_DIR/events"
+  cat > "$HARNESS_DIR/env-guard-source"
+  if [ ! -f "$ENV_FILE" ]; then
+    echo 'deployment .env file is missing' >&2
+    exit 1
+  fi
+  if [ "$ENV_PERMISSIONS" != 600 ]; then
+    if [ "$ENV_CHMOD_EXIT" != 0 ]; then exit "$ENV_CHMOD_EXIT"; fi
+    : > "$ENV_CHMOD_MARKER"
+  fi
 else
   printf '%s\n' privilege-drop >> "$HARNESS_DIR/events"
   shift
@@ -890,6 +920,15 @@ else
   cat > "$HARNESS_DIR/privilege-drop-source"
   AXISAI_OUTER_LOCK_FD=7 sh "$script_path" "$sha" "$deploy_dir" "$url"
 fi
+""")
+
+    _write_shell_stub(stubs, "aws", """
+case "$*" in
+  *'ssm get-parameter'*)
+    printf '%s\n' "$DEPLOY_SHA:11111111-1111-1111-1111-111111111111"
+    ;;
+  *) exit 64 ;;
+esac
 """)
 
     _write_shell_stub(stubs, "mktemp", """
@@ -1001,7 +1040,7 @@ def test_bootstrap_holds_lock_through_safeguards_and_helper_cleanup(
 
     assert completed.returncode == remote_exit_code, completed.stderr
     assert (harness / "events").read_text(encoding="utf-8").splitlines() == [
-        "outer-lock", "stat", "nginx", "systemctl", "systemctl", "ss", "ss",
+        "outer-lock", "env-guard", "nginx", "systemctl", "systemctl", "ss", "ss",
         "mktemp", "chmod", "chown", "privilege-drop",
     ]
     assert _read_null_arguments(harness / "mktemp-args") == ["/tmp/fitx-deploy.XXXXXX"]
@@ -1046,7 +1085,7 @@ def test_bootstrap_missing_env_fails_before_nginx_or_helper(bootstrap_harness):
 
     assert completed.returncode != 0
     assert "deployment .env file is missing" in completed.stderr
-    assert events == ["outer-lock"]
+    assert events == ["outer-lock", "env-guard"]
 
 
 def test_bootstrap_repairs_and_rechecks_env_permissions_before_helper(
@@ -1055,7 +1094,8 @@ def test_bootstrap_repairs_and_rechecks_env_permissions_before_helper(
     events = bootstrap_harness.events.read_text(encoding="utf-8").splitlines()
 
     assert completed.returncode == 0, completed.stderr
-    assert events[:4] == ["outer-lock", "stat", "chmod", "stat"]
+    assert events[:2] == ["outer-lock", "env-guard"]
+    assert bootstrap_harness.env_chmod_marker.exists()
     assert "privilege-drop" in events
 
 
@@ -1419,6 +1459,19 @@ def test_every_non_polling_aws_cli_call_is_bounded(args):
     assert calls[0]["timeout"] == AWS_CLI_CALL_TIMEOUT_SECONDS
 
 
+def test_send_command_disables_opaque_aws_cli_retries():
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(kwargs)
+        return FakeAwsCompletedProcess(stdout='{"Command": {}}')
+
+    run_aws_json(["ssm", "send-command"], run=run)
+
+    assert calls[0]["env"]["AWS_MAX_ATTEMPTS"] == "1"
+    assert calls[0]["env"]["AWS_RETRY_MODE"] == "standard"
+
+
 @pytest.mark.parametrize("completed,error_pattern", [
     (FakeAwsCompletedProcess(returncode=7, stderr="denied"), "failed with exit code 7"),
     (FakeAwsCompletedProcess(stdout="not-json"), "invalid JSON"),
@@ -1480,6 +1533,7 @@ def test_run_deploy_orders_validation_preflight_exact_script_send_and_poll(
     )
     events = []
     sent_parameters = []
+    invocation_states = iter(["Pending", "In Progress", "Success"])
     now = datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc)
 
     def run_git(args):
@@ -1509,10 +1563,20 @@ def test_run_deploy_orders_validation_preflight_exact_script_send_and_poll(
                 "CommandId": "11111111-1111-1111-1111-111111111111",
             }}
         if args[:2] == ["ssm", "get-command-invocation"]:
+            state = next(invocation_states)
             return invocation_response(
-                "Success", response_code=0,
+                state, response_code=0 if state == "Success" else -1,
                 stdout="exact deploy complete\n", stderr="bounded warning\n",
             )
+        if args[:2] == ["ssm", "put-parameter"]:
+            value = args[args.index("--value") + 1]
+            assert value == (
+                f"{VALID_ENV['DEPLOY_SHA']}:"
+                "11111111-1111-1111-1111-111111111111"
+            )
+            return {"Version": 1, "Tier": "Standard"}
+        if args[:2] == ["ssm", "delete-parameter"]:
+            return {}
         raise AssertionError(f"unexpected AWS call: {args}")
 
     messages = []
@@ -1531,11 +1595,16 @@ def test_run_deploy_orders_validation_preflight_exact_script_send_and_poll(
         "aws:ec2:describe-instances",
         "aws:ssm:describe-instance-information",
         "aws:ssm:send-command",
+        "aws:ssm:put-parameter",
         "aws:ssm:get-command-invocation",
+        "aws:ssm:get-command-invocation",
+        "aws:ssm:get-command-invocation",
+        "aws:ssm:delete-parameter",
     ]
     remote_command = sent_parameters[0]["commands"][0]
     remote_lines = remote_command.splitlines()
-    remote_arguments = shlex.split(remote_lines[0].split(" <<", 1)[0])
+    root_wrapper_line = next(line for line in remote_lines if line.startswith("python3 - "))
+    remote_arguments = shlex.split(root_wrapper_line.split(" <<", 1)[0])
     assert remote_arguments[:2] == ["python3", "-"]
     inner_bootstrap = base64.b64decode(
         remote_arguments[2], validate=True,
@@ -1543,13 +1612,19 @@ def test_run_deploy_orders_validation_preflight_exact_script_send_and_poll(
     assert base64.b64encode(exact_script).decode("ascii") in inner_bootstrap
     assert "sudo" not in inner_bootstrap
     assert deploy_control.PRIVILEGE_DROP_SOURCE in inner_bootstrap
+    assert "aws ssm get-parameter" in remote_command
+    assert remote_command.index("aws ssm get-parameter") < remote_command.index(root_wrapper_line)
     assert f"'{VALID_ENV['DEPLOY_USER']}' \"$script_path\"" in inner_bootstrap
     assert "\"$public_health_url\" '7'" in inner_bootstrap
     assert (
         f"python3 - '{VALID_ENV['DEPLOY_USER']}' \"$script_path\" "
         f"'{VALID_ENV['DEPLOY_SHA']}' \"$deploy_dir\""
     ) in inner_bootstrap
-    assert messages[-5:] == [
+    assert messages[-9:] == [
+        "SSM command delivery authorized",
+        "SSM status: Pending",
+        "SSM status: In Progress",
+        "SSM reports command InProgress",
         "SSM status: Success",
         "SSM stdout:",
         "exact deploy complete",
@@ -1572,6 +1647,106 @@ def test_run_deploy_rejects_stale_candidate_before_any_aws_call(
         )
 
     assert aws_calls == []
+
+
+def test_ambiguous_send_command_failure_never_creates_delivery_authority(
+        monkeypatch, workspace_tmp_dir, fake_clock):
+    _write_integration_host_script(workspace_tmp_dir)
+    monkeypatch.setattr(deploy_control, "validate_candidate", lambda *args, **kwargs: None)
+    monkeypatch.setattr(deploy_control, "preflight", lambda *args, **kwargs: None)
+    calls = []
+
+    def aws(args):
+        calls.append(args[:2])
+        if args[:2] == ["ssm", "send-command"]:
+            raise AwsCliError("SendCommand response was lost")
+        raise AssertionError(f"unexpected AWS call after ambiguous send: {args}")
+
+    with pytest.raises(AwsCliError, match="response was lost"):
+        run_deploy(
+            VALID_ENV, workspace_tmp_dir, aws,
+            datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            fake_clock.monotonic, fake_clock.sleep, lambda message: None,
+        )
+
+    assert calls == [["ssm", "send-command"]]
+
+
+def test_ambiguous_authorization_response_keeps_monitoring_known_command(
+        monkeypatch, workspace_tmp_dir, fake_clock):
+    _write_integration_host_script(workspace_tmp_dir)
+    monkeypatch.setattr(deploy_control, "validate_candidate", lambda *args, **kwargs: None)
+    monkeypatch.setattr(deploy_control, "preflight", lambda *args, **kwargs: None)
+    calls = []
+    invocation_states = iter(["In Progress", "Failed"])
+
+    def aws(args):
+        calls.append(args[:2])
+        if args[:2] == ["ssm", "send-command"]:
+            return {"Command": {
+                "CommandId": "11111111-1111-1111-1111-111111111111",
+            }}
+        if args[:2] == ["ssm", "get-command-invocation"]:
+            state = next(invocation_states)
+            return invocation_response(state, response_code=-1 if state != "Failed" else 1)
+        if args[:2] == ["ssm", "put-parameter"]:
+            raise AwsCliError("PutParameter response was lost")
+        if args[:2] == ["ssm", "delete-parameter"]:
+            return {}
+        raise AssertionError(f"unexpected AWS call: {args}")
+
+    messages = []
+    with pytest.raises(InvocationFailed):
+        run_deploy(
+            VALID_ENV, workspace_tmp_dir, aws,
+            datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            fake_clock.monotonic, fake_clock.sleep, messages.append,
+        )
+
+    assert calls == [
+        ["ssm", "send-command"],
+        ["ssm", "put-parameter"],
+        ["ssm", "get-command-invocation"],
+        ["ssm", "get-command-invocation"],
+        ["ssm", "delete-parameter"],
+    ]
+    assert "SSM delivery authorization response ambiguous; monitoring command ID" in messages
+
+
+def test_controller_refuses_to_send_without_full_terminal_monitoring_reserve(
+        workspace_tmp_dir, fake_clock):
+    _write_integration_host_script(workspace_tmp_dir)
+    calls = []
+
+    def aws(args):
+        calls.append(args[:2])
+        if args[:2] == ["ec2", "describe-instances"]:
+            return {"Reservations": [{"Instances": [{
+                "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+                "State": {"Name": "running"},
+            }]}]}
+        if args[:2] == ["ssm", "describe-instance-information"]:
+            fake_clock.now = (
+                CONTROLLER_BUDGET_SECONDS - SEND_AND_MONITOR_RESERVE_SECONDS + 1
+            )
+            return {"InstanceInformationList": [{
+                "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+                "PingStatus": "Online",
+                "LastPingDateTime": "2026-08-22T17:58:00+00:00",
+            }]}
+        raise AssertionError("SendCommand must not run without its full reserve")
+
+    with pytest.raises(ConfigError, match="terminal monitoring reserve"):
+        run_deploy(
+            VALID_ENV, workspace_tmp_dir, aws,
+            datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            fake_clock.monotonic, fake_clock.sleep, lambda message: None,
+            run_git=fake_git_returning(VALID_ENV["DEPLOY_SHA"]),
+        )
+
+    assert ["ssm", "send-command"] not in calls
+    assert CONTROLLER_BUDGET_SECONDS == 46 * 60
+    assert SEND_AND_MONITOR_RESERVE_SECONDS > AWS_EXPIRY_SECONDS
 
 
 def test_run_deploy_rejects_failed_preflight_before_loading_or_sending_script(
