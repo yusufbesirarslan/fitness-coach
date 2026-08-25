@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 import re
 
@@ -339,6 +340,8 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
         "performs one more SSM managed-instance describe as its last AWS "
         "operation before SendCommand",
         "samples its injected UTC clock immediately after that response",
+        "Both boundaries accept only a live clock and reject a pre-sampled "
+        "timestamp before any AWS call",
         "Workflow job timeout | 65 minutes",
         "Controller step timeout | 46 minutes",
         "Delivery timeout | 60 seconds",
@@ -377,10 +380,12 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
     assert missing == []
 
 
-RETIRED_HEARTBEAT_CONTRACT_PHRASES = (
-    "five minutes old",
-    "samples its UTC clock immediately after the SSM describe response",
-    "the heartbeat decision is fresh at the send boundary",
+# The retired contract, matched as a family rather than one literal so the
+# runbook cannot re-acquire it in a slightly different wording.
+RETIRED_HEARTBEAT_PATTERNS = (
+    r"\b(?:five|5)\s+minutes?\b",
+    r"\b300\s+seconds\b",
+    r"samples its UTC clock immediately after the SSM describe response",
 )
 
 
@@ -408,30 +413,85 @@ def test_deployment_runbook_heartbeat_contract_matches_the_send_boundary():
     assert describe_index < clock_index
 
     assert [
-        phrase for phrase in RETIRED_HEARTBEAT_CONTRACT_PHRASES if phrase in guide
+        pattern
+        for pattern in RETIRED_HEARTBEAT_PATTERNS
+        if re.search(pattern, guide, flags=re.IGNORECASE)
     ] == []
 
 
+def _controller_module():
+    return ast.parse(_controller_source())
+
+
+def _function_def(module, name):
+    for node in ast.walk(module):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"{name} is not defined in the controller")
+
+
 def test_controller_proves_heartbeat_freshness_at_the_send_authority_boundary():
-    # The runbook claim above must be backed by the controller: the send path
-    # rechecks freshness with the canonical constant and does no further AWS
-    # work between that proof and SendCommand.
-    source = _controller_source()
+    # Structural, not textual: the statement immediately before the SendCommand
+    # submission must be the freshness proof, so no work -- bounded or not --
+    # can be introduced between the proof and the authority it protects.
+    send_command = _function_def(_controller_module(), "send_command")
 
-    assert "SSM_HEARTBEAT_MAX_AGE_SECONDS" in source
-    assert "SSM_HEARTBEAT_MAX_AGE_SECONDS = " not in source
-
-    send_tail = source.split("def send_command(", 1)[1]
-    send_body = re.split(r"^def ", send_tail, flags=re.MULTILINE)[0]
-    freshness_index = send_body.index("require_fresh_ssm_target(config, aws, utc_now)")
-    submit_index = send_body.index("aws(send_args)")
-    assert freshness_index < submit_index
-
-    between = send_body[
-        freshness_index + len("require_fresh_ssm_target(config, aws, utc_now)") :
-        submit_index
+    submit_indexes = [
+        index
+        for index, statement in enumerate(send_command.body)
+        if isinstance(statement, ast.Assign)
+        and isinstance(statement.value, ast.Call)
+        and isinstance(statement.value.func, ast.Name)
+        and statement.value.func.id == "aws"
     ]
-    assert between.strip() == "response ="
+    assert len(submit_indexes) == 1
+
+    proof = send_command.body[submit_indexes[0] - 1]
+    assert isinstance(proof, ast.Expr)
+    assert isinstance(proof.value, ast.Call)
+    assert isinstance(proof.value.func, ast.Name)
+    assert proof.value.func.id == "require_fresh_ssm_target"
+
+
+def test_controller_imports_the_canonical_threshold_instead_of_redeclaring_it():
+    # A locally redeclared ceiling -- under any spelling or annotation -- would
+    # let the controller drift away from the canonical contract module.
+    module = _controller_module()
+
+    module_bindings = set()
+    for node in module.body:
+        targets = (
+            [node.target] if isinstance(node, ast.AnnAssign) else
+            node.targets if isinstance(node, ast.Assign) else []
+        )
+        module_bindings.update(
+            target.id for target in targets if isinstance(target, ast.Name)
+        )
+    assert "SSM_HEARTBEAT_MAX_AGE_SECONDS" not in module_bindings
+
+    imported = {
+        alias.name
+        for node in ast.walk(module)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+    }
+    assert "SSM_HEARTBEAT_MAX_AGE_SECONDS" in imported
+
+
+def test_send_boundary_clock_is_typed_as_a_live_clock_not_a_frozen_sample():
+    # A `datetime` in this annotation is a clock sampled at some earlier point
+    # in the lifecycle -- exactly the retired early-clock contract.
+    module = _controller_module()
+
+    for name in ("preflight", "require_fresh_ssm_target", "send_command", "run_deploy"):
+        function = _function_def(module, name)
+        arguments = function.args.args + function.args.kwonlyargs
+        clock = next(
+            argument for argument in arguments if argument.arg == "utc_now"
+        )
+        assert ast.unparse(clock.annotation) == "UtcClock", name
+
+    assert not _function_def(module, "send_command").args.kw_defaults[0]
 
 
 def _deploy_source_violations(source):

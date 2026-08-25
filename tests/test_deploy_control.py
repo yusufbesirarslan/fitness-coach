@@ -306,7 +306,7 @@ def test_preflight_accepts_running_online_fresh_single_target():
         calls.append(args)
         return next(responses)
 
-    managed = preflight(DeployConfig.from_environ(VALID_ENV), aws, now)
+    managed = preflight(DeployConfig.from_environ(VALID_ENV), aws, lambda: now)
 
     assert managed.instance_id == VALID_ENV["EC2_INSTANCE_ID"]
     assert calls[0][:2] == ["ec2", "describe-instances"]
@@ -325,7 +325,7 @@ def test_preflight_rejects_unusable_target_before_send(state, ping, heartbeat, a
         preflight(
             DeployConfig.from_environ(VALID_ENV),
             aws,
-            datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            lambda: datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
         )
 
     assert not any(call[:2] == ["ssm", "send-command"] for call in calls)
@@ -345,7 +345,7 @@ def test_preflight_rejects_ambiguous_ssm_results(entries):
         preflight(
             DeployConfig.from_environ(VALID_ENV),
             lambda args: next(responses),
-            datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            lambda: datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
         )
 
 
@@ -353,7 +353,7 @@ def test_preflight_rejects_ambiguous_ec2_results():
     aws = lambda args: {"Reservations": [{"Instances": []}]}
 
     with pytest.raises(PreflightError, match="exactly one EC2"):
-        preflight(DeployConfig.from_environ(VALID_ENV), aws, datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc))
+        preflight(DeployConfig.from_environ(VALID_ENV), aws, lambda: datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc))
 
 
 def test_preflight_propagates_aws_cli_errors():
@@ -361,7 +361,7 @@ def test_preflight_propagates_aws_cli_errors():
         raise AwsCliError("aws cli failed")
 
     with pytest.raises(AwsCliError, match="aws cli failed"):
-        preflight(DeployConfig.from_environ(VALID_ENV), aws, datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc))
+        preflight(DeployConfig.from_environ(VALID_ENV), aws, lambda: datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc))
 
 
 def test_preflight_rejects_future_heartbeat_beyond_one_minute():
@@ -378,7 +378,7 @@ def test_preflight_rejects_future_heartbeat_beyond_one_minute():
         preflight(
             DeployConfig.from_environ(VALID_ENV),
             lambda args: next(responses),
-            datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            lambda: datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
         )
 
 
@@ -548,11 +548,114 @@ def test_direct_script_entrypoint_imports_contract_without_package_path():
     assert "DEPLOY_SHA must be lowercase 40-hex" in completed.stdout
 
 
+def test_send_samples_the_utc_clock_after_its_own_freshness_response():
+    # The send boundary must read the clock from the same instant as its own
+    # describe response -- not from any earlier point in the lifecycle.
+    config = DeployConfig.from_environ(VALID_ENV)
+    events = []
+
+    def clock():
+        events.append("utc-now")
+        return NOW
+
+    def aws(args):
+        if args[:2] == ["ssm", "describe-instance-information"]:
+            events.append("ssm-response")
+            return managed_instance_response(NOW)
+        if args[:2] == ["ssm", "send-command"]:
+            events.append("send-command")
+            return {"Command": {"CommandId": COMMAND_ID}}
+        raise AssertionError(args)
+
+    assert send_command(
+        config, HOST_SCRIPT, aws, AUTHORITY_TOKEN, utc_now=clock,
+    ) == COMMAND_ID
+    assert events == ["ssm-response", "utc-now", "send-command"]
+
+
+def test_send_boundary_refuses_a_pre_sampled_clock():
+    # A datetime is a clock frozen at some earlier instant. Accepting one would
+    # silently restore the retired early-clock contract, so the send authority
+    # boundary must reject it before any AWS call.
+    config = DeployConfig.from_environ(VALID_ENV)
+    calls = []
+
+    def aws(args):
+        calls.append(args)
+        raise AssertionError("no AWS call may precede the clock contract check")
+
+    with pytest.raises(ConfigError, match="callable"):
+        send_command(config, HOST_SCRIPT, aws, AUTHORITY_TOKEN, utc_now=NOW)
+    assert calls == []
+
+
+def test_preflight_refuses_a_pre_sampled_clock():
+    config = DeployConfig.from_environ(VALID_ENV)
+
+    def aws(args):
+        raise AssertionError("no AWS call may precede the clock contract check")
+
+    with pytest.raises(ConfigError, match="callable"):
+        preflight(config, aws, NOW)
+
+
+def test_run_deploy_refuses_a_pre_sampled_clock(workspace_tmp_dir, fake_clock):
+    # Kills the "sample once in run_deploy and hand the value down" refactor.
+    def aws(args):
+        raise AssertionError("no AWS call may precede the clock contract check")
+
+    with pytest.raises(ConfigError, match="callable"):
+        run_deploy(
+            VALID_ENV, workspace_tmp_dir, aws, NOW,
+            fake_clock.monotonic, fake_clock.sleep, lambda message: None,
+            run_git=lambda *args, **kwargs: None,
+        )
+
+
+def test_main_default_send_time_clock_is_live_not_frozen_at_startup(monkeypatch):
+    # Kills dropping the `lambda:` from main's default clock, which would freeze
+    # the send-boundary decision at controller start-up.
+    captured = {}
+
+    def fake_run_deploy(environ, repo_path, aws, clock, *args, **kwargs):
+        captured["clock"] = clock
+
+    monkeypatch.setattr(deploy_control, "run_deploy", fake_run_deploy)
+
+    assert main(
+        environ=VALID_ENV, repo_path=Path("checked-out-repository"),
+    ) == 0
+
+    clock = captured["clock"]
+    assert callable(clock)
+    first = clock()
+    assert isinstance(first, datetime) and first.tzinfo is not None
+    assert clock() >= first
+
+
+def test_main_normalizes_a_frozen_now_override_into_a_callable(monkeypatch):
+    captured = {}
+
+    def fake_run_deploy(environ, repo_path, aws, clock, *args, **kwargs):
+        captured["clock"] = clock
+
+    monkeypatch.setattr(deploy_control, "run_deploy", fake_run_deploy)
+
+    assert main(
+        environ=VALID_ENV,
+        repo_path=Path("checked-out-repository"),
+        now=NOW,
+    ) == 0
+
+    assert callable(captured["clock"])
+    assert captured["clock"]() == NOW
+
+
 def test_send_rejects_heartbeat_that_became_stale_after_preflight():
     config = DeployConfig.from_environ(VALID_ENV)
     aws = fresh_then_stale_ssm_runner(age_seconds=361)
 
-    preflight(config, aws, NOW)
+    preflight(config, aws, lambda: NOW)
     with pytest.raises(PreflightError, match="stale"):
         send_command(config, HOST_SCRIPT, aws, AUTHORITY_TOKEN, utc_now=lambda: NOW)
 
@@ -1805,7 +1908,7 @@ def test_run_deploy_orders_validation_preflight_exact_script_send_and_poll(
 
     messages = []
     result = run_deploy(
-        VALID_ENV, workspace_tmp_dir, aws, now,
+        VALID_ENV, workspace_tmp_dir, aws, lambda: now,
         fake_clock.monotonic, fake_clock.sleep, messages.append,
         run_git=run_git,
     )
@@ -1866,7 +1969,7 @@ def test_run_deploy_rejects_stale_candidate_before_any_aws_call(
     with pytest.raises(ConfigError, match="stale"):
         run_deploy(
             VALID_ENV, workspace_tmp_dir, lambda args: aws_calls.append(args),
-            datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            lambda: datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
             fake_clock.monotonic, fake_clock.sleep, lambda message: None,
             run_git=fake_git_returning("b" * 40),
         )
@@ -1892,7 +1995,7 @@ def test_ambiguous_send_command_failure_never_creates_delivery_authority(
     with pytest.raises(AwsCliError, match="response was lost"):
         run_deploy(
             VALID_ENV, workspace_tmp_dir, aws,
-            datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            lambda: datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
             fake_clock.monotonic, fake_clock.sleep, lambda message: None,
         )
 
@@ -1931,7 +2034,7 @@ def test_ambiguous_authorization_response_keeps_monitoring_known_command(
     with pytest.raises(InvocationFailed):
         run_deploy(
             VALID_ENV, workspace_tmp_dir, aws,
-            datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            lambda: datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
             fake_clock.monotonic, fake_clock.sleep, messages.append,
         )
 
@@ -1972,7 +2075,7 @@ def test_controller_refuses_to_send_without_full_terminal_monitoring_reserve(
     with pytest.raises(ConfigError, match="terminal monitoring reserve"):
         run_deploy(
             VALID_ENV, workspace_tmp_dir, aws,
-            datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            lambda: datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
             fake_clock.monotonic, fake_clock.sleep, lambda message: None,
             run_git=fake_git_returning(VALID_ENV["DEPLOY_SHA"]),
         )
@@ -1998,7 +2101,7 @@ def test_run_deploy_rejects_failed_preflight_before_loading_or_sending_script(
     with pytest.raises(PreflightError, match="not running"):
         run_deploy(
             VALID_ENV, workspace_tmp_dir, aws,
-            datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            lambda: datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
             fake_clock.monotonic, fake_clock.sleep, lambda message: None,
             run_git=fake_git_returning(VALID_ENV["DEPLOY_SHA"]),
         )
@@ -2028,7 +2131,7 @@ def test_run_deploy_requires_exact_host_script_after_preflight_before_send(
     with pytest.raises(ConfigError, match="production_deploy.sh"):
         run_deploy(
             VALID_ENV, workspace_tmp_dir, aws,
-            datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+            lambda: datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
             fake_clock.monotonic, fake_clock.sleep, lambda message: None,
             run_git=fake_git_returning(VALID_ENV["DEPLOY_SHA"]),
         )

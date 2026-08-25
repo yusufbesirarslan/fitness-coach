@@ -518,6 +518,28 @@ def validate_candidate(repo_path: Path, deploy_sha: str, run_git: GitRunner = _r
         raise ConfigError("deployment candidate is stale: origin/main differs from DEPLOY_SHA")
 
 
+def _require_live_clock(utc_now: UtcClock) -> UtcClock:
+    """Reject a pre-sampled clock before any AWS work.
+
+    A bare ``datetime`` is a clock frozen at some earlier instant. Accepting one
+    would decide heartbeat freshness from before the boundary that is about to
+    act, which is exactly the retired early-clock contract.
+    """
+    if not callable(utc_now):
+        raise ConfigError(
+            "UTC clock must be callable so freshness is sampled at the boundary"
+        )
+    return utc_now
+
+
+def _sample_utc(utc_now: UtcClock) -> datetime:
+    """Sample the live clock at the caller's own authority boundary."""
+    now = _require_live_clock(utc_now)()
+    if not isinstance(now, datetime):
+        raise PreflightError("preflight clock must return a datetime")
+    return now
+
+
 def _parse_heartbeat(value: object) -> datetime:
     if not isinstance(value, str):
         raise PreflightError("SSM target heartbeat is invalid")
@@ -560,9 +582,10 @@ def validate_managed_instance(
 def preflight(
     config: DeployConfig,
     aws: AwsJsonRunner,
-    utc_now: UtcClock | datetime,
+    utc_now: UtcClock,
 ) -> ManagedInstance:
     """Verify the configured instance is the sole running and fresh SSM target."""
+    _require_live_clock(utc_now)
     ec2 = aws([
         "ec2", "describe-instances", "--instance-ids", config.instance_id,
         "--region", config.region,
@@ -589,26 +612,25 @@ def preflight(
         "ssm", "describe-instance-information", "--filters",
         f"Key=InstanceIds,Values={config.instance_id}", "--region", config.region,
     ])
-    now = utc_now() if callable(utc_now) else utc_now
-    if not isinstance(now, datetime):
-        raise PreflightError("preflight clock must return a datetime")
-    return validate_managed_instance(ssm, config.instance_id, now)
+    return validate_managed_instance(
+        ssm, config.instance_id, _sample_utc(utc_now)
+    )
 
 
 def require_fresh_ssm_target(
     config: DeployConfig,
     aws: AwsJsonRunner,
-    utc_now: UtcClock | datetime,
+    utc_now: UtcClock,
 ) -> ManagedInstance:
     """Recheck the sole SSM target immediately before command submission."""
+    _require_live_clock(utc_now)
     ssm = aws([
         "ssm", "describe-instance-information", "--filters",
         f"Key=InstanceIds,Values={config.instance_id}", "--region", config.region,
     ])
-    now = utc_now() if callable(utc_now) else utc_now
-    if not isinstance(now, datetime):
-        raise PreflightError("preflight clock must return a datetime")
-    return validate_managed_instance(ssm, config.instance_id, now)
+    return validate_managed_instance(
+        ssm, config.instance_id, _sample_utc(utc_now)
+    )
 
 
 def render_bootstrap(
@@ -823,9 +845,10 @@ def send_command(
     aws: AwsJsonRunner,
     authority_token: str | None = None,
     *,
-    utc_now: UtcClock | datetime,
+    utc_now: UtcClock,
 ) -> str:
     """Deliver the encoded host script with separate delivery and execution bounds."""
+    _require_live_clock(utc_now)
     token = str(uuid4()) if authority_token is None else authority_token
     remote_command = build_remote_command(config, script, token)
     if len(remote_command) > LOCAL_RUN_SHELL_COMMAND_MAX_CHARS:
@@ -999,7 +1022,7 @@ def run_deploy(
     environ: Mapping[str, str],
     repo_path: Path,
     aws: AwsJsonRunner,
-    utc_now: UtcClock | datetime,
+    utc_now: UtcClock,
     monotonic: Callable[[], float],
     sleep: Callable[[float], None],
     log: Callable[[str], None],
@@ -1007,6 +1030,7 @@ def run_deploy(
     run_git: GitRunner = _run_git,
 ) -> InvocationResult:
     """Run the single validated production deployment lifecycle in order."""
+    _require_live_clock(utc_now)
     controller_deadline = monotonic() + CONTROLLER_BUDGET_SECONDS
     config = DeployConfig.from_environ(environ)
     validate_candidate(repo_path, config.deploy_sha, run_git=run_git)
@@ -1062,10 +1086,10 @@ def main(
     try:
         if now is not None and utc_now is not None:
             raise ConfigError("provide only one UTC clock override")
-        send_time_clock: UtcClock | datetime = (
+        send_time_clock: UtcClock = (
             utc_now
             if utc_now is not None
-            else now
+            else (lambda: now)
             if now is not None
             else lambda: datetime.now(timezone.utc)
         )

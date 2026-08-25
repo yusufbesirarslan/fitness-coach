@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.deploy_contract import host_timeout_environment
+from scripts.deploy_contract import HOST_PHASE_SECONDS, host_timeout_environment
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1168,11 +1168,25 @@ def test_success_deploys_exact_candidate_and_verifies_revision(bash_executable, 
     assert all(line.startswith(expected_prefix) for line in compose_lines)
     trace_lines = trace.splitlines()
     prune_index = trace_lines.index("docker image prune -f")
+    # The cleanup bound is not a free literal: the host derives it from the
+    # canonical cleanup phase budget minus its own kill grace, so cleanup's
+    # total wall time can never exceed the phase the contract reserved for it.
+    grace_match = re.search(
+        r"COMMAND_KILL_GRACE_SECONDS=([0-9]+)",
+        HOST_SCRIPT.read_text(encoding="utf-8"),
+    )
+    assert grace_match is not None
+    grace_seconds = int(grace_match.group(1))
+    expected_cleanup_timeout = HOST_PHASE_SECONDS["cleanup"] - grace_seconds
+    assert expected_cleanup_timeout > 0
     cleanup_indices = [
-        index for index, line in enumerate(trace_lines) if " 5s rm -f -- " in line
+        index
+        for index, line in enumerate(trace_lines)
+        if f" {expected_cleanup_timeout}s rm -f -- " in line
     ]
-    assert cleanup_indices
+    assert cleanup_indices, trace_lines
     assert prune_index < cleanup_indices[-1]
+    assert expected_cleanup_timeout + grace_seconds == HOST_PHASE_SECONDS["cleanup"]
 
 
 def test_stale_candidate_fails_before_checkout_or_docker(bash_executable, host_fixture):
