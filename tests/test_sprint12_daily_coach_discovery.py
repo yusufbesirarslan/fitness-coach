@@ -283,13 +283,13 @@ def test_no_blueprint_reads_the_plan_mutation_journal():
         "a blueprint now reads plan mutation history: %s" % sorted(offenders))
 
 
-# -- F6: P2-16 - injury annotation runs before canonical resolution ---------
-# `annotate_injuries` matches on the provider's raw exercise string; catalog
-# resolution happens afterwards. Two aliases of one canonical exercise can
-# therefore be annotated differently, and the note persists into `plan_data`.
+# -- F6: P2-16 CLOSED - injury annotation runs after canonical resolution ---
+# Sprint 12 PR2B moved the overlay past catalog resolution. Matching still
+# uses the (now canonical) display name, but only after `exercise_id` is
+# present, so a raw provider spelling cannot be warning authority.
 
-def test_injury_annotation_precedes_canonical_exercise_resolution():
-    """P2-16 - proven by call order in the generation service, not by comment."""
+def test_injury_annotation_follows_canonical_exercise_resolution():
+    """P2-16 closed - proven by call order in the generation service."""
     tree = ast.parse(_source("app/services/training_generation/service.py"))
 
     target = next(
@@ -297,9 +297,11 @@ def test_injury_annotation_precedes_canonical_exercise_resolution():
         if isinstance(node, ast.FunctionDef)
         and node.name == "generate_training_plan_payload"
     )
-    # Compare source LINES, not `ast.walk` order: walk is breadth-first, so its
-    # sequence says nothing about which call runs first.
-    lines = {"_parse_and_validate": [], "canonicalize_plan_exercises": []}
+    lines = {
+        "_parse_and_validate": [],
+        "canonicalize_plan_exercises": [],
+        "annotate_injuries": [],
+    }
     for node in ast.walk(target):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id in lines):
@@ -307,24 +309,17 @@ def test_injury_annotation_precedes_canonical_exercise_resolution():
 
     assert lines["_parse_and_validate"], "validation call site disappeared"
     assert lines["canonicalize_plan_exercises"], "canonicalization call site disappeared"
-    # Every parse/validate call - and `_parse_and_validate` is what runs
-    # `annotate_injuries` - precedes every canonicalization call.
+    assert lines["annotate_injuries"], "injury annotation left the generation pipeline"
     assert (max(lines["_parse_and_validate"])
-            < min(lines["canonicalize_plan_exercises"])), (
-        "canonicalization now runs before validation/annotation; re-assess "
-        "P2-16 in the discovery report")
+            < min(lines["canonicalize_plan_exercises"]))
+    assert (max(lines["canonicalize_plan_exercises"])
+            < min(lines["annotate_injuries"]))
 
-    # The annotation really is inside the earlier of the two.
     validate_source = _source(
         "app/services/training_generation/response_validator.py")
-    assert "warnings = annotate_injuries(structured, injuries)" in validate_source
-
-    # ...and the annotation really does match on the raw provider name.
-    validator = _source(
-        "app/services/training_generation/response_validator.py")
-    assert 'find_contraindicated(ex["isim"], injuries)' in validator, (
-        "the injury overlay no longer matches on the raw provider name; "
-        "P2-16 may be resolved")
+    assert "warnings = annotate_injuries(structured, injuries)" not in validate_source
+    assert "injury annotation requires canonical exercise identity" in validate_source
+    assert 'find_contraindicated(ex["isim"], injuries)' in validate_source
 
 
 def test_injury_warning_text_persists_into_the_stored_plan():

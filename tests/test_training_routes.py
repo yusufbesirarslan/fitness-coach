@@ -270,7 +270,7 @@ def test_plan_flags_contraindicated_exercise_that_slips_through(client, with_ses
 
     warnings = body["injury_warnings"]
     assert len(warnings) == 1
-    assert warnings[0]["egzersiz"] == "Conventional Deadlift"
+    assert warnings[0]["egzersiz"] == "Barbell Deadlift"
     assert warnings[0]["neden"] == "deadlift"
 
     exs = body["program"][0]["egzersizler"]

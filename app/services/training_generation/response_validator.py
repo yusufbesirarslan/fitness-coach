@@ -215,12 +215,22 @@ def validate_plan_structure(
 
 
 def annotate_injuries(plan: dict, injuries: str = "") -> list[dict]:
-    """Warn-only injury overlay. Not catalog authority and not a repair."""
+    """Warn-only injury overlay on an already-canonicalized plan.
+
+    Not catalog authority, not a repair, and not a medical engine. Matching
+    uses the canonical server-owned display name written by
+    ``canonicalize_plan_exercises``. A raw provider spelling without
+    ``exercise_id`` cannot reach the matcher.
+    """
     warnings: list[dict] = []
     if not injuries:
         return warnings
     for day in plan["program"]:
         for ex in day["egzersizler"]:
+            exercise_id = ex.get(EXERCISE_ID_KEY)
+            if not isinstance(exercise_id, str) or not exercise_id:
+                raise TypeError(
+                    "injury annotation requires canonical exercise identity")
             hit = injury_constraints.find_contraindicated(ex["isim"], injuries)
             if hit:
                 warn = f"⚠️ SAKATLIK RİSKİ ({hit}) - güvenli alternatifle değiştir"
@@ -233,12 +243,16 @@ def annotate_injuries(plan: dict, injuries: str = "") -> list[dict]:
 
 
 def validate_generated_plan(plan: dict, preferences, injuries: str = "") -> tuple[dict, list[dict]]:
-    """Structural + semantic validation used by generate and tests."""
+    """Structural + semantic validation used by generate and tests.
+
+    Injury annotation is not performed here. Warnings require canonical
+    exercise identity and are applied after ``canonicalize_plan_exercises``.
+    ``injuries`` is accepted for call-site compatibility and ignored.
+    """
     from app.services.training_generation.semantic_validator import (
         validate_plan_semantics,
     )
 
     structured = validate_plan_structure(plan, require_ozet=True)
     validate_plan_semantics(structured, preferences)
-    warnings = annotate_injuries(structured, injuries)
-    return structured, warnings
+    return structured, []

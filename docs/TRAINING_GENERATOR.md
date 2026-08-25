@@ -331,6 +331,18 @@ canonical display name; every prescription field (`set` / `tekrar` /
 `dinlenme` / `not`) is carried through unchanged. It never adds catalog
 metadata (equipment / movement / region) to the plan — that stays server-side.
 
+### Injury annotation (warn-only, after identity)
+
+`annotate_injuries` runs **after** canonicalization. It requires a
+non-empty `exercise_id` (canonical identity as a gate) and then matches
+with the existing string overlay against the catalog display name already
+written into `isim`. It is warn-only: it prepends a note onto `not` and
+never rejects, deletes, substitutes, or mutates sets/reps/load. A plan
+entry without `exercise_id` cannot reach the matcher, so a raw provider
+spelling is not warning authority. Save does not re-derive the overlay;
+it re-validates the already-canonical annotated payload and preserves
+`not`. Historical rows are not rewritten.
+
 ### No substitution, and the cardio carve-out
 
 There is **no automatic substitution, ever**. An unresolvable, ambiguous,
