@@ -41,6 +41,7 @@ from app.services.training_generation.prompt_builder import (
     canonical_exercise_vocabulary,
 )
 from app.services.training_generation.response_validator import (
+    annotate_injuries,
     coerce_plan_document,
     validate_generated_plan,
     validate_plan_structure,
@@ -129,8 +130,9 @@ class _CompletionBudget:
 
 def _parse_and_validate(text, truncated, preferences):
     parsed = extract_plan_object(text, truncated=truncated)
-    return validate_generated_plan(
+    structured, _ = validate_generated_plan(
         parsed, preferences, injuries=preferences.injuries)
+    return structured
 
 
 def resolve_save_exercise_context(token, secret_key, user_id):
@@ -243,7 +245,7 @@ def generate_training_plan_payload(
             prompt=prompt, system_prompt=system_prompt,
             max_tokens=PRIMARY_MAX_TOKENS, temperature=0.35)
         try:
-            plan, injury_warnings = _parse_and_validate(text, truncated, preferences)
+            plan = _parse_and_validate(text, truncated, preferences)
         except (SchemaInvalidError, SemanticInvalidError):
             # Provider said it stopped at the token cap. A closed-but-short
             # object is still truncation, not a semantic command miss.
@@ -263,7 +265,7 @@ def generate_training_plan_payload(
                 max_tokens=repair_tokens,
                 temperature=0.35,
             )
-            plan, injury_warnings = _parse_and_validate(text, truncated, preferences)
+            plan = _parse_and_validate(text, truncated, preferences)
         except (ParseFailedError, TruncatedError, SchemaInvalidError, SemanticInvalidError):
             _log(logger, "repair_failed", calls=len(budget.calls))
             raise
@@ -274,12 +276,16 @@ def generate_training_plan_payload(
         _log(logger, "semantic_invalid", calls=len(budget.calls), repair_eligible=0)
         raise
 
-    # Sprint 11 PR4 Task 3: canonicalize exercise identity exactly once, on the
-    # final accepted candidate, strictly OUTSIDE the try/except above. Never
-    # move this inside the repair except clauses — the repair path re-enters
-    # _parse_and_validate, so an exercise-authority failure canonicalized
-    # there would be misclassified as a parse/truncation-repairable outcome.
+    # Sprint 11 PR4 Task 3 / Sprint 12 PR2B: canonicalize exercise identity
+    # exactly once, on the final accepted candidate, strictly OUTSIDE the
+    # try/except above. Never move this inside the repair except clauses —
+    # the repair path re-enters _parse_and_validate, so an exercise-authority
+    # failure canonicalized there would be misclassified as a
+    # parse/truncation-repairable outcome.
+    # Injury annotation is warn-only and must run AFTER identity is
+    # catalog-owned; a raw provider spelling is not warning authority.
     plan = canonicalize_plan_exercises(plan, exercise_context)
+    injury_warnings = annotate_injuries(plan, preferences.injuries)
 
     ozet = plan.get("haftalik_ozet", {})
     yogunluk = ozet.get("yogunluk_skoru") or 7
