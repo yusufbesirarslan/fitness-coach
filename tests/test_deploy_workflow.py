@@ -35,6 +35,28 @@ def _deployment_guide():
     return DEPLOYMENT_GUIDE.read_text(encoding="utf-8")
 
 
+def trusted_action_references(paths):
+    """Yield mutable third-party action references as ``(path, reference)``."""
+    for workflow_path in paths:
+        for line in workflow_path.read_text(encoding="utf-8").splitlines():
+            match = re.search(r"\buses:\s*([^\s#]+)", line)
+            if not match:
+                continue
+            reference = match.group(1)
+            if reference.startswith("./"):
+                continue
+            if not re.fullmatch(r"[^@\s]+@[0-9a-f]{40}", reference):
+                yield workflow_path, reference
+
+
+@pytest.mark.parametrize(
+    "workflow_path",
+    [Path(".github/workflows/ci.yml"), Path(".github/workflows/deploy.yml")],
+)
+def test_every_trusted_action_reference_is_immutable(workflow_path):
+    assert list(trusted_action_references([workflow_path])) == []
+
+
 def test_deploy_has_only_ci_workflow_run_authority():
     trigger = _workflow_doc()["on"]
     assert set(trigger) == {"workflow_run"}
@@ -148,7 +170,7 @@ def test_ci_has_mandatory_root_linux_lock_job():
     assert job["runs-on"] == "ubuntu-latest"
     run_steps = "\n".join(step.get("run", "") for step in job["steps"])
     assert "sudo" in run_steps
-    assert "-m linux_lock" in run_steps
+    assert '-m "linux_lock or linux_helper_identity"' in run_steps
     assert "--run-authoritative-linux-lock-tests" in run_steps
 
 

@@ -13,8 +13,8 @@ jobs:
     name: pytest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"   # Dockerfile ile aynı taban
           cache: pip
@@ -43,7 +43,7 @@ jobs:
       - name: Prove root Linux OFD contention and release
         run: >-
           sudo -E "$(command -v python)" -m pytest -o addopts= -q
-          -m linux_lock --run-authoritative-linux-lock-tests
+          -m "linux_lock or linux_helper_identity" --run-authoritative-linux-lock-tests
           tests/test_production_deploy_script.py
 
   migration-drift:
@@ -84,8 +84,8 @@ jobs:
         {"ci-v1":"Y2ktb25seS1tb2JpbGUtZGVyaXZhdGlvbi1yb290LTAx"}
       FITX_SKIP_DB_INIT: "1"
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
@@ -128,8 +128,8 @@ jobs:
       PG_TEST_DATABASE_URL: >-
         postgresql://postgres:postgres@localhost:5432/fitx_mobile_race
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
