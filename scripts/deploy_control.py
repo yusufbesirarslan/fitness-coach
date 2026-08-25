@@ -1075,7 +1075,6 @@ def main(
     environ: Mapping[str, str] | None = None,
     repo_path: Path | None = None,
     aws: AwsJsonRunner | None = None,
-    now: datetime | None = None,
     utc_now: UtcClock | None = None,
     monotonic: Callable[[], float] | None = None,
     sleep: Callable[[float], None] | None = None,
@@ -1084,13 +1083,13 @@ def main(
 ) -> int:
     """CLI entrypoint returning non-zero for every typed deployment failure."""
     try:
-        if now is not None and utc_now is not None:
-            raise ConfigError("provide only one UTC clock override")
+        # Deliberately no `now: datetime` override. Wrapping a pre-sampled
+        # instant in `lambda: now` produces a callable that passes every
+        # downstream liveness guard forever, so an arbitrarily stale heartbeat
+        # would clear the send boundary. The only override is a live clock.
         send_time_clock: UtcClock = (
             utc_now
             if utc_now is not None
-            else (lambda: now)
-            if now is not None
             else lambda: datetime.now(timezone.utc)
         )
         run_deploy(

@@ -1,4 +1,5 @@
 import base64
+import inspect
 import json
 import os
 import shlex
@@ -453,16 +454,138 @@ def test_send_payload_separates_delivery_and_execution_timeout():
     assert args[args.index("--instance-ids") + 1] == VALID_ENV["EC2_INSTANCE_ID"]
 
 
-def test_send_rechecks_online_heartbeat_at_actual_send_boundary():
+def _foreign_managed_instance(last_ping):
+    """One online, perfectly fresh record -- belonging to a different host."""
+    return {"InstanceInformationList": [{
+        "InstanceId": "i-0000000000decafbad",
+        "PingStatus": "Online",
+        "LastPingDateTime": last_ping.isoformat(),
+    }]}
+
+
+def _running_ec2_response():
+    return {"Reservations": [{"Instances": [{
+        "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+        "State": {"Name": "running"},
+    }]}]}
+
+
+def test_send_boundary_describe_asks_only_about_the_configured_deploy_target():
+    # A freshness proof is worthless if it is a proof about some other record.
+    # The request itself must name this instance, in this region -- every other
+    # fixture stubs `aws` as a lambda that ignores its arguments, which leaves
+    # the request structurally invisible to the suite.
     config = DeployConfig.from_environ(VALID_ENV)
-    clock = iter((NOW, NOW + timedelta(seconds=61)))
+    calls = []
+
+    def aws(args):
+        calls.append(args)
+        return managed_instance_response(NOW)
+
+    require_fresh_ssm_target(config, aws, lambda: NOW)
+
+    assert len(calls) == 1
+    args = calls[0]
+    assert args[:2] == ["ssm", "describe-instance-information"]
+    assert args[args.index("--filters") + 1] == (
+        f"Key=InstanceIds,Values={VALID_ENV['EC2_INSTANCE_ID']}"
+    )
+    assert args[args.index("--region") + 1] == VALID_ENV["AWS_REGION"]
+
+
+def test_preflight_describe_asks_only_about_the_configured_deploy_target():
+    config = DeployConfig.from_environ(VALID_ENV)
+    calls = []
+
+    def aws(args):
+        calls.append(args)
+        if args[:2] == ["ec2", "describe-instances"]:
+            return _running_ec2_response()
+        return managed_instance_response(NOW)
+
+    preflight(config, aws, lambda: NOW)
+
+    describes = [
+        args for args in calls
+        if args[:2] == ["ssm", "describe-instance-information"]
+    ]
+    assert len(describes) == 1
+    assert describes[0][describes[0].index("--filters") + 1] == (
+        f"Key=InstanceIds,Values={VALID_ENV['EC2_INSTANCE_ID']}"
+    )
+    assert describes[0][describes[0].index("--region") + 1] == (
+        VALID_ENV["AWS_REGION"]
+    )
+
+
+def test_send_boundary_rejects_a_fresh_heartbeat_from_another_instance():
+    # Exactly one entry, online, zero seconds old -- every check except identity
+    # passes. Dropping the identity comparison would turn the proof into "some
+    # SSM record somewhere pinged recently".
+    config = DeployConfig.from_environ(VALID_ENV)
+
+    with pytest.raises(PreflightError, match="does not match configured"):
+        require_fresh_ssm_target(
+            config, lambda args: _foreign_managed_instance(NOW), lambda: NOW,
+        )
+
+
+def test_preflight_rejects_a_fresh_heartbeat_from_another_instance():
+    config = DeployConfig.from_environ(VALID_ENV)
+
+    def aws(args):
+        if args[:2] == ["ec2", "describe-instances"]:
+            return _running_ec2_response()
+        return _foreign_managed_instance(NOW)
+
+    with pytest.raises(PreflightError, match="does not match configured"):
+        preflight(config, aws, lambda: NOW)
+
+
+def test_final_ssm_target_check_refuses_a_pre_sampled_clock():
+    # The send-boundary function is exported and callable on its own; its own
+    # guard must hold rather than leaning on send_command's redundant one.
+    config = DeployConfig.from_environ(VALID_ENV)
+    calls = []
+
+    def aws(args):
+        calls.append(args)
+        raise AssertionError("the clock is checked before any AWS call")
+
+    with pytest.raises(ConfigError, match="callable"):
+        require_fresh_ssm_target(config, aws, NOW)
+
+    assert calls == []
+
+
+def test_final_ssm_target_check_refuses_a_clock_without_a_timezone():
+    # `datetime.now()` instead of `datetime.now(timezone.utc)` would otherwise
+    # make the age subtraction raise TypeError, which main does not handle and
+    # which would surface as an untyped traceback instead of a typed failure.
+    config = DeployConfig.from_environ(VALID_ENV)
+
+    with pytest.raises(PreflightError, match="timezone"):
+        require_fresh_ssm_target(
+            config,
+            lambda args: managed_instance_response(NOW),
+            lambda: NOW.replace(tzinfo=None),
+        )
+
+
+def test_send_rechecks_online_heartbeat_at_actual_send_boundary():
+    # The previous fixture drew from a two-element clock while asserting that
+    # exactly one describe happens, so its second element was unreachable and
+    # the "61 seconds" it advertised was never exercised. What this test does
+    # pin is the boundary case: a heartbeat exactly at the ceiling still sends.
+    config = DeployConfig.from_environ(VALID_ENV)
     calls = []
 
     def aws(args):
         calls.append(args)
         if args[:2] == ["ssm", "describe-instance-information"]:
-            sampled = next(clock)
-            return managed_instance_response(sampled - timedelta(seconds=360))
+            return managed_instance_response(
+                NOW - timedelta(seconds=SSM_HEARTBEAT_MAX_AGE_SECONDS)
+            )
         if args[:2] == ["ssm", "send-command"]:
             return {"Command": {"CommandId": COMMAND_ID}}
         raise AssertionError(args)
@@ -648,22 +771,43 @@ def test_main_default_send_time_clock_is_live_not_frozen_at_startup(monkeypatch)
     assert clock() > first
 
 
-def test_main_normalizes_a_frozen_now_override_into_a_callable(monkeypatch):
-    captured = {}
+def test_main_refuses_a_pre_sampled_clock_override():
+    # A bare timestamp handed to the entrypoint used to be wrapped in
+    # `lambda: now`, producing a callable that satisfies every downstream
+    # `callable()` guard forever. An hour-stale heartbeat then passed the send
+    # boundary. The entrypoint must reject it, before any AWS work.
+    calls = []
+    messages = []
 
-    def fake_run_deploy(environ, repo_path, aws, clock, *args, **kwargs):
-        captured["clock"] = clock
-
-    monkeypatch.setattr(deploy_control, "run_deploy", fake_run_deploy)
+    def aws(args):
+        calls.append(args)
+        raise AssertionError("no AWS work may begin behind a frozen clock")
 
     assert main(
         environ=VALID_ENV,
         repo_path=Path("checked-out-repository"),
-        now=NOW,
-    ) == 0
+        aws=aws,
+        utc_now=NOW,
+        log=messages.append,
+        run_git=fake_git_returning(VALID_ENV["DEPLOY_SHA"]),
+    ) == 1
 
-    assert callable(captured["clock"])
-    assert captured["clock"]() == NOW
+    assert calls == []
+    assert messages == ["deployment failed: UTC clock must be callable so "
+                        "freshness is sampled at the boundary"]
+
+
+def test_main_exposes_no_parameter_that_can_freeze_the_lifecycle_clock():
+    # Structural, so the laundering path cannot be reintroduced under a new
+    # name: no entrypoint parameter may carry an already-sampled instant.
+    parameters = inspect.signature(main).parameters
+
+    assert "now" not in parameters
+    assert [
+        name
+        for name, parameter in parameters.items()
+        if "datetime" in str(parameter.annotation)
+    ] == []
 
 
 def test_send_rejects_heartbeat_that_became_stale_after_preflight():
@@ -2302,7 +2446,7 @@ def test_main_returns_nonzero_when_bounded_aws_call_times_out(
         environ=VALID_ENV,
         repo_path=workspace_tmp_dir,
         aws=aws,
-        now=datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+        utc_now=lambda: datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
         monotonic=fake_clock.monotonic,
         sleep=fake_clock.sleep,
         log=messages.append,

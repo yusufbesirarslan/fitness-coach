@@ -1,5 +1,10 @@
 # Production Deployment Hardening PR1 Design
 
+> Superseded: the five-minute SSM heartbeat ceiling described below was
+> retired. The contract in force is 360 seconds, proven at the SendCommand
+> authority boundary; see `docs/DEPLOYMENT.md` and `scripts/deploy_contract.py`.
+> The rest of this document is kept as the original design record.
+
 ## Goal
 
 Make the single-host production deployment control plane deploy exactly the

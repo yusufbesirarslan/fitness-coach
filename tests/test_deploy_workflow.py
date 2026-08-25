@@ -393,6 +393,77 @@ RETIRED_HEARTBEAT_PATTERNS = (
 FOREIGN_HEARTBEAT_CEILING = r"(?<![\d,])300\s+seconds"
 
 
+# The freshness contract is pinned whole, not by required substrings. An
+# allow-list cannot notice a *false* sentence being added next to the true ones,
+# nor a true clause being deleted. Rewording this paragraph is a deliberate
+# contract change and must be made here in the same commit.
+FRESHNESS_CONTRACT_PARAGRAPH = (
+    "B accepts only the configured running EC2 instance. Git candidate "
+    "commands are individually bounded to 60 seconds. Its SSM "
+    "managed-instance record must be unique and match the configured ID: "
+    "`PingStatus` must be `Online` and `LastPingDateTime` must be no more "
+    "than 360 seconds old (nor more than one minute in the future). After "
+    "the EC2/SSM preflight, B performs one more SSM managed-instance "
+    "describe as its last AWS operation before SendCommand and samples "
+    "its injected UTC clock immediately after that response. Both "
+    "boundaries reject a bare timestamp as a typed configuration error "
+    "before any AWS call, and each boundary re-reads the clock after its "
+    "own describe response, so controller time spent between preflight "
+    "and send counts against heartbeat age. Failure is fail-closed; "
+    "correct the instance or SSM registration before retrying."
+)
+
+# Claim shapes that contradict the contract wherever in the runbook they appear.
+CONTRADICTED_OPERATIONAL_CLAIMS = (
+    r"atomic",
+    r"no time (?:can|will|may|could) (?:elapse|pass)",
+    r"no recheck",
+    r"remains? authoritative",
+    r"re-?prov\w+ the heartbeat every",
+)
+
+
+SUPERSEDED_MARKER = "> Superseded:"
+
+
+def test_no_document_states_a_retired_heartbeat_ceiling_as_current():
+    # docs/DEPLOYMENT.md is the runbook, but it is not the only place a reader
+    # greps. Historical design records may keep their original wording -- behind
+    # an explicit superseded banner. Without one, the retired ceiling reads as
+    # the contract in force.
+    offenders = []
+    for path in sorted(Path("docs").rglob("*.md")):
+        text = path.read_text(encoding="utf-8")
+        if "LastPingDateTime" not in text:
+            continue
+        if not re.search(r"(?<![\d,])(?:five|5)\s+minutes", text, flags=re.IGNORECASE):
+            continue
+        if SUPERSEDED_MARKER not in text:
+            offenders.append(path.as_posix())
+
+    assert offenders == []
+
+
+def test_the_runbook_freshness_contract_paragraph_is_pinned_verbatim():
+    paragraphs = [
+        " ".join(block.split())
+        for block in _deployment_guide().split("\n\n")
+    ]
+    contract = [block for block in paragraphs if "LastPingDateTime" in block]
+
+    assert contract == [FRESHNESS_CONTRACT_PARAGRAPH]
+
+
+def test_the_runbook_states_no_claim_the_controller_contradicts():
+    guide = " ".join(_deployment_guide().split())
+
+    assert [
+        pattern
+        for pattern in CONTRADICTED_OPERATIONAL_CLAIMS
+        if re.search(pattern, guide, flags=re.IGNORECASE)
+    ] == []
+
+
 def _heartbeat_sentences(guide):
     return [
         sentence
@@ -511,6 +582,33 @@ def test_controller_imports_the_canonical_threshold_instead_of_redeclaring_it():
         for alias in node.names
     }
     assert "SSM_HEARTBEAT_MAX_AGE_SECONDS" in imported
+
+
+def test_the_canonical_threshold_is_the_value_the_boundary_actually_compares():
+    # Forbidding one identifier is not enough: a second ceiling declared under a
+    # different name, with the canonical import left present but unused, would
+    # satisfy that guard while the boundary compares against the impostor. Tie
+    # the guard to the comparison site instead of to a spelling.
+    module = _controller_module()
+    boundary = _function_def(module, "validate_managed_instance")
+
+    loaded = {
+        node.id
+        for node in ast.walk(boundary)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+    }
+    assert "SSM_HEARTBEAT_MAX_AGE_SECONDS" in loaded
+
+    # ... and the name must still mean the canonical constant, unaliased.
+    sources = [
+        (node.module, alias.asname)
+        for node in ast.walk(module)
+        if isinstance(node, ast.ImportFrom)
+        for alias in node.names
+        if alias.name == "SSM_HEARTBEAT_MAX_AGE_SECONDS"
+    ]
+    assert sources
+    assert set(sources) == {("deploy_contract", None)}
 
 
 def test_send_boundary_clock_is_typed_as_a_live_clock_not_a_frozen_sample():
