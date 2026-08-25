@@ -160,6 +160,13 @@ def _summary(plan_data, day):
     duplicated onto a second surface. `None` means the canonical projection has no
     publishable day for today (no plan, an unreadable schedule, or content outside
     the public bounds). It never means "rest day": that is `schedule_state`'s job.
+
+    Deliberately carries no weekday name and no `tip` token. Both are localized
+    web copy, and both would hand a client a second way to answer "is today a rest
+    day?" - one that is not the canonical authority and would drift from it. The
+    canonical answers are `date` and `schedule_state`. `focus` is plan *content*
+    (free text an author wrote, like an exercise name), not an enum: display it,
+    never branch on it.
     """
     if plan_data is None:
         return None
@@ -170,8 +177,6 @@ def _summary(plan_data, day):
     if today_plan is None:
         return None
     return {
-        "day": today_plan["gun"],
-        "kind": today_plan["tip"],
         "focus": today_plan["odak"],
         "duration_min": today_plan["sure_dk"],
         "estimated_calories": today_plan["tahmini_kalori"],

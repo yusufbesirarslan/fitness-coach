@@ -364,6 +364,76 @@ def test_today_endpoint_belongs_to_the_single_mobile_blueprint(app):
 
 
 # ---------------------------------------------------------------------------
+# Production truth: no fixture, sample or placeholder Today (Sprint 12 PR2A)
+# ---------------------------------------------------------------------------
+def test_the_production_today_has_no_fixture_or_placeholder_fallback():
+    """PR2A removed fabricated mobile fitness state; PR3 must not re-add it.
+
+    A "friendly" default - a sample workout when the plan is missing, a demo day
+    when a read fails - is exactly the class of lie PR2A deleted. The failure path
+    is a 5xx, and the empty path is an honest empty state, so neither needs a
+    literal to fall back to.
+    """
+    source = _code_only(SERVICE_PATH) + _code_only(ROUTE_PATH)
+    for token in ("fixture", "sample", "demo", "placeholder", "dummy",
+                  "seed_", "FALLBACK", "fallback", "example_"):
+        assert token not in source, f"production Today must not ship {token!r}"
+    # No canned plan vocabulary. Reading a key off the canonical projection is
+    # fine (`today_plan['egzersizler']` is how the count is taken); *values* are
+    # not - a day type or a whole program literal can only be here if someone
+    # hard-coded a workout or re-implemented rest-day inference.
+    for literal in ("antrenman", "dinlenme", '"program"', "'program'"):
+        assert literal not in source, f"hard-coded plan content: {literal!r}"
+
+
+# ---------------------------------------------------------------------------
+# Query budget: Today is the highest-frequency read in the app
+# ---------------------------------------------------------------------------
+def _statements_for(client, user, monkeypatch):
+    from sqlalchemy import event
+
+    monkeypatch.setattr(
+        mobile_auth, "authenticate_access",
+        lambda raw: mobile_auth.MobilePrincipal(
+            user, SimpleNamespace(id=1), {"sub": user.cognito_sub}))
+    seen = []
+    engine = db.engine
+
+    def _record(conn, cursor, statement, params, context, many):
+        seen.append(" ".join(statement.split()))
+
+    event.listen(engine, "before_cursor_execute", _record)
+    try:
+        with audit_clock(FIXED_NOW):
+            response = client.get(
+                "/api/v1/today", headers={"Authorization": "Bearer token"})
+    finally:
+        event.remove(engine, "before_cursor_execute", _record)
+    assert response.status_code == 200
+    return seen
+
+
+@pytest.mark.parametrize("with_plan", [True, False])
+def test_today_costs_a_constant_bounded_number_of_queries(
+        client, make_user, monkeypatch, with_plan):
+    """One read per canonical authority, and the same count in every state.
+
+    A count that grows with plan content means an N+1 crept into the projection;
+    a count that differs between the plan and no-plan paths usually means a second
+    load of the same row. Both are regressions this endpoint cannot afford.
+    """
+    user = make_user(f"budget-{with_plan}")
+    if with_plan:
+        _save_plan(user)
+
+    statements = _statements_for(client, user, monkeypatch)
+
+    assert len(statements) <= 5, statements
+    plan_reads = [s for s in statements if "FROM training_plan" in s]
+    assert len(plan_reads) <= 1, f"the active plan is loaded twice: {plan_reads}"
+
+
+# ---------------------------------------------------------------------------
 # PR3 is a read projection: no schema, no persistence
 # ---------------------------------------------------------------------------
 def test_today_introduces_no_model_and_no_migration():

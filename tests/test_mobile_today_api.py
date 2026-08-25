@@ -241,8 +241,6 @@ def test_scheduled_day_publishes_a_bounded_summary_not_the_exercise_payload(
         client, as_mobile(mobile_user)).json["today"]["workout"]["summary"]
 
     assert summary == {
-        "day": WEEKDAYS[TODAY.weekday()],
-        "kind": "antrenman",
         "focus": "Tum vucut",
         "duration_min": 45,
         "estimated_calories": 320,
@@ -251,6 +249,10 @@ def test_scheduled_day_publishes_a_bounded_summary_not_the_exercise_payload(
     # PR3 is a Today read, not a workout-detail duplicate: no exercise payload.
     assert "egzersizler" not in json.dumps(summary)
     assert "Squat" not in json.dumps(summary)
+    # No localized weekday name and no `tip` token: either would let a client
+    # answer "rest day?" or "which day?" outside the canonical authority.
+    assert WEEKDAYS[TODAY.weekday()] not in json.dumps(summary, ensure_ascii=False)
+    assert "antrenman" not in json.dumps(summary)
 
 
 # -- Canonical state: rest day (only ever from the schedule) ----------------
