@@ -4,6 +4,8 @@ import re
 import pytest
 import yaml
 
+from scripts.deploy_contract import SSM_HEARTBEAT_MAX_AGE_SECONDS
+
 
 DOCKERIGNORE = Path(".dockerignore")
 CODEOWNERS = Path(".github/CODEOWNERS")
@@ -333,8 +335,10 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
         "at most one pending job",
         "SSM may still complete C on the host",
         "`PingStatus` must be `Online`",
-        "`LastPingDateTime` must be no more than five minutes old",
-        "samples its UTC clock immediately after the SSM describe response",
+        "`LastPingDateTime` must be no more than 360 seconds old",
+        "performs one more SSM managed-instance describe as its last AWS "
+        "operation before SendCommand",
+        "samples its injected UTC clock immediately after that response",
         "Workflow job timeout | 65 minutes",
         "Controller step timeout | 46 minutes",
         "Delivery timeout | 60 seconds",
@@ -367,7 +371,67 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
     }
 
     normalized_guide = " ".join(guide.split())
-    assert all(text in normalized_guide for text in required_contract_text)
+    missing = sorted(
+        text for text in required_contract_text if text not in normalized_guide
+    )
+    assert missing == []
+
+
+RETIRED_HEARTBEAT_CONTRACT_PHRASES = (
+    "five minutes old",
+    "samples its UTC clock immediately after the SSM describe response",
+    "the heartbeat decision is fresh at the send boundary",
+)
+
+
+def test_deployment_runbook_heartbeat_contract_matches_the_send_boundary():
+    # Task 1: the runbook is not free prose. Its stated heartbeat ceiling is the
+    # canonical constant the controller enforces, and the final freshness proof
+    # is the SendCommand authority boundary -- not an earlier preflight clock.
+    guide = " ".join(_deployment_guide().split())
+
+    stated_ages = [
+        int(value)
+        for value in re.findall(
+            r"`LastPingDateTime` must be no more than (\d+) seconds old", guide
+        )
+    ]
+    assert stated_ages == [SSM_HEARTBEAT_MAX_AGE_SECONDS]
+
+    describe_index = guide.index(
+        "performs one more SSM managed-instance describe as its last AWS "
+        "operation before SendCommand"
+    )
+    clock_index = guide.index(
+        "samples its injected UTC clock immediately after that response"
+    )
+    assert describe_index < clock_index
+
+    assert [
+        phrase for phrase in RETIRED_HEARTBEAT_CONTRACT_PHRASES if phrase in guide
+    ] == []
+
+
+def test_controller_proves_heartbeat_freshness_at_the_send_authority_boundary():
+    # The runbook claim above must be backed by the controller: the send path
+    # rechecks freshness with the canonical constant and does no further AWS
+    # work between that proof and SendCommand.
+    source = _controller_source()
+
+    assert "SSM_HEARTBEAT_MAX_AGE_SECONDS" in source
+    assert "SSM_HEARTBEAT_MAX_AGE_SECONDS = " not in source
+
+    send_tail = source.split("def send_command(", 1)[1]
+    send_body = re.split(r"^def ", send_tail, flags=re.MULTILINE)[0]
+    freshness_index = send_body.index("require_fresh_ssm_target(config, aws, utc_now)")
+    submit_index = send_body.index("aws(send_args)")
+    assert freshness_index < submit_index
+
+    between = send_body[
+        freshness_index + len("require_fresh_ssm_target(config, aws, utc_now)") :
+        submit_index
+    ]
+    assert between.strip() == "response ="
 
 
 def _deploy_source_violations(source):
