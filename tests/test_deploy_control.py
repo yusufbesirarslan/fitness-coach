@@ -17,6 +17,7 @@ import pytest
 import scripts.deploy_control as deploy_control
 from scripts.deploy_contract import (
     CONTROLLER_REQUIRED_SECONDS,
+    SSM_HEARTBEAT_MAX_AGE_SECONDS,
     HOST_PHASE_SECONDS,
     HOST_WORST_CASE_SECONDS,
     SSM_EXECUTION_MARGIN_SECONDS,
@@ -612,9 +613,21 @@ def test_run_deploy_refuses_a_pre_sampled_clock(workspace_tmp_dir, fake_clock):
         )
 
 
+class _AdvancingDatetime(datetime):
+    """A `datetime` whose `now()` strictly advances on every read."""
+
+    _reads = 0
+
+    @classmethod
+    def now(cls, tz=None):
+        cls._reads += 1
+        return NOW.astimezone(tz or timezone.utc) + timedelta(seconds=cls._reads)
+
+
 def test_main_default_send_time_clock_is_live_not_frozen_at_startup(monkeypatch):
-    # Kills dropping the `lambda:` from main's default clock, which would freeze
-    # the send-boundary decision at controller start-up.
+    # Kills freezing main's default clock -- both by dropping the `lambda:` and
+    # by capturing a single sample in a default argument.
+    monkeypatch.setattr(deploy_control, "datetime", _AdvancingDatetime)
     captured = {}
 
     def fake_run_deploy(environ, repo_path, aws, clock, *args, **kwargs):
@@ -630,7 +643,9 @@ def test_main_default_send_time_clock_is_live_not_frozen_at_startup(monkeypatch)
     assert callable(clock)
     first = clock()
     assert isinstance(first, datetime) and first.tzinfo is not None
-    assert clock() >= first
+    # A clock frozen at start-up returns the same instant forever, and `x >= x`
+    # would hide it, so the stub advances on every read and the check is strict.
+    assert clock() > first
 
 
 def test_main_normalizes_a_frozen_now_override_into_a_callable(monkeypatch):
@@ -696,6 +711,23 @@ def test_final_ssm_target_check_enforces_heartbeat_age_boundaries(
         assert require_fresh_ssm_target(config, aws, lambda: NOW).instance_id == config.instance_id
     else:
         with pytest.raises(PreflightError, match=expected_error):
+            require_fresh_ssm_target(config, aws, lambda: NOW)
+
+
+@pytest.mark.parametrize("future_seconds, expected", [(60, None), (61, "future")])
+def test_final_ssm_target_check_enforces_future_skew_boundaries(
+        future_seconds, expected):
+    config = DeployConfig.from_environ(VALID_ENV)
+
+    def aws(args):
+        return managed_instance_response(NOW + timedelta(seconds=future_seconds))
+
+    if expected is None:
+        assert require_fresh_ssm_target(
+            config, aws, lambda: NOW
+        ).instance_id == config.instance_id
+    else:
+        with pytest.raises(PreflightError, match=expected):
             require_fresh_ssm_target(config, aws, lambda: NOW)
 
 
@@ -2107,6 +2139,122 @@ def test_run_deploy_rejects_failed_preflight_before_loading_or_sending_script(
         )
 
     assert [call[:2] for call in aws_calls] == [["ec2", "describe-instances"]]
+
+
+def test_run_deploy_refuses_a_heartbeat_that_ages_out_during_the_lifecycle(
+        workspace_tmp_dir, fake_clock):
+    # The operational invariant behind the send boundary: time the controller
+    # itself spends between preflight and send counts against heartbeat age.
+    # The agent stops pinging, so `LastPingDateTime` is constant while the wall
+    # clock advances past the ceiling. A clock frozen anywhere in the lifecycle
+    # would report a young heartbeat here and let the send through.
+    _write_integration_host_script(workspace_tmp_dir)
+    last_ping = NOW
+    readings = iter([
+        NOW + timedelta(seconds=10),                                # preflight
+        NOW + timedelta(seconds=SSM_HEARTBEAT_MAX_AGE_SECONDS + 40),  # send
+    ])
+    aws_calls = []
+
+    def clock():
+        return next(readings)
+
+    def aws(args):
+        aws_calls.append(args[:2])
+        if args[:2] == ["ec2", "describe-instances"]:
+            return {"Reservations": [{"Instances": [{
+                "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+                "State": {"Name": "running"},
+            }]}]}
+        if args[:2] == ["ssm", "describe-instance-information"]:
+            return managed_instance_response(last_ping)
+        raise AssertionError(f"stale heartbeat must not reach {args[:2]}")
+
+    with pytest.raises(PreflightError, match="stale"):
+        run_deploy(
+            VALID_ENV, workspace_tmp_dir, aws, clock,
+            fake_clock.monotonic, fake_clock.sleep, lambda message: None,
+            run_git=fake_git_returning(VALID_ENV["DEPLOY_SHA"]),
+        )
+
+    assert ["ssm", "send-command"] not in aws_calls
+
+
+def test_run_deploy_reads_the_clock_only_after_each_describe_response(
+        workspace_tmp_dir, fake_clock):
+    # Age arithmetic is only honest if every clock read follows the describe
+    # response it judges. A read taken anywhere else -- including one taken in
+    # run_deploy and passed down behind a lambda, which no age assertion can
+    # distinguish -- shows up here as an out-of-place "utc-now".
+    _write_integration_host_script(workspace_tmp_dir)
+    events = []
+
+    def clock():
+        events.append("utc-now")
+        return NOW
+
+    def aws(args):
+        if args[:2] == ["ec2", "describe-instances"]:
+            events.append("ec2-response")
+            return {"Reservations": [{"Instances": [{
+                "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+                "State": {"Name": "running"},
+            }]}]}
+        if args[:2] == ["ssm", "describe-instance-information"]:
+            events.append("ssm-response")
+            return managed_instance_response(NOW)
+        if args[:2] == ["ssm", "send-command"]:
+            events.append("send-command")
+            raise AwsCliError("stop after the send boundary")
+        raise AssertionError(args[:2])
+
+    with pytest.raises(AwsCliError, match="stop after the send boundary"):
+        run_deploy(
+            VALID_ENV, workspace_tmp_dir, aws, clock,
+            fake_clock.monotonic, fake_clock.sleep, lambda message: None,
+            run_git=fake_git_returning(VALID_ENV["DEPLOY_SHA"]),
+        )
+
+    assert events == [
+        "ec2-response", "ssm-response", "utc-now",
+        "ssm-response", "utc-now", "send-command",
+    ]
+
+
+def test_run_deploy_sends_when_the_heartbeat_stays_inside_the_ceiling(
+        workspace_tmp_dir, fake_clock):
+    # The mirror of the test above: the same advancing clock must still allow a
+    # send while the heartbeat is genuinely inside the ceiling, so the refusal
+    # above is attributable to age and not to the advancing clock itself.
+    _write_integration_host_script(workspace_tmp_dir)
+    last_ping = NOW
+    readings = iter([
+        NOW + timedelta(seconds=10),
+        NOW + timedelta(seconds=SSM_HEARTBEAT_MAX_AGE_SECONDS),
+    ])
+    sent = []
+
+    def aws(args):
+        if args[:2] == ["ec2", "describe-instances"]:
+            return {"Reservations": [{"Instances": [{
+                "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+                "State": {"Name": "running"},
+            }]}]}
+        if args[:2] == ["ssm", "describe-instance-information"]:
+            return managed_instance_response(last_ping)
+        if args[:2] == ["ssm", "send-command"]:
+            sent.append(args)
+            raise AwsCliError("stop after the send boundary")
+        raise AssertionError(args[:2])
+
+    with pytest.raises(AwsCliError, match="stop after the send boundary"):
+        run_deploy(
+            VALID_ENV, workspace_tmp_dir, aws, lambda: next(readings),
+            fake_clock.monotonic, fake_clock.sleep, lambda message: None,
+            run_git=fake_git_returning(VALID_ENV["DEPLOY_SHA"]),
+        )
+
+    assert len(sent) == 1
 
 
 def test_run_deploy_requires_exact_host_script_after_preflight_before_send(

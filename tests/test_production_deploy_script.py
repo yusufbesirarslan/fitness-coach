@@ -1172,7 +1172,7 @@ def test_success_deploys_exact_candidate_and_verifies_revision(bash_executable, 
     # canonical cleanup phase budget minus its own kill grace, so cleanup's
     # total wall time can never exceed the phase the contract reserved for it.
     grace_match = re.search(
-        r"COMMAND_KILL_GRACE_SECONDS=([0-9]+)",
+        r"(?m)^\s*readonly COMMAND_KILL_GRACE_SECONDS=([0-9]+)\s*$",
         HOST_SCRIPT.read_text(encoding="utf-8"),
     )
     assert grace_match is not None
@@ -1186,7 +1186,19 @@ def test_success_deploys_exact_candidate_and_verifies_revision(bash_executable, 
     ]
     assert cleanup_indices, trace_lines
     assert prune_index < cleanup_indices[-1]
-    assert expected_cleanup_timeout + grace_seconds == HOST_PHASE_SECONDS["cleanup"]
+
+    # The safety property itself, read back from what the host actually
+    # published: cleanup's worst-case wall time never exceeds the phase the
+    # canonical contract reserved for it.
+    budget_line = next(
+        line for line in result.stderr.splitlines()
+        if line.startswith("host transaction budget:")
+    )
+    reported_cleanup = int(
+        re.search(r"\bcleanup=([0-9]+)\b", budget_line).group(1)
+    )
+    assert reported_cleanup <= HOST_PHASE_SECONDS["cleanup"]
+    assert reported_cleanup == expected_cleanup_timeout + grace_seconds
 
 
 def test_stale_candidate_fails_before_checkout_or_docker(bash_executable, host_fixture):

@@ -340,8 +340,9 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
         "performs one more SSM managed-instance describe as its last AWS "
         "operation before SendCommand",
         "samples its injected UTC clock immediately after that response",
-        "Both boundaries accept only a live clock and reject a pre-sampled "
-        "timestamp before any AWS call",
+        "Both boundaries reject a bare timestamp as a typed configuration "
+        "error before any AWS call",
+        "each boundary re-reads the clock after its own describe response",
         "Workflow job timeout | 65 minutes",
         "Controller step timeout | 46 minutes",
         "Delivery timeout | 60 seconds",
@@ -380,13 +381,24 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
     assert missing == []
 
 
-# The retired contract, matched as a family rather than one literal so the
-# runbook cannot re-acquire it in a slightly different wording.
+# The retired contract. "five minutes old" and the early-clock sentence are
+# distinctive enough to match anywhere; a bare "300 seconds" is only wrong when
+# it describes the heartbeat, so that one is scoped to heartbeat sentences.
+# Note: "the heartbeat decision is fresh at the send boundary" is deliberately
+# NOT listed -- it is a true description of the current contract.
 RETIRED_HEARTBEAT_PATTERNS = (
-    r"\b(?:five|5)\s+minutes?\b",
-    r"\b300\s+seconds\b",
+    r"(?:five|5)\s+minutes?\s+old",
     r"samples its UTC clock immediately after the SSM describe response",
 )
+FOREIGN_HEARTBEAT_CEILING = r"(?<![\d,])300\s+seconds"
+
+
+def _heartbeat_sentences(guide):
+    return [
+        sentence
+        for sentence in re.split(r"(?<=\.)\s+", guide)
+        if "LastPingDateTime" in sentence or "heartbeat" in sentence.lower()
+    ]
 
 
 def test_deployment_runbook_heartbeat_contract_matches_the_send_boundary():
@@ -418,6 +430,14 @@ def test_deployment_runbook_heartbeat_contract_matches_the_send_boundary():
         if re.search(pattern, guide, flags=re.IGNORECASE)
     ] == []
 
+    heartbeat_sentences = _heartbeat_sentences(guide)
+    assert heartbeat_sentences
+    assert [
+        sentence
+        for sentence in heartbeat_sentences
+        if re.search(FOREIGN_HEARTBEAT_CEILING, sentence)
+    ] == []
+
 
 def _controller_module():
     return ast.parse(_controller_source())
@@ -430,44 +450,59 @@ def _function_def(module, name):
     raise AssertionError(f"{name} is not defined in the controller")
 
 
+def _calls_to(node, name):
+    return [
+        call
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call)
+        and isinstance(call.func, ast.Name)
+        and call.func.id == name
+    ]
+
+
 def test_controller_proves_heartbeat_freshness_at_the_send_authority_boundary():
-    # Structural, not textual: the statement immediately before the SendCommand
-    # submission must be the freshness proof, so no work -- bounded or not --
-    # can be introduced between the proof and the authority it protects.
+    # Structural, not textual: whatever statement form submits the command, the
+    # statement immediately before it must be the freshness proof, so no work --
+    # bounded or not -- can be introduced between the proof and the authority it
+    # protects. Statement *form* is deliberately not constrained; only order is.
     send_command = _function_def(_controller_module(), "send_command")
 
     submit_indexes = [
         index
         for index, statement in enumerate(send_command.body)
-        if isinstance(statement, ast.Assign)
-        and isinstance(statement.value, ast.Call)
-        and isinstance(statement.value.func, ast.Name)
-        and statement.value.func.id == "aws"
+        if _calls_to(statement, "aws")
     ]
     assert len(submit_indexes) == 1
+    assert submit_indexes[0] > 0
 
     proof = send_command.body[submit_indexes[0] - 1]
-    assert isinstance(proof, ast.Expr)
-    assert isinstance(proof.value, ast.Call)
-    assert isinstance(proof.value.func, ast.Name)
-    assert proof.value.func.id == "require_fresh_ssm_target"
+    proof_calls = _calls_to(proof, "require_fresh_ssm_target")
+    assert len(proof_calls) == 1
+
+    # The proof must be handed the caller's own clock, not some other value.
+    argument_names = {
+        argument.id
+        for argument in ast.walk(proof_calls[0])
+        if isinstance(argument, ast.Name)
+    }
+    assert "utc_now" in argument_names
 
 
 def test_controller_imports_the_canonical_threshold_instead_of_redeclaring_it():
-    # A locally redeclared ceiling -- under any spelling or annotation -- would
-    # let the controller drift away from the canonical contract module.
+    # A redeclared ceiling -- at any scope, under any spelling or annotation --
+    # would let the controller drift away from the canonical contract module.
     module = _controller_module()
 
-    module_bindings = set()
-    for node in module.body:
+    bindings = set()
+    for node in ast.walk(module):
         targets = (
             [node.target] if isinstance(node, ast.AnnAssign) else
             node.targets if isinstance(node, ast.Assign) else []
         )
-        module_bindings.update(
+        bindings.update(
             target.id for target in targets if isinstance(target, ast.Name)
         )
-    assert "SSM_HEARTBEAT_MAX_AGE_SECONDS" not in module_bindings
+    assert "SSM_HEARTBEAT_MAX_AGE_SECONDS" not in bindings
 
     imported = {
         alias.name
@@ -491,7 +526,17 @@ def test_send_boundary_clock_is_typed_as_a_live_clock_not_a_frozen_sample():
         )
         assert ast.unparse(clock.annotation) == "UtcClock", name
 
-    assert not _function_def(module, "send_command").args.kw_defaults[0]
+    # Keyed by the argument itself: a default here would be a clock baked in at
+    # import time, and positional indexing would silently follow the wrong one.
+    send_command = _function_def(module, "send_command")
+    keyword_defaults = dict(
+        zip(send_command.args.kwonlyargs, send_command.args.kw_defaults)
+    )
+    clock = next(
+        argument for argument in send_command.args.kwonlyargs
+        if argument.arg == "utc_now"
+    )
+    assert keyword_defaults[clock] is None
 
 
 def _deploy_source_violations(source):

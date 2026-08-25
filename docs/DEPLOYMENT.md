@@ -48,9 +48,11 @@ and `LastPingDateTime` must be no more than 360 seconds old (nor more than one
 minute in the future). After the EC2/SSM preflight, B performs one more SSM
 managed-instance describe as its last AWS operation before SendCommand and
 samples its injected UTC clock immediately after that response. Both
-boundaries accept only a live clock and reject a pre-sampled timestamp before
-any AWS call, so no freshness decision can inherit an earlier reading. Failure
-is fail-closed; correct the instance or SSM registration before retrying.
+boundaries reject a bare timestamp as a typed configuration error before any AWS
+call, and each boundary re-reads the clock after its own describe response, so
+controller time spent between preflight and send counts against heartbeat age.
+Failure is fail-closed; correct the instance or SSM registration before
+retrying.
 
 The controller uses the following independent bounds.
 
