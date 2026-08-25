@@ -7,13 +7,21 @@ import stat
 import subprocess
 import tempfile
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 import scripts.deploy_control as deploy_control
+from scripts.deploy_contract import (
+    CONTROLLER_REQUIRED_SECONDS,
+    HOST_PHASE_SECONDS,
+    HOST_WORST_CASE_SECONDS,
+    SSM_EXECUTION_MARGIN_SECONDS,
+    SSM_EXECUTION_TIMEOUT_SECONDS,
+    host_timeout_environment,
+)
 from scripts.deploy_control import (
     AWS_CLI_CALL_TIMEOUT_SECONDS,
     AWS_EXPIRY_SECONDS,
@@ -35,6 +43,7 @@ from scripts.deploy_control import (
     build_remote_command,
     main,
     preflight,
+    require_fresh_ssm_target,
     read_invocation,
     run_aws_json,
     run_deploy,
@@ -52,6 +61,43 @@ VALID_ENV = {
     "DEPLOY_DIR": "/srv/axisai",
     "PUBLIC_HEALTH_URL": "https://fitness.example/health",
 }
+
+NOW = datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc)
+AUTHORITY_TOKEN = "11111111-1111-1111-1111-111111111111"
+COMMAND_ID = "22222222-2222-2222-2222-222222222222"
+HOST_SCRIPT = b"#!/bin/sh\nexit 0\n"
+
+
+def managed_instance_response(last_ping: datetime, *, ping_status: str = "Online"):
+    return {"InstanceInformationList": [{
+        "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+        "PingStatus": ping_status,
+        "LastPingDateTime": last_ping.isoformat(),
+    }]}
+
+
+def fresh_then_stale_ssm_runner(*, age_seconds: int):
+    describe_count = 0
+    sent = False
+
+    def aws(args):
+        nonlocal describe_count, sent
+        if args[:2] == ["ec2", "describe-instances"]:
+            return {"Reservations": [{"Instances": [{
+                "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+                "State": {"Name": "running"},
+            }]}]}
+        if args[:2] == ["ssm", "describe-instance-information"]:
+            describe_count += 1
+            age = 0 if describe_count == 1 else age_seconds
+            return managed_instance_response(NOW - timedelta(seconds=age))
+        if args[:2] == ["ssm", "send-command"]:
+            sent = True
+            return {"Command": {"CommandId": COMMAND_ID}}
+        raise AssertionError(args)
+
+    aws.sent = lambda: sent
+    return aws
 
 
 class FakeClock:
@@ -354,7 +400,7 @@ def test_preflight_samples_utc_immediately_after_ssm_describe_response():
 
     def utc_now():
         events.append("utc-now")
-        return datetime(2026, 8, 22, 18, 4, tzinfo=timezone.utc)
+        return datetime(2026, 8, 22, 18, 7, tzinfo=timezone.utc)
 
     with pytest.raises(PreflightError, match="stale"):
         preflight(DeployConfig.from_environ(VALID_ENV), aws, utc_now)
@@ -383,17 +429,110 @@ def test_send_payload_separates_delivery_and_execution_timeout():
 
     def aws(args):
         calls.append(args)
+        if args[:2] == ["ssm", "describe-instance-information"]:
+            return managed_instance_response(NOW)
         return {"Command": {"CommandId": "11111111-1111-1111-1111-111111111111"}}
 
-    command_id = send_command(DeployConfig.from_environ(VALID_ENV), b"echo safe", aws)
+    command_id = send_command(
+        DeployConfig.from_environ(VALID_ENV), b"echo safe", aws,
+        utc_now=lambda: NOW,
+    )
 
     assert command_id == "11111111-1111-1111-1111-111111111111"
-    args = calls[0]
+    assert [call[:2] for call in calls] == [
+        ["ssm", "describe-instance-information"],
+        ["ssm", "send-command"],
+    ]
+    args = calls[1]
     assert args[args.index("--timeout-seconds") + 1] == str(DELIVERY_TIMEOUT_SECONDS) == "60"
     parameters = json.loads(args[args.index("--parameters") + 1])
     assert parameters["executionTimeout"] == [str(EXECUTION_TIMEOUT_SECONDS)] == ["1800"]
     assert args[:2] == ["ssm", "send-command"]
     assert args[args.index("--instance-ids") + 1] == VALID_ENV["EC2_INSTANCE_ID"]
+
+
+def test_send_rechecks_online_heartbeat_at_actual_send_boundary():
+    config = DeployConfig.from_environ(VALID_ENV)
+    clock = iter((NOW, NOW + timedelta(seconds=61)))
+    calls = []
+
+    def aws(args):
+        calls.append(args)
+        if args[:2] == ["ssm", "describe-instance-information"]:
+            sampled = next(clock)
+            return managed_instance_response(sampled - timedelta(seconds=360))
+        if args[:2] == ["ssm", "send-command"]:
+            return {"Command": {"CommandId": COMMAND_ID}}
+        raise AssertionError(args)
+
+    assert send_command(
+        config, HOST_SCRIPT, aws, AUTHORITY_TOKEN, utc_now=lambda: NOW,
+    ) == COMMAND_ID
+    assert [call[1] for call in calls] == [
+        "describe-instance-information", "send-command",
+    ]
+
+
+def test_send_rejects_heartbeat_that_became_stale_after_preflight():
+    config = DeployConfig.from_environ(VALID_ENV)
+    aws = fresh_then_stale_ssm_runner(age_seconds=361)
+
+    preflight(config, aws, NOW)
+    with pytest.raises(PreflightError, match="stale"):
+        send_command(config, HOST_SCRIPT, aws, AUTHORITY_TOKEN, utc_now=lambda: NOW)
+
+    assert not aws.sent()
+
+
+def test_canonical_host_budget_preserves_literal_220_second_margin():
+    assert list(HOST_PHASE_SECONDS.values()) == [
+        10, 60, 80, 10, 70, 620, 160, 30, 440, 80, 20,
+    ]
+    assert HOST_WORST_CASE_SECONDS == 1580
+    assert SSM_EXECUTION_MARGIN_SECONDS == 220
+    assert SSM_EXECUTION_TIMEOUT_SECONDS - HOST_WORST_CASE_SECONDS == SSM_EXECUTION_MARGIN_SECONDS
+    assert CONTROLLER_REQUIRED_SECONDS == 2490 < 46 * 60
+
+
+@pytest.mark.parametrize("ping_status", ["ConnectionLost", "Inactive"])
+def test_final_ssm_target_check_rejects_non_online_status(ping_status):
+    with pytest.raises(PreflightError, match="not online"):
+        require_fresh_ssm_target(
+            DeployConfig.from_environ(VALID_ENV),
+            lambda args: managed_instance_response(NOW, ping_status=ping_status),
+            lambda: NOW,
+        )
+
+
+@pytest.mark.parametrize("age_seconds,expected_error", [
+    (360, None),
+    (361, "stale"),
+    (-61, "future"),
+])
+def test_final_ssm_target_check_enforces_heartbeat_age_boundaries(
+        age_seconds, expected_error):
+    config = DeployConfig.from_environ(VALID_ENV)
+    aws = lambda args: managed_instance_response(NOW - timedelta(seconds=age_seconds))
+
+    if expected_error is None:
+        assert require_fresh_ssm_target(config, aws, lambda: NOW).instance_id == config.instance_id
+    else:
+        with pytest.raises(PreflightError, match=expected_error):
+            require_fresh_ssm_target(config, aws, lambda: NOW)
+
+
+@pytest.mark.parametrize("heartbeat", ["not-a-date", "2026-08-22T18:00:00"])
+def test_final_ssm_target_check_rejects_malformed_heartbeat(heartbeat):
+    with pytest.raises(PreflightError, match="heartbeat"):
+        require_fresh_ssm_target(
+            DeployConfig.from_environ(VALID_ENV),
+            lambda args: {"InstanceInformationList": [{
+                "InstanceId": VALID_ENV["EC2_INSTANCE_ID"],
+                "PingStatus": "Online",
+                "LastPingDateTime": heartbeat,
+            }]},
+            lambda: NOW,
+        )
 
 
 def test_aws_expiry_is_derived_from_delivery_and_execution_timeouts():
@@ -434,6 +573,7 @@ def test_send_command_rejects_oversized_local_payload_before_aws():
         send_command(
             DeployConfig.from_environ(VALID_ENV), oversized,
             lambda args: calls.append(args),
+            utc_now=lambda: NOW,
         )
     assert calls == []
 
@@ -713,10 +853,11 @@ def test_privilege_drop_validates_user_drops_groups_then_execs_exact_helper():
         ("alarm", 0),
         ("execve", "/tmp/helper", [
             "/tmp/helper", "a" * 40, "/srv/axisai", "https://example.test/health",
-        ], {
-            "PATH": "/usr/local/bin:/usr/bin:/bin",
-            "AXISAI_OUTER_LOCK_FD": "7",
-        }),
+            ], {
+                "PATH": "/usr/local/bin:/usr/bin:/bin",
+                "AXISAI_OUTER_LOCK_FD": "7",
+                **host_timeout_environment(),
+            }),
     ]
 
 
@@ -1140,8 +1281,16 @@ def test_bootstrap_warns_for_port_30000_without_treating_it_as_fatsecret(
     {"Command": {"CommandId": "command-id"}},
 ])
 def test_send_command_requires_exactly_one_uuid_command_id(response):
+    def aws(args):
+        if args[:2] == ["ssm", "describe-instance-information"]:
+            return managed_instance_response(NOW)
+        return response
+
     with pytest.raises(InvocationProtocolError):
-        send_command(DeployConfig.from_environ(VALID_ENV), b"echo safe", lambda args: response)
+        send_command(
+            DeployConfig.from_environ(VALID_ENV), b"echo safe",
+            aws, utc_now=lambda: NOW,
+        )
 
 
 def test_read_invocation_builds_argument_array_and_preserves_aws_fields():
@@ -1594,6 +1743,7 @@ def test_run_deploy_orders_validation_preflight_exact_script_send_and_poll(
         "git:fetch", "git:cat-file", "git:rev-parse",
         "aws:ec2:describe-instances",
         "aws:ssm:describe-instance-information",
+        "aws:ssm:describe-instance-information",
         "aws:ssm:send-command",
         "aws:ssm:put-parameter",
         "aws:ssm:get-command-invocation",
@@ -1658,6 +1808,8 @@ def test_ambiguous_send_command_failure_never_creates_delivery_authority(
 
     def aws(args):
         calls.append(args[:2])
+        if args[:2] == ["ssm", "describe-instance-information"]:
+            return managed_instance_response(NOW)
         if args[:2] == ["ssm", "send-command"]:
             raise AwsCliError("SendCommand response was lost")
         raise AssertionError(f"unexpected AWS call after ambiguous send: {args}")
@@ -1669,7 +1821,10 @@ def test_ambiguous_send_command_failure_never_creates_delivery_authority(
             fake_clock.monotonic, fake_clock.sleep, lambda message: None,
         )
 
-    assert calls == [["ssm", "send-command"]]
+    assert calls == [
+        ["ssm", "describe-instance-information"],
+        ["ssm", "send-command"],
+    ]
 
 
 def test_ambiguous_authorization_response_keeps_monitoring_known_command(
@@ -1682,6 +1837,8 @@ def test_ambiguous_authorization_response_keeps_monitoring_known_command(
 
     def aws(args):
         calls.append(args[:2])
+        if args[:2] == ["ssm", "describe-instance-information"]:
+            return managed_instance_response(NOW)
         if args[:2] == ["ssm", "send-command"]:
             return {"Command": {
                 "CommandId": "11111111-1111-1111-1111-111111111111",
@@ -1704,6 +1861,7 @@ def test_ambiguous_authorization_response_keeps_monitoring_known_command(
         )
 
     assert calls == [
+        ["ssm", "describe-instance-information"],
         ["ssm", "send-command"],
         ["ssm", "put-parameter"],
         ["ssm", "get-command-invocation"],

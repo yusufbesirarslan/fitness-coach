@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from scripts.deploy_contract import host_timeout_environment
+
 
 ROOT = Path(__file__).resolve().parents[1]
 HOST_SCRIPT = ROOT / "scripts" / "production_deploy.sh"
@@ -114,7 +116,12 @@ class HostFixture:
             text=True,
             capture_output=True,
             check=False,
-            env={**self.environment, **inherited_lock, **environment},
+            env={
+                **self.environment,
+                **host_timeout_environment(),
+                **inherited_lock,
+                **environment,
+            },
             timeout=600,
         )
 
@@ -968,17 +975,21 @@ def test_host_transaction_budget_preserves_ssm_margin_and_rollback_reserve(
     result = fixture.run(bash_executable)
 
     assert result.returncode == 0, result.stderr
+    assert "worst_case=1580" in result.stderr
+    assert "execution=1800" in result.stderr
+    assert "margin=220" in result.stderr
     budget = re.search(
-        r"host transaction budget: limit=(\d+) worst_case=(\d+) lock=(\d+) clock=(\d+) "
+        r"host transaction budget: execution=(\d+) worst_case=(\d+) margin=(\d+) lock=(\d+) clock=(\d+) "
         r"clock_state=(\d+) rollback_reset=(\d+) "
         r"preflight=(\d+) candidate=(\d+) diagnostics=(\d+) rollback=(\d+) "
-        r"post_lock=(\d+) timeout_grace=(\d+) cleanup=(\d+) ssm_margin=(\d+)",
+        r"post_lock=(\d+) timeout_grace=(\d+) cleanup=(\d+)",
         result.stderr,
     )
     assert budget is not None
     (
-        limit,
+        execution,
         worst_case,
+        margin,
         lock,
         clock,
         clock_state,
@@ -990,11 +1001,13 @@ def test_host_transaction_budget_preserves_ssm_margin_and_rollback_reserve(
         post_lock,
         grace,
         cleanup,
-        margin,
     ) = map(int, budget.groups())
-    assert limit + margin == 1800
+    assert execution - worst_case == margin == 220
+    assert worst_case == 1580
     assert preflight + candidate + diagnostics + rollback == post_lock
-    assert lock + clock + clock_state + post_lock + grace + cleanup == worst_case < limit
+    assert clock + clock_state == 10
+    assert lock == 60
+    assert cleanup == 20
     assert rollback >= rollback_reset + (30 * 5) + (29 * 5)
     assert candidate >= (30 * 5) + (29 * 5) + (12 * 5) + (11 * 5)
     trace = fixture.trace.read_text(encoding="utf-8")
@@ -1009,6 +1022,18 @@ def test_host_transaction_budget_preserves_ssm_margin_and_rollback_reserve(
     )
     assert phase_grants
     assert all(int(grant) <= phase_limits[phase] for phase, grant in phase_grants)
+
+
+def test_host_transaction_budget_rejects_noncanonical_execution_timeout(
+        bash_executable, host_fixture):
+    fixture = host_fixture()
+
+    result = fixture.run(
+        bash_executable, SSM_EXECUTION_TIMEOUT_SECONDS="1700",
+    )
+
+    assert result.returncode == 70
+    assert "invalid host transaction budget" in result.stderr
 
 
 @pytest.mark.parametrize("clock_mode", ["fail", "hang"])

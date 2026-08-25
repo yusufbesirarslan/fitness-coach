@@ -44,11 +44,11 @@ to continue.
 B accepts only the configured running EC2 instance. Git candidate commands are
 individually bounded to 60 seconds. Its SSM managed-instance
 record must be unique and match the configured ID: `PingStatus` must be `Online`
-and `LastPingDateTime` must be no more than five minutes old (nor more than one
-minute in the future). The controller samples its UTC clock immediately after
-the SSM describe response, so the heartbeat decision is fresh at the send
-boundary. Failure is fail-closed; correct the instance or SSM registration
-before retrying.
+and `LastPingDateTime` must be no more than 360 seconds old (nor more than one
+minute in the future). After the EC2/SSM preflight, B performs one more SSM
+managed-instance describe as its last AWS operation before SendCommand and
+samples its injected UTC clock immediately after that response. Failure is
+fail-closed; correct the instance or SSM registration before retrying.
 
 The controller uses the following independent bounds.
 
@@ -61,6 +61,15 @@ The controller uses the following independent bounds.
 | AWS expiry | 1,860 seconds |
 | Polling horizon | 2,100 seconds |
 | Poll interval | 10 seconds |
+
+The timeout source of truth is `scripts/deploy_contract.py`. Its 1,580-second
+host worst case consists of root bootstrap (10), lock acquisition (60),
+authority and stale proof (80), clock setup (10), Git fetch/checkout (70),
+candidate build/start (620), candidate revision health (160), diagnostics
+(30), rollback build/start (440), rollback revision health (80), and cleanup
+(20) seconds. The host receives these fixed values from B at privilege drop;
+its 1,800-second SSM execution timeout therefore retains an exact 220-second
+margin.
 
 Before SendCommand, B reserves enough of its 46-minute budget for the bounded
 send, 2,100-second poll horizon, authorization, final invocation read, and

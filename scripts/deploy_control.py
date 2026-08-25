@@ -17,6 +17,13 @@ from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
+from scripts.deploy_contract import (
+    CONTROLLER_REQUIRED_SECONDS,
+    SSM_EXECUTION_TIMEOUT_SECONDS,
+    SSM_HEARTBEAT_MAX_AGE_SECONDS,
+    host_timeout_environment,
+)
+
 
 SHA_RE = re.compile(r"[0-9a-f]{40}")
 INSTANCE_RE = re.compile(r"i-[0-9a-f]{8}(?:[0-9a-f]{9})?")
@@ -27,7 +34,7 @@ AWS_ERROR_CODE_RE = re.compile(
 )
 
 DELIVERY_TIMEOUT_SECONDS = 60
-EXECUTION_TIMEOUT_SECONDS = 1800
+EXECUTION_TIMEOUT_SECONDS = SSM_EXECUTION_TIMEOUT_SECONDS
 AWS_EXPIRY_SECONDS = DELIVERY_TIMEOUT_SECONDS + EXECUTION_TIMEOUT_SECONDS
 POLL_HORIZON_SECONDS = 2100
 POLL_INTERVAL_SECONDS = 10
@@ -35,6 +42,8 @@ INVOCATION_CALL_TIMEOUT_SECONDS = 30
 AWS_CLI_CALL_TIMEOUT_SECONDS = 60
 GIT_CALL_TIMEOUT_SECONDS = 60
 CONTROLLER_BUDGET_SECONDS = 46 * 60
+if CONTROLLER_BUDGET_SECONDS < CONTROLLER_REQUIRED_SECONDS:
+    raise RuntimeError("controller timeout budget is below the deploy contract")
 AUTHORIZATION_CALL_TIMEOUT_SECONDS = AWS_CLI_CALL_TIMEOUT_SECONDS
 AUTHORITY_CLEANUP_RESERVE_SECONDS = AWS_CLI_CALL_TIMEOUT_SECONDS
 SEND_AND_MONITOR_RESERVE_SECONDS = (
@@ -207,7 +216,8 @@ if __name__ == "__main__":
     raise SystemExit(main())
 '''
 
-PRIVILEGE_DROP_SOURCE = r'''def _emit(stderr, message):
+PRIVILEGE_DROP_SOURCE = (
+    "HOST_TIMEOUT_ENVIRONMENT = " + repr(host_timeout_environment()) + "\n\n" + r'''def _emit(stderr, message):
     if hasattr(stderr, "write"):
         stderr.write(message + "\n")
     else:
@@ -241,6 +251,7 @@ def run(user_name, helper_path, deploy_sha, deploy_dir, public_url, fd_text,
             {
                 "PATH": "/usr/local/bin:/usr/bin:/bin",
                 "AXISAI_OUTER_LOCK_FD": "7",
+                **HOST_TIMEOUT_ENVIRONMENT,
             },
         )
     except (KeyError, OSError, ValueError):
@@ -268,6 +279,7 @@ def main():
 if __name__ == "__main__":
     raise SystemExit(main())
 '''
+)
 
 WAITING_STATES = frozenset({"Pending", "Delayed", "InProgress"})
 FAILURE_STATES = frozenset({
@@ -532,7 +544,7 @@ def validate_managed_instance(
     age = now - last_ping
     if age < -timedelta(minutes=1):
         raise PreflightError("SSM target heartbeat is too far in the future")
-    if age > timedelta(minutes=5):
+    if age > timedelta(seconds=SSM_HEARTBEAT_MAX_AGE_SECONDS):
         raise PreflightError("SSM target heartbeat is stale")
     return ManagedInstance(instance_id=instance_id, last_ping=last_ping)
 
@@ -565,6 +577,22 @@ def preflight(
     if state["Name"] != "running":
         raise PreflightError("EC2 target is not running")
 
+    ssm = aws([
+        "ssm", "describe-instance-information", "--filters",
+        f"Key=InstanceIds,Values={config.instance_id}", "--region", config.region,
+    ])
+    now = utc_now() if callable(utc_now) else utc_now
+    if not isinstance(now, datetime):
+        raise PreflightError("preflight clock must return a datetime")
+    return validate_managed_instance(ssm, config.instance_id, now)
+
+
+def require_fresh_ssm_target(
+    config: DeployConfig,
+    aws: AwsJsonRunner,
+    utc_now: UtcClock | datetime,
+) -> ManagedInstance:
+    """Recheck the sole SSM target immediately before command submission."""
     ssm = aws([
         "ssm", "describe-instance-information", "--filters",
         f"Key=InstanceIds,Values={config.instance_id}", "--region", config.region,
@@ -786,6 +814,8 @@ def send_command(
     script: bytes,
     aws: AwsJsonRunner,
     authority_token: str | None = None,
+    *,
+    utc_now: UtcClock | datetime,
 ) -> str:
     """Deliver the encoded host script with separate delivery and execution bounds."""
     token = str(uuid4()) if authority_token is None else authority_token
@@ -799,7 +829,7 @@ def send_command(
         "commands": [remote_command],
         "executionTimeout": [str(EXECUTION_TIMEOUT_SECONDS)],
     }
-    response = aws([
+    send_args = [
         "ssm", "send-command",
         "--region", config.region,
         "--instance-ids", config.instance_id,
@@ -807,7 +837,9 @@ def send_command(
         "--comment", f"axisai-deploy:{token}",
         "--timeout-seconds", str(DELIVERY_TIMEOUT_SECONDS),
         "--parameters", json.dumps(parameters, separators=(",", ":")),
-    ])
+    ]
+    require_fresh_ssm_target(config, aws, utc_now)
+    response = aws(send_args)
     return require_command_id(response)
 
 
@@ -977,7 +1009,9 @@ def run_deploy(
             "insufficient controller time for SendCommand and terminal monitoring reserve"
         )
     authority_token = str(uuid4())
-    command_id = send_command(config, script, aws, authority_token)
+    command_id = send_command(
+        config, script, aws, authority_token, utc_now=utc_now,
+    )
     log(f"SSM command created: {command_id}")
     try:
         authorize_command(config, authority_token, command_id, aws)
