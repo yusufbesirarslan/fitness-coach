@@ -1092,7 +1092,7 @@ def test_preflight_hang_times_out_before_candidate_mutation(bash_executable, hos
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
     assert "TIMEOUT_HANG phase=preflight operation=git:fetch" in trace
-    assert "timeout phase=preflight --signal=TERM --kill-after=2s 90s git fetch" in trace
+    assert "timeout phase=preflight --signal=TERM --kill-after=2s 70s git fetch" in trace
     assert "git reset --hard" not in trace
     assert "docker " not in trace
 
@@ -1109,7 +1109,7 @@ def test_candidate_deadline_hang_transitions_to_exactly_one_rollback(
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
     assert trace.count("TIMEOUT_HANG phase=candidate operation=docker:build") == 1
-    assert "timeout phase=candidate --signal=TERM --kill-after=2s 790s docker" in trace
+    assert "timeout phase=candidate --signal=TERM --kill-after=2s 780s docker" in trace
     assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
     assert "rollback verified" in result.stderr
 
@@ -1125,7 +1125,7 @@ def test_diagnostic_hang_cannot_consume_rollback_reserve(bash_executable, host_f
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
     assert trace.count("TIMEOUT_HANG phase=diagnostics operation=docker:ps") == 1
-    assert "timeout phase=diagnostics --signal=TERM --kill-after=2s 60s docker" in trace
+    assert "timeout phase=diagnostics --signal=TERM --kill-after=2s 30s docker" in trace
     assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
     assert "rollback verified" in result.stderr
 
@@ -1141,7 +1141,7 @@ def test_rollback_operation_hang_is_bounded_and_reported(bash_executable, host_f
     assert result.returncode != 0
     trace = fixture.trace.read_text(encoding="utf-8")
     assert trace.count("TIMEOUT_HANG phase=rollback operation=docker:build") == 1
-    assert "timeout phase=rollback --signal=TERM --kill-after=2s 620s docker" in trace
+    assert "timeout phase=rollback --signal=TERM --kill-after=2s 520s docker" in trace
     assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
     assert "rollback failed verification" in result.stderr
     assert "rollback verified" not in result.stderr

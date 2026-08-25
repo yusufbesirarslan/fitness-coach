@@ -17,12 +17,20 @@ from typing import Any
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
-from scripts.deploy_contract import (
-    CONTROLLER_REQUIRED_SECONDS,
-    SSM_EXECUTION_TIMEOUT_SECONDS,
-    SSM_HEARTBEAT_MAX_AGE_SECONDS,
-    host_timeout_environment,
-)
+if __package__:
+    from .deploy_contract import (
+        CONTROLLER_REQUIRED_SECONDS,
+        SSM_EXECUTION_TIMEOUT_SECONDS,
+        SSM_HEARTBEAT_MAX_AGE_SECONDS,
+        host_timeout_environment,
+    )
+else:
+    from deploy_contract import (
+        CONTROLLER_REQUIRED_SECONDS,
+        SSM_EXECUTION_TIMEOUT_SECONDS,
+        SSM_HEARTBEAT_MAX_AGE_SECONDS,
+        host_timeout_environment,
+    )
 
 
 SHA_RE = re.compile(r"[0-9a-f]{40}")

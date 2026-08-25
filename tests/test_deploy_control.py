@@ -5,6 +5,7 @@ import shlex
 import shutil
 import stat
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -471,6 +472,80 @@ def test_send_rechecks_online_heartbeat_at_actual_send_boundary():
     assert [call[1] for call in calls] == [
         "describe-instance-information", "send-command",
     ]
+
+
+def test_send_performs_no_forbidden_work_after_final_freshness(monkeypatch):
+    config = DeployConfig.from_environ(VALID_ENV)
+    final_freshness_seen = False
+    events = []
+
+    original_build_remote_command = deploy_control.build_remote_command
+    original_json_dumps = deploy_control.json.dumps
+    original_read_bytes = Path.read_bytes
+
+    def reject_after_freshness(name, operation):
+        def guarded(*args, **kwargs):
+            assert not final_freshness_seen, (
+                f"forbidden {name} after final SSM freshness response"
+            )
+            events.append(name)
+            return operation(*args, **kwargs)
+        return guarded
+
+    monkeypatch.setattr(
+        deploy_control,
+        "build_remote_command",
+        reject_after_freshness("remote-command construction", original_build_remote_command),
+    )
+    monkeypatch.setattr(
+        deploy_control.json,
+        "dumps",
+        reject_after_freshness("JSON construction", original_json_dumps),
+    )
+    monkeypatch.setattr(
+        Path,
+        "read_bytes",
+        reject_after_freshness("file read", original_read_bytes),
+    )
+    monkeypatch.setattr(
+        deploy_control.subprocess,
+        "run",
+        reject_after_freshness("subprocess work", deploy_control.subprocess.run),
+    )
+
+    def aws(args):
+        nonlocal final_freshness_seen
+        if args[:2] == ["ssm", "describe-instance-information"]:
+            final_freshness_seen = True
+            events.append("freshness response")
+            return managed_instance_response(NOW)
+        if args[:2] == ["ssm", "send-command"]:
+            events.append("send-command")
+            return {"Command": {"CommandId": COMMAND_ID}}
+        raise AssertionError(args)
+
+    assert send_command(
+        config, HOST_SCRIPT, aws, AUTHORITY_TOKEN, utc_now=lambda: NOW,
+    ) == COMMAND_ID
+    assert events == [
+        "remote-command construction", "JSON construction", "freshness response",
+        "send-command",
+    ]
+
+
+def test_direct_script_entrypoint_imports_contract_without_package_path():
+    completed = subprocess.run(
+        [sys.executable, "scripts/deploy_control.py"],
+        cwd=Path(__file__).resolve().parents[1],
+        env={},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    assert "ModuleNotFoundError" not in completed.stderr
+    assert "DEPLOY_SHA must be lowercase 40-hex" in completed.stdout
 
 
 def test_send_rejects_heartbeat_that_became_stale_after_preflight():
