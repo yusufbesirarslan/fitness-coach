@@ -86,10 +86,18 @@ def _get_client():
         # N5: açık connect/read timeout. Diğer tüm ağ çağrıları (requests/OpenAI/
         # Bedrock) timeout taşır; boto3 varsayılanları (~60s + retry → dakikalar)
         # /workout/complete ve öğün-foto yollarında thread'i uzun süre bloklardı.
+        # addressing_style=virtual is required: boto3's default "auto" mints
+        # https://{bucket}.s3.amazonaws.com/... (legacy global host). CSP
+        # img-src only allows the regional virtual-hosted host
+        # https://{bucket}.s3.{region}.amazonaws.com and the regional
+        # path-style host. The legacy global host is blocked by the browser.
         _client = boto3.client(
             "s3", region_name=AWS_REGION,
-            config=_BotoConfig(connect_timeout=5, read_timeout=10,
-                               retries={"max_attempts": 2}),
+            config=_BotoConfig(
+                connect_timeout=5, read_timeout=10,
+                retries={"max_attempts": 2},
+                s3={"addressing_style": "virtual"},
+            ),
         )
     return _client
 

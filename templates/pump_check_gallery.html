@@ -34,19 +34,33 @@ let galleryItems = [];
 function esc(v){ const d=document.createElement('div'); d.textContent=v == null ? '' : String(v); return d.innerHTML; }
 // location_type kanonik TR ('Ev'/'Spor Salonu') gelir; görünen etiket display-map ile çevrilir.
 function envLabel(v){ const m = {'Ev': __t('training.loc_home'), 'Spor Salonu': __t('training.loc_gym')}; return m[v] || v; }
+function photoFallback(kind){
+  const cls = kind === 'detail' ? 'gallery-detail-fallback' : 'gallery-media-fallback';
+  const label = esc(__t('gallery.photo_unavailable'));
+  return '<div class="'+cls+'" role="img" aria-label="'+label+'">'+label+'</div>';
+}
 function cardMedia(item){
   if(item.imageUrl){
-    return '<img src="'+esc(item.imageUrl).replace(/"/g,'&quot;')+'" loading="lazy" decoding="async" alt="">';
+    return '<img data-gallery-photo src="'+esc(item.imageUrl).replace(/"/g,'&quot;')+'" loading="lazy" decoding="async" alt="">';
   }
-  return '<div class="gallery-media-fallback" aria-hidden="true"></div>';
+  return photoFallback('card');
+}
+function bindGalleryPhotos(root){
+  root.querySelectorAll('img[data-gallery-photo]').forEach((img) => {
+    img.addEventListener('error', function onFail(){
+      img.removeEventListener('error', onFail);
+      const kind = img.closest('.gallery-detail') ? 'detail' : 'card';
+      img.outerHTML = photoFallback(kind);
+    });
+  });
 }
 function itemHTML(item){
   return '<button type="button" class="gallery-item" data-id="'+item.id+'">'+cardMedia(item)+'<div class="gallery-meta"><div class="gallery-date">'+esc(item.timePosted)+'</div><div class="gallery-desc">'+esc(item.description)+'</div></div></button>';
 }
 function openDetail(item){
   const image = item.imageUrl
-    ? '<img src="'+esc(item.imageUrl).replace(/"/g,'&quot;')+'" alt="">'
-    : '<div class="gallery-detail-fallback" aria-hidden="true"></div>';
+    ? '<img data-gallery-photo src="'+esc(item.imageUrl).replace(/"/g,'&quot;')+'" alt="">'
+    : photoFallback('detail');
   detail.innerHTML = image +
     '<div class="gallery-detail-body">' +
     '<h2 id="gallery-modal-title" style="margin:0;font-family:var(--font-display);letter-spacing:.08em;">' + esc(item.timePosted) + '</h2>' +
@@ -59,12 +73,14 @@ function openDetail(item){
     '</div>';
   modal.classList.add('show');
   document.body.style.overflow = 'hidden';
+  bindGalleryPhotos(detail);
 }
 async function loadGallery(){
   const res = await fetch('/pump-check-gallery/data');
   const data = await res.json();
   galleryItems = data.items || [];
   grid.innerHTML = galleryItems.length ? galleryItems.map(itemHTML).join('') : '<div class="empty-state"><div class="empty-icon">📷</div><div class="empty-desc">'+__t('gallery.empty')+'</div></div>';
+  bindGalleryPhotos(grid);
 }
 function closeModal(){
   modal.classList.remove('show');
