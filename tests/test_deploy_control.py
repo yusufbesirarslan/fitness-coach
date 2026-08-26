@@ -912,11 +912,50 @@ def test_the_send_time_clock_is_built_from_nothing_but_a_live_source():
     assert referenced == {"utc_now", "datetime", "timezone"}
 
 
-def _takes_no_arguments(arguments):
-    return not (
-        arguments.args or arguments.posonlyargs or arguments.kwonlyargs
-        or arguments.vararg or arguments.kwarg
+def _callable_with_no_arguments(arguments, *, bound_self=False):
+    """True when the callable can be invoked as `f()`.
+
+    Not the same question as "does it declare parameters". A defaulted
+    parameter is still a zero-argument call, and `def _pinned(instant=_FROZEN):
+    return instant` is a frozen clock that the earlier, stricter test could not
+    see. `*args`/`**kwargs` bind to nothing and never make `f()` illegal, so
+    they are not required arguments either.
+    """
+    positional = arguments.posonlyargs + arguments.args
+    if bound_self and positional:
+        positional = positional[1:]  # the instance supplies it
+    if len(positional) > len(arguments.defaults):
+        return False
+    # `kw_defaults` is parallel to `kwonlyargs`, with None where there is no
+    # default -- those are the keyword arguments the caller must supply.
+    return all(default is not None for default in arguments.kw_defaults)
+
+
+def test_the_zero_argument_census_counts_calls_not_declarations():
+    # Positive control. The census assertion below is an exact-list match, so
+    # a helper that answered "no" to everything would satisfy it silently.
+    module = ast.parse(
+        "def none(): pass\n"
+        "def defaulted(instant=FROZEN): return instant\n"
+        "def starred(*args, **kwargs): pass\n"
+        "def required(instant): return instant\n"
+        "def kwonly(*, instant): return instant\n"
+        "def kwonly_defaulted(*, instant=FROZEN): return instant\n"
+        "class C:\n"
+        "    def __call__(self): return FROZEN\n"
+        "    def method(self, instant): return instant\n"
     )
+    callable_with_none = {
+        node.name
+        for node in ast.walk(module)
+        if isinstance(node, ast.FunctionDef)
+        and _callable_with_no_arguments(
+            node.args, bound_self=node.name in ("__call__", "method")
+        )
+    }
+    assert callable_with_none == {
+        "none", "defaulted", "starred", "kwonly_defaulted", "__call__",
+    }
 
 
 def test_the_controller_injects_no_frozen_clock_anywhere():
@@ -929,15 +968,32 @@ def test_the_controller_injects_no_frozen_clock_anywhere():
     # `def` as well as `lambda`: a nested zero-argument function is the same
     # object with a different keyword in front of it, and censusing only
     # lambdas made `def _pinned(): return datetime.fromisoformat(...)` free.
+    # `__call__` and `functools.partial` for the same reason -- both produce an
+    # object that answers to `f()` without any `def` in the module declaring a
+    # zero-argument signature.
     module = ast.parse(CONTROLLER_SOURCE.read_text(encoding="utf-8"))
 
-    clock_shaped = [
-        ast.unparse(node) if isinstance(node, ast.Lambda) else node.name
-        for node in ast.walk(module)
-        if isinstance(node, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef))
-        and _takes_no_arguments(node.args)
+    clock_shaped = []
+    for node in ast.walk(module):
+        if isinstance(node, ast.Lambda):
+            if _callable_with_no_arguments(node.args):
+                clock_shaped.append(ast.unparse(node))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if _callable_with_no_arguments(
+                node.args, bound_self=node.name == "__call__"
+            ):
+                clock_shaped.append(node.name)
+        elif isinstance(node, ast.Call) and "partial" in ast.unparse(node.func):
+            clock_shaped.append(ast.unparse(node))
+
+    # `main` is the entrypoint, not a clock: its parameters are all defaulted so
+    # `python -m` can call it, and which parameters it may have is pinned
+    # separately by the signature whitelist. Everything else in this module that
+    # answers to `f()` is a clock, and exactly one of those is legitimate.
+    assert sorted(clock_shaped) == [
+        "lambda: datetime.now(timezone.utc)",
+        "main",
     ]
-    assert clock_shaped == ["lambda: datetime.now(timezone.utc)"]
 
 
 def test_send_rejects_heartbeat_that_became_stale_after_preflight():
