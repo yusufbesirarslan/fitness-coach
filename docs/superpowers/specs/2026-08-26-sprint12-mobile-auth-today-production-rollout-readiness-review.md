@@ -1,5 +1,9 @@
 # Sprint 12 — Mobile Auth + Today Production Rollout Readiness — Independent Review
 
+Later same-day gate: live smoke/soak status is in
+[parent document §29](./2026-08-26-sprint12-mobile-auth-today-production-rollout-readiness.md).
+That gate did not re-run this review. Verdict after smoke: **WAIT — SOAK IN PROGRESS**.
+
 - **Reviewer:** independent rollout-focused review (read-only)
 - **Date:** 2026-08-26
 - **Document under review:** [2026-08-26-sprint12-mobile-auth-today-production-rollout-readiness.md](./2026-08-26-sprint12-mobile-auth-today-production-rollout-readiness.md)

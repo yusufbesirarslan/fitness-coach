@@ -4,12 +4,17 @@ Assessment date: 2026-08-26.
 Assessor: bounded production-readiness review of current `origin/main`.
 This document does **not** activate flags, deploy, distribute a mobile build, or start PR5.
 
-**Verdict: READY WITH CONDITIONS.**
+**Verdict (2026-08-26 later gate): WAIT — SOAK IN PROGRESS.**
+
+Earlier same-day assessment: **READY WITH CONDITIONS.** That still describes
+architecture. The remaining Stage 2 authenticated production smoke is now
+**green**. The 24h backend soak through **2026-08-27 10:40 UTC** is **not**
+complete. Native-auth ON distribution remains **NO-GO**.
 
 Backend Stage 1 (`MOBILE_AUTH_ENABLED=1`) is already live on production SHA
-`a6d6b2e60dc7718bd47590d64b5f74542294025c`. Native-auth mobile must **not** be
-distributed until the conditions in §26 and §28 are closed. This assessment did
-not enable or disable anything.
+`a6d6b2e60dc7718bd47590d64b5f74542294025c`. See §29 for the controlled
+smoke + soak gate. This document does not activate flags, deploy, distribute
+a mobile build, or start PR5.
 
 ---
 
@@ -33,12 +38,15 @@ What changed the verdict from “READY FOR STAGED ROLLOUT”:
    (`ThreadReserve`, `AiSlotsActive`, `AiModelSlotsActive`, `ScrapeSlotsActive`).
    Documented HTTP abort signals (`HttpOverload`, login/Today SLIs) are **not**
    visible.
-3. Authenticated owner-scoped Today was **not** smoked against production with a
-   controlled identity (no production user mutation; no staging identity used).
+3. Authenticated owner-scoped Today **was smoked** against production with the
+   dedicated E2E identity on 2026-08-26 ~12:52 UTC — green (see §29). This
+   item is closed for Stage 2.
 4. Native-auth ON store/TestFlight artifact and previous native-auth-OFF rollback
    build are **not** proven as distributable artifacts.
 
-P0 = 0. Product-code P1 = 0. Operational P1 conditions remain (see §26).
+P0 = 0. Product-code P1 = 0. Operational P1 (HTTP SLIs) remains open for native
+expansion; log-only abort is **explicitly accepted for the remaining soak only**
+(see §29).
 
 ---
 
@@ -289,16 +297,15 @@ production composition.
 
 | # | Case | Proven where | Result |
 |---|---|---|---|
-| 1 | Valid login | local `tests/test_mobile_auth_api.py` / `_service.py` | 200 opaque credentials |
-| 2 | Invalid credentials | local tests; production `POST /login` with `{}` → 400; live Cognito `NotAuthorizedException` → 401 (owner IP, not this assessment’s credentials) | generic `AUTH_INVALID_CREDENTIALS` / `AUTH_INVALID_REQUEST`; no enumeration of unconfirmed users |
-| 3 | Expired/invalid token | local tests; production `GET /today` without token → 401 `AUTH_SESSION_EXPIRED` | 401 JSON, `Cache-Control: no-store` |
-| 4 | Refresh success | local tests | rotate + family version |
-| 5 | Refresh failure | local tests; production `POST /refresh` 400 from existing traffic | 400/401; reuse after grace revokes family |
-| 6 | Logout/revocation | local tests | family revoke; mobile logout best-effort |
+| 1 | Valid login | local tests; **production** 2026-08-26 ~12:52Z controlled E2E | 200 opaque `session` (`type=opaque`, Bearer, access+refresh+expiries); 462.8 ms client; no 5xx |
+| 2 | Invalid credentials | local tests; production `POST /login` with `{}` → 400; `{"username":"x","password":"y"}` → 401; live Cognito 401 from owner IP | generic `AUTH_INVALID_CREDENTIALS` / `AUTH_INVALID_REQUEST` |
+| 3 | Expired/invalid token | local tests; production `GET /today` without token and with `Bearer not-a-valid-token` | 401 `AUTH_SESSION_EXPIRED`, `Cache-Control: no-store` |
+| 4 | Refresh success | local tests; **production** controlled E2E | 200; credentials rotated; subsequent Today 200; 224.4 ms client / 27.3 ms server; no loop |
+| 5 | Refresh failure | local tests; production `POST /refresh` `{}` → 400; existing traffic 400 | 400 `AUTH_INVALID_REQUEST`; no `refresh_reuse` in soak logs |
+| 6 | Logout/revocation | local tests | family revoke; mobile logout best-effort. Not re-run in §29 (non-destructive smoke). |
 
-**Not executed against production with a controlled valid identity.** Do not use
-another real user’s data. Staging identities were not available to this
-assessment.
+Controlled production identity **was** used in §29. Do not use another real
+user’s data. No production plan mutation.
 
 ---
 
@@ -306,27 +313,27 @@ assessment.
 
 | # | Case | Proven where | Result |
 |---|---|---|---|
-| 7 | Authenticated GET `/api/v1/today` | local `tests/test_mobile_today_api.py` | 200 projection |
+| 7 | Authenticated GET `/api/v1/today` | local tests; **production** controlled E2E | 200 canonical projection; `status=no_plan`; 210–263 ms client |
 | 8 | Unauthenticated | **production** + tests | 401 `AUTH_SESSION_EXPIRED` |
-| 9 | Malformed token | tests | 401 |
-| 10 | Owner-only | tests: other user’s rest day never leaks | pass |
-| 11 | No query/header spoofing | tests: `?user_id=`, `X-User-Id`, `?date=` inert | pass |
-| 12 | No-plan | tests | 200 `status: no_plan`, distinct from rest |
-| 13 | Rest-day | tests | 200 `status: rest_day` |
-| 14 | Active workout | tests | 200 `scheduled_not_started` / action start |
-| 15 | Completed | tests | 200 `completed` (PumpCheck) |
+| 9 | Malformed token | tests; **production** invalid Bearer | 401 `AUTH_SESSION_EXPIRED` |
+| 10 | Owner-only | tests; production `/account/me` username matches controlled identity | pass (one-user). Two-user production not run |
+| 11 | No query/header spoofing | tests; **production** `?user_id=999999`, `X-User-Id: 999999`, `?date=2020-01-01` | inert; same fingerprint; did not adopt client date |
+| 12 | No-plan | tests; **production** controlled E2E (actual canonical state) | 200 `status: no_plan`, `plan.exists=false`, `is_rest_day=false` |
+| 13 | Rest-day | tests | 200 `status: rest_day`. Not forced in production |
+| 14 | Active workout | tests | 200 `scheduled_not_started` / action start. Not forced in production |
+| 15 | Completed | tests | 200 `completed` (PumpCheck). Not forced in production |
 
-Production authenticated Today body (no-plan/rest/active/completed) was **not**
-fetched. Limitation: no controlled staging identity; this assessment will not
-mutate production plans.
+Production authenticated Today body **was** fetched for the controlled E2E
+user: canonical `no_plan` on 2026-08-26 (Istanbul). Other product states remain
+covered by automated characterization. Plans were not mutated.
 
 ---
 
 ## 12. Cross-user isolation
 
-**Hard gate. Status: PASS on tests + unauthenticated production probe.
-Authenticated cross-user production probe: not run (would require two real
-users).**
+**Hard gate. Status: PASS on tests + production one-user spoof-resistance
+smoke. Authenticated two-user production probe: not run (no second controlled
+identity; not manufactured).**
 
 Backend:
 
@@ -341,7 +348,8 @@ Mobile:
 - Today state is in-memory; not a public cache.
 
 Unresolved cross-user ambiguity: **none in code**. Residual: production
-two-user confirmation is a Stage 2 smoke item, not an isolation defect.
+two-user confirmation remains unrun and is **not** required to close Stage 2
+given one-user spoof-resistance plus existing two-user automated tests.
 
 ---
 
@@ -486,22 +494,20 @@ Today fixture regression → halt distribution and ship native-auth OFF build.
 Existing production **mobile** users remain unaffected **only if** they still
 run native-auth **OFF** binaries (the compile-time default).
 
-### Stage 2 — Backend smoke (this assessment)
+### Stage 2 — Backend smoke
 
-Done without credentials:
+Unauthenticated probes (earlier assessment) plus controlled-identity smoke
+(§29, 2026-08-26 ~12:52Z):
 
-- health 200
+- health 200 before and after smoke
 - unauthenticated Today 401
-- login empty body 400
-- login GET 405
-- owner-IP invalid login 401 via Cognito (pre-existing traffic)
+- login empty body 400; malformed login 400; invalid credentials 401
+- controlled login 200; refresh 200 (rotated); authenticated Today 200 `no_plan`
+- spoof `user_id` / `X-User-Id` / `date` inert
+- `thread_reserve=8` after smoke (floor 2)
+- `RUNTIME_METRICS_ENABLED` left **UNSET**; log-only abort **accepted** for soak
 
-**Still required of the owner before calling Stage 2 green:**
-
-1. Controlled test identity: valid login, refresh, `GET /api/v1/today`
-2. Confirm owner-scoped body (no-plan or rest or scheduled — whatever that user actually is)
-3. Confirm `RUNTIME_METRICS_ENABLED=1` **or** accept log-only abort for soak
-4. Watch `thread_reserve` via deep health after a successful login
+**Stage 2 remaining items: closed.** Stage 3 soak is not.
 
 ### Stage 3 — Soak
 
@@ -655,9 +661,9 @@ Already true on 2026-08-26 except where noted.
 - [x] Auth hardening present
 - [x] Concurrency guard present
 - [x] Rollback path verified (documented; **not** executed)
-- [ ] Smoke test identities available **to this assessment** — **NO**
+- [x] Smoke test identities available **to this assessment** — dedicated production E2E account (see §29)
 - [x] `/api/v1/today` contract current on SHA
-- [ ] Monitoring sufficient for documented HTTP abort — **NO** (logs only)
+- [ ] Monitoring sufficient for documented HTTP abort — **NO** (logs only; accepted for soak, not closed)
 - [x] Product P0 = 0
 - [x] Product P1 = 0
 
@@ -666,18 +672,18 @@ Already true on 2026-08-26 except where noted.
 ### Native mobile rollout
 
 - [x] Backend API already enabled
-- [ ] Backend smoke green **including authenticated Today** — **NO**
-- [ ] Soak period green — **in progress** (started ~10:40Z 2026-08-26; recommend through 10:40Z 2026-08-27)
-- [ ] Login/refresh green on a controlled identity — **NO**
-- [ ] Today green on a controlled identity — **NO**
-- [ ] Exact native-auth ON build validated against **production origin** — **NO** (CI used `api.example.invalid`)
+- [x] Backend smoke green **including authenticated Today** — §29
+- [ ] Soak period green — **in progress** (started ~10:40Z 2026-08-26; through 10:40Z 2026-08-27). Evidence so far is clean; window not elapsed
+- [x] Login/refresh green on a controlled identity — §29
+- [x] Today green on a controlled identity — §29 `no_plan`
+- [ ] Exact native-auth ON build validated against **production origin** — **NO** (CI used `api.example.invalid`; no ON build distributed)
 - [x] Android CI green (OFF + ON compile) on `3386df3`
 - [x] iOS CI green (ON simulator) on `3386df3`
-- [ ] Rollback OFF build/path identified as a **store** artifact — **NO**; sideload OFF APK is the only proven path
+- [ ] Rollback OFF build/path identified as a **store** artifact — **NO**; sideload OFF APK procedure exists (`flutter build apk --debug --dart-define=AXISAI_NATIVE_AUTH_ENABLED=false`); no retained OFF artifact proven in this gate
 - [x] Product P0 = 0
 - [x] Product P1 = 0
 
-**Native mobile: NO-GO until remaining boxes are checked.**
+**Native mobile: WAIT — SOAK IN PROGRESS. Do not compile/distribute an internal native-auth ON build until the soak window closes clean.**
 
 ---
 
@@ -690,7 +696,7 @@ Already true on 2026-08-26 except where noted.
 5. Flask public name is `fitx-chatbot.duckdns.org`; product domain `www.axisaiapp.com` is the landing site; `api.axisaiapp.com` does not exist.
 6. Worker compose STATUS `unhealthy` is the image `/health` HEALTHCHECK on a process that does not serve HTTP; RQ heartbeat is alive. Do not abort on Compose STATUS.
 7. Web container recreated 2h after the GitHub deploy — flag flip time not in git.
-8. No controlled staging identity used here.
+8. Controlled production E2E identity **was** used in §29. No second controlled identity. No other real user.
 9. No TestFlight/Play staged rollout.
 10. Mobile production logs/metrics none.
 11. macOS CI does not build iOS native-auth OFF.
@@ -716,32 +722,36 @@ Do not start PR5. Do not fix PR2B residual.
 
 ## 28. Final verdict
 
-## READY WITH CONDITIONS
+## WAIT — SOAK IN PROGRESS
 
-Architecture/code on backend `a6d6b2e` and mobile `3386df3` are sound. The
-historical concurrency blocker is closed. Cross-user isolation and no-fixture
-containment hold in tests. Production backend mobile API is **already enabled**.
+Architecture/code on backend `a6d6b2e` and mobile `3386df3` remain sound.
+Stage 2 authenticated production smoke is **green** (§29). Stage 3 soak is
+**not complete** (window through **2026-08-27 10:40 UTC**). Evidence since
+web recreate `2026-08-26T10:40:33Z` is clean: no mobile 5xx, no overload 503,
+no `/health` 503, thread reserve 8, no restart loop.
 
-**Conditions before calling backend Stage 2/3 complete and before any native-auth ON distribution:**
+This is **not** GO FOR INTERNAL NATIVE-AUTH BUILD.
 
-1. Owner runs authenticated login + refresh + `GET /api/v1/today` with a
-   **controlled test identity** (not another real user; do not mutate plans).
-2. Leave `MOBILE_AUTH_ENABLED=1` through **2026-08-27 10:40 UTC** unless an
-   abort criterion fires. Watch docker logs and deep-health `thread_reserve`.
-3. Either set `RUNTIME_METRICS_ENABLED=1` (then `docker compose up -d`) **or**
-   formally accept log-only abort for this soak. Do not claim HTTP p95 abort
-   until the SLIs exist.
-4. Decide the native-auth HTTPS origin (`https://fitx-chatbot.duckdns.org` vs a
-   future `api.axisaiapp.com`). Do not use the landing CloudFront domain.
-5. Treat this document as the operator authority until `docs/ROLLOUT.md` /
-   `docs/FEATURE_FLAGS.md` / `app/feature_flags.py` lifecycle text is updated
-   in a separate docs change. This assessment does not rewrite flag defaults.
-6. Identify how a native-auth-OFF APK/IPA will be given to the internal cohort
-   if Stage 4 is aborted (sideload is the only proven path).
+**Remaining before any native-auth ON compile/distribution:**
+
+1. Leave `MOBILE_AUTH_ENABLED=1` through **2026-08-27 10:40 UTC** unless an
+   abort criterion fires. Continue log-only soak watch (§29 commands).
+2. Do **not** set `RUNTIME_METRICS_ENABLED` unless the owner later authorizes
+   that specific change. Log-only abort is accepted for this soak only. Do
+   not claim HTTP p95 abort until SLIs exist. Operational P1 remains open
+   for native expansion / GO.
+3. Native-auth HTTPS origin remains `https://fitx-chatbot.duckdns.org`.
+   Do not use the landing CloudFront domain or unresolved `api.axisaiapp.com`.
+4. Treat this document as the operator authority until lifecycle docs are
+   updated in a separate change.
+5. Sideload OFF rebuild procedure exists; store/TestFlight OFF rollback is
+   still unproven. Keep an OFF APK if/when an ON internal build is compiled
+   **after** soak.
 
 **This does not mean flags were activated by this task.** Production already
 had `MOBILE_AUTH_ENABLED=1`. `AXISAI_NATIVE_AUTH_ENABLED` remains default OFF
-and was not compiled for distribution here.
+and was not compiled for distribution here. `RUNTIME_METRICS_ENABLED` was
+**not** changed.
 
 ---
 
@@ -793,16 +803,250 @@ No application behavior changes were made. No production mutation.
 
 ## Exact next action required from the owner to continue (not Stage 1 enablement)
 
-Stage 1 is already live. Next owner actions:
+Stage 1 is already live. Stage 2 authenticated smoke is green. Next owner actions:
 
-1. **Do not distribute** a native-auth ON build today.
-2. Run the remaining Stage 2 authenticated smokes with a controlled identity
-   against `https://fitx-chatbot.duckdns.org`.
-3. Observe soak until 2026-08-27 10:40 UTC (or abort per §17).
-4. Decide metrics: turn on `RUNTIME_METRICS_ENABLED=1` **or** accept log-only.
-5. Only then compile an **internal** native-auth ON build with
-   `--dart-define=AXISAI_NATIVE_AUTH_ENABLED=true`
-   `--dart-define=AXISAI_API_BASE_URL=https://fitx-chatbot.duckdns.org`.
-6. Keep a native-auth OFF APK for rollback.
+1. **Do not distribute** a native-auth ON build.
+2. **Do not compile** an internal native-auth ON build until the soak window
+   closes clean at **2026-08-27 10:40 UTC**.
+3. Continue log-only soak monitoring with the §29 commands until that instant
+   (or abort per §17 / §29 abort status).
+4. Do **not** change `MOBILE_AUTH_ENABLED` or `RUNTIME_METRICS_ENABLED` unless
+   a later instruction authorizes that specific change.
+5. After a clean soak close, the next decision is whether to accept remaining
+   operational P1 (HTTP SLIs missing) for **internal-only** compile, or to
+   enable metrics first. That decision is **not** made here.
+6. Keep a native-auth OFF sideload procedure:
+   `flutter build apk --debug --dart-define=AXISAI_NATIVE_AUTH_ENABLED=false`.
 
-HARD STOP after this document. No flag changes, no deploy, no PR5, no PR2B fix.
+HARD STOP after this document. No flag changes, no deploy, no native-auth ON
+distribution, no PR5, no Sprint 13.
+
+---
+
+## 29. Controlled Production Smoke + Soak Gate
+
+Gate date/time: **2026-08-26 12:51–12:55 UTC**.
+Assessor: continuation of this runbook (not a rediscovery).
+Production origin: `https://fitx-chatbot.duckdns.org`.
+No flags changed. No deploy. No Docker restart. No Cognito mutation. No
+native-auth ON compile/distribution. PR5 remains deferred.
+
+### Identity
+
+| Field | Value |
+|---|---|
+| Classification | dedicated production E2E / release-validation account |
+| Username kind | test-only (`axisai.native.e2e`) |
+| Purpose | AxisAI release validation only |
+| Other real user | **not used** |
+| Second controlled identity | **none** — one-user spoof-resistance + existing two-user tests |
+| Password / token | **not recorded** |
+
+### SHAs and flags (reconfirmed, not rediscovered)
+
+| Field | Value |
+|---|---|
+| Backend SHA (host `sudo -u ubuntu git -C /home/ubuntu/fitness-coach rev-parse HEAD`) | `a6d6b2e60dc7718bd47590d64b5f74542294025c` |
+| Mobile SHA (authority, unchanged) | `3386df37198ef0193c64fa4754a686357868f785` |
+| `MOBILE_AUTH_ENABLED` | **TRUE** (`1` in host `.env`; deep-health `true`) — **not** set again |
+| `RUNTIME_METRICS_ENABLED` | **UNSET** — **not** changed |
+| `blocking_concurrency_slot()` on login/refresh | **present** (2 call sites in deployed `app/services/mobile_auth.py`) |
+
+### Login
+
+| Field | Result |
+|---|---|
+| `POST /api/v1/auth/login` | **200** |
+| Contract | opaque `session`: `type=opaque`, `token_type=Bearer`, access+refresh credentials, both expiries |
+| 5xx / overload 503 | **none** |
+| Client latency | **462.8 ms** |
+| Cache-Control | `no-store` |
+
+### Refresh
+
+| Field | Result |
+|---|---|
+| `POST /api/v1/auth/refresh` | **200** |
+| Rotated credentials | **yes** (new access and refresh, distinct from login) |
+| Subsequent `GET /api/v1/today` | **200**, fingerprint unchanged |
+| Refresh loop | **none** (single refresh) |
+| Token-family anomaly / `refresh_reuse` | **none** observed |
+| Client latency | **224.4 ms** (server `dur_ms=27.3`) |
+
+### Authenticated Today
+
+| Field | Result |
+|---|---|
+| `GET /api/v1/today` | **200** |
+| Canonical status | **`no_plan`** |
+| Date | `2026-08-26` (server Istanbul day) |
+| `canonical_local_date` | `2026-08-26` |
+| `plan.exists` | `false` |
+| `is_rest_day` | `false` (distinct from rest) |
+| `completed` | `false` |
+| `action` | `none` |
+| Workout summary | absent (`null`/none) — consistent with no plan |
+| Principal | `/api/v1/account/me` username matched the controlled E2E account; `profile_complete=false` |
+| Fixture / fabricated markers | **none** (`DRAFT_FIXTURE`, “Upper Body Strength”, `workout_example_001`, etc.) |
+| Client latency | **263.4 ms** first read; 210–216 ms spoof/post-refresh |
+
+No plan was mutated to force rest/completed/active states.
+
+### Spoof-resistance
+
+| Input | Status | Fingerprint vs baseline | Client date adopted? |
+|---|---|---|---|
+| `?user_id=999999` | 200 | **identical** | n/a |
+| `X-User-Id: 999999` | 200 | **identical** | n/a |
+| `?date=2020-01-01` | 200 | **identical** | **no** (stayed `2026-08-26`) |
+
+Baseline and spoof bodies shared the same 12-char SHA for the first second
+(`fbae36f3a0e9`). After refresh, `server_time` advanced (body hash changed)
+but the canonical fingerprint (date/status/plan/rest/completed) was unchanged.
+No second-user data was requested.
+
+### Negative auth (non-destructive)
+
+| Case | Result |
+|---|---|
+| Invalid Bearer on Today | 401 `AUTH_SESSION_EXPIRED`, `retryable=false`, `no-store` |
+| Unauthenticated Today | 401 `AUTH_SESSION_EXPIRED` |
+| Malformed login (username only) | 400 `AUTH_INVALID_REQUEST` |
+| Empty login `{}` | 400 `AUTH_INVALID_REQUEST` (public probe) |
+| Invalid credentials `x`/`y` | 401 `AUTH_INVALID_CREDENTIALS` (public probe) |
+| Empty refresh `{}` | 400 `AUTH_INVALID_REQUEST` (public probe) |
+
+### Health / deep health / thread reserve
+
+Public `/health` (before smoke 971 ms / after 212 ms): **200**
+`{"db":"ok","limiter_storage":"redis","status":"ok"}`.
+
+Public `/health?deep=1` remains shallow (CIDR/loopback-only), as previously
+documented.
+
+Loopback deep health via `docker exec` **after smoke** (12:54:21Z):
+
+| Field | Value |
+|---|---|
+| status | ok |
+| db / redis / login | ok |
+| worker | **alive** |
+| fatsecret_proxy | ok |
+| bedrock | enabled |
+| `MOBILE_AUTH_ENABLED` | true |
+| other rollout flags | all false |
+| thread_reserve | **8** |
+| thread_reserve_floor | 2 |
+| threads / workers | 8 / 1 |
+| ai_active | 0 |
+| db_pool | size 8, checked_out 1 |
+| auth_contract | skew 0s, token_use access, paths web+mobile |
+
+Web: running **healthy**, started `2026-08-26T10:40:33Z`, restarting=false,
+restarts=0. Worker: Compose **unhealthy** (known image HEALTHCHECK vs RQ;
+not an abort). Redis `fitx-redis`: healthy, started 2026-08-22, restarts=0.
+
+### Observability mode
+
+**24h soak proceeds with log-only abort monitoring.**
+
+`RUNTIME_METRICS_ENABLED` was **not** changed (host `.env` UNSET; no owner
+authorization for configuration mutation). Missing CloudWatch HTTP SLIs
+(`HttpOverload`, `AuthOutcomes`, login/Today 2xx/4xx/5xx, Today percentiles)
+are **not** pretended to exist.
+
+Docker json-file logs the gunicorn/app request lines on **stderr**. Merge
+streams (`2>&1`) or counts will read as empty.
+
+Exact soak-watch commands (EC2 / SSM, cwd `/home/ubuntu/fitness-coach`):
+
+```bash
+# /health (public)
+curl -sS --max-time 15 https://fitx-chatbot.duckdns.org/health
+
+# deep-health + thread reserve (loopback only)
+docker exec fitness-coach-web-1 python3 -c "import json,urllib.request; print(urllib.request.urlopen('http://127.0.0.1:5000/health?deep=1', timeout=10).read().decode())"
+
+# login failures (gunicorn+app each emit one line; unique ~ half)
+docker logs --since 24h --timestamps fitness-coach-web-1 2>&1 | grep 'path=/api/v1/auth/login' | grep -E 'status=401|status=400|status=5'
+
+# refresh failures
+docker logs --since 24h --timestamps fitness-coach-web-1 2>&1 | grep 'path=/api/v1/auth/refresh' | grep -E 'status=4|status=5'
+
+# Today 5xx
+docker logs --since 24h --timestamps fitness-coach-web-1 2>&1 | grep 'path=/api/v1/today' | grep 'status=5'
+
+# Today latency
+docker logs --since 24h --timestamps fitness-coach-web-1 2>&1 | grep 'path=/api/v1/today' | grep 'dur_ms='
+
+# overload 503s
+docker logs --since 24h --timestamps fitness-coach-web-1 2>&1 | grep -E 'status=503|AUTH_TEMPORARILY_UNAVAILABLE|blocking_capacity_exhausted|today_read_failed|refresh_reuse|Traceback'
+
+# compose (do not abort on worker unhealthy HEALTHCHECK mismatch)
+docker compose ps
+```
+
+### Soak evidence (window open)
+
+| Field | Value |
+|---|---|
+| Window | `2026-08-26T10:40:33Z` → **2026-08-27T10:40Z** |
+| Complete? | **NO** (~21h 45m remaining at 12:55Z) |
+| Web logs since recreate (merged stdout+stderr, ~3h) | 139 lines; gunicorn started **once** |
+| Login (raw dual-log counts) | 24 lines → ~12 unique: 200×3, 401×5, 400×4. **5xx=0** |
+| Refresh | 10 lines → ~5 unique: 200×1, 400×4. **5xx=0** |
+| Today | 30 lines → ~15 unique: 200×5, 401×10. **5xx=0** |
+| Overload 503 / `AUTH_TEMPORARILY_UNAVAILABLE` | **0** |
+| `today_read_failed` | **0** |
+| `refresh_reuse` | **0** |
+| Traceback | **0** |
+| Login server `dur_ms` (Cognito path) | ~250–948 ms for 401/200; 1.6–3.4 ms for 400 |
+| Today server `dur_ms` | ~1.0–1.4 ms for 401; 11.1–51.6 ms for authenticated 200 |
+
+No percentages invented. Observed counts only. 401/400 are expected
+unauthenticated/malformed probes plus owner-IP traffic, not abort signals.
+
+### Abort status
+
+**No abort criterion fired.**
+
+- no wrong-user Today
+- no cross-user leak attempt beyond inert spoof inputs
+- no fixture/fabricated Today
+- no client-date Today
+- no refresh-family anomaly
+- no auth/Today 5xx
+- thread reserve 8 (not at floor 2)
+- `/health` 200, not 503
+- no crash/restart loop
+- DB/Redis ok; worker heartbeat alive
+
+### Rollback / containment (unchanged; not executed)
+
+Backend: `MOBILE_AUTH_ENABLED=0` then `docker compose up -d`; prove
+`GET /api/v1/today` is **404 not 401**; prove `/health` 200. Restart/recreate
+required. Not instant.
+
+Mobile: halt ON-build rollout; sideload
+`flutter build apk --debug --dart-define=AXISAI_NATIVE_AUTH_ENABLED=false`;
+emergency backend flag OFF. App Store/TestFlight downgrade **not** proven.
+The local phase2 debug APK under `tmp/axisai-mobile-phase2` is a **native-auth
+ON** validation build (production host present) and is **not** an OFF rollback
+artifact.
+
+### P0 / P1 / P2
+
+| Severity | Count | Notes |
+|---|---|---|
+| P0 | **0** | no ownership, fixture, or health abort |
+| P1 | **1 operational** | HTTP abort SLIs still missing. **Accepted for remaining log-only soak only.** Still blocks GO FOR INTERNAL NATIVE-AUTH BUILD (GO requires P1=0 and soak complete) |
+| P2 | **5** (unchanged from independent review) | unreadable-plan doc wording; stale `blocked` label; log-only lossy under burst; worker HEALTHCHECK mismatch; rollback `.env` sloppiness / store rollback unproven |
+
+### Final native-build GO/NO-GO
+
+**WAIT — SOAK IN PROGRESS.**
+
+Not GO FOR INTERNAL NATIVE-AUTH BUILD.
+Not NO-GO (smoke did not fail; identity was available; no abort fired).
+
+PR5 remains **deferred**.
