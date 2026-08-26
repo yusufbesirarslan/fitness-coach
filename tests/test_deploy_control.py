@@ -698,10 +698,15 @@ def test_send_performs_no_forbidden_work_after_final_freshness(monkeypatch):
     assert send_command(
         config, HOST_SCRIPT, aws, AUTHORITY_TOKEN, utc_now=lambda: NOW,
     ) == COMMAND_ID
-    assert events == [
-        "remote-command construction", "JSON construction", "freshness response",
-        "send-command",
-    ]
+    # The invariant is an ordering, not a script. What the controller does
+    # *before* proving freshness is its own business and may be reordered or
+    # added to; what it does after is nothing at all.
+    boundary = events.index("freshness response")
+    assert events[boundary + 1:] == ["send-command"]
+
+    # And the payload really is built beforehand -- otherwise the guard would
+    # hold vacuously on a controller that had stopped building one.
+    assert "remote-command construction" in events[:boundary]
 
 
 def test_direct_script_entrypoint_imports_contract_without_package_path():
@@ -852,7 +857,10 @@ CONTROLLER_SOURCE = Path(deploy_control.__file__)
 def _controller_function(name):
     module = ast.parse(CONTROLLER_SOURCE.read_text(encoding="utf-8"))
     for node in ast.walk(module):
-        if isinstance(node, ast.FunctionDef) and node.name == name:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == name
+        ):
             return node
     raise AssertionError(f"{name} is not defined in the controller")
 
@@ -992,6 +1000,58 @@ def test_final_ssm_target_check_rejects_malformed_heartbeat(heartbeat):
             }]},
             lambda: NOW,
         )
+
+
+PLUS_FIVE = timezone(timedelta(hours=5))
+
+
+@pytest.mark.parametrize("age_seconds,expected_error", [
+    (0, None),
+    (360, None),
+    (361, "stale"),
+    (18000, "stale"),
+])
+def test_the_boundary_judges_an_offset_heartbeat_by_its_instant(
+        age_seconds, expected_error):
+    # SSM reports whatever offset the agent's host is in. Reinterpreting that
+    # stamp as UTC -- `heartbeat.replace(tzinfo=timezone.utc)` -- keeps the
+    # digits and moves the instant, so at +05:00 a five-hour-old heartbeat
+    # reads as brand new. Note the 18000-second case: expressed in +05:00 its
+    # wall clock is character-for-character the sampled clock's own.
+    config = DeployConfig.from_environ(VALID_ENV)
+    heartbeat = (NOW - timedelta(seconds=age_seconds)).astimezone(PLUS_FIVE)
+    aws = lambda args: managed_instance_response(heartbeat)
+
+    if expected_error is None:
+        instance = require_fresh_ssm_target(config, aws, lambda: NOW)
+        assert instance.last_ping == NOW - timedelta(seconds=age_seconds)
+    else:
+        with pytest.raises(PreflightError, match=expected_error):
+            require_fresh_ssm_target(config, aws, lambda: NOW)
+
+
+@pytest.mark.parametrize("age_seconds,expected_error", [
+    (360, None),
+    (361, "stale"),
+])
+def test_the_boundary_judges_an_offset_clock_by_its_instant(
+        age_seconds, expected_error):
+    # And symmetrically for the sampled clock. `datetime.now(timezone.utc)` is
+    # the live default, but nothing in the signature demands UTC, and a clock
+    # returning the same instant in another offset must reach the same verdict.
+    config = DeployConfig.from_environ(VALID_ENV)
+    aws = lambda args: managed_instance_response(
+        NOW - timedelta(seconds=age_seconds)
+    )
+    clock = lambda: NOW.astimezone(timezone(timedelta(hours=-3)))
+
+    if expected_error is None:
+        assert require_fresh_ssm_target(
+            config, aws, clock
+        ).instance_id == config.instance_id
+    else:
+        with pytest.raises(PreflightError, match=expected_error):
+            require_fresh_ssm_target(config, aws, clock)
 
 
 def test_aws_expiry_is_derived_from_delivery_and_execution_timeouts():

@@ -21,6 +21,7 @@ if __package__:
     from .deploy_contract import (
         CONTROLLER_REQUIRED_SECONDS,
         SSM_EXECUTION_TIMEOUT_SECONDS,
+        SSM_HEARTBEAT_FUTURE_SKEW_SECONDS,
         SSM_HEARTBEAT_MAX_AGE_SECONDS,
         host_timeout_environment,
     )
@@ -28,6 +29,7 @@ else:
     from deploy_contract import (
         CONTROLLER_REQUIRED_SECONDS,
         SSM_EXECUTION_TIMEOUT_SECONDS,
+        SSM_HEARTBEAT_FUTURE_SKEW_SECONDS,
         SSM_HEARTBEAT_MAX_AGE_SECONDS,
         host_timeout_environment,
     )
@@ -583,7 +585,7 @@ def validate_managed_instance(
 
     last_ping = _parse_heartbeat(entry.get("LastPingDateTime"))
     age = now - last_ping
-    if age < -timedelta(minutes=1):
+    if age < -timedelta(seconds=SSM_HEARTBEAT_FUTURE_SKEW_SECONDS):
         raise PreflightError("SSM target heartbeat is too far in the future")
     if age > timedelta(seconds=SSM_HEARTBEAT_MAX_AGE_SECONDS):
         raise PreflightError("SSM target heartbeat is stale")

@@ -6,7 +6,10 @@ import subprocess
 import pytest
 import yaml
 
-from scripts.deploy_contract import SSM_HEARTBEAT_MAX_AGE_SECONDS
+from scripts.deploy_contract import (
+    SSM_HEARTBEAT_FUTURE_SKEW_SECONDS,
+    SSM_HEARTBEAT_MAX_AGE_SECONDS,
+)
 
 
 DOCKERIGNORE = Path(".dockerignore")
@@ -198,14 +201,66 @@ def test_deploy_lifecycle_has_one_controller_entrypoint_and_named_inputs():
     }
 
 
+# The SSM lifecycle belongs to the controller alone. Anything in the workflow or
+# the host script that submits or reads a command is a second lifecycle that
+# never passes through the send-boundary freshness proof.
+SSM_LIFECYCLE_INVOCATIONS = (
+    # `aws ssm send-command`, `aws2 ssm send-command`, `awscli  ssm  send-command`,
+    # and the same broken across lines -- all one shape once normalised.
+    r"\baws\S*\s+ssm\s+send-command\b",
+    r"\baws\S*\s+ssm\s+get-command-invocation\b",
+    r"\baws\S*\s+ssm\s+list-command-invocations\b",
+    # boto3 / botocore, whatever the client is called.
+    r"\.\s*send_command\s*\(",
+    r"\.\s*get_command_invocation\s*\(",
+)
+
+
+def _normalised_shell(text):
+    """Whitespace-insensitive view: joined continuations, collapsed runs."""
+    joined = re.sub(r"\\\s*\n\s*", " ", text)
+    return " ".join(joined.split()).lower()
+
+
 def test_workflow_has_no_second_or_fail_open_ssm_lifecycle():
     body = _deploy_yaml()
 
-    assert "aws ssm send-command" not in body
-    assert "aws ssm get-command-invocation" not in body
+    # Whitespace-insensitive, and it covers the host script too: a substring
+    # check for one exact spelling was defeated by a single extra space.
+    for source in (body, _host_script()):
+        normalised = _normalised_shell(source)
+        assert [
+            pattern
+            for pattern in SSM_LIFECYCLE_INVOCATIONS
+            if re.search(pattern, normalised)
+        ] == []
+
+    # A local composite action is a shell script the scan above cannot see.
+    assert re.search(r"uses:\s*\.", body) is None
+
     assert "git reset --hard origin/main" not in body
     assert "2>/dev/null || true" not in body
     assert "Sunucuda komutlar" not in body
+
+
+def test_the_lifecycle_guard_recognises_the_invocations_it_claims_to():
+    # A negative assertion over a corpus that happens to be clean proves nothing
+    # about the patterns. Prove they match what they are written for.
+    spellings = (
+        "aws ssm send-command --instance-ids i-1",
+        "aws  ssm   send-command --instance-ids i-1",
+        "aws2 ssm send-command --instance-ids i-1",
+        "aws \\\n  ssm send-command --instance-ids i-1",
+        "ssm_client.send_command(InstanceIds=[instance])",
+        "client . get_command_invocation( CommandId=cid )",
+    )
+    for spelling in spellings:
+        normalised = _normalised_shell(spelling)
+        assert [
+            pattern
+            for pattern in SSM_LIFECYCLE_INVOCATIONS
+            if re.search(pattern, normalised)
+        ], spelling
 
 
 def test_existing_non_deploy_safeguards_remain_without_secret_output():
@@ -444,6 +499,44 @@ RETIRED_CEILING_SPELLINGS = (
 HEARTBEAT_SUBJECTS = (
     "LastPingDateTime", "PingStatus", "heartbeat", "ping", "SSM target",
 )
+
+
+def _names_a_heartbeat(text):
+    """Case-insensitively, and by whole words.
+
+    The subjects were matched case-sensitively while the retired ceilings were
+    matched case-insensitively, so capitalising one letter defeated every
+    document guard at once. Matched as substrings, meanwhile, a bare "ping"
+    also fires on "mapping" and "shipping", which made an unrelated document
+    an offender.
+    """
+    return any(
+        re.search(rf"\b{re.escape(subject)}\b", text, flags=re.IGNORECASE)
+        for subject in HEARTBEAT_SUBJECTS
+    )
+
+
+def test_the_heartbeat_subject_matcher_reads_words_not_substrings():
+    # Both halves matter: the guard has to fire on the subject however it is
+    # capitalised, and stay silent on words that merely contain it.
+    for naming in (
+        "Heartbeat age is bounded.",
+        "the LASTPINGDATETIME field",
+        "PingStatus must be Online",
+        "a stale ping is rejected",
+        "the sole SSM target",
+    ):
+        assert _names_a_heartbeat(naming), naming
+
+    for silent in (
+        "the mapping between roles",
+        "shipping the artefact",
+        "unpinged is not a word but pinged is not a subject either",
+        "no subject at all",
+    ):
+        assert not _names_a_heartbeat(silent), silent
+
+
 # A banner only excuses a document if it is a banner about *this* contract:
 # either it names what the retired wording was about, or it names the ceiling
 # that replaced it.
@@ -467,6 +560,16 @@ def _superseded(text):
     return any(subject.lower() in banner.lower() for subject in SUPERSEDED_SUBJECTS)
 
 
+MARKDOWN_SUFFIXES = (".md", ".markdown", ".mdx")
+
+# Documents that must be in the scanned corpus. A negative assertion over an
+# empty corpus passes, so any drift in the listing has to fail loudly instead.
+REQUIRED_SCANNED_DOCUMENTS = (
+    Path("docs/DEPLOYMENT.md"),
+    Path("README.md"),
+)
+
+
 def _shipped_markdown():
     """Every markdown file that actually ships, not one directory of them.
 
@@ -476,17 +579,47 @@ def _shipped_markdown():
 
     Tracked files plus untracked ones that are not ignored: the first is what
     ships, the second is what an author is about to add, so a new offender is
-    caught before it is even staged. Ignored paths are excluded deliberately --
-    `.superpowers/sdd/` is local agent scratch that cannot ship.
+    caught before it is even staged. Filtering happens here rather than in a
+    pathspec because git's pathspec is case-sensitive and `RUNBOOK.MD` is a
+    document like any other.
     """
     listing = subprocess.run(
         [
             "git", "-c", "safe.directory=*", "ls-files", "-z",
-            "--cached", "--others", "--exclude-standard", "--", "*.md",
+            "--cached", "--others", "--exclude-standard",
         ],
         capture_output=True, text=True, check=True,
     ).stdout
-    return sorted(Path(name) for name in listing.split("\0") if name)
+    return sorted(
+        Path(name)
+        for name in listing.split("\0")
+        if name and name.lower().endswith(MARKDOWN_SUFFIXES)
+    )
+
+
+def _sections(text):
+    """Markdown sections: a heading and the paragraphs beneath it.
+
+    Paragraph scope alone was evaded by naming the subject in a heading or an
+    introductory sentence and stating the retired ceiling in the next paragraph.
+    """
+    sections = []
+    current = []
+    for line in text.split("\n"):
+        if line.startswith("#") and current:
+            sections.append("\n".join(current))
+            current = []
+        current.append(line)
+    sections.append("\n".join(current))
+    return sections
+
+
+def test_the_scanned_document_corpus_is_not_empty():
+    corpus = _shipped_markdown()
+
+    assert len(corpus) > 20
+    for required in REQUIRED_SCANNED_DOCUMENTS:
+        assert required in corpus
 
 
 def test_no_document_states_a_retired_heartbeat_ceiling_as_current():
@@ -503,15 +636,18 @@ def test_no_document_states_a_retired_heartbeat_ceiling_as_current():
         text = path.read_text(encoding="utf-8")
         if _superseded(text):
             continue
-        for block in text.split("\n\n"):
-            paragraph = " ".join(block.split())
-            if not any(subject in paragraph for subject in HEARTBEAT_SUBJECTS):
+        for section in _sections(text):
+            # Subject anywhere in the section, ceiling anywhere in the same
+            # section: "## SSM target heartbeat" followed two paragraphs later
+            # by "It is 300 seconds" is one claim, however it is laid out.
+            if not _names_a_heartbeat(section):
                 continue
+            body = " ".join(section.split())
             if any(
-                re.search(pattern, paragraph, flags=re.IGNORECASE)
+                re.search(pattern, body, flags=re.IGNORECASE)
                 for pattern in RETIRED_CEILING_SPELLINGS
             ):
-                offenders.append(f"{path.as_posix()}: {paragraph[:60]}")
+                offenders.append(f"{path.as_posix()}: {body[:60]}")
 
     assert offenders == []
 
@@ -535,7 +671,7 @@ def test_the_runbook_speaks_about_heartbeat_freshness_in_exactly_one_place():
     speaking = [
         " ".join(block.split())
         for block in _deployment_guide().split("\n\n")
-        if any(subject in block for subject in HEARTBEAT_SUBJECTS)
+        if _names_a_heartbeat(block)
     ]
 
     assert speaking == [FRESHNESS_CONTRACT_PARAGRAPH]
@@ -549,16 +685,69 @@ def test_the_pinned_paragraph_states_the_canonical_threshold_itself():
         f"{SSM_HEARTBEAT_MAX_AGE_SECONDS} seconds old"
         in FRESHNESS_CONTRACT_PARAGRAPH
     )
+    assert SSM_HEARTBEAT_FUTURE_SKEW_SECONDS == 60
+    assert "one minute in the future" in FRESHNESS_CONTRACT_PARAGRAPH
+
+
+FRESHNESS_CLAIM_SUBJECTS = HEARTBEAT_SUBJECTS + (
+    "freshness", "preflight", "clock", "SendCommand", "send-command",
+)
+
+
+def _names_the_freshness_gate(text):
+    return any(
+        re.search(rf"\b{re.escape(subject)}\b", text, flags=re.IGNORECASE)
+        for subject in FRESHNESS_CLAIM_SUBJECTS
+    )
+
+
+def _sentences(text):
+    return re.split(r"(?<=[.:])\s+", " ".join(text.split()))
 
 
 def test_the_runbook_states_no_claim_the_controller_contradicts():
-    guide = " ".join(_deployment_guide().split())
+    # Sentence-scoped, and only sentences about the freshness gate: "the
+    # directory swap is atomic" and "these notes are advisory" are true
+    # statements about other things, and a guard that rejects them teaches
+    # authors to route around it.
+    offenders = []
+    for sentence in _sentences(_deployment_guide()):
+        if not _names_the_freshness_gate(sentence):
+            continue
+        offenders += [
+            f"{pattern}: {sentence[:60]}"
+            for pattern in CONTRADICTED_OPERATIONAL_CLAIMS
+            if re.search(pattern, sentence, flags=re.IGNORECASE)
+        ]
 
-    assert [
-        pattern
-        for pattern in CONTRADICTED_OPERATIONAL_CLAIMS
-        if re.search(pattern, guide, flags=re.IGNORECASE)
-    ] == []
+    assert offenders == []
+
+
+def test_each_contradicted_claim_pattern_matches_the_claim_it_names():
+    # A negative assertion proves nothing about its patterns. Every one of them
+    # has to fire on the sentence it was written for, in context.
+    claims = {
+        r"atomic": "The heartbeat proof and SendCommand are atomic.",
+        r"no time (?:can|will|may|could) (?:elapse|pass)":
+            "No time can elapse between the freshness proof and the send.",
+        r"no recheck": "There is no recheck of the SSM target before sending.",
+        r"remains? authoritative":
+            "The preflight clock remains authoritative at send time.",
+        r"re-?prov\w+ the heartbeat every":
+            "SSM re-provisions the heartbeat every 30 seconds.",
+        r"heartbeat is (?:re-?\w+|refreshed|renewed|updated) every":
+            "The heartbeat is refreshed every 30 seconds.",
+        r"advisory": "The heartbeat ceiling is advisory.",
+        r"best[- ]effort (?:freshness|heartbeat|check)":
+            "The controller makes a best-effort freshness attempt.",
+        r"heartbeat (?:check )?is (?:only )?(?:a )?(?:hint|warning|informational)":
+            "The heartbeat check is only a hint.",
+    }
+    assert sorted(claims) == sorted(CONTRADICTED_OPERATIONAL_CLAIMS)
+
+    for pattern, sentence in claims.items():
+        assert _names_the_freshness_gate(sentence), sentence
+        assert re.search(pattern, sentence, flags=re.IGNORECASE), pattern
 
 
 def _heartbeat_sentences(guide):
@@ -612,10 +801,61 @@ def _controller_module():
 
 
 def _function_def(module, name):
+    # Both flavours: making a boundary `async` is a refactor, not an escape
+    # from every structural guard that looks it up.
     for node in ast.walk(module):
-        if isinstance(node, ast.FunctionDef) and node.name == name:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == name
+        ):
             return node
     raise AssertionError(f"{name} is not defined in the controller")
+
+
+def _rejection_tests(function, message_fragment):
+    """The `if` conditions that reject with a given message.
+
+    Reading the comparison by its consequence, rather than by the operators or
+    the constructors it happens to spell, keeps the guard aimed at the contract
+    while leaving the arithmetic free to be written any equivalent way.
+    """
+    return [
+        node.test
+        for node in ast.walk(function)
+        if isinstance(node, ast.If)
+        and isinstance(node.test, ast.Compare)
+        and any(
+            isinstance(raised, ast.Raise)
+            and message_fragment in ast.unparse(raised).lower()
+            for raised in ast.walk(ast.Module(body=node.body, type_ignores=[]))
+        )
+    ]
+
+
+def _resolves_to(module, node, constant):
+    """True if `constant` is compared, directly or through a module binding.
+
+    `age > CEILING`, where `CEILING = timedelta(seconds=<constant>)` sits at
+    module level, is the same contract as comparing the constant inline. A
+    guard that cannot see that punishes a refactor it has no opinion about.
+    """
+    names = {
+        found.id for found in ast.walk(node) if isinstance(found, ast.Name)
+    }
+    if constant in names:
+        return True
+    for statement in module.body:
+        targets = (
+            [statement.target] if isinstance(statement, ast.AnnAssign)
+            else getattr(statement, "targets", [])
+        )
+        bound = {
+            target.id for target in targets if isinstance(target, ast.Name)
+        }
+        if bound & names and statement.value is not None:
+            if constant in ast.unparse(statement.value):
+                return True
+    return False
 
 
 def _calls_to(node, name):
@@ -682,6 +922,46 @@ def test_the_freshness_boundary_does_nothing_after_it_proves_freshness():
     assert len(proving) == 1
     assert proving[0] == len(boundary.body) - 1
 
+    # "Last statement" is not "last act": `return validate(...) if _settle()
+    # else None` satisfies the index check while `_settle()` busy-waits for as
+    # long as it likes. The proof must be the returned expression itself.
+    final = boundary.body[-1]
+    assert isinstance(final, ast.Return)
+    assert isinstance(final.value, ast.Call)
+    assert isinstance(final.value.func, ast.Name)
+    assert final.value.func.id == "validate_managed_instance"
+
+
+def test_the_aws_runner_does_no_unbounded_work_before_the_wire():
+    # `run_aws_json` is the only code that genuinely sits between the freshness
+    # proof and SendCommand on the wire, and the forbidden-work guard cannot see
+    # it: that test injects a fake runner. A retry or backoff loop added here
+    # spends heartbeat age the proof already accounted for, and the subprocess
+    # `timeout=` bounds only the subprocess.
+    runner = _function_def(_controller_module(), "run_aws_json")
+
+    loops = [
+        node for node in ast.walk(runner)
+        if isinstance(node, (ast.For, ast.AsyncFor, ast.While))
+    ]
+    assert loops == []
+
+    waiting = [
+        ast.unparse(node) for node in ast.walk(runner)
+        if isinstance(node, ast.Call)
+        and "sleep" in ast.unparse(node.func)
+    ]
+    assert waiting == []
+
+    # Exactly one launch, and it is the subprocess call itself.
+    launches = [
+        node for node in ast.walk(runner)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "run"
+    ]
+    assert len(launches) == 1
+
 
 def test_controller_imports_the_canonical_threshold_instead_of_redeclaring_it():
     # A redeclared ceiling -- at any scope, under any spelling or annotation --
@@ -717,34 +997,34 @@ def test_the_canonical_threshold_is_the_value_the_boundary_actually_compares():
     boundary = _function_def(module, "validate_managed_instance")
 
     # A dead `_ = SSM_HEARTBEAT_MAX_AGE_SECONDS` satisfies a whole-body search
-    # while the comparison runs against a shadow local, so read the staleness
-    # comparison itself. Only that one: the future-skew clause is a `<`.
-    ceiling_comparisons = [
-        node
-        for node in ast.walk(boundary)
-        if isinstance(node, ast.Compare)
-        and any(isinstance(op, (ast.Gt, ast.GtE)) for op in node.ops)
-        and "timedelta" in ast.unparse(node)
-    ]
-    assert len(ceiling_comparisons) == 1
+    # while the comparison runs against a shadow local, so read the comparison
+    # that actually rejects. Anchored on the rejection rather than on the word
+    # "timedelta", so hoisting the ceiling to a module constant or comparing
+    # `age.total_seconds()` stays green -- both are the same contract.
+    stale_tests = _rejection_tests(boundary, "stale")
+    assert len(stale_tests) == 1
+    assert any(isinstance(op, (ast.Gt, ast.GtE)) for op in stale_tests[0].ops)
+    assert _resolves_to(module, stale_tests[0], "SSM_HEARTBEAT_MAX_AGE_SECONDS")
 
-    compared = {
-        node.id
-        for node in ast.walk(ceiling_comparisons[0])
-        if isinstance(node, ast.Name)
-    }
-    assert "SSM_HEARTBEAT_MAX_AGE_SECONDS" in compared
+    # Its sibling tolerance is canonical too, and it is the opposite direction.
+    skew_tests = _rejection_tests(boundary, "future")
+    assert len(skew_tests) == 1
+    assert any(isinstance(op, (ast.Lt, ast.LtE)) for op in skew_tests[0].ops)
+    assert _resolves_to(module, skew_tests[0], "SSM_HEARTBEAT_FUTURE_SKEW_SECONDS")
 
     # ... and the name must still mean the canonical constant, unaliased.
-    sources = [
-        (node.module, alias.asname)
-        for node in ast.walk(module)
-        if isinstance(node, ast.ImportFrom)
-        for alias in node.names
-        if alias.name == "SSM_HEARTBEAT_MAX_AGE_SECONDS"
-    ]
-    assert sources
-    assert set(sources) == {("deploy_contract", None)}
+    for name in (
+        "SSM_HEARTBEAT_MAX_AGE_SECONDS", "SSM_HEARTBEAT_FUTURE_SKEW_SECONDS",
+    ):
+        sources = [
+            (node.module, alias.asname)
+            for node in ast.walk(module)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+            if alias.name == name
+        ]
+        assert sources, name
+        assert set(sources) == {("deploy_contract", None)}, name
 
 
 def test_send_boundary_clock_is_typed_as_a_live_clock_not_a_frozen_sample():

@@ -6,6 +6,9 @@ from types import MappingProxyType
 
 
 SSM_HEARTBEAT_MAX_AGE_SECONDS: int = 360
+# Clock skew the send boundary tolerates before calling a heartbeat
+# impossible. Its sibling above is canonical; this was a bare literal.
+SSM_HEARTBEAT_FUTURE_SKEW_SECONDS: int = 60
 SSM_EXECUTION_TIMEOUT_SECONDS: int = 1800
 HOST_PHASE_SECONDS = MappingProxyType({
     "root_bootstrap": 10,
