@@ -59,7 +59,19 @@ rather than a check. Nothing at run time distinguishes a live clock from one
 that captured a single instant and answers with it forever: both are callables
 returning a timezone-aware datetime, and two honest readings taken microseconds
 apart may be equal, so an advance test would reject real deploys without
-detecting what it targets. The controller closes the routes instead. The deploy
+detecting what it targets.
+
+A stronger check was considered and declined: comparing the injected clock's
+elapsed time against `time.monotonic()` across preflight and send, with a
+generous tolerance. That would detect a latched clock, and the monotonic source
+is already injected. It is not implemented because the seam it would guard is
+unreachable in production — the workflow runs the controller with no arguments,
+so the deploy always takes the pinned live default, and the clock parameter
+exists for tests. Adding runtime code that can abort a real deploy in order to
+defend a test-only seam is the wrong trade. If the entrypoint ever gains a
+caller that supplies a clock, implement the monotonic cross-check first.
+
+The controller closes the routes instead. The deploy
 entrypoint's parameters are whitelisted, the send-time clock is bound exactly
 once and its construction is pinned, no boundary declares a default clock, and
 the module is permitted exactly one callable taking no arguments — the live

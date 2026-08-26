@@ -232,27 +232,32 @@ SSM_LIFECYCLE_OPERATIONS = (
 # runs `python3 scripts/*.py` after assuming the production role; `.yaml`
 # because a SAM/CloudFormation template is deployable infrastructure that can
 # declare SSM automation of its own.
-EXECUTABLE_SUFFIXES = (".sh", ".bash", ".py", ".yml", ".yaml", ".mk")
+# Suffixes that cannot execute. Everything else shipped in this tree is
+# treated as executable -- the inversion is the point. Enumerating what runs
+# was defeated twice: once by an extensionless file with no shebang, once by
+# `.js`, and this tree also ships 320 `.json`, `nginx.conf`, `.ini` and
+# `.toml`, none of which any list named. A new suffix now joins the scanned
+# set by default instead of silently escaping it.
+PROSE_SUFFIXES = (".md", ".markdown", ".mdx", ".rst", ".txt", ".adoc")
 
-# Files CI or an operator runs that carry no suffix at all. An extensionless
-# shebang script is the ordinary way to ship a repository command, and a
-# Makefile is executable by every definition that matters here; neither was in
-# the corpus, so a complete second SSM lifecycle shipped green in both.
-EXECUTABLE_NAMES = frozenset({
-    "Makefile", "makefile", "GNUmakefile", "Dockerfile", "Procfile",
-})
+BINARY_SUFFIXES = (
+    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".bmp",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot",
+    ".pdf", ".zip", ".gz", ".tar", ".db", ".sqlite", ".pyc", ".mo",
+)
 
-# The only files allowed to name those operations. An allow-list of paths, not
-# a directory exclusion: a new file anywhere -- including a new test helper --
-# is a finding until it is added here on purpose.
-# Files that may MENTION SSM at all. Wider than the lifecycle owners below,
-# because the deploy workflow names the service in a step title while
-# delegating every call to the controller.
+# Kinds that must be present, so the inversion cannot quietly stop admitting a
+# whole class of file. `.js` and `.json` are here because they were the hole.
+REQUIRED_EXECUTABLE_KINDS = (".py", ".yml", ".sh", ".js", ".json")
+
 SSM_MENTION_ALLOWED = frozenset({
     Path("scripts/deploy_control.py"),
     Path("tests/test_deploy_control.py"),
     Path("tests/test_deploy_workflow.py"),
     Path(".github/workflows/deploy.yml"),
+    # A config template whose comment describes moving secrets to SSM
+    # Parameter Store. Prose in a file that is not prose.
+    Path(".env.example"),
 })
 
 SSM_LIFECYCLE_OWNERS = frozenset({
@@ -296,17 +301,8 @@ def _shipped_executable_sources():
         capture_output=True, text=True, check=True,
     ).stdout
     def executable(name):
-        path = Path(name)
-        if name.lower().endswith(EXECUTABLE_SUFFIXES) or path.name in EXECUTABLE_NAMES:
-            return True
-        if path.suffix:
-            return False
-        # No suffix and not a known name: read the shebang rather than guess.
-        try:
-            with (Path.cwd() / path).open("rb") as handle:
-                return handle.read(2) == b"#!"
-        except OSError:
-            return False
+        suffix = Path(name).suffix.lower()
+        return suffix not in BINARY_SUFFIXES and suffix not in PROSE_SUFFIXES
 
     return tuple(sorted(
         Path(name) for name in listing.split("\0") if name and executable(name)
@@ -332,14 +328,25 @@ def test_the_executable_corpus_covers_every_kind_of_thing_ci_can_run():
     for required in REQUIRED_EXECUTABLE_SOURCES:
         assert required in corpus, required
 
-    # Every admitted suffix is actually represented, so narrowing the filter
-    # back to one kind cannot pass by leaving the count high.
-    for suffix in EXECUTABLE_SUFFIXES:
-        if suffix in (".bash", ".mk"):
-            continue  # none in this tree; these suffixes are defensive
+    # Every kind that has to be there is there. `.js` and `.json` are named
+    # because they were the hole: the corpus used to enumerate what runs, and
+    # a `.js` file spelling `ssm` three times and naming two lifecycle
+    # operations shipped green.
+    for kind in REQUIRED_EXECUTABLE_KINDS:
         assert any(
-            path.name.lower().endswith(suffix) for path in corpus
-        ), suffix
+            path.name.lower().endswith(kind) for path in corpus
+        ), kind
+
+    # Nothing prose or binary leaked in through the inversion.
+    for path in corpus:
+        suffix = path.suffix.lower()
+        assert suffix not in PROSE_SUFFIXES, path
+        assert suffix not in BINARY_SUFFIXES, path
+
+    # An extensionless file is executable until proven otherwise, and is also
+    # read as prose -- belt and braces, because it can be either.
+    assert Path(".github/CODEOWNERS") in corpus
+    assert Path(".github/CODEOWNERS") in _shipped_markdown()
 
     assert len(corpus) > 100
 
@@ -1043,7 +1050,7 @@ def _superseded(text):
 
 # Prose is not only markdown. A retired ceiling stated in reStructuredText is
 # read by exactly the same operator.
-MARKDOWN_SUFFIXES = (".md", ".markdown", ".mdx", ".rst", ".txt", ".adoc")
+MARKDOWN_SUFFIXES = PROSE_SUFFIXES
 
 # Documents that must be in the scanned corpus. A negative assertion over an
 # empty corpus passes, so any drift in the listing has to fail loudly instead.
@@ -1074,10 +1081,17 @@ def _shipped_markdown():
         ],
         capture_output=True, text=True, check=True,
     ).stdout
+    def prose(name):
+        # Extensionless files too: `docs/DEPLOY_RUNBOOK` stating the retired
+        # contract as current was read by exactly the same operator as the
+        # runbook, and was in neither corpus.
+        return (
+            name.lower().endswith(MARKDOWN_SUFFIXES)
+            or not Path(name).suffix
+        )
+
     return tuple(sorted(
-        Path(name)
-        for name in listing.split("\0")
-        if name and name.lower().endswith(MARKDOWN_SUFFIXES)
+        Path(name) for name in listing.split("\0") if name and prose(name)
     ))
 
 
@@ -1688,21 +1702,71 @@ def test_the_freshness_boundary_does_nothing_after_it_proves_freshness():
 # and it is also the fix for the asymmetry the blocklist had: it rejected a
 # pure helper named `_select_call_timeout` for its name while accepting a real
 # sleep named `_settle`. Now both require a line, and only one of them is a lie.
-APPROVED_SEND_PATH_CALLEES = frozenset({
-    # Domain errors and value objects.
-    "AwsCliError", "ConfigError", "InvocationProtocolError", "ManagedInstance",
-    "PreflightError",
-    # Controller-local functions, each itself inside this closure.
-    "_authority_parameter", "_parse_heartbeat", "_require_live_clock",
-    "_require_live_clock()", "_sample_utc", "build_remote_command",
-    "render_bootstrap", "require_command_id", "require_fresh_ssm_target",
-    "validate_managed_instance",
-    # The injected AWS runner, and the one subprocess launch behind it.
-    "aws", "run",
-    # Pure stdlib: encoding, parsing, formatting, quoting. None of these block.
-    "UUID", "b64encode", "callable", "decode", "dumps", "encode",
-    "fromisoformat", "get", "group", "isinstance", "len", "loads", "quote",
-    "search", "str", "timedelta", "utcoffset", "uuid4",
+APPROVED_SEND_PATH_CALLS = frozenset({
+    # (calling function, resolved callee). Qualified by the caller because an
+    # unqualified list admits a generic approved name ANYWHERE on the path:
+    # `run` is legitimate in `run_aws_json` and is the subprocess launch, and
+    # `run = getattr(time, "sleep")` called from the freshness proof was
+    # therefore whitelisted. The same was true of `str`, `get`, `len`,
+    # `search`, `encode`, `decode`, `loads`, `dumps`, `quote` and `group`.
+    ("_authority_parameter", "ConfigError"),
+    ("_authority_parameter", "UUID"),
+    ("_authority_parameter", "str"),
+    ("_parse_heartbeat", "PreflightError"),
+    ("_parse_heartbeat", "fromisoformat"),
+    ("_parse_heartbeat", "isinstance"),
+    ("_parse_heartbeat", "utcoffset"),
+    ("_require_live_clock", "ConfigError"),
+    ("_require_live_clock", "callable"),
+    ("_sample_utc", "PreflightError"),
+    ("_sample_utc", "_require_live_clock"),
+    ("_sample_utc", "_require_live_clock()"),
+    ("_sample_utc", "isinstance"),
+    ("build_remote_command", "_authority_parameter"),
+    ("build_remote_command", "b64encode"),
+    ("build_remote_command", "decode"),
+    ("build_remote_command", "encode"),
+    ("build_remote_command", "render_bootstrap"),
+    ("build_remote_command", "str"),
+    ("build_remote_command", "uuid4"),
+    ("render_bootstrap", "b64encode"),
+    ("render_bootstrap", "decode"),
+    ("render_bootstrap", "encode"),
+    ("render_bootstrap", "quote"),
+    ("require_command_id", "InvocationProtocolError"),
+    ("require_command_id", "UUID"),
+    ("require_command_id", "get"),
+    ("require_command_id", "isinstance"),
+    ("require_command_id", "str"),
+    ("require_fresh_ssm_target", "_require_live_clock"),
+    ("require_fresh_ssm_target", "_sample_utc"),
+    ("require_fresh_ssm_target", "aws"),
+    ("require_fresh_ssm_target", "validate_managed_instance"),
+    ("run_aws_json", "AwsCliError"),
+    ("run_aws_json", "group"),
+    ("run_aws_json", "isinstance"),
+    ("run_aws_json", "len"),
+    ("run_aws_json", "loads"),
+    ("run_aws_json", "run"),
+    ("run_aws_json", "search"),
+    ("send_command", "ConfigError"),
+    ("send_command", "_require_live_clock"),
+    ("send_command", "aws"),
+    ("send_command", "build_remote_command"),
+    ("send_command", "dumps"),
+    ("send_command", "len"),
+    ("send_command", "require_command_id"),
+    ("send_command", "require_fresh_ssm_target"),
+    ("send_command", "str"),
+    ("send_command", "uuid4"),
+    ("validate_managed_instance", "ManagedInstance"),
+    ("validate_managed_instance", "PreflightError"),
+    ("validate_managed_instance", "_parse_heartbeat"),
+    ("validate_managed_instance", "get"),
+    ("validate_managed_instance", "isinstance"),
+    ("validate_managed_instance", "len"),
+    ("validate_managed_instance", "timedelta"),
+    ("validate_managed_instance", "utcoffset"),
 })
 
 # Modules whose attributes block. Binding one to a name is how the send-path
@@ -1774,17 +1838,28 @@ def test_nothing_on_the_send_path_can_loop_or_wait():
             if isinstance(node, (ast.For, ast.AsyncFor, ast.While))
         ] == [], name
 
-    # The whitelist, not a blocklist. Exact equality rather than a subset, so a
-    # name that stops being called has to leave the list too -- an entry nobody
-    # can account for is how a list like this rots into permission to do
-    # anything. The region is eleven functions; pinning it exactly is cheap.
+    # A comprehension is neither a `For` nor a `While`, and it can spin as long
+    # as it likes: `[c for c in remote_command if c not in remote_command]`
+    # over the real 65 536-character command is ~4e9 comparisons between the
+    # heartbeat verdict and the wire.
+    for name, function in sorted(reachable.items()):
+        assert [
+            node for node in ast.walk(function)
+            if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp,
+                                 ast.GeneratorExp))
+        ] == [], name
+
+    # The whitelist, not a blocklist, and qualified by the caller. Exact
+    # equality rather than a subset, so a name that stops being called has to
+    # leave the list too -- an entry nobody can account for is how a list like
+    # this rots into permission to do anything.
     called = {
-        _callee_name(node.func)
-        for function in reachable.values()
+        (name, _callee_name(node.func))
+        for name, function in reachable.items()
         for node in ast.walk(function)
         if isinstance(node, ast.Call)
     }
-    assert called == APPROVED_SEND_PATH_CALLEES
+    assert called == APPROVED_SEND_PATH_CALLS
 
     # Exactly one launch in the runner, and it is the subprocess call itself.
     runner = reachable["run_aws_json"]
@@ -1797,67 +1872,118 @@ def test_nothing_on_the_send_path_can_loop_or_wait():
     assert len(launches) == 1
 
 
-def test_the_controller_binds_no_alias_to_a_blocking_call():
-    # The whitelist above is defeated in one line if a blocking function can be
-    # rebound to an approved-looking name. This is the line that did it:
-    # `_settle = time.sleep`.
-    module = _controller_module()
+def _blocking_module_names(module):
+    """Every local name that refers to a blocking module.
+
+    `import time`, `import time as _t` and `import time, select` all bind a
+    name to something whose attributes block, and the guard used to know only
+    the first spelling.
+    """
+    names = set()
+    for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] in BLOCKING_MODULES:
+                    names.add(alias.asname or alias.name.split(".")[0])
+    return names
+
+
+def _blocking_bindings(module):
+    """Assignments that bind a name to something that can block."""
+    blocking = _blocking_module_names(module)
     offenders = []
     for node in ast.walk(module):
+        if isinstance(node, ast.ImportFrom) and node.module in BLOCKING_MODULES:
+            offenders.append(ast.unparse(node))
+            continue
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
         value = node.value
+        # `_settle = time.sleep`, and the same through an import alias.
         if (
             isinstance(value, ast.Attribute)
             and isinstance(value.value, ast.Name)
-            and value.value.id in BLOCKING_MODULES
+            and value.value.id in blocking
         ):
             offenders.append(ast.unparse(node))
-    assert offenders == []
+        # `run = getattr(time, "sleep")` -- a Call, which the shape test above
+        # cannot see, and the spelling that actually got through.
+        elif isinstance(value, ast.Call):
+            reached = {
+                child.id for child in ast.walk(value)
+                if isinstance(child, ast.Name)
+            }
+            if reached & blocking:
+                offenders.append(ast.unparse(node))
+    return offenders
 
-    # ... and `from time import sleep as _settle` is the same act.
-    imported = [
-        ast.unparse(node) for node in ast.walk(module)
-        if isinstance(node, ast.ImportFrom) and node.module in BLOCKING_MODULES
-    ]
-    assert imported == []
+
+def test_the_controller_binds_no_alias_to_a_blocking_call():
+    # The whitelist next door is defeated in one line if a blocking function
+    # can be rebound to an approved-looking name. `_settle = time.sleep` was
+    # the first spelling; `run = getattr(time, "sleep")` was the second, and it
+    # borrowed an approved name as well.
+    assert _blocking_bindings(_controller_module()) == []
 
 
-def test_the_alias_guard_sees_both_ways_of_binding_one():
-    # Positive control: the assertions above are negative and would hold
-    # vacuously against a module that simply had no assignments.
+def test_the_alias_guard_resolves_names_rather_than_matching_one_shape():
+    # Positive control. The assertion above is negative and would hold
+    # vacuously against a module with no assignments at all.
     module = ast.parse(
         "import time\n"
+        "import time as _t\n"
+        "import json\n"
         "_settle = time.sleep\n"
-        "_ok = json.dumps\n"
+        "_also = _t.sleep\n"
+        "run = getattr(time, \"sleep\")\n"
+        "fine = json.dumps\n"
     )
-    bound = [
-        ast.unparse(node) for node in ast.walk(module)
-        if isinstance(node, (ast.Assign, ast.AnnAssign))
-        and isinstance(node.value, ast.Attribute)
-        and isinstance(node.value.value, ast.Name)
-        and node.value.value.id in BLOCKING_MODULES
+    assert _blocking_module_names(module) == {"time", "_t"}
+    assert sorted(_blocking_bindings(module)) == [
+        "_also = _t.sleep",
+        "_settle = time.sleep",
+        "run = getattr(time, 'sleep')",
     ]
-    assert bound == ["_settle = time.sleep"]
 
-    aliased = ast.parse("from time import sleep as _settle\n")
-    assert [
-        node for node in ast.walk(aliased)
-        if isinstance(node, ast.ImportFrom) and node.module in BLOCKING_MODULES
-    ]
+    # `from time import sleep as _settle` is the same act by another route.
+    assert _blocking_bindings(
+        ast.parse("from time import sleep as _settle\n")
+    ) == ["from time import sleep as _settle"]
 
     # And the callee resolver reads through every shape the send path uses.
-    calls = ast.parse(
-        "time.sleep(1)\n_settle(1)\nbase64.b64encode(x).decode()\nf(a)()\n"
-    )
-    assert [
+    calls = ast.parse("time.sleep(1)\nbase64.b64encode(x).decode()\nf(a)()\n")
+    assert sorted(
         _callee_name(node.func) for node in ast.walk(calls)
         if isinstance(node, ast.Call)
-    ].count("sleep") == 1
-    assert "_settle" in [
-        _callee_name(node.func) for node in ast.walk(calls)
-        if isinstance(node, ast.Call)
+    ) == ["b64encode", "decode", "f", "f()", "sleep"]
+
+
+def test_nothing_follows_the_staleness_verdict_but_the_return():
+    """The adjacency guard, applied one level down.
+
+    `send_command`'s two statements are pinned, but the function that actually
+    renders the verdict is `validate_managed_instance`, and its tail was
+    unpinned -- so a sleep or an O(n^2) comprehension placed after the
+    staleness `raise` sat strictly between the heartbeat decision and the wire
+    with nothing to say about it.
+    """
+    validate = _function_def(_controller_module(), "validate_managed_instance")
+
+    ceilings = [
+        index for index, statement in enumerate(validate.body)
+        if isinstance(statement, ast.If)
+        and "SSM_HEARTBEAT_MAX_AGE_SECONDS" in ast.unparse(statement.test)
     ]
+    assert len(ceilings) == 1
+
+    tail = validate.body[ceilings[0] + 1:]
+    assert len(tail) == 1
+    assert isinstance(tail[0], ast.Return)
+    result = tail[0].value
+    assert isinstance(result, ast.Call)
+    assert isinstance(result.func, ast.Name)
+    assert result.func.id == "ManagedInstance"
+    assert _evaluates_only(tail[0], result)
 
 
 def test_the_send_path_guard_follows_indirection_and_names_waiting():
@@ -1879,15 +2005,15 @@ def test_the_send_path_guard_follows_indirection_and_names_waiting():
     # The helper is reached through the call, and what it calls is visible.
     assert set(reachable) == {"run_aws_json", "_delay"}
     called = {
-        _callee_name(node.func)
-        for function in reachable.values()
+        (name, _callee_name(node.func))
+        for name, function in reachable.items()
         for node in ast.walk(function)
         if isinstance(node, ast.Call)
     }
     # Neither the helper nor the thing it waits on is approved, so the
     # whitelist rejects this closure -- whatever the helper had been named.
-    assert called == {"_delay", "sleep"}
-    assert not called <= APPROVED_SEND_PATH_CALLEES
+    assert called == {("run_aws_json", "_delay"), ("_delay", "sleep")}
+    assert not called <= APPROVED_SEND_PATH_CALLS
 
     # Unreached functions are not the send path's business.
     assert "unrelated" not in reachable

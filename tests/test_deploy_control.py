@@ -976,12 +976,15 @@ def test_the_controller_injects_no_frozen_clock_anywhere():
     # Names bound to `functools.partial`, however it was imported. The check
     # used to be the literal substring "partial" in the unparsed callee, and
     # `from functools import partial as _bind` walked straight through it.
-    partial_names = {"functools.partial", "partial"}
+    # `lru_cache` and `cache` latch lazily on the first call, which is a frozen
+    # clock that arrives one read later than `partial`'s.
+    latching = ("partial", "lru_cache", "cache")
+    partial_names = {f"functools.{name}" for name in latching} | set(latching)
     for node in ast.walk(module):
         if isinstance(node, ast.ImportFrom) and node.module == "functools":
             partial_names |= {
                 alias.asname or alias.name
-                for alias in node.names if alias.name == "partial"
+                for alias in node.names if alias.name in latching
             }
 
     clock_shaped = []
