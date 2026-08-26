@@ -599,6 +599,39 @@ def test_send_describes_then_sends_and_accepts_the_ceiling_exactly():
     ]
 
 
+def test_send_boundary_propagates_a_failed_describe_instead_of_sending():
+    # Preflight has had this test since the beginning; the send boundary did
+    # not, even though `run_deploy` deliberately swallows `AwsCliError` in two
+    # other places. Wrapping the recheck in the same `except AwsCliError: pass`
+    # would submit a command with no freshness proof at all, and every test
+    # still passed.
+    config = DeployConfig.from_environ(VALID_ENV)
+    sent = []
+
+    def aws(args):
+        if args[:2] == ["ssm", "describe-instance-information"]:
+            raise AwsCliError("ThrottlingException")
+        sent.append(args)
+        raise AssertionError("SendCommand reached after a failed freshness proof")
+
+    with pytest.raises(AwsCliError, match="ThrottlingException"):
+        send_command(
+            config, HOST_SCRIPT, aws, AUTHORITY_TOKEN, utc_now=lambda: NOW,
+        )
+
+    assert sent == []
+
+
+def test_final_ssm_target_check_propagates_a_failed_describe():
+    config = DeployConfig.from_environ(VALID_ENV)
+
+    def aws(args):
+        raise AwsCliError("aws cli failed")
+
+    with pytest.raises(AwsCliError, match="aws cli failed"):
+        require_fresh_ssm_target(config, aws, lambda: NOW)
+
+
 def test_send_performs_no_forbidden_work_after_final_freshness(monkeypatch):
     config = DeployConfig.from_environ(VALID_ENV)
     final_freshness_seen = False
@@ -636,6 +669,19 @@ def test_send_performs_no_forbidden_work_after_final_freshness(monkeypatch):
         deploy_control.subprocess,
         "run",
         reject_after_freshness("subprocess work", deploy_control.subprocess.run),
+    )
+    # A retry backoff, a budget re-check, or any other wait placed between the
+    # freshness response and SendCommand spends heartbeat age the proof already
+    # accounted for. Four monkeypatched operations did not see any of them.
+    monkeypatch.setattr(
+        deploy_control.time,
+        "sleep",
+        reject_after_freshness("sleep", deploy_control.time.sleep),
+    )
+    monkeypatch.setattr(
+        deploy_control.time,
+        "monotonic",
+        reject_after_freshness("budget re-check", deploy_control.time.monotonic),
     )
 
     def aws(args):
@@ -822,7 +868,11 @@ def test_main_exposes_no_parameter_that_can_freeze_the_lifecycle_clock():
     # reviewer defeated in one line with `at: object | None = None` and
     # `lambda: at` -- the retired laundering path under a new spelling. Names and
     # annotations are the wrong thing to inspect. Whitelist the seams instead.
-    assert list(inspect.signature(main).parameters) == APPROVED_MAIN_PARAMETERS
+    # The invariant is which seams exist, not the order they are declared
+    # in: they are all keyword-only, so reordering them changes no call site.
+    assert sorted(inspect.signature(main).parameters) == sorted(
+        APPROVED_MAIN_PARAMETERS
+    )
 
 
 def test_the_send_time_clock_is_built_from_nothing_but_a_live_source():

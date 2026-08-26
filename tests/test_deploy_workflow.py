@@ -1,6 +1,7 @@
 import ast
 from pathlib import Path
 import re
+import subprocess
 
 import pytest
 import yaml
@@ -440,25 +441,65 @@ RETIRED_CEILING_SPELLINGS = (
     r"timedelta\(\s*minutes\s*=\s*5\s*\)",
     r"(?<![\d,])300\s+seconds",
 )
-HEARTBEAT_SUBJECTS = ("LastPingDateTime", "PingStatus", "heartbeat")
+HEARTBEAT_SUBJECTS = (
+    "LastPingDateTime", "PingStatus", "heartbeat", "ping", "SSM target",
+)
+# A banner only excuses a document if it is a banner about *this* contract:
+# either it names what the retired wording was about, or it names the ceiling
+# that replaced it.
+SUPERSEDED_SUBJECTS = HEARTBEAT_SUBJECTS + (
+    "ceiling", "freshness", str(SSM_HEARTBEAT_MAX_AGE_SECONDS),
+)
 
 
 def _superseded(text):
-    """True when the document opens with an explicit superseded banner."""
-    return SUPERSEDED_MARKER in text.split("\n\n", 2)[1] if "\n\n" in text else False
+    """True when the document opens with a banner retiring *this* contract.
+
+    An opening banner about something else used to exempt the whole file, which
+    short-circuited the per-paragraph scan entirely.
+    """
+    blocks = text.split("\n\n")
+    if len(blocks) < 2:
+        return False
+    banner = " ".join(blocks[1].split())
+    if SUPERSEDED_MARKER not in banner:
+        return False
+    return any(subject.lower() in banner.lower() for subject in SUPERSEDED_SUBJECTS)
+
+
+def _shipped_markdown():
+    """Every markdown file that actually ships, not one directory of them.
+
+    The scan used to walk `docs/` alone, so a runbook at the repo root could
+    state the retired ceiling as current and pass. Operator-facing prose already
+    lives in README.md, SECURITY.md, deploy/ and infra/ as well.
+
+    Tracked files plus untracked ones that are not ignored: the first is what
+    ships, the second is what an author is about to add, so a new offender is
+    caught before it is even staged. Ignored paths are excluded deliberately --
+    `.superpowers/sdd/` is local agent scratch that cannot ship.
+    """
+    listing = subprocess.run(
+        [
+            "git", "-c", "safe.directory=*", "ls-files", "-z",
+            "--cached", "--others", "--exclude-standard", "--", "*.md",
+        ],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    return sorted(Path(name) for name in listing.split("\0") if name)
 
 
 def test_no_document_states_a_retired_heartbeat_ceiling_as_current():
     # docs/DEPLOYMENT.md is the runbook, but it is not the only place a reader
-    # greps. Historical records may keep their original wording behind an
-    # opening superseded banner; without one the retired ceiling reads as the
-    # contract in force.
+    # greps -- nor is docs/ the only place prose ships. Historical records may
+    # keep their original wording behind an opening superseded banner about this
+    # contract; without one the retired ceiling reads as the contract in force.
     #
     # Scoped per paragraph, not per file: a banner buried at the bottom of a
     # document must not license the retired ceiling at the top, and an unrelated
     # "5 minutes" elsewhere in the runbook must not be flagged.
     offenders = []
-    for path in sorted(Path("docs").rglob("*.md")):
+    for path in _shipped_markdown():
         text = path.read_text(encoding="utf-8")
         if _superseded(text):
             continue
@@ -625,6 +666,23 @@ def test_controller_proves_heartbeat_freshness_at_the_send_authority_boundary():
     assert clocks[0] in argument_names
 
 
+def test_the_freshness_boundary_does_nothing_after_it_proves_freshness():
+    # The ordering guard above reads `send_command.body`, so the tail of the
+    # boundary function was invisible even though it sits strictly between the
+    # proof and the authority it protects: splitting the return into
+    # `instance = validate(...)` / `time.sleep(0)` / `return instance` survived
+    # the whole suite. The proof must therefore be the boundary's last act.
+    boundary = _function_def(_controller_module(), "require_fresh_ssm_target")
+
+    proving = [
+        index
+        for index, statement in enumerate(boundary.body)
+        if _calls_to(statement, "validate_managed_instance")
+    ]
+    assert len(proving) == 1
+    assert proving[0] == len(boundary.body) - 1
+
+
 def test_controller_imports_the_canonical_threshold_instead_of_redeclaring_it():
     # A redeclared ceiling -- at any scope, under any spelling or annotation --
     # would let the controller drift away from the canonical contract module.
@@ -699,6 +757,8 @@ def test_send_boundary_clock_is_typed_as_a_live_clock_not_a_frozen_sample():
         arguments = function.args.args + function.args.kwonlyargs
         # Keyed by the annotation, not the spelling: renaming the parameter is a
         # refactor, and exactly one clock per boundary is the real invariant.
+        # The trade is that the alias `UtcClock` is itself contract surface now
+        # -- renaming the alias is a deliberate change, made here too.
         clocks = [
             argument for argument in arguments
             if argument.annotation is not None
