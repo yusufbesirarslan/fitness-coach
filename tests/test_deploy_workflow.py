@@ -419,27 +419,58 @@ CONTRADICTED_OPERATIONAL_CLAIMS = (
     r"no time (?:can|will|may|could) (?:elapse|pass)",
     r"no recheck",
     r"remains? authoritative",
+    # Both voices of the same false claim. Active: "SSM re-provisions the
+    # heartbeat every N seconds"; passive: "the heartbeat is re-provisioned
+    # every N seconds". Only the first was matched.
     r"re-?prov\w+ the heartbeat every",
+    r"heartbeat is (?:re-?\w+|refreshed|renewed|updated) every",
+    # Framing that demotes a fail-closed gate to a hint.
+    r"advisory",
+    r"best[- ]effort (?:freshness|heartbeat|check)",
+    r"heartbeat (?:check )?is (?:only )?(?:a )?(?:hint|warning|informational)",
 )
 
 
 SUPERSEDED_MARKER = "> Superseded:"
 
+# Every spelling the retired ceiling has actually been written in. The digit and
+# comma guards keep "65 minutes" and "1,300 seconds" out.
+RETIRED_CEILING_SPELLINGS = (
+    r"(?<![\d,])(?:five|5)\s+minutes",
+    r"timedelta\(\s*minutes\s*=\s*5\s*\)",
+    r"(?<![\d,])300\s+seconds",
+)
+HEARTBEAT_SUBJECTS = ("LastPingDateTime", "PingStatus", "heartbeat")
+
+
+def _superseded(text):
+    """True when the document opens with an explicit superseded banner."""
+    return SUPERSEDED_MARKER in text.split("\n\n", 2)[1] if "\n\n" in text else False
+
 
 def test_no_document_states_a_retired_heartbeat_ceiling_as_current():
     # docs/DEPLOYMENT.md is the runbook, but it is not the only place a reader
-    # greps. Historical design records may keep their original wording -- behind
-    # an explicit superseded banner. Without one, the retired ceiling reads as
-    # the contract in force.
+    # greps. Historical records may keep their original wording behind an
+    # opening superseded banner; without one the retired ceiling reads as the
+    # contract in force.
+    #
+    # Scoped per paragraph, not per file: a banner buried at the bottom of a
+    # document must not license the retired ceiling at the top, and an unrelated
+    # "5 minutes" elsewhere in the runbook must not be flagged.
     offenders = []
     for path in sorted(Path("docs").rglob("*.md")):
         text = path.read_text(encoding="utf-8")
-        if "LastPingDateTime" not in text:
+        if _superseded(text):
             continue
-        if not re.search(r"(?<![\d,])(?:five|5)\s+minutes", text, flags=re.IGNORECASE):
-            continue
-        if SUPERSEDED_MARKER not in text:
-            offenders.append(path.as_posix())
+        for block in text.split("\n\n"):
+            paragraph = " ".join(block.split())
+            if not any(subject in paragraph for subject in HEARTBEAT_SUBJECTS):
+                continue
+            if any(
+                re.search(pattern, paragraph, flags=re.IGNORECASE)
+                for pattern in RETIRED_CEILING_SPELLINGS
+            ):
+                offenders.append(f"{path.as_posix()}: {paragraph[:60]}")
 
     assert offenders == []
 
@@ -452,6 +483,31 @@ def test_the_runbook_freshness_contract_paragraph_is_pinned_verbatim():
     contract = [block for block in paragraphs if "LastPingDateTime" in block]
 
     assert contract == [FRESHNESS_CONTRACT_PARAGRAPH]
+
+
+def test_the_runbook_speaks_about_heartbeat_freshness_in_exactly_one_place():
+    # Pinning one paragraph verbatim cannot notice a *second* paragraph being
+    # added elsewhere that states the freshness contract differently. Pinning
+    # the whole section verbatim would freeze the timeout table and the
+    # invocation-polling prose, which this task does not own. So: freshness is
+    # allowed to be discussed once, in the pinned paragraph, and nowhere else.
+    speaking = [
+        " ".join(block.split())
+        for block in _deployment_guide().split("\n\n")
+        if any(subject in block for subject in HEARTBEAT_SUBJECTS)
+    ]
+
+    assert speaking == [FRESHNESS_CONTRACT_PARAGRAPH]
+
+
+def test_the_pinned_paragraph_states_the_canonical_threshold_itself():
+    # And the pin has to track the constant: bumping the canonical ceiling
+    # without rewriting the runbook fails here rather than shipping a document
+    # that quietly disagrees with the boundary.
+    assert (
+        f"{SSM_HEARTBEAT_MAX_AGE_SECONDS} seconds old"
+        in FRESHNESS_CONTRACT_PARAGRAPH
+    )
 
 
 def test_the_runbook_states_no_claim_the_controller_contradicts():
@@ -550,13 +606,23 @@ def test_controller_proves_heartbeat_freshness_at_the_send_authority_boundary():
     proof_calls = _calls_to(proof, "require_fresh_ssm_target")
     assert len(proof_calls) == 1
 
-    # The proof must be handed the caller's own clock, not some other value.
+    # The proof must be handed the boundary's own injected clock, not some other
+    # value -- and the clock is identified by its annotation, so renaming the
+    # parameter stays a refactor rather than a contract change.
+    clocks = [
+        argument.arg
+        for argument in send_command.args.args + send_command.args.kwonlyargs
+        if argument.annotation is not None
+        and ast.unparse(argument.annotation) == "UtcClock"
+    ]
+    assert len(clocks) == 1
+
     argument_names = {
         argument.id
         for argument in ast.walk(proof_calls[0])
         if isinstance(argument, ast.Name)
     }
-    assert "utc_now" in argument_names
+    assert clocks[0] in argument_names
 
 
 def test_controller_imports_the_canonical_threshold_instead_of_redeclaring_it():
@@ -592,12 +658,24 @@ def test_the_canonical_threshold_is_the_value_the_boundary_actually_compares():
     module = _controller_module()
     boundary = _function_def(module, "validate_managed_instance")
 
-    loaded = {
-        node.id
+    # A dead `_ = SSM_HEARTBEAT_MAX_AGE_SECONDS` satisfies a whole-body search
+    # while the comparison runs against a shadow local, so read the staleness
+    # comparison itself. Only that one: the future-skew clause is a `<`.
+    ceiling_comparisons = [
+        node
         for node in ast.walk(boundary)
-        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+        if isinstance(node, ast.Compare)
+        and any(isinstance(op, (ast.Gt, ast.GtE)) for op in node.ops)
+        and "timedelta" in ast.unparse(node)
+    ]
+    assert len(ceiling_comparisons) == 1
+
+    compared = {
+        node.id
+        for node in ast.walk(ceiling_comparisons[0])
+        if isinstance(node, ast.Name)
     }
-    assert "SSM_HEARTBEAT_MAX_AGE_SECONDS" in loaded
+    assert "SSM_HEARTBEAT_MAX_AGE_SECONDS" in compared
 
     # ... and the name must still mean the canonical constant, unaliased.
     sources = [
@@ -619,10 +697,19 @@ def test_send_boundary_clock_is_typed_as_a_live_clock_not_a_frozen_sample():
     for name in ("preflight", "require_fresh_ssm_target", "send_command", "run_deploy"):
         function = _function_def(module, name)
         arguments = function.args.args + function.args.kwonlyargs
-        clock = next(
-            argument for argument in arguments if argument.arg == "utc_now"
-        )
-        assert ast.unparse(clock.annotation) == "UtcClock", name
+        # Keyed by the annotation, not the spelling: renaming the parameter is a
+        # refactor, and exactly one clock per boundary is the real invariant.
+        clocks = [
+            argument for argument in arguments
+            if argument.annotation is not None
+            and "Clock" in ast.unparse(argument.annotation)
+        ]
+        assert [ast.unparse(clock.annotation) for clock in clocks] == ["UtcClock"], name
+        assert not [
+            argument for argument in arguments
+            if argument.annotation is not None
+            and "datetime" in ast.unparse(argument.annotation)
+        ], name
 
     # Keyed by the argument itself: a default here would be a clock baked in at
     # import time, and positional indexing would silently follow the wrong one.
@@ -632,7 +719,8 @@ def test_send_boundary_clock_is_typed_as_a_live_clock_not_a_frozen_sample():
     )
     clock = next(
         argument for argument in send_command.args.kwonlyargs
-        if argument.arg == "utc_now"
+        if argument.annotation is not None
+        and ast.unparse(argument.annotation) == "UtcClock"
     )
     assert keyword_defaults[clock] is None
 

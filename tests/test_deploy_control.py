@@ -1,3 +1,4 @@
+import ast
 import base64
 import inspect
 import json
@@ -572,7 +573,7 @@ def test_final_ssm_target_check_refuses_a_clock_without_a_timezone():
         )
 
 
-def test_send_rechecks_online_heartbeat_at_actual_send_boundary():
+def test_send_describes_then_sends_and_accepts_the_ceiling_exactly():
     # The previous fixture drew from a two-element clock while asserting that
     # exactly one describe happens, so its second element was unreachable and
     # the "61 seconds" it advertised was never exercised. What this test does
@@ -797,17 +798,71 @@ def test_main_refuses_a_pre_sampled_clock_override():
                         "freshness is sampled at the boundary"]
 
 
-def test_main_exposes_no_parameter_that_can_freeze_the_lifecycle_clock():
-    # Structural, so the laundering path cannot be reintroduced under a new
-    # name: no entrypoint parameter may carry an already-sampled instant.
-    parameters = inspect.signature(main).parameters
+# The entrypoint's injection seams, whitelisted. Adding one is a deliberate act
+# that has to be made here, next to the reason the list exists.
+CONTROLLER_SOURCE = Path(deploy_control.__file__)
 
-    assert "now" not in parameters
-    assert [
-        name
-        for name, parameter in parameters.items()
-        if "datetime" in str(parameter.annotation)
-    ] == []
+
+def _controller_function(name):
+    module = ast.parse(CONTROLLER_SOURCE.read_text(encoding="utf-8"))
+    for node in ast.walk(module):
+        if isinstance(node, ast.FunctionDef) and node.name == name:
+            return node
+    raise AssertionError(f"{name} is not defined in the controller")
+
+
+APPROVED_MAIN_PARAMETERS = [
+    "environ", "repo_path", "aws", "utc_now", "monotonic", "sleep", "log",
+    "run_git",
+]
+
+
+def test_main_exposes_no_parameter_that_can_freeze_the_lifecycle_clock():
+    # Round 4 asserted that no parameter annotation mentions `datetime`, which a
+    # reviewer defeated in one line with `at: object | None = None` and
+    # `lambda: at` -- the retired laundering path under a new spelling. Names and
+    # annotations are the wrong thing to inspect. Whitelist the seams instead.
+    assert list(inspect.signature(main).parameters) == APPROVED_MAIN_PARAMETERS
+
+
+def test_the_send_time_clock_is_built_from_nothing_but_a_live_source():
+    # ... and pin what the clock is actually assembled from, so a whitelisted
+    # parameter cannot be re-purposed into a frozen instant either.
+    entrypoint = _controller_function("main")
+
+    assignments = [
+        node for node in ast.walk(entrypoint)
+        if isinstance(node, ast.AnnAssign)
+        and isinstance(node.target, ast.Name)
+        and node.target.id == "send_time_clock"
+    ]
+    assert len(assignments) == 1
+
+    referenced = {
+        node.id
+        for node in ast.walk(assignments[0].value)
+        if isinstance(node, ast.Name)
+    }
+    assert referenced == {"utc_now", "datetime", "timezone"}
+
+
+def test_the_controller_injects_no_frozen_clock_anywhere():
+    # A zero-argument lambda in this module is a clock by construction. Exactly
+    # one is legitimate: the live default. Any other is a sample taken at some
+    # earlier instant and dressed up as a clock -- which is the one thing
+    # `_require_live_clock` provably cannot detect at run time, because a frozen
+    # clock and a live one have identical shape.
+    module = ast.parse(CONTROLLER_SOURCE.read_text(encoding="utf-8"))
+
+    clock_shaped = [
+        ast.unparse(node)
+        for node in ast.walk(module)
+        if isinstance(node, ast.Lambda)
+        and not node.args.args
+        and not node.args.posonlyargs
+        and not node.args.kwonlyargs
+    ]
+    assert clock_shaped == ["lambda: datetime.now(timezone.utc)"]
 
 
 def test_send_rejects_heartbeat_that_became_stale_after_preflight():

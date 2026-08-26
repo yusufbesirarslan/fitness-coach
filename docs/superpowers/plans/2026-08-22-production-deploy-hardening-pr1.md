@@ -1,5 +1,11 @@
 # Production Deployment Hardening PR1 Implementation Plan
 
+> Superseded: the five-minute SSM heartbeat ceiling written into the steps
+> below was retired. The contract in force is 360 seconds, proven at the
+> SendCommand authority boundary; see `docs/DEPLOYMENT.md` and
+> `scripts/deploy_contract.py`. The rest of this document is kept as the
+> original implementation record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make production deployment use exactly the CI-approved SHA with stale rejection, GitHub and host serialization, bounded SSM delivery/execution, and authoritative running-revision verification.

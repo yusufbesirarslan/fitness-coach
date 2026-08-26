@@ -524,6 +524,17 @@ def _require_live_clock(utc_now: UtcClock) -> UtcClock:
     A bare ``datetime`` is a clock frozen at some earlier instant. Accepting one
     would decide heartbeat freshness from before the boundary that is about to
     act, which is exactly the retired early-clock contract.
+
+    This check is deliberately a shape check and nothing more. ``lambda: <an
+    instant sampled an hour ago>`` and a live clock are indistinguishable at run
+    time: both are zero-argument callables, and two genuine ``datetime.now``
+    reads can legitimately return the same value, so no advance-checking
+    heuristic can separate them without failing real deploys. ``utc_now`` is
+    therefore a trusted injection seam, on the same footing as monkeypatching
+    :func:`require_fresh_ssm_target` itself. What is guarded instead is every
+    route by which this repository can supply one: the entrypoint's parameters
+    are whitelisted, the send-time clock's construction is pinned, and this
+    module is allowed exactly one zero-argument lambda -- the live default.
     """
     if not callable(utc_now):
         raise ConfigError(
