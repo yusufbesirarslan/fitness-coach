@@ -973,6 +973,17 @@ def test_the_controller_injects_no_frozen_clock_anywhere():
     # zero-argument signature.
     module = ast.parse(CONTROLLER_SOURCE.read_text(encoding="utf-8"))
 
+    # Names bound to `functools.partial`, however it was imported. The check
+    # used to be the literal substring "partial" in the unparsed callee, and
+    # `from functools import partial as _bind` walked straight through it.
+    partial_names = {"functools.partial", "partial"}
+    for node in ast.walk(module):
+        if isinstance(node, ast.ImportFrom) and node.module == "functools":
+            partial_names |= {
+                alias.asname or alias.name
+                for alias in node.names if alias.name == "partial"
+            }
+
     clock_shaped = []
     for node in ast.walk(module):
         if isinstance(node, ast.Lambda):
@@ -980,11 +991,34 @@ def test_the_controller_injects_no_frozen_clock_anywhere():
                 clock_shaped.append(ast.unparse(node))
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             if _callable_with_no_arguments(
-                node.args, bound_self=node.name == "__call__"
+                node.args, bound_self=node.name in ("__call__", "__new__")
             ):
-                clock_shaped.append(node.name)
-        elif isinstance(node, ast.Call) and "partial" in ast.unparse(node.func):
+                # Scored with their class below, where the callable really is.
+                if node.name not in ("__call__", "__new__"):
+                    clock_shaped.append(node.name)
+        elif isinstance(node, ast.Call) and (
+            ast.unparse(node.func) in partial_names
+        ):
             clock_shaped.append(ast.unparse(node))
+
+    # A `ClassDef` is neither a `Lambda`, a `FunctionDef` nor a `Call`, so the
+    # census could not see one at all -- and `class _LatchedClock` with a
+    # `__new__` that samples once and returns that instant forever is a clock
+    # by any definition. Only the two shapes that can actually BE a clock are
+    # scored: `__call__` (the instance is the clock) and `__new__` (the class
+    # is). A dataclass or an exception defines neither, and `ConfigError()`
+    # takes no arguments but returns an exception -- flagging it would report a
+    # frozen clock where the census had found an error type.
+    for definition in ast.walk(module):
+        if not isinstance(definition, ast.ClassDef):
+            continue
+        for child in definition.body:
+            if (
+                isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and child.name in ("__call__", "__new__")
+                and _callable_with_no_arguments(child.args, bound_self=True)
+            ):
+                clock_shaped.append(f"{definition.name}.{child.name}")
 
     # `main` is the entrypoint, not a clock: its parameters are all defaulted so
     # `python -m` can call it, and which parameters it may have is pinned
@@ -994,6 +1028,69 @@ def test_the_controller_injects_no_frozen_clock_anywhere():
         "lambda: datetime.now(timezone.utc)",
         "main",
     ]
+
+
+# Every exported boundary that takes the send-time clock. A default here is a
+# clock nobody passes and nobody reviews.
+CLOCK_CARRYING_BOUNDARIES = (
+    "preflight", "require_fresh_ssm_target", "send_command", "run_deploy",
+)
+
+
+def _declared_default(arguments, name):
+    """The default expression for `name`, or None if it is required."""
+    positional = arguments.posonlyargs + arguments.args
+    first_defaulted = len(positional) - len(arguments.defaults)
+    for index, parameter in enumerate(positional):
+        if parameter.arg == name:
+            if index < first_defaulted:
+                return None
+            return arguments.defaults[index - first_defaulted]
+    for index, parameter in enumerate(arguments.kwonlyargs):
+        if parameter.arg == name:
+            return arguments.kw_defaults[index]
+    return None
+
+
+def test_no_boundary_supplies_its_own_clock():
+    # The census next door counts zero-argument callables in this module. It
+    # does not stop one being installed as the DEFAULT of a boundary the census
+    # has no opinion about -- which is how a latched clock reached
+    # `require_fresh_ssm_target`, the function whose own test says it "is
+    # exported and callable on its own". The clock is always the caller's.
+    module = ast.parse(CONTROLLER_SOURCE.read_text(encoding="utf-8"))
+
+    definitions = {
+        node.name: node for node in ast.walk(module)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    for name in CLOCK_CARRYING_BOUNDARIES:
+        function = definitions[name]
+        parameters = [
+            parameter.arg for parameter in
+            function.args.posonlyargs + function.args.args
+            + function.args.kwonlyargs
+        ]
+        assert "utc_now" in parameters, name
+        assert _declared_default(function.args, "utc_now") is None, name
+
+
+def test_the_default_reader_finds_defaults_in_both_positions():
+    # Positive control: the assertion above is negative in both directions.
+    module = ast.parse(
+        "def positional(a, b=1, utc_now=FROZEN): pass\n"
+        "def required(a, utc_now): pass\n"
+        "def kwonly(a, *, utc_now=FROZEN): pass\n"
+        "def kwonly_required(a, *, utc_now): pass\n"
+    )
+    defaults = {
+        node.name: _declared_default(node.args, "utc_now")
+        for node in module.body
+    }
+    assert defaults["required"] is None
+    assert defaults["kwonly_required"] is None
+    assert ast.unparse(defaults["positional"]) == "FROZEN"
+    assert ast.unparse(defaults["kwonly"]) == "FROZEN"
 
 
 def test_send_rejects_heartbeat_that_became_stale_after_preflight():

@@ -54,6 +54,19 @@ controller time spent between preflight and send counts against heartbeat age.
 Failure is fail-closed; correct the instance or SSM registration before
 retrying.
 
+The send boundary trusts the clock it is given, and that trust is a boundary
+rather than a check. Nothing at run time distinguishes a live clock from one
+that captured a single instant and answers with it forever: both are callables
+returning a timezone-aware datetime, and two honest readings taken microseconds
+apart may be equal, so an advance test would reject real deploys without
+detecting what it targets. The controller closes the routes instead. The deploy
+entrypoint's parameters are whitelisted, the send-time clock is bound exactly
+once and its construction is pinned, no boundary declares a default clock, and
+the module is permitted exactly one callable taking no arguments — the live
+default. Installing a pre-sampled clock therefore means editing the controller,
+which the tests refuse. Review any change to how the entrypoint obtains its
+clock as a security change.
+
 The controller uses the following independent bounds.
 
 | Limit | Value |

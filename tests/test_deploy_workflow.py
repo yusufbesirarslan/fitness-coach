@@ -232,11 +232,29 @@ SSM_LIFECYCLE_OPERATIONS = (
 # runs `python3 scripts/*.py` after assuming the production role; `.yaml`
 # because a SAM/CloudFormation template is deployable infrastructure that can
 # declare SSM automation of its own.
-EXECUTABLE_SUFFIXES = (".sh", ".bash", ".py", ".yml", ".yaml")
+EXECUTABLE_SUFFIXES = (".sh", ".bash", ".py", ".yml", ".yaml", ".mk")
+
+# Files CI or an operator runs that carry no suffix at all. An extensionless
+# shebang script is the ordinary way to ship a repository command, and a
+# Makefile is executable by every definition that matters here; neither was in
+# the corpus, so a complete second SSM lifecycle shipped green in both.
+EXECUTABLE_NAMES = frozenset({
+    "Makefile", "makefile", "GNUmakefile", "Dockerfile", "Procfile",
+})
 
 # The only files allowed to name those operations. An allow-list of paths, not
 # a directory exclusion: a new file anywhere -- including a new test helper --
 # is a finding until it is added here on purpose.
+# Files that may MENTION SSM at all. Wider than the lifecycle owners below,
+# because the deploy workflow names the service in a step title while
+# delegating every call to the controller.
+SSM_MENTION_ALLOWED = frozenset({
+    Path("scripts/deploy_control.py"),
+    Path("tests/test_deploy_control.py"),
+    Path("tests/test_deploy_workflow.py"),
+    Path(".github/workflows/deploy.yml"),
+})
+
 SSM_LIFECYCLE_OWNERS = frozenset({
     Path("scripts/deploy_control.py"),      # the one authorised lifecycle
     Path("tests/test_deploy_control.py"),   # its behavioural tests
@@ -277,10 +295,21 @@ def _shipped_executable_sources():
         ],
         capture_output=True, text=True, check=True,
     ).stdout
+    def executable(name):
+        path = Path(name)
+        if name.lower().endswith(EXECUTABLE_SUFFIXES) or path.name in EXECUTABLE_NAMES:
+            return True
+        if path.suffix:
+            return False
+        # No suffix and not a known name: read the shebang rather than guess.
+        try:
+            with (Path.cwd() / path).open("rb") as handle:
+                return handle.read(2) == b"#!"
+        except OSError:
+            return False
+
     return tuple(sorted(
-        Path(name)
-        for name in listing.split("\0")
-        if name and name.lower().endswith(EXECUTABLE_SUFFIXES)
+        Path(name) for name in listing.split("\0") if name and executable(name)
     ))
 
 
@@ -306,8 +335,8 @@ def test_the_executable_corpus_covers_every_kind_of_thing_ci_can_run():
     # Every admitted suffix is actually represented, so narrowing the filter
     # back to one kind cannot pass by leaving the count high.
     for suffix in EXECUTABLE_SUFFIXES:
-        if suffix == ".bash":
-            continue  # none in this tree; the suffix is defensive
+        if suffix in (".bash", ".mk"):
+            continue  # none in this tree; these suffixes are defensive
         assert any(
             path.name.lower().endswith(suffix) for path in corpus
         ), suffix
@@ -316,6 +345,31 @@ def test_the_executable_corpus_covers_every_kind_of_thing_ci_can_run():
 
     for owner in SSM_LIFECYCLE_OWNERS:
         assert owner in corpus, owner
+
+
+def test_nothing_outside_the_controller_mentions_ssm_at_all():
+    """The completeness half of the lifecycle guard.
+
+    The operation scan below is anchored on the operation name, and one string
+    interpolation defeats it: `verb=send; noun=command; aws ssm "${verb}-${noun}"`
+    contains no operation name to find. That class of guard cannot be completed
+    by adding spellings, so this one is anchored on the service instead. Four
+    of five hundred and fourteen shipped executables mention `ssm`; a fifth is
+    a deliberate act and should read as one.
+
+    This is still a text scan and it is still not a security boundary -- the
+    real single point of control is the deploy role's `ssm:SendCommand` grant.
+    It is a drift guard, and it is honest about which.
+    """
+    offenders = []
+    for path in _shipped_executable_sources():
+        if path in SSM_MENTION_ALLOWED:
+            continue
+        text = _normalised_source(path.read_text(encoding="utf-8", errors="replace"))
+        if re.search(r"\bssm\b", text):
+            offenders.append(path.as_posix())
+
+    assert offenders == []
 
 
 def test_no_second_ssm_lifecycle_exists_outside_the_controller():
@@ -607,9 +661,24 @@ FRESHNESS_CONTRACT_PARAGRAPH = (
 # The gate's own nouns. A contradiction pattern that contains one of these
 # cannot be read as a true sentence about anything else in the tree, which is
 # what licenses scanning the whole corpus for it.
+# The prefilter for both contradiction scans. Wider than the nouns the
+# corpus-wide patterns are built from, which is the safe direction: a prefilter
+# may admit a sentence no pattern wants, never the reverse.
 GATE_NOUNS = (
     "freshness", "heartbeat", "describe", "proof", "recheck", "gate", "check",
     "preflight", "clock", "sample", "decision", "send",
+)
+
+# The nouns a pattern must name to earn the corpus-wide tier. `gate` and `check`
+# are deliberately NOT here: they are ordinary English, and corpus-wide they
+# condemned "The Redis availability check is fail-open" and "the lease handoff
+# and its ownership check are atomic" -- true sentences this repository
+# documents about other subsystems. Those claims are still caught inside the
+# runbook by the loose tier-two patterns, where the subject scope makes them
+# safe.
+CORPUS_SAFE_NOUNS = (
+    "freshness", "heartbeat", "describe", "proof", "recheck", "preflight",
+    "clock", "sample", "decision", "send",
 )
 
 # Doubles as the corpus-wide scan's prefilter. Substring rather than whole-word,
@@ -644,45 +713,45 @@ GATE_SPECIFIC_CLAIMS = {
         "The heartbeat is refreshed every 30 seconds.",
     # Scoped to the gate's own nouns, in both voices: "bounded best-effort
     # cleanup" of the authority token is a true sentence about something else.
-    r"best[- ]effort\s+(?:freshness|heartbeat|describe|proof|recheck|gate|check)":
+    r"best[- ]effort\s+(?:freshness|heartbeat|describe|proof|recheck)":
         "The controller makes a best-effort freshness attempt.",
-    r"(?:freshness|heartbeat|describe|proof|recheck|gate|check)\b[^.]{0,40}?"
+    r"(?:freshness|heartbeat|describe|proof|recheck)\b[^.]{0,40}?"
     r"\bis best[- ]effort":
         "The final SSM describe before SendCommand is best-effort.",
     # Framing that demotes a fail-closed gate to a hint, in its gate-named
     # voice. `is` and `as` both, because "treat it as informational" is the
     # same instruction as "it is informational".
-    r"(?:freshness|heartbeat|describe|proof|recheck|gate|check)\b[^.]{0,40}?"
+    r"(?:freshness|heartbeat|describe|proof|recheck)\b[^.]{0,40}?"
     r"\b(?:is|as)\s+(?:only )?(?:an? )?(?:hint|advisory|informational|warning)\b":
         "Operators may treat a failed final describe as informational.",
-    r"(?:freshness|heartbeat|describe|proof|recheck|gate|check)\b[^.]{0,40}?"
+    r"(?:freshness|heartbeat|describe|proof|recheck)\b[^.]{0,40}?"
     r"\b(?:are|is) atomic\b":
         "The heartbeat proof and SendCommand are atomic.",
     # The single most likely false claim about a fail-closed gate, in its
     # commonest voices -- each tied to the gate, since "the rate limiter stays
     # fail-open" is a true sentence about a different subsystem.
-    r"(?:freshness|heartbeat|describe|proof|recheck|gate|check)\b[^.]{0,40}?"
+    r"(?:freshness|heartbeat|describe|proof|recheck)\b[^.]{0,40}?"
     r"\bis fail[- ]open":
         "The final SSM describe is fail-open.",
-    r"(?:freshness|heartbeat|describe|proof|recheck|gate|check)\b[^.]{0,40}?"
+    r"(?:freshness|heartbeat|describe|proof|recheck)\b[^.]{0,40}?"
     r"\b(?:does not block|is non-?blocking)":
         "A failed freshness describe does not block submission.",
-    r"(?:freshness|heartbeat|describe|proof|recheck|gate|check)\b[^.]{0,60}?"
+    r"(?:freshness|heartbeat|describe|proof|recheck)\b[^.]{0,60}?"
     r"\b(?:logs?|logged|logging)\b[^.]{0,60}?\b(?:continues?|proceeds?|submits?)":
         "If the final SSM describe fails, B logs the condition and "
         "continues to submission.",
     # ... and without the word "log", which the pattern above requires.
-    r"(?:freshness|heartbeat|describe|proof|recheck|gate|check)\b[^.]{0,50}?"
+    r"(?:freshness|heartbeat|describe|proof|recheck)\b[^.]{0,50}?"
     r"\bcarr(?:y|ies|ied) on\b":
         "If the final SSM describe errors, B carries on.",
-    r"(?:freshness|heartbeat|describe|proof|recheck|gate|check)\b[^.]{0,60}?"
+    r"(?:freshness|heartbeat|describe|proof|recheck)\b[^.]{0,60}?"
     r"\bsubmits?\b[^.]{0,30}\banyway\b":
         "If the final SSM describe errors, B submits the command anyway.",
-    r"(?:freshness|heartbeat|describe|proof|recheck|gate|check)\b[^.]{0,40}?"
+    r"(?:freshness|heartbeat|describe|proof|recheck)\b[^.]{0,40}?"
     r"\bis (?:only )?(?:a )?courtesy\b":
         "The final describe before SendCommand is a courtesy.",
     r"\bneed not\b[^.]{0,40}\b(?:stop|block|treat|reject)\b[^.]{0,40}?"
-    r"\b(?:freshness|heartbeat|describe|proof|recheck|gate|check)":
+    r"\b(?:freshness|heartbeat|describe|proof|recheck)":
         "Operators need not treat a failed final describe as a stop.",
     # Reusing an earlier sample IS the retired early-clock contract, whatever
     # words surround it.
@@ -753,6 +822,11 @@ RETIRED_CEILING_SPELLINGS = (
     r"timedelta\(\s*minutes\s*=\s*5\s*\)",
     r"(?<![\d,])300[\s-]+seconds?",
     r"(?<![\d,])300\s*s\b",
+    # Abbreviations state it just as plainly. Bounded to the two numbers that
+    # are the retired contract, so "45 min" elsewhere is untouched.
+    r"(?<![\d,])5\s*mins?\b",
+    r"(?<![\d,])300\s*secs?\b",
+    r"(?<![\d,])5\s*m\b",
 )
 
 # A number is only the retired contract when it is asserted AS a bound on
@@ -790,7 +864,10 @@ def _plain(text):
 # A cheap literal superset of every spelling above, used only to skip documents
 # wholesale. It must never be the patterns themselves: those carry lookbehinds
 # that can fail on a joined document while matching inside one of its sections.
-RETIRED_CEILING_TOKENS = ("minute", "300")
+# Still a strict superset: every spelling above contains "min" or "300" as a
+# literal, which `test_the_retired_ceiling_prefilter_cannot_narrow_the_scan`
+# asserts structurally. "5 m" is the exception and carries its own token.
+RETIRED_CEILING_TOKENS = ("min", "300", "5 m", "5m")
 
 # Documents stating the ceiling as current, in the spellings that have actually
 # been tried against this scan. Emphasis included: it is how the guard was
@@ -805,6 +882,9 @@ RETIRED_CEILING_EXAMPLES = (
     "The freshness ceiling is **300** seconds.",
     "A 300-second freshness window applies.",
     "The freshness ceiling is 300s.",
+    "The heartbeat ceiling is 5 min.",
+    "A stale LastPingDateTime is one older than 300 sec.",
+    "The heartbeat ceiling is 5m.",
 )
 
 
@@ -862,7 +942,8 @@ def test_the_retired_ceiling_prefilter_cannot_narrow_the_scan():
     # remain, and any new spelling has to satisfy both.
     for pattern in RETIRED_CEILING_SPELLINGS:
         assert any(
-            token in pattern.lower() for token in RETIRED_CEILING_TOKENS
+            token.replace(" ", "") in pattern.lower().replace("\\s*", "")
+            for token in RETIRED_CEILING_TOKENS
         ), pattern
 
     for example in RETIRED_CEILING_EXAMPLES:
@@ -937,6 +1018,7 @@ def test_the_heartbeat_subject_matcher_reads_words_not_substrings():
 SUPERSEDED_SUBJECTS = HEARTBEAT_SUBJECTS + (
     "ceiling", "freshness", str(SSM_HEARTBEAT_MAX_AGE_SECONDS),
 )
+SUPERSEDED_SUBJECT_RE = _word_alternation(SUPERSEDED_SUBJECTS)
 
 
 def _superseded(text):
@@ -951,10 +1033,17 @@ def _superseded(text):
     banner = " ".join(blocks[1].split())
     if SUPERSEDED_MARKER not in banner:
         return False
-    return any(subject.lower() in banner.lower() for subject in SUPERSEDED_SUBJECTS)
+    # Whole words. As a substring test this fired on "mapping", "shipping" and
+    # "stopping" via `ping`, so a banner about "the mapping of legacy deploy
+    # routes" bought an entire file a pass from every ceiling scan. Every other
+    # subject test in this module already went through `_word_alternation`;
+    # this was the one that did not.
+    return SUPERSEDED_SUBJECT_RE.search(banner) is not None
 
 
-MARKDOWN_SUFFIXES = (".md", ".markdown", ".mdx")
+# Prose is not only markdown. A retired ceiling stated in reStructuredText is
+# read by exactly the same operator.
+MARKDOWN_SUFFIXES = (".md", ".markdown", ".mdx", ".rst", ".txt", ".adoc")
 
 # Documents that must be in the scanned corpus. A negative assertion over an
 # empty corpus passes, so any drift in the listing has to fail loudly instead.
@@ -1135,8 +1224,15 @@ def test_the_runbook_states_no_claim_the_controller_contradicts():
     # statements about other things, and a guard that rejects them teaches
     # authors to route around it.
     offenders = []
-    for sentence in _sentences(_deployment_guide()):
-        if not _names_the_freshness_gate(sentence):
+    for sentence in _sentences(_plain(_deployment_guide())):
+        # `GATE_NOUN_RE`, not `_names_the_freshness_gate`. The subject list is
+        # narrower than the nouns these patterns are built from -- it has no
+        # `recheck`, `proof`, `gate` or `check` -- so "There is no recheck
+        # before submission. The proof is best-effort. The gate does not block."
+        # was discarded before a single pattern ran, in the one document these
+        # guards exist for. `_plain` for the same reason it is everywhere else:
+        # `fail-*open*` is the claim, emphasis and all.
+        if not GATE_NOUN_RE.search(sentence):
             continue
         offenders += [
             f"{pattern}: {sentence[:60]}"
@@ -1229,7 +1325,7 @@ def test_each_contradicted_claim_pattern_matches_the_claim_it_names():
     # and none of tier two's does. This is the whole reason `atomic` and
     # `advisory` are scanned in the runbook and nowhere else.
     for pattern in GATE_SPECIFIC_CONTRADICTIONS:
-        assert any(noun in pattern.lower() for noun in GATE_NOUNS), pattern
+        assert any(noun in pattern.lower() for noun in CORPUS_SAFE_NOUNS), pattern
     for pattern in RUNBOOK_ONLY_CONTRADICTIONS:
         assert not any(noun in pattern.lower() for noun in GATE_NOUNS), pattern
 
@@ -1241,6 +1337,17 @@ def test_each_contradicted_claim_pattern_matches_the_claim_it_names():
     for pattern, sentence in GATE_SPECIFIC_CLAIMS.items():
         stripped = GATE_NOUN_RE.sub(" ", sentence)
         assert not re.search(pattern, stripped, flags=re.IGNORECASE), pattern
+
+    # The prefilter guards the runbook scan too, and that scan runs BOTH tiers.
+    # So the superset claim has to hold for every pattern, not only tier one:
+    # whenever a pattern matches a control sentence, the prefilter must admit
+    # that sentence. This is the assertion whose absence let four true claims
+    # about the gate sit in the runbook unread.
+    for pattern, sentence in {
+        **GATE_SPECIFIC_CLAIMS, **RUNBOOK_ONLY_CLAIMS
+    }.items():
+        if re.search(pattern, sentence, flags=re.IGNORECASE):
+            assert GATE_NOUN_RE.search(sentence), pattern
 
 
 def _heartbeat_sentences(guide):
@@ -1371,6 +1478,21 @@ def _statement_expression(statement):
     return None
 
 
+def _innermost_call(expression):
+    """The deepest call in a chain of single-call wrappers, or None."""
+    if not isinstance(expression, ast.Call):
+        return None
+    while True:
+        nested = [
+            argument for argument in
+            list(expression.args) + [k.value for k in expression.keywords]
+            if isinstance(argument, ast.Call)
+        ]
+        if len(nested) != 1:
+            return expression
+        expression = nested[0]
+
+
 def _evaluates_only(statement, call):
     """True when `statement` evaluates `call` over already-computed arguments.
 
@@ -1378,10 +1500,31 @@ def _evaluates_only(statement, call):
     argument list runs between the freshness proof and the wire just as surely
     as a statement between them would.
     """
-    if _statement_expression(statement) is not call:
+    expression = _statement_expression(statement)
+    if expression is None:
         return False
-    if [node for node in ast.walk(statement) if isinstance(node, ast.Call)] != [call]:
+    # Every call in the statement must be on the single wrapper chain that ends
+    # at `call`; anything else is a second expression being evaluated here.
+    chain, cursor = [], expression
+    while isinstance(cursor, ast.Call):
+        chain.append(cursor)
+        if cursor is call:
+            break
+        nested = [
+            argument for argument in
+            list(cursor.args) + [k.value for k in cursor.keywords]
+            if isinstance(argument, ast.Call)
+        ]
+        if len(nested) != 1:
+            return False
+        cursor = nested[0]
+    if not chain or chain[-1] is not call:
         return False
+    if [node for node in ast.walk(statement)
+            if isinstance(node, ast.Call)] != chain:
+        return False
+    # The innermost call's own arguments must already be computed. This is the
+    # load-bearing half: an expression here runs before the wire.
     arguments = list(call.args) + [keyword.value for keyword in call.keywords]
     return all(
         isinstance(argument, (ast.Name, ast.Constant, ast.Attribute))
@@ -1406,9 +1549,28 @@ def test_the_statement_shape_guard_reads_arguments_as_well_as_statements():
     assert _evaluates_only(bind_proof, bind_proof.value)
     assert _evaluates_only(plain_send, plain_send.value)
     assert not _evaluates_only(nested_send, nested_send.value)
-    assert not _evaluates_only(wrapped_proof, wrapped_proof.value.args[0])
     assert _statement_expression(listed_send) is not None
     assert not _evaluates_only(listed_send, listed_send.value)
+
+    # A wrapper around the runner is allowed -- it runs after the wire -- and
+    # the innermost call is found through it. A call in the innermost call's
+    # OWN argument list is not, wherever the chain starts.
+    wrapped = ast.parse("x = wrap(send(args))\n").body[0]
+    assert _innermost_call(wrapped.value) is wrapped.value.args[0]
+    assert _evaluates_only(wrapped, wrapped.value.args[0])
+
+    # Laundering is caught by WHICH call ends up innermost, not by the chain
+    # test: `settle` runs before the wire, so it -- not the runner -- is the
+    # deepest call, and the guard's runner-identity assertion rejects it.
+    laundered = ast.parse("x = wrap(send(settle(args)))\n").body[0]
+    assert _innermost_call(laundered.value).func.id == "settle"
+    direct = ast.parse("x = send(settle(args))\n").body[0]
+    assert _innermost_call(direct.value).func.id == "settle"
+
+    # Two calls side by side are two expressions, not a wrapper chain.
+    forked = ast.parse("x = wrap(send(args), other(args))\n").body[0]
+    assert _innermost_call(forked.value) is forked.value
+    assert not _evaluates_only(forked, forked.value)
 
 
 def _calls_to(node, name):
@@ -1458,8 +1620,14 @@ def test_controller_proves_heartbeat_freshness_at_the_send_authority_boundary():
     # one call, over arguments that were computed earlier.
     assert _evaluates_only(proof, proof_calls[0])
 
+    # The runner call is the INNERMOST call of the send statement. Requiring it
+    # to be the outermost rejected `return require_command_id(aws(send_args))`,
+    # which is strictly less work than the two statements it replaces: a
+    # wrapper's arguments are evaluated first, so it runs after the wire and
+    # cannot spend heartbeat age. What must not appear is a call *inside* the
+    # runner's argument list, which is where `aws(_settle(send_args))` puts it.
     send = send_command.body[submit_indexes[0]]
-    submission = _statement_expression(send)
+    submission = _innermost_call(_statement_expression(send))
     assert isinstance(submission, ast.Call)
     assert isinstance(submission.func, ast.Name)
     assert submission.func.id == runners[0]
@@ -1510,12 +1678,55 @@ def test_the_freshness_boundary_does_nothing_after_it_proves_freshness():
     assert final.value.func.id == "validate_managed_instance"
 
 
-# Anything that can block. Named broadly on purpose: the guard is looking for
-# the *shape* of waiting, and a controller function has no legitimate reason to
-# call something whose name says it sleeps, waits, selects, polls or backs off.
-WAITING_CALL_RE = re.compile(
-    r"sleep|wait|select|poll|delay|backoff|retry|pause", re.IGNORECASE
-)
+# Everything the send path is allowed to call, by resolved callee name. This
+# is a WHITELIST because the blocklist it replaced could not work: it matched
+# the spelling of the callee, and the spelling is the attacker's to choose.
+# `_settle = time.sleep`, called from inside the freshness proof, slept 45
+# seconds between the heartbeat verdict and SendCommand with every test green.
+#
+# The cost is that adding a call here is a deliberate edit. That is the point,
+# and it is also the fix for the asymmetry the blocklist had: it rejected a
+# pure helper named `_select_call_timeout` for its name while accepting a real
+# sleep named `_settle`. Now both require a line, and only one of them is a lie.
+APPROVED_SEND_PATH_CALLEES = frozenset({
+    # Domain errors and value objects.
+    "AwsCliError", "ConfigError", "InvocationProtocolError", "ManagedInstance",
+    "PreflightError",
+    # Controller-local functions, each itself inside this closure.
+    "_authority_parameter", "_parse_heartbeat", "_require_live_clock",
+    "_require_live_clock()", "_sample_utc", "build_remote_command",
+    "render_bootstrap", "require_command_id", "require_fresh_ssm_target",
+    "validate_managed_instance",
+    # The injected AWS runner, and the one subprocess launch behind it.
+    "aws", "run",
+    # Pure stdlib: encoding, parsing, formatting, quoting. None of these block.
+    "UUID", "b64encode", "callable", "decode", "dumps", "encode",
+    "fromisoformat", "get", "group", "isinstance", "len", "loads", "quote",
+    "search", "str", "timedelta", "utcoffset", "uuid4",
+})
+
+# Modules whose attributes block. Binding one to a name is how the send-path
+# whitelist would be defeated without adding an obviously-blocking callee.
+BLOCKING_MODULES = frozenset({
+    "time", "select", "socket", "signal", "subprocess", "asyncio", "selectors",
+    "threading", "queue", "concurrent",
+})
+
+
+def _callee_name(func):
+    """What a call resolves to, independent of how it was reached.
+
+    `time.sleep(...)`, `_settle(...)` and `base64.b64encode(...).decode(...)`
+    are named `sleep`, `_settle` and `decode`. Attribute chains collapse to the
+    final attribute, and calling a call is marked with a trailing `()`.
+    """
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    if isinstance(func, ast.Call):
+        return _callee_name(func.func) + "()"
+    return ast.unparse(func)
 
 # Everything that can run between the freshness proof and SendCommand reaching
 # the wire. `run_aws_json` is a root rather than an edge because the runner is
@@ -1562,11 +1773,18 @@ def test_nothing_on_the_send_path_can_loop_or_wait():
             node for node in ast.walk(function)
             if isinstance(node, (ast.For, ast.AsyncFor, ast.While))
         ] == [], name
-        assert [
-            ast.unparse(node.func) for node in ast.walk(function)
-            if isinstance(node, ast.Call)
-            and WAITING_CALL_RE.search(ast.unparse(node.func))
-        ] == [], name
+
+    # The whitelist, not a blocklist. Exact equality rather than a subset, so a
+    # name that stops being called has to leave the list too -- an entry nobody
+    # can account for is how a list like this rots into permission to do
+    # anything. The region is eleven functions; pinning it exactly is cheap.
+    called = {
+        _callee_name(node.func)
+        for function in reachable.values()
+        for node in ast.walk(function)
+        if isinstance(node, ast.Call)
+    }
+    assert called == APPROVED_SEND_PATH_CALLEES
 
     # Exactly one launch in the runner, and it is the subprocess call itself.
     runner = reachable["run_aws_json"]
@@ -1577,6 +1795,69 @@ def test_nothing_on_the_send_path_can_loop_or_wait():
         and node.func.id == "run"
     ]
     assert len(launches) == 1
+
+
+def test_the_controller_binds_no_alias_to_a_blocking_call():
+    # The whitelist above is defeated in one line if a blocking function can be
+    # rebound to an approved-looking name. This is the line that did it:
+    # `_settle = time.sleep`.
+    module = _controller_module()
+    offenders = []
+    for node in ast.walk(module):
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        value = node.value
+        if (
+            isinstance(value, ast.Attribute)
+            and isinstance(value.value, ast.Name)
+            and value.value.id in BLOCKING_MODULES
+        ):
+            offenders.append(ast.unparse(node))
+    assert offenders == []
+
+    # ... and `from time import sleep as _settle` is the same act.
+    imported = [
+        ast.unparse(node) for node in ast.walk(module)
+        if isinstance(node, ast.ImportFrom) and node.module in BLOCKING_MODULES
+    ]
+    assert imported == []
+
+
+def test_the_alias_guard_sees_both_ways_of_binding_one():
+    # Positive control: the assertions above are negative and would hold
+    # vacuously against a module that simply had no assignments.
+    module = ast.parse(
+        "import time\n"
+        "_settle = time.sleep\n"
+        "_ok = json.dumps\n"
+    )
+    bound = [
+        ast.unparse(node) for node in ast.walk(module)
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        and isinstance(node.value, ast.Attribute)
+        and isinstance(node.value.value, ast.Name)
+        and node.value.value.id in BLOCKING_MODULES
+    ]
+    assert bound == ["_settle = time.sleep"]
+
+    aliased = ast.parse("from time import sleep as _settle\n")
+    assert [
+        node for node in ast.walk(aliased)
+        if isinstance(node, ast.ImportFrom) and node.module in BLOCKING_MODULES
+    ]
+
+    # And the callee resolver reads through every shape the send path uses.
+    calls = ast.parse(
+        "time.sleep(1)\n_settle(1)\nbase64.b64encode(x).decode()\nf(a)()\n"
+    )
+    assert [
+        _callee_name(node.func) for node in ast.walk(calls)
+        if isinstance(node, ast.Call)
+    ].count("sleep") == 1
+    assert "_settle" in [
+        _callee_name(node.func) for node in ast.walk(calls)
+        if isinstance(node, ast.Call)
+    ]
 
 
 def test_the_send_path_guard_follows_indirection_and_names_waiting():
@@ -1595,23 +1876,18 @@ def test_the_send_path_guard_follows_indirection_and_names_waiting():
     )
     reachable = _reachable_controller_functions(module, ("run_aws_json",))
 
-    # The helper is reached through the call, and the sleeper inside it is seen.
+    # The helper is reached through the call, and what it calls is visible.
     assert set(reachable) == {"run_aws_json", "_delay"}
-    assert [
-        ast.unparse(node.func)
-        for node in ast.walk(reachable["_delay"])
+    called = {
+        _callee_name(node.func)
+        for function in reachable.values()
+        for node in ast.walk(function)
         if isinstance(node, ast.Call)
-        and WAITING_CALL_RE.search(ast.unparse(node.func))
-    ] == ["time.sleep"]
-
-    # ... and a blocking call that never says "sleep" is waiting all the same.
-    blocking = _function_def(module, "_block")
-    assert [
-        ast.unparse(node.func)
-        for node in ast.walk(blocking)
-        if isinstance(node, ast.Call)
-        and WAITING_CALL_RE.search(ast.unparse(node.func))
-    ] == ["select.select"]
+    }
+    # Neither the helper nor the thing it waits on is approved, so the
+    # whitelist rejects this closure -- whatever the helper had been named.
+    assert called == {"_delay", "sleep"}
+    assert not called <= APPROVED_SEND_PATH_CALLEES
 
     # Unreached functions are not the send path's business.
     assert "unrelated" not in reachable
