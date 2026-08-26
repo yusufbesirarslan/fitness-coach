@@ -258,12 +258,33 @@ SSM_MENTION_ALLOWED = frozenset({
     # A config template whose comment describes moving secrets to SSM
     # Parameter Store. Prose in a file that is not prose.
     Path(".env.example"),
+    # Operator-facing prose that discusses the one lifecycle. A new markdown
+    # file naming `ssm` is a deliberate act, same as a new executable: it is
+    # not auto-allowed, which is how a copy-paste runbook is refused.
+    Path("docs/DEPLOYMENT.md"),
+    Path("docs/STATUS.md"),
+    Path("CLAUDE.md"),
+    Path("docs/triage-2026-07-02.md"),
+    Path("docs/superpowers/plans/2026-08-22-production-deploy-hardening-pr1.md"),
+    Path("docs/superpowers/plans/2026-08-25-production-deploy-hardening-pr1-remediation.md"),
+    Path("docs/superpowers/specs/2026-08-22-production-deploy-hardening-pr1-design.md"),
+    Path("docs/superpowers/specs/2026-08-24-production-deploy-hardening-pr1-remediation-design.md"),
 })
 
 SSM_LIFECYCLE_OWNERS = frozenset({
     Path("scripts/deploy_control.py"),      # the one authorised lifecycle
     Path("tests/test_deploy_control.py"),   # its behavioural tests
     Path("tests/test_deploy_workflow.py"),  # this file's own patterns
+})
+
+# Historical specs/plans that name the controller's operations as documentation
+# of that one lifecycle. They are not owners: a new markdown file with a fenced
+# `aws ssm send-command` is a second lifecycle even if it lives under docs/.
+SSM_LIFECYCLE_ALLOWED = SSM_LIFECYCLE_OWNERS | frozenset({
+    Path("docs/superpowers/plans/2026-08-22-production-deploy-hardening-pr1.md"),
+    Path("docs/superpowers/plans/2026-08-25-production-deploy-hardening-pr1-remediation.md"),
+    Path("docs/superpowers/specs/2026-08-22-production-deploy-hardening-pr1-design.md"),
+    Path("docs/superpowers/specs/2026-08-24-production-deploy-hardening-pr1-remediation-design.md"),
 })
 
 
@@ -306,6 +327,20 @@ def _shipped_executable_sources():
 
     return tuple(sorted(
         Path(name) for name in listing.split("\0") if name and executable(name)
+    ))
+
+
+@lru_cache(maxsize=1)
+def _shipped_operator_sources():
+    """Everything an operator can execute, including copy-pasteable prose.
+
+    The executable corpus inverts "what CI can run" and therefore drops
+    markdown. A fenced ``aws ssm send-command`` in a runbook is the document
+    an operator actually executes, so the SSM mention and lifecycle scans
+    read the union.
+    """
+    return tuple(sorted(
+        set(_shipped_executable_sources()) | set(_shipped_markdown())
     ))
 
 
@@ -354,6 +389,24 @@ def test_the_executable_corpus_covers_every_kind_of_thing_ci_can_run():
         assert owner in corpus, owner
 
 
+def test_the_operator_corpus_includes_copy_pasteable_prose():
+    """The executable inversion dropped markdown; the SSM scans must not.
+
+    A fenced `aws ssm send-command` in a runbook is what an operator
+    executes. `docs/DEPLOYMENT.md` is prose, so it is absent from the
+    executable corpus and present in the operator union.
+    """
+    operator = set(_shipped_operator_sources())
+    assert set(_shipped_executable_sources()) <= operator
+    assert set(_shipped_markdown()) <= operator
+    assert Path("docs/DEPLOYMENT.md") in operator
+    assert Path("docs/DEPLOYMENT.md") not in _shipped_executable_sources()
+    assert Path("docs/DEPLOYMENT.md") in _shipped_markdown()
+    # An allow-list entry for a path that is not in the corpus is dead.
+    for path in SSM_MENTION_ALLOWED | SSM_LIFECYCLE_ALLOWED:
+        assert path in operator, path
+
+
 def test_nothing_outside_the_controller_mentions_ssm_at_all():
     """The completeness half of the lifecycle guard.
 
@@ -366,10 +419,11 @@ def test_nothing_outside_the_controller_mentions_ssm_at_all():
 
     This is still a text scan and it is still not a security boundary -- the
     real single point of control is the deploy role's `ssm:SendCommand` grant.
-    It is a drift guard, and it is honest about which.
+    It is a drift guard, and it is honest about which. Operator markdown is
+    in the corpus: a fenced send-command is the document an operator runs.
     """
     offenders = []
-    for path in _shipped_executable_sources():
+    for path in _shipped_operator_sources():
         if path in SSM_MENTION_ALLOWED:
             continue
         text = _normalised_source(path.read_text(encoding="utf-8", errors="replace"))
@@ -381,8 +435,8 @@ def test_nothing_outside_the_controller_mentions_ssm_at_all():
 
 def test_no_second_ssm_lifecycle_exists_outside_the_controller():
     offenders = []
-    for path in _shipped_executable_sources():
-        if path in SSM_LIFECYCLE_OWNERS:
+    for path in _shipped_operator_sources():
+        if path in SSM_LIFECYCLE_ALLOWED:
             continue
         normalised = _normalised_source(path.read_text(encoding="utf-8"))
         if SSM_LIFECYCLE_RE.search(normalised):
@@ -858,15 +912,19 @@ CADENCE_WORD_RE = re.compile("|".join(CADENCE_WORDS), re.IGNORECASE)
 CLAIM_WINDOW = 60
 
 MARKDOWN_EMPHASIS = str.maketrans({character: None for character in "*_`~"})
+ZERO_WIDTH = str.maketrans({
+    "\u200b": None, "\u200c": None, "\u200d": None, "\ufeff": None,
+})
 
 
 def _plain(text):
     """Markdown emphasis removed before any pattern reads the text.
 
     `**300** seconds` and `*five* minutes` state the retired ceiling exactly as
-    plainly as the unadorned forms, and every spelling missed them.
+    plainly as the unadorned forms, and every spelling missed them. Zero-width
+    characters are the same act: `f\\u200bive minutes` is still "five minutes".
     """
-    return text.translate(MARKDOWN_EMPHASIS)
+    return text.translate(MARKDOWN_EMPHASIS).translate(ZERO_WIDTH)
 
 # A cheap literal superset of every spelling above, used only to skip documents
 # wholesale. It must never be the patterns themselves: those carry lookbehinds
@@ -881,6 +939,7 @@ RETIRED_CEILING_TOKENS = ("min", "300", "5 m", "5m")
 # defeated, not a hypothetical.
 RETIRED_CEILING_EXAMPLES = (
     "The heartbeat may be up to five minutes old.",
+    "The heartbeat may be up to f\u200bive minutes old.",
     "The heartbeat ceiling is 5 minutes.",
     "The heartbeat ceiling is *five* minutes.",
     "A five-minute heartbeat ceiling applies.",
@@ -1800,21 +1859,48 @@ BOUNDED_SEND_PATH_ROOTS = (
 )
 
 
+def _send_path_tree(definition):
+    """Statements that run when this definition is entered at send time.
+
+    A class decorator runs at import, not between the freshness verdict and
+    the wire. Methods and field initialisers run at construction, which is
+    after the staleness raise and before SendCommand.
+    """
+    if isinstance(definition, ast.ClassDef):
+        return ast.Module(body=list(definition.body), type_ignores=[])
+    return definition
+
+
 def _reachable_controller_functions(module, roots):
-    """Every controller function reachable from `roots` by a direct call."""
-    definitions = {
-        node.name: node
-        for node in ast.walk(module)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
+    """Every controller function or class reachable from `roots` by a call."""
+    definitions = {}
+    for node in ast.walk(module):
+        if isinstance(node, ast.ClassDef):
+            definitions[node.name] = node
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if not isinstance(definitions.get(node.name), ast.ClassDef):
+                definitions[node.name] = node
     seen, pending = set(), list(roots)
     while pending:
         name = pending.pop()
         if name in seen or name not in definitions:
             continue
         seen.add(name)
-        for call in ast.walk(definitions[name]):
-            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name):
+        tree = _send_path_tree(definitions[name])
+        # A `raise AwsCliError(...)` constructs a class, but that is the
+        # fail-closed path. Following it put exception `__init__` on the send
+        # path. `return ManagedInstance(...)` is the fresh path and is followed.
+        under_raise = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Raise) and node.exc is not None:
+                for child in ast.walk(node.exc):
+                    under_raise.add(id(child))
+        for call in ast.walk(tree):
+            if (
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Name)
+                and id(call) not in under_raise
+            ):
                 pending.append(call.func.id)
     return {name: definitions[name] for name in seen}
 
@@ -1831,10 +1917,14 @@ def test_nothing_on_the_send_path_can_loop_or_wait():
     assert set(BOUNDED_SEND_PATH_ROOTS) <= set(reachable)
     # The walk really followed edges rather than returning its own roots.
     assert len(reachable) > len(BOUNDED_SEND_PATH_ROOTS)
+    # Construction after the verdict is on the path. A method on this class
+    # is work the heartbeat proof has already spent.
+    assert "ManagedInstance" in reachable
 
     for name, function in sorted(reachable.items()):
+        tree = _send_path_tree(function)
         assert [
-            node for node in ast.walk(function)
+            node for node in ast.walk(tree)
             if isinstance(node, (ast.For, ast.AsyncFor, ast.While))
         ] == [], name
 
@@ -1843,8 +1933,9 @@ def test_nothing_on_the_send_path_can_loop_or_wait():
     # over the real 65 536-character command is ~4e9 comparisons between the
     # heartbeat verdict and the wire.
     for name, function in sorted(reachable.items()):
+        tree = _send_path_tree(function)
         assert [
-            node for node in ast.walk(function)
+            node for node in ast.walk(tree)
             if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp,
                                  ast.GeneratorExp))
         ] == [], name
@@ -1856,7 +1947,7 @@ def test_nothing_on_the_send_path_can_loop_or_wait():
     called = {
         (name, _callee_name(node.func))
         for name, function in reachable.items()
-        for node in ast.walk(function)
+        for node in ast.walk(_send_path_tree(function))
         if isinstance(node, ast.Call)
     }
     assert called == APPROVED_SEND_PATH_CALLS
@@ -1888,6 +1979,28 @@ def _blocking_module_names(module):
     return names
 
 
+def _expression_reaches_blocking(value, blocking):
+    """True when `value` can resolve to a blocking callable.
+
+    Attribute-of-Name (`time.sleep`) and Call-walking-Names (`getattr(time,
+    "sleep")`) were the two shapes round 11 knew. A Subscript
+    (`time.__dict__["sleep"]`) is neither, and `__import__("time").sleep`
+    never binds a blocking Name at all -- the module is a string.
+    """
+    for child in ast.walk(value):
+        if isinstance(child, ast.Name) and (
+            child.id in blocking or child.id in {"__import__", "import_module"}
+        ):
+            return True
+        if (
+            isinstance(child, ast.Constant)
+            and isinstance(child.value, str)
+            and child.value.split(".")[0] in BLOCKING_MODULES
+        ):
+            return True
+    return False
+
+
 def _blocking_bindings(module):
     """Assignments that bind a name to something that can block."""
     blocking = _blocking_module_names(module)
@@ -1899,22 +2012,10 @@ def _blocking_bindings(module):
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
         value = node.value
-        # `_settle = time.sleep`, and the same through an import alias.
-        if (
-            isinstance(value, ast.Attribute)
-            and isinstance(value.value, ast.Name)
-            and value.value.id in blocking
-        ):
+        if value is None:
+            continue
+        if _expression_reaches_blocking(value, blocking):
             offenders.append(ast.unparse(node))
-        # `run = getattr(time, "sleep")` -- a Call, which the shape test above
-        # cannot see, and the spelling that actually got through.
-        elif isinstance(value, ast.Call):
-            reached = {
-                child.id for child in ast.walk(value)
-                if isinstance(child, ast.Name)
-            }
-            if reached & blocking:
-                offenders.append(ast.unparse(node))
     return offenders
 
 
@@ -1936,12 +2037,22 @@ def test_the_alias_guard_resolves_names_rather_than_matching_one_shape():
         "_settle = time.sleep\n"
         "_also = _t.sleep\n"
         "run = getattr(time, \"sleep\")\n"
+        "_via_dict = time.__dict__[\"sleep\"]\n"
+        "_via_import = __import__(\"time\").sleep\n"
+        "_via_module = importlib.import_module(\"time\").sleep\n"
+        "_via_attr = operator.attrgetter(\"sleep\")(__import__(\"time\"))\n"
+        "_via_vars = vars()[\"time\"].sleep\n"
         "fine = json.dumps\n"
     )
     assert _blocking_module_names(module) == {"time", "_t"}
     assert sorted(_blocking_bindings(module)) == [
         "_also = _t.sleep",
         "_settle = time.sleep",
+        "_via_attr = operator.attrgetter('sleep')(__import__('time'))",
+        "_via_dict = time.__dict__['sleep']",
+        "_via_import = __import__('time').sleep",
+        "_via_module = importlib.import_module('time').sleep",
+        "_via_vars = vars()['time'].sleep",
         "run = getattr(time, 'sleep')",
     ]
 
@@ -1976,7 +2087,7 @@ def test_nothing_follows_the_staleness_verdict_but_the_return():
     ]
     assert len(ceilings) == 1
 
-    tail = validate.body[ceilings[0] + 1:]
+    tail = _fresh_path_after_ceiling(validate)
     assert len(tail) == 1
     assert isinstance(tail[0], ast.Return)
     result = tail[0].value
@@ -1984,6 +2095,38 @@ def test_nothing_follows_the_staleness_verdict_but_the_return():
     assert isinstance(result.func, ast.Name)
     assert result.func.id == "ManagedInstance"
     assert _evaluates_only(tail[0], result)
+
+
+def _fresh_path_after_ceiling(function):
+    """Statements that run after the staleness `If` decides the target is fresh.
+
+    Round 11 pinned `validate.body[ceiling + 1:]` and missed `If.orelse` -- the
+    fresh path, and the only path that proceeds to SendCommand. A callee-free
+    `_ = instance_id` in that `else` sat between the verdict and the wire.
+    """
+    ceilings = [
+        index for index, statement in enumerate(function.body)
+        if isinstance(statement, ast.If)
+        and "SSM_HEARTBEAT_MAX_AGE_SECONDS" in ast.unparse(statement.test)
+    ]
+    if len(ceilings) != 1:
+        return []
+    ceiling = function.body[ceilings[0]]
+    return list(ceiling.orelse) + list(function.body[ceilings[0] + 1:])
+
+
+def test_the_verdict_tail_pin_reads_the_fresh_else_branch():
+    sneaky = ast.parse(
+        "def validate_managed_instance():\n"
+        "    if age > timedelta(seconds=SSM_HEARTBEAT_MAX_AGE_SECONDS):\n"
+        "        raise PreflightError('stale')\n"
+        "    else:\n"
+        "        _ = instance_id\n"
+        "    return ManagedInstance(instance_id=instance_id, last_ping=last_ping)\n"
+    ).body[0]
+    tail = _fresh_path_after_ceiling(sneaky)
+    assert any(isinstance(statement, ast.Assign) for statement in tail)
+    assert len(tail) == 2
 
 
 def test_the_send_path_guard_follows_indirection_and_names_waiting():
@@ -2017,6 +2160,75 @@ def test_the_send_path_guard_follows_indirection_and_names_waiting():
 
     # Unreached functions are not the send path's business.
     assert "unrelated" not in reachable
+
+
+def test_the_send_path_guard_enters_a_class_constructed_after_the_verdict():
+    # `return ManagedInstance(...)` is an approved send-path Call. The class
+    # body is a ClassDef, so a walk that only indexes FunctionDef never enters
+    # `__post_init__`, and a busy-wait there runs after the staleness verdict.
+    module = ast.parse(
+        "def validate_managed_instance():\n"
+        "    raise PreflightError('stale')\n"
+        "    return ManagedInstance()\n"
+        "class ManagedInstance:\n"
+        "    def __post_init__(self):\n"
+        "        remaining = 8\n"
+        "        while remaining:\n"
+        "            remaining -= 1\n"
+        "class PreflightError:\n"
+        "    def __init__(self, message):\n"
+        "        while True:\n"
+        "            pass\n"
+        "def unrelated():\n"
+        "    while True:\n"
+        "        pass\n"
+    )
+    reachable = _reachable_controller_functions(
+        module, ("validate_managed_instance",)
+    )
+    assert "ManagedInstance" in reachable
+    # Fail-closed construction is not the send path.
+    assert "PreflightError" not in reachable
+    assert "unrelated" not in reachable
+    tree = _send_path_tree(reachable["ManagedInstance"])
+    assert [
+        node for node in ast.walk(tree) if isinstance(node, ast.While)
+    ], "constructor body must be on the send path"
+
+
+def test_managed_instance_is_a_frozen_record_with_no_behaviour():
+    """Construction after the verdict is not a place to hide work.
+
+    Production `ManagedInstance` stays a two-field frozen dataclass. A
+    method, a `__post_init__`, or any statement that is not a field
+    annotation would run after the staleness raise. The send-path walk
+    would then see it; this pin refuses the method existing at all.
+    """
+    definition = next(
+        node for node in _controller_module().body
+        if isinstance(node, ast.ClassDef) and node.name == "ManagedInstance"
+    )
+    assert any(
+        isinstance(decorator, ast.Call)
+        and isinstance(decorator.func, ast.Name)
+        and decorator.func.id == "dataclass"
+        and any(
+            keyword.arg == "frozen"
+            and isinstance(keyword.value, ast.Constant)
+            and keyword.value.value is True
+            for keyword in decorator.keywords
+        )
+        for decorator in definition.decorator_list
+    )
+    assert [
+        node for node in definition.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ] == []
+    assert all(isinstance(node, ast.AnnAssign) for node in definition.body)
+    assert [
+        node.target.id for node in definition.body
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+    ] == ["instance_id", "last_ping"]
 
 
 def test_controller_imports_the_canonical_threshold_instead_of_redeclaring_it():

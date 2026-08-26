@@ -958,6 +958,60 @@ def test_the_zero_argument_census_counts_calls_not_declarations():
     }
 
 
+LATCHING_CLOCK_WRAPPERS = ("partial", "lru_cache", "cache")
+
+
+def _latching_clock_callee_names(module):
+    """Local names that wrap a callable into a latched clock.
+
+    Round 11 resolved `from functools import lru_cache as _memo` and the
+    literal `functools.lru_cache`. `import functools as _ft` was still
+    invisible: `ast.unparse` of the decorator is `_ft.lru_cache`.
+    """
+    names = {f"functools.{name}" for name in LATCHING_CLOCK_WRAPPERS} | set(
+        LATCHING_CLOCK_WRAPPERS
+    )
+    for node in ast.walk(module):
+        if isinstance(node, ast.ImportFrom) and node.module == "functools":
+            names |= {
+                alias.asname or alias.name
+                for alias in node.names if alias.name in LATCHING_CLOCK_WRAPPERS
+            }
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] != "functools":
+                    continue
+                local = alias.asname or "functools"
+                names |= {
+                    f"{local}.{name}" for name in LATCHING_CLOCK_WRAPPERS
+                }
+                parts = alias.name.split(".")
+                if (
+                    len(parts) > 1
+                    and parts[-1] in LATCHING_CLOCK_WRAPPERS
+                    and alias.asname
+                ):
+                    names.add(alias.asname)
+    return names
+
+
+def test_the_frozen_clock_census_resolves_functools_aliases():
+    module = ast.parse(
+        "import functools as _ft\n"
+        "@_ft.lru_cache(maxsize=1)\n"
+        "def _latched(tz):\n"
+        "    return tz\n"
+        "from functools import cache as _memo\n"
+        "@_memo()\n"
+        "def also(tz):\n"
+        "    return tz\n"
+    )
+    names = _latching_clock_callee_names(module)
+    decorator = module.body[1].decorator_list[0]
+    assert ast.unparse(decorator.func) in names
+    assert "_memo" in names
+
+
 def test_the_controller_injects_no_frozen_clock_anywhere():
     # A zero-argument callable in this module is a clock by construction.
     # Exactly one is legitimate: the live default. Any other is a sample taken
@@ -978,14 +1032,7 @@ def test_the_controller_injects_no_frozen_clock_anywhere():
     # `from functools import partial as _bind` walked straight through it.
     # `lru_cache` and `cache` latch lazily on the first call, which is a frozen
     # clock that arrives one read later than `partial`'s.
-    latching = ("partial", "lru_cache", "cache")
-    partial_names = {f"functools.{name}" for name in latching} | set(latching)
-    for node in ast.walk(module):
-        if isinstance(node, ast.ImportFrom) and node.module == "functools":
-            partial_names |= {
-                alias.asname or alias.name
-                for alias in node.names if alias.name in latching
-            }
+    partial_names = _latching_clock_callee_names(module)
 
     clock_shaped = []
     for node in ast.walk(module):
