@@ -27,11 +27,17 @@ def _source(relative):
 
 
 # -- F1: the mobile API has no Daily-Coach domain ---------------------------
-# The whole convergence question turns on this. `/api/v1` publishes auth,
-# nutrition and Pump Check - and nothing about training, workout state,
-# progress, check-ins or the Coach. A mobile Today surface therefore cannot be
-# assembled from existing mobile endpoints at all: it is not a composition
-# problem, it is a missing-contract problem.
+# The whole convergence question turns on this. At discovery time `/api/v1`
+# published auth, nutrition and Pump Check - and nothing about training,
+# workout state, progress, check-ins or the Coach. A mobile Today surface
+# therefore could not be assembled from existing mobile endpoints at all: it
+# was not a composition problem, it was a missing-contract problem.
+#
+# Sprint 12 PR3 closed exactly that gap by publishing `GET /api/v1/today`,
+# which *projects* the canonical workout-state authority rather than adding a
+# second one. The two tests below keep their PR1 names so the discovery
+# report's F1 row still resolves to them, but they now pin the post-PR3 truth:
+# one canonical Today aggregate, and still no other Daily-Coach domain.
 
 @pytest.fixture(scope="module")
 def mobile_enabled_app():
@@ -79,6 +85,13 @@ def test_mobile_api_publishes_only_auth_nutrition_and_pump_check(
 
     Kept as an exact set on purpose: the point of the finding is the *absence*
     of whole domains, and a subset assertion would not notice one arriving.
+
+    `/api/v1/today` joined the set in Sprint 12 PR3. It is the only addition
+    the finding tolerates without being restated, because it publishes no new
+    authority - it is a read projection of the canonical workout state the web
+    app already serves (see ``docs/MOBILE_TODAY.md``). Any *further* path
+    appearing here means a domain arrived on mobile and the discovery report
+    has to be revisited, which is what this exact-set assertion is for.
     """
     assert _mobile_paths(mobile_enabled_app) == {
         "/api/v1/auth/login",
@@ -95,7 +108,17 @@ def test_mobile_api_publishes_only_auth_nutrition_and_pump_check(
         "/api/v1/pump-checks/<pump_check_token>",
         "/api/v1/pump-check-comparisons",
         "/api/v1/pump-check-comparisons/<comparison_id>",
+        "/api/v1/today",
     }
+
+
+# The only two `/api/v1` paths allowed to carry "today". Both are canonical
+# reads: the nutrition diary owns the food ledger, `/api/v1/today` projects the
+# workout-state authority. Neither computes a Today of its own.
+_APPROVED_TODAY_PATHS = {
+    "/api/v1/nutrition/diary/today",
+    "/api/v1/today",
+}
 
 
 @pytest.mark.parametrize(
@@ -108,12 +131,18 @@ def test_no_mobile_endpoint_serves_a_daily_coach_domain(
 
     `plan` is checked too: the only `/api/v1` path that could contain it would
     be a training plan, since nutrition plans are not published to mobile
-    either. `today` is checked to prove no aggregate exists yet - the one
-    `/nutrition/diary/today` path is the single, domain-scoped exception.
+    either.
+
+    `today` is still checked, and is now the sharper of the two Today guards.
+    Since Sprint 12 PR3 there are exactly two approved Today paths - the
+    domain-scoped nutrition diary and the canonical aggregate - so what this
+    case proves is no longer "no aggregate exists" but "no *second* one does".
+    A `/api/v1/coach/today` or `/api/v1/training/today` arriving later would
+    fail here, which is precisely the outcome PR3's one-authority rule forbids.
     """
     offenders = {
         path for path in _mobile_paths(mobile_enabled_app)
-        if domain in path and path != "/api/v1/nutrition/diary/today"
+        if domain in path and path not in _APPROVED_TODAY_PATHS
     }
     assert offenders == set(), (
         "a mobile endpoint now serves '%s'; the discovery report's "

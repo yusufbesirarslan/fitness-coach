@@ -218,3 +218,4 @@ def me():
 from app.blueprints import mobile_nutrition  # noqa: E402,F401
 from app.blueprints import mobile_pump_checks  # noqa: E402,F401
 from app.blueprints import mobile_pump_check_comparisons  # noqa: E402,F401
+from app.blueprints import mobile_today  # noqa: E402,F401
