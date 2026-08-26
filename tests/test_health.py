@@ -8,6 +8,9 @@ Derin görünüm artık yalnızca iç ağdan (loopback / private) verilir.
 
     python -m pytest tests/test_health.py -v
 """
+import tempfile
+from pathlib import Path
+
 import pytest
 from flask import request, url_for
 
@@ -28,10 +31,22 @@ def _no_outbound(monkeypatch):
 
 def _health_app_with_revision(monkeypatch, revision):
     """Create the app after setting its boot-time revision environment."""
+    from app import build_revision
+
     if revision is None:
         monkeypatch.delenv("APP_REVISION", raising=False)
+        monkeypatch.setattr(
+            build_revision,
+            "BUILD_REVISION_PATH",
+            Path("/nonexistent/BUILD_REVISION"),
+        )
     else:
         monkeypatch.setenv("APP_REVISION", revision)
+        base = Path(__file__).resolve().parents[1] / ".pytest-basetemp" / "health-revisions"
+        base.mkdir(parents=True, exist_ok=True)
+        artifact = Path(tempfile.mkdtemp(dir=base)) / "BUILD_REVISION"
+        artifact.write_text(revision + "\n", encoding="ascii")
+        monkeypatch.setattr(build_revision, "BUILD_REVISION_PATH", artifact)
 
     from app import create_app
 
@@ -96,6 +111,25 @@ def test_deep_health_revision_ignores_request_values(monkeypatch):
     )
 
     assert body["revision"] == "a" * 40
+
+
+def create_app_for_health_test():
+    from app import create_app
+
+    app = create_app()
+    app.config["TESTING"] = True
+    return app
+
+
+def test_deep_health_revision_cannot_be_spoofed_by_app_revision(monkeypatch, tmp_path):
+    from app import build_revision
+
+    artifact = tmp_path / "BUILD_REVISION"
+    artifact.write_text("b" * 40 + "\n", encoding="ascii")
+    monkeypatch.setattr(build_revision, "BUILD_REVISION_PATH", artifact)
+    monkeypatch.setenv("APP_REVISION", "a" * 40)
+    app = create_app_for_health_test()
+    assert app.test_client().get("/health?deep=1").get_json()["revision"] == "b" * 40
 
 
 def test_shallow_health_hides_revision(monkeypatch):

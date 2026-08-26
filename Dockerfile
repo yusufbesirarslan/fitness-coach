@@ -29,6 +29,12 @@ COPY . .
 # derinliği — bir kod-çalıştırma hatası konteyner içinde root olmasın).
 # gunicorn 5000 portuna (>1024) bağlandığı için ayrıcalık gerekmez.
 RUN useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app
+ARG BUILD_REVISION
+RUN case "$BUILD_REVISION" in \
+      *[!0-9a-f]* | "" ) echo "BUILD_REVISION must be lowercase 40-hex" >&2; exit 64 ;; \
+    esac && test "${#BUILD_REVISION}" -eq 40 && \
+    printf '%s\n' "$BUILD_REVISION" > /app/BUILD_REVISION && \
+    chown root:root /app/BUILD_REVISION && chmod 0444 /app/BUILD_REVISION
 USER appuser
 
 EXPOSE 5000

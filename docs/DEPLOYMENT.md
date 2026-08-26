@@ -153,11 +153,14 @@ equality check prevents a mutable-main checkout.
 
 C materializes each build context from `git archive` of the exact revision into
 a private temporary directory. Untracked or ignored host files therefore cannot
-enter an image build. C builds and starts the Compose release with
-`APP_REVISION` set to the exact candidate SHA. It requires all of the following
-before accepting the release:
+enter an image build. C builds that archive with Docker build argument
+`BUILD_REVISION` set to the exact candidate SHA and may still inject
+`APP_REVISION` as non-authoritative runtime metadata. The image bakes
+`/app/BUILD_REVISION` as a root-owned mode-0444 file. Serving truth is
+`DEPLOY_SHA == checked-out HEAD == BUILD_REVISION == deep-health revision`.
+It requires all of the following before accepting the release:
 
-1. the running `web` container reports the expected `APP_REVISION`;
+1. the running `web` container's `/app/BUILD_REVISION` equals the expected SHA;
 2. `/health?deep=1`, probed inside the running `web` container, returns HTTP 200
    and JSON `status: ok`;
 3. deep health's server-owned `revision` equals the expected SHA.
@@ -168,11 +171,12 @@ post-start failure enters rollback while the locks remain held. An optional
 internal deep-health gate. Its failure also rolls the candidate back.
 
 Rollback resets exactly to `PREV_COMMIT`, rereads `HEAD`, rebuilds/restarts with
-that same revision, and repeats container plus deep-health verification. A
-rollback is reported verified only after those checks succeed. The only legacy
-exception is the immediate predecessor of the revision-aware helper: its
-missing deep-health revision may serve as a one-time compatibility proof; any
-present rollback revision must still match exactly.
+that same revision (`BUILD_REVISION=PREV_COMMIT`), and repeats container plus
+deep-health verification against the previous baked revision. A rollback is
+reported verified only after those checks succeed. The only legacy exception is
+the immediate predecessor of the revision-aware helper: its missing deep-health
+revision may serve as a one-time compatibility proof; any present rollback
+revision must still match exactly.
 
 ## Database and operational boundaries
 

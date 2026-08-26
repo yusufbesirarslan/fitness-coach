@@ -328,11 +328,15 @@ write_override() {
     '  web:' \
     '    build:' \
     "      context: '$build_context'" \
+    '      args:' \
+    "        BUILD_REVISION: '$revision'" \
     '    environment:' \
     "      APP_REVISION: '$revision'" \
     '  worker:' \
     '    build:' \
     "      context: '$build_context'" \
+    '      args:' \
+    "        BUILD_REVISION: '$revision'" \
     '    environment:' \
     "      APP_REVISION: '$revision'" > "$OVERRIDE_FILE" || return 1
 }
@@ -441,7 +445,7 @@ start_and_verify_release() {
   run_external docker compose "${COMPOSE_FILES[@]}" build || return 1
   run_external docker compose "${COMPOSE_FILES[@]}" up -d --remove-orphans || return 1
   run_external docker compose "${COMPOSE_FILES[@]}" ps || return 1
-  running_revision="$(run_external docker compose "${COMPOSE_FILES[@]}" exec -T web printenv APP_REVISION)" || return 1
+  running_revision="$(run_external docker compose "${COMPOSE_FILES[@]}" exec -T web cat /app/BUILD_REVISION)" || return 1
   if [[ "$running_revision" != "$revision" ]]; then
     echo "running web container revision mismatch" >&2
     return 1

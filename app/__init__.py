@@ -209,7 +209,7 @@ def create_app():
         # izleyerek Redis'in düştüğü ve login'in fail-closed olduğu ANI öğrenirdi.
         # Dışarıya 403 DEĞİL, sığ gövde döneriz — 403'ün kendisi de bir sinyal olurdu.
         if request.args.get("deep") == "1" and _deep_health_allowed():
-            body["revision"] = app.config["APP_REVISION"]
+            body["revision"] = app.config["BUILD_REVISION"]
             body["redis"] = {"redis": "ok", "memory": "unconfigured"}.get(
                 body["limiter_storage"], "error")
             login_ok = (not app.config.get("LOGIN_FAIL_CLOSED", True)

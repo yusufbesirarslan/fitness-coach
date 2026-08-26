@@ -7,6 +7,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 
 from app import feature_flags as _feature_flags
+from app.build_revision import load_build_revision
 
 
 
@@ -299,6 +300,7 @@ def configure_app(app):
                or os.environ.get("FLASK_ENV") == "development")
     app.config["FITX_IS_DEV"] = _is_dev
     app.config["APP_REVISION"] = os.environ.get("APP_REVISION", "unknown")
+    app.config["BUILD_REVISION"] = load_build_revision()
     # Genel istek-gövdesi tavanı. Flask varsayılanı SINIRSIZDIR: her route kendi
     # alan-başı kapısına (avatar 500 KB, pump-check 8 MB data-URL, menü metni
     # 40 KB) güveniyordu ve bu kapılara ULAŞMADAN önce gövde zaten tamamen

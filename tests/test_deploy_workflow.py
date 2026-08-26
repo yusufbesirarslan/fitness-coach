@@ -534,6 +534,22 @@ def test_production_build_context_excludes_development_and_backups():
     assert "build:" in host and "context:" in host
 
 
+def test_dockerfile_bakes_immutable_build_revision():
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+    host = _host_script()
+
+    assert "ARG BUILD_REVISION" in dockerfile
+    assert 'case "$BUILD_REVISION" in' in dockerfile
+    assert "*[!0-9a-f]*" in dockerfile
+    assert 'printf \'%s\\n\' "$BUILD_REVISION" > /app/BUILD_REVISION' in dockerfile
+    assert "chown root:root /app/BUILD_REVISION" in dockerfile
+    assert "chmod 0444 /app/BUILD_REVISION" in dockerfile
+    assert dockerfile.index("ARG BUILD_REVISION") < dockerfile.index("USER appuser")
+    assert 'git archive --format=tar "$revision"' in host
+    assert "BUILD_REVISION: '$revision'" in host
+    assert "cat /app/BUILD_REVISION" in host
+
+
 def test_deploy_fails_on_live_nginx_csp_header_instead_of_sed_mutation():
     body = _controller_source()
 
@@ -652,6 +668,8 @@ def test_deployment_runbook_defines_the_immutable_operational_contract():
         "`origin/main` differs from `DEPLOY_SHA`",
         "resets only to `DEPLOY_SHA`",
         "server-owned `revision` equals the expected SHA",
+        "`BUILD_REVISION` set to the exact candidate SHA",
+        "the running `web` container's `/app/BUILD_REVISION` equals the expected SHA",
         "exact `PREV_COMMIT`",
         "Rollback resets exactly to `PREV_COMMIT`",
         "Code rollback does not roll back database migrations",

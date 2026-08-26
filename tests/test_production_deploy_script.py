@@ -71,7 +71,7 @@ def bash_executable() -> str:
 
 @pytest.fixture
 def tmp_path() -> Path:
-    temp_root = ROOT / ".pytest_cache" / "production-deploy"
+    temp_root = ROOT / ".pytest-basetemp" / "production-deploy"
     temp_root.mkdir(parents=True, exist_ok=True)
     path = Path(tempfile.mkdtemp(prefix="case-", dir=temp_root))
     try:
@@ -88,6 +88,9 @@ class HostFixture:
     prev_commit: str
     candidate_commit: str
     environment: dict[str, str]
+
+    def trace_text(self) -> str:
+        return self.trace.read_text(encoding="utf-8")
 
     def command(self, bash_executable: str, deploy_sha: str | None = None) -> list[str]:
         return [
@@ -150,6 +153,8 @@ def host_fixture(tmp_path: Path):
         flock_exit: int = 0,
         container_revision: str = "",
         rollback_container_revision: str = "",
+        baked_revision: str = "",
+        rollback_baked_revision: str = "",
         health_code: int = 200,
         health_status: str = "ok",
         health_revision: str = "",
@@ -344,8 +349,10 @@ for argument in "$@"; do
   previous="$argument"
 done
 revision=''
+baked=''
 if [[ -n "$override" && -f "$override" ]]; then
   revision="$(grep -m1 'APP_REVISION:' "$override" | cut -d "'" -f 2)"
+  baked="$(grep -m1 'BUILD_REVISION:' "$override" | cut -d "'" -f 2)"
 fi
 operation=''
 if [[ " $* " == *' build '* ]]; then operation=build; fi
@@ -362,12 +369,24 @@ fi
 if [[ "$operation" == build || "$operation" == up ]]; then
   printf '%s' "$revision" > "$DOCKER_STATE_FILE"
   printf 'APP_REVISION=%s\n' "$revision" >> "$TRACE_FILE"
+  printf 'BUILD_REVISION=%s\n' "$baked" >> "$TRACE_FILE"
 fi
 if [[ " $* " == *' exec -T web printenv APP_REVISION '* ]]; then
   if [[ "$revision" == "$FAKE_CANDIDATE_SHA" && -n "${FAKE_CANDIDATE_CONTAINER_REVISION:-}" ]]; then
     printf '%s\n' "$FAKE_CANDIDATE_CONTAINER_REVISION"
   elif [[ "$revision" != "$FAKE_CANDIDATE_SHA" && -n "${FAKE_ROLLBACK_CONTAINER_REVISION:-}" ]]; then
     printf '%s\n' "$FAKE_ROLLBACK_CONTAINER_REVISION"
+  else
+    printf '%s\n' "$revision"
+  fi
+fi
+if [[ " $* " == *' exec -T web cat /app/BUILD_REVISION '* ]]; then
+  if [[ "$revision" == "$FAKE_CANDIDATE_SHA" && -n "${FAKE_CANDIDATE_BAKED_REVISION:-}" ]]; then
+    printf '%s\n' "$FAKE_CANDIDATE_BAKED_REVISION"
+  elif [[ "$revision" != "$FAKE_CANDIDATE_SHA" && -n "${FAKE_ROLLBACK_BAKED_REVISION:-}" ]]; then
+    printf '%s\n' "$FAKE_ROLLBACK_BAKED_REVISION"
+  elif [[ -n "$baked" ]]; then
+    printf '%s\n' "$baked"
   else
     printf '%s\n' "$revision"
   fi
@@ -591,6 +610,10 @@ esac
                 "DOCKER_STATE_FILE": _bash_path(docker_state),
                 "FAKE_CANDIDATE_CONTAINER_REVISION": container_revision,
                 "FAKE_ROLLBACK_CONTAINER_REVISION": rollback_container_revision,
+                "FAKE_CANDIDATE_BAKED_REVISION": baked_revision or container_revision,
+                "FAKE_ROLLBACK_BAKED_REVISION": (
+                    rollback_baked_revision or rollback_container_revision
+                ),
                 "FAKE_CANDIDATE_SHA": candidate_commit,
                 "FAKE_CANDIDATE_HEALTH_CODE": str(health_code),
                 "FAKE_CANDIDATE_HEALTH_STATUS": health_status,
@@ -1158,7 +1181,8 @@ def test_success_deploys_exact_candidate_and_verifies_revision(bash_executable, 
     assert f"git fetch origin main --prune" in trace
     assert f"git reset --hard {fixture.candidate_commit}" in trace
     assert f"APP_REVISION={fixture.candidate_commit}" in trace
-    assert "exec -T web printenv APP_REVISION" in trace
+    assert f"BUILD_REVISION={fixture.candidate_commit}" in trace
+    assert "exec -T web cat /app/BUILD_REVISION" in trace
     assert "exec -T web python3 -" in trace
     assert f"INTERNAL_HEALTH_REVISION={fixture.candidate_commit} ATTEMPT=1" in trace
     assert f"git archive --format=tar {fixture.candidate_commit}" in trace
@@ -1199,6 +1223,17 @@ def test_success_deploys_exact_candidate_and_verifies_revision(bash_executable, 
     )
     assert reported_cleanup <= HOST_PHASE_SECONDS["cleanup"]
     assert reported_cleanup == expected_cleanup_timeout + grace_seconds
+
+
+def test_baked_build_revision_matches_git_archive_revision(bash_executable, host_fixture):
+    fixture = host_fixture()
+    result = fixture.run(bash_executable)
+
+    assert result.returncode == 0, result.stderr
+    trace = fixture.trace_text()
+    assert f"git archive --format=tar {fixture.candidate_commit}" in trace
+    assert f"BUILD_REVISION={fixture.candidate_commit}" in trace
+    assert "exec -T web cat /app/BUILD_REVISION" in trace
 
 
 def test_stale_candidate_fails_before_checkout_or_docker(bash_executable, host_fixture):
@@ -1253,6 +1288,27 @@ def test_wrong_deep_health_revision_rolls_back(bash_executable, host_fixture):
     assert result.returncode != 0
     assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
     assert "deep health revision mismatch" in result.stderr
+
+
+def test_wrong_baked_candidate_revision_forces_rollback(bash_executable, host_fixture):
+    fixture = host_fixture(baked_revision="c" * 40)
+    result = fixture.run(bash_executable)
+    assert result.returncode != 0
+    assert f"git reset --hard {fixture.prev_commit}" in fixture.trace_text()
+
+
+def test_rollback_exposes_prev_commit_as_baked_and_health_revision(
+    bash_executable, host_fixture
+):
+    fixture = host_fixture(baked_revision="c" * 40)
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    trace = fixture.trace_text()
+    assert f"git reset --hard {fixture.prev_commit}" in trace
+    assert f"BUILD_REVISION={fixture.prev_commit}" in trace
+    assert f"INTERNAL_HEALTH_REVISION={fixture.prev_commit}" in trace
+    assert "exec -T web cat /app/BUILD_REVISION" in trace
 
 
 def test_candidate_health_retries_bounded_calls_until_delayed_success(

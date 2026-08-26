@@ -4,6 +4,7 @@ instance/
 *.db
 *.pyc
 .pytest_cache/
+.pytest-basetemp/
 .venv/
 venv/
 
