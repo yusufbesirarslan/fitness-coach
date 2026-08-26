@@ -995,6 +995,26 @@ def _latching_clock_callee_names(module):
     return names
 
 
+def _latching_wrapper_expressions(module):
+    """Latching wrappers used in this module, as they appear in the tree.
+
+    Round 12 scored only `ast.Call` (`@_ft.lru_cache(maxsize=1)`, `@latch()`).
+    `@latch` and `@_ft.cache` are Name / Attribute, not Call.
+    """
+    names = _latching_clock_callee_names(module)
+    found = []
+    for node in ast.walk(module):
+        if isinstance(node, ast.Call) and ast.unparse(node.func) in names:
+            found.append(ast.unparse(node))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            for decorator in node.decorator_list:
+                if isinstance(decorator, ast.Call):
+                    continue
+                if ast.unparse(decorator) in names:
+                    found.append(ast.unparse(decorator))
+    return found
+
+
 def test_the_frozen_clock_census_resolves_functools_aliases():
     module = ast.parse(
         "import functools as _ft\n"
@@ -1010,6 +1030,20 @@ def test_the_frozen_clock_census_resolves_functools_aliases():
     decorator = module.body[1].decorator_list[0]
     assert ast.unparse(decorator.func) in names
     assert "_memo" in names
+
+    bare = ast.parse(
+        "from functools import cache as latch\n"
+        "@latch\n"
+        "def _latched(tz):\n"
+        "    return tz\n"
+        "import functools as _ft\n"
+        "@_ft.cache\n"
+        "def also(tz):\n"
+        "    return tz\n"
+    )
+    found = _latching_wrapper_expressions(bare)
+    assert "latch" in found
+    assert "_ft.cache" in found
 
 
 def test_the_controller_injects_no_frozen_clock_anywhere():
@@ -1032,8 +1066,6 @@ def test_the_controller_injects_no_frozen_clock_anywhere():
     # `from functools import partial as _bind` walked straight through it.
     # `lru_cache` and `cache` latch lazily on the first call, which is a frozen
     # clock that arrives one read later than `partial`'s.
-    partial_names = _latching_clock_callee_names(module)
-
     clock_shaped = []
     for node in ast.walk(module):
         if isinstance(node, ast.Lambda):
@@ -1046,10 +1078,7 @@ def test_the_controller_injects_no_frozen_clock_anywhere():
                 # Scored with their class below, where the callable really is.
                 if node.name not in ("__call__", "__new__"):
                     clock_shaped.append(node.name)
-        elif isinstance(node, ast.Call) and (
-            ast.unparse(node.func) in partial_names
-        ):
-            clock_shaped.append(ast.unparse(node))
+    clock_shaped.extend(_latching_wrapper_expressions(module))
 
     # A `ClassDef` is neither a `Lambda`, a `FunctionDef` nor a `Call`, so the
     # census could not see one at all -- and `class _LatchedClock` with a

@@ -1886,7 +1886,17 @@ def _reachable_controller_functions(module, roots):
         if name in seen or name not in definitions:
             continue
         seen.add(name)
-        tree = _send_path_tree(definitions[name])
+        definition = definitions[name]
+        # Dataclass construction calls inherited `__post_init__` / `__new__`
+        # even when those methods are not on this ClassDef. Bases are not a
+        # Call, so they have to be followed by name.
+        if isinstance(definition, ast.ClassDef):
+            for base in definition.bases:
+                if isinstance(base, ast.Name):
+                    pending.append(base.id)
+                elif isinstance(base, ast.Attribute):
+                    pending.append(base.attr)
+        tree = _send_path_tree(definition)
         # A `raise AwsCliError(...)` constructs a class, but that is the
         # fail-closed path. Following it put exception `__init__` on the send
         # path. `return ManagedInstance(...)` is the fresh path and is followed.
@@ -2196,13 +2206,42 @@ def test_the_send_path_guard_enters_a_class_constructed_after_the_verdict():
     ], "constructor body must be on the send path"
 
 
+def test_the_send_path_guard_enters_inherited_constructor_bodies():
+    # Dataclass construction calls an inherited `__post_init__` even when
+    # that method is not in `ManagedInstance.__dict__`. Bases are not a
+    # Call, so a walk that only follows `ManagedInstance(...)` never
+    # entered `_Record` and a busy-wait there ran after the verdict.
+    module = ast.parse(
+        "class _Record:\n"
+        "    def __post_init__(self):\n"
+        "        remaining = 8\n"
+        "        while remaining:\n"
+        "            remaining -= 1\n"
+        "class ManagedInstance(_Record):\n"
+        "    pass\n"
+        "def validate_managed_instance():\n"
+        "    return ManagedInstance()\n"
+    )
+    reachable = _reachable_controller_functions(
+        module, ("validate_managed_instance",)
+    )
+    assert "ManagedInstance" in reachable
+    assert "_Record" in reachable
+    tree = _send_path_tree(reachable["_Record"])
+    assert [
+        node for node in ast.walk(tree) if isinstance(node, ast.While)
+    ], "inherited constructor body must be on the send path"
+
+
 def test_managed_instance_is_a_frozen_record_with_no_behaviour():
     """Construction after the verdict is not a place to hide work.
 
-    Production `ManagedInstance` stays a two-field frozen dataclass. A
-    method, a `__post_init__`, or any statement that is not a field
-    annotation would run after the staleness raise. The send-path walk
-    would then see it; this pin refuses the method existing at all.
+    Production `ManagedInstance` stays a two-field frozen dataclass with
+    no bases. A method, a `__post_init__`, a base whose `__post_init__`
+    dataclass construction would call, or any statement that is not a
+    field annotation would run after the staleness raise. The send-path
+    walk would then see it; this pin refuses the method or base existing
+    at all.
     """
     definition = next(
         node for node in _controller_module().body
@@ -2220,6 +2259,7 @@ def test_managed_instance_is_a_frozen_record_with_no_behaviour():
         )
         for decorator in definition.decorator_list
     )
+    assert definition.bases == []
     assert [
         node for node in definition.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
