@@ -888,13 +888,21 @@ def test_the_send_time_clock_is_built_from_nothing_but_a_live_source():
     # parameter cannot be re-purposed into a frozen instant either.
     entrypoint = _controller_function("main")
 
+    # Every binding, not only the annotated one: a later `send_time_clock =
+    # _pinned_clock` under an `if` rebinds the seam after the pinned
+    # construction and leaves that construction perfectly intact.
     assignments = [
         node for node in ast.walk(entrypoint)
-        if isinstance(node, ast.AnnAssign)
-        and isinstance(node.target, ast.Name)
-        and node.target.id == "send_time_clock"
+        if isinstance(node, (ast.Assign, ast.AnnAssign))
+        and any(
+            isinstance(target, ast.Name) and target.id == "send_time_clock"
+            for target in (
+                node.targets if isinstance(node, ast.Assign) else [node.target]
+            )
+        )
     ]
     assert len(assignments) == 1
+    assert isinstance(assignments[0], ast.AnnAssign)
 
     referenced = {
         node.id
@@ -904,21 +912,30 @@ def test_the_send_time_clock_is_built_from_nothing_but_a_live_source():
     assert referenced == {"utc_now", "datetime", "timezone"}
 
 
+def _takes_no_arguments(arguments):
+    return not (
+        arguments.args or arguments.posonlyargs or arguments.kwonlyargs
+        or arguments.vararg or arguments.kwarg
+    )
+
+
 def test_the_controller_injects_no_frozen_clock_anywhere():
-    # A zero-argument lambda in this module is a clock by construction. Exactly
-    # one is legitimate: the live default. Any other is a sample taken at some
-    # earlier instant and dressed up as a clock -- which is the one thing
-    # `_require_live_clock` provably cannot detect at run time, because a frozen
-    # clock and a live one have identical shape.
+    # A zero-argument callable in this module is a clock by construction.
+    # Exactly one is legitimate: the live default. Any other is a sample taken
+    # at some earlier instant and dressed up as a clock -- which is the one
+    # thing `_require_live_clock` provably cannot detect at run time, because a
+    # frozen clock and a live one have identical shape.
+    #
+    # `def` as well as `lambda`: a nested zero-argument function is the same
+    # object with a different keyword in front of it, and censusing only
+    # lambdas made `def _pinned(): return datetime.fromisoformat(...)` free.
     module = ast.parse(CONTROLLER_SOURCE.read_text(encoding="utf-8"))
 
     clock_shaped = [
-        ast.unparse(node)
+        ast.unparse(node) if isinstance(node, ast.Lambda) else node.name
         for node in ast.walk(module)
-        if isinstance(node, ast.Lambda)
-        and not node.args.args
-        and not node.args.posonlyargs
-        and not node.args.kwonlyargs
+        if isinstance(node, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef))
+        and _takes_no_arguments(node.args)
     ]
     assert clock_shaped == ["lambda: datetime.now(timezone.utc)"]
 

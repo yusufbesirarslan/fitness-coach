@@ -205,15 +205,21 @@ def test_deploy_lifecycle_has_one_controller_entrypoint_and_named_inputs():
 # the host script that submits or reads a command is a second lifecycle that
 # never passes through the send-boundary freshness proof.
 SSM_LIFECYCLE_INVOCATIONS = (
-    # `aws ssm send-command`, `aws2 ssm send-command`, `awscli  ssm  send-command`,
-    # and the same broken across lines -- all one shape once normalised.
-    r"\baws\S*\s+ssm\s+send-command\b",
-    r"\baws\S*\s+ssm\s+get-command-invocation\b",
-    r"\baws\S*\s+ssm\s+list-command-invocations\b",
+    # Anchored on the service and operation, never on the binary in front of
+    # them. `aws --region eu-central-1 ssm send-command` puts global options
+    # between the two, and the binary itself may be `aws2`, `awscli`, or any
+    # wrapper -- so requiring `ssm` to follow `aws` immediately guarded one
+    # spelling out of an open set.
+    r"\bssm\s+send-command\b",
+    r"\bssm\s+get-command-invocation\b",
+    r"\bssm\s+list-command-invocations\b",
     # boto3 / botocore, whatever the client is called.
     r"\.\s*send_command\s*\(",
     r"\.\s*get_command_invocation\s*\(",
 )
+
+WORKFLOW_SUFFIXES = (".yml", ".yaml")
+SHELL_SUFFIXES = (".sh", ".bash")
 
 
 def _normalised_shell(text):
@@ -222,21 +228,61 @@ def _normalised_shell(text):
     return " ".join(joined.split()).lower()
 
 
+def _shipped_execution_sources():
+    """Everything shipped that CI or the host can actually execute.
+
+    Two named files were scanned, so a second lifecycle only had to be written
+    into a third: another workflow, a composite action's `action.yml`, or any
+    other shell script in the tree. The corpus is the whole shipped set, for
+    the same reason `_shipped_markdown` is.
+    """
+    listing = subprocess.run(
+        [
+            "git", "-c", "safe.directory=*", "ls-files", "-z",
+            "--cached", "--others", "--exclude-standard",
+        ],
+        capture_output=True, text=True, check=True,
+    ).stdout
+    sources = []
+    for name in listing.split("\0"):
+        lowered = name.lower()
+        if not name:
+            continue
+        if lowered.endswith(SHELL_SUFFIXES) or (
+            name.startswith(".github/") and lowered.endswith(WORKFLOW_SUFFIXES)
+        ):
+            sources.append(Path(name))
+    return sorted(sources)
+
+
+def test_the_executable_corpus_covers_the_workflow_and_the_host_script():
+    corpus = _shipped_execution_sources()
+
+    assert Path(".github/workflows/deploy.yml") in corpus
+    assert Path("scripts/production_deploy.sh") in corpus
+    assert len(corpus) > 2
+
+
 def test_workflow_has_no_second_or_fail_open_ssm_lifecycle():
     body = _deploy_yaml()
 
-    # Whitespace-insensitive, and it covers the host script too: a substring
-    # check for one exact spelling was defeated by a single extra space.
-    for source in (body, _host_script()):
-        normalised = _normalised_shell(source)
-        assert [
-            pattern
+    # Whitespace-insensitive, over everything executable that ships: a substring
+    # check for one exact spelling was defeated by a single extra space, and a
+    # two-file corpus was defeated by writing the second lifecycle elsewhere.
+    offenders = []
+    for path in _shipped_execution_sources():
+        normalised = _normalised_shell(path.read_text(encoding="utf-8"))
+        offenders += [
+            f"{path.as_posix()}: {pattern}"
             for pattern in SSM_LIFECYCLE_INVOCATIONS
             if re.search(pattern, normalised)
-        ] == []
+        ]
 
-    # A local composite action is a shell script the scan above cannot see.
-    assert re.search(r"uses:\s*\.", body) is None
+    assert offenders == []
+
+    # A local composite action's own `action.yml` is in the corpus above, but
+    # say so explicitly: quoting the path is not an exemption.
+    assert re.search(r"""uses:\s*['"]?\s*\.""", body) is None
 
     assert "git reset --hard origin/main" not in body
     assert "2>/dev/null || true" not in body
@@ -245,12 +291,17 @@ def test_workflow_has_no_second_or_fail_open_ssm_lifecycle():
 
 def test_the_lifecycle_guard_recognises_the_invocations_it_claims_to():
     # A negative assertion over a corpus that happens to be clean proves nothing
-    # about the patterns. Prove they match what they are written for.
+    # about the patterns. Prove they match what they are written for -- and the
+    # list deliberately leads with the spellings that walked past round 7.
     spellings = (
+        "aws --region eu-central-1 ssm send-command --instance-ids i-1",
+        "aws --profile deploy --output json --no-cli-pager ssm send-command",
+        "/usr/local/bin/aws ssm send-command --instance-ids i-1",
         "aws ssm send-command --instance-ids i-1",
         "aws  ssm   send-command --instance-ids i-1",
         "aws2 ssm send-command --instance-ids i-1",
         "aws \\\n  ssm send-command --instance-ids i-1",
+        "aws \\\n  --region eu-central-1 \\\n  ssm send-command",
         "ssm_client.send_command(InstanceIds=[instance])",
         "client . get_command_invocation( CommandId=cid )",
     )
@@ -480,10 +531,22 @@ CONTRADICTED_OPERATIONAL_CLAIMS = (
     # every N seconds". Only the first was matched.
     r"re-?prov\w+ the heartbeat every",
     r"heartbeat is (?:re-?\w+|refreshed|renewed|updated) every",
-    # Framing that demotes a fail-closed gate to a hint.
+    # Framing that demotes a fail-closed gate to a hint. The subject is
+    # supplied by the sentence scope, so these must not re-specify it: the same
+    # false claim about "the final describe" was free while only the spelling
+    # "heartbeat" was covered.
     r"advisory",
-    r"best[- ]effort (?:freshness|heartbeat|check)",
-    r"heartbeat (?:check )?is (?:only )?(?:a )?(?:hint|warning|informational)",
+    # Scoped to the gate's own nouns, in both voices: "bounded best-effort
+    # cleanup" of the authority token is a true sentence about something else.
+    r"best[- ]effort\s+(?:freshness|heartbeat|describe|proof|recheck|gate|check)",
+    r"(?:freshness|heartbeat|describe|proof|recheck|gate|check)\b[^.]{0,40}?\bis best[- ]effort",
+    r"(?:only )?(?:a |as )?(?:hint|warning|informational)\b",
+    # The single most likely false claim about a fail-closed gate, in its
+    # commonest voices.
+    r"fail[- ]open",
+    r"does not block",
+    r"non-?blocking",
+    r"(?:logs?|logged|logging)\b.{0,60}?\b(?:continues?|proceeds?|submits?)",
 )
 
 
@@ -491,29 +554,85 @@ SUPERSEDED_MARKER = "> Superseded:"
 
 # Every spelling the retired ceiling has actually been written in. The digit and
 # comma guards keep "65 minutes" and "1,300 seconds" out.
+# Wider than HEARTBEAT_SUBJECTS, and used only at sentence scope: these words
+# name the freshness gate without naming its mechanism.
+RETIRED_CEILING_SUBJECTS = (
+    "freshness", "ceiling", "stale", "max age", "maximum age",
+    "SendCommand", "send-command",
+)
+
+
+RETIRED_CEILING_SUBJECT_RE = None  # bound below
+
+
+def _names_a_retired_ceiling_subject(text):
+    return RETIRED_CEILING_SUBJECT_RE.search(text) is not None
+
+
 RETIRED_CEILING_SPELLINGS = (
     r"(?<![\d,])(?:five|5)\s+minutes",
     r"timedelta\(\s*minutes\s*=\s*5\s*\)",
     r"(?<![\d,])300\s+seconds",
 )
+
+# A cheap literal superset of every spelling above, used only to skip documents
+# wholesale. It must never be the patterns themselves: those carry lookbehinds
+# that can fail on a joined document while matching inside one of its sections.
+RETIRED_CEILING_TOKENS = ("minute", "300")
+
+# One document per spelling, stating it as current. Used to prove the prefilter
+# does not narrow the scan, and that each spelling still matches something.
+RETIRED_CEILING_EXAMPLES = (
+    "The heartbeat may be up to five minutes old.",
+    "The heartbeat ceiling is 5 minutes.",
+    "The boundary compares timedelta(minutes=5).",
+    "The freshness ceiling is 300 seconds.",
+)
+
+
+def test_the_retired_ceiling_prefilter_cannot_narrow_the_scan():
+    for example in RETIRED_CEILING_EXAMPLES:
+        matched = [
+            pattern for pattern in RETIRED_CEILING_SPELLINGS
+            if re.search(pattern, example, flags=re.IGNORECASE)
+        ]
+        assert matched, example
+        assert any(
+            token in example.lower() for token in RETIRED_CEILING_TOKENS
+        ), example
+
+    # And every spelling is exercised by at least one example.
+    covered = {
+        pattern
+        for pattern in RETIRED_CEILING_SPELLINGS
+        for example in RETIRED_CEILING_EXAMPLES
+        if re.search(pattern, example, flags=re.IGNORECASE)
+    }
+    assert covered == set(RETIRED_CEILING_SPELLINGS)
 HEARTBEAT_SUBJECTS = (
     "LastPingDateTime", "PingStatus", "heartbeat", "ping", "SSM target",
 )
 
 
-def _names_a_heartbeat(text):
-    """Case-insensitively, and by whole words.
+def _word_alternation(subjects):
+    """One compiled whole-word alternation, case-insensitive.
 
-    The subjects were matched case-sensitively while the retired ceilings were
-    matched case-insensitively, so capitalising one letter defeated every
-    document guard at once. Matched as substrings, meanwhile, a bare "ping"
-    also fires on "mapping" and "shipping", which made an unrelated document
-    an offender.
+    Case-insensitively because "Heartbeat" starts sentences, and the retired
+    ceilings were already matched that way -- capitalising one letter used to
+    defeat every document guard at once. By whole words because a bare "ping"
+    substring also fires on "mapping" and "shipping".
     """
-    return any(
-        re.search(rf"\b{re.escape(subject)}\b", text, flags=re.IGNORECASE)
-        for subject in HEARTBEAT_SUBJECTS
+    return re.compile(
+        r"\b(?:%s)\b" % "|".join(re.escape(subject) for subject in subjects),
+        re.IGNORECASE,
     )
+
+
+HEARTBEAT_SUBJECT_RE = None  # bound below, once HEARTBEAT_SUBJECTS exists
+
+
+def _names_a_heartbeat(text):
+    return HEARTBEAT_SUBJECT_RE.search(text) is not None
 
 
 def test_the_heartbeat_subject_matcher_reads_words_not_substrings():
@@ -631,23 +750,40 @@ def test_no_document_states_a_retired_heartbeat_ceiling_as_current():
     # Scoped per paragraph, not per file: a banner buried at the bottom of a
     # document must not license the retired ceiling at the top, and an unrelated
     # "5 minutes" elsewhere in the runbook must not be flagged.
+    def stating(text):
+        return [
+            pattern for pattern in RETIRED_CEILING_SPELLINGS
+            if re.search(pattern, text, flags=re.IGNORECASE)
+        ]
+
     offenders = []
     for path in _shipped_markdown():
         text = path.read_text(encoding="utf-8")
         if _superseded(text):
             continue
+        # Almost no document mentions a retired ceiling at all, and asking the
+        # subject question of every section and sentence in the tree costs
+        # eighteen seconds to learn the same thing.
+        lowered = text.lower()
+        if not any(token in lowered for token in RETIRED_CEILING_TOKENS):
+            continue
+
         for section in _sections(text):
-            # Subject anywhere in the section, ceiling anywhere in the same
-            # section: "## SSM target heartbeat" followed two paragraphs later
-            # by "It is 300 seconds" is one claim, however it is laid out.
-            if not _names_a_heartbeat(section):
-                continue
+            # Wide scope, narrow subject: "## SSM target heartbeat" followed two
+            # paragraphs later by "It is 300 seconds" is one claim, however it
+            # is laid out. Only the unmistakable subjects, because a whole
+            # section is a lot of unrelated prose to hold responsible.
             body = " ".join(section.split())
-            if any(
-                re.search(pattern, body, flags=re.IGNORECASE)
-                for pattern in RETIRED_CEILING_SPELLINGS
-            ):
+            if stating(body) and _names_a_heartbeat(section):
                 offenders.append(f"{path.as_posix()}: {body[:60]}")
+
+        # Narrow scope, wide subject: "The freshness ceiling is 300 seconds"
+        # names the gate without using any of the words above. Sentence scope
+        # is what makes the wider subject list safe -- an unrelated true
+        # sentence about a 300-second controller budget stays untouched.
+        for sentence in _sentences(text):
+            if stating(sentence) and _names_a_retired_ceiling_subject(sentence):
+                offenders.append(f"{path.as_posix()}: {sentence[:60]}")
 
     assert offenders == []
 
@@ -685,20 +821,34 @@ def test_the_pinned_paragraph_states_the_canonical_threshold_itself():
         f"{SSM_HEARTBEAT_MAX_AGE_SECONDS} seconds old"
         in FRESHNESS_CONTRACT_PARAGRAPH
     )
-    assert SSM_HEARTBEAT_FUTURE_SKEW_SECONDS == 60
-    assert "one minute in the future" in FRESHNESS_CONTRACT_PARAGRAPH
+    # Derived, not hardcoded, so the prose and the constant cannot drift apart
+    # in the direction the ceiling above is already protected against.
+    assert SSM_HEARTBEAT_FUTURE_SKEW_SECONDS % 60 == 0
+    minutes = SSM_HEARTBEAT_FUTURE_SKEW_SECONDS // 60
+    spelled = "one minute" if minutes == 1 else f"{minutes} minutes"
+    assert f"{spelled} in the future" in FRESHNESS_CONTRACT_PARAGRAPH
 
 
 FRESHNESS_CLAIM_SUBJECTS = HEARTBEAT_SUBJECTS + (
     "freshness", "preflight", "clock", "SendCommand", "send-command",
+    # "a failed final describe is informational" names the gate perfectly well
+    # without using any of the words above it.
+    "describe", "SSM", "authority", "boundary", "fail-closed",
 )
 
 
+FRESHNESS_CLAIM_SUBJECT_RE = None  # bound below
+
+
 def _names_the_freshness_gate(text):
-    return any(
-        re.search(rf"\b{re.escape(subject)}\b", text, flags=re.IGNORECASE)
-        for subject in FRESHNESS_CLAIM_SUBJECTS
-    )
+    return FRESHNESS_CLAIM_SUBJECT_RE.search(text) is not None
+
+
+HEARTBEAT_SUBJECT_RE = _word_alternation(HEARTBEAT_SUBJECTS)
+RETIRED_CEILING_SUBJECT_RE = _word_alternation(
+    HEARTBEAT_SUBJECTS + RETIRED_CEILING_SUBJECTS
+)
+FRESHNESS_CLAIM_SUBJECT_RE = _word_alternation(FRESHNESS_CLAIM_SUBJECTS)
 
 
 def _sentences(text):
@@ -738,10 +888,21 @@ def test_each_contradicted_claim_pattern_matches_the_claim_it_names():
         r"heartbeat is (?:re-?\w+|refreshed|renewed|updated) every":
             "The heartbeat is refreshed every 30 seconds.",
         r"advisory": "The heartbeat ceiling is advisory.",
-        r"best[- ]effort (?:freshness|heartbeat|check)":
+        r"best[- ]effort\s+(?:freshness|heartbeat|describe|proof|recheck|gate|check)":
             "The controller makes a best-effort freshness attempt.",
-        r"heartbeat (?:check )?is (?:only )?(?:a )?(?:hint|warning|informational)":
-            "The heartbeat check is only a hint.",
+        r"(?:freshness|heartbeat|describe|proof|recheck|gate|check)\b[^.]{0,40}?\bis best[- ]effort":
+            "The final SSM describe before SendCommand is best-effort.",
+        r"(?:only )?(?:a |as )?(?:hint|warning|informational)\b":
+            "Operators may treat a failed final describe as informational.",
+        r"fail[- ]open":
+            "The final SSM describe is fail-open.",
+        r"does not block":
+            "A failed freshness describe does not block submission.",
+        r"non-?blocking":
+            "The SendCommand freshness proof is non-blocking.",
+        r"(?:logs?|logged|logging)\b.{0,60}?\b(?:continues?|proceeds?|submits?)":
+            "If the final SSM describe fails, B logs the condition and "
+            "continues to submission.",
     }
     assert sorted(claims) == sorted(CONTRADICTED_OPERATIONAL_CLAIMS)
 
@@ -875,10 +1036,20 @@ def test_controller_proves_heartbeat_freshness_at_the_send_authority_boundary():
     # protects. Statement *form* is deliberately not constrained; only order is.
     send_command = _function_def(_controller_module(), "send_command")
 
+    # Keyed by annotation, like the clock below: renaming the injected runner is
+    # a refactor, and the guard has no opinion about what it is called.
+    runners = [
+        argument.arg
+        for argument in send_command.args.args + send_command.args.kwonlyargs
+        if argument.annotation is not None
+        and ast.unparse(argument.annotation) == "AwsJsonRunner"
+    ]
+    assert len(runners) == 1
+
     submit_indexes = [
         index
         for index, statement in enumerate(send_command.body)
-        if _calls_to(statement, "aws")
+        if _calls_to(statement, runners[0])
     ]
     assert len(submit_indexes) == 1
     assert submit_indexes[0] > 0
@@ -886,6 +1057,13 @@ def test_controller_proves_heartbeat_freshness_at_the_send_authority_boundary():
     proof = send_command.body[submit_indexes[0] - 1]
     proof_calls = _calls_to(proof, "require_fresh_ssm_target")
     assert len(proof_calls) == 1
+
+    # Ordering alone is not enough. `_settle(require_fresh_ssm_target(...))`
+    # is still "the statement before the send", and it can wait as long as it
+    # likes after the proof returns -- 45 seconds turns a heartbeat proven at
+    # 359s into a send at 404s. The proof statement must be the bare call.
+    assert isinstance(proof, ast.Expr)
+    assert proof.value is proof_calls[0]
 
     # The proof must be handed the boundary's own injected clock, not some other
     # value -- and the clock is identified by its annotation, so renaming the

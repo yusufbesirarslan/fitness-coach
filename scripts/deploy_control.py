@@ -535,8 +535,9 @@ def _require_live_clock(utc_now: UtcClock) -> UtcClock:
     therefore a trusted injection seam, on the same footing as monkeypatching
     :func:`require_fresh_ssm_target` itself. What is guarded instead is every
     route by which this repository can supply one: the entrypoint's parameters
-    are whitelisted, the send-time clock's construction is pinned, and this
-    module is allowed exactly one zero-argument lambda -- the live default.
+    are whitelisted, the send-time clock is bound exactly once and its
+    construction is pinned, and this module is allowed exactly one
+    zero-argument callable -- the live default.
     """
     if not callable(utc_now):
         raise ConfigError(
