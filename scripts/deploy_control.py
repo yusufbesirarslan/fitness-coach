@@ -63,7 +63,12 @@ SEND_AND_MONITOR_RESERVE_SECONDS = (
     + AUTHORIZATION_CALL_TIMEOUT_SECONDS
     + AUTHORITY_CLEANUP_RESERVE_SECONDS
 )
-ROOT_OUTER_LOCK_PATH = "/run/lock/axisai-production/production.lock"
+ROOT_RUNTIME_DIR = "/run/lock/axisai-production"
+ROOT_OUTER_LOCK_PATH = f"{ROOT_RUNTIME_DIR}/production.lock"
+# Transaction scratch state lives in the root-owned runtime directory, never
+# in the production checkout.  Root provisions it after the mutation gate
+# opens and removes it after the child terminates.
+MONOTONIC_STATE_PATH = f"{ROOT_RUNTIME_DIR}/monotonic-clock"
 AUTHORITY_PARAMETER_PREFIX = "/axisai/production-deploy-authority/"
 AUTHORITY_WAIT_ATTEMPTS = 14
 AUTHORITY_GATE_WORST_CASE_SECONDS = AUTHORITY_WAIT_ATTEMPTS * 5
@@ -227,7 +232,9 @@ if __name__ == "__main__":
 '''
 
 PRIVILEGE_DROP_SOURCE = (
-    "HOST_TIMEOUT_ENVIRONMENT = " + repr(host_timeout_environment()) + "\n\n" + r'''def _emit(stderr, message):
+    "HOST_TIMEOUT_ENVIRONMENT = " + repr(host_timeout_environment()) + "\n"
+    + "MONOTONIC_STATE_PATH = " + repr(MONOTONIC_STATE_PATH)
+    + "\n\n" + r'''def _emit(stderr, message):
     if hasattr(stderr, "write"):
         stderr.write(message + "\n")
     else:
@@ -261,6 +268,7 @@ def run(user_name, helper_path, deploy_sha, deploy_dir, public_url, fd_text,
             {
                 "PATH": "/usr/local/bin:/usr/bin:/bin",
                 "AXISAI_OUTER_LOCK_FD": "7",
+                "AXISAI_MONOTONIC_STATE": MONOTONIC_STATE_PATH,
                 **HOST_TIMEOUT_ENVIRONMENT,
             },
         )
@@ -670,6 +678,54 @@ if [ "${{AXISAI_ROOT_LOCK_FD:-}}" != '{OUTER_LOCK_CAPABILITY_FD}' ]; then
   exit 73
 fi
 
+# Authority proof.  This runs behind the outer lock and ahead of every
+# mutation: a command the controller never authorized must not be able to
+# change one byte of production state before it is rejected.
+authority_parameter="$(printf '%s' '{encoded_authority_parameter}' | base64 --decode)"
+authority_value=''
+authority_ready=0
+for authority_attempt in $(seq 1 {AUTHORITY_WAIT_ATTEMPTS}); do
+  authority_value="$(timeout --signal=TERM --kill-after=1s 4s \
+    aws ssm get-parameter --region '{region}' --name "$authority_parameter" \
+    --query Parameter.Value --output text --no-cli-pager 2>/dev/null || true)"
+  if python3 - "$authority_value" '{deploy_sha}' <<'AXISAI_AUTHORITY_VALUE_PY'
+import re
+import sys
+value, deploy_sha = sys.argv[1:]
+pattern = re.compile(
+    re.escape(deploy_sha) +
+    r":[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}"
+)
+raise SystemExit(0 if pattern.fullmatch(value) else 1)
+AXISAI_AUTHORITY_VALUE_PY
+  then
+    authority_ready=1
+    break
+  fi
+  sleep 1
+done
+if [ "$authority_ready" != 1 ]; then
+  echo 'deployment delivery was not authorized by the controller' >&2
+  exit 75
+fi
+
+# Staleness proof.  `ls-remote` reads the remote advertisement only: it writes
+# no ref and no object, which is exactly why it -- and never a ref-writing
+# fetch -- is the pre-mutation proof.  It runs as the configured deploy user
+# so the root bootstrap never borrows root's credentials for a network read.
+remote_main=''
+if ! remote_main="$(root_external runuser -u '{deploy_user}' -- \
+  git -C "$deploy_dir" ls-remote --exit-code origin refs/heads/main)"; then
+  echo 'deployment candidate could not be proven current at host mutation gate' >&2
+  exit 75
+fi
+if [ "$remote_main" != "{deploy_sha}$(printf '\t')refs/heads/main" ]; then
+  echo 'deployment candidate is stale at host mutation gate' >&2
+  exit 75
+fi
+
+# ---- mutation gate: nothing above this line changes production state. ----
+
 root_external python3 - '{deploy_user}' "$deploy_dir" <<'AXISAI_ENV_GUARD_PY'
 import os
 import pwd
@@ -746,9 +802,11 @@ else
   echo 'WARNING: fatsecret proxy is not listening on 127.0.0.1:3000'
 fi
 
+root_external install -o '{deploy_user}' -m 0600 /dev/null \
+  '{MONOTONIC_STATE_PATH}'
 script_path="$(root_external mktemp /tmp/fitx-deploy.XXXXXX)"
 cleanup() {{
-  root_external rm -f -- "$script_path" || true
+  root_external rm -f -- "$script_path" '{MONOTONIC_STATE_PATH}' || true
 }}
 trap cleanup EXIT
 trap 'exit 129' HUP
@@ -762,38 +820,14 @@ python3 - '{deploy_user}' "$script_path" '{deploy_sha}' "$deploy_dir" \
 {PRIVILEGE_DROP_SOURCE}AXISAI_PRIVILEGE_DROP_PY
 """
     encoded_bootstrap = base64.b64encode(inner_bootstrap.encode("utf-8")).decode("ascii")
-    authority_gate = f"""set -eu
-authority_parameter="$(printf '%s' '{encoded_authority_parameter}' | base64 --decode)"
-authority_value=''
-authority_ready=0
-for authority_attempt in $(seq 1 {AUTHORITY_WAIT_ATTEMPTS}); do
-  authority_value="$(timeout --signal=TERM --kill-after=1s 4s \
-    aws ssm get-parameter --region '{region}' --name "$authority_parameter" \
-    --query Parameter.Value --output text --no-cli-pager 2>/dev/null || true)"
-  if python3 - "$authority_value" '{deploy_sha}' <<'AXISAI_AUTHORITY_VALUE_PY'
-import re
-import sys
-value, deploy_sha = sys.argv[1:]
-pattern = re.compile(
-    re.escape(deploy_sha) +
-    r":[0-9a-f]{{8}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{4}}-[0-9a-f]{{12}}"
-)
-raise SystemExit(0 if pattern.fullmatch(value) else 1)
-AXISAI_AUTHORITY_VALUE_PY
-  then
-    authority_ready=1
-    break
-  fi
-  sleep 1
-done
-if [ "$authority_ready" != 1 ]; then
-  echo 'deployment delivery was not authorized by the controller' >&2
-  exit 75
-fi
-"""
+    # The authority gate moved into the root-lock child and took the outer
+    # script's `set -eu` with it.  The outer script is one command with no
+    # parameter expansion, so the options are inert today -- but they were the
+    # stated contract for whatever RunShellScript executes, and a second line
+    # added later must not inherit a shell that keeps going after a failure.
     return (
-        authority_gate
-        + f"python3 - {shlex.quote(encoded_bootstrap)} "
+        "set -eu\n"
+        f"python3 - {shlex.quote(encoded_bootstrap)} "
         "<<'AXISAI_ROOT_LOCK_PY'\n"
         f"{ROOT_LOCK_WRAPPER_SOURCE}"
         "AXISAI_ROOT_LOCK_PY\n"

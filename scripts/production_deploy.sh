@@ -201,9 +201,10 @@ cleanup() {
   if [[ -n "$HEALTH_BODY" ]]; then
     cleanup_files+=("$HEALTH_BODY")
   fi
-  if [[ -n "$MONOTONIC_STATE_FILE" ]]; then
-    cleanup_files+=("$MONOTONIC_STATE_FILE")
-  fi
+  # The clock state lives in the root-owned runtime directory, which this
+  # unprivileged process cannot unlink from.  Root removes it after the child
+  # terminates; listing it here would make one guaranteed `rm` failure abandon
+  # the checkout files that this process really does own.
   if ((${#cleanup_files[@]} > 0)); then
     timeout --signal=TERM --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
       "${CLEANUP_TIMEOUT_SECONDS}s" rm -f -- "${cleanup_files[@]}" || true
@@ -219,10 +220,19 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if ! MONOTONIC_STATE_FILE="$(timeout --signal=TERM \
-  --kill-after="${COMMAND_KILL_GRACE_SECONDS}s" \
-  "${CLOCK_STATE_SETUP_TIMEOUT_SECONDS}s" \
-  mktemp "$DEPLOY_DIR/.axisai-monotonic-clock.XXXXXX")"; then
+# Transaction scratch state belongs to the root-controlled runtime area, never
+# to the production checkout.  The root bootstrap provisions this file after its
+# authority and staleness proofs pass, and hands the path down at privilege
+# drop; a stale command therefore never creates it at all.
+MONOTONIC_STATE_FILE="${AXISAI_MONOTONIC_STATE:-}"
+if [[ "$MONOTONIC_STATE_FILE" != /* ]] ||
+   [[ "$MONOTONIC_STATE_FILE" == *$'\n'* ]] ||
+   [[ "$MONOTONIC_STATE_FILE" == *$'\r'* ]] ||
+   ! clock_state_metadata="$(
+       LC_ALL=C stat -c '%u:%a:%h:%F' -- "$MONOTONIC_STATE_FILE"
+     )" ||
+   [[ "$clock_state_metadata" != "$EUID:600:1:regular file" &&
+      "$clock_state_metadata" != "$EUID:600:1:regular empty file" ]]; then
   echo "monotonic clock state unavailable before deployment mutation" >&2
   exit 70
 fi

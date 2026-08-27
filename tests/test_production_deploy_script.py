@@ -87,6 +87,7 @@ class HostFixture:
     trace: Path
     prev_commit: str
     candidate_commit: str
+    monotonic_state: Path
     environment: dict[str, str]
 
     def trace_text(self) -> str:
@@ -114,6 +115,8 @@ class HostFixture:
             "FAKE_OUTER_LOCK_HELD": "1",
             "FAKE_OUTER_CAPABILITY_LOCKED": "1",
         }
+        # Root reprovisions the clock state for every invocation.
+        self.monotonic_state.write_text("", encoding="utf-8")
         return subprocess.run(
             command,
             text=True,
@@ -189,6 +192,8 @@ def host_fixture(tmp_path: Path):
         fake_clock_count = tmp_path / "fake-clock-count"
         fake_clock_readings = tmp_path / "fake-clock-readings"
         fake_clock_latch = tmp_path / "fake-clock-latch"
+        monotonic_state = tmp_path / "runtime-monotonic-clock"
+        monotonic_state.write_text("", encoding="utf-8")
         fake_bin.mkdir()
         trace.write_text("", encoding="utf-8")
         fake_clock.write_text("1000", encoding="utf-8")
@@ -290,6 +295,9 @@ case "$last" in
       exit 0
     fi
     printf '%s\n' "$FAKE_OUTER_FD_METADATA"
+    ;;
+  "$AXISAI_MONOTONIC_STATE")
+    printf '%s\n' "${FAKE_MONOTONIC_STATE_METADATA:-$EUID:600:1:regular empty file}"
     ;;
   *) exit 65 ;;
 esac
@@ -604,6 +612,7 @@ esac
                 "REAL_PYTHON": Path(sys.executable).resolve().as_posix(),
                 "FLOCK_EXIT": str(flock_exit),
                 "EXPECTED_OUTER_LOCK_PATH": OUTER_LOCK_PATH,
+                "AXISAI_MONOTONIC_STATE": _bash_path(monotonic_state),
                 "FAKE_OUTER_DIR_METADATA": "0:directory:755",
                 "FAKE_OUTER_FILE_METADATA": "11:22:0:regular empty file:644:1",
                 "FAKE_OUTER_FD_METADATA": "11:22:0:regular empty file:644:1",
@@ -657,6 +666,7 @@ esac
             trace,
             prev_commit,
             candidate_commit,
+            monotonic_state,
             environment,
         )
 
@@ -1234,6 +1244,47 @@ def test_baked_build_revision_matches_git_archive_revision(bash_executable, host
     assert f"git archive --format=tar {fixture.candidate_commit}" in trace
     assert f"BUILD_REVISION={fixture.candidate_commit}" in trace
     assert "exec -T web cat /app/BUILD_REVISION" in trace
+
+
+def test_clock_state_mutation_never_touches_the_production_checkout(
+    bash_executable, host_fixture
+):
+    fixture = host_fixture()
+    result = fixture.run(bash_executable)
+
+    assert result.returncode == 0, result.stderr
+    assert list(fixture.deploy_dir.glob(".axisai-monotonic-clock*")) == []
+    trace = fixture.trace_text()
+    assert ".axisai-monotonic-clock" not in trace
+    assert fixture.monotonic_state.read_text(encoding="utf-8").strip() != ""
+
+
+@pytest.mark.parametrize(
+    ("environment", "metadata"),
+    [
+        ({"AXISAI_MONOTONIC_STATE": ""}, None),
+        ({"AXISAI_MONOTONIC_STATE": "relative/clock"}, None),
+        ({}, "0:600:1:regular empty file"),
+        ({}, "$EUID:644:1:regular empty file"),
+        ({}, "$EUID:600:2:regular empty file"),
+        ({}, "$EUID:600:1:symbolic link"),
+    ],
+)
+def test_unusable_runtime_clock_state_fails_closed_before_mutation(
+    bash_executable, host_fixture, environment, metadata
+):
+    fixture = host_fixture()
+    overrides = dict(environment)
+    if metadata is not None:
+        overrides["FAKE_MONOTONIC_STATE_METADATA"] = metadata
+
+    result = fixture.run(bash_executable, **overrides)
+
+    assert result.returncode == 70
+    assert "monotonic clock state unavailable" in result.stderr
+    trace = fixture.trace_text()
+    assert "git " not in trace
+    assert "docker " not in trace
 
 
 def test_stale_candidate_fails_before_checkout_or_docker(bash_executable, host_fixture):

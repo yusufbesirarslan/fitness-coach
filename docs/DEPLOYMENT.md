@@ -122,10 +122,10 @@ and `Execution Timed Out`) have the same failure meaning. An unknown value,
 malformed response, CLI failure, or exhausted polling horizon is also a failed
 deployment. Immediately after SendCommand returns one canonical command ID, B
 writes a short-lived, per-command Parameter Store authority value before its
-first invocation poll. The host refuses to acquire the
-root lock or mutate anything until that value contains the exact `DEPLOY_SHA`
-and command ID. Therefore an ambiguous SendCommand response cannot authorize an
-unknown command. The instance profile needs `ssm:GetParameter` only for
+first invocation poll. The host proves that value carries the exact
+`DEPLOY_SHA` and command ID before it mutates anything, and it proves it from
+inside the root lock. Therefore an ambiguous SendCommand response cannot
+authorize an unknown command. The instance profile needs `ssm:GetParameter` only for
 `/axisai/production-deploy-authority/*`; the deploy role needs narrowly scoped
 `ssm:PutParameter` and `ssm:DeleteParameter` on the same prefix. B deletes the
 authority value after the terminal result, with bounded best-effort cleanup.
@@ -143,6 +143,26 @@ has no direct-entry fallback or deploy-directory lock. A lock timeout exits
 with status 73. Treat this as
 contention, not a safe concurrent deploy: retry after lock contention only once
 the prior deployment has finished.
+
+The root bootstrap runs a fixed order: outer lock, controller authority proof,
+deploy-user read-only `ls-remote` staleness proof, mutation gate, then
+everything else. Both proofs run behind the lock and ahead of the gate. The
+staleness proof runs as the configured deploy user, so the root bootstrap never
+borrows root's credentials for a network read, and it uses `git ls-remote`
+precisely because that writes no ref and no object; a `git fetch` would be a
+mutation, not a proof. A command the controller never authorized, or one whose
+`DEPLOY_SHA` is no longer the tip of `origin/main`, exits 75 having changed
+nothing in production: no `.env` mode repair, no nginx validation or reload, no
+helper script, no privilege drop, no fetched ref or object.
+
+Transaction scratch state lives in the root-owned runtime directory as
+`/run/lock/axisai-production/monotonic-clock`, never in the production checkout.
+Root creates it mode 0600, owned by the deploy user, only after the mutation
+gate opens; hands the path down at privilege drop as `AXISAI_MONOTONIC_STATE`;
+and removes it once the child terminates. C refuses to start unless that path is
+absolute and names a regular, single-link, mode-0600 file owned by C's own
+effective UID, exiting 70 otherwise. A command rejected at the gate therefore
+never creates it at all.
 
 Before it changes the checkout, C fetches `origin/main`, proves the candidate
 and current production commits exist, requires that `origin/main` differs from

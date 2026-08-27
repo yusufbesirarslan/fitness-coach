@@ -11,7 +11,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import pytest
@@ -1319,13 +1319,14 @@ def test_generated_command_stays_below_local_growth_guard():
 
 def test_root_bootstrap_and_workflow_helper_fit_strictly_inside_ssm_budget():
     assert deploy_control.ROOT_EXTERNAL_CALL_COUNT == 16
-    assert "timeout --signal=TERM --kill-after=1s 4s" in build_remote_command(
+    command = build_remote_command(
         DeployConfig.from_environ(VALID_ENV), b"exit 0\n",
-    ) or "timeout --signal=TERM --kill-after=1s 4s" in base64.b64decode(
-        shlex.split(build_remote_command(
-            DeployConfig.from_environ(VALID_ENV), b"exit 0\n",
-        ).splitlines()[0].split(" <<", 1)[0])[2], validate=True,
-    ).decode("utf-8")
+    )
+    assert (
+        "timeout --signal=TERM --kill-after=1s 4s" in command
+        or "timeout --signal=TERM --kill-after=1s 4s"
+        in _decode_inner_bootstrap(command)
+    )
     assert (
         deploy_control.AUTHORITY_GATE_WORST_CASE_SECONDS
         + deploy_control.ROOT_BOOTSTRAP_WORST_CASE_SECONDS
@@ -1386,6 +1387,28 @@ def _read_null_arguments(path):
     payload = path.read_bytes()
     assert payload.endswith(b"\0")
     return payload[:-1].decode("utf-8").split("\0")
+
+
+def _locate_git_bash():
+    """Locate the Git-for-Windows bash binary across install layouts.
+
+    `git` resolves to `<root>/cmd/git.exe`, `<root>/bin/git.exe`, or
+    `<root>/mingw64/bin/git.exe` depending on the installer and PATH, but
+    `bash.exe` only ever lives in `<root>/bin`.  This is intentionally
+    Windows-only: the harness stubs are `bash.exe` shims.
+    """
+    candidates = []
+    git = shutil.which("git")
+    if git is not None:
+        parents = Path(git).resolve().parents
+        candidates.extend(parent / "bin" / "bash.exe" for parent in parents[:3])
+    shell = shutil.which("bash")
+    if shell is not None and shell.lower().endswith(".exe"):
+        candidates.append(Path(shell))
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 def _git_bash_path(path):
@@ -1624,6 +1647,7 @@ def test_privilege_drop_validates_user_drops_groups_then_execs_exact_helper():
             ], {
                 "PATH": "/usr/local/bin:/usr/bin:/bin",
                 "AXISAI_OUTER_LOCK_FD": "7",
+                "AXISAI_MONOTONIC_STATE": deploy_control.MONOTONIC_STATE_PATH,
                 **host_timeout_environment(),
             }),
     ]
@@ -1717,10 +1741,48 @@ class BootstrapHarness:
     deploy_dir: Path
     remote_script: Path
     events: Path
+    mutations: Path
     env_file: Path
     env_chmod_marker: Path
+    nginx_site: Path
+    nginx_state: Path
+    git_refs: Path
+    docker_trace: Path
+    revision_marker: Path
+    monotonic_state: Path
     config: DeployConfig
     script: bytes
+
+    def trace_text(self) -> str:
+        return self.mutations.read_text(encoding="utf-8")
+
+    def mutation_trace(self) -> list[str]:
+        return self.trace_text().splitlines()
+
+    def event_trace(self) -> list[str]:
+        return self.events.read_text(encoding="utf-8").splitlines()
+
+    @staticmethod
+    def _file_state(path: Path):
+        try:
+            status = path.stat()
+        except FileNotFoundError:
+            return None
+        return (path.read_bytes(), stat.S_IMODE(status.st_mode), status.st_ino)
+
+    def production_snapshot(self) -> dict:
+        """Byte/mode/inode state of every production object the host owns."""
+        return {
+            "env": self._file_state(self.env_file),
+            "env_chmod_marker": self.env_chmod_marker.exists(),
+            "nginx_site": self._file_state(self.nginx_site),
+            "nginx_service": self._file_state(self.nginx_state),
+            "git_refs": self._file_state(self.git_refs),
+            "docker": self._file_state(self.docker_trace),
+            "revision_marker": self._file_state(self.revision_marker),
+            "helper_script": self._file_state(self.remote_script),
+            "monotonic_state": self._file_state(self.monotonic_state),
+        }
 
     def run(
         self,
@@ -1734,11 +1796,16 @@ class BootstrapHarness:
         systemctl_action_exit=0,
         fatsecret_listener="LISTEN 0 128 127.0.0.1:3000 0.0.0.0:*",
         remote_exit_code=0,
+        remote_main=None,
+        remote_proof_exit=0,
+        authority_value=None,
     ):
         self.events.write_text("", encoding="utf-8")
+        self.mutations.write_text("", encoding="utf-8")
         self.env_chmod_marker.unlink(missing_ok=True)
         if env_exists:
-            self.env_file.write_text("test-only-placeholder\n", encoding="utf-8")
+            if not self.env_file.exists():
+                self.env_file.write_text("test-only-placeholder\n", encoding="utf-8")
         else:
             self.env_file.unlink(missing_ok=True)
         bash_root = _git_bash_path(self.root)
@@ -1758,12 +1825,42 @@ class BootstrapHarness:
             "SYSTEMCTL_ACTION_EXIT": str(systemctl_action_exit),
             "FATSECRET_LISTENER": fatsecret_listener,
             "REMOTE_EXIT_CODE": str(remote_exit_code),
+            "MUTATION_LOG": _git_bash_path(self.mutations),
+            "REMOTE_MAIN": remote_main or self.config.deploy_sha,
+            "REMOTE_PROOF_EXIT": str(remote_proof_exit),
+            "AUTHORITY_VALUE": (
+                authority_value
+                if authority_value is not None
+                else f"{self.config.deploy_sha}:{AUTHORITY_TOKEN}"
+            ),
+            "NGINX_STATE": _git_bash_path(self.nginx_state),
+            "GIT_REFS": _git_bash_path(self.git_refs),
+            "DOCKER_TRACE": _git_bash_path(self.docker_trace),
+            "HARNESS_MONOTONIC_STATE": _git_bash_path(self.monotonic_state),
         }
+        # Git for Windows truncates a process command line at 8 KiB in BOTH
+        # directions: `bash -c <script>` silently loses the tail of a longer
+        # script, and bash silently truncates a longer argv when it execs a
+        # child.  The rendered bootstrap is larger than that, so this harness
+        # (a) hands bash a script file, which is also how the SSM agent
+        # delivers the command on the real host, and (b) shadows the outer
+        # `python3` with a shell function that runs the very same stub body
+        # without an exec.  Neither step alters one byte of the rendered
+        # command, and the bootstrap's own `python3` calls still resolve the
+        # PATH stub: the function is deliberately not exported, so the
+        # root-lock child looks it up exactly as the real host would.
+        command_file = self.root / "remote-command.sh"
+        command_file.write_text(
+            f"export PATH={shlex.quote(f'{bash_stubs}:/usr/bin:/bin')}\n"
+            f"python3() {{ ( . {shlex.quote(f'{bash_stubs}/python3')} ); }}\n"
+            + build_remote_command(self.config, self.script),
+            encoding="utf-8",
+            newline="\n",
+        )
         return subprocess.run(
             [
-                str(self.bash), "--noprofile", "--norc", "-c",
-                f"export PATH={shlex.quote(f'{bash_stubs}:/usr/bin:/bin')}\n"
-                + build_remote_command(self.config, self.script),
+                str(self.bash), "--noprofile", "--norc",
+                _git_bash_path(command_file),
             ],
             capture_output=True,
             text=True,
@@ -1774,11 +1871,8 @@ class BootstrapHarness:
 
 @pytest.fixture
 def bootstrap_harness(workspace_tmp_dir):
-    git = shutil.which("git")
-    if git is None:
-        pytest.skip("Git Bash is unavailable")
-    git_bash = Path(git).parent.parent / "bin" / "bash.exe"
-    if not git_bash.is_file():
+    git_bash = _locate_git_bash()
+    if git_bash is None:
         pytest.skip("Git Bash is unavailable")
 
     harness = workspace_tmp_dir / "bootstrap-harness"
@@ -1790,6 +1884,21 @@ def bootstrap_harness(workspace_tmp_dir):
     env_chmod_marker = harness / "env-chmod-complete"
     events = harness / "events"
     events.write_text("", encoding="utf-8")
+    mutations = harness / "mutations"
+    mutations.write_text("", encoding="utf-8")
+    env_file.write_text("test-only-placeholder\n", encoding="utf-8")
+    nginx_site = harness / "nginx-site"
+    nginx_site.write_text("server { listen 80; }\n", encoding="utf-8")
+    nginx_state = harness / "nginx-service-state"
+    nginx_state.write_text("", encoding="utf-8")
+    git_refs = harness / "git-refs"
+    git_refs.write_text("", encoding="utf-8")
+    docker_trace = harness / "docker-trace"
+    docker_trace.write_text("", encoding="utf-8")
+    revision_marker = deploy_dir_path / "BUILD_REVISION"
+    revision_marker.write_text("b" * 40 + "\n", encoding="utf-8")
+    monotonic_state = harness / "runtime-monotonic-clock"
+    monotonic_state.write_text("", encoding="utf-8")
     remote_script = harness / "decoded-script"
     bash_harness = _git_bash_path(harness)
 
@@ -1805,12 +1914,20 @@ if [ "$#" = 2 ]; then
   esac
   shift
   cat > "$HARNESS_DIR/root-lock-source"
+  # Piped, not `sh -c "$command"`: the decoded bootstrap is larger than the
+  # 8 KiB command line Git for Windows will carry, and an argv would be
+  # truncated in silence.
   printf '%s' "$1" | base64 --decode | AXISAI_ROOT_LOCK_FD=7 /bin/sh
-elif [ "$#" = 3 ] && [ "${2#"$DEPLOY_SHA:"}" != "$2" ]; then
+elif [ "$#" = 3 ] && [ "$3" = "$DEPLOY_SHA" ]; then
+  printf '%s\n' authority >> "$HARNESS_DIR/events"
   cat > "$HARNESS_DIR/authority-value-source"
-  exit 0
+  case "$2" in
+    "$DEPLOY_SHA":????????-????-????-????-????????????) exit 0 ;;
+    *) exit 1 ;;
+  esac
 elif [ "$#" = 3 ]; then
   printf '%s\n' env-guard >> "$HARNESS_DIR/events"
+  printf '%s\n' 'fchmod:.env' >> "$MUTATION_LOG"
   cat > "$HARNESS_DIR/env-guard-source"
   if [ ! -f "$ENV_FILE" ]; then
     echo 'deployment .env file is missing' >&2
@@ -1822,6 +1939,7 @@ elif [ "$#" = 3 ]; then
   fi
 else
   printf '%s\n' privilege-drop >> "$HARNESS_DIR/events"
+  printf '%s\n' 'privilege-drop' >> "$MUTATION_LOG"
   shift
   user="$1"; script_path="$2"; sha="$3"; deploy_dir="$4"; url="$5"; fd="$6"
   test "$user" = deploy
@@ -1834,19 +1952,57 @@ fi
     _write_shell_stub(stubs, "aws", """
 case "$*" in
   *'ssm get-parameter'*)
-    printf '%s\n' "$DEPLOY_SHA:11111111-1111-1111-1111-111111111111"
+    printf '%s\n' "$AUTHORITY_VALUE"
     ;;
   *) exit 64 ;;
 esac
 """)
 
+    _write_shell_stub(stubs, "runuser", """
+printf '%s\n' runuser >> "$HARNESS_DIR/events"
+printf '%s\\0' "$@" > "$HARNESS_DIR/runuser-args"
+test "$1" = '-u'
+test "$3" = '--'
+shift 3
+exec "$@"
+""")
+
+    _write_shell_stub(stubs, "git", """
+printf '%s\n' "git:$*" >> "$HARNESS_DIR/git-calls"
+case "$*" in
+  *' ls-remote '*)
+    if [ "$REMOTE_PROOF_EXIT" != 0 ]; then exit "$REMOTE_PROOF_EXIT"; fi
+    printf '%s\\t%s\n' "$REMOTE_MAIN" refs/heads/main
+    ;;
+  *' fetch '*)
+    printf '%s\n' "git:fetch" >> "$MUTATION_LOG"
+    printf '%s\n' "$REMOTE_MAIN" >> "$GIT_REFS"
+    ;;
+  *) exit 64 ;;
+esac
+""")
+
+    _write_shell_stub(stubs, "docker", """
+printf '%s\n' "docker:$*" >> "$MUTATION_LOG"
+printf '%s\n' "docker:$*" >> "$DOCKER_TRACE"
+""")
+
+    _write_shell_stub(stubs, "install", """
+printf '%s\n' install >> "$HARNESS_DIR/events"
+printf '%s\\0' "$@" > "$HARNESS_DIR/install-args"
+printf '%s\n' "install:$*" >> "$MUTATION_LOG"
+: > "$HARNESS_MONOTONIC_STATE"
+""")
+
     _write_shell_stub(stubs, "mktemp", """
 printf '%s\n' mktemp >> "$HARNESS_DIR/events"
+printf '%s\n' "mktemp:$*" >> "$MUTATION_LOG"
 printf '%s\\0' "$@" > "$HARNESS_DIR/mktemp-args"
 printf '%s\n' "$HARNESS_DIR/decoded-script"
 """)
     _write_shell_stub(stubs, "chmod", """
 printf '%s\n' chmod >> "$HARNESS_DIR/events"
+printf '%s\n' "chmod:$*" >> "$MUTATION_LOG"
 printf '%s\\0' "$@" > "$HARNESS_DIR/chmod-args"
 last=''
 for argument in "$@"; do last="$argument"; done
@@ -1861,6 +2017,7 @@ printf '%s\\0' "$@" > "$HARNESS_DIR/id-args"
 """)
     _write_shell_stub(stubs, "chown", """
 printf '%s\n' chown >> "$HARNESS_DIR/events"
+printf '%s\n' "chown:$*" >> "$MUTATION_LOG"
 printf '%s\\0' "$@" > "$HARNESS_DIR/chown-args"
 """)
     _write_shell_stub(stubs, "nginx", """
@@ -1872,8 +2029,16 @@ exit "$NGINX_EXIT"
 printf '%s\n' systemctl >> "$HARNESS_DIR/events"
 case "$1" in
   is-active) exit "$SYSTEMCTL_ACTIVE_EXIT" ;;
-  reload) exit "$SYSTEMCTL_ACTION_EXIT" ;;
-  enable) exit "$SYSTEMCTL_ACTION_EXIT" ;;
+  reload)
+    printf '%s\n' "systemctl:reload" >> "$MUTATION_LOG"
+    printf '%s\n' reloaded >> "$NGINX_STATE"
+    exit "$SYSTEMCTL_ACTION_EXIT"
+    ;;
+  enable)
+    printf '%s\n' "systemctl:enable" >> "$MUTATION_LOG"
+    printf '%s\n' enabled >> "$NGINX_STATE"
+    exit "$SYSTEMCTL_ACTION_EXIT"
+    ;;
   *) exit 64 ;;
 esac
 """)
@@ -1931,8 +2096,15 @@ exit "$REMOTE_EXIT_CODE"
         deploy_dir=deploy_dir_path,
         remote_script=remote_script,
         events=events,
+        mutations=mutations,
         env_file=env_file,
         env_chmod_marker=env_chmod_marker,
+        nginx_site=nginx_site,
+        nginx_state=nginx_state,
+        git_refs=git_refs,
+        docker_trace=docker_trace,
+        revision_marker=revision_marker,
+        monotonic_state=monotonic_state,
         config=config,
         script=script,
     )
@@ -1949,8 +2121,9 @@ def test_bootstrap_holds_lock_through_safeguards_and_helper_cleanup(
 
     assert completed.returncode == remote_exit_code, completed.stderr
     assert (harness / "events").read_text(encoding="utf-8").splitlines() == [
-        "outer-lock", "env-guard", "nginx", "systemctl", "systemctl", "ss", "ss",
-        "mktemp", "chmod", "chown", "privilege-drop",
+        "outer-lock", "authority", "runuser",
+        "env-guard", "nginx", "systemctl", "systemctl", "ss", "ss",
+        "install", "mktemp", "chmod", "chown", "privilege-drop",
     ]
     assert _read_null_arguments(harness / "mktemp-args") == ["/tmp/fitx-deploy.XXXXXX"]
     assert _read_null_arguments(harness / "chmod-args") == ["0700", bash_remote_script]
@@ -1994,7 +2167,7 @@ def test_bootstrap_missing_env_fails_before_nginx_or_helper(bootstrap_harness):
 
     assert completed.returncode != 0
     assert "deployment .env file is missing" in completed.stderr
-    assert events == ["outer-lock", "env-guard"]
+    assert events == ["outer-lock", "authority", "runuser", "env-guard"]
 
 
 def test_bootstrap_repairs_and_rechecks_env_permissions_before_helper(
@@ -2003,7 +2176,7 @@ def test_bootstrap_repairs_and_rechecks_env_permissions_before_helper(
     events = bootstrap_harness.events.read_text(encoding="utf-8").splitlines()
 
     assert completed.returncode == 0, completed.stderr
-    assert events[:2] == ["outer-lock", "env-guard"]
+    assert events[:4] == ["outer-lock", "authority", "runuser", "env-guard"]
     assert bootstrap_harness.env_chmod_marker.exists()
     assert "privilege-drop" in events
 
@@ -2026,6 +2199,148 @@ def test_bootstrap_nginx_failure_stops_before_systemctl_and_helper(bootstrap_har
     assert "nginx configuration test failed" in completed.stderr
     assert "systemctl" not in events
     assert "privilege-drop" not in events
+
+
+def _decode_inner_bootstrap(command):
+    """Return the base64-decoded root-lock child of a rendered bootstrap."""
+    root_wrapper_line = next(
+        line for line in command.splitlines() if line.startswith("python3 - ")
+    )
+    arguments = shlex.split(root_wrapper_line.split(" <<", 1)[0])
+    return base64.b64decode(arguments[2], validate=True).decode("utf-8")
+
+
+MUTATION_MARKERS = (
+    "AXISAI_ENV_GUARD_PY",
+    "os.fchmod",
+    "nginx -t",
+    "systemctl",
+    "mktemp",
+    "chmod 0700",
+    "chown",
+    "AXISAI_PRIVILEGE_DROP_PY",
+)
+
+
+def test_stale_post_lock_command_preserves_all_production_state(bootstrap_harness):
+    before = bootstrap_harness.production_snapshot()
+    result = bootstrap_harness.run(remote_main="f" * 40)
+    after = bootstrap_harness.production_snapshot()
+
+    assert result.returncode == 75, result.stderr
+    assert "stale at host mutation gate" in result.stderr
+    assert after == before
+    assert bootstrap_harness.mutation_trace() == []
+
+
+def test_stale_command_never_chmods_env_or_reloads_nginx(bootstrap_harness):
+    result = bootstrap_harness.run(remote_main="f" * 40)
+
+    assert result.returncode == 75
+    assert "fchmod:.env" not in bootstrap_harness.trace_text()
+    assert "systemctl" not in bootstrap_harness.trace_text()
+
+
+def test_stale_command_never_writes_local_refs_before_the_remote_proof(
+        bootstrap_harness):
+    """A local `git fetch` writes refs/objects, so it is mutation, not proof."""
+    result = bootstrap_harness.run(remote_main="f" * 40)
+
+    assert result.returncode == 75
+    assert "git:fetch" not in bootstrap_harness.trace_text()
+    assert bootstrap_harness.git_refs.read_bytes() == b""
+    assert bootstrap_harness.event_trace() == ["outer-lock", "authority", "runuser"]
+
+
+def test_root_bootstrap_proves_remote_main_before_any_mutation():
+    inner_bootstrap = _decode_inner_bootstrap(
+        build_remote_command(DeployConfig.from_environ(VALID_ENV), b"exit 0\n"),
+    )
+
+    proof = inner_bootstrap.index("ls-remote --exit-code origin refs/heads/main")
+    authority = inner_bootstrap.index("aws ssm get-parameter")
+    capability = inner_bootstrap.index("AXISAI_ROOT_LOCK_FD")
+    assert capability < authority < proof
+    for marker in MUTATION_MARKERS:
+        assert proof < inner_bootstrap.index(marker), marker
+    # The read-only proof must not be "optimised" into a ref-writing fetch.
+    assert "git fetch" not in inner_bootstrap
+    assert "runuser -u" in inner_bootstrap
+
+
+def test_authority_gate_runs_inside_the_root_lock_child():
+    command = build_remote_command(
+        DeployConfig.from_environ(VALID_ENV), b"exit 0\n",
+    )
+
+    lines = command.split("\n")
+    # The outer script keeps its explicit shell error handling and is otherwise
+    # nothing but the root-lock wrapper invocation.
+    assert lines[0] == "set -eu"
+    assert lines[1].startswith("python3 - ")
+    assert "aws ssm get-parameter" not in lines[0]
+    assert "aws ssm get-parameter" not in lines[1]
+    assert "aws ssm get-parameter" in _decode_inner_bootstrap(command)
+
+
+def test_unauthorized_command_is_rejected_inside_the_lock_before_mutation(
+        bootstrap_harness):
+    before = bootstrap_harness.production_snapshot()
+    result = bootstrap_harness.run(authority_value="not-authorized")
+
+    assert result.returncode == 75
+    assert "not authorized by the controller" in result.stderr
+    assert bootstrap_harness.mutation_trace() == []
+    assert bootstrap_harness.production_snapshot() == before
+    # The gate must be proven behind the outer lock, not ahead of it.
+    assert bootstrap_harness.event_trace()[0] == "outer-lock"
+    assert "runuser" not in bootstrap_harness.event_trace()
+
+
+def test_unprovable_remote_main_fails_closed_as_stale_without_mutation(
+        bootstrap_harness):
+    result = bootstrap_harness.run(remote_proof_exit=2)
+
+    assert result.returncode == 75
+    assert "could not be proven current" in result.stderr
+    assert bootstrap_harness.mutation_trace() == []
+
+
+def test_current_candidate_passes_the_gate_and_reaches_the_helper(
+        bootstrap_harness):
+    result = bootstrap_harness.run()
+
+    assert result.returncode == 0, result.stderr
+    assert bootstrap_harness.event_trace()[:3] == [
+        "outer-lock", "authority", "runuser",
+    ]
+    assert "privilege-drop" in bootstrap_harness.event_trace()
+    assert _read_null_arguments(bootstrap_harness.root / "runuser-args") == [
+        "-u", VALID_ENV["DEPLOY_USER"], "--", "git", "-C",
+        _git_bash_path(bootstrap_harness.deploy_dir),
+        "ls-remote", "--exit-code", "origin", "refs/heads/main",
+    ]
+
+
+def test_monotonic_clock_state_lives_in_the_verified_root_runtime_directory():
+    inner_bootstrap = _decode_inner_bootstrap(
+        build_remote_command(DeployConfig.from_environ(VALID_ENV), b"exit 0\n"),
+    )
+
+    assert deploy_control.MONOTONIC_STATE_PATH == (
+        deploy_control.ROOT_RUNTIME_DIR + "/monotonic-clock"
+    )
+    assert deploy_control.ROOT_RUNTIME_DIR == str(
+        PurePosixPath(deploy_control.ROOT_OUTER_LOCK_PATH).parent
+    )
+    assert deploy_control.MONOTONIC_STATE_PATH in inner_bootstrap
+    assert '"AXISAI_MONOTONIC_STATE": MONOTONIC_STATE_PATH' in (
+        deploy_control.PRIVILEGE_DROP_SOURCE
+    )
+    # The clock state is provisioned only after the mutation gate opens.
+    assert inner_bootstrap.index(
+        "ls-remote --exit-code origin refs/heads/main"
+    ) < inner_bootstrap.index(deploy_control.MONOTONIC_STATE_PATH)
 
 
 def test_bootstrap_warns_for_port_30000_without_treating_it_as_fatsecret(
@@ -2530,8 +2845,13 @@ def test_run_deploy_orders_validation_preflight_exact_script_send_and_poll(
     assert base64.b64encode(exact_script).decode("ascii") in inner_bootstrap
     assert "sudo" not in inner_bootstrap
     assert deploy_control.PRIVILEGE_DROP_SOURCE in inner_bootstrap
-    assert "aws ssm get-parameter" in remote_command
-    assert remote_command.index("aws ssm get-parameter") < remote_command.index(root_wrapper_line)
+    # The authority gate proves itself inside the root-lock child, so it can
+    # never run ahead of the outer lock -- and never ahead of the mutation gate.
+    assert "aws ssm get-parameter" not in remote_command
+    assert "aws ssm get-parameter" in inner_bootstrap
+    assert inner_bootstrap.index("aws ssm get-parameter") < inner_bootstrap.index(
+        "AXISAI_ENV_GUARD_PY"
+    )
     assert f"'{VALID_ENV['DEPLOY_USER']}' \"$script_path\"" in inner_bootstrap
     assert "\"$public_health_url\" '7'" in inner_bootstrap
     assert (
