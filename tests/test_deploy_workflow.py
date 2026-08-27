@@ -21,6 +21,7 @@ WORKFLOW = Path(".github/workflows/deploy.yml")
 CONTROLLER = Path("scripts/deploy_control.py")
 HOST_SCRIPT = Path("scripts/production_deploy.sh")
 DEPLOYMENT_GUIDE = Path("docs/DEPLOYMENT.md")
+DOCKERFILE = Path("Dockerfile")
 
 
 def _deploy_yaml():
@@ -37,6 +38,47 @@ def _controller_source():
 
 def _host_script():
     return HOST_SCRIPT.read_text(encoding="utf-8")
+
+
+def _dockerfile_source():
+    return DOCKERFILE.read_text(encoding="utf-8")
+
+
+def _dockerfile_instructions(text):
+    """Dockerfile metnini sıralı ``(TALIMAT, argüman)`` çiftlerine ayrıştırır.
+
+    Yorum satırları (ilk boşluksuz karakteri '#') ve boş satırlar atlanır;
+    ters bölü (\\) ile süren fiziksel satırlar TEK mantıksal talimatta
+    birleştirilir. Talimat anahtar kelimesi büyük harfe çevrilir, argüman
+    metni olduğu gibi tutulur (yalnızca iç boşluklar teke indirilir).
+    """
+    kept_lines = [
+        line for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+    logical_lines = []
+    buffer = ""
+    for line in kept_lines:
+        stripped = line.rstrip()
+        if stripped.endswith("\\"):
+            buffer += stripped[:-1] + " "
+        else:
+            buffer += stripped
+            logical_lines.append(buffer)
+            buffer = ""
+    if buffer:
+        logical_lines.append(buffer)
+
+    instructions = []
+    for logical in logical_lines:
+        parts = logical.strip().split(None, 1)
+        if not parts:
+            continue
+        keyword = parts[0].upper()
+        argument = " ".join(parts[1].split()) if len(parts) > 1 else ""
+        instructions.append((keyword, argument))
+    return instructions
 
 
 def _deployment_guide():
@@ -534,17 +576,65 @@ def test_production_build_context_excludes_development_and_backups():
     assert "build:" in host and "context:" in host
 
 
+# Bu test METİN İÇİNDE geçme (substring) değil, Dockerfile TALİMAT SIRASINI
+# doğrular: garanti sıraya bağlıdır ("appuser'ın /app'e recursive chown'u
+# BUILD_REVISION'ı bake etmeden ÖNCE mi oluyor, /app root'a geri mi alınıyor
+# appuser'a geçmeden ÖNCE mi") — metnin dosyada bir yerde var olması bunu
+# KANITLAMAZ. Ham substring testleri, useradd+chown -R'ın bake adımından
+# SONRAYA taşınmasını ya da uzunluk kontrolünün silinmesini yakalayamaz.
 def test_dockerfile_bakes_immutable_build_revision():
-    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+    dockerfile = _dockerfile_source()
+    instructions = _dockerfile_instructions(dockerfile)
     host = _host_script()
 
-    assert "ARG BUILD_REVISION" in dockerfile
-    assert 'case "$BUILD_REVISION" in' in dockerfile
-    assert "*[!0-9a-f]*" in dockerfile
-    assert 'printf \'%s\\n\' "$BUILD_REVISION" > /app/BUILD_REVISION' in dockerfile
-    assert "chown root:root /app/BUILD_REVISION" in dockerfile
-    assert "chmod 0444 /app/BUILD_REVISION" in dockerfile
-    assert dockerfile.index("ARG BUILD_REVISION") < dockerfile.index("USER appuser")
+    arg_indices = [
+        i for i, (kw, arg) in enumerate(instructions)
+        if kw == "ARG" and arg == "BUILD_REVISION"
+    ]
+    recursive_chown_indices = [
+        i for i, (kw, arg) in enumerate(instructions)
+        if kw == "RUN" and "chown -R appuser:appuser /app" in arg
+    ]
+    bake_indices = [
+        i for i, (kw, arg) in enumerate(instructions)
+        if kw == "RUN"
+        and 'printf \'%s\\n\' "$BUILD_REVISION" > /app/BUILD_REVISION' in arg
+    ]
+    root_reclaim_indices = [
+        i for i, (kw, arg) in enumerate(instructions)
+        if kw == "RUN" and re.search(r"chown root:root /app(?!\S)", arg)
+    ]
+    user_indices = [i for i, (kw, arg) in enumerate(instructions) if kw == "USER"]
+
+    assert len(arg_indices) == 1
+    assert len(recursive_chown_indices) == 1
+    assert len(bake_indices) == 1
+    assert len(root_reclaim_indices) == 1
+    assert len(user_indices) == 1
+
+    recursive_chown_idx = recursive_chown_indices[0]
+    arg_idx = arg_indices[0]
+    bake_idx = bake_indices[0]
+    root_reclaim_idx = root_reclaim_indices[0]
+    user_idx = user_indices[0]
+
+    assert (
+        recursive_chown_idx
+        < arg_idx
+        < bake_idx
+        < root_reclaim_idx
+        < user_idx
+    )
+
+    bake_argument = instructions[bake_idx][1]
+    assert 'case "$BUILD_REVISION" in' in bake_argument
+    assert "*[!0-9a-f]*" in bake_argument
+    assert 'test "${#BUILD_REVISION}" -eq 40' in bake_argument
+    assert "chown root:root /app/BUILD_REVISION" in bake_argument
+    assert "chmod 0444 /app/BUILD_REVISION" in bake_argument
+
+    assert instructions[user_idx][1] == "appuser"
+
     assert 'git archive --format=tar "$revision"' in host
     assert "BUILD_REVISION: '$revision'" in host
     assert "cat /app/BUILD_REVISION" in host
