@@ -44,18 +44,55 @@ def _dockerfile_source():
     return DOCKERFILE.read_text(encoding="utf-8")
 
 
+class UnsupportedDockerfileConstruct(AssertionError):
+    """Aşağıdaki tripwire ayrıştırıcısının MODELLEYEMEDİĞİ bir Dockerfile yapısı.
+
+    Bu ayrıştırıcı gerçek BuildKit ayrıştırıcısı DEĞİLDİR. Modelleyemediği bir
+    yapıyı sessizce YANLIŞ ayrıştırmaktansa GÜRÜLTÜYLE düşer (fail-closed):
+    yanlış ayrıştırma, üstüne kurulan metin taramasını sessizce körleştirir ve
+    test o körlükte YEŞİL kalır — bu, hiç kontrol olmamasından daha kötüdür.
+    """
+
+
+# BuildKit heredoc'u (`RUN <<EOF ... EOF`) bu satır-tabanlı ayrıştırıcının
+# modelleyemediği tek somut yapıdır: gövde satırları ters bölü ile SÜRMEYEN
+# fiziksel satırlardır, dolayısıyla her biri SAHTE bir talimata bölünür
+# (`chmod 0777 /app` → ('CHMOD', '0777 /app')) — anahtar kelime yanlış olur VE
+# "chmod" kelimesi argümandan tamamen SİLİNİR, yani kanıt yok edilir.
+# Heredoc'u yarı doğru modellemek yerine varlığında fail-closed oluyoruz;
+# yarım bir uygulama, kaçırdığı yazımda yine sessizce yeşil kalırdı.
+_HEREDOC_REDIRECTION = re.compile(r"<<")
+
+
 def _dockerfile_instructions(text):
     """Dockerfile metnini sıralı ``(TALIMAT, argüman)`` çiftlerine ayrıştırır.
 
     Yorum satırları (ilk boşluksuz karakteri '#') ve boş satırlar atlanır;
-    ters bölü (\\) ile süren fiziksel satırlar TEK mantıksal talimatta
+    ters bölü (\) ile süren fiziksel satırlar TEK mantıksal talimatta
     birleştirilir. Talimat anahtar kelimesi büyük harfe çevrilir, argüman
     metni olduğu gibi tutulur (yalnızca iç boşluklar teke indirilir).
+
+    SINIRLI bir modeldir ve bunu SAKLAMAZ: modelleyemediği bir yapı (heredoc)
+    görürse ``UnsupportedDockerfileConstruct`` fırlatır. Revizyon
+    değişmezliğinin OTORİTER kanıtı bu ayrıştırıcı değil,
+    ``.github/workflows/ci.yml`` içindeki ``image-revision-authority``
+    job'ıdır — bkz. ``test_dockerfile_bakes_immutable_build_revision``.
     """
     kept_lines = [
         line for line in text.splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
+
+    for line in kept_lines:
+        if _HEREDOC_REDIRECTION.search(line):
+            raise UnsupportedDockerfileConstruct(
+                f"Dockerfile satırı heredoc yönlendirmesi içeriyor: {line.strip()!r}. "
+                "Bu tripwire ayrıştırıcısı heredoc gövdelerini modelleyemez "
+                "(gövde satırlarını sahte talimatlara böler ve komut adını "
+                "argümandan siler), bu yüzden fail-closed düşüyor. Revizyon "
+                "değişmezliğini .github/workflows/ci.yml içindeki "
+                "'image-revision-authority' job'ına karşı doğrulayın."
+            )
 
     logical_lines = []
     buffer = ""
@@ -576,12 +613,50 @@ def test_production_build_context_excludes_development_and_backups():
     assert "build:" in host and "context:" in host
 
 
-# Bu test METİN İÇİNDE geçme (substring) değil, Dockerfile TALİMAT SIRASINI
-# doğrular: garanti sıraya bağlıdır ("appuser'ın /app'e recursive chown'u
-# BUILD_REVISION'ı bake etmeden ÖNCE mi oluyor, /app root'a geri mi alınıyor
-# appuser'a geçmeden ÖNCE mi") — metnin dosyada bir yerde var olması bunu
-# KANITLAMAZ. Ham substring testleri, useradd+chown -R'ın bake adımından
-# SONRAYA taşınmasını ya da uzunluk kontrolünün silinmesini yakalayamaz.
+# BU TEST BİR TRIPWIRE'DIR — GÜVENLİK GARANTİSİ DEĞİL.
+#
+# Guard'lanan özellik bir DOSYA SİSTEMİ özelliğidir: yetkisiz çalışma-zamanı
+# kullanıcısı `appuser`, imajdaki `/app/BUILD_REVISION` dosyasını silemez,
+# yeniden adlandıramaz, içeriğini değiştiremez ve yerine yenisini koyamaz.
+# (Bu dosya, "servis edilen revizyon" kanıt zincirinin bir yarısıdır:
+# DEPLOY_SHA == checkout HEAD == BUILD_REVISION == deep-health revizyonu —
+# taklit edilen bir çalışma-zamanı APP_REVISION'ı bayat bir konteyneri taze
+# göstermesin diye.)
+#
+# Dockerfile KAYNAK METNİNİ taramak bu özelliği KANITLAYAMAZ, ve üç tur
+# boyunca da kanıtlayamadı: aynı dosya sistemi sonucunu üreten pratikte
+# sınırsız sayıda yazım vardır — `install -d -m 0777 /app`,
+# `setfacl -m u:appuser:rwx /app`, yol ile çağrılan bir script, kabuk
+# değişkeninden kurulan komut adı (A=ch; B=mod; "$A$B" 0777 /app), `tar` ile
+# eski sahiplik metadatasının geri yüklenmesi, gönderilmeyen bir "decoy"
+# stage... Yasak YAZIMLARI saymak KAYBEDİLEN bir oyundur ve dördüncü bir tur
+# da aynı şekilde yenilirdi.
+#
+# OTORİTER GARANTİ: `.github/workflows/ci.yml` içindeki
+# `image-revision-authority` job'ı ("authoritative image revision
+# immutability"). O job GERÇEK imajı build eder ve GERÇEK dosya sistemini
+# iddia eder: varsayılan kullanıcının `appuser` olduğunu (decoy stage
+# gönderilen stage'in kendi çalışma-zamanı kimliğini taklit EDEMEZ), `/app`
+# ve `/app/BUILD_REVISION` sahiplik+modunu, dosya içeriğini ve — YÜK TAŞIYAN
+# yarısı — `appuser` olarak koşan unlink / rename / içerik-üzerine-yazma /
+# yeni-dosya-yaratma / symlink denemelerinin HEPSİNİN başarısız olduğunu.
+# O kontrol MEKANİZMADAN BAĞIMSIZDIR: yukarıdaki tekniklerin hiçbirini
+# TANIMASI gerekmez, çünkü hepsi aynı gözlemlenebilir imaj davranışını bozar.
+#
+# BU test yalnızca UCUZ ve HIZLI bir tripwire'dır: Docker daemon'ı olmadan,
+# yerelde, Dockerfile'ın BEKLENEN ŞEKLİNİ (talimat sırası, tekillik, bake
+# doğrulaması, reclaim modu, pencerede izin talimatı yokluğu) kontrol eder.
+# YEŞİL OLMASI özelliğin geçerli olduğunun KANITI DEĞİLDİR; KIRMIZI olması
+# beklenen şeklin bozulduğunun erken uyarısıdır. Bu testin C3 (yol ile
+# script), C4 (değişkenden komut adı), `install -d`, `setfacl`, `tar`
+# sınıflarını YAKALAMASI BEKLENMEZ — yapısal olarak yakalayamaz ve
+# yakalıyormuş gibi yapmak, düzeltilen arıza modunun ta kendisidir. Onları
+# `image-revision-authority` job'ı kapatır.
+#
+# Modelleyemediği yapılarda tripwire YEŞİL KALMAZ, FAIL-CLOSED olur: heredoc
+# görürse `_dockerfile_instructions` fırlatır; birden fazla `FROM` varsa
+# (hangi stage'in gönderildiğini bu düz tarama BİLEMEZ) test açıkça
+# başarısız olur ve otoriter job'a yönlendirir.
 #
 # NOT: reclaim talimatını bulmak için kullanılan "chown root:root /app" deseni
 # KASITLI OLARAK dar — "chown root:root /app/" (sonda slash) veya
@@ -594,6 +669,23 @@ def test_dockerfile_bakes_immutable_build_revision():
     dockerfile = _dockerfile_source()
     instructions = _dockerfile_instructions(dockerfile)
     host = _host_script()
+
+    # Çok aşamalı dosyada FAIL-CLOSED. Bu ayrıştırıcı TEK düz talimat listesi
+    # üretir ve talimatın hangi stage'e ait olduğunu bilmez; `docker build .`
+    # varsayılan hedefi SONUNCU stage'dir ve önceki stage'ler imaja hiç
+    # girmeyebilir. Dolayısıyla aşağıdaki tekillik/sıra iddialarının tamamı,
+    # gönderilmeyen bir "decoy" stage tarafından karşılanabilir — tahmin
+    # etmek yerine açıkça düşüyoruz.
+    from_indices = [i for i, (kw, _arg) in enumerate(instructions) if kw == "FROM"]
+    assert len(from_indices) == 1, (
+        f"Dockerfile {len(from_indices)} adet FROM içeriyor (çok aşamalı build). "
+        "Bu tripwire hangi stage'in GERÇEKTEN gönderildiğini modelleyemez, bu "
+        "yüzden fail-closed düşüyor: buradaki sayım ve sıra iddiaları imaja hiç "
+        "girmeyen bir stage tarafından karşılanabilir. Revizyon değişmezliğinin "
+        "OTORİTER kanıtı .github/workflows/ci.yml içindeki "
+        "'image-revision-authority' job'ıdır — çok aşamalı bir Dockerfile'ı o "
+        "job'a karşı doğrulayın."
+    )
 
     arg_indices = [
         i for i, (kw, arg) in enumerate(instructions)
@@ -655,30 +747,44 @@ def test_dockerfile_bakes_immutable_build_revision():
     reclaim_mode = int(chmod_match.group(1), 8)
     assert reclaim_mode & 0o022 == 0
 
-    # Sahiplik+mod reclaim ANINDA doğru alınmış olsa da, reclaim'den SONRA
-    # USER'a kadar /app'e dokunan başka bir chmod/chown/chgrp talimatı
-    # garantiyi yeniden açabilir (ör. "geliştirici" bir izin hatasını
-    # 0777/o+w ile "düzeltir", ya da sahipliği appuser'a geri verir) —
-    # garanti yalnızca reclaim ANINDA değil, USER'a kadar KALICI olmalı.
+    # PENCERE = BAKE'ten hemen SONRA → SONUNCU USER (reclaim'den sonra DEĞİL).
+    # Bake adımı DOSYANIN KENDİ sahipliğini/modunu (root:root 0444) kurar ve
+    # daha sonra hiçbir talimat onu YENİDEN İDDİA ETMEZ — reclaim yalnızca
+    # DİZİNE dokunur. Bake ile reclaim arasına konan bir
+    # `RUN chmod 0666 /app/BUILD_REVISION` appuser'a ("other") doğrudan
+    # içerik yazma yetkisi verirdi: ne unlink ne rename gerekir, dizin izni
+    # hiç devreye girmez. Eski pencere (reclaim+1'den başlayan) bunu HİÇ
+    # görmüyordu.
     #
-    # Hedefi "/app" metniyle eşleştirmeye ÇALIŞMIYORUZ: WORKDIR /app zaten
-    # ayarlı olduğundan sonraki bir RUN, /app'i hiç yazmadan mevcut dizini
-    # ("." , "--reference=/app/BUILD_REVISION" vb.) hedefleyip aynı deliği
-    # açabilir — hedef yazımlarını tek tek saymak kaybedilen bir oyun ve bir
-    # sonraki inceleyen kaçırdığımız yazımı bulur. Bunun yerine KÖRLEMESİNE
-    # bir kural: bu pencerede chmod/chown/chgrp'in TAMAMEN YASAK olması —
-    # pencere bugün boştur, bu yüzden bu kural hiçbir şeye mal olmuyor ve
-    # gelecekte oraya eklenecek her izin talimatı bilinçli olarak yeniden
+    # Talimat TÜRÜ filtresi de KALDIRILDI (eskiden `if kw != "RUN": continue`):
+    # `COPY --chown=appuser:appuser <src> /app/BUILD_REVISION` dosyanın
+    # inode'unu appuser SAHİPLİĞİNDE yeniden oluşturur (sahip yazma bitini her
+    # zaman geri açabilir) ve `ONBUILD RUN chmod ...` da kendi başına bir
+    # üst-düzey anahtar kelimedir; ikisi de RUN DEĞİLDİR. Artık HER talimat
+    # türü — RUN, COPY, ADD, ONBUILD, VOLUME, USER — taranır ve anahtar
+    # kelimenin kendisi de taranan metne dahil edilir.
+    #
+    # Reclaim talimatının KENDİSİ muaftır (yukarıda ayrıca ve daha sıkı
+    # doğrulandı); pencerede başka HİÇBİR izin talimatı olamaz. Pencere bugün
+    # reclaim dışında BOŞtur, yani bu körlemesine kural hiçbir şeye mal
+    # olmuyor ve oraya eklenecek her izin talimatı bilinçli olarak yeniden
     # tartışılmak zorunda kalır.
-    for i in range(root_reclaim_idx + 1, final_user_idx):
-        kw, arg = instructions[i]
-        if kw != "RUN":
+    #
+    # Bu kuralın SINIRI açıktır ve saklanmaz: chmod/chown/chgrp kelimesini hiç
+    # içermeyen eşdeğerler (`install -d -m 0777`, `setfacl`, `tar`, yol ile
+    # çağrılan script, değişkenden kurulan komut adı) buradan GEÇER. Onları
+    # image-revision-authority job'ı yakalar.
+    for i in range(bake_idx + 1, final_user_idx):
+        if i == root_reclaim_idx:
             continue
-        assert not re.search(r"\b(chmod|chown|chgrp)\b", arg), (
+        kw, arg = instructions[i]
+        assert not re.search(r"\b(chmod|chown|chgrp)\b", f"{kw} {arg}"), (
             f"instruction {i} ({kw!r}, {arg!r}) performs a permission "
-            "change between the /app root-reclaim and the final USER — "
-            "anything in this window can hand /app write access back to "
-            "appuser and reopen the unlink-and-replace hole"
+            "change between the BUILD_REVISION bake and the final USER — "
+            "anything in this window can hand /app or /app/BUILD_REVISION "
+            "write access back to appuser and reopen the unlink-and-replace "
+            "hole. The authoritative check is the 'image-revision-authority' "
+            "job in .github/workflows/ci.yml."
         )
 
     assert instructions[final_user_idx][1] == "appuser"
