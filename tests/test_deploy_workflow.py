@@ -656,19 +656,29 @@ def test_dockerfile_bakes_immutable_build_revision():
     assert reclaim_mode & 0o022 == 0
 
     # Sahiplik+mod reclaim ANINDA doğru alınmış olsa da, reclaim'den SONRA
-    # USER'a kadar /app'e dokunan başka bir chmod/chown talimatı garantiyi
-    # yeniden açabilir (ör. "geliştirici" bir izin hatasını 0777/o+w ile
-    # "düzeltir", ya da sahipliği appuser'a geri verir) — garanti yalnızca
-    # reclaim ANINDA değil, USER'a kadar KALICI olmalı.
+    # USER'a kadar /app'e dokunan başka bir chmod/chown/chgrp talimatı
+    # garantiyi yeniden açabilir (ör. "geliştirici" bir izin hatasını
+    # 0777/o+w ile "düzeltir", ya da sahipliği appuser'a geri verir) —
+    # garanti yalnızca reclaim ANINDA değil, USER'a kadar KALICI olmalı.
+    #
+    # Hedefi "/app" metniyle eşleştirmeye ÇALIŞMIYORUZ: WORKDIR /app zaten
+    # ayarlı olduğundan sonraki bir RUN, /app'i hiç yazmadan mevcut dizini
+    # ("." , "--reference=/app/BUILD_REVISION" vb.) hedefleyip aynı deliği
+    # açabilir — hedef yazımlarını tek tek saymak kaybedilen bir oyun ve bir
+    # sonraki inceleyen kaçırdığımız yazımı bulur. Bunun yerine KÖRLEMESİNE
+    # bir kural: bu pencerede chmod/chown/chgrp'in TAMAMEN YASAK olması —
+    # pencere bugün boştur, bu yüzden bu kural hiçbir şeye mal olmuyor ve
+    # gelecekte oraya eklenecek her izin talimatı bilinçli olarak yeniden
+    # tartışılmak zorunda kalır.
     for i in range(root_reclaim_idx + 1, final_user_idx):
         kw, arg = instructions[i]
         if kw != "RUN":
             continue
-        touches_app = re.search(r"/app(?!\S)", arg)
-        touches_permissions = re.search(r"\b(chmod|chown)\b", arg)
-        assert not (touches_app and touches_permissions), (
-            f"instruction {i} ({kw!r}, {arg!r}) alters /app permissions "
-            "after the root reclaim"
+        assert not re.search(r"\b(chmod|chown|chgrp)\b", arg), (
+            f"instruction {i} ({kw!r}, {arg!r}) performs a permission "
+            "change between the /app root-reclaim and the final USER — "
+            "anything in this window can hand /app write access back to "
+            "appuser and reopen the unlink-and-replace hole"
         )
 
     assert instructions[final_user_idx][1] == "appuser"
