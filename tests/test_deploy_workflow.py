@@ -582,6 +582,14 @@ def test_production_build_context_excludes_development_and_backups():
 # appuser'a geçmeden ÖNCE mi") — metnin dosyada bir yerde var olması bunu
 # KANITLAMAZ. Ham substring testleri, useradd+chown -R'ın bake adımından
 # SONRAYA taşınmasını ya da uzunluk kontrolünün silinmesini yakalayamaz.
+#
+# NOT: reclaim talimatını bulmak için kullanılan "chown root:root /app" deseni
+# KASITLI OLARAK dar — "chown root:root /app/" (sonda slash) veya
+# "chown --no-dereference root:root /app" gibi anlamca eşdeğer ama farklı
+# yazılmış biçimler bu regex'i eşleştirmez ve testi (güvenli tarafta) YANLIŞ
+# KIRMIZI'ya düşürür. Bu, genel bir chown argüman ayrıştırıcısı yazmaktan
+# kaçınmak için bilinçli bir tercih; literal yazım burada YÜK TAŞIYICI —
+# Dockerfile'daki gerçek satır değişirse bu regex de birlikte güncellenmeli.
 def test_dockerfile_bakes_immutable_build_revision():
     dockerfile = _dockerfile_source()
     instructions = _dockerfile_instructions(dockerfile)
@@ -604,26 +612,29 @@ def test_dockerfile_bakes_immutable_build_revision():
         i for i, (kw, arg) in enumerate(instructions)
         if kw == "RUN" and re.search(r"chown root:root /app(?!\S)", arg)
     ]
+    # USER root ... USER appuser (yeniden yükselt-sonra-düşür) YASAL bir
+    # örüntüdür — tekil USER talimatı ZORUNLU DEĞİL, ama SONUNCUSU appuser
+    # olmalı ve sıralama sınırı da SONUNCU USER'a göre kurulmalı.
     user_indices = [i for i, (kw, arg) in enumerate(instructions) if kw == "USER"]
 
     assert len(arg_indices) == 1
     assert len(recursive_chown_indices) == 1
     assert len(bake_indices) == 1
     assert len(root_reclaim_indices) == 1
-    assert len(user_indices) == 1
+    assert len(user_indices) >= 1
 
     recursive_chown_idx = recursive_chown_indices[0]
     arg_idx = arg_indices[0]
     bake_idx = bake_indices[0]
     root_reclaim_idx = root_reclaim_indices[0]
-    user_idx = user_indices[0]
+    final_user_idx = user_indices[-1]
 
     assert (
         recursive_chown_idx
         < arg_idx
         < bake_idx
         < root_reclaim_idx
-        < user_idx
+        < final_user_idx
     )
 
     bake_argument = instructions[bake_idx][1]
@@ -633,7 +644,34 @@ def test_dockerfile_bakes_immutable_build_revision():
     assert "chown root:root /app/BUILD_REVISION" in bake_argument
     assert "chmod 0444 /app/BUILD_REVISION" in bake_argument
 
-    assert instructions[user_idx][1] == "appuser"
+    # Sahiplik /app üzerinde root'a geri alınmış olsa bile MOD appuser'ın
+    # yazma bitini (grup veya diğer) geri açarsa aynı unlink-ve-yeniden-
+    # oluştur yolu tekrar açılır. Literal "0755" yerine oktal'i sayıya
+    # çevirip 0o022 (grup+diğer yazma) bitini kontrol ediyoruz — gelecekte
+    # 0700 ya da 0555 gibi başka güvenli modlar da geçerli kalsın.
+    reclaim_argument = instructions[root_reclaim_idx][1]
+    chmod_match = re.search(r"chmod\s+(\d+)\s+/app(?!\S)", reclaim_argument)
+    assert chmod_match is not None
+    reclaim_mode = int(chmod_match.group(1), 8)
+    assert reclaim_mode & 0o022 == 0
+
+    # Sahiplik+mod reclaim ANINDA doğru alınmış olsa da, reclaim'den SONRA
+    # USER'a kadar /app'e dokunan başka bir chmod/chown talimatı garantiyi
+    # yeniden açabilir (ör. "geliştirici" bir izin hatasını 0777/o+w ile
+    # "düzeltir", ya da sahipliği appuser'a geri verir) — garanti yalnızca
+    # reclaim ANINDA değil, USER'a kadar KALICI olmalı.
+    for i in range(root_reclaim_idx + 1, final_user_idx):
+        kw, arg = instructions[i]
+        if kw != "RUN":
+            continue
+        touches_app = re.search(r"/app(?!\S)", arg)
+        touches_permissions = re.search(r"\b(chmod|chown)\b", arg)
+        assert not (touches_app and touches_permissions), (
+            f"instruction {i} ({kw!r}, {arg!r}) alters /app permissions "
+            "after the root reclaim"
+        )
+
+    assert instructions[final_user_idx][1] == "appuser"
 
     assert 'git archive --format=tar "$revision"' in host
     assert "BUILD_REVISION: '$revision'" in host
