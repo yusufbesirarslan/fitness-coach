@@ -826,7 +826,8 @@ def test_real_flock_unrelated_holder_cannot_forge_inherited_ofd(
         result = subprocess.run(
             fixture.command(bash_executable, "not-a-sha"),
             text=True, capture_output=True, check=False, env=environment, timeout=30,
-            pass_fds=(caller_fd,), preexec_fn=lambda: os.dup2(caller_fd, 7),
+            close_fds=False,
+            preexec_fn=lambda: os.dup2(caller_fd, 7, inheritable=True),
         )
         assert result.returncode == 73
         assert "outer deployment lock capability is not held" in result.stderr
@@ -887,7 +888,8 @@ def test_real_locked_inherited_ofd_reaches_helper_validation(
         result = subprocess.run(
             fixture.command(bash_executable, "not-a-sha"),
             text=True, capture_output=True, check=False, env=environment, timeout=30,
-            pass_fds=(inherited_fd,), preexec_fn=lambda: os.dup2(inherited_fd, 7),
+            close_fds=False,
+            preexec_fn=lambda: os.dup2(inherited_fd, 7, inheritable=True),
         )
         assert result.returncode == 64, result.stderr
         assert "DEPLOY_SHA must be lowercase 40-hex" in result.stderr
