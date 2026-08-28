@@ -819,6 +819,7 @@ def test_real_flock_unrelated_holder_cannot_forge_inherited_ofd(
         assert _readline_with_timeout(holder.stdout, timeout=10).strip() == "ready"
         caller_fd = os.open(lock_path, flags)  # Exact inode, deliberately unlocked OFD.
         environment = fixture.environment.copy()
+        environment.update(host_timeout_environment())
         environment.pop("BASH_ENV", None)
         environment["PATH"] = os.environ.get("PATH", "")
         environment["AXISAI_OUTER_LOCK_FD"] = "7"
@@ -879,6 +880,7 @@ def test_real_locked_inherited_ofd_reaches_helper_validation(
         inherited_fd = os.open(lock_path, os.O_RDONLY | os.O_NOFOLLOW)
         fcntl.flock(inherited_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         environment = fixture.environment.copy()
+        environment.update(host_timeout_environment())
         environment.pop("BASH_ENV", None)
         environment["PATH"] = os.environ.get("PATH", "")
         environment["AXISAI_OUTER_LOCK_FD"] = "7"
@@ -1656,13 +1658,30 @@ def test_real_deploy_user_cannot_replace_the_verified_helper_object(
         ], attack.stdout + attack.stderr
         assert helper.read_bytes() == HELPER_PROBE
 
-        # And the verified object still executes as that unprivileged user.
+        # The verified object executes under the exact identity the production
+        # privilege drop builds: initgroups() replaces root's supplementary
+        # groups with the deploy user's, so the root-owned helper is reached
+        # through its "other" r-x bits.
         executed = subprocess.run(
             [str(helper)], text=True, capture_output=True, check=False,
             timeout=30, user=account.pw_uid, group=account.pw_gid,
+            extra_groups=[account.pw_gid],
         )
         assert executed.returncode == 0, executed.stderr
         assert executed.stdout.strip() == "validated"
+
+        # The other half of that contract, asserted rather than assumed: mode
+        # 0505 grants the GROUP class nothing, and the helper's group is root.
+        # A drop that forgot initgroups() would keep gid 0 in the child's group
+        # list, match the group class, and be denied. The helper is therefore
+        # fail-closed against an incomplete privilege drop, and this is why
+        # PRIVILEGE_DROP_SOURCE calls initgroups() before setgid/setuid.
+        with pytest.raises(PermissionError):
+            subprocess.run(
+                [str(helper)], text=True, capture_output=True, check=False,
+                timeout=30, user=account.pw_uid, group=account.pw_gid,
+                extra_groups=[0],
+            )
     finally:
         shutil.rmtree(directory, ignore_errors=True)
 
