@@ -77,6 +77,18 @@ AUTHORITY_PARAMETER_PREFIX = "/axisai/production-deploy-authority/"
 AUTHORITY_WAIT_ATTEMPTS = 14
 AUTHORITY_GATE_WORST_CASE_SECONDS = AUTHORITY_WAIT_ATTEMPTS * 5
 OUTER_LOCK_CAPABILITY_FD = 7
+# Canonical hardened execution PATH for every privileged deploy boundary.
+#
+# Both boundaries below hand their child an explicit environment, so PATH is a
+# deployment contract, not an inherited convenience.  The retired value
+# (`/usr/local/bin:/usr/bin:/bin`) omitted the sbin directories, and Ubuntu
+# ships `runuser` and `nginx` in /usr/sbin -- so the root bootstrap's staleness
+# proof and its nginx validation could never resolve their binaries, while
+# `aws` lives in /usr/local/bin and resolved only by luck of ordering.  This is
+# the standard root PATH: sbin before bin at each prefix, local before system.
+HARDENED_EXECUTION_PATH = (
+    "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+)
 # AWS-RunShellScript does not publish a commands-element maximum.  This is a
 # deliberately conservative local growth guard for our generated bootstrap.
 LOCAL_RUN_SHELL_COMMAND_MAX_CHARS = 65_536
@@ -92,7 +104,9 @@ ROOT_BOOTSTRAP_WORST_CASE_SECONDS = (
 # The helper inherits the already-held outer lock: 4 + 7 + 1560 + 2 + 7.
 WORKFLOW_HELPER_WORST_CASE_SECONDS = 1580
 
-ROOT_LOCK_WRAPPER_SOURCE = r'''def _emit(stderr, message):
+ROOT_LOCK_WRAPPER_SOURCE = (
+    "HARDENED_PATH = " + repr(HARDENED_EXECUTION_PATH)
+    + "\n\n" + r'''def _emit(stderr, message):
     if hasattr(stderr, "write"):
         stderr.write(message + "\n")
     else:
@@ -201,7 +215,7 @@ def run(encoded_command, os_module, stat_module, fcntl_module,
             check=False,
             pass_fds=(7,),
             env={
-                "PATH": "/usr/local/bin:/usr/bin:/bin",
+                "PATH": HARDENED_PATH,
                 "AXISAI_ROOT_LOCK_FD": "7",
             },
         )
@@ -234,6 +248,7 @@ def main():
 if __name__ == "__main__":
     raise SystemExit(main())
 '''
+)
 
 # The privileged helper is an OBJECT, not a pathname the deploy user can
 # replace.  Root materializes it inside a private root-owned directory, digest-
@@ -387,7 +402,8 @@ if __name__ == "__main__":
 
 
 PRIVILEGE_DROP_SOURCE = (
-    "HOST_TIMEOUT_ENVIRONMENT = " + repr(host_timeout_environment()) + "\n"
+    "HARDENED_PATH = " + repr(HARDENED_EXECUTION_PATH) + "\n"
+    + "HOST_TIMEOUT_ENVIRONMENT = " + repr(host_timeout_environment()) + "\n"
     + "MONOTONIC_STATE_PATH = " + repr(MONOTONIC_STATE_PATH)
     + "\n\n" + r'''def _emit(stderr, message):
     if hasattr(stderr, "write"):
@@ -421,7 +437,7 @@ def run(user_name, helper_path, deploy_sha, deploy_dir, public_url, fd_text,
             helper_path,
             [helper_path, deploy_sha, deploy_dir, public_url],
             {
-                "PATH": "/usr/local/bin:/usr/bin:/bin",
+                "PATH": HARDENED_PATH,
                 "AXISAI_OUTER_LOCK_FD": "7",
                 "AXISAI_MONOTONIC_STATE": MONOTONIC_STATE_PATH,
                 **HOST_TIMEOUT_ENVIRONMENT,

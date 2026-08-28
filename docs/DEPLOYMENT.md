@@ -156,6 +156,19 @@ with status 73. Treat this as
 contention, not a safe concurrent deploy: retry after lock contention only once
 the prior deployment has finished.
 
+Both privileged boundaries hand their child a complete environment rather than
+an inherited one, so the execution `PATH` is deployment contract surface. The
+canonical value is the standard root search order,
+`/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`, defined once as
+`HARDENED_EXECUTION_PATH` in `scripts/deploy_control.py` and injected into both
+the outer root-lock child and the privilege-dropped helper. The sbin entries are
+not decoration: Ubuntu ships `runuser` and `nginx` in `/usr/sbin`, so a PATH
+without it cannot resolve the staleness proof's `runuser` or the nginx
+validation gate, and `aws` lives in `/usr/local/bin`. Each gate only becomes
+reachable once the one before it passes, so an unresolvable command surfaces one
+deploy attempt at a time; every external command the bootstrap and the helper
+invoke is enumerated and pinned to this PATH in `tests/test_deploy_control.py`.
+
 The root bootstrap runs a fixed order: outer lock, controller authority proof,
 deploy-user read-only `ls-remote` staleness proof, mutation gate, then
 everything else. Both proofs run behind the lock and ahead of the gate. The
