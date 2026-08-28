@@ -228,7 +228,7 @@ It requires all of the following before accepting the release:
 
 Every externally sourced production image is immutable: it names an explicit
 version and pins the content digest. The only third-party Compose image is
-`redis:7.4.11-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf`
+`redis:8.8.0-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005`
 (the Docker Hub multi-platform index digest); `web` and `worker` build the exact
 local context, and the application base image is likewise digest-pinned in the
 Dockerfile. A mutable tag such as `redis:alpine` is a shipment blocker: it lets

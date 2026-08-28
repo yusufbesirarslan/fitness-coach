@@ -72,10 +72,21 @@ def test_every_external_production_image_is_versioned_and_digest_pinned(services
     assert violations == {}
 
 
-def test_redis_stays_on_compatible_major_seven(services):
-    # Pinning must not silently jump a major: the leaderboard sorted-set and
-    # limiter contracts are validated against Redis 7.
-    assert services["redis"]["image"].startswith("redis:7.4.11-alpine@sha256:")
+def test_redis_pin_matches_the_major_production_actually_runs(services):
+    # Pinning must not silently jump a major -- in EITHER direction. The
+    # retired guard demanded 7.4.11 while the host had been serving
+    # `redis:alpine`, which has resolved to Redis 8 for a long time; the
+    # persisted volume therefore holds an RDB written in format 14. Redis 7.4
+    # refuses that file outright -- "Can't handle RDB format version 14",
+    # confirmed by running 7.4.11 against a read-only copy of the production
+    # volume -- so the downgrade was a guaranteed crash loop on the first
+    # deploy after it landed, not a theoretical risk.
+    #
+    # Anchored on the major rather than the exact patch so a security bump
+    # inside 8.x is a one-line change, while a major move stays deliberate.
+    image = services["redis"]["image"]
+    assert image.startswith("redis:8."), image
+    assert not image.startswith("redis:7."), image
 
 
 def test_only_redis_is_an_external_production_image(services):

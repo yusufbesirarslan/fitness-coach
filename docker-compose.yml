@@ -66,8 +66,16 @@ services:
     # Değişmez (immutable) üretim imajı: `redis:alpine` MUTABLE bir etiketti —
     # aynı uygulama SHA'sının iki deploy'u arasında sessizce farklı üçüncü-taraf
     # baytlara çözülebiliyordu. Sürüm + içerik digest'i birlikte sabitlenir
-    # (Docker Hub çok-platformlu OCI index digest'i, redis 7.4.11-alpine).
-    image: redis:7.4.11-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
+    # (Docker Hub çok-platformlu OCI index digest'i, redis 8.8.0-alpine).
+    #
+    # Major 8, major 7 DEĞİL: üretim hostu bu pin'den önce `redis:alpine`
+    # çalıştırıyordu ve o etiket uzun süredir Redis 8'e çözülüyor. Kalıcı
+    # volume'daki dump.rdb RDB format 14 ile yazılmış; Redis 7.4 onu
+    # okuyamaz ("Can't handle RDB format version 14") ve açılışta ölür.
+    # 7.4.11'e sabitlemek bu yüzden sessiz bir major DÜŞÜRME idi ve ilk
+    # deploy'da fitx-redis'i restart döngüsüne soktu. 8.8.0 = hostta zaten
+    # çalışan tam sürüm: veri taşıma yok, davranış değişikliği yok.
+    image: redis:8.8.0-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005
     user: redis
     container_name: fitx-redis
     # web ile tutarlı: manuel stop'a saygı duy (önceden 'always' idi — 3.11).
