@@ -5,6 +5,8 @@ from app.extensions import db
 from app.models import DailyQuest
 from app.services.gamification import lb_rebuild
 
+_FRESH_SCHEMA_STAMP = "aa11bb22cc33"
+
 
 def _handle_upgrade_failure(app, message):
     db.session.rollback()
@@ -62,6 +64,25 @@ def init_database(app):
                 )
 
         db.create_all()
+
+        # Fresh schemas are created from current model metadata, then stamped at
+        # the last revision whose schema is represented by that metadata. Run
+        # the remaining migrations before any seed/backfill helper can commit:
+        # an upgrade failure must not leave durable application data in a
+        # partially migrated database.
+        if not _has_alembic:
+            try:
+                from flask_migrate import stamp, upgrade
+                if os.path.isdir(_migrations_dir):
+                    stamp(revision=_FRESH_SCHEMA_STAMP)
+                    upgrade()
+                    app.logger.info("[DB] Taze şema Alembic head'e yükseltildi.")
+            except Exception:
+                _handle_upgrade_failure(
+                    app,
+                    "[DB] Taze şemayı Alembic zincirine alma başarısız.",
+                )
+
         # I-M1: eski ham idempotent ALTER/UPDATE döngüsü KALDIRILDI. Tüm kolonlar
         # artık ya Alembic zincirinde (drift kapatan migration f1a2b3c4d5e6 dahil)
         # ya da fresh DB'lerde yukarıdaki create_all ile geliyor; tek-seferlik veri
@@ -128,22 +149,6 @@ def init_database(app):
             db.session.rollback()
             app.logger.warning("[DB_INIT] backfill_referral_codes başarısız (boot devam ediyor)",
                                exc_info=True)
-
-        # Taze şema create_all ile oluştu; model dışı DB nesnelerini kuran migration'ın
-        # gerçekten çalışması için önce trigger revision'ının selefini damgala,
-        # ardından head'e upgrade et.
-        if not _has_alembic:
-            try:
-                from flask_migrate import stamp, upgrade
-                if os.path.isdir(_migrations_dir):
-                    stamp(revision="aa11bb22cc33")
-                    upgrade()
-                    app.logger.info("[DB] Taze şema Alembic head'e yükseltildi.")
-            except Exception:
-                _handle_upgrade_failure(
-                    app,
-                    "[DB] Taze şemayı Alembic zincirine alma başarısız.",
-                )
 
         # Liderlik sorted set'lerini Postgres'ten doldur (Redis varsa). Redis sonradan
         # ayağa kalkarsa ilk leaderboard isteği zaten Postgres'e düşer; sonraki restart hidratlar.
