@@ -1050,3 +1050,306 @@ Not GO FOR INTERNAL NATIVE-AUTH BUILD.
 Not NO-GO (smoke did not fail; identity was available; no abort fired).
 
 PR5 remains **deferred**.
+
+---
+
+## 30. 24h Soak Closeout + Internal Native-Auth Build Gate
+
+Closeout assessment: **2026-08-28T06:26:31Z → 2026-08-28T06:45:34Z**.
+Continuation of §29 (not a rediscovery). No flags changed. No deploy. No
+restart. No Cognito mutation. No native-auth ON compile or distribution.
+PR5 remains deferred.
+
+### 30.1 Soak window — elapsed, but only partially evidenced
+
+| Field | Value |
+|---|---|
+| Nominal start | `2026-08-26T10:40:33Z` (web container start; single gunicorn boot) |
+| Nominal close | `2026-08-27T10:40:00Z` |
+| Nominal duration | 23h 59m 27s |
+| Window elapsed at assessment time? | **YES** — closed 20h 05m before this closeout began |
+| Request-level evidence actually available | `2026-08-26T10:40:33.826Z` → `2026-08-27T04:34:43.189Z` |
+| Evidenced duration | **17h 54m 10s** |
+| Evidence coverage of the window | **74.6%** |
+| Un-evidenced tail | **6h 05m 17s** (`04:34:43Z` → `10:40:00Z`) |
+
+`WAIT — SOAK IN PROGRESS` is **withdrawn**: the window has closed. It is
+replaced by a finding about what the window actually proves.
+
+### 30.2 SHAs and contract drift — no drift
+
+| Field | Value | Drift |
+|---|---|---|
+| Backend `origin/main` | `a6d6b2e60dc7718bd47590d64b5f74542294025c` | **none** vs §29 |
+| Deployed backend HEAD (host `git -C /home/ubuntu/fitness-coach rev-parse HEAD`) | `a6d6b2e60dc7718bd47590d64b5f74542294025c` | **none** — deployed == `origin/main` |
+| Deployed tracked working tree | clean | — |
+| Mobile `origin/main` | `3386df37198ef0193c64fa4754a686357868f785` | **none** — identical to shipped PR4 SHA |
+| Backend/mobile contract drift | **none observed** | — |
+
+No production code changed during or after the soak, so the soak is not
+invalidated by a moving SHA. Two **untracked** host files exist
+(`amazon-cloudwatch-agent.deb`, `docker-compose.yml.bak.1780750854`); the
+backup filename epoch resolves to **2026-06-06T13:00:54Z**, ~11 weeks before
+the soak, so neither is a mid-soak configuration change. The tracked tree is
+clean.
+
+### 30.3 Runtime flags (read, not changed)
+
+| Flag | Host `.env` | Effect |
+|---|---|---|
+| `MOBILE_AUTH_ENABLED` | `1` | `/api/v1` registered |
+| `RUNTIME_METRICS_ENABLED` | **absent** → repo default `0` | CloudWatch HTTP SLIs unavailable |
+
+> HTTP/auth soak was log-only; CloudWatch HTTP SLIs were unavailable.
+
+No success rates and no latency percentiles are stated anywhere in this
+closeout, because none were collected.
+
+### 30.4 Restart / crash / capacity evidence — clean
+
+| Subject | Evidence | Verdict |
+|---|---|---|
+| Web container | started `2026-08-26T10:40:33.152Z`, `RestartCount=0`, `Running=true`, `Restarting=false`, `OOMKilled=false`, `ExitCode=0`, health `healthy`, up 44h | **no restart, no crash, no OOM** |
+| Gunicorn | exactly **one** boot line (`Starting gunicorn 26.0.0` @ `10:40:33.826Z`); no second boot in the whole log | **no worker respawn** |
+| Worker container | started `2026-08-26T06:20:44Z`, `RestartCount=0`, `OOMKilled=false`, Compose `unhealthy` | **known HEALTHCHECK/RQ port mismatch — not an abort** (see caveat 30.8) |
+| Redis `fitx-redis` | started `2026-08-22T14:43:50Z`, `RestartCount=0`, healthy | **stable across the soak** |
+| Host | uptime 5d 15h at `06:26Z` → boot ≈ `2026-08-22T14:44Z` | **no host reboot during the soak** |
+| Mid-soak redeploy | none — container start predates the window and never recreated | **soak is one continuous runtime** |
+
+The runtime was continuous for the entire nominal window. There is **no**
+evidence of thread/worker exhaustion, crash-loop, OOM, or recreate.
+
+### 30.5 Log retention — complete and unrotated, then silent
+
+| Field | Value |
+|---|---|
+| Log driver | `json-file`, `max-size=10m`, `max-file=3` |
+| Files present | **one** (`…-json.log`), no `.1` / `.2` |
+| Size | **78,545 bytes** of a 10 MB rotation threshold |
+| Rotation during soak | **none** — logs are complete from container start |
+| Total lines | 396 |
+| First line | `2026-08-26T10:40:33.826Z` gunicorn boot |
+| Last line | `2026-08-27T04:34:43.189Z` — `status=403 path=<unmatched> ip=104.253.82.138` (internet scanner) |
+| Observed line rate while serving | ≈ **22.1 lines/h** |
+
+Logs did **not** rotate and are **not** lossy. The absence of records after
+`2026-08-27T04:34:43Z` is therefore a real absence of proxied requests, not a
+retention artifact.
+
+### 30.6 BLOCKER — the public production edge is refusing connections
+
+Discovered during this closeout, independent of the soak questions.
+
+| Probe | Source | Result |
+|---|---|---|
+| DNS `fitx-chatbot.duckdns.org` | local resolver | **resolves correctly** → `18.153.156.28` |
+| TCP `18.153.156.28:443` | operator host (`85.107.65.28`) | **FAIL** (`06:26Z` and re-confirmed `06:45:34Z`) |
+| TCP `18.153.156.28:80` | operator host | **FAIL** |
+| TCP `api.github.com:443` | operator host | **SUCCESS** (control — local egress is healthy) |
+| `GET https://fitx-chatbot.duckdns.org/health` | **independent off-network vantage** | **`connect ECONNREFUSED 18.153.156.28:443`** |
+| EC2 instance state | AWS API | `running`, public IP `18.153.156.28` unchanged |
+| Security group `launch-wizard-1` | AWS API | ingress `tcp/80` **and** `tcp/443` from `0.0.0.0/0` — **open** |
+| Subnet NACL `acl-0446b970a2fbb3bb8` | AWS API | allow-all ingress and egress |
+| SSM agent | AWS API | **Online**, last ping `2026-08-28T06:43:15Z` — host is alive |
+| Flask app internally | Docker HEALTHCHECK | container `healthy` at `06:26Z` — app still serving on `127.0.0.1:5000` |
+
+`ECONNREFUSED` is a TCP reset, not a timeout: packets reach the host and the
+host actively refuses them. Combined with an open SG, an open NACL, a live host
+and a healthy internal app, this localises the fault to the **host-level public
+edge (nginx) on ports 80/443, which is not listening**.
+
+**The production API origin that an internal native-auth ON build must target —
+`https://fitx-chatbot.duckdns.org` — is currently DOWN.**
+
+Timing (inference, explicitly not proven): the app served ≈22 request lines per
+hour, including continuous internet-scanner noise, and then recorded **exactly
+zero** proxied requests for the following ~26 hours. The most probable edge-stop
+time is therefore **≈ `2026-08-27T04:34:43Z`**, i.e. **~6h05m before the soak
+window closed**. The exact stop time and root cause are **not proven** — see
+30.9 for the uncollected host evidence.
+
+### 30.7 Soak conclusions on the evidenced 17h 54m
+
+Scope: these hold for `2026-08-26T10:40:33Z` → `2026-08-27T04:34:43Z` only.
+
+| Question | Finding | Confidence |
+|---|---|---|
+| Auth-related 5xx | **none observed** (per §29 counts over the same unrotated log; no 5xx line ever appeared) | log-only |
+| Today-related 5xx | **none observed** | log-only |
+| Overload `503` / `AUTH_TEMPORARILY_UNAVAILABLE` | **none observed** | log-only |
+| `refresh_reuse` / token-family anomaly | **none observed** | log-only |
+| Repeated refresh loops / auth churn | **none observed** | log-only |
+| Tracebacks / exceptions | **none observed** | log-only |
+| `today_read_failed` | **none observed** | log-only |
+| Gunicorn / worker restarts | **zero** | **container-inspect proven** |
+| Host / container restarts | **zero** | **container-inspect proven** |
+| DB issues | none; `/health` `db: ok` at last read | log-only |
+| Redis issues | none; `limiter_storage: redis`, container healthy, 0 restarts | proven |
+| Thread reserve reaching floor | no evidence of it; last read 8 / floor 2 (§29, `12:54:21Z`) | **stale — not re-read** |
+| Wrong-user Today | **none** | proven structurally (30.10) |
+| Product regression indicated | **none** | — |
+
+**Historical blocker question — did mobile auth/API enablement show evidence of
+thread/worker exhaustion during the soak?** **No.** Zero restarts, zero worker
+respawns, zero overload 503s, and a single continuous gunicorn process. But this
+was measured under **near-zero authenticated load** — the window contains only a
+handful of real auth requests, so it demonstrates *absence of failure at idle*,
+**not** capacity headroom under a real cohort.
+
+### 30.8 Evidence NOT collected in this closeout
+
+Read-only SSM command execution against the production host was **blocked by
+this environment's command classifier** after the first successful batch. The
+following required items are therefore **not** re-verified at closeout:
+
+- per-string sweep over the exact interval (`500/502/503/504`,
+  `AUTH_TEMPORARILY_UNAVAILABLE`, `overload`, `refresh_reuse`, `Traceback`,
+  worker timeout, DB/Redis errors, `today_read_failed`)
+- `path` × `status` histogram for `/api/v1/auth/login`, `/api/v1/auth/refresh`,
+  `/api/v1/today`
+- **final** `/health` body
+- **final** deep health, thread reserve, reserve floor, worker heartbeat
+- nginx service state, listening sockets, host firewall — the direct proof of
+  the 30.6 root cause
+- confirmation the RQ worker is genuinely alive *now* (the Compose `unhealthy`
+  HEALTHCHECK mismatch was ruled non-aborting on a **2026-08-26** deep-health
+  read; it has **not** been re-confirmed at closeout)
+
+The final `/health` and deep-health readings required by §8 of the task brief
+are **stale as of 2026-08-26T12:54:21Z** and could not be refreshed, both
+because SSM is blocked and because the public endpoint refuses connections.
+
+### 30.9 Exact commands required to close 30.8 (not executed)
+
+```bash
+# host edge root cause
+ss -ltn; systemctl status nginx --no-pager -l; ufw status verbose
+# final health + capacity
+curl -sS http://127.0.0.1:5000/health
+docker exec fitness-coach-web-1 python3 -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:5000/health?deep=1',timeout=10).read().decode())"
+# exact-interval sweep
+docker logs --timestamps fitness-coach-web-1 2>&1 | grep -oE 'path=[^ ]+ status=[0-9]{3}' | sort | uniq -c | sort -rn
+docker logs --timestamps fitness-coach-web-1 2>&1 | grep -ciE 'status=50[0-9]|AUTH_TEMPORARILY_UNAVAILABLE|refresh_reuse|Traceback|today_read_failed'
+```
+
+### 30.10 Product / security invariants — re-verified from the deployed SHA
+
+Verified structurally against `a6d6b2e` (the SHA actually running) and mobile
+`3386df3`. These do not depend on the blocked host evidence.
+
+| Invariant | Evidence | Status |
+|---|---|---|
+| Authenticated principal owns Today | `app/blueprints/mobile_today.py` — `build_today(g.mobile_user.id)`; route reads no query param, body, or header beyond the auth boundary | **HOLDS** |
+| Arbitrary `user_id` / `X-User-Id` / `date` inert | structurally impossible to influence — no such input is read | **HOLDS** |
+| No fixture fallback on failure | `TodayUnavailable` → `503 TODAY_TEMPORARILY_UNAVAILABLE`, `retryable=true`, session preserved; never synthesizes empty/resting Today | **HOLDS** |
+| No fixture Today in production | `AppComposition.configured` wires `LiveTodayRepository` or `UnavailableTodayRepository`; `Fixture*` only in `AppComposition.development` | **HOLDS** |
+| No fixture assets bundled | `fixtures/` is **not** declared under `flutter:` assets in `pubspec.yaml` | **HOLDS** |
+| Canonical chain | backend state → `/api/v1/today` → `AuthenticatedTransport` → `LiveTodayRepository` → `TodayApiMapper` → UI | **HOLDS** |
+| No client rest/completion inference | `TodayApiMapper` maps server `status` strings and `dto.workout.completed`; unknown status → explicit error, never a fabricated state | **HOLDS** |
+| No client date authority | zero `DateTime.now()` in `lib/features/today/` | **HOLDS** |
+| Mobile clears state on logout / user switch | `test/app/shell/logout_invalidation_test.dart` — logout clears every protected destination stack; `TodayScreen` asserted gone | **HOLDS** |
+| Two-user isolation coverage valid | mobile main unmoved from PR4 SHA; isolation/logout suites unchanged | **HOLDS** |
+| Refresh-family integrity implemented | `mobile_auth.py:409-411` — `refresh_reuse` → security event → family revoke → refresh failure | **HOLDS** |
+| Native-auth flag default OFF | `NativeAuthRollout.fromEnvironment` `defaultValue: false` | **HOLDS** |
+
+No contrary evidence found. **No product/security NO-GO condition is present.**
+
+### 30.11 Rollback / containment recheck (not executed)
+
+| Path | Status |
+|---|---|
+| Backend containment `MOBILE_AUTH_ENABLED=0` + `docker compose up -d` → `/api/v1/today` = 404 | config location known (`/home/ubuntu/fitness-coach/.env`), operator access exists **via SSM**, recreate requirement understood, health verification known — **viable in principle** |
+| Backend containment — practical caveat | containment is verified by probing `/api/v1/today` for `404`. **That probe currently cannot be executed from outside**, because the edge refuses connections. Containment is verifiable only from host loopback until 30.6 is fixed. |
+| Mobile OFF recovery | **reproducible** — flag defaults to `false`; an OFF build is `flutter build apk --dart-define=AXISAI_NATIVE_AUTH_ENABLED=false` (or simply omitting the define). Configured composition then wires `UnavailableTodayRepository` and no auth graph. |
+| Known-good OFF artifact | **none archived.** The local `tmp/axisai-mobile-phase2` debug APK is a native-auth **ON** build, not an OFF rollback artifact. |
+| OFF-by-rebuild sufficient for internal-only? | **Yes** for a tiny internal sideload cohort — reinstall is operator-controlled and immediate. |
+| Store downgrade | **NOT proven.** No TestFlight/Play rollback capability is claimed. |
+
+### 30.12 Operational P1 reassessment
+
+Original P1: *HTTP/Auth abort SLIs are missing while `/api/v1` is already
+public.* Still missing: login/refresh success-failure rates, Today
+2xx/4xx/5xx counters, latency percentiles, `HttpOverload`, `AuthOutcomes`,
+device-side mobile telemetry.
+
+Judged solely for **internal native-auth build validation**, the SLI gap alone
+would have been arguable — a tiny controlled cohort with a clean soak and
+log-based abort watching is a defensible risk. **But the acceptance test for
+that waiver is precisely the one that failed:** the closeout tried to read
+current production state and could not, because the endpoint refuses
+connections and the operator path was unavailable. An observability gap that
+hides a **live outage for ~26 hours** is not a tolerable monitoring posture even
+for a tiny cohort.
+
+**Disposition: STILL BLOCKING.**
+
+Grounds, per §9 of the task brief: soak evidence is incomplete (74.6% coverage),
+capacity cannot currently be observed, aborts cannot be detected reliably —
+demonstrated, not hypothesised — and runtime state is uncertain.
+
+### 30.13 Independent closeout review
+
+| # | Dimension | Severity | Finding |
+|---|---|---|---|
+| 1 | Cross-user risk | — | **clean** — principal is structurally the credential |
+| 2 | Auth concurrency | — | **clean** — 0 overload 503s, 0 restarts; unproven under real load |
+| 3 | Refresh integrity | — | **clean** — 0 `refresh_reuse`, reuse detection present |
+| 4 | Today failures | — | **clean** on the evidenced interval |
+| 5 | Server capacity | P2 | no exhaustion; measured at idle, so headroom is undemonstrated |
+| 6 | Crash / restart evidence | — | **clean** — 0 restarts across all three containers, no host reboot |
+| 7 | Observability gap | **operational P1** | HTTP SLIs absent; the gap concealed a live outage for ~26h |
+| 8 | Rollback viability | **operational P1** | backend containment cannot be *externally verified* while the edge is down; no archived OFF artifact |
+| 9 | Fixture safety | — | **clean** — not bundled, not wired in configured composition |
+| 10 | Backend/mobile contract drift | — | **clean** — both SHAs unmoved |
+| 11 | Internal cohort containment | **operational P1** | an internal build cannot be validated against an origin that refuses connections |
+| 12 | Wider-rollout implication | P2 | §28/§29 verdict text must not be read as approving anything beyond internal scope |
+
+Additional P2s carried forward unchanged from §29: unreadable-plan doc wording;
+stale `blocked` label; log-only sweeps lossy under burst; worker HEALTHCHECK
+port mismatch; rollback `.env` sloppiness / unproven store rollback.
+
+| Severity | Count |
+|---|---|
+| **P0** | **0** |
+| **Product-code P1** | **0** |
+| **Operational P1** | **3** (items 7, 8, 11) |
+| **P2** | **7** |
+
+### 30.14 Final native-build gate
+
+## NO-GO — OPERATIONAL READINESS
+
+Not a product or security NO-GO: P0 = 0, product-code P1 = 0, and every
+ownership, fixture, date-authority and refresh-integrity invariant re-verified
+clean against the deployed SHA.
+
+The gate fails on operations:
+
+1. **The target API origin is down.** `https://fitx-chatbot.duckdns.org`
+   refuses TCP on both 443 and 80, confirmed from two independent vantage
+   points with SG/NACL open and the host alive. An internal native-auth ON
+   build compiled against this origin would fail at login on first launch.
+2. **The soak window is only 74.6% evidenced.** The final 6h 05m carries no
+   request-level evidence, and the silence is most probably the outage itself
+   rather than a quiet period.
+3. **Final health, deep health and thread reserve are stale** (2026-08-26T12:54:21Z)
+   and could not be refreshed.
+4. **Operational P1 remains blocking**, now demonstrated rather than theoretical.
+
+PR5 remains **deferred**. No flags were changed. Nothing was compiled,
+distributed, deployed, or restarted.
+
+### 30.15 Smallest exact blocker-closing action
+
+1. Restore the public edge on `i-0c6f5352fc214e68d` (diagnose and start nginx;
+   confirm `ss -ltn` shows `:80` and `:443` listening) and establish **why** it
+   stopped — an unexplained edge stop is itself a rollout risk.
+2. Externally re-verify: `GET /health` → 200, unauthenticated
+   `GET /api/v1/today` → 401 (**not** 404, which would mean the flag is off).
+3. Capture the **final** deep health, thread reserve and reserve floor.
+4. Run the 30.9 sweep over the full window and record the result.
+5. Restart a clean **24h soak** from a confirmed-reachable edge. The current
+   window cannot be certified continuous, because for its last ~6h the service
+   was most likely not publicly reachable at all.
+
+Only after those close does the internal-build gate become re-assessable.
