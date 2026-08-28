@@ -48,3 +48,48 @@ deploy'da `127.0.0.1:3000` dinleyicisini kontrol eder; `/health?deep=1`
   `cp`'leme (bkz. nginx.conf içindeki uyarı) — satırları elle merge et.
 - Doğrulama: host'ta `ss -ltn | grep 3000` → yalnız `127.0.0.1:3000`;
   `curl -s 'http://127.0.0.1:5000/health?deep=1'` → `"fatsecret_proxy":"ok"`.
+
+## nginx startup DNS resilience (2026-08-28)
+
+The static `proxy_pass https://platform.fatsecret.com` directive above is
+resolved by `nginx -t` during the service's `ExecStartPre`. A transient DNS
+failure can therefore fail the entire nginx activation, including the public
+80/443 listeners. Ordering nginx after `nss-lookup.target` does not prove that
+DNS answers are ready.
+
+The repository-owned systemd drop-in is:
+
+```
+deploy/systemd/nginx.service.d/dns-restart-resilience.conf
+```
+
+Install it reproducibly on the host:
+
+```sh
+sudo install -d -m 0755 /etc/systemd/system/nginx.service.d
+sudo install -m 0644 \
+  deploy/systemd/nginx.service.d/dns-restart-resilience.conf \
+  /etc/systemd/system/nginx.service.d/dns-restart-resilience.conf
+sudo systemctl daemon-reload
+sudo systemd-analyze verify nginx.service
+sudo nginx -t
+sudo systemctl restart nginx
+```
+
+Effective behavior: `Restart=on-failure`, `RestartSec=10s`, with at most 12
+activations in 300 seconds. This covers the proven short resolver restart race
+without an unbounded high-frequency loop. If DNS remains unavailable for about
+110 seconds, start limiting leaves nginx failed for operator intervention; the
+external Route 53 health check and CloudWatch alarm remain the detection path.
+
+Rollback:
+
+```sh
+sudo rm /etc/systemd/system/nginx.service.d/dns-restart-resilience.conf
+sudo systemctl daemon-reload
+sudo systemctl reset-failed nginx
+```
+
+Then verify `systemctl show nginx -p Restart -p RestartUSec` reports the vendor
+defaults. Removing the drop-in does not change nginx site configuration or
+restart the running service by itself.
