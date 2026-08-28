@@ -1554,3 +1554,248 @@ authenticated smoke could not be executed and the demonstrated
 maintenance/DNS restart race has no preventive mitigation. This is not
 authorization to compile or distribute native-auth ON, change either auth
 flag, start PR5, or begin another sprint.
+
+---
+
+## 32. Nginx DNS-Restart Resilience + Fresh Auth Smoke + New Soak
+
+Assessment window: **2026-08-28T11:19:06Z to 2026-08-28T11:34:16Z**.
+This section appends to sections 30 and 31. Their failed-soak and outage-RCA
+evidence remains unchanged. No application deploy, application/container
+restart, feature-flag change, Cognito mutation, database/Redis mutation,
+mobile build, or product behavior change occurred.
+
+### 32.1 DNS-Restart Resilience
+
+#### Exact startup dependency
+
+`nginx -T` from SSM command `c0590c0d-7d84-42ff-af39-d011faf23f9d`
+identified the only deployed hostname dependency:
+
+| Field | Evidence |
+|---|---|
+| Enabled file | `/etc/nginx/sites-enabled/fatsecret-proxy` -> `/etc/nginx/sites-available/fatsecret-proxy` |
+| Server/location | loopback server `listen 127.0.0.1:3000`, `location /` |
+| Responsible directive | `proxy_pass https://platform.fatsecret.com;` |
+| Host/TLS behavior | `proxy_set_header Host platform.fatsecret.com`; existing static proxy behavior unchanged |
+| Startup behavior | vendor `ExecStartPre=/usr/sbin/nginx -t -q ...` resolves the static upstream; a failed lookup fails activation before 80/443 return |
+| Runtime chain | public `/fatsecret/rest/server.api` -> `127.0.0.1:3000` -> `platform.fatsecret.com` |
+
+The live site files are host-managed/certbot-managed. The repository already
+documented the FatSecret block in `deploy/fatsecret-proxy.md`, but had no
+installable systemd resilience artifact. The production nginx version is
+`1.28.3`; its vendor unit is `Type=forking`, ordered after
+`network-online.target` and `nss-lookup.target`, and previously had
+`Restart=no`. That ordering did not protect against the proven transient DNS
+readiness failure.
+
+#### Selected mitigation
+
+The primary mitigation is the systemd drop-in:
+
+```ini
+[Unit]
+StartLimitIntervalSec=300
+StartLimitBurst=12
+
+[Service]
+Restart=on-failure
+RestartSec=10s
+```
+
+Production location:
+`/etc/systemd/system/nginx.service.d/dns-restart-resilience.conf`.
+
+Repository source of truth:
+`deploy/systemd/nginx.service.d/dns-restart-resilience.conf`.
+
+Both files have SHA-256
+`ddff7d60c1e8248a85baf707bdbc9cabc005733b7f769088e5e40bdafef12621`.
+The repository runbook records exact install, validation, and rollback
+commands. Installation remains a deliberate host-provisioning step; automated
+multi-host configuration management is a bounded follow-up, not part of this
+task.
+
+This policy gives the failed activation up to 12 starts in five minutes,
+spaced ten seconds apart: approximately 110 seconds of automatic recovery for
+the proven short resolver restart race, followed by a failed state for
+operator review instead of unbounded high-frequency thrashing.
+
+Rejected alternatives:
+
+- Runtime nginx DNS resolution was not introduced. A variable-based
+  `proxy_pass`/`resolver` change would alter resolution timing, TTL caching,
+  TLS SNI, and failure semantics for an otherwise stable proxy path.
+- No startup shell/DNS wrapper was added. Native systemd restart semantics
+  directly cover failed `ExecStartPre` activations with less complexity.
+- No additional ordering-only dependency was added; ordering is not readiness.
+
+Residual risk: DNS unavailability lasting beyond the approximately 110-second
+retry window can still leave nginx failed. The Route 53 health check and
+CloudWatch alarm remain the detection path. This is a materially smaller and
+bounded residual than the proven seconds-long `systemd-resolved` restart race.
+
+#### Backup and rollback
+
+Before installation, the effective unit, effective properties, full nginx
+configuration, and prior drop-in absence were captured at:
+
+`/var/backups/axisai/nginx-dns-resilience-20260828T112856Z`
+
+Rollback is to remove only
+`/etc/systemd/system/nginx.service.d/dns-restart-resilience.conf`, run
+`systemctl daemon-reload` and `systemctl reset-failed nginx`, then verify
+`Restart`, `RestartUSec`, `StartLimitIntervalUSec`, and `StartLimitBurst`
+returned to vendor defaults. Removing the drop-in does not alter nginx site
+configuration or restart the currently running service by itself.
+
+### 32.2 Post-Mitigation Proof
+
+SSM command `4619d4d5-8213-4bd6-9dec-799e440b8be9` installed and validated the
+drop-in without restarting nginx:
+
+| Check | Result |
+|---|---|
+| Effective unit | drop-in loaded from the intended `/etc/systemd/system` path |
+| Service type | `forking` (unchanged) |
+| Restart policy | `on-failure`, `RestartUSec=10s` |
+| Start limit | 12 activations / 5 minutes |
+| `systemd-analyze verify nginx.service` | no nginx/unit warning; only unrelated vendor XFS `CPUAccounting` deprecation warnings |
+| `nginx -t` | syntax OK; test successful |
+| Service during install | active; `NRestarts=0` |
+
+The isolated systemd proof did not stop DNS or touch nginx:
+
+| Proof | SSM command | Result |
+|---|---|---|
+| RED: same transient with no restart policy | `9a3d7e92-3699-4e42-9031-b46092be9f96` | transient cleared, unit remained `failed`, `NRestarts=0` |
+| GREEN: exact installed retry/start-limit values | `bfea0130-c80b-496b-b2a9-997dcd8337d4` | initial failed activation retried to `active`, `Result=success`, `NRestarts=1` |
+
+Temporary proof unit and marker files were removed immediately after each
+test, followed by `daemon-reload`. Production DNS was never stopped or
+degraded.
+
+One controlled nginx restart was performed by SSM command
+`2fad2613-703e-4b57-8e40-199422ed9647`:
+
+| Field | Result |
+|---|---|
+| Restart window | `2026-08-28T11:32:06.328Z` -> `2026-08-28T11:32:06.568Z` (~240 ms) |
+| nginx | active; new master PID `1773521`; normal controlled stop/start journal; `NRestarts=0` |
+| Listeners | nginx owns IPv4/IPv6 80 and 443 |
+| Post-restart `nginx -t` | successful |
+| Public `/health` | 200 |
+| Public unauthenticated `/api/v1/today` | 401, not 404 |
+| Application containers | same IDs/start times; web/worker/Redis each `RestartCount=0` |
+| Application deploy/restart | none |
+
+Recurrence verdict: **NO** -- if the same short transient DNS failure occurs
+during a future nginx activation, nginx will not remain permanently stopped;
+systemd retries after DNS clears. The isolated RED/GREEN proof demonstrates
+this behavior without deliberately breaking production DNS.
+
+### 32.3 External Edge Observability
+
+After the controlled restart:
+
+- Route 53 health check `988a197b-86d5-4adb-a643-3628007dc0da`: **16/16
+  observations successful**, HTTP 200, resolved IP `18.153.156.28`, latest
+  captured checks `2026-08-28T11:33:48Z` to `11:34:15Z`.
+- CloudWatch alarm `AxisAI-Public-Edge-HealthCheck` in `us-east-1`: **OK**.
+- Alarm notification actions: none. Explicit manual polling remains acceptable
+  for this controlled soak gate and remains P2 for wider rollout.
+- `RUNTIME_METRICS_ENABLED` remains OFF and was not changed.
+
+### 32.4 Fresh Authenticated Smoke
+
+The only authorized identity remains `axisai.native.e2e`. Its credential is
+not available in the permitted operator environment. A fresh names-only check
+found no release-validation credential in SSM Parameter Store, GitHub Actions
+secret inventory, or local credential targets; Secrets Manager contains only
+the existing application secret already checked in section 31. No secret value
+was printed or written.
+
+| Required check | Result |
+|---|---|
+| Credential available? | **NO** |
+| Login | **NOT RUN** |
+| Refresh | **NOT RUN** |
+| Authenticated Today | **NOT RUN** |
+| Canonical principal/state | fresh production confirmation **NOT RUN** |
+| Query/header spoof resistance | fresh production confirmation **NOT RUN** |
+| Fixture/fabricated-state evidence | deployed contract unchanged; fresh authenticated body unavailable |
+| Logout/session invalidation | **NOT RUN** |
+
+The credential was not guessed, reset, copied from another user, committed, or
+logged. The August 26 authenticated smoke remains historical evidence and is
+not substituted for the required post-recovery smoke.
+
+### 32.5 Health and Capacity
+
+Fresh in-container deep health from SSM command
+`f14c7c5b-2d09-4bc8-83f1-277024ce9543` at
+`2026-08-28T11:34:16Z`:
+
+| Field | Result |
+|---|---|
+| Overall / DB / Redis / login | `ok` / `ok` / `ok` / `ok` |
+| FatSecret proxy | `ok` |
+| Worker | `alive` (container's known port-healthcheck mismatch remains) |
+| Thread reserve / floor | **8 / 2** |
+| Threads / workers | 8 / 1 |
+| AI active / maximum | 0 / 4 |
+| DB pool | size 8, checked out 1 |
+| Backend SHA | `a6d6b2e60dc7718bd47590d64b5f74542294025c`; tracked tree clean |
+| Web / worker / Redis restarts | 0 / 0 / 0 |
+| nginx warning journal after restart | none |
+| Post-restart app-log sweep | only the expected unauthenticated Today 401; no auth/Today 5xx, overload 503, `refresh_reuse`, traceback, worker timeout, DB error, or Redis error |
+
+Mobile PR4 remains `3386df37198ef0193c64fa4754a686357868f785` and no
+mobile/product contract changed.
+
+### 32.6 Fresh Soak
+
+**A new soak was not started.** No `NEW_SOAK_START` or `NEW_SOAK_END` is
+recorded, and neither previous failed interval is combined with later
+evidence.
+
+The infrastructure, edge, monitoring, capacity, SHA, and unauthenticated gates
+pass. The required controlled login, refresh, authenticated Today, spoof
+resistance, canonical-state, and logout checks are absent because the
+authorized credential is unavailable. That is a soak-invalidating operational
+P1.
+
+If the credential becomes securely available, the exact next gate is to run
+the full controlled smoke, re-snapshot health/capacity and external edge state,
+then record a new exact contiguous 24-hour start/end only if every gate passes.
+During that soak, poll Route 53 and the CloudWatch alarm, nginx active state,
+80/443 listeners, nginx restart events/journal, Docker/app logs, deep health,
+thread reserve/floor, DB/Redis, and the documented auth/Today abort strings.
+Any external unhealthy transition, nginx failure, repeated 5xx, overload 503,
+capacity-floor hit, auth-integrity anomaly, wrong-user Today, fixture state,
+restart/crash, or DB/Redis failure aborts the soak.
+
+### 32.7 Independent Review and Severity
+
+Independent review of commit `182803670be17ba5b0c344730c2247d2f0eb610f`
+found no critical or important issue. It confirmed recurrence mitigation,
+bounded restart-loop behavior, nginx config safety, byte-identical persistence,
+rollback, unchanged cross-user/fixture behavior, external monitoring, and the
+authenticated-smoke prerequisite. Its sole minor rollback-verification wording
+finding was corrected before this section was finalized.
+
+| Severity | Count | Finding |
+|---|---:|---|
+| P0 | **0** | no security/auth bypass evidence |
+| Product P1 | **0** | no product or contract change |
+| Operational P1 | **1** | fresh controlled authenticated smoke blocked by unavailable authorized credential |
+| P2 | **4** | alarm has no notification action; runtime HTTP metrics OFF; known worker healthcheck mismatch; DNS outage beyond bounded retry window still needs operator intervention |
+
+## NO-GO — AUTHENTICATED SMOKE BLOCKED
+
+The proven nginx/DNS recurrence is materially mitigated and post-mitigation
+edge, health, capacity, persistence, rollback, and monitoring checks pass. The
+fresh 24-hour soak is not eligible to start because the existing controlled
+identity's credential is unavailable and the required authenticated smoke
+cannot safely run. Native-auth ON build/distribution, both auth flags, runtime
+metrics, PR5, Sprint 13, and merge of this draft PR remain untouched.

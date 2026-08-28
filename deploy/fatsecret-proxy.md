@@ -90,6 +90,11 @@ sudo systemctl daemon-reload
 sudo systemctl reset-failed nginx
 ```
 
-Then verify `systemctl show nginx -p Restart -p RestartUSec` reports the vendor
-defaults. Removing the drop-in does not change nginx site configuration or
-restart the running service by itself.
+Then verify the vendor defaults with:
+
+```sh
+systemctl show nginx -p Restart -p RestartUSec -p StartLimitIntervalUSec -p StartLimitBurst
+```
+
+Removing the drop-in does not change nginx site configuration or restart the
+running service by itself.
