@@ -2051,6 +2051,14 @@ APPROVED_SEND_PATH_CALLS = frozenset({
     ("build_remote_command", "str"),
     ("build_remote_command", "uuid4"),
     ("render_bootstrap", "b64encode"),
+    # Pinning the helper digest into the bootstrap. All four are bounded work
+    # over the ~20 KiB helper the controller already holds in memory, and all
+    # four run BEFORE the send-boundary freshness verdict, so none of them
+    # spends heartbeat age between that verdict and the wire.
+    ("render_bootstrap", "b64decode"),
+    ("render_bootstrap", "sha256"),
+    ("render_bootstrap", "hexdigest"),
+    ("render_bootstrap", "repr"),
     ("render_bootstrap", "decode"),
     ("render_bootstrap", "encode"),
     ("render_bootstrap", "quote"),
