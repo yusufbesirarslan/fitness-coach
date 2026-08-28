@@ -11,7 +11,13 @@ on:
     workflows: ["CI"]
     types: [completed]
     branches: [main]
-  workflow_dispatch: # Elle tetiklemek için buton ekler (acil çıkış kapısı)
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+env:
+  DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
 
 permissions:
   id-token: write
@@ -20,16 +26,32 @@ permissions:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # CI kırmızıysa deploy HİÇ çalışmaz. workflow_dispatch elle tetiklemeyi korur.
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 65
+    environment: production
+    # CI basarisizsa deploy hic calismaz.
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event == 'push' && github.sha == github.event.workflow_run.head_sha }}
     steps:
-      - uses: actions/checkout@v7
+      - name: Verify privileged workflow identity
+        timeout-minutes: 1
+        env:
+          CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: test -n "$WORKFLOW_SHA" && test "$WORKFLOW_SHA" = "$CANDIDATE_SHA"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Configure AWS credentials via OIDC
-        uses: aws-actions/configure-aws-credentials@v6
+        timeout-minutes: 3
+        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION || 'eu-central-1' }}
+          role-session-name: axisai-${{ github.run_id }}
 
       # H4: havuz IaC'de degil (konsol-yonetimli). Uygulamanin kimlik saglayicisi
       # hakkindaki VARSAYIMLARINI (PreventUserExistenceErrors ACIK, MFA KAPALI,
@@ -38,12 +60,12 @@ jobs:
       # kaldirilip bloklayici yapilmali.
       - name: Cognito pool config drift check (non-blocking)
         continue-on-error: true
+        timeout-minutes: 2
         env:
           COGNITO_USER_POOL_ID: ${{ vars.COGNITO_USER_POOL_ID || 'eu-central-1_kaX0SORRK' }}
           COGNITO_APP_CLIENT_ID: ${{ vars.COGNITO_APP_CLIENT_ID || '3rdtrk3vl1dp0m1d19gdc3pqib' }}
         run: |
-          pip install --quiet boto3
-          python scripts/check_cognito_pool.py
+          python3 scripts/check_cognito_pool.py
 
       # 2026-07-13: `sam build` atlanarak deploy edilen Lambda bagimliliklari
       # VENDOR ETMEDI; handler istisnalari yuttugu icin Cognito trigger'i BASARILI
@@ -52,11 +74,11 @@ jobs:
       # lambda:GetFunction eklendikten sonra continue-on-error kaldirilmali.
       - name: CustomEmailSender Lambda package check (non-blocking)
         continue-on-error: true
+        timeout-minutes: 2
         env:
           COGNITO_EMAIL_LAMBDA_NAME: ${{ vars.COGNITO_EMAIL_LAMBDA_NAME || 'axisai-cognito-email-sender-EmailSenderFunction-hL04ENGVLu1E' }}
         run: |
-          pip install --quiet boto3
-          python scripts/check_email_lambda.py
+          python3 scripts/check_email_lambda.py
 
       # M5: rollback KODU geri alir ama boot'ta uygulanan DB migration'larini
       # GERI ALMAZ (bkz. CLAUDE.md A2). Gercek kullanici verisi varken bu,
@@ -65,12 +87,19 @@ jobs:
       # tanimli degilse ya da rolde rds:CreateDBSnapshot yoksa: uyar, gecme.
       - name: Pre-deploy RDS snapshot (non-blocking)
         continue-on-error: true
+        timeout-minutes: 2
+        env:
+          RDS_INSTANCE_ID: ${{ vars.RDS_INSTANCE_ID }}
         run: |
-          RDS_ID="${{ vars.RDS_INSTANCE_ID }}"
+          RDS_ID="$RDS_INSTANCE_ID"
           if [ -z "$RDS_ID" ]; then
             echo "UYARI: vars.RDS_INSTANCE_ID tanimli degil - deploy oncesi snapshot ATLANDI."
             echo "Yikici bir migration geri alinamaz (A2). Degiskeni tanimlayin ve deploy rolune rds:CreateDBSnapshot verin."
             exit 0
+          fi
+          if ! [[ "$RDS_ID" =~ ^[a-z][a-z0-9-]{0,62}$ ]]; then
+            echo "HATA: RDS_INSTANCE_ID gecersiz." >&2
+            exit 1
           fi
           SNAP_ID="predeploy-${RDS_ID}-$(date -u +%Y%m%d%H%M%S)"
           echo "RDS snapshot aliniyor: $SNAP_ID"
@@ -80,52 +109,12 @@ jobs:
             --query "DBSnapshot.DBSnapshotIdentifier" --output text
           echo "Snapshot baslatildi (arka planda tamamlanir): $SNAP_ID"
 
-      - name: Execute Deploy Commands via AWS SSM
-        run: |
-          COMMAND_ID=$(aws ssm send-command \
-            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
-            --document-name "AWS-RunShellScript" \
-            --parameters '{"commands":[
-              "NGINX_SITE=/etc/nginx/sites-available/fitx; if [ -f \"$NGINX_SITE\" ] && grep -q \"add_header Content-Security-Policy\" \"$NGINX_SITE\"; then echo \"ERROR: nginx site config still contains add_header Content-Security-Policy; remove it or render the repo config before deploy\"; exit 1; else echo \"nginx: CSP add_header yok (CSP Flask tarafindan uretiliyor)\"; fi",
-              "if nginx -t; then if systemctl is-active --quiet nginx; then systemctl reload nginx && echo \"nginx: reload edildi\"; else echo \"nginx: servis aktif degil, baslatiliyor ve boot icin enable ediliyor\"; systemctl enable --now nginx; echo \"nginx servis durumu: $(systemctl is-active nginx)\"; fi; else echo \"ERROR: nginx -t CONFIG TESTI BASARISIZ - deploy durduruluyor (public site kirik config servis edebilir)\"; exit 1; fi",
-              "echo \"80/443 dinleyenler:\"; ss -ltnp 2>/dev/null | grep -E \":(80|443) \" || echo \"UYARI: 80/443 portunu dinleyen yok - site disaridan erisilemez\"",
-              "ENV_FILE=${{ secrets.DEPLOY_DIR }}/.env; if [ -f \"$ENV_FILE\" ]; then PERM=$(stat -c %a \"$ENV_FILE\"); if [ \"$PERM\" != \"600\" ]; then echo \"UYARI: .env izinleri $PERM (grup/dunya okunabilir) - 600 olarak duzeltiliyor. Icerik: SECRET_KEY, RDS kimlik bilgileri, COGNITO_TOKEN_ENC_KEY, RESEND_API_KEY, OPENAI_API_KEY\"; chmod 600 \"$ENV_FILE\"; else echo \".env izinleri: 600 (dogru)\"; fi; else echo \"KRITIK: .env bulunamadi: $ENV_FILE - uygulama yapilandirmasiz baslar\"; fi",
-              "if ss -ltn 2>/dev/null | grep -q \"127.0.0.1:3000\"; then echo \"fatsecret proxy: 127.0.0.1:3000 dinliyor\"; else echo \"UYARI: FatSecret proxy (127.0.0.1:3000) DINLEMIYOR - besin aramalari 502 olur, makro cozumu LLM tahminine duser. Proxy nginx site blogudur; sites-enabled/fatsecret-proxy ve nginx durumunu kontrol edin (bkz deploy/fatsecret-proxy.md) - deploy bloklanmadi\"; fi",
-              "sudo -u ${{ secrets.DEPLOY_USER }} bash -lc '\''set -euo pipefail; cd ${{ secrets.DEPLOY_DIR }}; PREV_COMMIT=$(git rev-parse HEAD); echo \"PREV_COMMIT=$PREV_COMMIT\"; git fetch --all --prune; git reset --hard origin/main; docker compose build; docker compose up -d; HEALTH_OK=0; for i in $(seq 1 30); do CODE=$(curl -s -o /dev/null -w \"%{http_code}\" \"http://127.0.0.1:5000/health?deep=1\" || true); echo \"deep health attempt $i: $CODE\"; if [ \"$CODE\" = \"200\" ]; then HEALTH_OK=1; break; fi; sleep 5; done; if [ \"$HEALTH_OK\" != \"1\" ]; then echo \"ROLLBACK: health gate failed, returning to $PREV_COMMIT\"; docker compose logs --no-color --tail 80 web || true; git reset --hard \"${PREV_COMMIT:?rollback target missing}\"; docker compose up -d --build; RB_OK=0; for j in $(seq 1 30); do RCODE=$(curl -s -o /dev/null -w \"%{http_code}\" http://127.0.0.1:5000/health || true); echo \"rollback health attempt $j: $RCODE\"; if [ \"$RCODE\" = \"200\" ]; then RB_OK=1; break; fi; sleep 5; done; if [ \"$RB_OK\" = \"1\" ]; then echo \"ROLLBACK OK: onceki surum saglikli\"; else echo \"CRITICAL: ROLLBACK DA SAGLIKSIZ - elle mudahale gerekli (muhtemel sema drift, bkz A2)\"; fi; exit 1; fi; PUB_URL=\"${{ vars.PUBLIC_HEALTH_URL }}\"; if [ -n \"$PUB_URL\" ]; then PUB_OK=0; for k in $(seq 1 12); do PCODE=$(curl -s -o /dev/null -w \"%{http_code}\" \"$PUB_URL\" || true); echo \"public health attempt $k: $PCODE\"; if [ \"$PCODE\" = \"200\" ]; then PUB_OK=1; break; fi; sleep 5; done; if [ \"$PUB_OK\" != \"1\" ]; then echo \"ROLLBACK: public health ($PUB_URL) gate failed, returning to $PREV_COMMIT\"; git reset --hard \"${PREV_COMMIT:?rollback target missing}\"; docker compose up -d --build; echo \"CRITICAL: public probe sonrasi rollback yapildi - nginx/DNS/TLS kontrol et\"; exit 1; fi; else echo \"public health probe atlandi (vars.PUBLIC_HEALTH_URL tanimli degil)\"; fi; docker image prune -f; docker compose ps; docker compose logs --no-color --tail 40 web'\''"
-            ], "executionTimeout":["900"]}' \
-            --query "Command.CommandId" \
-            --output text)
-          
-          echo "SSM Command ID: $COMMAND_ID"
-          echo "Sunucuda komutlar başlatıldı, durum kontrol ediliyor..."
-          
-          # Dökümandaki poll döngüsü: 110 kez döner, her adımda 10 saniye bekler (~18 dakika max)
-          STATUS="Pending"
-          for i in {1..110}; do
-            INVOCATION=$(aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" \
-              --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
-              2>/dev/null || true)
-            
-            STATUS=$(echo "$INVOCATION" | jq -r '.Status' 2>/dev/null || echo "Pending")
-            
-            if [ "$STATUS" = "Success" ] || [ "$STATUS" = "Failed" ] || [ "$STATUS" = "Cancelled" ] || [ "$STATUS" = "TimedOut" ]; then
-              break
-            fi
-            
-            echo "Güncel Durum: $STATUS... 10 saniye sonra tekrar kontrol edilecek..."
-            sleep 10
-          done
-          
-          echo "=================== SUNUCU ÇIKTILARI (STDOUT) ==================="
-          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "${{ secrets.EC2_INSTANCE_ID }}" --query "StandardOutputContent" --output text
-          
-          echo "=================== SUNUCU HATALARI (STDERR) ==================="
-          aws ssm get-command-invocation --command-id "$COMMAND_ID" --instance-id "${{ secrets.EC2_INSTANCE_ID }}" --query "StandardErrorContent" --output text
-          
-          if [ "$STATUS" != "Success" ]; then
-            echo "Deploy başarısız oldu! Durum: $STATUS"
-            exit 1
-          fi
-          
-          echo "Deploy başarıyla tamamlandı! FitX yayında! 🎉"
+      - name: Deploy exact CI-approved revision via AWS SSM
+        timeout-minutes: 46
+        env:
+          AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+          EC2_INSTANCE_ID: ${{ secrets.EC2_INSTANCE_ID }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_DIR: ${{ secrets.DEPLOY_DIR }}
+          PUBLIC_HEALTH_URL: ${{ vars.PUBLIC_HEALTH_URL }}
+        run: python3 scripts/deploy_control.py

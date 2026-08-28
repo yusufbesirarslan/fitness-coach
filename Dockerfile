@@ -29,6 +29,20 @@ COPY . .
 # derinliği — bir kod-çalıştırma hatası konteyner içinde root olmasın).
 # gunicorn 5000 portuna (>1024) bağlandığı için ayrıcalık gerekmez.
 RUN useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app
+ARG BUILD_REVISION
+RUN case "$BUILD_REVISION" in \
+      *[!0-9a-f]* | "" ) echo "BUILD_REVISION must be lowercase 40-hex" >&2; exit 64 ;; \
+    esac && test "${#BUILD_REVISION}" -eq 40 && \
+    printf '%s\n' "$BUILD_REVISION" > /app/BUILD_REVISION && \
+    chown root:root /app/BUILD_REVISION && chmod 0444 /app/BUILD_REVISION
+# /app dizini appuser'a ait kalırsa (0755, appuser sahipliğinde) appuser BUILD_REVISION'ı
+# unlink edip yeniden oluşturabilir — POSIX'te silme/yeniden adlandırma izni dosyanın
+# kendi modundan değil, İÇİNDE BULUNDUĞU dizinin yazma bitinden gelir. Dizini root'a
+# devretmek yük taşıyan yarısı: sahiplik appuser'da kalsaydı appuser chmod ile yazma
+# bitini geri açabilirdi. /app içindeki her şey önceki recursive chown'dan appuser'da
+# kalır; bu yalnızca appuser'ın /app'in KENDİSİNE doğrudan girdi ekleme/silme/yeniden
+# adlandırma yeteneğini kaldırır.
+RUN chown root:root /app && chmod 0755 /app
 USER appuser
 
 EXPOSE 5000

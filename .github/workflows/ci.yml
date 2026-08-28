@@ -13,8 +13,8 @@ jobs:
     name: pytest
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"   # Dockerfile ile aynı taban
           cache: pip
@@ -26,6 +26,130 @@ jobs:
         # conftest.py tüm env'i hermetik kurar (in-memory SQLite, sahte anahtarlar,
         # REDIS_URL boş) → ek servise gerek yok.
         run: python -m pytest -q
+
+  linux-production-locks:
+    name: authoritative Linux production locks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Prove root Linux OFD contention and release
+        run: >-
+          sudo -E "$(command -v python)" -m pytest -o addopts= -q
+          -m "linux_lock or linux_helper_identity" --run-authoritative-linux-lock-tests
+          tests/test_production_deploy_script.py
+
+  image-revision-authority:
+    name: authoritative image revision immutability
+    # Revizyon değişmezliğinin OTORİTER kanıtı BURASIDIR — Dockerfile KAYNAK
+    # METNİNİ tarayan tests/test_deploy_workflow.py tripwire'ı değil. Burada
+    # gerçek imaj build edilir ve GERÇEK dosya sistemi iddia edilir, yani
+    # kontrol MEKANİZMADAN BAĞIMSIZDIR: `install -d -m 0777`, `setfacl`,
+    # heredoc RUN, yol ile çağrılan bir script, kabuk değişkeninden kurulan
+    # komut adı, `tar` ile sahiplik geri yükleme ve çok aşamalı bir "decoy"
+    # stage — hepsi aşağıdaki iddiaları bozar ve guard'ın hiçbirini TANIMASI
+    # gerekmez.
+    runs-on: ubuntu-latest
+    env:
+      IMAGE: axisai-revision-guard:ci
+      # Dockerfile bu değeri doğrular (40 küçük-harf hex, aksi halde exit 64);
+      # sentetik ama GEÇERLİ sabit bir literal.
+      BUILD_REVISION: 0123456789abcdef0123456789abcdef01234567
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the production image with a synthetic revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --build-arg BUILD_REVISION="$BUILD_REVISION" -t "$IMAGE" .
+      - name: Assert the built image denies appuser any write to BUILD_REVISION
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          fail() {
+            echo "FAIL: $*" >&2
+            exit 1
+          }
+
+          # 1 — KİMLİK. Gönderilen stage'in KENDİ çalışma-zamanı kimliği;
+          # gönderilmeyen bir decoy stage bunu taklit edemez.
+          identity="$(docker run --rm "$IMAGE" id -un)"
+          if [ "$identity" != "appuser" ]; then
+            fail "default image user is '$identity', expected 'appuser'"
+          fi
+          echo "OK identity: default user is appuser"
+
+          # 2 — SAHİPLİK + MOD (root olarak okunur; iddia metadata'nın kendisi).
+          stat_out="$(docker run --rm --user root "$IMAGE" \
+            stat -c '%U:%G %a' /app /app/BUILD_REVISION)"
+          dir_stat="$(printf '%s\n' "$stat_out" | sed -n '1p')"
+          file_stat="$(printf '%s\n' "$stat_out" | sed -n '2p')"
+          if [ "$dir_stat" != "root:root 755" ]; then
+            fail "/app is '$dir_stat', expected 'root:root 755'"
+          fi
+          if [ "$file_stat" != "root:root 444" ]; then
+            fail "/app/BUILD_REVISION is '$file_stat', expected 'root:root 444'"
+          fi
+          echo "OK metadata: /app='$dir_stat' /app/BUILD_REVISION='$file_stat'"
+
+          # 3 — İÇERİK: build arg'ın BİREBİR kendisi.
+          baked="$(docker run --rm "$IMAGE" cat /app/BUILD_REVISION)"
+          if [ "$baked" != "$BUILD_REVISION" ]; then
+            fail "/app/BUILD_REVISION holds '$baked', expected '$BUILD_REVISION'"
+          fi
+          echo "OK content: baked revision equals the build arg"
+
+          # 4 — YÜK TAŞIYAN YARISI: imajın VARSAYILAN kullanıcısı olarak her
+          # mutasyon denemesi BAŞARISIZ olmalı. `set -e` BEKLENEN bir
+          # başarısızlıkta tetiklenmez, bu yüzden açıkça ters çeviriyoruz.
+          deny() {
+            local label="$1"
+            shift
+            if docker run --rm "$IMAGE" "$@"; then
+              fail "appuser was ALLOWED to $label (command: $*)"
+            fi
+            echo "OK denied: $label"
+          }
+
+          deny "unlink /app/BUILD_REVISION" rm -f /app/BUILD_REVISION
+          deny "rename /app/BUILD_REVISION" mv /app/BUILD_REVISION /app/stolen
+          deny "overwrite /app/BUILD_REVISION content" \
+            sh -c 'printf x > /app/BUILD_REVISION'
+          deny "create a new entry in /app" touch /app/newly-created-file
+          deny "create a symlink in /app" ln -s /evil /app/BUILD_REVISION-link
+
+          # 5 — Beşinin HEPSİNİ TEK konteynerde dene ve dosyanın AYNI konteyner
+          # içinde hâlâ var + DEĞİŞMEMİŞ olduğunu, hiçbir artık girdi
+          # oluşmadığını doğrula (her `docker run` taze bir konteyner olduğu
+          # için 4. adım tek başına bunu göstermez).
+          after="$(docker run --rm "$IMAGE" sh -c '
+            ( rm -f /app/BUILD_REVISION ) 2>/dev/null || true
+            ( mv /app/BUILD_REVISION /app/stolen ) 2>/dev/null || true
+            ( printf x > /app/BUILD_REVISION ) 2>/dev/null || true
+            ( touch /app/newly-created-file ) 2>/dev/null || true
+            ( ln -s /evil /app/BUILD_REVISION-link ) 2>/dev/null || true
+            echo "revision=$(cat /app/BUILD_REVISION)"
+            for leftover in /app/stolen /app/newly-created-file /app/BUILD_REVISION-link
+            do
+              if [ -e "$leftover" ] || [ -L "$leftover" ]; then
+                echo "leftover=$leftover"
+              fi
+            done
+          ')"
+          if [ "$after" != "revision=$BUILD_REVISION" ]; then
+            fail "after all five attempts in ONE container the image reported <$after>, expected exactly <revision=$BUILD_REVISION>"
+          fi
+          echo "OK survivability: file present, unchanged, no leftover entries"
 
   migration-drift:
     name: schema-drift guard
@@ -65,8 +189,8 @@ jobs:
         {"ci-v1":"Y2ktb25seS1tb2JpbGUtZGVyaXZhdGlvbi1yb290LTAx"}
       FITX_SKIP_DB_INIT: "1"
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
@@ -109,8 +233,8 @@ jobs:
       PG_TEST_DATABASE_URL: >-
         postgresql://postgres:postgres@localhost:5432/fitx_mobile_race
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
           cache: pip
