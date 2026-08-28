@@ -327,6 +327,15 @@ def test_default_gate_caps_leave_thread_reserve():
         f"kapıları {ai_gate.WEB_THREADS} thread'e karşı yalnız {reserve} rezerv bırakıyor")
 
 
+def test_capacity_snapshot_counts_model_work_outside_route_slots(monkeypatch):
+    monkeypatch.setattr(ai_gate, "WEB_THREADS", 8)
+    monkeypatch.setitem(ai_gate._active, "ai", 1)
+    monkeypatch.setitem(ai_gate._active, "model", 3)
+    monkeypatch.setitem(ai_gate._active, "scrape", 1)
+
+    assert ai_gate.capacity_snapshot()["thread_reserve"] == 4
+
+
 def test_invalid_thread_reserve_is_fatal_in_production(app, monkeypatch):
     app.config["FITX_IS_DEV"] = False
     monkeypatch.setattr(ai_gate, "AI_MAX_CONCURRENCY", 5)
