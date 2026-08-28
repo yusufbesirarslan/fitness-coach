@@ -4,6 +4,7 @@ Proposal creation must not touch TrainingPlan, mutation_version, or the
 journal. Isolation is structural: User B cannot load User A's pending row.
 """
 import json
+import logging
 
 import pytest
 
@@ -14,6 +15,7 @@ from app.models import (
     TrainingPlanConfirmationProposal,
 )
 from app.services import plan_confirmation
+from app.services.plan_confirmation import service as confirmation_service
 from app.services.plan_mutation.fingerprint import snapshot_fingerprint
 from tests.test_coach_plan_tool_characterization import (  # noqa: F401
     _program, open_transaction, planned_user,
@@ -38,6 +40,27 @@ def _create(user, **overrides):
     fields = _fields(user)
     fields.update(overrides)
     return plan_confirmation.create_or_reuse_pending(user.id, **fields)
+
+
+def test_settle_logs_cleanup_failure_without_raising(app, monkeypatch, caplog):
+    class BrokenCleanupSession:
+        new = ()
+        dirty = ()
+        deleted = ()
+
+        def in_transaction(self):
+            return True
+
+        def rollback(self):
+            raise RuntimeError("cleanup failed")
+
+    monkeypatch.setattr(confirmation_service.db, "session",
+                        lambda: BrokenCleanupSession())
+    caplog.set_level(logging.DEBUG, logger=app.logger.name)
+
+    confirmation_service._settle()
+
+    assert "cleanup failed" in caplog.text
 
 
 def test_creating_a_proposal_does_not_mutate_the_plan(

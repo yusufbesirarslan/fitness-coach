@@ -190,7 +190,7 @@ def premium_ai_plan_gate(kind):
                     db.session.rollback()
                     current_app.logger.exception("AI quota refund failed")
                 raise
-            if resp.status_code != 200:
+            if resp.status_code >= 400:
                 db.session.rollback()
                 try:
                     refund_ai_quota(current_user, kind)
