@@ -60,6 +60,26 @@ def test_enqueue_or_run_falls_back_inline_on_enqueue_error(monkeypatch):
     assert ran == [5]  # enqueue patladı → satır-içine düştü
 
 
+def test_dispatch_background_uses_daemon_thread_without_queue(monkeypatch):
+    monkeypatch.setattr(jobs, "get_queue", lambda: None)
+    started = []
+
+    class ThreadProbe:
+        def __init__(self, *, target, args, kwargs, daemon):
+            started.append((target, args, kwargs, daemon))
+
+        def start(self):
+            started.append("started")
+
+    monkeypatch.setattr(jobs.threading, "Thread", ThreadProbe)
+    target = lambda: None
+
+    result = jobs.dispatch_background(target, 1, flag=True)
+
+    assert result == {"queued": False, "threaded": True}
+    assert started == [(target, (1,), {"flag": True}, True), "started"]
+
+
 # ── Worker heartbeat ────────────────────────────────────────────────────────
 
 class _HeartbeatRedis:

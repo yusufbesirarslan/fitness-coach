@@ -14,6 +14,7 @@ ise sıradan `redis_client` üzerinden yazılır/okunur.
 """
 import logging
 import os
+import threading
 
 from app.config import _REDIS_URL
 
@@ -94,6 +95,34 @@ def enqueue_or_run(func, *args, **kwargs):
                          type(e).__name__, e)
     result = func(*args, **kwargs)
     return {"queued": False, "result": result}
+
+
+def dispatch_background(func, *args, **kwargs):
+    """Queue maintenance work, or run it on a daemon thread without a queue.
+
+    Unlike ``enqueue_or_run``, this helper never executes the function on the
+    caller's request thread. Maintenance is idempotent and owns its app/session
+    context, so a short-lived daemon is the safe worker-less development path.
+    """
+    q = get_queue()
+    if q is not None:
+        try:
+            job = q.enqueue_call(func, args=args, kwargs=kwargs,
+                                 retry=_default_retry())
+            return {"queued": True, "job_id": job.id}
+        except Exception as e:
+            _log.warning(
+                "[JOBS] background enqueue basarisiz, daemon thread kullaniliyor: %s: %s",
+                type(e).__name__, e)
+    try:
+        worker = threading.Thread(
+            target=func, args=args, kwargs=kwargs, daemon=True)
+        worker.start()
+        return {"queued": False, "threaded": True}
+    except Exception as e:
+        _log.warning("[JOBS] background thread baslatilamadi: %s: %s",
+                     type(e).__name__, e)
+        return {"queued": False, "threaded": False}
 
 
 # ── Worker canlılık (heartbeat) — /health?deep=1 için BİLGİLENDİRİCİ ────────

@@ -282,21 +282,9 @@ def maybe_weekly_rollover():
     # süpürme günlüktür ve rollover hata verse bile süpürme çalışmalıdır.
     if not _purge_throttle_passed(now):
         return
-    try:
-        from app.services import mobile_auth, session_store
-        session_store.purge_expired()
-        mobile_auth.purge_expired(now)
-    except Exception:
-        db.session.rollback()
-        current_app.logger.warning("[SESSION] Oturum süpürme başarısız", exc_info=True)
-    # Aynı günlük pencerede eski bildirimler de süpürülür (Sprint 5 PR1) —
-    # ayrı throttle anahtarı yok; oturum süpürmesi hata verse bile denenir.
-    try:
-        from app.services import notifications
-        notifications.purge_old(now)
-    except Exception:
-        db.session.rollback()
-        current_app.logger.warning("[NOTIF] Bildirim süpürme başarısız", exc_info=True)
+    from app.jobs import dispatch_background
+    from app.jobs.tasks import run_daily_maintenance
+    dispatch_background(run_daily_maintenance, now.isoformat())
 
 
 def update_streak():

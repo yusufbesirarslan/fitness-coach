@@ -13,6 +13,7 @@ top-level fonksiyon + `_in_app_context` sarmalayıcı + `enqueue_or_run` çağr�
 """
 import logging
 import os
+from datetime import datetime
 
 _log = logging.getLogger(__name__)
 
@@ -67,4 +68,30 @@ def summarize_conversation(conversation_id):
         ai_metrics.increment("SummarizeJob",
                              dimensions={"result": "done" if did else "skip"})
         return did
+    return _in_app_context(_body)
+
+
+def run_daily_maintenance(now_iso):
+    """Purge expired/old rows outside the request that won the daily lock."""
+    now = datetime.fromisoformat(now_iso)
+
+    def _body():
+        from app.extensions import db
+        from app.services import mobile_auth, notifications, session_store
+
+        results = {}
+        for name, operation in (
+            ("sessions", session_store.purge_expired),
+            ("mobile_auth", lambda: mobile_auth.purge_expired(now)),
+            ("notifications", lambda: notifications.purge_old(now)),
+        ):
+            try:
+                results[name] = operation()
+            except Exception:
+                db.session.rollback()
+                results[name] = "error"
+                _log.warning("[JOBS] daily maintenance %s failed", name,
+                             exc_info=True)
+        return results
+
     return _in_app_context(_body)

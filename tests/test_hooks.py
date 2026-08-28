@@ -376,11 +376,18 @@ def test_rollover_hook_also_purges_expired_sessions(app, monkeypatch):
     monkeypatch.setattr(hooks, "_purge_throttle_passed", lambda now: True)
     monkeypatch.setattr(hooks, "run_weekly_rollover", lambda now: None)
 
-    from app.services import session_store
-    monkeypatch.setattr(session_store, "purge_expired", lambda: calls.append(1))
+    from app import jobs
+    from app.jobs import tasks
+    monkeypatch.setattr(
+        jobs, "dispatch_background",
+        lambda func, *args, **kwargs: calls.append((func, args, kwargs)),
+    )
 
     hooks.maybe_weekly_rollover()
-    assert calls == [1]
+    assert len(calls) == 1
+    assert calls[0][0] is tasks.run_daily_maintenance
+    assert len(calls[0][1]) == 1
+    assert calls[0][2] == {}
 
 
 def test_purge_skipped_while_throttle_held(app, monkeypatch):
@@ -399,8 +406,7 @@ def test_purge_skipped_while_throttle_held(app, monkeypatch):
 
 
 def test_purge_runs_even_when_rollover_raises(app, monkeypatch):
-    """Süpürme rollover'a BAĞLI olmamalı: rollover patlasa da oturum satırları
-    süpürülmeye devam etmeli (ayrı sorumluluk, ayrı throttle)."""
+    """Bakım rollover'a BAĞLI olmamalı: rollover patlasa da dispatch edilir."""
     from app import hooks
 
     calls = []
@@ -412,11 +418,16 @@ def test_purge_runs_even_when_rollover_raises(app, monkeypatch):
 
     monkeypatch.setattr(hooks, "run_weekly_rollover", boom)
 
-    from app.services import session_store
-    monkeypatch.setattr(session_store, "purge_expired", lambda: calls.append(1))
+    from app import jobs
+    from app.jobs import tasks
+    monkeypatch.setattr(
+        jobs, "dispatch_background",
+        lambda func, *args, **kwargs: calls.append((func, args, kwargs)),
+    )
 
     hooks.maybe_weekly_rollover()
-    assert calls == [1]
+    assert len(calls) == 1
+    assert calls[0][0] is tasks.run_daily_maintenance
 
 
 def test_purge_throttle_uses_redis_nx_lock_fleet_wide(app, monkeypatch):
