@@ -140,6 +140,18 @@ class _LazyChildModels:
 _USER_CHILD_MODELS = _LazyChildModels()
 
 
+# User FK'leri yalnızca ``user_id`` adıyla gelmez. Bu kolonlar _purge_user
+# içinde iki yönlü/açık sorgularla temizlenir; mapper tabanlı guard yeni bir
+# user FK'si eklendiğinde bu envanter güncellenmeden CI'ın yeşil kalmasını önler.
+_USER_FK_MANUAL_CLEANUP = frozenset({
+    ("Friendship", "sender_id"),
+    ("Friendship", "receiver_id"),
+    ("Message", "sender_id"),
+    ("Message", "receiver_id"),
+    ("Notification", "actor_id"),
+})
+
+
 def _purge_user(user):
     """Bir kullanıcıyı ve ona bağlı tüm satırları FK-güvenli sırada sil.
 
