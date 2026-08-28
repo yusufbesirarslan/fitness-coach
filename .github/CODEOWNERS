@@ -1,6 +1,42 @@
+# Production deployment authority surfaces.
+#
+# Coverage here is NOT a merge gate on its own: GitHub enforces it only when
+# branch protection on `main` requires review from Code Owners. This file makes
+# every surface that can change what production runs, or how it is deployed,
+# routable to a required reviewer. No repository-wide `*` rule: a catch-all
+# would make unrelated churn indistinguishable from deployment-authority drift.
+
+# Ownership and CI/CD control plane
 /.github/CODEOWNERS @yusufbesirarslan
 /.github/workflows/deploy.yml @yusufbesirarslan
 /.github/workflows/ci.yml @yusufbesirarslan
+
+# Deploy transaction: controller, canonical time contract, host helper
+/scripts/deploy_contract.py @yusufbesirarslan
 /scripts/deploy_control.py @yusufbesirarslan
 /scripts/production_deploy.sh @yusufbesirarslan
+/scripts/check_cognito_pool.py @yusufbesirarslan
+/scripts/check_email_lambda.py @yusufbesirarslan
+
+# Image and runtime composition — what production actually executes
+/Dockerfile @yusufbesirarslan
+/.dockerignore @yusufbesirarslan
+/docker-compose.yml @yusufbesirarslan
+/requirements.txt @yusufbesirarslan
+/gunicorn.conf.py @yusufbesirarslan
+/nginx.conf @yusufbesirarslan
+/starter.py @yusufbesirarslan
+/worker.py @yusufbesirarslan
+
+# Startup, configuration, and the serving-revision proof
+/app/__init__.py @yusufbesirarslan
+/app/config.py @yusufbesirarslan
+/app/build_revision.py @yusufbesirarslan
+/app/db_init.py @yusufbesirarslan
+
+# Migration authority — runs at boot, ahead of the health gate
+/migrations/** @yusufbesirarslan
+/migrations/versions/** @yusufbesirarslan
+
+# Deploy contract documentation
 /docs/DEPLOYMENT.md @yusufbesirarslan

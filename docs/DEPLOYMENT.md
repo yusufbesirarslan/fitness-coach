@@ -30,6 +30,18 @@ deployment helpers; disallow bypass, force-push, and deletion. Before deploy,
 protect the `production` environment with required reviewers and restrict the
 OIDC role trust policy to this repository, branch, workflow, and environment.
 
+`.github/CODEOWNERS` names every production-authority surface: the CI/CD control
+plane, the deploy controller and its canonical time contract, the host helper,
+image and runtime composition, application startup and the serving-revision
+proof, migration authority, and this runbook.
+CODEOWNERS file coverage is not a merge gate: GitHub consults it only when
+branch protection on `main` requires review from Code Owners. That setting, like
+every other gate in this section, is external, is reported here as not proven,
+and must be verified on GitHub before merge. All five external gates -- PR-only `main`, required `CI`, required
+CODEOWNER review, blocked force-push/deletion, and a protected `production`
+environment with required reviewers and restricted OIDC trust -- are currently
+recorded as unproven.
+
 GitHub serializes this work with the `production-deploy` concurrency group and
 `cancel-in-progress: false`. GitHub keeps the running job and at most one pending
 job for that group; a newer pending job may replace an older pending job. It

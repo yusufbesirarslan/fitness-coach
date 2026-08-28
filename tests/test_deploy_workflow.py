@@ -1,6 +1,6 @@
 import ast
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 import subprocess
 
@@ -2769,3 +2769,120 @@ def test_deploy_source_guard_allows_the_canonical_env_file_metadata_forms():
     )
 
     assert _deploy_source_violations(safe_source) == []
+
+
+# --- CODEOWNERS authority coverage (deploy hardening PR1, finding 7) --------
+#
+# File coverage is not a merge gate by itself, but an uncovered production
+# authority surface cannot even be routed to a required reviewer. The branch
+# introduced new authority files (`scripts/deploy_contract.py` holds the whole
+# SSM/host timeout algebra; `app/build_revision.py` is the serving-revision
+# proof) that the previous six rules never matched.
+
+PRODUCTION_AUTHORITY_SURFACES = (
+    ".github/CODEOWNERS",
+    ".github/workflows/ci.yml",
+    ".github/workflows/deploy.yml",
+    "scripts/deploy_contract.py",
+    "scripts/deploy_control.py",
+    "scripts/production_deploy.sh",
+    "scripts/check_cognito_pool.py",
+    "scripts/check_email_lambda.py",
+    "Dockerfile",
+    "docker-compose.yml",
+    ".dockerignore",
+    "requirements.txt",
+    "starter.py",
+    "worker.py",
+    "gunicorn.conf.py",
+    "nginx.conf",
+    "app/__init__.py",
+    "app/config.py",
+    "app/build_revision.py",
+    "app/db_init.py",
+    "migrations/env.py",
+    "migrations/versions/f1a2b3c4d5e6_imm1_sync_drift_columns.py",
+    "docs/DEPLOYMENT.md",
+)
+
+
+def parse_codeowners(source):
+    """Return (pattern, owners) rules in file order, ignoring blanks/comments."""
+    rules = []
+    for line in source.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        pattern, *owners = line.split()
+        if owners:
+            rules.append((pattern, tuple(owners)))
+    return rules
+
+
+def _rule_matches(pattern, path):
+    """Approximate GitHub CODEOWNERS matching for the subset of syntax used."""
+    anchored = pattern.startswith("/")
+    body = pattern.lstrip("/")
+    directory_only = body.endswith("/")
+    body = body.rstrip("/")
+
+    regex = ""
+    index = 0
+    while index < len(body):
+        if body.startswith("**/", index):
+            regex += "(?:.*/)?"
+            index += 3
+        elif body.startswith("**", index):
+            regex += ".*"
+            index += 2
+        elif body[index] == "*":
+            regex += "[^/]*"
+            index += 1
+        elif body[index] == "?":
+            regex += "[^/]"
+            index += 1
+        else:
+            regex += re.escape(body[index])
+            index += 1
+    if directory_only or not body.split("/")[-1]:
+        regex += "/.*"
+    else:
+        regex += "(?:/.*)?"
+    prefix = "" if anchored else "(?:.*/)?"
+    return re.fullmatch(prefix + regex, str(path)) is not None
+
+
+def codeowner_for(path, rules):
+    """Last matching rule wins, exactly as GitHub resolves CODEOWNERS."""
+    owners = ()
+    for pattern, rule_owners in rules:
+        if _rule_matches(pattern, path):
+            owners = rule_owners
+    return owners
+
+
+def test_every_production_authority_surface_has_an_owner():
+    rules = parse_codeowners(CODEOWNERS.read_text(encoding="utf-8"))
+    uncovered = [
+        path for path in PRODUCTION_AUTHORITY_SURFACES
+        if not codeowner_for(PurePosixPath(path), rules)
+    ]
+    assert uncovered == []
+
+
+def test_every_listed_authority_surface_actually_exists():
+    # A rule that guards a deleted path is theatre; keep the list honest.
+    missing = [path for path in PRODUCTION_AUTHORITY_SURFACES if not Path(path).exists()]
+    assert missing == []
+
+
+def test_codeowners_declares_no_repository_wide_catch_all():
+    # A trailing `*` rule would make every surface "covered" while routing
+    # unrelated churn to the deployment owner, hiding real authority drift.
+    rules = parse_codeowners(CODEOWNERS.read_text(encoding="utf-8"))
+    assert [pattern for pattern, _ in rules if pattern in {"*", "/*", "**"}] == []
+
+
+def test_runbook_states_codeowner_enforcement_is_external_and_unproven():
+    guide = DEPLOYMENT_GUIDE.read_text(encoding="utf-8")
+    assert "CODEOWNERS file coverage is not a merge gate" in guide
