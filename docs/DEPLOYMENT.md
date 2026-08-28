@@ -167,6 +167,27 @@ mutation, not a proof. A command the controller never authorized, or one whose
 nothing in production: no `.env` mode repair, no nginx validation or reload, no
 helper script, no privilege drop, no fetched ref or object.
 
+The privileged helper is an object, not a replaceable pathname. After the
+mutation gate, root creates a private directory with `mkdtemp` under `/tmp` --
+root-owned, mode 0700 at creation, unpredictably named -- opens it with
+`O_DIRECTORY|O_NOFOLLOW`, and writes the helper inside it with
+`O_CREAT|O_EXCL|O_NOFOLLOW`. It then `fchmod`s the file to 0505 and verifies,
+through the same descriptor it wrote, that the SHA-256 of the stored bytes
+equals the digest the controller pinned into the bootstrap, that the file is a
+single-linked regular file owned by uid 0, and that the descriptor and the path
+resolve to the same device and inode. Only then is the directory widened to
+0755 so the deploy user can traverse it, and its identity is re-checked after
+the widening. The helper is never chowned to the deploy user and never carries
+a write bit for anyone. Because the parent directory stays root-owned and
+non-writable by others, the deploy user cannot unlink or recreate that entry,
+so the pathname handed across the privilege drop cannot be swapped between
+validation and `execve`. Root removes the whole directory after the child
+terminates.
+
+The directory lives under `/tmp` rather than the root runtime directory because
+systemd mounts `/run/lock` `noexec`: a helper materialized there would validate
+perfectly and then fail `execve` with `EACCES` on the production host.
+
 Transaction scratch state lives in the root-owned runtime directory as
 `/run/lock/axisai-production/monotonic-clock`, never in the production checkout.
 Root creates it mode 0600, owned by the deploy user, only after the mutation

@@ -1,5 +1,6 @@
 import ast
 import base64
+import hashlib
 import inspect
 import json
 import os
@@ -1899,7 +1900,7 @@ def bootstrap_harness(workspace_tmp_dir):
     revision_marker.write_text("b" * 40 + "\n", encoding="utf-8")
     monotonic_state = harness / "runtime-monotonic-clock"
     monotonic_state.write_text("", encoding="utf-8")
-    remote_script = harness / "decoded-script"
+    remote_script = harness / "helper-dir" / "production_deploy.sh"
     bash_harness = _git_bash_path(harness)
 
     _write_shell_stub(stubs, "python3", """
@@ -1918,6 +1919,17 @@ if [ "$#" = 2 ]; then
   # 8 KiB command line Git for Windows will carry, and an argv would be
   # truncated in silence.
   printf '%s' "$1" | base64 --decode | AXISAI_ROOT_LOCK_FD=7 /bin/sh
+elif [ "$#" = 3 ] && [ "$2" = materialize-helper ]; then
+  printf '%s\\n' materialize-helper >> "$HARNESS_DIR/events"
+  printf '%s\\0' "$@" > "$HARNESS_DIR/helper-args"
+  cat > "$HARNESS_DIR/helper-materialization-source"
+  # Emulate root materialization: a private directory holding the exact
+  # verified bytes, which the harness later asserts root removed.
+  mkdir -p "$HARNESS_DIR/helper-dir"
+  sed -n "s/^ENCODED_HELPER = '\\\\(.*\\\\)'$/\\\\1/p" \\
+    "$HARNESS_DIR/helper-materialization-source" | base64 --decode \\
+    > "$HARNESS_DIR/helper-dir/production_deploy.sh"
+  printf '%s\\n' "$HARNESS_DIR/helper-dir"
 elif [ "$#" = 3 ] && [ "$3" = "$DEPLOY_SHA" ]; then
   printf '%s\n' authority >> "$HARNESS_DIR/events"
   cat > "$HARNESS_DIR/authority-value-source"
@@ -2115,7 +2127,6 @@ def test_bootstrap_holds_lock_through_safeguards_and_helper_cleanup(
         bootstrap_harness, remote_exit_code):
     completed = bootstrap_harness.run(remote_exit_code=remote_exit_code)
     harness = bootstrap_harness.root
-    bash_remote_script = f"{_git_bash_path(harness)}/decoded-script"
     deploy_dir = _git_bash_path(bootstrap_harness.deploy_dir)
     public_url = bootstrap_harness.config.public_health_url
 
@@ -2123,12 +2134,16 @@ def test_bootstrap_holds_lock_through_safeguards_and_helper_cleanup(
     assert (harness / "events").read_text(encoding="utf-8").splitlines() == [
         "outer-lock", "authority", "runuser",
         "env-guard", "nginx", "systemctl", "systemctl", "ss", "ss",
-        "install", "mktemp", "chmod", "chown", "privilege-drop",
+        "install", "materialize-helper", "privilege-drop",
     ]
-    assert _read_null_arguments(harness / "mktemp-args") == ["/tmp/fitx-deploy.XXXXXX"]
-    assert _read_null_arguments(harness / "chmod-args") == ["0700", bash_remote_script]
-    assert _read_null_arguments(harness / "chown-args") == [
-        "--", VALID_ENV["DEPLOY_USER"], bash_remote_script,
+    # The helper is materialized as a root-owned object, never chmod-ed or
+    # chown-ed into the deploy user's reach: those stubs must not fire at all.
+    assert not (harness / "mktemp-args").exists()
+    assert not (harness / "chmod-args").exists()
+    assert not (harness / "chown-args").exists()
+    assert _read_null_arguments(harness / "helper-args") == [
+        "-", "materialize-helper",
+        hashlib.sha256(bootstrap_harness.script).hexdigest(),
     ]
     assert _read_null_arguments(harness / "script-args") == [
         VALID_ENV["DEPLOY_SHA"], deploy_dir, public_url,
@@ -2215,9 +2230,7 @@ MUTATION_MARKERS = (
     "os.fchmod",
     "nginx -t",
     "systemctl",
-    "mktemp",
-    "chmod 0700",
-    "chown",
+    "AXISAI_HELPER_MATERIALIZATION_PY",
     "AXISAI_PRIVILEGE_DROP_PY",
 )
 
@@ -3226,3 +3239,194 @@ def test_main_passes_injected_utc_clock_without_sampling_it_early(monkeypatch):
 
     assert exit_code == 0
     assert captured["clock"] is utc_now
+
+
+# --- privileged helper object identity (deploy hardening PR1, finding 6) ----
+#
+# The bootstrap used to `mktemp` the helper in world-writable /tmp, `chmod 0700`
+# it, and `chown` it to the deploy user, then `execve` that PATHNAME after
+# dropping privilege. Between the chown and the execve the deploy user owned
+# both the file and a sticky-directory entry it could unlink, so it could
+# substitute arbitrary bytes and have them executed holding the outer lock
+# capability and the whole transaction environment. The helper must instead be
+# a root-owned, non-writable object inside a root-owned private directory that
+# the deploy user can traverse and execute but never replace.
+
+
+class FakeHelperOs:
+    O_RDONLY = 1
+    O_RDWR = 2
+    O_CREAT = 4
+    O_EXCL = 8
+    O_NOFOLLOW = 16
+    O_CLOEXEC = 32
+    O_DIRECTORY = 64
+
+    def __init__(self, *, symlink=False, exists=False, short_write=False,
+                 uid=0, nlink=1, corrupt=None, swap_path_inode=False,
+                 refuse_fchmod=False):
+        self.symlink = symlink
+        self.exists = exists
+        self.short_write = short_write
+        self.uid = uid
+        self.nlink = nlink
+        self.corrupt = corrupt
+        self.swap_path_inode = swap_path_inode
+        self.refuse_fchmod = refuse_fchmod
+        self.open_calls = []
+        self.chown_calls = []
+        self.fchmod_calls = []
+        self.closed = []
+        self.fsync_calls = []
+        self.mode = 0o500
+        self.content = b""
+        self.offset = 0
+
+    def open(self, path, flags, mode=0o777, *, dir_fd=None):
+        self.open_calls.append((path, flags, mode, dir_fd))
+        if self.symlink:
+            raise OSError("refusing symbolic link")
+        if flags & self.O_EXCL and self.exists:
+            raise FileExistsError(path)
+        return 21
+
+    def write(self, fd, payload):
+        assert fd == 21
+        if self.short_write:
+            self.short_write = False
+            self.content += payload[:1]
+            return 1
+        self.content += payload
+        return len(payload)
+
+    def lseek(self, fd, position, whence):
+        assert fd == 21
+        self.offset = position
+        return position
+
+    def read(self, fd, size):
+        assert fd == 21
+        source = self.content if self.corrupt is None else self.corrupt
+        chunk = source[self.offset:self.offset + size]
+        self.offset += len(chunk)
+        return chunk
+
+    def fsync(self, fd):
+        self.fsync_calls.append(fd)
+
+    def fchmod(self, fd, mode):
+        self.fchmod_calls.append((fd, mode))
+        if not self.refuse_fchmod:
+            self.mode = mode
+
+    def chown(self, *args, **kwargs):  # pragma: no cover - must never be called
+        self.chown_calls.append((args, kwargs))
+
+    def fstat(self, fd):
+        assert fd == 21
+        return SimpleNamespace(
+            st_uid=self.uid, st_mode=stat.S_IFREG | self.mode,
+            st_nlink=self.nlink, st_dev=1, st_ino=21,
+        )
+
+    def stat(self, path, *, dir_fd=None, follow_symlinks=True):
+        assert follow_symlinks is False
+        return SimpleNamespace(
+            st_uid=self.uid, st_mode=stat.S_IFREG | self.mode,
+            st_nlink=self.nlink, st_dev=1,
+            st_ino=99 if self.swap_path_inode else 21,
+        )
+
+    def close(self, fd):
+        self.closed.append(fd)
+
+
+def _load_helper_materializer():
+    namespace = {"__name__": "helper_materializer_test"}
+    exec(deploy_control.HELPER_MATERIALIZATION_SOURCE, namespace)
+    return namespace
+
+
+HELPER_BYTES = b"#!/usr/bin/env bash\necho validated\n"
+HELPER_SHA256 = hashlib.sha256(HELPER_BYTES).hexdigest()
+
+
+def test_verified_helper_is_root_owned_unwritable_and_never_chowned():
+    fake_os = FakeHelperOs()
+    namespace = _load_helper_materializer()
+
+    fd, name = namespace["create_verified_helper"](
+        9, HELPER_BYTES, HELPER_SHA256, fake_os, stat, hashlib,
+    )
+
+    assert (fd, name) == (21, namespace["HELPER_NAME"])
+    # Created exclusively, without following a symlink, inside the given dir.
+    path, flags, mode, dir_fd = fake_os.open_calls[0]
+    assert path == namespace["HELPER_NAME"] and dir_fd == 9 and mode == 0o500
+    for required in (fake_os.O_CREAT, fake_os.O_EXCL, fake_os.O_NOFOLLOW,
+                     fake_os.O_CLOEXEC, fake_os.O_RDWR):
+        assert flags & required
+    assert fake_os.content == HELPER_BYTES
+    assert fake_os.fsync_calls == [21]
+    # 0505: root r-x, other r-x. No write bit for anyone, no group access.
+    assert fake_os.mode == 0o505
+    assert fake_os.mode & 0o222 == 0
+    assert fake_os.chown_calls == []
+
+
+@pytest.mark.parametrize("kwargs, expected", [
+    ({"corrupt": b"#!/bin/sh\necho attacker\n"}, "digest"),
+    ({"uid": 1000}, "unsafe helper object"),
+    ({"nlink": 2}, "unsafe helper object"),
+    ({"swap_path_inode": True}, "helper identity changed"),
+    ({"refuse_fchmod": True}, "helper identity changed"),
+])
+def test_verified_helper_rejects_unsafe_objects(kwargs, expected):
+    fake_os = FakeHelperOs(**kwargs)
+    namespace = _load_helper_materializer()
+
+    with pytest.raises(OSError, match=expected):
+        namespace["create_verified_helper"](
+            9, HELPER_BYTES, HELPER_SHA256, fake_os, stat, hashlib,
+        )
+    assert fake_os.closed == [21]
+
+
+def test_verified_helper_completes_a_short_write_before_hashing():
+    fake_os = FakeHelperOs(short_write=True)
+    namespace = _load_helper_materializer()
+
+    namespace["create_verified_helper"](
+        9, HELPER_BYTES, HELPER_SHA256, fake_os, stat, hashlib,
+    )
+
+    assert fake_os.content == HELPER_BYTES
+
+
+@pytest.mark.parametrize("kwargs", [{"symlink": True}, {"exists": True}])
+def test_verified_helper_refuses_a_preexisting_or_symlinked_path(kwargs):
+    fake_os = FakeHelperOs(**kwargs)
+    namespace = _load_helper_materializer()
+
+    with pytest.raises(OSError):
+        namespace["create_verified_helper"](
+            9, HELPER_BYTES, HELPER_SHA256, fake_os, stat, hashlib,
+        )
+    assert fake_os.closed == []
+
+
+def test_bootstrap_no_longer_hands_the_helper_object_to_the_deploy_user():
+    inner_bootstrap = _decode_inner_bootstrap(
+        build_remote_command(DeployConfig.from_environ(VALID_ENV), HELPER_BYTES)
+    )
+
+    # The exact race primitives are gone: no world-writable mktemp target, no
+    # chmod/chown of the executed object to the unprivileged deploy user.
+    assert "mktemp /tmp/fitx-deploy" not in inner_bootstrap
+    assert "chmod 0700" not in inner_bootstrap
+    assert f"chown -- '{VALID_ENV['DEPLOY_USER']}'" not in inner_bootstrap
+    # The exact bytes the controller loaded are pinned by digest.
+    assert HELPER_SHA256 in inner_bootstrap
+    assert deploy_control.HELPER_MATERIALIZATION_SOURCE in inner_bootstrap
+    # Root still owns the object and removes its private directory afterwards.
+    assert "rm -r -f -- \"$helper_dir\"" in inner_bootstrap

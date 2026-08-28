@@ -1565,3 +1565,101 @@ def test_public_health_runs_after_internal_gate_and_failure_rolls_back(
     assert all("--connect-timeout 2 --max-time 5" in line for line in public_calls)
     assert _trace_command_count(trace, f"git reset --hard {fixture.prev_commit}") == 1
     assert "public health readiness exhausted after 12 attempts" in result.stderr
+
+
+# --- authoritative Linux privileged-helper object identity (finding 6) ------
+#
+# The portable tests in tests/test_deploy_control.py prove the materializer's
+# logic against injected fakes. Only a real root Linux kernel can prove the
+# property that actually matters: after root materializes the helper, the
+# unprivileged deploy user cannot replace the object at that pathname, and the
+# bytes reached by `execve` are the bytes root verified.
+
+
+@pytest.mark.linux_helper_identity
+def test_real_deploy_user_cannot_replace_the_verified_helper_object(request):
+    import base64
+    import grp
+    import hashlib
+    import pwd
+    import stat as stat_module
+
+    import scripts.deploy_control as deploy_control
+
+    assert request.config.getoption("--run-authoritative-linux-lock-tests")
+    assert os.name == "posix" and os.geteuid() == 0
+
+    validated = b"#!/bin/sh\necho validated\n"
+    namespace = {"__name__": "helper_identity_linux"}
+    exec(
+        "ENCODED_HELPER = "
+        + repr(base64.b64encode(validated).decode("ascii"))
+        + "\n"
+        + deploy_control.HELPER_MATERIALIZATION_SOURCE,
+        namespace,
+    )
+
+    # An unprivileged identity to attack with; every Linux runner has "nobody".
+    account = pwd.getpwnam("nobody")
+
+    completed = subprocess.run(
+        [sys.executable, "-c", (
+            "import sys;"
+            "source=open(sys.argv[1],'rb').read().decode('utf-8');"
+            "ns={'__name__':'__main__','sys':sys};"
+            "exec(compile(source,'helper','exec'),ns)"
+        ), _write_materializer(namespace, deploy_control, validated),
+            hashlib.sha256(validated).hexdigest()],
+        text=True, capture_output=True, check=False, timeout=30,
+    )
+    assert completed.returncode == 0, completed.stderr
+    directory = Path(completed.stdout.strip())
+    helper = directory / deploy_control.HELPER_NAME
+    try:
+        directory_status = directory.lstat()
+        helper_status = helper.lstat()
+        # Root owns both; nobody may traverse and execute, never write.
+        assert directory_status.st_uid == 0
+        assert stat_module.S_IMODE(directory_status.st_mode) == 0o755
+        assert helper_status.st_uid == 0 and helper_status.st_nlink == 1
+        assert stat_module.S_IMODE(helper_status.st_mode) == 0o505
+        assert helper.read_bytes() == validated
+
+        # The real kernel check: the deploy user cannot unlink or recreate the
+        # entry, because the parent directory is root-owned and not writable.
+        attack = subprocess.run(
+            [sys.executable, "-c", (
+                "import os,sys;"
+                "os.setgid(int(sys.argv[2]));os.setuid(int(sys.argv[1]));"
+                "\ntry:\n os.unlink(sys.argv[3]);print('unlinked')\n"
+                "except OSError as error:\n print('refused:%d' % error.errno)"
+            ), str(account.pw_uid), str(account.pw_gid), str(helper)],
+            text=True, capture_output=True, check=False, timeout=30,
+        )
+        assert attack.stdout.strip().startswith("refused:"), attack.stdout
+        assert helper.read_bytes() == validated
+
+        # And the verified object still executes as the deploy user.
+        executed = subprocess.run(
+            [str(helper)], text=True, capture_output=True, check=False,
+            timeout=30,
+            user=account.pw_uid, group=account.pw_gid,
+        )
+        assert executed.returncode == 0, executed.stderr
+        assert executed.stdout.strip() == "validated"
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
+def _write_materializer(namespace, deploy_control, validated):
+    import base64
+
+    source = (
+        "ENCODED_HELPER = "
+        + repr(base64.b64encode(validated).decode("ascii"))
+        + "\n"
+        + deploy_control.HELPER_MATERIALIZATION_SOURCE
+    )
+    path = Path(tempfile.mkdtemp()) / "materialize_helper.py"
+    path.write_text(source, encoding="utf-8")
+    return str(path)

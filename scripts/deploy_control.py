@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import re
@@ -69,6 +70,9 @@ ROOT_OUTER_LOCK_PATH = f"{ROOT_RUNTIME_DIR}/production.lock"
 # in the production checkout.  Root provisions it after the mutation gate
 # opens and removes it after the child terminates.
 MONOTONIC_STATE_PATH = f"{ROOT_RUNTIME_DIR}/monotonic-clock"
+# Fixed basename of the privileged helper object inside its private
+# root-owned directory.
+HELPER_NAME = "production_deploy.sh"
 AUTHORITY_PARAMETER_PREFIX = "/axisai/production-deploy-authority/"
 AUTHORITY_WAIT_ATTEMPTS = 14
 AUTHORITY_GATE_WORST_CASE_SECONDS = AUTHORITY_WAIT_ATTEMPTS * 5
@@ -230,6 +234,157 @@ def main():
 if __name__ == "__main__":
     raise SystemExit(main())
 '''
+
+# The privileged helper is an OBJECT, not a pathname the deploy user can
+# replace.  Root materializes it inside a private root-owned directory, digest-
+# verifies the exact bytes through the same descriptor it wrote, and leaves it
+# root-owned mode 0505: readable and executable by the deploy user, writable by
+# nobody.  Because the parent directory is root-owned and not group/other
+# writable, the deploy user cannot unlink or recreate the entry, so the pathname
+# handed across the privilege drop cannot be swapped between validation and
+# `execve`.
+#
+# The directory lives under /tmp and NOT under ROOT_RUNTIME_DIR: systemd mounts
+# /run/lock `noexec`, so a helper materialized there could be validated
+# perfectly and still fail `execve` with EACCES on the production host.
+HELPER_PARENT_DIR = "/tmp"
+HELPER_DIRECTORY_PREFIX = "axisai-deploy-helper."
+HELPER_MATERIALIZATION_SOURCE = (
+    "HELPER_NAME = " + repr(HELPER_NAME)
+    + "\nHELPER_MODE = 0o505"
+    + "\nHELPER_PARENT_DIR = " + repr(HELPER_PARENT_DIR)
+    + "\nHELPER_DIRECTORY_PREFIX = " + repr(HELPER_DIRECTORY_PREFIX)
+    + "\n\n" + r'''def _write_all(os_module, fd, payload):
+    written = 0
+    while written < len(payload):
+        chunk = os_module.write(fd, payload[written:])
+        if chunk <= 0:
+            raise OSError("short helper write")
+        written += chunk
+
+
+def _read_all(os_module, fd):
+    os_module.lseek(fd, 0, 0)
+    chunks = []
+    while True:
+        chunk = os_module.read(fd, 65536)
+        if not chunk:
+            return b"".join(chunks)
+        chunks.append(chunk)
+
+
+def create_verified_helper(directory_fd, helper_bytes, expected_sha256,
+                           os_module, stat_module, hashlib_module):
+    """Create the root-owned, unreplaceable helper object inside directory_fd."""
+    fd = os_module.open(
+        HELPER_NAME,
+        os_module.O_RDWR | os_module.O_CREAT | os_module.O_EXCL |
+        os_module.O_NOFOLLOW | os_module.O_CLOEXEC,
+        0o500,
+        dir_fd=directory_fd,
+    )
+    try:
+        _write_all(os_module, fd, helper_bytes)
+        os_module.fsync(fd)
+        # After this point no write bit exists for any user, so the digest below
+        # describes bytes that can no longer change.
+        os_module.fchmod(fd, HELPER_MODE)
+        digest = hashlib_module.sha256(_read_all(os_module, fd)).hexdigest()
+        if digest != expected_sha256:
+            raise OSError("helper digest mismatch")
+        status = os_module.fstat(fd)
+        path_status = os_module.stat(
+            HELPER_NAME, dir_fd=directory_fd, follow_symlinks=False
+        )
+        if (status.st_uid != 0 or not stat_module.S_ISREG(status.st_mode) or
+                status.st_nlink != 1 or path_status.st_uid != 0 or
+                not stat_module.S_ISREG(path_status.st_mode) or
+                path_status.st_nlink != 1):
+            raise OSError("unsafe helper object")
+        if (stat_module.S_IMODE(status.st_mode) != HELPER_MODE or
+                stat_module.S_IMODE(path_status.st_mode) != HELPER_MODE or
+                (status.st_dev, status.st_ino) !=
+                (path_status.st_dev, path_status.st_ino)):
+            raise OSError("helper identity changed")
+        return fd, HELPER_NAME
+    except BaseException:
+        os_module.close(fd)
+        raise
+
+
+def main():
+    import base64
+    import hashlib
+    import os
+    import stat
+    import sys
+    import tempfile
+    if len(sys.argv) != 3 or sys.argv[1] != "materialize-helper":
+        sys.stderr.write("helper materialization arguments are invalid\n")
+        return 70
+    encoded_helper = ENCODED_HELPER
+    expected_sha256 = sys.argv[2]
+    directory = None
+    directory_fd = None
+    helper_fd = None
+    try:
+        helper_bytes = base64.b64decode(encoded_helper, validate=True)
+        # mkdtemp is root-owned mode 0700 at creation and unpredictably named,
+        # so no unprivileged process can pre-create or race the directory.
+        directory = tempfile.mkdtemp(
+            prefix=HELPER_DIRECTORY_PREFIX, dir=HELPER_PARENT_DIR
+        )
+        directory_fd = os.open(
+            directory,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+        directory_status = os.fstat(directory_fd)
+        if (not stat.S_ISDIR(directory_status.st_mode) or
+                directory_status.st_uid != 0 or
+                stat.S_IMODE(directory_status.st_mode) != 0o700):
+            raise OSError("unsafe helper directory")
+        helper_fd, name = create_verified_helper(
+            directory_fd, helper_bytes, expected_sha256, os, stat, hashlib
+        )
+        # Only now widen the directory to traversable.  Root still owns it and
+        # no other user may write it, so the verified entry cannot be unlinked.
+        os.fchmod(directory_fd, 0o755)
+        widened = os.fstat(directory_fd)
+        if (widened.st_uid != 0 or
+                stat.S_IMODE(widened.st_mode) != 0o755 or
+                (widened.st_dev, widened.st_ino) !=
+                (directory_status.st_dev, directory_status.st_ino)):
+            raise OSError("helper directory identity changed")
+        sys.stdout.write(directory + "\n")
+        return 0
+    except (OSError, ValueError, UnicodeError):
+        # The caller never learns the path on this branch, so its EXIT trap
+        # cannot remove the directory; clean up the partial object here.
+        if directory is not None:
+            try:
+                os.unlink(os.path.join(directory, HELPER_NAME))
+            except OSError:
+                pass
+            try:
+                os.rmdir(directory)
+            except OSError:
+                pass
+        sys.stderr.write("privileged helper object could not be materialized\n")
+        return 70
+    finally:
+        for descriptor in (helper_fd, directory_fd):
+            if descriptor is not None:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+'''
+)
+
 
 PRIVILEGE_DROP_SOURCE = (
     "HOST_TIMEOUT_ENVIRONMENT = " + repr(host_timeout_environment()) + "\n"
@@ -665,6 +820,16 @@ def render_bootstrap(
     region: str,
 ) -> str:
     """Render a fixed root bootstrap from validated and base64-encoded values."""
+    helper_sha256 = hashlib.sha256(
+        base64.b64decode(encoded_script, validate=True)
+    ).hexdigest()
+    # The exact helper payload travels inside the materialization source, so the
+    # bootstrap never writes it through a shell redirection into a path an
+    # unprivileged user could have replaced.
+    helper_materialization_source = (
+        "ENCODED_HELPER = " + repr(encoded_script) + "\n"
+        + HELPER_MATERIALIZATION_SOURCE
+    )
     inner_bootstrap = f"""set -eu
 umask 077
 root_external() {{
@@ -804,17 +969,28 @@ fi
 
 root_external install -o '{deploy_user}' -m 0600 /dev/null \
   '{MONOTONIC_STATE_PATH}'
-script_path="$(root_external mktemp /tmp/fitx-deploy.XXXXXX)"
+# Root materializes the helper as a digest-verified, root-owned, unwritable
+# object inside a private root-owned directory.  It is never chowned to the
+# deploy user and never lands directly in a world-writable directory, so the
+# pathname handed across the privilege drop cannot be swapped for other bytes
+# between validation and `execve`.
+helper_dir="$(root_external python3 - 'materialize-helper' '{helper_sha256}' \
+  <<'AXISAI_HELPER_MATERIALIZATION_PY'
+{helper_materialization_source}AXISAI_HELPER_MATERIALIZATION_PY
+)"
 cleanup() {{
-  root_external rm -f -- "$script_path" '{MONOTONIC_STATE_PATH}' || true
+  root_external rm -r -f -- "$helper_dir" || true
+  root_external rm -f -- '{MONOTONIC_STATE_PATH}' || true
 }}
 trap cleanup EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
-printf '%s' '{encoded_script}' | root_external base64 --decode > "$script_path"
-root_external chmod 0700 "$script_path"
-root_external chown -- '{deploy_user}' "$script_path"
+case "$helper_dir" in
+  /*/*) ;;
+  *) echo 'privileged helper directory is unusable' >&2; exit 70 ;;
+esac
+script_path="$helper_dir/{HELPER_NAME}"
 python3 - '{deploy_user}' "$script_path" '{deploy_sha}' "$deploy_dir" \
   "$public_health_url" '{OUTER_LOCK_CAPABILITY_FD}' <<'AXISAI_PRIVILEGE_DROP_PY'
 {PRIVILEGE_DROP_SOURCE}AXISAI_PRIVILEGE_DROP_PY
