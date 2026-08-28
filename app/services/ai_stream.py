@@ -49,6 +49,20 @@ def _usage_of(message):
     return {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}
 
 
+def _add_usage(total, current):
+    """Accumulate usage across every provider turn in a tool loop."""
+    if current is None:
+        return total
+    if total is None:
+        return dict(current)
+    return {
+        "prompt_tokens": ((total.get("prompt_tokens") or 0)
+                          + (current.get("prompt_tokens") or 0)),
+        "completion_tokens": ((total.get("completion_tokens") or 0)
+                              + (current.get("completion_tokens") or 0)),
+    }
+
+
 def _chunks(text):
     for i in range(0, len(text), CHUNK_CHARS):
         yield text[i:i + CHUNK_CHARS]
@@ -260,7 +274,7 @@ def _stream_bedrock(user_id, question, context, history, language,
             return
 
         try:
-            usage = _usage_of(final) or usage
+            usage = _add_usage(usage, _usage_of(final))
 
             if getattr(final, "stop_reason", None) != "tool_use":
                 yield from _flush_buffered(buffered, parts)
