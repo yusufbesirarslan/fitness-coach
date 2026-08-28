@@ -1353,3 +1353,204 @@ distributed, deployed, or restarted.
    was most likely not publicly reachable at all.
 
 Only after those close does the internal-build gate become re-assessable.
+
+---
+
+## 31. Public Edge Recovery + Fresh Soak Restart
+
+Assessment window: **2026-08-28T10:47:24Z to 2026-08-28T11:02:17Z**.
+This is a continuation of the failed-soak closeout in section 30. The 74.6%
+historical soak remains failed and is not combined with any later interval.
+No application or mobile code was changed or deployed. No feature flag,
+Cognito setting, secret, container, or native build was changed.
+
+### 31.1 Edge Outage RCA
+
+| Field | Evidence |
+|---|---|
+| Symptoms | Public TCP 80/443 refused connections while EC2, SSM, Docker web, Redis, and loopback Flask remained alive. |
+| Last proxied request before the outage investigation | `2026-08-27T04:34:43.189Z`; this remains request-history evidence, not the edge-stop timestamp. |
+| Confirmed edge failure time | **`2026-08-27T06:40:33Z`** from the nginx/systemd journal. This supersedes the earlier approximate `04:34:43Z` inference as the proven service-stop time. |
+| Primary category | **nginx stopped** |
+| Proven failure mechanism | `apt-daily-upgrade`/`unattended-upgrade` upgraded OpenSSL packages. `needrestart` issued one restart transaction for nginx and `systemd-resolved` (among other services). Nginx stopped cleanly, then its `ExecStartPre nginx -t` ran while name resolution/network services were being reinitialized and failed with `host not found in upstream "platform.fatsecret.com"`. Systemd left nginx failed and ports 80/443 unowned. |
+| Initiating root cause | **Automated package-maintenance service restart plus a transient DNS-readiness race.** There was no nginx package upgrade on August 27 and no nginx config edit. |
+| Supporting evidence | `apt/history.log` records OpenSSL `3.5.5-1ubuntu3.3 -> .4` at `06:40:27-31Z`; `unattended-upgrades-dpkg.log` records `systemctl restart ... nginx.service ... systemd-resolved.service ...`; the journal records resolver stop/start and the nginx pre-start failure in the same second. |
+| Config state | `/etc/nginx/nginx.conf` mtime `2026-03-27`; `sites-enabled/fatsecret-proxy` mtime `2026-05-30`; pre-recovery `nginx -t` on August 28 was successful once DNS was available. |
+| Excluded causes | No bind owner on 80/443, no host firewall rule (`ufw` inactive), no OOM evidence, no host reboot, disk 57%, inodes 9%, about 2.8 GiB memory available, TLS certificate valid through `2026-11-20`, Flask healthy on 127.0.0.1:5000. |
+| Confidence | **High** for both the failure mechanism and initiating event. |
+
+The service did not crash and the application upstream did not fail. This was
+an unattended-maintenance restart failure at the reverse-proxy boundary.
+
+Recurrence risk is **not zero**: a future maintenance transaction can again
+restart nginx while DNS is temporarily unavailable, and the stock nginx unit
+does not automatically retry a failed pre-start. The new external check below
+makes recurrence measurable and abortable, but does not prevent or
+auto-remediate it. A persistent systemd retry/readiness override should be a
+separate, bounded infrastructure change; it does not belong in documentation
+PR #246 and was not improvised on the host.
+
+### 31.2 Recovery Proof
+
+Pre-intervention SSM command `e19e206f-0ef9-4adc-ba1e-6969aa1ab693` captured:
+
+| Check | Result before intervention |
+|---|---|
+| `:80` listener | **none** |
+| `:443` listener | **none** |
+| `:5000` listener | `docker-proxy` on `127.0.0.1:5000` |
+| nginx | `failed`, enabled; failure since `2026-08-27T06:40:33Z`; main PID 0 |
+| `nginx -t` | **successful** on `2026-08-28T10:47:24Z` |
+| Loopback `/health` | **200**, DB ok, Redis limiter storage |
+| Loopback unauthenticated `/api/v1/today` | **401 `AUTH_SESSION_EXPIRED`**, not 404 |
+
+The single recovery action was:
+
+```text
+sudo systemctl start nginx
+```
+
+SSM command `fb67685a-aa96-48ef-baa8-a005d3db820c` completed successfully at
+**`2026-08-28T10:50:57Z`**.
+
+| Recovery field | Result |
+|---|---|
+| Runtime/config changed | **none** |
+| Service action | nginx **started**; no reload/restart of Flask, Docker, Redis, or worker |
+| Application deploy | **none** |
+| nginx PID/start | master PID `1764314`; active since `2026-08-28T10:50:57Z` |
+| Listeners after start | nginx owns IPv4/IPv6 80 and 443; Docker still owns loopback 5000 |
+| Host-path public `/health` | **200** `{"db":"ok","limiter_storage":"redis","status":"ok"}` |
+| Host-path unauthenticated Today | **401 `AUTH_SESSION_EXPIRED`** |
+| Operator off-host `/health` | **200** at `2026-08-28T10:51:47Z` |
+| Operator off-host unauthenticated Today | **401** at the same time |
+| HTTP port 80 | **301** to the HTTPS health URL |
+| Independent external vantage | Route 53 checkers in US, EU, APAC, and South America all reported HTTP 200 for the HTTPS health endpoint at approximately `10:59Z` |
+| Immediate stability check | At `2026-08-28T11:02:17Z`, nginx remained active with the same PID, `NRestarts=0`, ports 80/443 listening, health 200, Today 401, and no journal errors after start |
+
+### 31.3 Fresh Deep Health
+
+SSM command `b2ef3b78-4bfd-4009-b08c-72f42dad366b` captured fresh deep health at
+`2026-08-28T10:52:51Z`:
+
+| Field | Result |
+|---|---|
+| Backend SHA | `a6d6b2e60dc7718bd47590d64b5f74542294025c` (expected; tracked tree clean) |
+| Overall / DB / Redis / login | `ok` / `ok` / `ok` / `ok` |
+| Worker | `alive` |
+| FatSecret proxy | `ok` |
+| Thread reserve / floor | **8 / 2** |
+| Threads / workers | 8 / 1 |
+| `ai_active` / maximum | 0 / 4 |
+| DB pool | size 8, checked out 1 |
+| `MOBILE_AUTH_ENABLED` | **true** (`1` in host `.env`) |
+| Other rollout flags | all false |
+| `RUNTIME_METRICS_ENABLED` | absent, therefore repo default **OFF**; not changed |
+| Web container | running, healthy, restart 0, OOM false; original `2026-08-26T10:40:33Z` start retained |
+| Worker container | running, restart 0, OOM false; known port-healthcheck mismatch remains |
+| Redis container | running, healthy, restart 0, OOM false |
+
+The two previously documented untracked host files predate this recovery and
+remain unchanged. No product deployment occurred.
+
+### 31.4 Controlled Authenticated Confirmation
+
+The dedicated `axisai.native.e2e` account remains the only authorized
+production smoke identity. Its credential was **not available to this operator
+session** in the permitted local environment, AWS Secrets Manager secret keys,
+SSM Parameter Store, or GitHub Actions secret inventory. Credentials were not
+guessed, reset, requested from another user, or recorded.
+
+| Required check | Result |
+|---|---|
+| Login | **NOT RUN - authorized credential unavailable** |
+| Refresh | **NOT RUN** |
+| Authenticated Today | **NOT RUN** |
+| Principal ownership | Structurally unchanged on deployed SHA; fresh production confirmation not run |
+| Spoof resistance | Structurally unchanged and prior production evidence retained; fresh production confirmation not run |
+| Fixture/fabricated state | Code/contract unchanged; fresh authenticated body not available |
+| Logout/session behavior | **NOT RUN** |
+
+This is a hard fresh-soak start blocker. The earlier August 26 smoke remains
+historical evidence but is not substituted for the required post-recovery
+confirmation.
+
+### 31.5 Rollback and Containment
+
+Conceptual rollback remains unchanged and viable:
+
+- Backend containment remains the exact `.env` edit
+  `MOBILE_AUTH_ENABLED=0` followed by `docker compose up -d`, then loopback and
+  public Today must become 404. It was not executed because no product abort
+  fired and the task forbids changing the flag.
+- Mobile containment remains a build compiled with
+  `AXISAI_NATIVE_AUTH_ENABLED=false`; no build was compiled or distributed.
+- The restored public edge makes either containment result externally
+  verifiable again.
+- No persistent nginx/systemd retry mitigation exists yet. That is a separate
+  infrastructure change, not an application rollback change.
+
+### 31.6 External Edge Observability
+
+Before this recovery there was no Route 53 health check and no CloudWatch
+Synthetics canary for the origin.
+
+Created during this task:
+
+| Signal | Configuration / state |
+|---|---|
+| Route 53 health check | `988a197b-86d5-4adb-a643-3628007dc0da`, name `AxisAI-Public-Edge-Health`, DNS-resolved HTTPS/SNI to `fitx-chatbot.duckdns.org:443/health`, 30-second interval, failure threshold 3 |
+| Independent observations | **16/16 successful** in the first captured multi-region observation set; HTTP 200, resolved IP `18.153.156.28` |
+| CloudWatch alarm | `AxisAI-Public-Edge-HealthCheck` in `us-east-1`, metric `AWS/Route53 HealthCheckStatus`, two 60-second minimum datapoints below 1; state **OK** after data arrived |
+| Notification action | **none**; the existing production SNS topic is in `eu-central-1`, while Route 53 health metrics/this alarm are in `us-east-1` |
+| Runtime HTTP metrics | `RUNTIME_METRICS_ENABLED` remains OFF; application HTTP/auth counters and latency metrics remain unavailable |
+
+This closes the specific **external edge observability missing** gap for
+measurement and soak evidence: a quiet request-log period can now be
+distinguished from an unreachable edge. The absent notification action is a
+P2 follow-up; during any future soak the alarm/check must be polled explicitly.
+
+### 31.7 Severity Review
+
+| Severity | Count | Finding |
+|---|---:|---|
+| P0 | **0** | no auth bypass or cross-user evidence |
+| Product P1 | **0** | Today and fixture contracts unchanged; public route registered |
+| Operational P1 | **2** | required post-recovery authenticated smoke unavailable; known nginx/DNS restart race has no preventive retry/ordering mitigation |
+| P2 | **3** | CloudWatch edge alarm has no notification action; runtime HTTP metrics remain OFF; worker container healthcheck mismatch remains |
+
+### 31.8 Fresh Soak Decision
+
+**A new 24-hour soak was not started.** No `NEW_SOAK_START` or
+`NEW_SOAK_END` is recorded.
+
+Passed start criteria: public 443, public health 200, unauthenticated Today
+401, fresh deep health, thread reserve, stable nginx, expected backend SHA,
+unchanged mobile contract, external edge measurement, P0=0, product P1=0.
+
+Failed start criteria:
+
+1. controlled login/refresh/authenticated Today/logout could not be run with
+   the authorized account after recovery;
+2. recurrence prevention for the proven nginx/DNS maintenance race is not
+   codified, leaving an operational P1 until explicitly accepted for a
+   monitored 24-hour observation or fixed in a bounded infrastructure change.
+
+Exact next gate: make the existing release-validation credential available
+without recording it, run the complete controlled smoke, and either land a
+bounded nginx/systemd retry-readiness infrastructure fix or explicitly accept
+the known, externally monitored recurrence risk for this soak only. If those
+checks pass, record a new exact UTC start/end and monitor Route 53 health,
+CloudWatch alarm state, nginx/container restarts, deep health/thread reserve,
+and the existing log abort strings. Any public failure, health failure, nginx
+death, repeated 5xx, capacity-floor hit, auth-integrity anomaly, wrong-user
+Today, fabricated state, restart/crash, or DB/Redis failure aborts immediately.
+
+## NO-GO — ROOT CAUSE / RECURRENCE RISK
+
+The edge is restored and externally proven, and the root cause is established
+with high confidence. The task remains NO-GO because the required fresh
+authenticated smoke could not be executed and the demonstrated
+maintenance/DNS restart race has no preventive mitigation. This is not
+authorization to compile or distribute native-auth ON, change either auth
+flag, start PR5, or begin another sprint.
