@@ -180,6 +180,15 @@ enter an image build. C builds that archive with Docker build argument
 `DEPLOY_SHA == checked-out HEAD == BUILD_REVISION == deep-health revision`.
 It requires all of the following before accepting the release:
 
+Every externally sourced production image is immutable: it names an explicit
+version and pins the content digest. The only third-party Compose image is
+`redis:7.4.11-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf`
+(the Docker Hub multi-platform index digest); `web` and `worker` build the exact
+local context, and the application base image is likewise digest-pinned in the
+Dockerfile. A mutable tag such as `redis:alpine` is a shipment blocker: it lets
+two deploys of the identical application SHA resolve to different third-party
+bytes.
+
 1. the running `web` container's `/app/BUILD_REVISION` equals the expected SHA;
 2. `/health?deep=1`, probed inside the running `web` container, returns HTTP 200
    and JSON `status: ok`;
