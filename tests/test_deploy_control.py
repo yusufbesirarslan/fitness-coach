@@ -4,6 +4,7 @@ import hashlib
 import inspect
 import json
 import os
+import re
 import shlex
 import shutil
 import stat
@@ -1597,7 +1598,7 @@ def test_root_lock_wrapper_provisions_root_owned_nonwritable_directory_and_reada
         "check": False,
         "pass_fds": (deploy_control.OUTER_LOCK_CAPABILITY_FD,),
         "env": {
-            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "PATH": deploy_control.HARDENED_EXECUTION_PATH,
             "AXISAI_ROOT_LOCK_FD": str(deploy_control.OUTER_LOCK_CAPABILITY_FD),
         },
     })]
@@ -1646,7 +1647,7 @@ def test_privilege_drop_validates_user_drops_groups_then_execs_exact_helper():
         ("execve", "/tmp/helper", [
             "/tmp/helper", "a" * 40, "/srv/axisai", "https://example.test/health",
             ], {
-                "PATH": "/usr/local/bin:/usr/bin:/bin",
+                "PATH": deploy_control.HARDENED_EXECUTION_PATH,
                 "AXISAI_OUTER_LOCK_FD": "7",
                 "AXISAI_MONOTONIC_STATE": deploy_control.MONOTONIC_STATE_PATH,
                 **host_timeout_environment(),
@@ -3430,3 +3431,187 @@ def test_bootstrap_no_longer_hands_the_helper_object_to_the_deploy_user():
     assert deploy_control.HELPER_MATERIALIZATION_SOURCE in inner_bootstrap
     # Root still owns the object and removes its private directory afterwards.
     assert "rm -r -f -- \"$helper_dir\"" in inner_bootstrap
+# --- canonical hardened execution PATH -------------------------------------
+#
+# Both privileged deploy boundaries hand their child a *complete* environment,
+# so PATH is deployment contract surface, not an inherited convenience.  The
+# retired value below omitted the sbin directories.  Production probe evidence
+# from the deploy host: `runuser` and `nginx` live in /usr/sbin and resolved
+# nowhere, so the pre-mutation staleness proof and the nginx validation gate
+# both failed closed -- one gate per deploy attempt, because each gate only
+# becomes reachable after the previous one passes.  Enumerating every external
+# command the bootstrap and the helper invoke is the point of these tests: the
+# defect was systemic, not `aws`-specific.
+
+RETIRED_HARDENED_PATH = "/usr/local/bin:/usr/bin:/bin"
+
+# name -> the absolute directory the executable occupies on the Ubuntu deploy
+# host.  Keyed by directory rather than by full path so the table states the
+# only fact PATH resolution actually depends on.
+REQUIRED_DEPLOY_EXECUTABLES = {
+    "aws": "/usr/local/bin",
+    "runuser": "/usr/sbin",
+    "nginx": "/usr/sbin",
+    "ss": "/usr/bin",
+    "git": "/usr/bin",
+    "docker": "/usr/bin",
+    "timeout": "/usr/bin",
+    "base64": "/usr/bin",
+    "python3": "/usr/bin",
+    "systemctl": "/usr/bin",
+    "install": "/usr/bin",
+    "grep": "/usr/bin",
+    "rm": "/usr/bin",
+    "seq": "/usr/bin",
+    "sleep": "/usr/bin",
+    "curl": "/usr/bin",
+    "mktemp": "/usr/bin",
+    "tar": "/usr/bin",
+}
+
+# The subset the three fail-closed production attempts actually tripped on.
+SBIN_ONLY_DEPLOY_EXECUTABLES = ("runuser", "nginx")
+
+
+def _mirror_deploy_host(root):
+    """Materialize every required executable at its real absolute directory."""
+    for name, directory in REQUIRED_DEPLOY_EXECUTABLES.items():
+        target = root / directory.lstrip("/")
+        target.mkdir(parents=True, exist_ok=True)
+        binary = target / name
+        binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        binary.chmod(0o755)
+
+
+def _resolve_under(root, search_path, name):
+    """Resolve `name` the way execvp does: first PATH entry that holds it.
+
+    `shutil.which` is not used deliberately -- on Windows it consults PATHEXT
+    and would report a false negative for extension-less POSIX binaries, which
+    would make this contract silently untested off Linux.
+    """
+    for entry in search_path.split(":"):
+        candidate = root / entry.lstrip("/") / name
+        if candidate.is_file():
+            return "/" + candidate.relative_to(root).as_posix()
+    return None
+
+
+def test_canonical_hardened_path_is_the_standard_root_search_order():
+    entries = deploy_control.HARDENED_EXECUTION_PATH.split(":")
+
+    assert entries == [
+        "/usr/local/sbin", "/usr/local/bin",
+        "/usr/sbin", "/usr/bin",
+        "/sbin", "/bin",
+    ]
+    # Every entry is absolute: a relative element is a privilege-escalation
+    # primitive in a root child, and this PATH is handed to one.
+    assert all(entry.startswith("/") for entry in entries)
+    assert len(set(entries)) == len(entries)
+    # The retired PATH is a strict subset in the same relative order, so this
+    # change only ever widens resolution -- it cannot shadow a binary that
+    # already resolved.
+    retired = RETIRED_HARDENED_PATH.split(":")
+    assert [entry for entry in entries if entry in retired] == retired
+
+
+def test_required_deploy_executables_resolve_under_the_canonical_path(tmp_path):
+    _mirror_deploy_host(tmp_path)
+
+    resolved = {
+        name: _resolve_under(
+            tmp_path, deploy_control.HARDENED_EXECUTION_PATH, name
+        )
+        for name in REQUIRED_DEPLOY_EXECUTABLES
+    }
+
+    assert resolved == {
+        name: f"{directory}/{name}"
+        for name, directory in REQUIRED_DEPLOY_EXECUTABLES.items()
+    }
+
+
+def test_retired_hardened_path_could_not_resolve_the_sbin_executables(tmp_path):
+    # Without this the test above passes vacuously against any PATH at all.
+    # This pins the defect: exactly the sbin binaries were unresolvable, which
+    # is why `aws` alone was never the whole story.
+    _mirror_deploy_host(tmp_path)
+
+    unresolved = sorted(
+        name for name in REQUIRED_DEPLOY_EXECUTABLES
+        if _resolve_under(tmp_path, RETIRED_HARDENED_PATH, name) is None
+    )
+
+    assert unresolved == sorted(SBIN_ONLY_DEPLOY_EXECUTABLES)
+
+
+def test_both_privileged_boundaries_receive_one_canonical_path():
+    # The outer root-lock child and the privilege-dropped helper are separate
+    # source objects; a second hard-coded literal in either one would reopen
+    # the defect while every env-dict assertion above still passed.
+    boundaries = {
+        "root-lock child": deploy_control.ROOT_LOCK_WRAPPER_SOURCE,
+        "privilege drop": deploy_control.PRIVILEGE_DROP_SOURCE,
+    }
+
+    for label, source in boundaries.items():
+        namespace = {"__name__": f"path_contract_{label}"}
+        exec(source, namespace)
+        assert namespace["HARDENED_PATH"] == (
+            deploy_control.HARDENED_EXECUTION_PATH
+        ), label
+        assert RETIRED_HARDENED_PATH not in source, label
+        # The PATH the child receives is the injected name, never a literal.
+        assert '"PATH": HARDENED_PATH,' in source, label
+
+
+def test_every_external_command_the_deploy_invokes_is_a_known_executable():
+    # The systemic lesson from three fail-closed attempts: a command that does
+    # not resolve is invisible until the gate before it passes.  Enumerate the
+    # whole set instead of discovering it one deploy at a time.
+    inner_bootstrap = _decode_inner_bootstrap(
+        build_remote_command(DeployConfig.from_environ(VALID_ENV), HOST_SCRIPT)
+    )
+    helper_source = (
+        Path(__file__).resolve().parents[1]
+        / "scripts" / "production_deploy.sh"
+    ).read_text(encoding="utf-8")
+
+    root_commands = set(
+        re.findall(r"root_external\s+([A-Za-z0-9_.-]+)", inner_bootstrap)
+    )
+    helper_commands = set(
+        re.findall(r"run_external\s+([A-Za-z0-9_.-]+)", helper_source)
+    )
+
+    assert root_commands, "root bootstrap dispatches no external command"
+    assert helper_commands, "host helper dispatches no external command"
+    assert root_commands <= set(REQUIRED_DEPLOY_EXECUTABLES)
+    assert helper_commands <= set(REQUIRED_DEPLOY_EXECUTABLES)
+    # `root_external` is itself `timeout`, and these three run outside it:
+    # the authority read, the authority-parameter decode, and the retry loop.
+    assert "timeout --signal=TERM --kill-after=1s 4s" in inner_bootstrap
+    assert "aws ssm get-parameter" in inner_bootstrap
+    assert "base64 --decode" in inner_bootstrap
+    assert f"seq 1 {deploy_control.AUTHORITY_WAIT_ATTEMPTS}" in inner_bootstrap
+    # git runs through runuser, so it resolves against this same PATH.
+    assert "runuser -u" in inner_bootstrap and "git -C" in inner_bootstrap
+
+
+def test_the_gates_that_failed_in_production_now_resolve(tmp_path):
+    _mirror_deploy_host(tmp_path)
+    inner_bootstrap = _decode_inner_bootstrap(
+        build_remote_command(DeployConfig.from_environ(VALID_ENV), HOST_SCRIPT)
+    )
+
+    # Staleness proof (exit 75) and the nginx gate (exit 1) are the two the
+    # narrow PATH broke; `aws` is the one the earlier attempt surfaced.
+    for name in ("runuser", "nginx", "aws", "timeout"):
+        assert name in inner_bootstrap
+        assert _resolve_under(
+            tmp_path, deploy_control.HARDENED_EXECUTION_PATH, name
+        ) is not None, name
+
+    for name in SBIN_ONLY_DEPLOY_EXECUTABLES:
+        assert _resolve_under(tmp_path, RETIRED_HARDENED_PATH, name) is None
