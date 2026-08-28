@@ -1157,6 +1157,7 @@
   "route.no_permission": "Yetkiniz yok.",
   "route.supp_deleted": "Supplement silindi.",
   "route.name_too_long": "Ad soyad en fazla 150 karakter olabilir.",
+  "route.name_invalid": "Ad soyad desteklenmeyen kontrol karakterleri içeriyor.",
   "route.request_pending": "Zaten bekleyen bir istek var.",
   "route.plan_data_missing": "Plan verisi eksik",
   "route.weight_required": "Kilo zorunludur",

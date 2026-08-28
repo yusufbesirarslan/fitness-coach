@@ -12,7 +12,7 @@ from app.models import PumpCheck, Supplement, User, UserSession, UserWearableCon
 from app.services.avatars import set_user_avatar
 from app.services.calculations import calculate_bmr, calculate_target, calculate_tdee, generate_nutrition_plan, generate_training_plan
 from app.services.pump_checks import serialize_pump_check_card
-from app.services.validators import validate_username
+from app.services.validators import validate_full_name, validate_username
 
 
 bp = Blueprint("profile", __name__)
@@ -121,8 +121,9 @@ def edit_profile():
         if User.query.filter_by(username=new_username).first():
             return jsonify({"error": t("route.username_taken")}), 400
 
-    if len(new_full_name) > 150:
-        return jsonify({"error": t("route.name_too_long")}), 400
+    full_name_error = validate_full_name(new_full_name)
+    if full_name_error:
+        return jsonify({"error": full_name_error}), 400
 
     if "profile_picture" in data:
         # S3 açıksa avatarı S3'e koyar (key saklar, base64'ü temizler); kapalıysa
