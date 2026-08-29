@@ -1799,3 +1799,60 @@ fresh 24-hour soak is not eligible to start because the existing controlled
 identity's credential is unavailable and the required authenticated smoke
 cannot safely run. Native-auth ON build/distribution, both auth flags, runtime
 metrics, PR5, Sprint 13, and merge of this draft PR remain untouched.
+
+---
+
+## 33. Sprint 12 Final Closure
+
+**Decision date:** 2026-08-29
+
+This section records the final strategic closure decision. It supersedes the
+earlier operational verdict for Sprint 12 closure purposes; all preceding
+failed-soak, outage, recovery, and RCA evidence remains historical evidence
+and is neither deleted nor counted as a completed launch-hardening gate.
+
+### 33.1 Final Status
+
+1. **Sprint 12 core implementation is COMPLETE.**
+2. **nginx DNS-restart resilience is production-applied and repository-owned
+   by this PR**, including
+   `deploy/systemd/nginx.service.d/dns-restart-resilience.conf` and its
+   operational documentation.
+3. **Native-auth production rollout is DEFERRED.** No native-auth ON build is
+   authorized by this closure.
+4. The fresh authenticated smoke and fresh contiguous 24-hour soak move to the
+   **Sprint 15 / launch-hardening resume gate**.
+5. **PR5 is deferred.**
+6. The next product sprint is **Sprint 13 — Nutrition closure**.
+
+### 33.2 Exact Sprint 15 / Launch-Hardening Resume Gate
+
+Resume only from current evidence and perform every gate in this order:
+
+1. Verify the current SHA and repository/production drift state.
+2. Run a controlled authenticated login, refresh, and canonical Today smoke,
+   including the documented identity, spoof-resistance, fixture-state, and
+   logout/session-integrity checks.
+3. Capture fresh health and capacity gates.
+4. Start and complete a **new contiguous 24-hour soak**. Historical or partial
+   soak intervals must not be combined with the new interval.
+5. Authorize an **internal native-auth ON build only after all preceding gates
+   pass**.
+
+Any failure returns the launch-hardening gate to not-ready and requires a new
+eligible contiguous soak after remediation.
+
+### 33.3 Closure Scope and Severity
+
+This closure changes documentation and PR state only. It does not change
+`MOBILE_AUTH_ENABLED`, `AXISAI_NATIVE_AUTH_ENABLED`,
+`RUNTIME_METRICS_ENABLED`, production runtime, Cognito, or application
+behavior. It does not authorize authenticated-smoke/soak continuation,
+credential plumbing, PR5, or Sprint 13 implementation in this PR.
+
+The formerly active operational P1 is now an explicitly deferred Sprint 15
+resume gate rather than an unresolved Sprint 12 core blocker. Final closure
+review is **P0 = 0 / P1 = 0**. Earlier severity tables remain the historical
+record for the rollout attempts they describe.
+
+## SPRINT 12 CORE COMPLETE — NATIVE-AUTH ROLLOUT DEFERRED
