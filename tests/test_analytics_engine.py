@@ -271,7 +271,7 @@ def test_low_hydration_nudge_below_threshold(make_user):
     assert "NUDGE_LOW_HYDRATION" in _nudge_types(user)
 
 
-def test_sparse_hydration_uses_full_seven_day_window(make_user):
+def test_sparse_hydration_with_only_two_days_is_silent(make_user):
     user = make_user("sparsewater", last_login=date.today())
     today = app_today()
     for days_ago in (0, 6):
@@ -282,7 +282,21 @@ def test_sparse_hydration_uses_full_seven_day_window(make_user):
         ))
     db.session.commit()
 
-    assert "NUDGE_LOW_HYDRATION" in _nudge_types(user)
+    assert "NUDGE_LOW_HYDRATION" not in _nudge_types(user)
+
+
+def test_three_tracked_hydration_days_use_observed_average(make_user):
+    user = make_user("trackedwater", last_login=date.today())
+    today = app_today()
+    for days_ago in (0, 2, 6):
+        db.session.add(WaterLog(
+            user_id=user.id,
+            count=8,
+            date_key=(today - timedelta(days=days_ago)).isoformat(),
+        ))
+    db.session.commit()
+
+    assert "NUDGE_LOW_HYDRATION" not in _nudge_types(user)
 
 
 def test_hydration_silent_when_adequate(make_user):

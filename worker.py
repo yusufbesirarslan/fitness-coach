@@ -14,22 +14,59 @@ import logging
 import os
 import sys
 import threading
+import time
 
 logging.basicConfig(level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(),
                                   logging.INFO))
 _log = logging.getLogger("fitx.worker")
 
 
+PROXY_SAMPLE_INTERVAL_SECONDS = 600
+
+
+def _sample_fatsecret_safely():
+    """Run the optional proxy sample so nothing can propagate to the caller.
+
+    The heartbeat daemon owns the #251 worker-liveness contract. It is a bare
+    `while` loop in a thread: an exception escaping here does not skip ONE
+    sample, it ends the thread, and every FUTURE heartbeat write is lost. The
+    worker then reads dead in /health?deep=1 while it is still consuming jobs.
+    FatSecret is an OPTIONAL dependency and must never have that power.
+    """
+    from app.jobs.tasks import sample_fatsecret_proxy
+    try:
+        sample_fatsecret_proxy()
+    except Exception:
+        _log.warning("FatSecret ornegi basarisiz — heartbeat devam ediyor",
+                     exc_info=True)
+
+
+def _heartbeat_tick(last_proxy_sample, now):
+    """One heartbeat iteration; returns the next ``last_proxy_sample``.
+
+    The heartbeat write comes FIRST and is independent of the optional sample.
+    The timestamp advances even when the sample fails, so a persistently broken
+    proxy is probed on its own interval instead of on every tick."""
+    from app.jobs import record_worker_heartbeat
+    record_worker_heartbeat()
+    if now - last_proxy_sample < PROXY_SAMPLE_INTERVAL_SECONDS:
+        return last_proxy_sample
+    _sample_fatsecret_safely()
+    return now
+
+
 def _start_heartbeat():
     """Heartbeat'i arka-plan daemon thread'de TTL/2'de bir tazele. Boşta (job yok)
     worker bile canlı görünsün diye — RQ'nun kendi worker-heartbeat'i bizim
     bilgilendirici anahtarımızı yazmaz."""
-    from app.jobs import WORKER_HEARTBEAT_TTL, record_worker_heartbeat
+    from app.jobs import WORKER_HEARTBEAT_TTL
     stop = threading.Event()
 
     def _loop():
+        last_proxy_sample = 0.0
         while not stop.is_set():
-            record_worker_heartbeat()
+            last_proxy_sample = _heartbeat_tick(last_proxy_sample,
+                                                time.monotonic())
             stop.wait(max(WORKER_HEARTBEAT_TTL // 2, 5))
 
     t = threading.Thread(target=_loop, name="worker-heartbeat", daemon=True)

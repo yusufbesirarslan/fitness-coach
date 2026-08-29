@@ -200,6 +200,7 @@ def stream_answer(user_id, question, client_history=None, language="tr"):
     from app.services import ai_stream
     parts = []
     finished = False
+    terminal_done_yielded = False
     try:
         for event in ai_stream.stream_coach_answer(
                 user_id, question, context, history, language=language):
@@ -232,12 +233,7 @@ def stream_answer(user_id, question, client_history=None, language="tr"):
                             usage=event.get("usage"))
                 _emit_metrics("stream", is_error=is_fallback,
                               usage=event.get("usage"))
-                if deferred_summarize is not None:
-                    # Worker'sız erteleme (triage #4): tüm delta'lar istemciye
-                    # aktı, özet artık ilk-token gecikmesine binmez. done yield'ının
-                    # SONRASINA konamaz — route done'da döner, generator close
-                    # (GeneratorExit) yield sonrası kodu hiç çalıştırmazdı.
-                    deferred_summarize()
+                terminal_done_yielded = True
                 yield {"type": "done", "text": answer,
                        "is_error_fallback": is_fallback,
                        "usage": event.get("usage")}
@@ -253,3 +249,8 @@ def stream_answer(user_id, question, client_history=None, language="tr"):
                     "[PIPELINE][stream] istemci koptu — kısmi yanıt kaydedildi (%s kr)",
                     len(partial))
         raise
+    finally:
+        # Deliver the terminal frame before worker-less summary work begins.
+        # Generator.close() still executes this block when a route stops at done.
+        if terminal_done_yielded and deferred_summarize is not None:
+            deferred_summarize()

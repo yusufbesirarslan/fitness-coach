@@ -6,6 +6,7 @@ one, and the store never accepts one.
 """
 from datetime import datetime
 
+from flask import current_app
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
@@ -227,7 +228,8 @@ def _settle():
             return
         session.rollback()
     except Exception:
-        pass
+        current_app.logger.debug(
+            "Plan confirmation transaction cleanup failed", exc_info=True)
 
 
 def _clip_summary(summary):

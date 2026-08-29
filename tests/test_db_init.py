@@ -35,7 +35,8 @@ def test_fresh_init_stamps_trigger_predecessor_then_upgrades(monkeypatch):
         )
 
     def record_upgrade(revision="head", **_kwargs):
-        calls.append(("upgrade", revision))
+        from app.models import DailyQuest
+        calls.append(("upgrade", revision, DailyQuest.query.count()))
 
     monkeypatch.setattr(flask_migrate, "stamp", record_stamp)
     monkeypatch.setattr(flask_migrate, "upgrade", record_upgrade)
@@ -46,7 +47,7 @@ def test_fresh_init_stamps_trigger_predecessor_then_upgrades(monkeypatch):
         try:
             assert calls == [
                 ("stamp", "aa11bb22cc33", True),
-                ("upgrade", "head"),
+                ("upgrade", "head", 0),
             ]
         finally:
             db.session.remove()
@@ -78,6 +79,30 @@ def test_fresh_init_upgrade_failure_is_fatal_by_default(monkeypatch):
             with flask_app.app_context():
                 db.session.remove()
                 db.drop_all()
+
+
+def test_fresh_upgrade_failure_commits_no_seed_rows(monkeypatch):
+    monkeypatch.delenv("FITX_SKIP_DB_INIT", raising=False)
+    monkeypatch.delenv("FITX_DB_UPGRADE_FAIL_OPEN", raising=False)
+
+    import flask_migrate
+
+    from app import create_app
+    from app.extensions import db
+
+    commits = []
+    monkeypatch.setattr(flask_migrate, "stamp", lambda **_kwargs: None)
+
+    def fail_upgrade(**_kwargs):
+        raise RuntimeError("fresh migration failed")
+
+    monkeypatch.setattr(flask_migrate, "upgrade", fail_upgrade)
+    monkeypatch.setattr(db.session, "commit", lambda: commits.append("commit"))
+
+    with pytest.raises(RuntimeError, match="fresh migration failed"):
+        create_app()
+
+    assert commits == []
 
 
 @pytest.fixture

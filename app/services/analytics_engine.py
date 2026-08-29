@@ -220,15 +220,15 @@ def _check_hydration(user, db, models, today, nudges, en=False):
     rows = WaterLog.query.filter(
         WaterLog.user_id == user.id,
         WaterLog.date_key >= lo, WaterLog.date_key <= hi).all()
-    if not rows:
+    if len(rows) < 3:
         return
-    days = 7
+    days = len(rows)
     avg_cups = sum(r.count or 0 for r in rows) / days
     if avg_cups < 6:
         nudges.append(
-            f"NUDGE_LOW_HYDRATION: Over the last {days} days average daily water is ~{round(avg_cups, 1)} "
+            f"NUDGE_LOW_HYDRATION: Across {days} tracked days average daily water is ~{round(avg_cups, 1)} "
             f"cups (≈{round(avg_cups * 240)} ml) — low. Gently suggest increasing water intake."
             if en else
-            f"NUDGE_LOW_HYDRATION: Son {days} günde ortalama günlük su ~{round(avg_cups, 1)} "
+            f"NUDGE_LOW_HYDRATION: {days} kayıtlı günde ortalama günlük su ~{round(avg_cups, 1)} "
             f"bardak (≈{round(avg_cups * 240)} ml) — düşük. Su alımını artırmayı nazikçe öner."
         )

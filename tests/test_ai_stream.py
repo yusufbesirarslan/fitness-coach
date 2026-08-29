@@ -187,6 +187,14 @@ def test_usage_of_none_when_absent():
     assert ai_stream._usage_of(SimpleNamespace()) is None
 
 
+def test_add_usage_sums_every_provider_call():
+    assert ai_stream._add_usage(
+        {"prompt_tokens": 10, "completion_tokens": 2},
+        {"prompt_tokens": 7, "completion_tokens": 5},
+    ) == {"prompt_tokens": 17, "completion_tokens": 7}
+    assert ai_stream._add_usage(None, None) is None
+
+
 # ── Bedrock akış yolu: tek tur ───────────────────────────────────────────────
 
 def test_bedrock_streams_deltas_then_done(app, bedrock_on):
@@ -232,10 +240,12 @@ def test_bedrock_tool_loop_runs_tool_then_streams_final(app, bedrock_on, monkeyp
         [],  # araç turu metin akıtmıyor
         _final(stop_reason="tool_use",
                content=[_tool_use_block("query_fitx_metrics", "t1",
-                                        {"metric_type": "nutrition"})]))
+                                        {"metric_type": "nutrition"})],
+               usage=_usage(input_tokens=10, output_tokens=2)))
     final_turn = _FakeStream(
         ["Bugün 1800 kcal aldın."],
-        _final(content=[_text_block("Bugün 1800 kcal aldın.")]))
+        _final(content=[_text_block("Bugün 1800 kcal aldın.")],
+               usage=_usage(input_tokens=7, output_tokens=5)))
     fake = bedrock_on(tool_turn, final_turn)
 
     with app.app_context():
@@ -245,6 +255,10 @@ def test_bedrock_tool_loop_runs_tool_then_streams_final(app, bedrock_on, monkeyp
     assert [e["text"] for e in events if e["type"] == "delta"] == ["Bugün 1800 kcal aldın."]
     assert events[-1]["type"] == "done"
     assert events[-1]["text"] == "Bugün 1800 kcal aldın."
+    assert events[-1]["usage"] == {
+        "prompt_tokens": 17,
+        "completion_tokens": 7,
+    }
     # İki tur = iki stream çağrısı; ikinci çağrının convo'su araç sonucunu taşır.
     assert len(fake.calls) == 2
     second_convo = fake.calls[1]["messages"]

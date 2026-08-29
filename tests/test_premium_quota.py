@@ -232,6 +232,32 @@ def test_plan_gate_refunds_when_wrapped_route_raises(app, make_user):
     assert premium.remaining_ai_plans(user, "training") == 1
 
 
+@pytest.mark.parametrize(
+    ("status", "should_refund"),
+    [(200, False), (201, False), (204, False), (302, False),
+     (400, True), (500, True)],
+)
+def test_plan_gate_refunds_only_http_failures(
+        app, make_user, monkeypatch, status, should_refund):
+    user = make_user(f"route-status-{status}")
+    refunds = []
+    monkeypatch.setattr(premium, "reserve_ai_quota", lambda *args: True)
+    monkeypatch.setattr(premium, "refund_ai_quota",
+                        lambda *args, **kwargs: refunds.append(args[1]))
+
+    @premium.premium_ai_plan_gate("training")
+    def status_route():
+        return "", status
+
+    app.config["AI_PLAN_QUOTA_ENABLED"] = True
+    with app.test_request_context("/training-plan", method="POST"):
+        login_user(user)
+        response = status_route()
+
+    assert response.status_code == status
+    assert refunds == (["training"] if should_refund else [])
+
+
 def test_plan_gate_rolls_back_failed_transaction_before_refund(app, make_user):
     user = make_user("failed-transaction")
 

@@ -12,8 +12,11 @@ True ile kurulu (uygulama geneli string kullanımı için); bu yüzden RQ için
 _REDIS_URL'den AYRI bir bytes-bağlantı kurulur. Basit string heartbeat anahtarı
 ise sıradan `redis_client` üzerinden yazılır/okunur.
 """
+import json
 import logging
 import os
+import threading
+import time
 
 from app.config import _REDIS_URL
 
@@ -22,9 +25,14 @@ _log = logging.getLogger(__name__)
 QUEUE_NAME = "fitx:ai"
 WORKER_HEARTBEAT_KEY = "fitx:worker:alive"
 WORKER_HEARTBEAT_TTL = int(os.getenv("WORKER_HEARTBEAT_TTL", "120"))
+FATSECRET_STATUS_KEY = "fitx:fatsecret:status"
+FATSECRET_STATUS_TTL = int(os.getenv("FATSECRET_STATUS_TTL", "1800"))
 
 _rq_module = None       # rq modülü ya da False (import denendi, yok)
 _bytes_redis = None     # RQ için decode_responses=False bağlantı
+
+_fatsecret_local = None
+_fatsecret_lock = threading.Lock()
 
 
 def _rq():
@@ -96,6 +104,70 @@ def enqueue_or_run(func, *args, **kwargs):
     return {"queued": False, "result": result}
 
 
+def _bind_current_app(func, args, kwargs):
+    """Wrap ``func`` so a daemon thread runs it under the LIVE Flask app.
+
+    Same shape as ``ai_pipeline._deferred_summarize``: capture the app object
+    while we still have a context, then push it inside the thread. Without this
+    the daemon has no app context, so ``tasks._in_app_context`` takes its worker
+    branch — a SECOND ``create_app()`` with its own SQLAlchemy engine and pool
+    inside the web process, plus a process-wide ``FITX_SKIP_DB_INIT`` mutation
+    that would silently disable boot migrations for the real app.
+
+    The session is removed afterwards: ``db.session`` is thread-scoped, so a
+    daemon that never removes it leaks its checked-out connection.
+    """
+    from flask import current_app, has_app_context
+    app = current_app._get_current_object() if has_app_context() else None
+
+    def run():
+        if app is None:
+            # No context to inherit (worker/CLI) — the task body sets up its own.
+            func(*args, **kwargs)
+            return
+        with app.app_context():
+            try:
+                func(*args, **kwargs)
+            except Exception as e:
+                app.logger.warning("[JOBS] background is basarisiz: %s: %s",
+                                   type(e).__name__, e, exc_info=True)
+            finally:
+                try:
+                    from app.extensions import db
+                    db.session.remove()
+                except Exception:
+                    pass
+    return run
+
+
+def dispatch_background(func, *args, **kwargs):
+    """Queue maintenance work, or run it on a daemon thread without a queue.
+
+    Unlike ``enqueue_or_run``, this helper never executes the function on the
+    caller's request thread. Maintenance is idempotent, so a short-lived daemon
+    bound to the CURRENT application is the safe worker-less path.
+    """
+    q = get_queue()
+    if q is not None:
+        try:
+            job = q.enqueue_call(func, args=args, kwargs=kwargs,
+                                 retry=_default_retry())
+            return {"queued": True, "job_id": job.id}
+        except Exception as e:
+            _log.warning(
+                "[JOBS] background enqueue basarisiz, daemon thread kullaniliyor: %s: %s",
+                type(e).__name__, e)
+    try:
+        worker = threading.Thread(
+            target=_bind_current_app(func, args, kwargs), daemon=True)
+        worker.start()
+        return {"queued": False, "threaded": True}
+    except Exception as e:
+        _log.warning("[JOBS] background thread baslatilamadi: %s: %s",
+                     type(e).__name__, e)
+        return {"queued": False, "threaded": False}
+
+
 # ── Worker canlılık (heartbeat) — /health?deep=1 için BİLGİLENDİRİCİ ────────
 
 def record_worker_heartbeat():
@@ -121,6 +193,54 @@ def worker_alive():
         return bool(redis_client.exists(WORKER_HEARTBEAT_KEY))
     except Exception:
         return None
+
+
+# ── Cached dependency status — background probe → request-free health read ──
+
+def record_fatsecret_status(status, *, checked_at=None):
+    """Store a bounded, non-sensitive proxy probe result for readiness reads."""
+    global _fatsecret_local
+    if status not in ("ok", "error"):
+        raise ValueError("invalid FatSecret status")
+    payload = {"status": status,
+               "checked_at": time.time() if checked_at is None else checked_at}
+    with _fatsecret_lock:
+        _fatsecret_local = payload
+
+    from app.extensions import redis_client
+    connection = redis_client or _bytes_redis
+    if connection is not None:
+        try:
+            connection.setex(FATSECRET_STATUS_KEY, FATSECRET_STATUS_TTL,
+                             json.dumps(payload))
+        except Exception as e:
+            _log.warning("[JOBS] FatSecret status cache write failed: %s: %s",
+                         type(e).__name__, e)
+
+
+def fatsecret_status(*, now=None, max_age=900):
+    """Return a fresh cached proxy status, or None when absent/stale."""
+    from app.extensions import redis_client
+    connection = redis_client or _bytes_redis
+    payload = None
+    if connection is not None:
+        try:
+            raw = connection.get(FATSECRET_STATUS_KEY)
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8")
+            if raw:
+                payload = json.loads(raw)
+        except Exception as e:
+            _log.warning("[JOBS] FatSecret status cache read failed: %s: %s",
+                         type(e).__name__, e)
+    if payload is None:
+        with _fatsecret_lock:
+            payload = dict(_fatsecret_local) if _fatsecret_local else None
+    current = time.time() if now is None else now
+    if (not payload or payload.get("status") not in ("ok", "error")
+            or current - float(payload.get("checked_at", 0)) > max_age):
+        return None
+    return payload["status"]
 
 
 # ── Ölü-mektup (dead-letter) — RQ FailedJobRegistry sarmalayıcıları (CLI için) ──

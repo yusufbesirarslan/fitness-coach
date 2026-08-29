@@ -1157,6 +1157,7 @@
   "route.no_permission": "You don't have permission.",
   "route.supp_deleted": "Supplement deleted.",
   "route.name_too_long": "Full name can be at most 150 characters.",
+  "route.name_invalid": "Full name contains unsupported control characters.",
   "route.request_pending": "There's already a pending request.",
   "route.plan_data_missing": "Plan data is missing",
   "route.weight_required": "Weight is required",

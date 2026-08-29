@@ -80,10 +80,8 @@ def _leave(kind):
 def capacity_snapshot():
     """Anlık thread kapasitesi görünümü (süreç-içi, ağ'a çıkmaz).
 
-    `model` izinleri `ai` izinlerinin İÇİNDE alınır (her model çağrısı zaten bir
-    route kapısı ya da `blocking_concurrency_slot` tutan bir thread'den gelir),
-    bu yüzden rezerv hesabından İKİNCİ KEZ düşülmez — düşülseydi rezerv olduğundan
-    düşük görünür ve sahte alarm üretirdi.
+    Model slots normally nest inside AI route slots. Any excess model activity
+    represents work outside those route slots and consumes additional threads.
     """
     with _active_lock:
         ai_active = _active["ai"]
@@ -94,7 +92,8 @@ def capacity_snapshot():
         "ai_active": ai_active,
         "model_active": model_active,
         "scrape_active": scrape_active,
-        "thread_reserve": WEB_THREADS - ai_active - scrape_active,
+        "thread_reserve": (WEB_THREADS - ai_active - scrape_active
+                           - max(0, model_active - ai_active)),
         "thread_reserve_floor": THREAD_RESERVE_MIN,
     }
 

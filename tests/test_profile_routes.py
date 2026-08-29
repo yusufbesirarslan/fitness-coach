@@ -114,6 +114,23 @@ def test_edit_profile_long_full_name_rejected(client, auth_user):
     assert response.status_code == 400
 
 
+def test_edit_profile_control_character_in_full_name_rejected(client, auth_user):
+    response = client.post("/edit-profile", json={
+        "username": "testuser", "full_name": "Yusuf\u0000Admin",
+    })
+    assert response.status_code == 400
+    assert _fresh_user(auth_user.id).full_name != "Yusuf\u0000Admin"
+
+
+def test_edit_profile_legitimate_name_punctuation_allowed(client, auth_user):
+    full_name = "O'Connor & Sons <TR>"
+    response = client.post("/edit-profile", json={
+        "username": "testuser", "full_name": full_name,
+    })
+    assert response.status_code == 200
+    assert _fresh_user(auth_user.id).full_name == full_name
+
+
 def test_edit_profile_invalid_goal_rejected(client, auth_user):
     response = client.post("/edit-profile",
                            json={"username": "testuser", "goal": "dunya fethi"})

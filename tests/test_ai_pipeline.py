@@ -276,11 +276,16 @@ def test_stream_defers_inline_summarize_after_answer(app, make_user, monkeypatch
     monkeypatch.setattr(ai_stream, "stream_coach_answer", fake_stream)
 
     with app.test_request_context("/"):
-        out = list(ai_pipeline.stream_answer(user.id, "soru"))
+        gen = ai_pipeline.stream_answer(user.id, "soru")
+        meta = next(gen)
+        done = next(gen)
+        conv_id = meta["conversation_id"]
+        assert done["type"] == "done"
+        assert conv_id is not None
+        assert events == ["stream"]
+        gen.close()
+        gen.close()
 
-    assert out[-1]["type"] == "done"
-    conv_id = out[0]["conversation_id"]
-    assert conv_id is not None
     assert events == ["stream", ("summarize", conv_id)]
 
 

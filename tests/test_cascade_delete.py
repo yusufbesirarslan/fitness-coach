@@ -36,20 +36,28 @@ def test_user_delete_cascades_children(app, make_user):
         assert model.query.filter_by(user_id=uid).count() == 0, model.__name__
 
 
-def test_purge_user_covers_every_user_child_model():
-    # B4: cleanup-test-users'ın elle silme listesi user_id taşıyan HER modeli
-    # içermeli — SQLite'ta FK pragma bir gün kapanırsa/eski DB'de cascade yoksa
-    # öksüz satır kalmasın. Yeni user-child model ekleyen bu listeye de eklemeli.
-    from app.cli import _USER_CHILD_MODELS
-    covered = set(_USER_CHILD_MODELS)
+def test_purge_user_covers_every_foreign_key_to_user():
+    # Coverage follows the FK target, not a column-name convention. A future
+    # reporter_id/mentioned_user_id must fail this guard.
+    from app.cli import _USER_CHILD_MODELS, _USER_FK_MANUAL_CLEANUP
+    direct = set(_USER_CHILD_MODELS)
     missing = []
     for mapper in db.Model.registry.mappers:
         cls = mapper.class_
         if cls.__name__ == "User":
             continue
-        if any(c.name == "user_id" for c in mapper.columns) and cls not in covered:
-            missing.append(cls.__name__)
-    assert not missing, f"_purge_user kapsamında olmayan user-child modeller: {missing}"
+        for column in mapper.columns:
+            targets_user = any(
+                fk.column.table.name == "user" for fk in column.foreign_keys
+            )
+            if not targets_user:
+                continue
+            if column.name == "user_id" and cls in direct:
+                continue
+            if (cls.__name__, column.name) in _USER_FK_MANUAL_CLEANUP:
+                continue
+            missing.append(f"{cls.__name__}.{column.name}")
+    assert missing == [], f"_purge_user kapsamında olmayan user FK'leri: {missing}"
 
 
 def test_purge_user_removes_social_and_wearable_children(app, make_user):
