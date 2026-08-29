@@ -58,6 +58,25 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    # Worker'a KENDİ sağlık sözleşmesini ver. Aksi halde imaj düzeyindeki
+    # HEALTHCHECK'i (web'e ait `http://127.0.0.1:5000/health`) miras alır — ama
+    # worker `python worker.py` koşar ve 5000'de dinleyen HİÇBİR ŞEY yoktur, yani
+    # her probe "Connection refused" ile düşer. Bu kalıcı yanlış-negatif gerçek bir
+    # worker arızasını görünmez kılar (prod: failingstreak=988, restarts=0).
+    # Kontrol yeni bir protokol icat etmez: worker.py'nin zaten yazdığı Redis
+    # heartbeat'ini (fitx:worker:alive) mevcut app.jobs yardımcılarıyla okur.
+    # start_period, worker'ın import + Redis bağlantısı + ilk heartbeat yazımı için;
+    # heartbeat TTL/2'de bir (varsayılan 60s) tazelendiğinden interval 30s + retries
+    # 3 bayat bir heartbeat'i, sağlıklı bir worker'ı yanlışlıkla düşürmeden yakalar.
+    healthcheck:
+      # `-m` ŞART: script'i yol ile çağırmak sys.path[0]'i /app/scripts yapar ve
+      # `import app.jobs` ModuleNotFoundError verir. `-m` cwd'yi (WORKDIR /app)
+      # sys.path'e koyar — uygulama paketi ancak böyle çözülür.
+      test: ["CMD", "python", "-m", "scripts.worker_healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
     depends_on:
       redis:
         condition: service_healthy
