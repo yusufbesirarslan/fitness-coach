@@ -6,7 +6,8 @@ Date: 2026-08-28
 
 Review the findings recorded by commits `e3643b8` (2026-08-14) and
 `95630a5` (2026-08-28), reproduce each actionable defect against
-`origin/main` at `a6d6b2e`, and fix confirmed defects without broad refactors or
+`origin/main` (written at `a6d6b2e`, now rebased onto `ad77426`), and fix
+confirmed defects without broad refactors or
 breaking established deployment contracts.
 
 ## Scope and disposition

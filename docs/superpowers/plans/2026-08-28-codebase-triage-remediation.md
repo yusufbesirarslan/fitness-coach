@@ -12,7 +12,9 @@
 
 ## Global Constraints
 
-- Base all work on `origin/main` commit `a6d6b2e` in `fix/triage-2026-08-28`.
+- Base all work on `origin/main` in `fix/triage-2026-08-28`. The branch was
+  written against `a6d6b2e` and has since been rebased onto the current
+  `origin/main` `ad77426`, which is the base this PR must be reviewed against.
 - Write and observe a failing regression test before each production change.
 - Preserve `FITX_DB_UPGRADE_FAIL_OPEN`, single-worker AI gating, and informational deep-health semantics.
 - Do not add infrastructure dependencies or reject legitimate punctuation/non-ASCII characters in names.
