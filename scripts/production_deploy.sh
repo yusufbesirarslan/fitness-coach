@@ -60,6 +60,12 @@ readonly PUBLIC_HEALTH_ATTEMPTS=12
 readonly HEALTH_CONNECT_TIMEOUT_SECONDS=2
 readonly HEALTH_MAX_TIME_SECONDS=5
 readonly HEALTH_RETRY_DELAY_SECONDS=5
+readonly ABSENT_BUILD_REVISION_MARKER='__axisai_build_revision_absent__'
+# The baked-revision probe reports an absent /app/BUILD_REVISION *in band* and
+# still exits 0, so an unreachable container, a transport error, or an exhausted
+# phase deadline stays a hard failure for every revision instead of being read
+# as the legacy "image predates BUILD_REVISION" case.
+readonly READ_BUILD_REVISION_SH="if [ -f /app/BUILD_REVISION ]; then cat /app/BUILD_REVISION; else echo '$ABSENT_BUILD_REVISION_MARKER'; fi"
 
 clock_now() {
   local destination="$1" reading previous
@@ -444,23 +450,43 @@ verify_public_health() {
   return 1
 }
 
+# Baked-revision identity is exact for candidates and for modern rollbacks.
+# Only the already-established LEGACY_ROLLBACK_ALLOWED contract may accept an
+# image that predates /app/BUILD_REVISION, and even then a file that is present
+# must still match the expected revision exactly.
+verify_running_revision() {
+  local expected_revision="$1"
+  local allow_missing_revision="$2"
+  local running_revision
+
+  running_revision="$(run_external docker compose "${COMPOSE_FILES[@]}" \
+    exec -T web sh -c "$READ_BUILD_REVISION_SH")" || return 1
+  if [[ "$running_revision" == "$ABSENT_BUILD_REVISION_MARKER" ]]; then
+    if [[ "$allow_missing_revision" != "1" ]]; then
+      echo "running web container has no /app/BUILD_REVISION" >&2
+      return 1
+    fi
+    echo "rollback compatibility proof accepted: image has no /app/BUILD_REVISION" >&2
+    return 0
+  fi
+  if [[ "$running_revision" != "$expected_revision" ]]; then
+    echo "running web container revision mismatch" >&2
+    return 1
+  fi
+}
+
 start_and_verify_release() {
   local revision="$1"
-  local allow_missing_health_revision="$2"
+  local allow_missing_revision="$2"
   local check_public="$3"
-  local running_revision
 
   materialize_build_context "$revision" || return 1
   write_override "$revision" "$BUILD_CONTEXT_DIR" || return 1
   run_external docker compose "${COMPOSE_FILES[@]}" build || return 1
   run_external docker compose "${COMPOSE_FILES[@]}" up -d --remove-orphans || return 1
   run_external docker compose "${COMPOSE_FILES[@]}" ps || return 1
-  running_revision="$(run_external docker compose "${COMPOSE_FILES[@]}" exec -T web cat /app/BUILD_REVISION)" || return 1
-  if [[ "$running_revision" != "$revision" ]]; then
-    echo "running web container revision mismatch" >&2
-    return 1
-  fi
-  probe_internal_health "$revision" "$allow_missing_health_revision" || return 1
+  verify_running_revision "$revision" "$allow_missing_revision" || return 1
+  probe_internal_health "$revision" "$allow_missing_revision" || return 1
   if [[ "$check_public" == "1" && -n "$PUBLIC_HEALTH_URL" ]]; then
     verify_public_health || return 1
   fi
