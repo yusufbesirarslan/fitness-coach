@@ -108,7 +108,7 @@ activate first.
 | 6 | `FITX_WORKOUT_SESSIONS_ENABLED` | Mutating and schema-backed. Staging first; needs migration `a994f9bed783`. |
 | 7 | `AI_ADAPTIVE_PLAN_CONTEXT` | Changes AI behaviour for every user. Staging + human answer review; no metric can judge quality. |
 | 8 | `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` | **The only flag that lets the AI write user data.** After #7, which owns the system prompt it extends. Staging + journal review; needs migration `b3c4d5e6f7a8`. |
-| 9 | `MOBILE_AUTH_ENABLED` | **Blocked until PR4 merges.** Attack-surface change with an unbounded pre-auth blocking call today. |
+| 9 | `MOBILE_AUTH_ENABLED` | Hardening PR4 is merged (`34f8dc79`). Treat the `blocked` lifecycle label as stale. **Runtime (2026-08-26):** already `1` on production SHA `a6d6b2e` — do **not** enable it again. Native-auth mobile remains OFF until [docs/superpowers/specs/2026-08-26-sprint12-mobile-auth-today-production-rollout-readiness.md](../superpowers/specs/2026-08-26-sprint12-mobile-auth-today-production-rollout-readiness.md) conditions close. |
 
 **Nav v2 is not a prerequisite for anything.** `app/nav.py` points its four
 primary destinations at pre-existing canonical routes (`/`, `/training`,
