@@ -1,7 +1,7 @@
 """/health ve /health?deep=1 testleri.
 
 M3: derin görünüm iç duruşu ifşa eder (login offline mı, Redis ayakta mı,
-Bedrock açık mı) ve her çağrıda bir DIŞ HTTP isteği tetikler. Anonim bir
+Bedrock açık mı). Anonim bir
 saldırgan "login: offline"ı izleyerek Redis'in düştüğü ve login'in fail-closed
 olduğu ANI öğrenebilirdi — yani saldırıya başlamak için en uygun pencereyi.
 Derin görünüm artık yalnızca iç ağdan (loopback / private) verilir.
@@ -16,17 +16,6 @@ from flask import request, url_for
 
 _DEEP_KEYS = ("redis", "login", "bedrock", "fatsecret_proxy", "worker",
               "flags", "capacity", "revision")
-
-
-@pytest.fixture(autouse=True)
-def _no_outbound(monkeypatch):
-    """Derin probe FatSecret proxy'sine dış istek atar — testte ağa çıkma."""
-    import requests
-
-    class _Resp:
-        status_code = 404  # canlı proxy auth'suz istekte 4xx döner
-
-    monkeypatch.setattr(requests, "get", lambda *a, **kw: _Resp())
 
 
 def _health_app_with_revision(monkeypatch, revision):

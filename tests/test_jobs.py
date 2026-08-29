@@ -94,6 +94,9 @@ class _HeartbeatRedis:
     def exists(self, key):
         return 1 if key in self.store else 0
 
+    def get(self, key):
+        return self.store.get(key)
+
 
 def test_worker_heartbeat_roundtrip(monkeypatch):
     r = _HeartbeatRedis()
@@ -119,6 +122,33 @@ def test_worker_heartbeat_swallows_redis_error(monkeypatch):
     monkeypatch.setattr("app.extensions.redis_client", _BoomRedis())
     jobs.record_worker_heartbeat()      # patlamamalı
     assert jobs.worker_alive() is None  # hata → None
+
+
+def test_fatsecret_status_cache_roundtrip(monkeypatch):
+    r = _HeartbeatRedis()
+    monkeypatch.setattr("app.extensions.redis_client", r)
+
+    jobs.record_fatsecret_status("error", checked_at=1000.0)
+
+    assert jobs.fatsecret_status(now=1001.0, max_age=900) == "error"
+    assert jobs.fatsecret_status(now=2000.0, max_age=900) is None
+
+
+def test_fatsecret_sampler_records_result_without_raising(monkeypatch):
+    from app.jobs import tasks
+    import app.config as config_mod
+
+    monkeypatch.setattr(config_mod, "FATSECRET_BASE_URL", "https://proxy.example")
+    recorded = []
+    monkeypatch.setattr(jobs, "record_fatsecret_status",
+                        lambda status, **kwargs: recorded.append(status))
+
+    class Response:
+        status_code = 502
+
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: Response())
+    assert tasks.sample_fatsecret_proxy() == "error"
+    assert recorded == ["error"]
 
 
 # ── Dead-letter helpers ─────────────────────────────────────────────────────

@@ -204,8 +204,8 @@ def create_app():
         # ama derin görünüm 503 döner ki gate "yeşilken login kapalı" yakalasın.
         #
         # M3: derin görünüm YALNIZCA iç ağdan verilir. İçerik iç duruşu ifşa eder
-        # (login offline mı, Redis ayakta mı, Bedrock açık mı) ve her çağrıda bir
-        # DIŞ HTTP isteği (FatSecret proxy) tetikler. Anonim biri "login: offline"ı
+        # (login offline mı, Redis ayakta mı, Bedrock açık mı). Anonim biri
+        # "login: offline"ı
         # izleyerek Redis'in düştüğü ve login'in fail-closed olduğu ANI öğrenirdi.
         # Dışarıya 403 DEĞİL, sığ gövde döneriz — 403'ün kendisi de bir sinyal olurdu.
         if request.args.get("deep") == "1" and _deep_health_allowed():
@@ -220,27 +220,19 @@ def create_app():
             # WS8: worker canlılığı BİLGİLENDİRİCİ (gating DEĞİL). Worker yoksa
             # arka-plan işleri satır-içine düşer; deploy'u düşürmez. None=bilinmiyor
             # (Redis yok), True/False=heartbeat penceresinde worker görüldü/görülmedi.
-            from app.jobs import worker_alive
+            from app.jobs import fatsecret_status, worker_alive
             alive = worker_alive()
             body["worker"] = ("unknown" if alive is None
                               else "alive" if alive else "down")
             # I4: FatSecret loopback proxy'si (host, 127.0.0.1:3000) süpervizörsüz
             # bir SPOF — düşerse makro çözümü sessizce LLM tahminine düşer.
-            # BİLGİLENDİRİCİ alan: hata deploy gate'ini düşürmez (proxy kesintisi
-            # app rollback'i gerektirmez), yalnızca izleme/deploy logunda görünür.
+            # Arka-plan örnekleyicisinin önbelleğini okuyan BİLGİLENDİRİCİ alan:
+            # hata deploy gate'ini düşürmez; örnek yoksa/stale ise "unknown".
             import app.config as config_mod
             if not config_mod.FATSECRET_BASE_URL:
                 body["fatsecret_proxy"] = "unconfigured"
             else:
-                import requests
-                try:
-                    r = requests.get(
-                        config_mod.FATSECRET_BASE_URL.rstrip("/") + "/rest/server.api",
-                        timeout=3)
-                    # Canlı proxy auth'suz istekte 4xx döner; nginx 502 = proxy ölü.
-                    body["fatsecret_proxy"] = "ok" if r.status_code < 500 else "error"
-                except Exception:
-                    body["fatsecret_proxy"] = "error"
+                body["fatsecret_proxy"] = fatsecret_status() or "unknown"
             # Rollout bayraklarının O ANKİ durumu. Bayraklar host .env'inde yaşar
             # ve deploy pipeline'ı onları TAŞIMAZ (bkz. docs/ROLLOUT.md) — yani
             # "canlıda ne açık?" sorusunun repodan yanıtı YOKTUR. Yalnızca ad +

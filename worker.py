@@ -14,6 +14,7 @@ import logging
 import os
 import sys
 import threading
+import time
 
 logging.basicConfig(level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(),
                                   logging.INFO))
@@ -25,11 +26,17 @@ def _start_heartbeat():
     worker bile canlı görünsün diye — RQ'nun kendi worker-heartbeat'i bizim
     bilgilendirici anahtarımızı yazmaz."""
     from app.jobs import WORKER_HEARTBEAT_TTL, record_worker_heartbeat
+    from app.jobs.tasks import sample_fatsecret_proxy
     stop = threading.Event()
 
     def _loop():
+        last_proxy_sample = 0.0
         while not stop.is_set():
             record_worker_heartbeat()
+            now = time.monotonic()
+            if now - last_proxy_sample >= 600:
+                sample_fatsecret_proxy()
+                last_proxy_sample = now
             stop.wait(max(WORKER_HEARTBEAT_TTL // 2, 5))
 
     t = threading.Thread(target=_loop, name="worker-heartbeat", daemon=True)

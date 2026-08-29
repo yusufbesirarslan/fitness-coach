@@ -71,6 +71,25 @@ def summarize_conversation(conversation_id):
     return _in_app_context(_body)
 
 
+def sample_fatsecret_proxy():
+    """Probe the optional local proxy outside request handling and cache status."""
+    import app.config as config_mod
+    if not config_mod.FATSECRET_BASE_URL:
+        return "unconfigured"
+    status = "error"
+    try:
+        import requests
+        response = requests.get(
+            config_mod.FATSECRET_BASE_URL.rstrip("/") + "/rest/server.api",
+            timeout=3)
+        status = "ok" if response.status_code < 500 else "error"
+    except Exception:
+        _log.warning("[JOBS] FatSecret proxy probe failed", exc_info=True)
+    from app.jobs import record_fatsecret_status
+    record_fatsecret_status(status)
+    return status
+
+
 def run_daily_maintenance(now_iso):
     """Purge expired/old rows outside the request that won the daily lock."""
     now = datetime.fromisoformat(now_iso)
@@ -84,6 +103,7 @@ def run_daily_maintenance(now_iso):
             ("sessions", session_store.purge_expired),
             ("mobile_auth", lambda: mobile_auth.purge_expired(now)),
             ("notifications", lambda: notifications.purge_old(now)),
+            ("fatsecret_proxy", sample_fatsecret_proxy),
         ):
             try:
                 results[name] = operation()

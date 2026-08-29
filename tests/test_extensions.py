@@ -120,14 +120,24 @@ def test_deep_health_reports_fatsecret_proxy(app, monkeypatch):
     assert client.get("/health?deep=1").get_json()["fatsecret_proxy"] == "unconfigured"
 
     monkeypatch.setattr(config_mod, "FATSECRET_BASE_URL", "https://x.example/fatsecret")
-    import requests as requests_mod
-
-    def dead(*a, **k):
-        raise requests_mod.exceptions.ConnectionError("down")
-    monkeypatch.setattr(requests_mod, "get", dead)
+    import app.jobs as jobs
+    monkeypatch.setattr(jobs, "fatsecret_status", lambda: "error")
+    monkeypatch.setattr("requests.get", lambda *a, **k: pytest.fail(
+        "deep health must not perform outbound I/O"))
     resp = client.get("/health?deep=1")
     assert resp.get_json()["fatsecret_proxy"] == "error"
     assert resp.status_code == 200                       # bilgilendirici: gate'i düşürmez
+
+
+def test_deep_health_reports_unknown_without_cached_fatsecret_sample(app, monkeypatch):
+    import app.config as config_mod
+    import app.jobs as jobs
+
+    monkeypatch.setattr(config_mod, "FATSECRET_BASE_URL", "https://proxy.example")
+    monkeypatch.setattr(jobs, "fatsecret_status", lambda: None)
+
+    body = app.test_client().get("/health?deep=1").get_json()
+    assert body["fatsecret_proxy"] == "unknown"
 
 
 def test_deep_health_503_when_login_fail_closed(app, monkeypatch):
