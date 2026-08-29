@@ -10,7 +10,7 @@ That gate did not re-run this review. Verdict after smoke: **WAIT — SOAK IN PR
 - **Authority SHAs:** backend `a6d6b2e60dc7718bd47590d64b5f74542294025c`; mobile `3386df37198ef0193c64fa4754a686357868f785` (mobile sources not in this worktree)
 - **Scope:** rollout dimensions only. No application-code change. No flag flip, deploy, or PR5.
 
-This review spot-checked cited backend facts against the current tree and the public GitHub runs. It did not re-run SSM, pytest, or Flutter CI, and it could not open the private mobile repository.
+This review spot-checked cited backend facts against the current tree and the public GitHub runs. It did not re-run Systems Manager, pytest, or Flutter CI, and it could not open the private mobile repository.
 
 ---
 
@@ -110,7 +110,7 @@ Checked against the four questions:
 1. **Is READY WITH CONDITIONS justified?** Yes. Product P0 = 0 and product-code P1 = 0 on the backend SHA. Remaining work is operator smoke, soak, metrics-or-log-only, origin choice, and a native-auth OFF sideload artifact — not a code rewrite.
 2. **Does it overclaim production state?** No. Public GitHub confirms backend SHA `a6d6b2e`, CI run 360 success, Deploy run 227 success. The assessment distinguishes proven (flag ON, unauthenticated 401, health 200) from unproven (authenticated Today body, TestFlight/Play binary, CW alarms, exact flag-flip time). It does not claim the 10:40Z recreate **is** the enablement instant.
 3. **Does it understate the risk that `MOBILE_AUTH_ENABLED` is already ON?** No. That is the first reason the verdict is not “READY FOR STAGED ROLLOUT”. Pre-auth login/refresh are already on the internet; PR4 is the reason that is not still a P0 thread-exhaustion hole. Existing traffic from `85.107.65.28` is reported as owner-IP / not this assessment’s credentials — appropriately not treated as a proven native-auth ON store build. Residual: soak start is inferred from container recreate, so exposure may already be longer than 24h; the extra 24h is additional observation, not a claim that the surface was closed before 10:40Z.
-4. **Are abort/rollback procedures executable?** Yes, with the caveats already written. Backend abort: SSM docker logs + deep-health `thread_reserve` + public `/health` + unauthenticated Today status. Backend rollback: `.env` `=0` + compose recreate + **404 vs 401** proof; minutes, not seconds; does not revert DB or issued-credential history. Native rollback: halt distribution, sideload OFF, optional backend-off containment; App Store/TestFlight rollback is **not** a procedure that exists yet. Do not use `www.axisaiapp.com` or `api.axisaiapp.com` as the native origin.
+4. **Are abort/rollback procedures executable?** Yes, with the caveats already written. Backend abort: Systems Manager docker logs + deep-health `thread_reserve` + public `/health` + unauthenticated Today status. Backend rollback: `.env` `=0` + compose recreate + **404 vs 401** proof; minutes, not seconds; does not revert DB or issued-credential history. Native rollback: halt distribution, sideload OFF, optional backend-off containment; App Store/TestFlight rollback is **not** a procedure that exists yet. Do not use `www.axisaiapp.com` or `api.axisaiapp.com` as the native origin.
 
 `docs/ROLLOUT.md` order #9 now points at the assessment. Treat that pointer as operator routing, not as closure of condition 5, and not as permission to distribute a native-auth ON build.
 

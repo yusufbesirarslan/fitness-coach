@@ -209,7 +209,7 @@ the implementation.
 
 Distinguished on purpose. Do not treat repository defaults as production.
 
-### Proven runtime (read-only SSM + HTTPS probes, 2026-08-26)
+### Proven runtime (read-only Systems Manager + HTTPS probes, 2026-08-26)
 
 | Fact | Evidence |
 |---|---|
@@ -230,7 +230,7 @@ Distinguished on purpose. Do not treat repository defaults as production.
 | Cognito pool | `.env` `COGNITO_USER_POOL_ID=eu-central-1_kaX0SORRK` |
 | `RUNTIME_METRICS_ENABLED` | **not present** in host `.env` → repo default `0` |
 | `APP_BASE_URL` | **not present** in host `.env` |
-| Restart mechanism | GitHub Actions `Deploy to EC2` via SSM: `git reset --hard origin/main`; `docker compose build`; `docker compose up -d`; deep-health gate; code rollback on failure. Flag change: edit `.env` then `docker compose up -d` (no merge). |
+| Restart mechanism | GitHub Actions `Deploy to EC2` via Systems Manager: `git reset --hard origin/main`; `docker compose build`; `docker compose up -d`; deep-health gate; code rollback on failure. Flag change: edit `.env` then `docker compose up -d` (no merge). |
 
 Logs already show production mobile-auth traffic from `85.107.65.28` (login 401
 `NotAuthorizedException`, refresh 400, account/me 401, today 401). This
@@ -701,7 +701,7 @@ Already true on 2026-08-26 except where noted.
 10. Mobile production logs/metrics none.
 11. macOS CI does not build iOS native-auth OFF.
 12. ADR 0004 still mentions fixture shell for disabled auth; code is Unavailable\*.
-13. Deep health is loopback/CIDR-only; operators need SSM/docker exec to read flags.
+13. Deep health is loopback/CIDR-only; operators need Systems Manager/docker exec to read flags.
 14. PR5 Adaptive Coaching remains deferred (correct).
 15. `plan_mutation/document.py` warning-overlay residual remains deferred (correct).
 
@@ -775,7 +775,7 @@ and was not compiled for distribution here. `RUNTIME_METRICS_ENABLED` was
 | 14 | Rollback feasibility | Backend `.env`+compose yes; mobile compile-time yes with sideload; store rollback unproven | P2 for store |
 | 15 | Wrong go/no-go | Stale `blocked` label would have wrongly blocked or confused operators | P2 docs (this runbook supersedes) |
 | 16 | Secrets/logging | `.env` on disk; no token logs found | P2 known M4 |
-| 17 | Deployment-state uncertainty | Runtime **was** verified via SSM; remaining gaps listed in §7 | — |
+| 17 | Deployment-state uncertainty | Runtime **was** verified via Systems Manager; remaining gaps listed in §7 | — |
 
 **P0 = 0. Product-code P1 = 0. Operational P1 = observability for HTTP abort.**
 
@@ -958,7 +958,7 @@ are **not** pretended to exist.
 Docker json-file logs the gunicorn/app request lines on **stderr**. Merge
 streams (`2>&1`) or counts will read as empty.
 
-Exact soak-watch commands (EC2 / SSM, cwd `/home/ubuntu/fitness-coach`):
+Exact soak-watch commands (EC2 / Systems Manager, cwd `/home/ubuntu/fitness-coach`):
 
 ```bash
 # /health (public)
@@ -1150,7 +1150,7 @@ Discovered during this closeout, independent of the soak questions.
 | EC2 instance state | AWS API | `running`, public IP `18.153.156.28` unchanged |
 | Security group `launch-wizard-1` | AWS API | ingress `tcp/80` **and** `tcp/443` from `0.0.0.0/0` — **open** |
 | Subnet NACL `acl-0446b970a2fbb3bb8` | AWS API | allow-all ingress and egress |
-| SSM agent | AWS API | **Online**, last ping `2026-08-28T06:43:15Z` — host is alive |
+| Systems Manager agent | AWS API | **Online**, last ping `2026-08-28T06:43:15Z` — host is alive |
 | Flask app internally | Docker HEALTHCHECK | container `healthy` at `06:26Z` — app still serving on `127.0.0.1:5000` |
 
 `ECONNREFUSED` is a TCP reset, not a timeout: packets reach the host and the
@@ -1198,7 +1198,7 @@ handful of real auth requests, so it demonstrates *absence of failure at idle*,
 
 ### 30.8 Evidence NOT collected in this closeout
 
-Read-only SSM command execution against the production host was **blocked by
+Read-only Systems Manager command execution against the production host was **blocked by
 this environment's command classifier** after the first successful batch. The
 following required items are therefore **not** re-verified at closeout:
 
@@ -1217,7 +1217,7 @@ following required items are therefore **not** re-verified at closeout:
 
 The final `/health` and deep-health readings required by §8 of the task brief
 are **stale as of 2026-08-26T12:54:21Z** and could not be refreshed, both
-because SSM is blocked and because the public endpoint refuses connections.
+because Systems Manager is blocked and because the public endpoint refuses connections.
 
 ### 30.9 Exact commands required to close 30.8 (not executed)
 
@@ -1258,7 +1258,7 @@ No contrary evidence found. **No product/security NO-GO condition is present.**
 
 | Path | Status |
 |---|---|
-| Backend containment `MOBILE_AUTH_ENABLED=0` + `docker compose up -d` → `/api/v1/today` = 404 | config location known (`/home/ubuntu/fitness-coach/.env`), operator access exists **via SSM**, recreate requirement understood, health verification known — **viable in principle** |
+| Backend containment `MOBILE_AUTH_ENABLED=0` + `docker compose up -d` → `/api/v1/today` = 404 | config location known (`/home/ubuntu/fitness-coach/.env`), operator access exists **via Systems Manager**, recreate requirement understood, health verification known — **viable in principle** |
 | Backend containment — practical caveat | containment is verified by probing `/api/v1/today` for `404`. **That probe currently cannot be executed from outside**, because the edge refuses connections. Containment is verifiable only from host loopback until 30.6 is fixed. |
 | Mobile OFF recovery | **reproducible** — flag defaults to `false`; an OFF build is `flutter build apk --dart-define=AXISAI_NATIVE_AUTH_ENABLED=false` (or simply omitting the define). Configured composition then wires `UnavailableTodayRepository` and no auth graph. |
 | Known-good OFF artifact | **none archived.** The local `tmp/axisai-mobile-phase2` debug APK is a native-auth **ON** build, not an OFF rollback artifact. |
@@ -1368,7 +1368,7 @@ Cognito setting, secret, container, or native build was changed.
 
 | Field | Evidence |
 |---|---|
-| Symptoms | Public TCP 80/443 refused connections while EC2, SSM, Docker web, Redis, and loopback Flask remained alive. |
+| Symptoms | Public TCP 80/443 refused connections while EC2, Systems Manager, Docker web, Redis, and loopback Flask remained alive. |
 | Last proxied request before the outage investigation | `2026-08-27T04:34:43.189Z`; this remains request-history evidence, not the edge-stop timestamp. |
 | Confirmed edge failure time | **`2026-08-27T06:40:33Z`** from the nginx/systemd journal. This supersedes the earlier approximate `04:34:43Z` inference as the proven service-stop time. |
 | Primary category | **nginx stopped** |
@@ -1392,7 +1392,7 @@ PR #246 and was not improvised on the host.
 
 ### 31.2 Recovery Proof
 
-Pre-intervention SSM command `e19e206f-0ef9-4adc-ba1e-6969aa1ab693` captured:
+Pre-intervention Systems Manager command `e19e206f-0ef9-4adc-ba1e-6969aa1ab693` captured:
 
 | Check | Result before intervention |
 |---|---|
@@ -1410,7 +1410,7 @@ The single recovery action was:
 sudo systemctl start nginx
 ```
 
-SSM command `fb67685a-aa96-48ef-baa8-a005d3db820c` completed successfully at
+Systems Manager command `fb67685a-aa96-48ef-baa8-a005d3db820c` completed successfully at
 **`2026-08-28T10:50:57Z`**.
 
 | Recovery field | Result |
@@ -1430,7 +1430,7 @@ SSM command `fb67685a-aa96-48ef-baa8-a005d3db820c` completed successfully at
 
 ### 31.3 Fresh Deep Health
 
-SSM command `b2ef3b78-4bfd-4009-b08c-72f42dad366b` captured fresh deep health at
+Systems Manager command `b2ef3b78-4bfd-4009-b08c-72f42dad366b` captured fresh deep health at
 `2026-08-28T10:52:51Z`:
 
 | Field | Result |
@@ -1458,7 +1458,7 @@ remain unchanged. No product deployment occurred.
 The dedicated `axisai.native.e2e` account remains the only authorized
 production smoke identity. Its credential was **not available to this operator
 session** in the permitted local environment, AWS Secrets Manager secret keys,
-SSM Parameter Store, or GitHub Actions secret inventory. Credentials were not
+Systems Manager Parameter Store, or GitHub Actions secret inventory. Credentials were not
 guessed, reset, requested from another user, or recorded.
 
 | Required check | Result |
@@ -1569,7 +1569,7 @@ mobile build, or product behavior change occurred.
 
 #### Exact startup dependency
 
-`nginx -T` from SSM command `c0590c0d-7d84-42ff-af39-d011faf23f9d`
+`nginx -T` from Systems Manager command `c0590c0d-7d84-42ff-af39-d011faf23f9d`
 identified the only deployed hostname dependency:
 
 | Field | Evidence |
@@ -1651,7 +1651,7 @@ configuration or restart the currently running service by itself.
 
 ### 32.2 Post-Mitigation Proof
 
-SSM command `4619d4d5-8213-4bd6-9dec-799e440b8be9` installed and validated the
+Systems Manager command `4619d4d5-8213-4bd6-9dec-799e440b8be9` installed and validated the
 drop-in without restarting nginx:
 
 | Check | Result |
@@ -1666,7 +1666,7 @@ drop-in without restarting nginx:
 
 The isolated systemd proof did not stop DNS or touch nginx:
 
-| Proof | SSM command | Result |
+| Proof | Systems Manager command | Result |
 |---|---|---|
 | RED: same transient with no restart policy | `9a3d7e92-3699-4e42-9031-b46092be9f96` | transient cleared, unit remained `failed`, `NRestarts=0` |
 | GREEN: exact installed retry/start-limit values | `bfea0130-c80b-496b-b2a9-997dcd8337d4` | initial failed activation retried to `active`, `Result=success`, `NRestarts=1` |
@@ -1675,7 +1675,7 @@ Temporary proof unit and marker files were removed immediately after each
 test, followed by `daemon-reload`. Production DNS was never stopped or
 degraded.
 
-One controlled nginx restart was performed by SSM command
+One controlled nginx restart was performed by Systems Manager command
 `2fad2613-703e-4b57-8e40-199422ed9647`:
 
 | Field | Result |
@@ -1710,7 +1710,7 @@ After the controlled restart:
 
 The only authorized identity remains `axisai.native.e2e`. Its credential is
 not available in the permitted operator environment. A fresh names-only check
-found no release-validation credential in SSM Parameter Store, GitHub Actions
+found no release-validation credential in Systems Manager Parameter Store, GitHub Actions
 secret inventory, or local credential targets; Secrets Manager contains only
 the existing application secret already checked in section 31. No secret value
 was printed or written.
@@ -1732,7 +1732,7 @@ not substituted for the required post-recovery smoke.
 
 ### 32.5 Health and Capacity
 
-Fresh in-container deep health from SSM command
+Fresh in-container deep health from Systems Manager command
 `f14c7c5b-2d09-4bc8-83f1-277024ce9543` at
 `2026-08-28T11:34:16Z`:
 
