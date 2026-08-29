@@ -160,7 +160,9 @@ def remaining_ai_chats(user):
 def premium_ai_plan_gate(kind):
     """AI plan üretim route'una sar: kota dolu (non-premium) ise 402 döndür.
 
-    Hakkı route'dan önce rezerve et; exception veya 200 dışı yanıtta iade et.
+    Hakkı route'dan önce rezerve et; exception VEYA hata yanıtında (>= 400)
+    iade et. 2xx/3xx hak yakar: 201/204 gibi başarılı statüler ve
+    yönlendirmeler gerçekten plan üretmiş sayılır.
 
     @login_required ve limiter dekoratörlerinin İÇİNDE (en yakın fn'e) konmalı.
     """

@@ -79,9 +79,12 @@ def sample_fatsecret_proxy():
     status = "error"
     try:
         import requests
+        # allow_redirects=False: the probe must classify THIS proxy, not
+        # whatever a 3xx points at. Following a redirect would let a
+        # misconfigured hop report "ok" for a host we never meant to reach.
         response = requests.get(
             config_mod.FATSECRET_BASE_URL.rstrip("/") + "/rest/server.api",
-            timeout=3)
+            timeout=3, allow_redirects=False)
         status = "ok" if response.status_code < 500 else "error"
     except Exception:
         _log.warning("[JOBS] FatSecret proxy probe failed", exc_info=True)

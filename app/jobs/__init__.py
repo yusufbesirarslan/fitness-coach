@@ -104,12 +104,48 @@ def enqueue_or_run(func, *args, **kwargs):
     return {"queued": False, "result": result}
 
 
+def _bind_current_app(func, args, kwargs):
+    """Wrap ``func`` so a daemon thread runs it under the LIVE Flask app.
+
+    Same shape as ``ai_pipeline._deferred_summarize``: capture the app object
+    while we still have a context, then push it inside the thread. Without this
+    the daemon has no app context, so ``tasks._in_app_context`` takes its worker
+    branch — a SECOND ``create_app()`` with its own SQLAlchemy engine and pool
+    inside the web process, plus a process-wide ``FITX_SKIP_DB_INIT`` mutation
+    that would silently disable boot migrations for the real app.
+
+    The session is removed afterwards: ``db.session`` is thread-scoped, so a
+    daemon that never removes it leaks its checked-out connection.
+    """
+    from flask import current_app, has_app_context
+    app = current_app._get_current_object() if has_app_context() else None
+
+    def run():
+        if app is None:
+            # No context to inherit (worker/CLI) — the task body sets up its own.
+            func(*args, **kwargs)
+            return
+        with app.app_context():
+            try:
+                func(*args, **kwargs)
+            except Exception as e:
+                app.logger.warning("[JOBS] background is basarisiz: %s: %s",
+                                   type(e).__name__, e, exc_info=True)
+            finally:
+                try:
+                    from app.extensions import db
+                    db.session.remove()
+                except Exception:
+                    pass
+    return run
+
+
 def dispatch_background(func, *args, **kwargs):
     """Queue maintenance work, or run it on a daemon thread without a queue.
 
     Unlike ``enqueue_or_run``, this helper never executes the function on the
-    caller's request thread. Maintenance is idempotent and owns its app/session
-    context, so a short-lived daemon is the safe worker-less development path.
+    caller's request thread. Maintenance is idempotent, so a short-lived daemon
+    bound to the CURRENT application is the safe worker-less path.
     """
     q = get_queue()
     if q is not None:
@@ -123,7 +159,7 @@ def dispatch_background(func, *args, **kwargs):
                 type(e).__name__, e)
     try:
         worker = threading.Thread(
-            target=func, args=args, kwargs=kwargs, daemon=True)
+            target=_bind_current_app(func, args, kwargs), daemon=True)
         worker.start()
         return {"queued": False, "threaded": True}
     except Exception as e:

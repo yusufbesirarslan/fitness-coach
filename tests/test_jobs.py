@@ -65,19 +65,163 @@ def test_dispatch_background_uses_daemon_thread_without_queue(monkeypatch):
     started = []
 
     class ThreadProbe:
-        def __init__(self, *, target, args, kwargs, daemon):
-            started.append((target, args, kwargs, daemon))
+        def __init__(self, *, target, daemon):
+            started.append((target, daemon))
 
         def start(self):
             started.append("started")
 
     monkeypatch.setattr(jobs.threading, "Thread", ThreadProbe)
-    target = lambda: None
+    ran = []
 
-    result = jobs.dispatch_background(target, 1, flag=True)
+    result = jobs.dispatch_background(lambda *a, **k: ran.append((a, k)), 1,
+                                      flag=True)
 
     assert result == {"queued": False, "threaded": True}
-    assert started == [(target, (1,), {"flag": True}, True), "started"]
+    assert len(started) == 2 and started[1] == "started"
+    runner, daemon = started[0]
+    assert daemon is True
+    assert ran == []                       # not on the caller's thread
+    runner()                               # the bound wrapper carries the args
+    assert ran == [((1,), {"flag": True})]
+
+
+# ── P2: worker-less fallback must REUSE the live app (triage 2026-08-28) ────
+#
+# Without binding, the daemon thread has no app context, so
+# ``tasks._in_app_context`` takes its WORKER branch inside the web process: a
+# second ``create_app()`` with its own SQLAlchemy engine and pool, plus a
+# process-wide ``FITX_SKIP_DB_INIT=1`` that silently disables boot migrations
+# for the real application.
+
+def test_dispatch_background_runs_under_the_live_application(app, monkeypatch):
+    import threading as _threading
+
+    from flask import current_app, has_app_context
+
+    monkeypatch.setattr(jobs, "get_queue", lambda: None)
+    live = current_app._get_current_object()
+    done = _threading.Event()
+    seen = {}
+
+    def target(marker):
+        try:
+            seen["marker"] = marker
+            seen["has_context"] = has_app_context()
+            seen["app"] = (current_app._get_current_object()
+                           if has_app_context() else None)
+        finally:
+            done.set()
+
+    assert jobs.dispatch_background(target, "m1") == {"queued": False,
+                                                     "threaded": True}
+    assert done.wait(10), "background daemon never ran"
+
+    assert seen["marker"] == "m1"
+    assert seen["has_context"] is True
+    assert seen["app"] is live          # the SAME app object, not a new one
+
+
+def test_dispatch_background_creates_no_second_app_and_no_env_mutation(
+        app, monkeypatch):
+    import os
+    import threading as _threading
+
+    import app as app_pkg
+    from app.jobs import tasks
+
+    monkeypatch.setattr(jobs, "get_queue", lambda: None)
+    monkeypatch.setattr(tasks, "_worker_app", None)
+    monkeypatch.delenv("FITX_SKIP_DB_INIT", raising=False)
+
+    def _forbidden(*args, **kwargs):
+        raise AssertionError("a second Flask application was created")
+
+    monkeypatch.setattr(app_pkg, "create_app", _forbidden)
+
+    order = _maintenance_probes(monkeypatch)
+    done = _threading.Event()
+    real = tasks.run_daily_maintenance
+
+    def traced(now_iso):
+        try:
+            return real(now_iso)
+        finally:
+            done.set()
+
+    jobs.dispatch_background(traced, _NOW_ISO)
+    assert done.wait(10), "maintenance daemon never ran"
+
+    assert order == ["sessions", "mobile_auth", "notifications",
+                     "fatsecret_proxy"]
+    assert tasks._worker_app is None           # no cached second application
+    assert "FITX_SKIP_DB_INIT" not in os.environ   # no process-global mutation
+
+
+# ── run_daily_maintenance: every operation runs; a failure is ISOLATED ──────
+
+_NOW_ISO = "2026-08-28T03:00:00"
+
+
+def _maintenance_probes(monkeypatch, failing=None):
+    """Patch every maintenance operation; return the ordered call log."""
+    from app.jobs import tasks
+    from app.services import mobile_auth, notifications, session_store
+
+    order = []
+
+    def probe(name):
+        def _run(*args, **kwargs):
+            order.append(name)
+            if name == failing:
+                raise RuntimeError("%s patladi" % name)
+            return name
+        return _run
+
+    monkeypatch.setattr(session_store, "purge_expired", probe("sessions"))
+    monkeypatch.setattr(mobile_auth, "purge_expired", probe("mobile_auth"))
+    monkeypatch.setattr(notifications, "purge_old", probe("notifications"))
+    monkeypatch.setattr(tasks, "sample_fatsecret_proxy", probe("fatsecret_proxy"))
+    return order
+
+
+def test_daily_maintenance_runs_every_intended_operation(app, monkeypatch):
+    from app.jobs import tasks
+
+    order = _maintenance_probes(monkeypatch)
+
+    results = tasks.run_daily_maintenance(_NOW_ISO)
+
+    assert order == ["sessions", "mobile_auth", "notifications",
+                     "fatsecret_proxy"]
+    assert results == {"sessions": "sessions", "mobile_auth": "mobile_auth",
+                       "notifications": "notifications",
+                       "fatsecret_proxy": "fatsecret_proxy"}
+
+
+@pytest.mark.parametrize("failing", ["sessions", "mobile_auth", "notifications",
+                                     "fatsecret_proxy"])
+def test_daily_maintenance_isolates_one_failing_operation(app, monkeypatch,
+                                                          failing):
+    """One broken operation rolls back and is recorded — the rest still run."""
+    from app.extensions import db
+    from app.jobs import tasks
+
+    order = _maintenance_probes(monkeypatch, failing=failing)
+
+    rollbacks = []
+    real_rollback = db.session.rollback
+    monkeypatch.setattr(db.session, "rollback",
+                        lambda: rollbacks.append(1) or real_rollback())
+
+    results = tasks.run_daily_maintenance(_NOW_ISO)
+
+    # Attempted in order, none skipped: the failure isolates, it does not abort.
+    assert order == ["sessions", "mobile_auth", "notifications",
+                     "fatsecret_proxy"]
+    assert results[failing] == "error"
+    assert [k for k, v in results.items() if v == "error"] == [failing]
+    assert len(rollbacks) == 1        # rollback happened, for the failed op only
 
 
 # ── Worker heartbeat ────────────────────────────────────────────────────────
@@ -149,6 +293,127 @@ def test_fatsecret_sampler_records_result_without_raising(monkeypatch):
     monkeypatch.setattr("requests.get", lambda *args, **kwargs: Response())
     assert tasks.sample_fatsecret_proxy() == "error"
     assert recorded == ["error"]
+
+
+# ── Worker heartbeat daemon — #251 liveness contract (PR #253 hardening) ─
+
+def test_heartbeat_tick_survives_a_failing_fatsecret_sample(monkeypatch):
+    """A sampling failure must not end the daemon.
+
+    The heartbeat runs in a bare ``while`` loop in a thread. An exception
+    escaping the OPTIONAL FatSecret sample does not skip one probe — it kills
+    the thread, so every FUTURE heartbeat write is lost and the worker reads
+    dead in /health?deep=1 while it is still consuming jobs.
+    """
+    import worker
+    from app.jobs import tasks
+
+    r = _HeartbeatRedis()
+    monkeypatch.setattr("app.extensions.redis_client", r)
+
+    def boom():
+        raise RuntimeError("proxy exploded")
+
+    monkeypatch.setattr(tasks, "sample_fatsecret_proxy", boom)
+
+    writes = []
+    real_setex = r.setex
+    monkeypatch.setattr(
+        r, "setex",
+        lambda k, ttl, v: writes.append((k, ttl)) or real_setex(k, ttl, v))
+
+    interval = worker.PROXY_SAMPLE_INTERVAL_SECONDS
+    last = 0.0
+    for now in (1000.0, 1000.0 + interval, 1000.0 + 2 * interval):
+        last = worker._heartbeat_tick(last, now)   # must not raise
+
+    assert len(writes) == 3                        # every tick still wrote
+    assert {k for k, _ in writes} == {jobs.WORKER_HEARTBEAT_KEY}
+    assert {ttl for _, ttl in writes} == {jobs.WORKER_HEARTBEAT_TTL}
+    assert jobs.worker_alive() is True
+
+
+def test_failing_sample_still_advances_the_probe_throttle(monkeypatch):
+    """A dead proxy is retried on its interval, not on every single tick."""
+    import worker
+    from app.jobs import tasks
+
+    monkeypatch.setattr("app.extensions.redis_client", _HeartbeatRedis())
+    attempts = []
+
+    def boom():
+        attempts.append(1)
+        raise RuntimeError("proxy exploded")
+
+    monkeypatch.setattr(tasks, "sample_fatsecret_proxy", boom)
+
+    last = worker._heartbeat_tick(0.0, 1000.0)
+    assert (last, len(attempts)) == (1000.0, 1)
+    last = worker._heartbeat_tick(last, 1001.0)     # inside the interval
+    assert (last, len(attempts)) == (1000.0, 1)     # no retry storm
+
+
+def test_heartbeat_is_written_before_and_independently_of_the_sample(monkeypatch):
+    import worker
+    from app.jobs import tasks
+
+    seq = []
+    monkeypatch.setattr(jobs, "record_worker_heartbeat",
+                        lambda: seq.append("beat"))
+    monkeypatch.setattr(tasks, "sample_fatsecret_proxy",
+                        lambda: seq.append("sample"))
+
+    interval = worker.PROXY_SAMPLE_INTERVAL_SECONDS
+    last = worker._heartbeat_tick(0.0, 1000.0)
+    assert seq == ["beat", "sample"]
+
+    last = worker._heartbeat_tick(last, 1001.0)     # throttled sample
+    assert seq == ["beat", "sample", "beat"]        # heartbeat is NOT throttled
+
+    worker._heartbeat_tick(last, 1000.0 + interval)
+    assert seq == ["beat", "sample", "beat", "beat", "sample"]
+
+
+def test_worker_heartbeat_protocol_is_unchanged(monkeypatch):
+    """No new key, no new value, no new TTL — #251's contract verbatim."""
+    import worker
+    from app.jobs import tasks
+
+    r = _HeartbeatRedis()
+    monkeypatch.setattr("app.extensions.redis_client", r)
+    monkeypatch.setattr(tasks, "sample_fatsecret_proxy", lambda: None)
+
+    worker._heartbeat_tick(0.0, 1000.0)
+
+    assert jobs.WORKER_HEARTBEAT_KEY == "fitx:worker:alive"
+    assert list(r.store) == [jobs.WORKER_HEARTBEAT_KEY]   # ONLY that key
+    assert r.store[jobs.WORKER_HEARTBEAT_KEY] == "1"
+    assert r.ttls[jobs.WORKER_HEARTBEAT_KEY] == jobs.WORKER_HEARTBEAT_TTL
+
+
+def test_fatsecret_probe_does_not_follow_redirects(monkeypatch):
+    """A 3xx must classify THIS proxy, not whatever the hop points at."""
+    import app.config as config_mod
+    from app.jobs import tasks
+
+    monkeypatch.setattr(config_mod, "FATSECRET_BASE_URL", "https://proxy.example")
+    monkeypatch.setattr(jobs, "record_fatsecret_status", lambda status, **k: None)
+
+    seen = {}
+
+    class Response:
+        status_code = 302
+
+    def fake_get(url, **kwargs):
+        seen["url"] = url
+        seen["kwargs"] = kwargs
+        return Response()
+
+    monkeypatch.setattr("requests.get", fake_get)
+
+    assert tasks.sample_fatsecret_proxy() == "ok"
+    assert seen["kwargs"]["allow_redirects"] is False
+    assert seen["kwargs"]["timeout"] == 3
 
 
 # ── Dead-letter helpers ─────────────────────────────────────────────────────
