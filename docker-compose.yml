@@ -63,7 +63,11 @@ services:
         condition: service_healthy
 
   redis:
-    image: redis:alpine
+    # Değişmez (immutable) üretim imajı: `redis:alpine` MUTABLE bir etiketti —
+    # aynı uygulama SHA'sının iki deploy'u arasında sessizce farklı üçüncü-taraf
+    # baytlara çözülebiliyordu. Sürüm + içerik digest'i birlikte sabitlenir
+    # (Docker Hub çok-platformlu OCI index digest'i, redis 7.4.11-alpine).
+    image: redis:7.4.11-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     user: redis
     container_name: fitx-redis
     # web ile tutarlı: manuel stop'a saygı duy (önceden 'always' idi — 3.11).

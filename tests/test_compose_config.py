@@ -8,6 +8,7 @@ doldurur ve web + redis + deploy'u BİRLİKTE düşürür; mem_limit disk için 
 
     python -m pytest tests/test_compose_config.py -v
 """
+import re
 from pathlib import Path
 
 import pytest
@@ -48,3 +49,38 @@ def test_ports_bound_to_loopback_only(services, service):
 @pytest.mark.parametrize("service", ["web", "redis", "worker"])
 def test_memory_limit_set(services, service):
     assert services[service].get("mem_limit")
+
+
+# --- Production image immutability (deploy hardening PR1, finding 8) ---------
+#
+# `redis:alpine` is a MUTABLE tag: the same string resolves to different bytes
+# over time, so `docker compose build/up` on the production host can silently
+# introduce an unreviewed third-party image between two deploys of the exact
+# same application SHA. Every externally sourced production image must name an
+# explicit version AND pin the immutable content digest.
+
+_IMMUTABLE_IMAGE_RE = re.compile(r"[^:@\s]+:[^@\s]+@sha256:[0-9a-f]{64}")
+
+
+def test_every_external_production_image_is_versioned_and_digest_pinned(services):
+    violations = {
+        name: service["image"]
+        for name, service in services.items()
+        if service.get("image") is not None
+        and not _IMMUTABLE_IMAGE_RE.fullmatch(service["image"])
+    }
+    assert violations == {}
+
+
+def test_redis_stays_on_compatible_major_seven(services):
+    # Pinning must not silently jump a major: the leaderboard sorted-set and
+    # limiter contracts are validated against Redis 7.
+    assert services["redis"]["image"].startswith("redis:7.4.11-alpine@sha256:")
+
+
+def test_only_redis_is_an_external_production_image(services):
+    # web/worker build the exact local context; nothing else may appear as a
+    # third-party image without passing the guard above.
+    assert {
+        name for name, service in services.items() if service.get("image") is not None
+    } == {"redis"}

@@ -36,7 +36,10 @@ continue-on-error kaldırılıp BLOKLAYICI yapılabilir.
 """
 import argparse
 import io
+import json
 import os
+import re
+import subprocess
 import sys
 import urllib.request
 import zipfile
@@ -91,13 +94,44 @@ def evaluate(config, entries):
     return problems
 
 
-def _fetch(function_name):
+class AwsCliCheckError(RuntimeError):
+    def __init__(self, message, code=""):
+        super().__init__(message)
+        self.response = {"Error": {"Code": code}}
+
+
+def _aws_json(args, *, run=subprocess.run):
+    command = ["aws", *args, "--output", "json", "--no-cli-pager"]
+    try:
+        completed = run(
+            command, capture_output=True, text=True, check=False, timeout=60
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise AwsCliCheckError("bounded AWS CLI call failed") from error
+    if completed.returncode != 0:
+        match = re.search(
+            r"An error occurred \(([A-Za-z][A-Za-z0-9]*)\) when calling",
+            completed.stderr or "",
+        )
+        raise AwsCliCheckError(
+            "AWS CLI returned nonzero", match.group(1) if match else ""
+        )
+    try:
+        payload = json.loads(completed.stdout)
+    except (json.JSONDecodeError, TypeError) as error:
+        raise AwsCliCheckError("AWS CLI returned invalid JSON") from error
+    if not isinstance(payload, dict):
+        raise AwsCliCheckError("AWS CLI returned a non-object")
+    return payload
+
+
+def _fetch(function_name, *, run=subprocess.run, open_url=urllib.request.urlopen):
     """Deploy EDİLMİŞ artifact'ı indir ve üst düzey girdilerini çıkar."""
-    import boto3
-    lam = boto3.client("lambda")
-    fn = lam.get_function(FunctionName=function_name)
+    fn = _aws_json([
+        "lambda", "get-function", "--function-name", function_name,
+    ], run=run)
     config = fn["Configuration"]
-    with urllib.request.urlopen(fn["Code"]["Location"]) as resp:  # noqa: S310 — AWS imzalı URL
+    with open_url(fn["Code"]["Location"], timeout=30) as resp:  # noqa: S310
         blob = resp.read()
     with zipfile.ZipFile(io.BytesIO(blob)) as zf:
         entries = {name.split("/")[0] for name in zf.namelist()}

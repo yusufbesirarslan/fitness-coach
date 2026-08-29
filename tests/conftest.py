@@ -55,6 +55,15 @@ import pytest  # noqa: E402
 from flask.testing import FlaskClient  # noqa: E402
 from werkzeug.datastructures import Headers  # noqa: E402
 
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--run-authoritative-linux-lock-tests",
+        action="store_true",
+        default=False,
+        help="confirm the dedicated root Linux production-lock CI environment",
+    )
+
 _STATE_CHANGING = {"POST", "PUT", "PATCH", "DELETE"}
 
 

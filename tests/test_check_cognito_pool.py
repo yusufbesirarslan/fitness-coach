@@ -8,7 +8,9 @@ sabitler — ağ/AWS yok.
     python -m pytest tests/test_check_cognito_pool.py -v
 """
 import importlib.util
+import json
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -16,6 +18,28 @@ _SPEC = importlib.util.spec_from_file_location(
     "check_cognito_pool", Path("scripts/check_cognito_pool.py"))
 check_cognito_pool = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(check_cognito_pool)
+
+
+def test_describe_uses_bounded_aws_cli_without_runtime_package_install():
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        payload = {"UserPool": _good_pool()} if command[2] == "describe-user-pool" else {
+            "UserPoolClient": _good_client()
+        }
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+
+    pool, client = check_cognito_pool._describe("pool-1", "client-1", run=run)
+
+    assert pool == _good_pool()
+    assert client == _good_client()
+    assert [call[0][0:3] for call in calls] == [
+        ["aws", "cognito-idp", "describe-user-pool"],
+        ["aws", "cognito-idp", "describe-user-pool-client"],
+    ]
+    assert all(call[1]["timeout"] == 60 for call in calls)
+    assert all(call[1]["check"] is False for call in calls)
 
 
 def _good_pool(**over):

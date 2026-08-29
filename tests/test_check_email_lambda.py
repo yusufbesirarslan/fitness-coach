@@ -8,7 +8,11 @@ ağ/AWS yok.
     python -m pytest tests/test_check_email_lambda.py -v
 """
 import importlib.util
+import io
+import json
 from pathlib import Path
+import subprocess
+import zipfile
 
 import pytest
 
@@ -16,6 +20,39 @@ _SPEC = importlib.util.spec_from_file_location(
     "check_email_lambda", Path("scripts/check_email_lambda.py"))
 check_email_lambda = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(check_email_lambda)
+
+
+def test_fetch_uses_bounded_aws_cli_and_reads_the_signed_artifact():
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as bundle:
+        for entry in _good_entries():
+            bundle.writestr(entry, "")
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return archive.getvalue()
+
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        payload = {"Configuration": _good_config(), "Code": {"Location": "https://signed.invalid/code"}}
+        return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+
+    config, entries = check_email_lambda._fetch(
+        "email-function", run=run, open_url=lambda url, timeout: Response()
+    )
+
+    assert config == _good_config()
+    assert entries == _good_entries()
+    assert calls[0][0][0:3] == ["aws", "lambda", "get-function"]
+    assert calls[0][1]["timeout"] == 60
 
 
 def _good_config(**over):
