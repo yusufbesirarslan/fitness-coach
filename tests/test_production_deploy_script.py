@@ -158,6 +158,10 @@ def host_fixture(tmp_path: Path):
         rollback_container_revision: str = "",
         baked_revision: str = "",
         rollback_baked_revision: str = "",
+        baked_revision_missing: bool = False,
+        rollback_baked_revision_missing: bool = False,
+        candidate_revision_probe_exit: int = 0,
+        rollback_revision_probe_exit: int = 0,
         health_code: int = 200,
         health_status: str = "ok",
         health_revision: str = "",
@@ -185,6 +189,7 @@ def host_fixture(tmp_path: Path):
         fake_bin = tmp_path / "fake-bin"
         trace = tmp_path / "trace.log"
         docker_state = tmp_path / "docker-revision"
+        container_root = tmp_path / "container-app"
         candidate_health_count = tmp_path / "candidate-health-count"
         rollback_health_count = tmp_path / "rollback-health-count"
         public_health_count = tmp_path / "public-health-count"
@@ -195,6 +200,7 @@ def host_fixture(tmp_path: Path):
         monotonic_state = tmp_path / "runtime-monotonic-clock"
         monotonic_state.write_text("", encoding="utf-8")
         fake_bin.mkdir()
+        container_root.mkdir()
         trace.write_text("", encoding="utf-8")
         fake_clock.write_text("1000", encoding="utf-8")
         fake_clock_count.write_text("0", encoding="utf-8")
@@ -388,16 +394,43 @@ if [[ " $* " == *' exec -T web printenv APP_REVISION '* ]]; then
     printf '%s\n' "$revision"
   fi
 fi
-if [[ " $* " == *' exec -T web cat /app/BUILD_REVISION '* ]]; then
-  if [[ "$revision" == "$FAKE_CANDIDATE_SHA" && -n "${FAKE_CANDIDATE_BAKED_REVISION:-}" ]]; then
-    printf '%s\n' "$FAKE_CANDIDATE_BAKED_REVISION"
-  elif [[ "$revision" != "$FAKE_CANDIDATE_SHA" && -n "${FAKE_ROLLBACK_BAKED_REVISION:-}" ]]; then
-    printf '%s\n' "$FAKE_ROLLBACK_BAKED_REVISION"
-  elif [[ -n "$baked" ]]; then
-    printf '%s\n' "$baked"
-  else
-    printf '%s\n' "$revision"
+if [[ " $* " == *' exec -T web sh -c '* ]]; then
+  probe=''
+  for argument in "$@"; do probe="$argument"; done
+  if [[ "$probe" != *'/app/BUILD_REVISION'* ]]; then
+    echo 'unexpected container probe' >&2
+    exit 66
   fi
+  if [[ "$revision" == "$FAKE_CANDIDATE_SHA" ]]; then
+    image_dir="$FAKE_CONTAINER_ROOT/candidate"
+    image_missing="$FAKE_CANDIDATE_BAKED_MISSING"
+    probe_exit="$FAKE_CANDIDATE_REVISION_PROBE_EXIT"
+    image_revision="${FAKE_CANDIDATE_BAKED_REVISION:-}"
+  else
+    image_dir="$FAKE_CONTAINER_ROOT/rollback"
+    image_missing="$FAKE_ROLLBACK_BAKED_MISSING"
+    probe_exit="$FAKE_ROLLBACK_REVISION_PROBE_EXIT"
+    image_revision="${FAKE_ROLLBACK_BAKED_REVISION:-}"
+  fi
+  if [[ "$probe_exit" != 0 ]]; then
+    echo 'Error response from daemon: container is not running' >&2
+    exit "$probe_exit"
+  fi
+  if [[ -z "$image_revision" ]]; then
+    image_revision="${baked:-$revision}"
+  fi
+  # The image filesystem is real: an image baked before the revision contract
+  # simply has no BUILD_REVISION file, exactly like a6d6b2e's image.
+  mkdir -p "$image_dir"
+  rm -f "$image_dir/BUILD_REVISION"
+  if [[ "$image_missing" != 1 ]]; then
+    printf '%s\n' "$image_revision" > "$image_dir/BUILD_REVISION"
+  fi
+  # Run the host's own probe snippet, only rebased onto that filesystem, so the
+  # test can never pass by mocking the branch under test away.
+  translated="$(printf '%s' "$probe" | sed "s|/app/|$image_dir/|g")"
+  sh -c "$translated"
+  exit "$?"
 fi
 if [[ " $* " == *' exec -T web python3 - '* ]]; then
   health_revision="$revision"
@@ -617,12 +650,19 @@ esac
                 "FAKE_OUTER_FILE_METADATA": "11:22:0:regular empty file:644:1",
                 "FAKE_OUTER_FD_METADATA": "11:22:0:regular empty file:644:1",
                 "DOCKER_STATE_FILE": _bash_path(docker_state),
+                "FAKE_CONTAINER_ROOT": _bash_path(container_root),
                 "FAKE_CANDIDATE_CONTAINER_REVISION": container_revision,
                 "FAKE_ROLLBACK_CONTAINER_REVISION": rollback_container_revision,
                 "FAKE_CANDIDATE_BAKED_REVISION": baked_revision or container_revision,
                 "FAKE_ROLLBACK_BAKED_REVISION": (
                     rollback_baked_revision or rollback_container_revision
                 ),
+                "FAKE_CANDIDATE_BAKED_MISSING": "1" if baked_revision_missing else "0",
+                "FAKE_ROLLBACK_BAKED_MISSING": (
+                    "1" if rollback_baked_revision_missing else "0"
+                ),
+                "FAKE_CANDIDATE_REVISION_PROBE_EXIT": str(candidate_revision_probe_exit),
+                "FAKE_ROLLBACK_REVISION_PROBE_EXIT": str(rollback_revision_probe_exit),
                 "FAKE_CANDIDATE_SHA": candidate_commit,
                 "FAKE_CANDIDATE_HEALTH_CODE": str(health_code),
                 "FAKE_CANDIDATE_HEALTH_STATUS": health_status,
@@ -1196,7 +1236,8 @@ def test_success_deploys_exact_candidate_and_verifies_revision(bash_executable, 
     assert f"git reset --hard {fixture.candidate_commit}" in trace
     assert f"APP_REVISION={fixture.candidate_commit}" in trace
     assert f"BUILD_REVISION={fixture.candidate_commit}" in trace
-    assert "exec -T web cat /app/BUILD_REVISION" in trace
+    assert "exec -T web sh -c" in trace
+    assert "/app/BUILD_REVISION" in trace
     assert "exec -T web python3 -" in trace
     assert f"INTERNAL_HEALTH_REVISION={fixture.candidate_commit} ATTEMPT=1" in trace
     assert f"git archive --format=tar {fixture.candidate_commit}" in trace
@@ -1247,7 +1288,8 @@ def test_baked_build_revision_matches_git_archive_revision(bash_executable, host
     trace = fixture.trace_text()
     assert f"git archive --format=tar {fixture.candidate_commit}" in trace
     assert f"BUILD_REVISION={fixture.candidate_commit}" in trace
-    assert "exec -T web cat /app/BUILD_REVISION" in trace
+    assert "exec -T web sh -c" in trace
+    assert "/app/BUILD_REVISION" in trace
 
 
 def test_clock_state_mutation_never_touches_the_production_checkout(
@@ -1363,7 +1405,8 @@ def test_rollback_exposes_prev_commit_as_baked_and_health_revision(
     assert f"git reset --hard {fixture.prev_commit}" in trace
     assert f"BUILD_REVISION={fixture.prev_commit}" in trace
     assert f"INTERNAL_HEALTH_REVISION={fixture.prev_commit}" in trace
-    assert "exec -T web cat /app/BUILD_REVISION" in trace
+    assert "exec -T web sh -c" in trace
+    assert "/app/BUILD_REVISION" in trace
 
 
 def test_candidate_health_retries_bounded_calls_until_delayed_success(
@@ -1476,6 +1519,213 @@ def test_old_rollback_without_health_revision_uses_compatibility_proof(
     assert result.returncode != 0
     assert "rollback compatibility proof accepted" in result.stderr
     assert "rollback verified" in result.stderr
+    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
+
+
+# --- baked revision identity contract -------------------------------------
+#
+# The host proves which build is actually running by reading /app/BUILD_REVISION
+# inside the container.  Images built before that contract existed have no such
+# file, so an authorized legacy rollback -- and only that -- may accept its
+# absence.  Everything else must still prove exact revision identity.
+#
+# These cases all force the rollback path with a candidate whose baked revision
+# is wrong, which fails the candidate at the identity check itself.
+
+FORCE_ROLLBACK_BAKED_REVISION = "c" * 40
+
+
+def _absent_revision_marker() -> str:
+    match = re.search(
+        r"(?m)^readonly ABSENT_BUILD_REVISION_MARKER='([^']+)'\s*$",
+        HOST_SCRIPT.read_text(encoding="utf-8"),
+    )
+    assert match is not None, "host script no longer publishes an absence marker"
+    return match.group(1)
+
+
+def test_candidate_with_exact_baked_revision_passes(bash_executable, host_fixture):
+    fixture = host_fixture()
+    result = fixture.run(bash_executable)
+
+    assert result.returncode == 0, result.stderr
+    trace = fixture.trace_text()
+    assert "exec -T web sh -c" in trace
+    assert "/app/BUILD_REVISION" in trace
+    assert "running web container revision mismatch" not in result.stderr
+    assert "rollback compatibility proof accepted" not in result.stderr
+    assert f"git reset --hard {fixture.prev_commit}" not in trace
+
+
+def test_candidate_without_baked_revision_fails(bash_executable, host_fixture):
+    fixture = host_fixture(baked_revision_missing=True)
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    assert "running web container has no /app/BUILD_REVISION" in result.stderr
+    assert "rollback compatibility proof accepted: image has no" not in result.stderr
+    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
+
+
+def test_candidate_with_mismatched_baked_revision_fails(bash_executable, host_fixture):
+    fixture = host_fixture(baked_revision=FORCE_ROLLBACK_BAKED_REVISION)
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    assert "running web container revision mismatch" in result.stderr
+    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
+
+
+def test_modern_rollback_with_exact_baked_revision_passes(bash_executable, host_fixture):
+    fixture = host_fixture(
+        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
+        previous_has_hardened_marker=True,
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    assert "rollback verified" in result.stderr
+    assert "rollback compatibility proof accepted" not in result.stderr
+    trace = fixture.trace_text()
+    assert f"BUILD_REVISION={fixture.prev_commit}" in trace
+    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
+
+
+def test_modern_rollback_without_baked_revision_fails(bash_executable, host_fixture):
+    fixture = host_fixture(
+        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
+        previous_has_hardened_marker=True,
+        rollback_baked_revision_missing=True,
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    assert "running web container has no /app/BUILD_REVISION" in result.stderr
+    assert "rollback compatibility proof accepted: image has no" not in result.stderr
+    assert "rollback failed verification" in result.stderr
+    assert "rollback verified" not in result.stderr
+
+
+def test_modern_rollback_with_mismatched_baked_revision_fails(bash_executable, host_fixture):
+    fixture = host_fixture(
+        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
+        previous_has_hardened_marker=True,
+        rollback_baked_revision="d" * 40,
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    assert "running web container revision mismatch" in result.stderr
+    assert "rollback failed verification" in result.stderr
+    assert "rollback verified" not in result.stderr
+
+
+def test_legacy_rollback_without_baked_revision_passes(bash_executable, host_fixture):
+    # The observed a6d6b2e regression: the pre-hardening image starts, is
+    # healthy, and carries no /app/BUILD_REVISION at all.
+    fixture = host_fixture(
+        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
+        rollback_baked_revision_missing=True,
+        rollback_health_has_revision=False,
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    assert (
+        "rollback compatibility proof accepted: image has no /app/BUILD_REVISION"
+        in result.stderr
+    )
+    assert (
+        "rollback compatibility proof accepted: deep health has no revision"
+        in result.stderr
+    )
+    assert "rollback verified" in result.stderr
+    assert "rollback failed verification" not in result.stderr
+    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
+
+
+def test_legacy_rollback_with_exact_baked_revision_passes(bash_executable, host_fixture):
+    fixture = host_fixture(
+        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
+        rollback_health_has_revision=False,
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    assert "rollback compatibility proof accepted: image has no" not in result.stderr
+    # The only mismatch is the candidate's, which is what forced the rollback;
+    # the legacy target itself proved exact baked identity.
+    assert result.stderr.count("running web container revision mismatch") == 1
+    rollback_log = result.stderr.split("rolling back to", 1)[1]
+    assert "running web container revision mismatch" not in rollback_log
+    assert "rollback verified" in result.stderr
+    assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
+
+
+def test_legacy_rollback_with_wrong_baked_revision_fails(bash_executable, host_fixture):
+    fixture = host_fixture(
+        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
+        rollback_baked_revision="d" * 40,
+        rollback_health_has_revision=False,
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    assert "running web container revision mismatch" in result.stderr
+    assert "rollback failed verification" in result.stderr
+    assert "rollback verified" not in result.stderr
+
+
+def test_legacy_baked_revision_compatibility_is_not_available_to_modern_revisions(
+    bash_executable, host_fixture
+):
+    # Identical to the accepted legacy case except that the rollback target
+    # already ships scripts/production_deploy.sh, which is the single existing
+    # legacy detector.  No date, SHA, or version widens it.
+    fixture = host_fixture(
+        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
+        rollback_baked_revision_missing=True,
+        rollback_health_has_revision=False,
+        previous_has_hardened_marker=True,
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    assert "rollback compatibility proof accepted" not in result.stderr
+    assert "running web container has no /app/BUILD_REVISION" in result.stderr
+    assert "rollback failed verification" in result.stderr
+
+
+def test_unreachable_container_is_never_read_as_a_legacy_image(
+    bash_executable, host_fixture
+):
+    # The absence signal is in band and the probe still exits 0 whenever the
+    # container answers, so a transport failure or an exhausted phase deadline
+    # cannot masquerade as a pre-hardening image even where legacy rollback is
+    # authorized.
+    fixture = host_fixture(
+        baked_revision=FORCE_ROLLBACK_BAKED_REVISION,
+        rollback_health_has_revision=False,
+        rollback_revision_probe_exit=1,
+    )
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    assert "rollback compatibility proof accepted: image has no" not in result.stderr
+    assert "rollback failed verification" in result.stderr
+    assert "rollback verified" not in result.stderr
+
+
+def test_absence_marker_is_never_accepted_as_a_revision_identity(
+    bash_executable, host_fixture
+):
+    # A candidate image whose BUILD_REVISION literally contains the marker still
+    # fails: the marker only ever means "absent", it never proves identity.
+    fixture = host_fixture(baked_revision=_absent_revision_marker())
+    result = fixture.run(bash_executable)
+
+    assert result.returncode != 0
+    assert "running web container has no /app/BUILD_REVISION" in result.stderr
     assert _run(["git", "-C", str(fixture.deploy_dir), "rev-parse", "HEAD"]) == fixture.prev_commit
 
 

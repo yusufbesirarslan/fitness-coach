@@ -249,9 +249,15 @@ Rollback resets exactly to `PREV_COMMIT`, rereads `HEAD`, rebuilds/restarts with
 that same revision (`BUILD_REVISION=PREV_COMMIT`), and repeats container plus
 deep-health verification against the previous baked revision. A rollback is
 reported verified only after those checks succeed. The only legacy exception is
-the immediate predecessor of the revision-aware helper: its missing deep-health
-revision may serve as a one-time compatibility proof; any present rollback
-revision must still match exactly.
+the immediate predecessor of the revision-aware helper: a missing
+`/app/BUILD_REVISION` and a missing deep-health revision may each serve as a
+one-time compatibility proof; any present rollback revision must still match
+exactly. That exception is keyed solely to whether the rollback target predates
+`scripts/production_deploy.sh`, never to a SHA, date, or version list. The
+container probe reports an absent `/app/BUILD_REVISION` in band and still
+succeeds whenever the container answers, so an unreachable container, a
+transport error, or an exhausted phase deadline is a hard failure for every
+revision and can never be read as the legacy case.
 
 ## Database and operational boundaries
 
