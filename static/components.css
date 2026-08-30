@@ -59,6 +59,9 @@ img, video { max-width: 100%; }
   font-size: var(--text-md); font-weight: var(--weight-medium);
   border: var(--border-w-1) solid var(--color-border-1); border-radius: var(--radius-sm);
   cursor: pointer; transition: all var(--duration-fast) var(--ease-standard);
+  /* The component is also rendered as an <a> (empty-state CTAs); without this it
+     arrives underlined. No-op for the <button> consumers. */
+  text-decoration: none;
 }
 .btn-ghost:hover  { color: var(--color-text-1); border-color: var(--color-border-2); background: var(--overlay-4); }
 .btn-ghost:active { transform: scale(0.97); }

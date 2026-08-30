@@ -86,9 +86,14 @@ renkli dolgu üstünde tema'dan bağımsız koyu metin → `var(--gray-950)`).
   Hiyerarşi merdiveni: `--text-display-*` > `--text-metric-*` > bölüm başlığı >
   gövde > metadata.
 - Ağırlıklar: `--weight-light..--weight-extrabold` → 300–800.
-- Satır yüksekliği: `--leading-none/tight/snug/normal/relaxed` → 1 / 1.2 / 1.4 / 1.6 / 1.75.
-- Harf aralığı: `--tracking-wide/wider/widest/label` → .04 / .08 / .12 / .16 em
-  (uppercase mikro etiketler `--tracking-label`).
+- Satır yüksekliği: `--leading-none/headline/tight/snug/normal/relaxed` →
+  1 / 1.1 / 1.2 / 1.4 / 1.6 / 1.75. `--leading-headline` sayfa başlığı içindir:
+  skala 1 → 1.2 arasında boştu, başlık ya kendi alt uzantılarına oturuyor ya da
+  gövde metni gibi okunuyordu.
+- Harf aralığı: `--tracking-tight/wide/wider/widest/label` →
+  -.01 / .04 / .08 / .12 / .16 em (uppercase mikro etiketler `--tracking-label`).
+  `--tracking-tight` YALNIZCA büyük punto optik düzeltmesidir (başlık); gövde
+  veya mikro etikette KULLANMA.
 
 ### Boşluk (8-pt grid)
 
