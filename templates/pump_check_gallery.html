@@ -12,12 +12,12 @@
 <div class="toast-wrap" id="toast-wrap"></div>
 {% include "_nav.html" %}
 <main class="main-content">
-    <div class="page-hdr">
-        <h1>{{ t('gallery.h1_a') }}<br><span>{{ t('gallery.h1_b') }}</span></h1>
+    <div class="page-hdr gallery-hdr">
+        <h1>{{ t('gallery.h1_a') }} <span>{{ t('gallery.h1_b') }}</span></h1>
         <p>{{ t('gallery.page_sub') }}</p>
     </div>
     <div class="gallery-wrap">
-        <div class="gallery-grid" id="gallery-grid"></div>
+        <div class="gallery-grid" id="gallery-grid" data-state="loading"></div>
     </div>
 </main>
 {% include "_actionbar.html" %}
@@ -31,7 +31,9 @@ const grid = document.getElementById('gallery-grid');
 const modal = document.getElementById('gallery-modal');
 const detail = document.getElementById('gallery-detail');
 let galleryItems = [];
+let lastFocused = null;
 function esc(v){ const d=document.createElement('div'); d.textContent=v == null ? '' : String(v); return d.innerHTML; }
+function attr(v){ return esc(v).replace(/"/g,'&quot;'); }
 // location_type kanonik TR ('Ev'/'Spor Salonu') gelir; görünen etiket display-map ile çevrilir.
 function envLabel(v){ const m = {'Ev': __t('training.loc_home'), 'Spor Salonu': __t('training.loc_gym')}; return m[v] || v; }
 function photoFallback(kind){
@@ -39,11 +41,14 @@ function photoFallback(kind){
   const label = esc(__t('gallery.photo_unavailable'));
   return '<div class="'+cls+'" role="img" aria-label="'+label+'">'+label+'</div>';
 }
+// The media frame owns the geometry (aspect-ratio in CSS), so a photo, a
+// still-loading photo and the unavailable fallback all occupy the same box and
+// nothing reflows when the bytes land.
 function cardMedia(item){
-  if(item.imageUrl){
-    return '<img data-gallery-photo src="'+esc(item.imageUrl).replace(/"/g,'&quot;')+'" loading="lazy" decoding="async" alt="">';
-  }
-  return photoFallback('card');
+  const inner = item.imageUrl
+    ? '<img data-gallery-photo src="'+attr(item.imageUrl)+'" loading="lazy" decoding="async" alt="">'
+    : photoFallback('card');
+  return '<span class="gallery-media">'+inner+'</span>';
 }
 function bindGalleryPhotos(root){
   root.querySelectorAll('img[data-gallery-photo]').forEach((img) => {
@@ -55,38 +60,91 @@ function bindGalleryPhotos(root){
   });
 }
 function itemHTML(item){
-  return '<button type="button" class="gallery-item" data-id="'+item.id+'">'+cardMedia(item)+'<div class="gallery-meta"><div class="gallery-date">'+esc(item.timePosted)+'</div><div class="gallery-desc">'+esc(item.description)+'</div></div></button>';
+  return '<button type="button" class="gallery-item" data-id="'+item.id+'">'+cardMedia(item)+'<span class="gallery-meta"><span class="gallery-date">'+esc(item.timePosted)+'</span><span class="gallery-desc">'+esc(item.description)+'</span></span></button>';
+}
+// Two reserved rows at the grid's ACTUAL column count, so the placeholder
+// occupies the geometry the photos will occupy instead of a guessed number.
+function skeletonHTML(){
+  const tracks = getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean);
+  const columns = Math.max(tracks.length, 1);
+  let out = '';
+  for(let i = 0; i < columns * 2; i++){
+    out += '<div class="gallery-skeleton" aria-hidden="true"><div class="gallery-skeleton-media"></div><div class="gallery-skeleton-meta"></div></div>';
+  }
+  return out;
+}
+function emptyHTML(){
+  return '<div class="empty-state gallery-state">' +
+    '<div class="empty-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>' +
+    '<div class="empty-title">'+esc(__t('gallery.empty_title'))+'</div>' +
+    '<div class="empty-desc">'+esc(__t('gallery.empty'))+'</div>' +
+    '<a class="btn-ghost" href="/training">'+esc(__t('gallery.empty_cta'))+'</a>' +
+    '</div>';
+}
+// A read failure is NOT an empty gallery: presenting one as the other would tell
+// the user their Pump Checks are gone.
+function errorHTML(){
+  return '<div class="empty-state gallery-state">' +
+    '<div class="empty-title">'+esc(__t('gallery.unavailable'))+'</div>' +
+    '<button type="button" class="btn-ghost" data-retry-gallery>'+esc(__t('gallery.retry'))+'</button>' +
+    '</div>';
 }
 function openDetail(item){
+  lastFocused = document.activeElement;
   const image = item.imageUrl
-    ? '<img data-gallery-photo src="'+esc(item.imageUrl).replace(/"/g,'&quot;')+'" alt="">'
+    ? '<img data-gallery-photo src="'+attr(item.imageUrl)+'" alt="">'
     : photoFallback('detail');
-  detail.innerHTML = image +
+  const closeLabel = attr(__t('training.close'));
+  detail.innerHTML =
+    '<div class="gallery-detail-media">' + image +
+    '<button type="button" class="gallery-detail-close" data-close-gallery aria-label="'+closeLabel+'">&times;</button>' +
+    '</div>' +
     '<div class="gallery-detail-body">' +
-    '<h2 id="gallery-modal-title" style="margin:0;font-family:var(--font-display);letter-spacing:.08em;">' + esc(item.timePosted) + '</h2>' +
+    '<h2 id="gallery-modal-title" class="gallery-detail-title">' + esc(item.timePosted) + '</h2>' +
     (item.workoutScore != null ? '<div><div class="gallery-label">'+__t('feed.workout_score')+'</div><div class="gallery-value">'+esc(item.workoutScore)+'</div></div>' : '') +
     '<div><div class="gallery-label">'+__t('feed.environment')+'</div><div class="gallery-value">'+esc(envLabel(item.environment))+'</div></div>' +
     '<div><div class="gallery-label">'+__t('feed.description')+'</div><div class="gallery-value">'+esc(item.description)+'</div></div>' +
     '<div><div class="gallery-label">'+__t('gallery.sharing_status')+'</div><div class="gallery-value">'+esc(__t(item.sharingStatus && item.sharingStatus.key ? item.sharingStatus.key : ""))+'</div></div>' +
     '<div><div class="gallery-label">'+__t('feed.repost')+'</div><div class="gallery-value">'+__t('feed.reposts_count', {n: item.repostsCount || 0})+'</div></div>' +
-    '<div class="gallery-actions"><button type="button" class="btn-ghost" data-close-gallery>'+__t('common.cancel')+'</button><button type="button" class="btn-ghost" data-share-gallery>'+__t('feed.share')+'</button><button type="button" class="btn-ghost" data-delete-gallery="'+item.id+'">'+__t('gallery.delete')+'</button></div>' +
+    '<div class="gallery-actions"><button type="button" class="btn-ghost" data-share-gallery>'+__t('feed.share')+'</button><button type="button" class="btn-ghost" data-delete-gallery="'+item.id+'">'+__t('gallery.delete')+'</button></div>' +
     '</div>';
   modal.classList.add('show');
   document.body.style.overflow = 'hidden';
   bindGalleryPhotos(detail);
+  const close = detail.querySelector('[data-close-gallery]');
+  if(close) close.focus();
 }
 async function loadGallery(){
-  const res = await fetch('/pump-check-gallery/data');
-  const data = await res.json();
+  grid.setAttribute('data-state', 'loading');
+  grid.innerHTML = skeletonHTML();
+  let data;
+  try {
+    const res = await fetch('/pump-check-gallery/data');
+    if(!res.ok) throw new Error('gallery_unavailable');
+    data = await res.json();
+  } catch (err) {
+    galleryItems = [];
+    grid.setAttribute('data-state', 'unavailable');
+    grid.innerHTML = errorHTML();
+    return;
+  }
   galleryItems = data.items || [];
-  grid.innerHTML = galleryItems.length ? galleryItems.map(itemHTML).join('') : '<div class="empty-state"><div class="empty-icon">📷</div><div class="empty-desc">'+__t('gallery.empty')+'</div></div>';
+  grid.setAttribute('data-state', galleryItems.length ? 'populated' : 'empty');
+  grid.innerHTML = galleryItems.length ? galleryItems.map(itemHTML).join('') : emptyHTML();
   bindGalleryPhotos(grid);
 }
 function closeModal(){
   modal.classList.remove('show');
   document.body.style.overflow = '';
+  detail.innerHTML = '';
+  if(lastFocused && document.contains(lastFocused)) lastFocused.focus();
+  lastFocused = null;
 }
 grid.addEventListener('click', (e) => {
+  if(e.target.closest('[data-retry-gallery]')){
+    loadGallery();
+    return;
+  }
   const btn = e.target.closest('[data-id]');
   if(!btn) return;
   const item = galleryItems.find((row) => String(row.id) === btn.dataset.id);
@@ -120,7 +178,17 @@ modal.addEventListener('click', async (e) => {
   }
 });
 document.addEventListener('keydown', (e) => {
-  if(e.key === 'Escape' && modal.classList.contains('show')) closeModal();
+  if(!modal.classList.contains('show')) return;
+  if(e.key === 'Escape'){ closeModal(); return; }
+  // Keep Tab inside the open detail: a dialog the keyboard can walk out of
+  // leaves the user tabbing an inert page behind a scrim.
+  if(e.key !== 'Tab') return;
+  const stops = detail.querySelectorAll('button, [href]');
+  if(!stops.length) return;
+  const first = stops[0];
+  const last = stops[stops.length - 1];
+  if(e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+  else if(!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
 });
 loadGallery();
 </script>

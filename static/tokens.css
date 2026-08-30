@@ -176,11 +176,17 @@
   --weight-extrabold: 800;
 
   --leading-none:    1;
+  /* Headline leading. The scale jumped 1 -> 1.2 with nothing in between, so a
+     page headline either sat on its own descenders or read as body copy. */
+  --leading-headline: 1.1;
   --leading-tight:   1.2;
   --leading-snug:    1.4;
   --leading-normal:  1.6;
   --leading-relaxed: 1.75;
 
+  /* Optical correction for large type only: at headline sizes the default
+     letterfit reads loose. Never for body or micro labels. */
+  --tracking-tight:  -0.01em;
   --tracking-wide:   0.04em;
   --tracking-wider:  0.08em;
   --tracking-widest: 0.12em;

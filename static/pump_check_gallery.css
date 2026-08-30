@@ -1,24 +1,309 @@
-/* pump_check_gallery page — extracted from inline <style> (Phase 5 Final QA), canonical tokens. */
-    .gallery-wrap { max-width: 880px; margin: 0 auto; }
-    .gallery-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; }
-    .gallery-item { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); overflow:hidden; cursor:pointer; text-align:left; padding:0; color:var(--text); }
-    .gallery-item img { width:100%; aspect-ratio:1/1; object-fit:cover; display:block; background:rgba(var(--white-rgb),.03); }
-    .gallery-media-fallback { aspect-ratio:1/1; display:flex; align-items:center; justify-content:center; padding:12px; text-align:center; color:var(--text-3); font-size:12px; background:
-      radial-gradient(circle at top right, rgba(var(--color-primary-rgb),.34), transparent 34%),
-      linear-gradient(180deg, rgba(var(--white-rgb),.04), rgba(var(--white-rgb),.015)),
-      linear-gradient(135deg, var(--color-scrim-1), var(--color-scrim-2)); }
-    .gallery-meta { padding:10px; }
-    .gallery-date { color:var(--text-3); font-size:11px; }
-    .gallery-desc { font-size:13px; margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .gallery-modal { position:fixed; inset:0; z-index:1000; display:none; align-items:center; justify-content:center; background:rgba(var(--black-rgb),.78); padding:20px; }
-    .gallery-modal.show { display:flex; }
-    .gallery-detail { width:min(920px,100%); max-height:92vh; overflow:auto; background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--shadow-lg); }
-    .gallery-detail img { width:100%; max-height:70vh; object-fit:contain; background:var(--color-surface-deepest); display:block; }
-    .gallery-detail-fallback { min-height:320px; display:flex; align-items:center; justify-content:center; padding:16px; text-align:center; color:var(--text-3); font-size:13px; background:
-      radial-gradient(circle at top right, rgba(var(--color-primary-rgb),.34), transparent 34%),
-      linear-gradient(180deg, rgba(var(--white-rgb),.04), rgba(var(--white-rgb),.015)),
-      linear-gradient(135deg, var(--color-scrim-1), var(--color-scrim-2)); }
-    .gallery-detail-body { padding:18px; display:flex; flex-direction:column; gap:12px; }
-    .gallery-label { font-size:10px; font-weight:700; letter-spacing:.14em; color:var(--text-3); margin-bottom:3px; }
-    .gallery-value { font-size:14px; color:var(--text); line-height:1.45; }
-    .gallery-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:4px; }
+/* Pump Check Gallery — premium progress-photo surface (PR2).
+
+   Design rationale: docs/PUMP_CHECK_GALLERY_UI.md.
+
+   Every selector in this file is exclusive to this page (no other template, JS
+   or CSS references a `.gallery-*` class), so nothing here can reach another
+   surface. The shared layer is READ, never rewritten: tokens.css supplies every
+   value and components.css supplies `.empty-state` / `.btn-ghost`. */
+
+/* ── 1. PAGE HEADER ───────────────────────────────────────────
+   The shared `.page-hdr h1` role is the app's Bebas Neue poster title. On the
+   one surface whose subject is the user's own body, condensed all-caps display
+   type reads as a gym flyer and competes with the photographs. This page takes
+   a neutral headline role instead — locally, because every other page still
+   wants the poster title and retiring `--font-display` app-wide is a different
+   change with different consumers. */
+.gallery-hdr { margin-bottom: var(--space-6); }
+.gallery-hdr h1 {
+  font-family: var(--font-sans);
+  font-size: var(--text-display-sm);
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-headline);
+  text-transform: none;
+}
+.gallery-hdr p { margin-top: var(--space-3); max-width: 56ch; }
+
+/* ── 2. RESPONSIVE GRID ───────────────────────────────────────
+   A deliberate minimum card width per tier, not "as many columns as fit". The
+   previous 150px minimum produced five ~168px thumbnails on a 1280px viewport
+   inside an 880px wrapper — the photos were the smallest thing on a page about
+   photos. The wrapper cap is gone; `.main-content` (--content-max) already
+   centres and bounds the page.
+
+   Measured results (docs/PUMP_CHECK_GALLERY_UI.md): 320 -> 2x138 · 390 -> 2x173
+   · 768 -> 3x229 · 1280/1440 -> 4x293. */
+.gallery-wrap {
+  --gallery-card-min: 132px;
+  --gallery-gap: var(--space-3);
+}
+@media (min-width: 520px) {
+  .gallery-wrap { --gallery-card-min: 200px; --gallery-gap: var(--space-4); }
+}
+@media (min-width: 1024px) {
+  .gallery-wrap { --gallery-card-min: 260px; --gallery-gap: var(--space-5); }
+}
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--gallery-card-min), 1fr));
+  gap: var(--gallery-gap);
+}
+/* The empty / unavailable states are single blocks inside the same grid. */
+.gallery-state { grid-column: 1 / -1; }
+
+/* ── 3. CARD ──────────────────────────────────────────────────
+   Photo first, metadata in support. The card carries no padding of its own:
+   the media is edge-to-edge and `.gallery-meta` owns its inset. */
+.gallery-item {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  text-align: left;
+  color: var(--color-text-1);
+  background: var(--color-surface-2);
+  border: var(--border-w-1) solid var(--color-border-1);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color var(--duration-base) var(--ease-standard),
+              box-shadow var(--duration-base) var(--ease-standard);
+}
+.gallery-item:hover {
+  border-color: var(--color-border-2);
+  box-shadow: var(--elevation-2);
+}
+/* components.css rounds focused buttons to --radius-sm; on a 16px card that
+   reads as the corners changing shape when the keyboard reaches it. */
+.gallery-item:focus-visible {
+  outline: var(--border-w-3) solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-lg);
+}
+
+/* 4:5 portrait. Pump Checks are phone photographs of a standing body; a 1:1
+   crop of one cuts the head or the legs out of the frame the gallery exists to
+   show. The frame is the geometry authority — the photo, the loading state and
+   the unavailable state are all measured against it. */
+.gallery-media {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  overflow: hidden;
+  background: var(--color-surface-3);
+}
+.gallery-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--duration-slow) var(--ease-standard);
+}
+.gallery-item:hover .gallery-media img { transform: scale(1.02); }
+
+/* Same box as a photo, deliberately quiet: this is a missing file, not an
+   error the user caused or can act on. */
+.gallery-media-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-3);
+  text-align: center;
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--color-text-3);
+  background: var(--color-surface-3);
+}
+
+.gallery-meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4) var(--space-4);
+}
+.gallery-date {
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-1);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+/* Secondary detail, clamped to two lines so one long description cannot set the
+   height of every card in its row. The full text is in the detail view. */
+.gallery-desc {
+  font-size: var(--text-sm);
+  line-height: var(--leading-snug);
+  color: var(--color-text-3);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* ── 4. LOADING ───────────────────────────────────────────────
+   Reserves the final card geometry so the grid does not jump when the photos
+   arrive. One slow opacity pulse, not a travelling shimmer. */
+.gallery-skeleton {
+  background: var(--color-surface-2);
+  border: var(--border-w-1) solid var(--color-border-1);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+.gallery-skeleton-media {
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  background: var(--color-surface-3);
+  animation: gallery-skeleton-pulse 2.4s var(--ease-standard) infinite;
+}
+/* Matches .gallery-meta: --text-md line + --text-sm line + gap + padding. */
+.gallery-skeleton-meta { height: 62px; }
+@keyframes gallery-skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+/* ── 5. DETAIL / MODAL ────────────────────────────────────────
+   Opening a Pump Check should look like looking at the photo. Below 900px the
+   panel stacks (photo, then facts); at and above it the photo takes the wider
+   column and fills the panel's height. */
+.gallery-modal {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  background: rgba(var(--black-rgb), 0.78);
+}
+.gallery-modal.show { display: flex; }
+.gallery-detail {
+  display: flex;
+  flex-direction: column;
+  width: min(1040px, 100%);
+  max-height: 92vh;
+  overflow: hidden;
+  background: var(--color-surface-2);
+  border: var(--border-w-1) solid var(--color-border-1);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elevation-3);
+}
+.gallery-detail-media {
+  position: relative;
+  flex: none;
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  max-height: 52vh;
+  background: var(--color-surface-deepest);
+}
+.gallery-detail-media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.gallery-detail-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+  text-align: center;
+  font-size: var(--text-md);
+  color: var(--color-text-3);
+  background: var(--color-surface-3);
+}
+.gallery-detail-close {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--text-2xl);
+  line-height: var(--leading-none);
+  color: var(--white);
+  background: rgba(var(--black-rgb), 0.55);
+  border: var(--border-w-1) solid rgba(var(--white-rgb), 0.16);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+.gallery-detail-close:hover { background: rgba(var(--black-rgb), 0.78); }
+.gallery-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  overflow-y: auto;
+  /* Without this the flex/grid item refuses to shrink below its content and the
+     facts column runs off the bottom of the panel instead of scrolling. */
+  min-height: 0;
+}
+.gallery-detail-title {
+  font-family: var(--font-sans);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+  color: var(--color-text-1);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+.gallery-label {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--color-text-3);
+  margin-bottom: var(--space-1);
+}
+.gallery-value {
+  font-size: var(--text-base);
+  line-height: var(--leading-snug);
+  color: var(--color-text-1);
+}
+.gallery-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: auto;
+  padding-top: var(--space-2);
+}
+
+@media (min-width: 900px) {
+  /* A DEFINITE height, not min-height: with `height: auto` the row track sizes
+     to the facts column's content, the panel's max-height then clips it, and the
+     photo and the action buttons are cut off instead of the column scrolling.
+     `minmax(0, 1fr)` on the row is what lets both children shrink into it. */
+  .gallery-detail {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
+    grid-template-rows: minmax(0, 1fr);
+    height: min(72vh, 660px);
+  }
+  .gallery-detail-media {
+    aspect-ratio: auto;
+    max-height: none;
+    height: 100%;
+    min-height: 0;
+  }
+}
+
+/* ── 6. REDUCED MOTION ────────────────────────────────────────
+   components.css only silences `.skeleton` / `[class*="shimmer"]`; this page's
+   placeholder and hover feedback are its own and need their own rule. */
+@media (prefers-reduced-motion: reduce) {
+  .gallery-skeleton-media { animation: none; }
+  .gallery-item,
+  .gallery-media img,
+  .gallery-detail-close { transition: none; }
+  .gallery-item:hover .gallery-media img { transform: none; }
+}
