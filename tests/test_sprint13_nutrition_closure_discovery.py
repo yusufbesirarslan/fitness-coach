@@ -32,7 +32,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXED_DAY = date(2026, 8, 9)
 
 # `MealLog.tarih` is the canonical Istanbul day key. Every live writer produces
-# this shape; migration df0d08c0cd24 did not (F13).
+# this shape. Migration df0d08c0cd24 briefly did not, and its direct successor
+# 9be792c80008 normalized every row it wrote (report 5.1).
 ISO_DAY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -55,6 +56,48 @@ def _python_files(*relative_roots):
 
 def _relative(path):
     return path.relative_to(REPO_ROOT).as_posix()
+
+
+def _literal(tree, name):
+    """The literal value assigned to a module-level name, or None."""
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+                isinstance(target, ast.Name) and target.id == name
+                for target in node.targets):
+            return ast.literal_eval(node.value)
+    return None
+
+
+def _revision_graph():
+    """``{revision: down_revision}`` for every Alembic revision file."""
+    graph = {}
+    for path in (REPO_ROOT / "migrations" / "versions").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        graph[_literal(tree, "revision")] = _literal(tree, "down_revision")
+    return graph
+
+
+def _parents(down_revision):
+    if isinstance(down_revision, (tuple, list)):
+        return [item for item in down_revision if item]
+    return [down_revision] if down_revision else []
+
+
+def _ancestors_of_head(graph):
+    """Every revision reachable by walking down from the single head."""
+    parents = set()
+    for down in graph.values():
+        parents.update(_parents(down))
+    heads = sorted(set(graph) - parents)
+    assert len(heads) == 1, f"Expected exactly one Alembic head, found {heads}."
+    seen, stack = set(), [heads[0]]
+    while stack:
+        revision = stack.pop()
+        if revision in seen:
+            continue
+        seen.add(revision)
+        stack.extend(_parents(graph.get(revision)))
+    return seen
 
 
 def _constructs(path, class_name):
@@ -185,7 +228,8 @@ def test_raw_sql_ledger_inserts_are_limited_to_the_two_known_places():
     assert raw_writers == {
         "fitx_mcp/server.py",  # W9 - developer tool, not in the deployed image
         "migrations/versions/"
-        "df0d08c0cd24_backfill_user_daily_nutrition_to_meal_.py",  # W11 - F13
+        # W11 - the yearless backfill; repaired by 9be792c80008 (report 5.1)
+        "df0d08c0cd24_backfill_user_daily_nutrition_to_meal_.py",
     }
 
 
@@ -198,8 +242,12 @@ def test_the_mcp_ledger_writer_is_not_part_of_the_deployed_image():
 
 
 # ---------------------------------------------------------------------------
-# F13 / N5 / C14 - the day key
+# N5 / report 5.1 - the day key
 # ---------------------------------------------------------------------------
+# F13 was withdrawn and C14 retired by independent review: the yearless backfill
+# was normalized by its own direct successor. These tests therefore pin the whole
+# chain - defect *and* repair - rather than only the half that made the original
+# finding look live.
 
 def test_every_live_writer_uses_the_canonical_iso_day_key(app, make_user):
     """N5: the day is the server's, and it is ISO.
@@ -216,39 +264,74 @@ def test_every_live_writer_uses_the_canonical_iso_day_key(app, make_user):
     assert date.fromisoformat(entry.tarih)
 
 
-def test_the_historical_backfill_wrote_a_day_key_no_query_can_match():
-    """F13: pinned so PR2A's repair has something to point at.
+def test_the_yearless_backfill_was_repaired_by_its_direct_successor():
+    """Report 5.1 / N5: the complete historical invariant, not half of it.
 
-    The assertion is behavioural, not textual: the migration's own expression is
-    evaluated and compared against the format every reader filters on.
+    PR1 as first written pinned only the transient defect - migration
+    df0d08c0cd24 formatting a yearless `%d.%m` day key - and concluded from it
+    that the ledger still holds unreachable rows. It does not: the very next
+    revision rewrote every row to the ISO Istanbul day. That made F13 a false
+    P1, and nothing in this module would have caught the mistake, because
+    deleting the repair migration failed no test.
+
+    So this asserts the chain end to end: the defect existed, the repair exists,
+    it is wired directly to the migration it repairs, it derives the day key from
+    canonical created-at semantics, and it sits before the Alembic head. Break
+    any link and the withdrawn finding becomes live again - which is exactly when
+    someone should have to look at report 5.1.
     """
-    source = _module_source(
-        "migrations/versions/"
-        "df0d08c0cd24_backfill_user_daily_nutrition_to_meal_.py")
-    tree = ast.parse(source)
+    versions = REPO_ROOT / "migrations" / "versions"
+    backfill = versions / "df0d08c0cd24_backfill_user_daily_nutrition_to_meal_.py"
+    repair = versions / "9be792c80008_tarih_to_iso_date_istanbul.py"
 
+    # 1. the older migration really did write a yearless day key.
     produced = None
-    for node in ast.walk(tree):
+    for node in ast.walk(ast.parse(backfill.read_text(encoding="utf-8"))):
         if (isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
                 and node.func.attr == "strftime"
                 and node.args
                 and isinstance(node.args[0], ast.Constant)):
             produced = datetime(2026, 6, 15, 20, 0).strftime(node.args[0].value)
-    assert produced is not None, (
-        "The backfill no longer formats a day key. If PR2A repaired it, this "
-        "test must be replaced by the repair's own assertion, not deleted.")
-    assert not ISO_DAY.match(produced), (
-        "The backfill now produces an ISO day key - F13 is fixed and this "
-        "characterization must be retired deliberately.")
-    assert produced < "2000-01-01", (
-        "A DD.MM key sorts below every ISO key, which is why range-filtered "
-        "readers silently exclude these rows.")
+    assert produced is not None and not ISO_DAY.match(produced), (
+        "The backfill no longer formats a non-ISO day key. The chain this test "
+        "pins has changed; update report 5.1 deliberately.")
+
+    # 2. + 3. the repair exists, and it is the backfill's direct successor.
+    assert repair.exists(), (
+        "9be792c80008 is gone. That migration is the entire reason F13 is a "
+        "withdrawn finding rather than a live P1; removing it re-opens the "
+        "defect and would require a repair migration after all.")
+    repair_tree = ast.parse(repair.read_text(encoding="utf-8"))
+    assert _literal(repair_tree, "revision") == "9be792c80008"
+    assert _literal(repair_tree, "down_revision") == "df0d08c0cd24", (
+        "The repair was disconnected from the migration it repairs. Its "
+        "guarantee is that no database can run one without the other.")
+
+    # 4. it normalizes with canonical created-at -> Istanbul day semantics.
+    source = repair.read_text(encoding="utf-8")
+    for fragment in ("UPDATE meal_log SET tarih", "created_at",
+                     "Europe/Istanbul", "astimezone", "date().isoformat()"):
+        assert fragment in source, (
+            f"The repair no longer derives tarih via {fragment!r}. Its rule is "
+            "identical to the repair PR2A would have performed, which is why "
+            "PR2A does not exist.")
+
+    # 5. the repair is an ancestor of the current head, so it cannot be skipped.
+    assert "9be792c80008" in _ancestors_of_head(_revision_graph()), (
+        "The repair is no longer an ancestor of the Alembic head, so a database "
+        "at head could have run the backfill without it.")
 
 
 def test_a_malformed_day_key_is_invisible_to_the_canonical_readers(
         app, make_user):
-    """F13: the consequence, exercised rather than argued."""
+    """Report 5.1: why a non-ISO key is invisible rather than miscounted.
+
+    Retained after F13's withdrawal because the reader behaviour is still the
+    load-bearing fact: it is what made the transient backfill state harmless
+    between the two June 2026 migrations, and it is why a *live* writer emitting
+    a non-ISO key would be a real defect rather than a cosmetic one.
+    """
     user = make_user("s13-orphan-row")
     db.session.add(MealLog(
         user_id=user.id, ogun="AI Koç", yemekler="Eski koç öğünü",
@@ -272,15 +355,32 @@ def test_a_malformed_day_key_is_invisible_to_the_canonical_readers(
         "The row exists; only the day-keyed queries cannot see it.")
 
 
-def test_the_schema_does_not_yet_enforce_the_day_key_format():
-    """C14: the invariant PR2A adds does not exist today."""
+def test_the_ledger_schema_pins_macro_bounds_and_not_the_day_key_format():
+    """C14 (RETIRED): the day key needs no database constraint.
+
+    The original report proposed `ck_meal_log_tarih_iso`. Review retired it on
+    its own merits, independently of the repair: `tarih` is `String(10)`, so a
+    CHECK can pin a *pattern* but never a calendar date - `'2026-13-45'`
+    satisfies every portable form - and PostgreSQL's regex operator is a syntax
+    error on SQLite, so no single portable constraint expresses the intent.
+
+    This test therefore no longer justifies a future migration. It characterizes
+    the constraint set as it is, so that adding one becomes a visible decision
+    rather than a drive-by.
+    """
     constraint_names = {
         constraint.name for constraint in MealLog.__table__.constraints
         if constraint.name
     }
-    assert "ck_meal_log_macro_bounds" in constraint_names
+    assert "ck_meal_log_macro_bounds" in constraint_names, (
+        "The macro bounds are the ledger's one real value constraint (N7).")
+    assert "uq_meal_log_user_idempotency" in constraint_names
     assert "ck_meal_log_tarih_iso" not in constraint_names, (
-        "PR2A's CHECK landed. Update decision C14 and this test together.")
+        "A day-key CHECK landed. C14 was retired on the evidence in report 5.1; "
+        "reinstating it is a new architecture decision, not a rebased migration.")
+    assert MealLog.__table__.c.tarih.type.length == 10, (
+        "tarih is a fixed-width string, which is precisely why a CHECK could "
+        "only ever pin a shape and not a real date.")
 
 
 # ---------------------------------------------------------------------------
@@ -559,17 +659,34 @@ def test_barcode_and_coach_disagree_on_the_carbohydrate_target(
 
 
 def test_the_barcode_target_fabricates_a_goal_the_user_never_configured():
-    """F3: the fabrication the mobile boundary refuses, still present on web."""
+    """F3a: fabricated on a live route, and rendered by nothing - hence P2.
+
+    Both halves matter. The fabrication is real, and barcode is the only server
+    surface that commits it (coach returns None, menu returns 400). But it is
+    P2 rather than P1 only because no first-party surface reads the payload that
+    carries it. If that changes, the severity changes with it.
+    """
     from app.services import barcode
 
     unconfigured = SimpleNamespace(target_calories=None, goal=None)
     targets = barcode._target_macros(unconfigured)
     assert targets["calories"] == 2000, (
-        "PR2 removed the fabricated default. Update F3 and this test together.")
+        "PR2 removed the fabricated default. Update F3a and this test together.")
 
     from app.services.mobile_nutrition import serialization
     assert serialization.nutrition_goal(None) is None, (
-        "The mobile boundary is the reference behaviour for F3.")
+        "The mobile boundary is the reference behaviour for F3a.")
+
+    frontend = list((REPO_ROOT / "static").rglob("*.js"))
+    frontend += list((REPO_ROOT / "templates").rglob("*.html"))
+    for key in ("daily_context", "portion_recommendation", "axisai_food_score"):
+        renderers = [
+            _relative(path) for path in frontend
+            if key in path.read_text(encoding="utf-8", errors="ignore")
+        ]
+        assert renderers == [], (
+            f"{key} gained a first-party consumer in {renderers}, so the "
+            "fabricated target is now user-visible. F3a becomes a P1.")
 
 
 def test_progress_and_mobile_today_consume_no_nutrition_authority():
@@ -613,6 +730,41 @@ def test_the_orphaned_nutrition_read_surfaces_still_exist_and_have_no_consumer(
         assert callers == [], (
             f"{endpoint} gained a consumer. F9 recommended retiring it (C8); "
             "wiring it up instead is a decision that needs recording.")
+
+
+# ---------------------------------------------------------------------------
+# F14 / C4 / N9 - the correction primitive's resource lifecycle
+# ---------------------------------------------------------------------------
+
+def test_deleting_a_ledger_row_releases_no_stored_meal_photo():
+    """F14: the primitive Sprint 13 closes on has no object lifecycle.
+
+    Two halves, both load-bearing. The repository owns no S3 deletion primitive
+    at all, so there is nothing a caller could reach for; and the single code
+    path that deletes a canonical row does not reach for one. Together they are
+    why "delete + re-log is exact" (C4, as first written) is false for a
+    photo-bearing row, and why PR4 must add the lifecycle rather than assume it.
+    """
+    import s3_helper
+
+    deleters = sorted(
+        name for name in dir(s3_helper)
+        if not name.startswith("__")
+        and ("delete" in name.lower() or "remove" in name.lower()))
+    assert deleters == [], (
+        f"s3_helper grew {deleters}. If PR4 added the deletion primitive F14 "
+        "asks for, replace this characterization with the lifecycle's own "
+        "test - including its partial-failure path - rather than deleting it.")
+
+    tree = ast.parse(
+        _module_source("app/services/mobile_diary_mutation/service.py"))
+    delete_entry = next(
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "delete_entry")
+    body = ast.dump(delete_entry).lower()
+    assert "photo" not in body and "s3" not in body, (
+        "delete_entry now touches the stored object. That is F14's fix landing; "
+        "update the finding, C4 and this test together.")
 
 
 # ---------------------------------------------------------------------------

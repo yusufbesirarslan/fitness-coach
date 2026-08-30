@@ -22,24 +22,31 @@ What is *not* closed is the **web** side of the same ledger, and a set of
 
 * the web has **no correction path at all** for a committed ledger row — no
   delete, no slot change, no edit — while mobile has both supported mutations;
-* **five** independent macro-target derivations exist, two of which disagree
-  numerically for every non-bulk user, and two of which fabricate a `2000 kcal`
-  goal for a user who never configured one;
+* the **daily macro-target split and the remaining-macro budget** are derived
+  independently by three server call sites, two of which disagree numerically
+  for every non-bulk user, and one of which fabricates a `2000 kcal` goal for a
+  user who never configured one — with a fourth, competing split living in the
+  browser;
 * the main web search-and-log path posts **per-100 g** figures as a meal total,
   so quantity is silently fixed at 100 g;
 * the web `/meal-log` `override_macros` branch persists **client-computed**
   nutrition (bounded only by a physical-plausibility clamp) into the same ledger
-  the mobile path recomputes from provider truth.
+  the mobile path recomputes from provider truth;
+* deletion — the single correction primitive this closure rests on — has **no
+  stored-object lifecycle**: the row goes, the S3 meal photo stays forever, and
+  the repository has no object-deletion primitive to call (F14).
 
-There is also one **historical data-integrity defect**: migration `df0d08c0cd24`
-backfilled old AI-Coach meals into the ledger with a `DD.MM` day key, a format
-no `tarih`-keyed query can ever match.
+**The ledger's day keys are not a defect.** This report as first written raised a
+P1 (`F13`) over a historical `DD.MM` backfill. That conclusion was wrong and is
+**withdrawn**: the transient state was normalised by that migration's own direct
+successor, `9be792c80008`. See **§5.1**.
 
 **Nutrition core closure does not need a provenance column, a history endpoint,
-a mobile menu adapter, or a nutrition intelligence domain.** It needs authority
-convergence on the derived figures, a web correction path, one conditional
-day-key repair, and the removal of orphaned/unsafe sibling writers. That is five
-small, independently reviewable PRs.
+a mobile menu adapter, a nutrition intelligence domain, or a schema migration.**
+It needs authority convergence on the derived figures, a web correction path
+whose resource lifecycle is closed, and the removal of orphaned or unsafe
+sibling writers. That is **four** small, independently reviewable PRs and **no
+migration at all**.
 
 **No P0 was found.** No writer fabricates persisted state, no double-count path
 exists, no cross-user read or write was found, and the day boundary is
@@ -49,19 +56,40 @@ server-owned everywhere it matters.
 
 | ID | Sev | One line |
 |---|---|---|
-| F13 | P1 | Migration `df0d08c0cd24` wrote `tarih` as `DD.MM`; any row it created is unreachable by every day-keyed query |
 | F1 | P1 | Web cannot delete, move, or edit a committed `MealLog` row — no correction path |
-| F2 | P1 | Five macro-target derivations; `barcode._target_macros` disagrees with coach/menu for every non-bulk goal |
-| F3 | P1 | `barcode._target_macros` and `/meal-log/review` fabricate a `2000 kcal` target when none is configured |
+| F14 | P1 | Deleting a ledger row releases no S3 meal photo; `s3_helper` exposes no deletion primitive at all |
+| F2 | P1 | Three server derivations of one daily macro-target split; `barcode._target_macros` disagrees with coach/menu for every non-bulk goal |
+| F3a | P2 | `barcode._target_macros` fabricates a `2000 kcal` target and publishes it on the **live** `GET /api/food/barcode` payload — currently rendered by nothing |
 | F4 | P1 | Web multi-food quick log posts **per-100 g** values as the meal total (quantity fixed at 100 g, never chosen) |
 | F5 | P1 | `/meal-log` `override_macros` persists client-computed macros; the mobile path recomputes from the provider. Same ledger, two trust models |
-| F6 | P2 | `POST /api/food/barcode/add` accepts a caller-supplied `food` object and has **no** frontend consumer |
+| F6 | P2 | `POST /api/food/barcode/add` accepts a caller-supplied `food` object; no first-party consumer, but a documented `/api/food/*` compatibility surface — deprecate before removing (C13) |
 | F7 | P2 | `/meal-log` does not validate `ogun`: free text reaches `MealLog.ogun` (`String(100)`) → `unknown` slot on the wire, `DataError` above 100 chars |
 | F8 | P2 | Social meal-suggestion writer sets no `source` (reads back as `manual`) and uses no idempotency key |
 | F9 | P2 | `/api/progress/nutrition` and `/api/progress/insights` are orphaned; the latter contains an unowned calorie-adherence heuristic |
 | F10 | P2 | `static/nutrition.js` computes a 0–100 nutrition score and an A–D letter grade in the browser, with no server owner and no mobile counterpart |
 | F11 | P2 | `fitx_mcp.log_nutrition_entry` writes the ledger with `user_id` as a *tool parameter* and no idempotency (not deployed) |
 | F12 | P2 | `diary_log_meal` writes the ledger without an idempotency key (safe today only because of the atomic `is_logged` claim) |
+| F3b | — | `/meal-log/review`'s `2000` is an internal LLM-prompt fallback for qualitative text, never a published target — **benign**, recorded so it is not re-raised |
+| ~~F13~~ | — | **WITHDRAWN by independent review.** The `DD.MM` backfill was normalised by its own direct successor `9be792c80008`; there is no live defect. See **§5.1** |
+
+### Review remediation
+
+This document was independently reviewed after its first commit (`3b49fcf`). The
+review verdict was **APPROVED WITH REQUIRED CHANGES**. Incorporated here:
+
+| # | Correction |
+|---|---|
+| 1 | `F13` **withdrawn** — the day-key defect was already repaired in June 2026 (**§5.1**) |
+| 2 | `C14` **retired** — no repair migration and no `ck_meal_log_tarih_iso`; **Sprint 13 requires no migration** |
+| 3 | `PR2A` **removed** from the implementation sequence |
+| 4 | `N5` **satisfied**, not open |
+| 5 | `F3` **downgraded to P2** and split into `F3a` (live but unrendered fabrication) and `F3b` (benign prompt fallback) |
+| 6 | `C2` **narrowed** to one shared domain fact; analytics reclassified as a consumer; the browser split assigned to `PR5` so `N4` is satisfiable |
+| 7 | `C4` — *"re-logging is exact"* **removed**; deletion is a lossy primitive |
+| 8 | `F14` **added** (P1) — no S3 object lifecycle on delete; owned by `PR4` |
+| 9 | `C5` **split** — web delete is a core blocker, web slot move is not |
+| 10 | `N9` **scoped** to current-day entries, with deletion as the required primitive |
+| 11 | `C13` **softened** — `/api/food/barcode/add` is a legacy compatibility surface, deprecated before removal |
 
 ---
 
@@ -181,7 +209,7 @@ unavailable · **L** legacy compatibility.
 | Consumed-food ledger | `MealLog` | **AP** | `app/models.py:557-599` |
 | Diary/builder state | `CustomMeal` + `CustomMealItem` | **S** | `app/models.py:1338-1374`; `diary.py:436-493` docstring: "KANONİK … DEĞİLDİR" |
 | Nutrition plan | `NutritionPlan.plan_data` (opaque LLM JSON) | **AP** (separate domain) | `app/models.py:321-329` |
-| Calendar day + timezone | `app/timeutil` (`app_today`, `day_key`, `APP_TZ = Europe/Istanbul`) | **AD** | `app/timeutil.py:12,40,45`; `MealLog.tarih` is `NOT NULL` with an `app_today()` default — but the ISO **format is not enforced by the schema** (F13) |
+| Calendar day + timezone | `app/timeutil` (`app_today`, `day_key`, `APP_TZ = Europe/Istanbul`) | **AD** | `app/timeutil.py:12,40,45`; `MealLog.tarih` is `NOT NULL` with an `app_today()` default. No schema `CHECK` pins the format, and **§5.1** explains why adding one is not warranted |
 | Daily calories/macros | `MealLog` rows summed server-side, NULL→0 | **AD** | `mobile_nutrition/serialization.py:day_totals`; `meallog.py:217-239` |
 | Calorie target | newest `UserSession.target_calories` | **AP** | `mobile_nutrition/queries.py:fetch_target_energy_kcal` |
 | **Macro targets** | **no owner — 5 derivations** | **AD (contested)** | F2, §7 |
@@ -214,6 +242,68 @@ No third definition was found. `/api/progress/nutrition`,
 `ai_coach._today_nutrition_totals` and `fitx_mcp` all read `MealLog` and none
 of them persists a competing total.
 
+### 5.1 Day-key chronology — why no repair and no `CHECK` are required
+
+This subsection exists because the original discovery got this wrong. The
+correction matters more than the appearance of a clean report.
+
+PR1 as first written raised a P1 (`F13`):
+`migrations/versions/df0d08c0cd24_backfill_user_daily_nutrition_to_meal_.py:58`
+backfills old AI-Coach meals with `created.strftime("%d.%m")`, a yearless key no
+`tarih`-filtered query can match. That observation about *that migration* is
+accurate. The conclusion drawn from it was not — **the discovery missed the
+direct successor migration.**
+
+| Revision | Parent | Created | Effect on `meal_log.tarih` |
+|---|---|---|---|
+| `df0d08c0cd24` | `54f2eb195404` | 2026-06-15 20:00:19 | backfills `user_daily_nutrition` rows with a yearless `DD.MM` key |
+| **`9be792c80008`** | **`df0d08c0cd24`** | **2026-06-15 20:18:37** | **rewrites every row**: `created_at` (naive UTC) → `Europe/Istanbul` → `date().isoformat()` |
+| `b8c9d0e1f2a3` | later | — | backfills NULL `tarih` from `created_at` at Istanbul, then `SET NOT NULL` (PostgreSQL) |
+| `f6a7b8c9d0e1` | later | — | `DROP TABLE IF EXISTS user_daily_nutrition` — the malformed producer's source table no longer exists |
+
+`9be792c80008` is the **immediate child** of the backfill, eighteen minutes later
+in migration history, and its docstring states the intent outright:
+*"meal_log.tarih'i yıl-içermeyen '%d.%m'den ISO 'YYYY-MM-DD'ye taşı…
+Idempotent: tekrar çalışsa aynı ISO değerini üretir."* Its rule —
+`created.replace(tzinfo=UTC).astimezone(Europe/Istanbul).date().isoformat()` —
+is **exactly** the repair the withdrawn `PR2A` proposed, applied unconditionally
+to every row instead of conditionally to malformed ones.
+
+The graph makes that repair unavoidable rather than optional: all **37**
+revisions are ancestors of the single head `c2d3e4f5a6b7`, so no database at
+head can have run `df0d08c0cd24` without also running `9be792c80008`. Both
+migrations were replayed in sequence against an isolated database during review;
+rows written as `['15.06', '15.06', '02.01']` came out as
+`['2025-06-15', '2026-06-15', '2026-01-03']` — the last confirming the Istanbul
+day-shift of a `22:30 UTC` timestamp.
+
+**Why no `CHECK` replaces it.** The retired `ck_meal_log_tarih_iso` was not
+merely unnecessary, it was weaker than it read. `MealLog.tarih` is `String(10)`,
+so a constraint can only pin a **pattern, never a calendar date** — `2026-13-45`
+satisfies every form of it. PostgreSQL's `~` is a syntax error on SQLite, so a
+single portable `CheckConstraint` in `__table_args__` cannot be a regex at all;
+the portable `GLOB` / `LIKE` forms that do build on both engines accept
+impossible dates. That is unlike `ck_meal_log_macro_bounds`, which *is* portably
+expressible — the precedent does not transfer. Weighed against a lock on the
+ledger table, for a producer that no longer exists, the trade is not worth
+making.
+
+**Consequences, recorded plainly:**
+
+* `F13` is **withdrawn**, not downgraded. It was never a live defect.
+* No day-key repair migration is required, so **`PR2A` does not exist**.
+* **`N5` is satisfied**, not open.
+* One residual theoretical gap is recorded and deliberately *not* promoted to a
+  finding: a row written before June 2026 with `created_at IS NULL` is
+  `continue`d past by `9be792c80008`. `MealLog.created_at` is nullable, but every
+  writer in §6 relies on its `datetime.utcnow` default, `b8c9d0e1f2a3` later
+  backfills NULL day keys on PostgreSQL, and the only producer of non-ISO keys
+  was dropped along with its source table. A bounded historical curiosity, not a
+  P1.
+* The characterization suite now pins the **repair**, not only the transient
+  defect (§19). Before this remediation, deleting `9be792c80008` would have
+  failed no test — a false negative in the guard set.
+
 ---
 
 ## 6. Writer inventory
@@ -237,7 +327,7 @@ or persists what the caller supplied (`client`, bounded by the clamp).
 | W8 | Mobile slot move / delete | `PATCH`/`DELETE /api/v1/nutrition/logs/<token>` (`mobile_nutrition.py:170,207`) | `require_mobile_auth` | `g.mobile_user.id` | current `day_key()` only | 4 slots, strict enum | n/a | n/a | unchanged | `If-Match` revision (not replay-idempotent by design) | `SELECT … FOR UPDATE` + revision compare under the lock | single txn | `200` / `204` after commit |
 | W9 | MCP tool (**not deployed**) | `fitx_mcp/server.py:380` | **none — `user_id` is a tool argument** | arbitrary | `_day_key()` | literal `"AI Koç"` | client (tool arguments) | `clamp_serving_macros` | `coach` | **none** | raw psycopg2 | single txn | n/a |
 | W10 | Frontend-audit seeder (**not production**) | `scripts/frontend_audit/seed.py:138` | n/a | fixture | fixture | fixture | n/a | n/a | n/a | n/a | n/a | n/a | n/a |
-| W11 | One-time backfill (**already ran, June 2026**) | `migrations/versions/df0d08c0cd24_…py:36-61` | n/a — bulk `INSERT … SELECT` from `user_daily_nutrition` | row's own `user_id` | **`created.strftime("%d.%m")` — malformed** (F13) | literal `"AI Koç"` | none — copied verbatim | **none** | `coach` | n/a | n/a | migration txn | n/a |
+| W11 | One-time backfill (**already ran, June 2026**) | `migrations/versions/df0d08c0cd24_…py:36-61` | n/a — bulk `INSERT … SELECT` from `user_daily_nutrition` | row's own `user_id` | `created.strftime("%d.%m")` — **transient**, normalised to ISO by its direct successor `9be792c80008` (§5.1) | literal `"AI Koç"` | none — copied verbatim | **none** | `coach` | n/a | n/a | migration txn | n/a |
 
 ### Sibling writers that bypass the canonical mobile path's protections
 
@@ -277,8 +367,8 @@ the builder row it was composed from, and no reader sums them (§7).
 | Mobile Nutrition (`/api/v1/nutrition/diary/today`) | `MealLog` | **no** — `totals` are the server's; `goalImpact` is a null-guarded presentation projection (`nutrition_diary_day.dart:131-139`) | no | **`null` stays `null`** per macro; totals NULL→0, documented | server, published with IANA zone |
 | AI Coach context (`ai_coach._today_nutrition_totals`, `_remaining_macros_for_user`) | `MealLog` + `UserSession` | **yes** — remaining-macro budget | **yes** (F2) | NULL→0 via `coalesce` | `day_key()` |
 | Menu analysis (`menu.analyze_menu:301-319`) | `MealLog` + `UserSession` | **yes** — remaining-macro budget (formula duplicated from coach) | **yes** (F2) | zero-fills | `day_key()` |
-| Barcode goal impact (`barcode.goal_impact_for_add`, `_target_macros`) | `MealLog` + `UserSession` | **yes** — targets/remaining, **and a `2000 kcal` default** | **yes** (F2, F3) | zero-fills | `day_key()` |
-| Weekly nudges (`analytics_engine._check_protein_goal:108`, `_check_missing_logs`) | `MealLog` | **yes** — weekly protein goal (aligned to coach for protein only) | partially (F2) | NULL→0 | `MealLog.tarih` range |
+| Barcode goal impact (`barcode.goal_impact_for_add`, `_target_macros`) | `MealLog` + `UserSession` | **yes** — targets/remaining, **and a `2000 kcal` default** | **yes** (F2, F3a) | zero-fills | `day_key()` |
+| Weekly nudges (`analytics_engine._check_protein_goal:108`, `_check_missing_logs`) | `MealLog` | answers a **different question** — a *weekly* protein goal, already aligned to the coach percentage | **no** — a downstream **consumer** of the same ratio, not a competing target authority | NULL→0 | `MealLog.tarih` range |
 | Heatmap (`tracking.py:832`) | distinct `MealLog.tarih` | no | no | absent day = level 0 | `tarih` |
 | `/api/progress/nutrition` (`tracking.py:615`) | `MealLog` | no | **orphaned — no consumer** (F9) | zero-fills; `kcal > 0` used as "logged" | `tarih` |
 | `/api/progress/insights` (`tracking.py:894`) | `MealLog` + `UserSession` | **yes** — calorie-adherence tone, `80 ≤ pct ≤ 110` = success | **orphaned — no consumer** (F9) | skips when `target` falsy | `app_today()` |
@@ -309,8 +399,9 @@ reads, and the mobile client shows nothing equivalent.
 | Log provider-backed food | yes | via `override_macros` (client math) | canonical, server-recomputed | ❌ F5 |
 | Log manual food | yes | yes | yes (typed bounds) | ⚠️ different validation |
 | Log meal photo | yes (`photo_key`) | yes | **no mobile path** | ⚠️ web-only capability |
-| **Delete a committed entry** | mobile route only | **no** | yes | ❌ **F1** |
-| **Move a committed entry's slot** | mobile route only | **no** | yes | ❌ **F1** |
+| **Delete a committed entry** | mobile route only | **no** | yes | ❌ **F1** — core blocker (C5) |
+| Release the stored photo when an entry is deleted | **no path anywhere** | n/a | n/a | ❌ **F14** — the object outlives the row on every client |
+| Move a committed entry's slot | mobile route only | no | yes | ⚠️ product gap, **not** a closure blocker (C5) |
 | Edit description / nutrition of a committed entry | **unsupported by design** | no | no | ✅ consistent |
 | Entry identity | opaque token (mobile), raw `meal_log_id` echoed by W4 | raw int | opaque token | ⚠️ F6 |
 | Stale-write protection | `If-Match` (mobile) | n/a (no mutation) | yes | ✅ |
@@ -330,7 +421,7 @@ reads, and the mobile client shows nothing equivalent.
 |---|---|---|
 | Mobile PR3B — opaque ids, revisions, `If-Match`, slot move, delete, post-`412`/`404`/ambiguous re-read, no local macro subtraction | **CLOSED — shipped** | `live_nutrition_repository.dart:145-176` sends `If-Match: "<revision>"` on PATCH and DELETE with `ReplayPolicy.never`; `nutrition_diary_mutation_controller.dart:187-249` maps `staleDiaryEntry`→re-read, `diaryEntryNotFound`→re-read, connectivity/timeout/503/429→re-read, then decides `_desiredStateReached`; totals are never recomputed client-side (`nutrition_diary_day.dart:76-86`) |
 | Manual description / nutrition editing | **NO LONGER DESIRABLE as a Sprint 13 requirement** | Requires a durable entry-kind that is not persisted; the correct correction primitive (delete + re-log) already exists on mobile and is missing only on web. Closing F1 supersedes the need. See **C4** |
-| Provider quantity / serving change | **NO LONGER DESIRABLE (Sprint 13)** | Same. Cannot be proven from the ledger; the builder holds the structured values, and re-logging is exact. See **C4** |
+| Provider quantity / serving change | **NO LONGER DESIRABLE (Sprint 13)** | Same. Cannot be proven from the ledger; the builder holds the structured values, and delete + re-log reproduces the row within the bounds **C4** now states explicitly — a stored meal photo is **not** among them (F14) |
 | Provider food replacement | **NO LONGER DESIRABLE (Sprint 13)** | Same |
 | Provider ↔ manual conversion | **CLOSED — forbidden, permanently** | Would fabricate provenance; the current contract already forbids it |
 | Provider provenance columns on `MealLog` | **STILL OPEN — SAFE POST-CLOSURE** | Not a correctness bug (see **C4**). Nothing today reads provenance it does not have; the mobile contract publishes the absence honestly |
@@ -401,31 +492,55 @@ product does not need.
 *Migration:* none. *Security:* none. *Compat:* none.
 *Owned by:* nothing — this decision is a constraint on later PRs.
 
-### C2 — Macro targets get exactly one server-owned derivation
+### C2 — The daily macro-target split has exactly one server-owned derivation
 
-*Evidence (F2, F3):* five derivations —
-`ai_coach._remaining_macros_for_user:133`, `menu.analyze_menu:311-313`,
-`barcode._target_macros:219`, `analytics_engine._check_protein_goal:119`, and
-`static/nutrition.js:168-172`. For `goal = "kilo verme"` or `goal = ""` (the two
-non-bulk values `profile.py:135` permits), coach/menu compute carbohydrate
+*The domain fact:* **the authoritative daily macro-target split and the derived
+remaining-macro budget** — one question ("given this user's configured calorie
+target and goal, how much protein / carbohydrate / fat does the day allow, and
+how much of it is left?"), currently answered more than once.
+
+*Evidence (F2, F3a):* three server call sites derive it —
+`ai_coach._remaining_macros_for_user:133`, `menu.analyze_menu:311-313` and
+`barcode._target_macros:219`. For `goal = "kilo verme"` or `goal = ""` (two of
+the three values `profile.py:135` permits), coach and menu compute carbohydrate
 target `cal × 0.50 / 4` while barcode computes `cal × 0.45 / 4` — for a
 2000 kcal user, **250 g vs 225 g**. `barcode._target_macros:220` additionally
-substitutes `2000` when no target is configured, and `/meal-log/review:308`
-does the same, which is precisely the fabrication the mobile boundary refuses
-(`serialization.py:nutrition_goal`).
-*Options:* (a) one pure `nutrition_targets` module every reader calls;
+substitutes `2000` when no target is configured, which is precisely the
+fabrication the mobile boundary refuses (`serialization.py:nutrition_goal`).
+
+*What is **not** a competing authority:*
+
+* `analytics_engine._check_protein_goal:119` answers a **different question** — a
+  *weekly* protein goal — and already consumes the coach percentage
+  deliberately. It is a downstream **consumer** of the same ratio, not a rival
+  target authority. Converging it on the canonical ratio is fine; describing it
+  as a fifth contradicting derivation was not.
+* `/meal-log/review`'s `2000` (F3b) is an internal fallback inside an LLM prompt
+  that produces qualitative text. It publishes no number as a configured target
+  and must not be forced to become one.
+
+*What **is** the other half of the problem:* `static/nutrition.js:168-172`
+carries a browser-owned `30/40/30` split matching none of the server formulas.
+It is presentation, but it is the number a web user actually reads. **PR2 is
+backend-only and must not touch `static/`**, so that half is explicitly assigned
+to **PR5** — without which N4 could never be marked satisfied.
+
+*Options:* (a) one pure `nutrition_targets` module every server reader calls;
 (b) persist macro targets on `UserSession`; (c) leave it.
-*Chosen:* **(a)** — a pure, stdlib-only derivation module with the coach/menu
-formula as the surviving definition, returning `None` when no target is
-configured. Callers decide how to present absence; none substitutes a number.
+*Chosen:* **(a)** — a pure, stdlib-only derivation with the coach/menu formula
+as the surviving definition, returning `None` when no target is configured.
+Callers decide how to present absence; none substitutes a number.
 *Rejected:* (b) is a migration to fix a duplication problem, and it would make
 historic rows carry targets nobody set; (c) leaves two surfaces contradicting
 each other in front of the same user on the same day.
-*Single authority:* one function, five call sites.
+*Single authority:* one function; three server call sites, plus analytics
+consuming the same ratio for its own question.
 *Migration:* none. *Security:* none. *Compat:* the barcode payload's
-`targets.carbs` changes for non-bulk users — a **correction**, and the barcode
-add route has no frontend consumer today (F6).
-*Owned by:* **PR2**.
+`targets.carbs` changes for non-bulk users — a **correction**. Note the
+fabrication ships on the **live** `GET /api/food/barcode?code=` lookup route
+(`static/nutrition.js:497`), not only on the unconsumed add route; no first-party
+surface renders it today (F3a).
+*Owned by:* **PR2** (server) and **PR5** (browser split).
 
 ### C3 — Web provider-backed logging must be recomputed server-side; manual entry stays a bounded manual command
 
@@ -449,49 +564,79 @@ row; (c) removes the only way to log a food the provider does not have.
 *Compat:* the web request shape changes; the ledger shape does not.
 *Owned by:* **PR3**.
 
-### C4 — Advanced diary editing is **not** required for Nutrition core closure; the correction primitive is delete + re-log
+### C4 — Advanced diary editing is **not** required for Nutrition core closure; the correction primitive is delete + re-log, and it is lossy
 
 *Evidence:* the ledger stores totals, a display description, a slot label and a
 source — and nothing that could reconstruct a provider food, serving or
 quantity (§5). The builder holds those values, but only for builder-composed
-meals, and only until the day rolls over. Re-logging is exact: it produces the
-same row the original write would have produced, with correct provenance.
-*Options:* (a) declare advanced editing out of scope and guarantee a correction
-path on every client; (b) add provenance columns and build provider-aware edit;
-(c) leave the historical "PR3B later" ambiguity open.
+meals, and only until the day rolls over.
+
+*Delete + re-log is **bounded**, not exact.* Re-logging reproduces the ledger's
+macros, description, slot and source. It does **not** reproduce:
+
+* the **stored meal photo** — `photo_key` is written by the web `/meal-log` path
+  only, and mobile has no photo-logging path at all (§8), so a mobile user who
+  deletes a web-logged photo meal cannot reproduce it on that client;
+* the original `created_at`, which the new row re-stamps;
+* the original idempotency key and fingerprint.
+
+The stored object itself is left behind entirely (**F14**). Any claim that
+re-logging is "exact" is **withdrawn**. Deletion is an acceptable correction
+primitive only where its losses are explicit, surfaced to the user before they
+confirm, and — for the photo — accompanied by an object lifecycle. **PR4** owns
+that.
+
+*Options:* (a) declare advanced editing out of scope and guarantee a bounded,
+honestly-described correction path on every client; (b) add provenance columns
+and build provider-aware editing; (c) leave the historical "PR3B later" ambiguity
+open.
 *Chosen:* **(a)**. The historical deferral is closed as *not required*, not as
 *postponed*. Unsupported edits stay explicitly unsupported — which the mobile
 contract already states (`docs/MOBILE_NUTRITION.md:393-400`).
-*Rejected:* (b) is a migration in search of a requirement: no surface today
-asks the ledger for provenance, and inferring it from `source`, description,
-macro ratios, barcode text or the idempotency fingerprint is forbidden and
-would be guessing. (c) is what this PR exists to end.
+*Rejected:* (b) is a migration in search of a requirement: no surface today asks
+the ledger for provenance, and inferring it from `source`, description, macro
+ratios, barcode text or the idempotency fingerprint is forbidden and would be
+guessing. Making deletion honest is cheaper, and truer, than making editing
+perfect. (c) is what this PR exists to end.
 *Single authority:* preserved — no second representation of an entry's history.
-*Migration:* none. *Security:* none. *Compat:* requires C5.
-*Owned by:* the closure criteria (§12), enforced by C5.
+*Migration:* none — and no provenance/schema expansion is introduced merely to
+make editing perfect. *Security:* none. *Compat:* requires C5.
+*Owned by:* the closure criteria (§12), enforced by C5 and by F14's fix in PR4.
 
-### C5 — The web gains ledger delete and slot move; it is a core-closure blocker
+### C5 — The web gains ledger **delete** (a core blocker); web slot move is a post-closure product gap
 
 *Evidence (F1):* no route mutates or deletes a `MealLog` row for a web user. A
-grep of the repository finds `MealLog` construction in eight places and
-`db.session.delete` on a `MealLog` row in **one** — the mobile mutation service.
-The web builder's PATCH/DELETE routes operate on `CustomMealItem` and refuse to
-act once `is_logged` is true (`diary.py:304,371`), which is correct for the
-builder and leaves the ledger untouchable.
-*Options:* (a) add web delete + slot move over the same
-`mobile_diary_mutation` service; (b) add a web-only delete with its own
-semantics; (c) accept that web users cannot correct a mislogged meal.
-*Chosen:* **(a)** — the web routes call the existing service. Web has no
+grep of the repository finds `MealLog` construction in eight places,
+`db.session.delete` on a `MealLog` row in **one**, and attribute mutation of one
+in **one** — both inside the mobile mutation service. The web builder's
+PATCH/DELETE routes operate on `CustomMealItem` and refuse to act once
+`is_logged` is true (`diary.py:304,371`), which is correct for the builder and
+leaves the ledger untouchable.
+
+**These are two decisions, not one.**
+
+| Capability | Classification | Reasoning |
+|---|---|---|
+| **Web delete** | **CORE BLOCKER** | The product lets a web user create canonical consumed-food rows and gives them no truthful way to remove a mistaken one. That is a missing *authority*, not a missing feature: the error propagates into every total, nudge and weekly report forever |
+| **Web slot move** | **PRODUCT GAP / POST-CLOSURE** | By C4 the correction primitive is delete + re-log, and by C12 `ogun` is a display label rather than an enum. Requiring it is mobile parity, and parity is not what closure means |
+
+*Options:* (a) add web delete over the same `mobile_diary_mutation` service and
+defer slot move; (b) add both; (c) add a web-only delete with its own semantics;
+(d) accept that web users cannot correct a mislogged meal.
+*Chosen:* **(a)** — the web route calls the existing service. Web has no
 `If-Match` story, so the precondition transport differs (the row's own revision
-carried in the page payload, or a form-level confirmation); the *authority*,
-the row lock, and the revision comparison do not.
-*Rejected:* (b) creates a second mutation semantic over one ledger; (c) makes
-"core complete" untrue — a user who logs the wrong meal on the web is stuck
-with it forever, and it silently corrupts every downstream total.
+carried in the page payload, or a form-level confirmation); the *authority*, the
+row lock, and the revision comparison do not.
+*Rejected:* (b) widens the sprint for parity rather than correctness; (c) creates
+a second mutation semantic over one ledger; (d) makes "core complete" untrue — a
+user who logs the wrong meal on the web is stuck with it forever.
+*Note on day scope:* the service is day-agnostic — `_locked_current_row` takes
+`diary_date` as a parameter — so the current-day restriction is **route policy**,
+not a service constraint. N9 is scoped to match what PR4 actually ships.
 *Single authority:* one mutation service, two transports.
 *Migration:* none. *Security:* web CSRF + `@require_auth`; ownership already
 enforced inside the service. *Compat:* additive.
-*Owned by:* **PR4**.
+*Owned by:* **PR4**. Web slot move → post-closure backlog (§12).
 
 ### C6 — Nutrition history is not part of core closure
 
@@ -566,36 +711,47 @@ labels (F7), which removes the `DataError` and the arbitrary-slot path without
 touching the schema or the three intentional non-slot writers.
 *Owned by:* **PR3**.
 
-### C14 — The ledger day key becomes a database-enforced invariant, and malformed rows are repaired conditionally
+### C13 — `POST /api/food/barcode/add` is made safe and deprecated; removal needs evidence
 
-*Evidence (F13):* one historical writer produced `DD.MM` keys; nothing prevents
-another from doing it again.
-*Options:* (a) conditional repair + a `CHECK` constraint on the format;
-(b) repair only; (c) constraint only; (d) leave the rows where they are, since
-they are invisible rather than wrong.
-*Chosen:* **(a)**. The repair is exact and needs no guesswork:
-`app_date_of(created_at)` is the repository's own rule for turning the stored
-naive-UTC timestamp into an Istanbul day, and it is the same rule that produced
-`tarih` for every correctly written row. The `CHECK` makes the invariant the
-database's, so no future writer — including a raw-SQL one like W9 or W11 — can
-reintroduce the defect.
-*Rejected:* (b) leaves the door open; (c) would fail to apply while malformed
-rows exist; (d) leaves permanently unreachable rows inside the canonical ledger
-and a schema that permits more of them.
-*Single authority:* strengthens it — `app/timeutil` becomes the only producer of
-a value the database will accept.
-*Migration:* **yes** — one data repair plus one `CHECK`. It is a no-op on a
-database with no malformed rows. This is the only migration Sprint 13 needs.
-*Security:* none. *Compat:* repaired rows begin appearing in day-keyed reads,
-which is the intent; a user could see old coach meals reappear on past days.
-*Owned by:* **PR2A**.
+It has no consumer under `static/` or `templates/`, it accepts a caller-supplied
+`food` object, and it echoes the raw `meal_log_id`. Its capability is fully
+covered by C3's server-recomputed web provider path.
 
-### C13 — `POST /api/food/barcode/add` is removed
+But "no first-party consumer" is not "provably dead". `docs/MOBILE_NUTRITION.md:19,277`
+records the `/api/food/*` routes as **keeping their paths** — a documented
+compatibility surface. Deleting the route on internal-reference evidence alone
+would be withdrawing a contract the repository still advertises.
 
-It has no frontend consumer, it accepts a caller-supplied `food` object, and it
-echoes the raw `meal_log_id`. Its capability is fully covered by C3's
-server-recomputed web provider path.
-*Owned by:* **PR3** (same rollback boundary as the web logging change).
+*Chosen:* **PR3 makes it safe and marks it deprecated** — the caller-supplied
+`food` object stops being trusted and the raw `meal_log_id` stops being echoed —
+while the path keeps responding. **PR5 may remove it** only if deprecation or
+disuse evidence exists by then. The unsafe behaviour is fixed either way; the
+route's continued existence is a separate decision with a separate evidence bar.
+*Rejected:* unconditional deletion in PR3 — it couples a real safety fix to an
+unproven compatibility claim, and the two carry different rollback risks.
+*Owned by:* **PR3** (safety + deprecation); **PR5** (removal, conditional).
+
+### C14 — RETIRED / NOT REQUIRED
+
+*Original proposal:* repair historical `MealLog.tarih` values conditionally and
+add a `ck_meal_log_tarih_iso` `CHECK` constraint, owned by a `PR2A`.
+
+*Retired by independent review.* Both halves fail on their own evidence:
+
+* **the repair already happened.** `9be792c80008` normalised every row in June
+  2026 using the identical rule PR2A proposed, and the malformed producer's
+  source table was subsequently dropped (**§5.1**);
+* **the `CHECK` cannot enforce what it claimed.** `tarih` is `String(10)`, so a
+  constraint pins a *pattern*, never a calendar date, and no portable form exists
+  across PostgreSQL and SQLite (**§5.1**).
+
+*Architecture conclusion recorded in its place:* **no Sprint 13 migration is
+required for day-key correctness.** `app/timeutil` is the sole live producer of
+day keys and that is sufficient. A future schema change here would require new
+evidence — a live writer producing a non-ISO key, or a demonstrated malformed
+row — and is **not** pre-authorized by this discovery.
+
+*Owned by:* nobody. **`PR2A` does not exist.**
 
 ---
 
@@ -609,12 +765,12 @@ stated so it can be checked, not argued.
 | **N1** | Exactly one canonical consumed-food ledger (`MealLog`), and no surface persists a competing definition of what was eaten | ✅ already true | — (C1 guards it) |
 | **N2** | Every supported writer converges on that ledger through a single clamp/validation gate, and no writer accepts caller-supplied nutrition for a provider-backed food | ❌ F5, F6 | PR3 |
 | **N3** | Canonical daily totals cannot differ between web, mobile, Coach and downstream consumers, because all of them read the same rows and none re-derives totals | ✅ already true | — |
-| **N4** | Every **derived** nutrition figure (macro targets, remaining budget) has exactly one server-owned derivation, and no surface substitutes a number for an unset target | ❌ F2, F3 | PR2 |
-| **N5** | Day and day-boundary decisions are server-owned and identical on every path (`app/timeutil`), and every persisted day key is a valid ISO calendar date | ⚠️ true of every live writer; ❌ F13 for historical rows, and unenforced by the schema | PR2A |
+| **N4** | The daily macro-target split and the remaining-macro budget have exactly one server-owned derivation; no first-party surface — server or browser — presents a different interpretation of that same configured daily target; and no surface substitutes a number for an unset target. Analytical questions that are genuinely different (a weekly protein goal, a recommendation heuristic) are **not** required to become identical | ❌ F2, F3a (server); ❌ F10 (browser split) | PR2 (server) + PR5 (browser) |
+| **N5** | Day and day-boundary decisions are server-owned and identical on every path (`app/timeutil`), and every persisted day key is a valid ISO calendar date | ✅ **already true** — every live writer derives its day key from `app/timeutil`, and the one transient yearless backfill was normalised by its direct successor `9be792c80008` (§5.1). No schema `CHECK` is needed to hold this | — |
 | **N6** | Null and zero are truthful at every published boundary: a missing macro is not a measured zero, and an unset goal is not `0` | ⚠️ true on `/api/v1`; false on the legacy web payloads | accepted as legacy (C6); not a blocker |
 | **N7** | User- and provider-supplied nutrition is bounded before persistence on every path | ✅ already true (clamp + DB `CHECK`) | — |
 | **N8** | Repeated requests are safe on every application writer | ⚠️ W3 relies on a structural claim, W6 has none | PR3 (declare/attach keys) |
-| **N9** | Mobile mutations are stale-safe, and **every** client has a correction path for a committed entry; edits that cannot be proven from stored state remain explicitly unsupported rather than silently approximated | ❌ F1 (web has no correction path) | PR4 |
+| **N9** | Mobile mutations are stale-safe, and **every supported first-party client that can create a current-day consumed-food entry has a truthful correction path for that current-day entry** — deletion being the required primitive. That path must be ownership-isolated, stale-safe, free of client-fabricated totals, must close the lifecycle of a photo-bearing entry, and must tell the user where deletion is lossy. Edits that cannot be proven from stored state remain explicitly unsupported rather than silently approximated; correction of **past-day** entries and web slot move are outside Sprint 13 | ❌ F1, F14 (web has no correction path; deletion releases no stored object) | PR4 |
 | **N10** | No unowned nutrition scoring/adherence definition ships on any surface | ❌ F9, F10 | PR5 |
 
 ### What may honestly remain open after Sprint 13
@@ -624,6 +780,8 @@ stated so it can be checked, not argued.
 * A mobile menu-scanning adapter (C7).
 * A validated nutrition intelligence / adherence domain (C8).
 * Meal photos on mobile.
+* Web **slot move** for a committed entry (C5) — a product gap, not a closure gap.
+* Correction of entries on **past** days, on either client (C5, N9).
 * Nutrition plan schema validation (C9).
 * Hydration on mobile (C10).
 * Activation of `MOBILE_AUTH_ENABLED` (C11, Sprint 15).
@@ -643,40 +801,6 @@ no second consumed-food ledger, no unbounded macro reaching the database.
 
 ### P1
 
-**F13 — the ledger may hold rows with an unmatchable day key.**
-`migrations/versions/df0d08c0cd24_backfill_user_daily_nutrition_to_meal_.py:58`
-writes `"tarih": created.strftime("%d.%m")` — a `DD.MM` label — into the column
-every other writer fills with ISO `YYYY-MM-DD` (`app/timeutil.py:45-57`;
-`MealLog.tarih` even defaults to `app_today().isoformat()`). Nothing at the
-database level pins the format: `tarih` is `String(10) NOT NULL` with no `CHECK`.
-
-Consequences, traced:
-
-* `"15.06" >= "2026-08-24"` is `False` under string comparison, so every
-  range-filtered reader excludes such a row: `/api/progress/nutrition`
-  (`tracking.py:621`), the heatmap (`tracking.py:849`),
-  `analytics_engine._check_protein_goal:129-131`, `ai_coach:602-603`.
-* Every equality-filtered reader excludes it too: `/meal-log/today`,
-  `/api/v1/nutrition/diary/today`, `menu.py:301`, `ai_coach:122`.
-* `/meal-log/history` groups by `tarih` and takes the 14 lexicographically
-  greatest keys, which `DD.MM` never reaches; `display_ddmm` would return such a
-  value unchanged (`timeutil.py:93-98`).
-
-So the rows are **consistently invisible rather than miscounted** — no total is
-wrong today. They are still orphaned rows in the canonical ledger, and any
-future query that loosens its filter would surface them in the wrong year.
-
-`CLAUDE.md` already documents the invariant the migration broke — *"Eski
-UserDailyNutrition verisi MealLog'a taşındı… MealLog.tarih ISO 'YYYY-MM-DD'"* —
-in the same sentence that describes this backfill. The documentation and the
-migration that implements it disagree, which is exactly the drift this PR's
-characterization tests exist to stop.
-
-**Whether any such row exists in production is not provable from the
-repository** — it depends on whether `user_daily_nutrition` held rows when the
-migration ran on 2026-06-15. The defective code path is proven; the row count is
-not. → PR2A.
-
 **F1 — the web has no correction path for the canonical ledger.**
 `MealLog` rows are created by six web paths and deleted by none.
 `app/blueprints/nutrition/diary.py:297,364` mutate and delete `CustomMealItem`
@@ -684,19 +808,37 @@ and refuse once `is_logged` is set. A web user who logs the wrong meal cannot
 fix it, and the error propagates into every total, nudge and weekly report
 forever. Blocks **N9**. → PR4.
 
-**F2 — five macro-target derivations, two of which disagree numerically.**
-`app/services/barcode.py:226` uses `calories * 0.45 / 4` for carbohydrates
-unconditionally; `app/services/ai_coach.py:148` and `app/blueprints/menu.py:313`
-use `0.50` for every goal except `"kas kazanma"`. `profile.py:135` permits
-exactly `{"kilo verme", "kas kazanma", ""}`, so **two of the three real goal
-values disagree**. `static/nutrition.js:168-172` adds a fourth split
-(`30/40/30`) that matches none of them. Blocks **N4**. → PR2.
+**F14 — deleting a ledger row releases no stored meal photo.**
+`MealLog.photo_key` holds an S3 object key (`models.py:573`), written by the web
+`/meal-log` path (`meallog.py:63,118`) and read back by every serializer. **No
+application path deletes it.** `s3_helper.py` exposes `upload_image`,
+`get_object_bytes`, `generate_presigned_url` and `key_belongs_to_user` — and **no
+deletion function at all**, so there is nothing for a caller to call.
+`mobile_diary_mutation/service.py:delete_entry` therefore removes the row and
+orphans the object permanently.
 
-**F3 — a fabricated `2000 kcal` target.** `app/services/barcode.py:220`
-(`_to_float(..., 2000) or 2000`) and
-`app/blueprints/nutrition/meallog.py:308` present a goal the user never set. The
-mobile boundary explicitly refuses this (`serialization.py:nutrition_goal`).
-Blocks **N4**. → PR2.
+Stated precisely: this is **not** cross-user access and **not** current data
+corruption. The object stays private and the ledger stays internally consistent.
+It is a **resource-lifecycle defect in the exact primitive this sprint makes its
+correction model** (C4, C5, N9). PR4 would otherwise knowingly ship canonical
+deletion with an unclosed durable resource behind it, and every subsequent
+delete would widen the leak. It is also what makes delete + re-log lossy in a way
+a mobile user cannot repair at all, since mobile has no photo-logging path
+(§8). Blocks **N9**. → PR4 (which must add the deletion primitive as well as
+call it).
+
+**F2 — three server derivations of one daily macro-target split, two of which
+disagree numerically.** `app/services/barcode.py:226` uses `calories * 0.45 / 4`
+for carbohydrates unconditionally; `app/services/ai_coach.py:148` and
+`app/blueprints/menu.py:313` use `0.50` for every goal except `"kas kazanma"`.
+`profile.py:135` permits exactly `{"kilo verme", "kas kazanma", ""}`, so **two of
+the three real goal values disagree** — 250 g vs 225 g at 2000 kcal, confirmed by
+executing both functions. `static/nutrition.js:168-172` adds a fourth split
+(`30/40/30`) in the browser that matches none of them.
+`analytics_engine._check_protein_goal:119` is deliberately **not** counted here:
+it answers a weekly question and already consumes the coach percentage, so it is
+a consumer of the ratio rather than a competing authority. Blocks **N4**.
+→ PR2 (server) and PR5 (browser).
 
 **F4 — the web multi-food quick log records per-100 g values as a meal total.**
 `static/nutrition.js:517-523` reduces `f.per_100g.*` across `selectedFoods` and
@@ -712,14 +854,49 @@ persists caller-computed macros after a plausibility clamp;
 server-side. `docs/MOBILE_NUTRITION.md:315-320` states the recompute rule as
 universal — it is true of the mobile path only. The override branch also sets
 no `source`, so a browser-computed provider serving is stamped `"manual"` by the
-column default and is indistinguishable from a hand-typed meal.
+column default and is indistinguishable from a hand-typed meal. Note this is a
+finding about **provider-backed** logging: genuinely manual entry is
+user-authoritative by design and stays that way (C3).
 Blocks **N2**. → PR3.
 
 ### P2
 
+**F3a — a fabricated `2000 kcal` target, published on a live route.**
+`app/services/barcode.py:220` (`_to_float(..., 2000) or 2000`) returns a complete
+target set for a user who configured nothing — verified by execution:
+`_target_macros(SimpleNamespace(target_calories=None, goal=None))` yields
+`{'calories': 2000, 'protein': 125.0, 'carbs': 225.0, 'fat': 55.6}`. Coach
+returns `None` in the same situation and menu returns `400`, so barcode is the
+**sole** server fabricator, and the mobile boundary explicitly refuses the
+pattern (`serialization.py:nutrition_goal`).
+
+It ships in `daily_context` from `build_lookup_response`, i.e. on the **live**
+`GET /api/food/barcode?code=` route that `static/nutrition.js:497` calls — not
+only on the unconsumed `add` route, which is where the original report's
+compatibility reasoning was mistakenly attached. Severity is **P2**, not P1,
+because no first-party surface renders it: `daily_context`, `recommendations`,
+`portion_recommendation` and `axisai_food_score` have **zero** occurrences under
+`static/` and `templates/`, and `resolveBarcode` reads only
+`food_id` / `name` / `brand` / `servings`. A real authority defect — the API
+publishes a goal nobody set — with no current user-visible blast radius.
+→ PR2.
+
+**F3b — `/meal-log/review`'s `2000` is an internal prompt fallback, not a
+published target. Benign.** `app/blueprints/nutrition/meallog.py:308` substitutes
+`2000` when no `target_calories` exists, but the value is interpolated into an
+LLM prompt that returns *qualitative* review text. It is neither persisted nor
+published as a number, so it is materially different from F3a and is **not**
+required to become the user's canonical target. Recorded so it is not re-raised
+as a fabrication; unless a consumer is shown to read it as a configured goal, no
+action. → no PR.
+
 **F6 — `POST /api/food/barcode/add` accepts a caller-supplied `food` object**
 (`app/blueprints/food.py:123-129`) and echoes the raw `meal_log_id`
-(`:154`). No file under `static/` or `templates/` calls it. → PR3 (C13, remove).
+(`:154`). No file under `static/` or `templates/` calls it — but
+`docs/MOBILE_NUTRITION.md:19,277` documents the `/api/food/*` paths as retained,
+so it is a **legacy compatibility surface**, not a proven-dead route.
+→ PR3 makes it safe and deprecates it; PR5 may remove it only with evidence
+(C13).
 
 **F7 — `/meal-log` does not validate `ogun`** (`meallog.py:32`). Free text
 reaches `MealLog.ogun` (`String(100)`), publishes as slot `unknown`, and raises
@@ -733,15 +910,20 @@ as `unknown` — describes a suggestion-accepted meal as hand-entered. It also
 uses no idempotency key. → PR3.
 
 **F9 — orphaned nutrition read surfaces.** `/api/progress/nutrition`
-(`tracking.py:615`) and `/api/progress/insights` (`tracking.py:894`) have no
-consumer in `static/` or `templates/`. The latter contains an unowned
+(`tracking.py:615`) and the legacy `/api/progress/insights` (`tracking.py:894`)
+have no consumer in `static/` or `templates/`. The latter contains an unowned
 calorie-adherence rule (`80 ≤ pct ≤ 110` → `success`, `tracking.py:920-928`).
+The **live** Axis Insights consumer is the different `/api/progress/axis-insights`
+route, and `tracking.py:742` itself documents the legacy route as untouched —
+these two must not be confused when PR5 removes one of them.
 → PR5 (C8).
 
-**F10 — a browser-only nutrition score with no owner.**
+**F10 — a browser-only nutrition score, grade and macro split with no owner.**
 `static/nutrition.js:187-210` computes a 0–100 value and an A–D grade from
-hand-tuned thresholds and renders it per meal (`:237`). Presentation-only, but
-it is a product judgement no server owns and no other client shows. → PR5 (C8).
+hand-tuned thresholds and renders it per meal (`:237`); `:168-172` carries a
+`30/40/30` macro-target split matching no server formula. Presentation-only, but
+they are product judgements no server owns and no other client shows — and the
+split is the remaining half of N4. → PR5 (C8, C2).
 
 **F11 — `fitx_mcp.log_nutrition_entry` writes the ledger with `user_id` as a
 tool argument** (`fitx_mcp/server.py:380-401`), with no authenticated principal
@@ -754,184 +936,253 @@ must not be forgotten when the ledger's write rules change. → recorded; no PR.
 `is_logged` atomically in the same transaction. The protection is real but
 undeclared. → PR3 (declare it, or attach a key).
 
+### Withdrawn
+
+**F13 — "the ledger may hold rows with an unmatchable day key" — WITHDRAWN.**
+The original finding correctly observed that
+`df0d08c0cd24_backfill_user_daily_nutrition_to_meal_.py:58` writes
+`created.strftime("%d.%m")`. It incorrectly concluded that such rows persist. The
+migration's **direct successor** `9be792c80008` rewrote every row to the ISO
+Istanbul day eighteen minutes later in migration history, using the same rule
+PR2A would have used; the producer's source table was later dropped; and all 37
+revisions are ancestors of the single head, so the repair cannot be skipped. Full
+chronology, the empirical replay, and the reasoning against a prophylactic
+`CHECK` are in **§5.1**. Consequences: no repair, no constraint, no `PR2A`, and
+**N5 is satisfied**.
+
 ---
 
 ## 14. Sprint 13 PR2+ implementation sequence
 
 Derived from the findings, ordered by: correctness before capability, canonical
-authority before adapters, backend contract before consumer, no schema change
-required by any of them, one reviewable responsibility per PR, independent
+authority before adapters, backend contract before consumer, **no schema change
+in any of them**, one reviewable responsibility per PR, and an independent
 rollback boundary for each.
 
 ```
 PR1 (this) ── discovery + characterization
     |
-    +-- PR2A ledger day-key repair + CHECK invariant   (F13 -> N5)
-    |            data integrity first; no other PR depends on it, and it
-    |            depends on none, so it can land immediately
+    +-- PR2  canonical daily macro-target authority  (F2, F3a -> N4, server half)
     |
-    +-- PR2  canonical macro-target authority          (F2, F3 -> N4)
+    +-- PR3  web write-path convergence              (F4, F5, F6, F7, F8, F12 -> N2, N8)
     |
-    +-- PR3  web write-path convergence                (F4, F5, F6, F7, F8, F12 -> N2, N8)
-    |            depends on PR2 only for the shared "no fabricated target" rule
+    +-- PR4  web ledger correction path              (F1, F14 -> N9)
     |
-    +-- PR4  web ledger correction path                (F1 -> N9)
-    |            independent of PR2/PR3; sequenced after PR3 so the web write
-    |            path is settled before a mutation path is added over it
-    |
-    +-- PR5  retire unowned nutrition intelligence     (F9, F10 -> N10)
-                 optional, last, smallest rollback boundary
+    +-- PR5  retire/confine unowned intelligence     (F9, F10 -> N10, N4 browser half)
 ```
 
-### PR2A — Ledger day-key repair and invariant
+Dependency edges, stated explicitly rather than implied by the order:
 
-* **Objective:** every `MealLog.tarih` is a valid ISO calendar date, and the
-  database refuses anything else.
+```
+PR2 ──────→ PR3 ──────→ PR5
+  │                      ↑
+  └────────────────────┘
+
+PR3 ──────→ PR4        (operational ordering, not a technical dependency)
+```
+
+* **`PR2 → PR3`** — PR3 inherits the "never fabricate a target" rule.
+* **`PR2 → PR5`** — PR5 retires the browser split, which requires a server
+  authority to defer to.
+* **`PR3 → PR5`** — PR5 may remove `/api/food/barcode/add` only after PR3 has
+  made it safe and deprecated it (C13).
+* **`PR3 → PR4`** — **operational, not technical.** PR4 has no schema dependency
+  on PR2 and no code dependency on PR3; it is sequenced after PR3 so the web
+  write path is settled before a correction surface is built over it. It may land
+  earlier if the correction gap is judged more urgent than that ordering benefit.
+
+**There is no `PR2A`, and no migration gate anywhere in this sequence.**
+
+### PR2 — Canonical daily macro-target authority
+
+* **Objective:** one pure server-owned derivation of the configured daily calorie
+  target's macro split and the remaining-macro budget; no surface substitutes a
+  number for an unset target.
 * **Repositories:** `fitness-coach` only.
-* **Authority:** *reuses* `app/timeutil.app_date_of` as the sole repair rule;
-  adds no authority.
-* **Schema:** **one migration** — an `UPDATE` of rows whose `tarih` does not
-  match `^\d{4}-\d{2}-\d{2}$`, setting it to `app_date_of(created_at)`, followed
-  by `ck_meal_log_tarih_iso`. Must be written DB-agnostically (PostgreSQL prod,
-  SQLite dev), like `df0d08c0cd24` was.
-* **Risks:** the repair is a no-op if no malformed rows exist, and the row count
-  is unknown before it runs — so the migration must **log** how many rows it
-  touched. Repaired rows become visible in past-day reads, which will change
-  historical totals for affected users (a correction). Adding a `CHECK` to a
-  large table takes a brief lock; the table is small enough that this is
-  acceptable, but the migration should be run in the normal deploy window.
-* **Prerequisite:** none.
-* **Acceptance:** the migration is idempotent and reversible in the sense that
-  matters (the `CHECK` drops cleanly; repaired values are not restored, and the
-  down-revision must say so explicitly); after upgrade, an attempted insert of a
-  non-ISO `tarih` fails at the database on both engines; the discovery test
-  asserting that no live writer produces a non-ISO key still passes.
-* **Out of scope:** deleting `user_daily_nutrition`; changing `display_ddmm`;
-  changing the history contract (C6); any other column.
-
-### PR2 — Canonical macro-target authority
-
-* **Objective:** one server-owned derivation of daily macro targets and the
-  remaining-macro budget; no surface substitutes a number for an unset target.
-* **Repositories:** `fitness-coach` only.
-* **Authority:** *changes* — the macro-target derivation moves from four copies
-  to one pure module; *reuses* — `UserSession.target_calories`, `MealLog`.
-* **Schema:** none.
+* **Authority:** *changes* — the derivation moves from three server copies to one
+  pure module; *reuses* — `UserSession.target_calories`, `MealLog`.
+* **Shape:** pure and stdlib-only. Independent of Flask request state; no UI or
+  client types; nothing persisted. Returns **no fabricated configured target**
+  when none exists.
+* **Consumers to converge**, each confirmed against current code before it is
+  changed: `ai_coach._remaining_macros_for_user`, `menu.analyze_menu`, and
+  `barcode._target_macros` / `goal_impact_for_add`.
+  `analytics_engine._check_protein_goal` may consume the canonical **ratio**
+  where the question is semantically identical, but must not be refactored into
+  — or described as — a competing target authority; its weekly framing stays.
+* **Schema:** none. **Migration:** none.
 * **Risks:** `barcode.goal_impact_for_add` carbohydrate targets change for
-  non-bulk users (a correction); a user with no target now sees an explicit
-  "no goal configured" instead of a `2000 kcal` comparison, which changes coach
+  non-bulk users (a correction); a user with no target now sees an explicit "no
+  goal configured" instead of a `2000 kcal` comparison, which changes coach
   prompt text and the barcode payload.
 * **Prerequisite:** none.
-* **Acceptance:** exactly one function in the repository computes macro targets
-  from a calorie target and a goal, proven by a characterization test; all four
-  server call sites use it; a user with no `target_calories` receives `None`
-  from every one of them; existing coach/menu/barcode/analytics tests pass.
+* **Acceptance:** exactly one function in the repository derives a macro split
+  from a calorie target and a goal, proven by a characterization test; all three
+  server call sites use it; a user with no `target_calories` receives `None` from
+  every one of them; `/meal-log/review`'s qualitative prompt fallback (F3b) is
+  left as-is or documented, never promoted to a published target; existing
+  coach/menu/barcode/analytics tests pass.
 * **Out of scope:** persisting targets; changing the calorie-target selector;
-  the browser's `30/40/30` split (that is PR5's surface, and PR2 must not touch
-  `static/`).
+  recommendation heuristics that answer a different question; and the browser's
+  `30/40/30` split — **PR2 must not touch `static/`**. That half of N4 is PR5's.
 
-### PR3 — Web write-path convergence
+### PR3 — Web nutrition write-path convergence
 
-* **Objective:** the web logs provider-backed food the way mobile does, manual
-  entry is a bounded manual command, and the unsafe/undeclared sibling writers
-  are removed or made explicit.
+* **Objective:** the web logs provider-backed food the way mobile does, genuinely
+  manual entry stays user-authoritative within typed bounds, and the unsafe or
+  undeclared sibling writers are made explicit.
 * **Repositories:** `fitness-coach` only (backend + `static/nutrition.js`).
 * **Authority:** *changes* — provider-backed macro computation moves from the
-  browser to `mobile_log_food`'s recompute; *reuses* — the ledger, the clamp,
-  `meal_idempotency`.
-* **Schema:** none.
+  browser to the canonical logging service's recompute; *reuses* — the ledger,
+  the clamp, `meal_idempotency`.
+* **Architectural rule — reuse the authority, do not fork it.**
+  `app/services/mobile_log_food` was independently verified to be **domain-pure**:
+  it imports no `flask`, references no `request`, and reads no `g`. A web adapter
+  can call it directly despite the `mobile_` name. If a rename or move is needed
+  to make shared ownership honest now that the caller is not only mobile, keep
+  that refactor **bounded and behaviour-preserving**. Naming alone must not be
+  allowed to create a second service.
+* **Schema:** none. **Migration:** none unless new implementation evidence proves
+  otherwise — this discovery does not authorize one.
 * **Risks:** the largest behavioural PR of the sprint. Logged calories for the
   multi-select path change (from per-100 g to the chosen quantity) — a
-  correction, but a visible one. `/api/food/barcode/add` removal is a public
-  route deletion. `ogun` validation rejects requests that previously succeeded.
-* **Prerequisite:** PR2 (shares the "never fabricate a target" rule).
-* **Acceptance:** a provider-backed web log produces a byte-identical ledger row
-  to the equivalent `/api/v1/nutrition/logs` call; `override_macros` accepts
-  only manual commands within the mobile snapshot's bounds; `ogun` outside the
-  four canonical labels is `400`; the suggestion writer sets
+  correction, but a visible one. `ogun` validation rejects requests that
+  previously succeeded.
+* **Prerequisite:** PR2.
+* **Acceptance:** a provider-backed web log produces a ledger row identical to
+  the equivalent `/api/v1/nutrition/logs` call; `override_macros` accepts only
+  genuinely manual commands, within the mobile snapshot's typed bounds; `ogun`
+  outside the four canonical labels is `400`; the suggestion writer sets
   `source="suggestion"` (a new value added to `KNOWN_SOURCES`) and uses a key;
-  `diary_log_meal`'s replay safety is declared in a test; `/api/food/barcode/add`
-  is gone and nothing references it.
+  `diary_log_meal`'s replay behaviour is declared in a test;
+  `POST /api/food/barcode/add` no longer trusts a caller-supplied `food` object
+  and no longer echoes a raw `meal_log_id`, and is marked deprecated **while
+  still responding** (C13).
 * **Out of scope:** any mutation or deletion of a committed row (PR4); any
-  scoring change (PR5); any mobile change; any UI redesign.
+  scoring change (PR5); **removing** `/api/food/barcode/add` (PR5, conditional);
+  any mobile change; any UI redesign.
 
 ### PR4 — Web ledger correction path
 
-* **Objective:** a web user can delete a committed entry and move its slot,
-  through the same authority mobile uses.
+* **Objective:** a web user can delete a committed entry through the same
+  authority mobile uses, and that deletion closes the durable resources it owns.
 * **Repositories:** `fitness-coach` only.
+* **Core requirement: web delete only.** Web slot move is **not** required for
+  Sprint 13 Core Complete (C5); it moves to the post-closure backlog.
 * **Authority:** *reuses* `app/services/mobile_diary_mutation` (renamed if the
   name stops being honest); no second mutation semantic.
-* **Schema:** none.
+* **Must preserve, unchanged:** owner isolation; current-day semantics; the
+  `SELECT … FOR UPDATE` row lock; the revision / stale-precondition comparison
+  *under* that lock; canonical re-read where required; server-owned totals; no
+  client-fabricated totals; and the mobile contract's behaviour bit-for-bit.
+* **Photo-object lifecycle (F14) — PR4 owns it.** The acceptance criteria must
+  **state**, not assume, all of:
+  * what deletes the database row;
+  * what releases the associated S3 object — noting that `s3_helper` exposes **no
+    deletion primitive today**, so PR4 must add one;
+  * the ordering of the two, and which is permitted to fail first;
+  * retry safety after a partial failure;
+  * what happens if the row delete succeeds and object cleanup fails, and the
+    converse;
+  * whether cleanup is transactional, compensating, queued or best-effort —
+    chosen explicitly rather than by default;
+  * observability when orphan cleanup fails, so a leak is visible rather than
+    silent;
+  * a user-facing confirmation that deletion is lossy, naming the stored photo
+    where one exists.
+* **Schema:** none. **Migration:** none — `photo_key` already exists.
 * **Risks:** the web has no `If-Match` story, so the precondition transport must
-  be designed without weakening the row-lock + revision comparison; deletion is
-  hard and irreversible (as on mobile), so the confirmation UX matters.
-* **Prerequisite:** PR3.
-* **Acceptance:** web delete and slot move are current-day only, ownership-
-  scoped, row-locked, revision-checked, and reject a stale precondition; the
-  mobile contract's behaviour is bit-for-bit unchanged; a mislogged web meal can
-  be corrected end-to-end; unsupported edits still return an explicit refusal
-  rather than an approximation.
-* **Out of scope:** editing description, nutrition, quantity, serving or
-  provider (C4); soft delete, tombstones or a mutation journal; history.
+  be designed without weakening the row lock + revision comparison; deletion is
+  hard and irreversible (as on mobile), so the confirmation UX matters; releasing
+  the object before the row is gone can leave a row pointing at nothing.
+* **Prerequisite:** PR3 operationally; none technically.
+* **Acceptance:** a mislogged web meal can be corrected end-to-end; delete is
+  current-day, ownership-scoped, row-locked, revision-checked, and rejects a
+  stale precondition; the photo lifecycle above is implemented and tested,
+  including its partial-failure path; unsupported edits still return an explicit
+  refusal rather than an approximation.
+* **Out of scope:** editing description, nutrition, quantity, serving or provider
+  (C4); **web slot move**; correction of past-day entries; advanced diary
+  editing of any kind; soft delete, tombstones or a mutation journal; history.
 
-### PR5 — Retire unowned nutrition intelligence
+### PR5 — Retire or confine unowned Nutrition intelligence and presentation authority
 
-* **Objective:** no surface ships a nutrition score or adherence judgement that
-  no service owns.
+* **Objective:** no surface ships a nutrition score, an adherence judgement, or a
+  macro target that no service owns.
 * **Repositories:** `fitness-coach` only.
-* **Authority:** removes two; adds none.
-* **Schema:** none.
-* **Risks:** lowest of the sprint — both server endpoints are orphaned; the
-  browser score is presentation-only.
-* **Prerequisite:** none (may run in parallel with PR4).
-* **Acceptance:** `/api/progress/nutrition` and `/api/progress/insights` are
-  removed with no remaining reference; the browser score and grade are either
-  deleted or confined behind an explicit "presentation-only, never persisted,
-  never exported" boundary with a test that pins it; no new score is introduced.
-* **Out of scope:** creating any adherence/intelligence domain; touching the
+* **Authority:** removes; adds none.
+* **Scope — investigate and finalise:**
+  * `/api/progress/nutrition` and the **legacy** `/api/progress/insights` (F9).
+    The live Axis Insights consumer is the different `/api/progress/axis-insights`
+    route; do not confuse the two.
+  * the browser score and A–D grade (F10) — delete, or confine behind an explicit
+    "presentation-only, never persisted, never exported" boundary with a test
+    that pins it.
+  * the browser `30/40/30` macro split (`static/nutrition.js:168-172`) — retire it
+    in favour of PR2's server authority. **This is what closes N4's remaining
+    half**, and it is why PR5 depends on PR2.
+  * `POST /api/food/barcode/add` — remove **only if** deprecation or disuse
+    evidence exists by then (C13). Absence of first-party references is not that
+    evidence on its own, and no compatibility route may be deleted solely because
+    the first-party UI does not call it.
+* **Schema:** none. **Migration:** none.
+* **Risks:** lowest of the sprint for the server endpoints, which are orphaned.
+  The browser change is user-visible: displayed macro targets move to the
+  canonical split.
+* **Prerequisite:** PR2 (for the split); PR3 (for the deprecation, if removal
+  happens here).
+* **Acceptance:** the orphaned endpoints are removed with no remaining reference;
+  the browser presents the server's macro split or none at all; the score and
+  grade are deleted or provably confined; no new score is introduced; any
+  compatibility route removed here has recorded evidence behind it.
+* **Out of scope:** creating any adherence or intelligence domain; touching the
   canonical Progress services.
 
 ---
 
 ## 15. Migration implications
 
-**Exactly one**, and it is a repair, not a feature: PR2A's day-key normalisation
-plus `ck_meal_log_tarih_iso` (C14). Current head is `c2d3e4f5a6b7`; after
-Sprint 13 the head is that one new revision. PR2, PR3, PR4 and PR5 require no
-schema change at all.
+**None.** Sprint 13 requires **no schema migration**. The current Alembic head is
+`c2d3e4f5a6b7`, and it is still the head after Sprint 13: PR2, PR3, PR4 and PR5
+each ship with an unchanged migration graph.
+
+The day-key repair this report originally proposed does not exist, because the
+repair already happened in June 2026 (§5.1; C14 retired). Any **future** schema
+change in this area — including a `tarih` format constraint — requires new
+evidence, such as a live writer producing a non-ISO key or a demonstrated
+malformed row, and is **not** pre-authorized by this discovery.
 
 Any proposal to add a provenance column must first satisfy C4 by naming the
-product requirement that reads it.
+product requirement that reads it. PR4's photo lifecycle (F14) is an object-store
+concern and needs no column: `photo_key` already exists.
 
 ## 16. Rollout implications
 
-No Sprint 13 PR may change a feature-flag default, and none is gated behind a
-new flag: PR2A–PR5 are all corrections to live, unflagged behaviour. PR2A is the
-only one that touches the database and must therefore ride a normal deploy
-window with the migration gate; the rest are code-only. Mobile
-nutrition remains dark behind `MOBILE_AUTH_ENABLED` throughout, and nothing in
-this sequence depends on that flag being enabled. Sprint 15's native-auth
-rollout is not coupled to Nutrition closure in either direction.
+No Sprint 13 PR may change a feature-flag default, and none is gated behind a new
+flag: PR2–PR5 are all corrections to live, unflagged behaviour. **No PR touches
+the database**, so none needs a migration deploy window. Mobile nutrition remains
+dark behind `MOBILE_AUTH_ENABLED` throughout, and nothing in this sequence
+depends on that flag being enabled. Sprint 15's native-auth rollout is not
+coupled to Nutrition closure in either direction.
 
-The only user-visible number changes are corrections: repaired historical coach
-meals reappearing on past days (PR2A), the barcode carbohydrate target (PR2),
-the absence of a fabricated 2000 kcal goal (PR2), and the multi-food quick-log
-quantity (PR3). Each should ship with a release note.
+The only user-visible number changes are corrections: the barcode carbohydrate
+target and the absence of a fabricated 2000 kcal goal (PR2), the multi-food
+quick-log quantity (PR3), and the browser macro split aligning with the server
+(PR5). Each should ship with a release note. PR4 additionally introduces a
+**destructive** user action and must ship with a confirmation that states what
+deletion loses (C4, F14).
 
 ## 17. Rollback philosophy
 
-Each PR is one `git revert` with no data to undo:
+Each PR is one `git revert`. **No PR writes a migration**, so no PR needs a
+down-revision plan and no PR has schema to undo.
 
 | PR | Rollback | Data left behind |
 |---|---|---|
-| PR2A | `alembic downgrade` drops `ck_meal_log_tarih_iso` | **repaired day keys stay repaired** — the down-revision must say so rather than pretend to restore `DD.MM`, because restoring a defect is not a rollback |
-| PR2 | revert; the four call sites return to their own formulas | none — nothing persisted |
-| PR3 | revert; the web returns to client-computed macros and the removed route returns | ledger rows written correctly stay correct |
-| PR4 | revert; web loses the correction path again | deletions already performed stay deleted — hard delete is irreversible by design, which is why PR4 ships after PR3 and behind an explicit confirmation |
+| PR2 | revert; the three call sites return to their own formulas | none — nothing persisted |
+| PR3 | revert; the web returns to client-computed macros and the deprecated route loses its safety fix | ledger rows written correctly stay correct |
+| PR4 | revert; the web loses the correction path again | deletions already performed stay deleted — hard delete is irreversible by design, which is why PR4 ships after PR3 and behind an explicit confirmation. **Objects already released stay released**, so the photo lifecycle must be ordered such that a revert can never leave a surviving row pointing at a deleted object |
 | PR5 | revert; the orphaned endpoints and the browser score return | none |
-
-No PR writes a migration, so no PR needs a down-revision plan.
 
 ## 18. Explicit non-goals for PR1 — all honoured
 
@@ -944,15 +1195,29 @@ weakened, skipped, xfailed, renamed away or broadened.
 
 ## 19. Evidence produced by this PR
 
-`tests/test_sprint13_nutrition_closure_discovery.py` — 25 discovery
+`tests/test_sprint13_nutrition_closure_discovery.py` — **26** discovery
 characterization tests. Each maps to a claim above and fails if the claim stops
 being true. Structural properties are proven by AST, import, URL-map or runtime
 characterization rather than by copy or layout snapshots.
 
-**Non-vacuity, proven by mutation.** Five architecture guards were checked by
-temporarily violating the real invariant in the working tree, confirming the
-guard failed, and restoring with `git checkout --`. No mutation remains in the
-branch (`git status --porcelain` shows only the two new files).
+### What the review remediation changed in this module
+
+| Test | Change | Why |
+|---|---|---|
+| `test_the_historical_backfill_wrote_a_day_key_no_query_can_match` | **replaced** by `test_the_yearless_backfill_was_repaired_by_its_direct_successor` | The old test was mechanically correct and architecturally misleading. It pinned only the transient defect, so **deleting the repair migration `9be792c80008` failed no test** — a false negative that let a withdrawn finding look live. The replacement pins the whole chain: the defect existed, the repair exists, it is the backfill's direct child, it derives the day from `created_at` → Istanbul → ISO, and it is an ancestor of the single head |
+| `test_the_schema_does_not_yet_enforce_the_day_key_format` | **reframed** as `test_the_ledger_schema_pins_macro_bounds_and_not_the_day_key_format` | Its stated purpose was to justify `ck_meal_log_tarih_iso`. C14 is retired, so it now characterizes the constraint set as it is — including that `tarih` is `String(10)`, which is *why* a CHECK could only ever pin a shape |
+| `test_a_malformed_day_key_is_invisible_to_the_canonical_readers` | kept; docstring corrected | The reader behaviour is still load-bearing — it is what made the transient state harmless between the two June 2026 migrations. Only the finding it hung from changed |
+| `test_the_barcode_target_fabricates_a_goal_the_user_never_configured` | **extended** | Now also asserts that `daily_context`, `portion_recommendation` and `axisai_food_score` have no first-party consumer — the fact that makes F3a a P2 rather than a P1, so the severity cannot drift silently |
+| `test_deleting_a_ledger_row_releases_no_stored_meal_photo` | **added** | Pins F14 in both halves: `s3_helper` exposes no deletion primitive at all, and `delete_entry` reaches for none |
+
+Every other guard was left untouched. Nothing was weakened, deleted, skipped,
+xfailed, renamed away or broadened, and no production code was modified.
+
+### Non-vacuity, proven by mutation
+
+Seven architecture guards were checked by temporarily violating the real
+invariant, confirming the guard failed, and restoring exactly. No mutation
+remains in the branch.
 
 | Mutation | Guard | Result |
 |---|---|---|
@@ -961,30 +1226,45 @@ branch (`git status --porcelain` shows only the two new files).
 | Added `GET /api/v1/nutrition/diary/history` | `test_mobile_nutrition_route_inventory` and `test_the_mobile_surface_publishes_no_history_menu_plan_or_water` | both FAILED ✅ |
 | Imported `MealLog` into `progress_summary/queries.py` | `test_progress_and_mobile_today_consume_no_nutrition_authority` | FAILED ✅ |
 | Added `DELETE /meal-log/<id>` (the PR4 capability) | `test_the_web_nutrition_blueprint_publishes_no_ledger_mutation_route` | FAILED ✅ |
+| **Deleted `9be792c80008`, the repair migration** | `test_the_yearless_backfill_was_repaired_by_its_direct_successor` | **FAILED ✅** — the false negative the review found is now closed |
+| **Repointed `9be792c80008.down_revision` away from `df0d08c0cd24`** | same | **FAILED ✅** |
 
-### Validation run
+The last two are the guards this remediation exists to add. Both mutations were
+made in the review environment only and restored byte-for-byte; `git status`
+after restoration showed nothing but the two intended files.
+
+### Validation run — review remediation
 
 `python -m py_compile tests/test_sprint13_nutrition_closure_discovery.py` — OK.
+`git diff --check` — clean.
 
-New suite: `pytest tests/test_sprint13_nutrition_closure_discovery.py -q -p no:randomly`
-→ **25 passed**.
+| # | Command | Result |
+|---|---|---|
+| 1 | `pytest tests/test_sprint13_nutrition_closure_discovery.py tests/test_migration_graph.py -q -p no:randomly` | **36 passed** (38.61s) |
+| 2 | `pytest tests/test_barcode.py tests/test_nutrition_routes.py tests/test_timeutil.py -q -p no:randomly` — the corrected macro-target and day-key claims | **65 passed** (80.66s) |
+| 3 | `pytest tests/test_mobile_diary_mutation_api.py tests/test_mobile_diary_mutation_architecture.py tests/test_mobile_log_food_api.py -q -p no:randomly` — the mutation/delete surface F14 and C5 rest on | **55 passed** (70.10s) |
 
-Focused regression gate over every architecture surface this report relies on.
-Batched because the suite is slow; `-p no:randomly` so an ordering-sensitive
-failure is reproducible.
+**156 tests, 0 failures.** The full 898-test discovery gate was not re-run: the
+remediation diff is confined to this document and the characterization module,
+and the module's imports and runtime surface are unchanged.
 
-| # | Surface | Files | Result |
-|---|---|---|---|
-| 1 | Mobile diary read + food discovery | `test_mobile_nutrition_api`, `test_mobile_nutrition_revision`, `test_mobile_food_discovery`, `test_food_discovery_characterization` | 123 passed (81.19s) |
-| 2 | Mobile ledger write + mutation | `test_mobile_log_food_api`, `test_mobile_log_food_fingerprint`, `test_mobile_diary_mutation_api`, `test_mobile_diary_mutation_architecture`, `test_mobile_diary_mutation_parsing` | 103 passed (62.73s) |
-| 3 | Web nutrition, macro pipeline, day keys | `test_nutrition_routes`, `test_nutrition_pipeline`, `test_timeutil`, `test_ai_nutrition_llm` | 206 passed (97.90s) |
-| 4 | Food / barcode / menu writers | `test_food_routes`, `test_barcode`, `test_barcode_workflow`, `test_menu_routes`, `test_menu_fetch` | 114 passed (115.00s) |
-| 5 | AI Coach meal staging + confirmation | `test_ai_coach`, `test_coach_confirmation_lifecycle`, `test_coach_routes`, `test_coach_tools` | 148 passed (155.26s) |
-| 6 | Mobile auth boundary + migration graph | `test_mobile_auth_feature_gate`, `test_mobile_auth_api`, `test_migration_graph` | 45 passed (52.34s) |
-| 7 | Progress aggregation + Sprint 12 discovery tripwire | `test_progress_api`, `test_progress_summary`, `test_progress_insights`, `test_sprint12_daily_coach_discovery` | 134 passed (65.64s) |
+### Validation run — original discovery commit (`3b49fcf`)
 
-**898 tests, 0 failures, 0 skips introduced, 0 existing tests changed.** No
-existing test was weakened, deleted, skipped, xfailed, renamed or broadened.
+Recorded for provenance and unchanged by this remediation. New suite:
+**25 passed**. Focused regression gate, batched because the suite is slow, with
+`-p no:randomly` so an ordering-sensitive failure is reproducible:
+
+| # | Surface | Result |
+|---|---|---|
+| 1 | Mobile diary read + food discovery | 123 passed (81.19s) |
+| 2 | Mobile ledger write + mutation | 103 passed (62.73s) |
+| 3 | Web nutrition, macro pipeline, day keys | 206 passed (97.90s) |
+| 4 | Food / barcode / menu writers | 114 passed (115.00s) |
+| 5 | AI Coach meal staging + confirmation | 148 passed (155.26s) |
+| 6 | Mobile auth boundary + migration graph | 45 passed (52.34s) |
+| 7 | Progress aggregation + Sprint 12 discovery tripwire | 134 passed (65.64s) |
+
+**898 tests, 0 failures, 0 skips introduced, 0 existing tests changed.**
 
 ## 20. Files inspected
 
