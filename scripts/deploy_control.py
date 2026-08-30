@@ -495,6 +495,19 @@ class GitCliError(ConfigError):
     """Raised when a bounded local Git validation command fails."""
 
 
+class CandidateSuperseded(RuntimeError):
+    """Raised when main moved past this candidate before the deploy was approved.
+
+    Deliberately NOT a :class:`ConfigError`. A superseded candidate is a normal
+    outcome of the production approval gate, not a deployment failure: the
+    commit is still on ``origin/main``'s history, a newer commit simply won the
+    race, and that newer commit has its own deploy run. Folding it into the
+    exit-1 family reports a red failure for the exact condition the workflow's
+    own ``github.sha == workflow_run.head_sha`` guard already treats as a clean
+    skip when it happens before dispatch instead of during approval.
+    """
+
+
 class PreflightError(RuntimeError):
     """Raised when the configured EC2/SSM target cannot receive a deploy."""
 
@@ -683,7 +696,26 @@ def run_aws_json(
 
 
 def validate_candidate(repo_path: Path, deploy_sha: str, run_git: GitRunner = _run_git) -> None:
-    """Confirm the requested commit remains the current candidate on origin/main."""
+    """Confirm the requested commit remains the current candidate on origin/main.
+
+    Three outcomes, because ``origin/main != DEPLOY_SHA`` is not one condition:
+
+    * equal -- the candidate is current; deploy proceeds.
+    * behind -- ``DEPLOY_SHA`` is still an ancestor of ``origin/main``. Main
+      moved forward while this run waited on the production approval gate. The
+      newer commit has its own deploy run, so this one raises
+      :class:`CandidateSuperseded` and is skipped without deploying.
+    * divergent -- ``DEPLOY_SHA`` is not on ``origin/main``'s history at all
+      (force-push, branch rewrite, rollback). This is the condition stale
+      rejection exists for, and it still fails closed with
+      :class:`ConfigError`.
+
+    Ancestry is read from ``git merge-base`` rather than ``--is-ancestor``
+    because the bounded runner reports a non-zero git exit as
+    :class:`GitCliError`; that would make "not an ancestor" indistinguishable
+    from a genuine git failure, and a genuine git failure must never be
+    downgraded to a clean skip.
+    """
     if not SHA_RE.fullmatch(deploy_sha):
         raise ConfigError("DEPLOY_SHA must be lowercase 40-hex")
 
@@ -692,11 +724,18 @@ def validate_candidate(repo_path: Path, deploy_sha: str, run_git: GitRunner = _r
         run_git([*git_prefix, "fetch", "origin", "main", "--prune"])
         run_git([*git_prefix, "cat-file", "-e", f"{deploy_sha}^{{commit}}"])
         origin_main = run_git([*git_prefix, "rev-parse", "refs/remotes/origin/main"])
+        if origin_main == deploy_sha:
+            return
+        merge_base = run_git([*git_prefix, "merge-base", deploy_sha, origin_main])
     except (OSError, subprocess.SubprocessError) as error:
         raise ConfigError("unable to validate deployment candidate") from error
 
-    if origin_main != deploy_sha:
-        raise ConfigError("deployment candidate is stale: origin/main differs from DEPLOY_SHA")
+    if merge_base == deploy_sha:
+        raise CandidateSuperseded(
+            "deployment candidate was superseded: origin/main has moved past "
+            "DEPLOY_SHA, whose own deploy run carries the newer revision"
+        )
+    raise ConfigError("deployment candidate is stale: origin/main differs from DEPLOY_SHA")
 
 
 def _require_live_clock(utc_now: UtcClock) -> UtcClock:
@@ -1342,6 +1381,9 @@ def main(
             log,
             run_git=run_git,
         )
+    except CandidateSuperseded as skipped:
+        log(f"deployment skipped: {skipped}")
+        return 0
     except (
         AwsCliError,
         ConfigError,

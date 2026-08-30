@@ -38,6 +38,7 @@ from scripts.deploy_control import (
     DeployConfig,
     EXECUTION_TIMEOUT_SECONDS,
     GIT_CALL_TIMEOUT_SECONDS,
+    CandidateSuperseded,
     GitCliError,
     INVOCATION_CALL_TIMEOUT_SECONDS,
     InvocationFailed,
@@ -167,6 +168,22 @@ def fake_git_returning(sha):
     return run_git
 
 
+def fake_git_with_history(origin_main, merge_base):
+    """A git fake that can also answer where the candidate sits in history."""
+    calls = []
+
+    def run_git(args):
+        calls.append(args)
+        if args[-2:] == ["rev-parse", "refs/remotes/origin/main"]:
+            return origin_main
+        if len(args) > 3 and args[-3] == "merge-base":
+            return merge_base
+        return ""
+
+    run_git.calls = calls
+    return run_git
+
+
 def test_config_accepts_one_explicit_production_target():
     config = DeployConfig.from_environ(VALID_ENV)
 
@@ -239,6 +256,39 @@ def test_config_allows_an_empty_optional_health_url():
 def test_validate_candidate_requires_origin_main_to_equal_deploy_sha():
     with pytest.raises(ConfigError, match="stale"):
         validate_candidate(Path("/candidate"), "a" * 40, run_git=fake_git_returning("b" * 40))
+
+
+def test_validate_candidate_skips_a_candidate_main_has_moved_past():
+    """main moved forward while the deploy waited for approval: skip, do not fail."""
+    deploy_sha = "a" * 40
+    run_git = fake_git_with_history("b" * 40, merge_base=deploy_sha)
+
+    with pytest.raises(CandidateSuperseded, match="superseded"):
+        validate_candidate(Path("/candidate"), deploy_sha, run_git=run_git)
+
+
+def test_validate_candidate_rejects_a_candidate_that_left_origin_main_history():
+    """A candidate off main's history is a rewrite, not a supersession: fail closed."""
+    run_git = fake_git_with_history("b" * 40, merge_base="c" * 40)
+
+    with pytest.raises(ConfigError, match="stale"):
+        validate_candidate(Path("/candidate"), "a" * 40, run_git=run_git)
+
+
+def test_validate_candidate_asks_git_where_the_candidate_sits_in_main_history():
+    deploy_sha = "a" * 40
+    origin_main = "b" * 40
+    run_git = fake_git_with_history(origin_main, merge_base=deploy_sha)
+
+    with pytest.raises(CandidateSuperseded):
+        validate_candidate(Path("/candidate"), deploy_sha, run_git=run_git)
+
+    assert run_git.calls[3][-3:] == ["merge-base", deploy_sha, origin_main]
+
+
+def test_a_superseded_candidate_is_not_a_config_error():
+    """`main` must not fold supersession into the exit-1 failure family."""
+    assert not issubclass(CandidateSuperseded, ConfigError)
 
 
 def test_validate_candidate_fetches_and_checks_the_current_origin_main():
@@ -3205,6 +3255,30 @@ def test_main_returns_nonzero_when_bounded_aws_call_times_out(
     assert messages == [
         "deployment failed: aws ec2 describe-instances timed out after 60 seconds",
     ]
+
+
+def test_main_exits_zero_without_deploying_a_superseded_candidate(
+        workspace_tmp_dir, fake_clock):
+    _write_integration_host_script(workspace_tmp_dir)
+    aws_calls = []
+    messages = []
+
+    exit_code = main(
+        environ=VALID_ENV,
+        repo_path=workspace_tmp_dir,
+        aws=lambda args: aws_calls.append(args),
+        utc_now=lambda: datetime(2026, 8, 22, 18, 0, tzinfo=timezone.utc),
+        monotonic=fake_clock.monotonic,
+        sleep=fake_clock.sleep,
+        log=messages.append,
+        run_git=fake_git_with_history(
+            "b" * 40, merge_base=VALID_ENV["DEPLOY_SHA"],
+        ),
+    )
+
+    assert exit_code == 0
+    assert aws_calls == []
+    assert any("superseded" in message for message in messages)
 
 
 def test_main_defaults_to_the_concrete_bounded_aws_json_runner(monkeypatch):
