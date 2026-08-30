@@ -33,11 +33,12 @@ def _source(relative):
 # therefore could not be assembled from existing mobile endpoints at all: it
 # was not a composition problem, it was a missing-contract problem.
 #
-# Sprint 12 PR3 closed exactly that gap by publishing `GET /api/v1/today`,
-# which *projects* the canonical workout-state authority rather than adding a
-# second one. The two tests below keep their PR1 names so the discovery
-# report's F1 row still resolves to them, but they now pin the post-PR3 truth:
-# one canonical Today aggregate, and still no other Daily-Coach domain.
+# Sprint 12 PR3 closed the Today gap by publishing `GET /api/v1/today`, which
+# *projects* the canonical workout-state authority rather than adding a second
+# one. Mobile Training PR2 later added three bounded, read-only projections of
+# canonical Training authority. The tests below now pin that post-PR2 truth:
+# one canonical Today aggregate, the three approved Training reads, and no
+# other Daily-Coach domain.
 
 @pytest.fixture(scope="module")
 def mobile_enabled_app():
@@ -79,19 +80,17 @@ def _mobile_paths(flask_app):
     }
 
 
-def test_mobile_api_publishes_only_auth_nutrition_and_pump_check(
+def test_mobile_api_publishes_only_approved_domain_contracts(
         mobile_enabled_app):
     """F1 - the entire mobile contract, enumerated.
 
     Kept as an exact set on purpose: the point of the finding is the *absence*
     of whole domains, and a subset assertion would not notice one arriving.
 
-    `/api/v1/today` joined the set in Sprint 12 PR3. It is the only addition
-    the finding tolerates without being restated, because it publishes no new
-    authority - it is a read projection of the canonical workout state the web
-    app already serves (see ``docs/MOBILE_TODAY.md``). Any *further* path
-    appearing here means a domain arrived on mobile and the discovery report
-    has to be revisited, which is what this exact-set assertion is for.
+    `/api/v1/today` joined the set in Sprint 12 PR3. Mobile Training PR2 adds
+    exactly three canonical read projections. Any further path means a domain
+    arrived on mobile and its architecture has to be reviewed, which is what
+    this exact-set assertion is for.
     """
     assert _mobile_paths(mobile_enabled_app) == {
         "/api/v1/auth/login",
@@ -109,6 +108,9 @@ def test_mobile_api_publishes_only_auth_nutrition_and_pump_check(
         "/api/v1/pump-check-comparisons",
         "/api/v1/pump-check-comparisons/<comparison_id>",
         "/api/v1/today",
+        "/api/v1/training/preferences",
+        "/api/v1/training/plans/current",
+        "/api/v1/training/workouts/<workout_reference>",
     }
 
 
@@ -120,18 +122,24 @@ _APPROVED_TODAY_PATHS = {
     "/api/v1/today",
 }
 
+_APPROVED_TRAINING_PATHS = {
+    "/api/v1/training/preferences",
+    "/api/v1/training/plans/current",
+    "/api/v1/training/workouts/<workout_reference>",
+}
+
 
 @pytest.mark.parametrize(
     "domain",
     ["training", "workout", "plan", "progress", "coach", "checkin", "today"],
 )
-def test_no_mobile_endpoint_serves_a_daily_coach_domain(
+def test_no_unapproved_mobile_endpoint_serves_a_daily_coach_domain(
         mobile_enabled_app, domain):
-    """F1 - no mobile route mentions any Today signal domain.
+    """F1 - no unapproved mobile route mentions a Today signal domain.
 
-    `plan` is checked too: the only `/api/v1` path that could contain it would
-    be a training plan, since nutrition plans are not published to mobile
-    either.
+    Training PR2 deliberately publishes current-plan and workout reads. They
+    remain projections of canonical Training authority and are enumerated
+    above; this guard still rejects any additional Training or Today surface.
 
     `today` is still checked, and is now the sharper of the two Today guards.
     Since Sprint 12 PR3 there are exactly two approved Today paths - the
@@ -142,11 +150,13 @@ def test_no_mobile_endpoint_serves_a_daily_coach_domain(
     """
     offenders = {
         path for path in _mobile_paths(mobile_enabled_app)
-        if domain in path and path not in _APPROVED_TODAY_PATHS
+        if (domain in path
+            and path not in _APPROVED_TODAY_PATHS
+            and path not in _APPROVED_TRAINING_PATHS)
     }
     assert offenders == set(), (
-        "a mobile endpoint now serves '%s'; the discovery report's "
-        "missing-contract finding is out of date: %s"
+        "an unapproved mobile endpoint now serves '%s'; review the mobile "
+        "authority contract: %s"
         % (domain, sorted(offenders)))
 
 

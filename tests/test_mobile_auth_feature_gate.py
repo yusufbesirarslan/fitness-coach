@@ -59,6 +59,9 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("get", "/api/v1/account/me"),
         ("get", "/api/v1/nutrition/diary/today"),
         ("get", "/api/v1/today"),
+        ("get", "/api/v1/training/preferences"),
+        ("get", "/api/v1/training/plans/current"),
+        ("get", "/api/v1/training/workouts/AAAAAAAAAAAAAAAAAAAAAAAA"),
     ):
         headers = post_headers if method == "post" else None
         assert getattr(client, method)(path, headers=headers).status_code == 404
@@ -125,6 +128,9 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             # Sprint 12 PR3. Canonical Today read; on this blueprint so it cannot
             # become an ungated parallel mobile surface.
             ("/api/v1/today", ("GET",)),
+            ("/api/v1/training/preferences", ("GET",)),
+            ("/api/v1/training/plans/current", ("GET",)),
+            ("/api/v1/training/workouts/<workout_reference>", ("GET",)),
         }
 
 
