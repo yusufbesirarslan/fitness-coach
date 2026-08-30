@@ -9,13 +9,13 @@ Flask-Limiter==4.1.1
 Flask-Migrate==4.1.0
 Flask-SQLAlchemy==3.1.1
 Authlib==1.7.2
-SQLAlchemy==2.0.51
+SQLAlchemy==2.0.52
 Werkzeug==3.1.8
-gunicorn==26.0.0
+gunicorn==26.2.0
 openai==2.50.0
 anthropic[bedrock]==0.120.2
 psycopg2-binary==2.9.12
-python-dotenv==1.2.2
+python-dotenv==1.2.3
 requests==2.34.2
 Brotli==1.2.0
 beautifulsoup4==4.15.0
@@ -23,14 +23,14 @@ beautifulsoup4==4.15.0
 # yükseltme PR'ları açar; pin'ler tekrarlanabilir build için sabit kalır.
 pdfplumber==0.11.10
 Pillow==12.3.0
-boto3==1.43.59
-redis==8.0.1
+boto3==1.43.81
+redis==8.1.0
 # Arka-plan iş kuyruğu (Sprint 4 WS8) — app/jobs/, worker.py. Redis yoksa/rq
 # kurulu değilse get_queue() None döner ve işler satır-içi (inline) çalışır.
-rq==2.10.0
+rq==2.11.0
 # Merkezi e-posta altyapısı (app/services/email_service.py) — Resend resmi SDK.
-resend==2.35.0
+resend==2.42.0
 # Hata izleme — yalnızca SENTRY_DSN ayarlıysa etkin (app/observability.py).
-sentry-sdk[flask]==2.66.1
-cryptography==50.0.0
+sentry-sdk[flask]==2.68.1
+cryptography==50.0.1
 tzdata==2026.3
