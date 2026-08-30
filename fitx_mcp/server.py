@@ -62,6 +62,10 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in _sys.path:
     _sys.path.insert(0, _REPO_ROOT)
 from app.services.nutrition_pipeline import clamp_serving_macros
+from app.services.nutrition_targets import (
+    derive_daily_macro_targets,
+    remaining_macro_budget,
+)
 from app.services import coach_context_queries as _coach_context_queries
 from app.services.coach_context_queries import (
     _app_today,
@@ -546,7 +550,12 @@ def analyze_and_rank_menu(raw_menu_text: str, user_id: int) -> str:
             (user_id,),
         )
         sess = cur.fetchone()
-        if not sess or not sess["target_calories"]:
+        # Yapılandırılmış hedef yoksa kanonik otorite yokluk döner; bu araç onu
+        # KENDİ mevcut hata sözleşmesine çevirir — sayı uydurmaz (F3a).
+        targets = derive_daily_macro_targets(
+            sess["target_calories"] if sess else None,
+            sess["goal"] if sess else None)
+        if targets is None:
             return json.dumps({"error": "Kullanıcı profil verisi bulunamadı."}, ensure_ascii=False)
 
         today = _day_key()
@@ -558,18 +567,16 @@ def analyze_and_rank_menu(raw_menu_text: str, user_id: int) -> str:
         )
         consumed = cur.fetchone()
 
-    target_cal = sess["target_calories"]
-    goal = sess["goal"] or ""
-    protein_target = target_cal * (0.30 if goal == "kas kazanma" else 0.25) / 4
-    fat_target = target_cal * 0.25 / 9
-    carb_target = target_cal * (0.45 if goal == "kas kazanma" else 0.50) / 4
-
-    remaining = {
-        "calories": max(target_cal - consumed["cal"], 0),
-        "protein": max(protein_target - consumed["pro"], 0),
-        "carbs": max(carb_target - consumed["carb"], 0),
-        "fat": max(fat_target - consumed["fat"], 0),
-    }
+    # Hedef makro dağılımı kanonik otoriteden gelir (Sprint 13 PR2, C2) —
+    # bu araç formülün DÖRDÜNCÜ kopyasını taşıyordu. `nutrition_targets` saf ve
+    # stdlib-only olduğundan bu standalone süreç için ek yük getirmez; aynı
+    # nedenle `clamp_serving_macros` da yukarıda app.services'ten alınıyor.
+    remaining = remaining_macro_budget(targets, {
+        "calories": consumed["cal"],
+        "protein": consumed["pro"],
+        "carbs": consumed["carb"],
+        "fat": consumed["fat"],
+    }).as_dict()
 
     lines = [l.strip() for l in raw_menu_text.split("\n") if len(l.strip()) > 2]
     food_candidates = []

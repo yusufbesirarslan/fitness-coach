@@ -48,6 +48,10 @@ from app.services.context_builder import (  # noqa: F401 (re-export)
 from app.services.fatsecret import _food_search_fatsecret, _food_search_static
 from app.services.gamification import _claim_quest, award_xp, log_activity
 from app.services.training_history import fetch_workout_entries, total_volume
+from app.services.nutrition_targets import (
+    derive_daily_macro_targets,
+    remaining_macro_budget,
+)
 from app.services.memory_manager import (  # noqa: F401 (re-export)
     COACH_HISTORY_CHAR_CAP,
     COACH_HISTORY_LIMIT,
@@ -133,26 +137,22 @@ def _today_nutrition_totals(user_id):
 def _remaining_macros_for_user(user_id):
     """Kullanicinin bugun KALAN gunluk makro butcesi.
 
-    UserSession hedef kalorisinden hedef-makro dagilimi (analyze_menu ile ayni
-    formul) cikarilir, bugun MealLog'a islenen tuketim dusulur.
-    Deterministik; LLM yok. Profil/hedef yoksa None doner.
+    Bu fonksiyon ARTIK hedef-makro formulunun sahibi DEGIL (Sprint 13 PR2, C2):
+    dagilimi tek kanonik otorite (`app.services.nutrition_targets`) turetir,
+    burada kalan yalnizca kocun sahip oldugu isler — en son UserSession'i ve
+    bugunun kanonik MealLog toplamlarini okumak. Ayni otoriteyi menu analizi,
+    barkod ve fitx_mcp de tuketir; formul artik ucuncu kez yazilmaz (F2).
+    Deterministik; LLM yok. Yapilandirilmis hedef yoksa None doner — sayi
+    uydurulmaz (F3a).
     """
     sess = (UserSession.query.filter_by(user_id=user_id)
             .order_by(UserSession.created_at.desc()).first())
-    if not sess or not sess.target_calories:
+    targets = derive_daily_macro_targets(
+        getattr(sess, "target_calories", None), getattr(sess, "goal", None))
+    if targets is None:
         return None
-    target_cal = sess.target_calories
-    goal = sess.goal or ""
-    protein_target = target_cal * (0.30 if goal == "kas kazanma" else 0.25) / 4
-    fat_target = target_cal * 0.25 / 9
-    carb_target = target_cal * (0.45 if goal == "kas kazanma" else 0.50) / 4
-    consumed = _today_nutrition_totals(user_id)
-    return {
-        "calories": max(target_cal - consumed["calories"], 0),
-        "protein": max(protein_target - consumed["protein"], 0),
-        "carbs": max(carb_target - consumed["carbs"], 0),
-        "fat": max(fat_target - consumed["fat"], 0),
-    }
+    remaining = remaining_macro_budget(targets, _today_nutrition_totals(user_id))
+    return remaining.as_dict()
 
 
 def _today_workout_totals(user_id):

@@ -20,6 +20,10 @@ from app.models import (
 )
 from app.services.ai_gate import blocking_concurrency_slot
 from app.services.fatsecret import _food_find_by_barcode
+from app.services.nutrition_targets import (
+    derive_daily_macro_targets,
+    remaining_macro_budget,
+)
 from app.services.workout_state import resolve_workout_state
 from app.timeutil import day_key
 
@@ -217,14 +221,54 @@ def _goal_key(goal):
 
 
 def _target_macros(session):
-    calories = _to_float(getattr(session, "target_calories", None), 2000) or 2000
-    goal = _goal_key(getattr(session, "goal", ""))
-    protein_ratio = 0.30 if goal == "bulk" else 0.25
+    """The user's configured daily macro target, or ``None`` if they have none.
+
+    Sprint 13 PR2 (C2): this helper no longer owns a formula. It resolves the
+    canonical authority for the caller's already-fetched session and returns the
+    canonical value unrounded; ``_published_macros`` applies this payload's one
+    decimal at the boundary, so the remaining-budget subtraction happens on the
+    exact figure rather than on a rounded one.
+
+    Two behaviours changed on purpose. Carbohydrates for a non-muscle-gain user
+    are now 50% of the target rather than 45%, because barcode was the odd one
+    out among three server derivations (F2). And a user with no configured
+    target gets ``None`` instead of a fabricated 2000 kcal goal they never set
+    (F3a) — callers publish that absence rather than dressing it up as zeros.
+
+    The goal *classifier* did not move: ``_goal_key``'s fuzzy bulk/cut/maintain
+    vocabulary still drives recommendation messaging, while the target split
+    matches the stored goal exactly. For the three goal values ``profile.py``
+    permits the two agree, which is what makes the parity test meaningful.
+    """
+    return derive_daily_macro_targets(
+        getattr(session, "target_calories", None),
+        getattr(session, "goal", None),
+    )
+
+
+def _published_macros(macros):
+    """Project a canonical macro set onto this payload's one-decimal shape.
+
+    Absence stays absence: `None` is published as `null`, never as a set of
+    zeros that would read as "a goal of nothing".
+    """
+    if macros is None:
+        return None
+    return {key: round(value, 1) for key, value in macros.as_dict().items()}
+
+
+def _daily_progress(targets, consumed):
+    """Percent of each target consumed today, or `None` with no target.
+
+    A percentage of an unconfigured target is not zero progress — it is not a
+    question, so it is not answered.
+    """
+    if targets is None:
+        return None
+    published = targets.as_dict()
     return {
-        "calories": calories,
-        "protein": round(calories * protein_ratio / 4, 1),
-        "carbs": round(calories * 0.45 / 4, 1),
-        "fat": round(calories * 0.25 / 9, 1),
+        key: round((consumed[key] / published[key]) * 100, 1) if published[key] else 0
+        for key in published
     }
 
 
@@ -243,19 +287,17 @@ def get_user_barcode_context(user_id, meal_time=""):
     session = UserSession.query.filter_by(user_id=user_id).order_by(UserSession.created_at.desc()).first()
     targets = _target_macros(session)
     consumed = _today_totals(user_id)
-    remaining = {key: round(max(targets[key] - consumed[key], 0), 1) for key in targets}
     return {
+        # The display goal classifier is a different question from the target
+        # split and keeps its own fuzzy vocabulary (C2, PR2 §7).
         "goal": _goal_key(getattr(session, "goal", "")),
-        "targets": targets,
+        "targets": _published_macros(targets),
         "consumed": consumed,
-        "remaining": remaining,
+        "remaining": _published_macros(remaining_macro_budget(targets, consumed)),
         "workout_completed_today": resolve_workout_state(
             user_id).completed_today,
         "meal_time": meal_time or "",
-        "daily_progress": {
-            key: round((consumed[key] / targets[key]) * 100, 1) if targets[key] else 0
-            for key in targets
-        },
+        "daily_progress": _daily_progress(targets, consumed),
     }
 
 
@@ -446,8 +488,8 @@ def goal_impact_for_add(user_id, added_macros):
         "fat": _round1(before["fat"] + added_macros["fat"]),
     }
     session = UserSession.query.filter_by(user_id=user_id).order_by(UserSession.created_at.desc()).first()
-    targets = _target_macros(session)
-    return {"before": before, "after": after, "targets": targets}
+    return {"before": before, "after": after,
+            "targets": _published_macros(_target_macros(session))}
 
 
 def add_food_to_diary(user_id, food, meal, serving_id=None, quantity=1,

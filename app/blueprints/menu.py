@@ -20,6 +20,10 @@ from app.services.fatsecret import _get_fatsecret_token, _lookup_macros_fatsecre
 from app.timeutil import day_key
 from app.services.foodcache import _cache_macros, _get_cached_macros
 from app.services.menu_extract import _content_has_food_items, _discover_menu_links, _extract_framework_state, _extract_page_sections, _menu_score, _try_wordpress_api
+from app.services.nutrition_targets import (
+    derive_daily_macro_targets,
+    remaining_macro_budget,
+)
 from app.services.menu_fetch import _fetch_page, _is_google_drive_url, _process_google_drive_url, _validate_menu_url
 
 
@@ -294,7 +298,13 @@ def analyze_menu():
 
     sess = UserSession.query.filter_by(user_id=current_user.id)\
         .order_by(UserSession.created_at.desc()).first()
-    if not sess or not sess.target_calories:
+    # Hedef makro dagilimi ARTIK burada turetilmez (Sprint 13 PR2, C2): tek
+    # kanonik otorite `app.services.nutrition_targets`. Otorite yapilandirilmis
+    # hedef yoksa yoklugu (None) doner; bu endpoint onu KENDI mevcut
+    # "profil verisi eksik" sozlesmesine cevirir — sayi uydurmaz (F3a).
+    targets = derive_daily_macro_targets(
+        getattr(sess, "target_calories", None), getattr(sess, "goal", None))
+    if targets is None:
         return jsonify({"error": t("route.profile_data_missing")}), 400
 
     today_str = day_key()
@@ -306,18 +316,7 @@ def analyze_menu():
         consumed["carbs"]    += m.karb or 0
         consumed["fat"]      += m.yag or 0
 
-    target_cal = sess.target_calories
-    goal = sess.goal or ""
-    protein_target = target_cal * (0.30 if goal == "kas kazanma" else 0.25) / 4
-    fat_target = target_cal * 0.25 / 9
-    carb_target = target_cal * (0.45 if goal == "kas kazanma" else 0.50) / 4
-
-    remaining = {
-        "calories": max(target_cal - consumed["calories"], 0),
-        "protein": max(protein_target - consumed["protein"], 0),
-        "carbs": max(carb_target - consumed["carbs"], 0),
-        "fat": max(fat_target - consumed["fat"], 0),
-    }
+    remaining = remaining_macro_budget(targets, consumed).as_dict()
 
     headings_hint = (data or {}).get("headings")
 
@@ -618,11 +617,6 @@ def analyze_menu():
         "categories": categories_result,
         "items": [item for items in categories_result.values() for item in items],
         "remaining": {k: int(round(v)) for k, v in remaining.items()},
-        "target": {
-            "calories": int(round(target_cal)),
-            "protein": int(round(protein_target)),
-            "carbs": int(round(carb_target)),
-            "fat": int(round(fat_target)),
-        },
+        "target": {k: int(round(v)) for k, v in targets.as_dict().items()},
         "consumed": {k: int(round(v)) for k, v in consumed.items()},
     })
