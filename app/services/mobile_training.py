@@ -12,9 +12,7 @@ from datetime import datetime, timezone
 from app.services.exercise_catalog import resolve_exercise
 from app.services.today_facts import get_active_plan
 from app.services.training_generation.capability import (
-    SUPPORTED_EQUIPMENT_BY_STYLE,
-    STATUS_CONFLICTING,
-    STATUS_UNSUPPORTED,
+    public_capability_constraints,
 )
 from app.services.training_generation.preference_contract import (
     BODY_FOCUS_VALUES,
@@ -83,34 +81,7 @@ def preference_contract() -> dict:
             "odak_hedef": _token_field("genel", FOCUS_VALUES),
             "injuries": {"type": "string", "default": ""},
         },
-        "capability_constraints": [
-            {
-                "status": STATUS_UNSUPPORTED,
-                "reason": "CROSSFIT_SCHEMA_UNSUPPORTED",
-                "when": {"antrenman_tarzi": _styles_for_rule("crossfit")},
-            },
-            {
-                "status": STATUS_UNSUPPORTED,
-                "reason": "POWERLIFTING_REQUIRES_GYM_EQUIPMENT",
-                "when": {
-                    "antrenman_tarzi": _styles_for_rule("powerlifting"),
-                    "ekipman": sorted(
-                        EQUIPMENT_VALUES
-                        - SUPPORTED_EQUIPMENT_BY_STYLE["powerlifting"]
-                    ),
-                },
-            },
-            {
-                "status": STATUS_CONFLICTING,
-                "reason": "CARDIO_DAYS_WITHOUT_TYPE",
-                "when": {"kardiyo_tipi": ["yok"], "kardiyo_gun": [1, 2, 3, 4, 5, 6]},
-            },
-            {
-                "status": STATUS_CONFLICTING,
-                "reason": "WEEK_ALLOCATION_EXCEEDS_SEVEN_DAYS",
-                "when": {"rule": "gun_sayisi + effective_kardiyo_gun > 7"},
-            },
-        ],
+        "capability_constraints": public_capability_constraints(),
     }
 
 
@@ -200,10 +171,6 @@ def _token_field(default, choices):
     return {"type": "token", "default": default, "choices": sorted(choices)}
 
 
-def _styles_for_rule(rule):
-    return sorted(token for token, target in STYLE_RULE_KEYS.items() if target == rule)
-
-
 def _project_plan(plan, user_id, secret) -> dict:
     try:
         lineage = _lineage(plan.lineage_id)
@@ -232,7 +199,10 @@ def _project_plan(plan, user_id, secret) -> dict:
         }
     except PlanUnprojectable:
         raise
-    except (ValueError, TypeError, KeyError, AttributeError, OverflowError) as error:
+    except (
+        ValueError, TypeError, KeyError, AttributeError, OverflowError,
+        RecursionError,
+    ) as error:
         raise PlanUnprojectable("persisted plan is not projectable") from error
 
 

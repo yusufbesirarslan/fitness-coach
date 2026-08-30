@@ -197,25 +197,33 @@ def test_preferences_publish_the_exact_canonical_rendering_contract(
             {
                 "status": "unsupported",
                 "reason": "CROSSFIT_SCHEMA_UNSUPPORTED",
-                "when": {"antrenman_tarzi": ["crossfit"]},
+                "when_any": [{"antrenman_tarzi": ["crossfit"]}],
             },
             {
                 "status": "unsupported",
                 "reason": "POWERLIFTING_REQUIRES_GYM_EQUIPMENT",
-                "when": {
+                "when_any": [{
                     "antrenman_tarzi": ["powerlifting"],
                     "ekipman": ["ev", "minimal"],
-                },
+                }],
             },
             {
                 "status": "conflicting",
                 "reason": "CARDIO_DAYS_WITHOUT_TYPE",
-                "when": {"kardiyo_tipi": ["yok"], "kardiyo_gun": [1, 2, 3, 4, 5, 6]},
+                "when_any": [{
+                    "kardiyo_tipi": ["yok"],
+                    "kardiyo_gun": [1, 2, 3, 4, 5, 6],
+                }],
             },
             {
                 "status": "conflicting",
                 "reason": "WEEK_ALLOCATION_EXCEEDS_SEVEN_DAYS",
-                "when": {"rule": "gun_sayisi + effective_kardiyo_gun > 7"},
+                "when_any": [
+                    {"gun_sayisi": [3], "kardiyo_tipi": ["bisiklet", "ip_atlama", "karisik", "kosu", "yuruyus", "yuzme"], "kardiyo_gun": [5, 6]},
+                    {"gun_sayisi": [4], "kardiyo_tipi": ["bisiklet", "ip_atlama", "karisik", "kosu", "yuruyus", "yuzme"], "kardiyo_gun": [4, 5, 6]},
+                    {"gun_sayisi": [5], "kardiyo_tipi": ["bisiklet", "ip_atlama", "karisik", "kosu", "yuruyus", "yuzme"], "kardiyo_gun": [3, 4, 5, 6]},
+                    {"gun_sayisi": [6], "kardiyo_tipi": ["bisiklet", "ip_atlama", "karisik", "kosu", "yuruyus", "yuzme"], "kardiyo_gun": [2, 3, 4, 5, 6]},
+                ],
             },
         ],
     }
@@ -340,6 +348,28 @@ def test_existing_unprojectable_plan_is_a_typed_conflict_not_no_plan(
     client, mobile_user, as_mobile, raw
 ):
     _save_plan(mobile_user, raw=raw)
+
+    response = _get_current(client, as_mobile(mobile_user))
+
+    assert response.status_code == 409
+    assert response.json["error"]["code"] == "TRAINING_PLAN_UNPROJECTABLE"
+    assert response.json["error"]["retryable"] is False
+
+
+def test_json_parser_recursion_is_unprojectable_not_retryable(
+    client, mobile_user, as_mobile, monkeypatch
+):
+    _save_plan(mobile_user)
+    from app.services import mobile_training
+
+    original_loads = mobile_training.json.loads
+
+    def _recursion_error(raw, *args, **kwargs):
+        if isinstance(raw, str):
+            raise RecursionError("stored JSON nesting limit exceeded")
+        return original_loads(raw, *args, **kwargs)
+
+    monkeypatch.setattr(mobile_training.json, "loads", _recursion_error)
 
     response = _get_current(client, as_mobile(mobile_user))
 

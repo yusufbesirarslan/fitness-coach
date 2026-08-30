@@ -1,6 +1,7 @@
 """Architecture and side-effect guards for native Training reads."""
 import ast
 import json
+from itertools import product
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,19 @@ from app import extensions
 from app.extensions import db
 from app.models import TrainingPlan
 from app.services import mobile_auth
+from app.services.mobile_training import preference_contract
+from app.services.training_generation.capability import (
+    STATUS_SUPPORTED,
+    evaluate_capability,
+)
+from app.services.training_generation.models import TrainingPreferences
+from app.services.training_generation.preference_contract import (
+    CARDIO_DAYS,
+    CARDIO_TYPES,
+    DAY_COUNTS,
+    EQUIPMENT_VALUES,
+    STYLE_RULE_KEYS,
+)
 from app.timeutil import APP_TZ, audit_clock
 
 
@@ -35,6 +49,41 @@ def _imports(path):
         elif isinstance(node, ast.ImportFrom) and node.module:
             modules.add(node.module)
     return modules
+
+
+def test_public_capability_constraints_match_canonical_evaluator_exhaustively():
+    constraints = preference_contract()["capability_constraints"]
+
+    def matches(constraint, preferences):
+        return any(
+            all(getattr(preferences, field) in values
+                for field, values in alternative.items())
+            for alternative in constraint["when_any"]
+        )
+
+    combinations = product(
+        sorted(DAY_COUNTS), sorted(EQUIPMENT_VALUES), sorted(CARDIO_TYPES),
+        sorted(CARDIO_DAYS), sorted(STYLE_RULE_KEYS),
+    )
+    for days, equipment, cardio_type, cardio_days, style in combinations:
+        preferences = TrainingPreferences(
+            gun_sayisi=days,
+            ekipman=equipment,
+            kardiyo_tipi=cardio_type,
+            kardiyo_gun=cardio_days,
+            antrenman_tarzi=style,
+        )
+        canonical = evaluate_capability(preferences)
+        matched = next(
+            (item for item in constraints if matches(item, preferences)), None
+        )
+        if canonical.status == STATUS_SUPPORTED:
+            assert matched is None
+        else:
+            assert matched is not None
+            assert (matched["status"], matched["reason"]) == (
+                canonical.status, canonical.reason,
+            )
 
 
 def _plan(user, exercise_count=1):
@@ -153,14 +202,18 @@ def test_plan_and_workout_reads_never_flush_or_write(
     user = make_user("training-write-guard")
     _plan(user)
     headers = _headers(monkeypatch, user)
-    session = db.session()
-    flushes = []
+    writes = []
 
-    def _record_flush(*args):
-        flushes.append("flush")
+    def _record_sql(conn, cursor, statement, params, context, many):
+        verb = statement.lstrip().split(None, 1)[0].upper()
+        if verb in {"INSERT", "UPDATE", "DELETE"}:
+            writes.append(statement)
 
-    event.listen(session, "before_flush", _record_flush)
+    event.listen(db.engine, "before_cursor_execute", _record_sql)
     try:
+        preferences = client.get(
+            "/api/v1/training/preferences", headers=headers
+        )
         with audit_clock(FIXED_NOW):
             plan = client.get("/api/v1/training/plans/current", headers=headers)
         reference = plan.json["plan"]["current_workout_ref"]
@@ -168,11 +221,12 @@ def test_plan_and_workout_reads_never_flush_or_write(
             f"/api/v1/training/workouts/{reference}", headers=headers
         )
     finally:
-        event.remove(session, "before_flush", _record_flush)
+        event.remove(db.engine, "before_cursor_execute", _record_sql)
 
+    assert preferences.status_code == 200
     assert plan.status_code == 200
     assert detail.status_code == 200
-    assert flushes == []
+    assert writes == []
 
 
 def _statements_for(client, path, headers, *, freeze=False):

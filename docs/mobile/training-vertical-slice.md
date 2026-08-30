@@ -379,10 +379,13 @@ response has exactly `contract_version`, `fields`, and `capability_constraints`.
 keys from the Training preference schema; each closed field publishes `type`,
 `default`, and deterministically sorted `choices`, while `injuries` publishes
 `{"type":"string","default":""}`. Capability constraints publish only closed
-`status`, `reason`, and typed `when` metadata for CrossFit unsupported,
+`status`, `reason`, and typed `when_any` alternatives for CrossFit unsupported,
 powerlifting equipment, cardio days without a type, and weekly allocation over
-seven days. The style/equipment values are derived from the canonical capability
-matrix. This is rendering metadata, not an alternate client validator;
+seven days. Each alternative is an AND of field-to-allowed-value lists; the
+ordered constraint list uses first-match semantics, matching the canonical
+evaluator's precedence. Values and bounded weekly-overflow combinations are
+derived by the canonical capability module and exhaustively checked against its
+evaluator. This is rendering metadata, not an alternate client validator;
 submission remains authoritative.
 
 The current-plan endpoint always returns HTTP 200 for readable product states.
