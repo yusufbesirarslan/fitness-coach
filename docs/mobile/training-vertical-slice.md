@@ -364,39 +364,92 @@ All endpoints are under the existing mobile API blueprint, require
 established mobile error envelope, derive owner/date from authentication and
 server time, and never call a browser controller.
 
-### Read contracts — recommended PR2
+### Read contracts — implemented PR2
 
 | Method/path | Request | Response | Idempotency | Canonical service reused |
 |---|---|---|---|---|
-| `GET /api/v1/training/preferences` | none | `contract_version`, choices/defaults, capability constraints | safe GET | preference constants and `evaluate_capability` vocabulary |
-| `GET /api/v1/training/plans/current` | none | exact `{ "plan": null }` no-plan state or `{ "plan": { ... } }` with lineage, mutation version, created time, score, seven bounded days and exercise IDs | safe GET | `get_active_plan`, plan validators/serializer |
-| `GET /api/v1/training/workouts/{workout_ref}` | opaque reference from the current-plan response | bound lineage/version/slot, bounded workout detail, canonical exercise IDs | safe GET | active-plan selector and bounded day projection |
+| `GET /api/v1/training/preferences` | none | exact metadata contract below | safe GET | preference constants and capability matrix vocabulary |
+| `GET /api/v1/training/plans/current` | none | exact `{ "plan": null }` no-plan state or the plan schema below | safe GET | `get_active_plan`, plan validator, exercise catalog, workout-state resolver |
+| `GET /api/v1/training/workouts/{workout_ref}` | opaque reference from the current-plan response | exact workout schema below | safe GET | active-plan selector and the shared bounded day projection |
 
-The preference response exposes choices and constraints for rendering, not an
-alternate client validator. Submission remains authoritative.
+All three routes live on the existing feature-gated mobile blueprint, require
+`Authorization: Bearer`, and return `Cache-Control: no-store`. The preference
+response has exactly `contract_version`, `fields`, and `capability_constraints`.
+`contract_version` is `1`. `fields` contains the eleven canonical preference
+keys from the Training preference schema; each closed field publishes `type`,
+`default`, and deterministically sorted `choices`, while `injuries` publishes
+`{"type":"string","default":""}`. Capability constraints publish only closed
+`status`, `reason`, and typed `when_any` alternatives for CrossFit unsupported,
+powerlifting equipment, cardio days without a type, and weekly allocation over
+seven days. Each alternative is an AND of field-to-allowed-value lists; the
+ordered constraint list uses first-match semantics, matching the canonical
+evaluator's precedence. Values and bounded weekly-overflow combinations are
+derived by the canonical capability module and exhaustively checked against its
+evaluator. This is rendering metadata, not an alternate client validator;
+submission remains authoritative.
 
 The current-plan endpoint always returns HTTP 200 for readable product states.
-No plan is exactly `{ "plan": null }`; a plan is exactly
-`{ "plan": { "plan_lineage": string, "mutation_version": integer,
-"created_at": UTC timestamp, "score": number|null, "days": [...] } }`.
+No plan is exactly `{ "plan": null }`; a plan is exactly:
+
+```json
+{
+  "plan": {
+    "plan_lineage": "opaque-lineage",
+    "mutation_version": 4,
+    "created_at": "2026-07-01T08:30:00Z",
+    "score": 8.5,
+    "current_workout_ref": "24-char-opaque-token",
+    "days": []
+  }
+}
+```
+
+`score` is null or a finite canonical 1–10 value. `current_workout_ref` is null
+unless the canonical Istanbul day is a scheduled workout/cardio day according to
+`resolve_workout_state`. `days` has exactly seven canonical weekday slots in
+Monday-through-Sunday order. Each day has exactly `slot`, `weekday`, `kind`,
+`focus`, `duration_minutes`, `estimated_calories`, `workout_ref`, and
+`exercises`. Closed `kind` values are `training`, `cardio`, and `rest`; rest days
+have a null reference and no exercises. A day is bounded to at most 32 exercises.
 An existing row that cannot be safely projected returns HTTP 409 with code
 `TRAINING_PLAN_UNPROJECTABLE` and `retryable:false`; it is never collapsed into
 no-plan. Flutter DTOs reject missing or additional top-level keys and never map
 the 409 to an empty plan.
 
 The plan object uses `plan_lineage` plus `mutation_version` as plan identity.
-Each day carries a server-projected `slot`, `kind`, and a bounded `workout_ref`.
-The reference is an opaque projection tied to owner, lineage, version, and slot;
-it is not a new persisted plan authority. Rest days have no workout reference.
+Each exercise has exactly `exercise_id`, `display_name`, `sets`, `reps`, `rest`,
+and `notes`. Identity and display name come from the active canonical catalog;
+the persisted display spelling is not an identity authority. Missing, unknown,
+inactive, or malformed IDs make the existing plan unprojectable. `rest` is
+exactly `{ "display_text": string, "seconds": integer|null }`. Seconds are
+derived only from exact `N sn`, `N dk`, or `0` forms and only up to 86,400;
+anything else remains bounded display text with null seconds. No fuzzy or
+locale-dependent client parsing is allowed.
+
+Each non-rest day carries a deterministic 24-character base64url HMAC reference.
+It is domain-separated and bound to authenticated owner, lineage, mutation
+version, and canonical slot; it contains no decodable database ID and is not a
+new persisted plan authority. Rest days have no workout reference.
 The workout-detail endpoint verifies every bound component against the current
 owned plan. A replacement or mutation returns HTTP 409 with code
 `TRAINING_WORKOUT_STALE` and `retryable:false`; the client discards the reference,
 re-reads the current plan, and does not retry the stale request.
 
-Exercise output retains the catalog `exercise_id`, display name, sets, reps,
-rest display value, and notes. If numeric rest seconds cannot be canonically
-derived, the first mobile DTO must carry the bounded rest display string rather
-than guessing.
+Workout detail is exactly `{ "workout": { "plan_lineage",
+"mutation_version", "workout_ref", "slot", "weekday", "kind", "focus",
+"duration_minutes", "estimated_calories", "exercises" } }`, using the same day
+and exercise projection as the current plan. Malformed or oversized path tokens
+return private `TRAINING_WORKOUT_NOT_FOUND` HTTP 404. Any syntactically valid
+token that does not match the authenticated owner's current revision—including
+foreign, tampered, random, replaced, mutated, or now-rest references—returns the
+same `TRAINING_WORKOUT_STALE` 409 and reveals no cross-owner existence fact.
+
+The read service performs zero writes and zero provider calls. With bearer
+authentication stubbed at its separately tested boundary, contract tests measure
+zero SQL statements for preference metadata, at most five for the current-plan
+composition, and exactly one owner-scoped active-plan query for workout detail;
+exercise count does not change those budgets. Existing `/api/v1/today` response
+bytes and browser Training behavior are unchanged.
 
 ### First-plan write — later backend PR
 
@@ -754,21 +807,21 @@ Review answers:
   for new domain work.
 - No Sprint 13 or Pump Check file is changed.
 
-## R. Recommended PR2
+## R. Implemented PR2
 
-Implement backend mobile Training read contracts only:
+PR2 implements backend mobile Training read contracts only:
 
 - `GET /api/v1/training/preferences`;
 - `GET /api/v1/training/plans/current`;
 - `GET /api/v1/training/workouts/{workout_ref}`;
-- shared bounded DTO/projection helpers over the canonical preference contract,
+- one shared bounded DTO/projection service over the canonical preference contract,
   active-plan selector, plan validation, and exercise identity;
 - bearer-auth, ownership, exact-schema, no-store, malformed-plan, no-plan,
   stale-reference, and zero-provider-call tests;
 - an architecture test prohibiting imports/calls from the new mobile route into
   the browser Training blueprint.
 
-Acceptance criteria:
+Verified acceptance criteria:
 
 1. cookie-only requests fail and bearer-authenticated owners can read only their
    own current plan;

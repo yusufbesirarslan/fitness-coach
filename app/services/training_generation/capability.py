@@ -14,7 +14,12 @@ from dataclasses import dataclass
 
 from app.services.training_generation.models import TrainingPreferences
 from app.services.training_generation.preference_contract import (
+    CARDIO_DAYS,
+    CARDIO_TYPES,
+    DAY_COUNTS,
+    EQUIPMENT_VALUES,
     PreferenceContractError,
+    STYLE_RULE_KEYS,
     canonical_style,
 )
 
@@ -33,6 +38,57 @@ SUPPORTED_EQUIPMENT_BY_STYLE = {
     "functional": frozenset({"spor_salonu", "ev", "minimal"}),
     "crossfit": frozenset(),
 }
+
+
+def public_capability_constraints() -> list[dict]:
+    """Return an ordered, field-only projection of the canonical matrix."""
+    active_cardio = sorted(CARDIO_TYPES - {"yok"})
+    weekly_overflow = []
+    for training_days in sorted(DAY_COUNTS):
+        invalid_cardio_days = sorted(
+            days for days in CARDIO_DAYS if training_days + days > 7
+        )
+        if invalid_cardio_days:
+            weekly_overflow.append({
+                "gun_sayisi": [training_days],
+                "kardiyo_tipi": active_cardio,
+                "kardiyo_gun": invalid_cardio_days,
+            })
+    def styles(rule):
+        return sorted(
+            token for token, target in STYLE_RULE_KEYS.items() if target == rule
+        )
+    return [
+        {
+            "status": STATUS_UNSUPPORTED,
+            "reason": "CROSSFIT_SCHEMA_UNSUPPORTED",
+            "when_any": [{"antrenman_tarzi": styles("crossfit")}],
+        },
+        {
+            "status": STATUS_UNSUPPORTED,
+            "reason": "POWERLIFTING_REQUIRES_GYM_EQUIPMENT",
+            "when_any": [{
+                "antrenman_tarzi": styles("powerlifting"),
+                "ekipman": sorted(
+                    EQUIPMENT_VALUES
+                    - SUPPORTED_EQUIPMENT_BY_STYLE["powerlifting"]
+                ),
+            }],
+        },
+        {
+            "status": STATUS_CONFLICTING,
+            "reason": "CARDIO_DAYS_WITHOUT_TYPE",
+            "when_any": [{
+                "kardiyo_tipi": ["yok"],
+                "kardiyo_gun": sorted(CARDIO_DAYS - {0}),
+            }],
+        },
+        {
+            "status": STATUS_CONFLICTING,
+            "reason": "WEEK_ALLOCATION_EXCEEDS_SEVEN_DAYS",
+            "when_any": weekly_overflow,
+        },
+    ]
 
 
 @dataclass(frozen=True)
