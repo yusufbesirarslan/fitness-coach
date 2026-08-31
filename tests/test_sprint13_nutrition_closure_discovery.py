@@ -625,13 +625,20 @@ def test_the_builder_delete_route_cannot_reach_a_committed_ledger_row(
 # F2 / F3 / N4 - the derived figures have no single owner
 # ---------------------------------------------------------------------------
 
-def test_barcode_and_coach_disagree_on_the_carbohydrate_target(
+def test_barcode_and_coach_now_agree_on_the_carbohydrate_target(
         app, make_user):
-    """F2: two surfaces, one user, one day, two different targets.
+    """F2 CLOSED by Sprint 13 PR2 (C2).
 
-    Run through the real functions rather than by comparing source constants, so
-    the disagreement is a behavioural fact and PR2's convergence has a test that
-    must be updated when it lands.
+    This test used to pin the *disagreement* — barcode published 225 g of
+    carbohydrate for a non-muscle-gain user while the coach published 250 g —
+    and it said, in as many words, that PR2's convergence should replace it.
+    PR2 landed, so the assertion is inverted: the surviving definition is the
+    coach/menu formula, and the divergent barcode value was the defect, not a
+    behaviour anyone relied on.
+
+    Still run through the real functions rather than source constants, so this
+    is a behavioural fact. The wider convergence proof (menu included, plus the
+    architecture guard) lives in `tests/test_nutrition_targets.py`.
     """
     from app.services import ai_coach, barcode
 
@@ -646,32 +653,34 @@ def test_barcode_and_coach_disagree_on_the_carbohydrate_target(
 
     # No meals logged, so the coach's "remaining" is its target.
     assert coach_remaining is not None
-    assert barcode_targets["carbs"] == pytest.approx(225.0)   # 2000 * 0.45 / 4
     assert coach_remaining["carbs"] == pytest.approx(250.0)   # 2000 * 0.50 / 4
-    assert barcode_targets["carbs"] != coach_remaining["carbs"], (
-        "The two derivations converged. If PR2 landed, replace this "
-        "characterization with the convergence assertion.")
-
-    # They do agree on protein, which is what makes the carbohydrate split look
-    # like an oversight rather than a deliberate difference.
-    assert barcode_targets["protein"] == pytest.approx(
+    assert barcode_targets.carbs == pytest.approx(
+        coach_remaining["carbs"]), (
+        "Barcode and the coach diverged again. There is exactly one canonical "
+        "daily macro-target derivation (C2) — see app/services/nutrition_targets.py.")
+    assert barcode_targets.protein == pytest.approx(
         coach_remaining["protein"])
 
 
-def test_the_barcode_target_fabricates_a_goal_the_user_never_configured():
-    """F3a: fabricated on a live route, and rendered by nothing - hence P2.
+def test_the_barcode_target_no_longer_fabricates_a_goal_the_user_never_set():
+    """F3a CLOSED by Sprint 13 PR2 (C2).
 
-    Both halves matter. The fabrication is real, and barcode is the only server
-    surface that commits it (coach returns None, menu returns 400). But it is
-    P2 rather than P1 only because no first-party surface reads the payload that
-    carries it. If that changes, the severity changes with it.
+    This used to assert `targets["calories"] == 2000` for a user who had
+    configured nothing, with a note saying PR2 would remove that default. It
+    did: absence is now published as absence, matching the mobile boundary that
+    was already the reference behaviour for this decision.
+
+    The second half of the finding is unchanged and still checked: the payload
+    that carries the target is rendered by no first-party surface, which is why
+    F3a was P2 rather than P1. If that ever changes, PR2's correction becomes
+    user-visible and this test says so out loud.
     """
     from app.services import barcode
 
     unconfigured = SimpleNamespace(target_calories=None, goal=None)
-    targets = barcode._target_macros(unconfigured)
-    assert targets["calories"] == 2000, (
-        "PR2 removed the fabricated default. Update F3a and this test together.")
+    assert barcode._target_macros(unconfigured) is None, (
+        "A fabricated configured target came back. F3a is closed by C2 — the "
+        "server must never substitute a number for an unset target.")
 
     from app.services.mobile_nutrition import serialization
     assert serialization.nutrition_goal(None) is None, (

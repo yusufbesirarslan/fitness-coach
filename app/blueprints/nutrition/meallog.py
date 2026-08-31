@@ -18,6 +18,7 @@ from app.models import MealLog, UserSession
 from app.prompts import nutrition as nutrition_prompts
 from app.services.ai import _openai_chat
 from app.services.nutrition_pipeline import sanitize_meal_total_macros
+from app.services.nutrition_targets import derive_daily_macro_targets
 from app.services.gamification import complete_quest_for_user
 from app.services import meal_idempotency
 from app.services.validators import _meal_photo_url, _to_float, validate_meal_photo
@@ -294,6 +295,17 @@ def review_meals():
     last_session = UserSession.query.filter_by(user_id=current_user.id)\
         .order_by(UserSession.created_at.desc()).first()
 
+    # F3b vs F3a (Sprint 13 PR2, §15). Bu route'un `2000`'i PR1'de "yalnızca
+    # LLM istemi içinde niteliksel metin üreten iç yedek" diye sınıflandırıldı
+    # ve KAPSAM DIŞI bırakıldı. O sınıflandırma istem için DOĞRU, yanıt için
+    # DEĞİLDİ: `target` aşağıda JSON payload'ında da YAYIMLANIYOR, yani
+    # yapılandırılmamış kullanıcı için uydurma bir "yapılandırılmış hedef"
+    # yayımlanıyordu — F3a'nın barkod'da kapatılan deseninin AYNISI.
+    # Bu yüzden YALNIZCA yayımlanan alan kanonik otoriteye bağlanır (hedef
+    # yoksa `null`); istemin niteliksel yedeği (F3b) BİLEREK DEĞİŞMEDİ.
+    configured = derive_daily_macro_targets(
+        getattr(last_session, "target_calories", None),
+        getattr(last_session, "goal", None))
     target = last_session.target_calories if last_session else 2000
     goal   = last_session.goal if last_session else "genel sağlık"
 
@@ -350,4 +362,9 @@ def review_meals():
         current_app.logger.exception("Öğün değerlendirmesi üretilemedi")
         review = t("route.eval_failed")
 
-    return jsonify({"review": review, "total_calories": round(total_cal), "target": round(target)})
+    return jsonify({
+        "review": review,
+        "total_calories": round(total_cal),
+        # Yapılandırılmış hedef yoksa `null` — uydurma bir sayı DEĞİL.
+        "target": round(configured.calories) if configured else None,
+    })

@@ -12,6 +12,7 @@ nudge metinleri de dile (language='tr'|'en') göre verilir.
 
 from datetime import datetime, timedelta
 
+from app.services.nutrition_targets import macro_calorie_ratios
 from app.services.training_history import fetch_workout_entries
 from app.timeutil import app_date_of, app_today
 
@@ -114,9 +115,12 @@ def _check_protein_goal(user, db, models, today, nudges, en=False):
     if not sess or not sess.target_calories:
         return
 
-    # Protein hedefi yüzdesi koç/menü ile tutarlı: kas kazanmada %30, aksi halde %25
-    # (eski sabit %30, diğer hesaplarla çelişiyordu — F8).
-    protein_pct = 0.30 if (sess.goal or "") == "kas kazanma" else 0.25
+    # Protein oranı kanonik otoriteden TÜKETİLİR (Sprint 13 PR2, C2): burada
+    # yeniden yazılmaz. Ama soru FARKLI — bu HAFTALIK bir protein hedefidir,
+    # günlük makro dağılımı DEĞİL; bu yüzden haftalık çerçeve (×7) ve eşikler
+    # olduğu gibi kalır ve bu fonksiyon dördüncü bir günlük hedef otoritesi
+    # DEĞİLDİR (PR1 raporu bunu bilerek "downstream consumer" saydı).
+    protein_pct = macro_calorie_ratios(sess.goal).protein
     weekly_protein_goal = sess.target_calories * protein_pct / 4 * 7
 
     week_start = today - timedelta(days=today.weekday())
