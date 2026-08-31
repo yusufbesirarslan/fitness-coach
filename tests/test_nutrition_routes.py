@@ -424,15 +424,20 @@ def test_meal_log_override_macros_clamped_to_physical_bounds(client, auth_user, 
     assert entry.kalori <= 3000 and entry.yag <= 150
 
 
-def test_meal_log_override_floors_negative_macros(client, auth_user):
+def test_meal_log_override_rejects_negative_macros(client, auth_user):
+    # Sprint 13 PR3 / F5: bu test eskiden negatif makroların 200 + sıfır olarak
+    # kaydedilmesini bekliyordu (test_meal_log_override_floors_negative_macros).
+    # O davranış PR3 öncesi kusurdu: geçersiz manuel besin değeri sessizce sıfıra
+    # çevrilip deftere yazılıyor, kullanıcı hatalı girdiğini asla öğrenemiyordu.
+    # PR3 manuel yolu ManualNutritionSnapshot sınırlarına bağlar: geçersiz girdi
+    # reddedilir, satır yazılmaz.
     response = client.post("/meal-log", json={
         "ogun": "Akşam", "yemekler": "hatalı giriş",
         "override_macros": {"kalori": -10, "protein": -2, "karb": -3, "yag": -4},
     })
-    assert response.status_code == 200
-    assert response.get_json()["nutrients"] == {
-        "kalori": 0, "protein": 0, "karb": 0, "yag": 0,
-    }
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+    assert MealLog.query.count() == 0
 
 
 def test_meal_log_override_macros_awards_meal_logged_quest(client, auth_user, monkeypatch):
@@ -499,7 +504,7 @@ def test_ai_meal_total_sanitized_before_persistence(client, auth_user, monkeypat
     )
 
     response = client.post(
-        "/meal-log", json={"ogun": "Ogle", "yemekler": "tavuk"})
+        "/meal-log", json={"ogun": "Öğle", "yemekler": "tavuk"})
 
     assert response.status_code == 200
     expected = {
@@ -532,7 +537,7 @@ def test_ai_meal_total_oversized_numeric_zeroed_before_persistence(
     )
 
     response = client.post(
-        "/meal-log", json={"ogun": "Ogle", "yemekler": "tavuk"})
+        "/meal-log", json={"ogun": "Öğle", "yemekler": "tavuk"})
 
     assert response.status_code == 200
     expected = {"kalori": 0, "protein": 30.0, "karb": 10.0, "yag": 5.0}
@@ -562,7 +567,7 @@ def test_ai_meal_total_normalization_logging_omits_meal_content(
     with caplog.at_level("INFO"):
         response = client.post(
             "/meal-log",
-            json={"ogun": "Ara Ogun", "yemekler": sensitive_meal},
+            json={"ogun": "Ara Öğün", "yemekler": sensitive_meal},
         )
 
     assert response.status_code == 200
@@ -695,7 +700,7 @@ def test_meal_log_idempotency_replays_before_second_ai_call(client, auth_user, m
         return '{"kalori": 240, "protein": 48, "karb": 6, "yag": 3}'
 
     monkeypatch.setattr(nutrition_meallog, "_openai_chat", fake_chat)
-    payload = {"ogun": "Ogle", "yemekler": "tavuk"}
+    payload = {"ogun": "Öğle", "yemekler": "tavuk"}
 
     first = client.post("/meal-log", json=payload, headers=_IDEMPOTENCY_HEADERS)
     second = client.post("/meal-log", json=payload, headers=_IDEMPOTENCY_HEADERS)
@@ -724,7 +729,7 @@ def test_quick_add_meal_idempotency_writes_one_row(client, auth_user):
 def test_meal_log_idempotency_is_scoped_to_authenticated_user(
         client, auth_user, make_user, login):
     payload = {
-        "ogun": "Aksam", "yemekler": "tavuk",
+        "ogun": "Akşam", "yemekler": "tavuk",
         "override_macros": {"kalori": 495, "protein": 62, "karb": 0, "yag": 10.5},
     }
     assert client.post("/meal-log", json=payload,

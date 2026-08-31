@@ -1166,6 +1166,18 @@ def _calculate_meal_suggestion(snapshot):
     }
 
 
+def _suggestion_idempotency_key(message_id):
+    """Deterministic, user-scoped replay key from the IMMUTABLE suggestion id.
+
+    F8 (Sprint 13 PR3). The key must be identical on every replay, so it derives
+    from the message identity alone — never from the macro text, which the
+    parse/provider/LLM pipeline can legitimately recompute differently between
+    attempts. Uniqueness is `(user_id, idempotency_key)`, so the message id needs
+    no user component. Shape matches `meal_idempotency._KEY_RE`.
+    """
+    return f"suggestion:{int(message_id)}"
+
+
 def _persist_meal_suggestion(snapshot, nutrients):
     if not nutrients:
         return None
@@ -1179,7 +1191,17 @@ def _persist_meal_suggestion(snapshot, nutrients):
         protein=nutrients["protein"],
         karb=nutrients["karb"],
         yag=nutrients["yag"],
-        tarih=day_key()
+        tarih=day_key(),
+        # F8: bu satır ELLE girilmiş bir öğün DEĞİL. `source` yazılmayınca ORM
+        # kolon varsayılanı "manual" damgalıyor ve mobil projeksiyon dahil HER
+        # okuyucu kabul edilen bir öneriyi el yazması sanıyordu.
+        source="suggestion",
+        # N8: replay koruması. commit_once ÇAĞRILMAZ — bu yazıcı, mesaj durum
+        # geçişi + yanıt mesajıyla AYNI dış transaction'ın içindedir (§28) ve
+        # burada commit etmek onları erken kalıcılaştırırdı. Anahtar satıra
+        # konur, dış commit onu yazar; yarışın son hakemi uq_meal_log_user_
+        # idempotency'dir, ilk hakem ise mevcut atomik Message claim'i.
+        idempotency_key=_suggestion_idempotency_key(snapshot.message_id),
     )
     db.session.add(entry)
     current_app.logger.info(

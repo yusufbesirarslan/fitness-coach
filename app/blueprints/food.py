@@ -93,14 +93,39 @@ def food_by_barcode():
     return jsonify(barcode_svc.build_lookup_response(product, context))
 
 
+def _deprecated_compatibility_response(payload, status=200):
+    """Mark a legacy compatibility surface without promising a sunset date.
+
+    C13 (Sprint 13 PR1/PR3): `POST /api/food/barcode/add` is a *documented*
+    compatibility surface (`docs/MOBILE_NUTRITION.md`), so PR3 makes it SAFE and
+    visibly deprecated while it keeps responding. Removal is PR5's decision and
+    needs disuse evidence — no `Sunset` header is emitted, because inventing a
+    removal date would be a promise nobody has agreed to.
+    """
+    response = jsonify(payload)
+    response.status_code = status
+    response.headers["Deprecation"] = "true"
+    response.headers["Link"] = '</meal-log>; rel="successor-version"'
+    return response
+
+
 @bp.route("/api/food/barcode/add", methods=["POST"])
 @require_auth
 @limiter.limit(FOOD_SEARCH_RATELIMIT, key_func=_user_or_ip_key)
 def barcode_add_to_diary():
+    """DEPRECATED compatibility surface — still supported for now (C13).
+
+    F6: the caller-supplied `food` object is NO LONGER READ. Provider nutrition
+    is resolved server-side from the barcode alone (`get_barcode_product`, i.e.
+    `BarcodeFoodCache` → FatSecret), so a caller can no longer decide what a
+    `source="barcode"` ledger row means. A payload that cannot identify provider
+    truth without trusting caller nutrition fails CLOSED. The raw `MealLog.id` is
+    no longer published on any variant — first write, replay or error.
+    """
     data = request.get_json(silent=True) or {}
     meal = (data.get("meal") or "").strip()
     if meal not in ("Kahvaltı", "Öğle", "Akşam", "Ara Öğün"):
-        return jsonify({"error": "invalid_meal"}), 400
+        return _deprecated_compatibility_response({"error": "invalid_meal"}, 400)
 
     idempotency_key = meal_idempotency.read_idempotency_key()
     existing = meal_idempotency.find_existing(current_user.id, idempotency_key)
@@ -108,8 +133,8 @@ def barcode_add_to_diary():
         goal_impact = barcode_svc.goal_impact_for_add(current_user.id, {
             "calories": 0, "protein": 0, "carbs": 0, "fat": 0,
         })
-        return jsonify({
-            "message": "logged", "meal_log_id": existing.id,
+        return _deprecated_compatibility_response({
+            "message": "logged",
             "nutrients": {
                 "kalori": round(existing.kalori or 0, 1),
                 "protein": round(existing.protein or 0, 1),
@@ -120,15 +145,14 @@ def barcode_add_to_diary():
             "analytics_events": ["Added To Diary"],
         })
 
-    food = data.get("food")
-    if not isinstance(food, dict):
-        try:
-            product = barcode_svc.get_barcode_product(data.get("barcode", ""))
-        except BlockingConcurrencyLimit:
-            return _fatsecret_busy_response("barcode_add_to_diary")
-        food = product["food"] if product else None
+    try:
+        product = barcode_svc.get_barcode_product(data.get("barcode", ""))
+    except BlockingConcurrencyLimit:
+        return _fatsecret_busy_response("barcode_add_to_diary")
+    food = product["food"] if product else None
     if not food:
-        return jsonify(barcode_svc.not_found_response()), 404
+        return _deprecated_compatibility_response(
+            barcode_svc.not_found_response(), 404)
 
     serving, added_preview = barcode_svc.scale_serving_macros(
         food,
@@ -136,7 +160,8 @@ def barcode_add_to_diary():
         data.get("serving_quantity", 1),
     )
     if not serving or not added_preview or added_preview["calories"] <= 0:
-        return jsonify({"error": "invalid_serving"}), 400
+        return _deprecated_compatibility_response(
+            {"error": "invalid_serving"}, 400)
     goal_impact = barcode_svc.goal_impact_for_add(current_user.id, added_preview)
 
     result = barcode_svc.add_food_to_diary(
@@ -148,13 +173,13 @@ def barcode_add_to_diary():
         idempotency_key=idempotency_key,
     )
     if not result:
-        return jsonify({"error": "invalid_serving"}), 400
+        return _deprecated_compatibility_response(
+            {"error": "invalid_serving"}, 400)
     entry, created = result
 
     quest_result = complete_quest_for_user(current_user.id, "meal_logged") if created else None
     response = {
         "message": "logged",
-        "meal_log_id": entry.id,
         "nutrients": {
             "kalori": round(entry.kalori or 0, 1),
             "protein": round(entry.protein or 0, 1),
@@ -166,7 +191,7 @@ def barcode_add_to_diary():
     }
     if quest_result:
         response["quest_awarded"] = quest_result
-    return jsonify(response)
+    return _deprecated_compatibility_response(response)
 
 
 @bp.route("/api/food/<food_id>/servings")

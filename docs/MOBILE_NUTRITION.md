@@ -104,7 +104,7 @@ so the list order is stable between reads.
 | `id` | string | Opaque entry identity — see below |
 | `slot` | string | `kahvalti` / `ogle` / `aksam` / `ara_ogun` / `unknown` |
 | `description` | string | The display string the server composed when the meal was logged |
-| `source` | string | `manual` / `diary` / `ai_plan` / `search` / `barcode` / `coach` / `unknown` |
+| `source` | string | `manual` / `diary` / `ai_plan` / `search` / `barcode` / `coach` / `suggestion` / `unknown` |
 | `logged_at` | string \| null | Offset-aware ISO 8601 instant, or `null` when unrecorded |
 | `nutrition` | object | Four nutrients, each a number or `null` |
 
@@ -123,6 +123,13 @@ text would be inventing data. The wire keys are not new: they are the keys
 `source` column existed carries NULL and becomes `unknown`, not `manual`: the
 web surface displays NULL as "manual", but that is a display default and copying
 it here would be exactly the kind of fabrication this contract exists to stop.
+
+`suggestion` was added by **Sprint 13 PR3** (F8). An accepted shared meal
+suggestion previously set no `source` at all, so the column default stamped it
+`manual` — a *recognised* value, which meant no reader could even tell the
+provenance had been lost. The writer now states what it is. **No historical row
+was backfilled and no migration was written**: rows accepted before PR3 keep
+whatever they were stamped with, and the vocabulary change is additive.
 
 ### `totals`
 
@@ -294,8 +301,8 @@ backend status:
 | Food search | `GET /api/food/search` | no — `@require_auth` | FatSecret-backed; returns `food_id`, `macros`, `per_100g` |
 | Serving detail | `GET /api/food/<food_id>/servings`, `GET /api/food/servings-by-name` | no — `@require_auth` | Provider serving ids and descriptions |
 | Barcode lookup | `GET /api/food/barcode` | no — `@require_auth` | Validates EAN/UPC length, DB-cached, `404` with a stable `not_found` body |
-| Barcode log | `POST /api/food/barcode/add` | no — `@require_auth` | Writes `MealLog` with `source="barcode"`; already honours `Idempotency-Key` |
-| Manual/AI meal log | `POST /meal-log` | no — `@require_auth` | Writes `MealLog`; already honours `Idempotency-Key` |
+| Barcode log | `POST /api/food/barcode/add` | no — `@require_auth` | **DEPRECATED compatibility surface** (Sprint 13 PR3, C13) — still supported for now, responds `Deprecation: true` + `Link: </meal-log>; rel="successor-version"`. Removal requires evidence and is PR5's decision; **no sunset date is promised**. Writes `MealLog` with `source="barcode"` recomputed from server-resolved provider truth (a caller-supplied `food` object is no longer read), honours `Idempotency-Key`, and publishes no raw `MealLog.id` on any variant |
+| Manual/AI meal log | `POST /meal-log` | no — `@require_auth` | Writes `MealLog`; already honours `Idempotency-Key`. Since Sprint 13 PR3 the request shape is an explicit, mutually exclusive command: `provider_food` (identities + quantity, recomputed server-side through the SAME `mobile_log_food` authority as `POST /api/v1/nutrition/logs`) · `override_macros` (genuinely manual, validated by the shared `ManualNutritionSnapshot` bounds) · free text / photo (AI estimation). Mixing them is `400`; `ogun` must be one of the four canonical labels |
 | Diary builder writes | `POST /api/diary/*` | no — `@require_auth` | Web staging surface; not the mobile logging path |
 | Menu scan/analyse | `POST /api/proxy/scan-menu`, `POST /api/menu/analyze` | no — `@require_auth` | Scrape + LLM; behind concurrency gates |
 

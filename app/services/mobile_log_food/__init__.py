@@ -5,7 +5,11 @@ from .commands import (
     ProviderBackedLogFoodCommand,
 )
 from .fingerprint import semantic_fingerprint
-from .parsing import InvalidLogFoodCommand, parse_command
+from .parsing import (
+    InvalidLogFoodCommand,
+    parse_command,
+    parse_manual_nutrition,
+)
 from .service import (
     IdempotencyConflict,
     ProviderFoodNotFound,
@@ -21,6 +25,7 @@ __all__ = [
     "semantic_fingerprint",
     "InvalidLogFoodCommand",
     "parse_command",
+    "parse_manual_nutrition",
     "IdempotencyConflict",
     "ProviderFoodNotFound",
     "log_food",

@@ -3,11 +3,15 @@
 const RING_CIRC = 301.6; // 2π × 48
 let targetCalories = 2000;
 
-function mealWriteHeaders() {
-  var key = (window.crypto && window.crypto.randomUUID)
+function newIdempotencyKey() {
+  return (window.crypto && window.crypto.randomUUID)
     ? window.crypto.randomUUID()
     : ('meal-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2));
-  return { 'Content-Type': 'application/json', 'Idempotency-Key': key };
+}
+
+function mealWriteHeaders() {
+  return { 'Content-Type': 'application/json',
+           'Idempotency-Key': newIdempotencyKey() };
 }
 
 let selectedMealType = 'Kahvaltı';
@@ -510,45 +514,75 @@ async function resolveBarcode(code) {
 }
 
 /* ── LOG MEAL ── */
+/* Sprint 13 PR3 (F4/F5). Seçilen bir besin ARTIK tek başına bir yazma komutudur.
+   Eskiden çok-besinli hızlı kayıt `per_100g` değerlerini tarayıcıda TOPLAYIP
+   `override_macros` olarak gönderiyordu — yani her besin sessizce "100 g"
+   sayılıyordu ve kalıcı makro otoritesi tarayıcıdaydı. Artık:
+
+     - sağlayıcı kimliği olan besin → `provider_food` (kimlik + porsiyon + adet);
+       sunucu porsiyon gerçeğini yeniden çeker ve ölçekler,
+     - sağlayıcı kimliği OLMAYAN besin (statik tablo/LLM yedeği; yeniden
+       çekilecek sağlayıcı gerçeği YOKTUR) → kullanıcının seçtiği gramajla ELLE
+       komut; kullanıcı-otoriter ve tipli sınırlı kalır.
+
+   Kayıt SIRALIdır ve her besin KENDİ idempotency anahtarını taşır: kısmi
+   başarıda yazılanlar listeden düşer, kalanlar AYNI anahtarlarla yeniden
+   denenebilir → sunucu replay eder, ikinci satır ve ikinci XP oluşmaz. */
+function postSelectedFood(entry, ogun, idempotencyKey) {
+  const headers = {
+    'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey };
+  const body = entry.food_id
+    ? {
+        ogun: ogun,
+        provider_food: {
+          provider: 'fatsecret',
+          food_id: entry.food_id,
+          serving_id: entry.serving_id,
+          quantity: entry.quantity,
+          discovery_source: entry.discovery_source || 'search',
+        },
+      }
+    : {
+        ogun: ogun,
+        yemekler: entry.label || entry.name,
+        override_macros: entry.manual,
+      };
+  return fetch('/meal-log', {
+    method: 'POST', headers: headers, body: JSON.stringify(body) });
+}
+
 async function logMeal() {
   const input = document.getElementById('meal-input');
   const loading = document.getElementById('loading');
 
   if (selectedFoods.length > 0) {
-    const t = selectedFoods.reduce((acc, f) => ({
-      cal: acc.cal + (f.per_100g.calories || 0),
-      p: acc.p + (f.per_100g.protein || 0),
-      k: acc.k + (f.per_100g.carbs || 0),
-      y: acc.y + (f.per_100g.fat || 0)
-    }), {cal:0, p:0, k:0, y:0});
-    const names = selectedFoods.map(f => f.name).join(', ');
-
+    if (!_selectedBatchKey) _selectedBatchKey = newIdempotencyKey();
     loading.classList.add('active');
+    let written = 0, failure = null;
     try {
-      const idempotencyHeaders = mealWriteHeaders();
-      const res = await fetch('/meal-log', {
-        method: 'POST',
-        headers: idempotencyHeaders,
-        body: JSON.stringify({
-          ogun: selectedMealType,
-          yemekler: names,
-          override_macros: { kalori: t.cal, protein: t.p, karb: t.k, yag: t.y }
-        })
-      });
-      const d = await res.json();
-      if (d.error) { showToast(d.error, 'error'); return; }
-      selectedFoods = [];
-      renderSelectedFoods();
-      input.value = '';
-      showToast(__t('nutrition.meal_saved'), 'success');
-      if (d.quest_awarded) showToast('+' + d.quest_awarded.xp + ' XP!', 'success');
-      closeManualSheet();
-      loadTodayData();
+      for (let i = 0; i < selectedFoods.length; i++) {
+        const entry = selectedFoods[i];
+        const res = await postSelectedFood(
+          entry, selectedMealType, _selectedBatchKey + '-' + entry.slot);
+        const d = await res.json();
+        if (d.error) { failure = d.error; break; }
+        written++;
+        if (d.quest_awarded && written === 1)
+          showToast('+' + d.quest_awarded.xp + ' XP!', 'success');
+      }
     } catch (e) {
-      showToast(__t('nutrition.conn_error_prefix') + e.message, 'error');
+      failure = __t('nutrition.conn_error_prefix') + e.message;
     } finally {
+      selectedFoods = selectedFoods.slice(written);
+      renderSelectedFoods();
       loading.classList.remove('active');
     }
+    if (failure) { showToast(failure, 'error'); loadTodayData(); return; }
+    _selectedBatchKey = null;
+    input.value = '';
+    showToast(__t('nutrition.meal_saved'), 'success');
+    closeManualSheet();
+    loadTodayData();
     return;
   }
 
@@ -1131,6 +1165,12 @@ function logWater() {
 let acTimeout = null;
 let selectedFoods = [];
 let acController = null;
+/* Bir "kayıt" partisinin sabit anahtar kökü + besin-başına kararlı son ek.
+   Kısmi başarıdan sonraki yeniden denemede AYNI anahtarlar gider → sunucu
+   replay eder (ikinci satır/ikinci XP yok). Parti ancak tamamı yazıldığında
+   sıfırlanır. */
+let _selectedBatchKey = null;
+let _selectedSeq = 0;
 
 document.getElementById('food-search-input').addEventListener('input', function() {
   clearTimeout(acTimeout);
@@ -1167,10 +1207,50 @@ async function searchFood(query) {
   }
 }
 
+/* F4: arama sonucu ARTIK doğrudan listeye girmez. Bir besin ancak AÇIK bir
+   porsiyon/adet (ya da gramaj) seçildikten sonra kayıt komutuna dönüşebilir;
+   bunun için MEVCUT porsiyon modali 'select' modunda yeniden kullanılır — yeni
+   bir UX sistemi kurulmaz. */
 function selectFood(food) {
-  selectedFoods.push(food);
   document.getElementById('food-search-input').value = '';
   document.getElementById('food-autocomplete-dropdown').style.display = 'none';
+  openSelectServing(food);
+}
+
+/* Porsiyon/adet (veya gramaj) SEÇİLDİKTEN sonra çağrılır. Sağlayıcı kimliği
+   varsa komut kimlik taşır (makro sunucuda yeniden hesaplanır); yoksa
+   kullanıcının seçtiği gramajla elle komut olur. Önizleme yalnızca gösterimdir. */
+function addSelectedFood(food, serving, quantity, grams) {
+  const entry = { name: food.name, slot: String(_selectedSeq++) };
+  if (food.food_id && serving) {
+    entry.food_id = food.food_id;
+    entry.serving_id = serving.serving_id;
+    entry.quantity = quantity;
+    entry.discovery_source = food.discovery_source || 'search';
+    entry.preview = {
+      kalori: (serving.calories || 0) * quantity,
+      protein: (serving.protein || 0) * quantity,
+      karb: (serving.carbs || 0) * quantity,
+      yag: (serving.fat || 0) * quantity,
+    };
+  } else {
+    const base = food.per_100g || {};
+    const scale = grams / 100;
+    entry.label = food.name + ' (' + Math.round(grams) + 'g)';
+    entry.manual = {
+      kalori: (base.calories || 0) * scale,
+      protein: (base.protein || 0) * scale,
+      karb: (base.carbs || 0) * scale,
+      yag: (base.fat || 0) * scale,
+    };
+    entry.preview = entry.manual;
+    // Sıfır-makro satırı kanonik deftere YAZILMAZ (meallog/social ile aynı
+    // koruma): ne sağlayıcı kimliği ne de ölçülebilir bir makro varsa ekleme.
+    const total = entry.manual.kalori + entry.manual.protein
+      + entry.manual.karb + entry.manual.yag;
+    if (!(total > 0)) { showToast(__t('nutrition.add_error'), 'error'); return; }
+  }
+  selectedFoods.push(entry);
   renderSelectedFoods();
 }
 
@@ -1189,13 +1269,14 @@ function renderSelectedFoods() {
     <div class="selected-food-item">
       <button class="sf-remove" data-action="removeSelectedFood" data-args="[${i}]">✕</button>
       <div style="flex:1;min-width:0;">
-        <div style="font-size:13px;color:var(--text);">${esc(f.name)}</div>
-        <div style="font-size:11px;color:var(--text-3);">${Math.round(f.per_100g.calories)} kcal · ${MA.p}:${Math.round(f.per_100g.protein)}g ${MA.k}:${Math.round(f.per_100g.carbs)}g ${MA.y}:${Math.round(f.per_100g.fat)}g</div>
+        <div style="font-size:13px;color:var(--text);">${esc(f.label || f.name)}</div>
+        <div style="font-size:11px;color:var(--text-3);">${Math.round(f.preview.kalori)} kcal · ${MA.p}:${Math.round(f.preview.protein)}g ${MA.k}:${Math.round(f.preview.karb)}g ${MA.y}:${Math.round(f.preview.yag)}g</div>
       </div>
     </div>`).join('');
+  // Yalnızca ÖNİZLEME toplamı — kalıcı otorite sunucudadır (F4/F5).
   const t = selectedFoods.reduce((acc, f) => ({
-    cal: acc.cal + (f.per_100g.calories || 0), p: acc.p + (f.per_100g.protein || 0),
-    k: acc.k + (f.per_100g.carbs || 0), y: acc.y + (f.per_100g.fat || 0)
+    cal: acc.cal + (f.preview.kalori || 0), p: acc.p + (f.preview.protein || 0),
+    k: acc.k + (f.preview.karb || 0), y: acc.y + (f.preview.yag || 0)
   }), {cal:0, p:0, k:0, y:0});
   totals.innerHTML = __t('nutrition.total_label') + ' <strong style="color:var(--color-primary);">' + Math.round(t.cal) + '</strong> kcal · ' + MA.p + ': ' + Math.round(t.p) + 'g · ' + MA.k + ': ' + Math.round(t.k) + 'g · ' + MA.y + ': ' + Math.round(t.y) + 'g';
 }
@@ -1450,9 +1531,41 @@ function openMealLogServing(food, ogun) {
   }
 }
 
+/* Çok-besinli hızlı kayıt akışı: aynı modalı 'select' modunda aç. Onaylandığında
+   defter YAZILMAZ — yalnızca seçilen porsiyon/adet (veya gramaj) `selectedFoods`
+   listesine AÇIK bir komut olarak eklenir (F4). */
+function openSelectServing(food) {
+  _smMode = 'select';
+  _smFood = food;
+  _smMealName = null;
+  _smServings = null;
+  _smResetFields(food);
+  const lookupKey = food.food_id || food.name;
+  if (!lookupKey) {
+    document.getElementById('sm-loading').style.display = 'none';
+    return;
+  }
+  document.getElementById('sm-loading').style.display = 'flex';
+  fetchServings(lookupKey).then(_smApplyServings);
+}
+
 function closeServingModal() {
   document.getElementById('serving-modal').classList.remove('open');
   _smFood = null; _smMealName = null; _smServings = null; _smMode = 'diary';
+}
+
+/* Modaldeki mevcut porsiyon seçimi (porsiyon nesnesi + adet) veya null. */
+function _smSelectedServing() {
+  if (!_smServings) return null;
+  const select = document.getElementById('sm-serving-select');
+  const srv = _smServings.find(s => s.serving_id === select.value);
+  if (!srv) return null;
+  const qty = parseFloat(document.getElementById('sm-qty-input').value) || 1;
+  return { serving: srv, quantity: qty };
+}
+
+function _smSelectedGrams() {
+  return parseFloat(document.getElementById('sm-gram-input').value) || 100;
 }
 
 /* Modaldeki mevcut seçimden makroları hesapla (porsiyon×adet veya gram).
@@ -1485,40 +1598,65 @@ function updateSmPreview() {
   document.getElementById('sm-fat').textContent = Math.round(m.yag) + 'g';
 }
 
+/* Barkod/porsiyon modalinden kanonik deftere yazma (F5/F16). Tarayıcının
+   hesapladığı `_smCurrentMacros()` YALNIZCA önizlemedir ve GÖNDERİLMEZ: sunucuya
+   besin + porsiyon KİMLİĞİ ve adet gider, makro sağlayıcı gerçeğinden orada
+   yeniden hesaplanır. Porsiyon kimliği çözülemiyorsa (sağlayıcı porsiyon
+   döndürmedi) KAYIT YAPILMAZ — gram-modu önizlemesinden uydurma bir sağlayıcı
+   satırı yazmak, kapatılan tam da o güven sınırıdır. */
+async function logProviderFoodToLedger(food, ogun) {
+  const picked = _smSelectedServing();
+  if (!food || !food.food_id || !picked) {
+    showToast(__t('nutrition.add_error'), 'error');
+    return;
+  }
+  try {
+    const res = await fetch('/meal-log', {
+      method: 'POST', headers: mealWriteHeaders(),
+      body: JSON.stringify({
+        ogun: ogun,
+        provider_food: {
+          provider: 'fatsecret',
+          food_id: food.food_id,
+          serving_id: picked.serving.serving_id,
+          quantity: picked.quantity,
+          discovery_source: food.discovery_source || 'barcode',
+        },
+      })
+    });
+    const d = await res.json();
+    if (d.error) { showToast(d.error, 'error'); return; }
+    showToast(__t('nutrition.meal_saved'), 'success');
+    if (d.quest_awarded) showToast('+' + d.quest_awarded.xp + ' XP!', 'success');
+    closeServingModal();
+    loadTodayData();
+  } catch (e) {
+    showToast(__t('nutrition.add_error'), 'error');
+  }
+}
+
 async function confirmServingModal() {
   if (!_smFood) return;
   const btn = document.getElementById('sm-confirm-btn');
   btn.disabled = true;
   btn.textContent = __t('nutrition.adding');
 
+  // ── 'select' modu (çok-besinli hızlı kayıt) → yalnızca listeye ekle ──
+  if (_smMode === 'select') {
+    const picked = _smSelectedServing();
+    addSelectedFood(_smFood, picked && picked.serving,
+                    picked ? picked.quantity : 0, _smSelectedGrams());
+    closeServingModal();
+    btn.disabled = false;
+    btn.textContent = __t('nutrition.add');
+    return;
+  }
+
   // ── 'meallog' modu (barkod) → doğrudan bugünkü kanonik deftere yaz ──
   if (_smMode === 'meallog') {
-    const macros = _smCurrentMacros();
-    try {
-      const idempotencyHeaders = mealWriteHeaders();
-      const res = await fetch('/meal-log', {
-        method: 'POST', headers: idempotencyHeaders,
-        body: JSON.stringify({
-          ogun: _smLogOgun,
-          yemekler: _smFood.name || __t('nutrition.log_barcode'),
-          override_macros: {
-            kalori: macros.kalori, protein: macros.protein,
-            karb: macros.karb, yag: macros.yag,
-          },
-        })
-      });
-      const d = await res.json();
-      if (d.error) { showToast(d.error, 'error'); return; }
-      showToast(__t('nutrition.meal_saved'), 'success');
-      if (d.quest_awarded) showToast('+' + d.quest_awarded.xp + ' XP!', 'success');
-      closeServingModal();
-      loadTodayData();
-    } catch (e) {
-      showToast(__t('nutrition.add_error'), 'error');
-    } finally {
-      btn.disabled = false;
-      btn.textContent = __t('nutrition.add');
-    }
+    await logProviderFoodToLedger(_smFood, _smLogOgun);
+    btn.disabled = false;
+    btn.textContent = __t('nutrition.add');
     return;
   }
 

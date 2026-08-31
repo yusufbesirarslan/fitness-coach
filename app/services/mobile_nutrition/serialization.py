@@ -44,6 +44,10 @@ SLOT_BY_MEAL_LABEL = {
 # copying it here would be the same fabrication this contract exists to stop.
 KNOWN_SOURCES = frozenset({
     "manual", "diary", "ai_plan", "barcode", "search", "coach",
+    # Sprint 13 PR3 (F8): an accepted shared meal suggestion. It was previously
+    # written with no `source`, so the column default stamped it "manual" - a
+    # KNOWN value, which meant no reader could even see the provenance was lost.
+    "suggestion",
 })
 
 
