@@ -52,6 +52,34 @@ migration at all**.
 exists, no cross-user read or write was found, and the day boundary is
 server-owned everywhere it matters.
 
+### Amendment — independent review of PR3 (2026-08-31)
+
+PR3 (`9f740d1`, "converge web food logging") was independently reviewed before
+push. The verdict was **CHANGES REQUIRED**: 0 P0, 1 P1, 9 P2. The reviewer found
+the *implementation* correct and needing no code change; the P1 is a **closure
+claim** defect in this document.
+
+PR3 closes **F4, F5, F6, F7, F8 and F12** — the direct web write paths. It does
+**not** close **N2** repository-wide, because the review discovered a writer this
+discovery never enumerated:
+
+* `POST /api/diary/meal/<meal_id>/item` (`nutrition/diary.py:211`) accepts
+  provider identity (`fatsecret_food_id`, `serving_id`) **and** caller-supplied
+  `serving_calories/protein/carbs/fat`, `metric_serving_amount` and
+  `serving_quantity`. Those are scaled and clamped into `CustomMealItem`.
+  `diary_log_meal` (`nutrition/diary.py:381`) later **sums the item macros** and
+  persists them into canonical `MealLog` with `source="diary"`, with **no
+  provider re-fetch at commit time**. The default `'diary'` mode of the very
+  serving modal PR3 rewrote (`static/nutrition.js:1678-1695`) still posts them.
+
+That is the same trust-boundary class N2 exists to prevent, on a different
+route. **N2 is therefore `OPEN`, blocked by the new finding `F15`**, and is owned
+by a new bounded follow-up, **PR3B — Diary Provider-Truth Convergence** (§14).
+
+This is not a PR3 failure. PR3 succeeded at its approved scope; **this
+discovery's writer inventory was incomplete**. `F15` is deliberately registered
+rather than absorbed by rewording N2, so the authority gap stays visible.
+
 ### Findings index
 
 | ID | Sev | One line |
@@ -62,6 +90,7 @@ server-owned everywhere it matters.
 | F3a | P2 | `barcode._target_macros` fabricates a `2000 kcal` target and publishes it on the **live** `GET /api/food/barcode` payload — currently rendered by nothing |
 | F4 | P1 | Web multi-food quick log posts **per-100 g** values as the meal total (quantity fixed at 100 g, never chosen) |
 | F5 | P1 | `/meal-log` `override_macros` persists client-computed macros; the mobile path recomputes from the provider. Same ledger, two trust models |
+| F15 | P1 | **Discovered by the independent PR3 review.** Diary-builder provider-backed items accept caller-supplied serving nutrition, and `diary_log_meal` promotes those `CustomMealItem` totals into canonical `MealLog` without a provider re-fetch |
 | F6 | P2 | `POST /api/food/barcode/add` accepts a caller-supplied `food` object; no first-party consumer, but a documented `/api/food/*` compatibility surface — deprecate before removing (C13) |
 | F7 | P2 | `/meal-log` does not validate `ogun`: free text reaches `MealLog.ogun` (`String(100)`) → `unknown` slot on the wire, `DataError` above 100 chars |
 | F8 | P2 | Social meal-suggestion writer sets no `source` (reads back as `manual`) and uses no idempotency key |
@@ -90,6 +119,29 @@ review verdict was **APPROVED WITH REQUIRED CHANGES**. Incorporated here:
 | 9 | `C5` **split** — web delete is a core blocker, web slot move is not |
 | 10 | `N9` **scoped** to current-day entries, with deletion as the required primitive |
 | 11 | `C13` **softened** — `/api/food/barcode/add` is a legacy compatibility surface, deprecated before removal |
+
+### Review remediation — round 2 (independent review of PR3)
+
+PR3's implementation commit `9f740d1` was independently reviewed on 2026-08-31.
+Verdict **CHANGES REQUIRED** — 0 P0, 1 P1, 9 P2, 5 Info. The reviewer stated
+explicitly that the PR3 production implementation needs **no code change**; the
+blocking P1 is this document's closure claim. Incorporated here, docs and
+characterization only:
+
+| # | Correction |
+|---|---|
+| 12 | `F15` **added** (P1, core blocker) — the diary-builder commit path promotes caller-supplied provider nutrition into `MealLog`. Discovered by the PR3 review, **not** by PR1 |
+| 13 | `N2` moved from *closed by PR3* to **`OPEN` — blocked by `F15`**. The criterion itself is **unchanged**: it was not reworded to exclude the diary path |
+| 14 | `PR3B — Diary Provider-Truth Convergence` **added** to the sequence (§14) as `F15`'s owner. Not implemented here |
+| 15 | The **writer inventory** (§6) now separates the `CustomMealItem` **staging** writer from the `diary_log_meal` **canonical** writer and records the trust chain between them |
+| 16 | `N8` **scope corrected** — the replay guarantee is stated for supported first-party write flows through their declared replay authority, not for arbitrary keyless raw `/meal-log` requests |
+| 17 | The **manual web/mobile validation mismatch** recorded as a bounded P2 debt item (§12) — measured, not fixed, and not claimed as parity |
+
+`F4`, `F5`, `F6`, `F7`, `F8` and `F12` remain **CLOSED by PR3**. `F5` was and
+stays the `/meal-log` `override_macros` defect discovered by PR1; it is **not**
+retroactively redefined to mean every provider-backed writer in the repository.
+`F15` is a separate, newly discovered finding, and the distinction is what keeps
+review provenance honest.
 
 ---
 
@@ -311,6 +363,13 @@ making.
 Every code path that can create, change, or delete canonical `MealLog` state.
 Eight in the application, one in a non-deployed tool, one in an audit script.
 
+**Amended by the independent PR3 review:** the table also carries one
+**staging** writer, `W3s`, which never touches `MealLog` itself but supplies
+every macro `W3` promotes into it. PR1 listed only the canonical writers, and
+that omission is why the diary trust gap (`F15`) went unenumerated. A writer that
+cannot reach `MealLog` directly is still part of the ledger's trust chain when a
+canonical writer copies its numbers.
+
 Legend — **Principal**: how the acting user is established. **Recompute**:
 whether the server derives the persisted macros from provider truth (`server`)
 or persists what the caller supplied (`client`, bounded by the clamp).
@@ -319,7 +378,8 @@ or persists what the caller supplied (`client`, bounded by the clamp).
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | W1 | Web manual / AI-estimated meal | `POST /meal-log` (`nutrition/meallog.py:27`) | Flask-Login + `cognito_sid` | `current_user` | `day_key()` | **unvalidated free text** (F7) | **client** on the `override_macros` branch (F5); LLM on the other | `clamp_serving_macros` / `sanitize_meal_total_macros` | **unset** → the column default stamps `manual` (F5) | optional header | unique key | commit-once | after commit |
 | W2 | Web AI-plan quick add | `POST /api/quick-add-meal` (`nutrition/diary.py:79`) | Flask-Login | `current_user` | `day_key()` | 4 canonical labels | server (from stored plan JSON) | `_sanitize_meal_macros` | `ai_plan` | optional header | unique key | commit-once | after commit |
-| W3 | Diary-builder commit | `POST /api/diary/meal/<id>/log` (`nutrition/diary.py:378`) | Flask-Login | `current_user` | `day_key()` | 4 canonical labels | server (sums builder items) | per item at write time (`_clamp_item_macros`) | `diary` | **none** (F12) | atomic `is_logged` claim | single txn | after commit |
+| W3 | Diary-builder commit (**canonical `MealLog` writer**) | `POST /api/diary/meal/<id>/log` (`nutrition/diary.py:381`) | Flask-Login | `current_user` | `day_key()` | 4 canonical labels | **inherited from staging** — sums `CustomMealItem` macros; **no provider re-fetch at commit time** (F15) | already applied per item at staging time (`_clamp_item_macros`) | `diary` | **none** (F12) | atomic `is_logged` claim | single txn | after commit |
+| W3s | Diary-builder **staging** writer (`CustomMeal` / `CustomMealItem`, **not** a ledger) | `POST /api/diary/meal/<id>/item` (`nutrition/diary.py:211`), `PATCH /api/diary/item/<id>` (`:300`) | Flask-Login | `current_user` (via `CustomMeal.user_id`) | n/a — staging rows carry no day key | n/a | **client** — accepts `serving_calories/protein/carbs/fat`, `metric_serving_amount`, `serving_quantity` **alongside** `fatsecret_food_id` + `serving_id` (F15) | `_clamp_item_macros` → `clamp_serving_macros` | n/a | none (staging is not the ledger) | last write wins on the item | commit per item | after commit |
 | W4 | Web barcode add | `POST /api/food/barcode/add` (`food.py:96`) → `barcode.add_food_to_diary` | Flask-Login | `current_user` | `day_key()` | 4 canonical labels (validated) | **client-supplied `food` object accepted** (F6) | `clamp_serving_macros` | `barcode` | optional header | unique key | commit-once | after commit |
 | W5 | AI Coach meal confirmation | `_tool_confirm_and_commit_meal_log` (`ai_coach.py:281`) | Flask-Login (coach turn) | `user_id` from session | `day_key()` | literal `"AI Koç"` → wire `unknown` | server (staged `PendingAction` payload) | `clamp_serving_macros` | `coach` | atomic `PendingAction` claim | delete-claim then insert | single txn | after commit |
 | W6 | Shared meal suggestion | `_persist_meal_suggestion` (`social.py:1169`) | Flask-Login (receiver flow) | `snapshot.receiver_id` | `day_key()` | `"<sender> …alınan öneri"` → wire `unknown` | server (parse + provider + LLM) | `clamp_serving_macros` | **unset** → the column default stamps `manual` (F8) | **none** | atomic message claim (`social.py:1019`) | single txn | after commit |
@@ -344,7 +404,25 @@ Recorded, **not fixed** in PR1:
 * **W6** loses its own provenance by not setting `source`. (F8)
 * **W3** is the only application writer with no idempotency key. It is safe
   today because `_claim_diary_meal` atomically flips `is_logged` inside the same
-  transaction, but the protection is structural, not declared. (F12)
+  transaction, but the protection is structural, not declared. (F12 — **closed by
+  PR3**, which declared the claim as the replay authority in a test.)
+* **W3s → W3** is a two-step trust chain, and the defect lives on the second
+  step. Recorded by the **independent PR3 review**, not by PR1:
+
+  ```
+  provider identity (fatsecret_food_id + serving_id)
+        +  caller-supplied serving nutrition
+        →  scale by serving_quantity, clamp (W3s: CustomMealItem)
+        →  sum over the meal's items (W3: diary_log_meal)
+        →  canonical MealLog(source="diary")
+  ```
+
+  `CustomMeal` / `CustomMealItem` are **staging**, not a competing ledger — no
+  reader adds them to `MealLog` (§7), so **N1 stays satisfied**. The write
+  authority problem is not the staging table's existence; it is that **promotion
+  into `MealLog` re-uses the caller's numbers** for a food the server could have
+  re-fetched from the provider, exactly as W7 does. Boundedness is not
+  authority: the clamp proves plausibility, never provenance. (F15) → PR3B.
 * **W9** takes `user_id` as a parameter. It is not in `docker-compose.yml`, the
   `Dockerfile`, or `deploy/`, so it is a developer tool — but it is a real
   ledger writer and belongs in this inventory. (F11)
@@ -763,15 +841,54 @@ stated so it can be checked, not argued.
 | # | Criterion | Status today | Closed by |
 |---|---|---|---|
 | **N1** | Exactly one canonical consumed-food ledger (`MealLog`), and no surface persists a competing definition of what was eaten | ✅ already true | — (C1 guards it) |
-| **N2** | Every supported writer converges on that ledger through a single clamp/validation gate, and no writer accepts caller-supplied nutrition for a provider-backed food | ❌ F4, F5, F6 | PR3 |
+| **N2** | Every supported writer converges on that ledger through a single clamp/validation gate, and no writer accepts caller-supplied nutrition for a provider-backed food | ❌ **OPEN — blocked by F15.** F4, F5, F6 are **closed by PR3** (direct web write paths). The diary staging → `diary_log_meal` promotion path still carries caller-supplied nutrition for a provider-identified food | PR3 (done) + **PR3B** (F15) |
 | **N3** | Canonical daily totals cannot differ between web, mobile, Coach and downstream consumers, because all of them read the same rows and none re-derives totals | ✅ already true | — |
 | **N4** | The daily macro-target split and the remaining-macro budget have exactly one server-owned derivation; no first-party surface — server or browser — presents a different interpretation of that same configured daily target; and no surface substitutes a number for an unset target. Analytical questions that are genuinely different (a weekly protein goal, a recommendation heuristic) are **not** required to become identical | ❌ F2, F3a (server); ❌ F10 (browser split) | PR2 (server) + PR5 (browser) |
 | **N5** | Day and day-boundary decisions are server-owned and identical on every path (`app/timeutil`), and every persisted day key is a valid ISO calendar date | ✅ **already true** — every live writer derives its day key from `app/timeutil`, and the one transient yearless backfill was normalised by its direct successor `9be792c80008` (§5.1). No schema `CHECK` is needed to hold this | — |
 | **N6** | Null and zero are truthful at every published boundary: a missing macro is not a measured zero, and an unset goal is not `0` | ⚠️ true on `/api/v1`; false on the legacy web payloads | accepted as legacy (C6); not a blocker |
 | **N7** | User- and provider-supplied nutrition is bounded before persistence on every path | ✅ already true (clamp + DB `CHECK`) | — |
-| **N8** | Repeated requests are safe on every application writer | ⚠️ W3 relies on a structural claim, W6 has none | PR3 (declare/attach keys) |
+| **N8** | Repeated requests from **supported first-party write flows** are safe through that flow's declared replay authority (an idempotency key, or an atomic claim on immutable state) | ✅ **satisfied by PR3, at that scope.** W3's `_claim_diary_meal` claim is now declared and pinned by test; W6 records a deterministic key derived from the immutable message id; the provider `/meal-log` command **requires** an `Idempotency-Key`. **Not claimed:** that every arbitrary accepted HTTP request is replay-safe — see the scope note below | PR3 |
 | **N9** | Mobile mutations are stale-safe, and **every supported first-party client that can create a current-day consumed-food entry has a truthful correction path for that current-day entry** — deletion being the required primitive. That path must be ownership-isolated, stale-safe, free of client-fabricated totals, must close the lifecycle of a photo-bearing entry, and must tell the user where deletion is lossy. Edits that cannot be proven from stored state remain explicitly unsupported rather than silently approximated; correction of **past-day** entries and web slot move are outside Sprint 13 | ❌ F1, F14 (web has no correction path; deletion releases no stored object) | PR4 |
 | **N10** | No unowned nutrition scoring/adherence definition ships on any surface | ❌ F9, F10 | PR5 |
+
+#### N8 scope — what the replay guarantee does and does not cover
+
+Stated precisely, because the looser phrasing would be false:
+
+* **Covered.** Every supported first-party write flow. The browser sends an
+  `Idempotency-Key` on `/meal-log`; the `provider_food` command **rejects a
+  request without one** (`400`); `diary_log_meal` is protected by the atomic
+  `is_logged` claim; the suggestion writer derives its key from the immutable
+  message id; `PendingAction` and `Message` claims arbitrate the coach and social
+  paths. Repeating any of those requests is safe.
+* **Not covered.** A **keyless raw request** to the optional-key modes of
+  `/meal-log` — the `override_macros` (manual) and free-text/photo commands — and
+  to `POST /api/food/barcode/add`. Replayed without a key, each writes a second
+  `MealLog` row and awards a second quest. The manual replay branch also does no
+  semantic fingerprint check, so the same key with a different command returns
+  the first row as success, where the provider command `409`s.
+
+That gap is a **P2**. Making a key mandatory on every `/meal-log` mode is a
+behavioural change with its own review; PR3 deliberately did not make it, and
+this remediation does not either. It is recorded here so no handoff claims
+blanket HTTP replay safety.
+
+#### Recorded P2 debt — web/mobile manual validation mismatch
+
+Measured by the independent PR3 review on both clients with the same input.
+**Pre-existing, not introduced by PR3, and deliberately not changed:**
+
+| Path | Pipeline |
+|---|---|
+| web `/meal-log` manual | `ManualNutritionSnapshot` → **`clamp_serving_macros`** |
+| mobile `/api/v1/nutrition/logs` manual | `ManualNutritionSnapshot` → persist |
+
+So `3500` kcal is rewritten by the web clamp, and `800 / 0 / 0 / 0` can land as
+**`0` kcal** on web (the Atwater rule) while mobile persists the snapshot
+verbatim. Classified **P2** because it is pre-existing, fail-safe rather than
+unbounded, mobile is still dark behind `MOBILE_AUTH_ENABLED`, and the blocking
+trust defect is elsewhere (`F15`). **Do not claim manual numeric parity between
+web and mobile** — it does not hold today.
 
 ### What may honestly remain open after Sprint 13
 
@@ -858,6 +975,54 @@ column default and is indistinguishable from a hand-typed meal. Note this is a
 finding about **provider-backed** logging: genuinely manual entry is
 user-authoritative by design and stays that way (C3).
 Blocks **N2**. → PR3.
+
+*Scope, recorded after the PR3 review:* F5 is **the `/meal-log`
+`override_macros` trust-model defect**, and nothing wider. PR3 closed it. It is
+**not** retroactively redefined to mean "every provider-backed writer in the
+repository" — the diary-builder path found later is **F15**, a separate finding
+with a separate owner.
+
+**F15 — the diary-builder commit path promotes caller-supplied nutrition for a
+provider-identified food into the canonical ledger.** *(Discovered during the
+independent review of PR3, 2026-08-31. PR1 did not enumerate this writer.)*
+
+`POST /api/diary/meal/<meal_id>/item` (`nutrition/diary.py:211-257`) accepts
+provider identity — `fatsecret_food_id` and `serving_id` — **in the same request
+body** as caller-owned nutrition: `serving_calories`, `serving_protein`,
+`serving_carbs`, `serving_fat`, `metric_serving_amount` and `serving_quantity`.
+It multiplies the four macros by the quantity, derives per-100 g figures from the
+caller's `metric_serving_amount`, and stores the result as a `CustomMealItem`
+after `_clamp_item_macros`. `PATCH /api/diary/item/<item_id>` (`:300-330`) accepts
+the same nutrition shape with `serving_id` alone — its `fatsecret_food_id` is
+already persisted on the row being edited, so the server holds a complete
+provider identity there too. The browser's **default `diary` mode** of the serving modal PR3
+rewrote still posts it (`static/nutrition.js:1678-1695`,
+`updateDiaryServing`, `updateDiaryServingQty`).
+
+`diary_log_meal` (`:381-419`) then sums `CustomMealItem.calories / .protein /
+.carbs / .fat` over the meal and writes those totals to canonical `MealLog` with
+`source="diary"`. **There is no provider re-fetch at canonical commit time** —
+the server holds `fatsecret_food_id` and `serving_id` and never asks the provider
+what that serving actually contains, unlike W7, which rebuilds the numbers from
+`mobile_food_discovery.servings(food_id)`.
+
+Stated precisely, so the finding is not read as more or less than it is:
+
+* `CustomMeal` / `CustomMealItem` remain **staging**, not a competing ledger — no
+  reader sums them with `MealLog` (§7). **N1 is still satisfied.**
+* The defect occurs **at promotion**, when staging state is committed to
+  `MealLog`.
+* **Provider identity exists** on the item and is persisted.
+* **Canonical nutrition is not re-fetched from provider truth.**
+* Client nutrition is only **bounded** — `_clamp_item_macros` proves physical
+  plausibility, never provenance.
+* This is **the same trust-boundary class N2 exists to prevent**, on a different
+  route from F5.
+* **No cross-user access**, **no second ledger**, **no schema defect**, and the
+  finding itself **requires no migration**.
+
+Blocks **N2**. Does **not** block N1, N3, N4 or N5 — no evidence was found that
+it touches any of them. → **PR3B**.
 
 ### P2
 
@@ -959,16 +1124,21 @@ authority before adapters, backend contract before consumer, **no schema change
 in any of them**, one reviewable responsibility per PR, and an independent
 rollback boundary for each.
 
+**Amended by the independent PR3 review:** `PR3B` was inserted after `PR3`. It
+owns `F15`, and it is **required for N2 / Core Complete**.
+
 ```
 PR1 (this) ── discovery + characterization
     |
-    +-- PR2  canonical daily macro-target authority  (F2, F3a -> N4, server half)
+    +-- PR2   canonical daily macro-target authority (F2, F3a -> N4, server half)  SHIPPED
     |
-    +-- PR3  web write-path convergence              (F4, F5, F6, F7, F8, F12 -> N2, N8)
+    +-- PR3   direct web write-path convergence      (F4, F5, F6, F7, F8, F12)     CURRENT
     |
-    +-- PR4  web ledger correction path              (F1, F14 -> N9)
+    +-- PR3B  diary provider-truth convergence       (F15 -> N2)                   NEW
     |
-    +-- PR5  retire/confine unowned intelligence     (F9, F10 -> N10, N4 browser half)
+    +-- PR4   web ledger correction path             (F1, F14 -> N9)
+    |
+    +-- PR5   retire/confine unowned intelligence    (F9, F10 -> N10, N4 browser half)
 ```
 
 Dependency edges, stated explicitly rather than implied by the order:
@@ -978,8 +1148,19 @@ PR2 ──────→ PR3 ──────→ PR5
   │                      ↑
   └────────────────────┘
 
-PR3 ──────→ PR4        (operational ordering, not a technical dependency)
+PR3  ─────→ PR3B       (operational ordering; PR3B reuses the authority PR3 wired up)
+PR3B ─────→ N2         (technical: N2 cannot close without it)
+PR3  ─────→ PR4        (operational ordering, not a technical dependency)
 ```
+
+* **`PR3 → PR3B`** — **operational, not technical.** PR3B has no schema
+  dependency and no code dependency on PR3; it is sequenced after it because PR3
+  is the commit that made `app/services/mobile_log_food` the shared provider
+  authority a diary recompute would reuse.
+* **`PR3B → PR4`** — **not asserted.** No evidence shows PR4's correction path
+  depends on PR3B. Settling the remaining write authority before building more
+  web correction behaviour is *preferred* operationally, and that is the only
+  claim made here.
 
 * **`PR2 → PR3`** — PR3 inherits the "never fabricate a target" rule.
 * **`PR2 → PR5`** — PR5 retires the browser split, which requires a server
@@ -1028,6 +1209,12 @@ PR3 ──────→ PR4        (operational ordering, not a technical depe
 
 ### PR3 — Web nutrition write-path convergence
 
+* **Status (2026-08-31):** implemented as `9f740d1`, independently reviewed,
+  **CHANGES REQUIRED** on the closure claim only. **F4, F5, F6, F7, F8, F12 are
+  CLOSED.** **N8 is satisfied at the first-party scope stated in §12.** **N2 is
+  NOT closed** — the review discovered `F15` on the diary-builder commit path,
+  which PR1 never enumerated and which is outside PR3's reviewed scope. N2 now
+  closes with **PR3B**. The implementation itself required no change.
 * **Objective:** the web logs provider-backed food the way mobile does, genuinely
   manual entry stays user-authoritative within typed bounds, and the unsafe or
   undeclared sibling writers are made explicit.
@@ -1058,9 +1245,47 @@ PR3 ──────→ PR4        (operational ordering, not a technical depe
   `POST /api/food/barcode/add` no longer trusts a caller-supplied `food` object
   and no longer echoes a raw `meal_log_id`, and is marked deprecated **while
   still responding** (C13).
+  **Scope of the N2 claim, corrected after review:** these criteria cover the
+  **direct web write paths** — `/meal-log`, the multi-food quick log,
+  `/api/food/barcode/add` and the suggestion writer. They do **not** cover the
+  diary staging → `diary_log_meal` promotion path (`F15`), so PR3 must not be
+  recorded as closing N2 repository-wide.
 * **Out of scope:** any mutation or deletion of a committed row (PR4); any
   scoring change (PR5); **removing** `/api/food/barcode/add` (PR5, conditional);
-  any mobile change; any UI redesign.
+  any mobile change; any UI redesign; **the diary-builder provider-trust gap
+  (`F15`) — PR3B**; making an `Idempotency-Key` mandatory on the optional-key
+  `/meal-log` modes (§12 N8 scope note); and the web/mobile manual clamp
+  mismatch (§12 P2 debt).
+
+### PR3B — Diary provider-truth convergence *(added by the PR3 review)*
+
+* **Status:** **not started, not designed.** This section registers the
+  architecture gap and its owner. It does **not** pre-decide an implementation.
+* **Objective — the minimal future requirement, and nothing more:** *a
+  provider-identified diary item must not obtain canonical nutrition from
+  caller-supplied serving macros.*
+* **Closes:** `F15`. **Unblocks:** `N2`, and with it Nutrition Core Complete.
+* **Conceptual ownership:** the whole chain, end to end —
+  `provider-identified CustomMealItem` → server/provider recomputation →
+  staging nutrition → `diary_log_meal` → canonical `MealLog`.
+* **Direction, not a design:** the first thing to investigate is **reuse of the
+  same canonical provider authority LogFood already uses**
+  (`app/services/mobile_log_food`, `mobile_food_discovery.servings`), rather than
+  a second recompute. Whether recomputation belongs at staging time, at promotion
+  time, or both is an open question about diary staging semantics — a
+  long-lived unlogged `CustomMeal` and a provider whose serving data changed are
+  the cases that decide it.
+* **Explicitly NOT pre-authorized by this discovery**, and each requiring its own
+  discovery against current diary semantics before it may be proposed: a new
+  endpoint; a schema column; **a migration**; a new provider cache; a new
+  persistence service.
+* **Schema:** none assumed. **Migration:** none authorized. If PR3B's own
+  discovery concludes a schema change is required, that is new evidence and needs
+  its own decision — it is not inherited from here.
+* **Prerequisite:** PR3, operationally.
+* **Out of scope:** everything PR4 and PR5 own; any change to manual diary
+  entry, which stays user-authoritative by C3; the F12 replay authority, already
+  settled by PR3.
 
 ### PR4 — Web ledger correction path
 
@@ -1146,6 +1371,13 @@ PR3 ──────→ PR4        (operational ordering, not a technical depe
 `c2d3e4f5a6b7`, and it is still the head after Sprint 13: PR2, PR3, PR4 and PR5
 each ship with an unchanged migration graph.
 
+`F15` and its owner `PR3B`, added by the PR3 review, change nothing here: the
+finding is a **trust-boundary** defect, not a storage defect. Provider identity is
+already persisted on `CustomMealItem` (`fatsecret_food_id`, `serving_id`), so no
+provenance column is needed to *state* the problem. **No migration is
+pre-authorized for PR3B**, and a proposal for one would need its own discovery
+and its own evidence.
+
 The day-key repair this report originally proposed does not exist, because the
 repair already happened in June 2026 (§5.1; C14 retired). Any **future** schema
 change in this area — including a `tarih` format constraint — requires new
@@ -1168,7 +1400,9 @@ coupled to Nutrition closure in either direction.
 The only user-visible number changes are corrections: the barcode carbohydrate
 target and the absence of a fabricated 2000 kcal goal (PR2), the multi-food
 quick-log quantity (PR3), and the browser macro split aligning with the server
-(PR5). Each should ship with a release note. PR4 additionally introduces a
+(PR5). PR3B will add one more — diary items logged from a provider serving move
+from the browser's numbers to the provider's — but it is unscheduled and
+undesigned. Each should ship with a release note. PR4 additionally introduces a
 **destructive** user action and must ship with a confirmation that states what
 deletion loses (C4, F14).
 
@@ -1180,7 +1414,7 @@ down-revision plan and no PR has schema to undo.
 | PR | Rollback | Data left behind |
 |---|---|---|
 | PR2 | revert; the three call sites return to their own formulas | none — nothing persisted |
-| PR3 | revert; the web returns to client-computed macros and the deprecated route loses its safety fix | ledger rows written correctly stay correct |
+| PR3 | revert; the web returns to client-computed macros and the deprecated route loses its safety fix | ledger rows written correctly stay correct. **Note:** reverting PR3 does not reopen `F15` — that defect predates PR3 and is untouched by it |
 | PR4 | revert; the web loses the correction path again | deletions already performed stay deleted — hard delete is irreversible by design, which is why PR4 ships after PR3 and behind an explicit confirmation. **Objects already released stay released**, so the photo lifecycle must be ordered such that a revert can never leave a surviving row pointing at a deleted object |
 | PR5 | revert; the orphaned endpoints and the browser score return | none |
 
@@ -1196,11 +1430,34 @@ weakened, skipped, xfailed, renamed away or broadened.
 ## 19. Evidence produced by this PR
 
 `tests/test_sprint13_nutrition_closure_discovery.py` — **26** discovery
-characterization tests. Each maps to a claim above and fails if the claim stops
-being true. Structural properties are proven by AST, import, URL-map or runtime
-characterization rather than by copy or layout snapshots.
+characterization tests at PR1, **29** after the PR3 review remediation. Each maps
+to a claim above and fails if the claim stops being true. Structural properties
+are proven by AST, import, URL-map or runtime characterization rather than by
+copy or layout snapshots.
 
-### What the review remediation changed in this module
+### What the PR3 review remediation changed in this module
+
+Three tests added, none changed, none removed, none weakened:
+
+| Test | Proves |
+|---|---|
+| `test_f15_the_diary_item_transport_accepts_provider_identity_and_nutrition` | `diary_add_item` reads `fatsecret_food_id` + `serving_id`, and `diary_update_item` reads `serving_id` (its food id is already on the row) — **each alongside the six caller-owned serving fields, in one request body**, and neither reaches for provider truth |
+| `test_f15_the_diary_commit_promotes_caller_nutrition_to_the_ledger` | End-to-end: a provider-identified item posted with caller macros lands in `MealLog(source="diary")` with **those** numbers. Values are chosen plausible so `_clamp_item_macros` is a no-op — bounding is not authority |
+| `test_f15_the_canonical_diary_writer_only_sums_staging_rows` | `diary_log_meal` derives canonical totals by summing `CustomMealItem` macros, constructs exactly one `MealLog`, and consults no provider at commit time; and the staging tables own no day key, which is why **N1 survives F15** |
+
+These are **characterization tests for an open finding**, and the module says so
+in a banner above them. When PR3B closes `F15` they must be **inverted or
+replaced**, never deleted: the successor must assert that a provider-identified
+diary item's canonical nutrition comes from provider truth.
+
+`tests/test_sprint13_nutrition_write_convergence.py` was corrected in two places
+for the same reason — its module docstring and the guard formerly named
+`test_no_supported_writer_persists_caller_supplied_provider_nutrition`, now
+`test_no_direct_web_write_path_persists_caller_supplied_provider_nutrition`. Both
+claimed repository-wide N2 coverage they do not have. **No assertion was
+changed, added or relaxed** — only the scope the guard claims for itself.
+
+### What the PR1 review remediation changed in this module
 
 | Test | Change | Why |
 |---|---|---|
@@ -1232,6 +1489,23 @@ remains in the branch.
 The last two are the guards this remediation exists to add. Both mutations were
 made in the review environment only and restored byte-for-byte; `git status`
 after restoration showed nothing but the two intended files.
+
+### Non-vacuity of the F15 characterization, proven by mutation
+
+Same method, applied to the three tests added by the PR3 review remediation. Each
+mutation was made to `app/blueprints/nutrition/diary.py`, observed, then reverted
+with `git checkout --` and confirmed byte-for-byte identical. **No mutation
+remains in the branch, and no production file is modified by this remediation.**
+
+| Mutation | Guard | Result |
+|---|---|---|
+| Stopped `diary_add_item` / `diary_update_item` reading `serving_calories/protein/carbs/fat` — i.e. the F15 fix, faked | `test_f15_the_diary_item_transport_accepts_provider_identity_and_nutrition` | **FAILED ✅** |
+| Same mutation, end to end | `test_f15_the_diary_commit_promotes_caller_nutrition_to_the_ledger` | **FAILED ✅** — the ledger no longer carried the caller's numbers |
+| Made `diary_log_meal` derive its totals from `per_100g_*` instead of summing the item macros | `test_f15_the_canonical_diary_writer_only_sums_staging_rows` | **FAILED ✅** |
+
+The first mutation is the shape PR3B's real fix will take, which is the point:
+these tests fail the moment the gap closes, forcing the ledger to be updated
+rather than letting a stale "open" finding sit in the document forever.
 
 ### Validation run — review remediation
 

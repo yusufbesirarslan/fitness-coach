@@ -4,7 +4,15 @@ PR1 (``docs/superpowers/specs/2026-08-30-sprint13-pr1-nutrition-closure-discover
 found one canonical consumed-food ledger with two trust models over it: the
 mobile LogFood path re-fetches provider truth and rescales it server-side, while
 the web posted browser-computed macros for the same provider food. PR3 closes
-that gap - F4, F5, F6, F7, F8 and F12, hence N2 and N8.
+that gap on the DIRECT web write paths - F4, F5, F6, F7, F8 and F12 - and
+satisfies N8 at the first-party scope stated in the report's section 12.
+
+N2 is NOT closed by this module. The independent review of PR3 discovered F15:
+the diary-builder staging path (`POST /api/diary/meal/<id>/item`) still accepts
+caller-supplied serving nutrition for a provider-identified food, and
+`diary_log_meal` promotes those totals into canonical `MealLog`. That path is
+characterized in `tests/test_sprint13_nutrition_closure_discovery.py` and owned
+by PR3B; nothing here should be read as covering it.
 
 These are *invariant* tests, not characterization tests: each one fails if the
 convergence regresses.
@@ -758,8 +766,15 @@ def test_no_second_log_food_service_was_forked():
     assert forks == []
 
 
-def test_no_supported_writer_persists_caller_supplied_provider_nutrition():
-    """N2, structurally: the request-macro path exists only for manual entry."""
+def test_no_direct_web_write_path_persists_caller_supplied_provider_nutrition():
+    """Structurally: on THESE routes, the request-macro path is manual-only.
+
+    Scope, corrected after the independent PR3 review: this guard covers
+    `/meal-log` and `POST /api/food/barcode/add`. It does NOT cover the
+    diary-builder staging writer, which still carries caller-supplied nutrition
+    for a provider-identified food into `MealLog` (F15, open, owned by PR3B).
+    It is therefore evidence for those two routes, not for N2 repository-wide.
+    """
     meallog = (REPO_ROOT / "app" / "blueprints" / "nutrition" / "meallog.py"
                ).read_text(encoding="utf-8")
     food = (REPO_ROOT / "app" / "blueprints" / "food.py"
