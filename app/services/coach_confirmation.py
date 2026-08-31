@@ -7,6 +7,8 @@ CONFIRM/CANCEL/NONE parser as PR4. The model does not choose whether a pending
 action executes.
 """
 import json
+import re
+import unicodedata
 
 from flask import g
 
@@ -30,6 +32,21 @@ _HELD_STREAM_TOOLS = frozenset(coach_plan_tools.PLAN_WRITE_TOOL_NAMES) | frozens
     "confirm_and_commit_workout_log",
     "cancel_pending_log",
 })
+
+_PLAN_CHANGE_PATTERNS = (
+    r"\b(?:add|addition|change|exercise|plan|remove|replace|workout)\b",
+    r"\b(?:antrenman|degisik\w*|egzersiz|ekle\w*|cikar\w*|yerine)\b",
+    r"\bprogram\w*\b",
+)
+_CONFIRMATION_REQUEST_PATTERNS = (
+    r"\bconfirm\b",
+    r"\bonay\w*\b",
+    r"\b(?:would you like|do you want)(?: me)? to\b",
+    r"\b(?:can|may|shall|should) (?:i|we)\b",
+    r"\b(?:reply|say) yes\b",
+    r"\bister misin\b",
+    r"\b(?:ekle|cikar|degistir)\w* mi\b",
+)
 
 
 def resolve_pending_turn(user_id, language="tr"):
@@ -85,6 +102,21 @@ def reply_after_tools(user_id, language="tr", tool_results=None):
     if not applied:
         return None
     return _format_plan_applied(applied[-1], language)
+
+
+def grounded_provider_reply(user_id, language, text):
+    """Suppress model-authored plan confirmation with no durable proposal.
+
+    This is a narrow output invariant, not an intent classifier: it does not
+    infer or execute a mutation. It only refuses to expose confirmation-request
+    copy when the server cannot read the state that such copy claims exists.
+    """
+    reply = text or ""
+    if not _asks_for_plan_confirmation(reply):
+        return reply
+    if _plan_pending(user_id) is not None:
+        return reply
+    return t("coach.confirm.no_plan_proposal", locale=language)
 
 
 def holds_stream_preamble(tool_names):
@@ -203,6 +235,19 @@ def _ensure_request_id():
             assign_request_id()
     except RuntimeError:
         pass
+
+
+def _asks_for_plan_confirmation(text):
+    normalized = unicodedata.normalize("NFKD", str(text or ""))
+    normalized = "".join(
+        char for char in normalized if not unicodedata.combining(char)
+    ).casefold().replace("ı", "i")
+    return (
+        any(re.search(pattern, normalized)
+            for pattern in _PLAN_CHANGE_PATTERNS)
+        and any(re.search(pattern, normalized)
+                for pattern in _CONFIRMATION_REQUEST_PATTERNS)
+    )
 
 
 def _plan_pending(user_id):

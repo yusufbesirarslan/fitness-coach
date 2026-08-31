@@ -14,7 +14,14 @@ import json
 import pytest
 
 from app.extensions import db
-from app.models import PendingAction, WorkoutLog, WorkoutSession
+from app.models import (
+    PendingAction,
+    PlanMutationRecord,
+    TrainingPlan,
+    TrainingPlanConfirmationProposal,
+    WorkoutLog,
+    WorkoutSession,
+)
 from app.observability import assign_request_id
 from app.services import ai_coach, coach_plan_tools, plan_confirmation
 from app.services.coach_plan_tools import results
@@ -563,6 +570,198 @@ def test_apply_now_add_without_session_persists_immediately(
     assert "lateral raise" in reply.lower()
     assert "added" in reply.lower()
     assert "confirm" not in reply.lower()
+
+
+def test_ask_stream_rejects_model_confirmation_without_plan_proposal(
+        client, auth_user, app, tools_on, monkeypatch):
+    """Widget path: no tool call cannot manufacture plan confirmation state."""
+    from tests.test_ai_stream import _FakeStream, _final, _text_block
+    from tests.test_coach_routes import _parse_sse
+
+    auth_user.language = "en"
+    plan = TrainingPlan(
+        user_id=auth_user.id,
+        score=8,
+        plan_data=json.dumps(_program(), ensure_ascii=False),
+    )
+    db.session.add(plan)
+    db.session.commit()
+    original_plan_data = plan.plan_data
+
+    app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = True
+    false_confirmation = "Would you like to confirm this addition?"
+    _script_bedrock_stream(monkeypatch, [
+        _FakeStream(
+            [false_confirmation],
+            _final(content=[_text_block(false_confirmation)]),
+        ),
+    ])
+
+    response = client.post("/ask/stream", json={
+        "question": "Add Dumbbell Curl 3x10 to my Monday/back workout.",
+    })
+    frames = _parse_sse(response.get_data(as_text=True))
+    response.close()
+    visible = "".join(
+        payload.get("text") or ""
+        for kind, payload in frames
+        if kind in ("delta", "done")
+    )
+
+    assert response.status_code == 200
+    assert "confirm" not in visible.lower()
+    assert "nothing was changed" in visible.lower()
+    refreshed = db.session.get(TrainingPlan, plan.id)
+    assert refreshed.plan_data == original_plan_data
+    assert refreshed.mutation_version == 0
+    assert TrainingPlanConfirmationProposal.query.filter_by(
+        user_id=auth_user.id).count() == 0
+    assert PlanMutationRecord.query.filter_by(user_id=auth_user.id).count() == 0
+    assert WorkoutLog.query.filter_by(user_id=auth_user.id).count() == 0
+
+
+@pytest.mark.parametrize("provider_text", [
+    "Would you like me to add that exercise?",
+    "Shall I add Dumbbell Curl to Monday?",
+    "Can I make this plan change?",
+    "Bunu programa eklememi ister misin?",
+    "Should we add Dumbbell Curl?",
+    "Dumbbell Curl'ü programa ekleyeyim mi?",
+    "Planına ekleyelim mi?",
+    "Bu egzersizi \u00e7\u0131karay\u0131m m\u0131?",
+])
+def test_provider_plan_confirmation_variants_require_real_proposal(
+        app, auth_user, provider_text):
+    from app.services import coach_confirmation
+
+    with app.test_request_context("/ask", method="POST"):
+        reply = coach_confirmation.grounded_provider_reply(
+            auth_user.id, "en", provider_text)
+
+    assert reply != provider_text
+    assert "nothing was changed" in reply.lower()
+
+
+@pytest.mark.parametrize("provider_text", [
+    "Would you like me to confirm your address?",
+    "Your workout plan is ready.",
+    "No plan change is pending.",
+])
+def test_provider_reply_does_not_misclassify_non_requests(
+        app, auth_user, provider_text):
+    from app.services import coach_confirmation
+
+    with app.test_request_context("/ask", method="POST"):
+        reply = coach_confirmation.grounded_provider_reply(
+            auth_user.id, "en", provider_text)
+
+    assert reply == provider_text
+
+
+def test_ask_stream_add_applies_once_with_server_owned_copy(
+        client, auth_user, app, tools_on, monkeypatch):
+    from tests.test_ai_stream import (
+        _FakeStream, _final, _text_block, _tool_use_block,
+    )
+    from tests.test_coach_routes import _parse_sse
+
+    auth_user.language = "en"
+    plan = TrainingPlan(
+        user_id=auth_user.id,
+        score=8,
+        plan_data=json.dumps(_program(), ensure_ascii=False),
+    )
+    db.session.add(plan)
+    db.session.commit()
+
+    app.config["AI_ADAPTIVE_PLAN_CONTEXT"] = True
+    premature = "Would you like to confirm this addition?"
+    fake = _script_bedrock_stream(monkeypatch, [
+        _FakeStream(
+            [premature],
+            _final(
+                stop_reason="tool_use",
+                content=[
+                    _text_block(premature),
+                    _tool_use_block(
+                        "add_training_plan_exercise", "t1",
+                        {"day": "Pazartesi", "exercise": "Dumbbell Curl",
+                         "sets": 3, "reps": "10"}),
+                ],
+            ),
+        ),
+    ])
+
+    response = client.post("/ask/stream", json={
+        "question": "Add Dumbbell Curl 3x10 to my Monday/back workout.",
+    })
+    frames = _parse_sse(response.get_data(as_text=True))
+    response.close()
+    visible = "".join(
+        payload.get("text") or ""
+        for kind, payload in frames
+        if kind in ("delta", "done")
+    )
+
+    assert response.status_code == 200
+    assert "confirm" not in visible.lower()
+    assert "dumbbell curl" in visible.lower()
+    assert "added" in visible.lower()
+    assert names(auth_user.id).count("Dumbbell Curl") == 1
+    refreshed = db.session.get(TrainingPlan, plan.id)
+    assert refreshed.mutation_version == 1
+    assert TrainingPlanConfirmationProposal.query.filter_by(
+        user_id=auth_user.id).count() == 0
+    assert PlanMutationRecord.query.filter_by(user_id=auth_user.id).count() == 1
+    assert WorkoutLog.query.filter_by(user_id=auth_user.id).count() == 0
+    assert len(fake.calls) == 1
+
+
+def test_flagged_read_tool_preamble_is_suppressed_without_skipping_tool(
+        app, auth_user, monkeypatch):
+    from app.observability import assign_request_id
+    from app.services import ai_stream
+    from tests.test_ai_stream import (
+        _FakeStream, _final, _text_block, _tool_use_block,
+    )
+
+    dispatched = []
+
+    def dispatch(user_id, name, arguments):
+        dispatched.append((user_id, name, arguments))
+        return "metric result"
+
+    monkeypatch.setattr(ai_coach, "_dispatch_coach_tool", dispatch)
+    false_confirmation = "Would you like me to add that exercise?"
+    _script_bedrock_stream(monkeypatch, [
+        _FakeStream(
+            [false_confirmation],
+            _final(
+                stop_reason="tool_use",
+                content=[
+                    _text_block(false_confirmation),
+                    _tool_use_block(
+                        "query_fitx_metrics", "t1",
+                        {"metric_type": "fitness"}),
+                ],
+            ),
+        ),
+        _FakeStream(
+            ["Your fitness metrics are ready."],
+            _final(content=[_text_block("Your fitness metrics are ready.")]),
+        ),
+    ])
+
+    with app.test_request_context("/ask/stream", method="POST"):
+        assign_request_id()
+        events = list(ai_stream.stream_coach_answer(
+            auth_user.id, "show my fitness metrics", "", [], language="en"))
+
+    assert len(dispatched) == 1
+    assert dispatched[0][1] == "query_fitx_metrics"
+    visible = _visible_text(events)
+    assert false_confirmation not in visible
+    assert "fitness metrics are ready" in visible.lower()
 
 
 def test_streaming_apply_now_does_not_emit_success_before_persist(

@@ -1165,7 +1165,8 @@ def _run_coach_conversation_openai(user_id, question, context, history,
         tool_calls = msg.tool_calls or []
 
         if not tool_calls:
-            final_text = msg.content or ""
+            final_text = coach_confirmation.grounded_provider_reply(
+                user_id, language, msg.content or "")
             break
 
         # Araç isteyen assistant mesajını (tool_calls ile) sıraya ekle.
@@ -1287,7 +1288,8 @@ def _run_coach_conversation_bedrock(user_id, question, context, history,
             if getattr(resp, "stop_reason", None) != "tool_use":
                 text = _first_text_block(resp)
                 if text:
-                    return text
+                    return coach_confirmation.grounded_provider_reply(
+                        user_id, language, text)
                 # Metin bloğu yok: hiç araç çalışmadıysa OpenAI'ya düş (soru
                 # cevaplanabilirdi); araç çalıştıysa sağlayıcı değiştirme.
                 if tools_ran == 0:

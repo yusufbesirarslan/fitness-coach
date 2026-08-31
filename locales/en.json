@@ -973,6 +973,7 @@
   "coach.confirm.propose_plan_remove": "I'll remove {exercise} from {day}. Confirm this change?",
   "coach.confirm.propose_plan_replace": "I'll replace {exercise} with {replacement} on {day}. Confirm this change?",
   "coach.confirm.propose_plan": "A training-plan change is waiting. Confirm this change?",
+  "coach.confirm.no_plan_proposal": "I couldn't prepare that plan change, so nothing was changed. Please repeat the exercise, day, sets, and reps.",
 
   "quest.login.title": "Daily Login",
   "quest.login.desc": "Log in to the app today",
