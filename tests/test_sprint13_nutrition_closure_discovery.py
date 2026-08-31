@@ -209,7 +209,9 @@ def test_canonical_ledger_writer_inventory_is_closed():
     }
     assert writers == {
         "app/blueprints/nutrition/diary.py",      # W2 quick-add, W3 builder commit
-        "app/blueprints/nutrition/meallog.py",    # W1 manual / AI / override
+        "app/blueprints/nutrition/meallog.py",    # W1 manual / AI / provider
+        # (PR3: the "override" command is now MANUAL only; the
+        # provider-backed command delegates to W7 and adds no writer)
         "app/blueprints/social.py",               # W6 shared meal suggestion
         "app/services/ai_coach.py",               # W5 coach confirmation
         "app/services/barcode.py",                # W4 barcode add
@@ -780,12 +782,18 @@ def test_deleting_a_ledger_row_releases_no_stored_meal_photo():
 # F5 / F7 / N2 - the web ledger writer's trust model
 # ---------------------------------------------------------------------------
 
-def test_the_web_meal_log_persists_client_supplied_macros_unchanged(
+def test_the_web_manual_meal_log_persists_user_supplied_macros_unchanged(
         app, client, auth_user):
-    """F5: the web trusts the caller's arithmetic; the mobile path does not.
+    """F5 closed (PR3): `override_macros` is now the MANUAL command only.
 
-    The values below are physically plausible, so `clamp_serving_macros` is a
-    no-op and what reaches the ledger is exactly what the browser computed.
+    Pre-PR3 this test characterized a defect: the same `override_macros` field
+    also carried browser-computed *provider* macros, so the web trusted the
+    caller's arithmetic for provider-backed food and stamped it `manual`.  PR3
+    splits the transport - provider writes go through `provider_food` and are
+    recomputed server-side - so what remains here is the intended invariant:
+    a genuinely hand-entered meal stays user-authoritative and is recorded as
+    `manual`.  The values below are physically plausible, so
+    `clamp_serving_macros` is a no-op.
     """
     response = client.post("/meal-log", json={
         "ogun": "Öğle",
@@ -798,31 +806,39 @@ def test_the_web_meal_log_persists_client_supplied_macros_unchanged(
     entry = MealLog.query.filter_by(user_id=auth_user.id).one()
     assert (entry.kalori, entry.protein, entry.karb, entry.yag) == (
         642.0, 44.0, 61.0, 21.0), (
-        "The web write path started recomputing. That is decision C3 landing; "
-        "update F5 and this characterization together.")
+        "A hand-entered meal must stay user-authoritative. If the manual "
+        "command started recomputing, decision C3 has been over-applied.")
     assert entry.source == "manual", (
-        "The override branch sets no source, so the column default stamps "
-        "'manual' - a browser-computed provider serving is recorded as a "
-        "hand-entered meal, and no reader can tell the difference.")
+        "A hand-entered meal is 'manual'. Provider-backed rows no longer "
+        "reach this branch, so 'manual' is now structurally truthful.")
 
 
-def test_the_web_meal_log_does_not_validate_the_meal_slot(
-        app, client, auth_user):
-    """F7 / C12: free text reaches the canonical slot column."""
+def test_the_web_meal_log_validates_the_meal_slot(app, client, auth_user):
+    """F7 / C12 closed (PR3): free text no longer reaches the slot column.
+
+    Pre-PR3 this test asserted the defect - `POST /meal-log` returned 200 for
+    `"brunch, sort of"` and the free text was persisted verbatim, so the
+    canonical ledger carried a slot no reader could bucket.  C12 chose
+    transport-boundary validation over fuzzy mapping, so the corrected
+    invariant is a deterministic 400 with no row written; the slot vocabulary
+    itself is still exactly the four canonical labels.
+    """
     from app.services.mobile_nutrition import serialization
 
-    assert client.post("/meal-log", json={
+    response = client.post("/meal-log", json={
         "ogun": "brunch, sort of",
         "yemekler": "Menemen",
         "override_macros": {
             "kalori": 400.0, "protein": 20.0, "karb": 12.0, "yag": 28.0},
-    }).status_code == 200
-
-    entry = MealLog.query.filter_by(user_id=auth_user.id).one()
-    assert entry.ogun == "brunch, sort of"
-    assert serialization.slot_token(entry.ogun) == serialization.SLOT_UNKNOWN, (
-        "An unrecognised label must publish as 'unknown' rather than be forced "
-        "into a bucket the user did not choose.")
+    })
+    assert response.status_code == 400
+    assert "error" in response.get_json()
+    assert MealLog.query.filter_by(user_id=auth_user.id).count() == 0, (
+        "Slot validation must run before persistence, not after.")
+    assert serialization.slot_token("brunch, sort of") == (
+        serialization.SLOT_UNKNOWN), (
+        "The serializer must keep publishing unrecognised labels as 'unknown' "
+        "for rows written before PR3; PR3 adds no backfill.")
 
 
 def test_the_web_history_contract_publishes_a_day_with_no_year(

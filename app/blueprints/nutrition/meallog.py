@@ -20,9 +20,39 @@ from app.services.ai import _openai_chat
 from app.services.nutrition_pipeline import sanitize_meal_total_macros
 from app.services.nutrition_targets import derive_daily_macro_targets
 from app.services.gamification import complete_quest_for_user
-from app.services import meal_idempotency
-from app.services.validators import _meal_photo_url, _to_float, validate_meal_photo
+from app.services import meal_idempotency, mobile_log_food
+from app.services.mobile_nutrition.serialization import SLOT_BY_MEAL_LABEL
+from app.services.validators import _meal_photo_url, validate_meal_photo
 from app.timeutil import day_key, display_ddmm
+
+
+# F7 / C12 (Sprint 13 PR3). `MealLog.ogun` bir GÖRÜNTÜ etiketi kolonudur ve
+# bilerek etiket yazan başka yazarlar da vardır ("AI Koç", "<gönderen>…alınan
+# öneri"); kolon enum'a çevrilmez. Doğrulama TRANSPORT sınırına aittir: web
+# /meal-log yalnızca dört kanonik öğün etiketini kabul eder. Serbest metin
+# daha önce deftere sızıyor, mobil projeksiyonda `unknown` slot'a düşüyor ve
+# 100 karakteri aşınca PostgreSQL'de DataError veriyordu.
+WEB_MEAL_SLOTS = tuple(SLOT_BY_MEAL_LABEL)
+
+
+def _provider_command(ogun, provider_food):
+    """Adapt the web transport into the canonical semantic LogFood command.
+
+    Yalnızca KİMLİKLER taşınır (sağlayıcı, besin, porsiyon, adet). Makro
+    hesabı sunucuda, `mobile_log_food` içinde sağlayıcı gerçeğinden yeniden
+    yapılır — tarayıcı önizlemesi ASLA kalıcı otorite değildir (C3/F5).
+    """
+    if not isinstance(provider_food, dict):
+        raise mobile_log_food.InvalidLogFoodCommand("provider command must be an object")
+    return mobile_log_food.parse_command({
+        "kind": "provider_backed",
+        "provider": provider_food.get("provider", "fatsecret"),
+        "food_id": provider_food.get("food_id"),
+        "serving_id": provider_food.get("serving_id"),
+        "quantity": provider_food.get("quantity", 1),
+        "slot": SLOT_BY_MEAL_LABEL[ogun],
+        "discovery_source": provider_food.get("discovery_source", "search"),
+    })
 
 
 @bp.route("/meal-log", methods=["POST"])
@@ -33,8 +63,36 @@ def log_meal():
     ogun     = data.get("ogun", "")
     yemekler = data.get("yemekler", "")
 
-    if not ogun or not yemekler:
+    # F7: slot doğrulaması HER yan etkiden önce — foto yükleme, sağlayıcı turu,
+    # LLM çağrısı, defter yazımı ve görev mutasyonu bu kapının ARDINDA kalır.
+    if ogun not in WEB_MEAL_SLOTS:
+        return jsonify({"error": t("route.invalid_meal_slot")}), 400
+
+    provider_food = data.get("provider_food")
+    if provider_food is not None:
+        return _log_provider_backed_meal(data, ogun, provider_food)
+
+    if not yemekler:
         return jsonify({"error": t("route.meal_foods_required")}), 400
+
+    # ELLE girilen beslenme kullanıcı-otoriterdir ve öyle kalır (C3) — ama tek
+    # bir tipli sınır politikasıyla: kanonik `ManualNutritionSnapshot` (mobil
+    # manuel komutun AYNI doğrulayıcısı). Eskiden `_to_float(..., 0)` bozuk /
+    # eksik / NaN / negatif değerleri SESSİZCE 0'a çeviriyordu; sıfır bir ölçüm
+    # değildir, 400 doğru cevaptır (PR3 §11). Doğrulama foto yüklemesinden
+    # ÖNCE — reddedilen bir istek S3'te yetim nesne bırakmasın.
+    override = data.get("override_macros")
+    manual_nutrition = None
+    if override is not None:
+        try:
+            manual_nutrition = mobile_log_food.parse_manual_nutrition({
+                "energy_kcal": override.get("kalori"),
+                "protein_g": override.get("protein"),
+                "carbohydrate_g": override.get("karb"),
+                "fat_g": override.get("yag"),
+            } if isinstance(override, dict) else override)
+        except mobile_log_food.InvalidLogFoodCommand:
+            return jsonify({"error": t("route.invalid_manual_nutrition")}), 400
 
     idempotency_key = meal_idempotency.read_idempotency_key()
     existing = meal_idempotency.find_existing(current_user.id, idempotency_key)
@@ -97,18 +155,17 @@ def log_meal():
         current_app.logger.info("[MEAL] Fitness shorthand normalized")
     yemekler_for_prompt = normalized_yemekler
 
-    override = data.get("override_macros")
-    if override and isinstance(override, dict):
-        # Kullanıcı override'ı doğrudan kanonik MealLog'a YAZMADAN ÖNCE fiziksel-
-        # sağlık kapısından geçir (menü/koç/diary hatlarıyla aynı tek kaynak) —
-        # aksi halde request-kontrollü çöp (örn. 9999 kcal) deftere sızıp günlük
-        # toplamları, protein nudge'ını ve haftalık raporları bozardı (C1).
+    if manual_nutrition is not None:
+        # Tipli sınırlar (yukarıda doğrulandı) DB CHECK'iyle aynıdır
+        # (100000/50000); fiziksel-sağlık kapısı bunun ÜSTÜNE gelen mevcut tek
+        # kaynaktır (menü/koç/diary ile aynı) — "99999 kcal" çöpü deftere
+        # sızmasın (C1).
         from app.services import nutrition_pipeline as _np
         kalori, protein, karb, yag = _np.clamp_serving_macros(
-            round(_to_float(override.get("kalori", 0)), 1),
-            round(_to_float(override.get("protein", 0)), 1),
-            round(_to_float(override.get("karb", 0)), 1),
-            round(_to_float(override.get("yag", 0)), 1),
+            round(float(manual_nutrition.energy_kcal), 1),
+            round(float(manual_nutrition.protein_g), 1),
+            round(float(manual_nutrition.carbohydrate_g), 1),
+            round(float(manual_nutrition.fat_g), 1),
         )
         nutrients = {"kalori": kalori, "protein": protein, "karb": karb, "yag": yag}
         today = day_key()
@@ -199,6 +256,61 @@ def log_meal():
     }
     if meal_photo_key:
         response["photo_url"] = _meal_photo_url(entry)
+    if quest_result:
+        response["quest_awarded"] = quest_result
+    return jsonify(response)
+
+
+def _log_provider_backed_meal(data, ogun, provider_food):
+    """Web'in sağlayıcı-destekli öğün yazma yolu — KANONİK LogFood otoritesi.
+
+    Bu yol makro HESAPLAMAZ: `mobile_log_food.log_food` porsiyon gerçeğini
+    `mobile_food_discovery.servings(food_id)`'den yeniden çeker ve adetle
+    sunucuda ölçekler. Mobil `POST /api/v1/nutrition/logs` ile AYNI servis,
+    aynı semantik parmak izi, aynı replay kuralı (C3 → N2/N8). Transport
+    ayrıdır; otorite tektir.
+    """
+    from app.services.ai_gate import BlockingConcurrencyLimit
+
+    # Karışık komut = belirsiz komut. Sağlayıcı kimliği taşıyan bir istek
+    # AYRICA makro/foto/serbest açıklama taşıyorsa hangisinin kalıcı olacağını
+    # SESSİZCE seçmek yerine kapalı düş (PR3 §7/§33).
+    if data.get("override_macros") or data.get("image") or data.get("yemekler"):
+        return jsonify({"error": t("route.mixed_meal_command")}), 400
+
+    idempotency_key = meal_idempotency.read_idempotency_key()
+    if idempotency_key is None:
+        return jsonify({"error": t("route.meal_idempotency_key_required")}), 400
+
+    try:
+        command = _provider_command(ogun, provider_food)
+        entry, created = mobile_log_food.log_food(
+            current_user.id, idempotency_key, command)
+    except mobile_log_food.InvalidLogFoodCommand:
+        return jsonify({"error": t("route.invalid_provider_meal_command")}), 400
+    except mobile_log_food.ProviderFoodNotFound:
+        return jsonify({"error": t("route.food_not_found")}), 404
+    except mobile_log_food.IdempotencyConflict:
+        return jsonify({"error": t("route.meal_idempotency_conflict")}), 409
+    except BlockingConcurrencyLimit:
+        current_app.logger.warning(
+            "log_meal event=blocking_capacity_exhausted stage=provider")
+        response = jsonify({"error": t("error.ai_busy")})
+        response.status_code = 503
+        response.headers["Retry-After"] = "15"
+        return response
+
+    # Görev/XP YALNIZCA gerçekten satır oluştuğunda — replay ikinci kez ödül
+    # vermez (N8).
+    quest_result = complete_quest_for_user(
+        current_user.id, "meal_logged") if created else None
+    response = {
+        "message": t("route.x_logged", name=entry.ogun),
+        "nutrients": {
+            "kalori": entry.kalori, "protein": entry.protein,
+            "karb": entry.karb, "yag": entry.yag,
+        },
+    }
     if quest_result:
         response["quest_awarded"] = quest_result
     return jsonify(response)

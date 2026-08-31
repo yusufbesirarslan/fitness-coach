@@ -55,6 +55,31 @@ def _provider(data):
         raise InvalidLogFoodCommand(str(error)) from None
 
 
+_MANUAL_NUTRITION_FIELDS = frozenset(
+    {"energy_kcal", "protein_g", "carbohydrate_g", "fat_g"})
+
+
+def parse_manual_nutrition(nutrition):
+    """Validate a manual nutrition snapshot: the ONLY manual bounds policy.
+
+    Public because the web `/meal-log` manual branch adapts into exactly this
+    validation rather than keeping a second, looser numeric policy of its own
+    (Sprint 13 PR3, C3). The mobile parser below is the other caller, so the
+    two clients cannot drift apart.
+    """
+    if not isinstance(nutrition, dict) or set(nutrition) != _MANUAL_NUTRITION_FIELDS:
+        raise InvalidLogFoodCommand("invalid nutrition snapshot")
+    try:
+        return ManualNutritionSnapshot(
+            energy_kcal=_decimal(nutrition["energy_kcal"]),
+            protein_g=_decimal(nutrition["protein_g"]),
+            carbohydrate_g=_decimal(nutrition["carbohydrate_g"]),
+            fat_g=_decimal(nutrition["fat_g"]),
+        )
+    except ValueError as error:
+        raise InvalidLogFoodCommand(str(error)) from None
+
+
 def _manual(data):
     if set(data) != {"kind", "description", "slot", "nutrition"}:
         raise InvalidLogFoodCommand("mixed, unknown, or missing manual fields")
@@ -64,17 +89,8 @@ def _manual(data):
     description = description.strip()
     if not 1 <= len(description) <= 500:
         raise InvalidLogFoodCommand("invalid description")
-    nutrition = data.get("nutrition")
-    expected = {"energy_kcal", "protein_g", "carbohydrate_g", "fat_g"}
-    if not isinstance(nutrition, dict) or set(nutrition) != expected:
-        raise InvalidLogFoodCommand("invalid nutrition snapshot")
+    snapshot = parse_manual_nutrition(data.get("nutrition"))
     try:
-        snapshot = ManualNutritionSnapshot(
-            energy_kcal=_decimal(nutrition["energy_kcal"]),
-            protein_g=_decimal(nutrition["protein_g"]),
-            carbohydrate_g=_decimal(nutrition["carbohydrate_g"]),
-            fat_g=_decimal(nutrition["fat_g"]),
-        )
         return ManualLogFoodCommand(
             description=description,
             slot=_enum(data.get("slot")),
