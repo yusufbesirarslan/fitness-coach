@@ -16,6 +16,15 @@ from app.i18n import t
 from app.models import CustomMeal, CustomMealItem, MealLog, NutritionPlan
 from app.services.gamification import complete_quest_for_user
 from app.services import meal_idempotency
+from app.services.mobile_log_food.parsing import (
+    InvalidLogFoodCommand,
+    parse_provider_identity,
+    parse_provider_quantity,
+)
+from app.services.provider_food_snapshot import (
+    ProviderFoodNotFound,
+    resolve_provider_food,
+)
 from app.services.validators import _to_float
 from app.timeutil import app_today, day_key
 
@@ -74,6 +83,89 @@ def _claim_diary_meal(meal_id, user_id):
         user_id=user_id,
         is_logged=False,
     ).update({"is_logged": True}, synchronize_session=False)
+
+
+# The diary PERSISTS the identities it validates, and its columns are narrower
+# than the canonical 128-character transport bound. Deriving the effective
+# bound from the model is what keeps the two from drifting apart: an identity
+# the provider would accept but the column cannot hold must fail here, at the
+# transport, rather than after the network call at the INSERT (PR3B, P2-01).
+_IDENTITY_MAX_LENGTH = min(
+    CustomMealItem.__table__.c.fatsecret_food_id.type.length,
+    CustomMealItem.__table__.c.serving_id.type.length,
+)
+
+
+def _provider_identity(value):
+    """One provider identity, on the canonical policy plus the storage bound."""
+    return parse_provider_identity(value, _IDENTITY_MAX_LENGTH)
+
+
+def _stored_quantity(value):
+    """The default a PATCH/promotion re-resolves at when the caller omits one.
+
+    A STORED quantity is not transport input, so a legacy row that never had
+    one keeps the documented single serving; ``None`` arriving from the REQUEST
+    is malformed and never reaches here (see `_transport_quantity`).
+    """
+    return 1 if value is None else value
+
+
+def _transport_quantity(data, field, default):
+    """Read one quantity from the request under the canonical typed policy.
+
+    ``data.get(field, default)`` is the whole point: an OMITTED field keeps
+    ``default``, while a field present as JSON ``null`` arrives as ``None`` and
+    is rejected instead of silently becoming a plausible serving (P1-02).
+    """
+    return parse_provider_quantity(data.get(field, default))
+
+
+def _provider_error(exc):
+    db.session.rollback()
+    if isinstance(exc, (ProviderFoodNotFound, ValueError)):
+        return jsonify({"error": "invalid_serving"}), 400
+    current_app.logger.exception("[DIARY] provider resolution failed")
+    return jsonify({
+        "error": "food_provider_unavailable",
+        "retryable": True,
+    }), 503
+
+
+def _apply_provider_snapshot(item, snapshot):
+    nutrition = snapshot.nutrition
+    per_100g = snapshot.nutrition_per_100g
+    item.food_name = snapshot.food_name
+    item.fatsecret_food_id = snapshot.food_id
+    item.serving_id = snapshot.serving_id
+    item.serving_description = snapshot.serving_description
+    item.serving_quantity = float(snapshot.quantity)
+    item.grams = round(float(snapshot.grams), 1)
+    item.calories = round(float(nutrition.energy_kcal), 1)
+    item.protein = round(float(nutrition.protein_g), 1)
+    item.carbs = round(float(nutrition.carbohydrate_g), 1)
+    item.fat = round(float(nutrition.fat_g), 1)
+    if per_100g:
+        item.per_100g_calories = round(float(per_100g.energy_kcal), 2)
+        item.per_100g_protein = round(float(per_100g.protein_g), 2)
+        item.per_100g_carbs = round(float(per_100g.carbohydrate_g), 2)
+        item.per_100g_fat = round(float(per_100g.fat_g), 2)
+    else:
+        item.per_100g_calories = None
+        item.per_100g_protein = None
+        item.per_100g_carbs = None
+        item.per_100g_fat = None
+    _clamp_item_macros(item)
+
+
+def _item_state(item):
+    return (
+        item.id, item.custom_meal_id, item.food_name, item.grams,
+        item.calories, item.protein, item.carbs, item.fat,
+        item.fatsecret_food_id, item.per_100g_calories,
+        item.per_100g_protein, item.per_100g_carbs, item.per_100g_fat,
+        item.serving_id, item.serving_description, item.serving_quantity,
+    )
 
 
 @bp.route("/api/quick-add-meal", methods=["POST"])
@@ -216,45 +308,52 @@ def diary_add_item(meal_id):
         return jsonify({"error": t("route.meal_already_logged")}), 400
 
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "invalid_serving"}), 400
     food_name = data.get("food_name", "").strip()
-    food_id = data.get("fatsecret_food_id", "")
+    # PRESENCE of either identity field is the provider claim, exactly as the
+    # canonical parser treats it: a field present as `null` is a malformed
+    # identity, not an absent one, so it cannot silently select manual mode.
+    provider_backed = bool({"fatsecret_food_id", "serving_id"} & set(data))
 
     if not food_name:
         return jsonify({"error": t("route.food_name_required")}), 400
 
-    srv_id = data.get("serving_id")
-    if srv_id:
-        # Negatif client değerleri negatif gram/per-100g makro üretip MealLog'a
-        # sızıyordu (B8) — koç/menü hatlarının aksine diary clamp çağırmıyor.
-        # Gram/miktarı negatife düşürme: <0 → 0 (falsy guard devreye girer).
-        qty = max(_to_float(data.get("serving_quantity", 1), 1), 0)
-        srv_cal = _to_float(data.get("serving_calories", 0))
-        srv_pro = _to_float(data.get("serving_protein", 0))
-        srv_carb = _to_float(data.get("serving_carbs", 0))
-        srv_fat = _to_float(data.get("serving_fat", 0))
-        metric_amt = max(_to_float(data.get("metric_serving_amount", 0)), 0)
-        grams = round(metric_amt * qty, 1) if metric_amt else 0
-        p100_cal = round(srv_cal / metric_amt * 100, 2) if metric_amt else 0
-        p100_pro = round(srv_pro / metric_amt * 100, 2) if metric_amt else 0
-        p100_carb = round(srv_carb / metric_amt * 100, 2) if metric_amt else 0
-        p100_fat = round(srv_fat / metric_amt * 100, 2) if metric_amt else 0
+    if provider_backed:
+        # The complete provider command is validated - typed, bounded, and
+        # fail-closed - BEFORE any network I/O, on the canonical LogFood
+        # policy. An incomplete half never falls back to caller-owned manual
+        # nutrition, and a malformed value never becomes a default.
+        try:
+            food_id = _provider_identity(data.get("fatsecret_food_id"))
+            srv_id = _provider_identity(data.get("serving_id"))
+            quantity = _transport_quantity(data, "serving_quantity", 1)
+        except InvalidLogFoodCommand as exc:
+            return _provider_error(exc)
+
+        # The ownership check above opened a read transaction. Provider I/O must
+        # not hold it open; after resolution we lock and re-check the meal.
+        db.session.rollback()
+        try:
+            snapshot = resolve_provider_food(
+                "fatsecret", food_id, srv_id, quantity)
+        except Exception as exc:
+            return _provider_error(exc)
+
+        meal = CustomMeal.query.filter_by(
+            id=meal_id, user_id=current_user.id).with_for_update().first()
+        if not meal:
+            db.session.rollback()
+            return jsonify({"error": t("route.meal_not_found")}), 404
+        if meal.is_logged:
+            db.session.rollback()
+            return jsonify({"error": t("route.meal_already_logged")}), 400
         item = CustomMealItem(
             custom_meal_id=meal_id,
-            food_name=food_name,
-            grams=grams,
-            calories=round(srv_cal * qty, 1),
-            protein=round(srv_pro * qty, 1),
-            carbs=round(srv_carb * qty, 1),
-            fat=round(srv_fat * qty, 1),
-            fatsecret_food_id=food_id or None,
-            per_100g_calories=p100_cal,
-            per_100g_protein=p100_pro,
-            per_100g_carbs=p100_carb,
-            per_100g_fat=p100_fat,
-            serving_id=str(srv_id),
-            serving_description=data.get("serving_description", ""),
-            serving_quantity=qty,
+            food_name=snapshot.food_name, grams=0,
+            calories=0, protein=0, carbs=0, fat=0,
         )
+        _apply_provider_snapshot(item, snapshot)
     else:
         grams = _to_float(data.get("grams", 100), 100)
         per_100g = data.get("per_100g")
@@ -273,7 +372,7 @@ def diary_add_item(meal_id):
             protein=round(p100_pro * scale, 1),
             carbs=round(p100_carb * scale, 1),
             fat=round(p100_fat * scale, 1),
-            fatsecret_food_id=food_id or None,
+            fatsecret_food_id=None,
             per_100g_calories=p100_cal,
             per_100g_protein=p100_pro,
             per_100g_carbs=p100_carb,
@@ -305,40 +404,71 @@ def diary_update_item(item_id):
         return jsonify({"error": t("route.meal_already_logged")}), 400
 
     data = request.get_json(silent=True) or {}
-    srv_id = data.get("serving_id")
+    if not isinstance(data, dict):
+        return jsonify({"error": "invalid_serving"}), 400
+    before = _item_state(item)
+    food_id = str(item.fatsecret_food_id or "").strip()
+    stored_serving_id = str(item.serving_id or "").strip()
 
-    if srv_id:
-        # B8: negatif değerleri ≥0'a kıs (negatif makro MealLog'a sızmasın).
-        qty = max(_to_float(data.get("serving_quantity", 1), 1), 0)
-        srv_cal = _to_float(data.get("serving_calories", 0))
-        srv_pro = _to_float(data.get("serving_protein", 0))
-        srv_carb = _to_float(data.get("serving_carbs", 0))
-        srv_fat = _to_float(data.get("serving_fat", 0))
-        metric_amt = max(_to_float(data.get("metric_serving_amount", 0)), 0)
-        item.serving_id = str(srv_id)
-        item.serving_description = data.get("serving_description", "")
-        item.serving_quantity = qty
-        item.grams = round(metric_amt * qty, 1) if metric_amt else 0
-        item.calories = round(srv_cal * qty, 1)
-        item.protein = round(srv_pro * qty, 1)
-        item.carbs = round(srv_carb * qty, 1)
-        item.fat = round(srv_fat * qty, 1)
-        if metric_amt:
-            item.per_100g_calories = round(srv_cal / metric_amt * 100, 2)
-            item.per_100g_protein = round(srv_pro / metric_amt * 100, 2)
-            item.per_100g_carbs = round(srv_carb / metric_amt * 100, 2)
-            item.per_100g_fat = round(srv_fat / metric_amt * 100, 2)
-    elif "serving_quantity" in data and item.serving_id:
-        qty = _to_float(data["serving_quantity"], item.serving_quantity or 1)
-        old_qty = item.serving_quantity or 1
-        factor = qty / old_qty
-        item.serving_quantity = qty
-        item.grams = round(item.grams * factor, 1)
-        item.calories = round(item.calories * factor, 1)
-        item.protein = round(item.protein * factor, 1)
-        item.carbs = round(item.carbs * factor, 1)
-        item.fat = round(item.fat * factor, 1)
+    if bool(food_id) != bool(stored_serving_id):
+        return jsonify({"error": "invalid_serving"}), 400
+
+    # Provider-identity transport fields are validated BEFORE the manual or
+    # provider branch is chosen, so a request cannot claim provider identity
+    # and be answered as a caller-authoritative manual update (P1-01). The food
+    # identity is server-stored: serving and quantity are the only selections
+    # this transport owns, so a request-supplied food id - matching the stored
+    # one or not - is an attempted identity conversion and fails closed.
+    if "fatsecret_food_id" in data:
+        return jsonify({"error": "invalid_serving"}), 400
+
+    if food_id:
+        if "grams" in data or "per_100g" in data:
+            return jsonify({"error": "invalid_serving"}), 400
+        try:
+            serving_id = (_provider_identity(data["serving_id"])
+                          if "serving_id" in data else stored_serving_id)
+            quantity = _transport_quantity(
+                data, "serving_quantity", _stored_quantity(item.serving_quantity))
+        except InvalidLogFoodCommand as exc:
+            return _provider_error(exc)
+
+        db.session.rollback()
+        try:
+            snapshot = resolve_provider_food(
+                "fatsecret", food_id, serving_id, quantity)
+        except Exception as exc:
+            return _provider_error(exc)
+
+        meal = CustomMeal.query.filter_by(
+            id=before[1], user_id=current_user.id).with_for_update().first()
+        item = CustomMealItem.query.filter_by(id=item_id).with_for_update().first()
+        if not meal or not item or item.custom_meal_id != meal.id:
+            db.session.rollback()
+            return jsonify({"error": t("route.food_not_found")}), 404
+        if meal.is_logged:
+            db.session.rollback()
+            return jsonify({"error": t("route.meal_already_logged")}), 400
+        if _item_state(item) != before:
+            db.session.rollback()
+            return jsonify({"error": "diary_item_changed"}), 409
+        _apply_provider_snapshot(item, snapshot)
     else:
+        if "serving_id" in data or "serving_quantity" in data:
+            return jsonify({"error": "invalid_serving"}), 400
+        db.session.rollback()
+        meal = CustomMeal.query.filter_by(
+            id=before[1], user_id=current_user.id).with_for_update().first()
+        item = CustomMealItem.query.filter_by(id=item_id).with_for_update().first()
+        if not meal or not item or item.custom_meal_id != meal.id:
+            db.session.rollback()
+            return jsonify({"error": t("route.food_not_found")}), 404
+        if meal.is_logged:
+            db.session.rollback()
+            return jsonify({"error": t("route.meal_already_logged")}), 400
+        if _item_state(item) != before:
+            db.session.rollback()
+            return jsonify({"error": "diary_item_changed"}), 409
         grams = _to_float(data.get("grams", item.grams), item.grams)
         scale = grams / 100.0
         item.grams = grams
@@ -368,7 +498,18 @@ def diary_delete_item(item_id):
     item = db.session.get(CustomMealItem, item_id)
     if not item or item.meal.user_id != current_user.id:
         return jsonify({"error": t("route.food_not_found")}), 404
+    meal_id = item.custom_meal_id
     if item.meal.is_logged:
+        return jsonify({"error": t("route.meal_already_logged")}), 400
+    db.session.rollback()
+    meal = CustomMeal.query.filter_by(
+        id=meal_id, user_id=current_user.id).with_for_update().first()
+    item = CustomMealItem.query.filter_by(id=item_id).with_for_update().first()
+    if not meal or not item or item.custom_meal_id != meal.id:
+        db.session.rollback()
+        return jsonify({"error": t("route.food_not_found")}), 404
+    if meal.is_logged:
+        db.session.rollback()
         return jsonify({"error": t("route.meal_already_logged")}), 400
     db.session.delete(item)
     db.session.commit()
@@ -387,17 +528,63 @@ def diary_log_meal(meal_id):
     if not meal.items:
         return jsonify({"error": t("route.add_one_food")}), 400
 
-    total_cal = sum(i.calories for i in meal.items)
-    total_pro = sum(i.protein for i in meal.items)
-    total_karb = sum(i.carbs for i in meal.items)
-    total_fat = sum(i.fat for i in meal.items)
+    meal_name = meal.meal_name
+    staging_items = sorted(meal.items, key=lambda item: item.id)
+    original_states = [_item_state(item) for item in staging_items]
+    provider_selections = []
+    for item in staging_items:
+        food_id = str(item.fatsecret_food_id or "").strip()
+        serving_id = str(item.serving_id or "").strip()
+        if bool(food_id) != bool(serving_id):
+            return jsonify({"error": "invalid_serving"}), 400
+        if food_id:
+            try:
+                quantity = parse_provider_quantity(
+                    _stored_quantity(item.serving_quantity))
+            except InvalidLogFoodCommand as exc:
+                return _provider_error(exc)
+            provider_selections.append(
+                (item.id, food_id, serving_id, quantity))
+
+    # Close the staging read transaction before any blocking provider call.
+    db.session.rollback()
+    resolved = {}
+    try:
+        for item_id, food_id, serving_id, quantity in provider_selections:
+            resolved[item_id] = resolve_provider_food(
+                "fatsecret", food_id, serving_id, quantity)
+    except Exception as exc:
+        return _provider_error(exc)
+
+    meal = CustomMeal.query.filter_by(
+        id=meal_id, user_id=current_user.id).with_for_update().first()
+    if not meal:
+        db.session.rollback()
+        return jsonify({"error": t("route.meal_not_found")}), 404
+    if meal.is_logged:
+        db.session.rollback()
+        return jsonify({"error": t("route.meal_already_logged")}), 400
+    items = CustomMealItem.query.filter_by(custom_meal_id=meal_id)\
+        .order_by(CustomMealItem.id).with_for_update().all()
+    if [_item_state(item) for item in items] != original_states:
+        db.session.rollback()
+        return jsonify({"error": "diary_meal_changed"}), 409
+
+    for item in items:
+        if item.id in resolved:
+            _apply_provider_snapshot(item, resolved[item.id])
+
+    total_cal = sum(i.calories for i in items)
+    total_pro = sum(i.protein for i in items)
+    total_karb = sum(i.carbs for i in items)
+    total_fat = sum(i.fat for i in items)
 
     def _item_label(i):
         if i.serving_description and i.serving_quantity:
             qty = int(i.serving_quantity) if i.serving_quantity == int(i.serving_quantity) else i.serving_quantity
             return f"{i.food_name} ({qty}x {i.serving_description})"
         return f"{i.food_name} ({int(i.grams)}g)"
-    yemekler = ", ".join(_item_label(i) for i in meal.items)
+    yemekler = ", ".join(_item_label(i) for i in items)
     today = day_key()
 
     if not _claim_diary_meal(meal_id, current_user.id):
@@ -406,7 +593,7 @@ def diary_log_meal(meal_id):
 
     entry = MealLog(
         user_id=current_user.id,
-        ogun=meal.meal_name,
+        ogun=meal_name,
         yemekler=yemekler,
         kalori=round(total_cal, 1),
         protein=round(total_pro, 1),
@@ -420,7 +607,7 @@ def diary_log_meal(meal_id):
 
     quest_result = complete_quest_for_user(current_user.id, "meal_logged")
     response = {
-        "message": t("route.x_logged", name=meal.meal_name),
+        "message": t("route.x_logged", name=meal_name),
         "nutrients": {
             "kalori": entry.kalori,
             "protein": entry.protein,

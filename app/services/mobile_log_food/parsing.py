@@ -5,7 +5,11 @@ from .commands import (
     ManualLogFoodCommand,
     ManualNutritionSnapshot,
     ProviderBackedLogFoodCommand,
+    _validated_amount,
 )
+
+PROVIDER_IDENTITY_MAX_LENGTH = 128
+PROVIDER_QUANTITY_MAX = Decimal("1000")
 
 
 class InvalidLogFoodCommand(ValueError):
@@ -16,11 +20,38 @@ def _enum(value):
     return value.strip().lower() if isinstance(value, str) else ""
 
 
-def _identity(value):
+def parse_provider_identity(value, maximum=PROVIDER_IDENTITY_MAX_LENGTH):
+    """Normalize and bound one provider identity: the ONLY identity policy.
+
+    Public because the diary blueprint adapts into exactly this validation
+    rather than keeping a second, unbounded policy of its own (Sprint 13 PR3B,
+    P2-01) - the same reason `parse_manual_nutrition` below is public. A caller
+    that PERSISTS the identity passes the narrower bound of the column that
+    will store it: 128 characters the provider would accept are still a failed
+    INSERT, and failing at the transport is the honest place to fail.
+    """
     normalized = value.strip() if isinstance(value, str) else ""
-    if not normalized or len(normalized) > 128:
+    if not normalized or len(normalized) > maximum:
         raise InvalidLogFoodCommand("invalid provider identity")
     return normalized
+
+
+def parse_provider_quantity(value):
+    """Validate one provider serving quantity: the ONLY quantity bounds policy.
+
+    Callers must read the field as ``data.get(name, <default>)`` so that an
+    OMITTED field keeps its documented default while a field present as JSON
+    ``null`` arrives here as ``None`` and is rejected. Rehabilitating ``None``
+    into a default is what let a malformed diary command become durable
+    one-serving provider staging (Sprint 13 PR3B, P1-02).
+    """
+    quantity = _decimal(value)
+    try:
+        _validated_amount("quantity", quantity, PROVIDER_QUANTITY_MAX,
+                          positive=True)
+    except ValueError as error:
+        raise InvalidLogFoodCommand(str(error)) from None
+    return quantity
 
 
 def _decimal(value):
@@ -45,8 +76,8 @@ def _provider(data):
     try:
         return ProviderBackedLogFoodCommand(
             provider=_enum(data.get("provider")),
-            food_id=_identity(data.get("food_id")),
-            serving_id=_identity(data.get("serving_id")),
+            food_id=parse_provider_identity(data.get("food_id")),
+            serving_id=parse_provider_identity(data.get("serving_id")),
             quantity=_decimal(data.get("quantity", 1)),
             slot=_enum(data.get("slot")),
             discovery_source=_enum(data.get("discovery_source", "search")),

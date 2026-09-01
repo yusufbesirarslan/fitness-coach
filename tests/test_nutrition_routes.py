@@ -20,6 +20,36 @@ from app.blueprints.nutrition import plan as nutrition_plan
 from app.extensions import db
 from app.timeutil import day_key
 from app.models import CustomMeal, CustomMealItem, MealLog, NutritionPlan, UserSession
+from app.services import mobile_food_discovery
+
+
+@pytest.fixture
+def diary_provider(monkeypatch):
+    servings = {
+        "s1": ("1 adet", 60, 90, 7, 0.6, 6.3),
+        "s9": ("1 tabak", 150, 195, 4, 42, 0.5),
+    }
+
+    def resolve(food_id):
+        resolve.calls.append(food_id)
+        return {
+            "provider": "fatsecret", "food_id": food_id,
+            "name": "Provider food", "brand": "",
+            "servings": [{
+                "serving_id": sid, "description": values[0],
+                "metric_mass": {"amount": values[1], "unit": "g"},
+                "nutrition": dict(zip(
+                    ("energy_kcal", "protein_g", "carbohydrate_g", "fat_g"),
+                    values[2:])),
+                "nutrition_per_100g": dict(zip(
+                    ("energy_kcal", "protein_g", "carbohydrate_g", "fat_g"),
+                    (value * 100 / values[1] for value in values[2:]))),
+            } for sid, values in servings.items()],
+        }
+
+    resolve.calls = []
+    monkeypatch.setattr(mobile_food_discovery, "servings", resolve)
+    return resolve
 
 
 # ---------------------------------------------------------------------------
@@ -165,33 +195,37 @@ def test_diary_add_item_requires_name(client, meal_id):
     assert response.status_code == 400
 
 
-def test_diary_add_item_negative_metric_no_negative_macros(client, meal_id):
-    # B8: negatif metric_serving_amount negatif gram/per-100g üretip MealLog'a
-    # sızıyordu. Artık ≥0'a kısılır — hiçbir makro/gram negatif olamaz.
-    client.post(f"/api/diary/meal/{meal_id}/item", json={
-        "food_name": "Hile", "serving_id": "s1", "serving_quantity": 1,
+@pytest.mark.parametrize("identity", [
+    {"fatsecret_food_id": "f1"},
+    {"serving_id": "s1"},
+])
+def test_diary_add_item_partial_provider_identity_fails_closed(
+        client, meal_id, identity):
+    # PR3B: provider-backed commands require the complete food + serving pair;
+    # neither incomplete half may fall back to caller-owned manual nutrition.
+    response = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "Hile", **identity, "serving_quantity": 1,
         "serving_calories": 100, "serving_protein": 5,
-        "metric_serving_amount": -50}).get_json()
-    item = CustomMealItem.query.filter_by(custom_meal_id=meal_id).one()
-    assert item.grams >= 0
-    assert (item.per_100g_calories or 0) >= 0
-    assert (item.per_100g_protein or 0) >= 0
+        "metric_serving_amount": -50,
+        "per_100g": {"calories": 100, "protein": 5}})
+    assert response.status_code == 400
+    assert CustomMealItem.query.filter_by(custom_meal_id=meal_id).count() == 0
 
 
-def test_diary_add_item_negative_serving_macros_floored(client, meal_id):
+def test_diary_add_item_ignores_negative_caller_serving_macros(
+        client, meal_id, diary_provider):
     # B6: negatif per-serving makrolar (serving_calories/protein/...) eskiden
     # kırpılmadan CustomMealItem'a ve oradan MealLog'a sızıp günlük toplamları
     # aşağı çekiyordu. Artık tüm makrolar ≥0'a taban yapılır.
     body = client.post(f"/api/diary/meal/{meal_id}/item", json={
-        "food_name": "Hile", "serving_id": "s1", "serving_quantity": 2,
+        "food_name": "Hile", "fatsecret_food_id": "f1",
+        "serving_id": "s1", "serving_quantity": 2,
         "metric_serving_amount": 100,
         "serving_calories": -500, "serving_protein": -30,
         "serving_carbs": -20, "serving_fat": -10,
     }).get_json()
-    assert body["calories"] >= 0
-    assert body["protein"] >= 0
-    assert body["carbs"] >= 0
-    assert body["fat"] >= 0
+    assert body["calories"] == 180
+    assert body["protein"] == 14
     item = db.session.get(CustomMealItem, body["item_id"])
     assert item.calories >= 0 and item.grams >= 0
 
@@ -209,24 +243,26 @@ def test_diary_add_item_negative_grams_branch_floored(client, meal_id):
     assert item.grams >= 0
 
 
-def test_diary_add_item_clamps_absurd_macros(client, meal_id):
+def test_diary_add_item_ignores_absurd_caller_macros(
+        client, meal_id, diary_provider):
     # H1: diary hattı eskiden YALNIZCA negatifleri 0'a çekiyordu; üst fiziksel-
     # tavan yoktu, istemci serving_calories: 90000 değerini doğrudan CustomMealItem'a
     # ve oradan kanonik MealLog'a sızdırabiliyordu. Artık clamp_serving_macros ile
     # diğer tüm ingest hatlarıyla aynı fiziksel sınırlara kısılır. Makrolar sıfır
     # olduğundan Atwater düzeltmesi desteklenmeyen kaloriyi de sıfıra indirir.
     body = client.post(f"/api/diary/meal/{meal_id}/item", json={
-        "food_name": "Hile", "serving_id": "s1", "serving_quantity": 1,
+        "food_name": "Hile", "fatsecret_food_id": "f1",
+        "serving_id": "s1", "serving_quantity": 1,
         "metric_serving_amount": 100,
         "serving_calories": 90000, "serving_protein": 0,
         "serving_carbs": 0, "serving_fat": 0,
     }).get_json()
-    assert body["calories"] == 0
+    assert body["calories"] == 90
     item = db.session.get(CustomMealItem, body["item_id"])
-    assert item.calories == 0
+    assert item.calories == 90
 
 
-def test_diary_update_item_clamps_absurd_macros(client, meal_id):
+def test_diary_update_manual_item_cannot_become_partial_provider(client, meal_id):
     # H1: güncelleme yolu da kısar — makul bir öğeyi sonradan 90000 kcal'lik bir
     # serving'e PATCH etmek tavanı aşamaz.
     item_id = client.post(f"/api/diary/meal/{meal_id}/item", json={
@@ -238,7 +274,223 @@ def test_diary_update_item_clamps_absurd_macros(client, meal_id):
         "serving_calories": 90000, "serving_protein": 0,
         "serving_carbs": 0, "serving_fat": 0,
     }).get_json()
-    assert body["calories"] == 0
+    assert body["error"] == "invalid_serving"
+
+
+# ---------------------------------------------------------------------------
+# PR3B remediation - the single fail-closed diary transport boundary (N2)
+#
+# The diary POST/PATCH transport must apply the SAME typed policy the canonical
+# LogFood parser applies, and must apply it BEFORE it chooses the manual or
+# provider branch and BEFORE any provider network I/O. Three ways it did not:
+#
+#   P1-01  PATCH derived provider identity only from the stored row, so a
+#          request claiming `fatsecret_food_id` on a manual item silently fell
+#          through to a caller-authoritative manual update and returned 200.
+#   P1-02  `data.get("serving_quantity")` made an omitted field and a present
+#          JSON `null` indistinguishable, so a malformed command became a
+#          plausible one-serving default and produced durable provider staging.
+#   P2-01  Provider identities were unbounded in transport, so an oversized id
+#          reached the provider and could only fail at the String(50) INSERT.
+# ---------------------------------------------------------------------------
+
+_ITEM_COLUMNS = (
+    "food_name", "grams", "calories", "protein", "carbs", "fat",
+    "fatsecret_food_id", "serving_id", "serving_description",
+    "serving_quantity", "per_100g_calories", "per_100g_protein",
+    "per_100g_carbs", "per_100g_fat",
+)
+
+
+def _item_row(item_id):
+    """Every persisted field of one staging item, for no-durable-effect asserts."""
+    db.session.expire_all()
+    item = db.session.get(CustomMealItem, item_id)
+    return tuple(getattr(item, name) for name in _ITEM_COLUMNS)
+
+
+def _manual_item(client, meal_id):
+    return client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "yumurta", "grams": 100,
+        "per_100g": {"calories": 150, "protein": 12, "carbs": 1, "fat": 10},
+    }).get_json()["item_id"]
+
+
+def _provider_item(client, meal_id):
+    return client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "caller", "fatsecret_food_id": "f1",
+        "serving_id": "s1", "serving_quantity": 1,
+    }).get_json()["item_id"]
+
+
+def test_diary_update_manual_item_rejects_request_provider_food_id(
+        client, meal_id, diary_provider):
+    """P1-01: a request-claimed food id is never answered as a manual update.
+
+    The stored row is manual, so the old branch selection ignored the request's
+    `fatsecret_food_id` entirely and performed a caller-authoritative manual
+    write underneath an explicit provider claim - the ambiguous 200 the
+    documented fail-closed boundary forbids.
+    """
+    item_id = _manual_item(client, meal_id)
+    before = _item_row(item_id)
+
+    response = client.patch(f"/api/diary/item/{item_id}", json={
+        "fatsecret_food_id": "f1", "grams": 250,
+        "per_100g": {"calories": 900, "protein": 90, "carbs": 5, "fat": 5},
+    })
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid_serving"
+    assert _item_row(item_id) == before
+    assert diary_provider.calls == []
+
+
+def test_diary_update_provider_item_rejects_request_food_identity(
+        client, meal_id, diary_provider):
+    """P1-01: identity conversion is not a PATCH concern on a provider item.
+
+    Serving and quantity are the only selections this transport owns; the food
+    identity is server-stored. A request-supplied id - matching or not - is an
+    attempted identity conversion, so it fails closed instead of being ignored.
+    """
+    item_id = _provider_item(client, meal_id)
+    diary_provider.calls.clear()
+    before = _item_row(item_id)
+
+    for claimed in ("f1", "f2"):
+        response = client.patch(f"/api/diary/item/{item_id}", json={
+            "fatsecret_food_id": claimed, "serving_quantity": 2})
+        assert response.status_code == 400, claimed
+        assert response.get_json()["error"] == "invalid_serving"
+
+    assert _item_row(item_id) == before
+    assert diary_provider.calls == []
+
+
+def test_diary_update_provider_item_still_accepts_serving_and_quantity(
+        client, meal_id, diary_provider):
+    """P1-01 guard: rejecting request identity must not break real PATCHes."""
+    item_id = _provider_item(client, meal_id)
+    body = client.patch(f"/api/diary/item/{item_id}", json={
+        "serving_id": "s9", "serving_quantity": 2}).get_json()
+    assert body["calories"] == 390.0
+    item = db.session.get(CustomMealItem, item_id)
+    assert item.serving_id == "s9"
+    assert item.serving_quantity == 2
+
+
+@pytest.mark.parametrize(
+    "quantity", [None, True, "", [], {}, "abc", "NaN", "Infinity", 0, -1, 1001])
+def test_diary_add_item_rejects_malformed_serving_quantity(
+        client, meal_id, diary_provider, quantity):
+    """P1-02: a malformed quantity is never rehabilitated into a default.
+
+    `None` is the finding's exact shape: `data.get("serving_quantity")` could
+    not tell an omitted field from a present JSON `null`, so a malformed
+    command produced durable one-serving provider staging.
+    """
+    response = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "Hile", "fatsecret_food_id": "f1",
+        "serving_id": "s1", "serving_quantity": quantity})
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid_serving"
+    assert CustomMealItem.query.filter_by(custom_meal_id=meal_id).count() == 0
+    assert diary_provider.calls == []
+
+
+def test_diary_add_item_omitted_serving_quantity_still_defaults_to_one(
+        client, meal_id, diary_provider):
+    """P1-02 guard: an ABSENT field keeps its documented default. Only a
+    present-but-malformed value fails closed - that is the whole distinction."""
+    body = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "caller", "fatsecret_food_id": "f1",
+        "serving_id": "s1"}).get_json()
+    assert body["calories"] == 90.0
+    assert db.session.get(CustomMealItem, body["item_id"]).serving_quantity == 1
+
+
+@pytest.mark.parametrize("quantity", [None, True, "abc", 0, -1, 1001])
+def test_diary_update_item_rejects_malformed_serving_quantity(
+        client, meal_id, diary_provider, quantity):
+    """P1-02: the PATCH quantity carries exactly the same typed policy as POST."""
+    item_id = _provider_item(client, meal_id)
+    diary_provider.calls.clear()
+    before = _item_row(item_id)
+
+    response = client.patch(f"/api/diary/item/{item_id}",
+                            json={"serving_quantity": quantity})
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid_serving"
+    assert _item_row(item_id) == before
+    assert diary_provider.calls == []
+
+
+def test_diary_update_item_omitted_serving_quantity_keeps_stored_quantity(
+        client, meal_id, diary_provider):
+    """P1-02 guard: omitting the quantity re-resolves at the STORED quantity."""
+    item_id = _provider_item(client, meal_id)
+    client.patch(f"/api/diary/item/{item_id}", json={"serving_quantity": 3})
+    body = client.patch(f"/api/diary/item/{item_id}",
+                        json={"serving_id": "s1"}).get_json()
+    assert body["calories"] == 270.0
+    assert db.session.get(CustomMealItem, item_id).serving_quantity == 3
+
+
+@pytest.mark.parametrize("identity", [
+    {"fatsecret_food_id": "f" * 129, "serving_id": "s1"},
+    {"fatsecret_food_id": "f1", "serving_id": "s" * 129},
+    {"fatsecret_food_id": 12345, "serving_id": "s1"},
+    {"fatsecret_food_id": "f1", "serving_id": True},
+])
+def test_diary_add_item_rejects_unbounded_provider_identity(
+        client, meal_id, diary_provider, identity):
+    """P2-01: identities are typed and bounded BEFORE the provider call.
+
+    An unbounded identity previously reached FatSecret and, had it resolved,
+    could only have failed at the String(50) INSERT.
+    """
+    response = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "Hile", **identity, "serving_quantity": 1})
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid_serving"
+    assert CustomMealItem.query.filter_by(custom_meal_id=meal_id).count() == 0
+    assert diary_provider.calls == []
+
+
+def test_diary_provider_identity_is_bounded_by_its_storage_column(
+        client, meal_id, diary_provider):
+    """P2-01: the canonical 128-char bound is not sufficient on its own here.
+
+    The diary PERSISTS the identity it validates and its columns are narrower
+    than the canonical transport bound, so the effective bound is the column's.
+    Deriving it from the model is what keeps the two from drifting apart.
+    """
+    column_limit = CustomMealItem.__table__.c.fatsecret_food_id.type.length
+    assert column_limit < 128
+
+    response = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "Hile", "fatsecret_food_id": "f" * (column_limit + 1),
+        "serving_id": "s1", "serving_quantity": 1})
+
+    assert response.status_code == 400
+    assert diary_provider.calls == []
+
+
+def test_diary_update_serving_id_is_bounded_before_provider_io(
+        client, meal_id, diary_provider):
+    """P2-01: the PATCH serving selection is bounded on the same authority."""
+    item_id = _provider_item(client, meal_id)
+    diary_provider.calls.clear()
+
+    response = client.patch(f"/api/diary/item/{item_id}",
+                            json={"serving_id": "s" * 129})
+
+    assert response.status_code == 400
+    assert diary_provider.calls == []
 
 
 def test_diary_add_item_grams_based_scaling(client, meal_id):
@@ -250,9 +502,10 @@ def test_diary_add_item_grams_based_scaling(client, meal_id):
     assert body["carbs"] == 56.0
 
 
-def test_diary_add_item_serving_based_math(client, meal_id):
+def test_diary_add_item_serving_based_math(client, meal_id, diary_provider):
     body = client.post(f"/api/diary/meal/{meal_id}/item", json={
-        "food_name": "yumurta", "serving_id": "s1", "serving_quantity": 3,
+        "food_name": "yumurta", "fatsecret_food_id": "f1",
+        "serving_id": "s1", "serving_quantity": 3,
         "serving_description": "1 adet", "metric_serving_amount": 60,
         "serving_calories": 90, "serving_protein": 7,
         "serving_carbs": 0.6, "serving_fat": 6.3,
@@ -263,13 +516,134 @@ def test_diary_add_item_serving_based_math(client, meal_id):
     assert item.per_100g_calories == 150.0  # 90/60*100
 
 
+def test_diary_provider_update_re_resolves_quantity_and_serving(
+        client, meal_id, diary_provider):
+    item_id = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "caller", "fatsecret_food_id": "f1",
+        "serving_id": "s1", "serving_quantity": 1,
+    }).get_json()["item_id"]
+    assert diary_provider.calls == ["f1"]
+
+    quantity = client.patch(f"/api/diary/item/{item_id}", json={
+        "serving_quantity": 2, "serving_calories": 999,
+    })
+    assert quantity.status_code == 200
+    assert quantity.get_json()["calories"] == 180
+    assert diary_provider.calls == ["f1", "f1"]
+
+    serving = client.patch(f"/api/diary/item/{item_id}", json={
+        "serving_id": "s9", "serving_quantity": 1,
+        "serving_calories": 999,
+    })
+    assert serving.status_code == 200
+    assert serving.get_json()["calories"] == 195
+    assert diary_provider.calls == ["f1", "f1", "f1"]
+
+
+def test_diary_provider_add_failure_preserves_retryable_meal(
+        client, meal_id, monkeypatch):
+    def unavailable(_food_id):
+        raise RuntimeError("provider down")
+    monkeypatch.setattr(mobile_food_discovery, "servings", unavailable)
+
+    response = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "caller", "fatsecret_food_id": "f1",
+        "serving_id": "s1", "serving_quantity": 1,
+    })
+
+    assert response.status_code == 503
+    assert response.get_json()["retryable"] is True
+    assert CustomMealItem.query.count() == 0
+    assert db.session.get(CustomMeal, meal_id).is_logged is False
+
+
+def test_diary_commit_re_resolves_legacy_provider_staging(
+        client, auth_user, meal_id, diary_provider):
+    item = CustomMealItem(
+        custom_meal_id=meal_id, food_name="tampered", grams=1,
+        calories=999, protein=99, carbs=88, fat=77,
+        fatsecret_food_id="f1", serving_id="s1",
+        serving_description="tampered", serving_quantity=2,
+    )
+    db.session.add(item)
+    db.session.commit()
+
+    response = client.post(f"/api/diary/meal/{meal_id}/log")
+
+    assert response.status_code == 200
+    entry = MealLog.query.filter_by(user_id=auth_user.id, source="diary").one()
+    assert (entry.kalori, entry.protein, entry.karb, entry.yag) == (
+        180.0, 14.0, 1.2, 12.6)
+
+
+def test_diary_mixed_manual_provider_commit_uses_each_authority(
+        client, auth_user, meal_id, diary_provider):
+    client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "manual", "grams": 100,
+        "per_100g": {"calories": 50, "protein": 2, "carbs": 3, "fat": 1},
+    })
+    client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "caller", "fatsecret_food_id": "f1",
+        "serving_id": "s1", "serving_quantity": 1,
+    })
+
+    assert client.post(f"/api/diary/meal/{meal_id}/log").status_code == 200
+    entry = MealLog.query.filter_by(user_id=auth_user.id, source="diary").one()
+    assert (entry.kalori, entry.protein, entry.karb, entry.yag) == (
+        140.0, 9.0, 3.6, 7.3)
+
+
+def test_diary_commit_provider_failure_keeps_staging_retryable(
+        client, meal_id, diary_provider, monkeypatch):
+    client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "caller", "fatsecret_food_id": "f1",
+        "serving_id": "s1", "serving_quantity": 1,
+    })
+    monkeypatch.setattr(
+        mobile_food_discovery, "servings",
+        lambda _food_id: (_ for _ in ()).throw(RuntimeError("provider down")))
+
+    response = client.post(f"/api/diary/meal/{meal_id}/log")
+
+    assert response.status_code == 503
+    assert MealLog.query.count() == 0
+    assert db.session.get(CustomMeal, meal_id).is_logged is False
+    assert CustomMealItem.query.count() == 1
+
+
+def test_diary_commit_detects_staging_drift_before_claim(
+        client, meal_id, diary_provider, monkeypatch):
+    item_id = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "caller", "fatsecret_food_id": "f1",
+        "serving_id": "s1", "serving_quantity": 1,
+    }).get_json()["item_id"]
+    calls = 0
+
+    def resolve_with_race(food_id):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            row = db.session.get(CustomMealItem, item_id)
+            row.serving_quantity = 2
+            db.session.commit()
+        return diary_provider(food_id)
+
+    monkeypatch.setattr(mobile_food_discovery, "servings", resolve_with_race)
+
+    response = client.post(f"/api/diary/meal/{meal_id}/log")
+
+    assert response.status_code == 409
+    assert MealLog.query.count() == 0
+    assert db.session.get(CustomMeal, meal_id).is_logged is False
+
+
 def test_diary_add_item_garbage_per100g_defaults_zero(client, meal_id):
     body = client.post(f"/api/diary/meal/{meal_id}/item", json={
         "food_name": "bilinmez", "grams": 100, "per_100g": "bozuk"}).get_json()
     assert body["calories"] == 0.0
 
 
-def test_diary_update_item_three_branches(client, meal_id):
+def test_diary_update_item_manual_branch_rejects_provider_mix(client, meal_id):
     item_id = client.post(f"/api/diary/meal/{meal_id}/item", json={
         "food_name": "pirinç", "grams": 100,
         "per_100g": {"calories": 130, "protein": 2.7, "carbs": 28, "fat": 0.3},
@@ -284,14 +658,7 @@ def test_diary_update_item_three_branches(client, meal_id):
         "serving_id": "s9", "serving_quantity": 2, "metric_serving_amount": 150,
         "serving_calories": 195, "serving_protein": 4, "serving_carbs": 42,
         "serving_fat": 0.5, "serving_description": "1 tabak"}).get_json()
-    assert body["calories"] == 390.0
-    assert body["grams"] == 300.0
-
-    # 3) yalnız adet değişimi → oranla
-    body = client.patch(f"/api/diary/item/{item_id}",
-                        json={"serving_quantity": 1}).get_json()
-    assert body["calories"] == 195.0
-    assert body["grams"] == 150.0
+    assert body["error"] == "invalid_serving"
 
 
 def test_diary_delete_item(client, meal_id):
@@ -328,14 +695,16 @@ def test_legacy_diary_item_mutations_keep_response_and_logged_lock_contract(
     assert db.session.get(CustomMealItem, item_id) is not None
 
 
-def test_diary_log_meal_totals_labels_and_lock(client, auth_user, meal_id):
+def test_diary_log_meal_totals_labels_and_lock(
+        client, auth_user, meal_id, diary_provider):
     assert client.post(f"/api/diary/meal/{meal_id}/log").status_code == 400  # boş öğün
 
     client.post(f"/api/diary/meal/{meal_id}/item", json={
         "food_name": "pirinç", "grams": 200,
         "per_100g": {"calories": 130, "protein": 2.7, "carbs": 28, "fat": 0.3}})
     client.post(f"/api/diary/meal/{meal_id}/item", json={
-        "food_name": "yumurta", "serving_id": "s1", "serving_quantity": 2,
+        "food_name": "yumurta", "fatsecret_food_id": "f1",
+        "serving_id": "s1", "serving_quantity": 2,
         "serving_description": "1 adet", "metric_serving_amount": 60,
         "serving_calories": 90, "serving_protein": 7, "serving_carbs": 0.6,
         "serving_fat": 6.3})
@@ -345,7 +714,7 @@ def test_diary_log_meal_totals_labels_and_lock(client, auth_user, meal_id):
 
     entry = MealLog.query.filter_by(user_id=auth_user.id, source="diary").one()
     assert "pirinç (200g)" in entry.yemekler
-    assert "yumurta (2x 1 adet)" in entry.yemekler
+    assert "Provider food (2x 1 adet)" in entry.yemekler
 
     # Kilitlendi: tekrar log/ekleme/düzenleme reddedilir.
     assert client.post(f"/api/diary/meal/{meal_id}/log").status_code == 400

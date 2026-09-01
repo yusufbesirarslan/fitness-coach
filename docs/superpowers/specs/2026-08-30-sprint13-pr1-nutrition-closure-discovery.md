@@ -80,6 +80,51 @@ This is not a PR3 failure. PR3 succeeded at its approved scope; **this
 discovery's writer inventory was incomplete**. `F15` is deliberately registered
 rather than absorbed by rewording N2, so the authority gap stays visible.
 
+### Amendment — PR3B implementation (2026-08-31)
+
+PR3B closes **F15**. Provider-backed diary staging accepts semantic identity and
+quantity only as nutrition authority, resolves through the same shared provider
+snapshot service as mobile LogFood, and resolves every provider item again before
+canonical commit. Provider I/O runs outside database transactions; commit then
+locks and compares the meal/item snapshot before the atomic `is_logged` claim.
+Manual diary entries remain caller-authoritative and bounded. No endpoint, schema,
+migration, Flutter, PR4, or PR5 work was added. **N2 is now satisfied.**
+
+#### Amendment — PR3B review remediation (2026-09-01)
+
+The independent review of PR3B held **N2 `OPEN`**: the trust model was right,
+but the transport in front of it was not yet the single typed, fail-closed
+boundary N2 requires. Two ways in, both now closed:
+
+* **P1-01 — partial provider identity on `PATCH`.** Provider identity was
+  derived only from the STORED row, so a request claiming `fatsecret_food_id`
+  on a manual item was answered as a caller-authoritative manual update with
+  `200`. Provider-identity transport fields are now validated *before* the
+  manual/provider branch is chosen. The food identity is server-stored, so a
+  request-supplied one — matching the stored value or not — is an attempted
+  identity conversion and is rejected; serving and quantity remain the only
+  selections the transport owns.
+* **P1-02 — explicit `null` quantity.** `data.get("serving_quantity")` could
+  not distinguish an omitted field from a field present as JSON `null`, so a
+  malformed command became a plausible one-serving default and produced
+  durable provider staging. Both `POST` and `PATCH` now read quantities as
+  `data.get(field, <default>)` and parse them with the canonical LogFood
+  policy: an OMITTED field keeps its documented default, a present `null` is
+  rejected. Diary and mobile LogFood no longer disagree about `null`.
+
+Both fixes are adaptations into the canonical parser rather than diary-local
+copies — `parse_provider_identity` and `parse_provider_quantity` join
+`parse_manual_nutrition` as the transport policies both clients share (the PR3
+precedent). Also remediated: identities are bounded before network I/O at the
+width of the column that stores them, derived from the model so the two cannot
+drift (**P2-01**); the F15 architecture guards were rebuilt on AST call and
+data-flow allow-listing after the substring probes were shown to miss alias,
+subscript, computed-key, second-resolver and second-numeric-policy bypasses
+(**P2-02**); `tests/test_diary_provider_truth_pg.py` covers the diary
+snapshot/claim races on PostgreSQL, which SQLite cannot prove (**P2-03**); and
+`instance/` is excluded from pytest collection so runtime artefacts can no
+longer break a full-repository run (**P2-04**).
+
 ### Findings index
 
 | ID | Sev | One line |
@@ -90,7 +135,7 @@ rather than absorbed by rewording N2, so the authority gap stays visible.
 | F3a | P2 | `barcode._target_macros` fabricates a `2000 kcal` target and publishes it on the **live** `GET /api/food/barcode` payload — currently rendered by nothing |
 | F4 | P1 | Web multi-food quick log posts **per-100 g** values as the meal total (quantity fixed at 100 g, never chosen) |
 | F5 | P1 | `/meal-log` `override_macros` persists client-computed macros; the mobile path recomputes from the provider. Same ledger, two trust models |
-| F15 | P1 | **Discovered by the independent PR3 review.** Diary-builder provider-backed items accept caller-supplied serving nutrition, and `diary_log_meal` promotes those `CustomMealItem` totals into canonical `MealLog` without a provider re-fetch |
+| ~~F15~~ | P1 | **CLOSED by PR3B.** Diary provider staging and canonical commit both resolve provider identity through shared server authority; caller serving macros are preview-only |
 | F6 | P2 | `POST /api/food/barcode/add` accepts a caller-supplied `food` object; no first-party consumer, but a documented `/api/food/*` compatibility surface — deprecate before removing (C13) |
 | F7 | P2 | `/meal-log` does not validate `ogun`: free text reaches `MealLog.ogun` (`String(100)`) → `unknown` slot on the wire, `DataError` above 100 chars |
 | F8 | P2 | Social meal-suggestion writer sets no `source` (reads back as `manual`) and uses no idempotency key |
@@ -378,8 +423,8 @@ or persists what the caller supplied (`client`, bounded by the clamp).
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | W1 | Web manual / AI-estimated meal | `POST /meal-log` (`nutrition/meallog.py:27`) | Flask-Login + `cognito_sid` | `current_user` | `day_key()` | **unvalidated free text** (F7) | **client** on the `override_macros` branch (F5); LLM on the other | `clamp_serving_macros` / `sanitize_meal_total_macros` | **unset** → the column default stamps `manual` (F5) | optional header | unique key | commit-once | after commit |
 | W2 | Web AI-plan quick add | `POST /api/quick-add-meal` (`nutrition/diary.py:79`) | Flask-Login | `current_user` | `day_key()` | 4 canonical labels | server (from stored plan JSON) | `_sanitize_meal_macros` | `ai_plan` | optional header | unique key | commit-once | after commit |
-| W3 | Diary-builder commit (**canonical `MealLog` writer**) | `POST /api/diary/meal/<id>/log` (`nutrition/diary.py:381`) | Flask-Login | `current_user` | `day_key()` | 4 canonical labels | **inherited from staging** — sums `CustomMealItem` macros; **no provider re-fetch at commit time** (F15) | already applied per item at staging time (`_clamp_item_macros`) | `diary` | **none** (F12) | atomic `is_logged` claim | single txn | after commit |
-| W3s | Diary-builder **staging** writer (`CustomMeal` / `CustomMealItem`, **not** a ledger) | `POST /api/diary/meal/<id>/item` (`nutrition/diary.py:211`), `PATCH /api/diary/item/<id>` (`:300`) | Flask-Login | `current_user` (via `CustomMeal.user_id`) | n/a — staging rows carry no day key | n/a | **client** — accepts `serving_calories/protein/carbs/fat`, `metric_serving_amount`, `serving_quantity` **alongside** `fatsecret_food_id` + `serving_id` (F15) | `_clamp_item_macros` → `clamp_serving_macros` | n/a | none (staging is not the ledger) | last write wins on the item | commit per item | after commit |
+| W3 | Diary-builder commit (**canonical `MealLog` writer**) | `POST /api/diary/meal/<id>/log` (`nutrition/diary.py`) | Flask-Login | `current_user` | `day_key()` | 4 canonical labels | **server** for every provider item — shared provider snapshot re-fetch; manual items use bounded staging truth | provider snapshot bounds + `_clamp_item_macros` | `diary` | **none** (F12) | read snapshot → provider I/O outside txn → `FOR UPDATE` compare → atomic `is_logged` claim | single final write txn | after commit |
+| W3s | Diary-builder **staging** writer (`CustomMeal` / `CustomMealItem`, **not** a ledger) | `POST /api/diary/meal/<id>/item`, `PATCH /api/diary/item/<id>` (`nutrition/diary.py`) | Flask-Login | `current_user` (via `CustomMeal.user_id`) | n/a — staging rows carry no day key | n/a | **server** for complete provider identity; manual only when provider identity is absent; incomplete/mixed identity fails closed | provider snapshot bounds + `_clamp_item_macros` | n/a | none (staging is not the ledger) | lock/re-read after provider I/O; drift rejected | commit per item | after commit |
 | W4 | Web barcode add | `POST /api/food/barcode/add` (`food.py:96`) → `barcode.add_food_to_diary` | Flask-Login | `current_user` | `day_key()` | 4 canonical labels (validated) | **client-supplied `food` object accepted** (F6) | `clamp_serving_macros` | `barcode` | optional header | unique key | commit-once | after commit |
 | W5 | AI Coach meal confirmation | `_tool_confirm_and_commit_meal_log` (`ai_coach.py:281`) | Flask-Login (coach turn) | `user_id` from session | `day_key()` | literal `"AI Koç"` → wire `unknown` | server (staged `PendingAction` payload) | `clamp_serving_macros` | `coach` | atomic `PendingAction` claim | delete-claim then insert | single txn | after commit |
 | W6 | Shared meal suggestion | `_persist_meal_suggestion` (`social.py:1169`) | Flask-Login (receiver flow) | `snapshot.receiver_id` | `day_key()` | `"<sender> …alınan öneri"` → wire `unknown` | server (parse + provider + LLM) | `clamp_serving_macros` | **unset** → the column default stamps `manual` (F8) | **none** | atomic message claim (`social.py:1019`) | single txn | after commit |
@@ -841,7 +886,7 @@ stated so it can be checked, not argued.
 | # | Criterion | Status today | Closed by |
 |---|---|---|---|
 | **N1** | Exactly one canonical consumed-food ledger (`MealLog`), and no surface persists a competing definition of what was eaten | ✅ already true | — (C1 guards it) |
-| **N2** | Every supported writer converges on that ledger through a single clamp/validation gate, and no writer accepts caller-supplied nutrition for a provider-backed food | ❌ **OPEN — blocked by F15.** F4, F5, F6 are **closed by PR3** (direct web write paths). The diary staging → `diary_log_meal` promotion path still carries caller-supplied nutrition for a provider-identified food | PR3 (done) + **PR3B** (F15) |
+| **N2** | Every supported writer converges on that ledger through a single clamp/validation gate, and no writer accepts caller-supplied nutrition for a provider-backed food | ✅ **satisfied by PR3 + PR3B.** Direct web and diary provider paths resolve server-owned provider truth; manual diary nutrition remains explicitly caller-authoritative and bounded | PR3 + PR3B |
 | **N3** | Canonical daily totals cannot differ between web, mobile, Coach and downstream consumers, because all of them read the same rows and none re-derives totals | ✅ already true | — |
 | **N4** | The daily macro-target split and the remaining-macro budget have exactly one server-owned derivation; no first-party surface — server or browser — presents a different interpretation of that same configured daily target; and no surface substitutes a number for an unset target. Analytical questions that are genuinely different (a weekly protein goal, a recommendation heuristic) are **not** required to become identical | ❌ F2, F3a (server); ❌ F10 (browser split) | PR2 (server) + PR5 (browser) |
 | **N5** | Day and day-boundary decisions are server-owned and identical on every path (`app/timeutil`), and every persisted day key is a valid ISO calendar date | ✅ **already true** — every live writer derives its day key from `app/timeutil`, and the one transient yearless backfill was normalised by its direct successor `9be792c80008` (§5.1). No schema `CHECK` is needed to hold this | — |
@@ -1259,22 +1304,17 @@ PR3  ─────→ PR4        (operational ordering, not a technical depend
 
 ### PR3B — Diary provider-truth convergence *(added by the PR3 review)*
 
-* **Status:** **not started, not designed.** This section registers the
-  architecture gap and its owner. It does **not** pre-decide an implementation.
+* **Status:** **implemented locally; evidence pending independent review.**
 * **Objective — the minimal future requirement, and nothing more:** *a
   provider-identified diary item must not obtain canonical nutrition from
   caller-supplied serving macros.*
-* **Closes:** `F15`. **Unblocks:** `N2`, and with it Nutrition Core Complete.
+* **Closes:** `F15`. **Satisfies:** `N2` together with PR3.
 * **Conceptual ownership:** the whole chain, end to end —
   `provider-identified CustomMealItem` → server/provider recomputation →
   staging nutrition → `diary_log_meal` → canonical `MealLog`.
-* **Direction, not a design:** the first thing to investigate is **reuse of the
-  same canonical provider authority LogFood already uses**
-  (`app/services/mobile_log_food`, `mobile_food_discovery.servings`), rather than
-  a second recompute. Whether recomputation belongs at staging time, at promotion
-  time, or both is an open question about diary staging semantics — a
-  long-lived unlogged `CustomMeal` and a provider whose serving data changed are
-  the cases that decide it.
+* **Implemented direction:** mobile LogFood and diary use one transport-independent
+  provider snapshot resolver. Diary resolves at staging and again at promotion;
+  legacy staging macros therefore never become canonical provider authority.
 * **Explicitly NOT pre-authorized by this discovery**, and each requiring its own
   discovery against current diary semantics before it may be proposed: a new
   endpoint; a schema column; **a migration**; a new provider cache; a new
@@ -1400,9 +1440,9 @@ coupled to Nutrition closure in either direction.
 The only user-visible number changes are corrections: the barcode carbohydrate
 target and the absence of a fabricated 2000 kcal goal (PR2), the multi-food
 quick-log quantity (PR3), and the browser macro split aligning with the server
-(PR5). PR3B will add one more — diary items logged from a provider serving move
-from the browser's numbers to the provider's — but it is unscheduled and
-undesigned. Each should ship with a release note. PR4 additionally introduces a
+(PR5). PR3B adds one more — diary items logged from a provider serving move
+from the browser's numbers to freshly resolved provider truth. Each should ship
+with a release note. PR4 additionally introduces a
 **destructive** user action and must ship with a confirmation that states what
 deletion loses (C4, F14).
 
@@ -1415,6 +1455,7 @@ down-revision plan and no PR has schema to undo.
 |---|---|---|
 | PR2 | revert; the three call sites return to their own formulas | none — nothing persisted |
 | PR3 | revert; the web returns to client-computed macros and the deprecated route loses its safety fix | ledger rows written correctly stay correct. **Note:** reverting PR3 does not reopen `F15` — that defect predates PR3 and is untouched by it |
+| PR3B | revert; diary provider staging again trusts browser nutrition and canonical commit stops re-resolving legacy provider rows | ledger rows already written from provider truth stay correct; no data repair is required |
 | PR4 | revert; the web loses the correction path again | deletions already performed stay deleted — hard delete is irreversible by design, which is why PR4 ships after PR3 and behind an explicit confirmation. **Objects already released stay released**, so the photo lifecycle must be ordered such that a revert can never leave a surviving row pointing at a deleted object |
 | PR5 | revert; the orphaned endpoints and the browser score return | none |
 
@@ -1443,12 +1484,18 @@ Three tests added, none changed, none removed, none weakened:
 |---|---|
 | `test_f15_the_diary_item_transport_accepts_provider_identity_and_nutrition` | `diary_add_item` reads `fatsecret_food_id` + `serving_id`, and `diary_update_item` reads `serving_id` (its food id is already on the row) — **each alongside the six caller-owned serving fields, in one request body**, and neither reaches for provider truth |
 | `test_f15_the_diary_commit_promotes_caller_nutrition_to_the_ledger` | End-to-end: a provider-identified item posted with caller macros lands in `MealLog(source="diary")` with **those** numbers. Values are chosen plausible so `_clamp_item_macros` is a no-op — bounding is not authority |
-| `test_f15_the_canonical_diary_writer_only_sums_staging_rows` | `diary_log_meal` derives canonical totals by summing `CustomMealItem` macros, constructs exactly one `MealLog`, and consults no provider at commit time; and the staging tables own no day key, which is why **N1 survives F15** |
+| `test_f15_the_canonical_diary_writer_only_sums_staging_rows` | Historical pre-PR3B behavior: `diary_log_meal` derived canonical totals by summing `CustomMealItem` macros and consulted no provider at commit time. **N1 survived F15 because canonical consumption readers use `MealLog`, while `CustomMeal` / `CustomMealItem` are builder state — not because staging lacks a field named `tarih`.** |
 
-These are **characterization tests for an open finding**, and the module says so
-in a banner above them. When PR3B closes `F15` they must be **inverted or
-replaced**, never deleted: the successor must assert that a provider-identified
-diary item's canonical nutrition comes from provider truth.
+PR3B **inverted and replaced** these three characterization tests rather than
+deleting them. Their successors assert that diary provider payloads do not own
+nutrition, staging and canonical commit use provider truth, provider calls run
+outside DB transactions, and the staging tables remain non-ledger state.
+
+| PR3B successor test | Proves |
+|---|---|
+| `test_f15_diary_provider_transport_has_identity_not_nutrition_authority` | diary provider writes invoke the shared resolver and do not read caller serving macros as authority |
+| `test_f15_diary_provider_truth_replaces_caller_nutrition` | provider truth wins at both staging and canonical commit, with provider calls outside transactions |
+| `test_f15_canonical_diary_writer_re_resolves_provider_staging` | canonical commit re-resolves provider identity and closes its read transaction first |
 
 `tests/test_sprint13_nutrition_write_convergence.py` was corrected in two places
 for the same reason — its module docstring and the guard formerly named

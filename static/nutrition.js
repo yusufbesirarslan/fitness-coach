@@ -1685,13 +1685,7 @@ async function confirmServingModal() {
         food_name: _smFood.name,
         fatsecret_food_id: _smFood.food_id,
         serving_id: srv.serving_id,
-        serving_description: srv.serving_description,
         serving_quantity: qty,
-        serving_calories: srv.calories,
-        serving_protein: srv.protein,
-        serving_carbs: srv.carbs,
-        serving_fat: srv.fat,
-        metric_serving_amount: srv.metric_serving_amount,
       };
     }
   }
@@ -1700,7 +1694,6 @@ async function confirmServingModal() {
     body = {
       food_name: _smFood.name, grams: grams,
       per_100g: _smFood.per_100g,
-      fatsecret_food_id: _smFood.food_id || ''
     };
   }
 
@@ -1745,13 +1738,7 @@ async function updateDiaryServing(itemId, servingId, foodId) {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         serving_id: srv.serving_id,
-        serving_description: srv.serving_description,
         serving_quantity: qty,
-        serving_calories: srv.calories,
-        serving_protein: srv.protein,
-        serving_carbs: srv.carbs,
-        serving_fat: srv.fat,
-        metric_serving_amount: srv.metric_serving_amount,
       })
     });
     loadDiary();
@@ -1769,13 +1756,7 @@ async function updateDiaryServingQty(itemId, qty, foodId) {
   try {
     const body = srv ? {
       serving_id: srv.serving_id,
-      serving_description: srv.serving_description,
       serving_quantity: qty,
-      serving_calories: srv.calories,
-      serving_protein: srv.protein,
-      serving_carbs: srv.carbs,
-      serving_fat: srv.fat,
-      metric_serving_amount: srv.metric_serving_amount,
     } : { serving_quantity: qty };
     await fetch('/api/diary/item/' + itemId, {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },

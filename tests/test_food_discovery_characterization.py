@@ -5,12 +5,9 @@ minimal service extraction the mobile adapters need is provably behaviour
 preserving. Nothing here asserts what the code *should* do — every assertion
 records what it *did* on `origin/main` at 78e9d3c.
 
-Two of these tests deliberately pin behaviour PR2A considers wrong for a mobile
-contract (an unknown serving mass and an underivable per-100 g reference both
-becoming a measured `0`). They stay green because the legacy web surfaces are
-not changed: the correction lives at the new `/api/v1` boundary and nowhere
-else. If someone later "fixes" the legacy builder, these tests are the alarm
-that a web payload changed shape.
+PR3B deliberately replaces the diary test that formerly pinned an unidentified
+serving plus caller macros. That mixed shape now fails closed because it cannot
+prove provider authority; the remaining characterization tests stay unchanged.
 
     python -m pytest tests/test_food_discovery_characterization.py -v
 """
@@ -360,19 +357,12 @@ def test_commit_once_without_a_key_never_deduplicates(app, make_user):
 
 
 # ---------------------------------------------------------------------------
-# The diary builder's zero-for-unknown behaviour (Gap 5), pinned as legacy.
+# The diary builder's incomplete-provider boundary, corrected by PR3B.
 # ---------------------------------------------------------------------------
 
-def test_diary_builder_persists_unknown_mass_and_per_100g_as_zero(
+def test_diary_builder_rejects_serving_without_provider_food_identity(
         client, auth_user):
-    """LEGACY, and deliberately unchanged by PR2A.
-
-    `/api/diary/meal/<id>/item` derives grams and the per-100 g reference from
-    `metric_serving_amount`, and when the provider had none it stores `0` for
-    both — "we do not know" recorded as "we measured nothing". PR2A closes this
-    for the mobile contract only; changing it here would change a live web
-    payload, which the PR is not allowed to do.
-    """
+    """PR3B successor: incomplete provider identity cannot use caller macros."""
     created = client.post("/api/diary/meal", json={"meal_name": "Kahvaltı"})
     meal_id = created.get_json()["meal_id"]
 
@@ -386,11 +376,6 @@ def test_diary_builder_persists_unknown_mass_and_per_100g_as_zero(
         "serving_fat": 6,
         # No metric_serving_amount: the provider did not state a mass.
     })
-    assert response.status_code == 200
-
-    item = CustomMealItem.query.filter_by(custom_meal_id=meal_id).one()
-    assert item.grams == 0                  # unknown mass -> measured zero
-    assert item.per_100g_calories == 0      # underivable reference -> zero
-    assert item.per_100g_protein == 0
-    assert item.calories == 240.0           # the multiplier itself is applied
+    assert response.status_code == 400
+    assert CustomMealItem.query.filter_by(custom_meal_id=meal_id).count() == 0
     assert CustomMeal.query.get(meal_id).user_id == auth_user.id

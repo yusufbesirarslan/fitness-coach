@@ -861,11 +861,11 @@ def test_the_web_history_contract_publishes_a_day_with_no_year(
 # ---------------------------------------------------------------------------
 # F15 / N2 - the diary-builder commit path's trust model
 #
-# THESE ARE CHARACTERIZATION TESTS FOR AN **OPEN** FINDING.
+# THESE ARE PR3B SUCCESSOR INVARIANTS FOR THE CLOSED FINDING.
 #
 # F15 was discovered during the independent review of Sprint 13 PR3 - PR1's
 # writer inventory never enumerated the diary staging writer, so PR3 could not
-# have closed it, and N2 is OPEN because of it (report 12, 13).
+# have closed it. PR3B closes it and, with PR3, satisfies N2 (report 12, 13).
 #
 # They pin the defect *as it currently is* so it cannot vanish from the
 # architecture ledger unnoticed. PR3B - Diary Provider-Truth Convergence - is
@@ -926,47 +926,207 @@ def _request_keys(func):
     return keys
 
 
-def test_f15_the_diary_item_transport_accepts_provider_identity_and_nutrition():
-    """F15, first half: one request body carries both, and no provider is asked.
+DIARY_MODULE = "app/blueprints/nutrition/diary.py"
+DIARY_WRITE_HANDLERS = ("diary_add_item", "diary_update_item", "diary_log_meal")
 
-    CHARACTERIZES AN OPEN DEFECT. See the section banner above.
+# The ONLY request-body keys a diary write handler may read the VALUE of.
+# Presence tests (`"x" in data`) are deliberately NOT constrained: rejecting a
+# field is the opposite of trusting it, and PR3B's fail-closed transport is
+# built out of exactly those presence checks.
+_DIARY_ALLOWED_VALUE_KEYS = {
+    "food_name", "fatsecret_food_id", "serving_id", "serving_quantity",
+    "grams", "per_100g", "calories", "protein", "carbs", "fat", "meal_name",
+}
+
+# Call shapes that would mean a SECOND provider-truth path exists on the diary
+# write path. Matched as resolved callee names, not as substrings of the file:
+# `fatsecret_food_id` is an identity FIELD this path legitimately handles, so a
+# bare-word probe would defeat itself.
+_FORBIDDEN_PROVIDER_CALLS = {
+    "servings", "search_foods", "get_barcode_product", "_food_get_raw",
+    "_provider_snapshot", "log_food", "food_get",
+}
+
+
+def _body_names(func):
+    """Names inside ``func`` bound to the parsed request body, transitively.
+
+    Aliasing is the first thing a substring guard misses: `body = data` and
+    then `body.get("serving_calories")` reads caller nutrition while the
+    literal `data.get("serving_calories")` never appears in the file.
     """
-    for handler, identity in _DIARY_PROVIDER_IDENTITY_KEYS.items():
+    names = set()
+    for node in ast.walk(func):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        value = node.value
+        if (isinstance(value, ast.BoolOp)
+                and isinstance(value.op, ast.Or) and value.values):
+            value = value.values[0]
+        if (isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Attribute)
+                and value.func.attr == "get_json"):
+            names.add(target.id)
+        elif isinstance(value, ast.Name) and value.id in names:
+            names.add(target.id)
+    return names
+
+
+def _body_value_reads(func):
+    """(literal keys, count of DYNAMIC reads) whose VALUE is read from the body.
+
+    A dynamic read - `data.get(key)` for a computed ``key`` - is counted rather
+    than named, because a single one would make any allow-list below unfalsifiable.
+    """
+    names = _body_names(func)
+    literal, dynamic = set(), 0
+
+    def record(key_node):
+        nonlocal dynamic
+        if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
+            literal.add(key_node.value)
+        else:
+            dynamic += 1
+
+    for node in ast.walk(func):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"get", "pop", "setdefault"}
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in names
+                and node.args):
+            record(node.args[0])
+        elif (isinstance(node, ast.Subscript)
+                and isinstance(node.value, ast.Name)
+                and node.value.id in names):
+            record(node.slice)
+    return literal, dynamic
+
+
+def _called_names(func):
+    """Every callee name in ``func``: bare `f()` and the attribute of `a.b()`."""
+    names = set()
+    for node in ast.walk(func):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name):
+            names.add(node.func.id)
+        elif isinstance(node.func, ast.Attribute):
+            names.add(node.func.attr)
+    return names
+
+
+def test_f15_diary_transport_reads_no_caller_nutrition_value():
+    """PR3B successor: caller nutrition is never READ as authority (P2-02).
+
+    This replaces a substring probe that asserted `'data.get("serving_calories"'`
+    did not appear in the file. That probe was satisfied by `data["serving_
+    calories"]`, by an alias, by a computed key, or by moving the read into a
+    helper. This one resolves the body through assignment, accepts only
+    literal keys from an explicit allow-list, and fails on any dynamic read.
+    """
+    for handler in DIARY_WRITE_HANDLERS:
         func = _diary_function(handler)
-        keys = _request_keys(func)
+        literal, dynamic = _body_value_reads(func)
 
-        assert identity <= keys, (
-            f"{handler} no longer reads provider identity. If the diary path "
-            "stopped being provider-backed, F15 changed shape - re-assess it.")
-        assert _DIARY_CALLER_NUTRITION_KEYS <= keys, (
-            f"{handler} no longer accepts caller-supplied serving nutrition. "
-            "That is the FIX F15 asks for: invert this test and close F15 / N2 "
-            "in the discovery document instead of deleting it.")
-
-        body = ast.unparse(func)
-        for name in _PROVIDER_LOOKUP_NAMES:
-            assert name not in body, (
-                f"{handler} now reaches for provider truth ({name!r}). If the "
-                "recompute landed, F15 is fixed - update the ledger.")
-
-    # The edit path reads no food id because the staging row already stores one:
-    # the server never lacks the identity it declines to use.
-    assert hasattr(CustomMealItem, "fatsecret_food_id")
-    assert hasattr(CustomMealItem, "serving_id")
+        assert dynamic == 0, (
+            f"{handler} reads a request-body value under a computed key. "
+            "The allow-list below cannot constrain what it cannot name.")
+        leaked = literal & _DIARY_CALLER_NUTRITION_KEYS - {"serving_quantity"}
+        assert not leaked, (
+            f"{handler} reads caller-owned nutrition {sorted(leaked)}. "
+            "Provider nutrition comes from resolve_provider_food (F15/N2).")
+        unknown = literal - _DIARY_ALLOWED_VALUE_KEYS
+        assert not unknown, (
+            f"{handler} reads unlisted request keys {sorted(unknown)}. "
+            "Add them here deliberately, having decided who owns them.")
 
 
-def test_f15_the_diary_commit_promotes_caller_nutrition_to_the_ledger(
-        app, client, auth_user):
-    """F15, second half: staging macros become canonical macros, verbatim.
+def test_f15_diary_write_path_has_no_second_provider_lookup():
+    """PR3B successor: exactly one provider authority on the diary write path."""
+    for handler in DIARY_WRITE_HANDLERS:
+        called = _called_names(_diary_function(handler))
+        second = called & _FORBIDDEN_PROVIDER_CALLS
+        assert not second, (
+            f"{handler} calls {sorted(second)}. Provider truth on this path "
+            "comes from resolve_provider_food and from nothing else.")
 
-    CHARACTERIZES AN OPEN DEFECT. See the section banner above.
+    resolving = {handler for handler in DIARY_WRITE_HANDLERS
+                 if "resolve_provider_food" in _called_names(
+                     _diary_function(handler))}
+    assert resolving == {"diary_add_item", "diary_update_item",
+                         "diary_log_meal"}, (
+        f"Only {sorted(resolving)} resolve provider truth. Staging, editing "
+        "and the canonical commit must each re-resolve it.")
 
-    The item is posted with real provider identity AND caller-chosen serving
-    macros. The values are physically plausible, so ``_clamp_item_macros`` is a
-    no-op and the arithmetic below is exact - which is the point: bounding is
-    not authority. Nothing here stubs a provider, because nothing on this path
-    ever calls one.
+
+def test_f15_diary_and_mobile_share_one_provider_resolver():
+    """PR3B successor: the two clients depend on the SAME resolver object.
+
+    Name-level checks let a helper be extracted, re-exported or shadowed under
+    a new name in one client only. Object identity cannot be faked that way.
     """
+    from app.blueprints.nutrition import diary
+    from app.services import provider_food_snapshot
+    from app.services.mobile_log_food import service as mobile_service
+
+    canonical = provider_food_snapshot.resolve_provider_food
+    assert diary.resolve_provider_food is canonical
+    assert mobile_service.resolve_provider_food is canonical
+
+
+def test_f15_diary_transport_policy_is_the_canonical_one():
+    """PR3B remediation: one typed transport policy, not a diary-local copy.
+
+    P1-02 and P2-01 were both second policies: a local quantity parser that
+    rehabilitated `None` into a default, and no identity bound at all. The
+    diary now adapts into the canonical LogFood parser, and the bound it adds
+    on top is DERIVED from the column that stores the identity rather than
+    written down a second time.
+    """
+    from app.blueprints.nutrition import diary
+    from app.services.mobile_log_food import parsing
+
+    assert diary.parse_provider_identity is parsing.parse_provider_identity
+    assert diary.parse_provider_quantity is parsing.parse_provider_quantity
+
+    tree = ast.parse(_module_source(DIARY_MODULE), filename=DIARY_MODULE)
+    called = {node.func.id for node in ast.walk(tree)
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    assert "Decimal" not in called, (
+        "The diary parses numbers again. Quantity bounds live in one place.")
+
+    assert diary._IDENTITY_MAX_LENGTH == min(
+        CustomMealItem.__table__.c.fatsecret_food_id.type.length,
+        CustomMealItem.__table__.c.serving_id.type.length), (
+        "The transport identity bound drifted from the column that stores it.")
+    assert diary._IDENTITY_MAX_LENGTH <= parsing.PROVIDER_IDENTITY_MAX_LENGTH
+
+
+def test_f15_diary_provider_truth_replaces_caller_nutrition(
+        app, client, auth_user, monkeypatch):
+    """PR3B successor: provider truth wins at staging and canonical commit."""
+    from app.services import mobile_food_discovery
+
+    calls = []
+    def _servings(food_id):
+        calls.append((food_id, db.session().in_transaction()))
+        return {
+            "provider": "fatsecret", "food_id": food_id,
+            "name": "Provider Chicken", "brand": "",
+            "servings": [{
+                "serving_id": "51359", "description": "100 g",
+                "metric_mass": {"amount": 100.0, "unit": "g"},
+                "nutrition": {"energy_kcal": 165, "protein_g": 31,
+                              "carbohydrate_g": 0, "fat_g": 3.6},
+                "nutrition_per_100g": {"energy_kcal": 165, "protein_g": 31,
+                                       "carbohydrate_g": 0, "fat_g": 3.6},
+            }],
+        }
+    monkeypatch.setattr(mobile_food_discovery, "servings", _servings)
     meal_id = client.post(
         "/api/diary/meal", json={"meal_name": "Öğle"}).get_json()["meal_id"]
 
@@ -977,59 +1137,31 @@ def test_f15_the_diary_commit_promotes_caller_nutrition_to_the_ledger(
         "serving_description": "100 g",
         "metric_serving_amount": 100,
         "serving_quantity": 2,
-        "serving_calories": 500,               # ... yet the CALLER states what
-        "serving_protein": 30,                 #     that serving contains
+        "serving_calories": 500,
+        "serving_protein": 30,
         "serving_carbs": 50,
         "serving_fat": 20,
     })
     assert added.status_code == 200
 
     item = CustomMealItem.query.filter_by(custom_meal_id=meal_id).one()
-    assert (item.fatsecret_food_id, item.serving_id) == ("33691", "51359"), (
-        "Provider identity IS persisted on the staging row - the server has "
-        "everything it needs to re-fetch, and does not.")
+    assert (item.fatsecret_food_id, item.serving_id) == ("33691", "51359")
     assert (item.calories, item.protein, item.carbs, item.fat) == (
-        1000.0, 60.0, 100.0, 40.0), (
-        "Staging nutrition is the caller's numbers scaled by quantity.")
+        330.0, 62.0, 0.0, 7.2)
 
     assert client.post(f"/api/diary/meal/{meal_id}/log").status_code == 200
 
     entry = MealLog.query.filter_by(user_id=auth_user.id).one()
     assert entry.source == "diary"
     assert (entry.kalori, entry.protein, entry.karb, entry.yag) == (
-        1000.0, 60.0, 100.0, 40.0), (
-        "F15: canonical MealLog carries caller-supplied nutrition for a "
-        "provider-identified food. When PR3B lands this becomes the provider's "
-        "own figures, and this assertion must be inverted, not removed.")
+        330.0, 62.0, 0.0, 7.2)
+    assert calls == [("33691", False), ("33691", False)]
 
 
-def test_f15_the_canonical_diary_writer_only_sums_staging_rows():
-    """F15, structurally: promotion is an aggregate, never a re-derivation.
-
-    CHARACTERIZES AN OPEN DEFECT. See the section banner above.
-    """
-    func = _diary_function("diary_log_meal")
-    body = ast.unparse(func)
-
-    for macro in ("calories", "protein", "carbs", "fat"):
-        assert f"i.{macro} for i in meal.items" in body, (
-            "diary_log_meal no longer sums the staging item's own macros. If "
-            "canonical totals are now derived some other way, F15 must be "
-            "re-assessed against that derivation.")
-
-    ledger_writes = [node for node in ast.walk(func)
-                     if isinstance(node, ast.Call)
-                     and isinstance(node.func, ast.Name)
-                     and node.func.id == "MealLog"]
-    assert len(ledger_writes) == 1, (
-        "diary_log_meal is the single canonical writer on this path.")
-
-    for name in _PROVIDER_LOOKUP_NAMES:
-        assert name not in body, (
-            f"diary_log_meal now consults provider truth ({name!r}) at commit "
-            "time. That is PR3B's fix - close F15, and record N2 as satisfied.")
-
-    # And the staging table is NOT a second ledger: it owns no day key, which is
-    # why N1 survives F15 (report 6, 13).
+def test_f15_canonical_diary_writer_re_resolves_provider_staging():
+    """PR3B successor: canonical commit calls the shared resolver."""
+    body = ast.unparse(_diary_function("diary_log_meal"))
+    assert "resolve_provider_food" in body
+    assert "db.session.rollback()" in body
     assert not hasattr(CustomMealItem, "tarih")
     assert not hasattr(CustomMeal, "tarih")
