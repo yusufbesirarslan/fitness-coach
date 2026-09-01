@@ -28,3 +28,43 @@ class IdempotencyConflict(PlanGenerationCommandError):
     public_code = "TRAINING_PLAN_IDEMPOTENCY_CONFLICT"
     http_status = 409
     retryable = False
+
+
+class GenerationInProgress(PlanGenerationCommandError):
+    public_code = "TRAINING_PLAN_GENERATION_IN_PROGRESS"
+    http_status = 409
+    retryable = True
+
+
+class ExistingPlanRefused(PlanGenerationCommandError):
+    public_code = "TRAINING_PLAN_REPLACEMENT_REFUSED"
+    http_status = 409
+    retryable = False
+
+
+class GenerationPrerequisiteMissing(PlanGenerationCommandError):
+    public_code = "TRAINING_PLAN_PREREQUISITE_MISSING"
+    http_status = 422
+    retryable = False
+
+
+class GenerationQuotaExceeded(PlanGenerationCommandError):
+    public_code = "PREMIUM_REQUIRED"
+    http_status = 402
+    retryable = False
+
+
+class GenerationPersistenceUnavailable(PlanGenerationCommandError):
+    public_code = "TRAINING_PLAN_PERSISTENCE_UNAVAILABLE"
+    http_status = 503
+    retryable = True
+
+
+class StoredGenerationFailure(PlanGenerationCommandError):
+    """A bounded terminal result reconstructed from the durable ledger."""
+
+    def __init__(self, public_code, http_status, retryable):
+        super().__init__("stored training plan generation failure")
+        self.public_code = public_code
+        self.http_status = http_status
+        self.retryable = retryable
