@@ -92,26 +92,41 @@ def build_current_plan(user_id: int, secret, *, sessions_enabled: bool = False) 
             plan = get_active_plan(user_id)
             if plan is None:
                 return {"plan": None}
-            day = app_today()
-            projected = _project_plan(plan, user_id, secret)
-            snapshot = resolve_workout_state(
-                user_id,
-                today=day,
-                plan=plan,
-                sessions_enabled=sessions_enabled,
-                strict_reads=True,
-            )
-            current_ref = None
-            if snapshot.schedule_state == SCHEDULE_SCHEDULED:
-                candidate = projected["days"][day.weekday()]
-                current_ref = candidate["workout_ref"]
-            projected["current_workout_ref"] = current_ref
-            return {"plan": projected}
+            return project_current_plan(
+                plan, user_id, secret, sessions_enabled=sessions_enabled)
     except PlanUnprojectable:
         raise
     except WorkoutStateReadError as error:
         raise TrainingReadUnavailable("canonical workout state unavailable") from error
     except Exception as error:  # query/snapshot failures are not empty product state
+        raise TrainingReadUnavailable("canonical Training read unavailable") from error
+
+
+def project_current_plan(
+    plan, user_id: int, secret, *, sessions_enabled: bool = False
+) -> dict:
+    """Project a known canonical row through the same current-plan authority."""
+    try:
+        day = app_today()
+        projected = _project_plan(plan, user_id, secret)
+        snapshot = resolve_workout_state(
+            user_id,
+            today=day,
+            plan=plan,
+            sessions_enabled=sessions_enabled,
+            strict_reads=True,
+        )
+        current_ref = None
+        if snapshot.schedule_state == SCHEDULE_SCHEDULED:
+            candidate = projected["days"][day.weekday()]
+            current_ref = candidate["workout_ref"]
+        projected["current_workout_ref"] = current_ref
+        return {"plan": projected}
+    except PlanUnprojectable:
+        raise
+    except WorkoutStateReadError as error:
+        raise TrainingReadUnavailable("canonical workout state unavailable") from error
+    except Exception as error:
         raise TrainingReadUnavailable("canonical Training read unavailable") from error
 
 
@@ -181,7 +196,19 @@ def _project_plan(plan, user_id, secret) -> dict:
         if not isinstance(raw, str) or len(raw) > _PLAN_DATA_MAX:
             raise ValueError("invalid plan document")
         document = json.loads(raw)
-        validated = validate_plan_structure(document, allow_exercise_id=True)
+        if not isinstance(document, dict) or not set(document) <= {
+                "program", "haftalik_ozet", "exercise_context"}:
+            raise ValueError("invalid plan document keys")
+        # ``exercise_context`` is server-created persistence metadata for the
+        # native command, not provider plan structure. Keep the canonical plan
+        # validator closed by passing only the shape it owns.
+        plan_document = {
+            key: document[key]
+            for key in ("program", "haftalik_ozet")
+            if key in document
+        }
+        validated = validate_plan_structure(
+            plan_document, allow_exercise_id=True)
         by_weekday = {day["gun"]: day for day in validated["program"]}
         days = [
             _project_day(

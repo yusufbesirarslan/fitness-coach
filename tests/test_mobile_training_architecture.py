@@ -136,10 +136,10 @@ def _headers(monkeypatch, user):
 
 
 def test_training_projection_depends_only_on_canonical_non_http_authorities():
-    modules = _imports(SERVICE_PATH) | _imports(ROUTE_PATH)
+    modules = _imports(SERVICE_PATH)
 
     assert "app.blueprints.training" not in modules
-    assert "app.extensions" not in _imports(SERVICE_PATH)
+    assert "app.extensions" not in modules
     for module in modules:
         assert not module.startswith("app.services.ai")
         assert not module.startswith("app.prompts")
@@ -147,7 +147,7 @@ def test_training_projection_depends_only_on_canonical_non_http_authorities():
 
 
 def test_training_read_modules_define_no_persistence_or_provider_operation():
-    source = _source(SERVICE_PATH) + _source(ROUTE_PATH)
+    source = _source(SERVICE_PATH)
     for forbidden in (
         "session.add(",
         "session.delete(",
@@ -165,10 +165,19 @@ def test_training_read_modules_define_no_persistence_or_provider_operation():
 def test_all_training_routes_use_the_shared_bearer_decorator(app):
     for endpoint in (
         "mobile_api.training_preferences",
+        "mobile_api.create_training_plan",
         "mobile_api.current_training_plan",
         "mobile_api.training_workout",
     ):
         assert getattr(app.view_functions[endpoint], "_require_mobile_auth", False) is True
+
+
+def test_generation_route_uses_the_command_and_shared_row_projector():
+    source = _source(ROUTE_PATH)
+
+    assert "generate_and_persist(" in source
+    assert "mobile_training.project_current_plan(" in source
+    assert "app.blueprints.training" not in _imports(ROUTE_PATH)
 
 
 def test_every_training_read_succeeds_when_provider_clients_are_detonators(
