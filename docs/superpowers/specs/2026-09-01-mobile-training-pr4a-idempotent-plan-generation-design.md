@@ -135,6 +135,8 @@ Add `TrainingPlanGenerationOperation` with these bounded fields:
 - optional candidate score;
 - optional successful `training_plan_id` as a soft reference;
 - optional successful `plan_lineage_id`;
+- `quota_reserved` boolean and optional bounded `quota_week`, so crash recovery
+  can distinguish an already-charged execution from a fresh claim;
 - optional bounded public error code, HTTP status, and retryable flag;
 - `created_at`, `updated_at`, and `completed_at` timestamps.
 
