@@ -109,6 +109,7 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/pump-check-comparisons/<comparison_id>",
         "/api/v1/today",
         "/api/v1/training/preferences",
+        "/api/v1/training/plans",
         "/api/v1/training/plans/current",
         "/api/v1/training/workouts/<workout_reference>",
     }
@@ -124,6 +125,12 @@ _APPROVED_TODAY_PATHS = {
 
 _APPROVED_TRAINING_PATHS = {
     "/api/v1/training/preferences",
+    # Mobile Training PR4A publishes exactly ONE native write: the idempotent
+    # generate-and-persist command for a user's FIRST plan. It creates only
+    # through canonical Training authority, never replaces an existing plan,
+    # and serves no Daily-Coach aggregate — so it is admitted here by review,
+    # not by widening the guard.
+    "/api/v1/training/plans",
     "/api/v1/training/plans/current",
     "/api/v1/training/workouts/<workout_reference>",
 }
@@ -331,10 +338,15 @@ def test_injury_annotation_follows_canonical_exercise_resolution():
     """P2-16 closed - proven by call order in the generation service."""
     tree = ast.parse(_source("app/services/training_generation/service.py"))
 
+    # Mobile Training PR4A extracted the generation pipeline out of the legacy
+    # browser wrapper into `generate_training_plan_candidate`, which BOTH the
+    # web payload path and the native command now run. The ordering invariant
+    # is unchanged; it is asserted where the pipeline actually lives, so the
+    # guard cannot pass by inspecting a wrapper that no longer generates.
     target = next(
         node for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "generate_training_plan_payload"
+        and node.name == "generate_training_plan_candidate"
     )
     lines = {
         "_parse_and_validate": [],
