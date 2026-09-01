@@ -11,6 +11,7 @@ from datetime import date
 
 import pytest
 from flask_login import login_user
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from app.blueprints import training as training_bp
@@ -103,6 +104,50 @@ def test_transactional_quota_refund_does_not_commit(make_user):
     premium.refund_ai_quota_in_transaction(user.id, "training", reserved_week)
     db.session.rollback()
     assert premium.remaining_ai_plans(db.session.get(User, user.id), "training") == 0
+
+
+def test_transactional_reserve_sees_a_concurrently_committed_reservation(make_user):
+    """The row lock must decide on the locked row, not a cached copy.
+
+    ``reserve_ai_quota_in_transaction`` locks the owner row with
+    ``with_for_update()``. SQLAlchemy returns an already-identity-mapped
+    instance *without* refreshing it, so without ``populate_existing()`` the
+    allowance decision is made against pre-lock state and a second caller can
+    re-spend an allowance another transaction already committed.
+    """
+    user = make_user("stale-quota-reserve")
+    db.session.commit()
+
+    cached = db.session.get(User, user.id)  # what request handling already holds
+    assert cached.user_metadata in (None, {})
+
+    spent = json.dumps({"ai_plan_quota": {"week": premium._week_key(), "training": 1}})
+    db.session.execute(
+        text('UPDATE "user" SET user_metadata = :meta WHERE id = :uid'),
+        {"meta": spent, "uid": user.id})
+
+    assert premium.reserve_ai_quota_in_transaction(user.id, "training", 1) is None
+
+
+def test_transactional_refund_sees_a_concurrently_committed_reservation(make_user):
+    """A refund must also read the locked row rather than a cached copy."""
+    user = make_user("stale-quota-refund")
+    db.session.commit()
+
+    cached = db.session.get(User, user.id)
+    assert cached.user_metadata in (None, {})
+
+    week = premium._week_key()
+    spent = json.dumps({"ai_plan_quota": {"week": week, "training": 1}})
+    db.session.execute(
+        text('UPDATE "user" SET user_metadata = :meta WHERE id = :uid'),
+        {"meta": spent, "uid": user.id})
+
+    premium.refund_ai_quota_in_transaction(user.id, "training", week)
+    db.session.commit()
+
+    refreshed = db.session.get(User, user.id)
+    assert refreshed.user_metadata["ai_plan_quota"]["training"] == 0
 
 
 def test_transactional_quota_helpers_leave_premium_uncharged(make_user):

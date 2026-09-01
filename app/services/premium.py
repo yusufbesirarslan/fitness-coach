@@ -96,8 +96,12 @@ def reserve_ai_quota_in_transaction(user_id, counter_key, limit):
     missing, or has no allowance left. Callers that need to distinguish those
     cases already own the authoritative user row/plan gate decision.
     """
+    # ``populate_existing()`` is not optional: with_for_update() takes the row
+    # lock, but SQLAlchemy hands back an already-identity-mapped instance
+    # WITHOUT refreshing it. Deciding the allowance on that pre-lock copy lets
+    # a second caller re-spend an allowance another transaction just committed.
     target = (db.session.query(User).filter_by(id=user_id)
-              .with_for_update().one_or_none())
+              .populate_existing().with_for_update().one_or_none())
     if target is None or target.is_premium:
         return None
 
@@ -128,8 +132,10 @@ def refund_ai_quota(user, counter_key, reserved_week=None):
 
 def refund_ai_quota_in_transaction(user_id, counter_key, reserved_week):
     """Refund a reservation without ending the caller's transaction."""
+    # Same locked-row read as the reservation: refunding against a cached copy
+    # would resurrect an allowance the owner has already spent elsewhere.
     target = (db.session.query(User).filter_by(id=user_id)
-              .with_for_update().one_or_none())
+              .populate_existing().with_for_update().one_or_none())
     if target is None or target.is_premium:
         return
 

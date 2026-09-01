@@ -172,7 +172,11 @@ def _assert_one_success(app, user_id, outcomes, calls):
         assert operation.status == "SUCCEEDED"
         assert operation.training_plan_id == plan.id
         assert operation.plan_lineage_id == plan.lineage_id
-        assert plan.mutation_version == 1
+        # A freshly generated plan has had no persisted state transition yet,
+        # so it converges on the legacy save path's version 0 (proven by
+        # tests/test_sprint11_training_preference_contract.py). The native
+        # command must not invent a different history position.
+        assert plan.mutation_version == 0
 
 
 def test_same_owner_key_fingerprint_runs_one_provider_execution(pg_generation_app):
