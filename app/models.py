@@ -344,6 +344,57 @@ def _new_mutation_public_id():
     return secrets.token_urlsafe(32)
 
 
+TRAINING_PLAN_GENERATION_IN_PROGRESS = "IN_PROGRESS"
+TRAINING_PLAN_GENERATION_GENERATED = "GENERATED"
+TRAINING_PLAN_GENERATION_SUCCEEDED = "SUCCEEDED"
+TRAINING_PLAN_GENERATION_FAILED = "FAILED"
+
+
+class TrainingPlanGenerationOperation(db.Model):
+    """Durable owner-scoped ledger for native training-plan generation."""
+
+    __tablename__ = "training_plan_generation_operation"
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(
+        db.Integer, db.ForeignKey("user.id", ondelete="CASCADE"), nullable=False)
+    idempotency_key = db.Column(db.String(64), nullable=False)
+    request_fingerprint = db.Column(db.String(64), nullable=False)
+    status = db.Column(db.String(20), nullable=False)
+    attempt_count = db.Column(
+        db.Integer, nullable=False, default=1, server_default="1")
+    candidate_plan_data = db.Column(db.Text)
+    candidate_score = db.Column(db.Float)
+    # Soft references intentionally survive legacy plan replacement semantics.
+    training_plan_id = db.Column(db.Integer)
+    plan_lineage_id = db.Column(db.String(64))
+    quota_reserved = db.Column(
+        db.Boolean, nullable=False, default=False, server_default=text("false"))
+    quota_week = db.Column(db.String(8))
+    error_code = db.Column(db.String(64))
+    error_http_status = db.Column(db.Integer)
+    error_retryable = db.Column(db.Boolean)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = db.Column(
+        db.DateTime, nullable=False, default=datetime.utcnow,
+        onupdate=datetime.utcnow)
+    completed_at = db.Column(db.DateTime)
+
+    __table_args__ = (
+        db.UniqueConstraint(
+            "user_id", "idempotency_key",
+            name="uq_training_plan_generation_user_key"),
+        db.Index(
+            "ix_training_plan_generation_owner_status", "user_id", "status"),
+        db.Index(
+            "uq_training_plan_generation_active_owner", "user_id", unique=True,
+            sqlite_where=text(
+                "status IN ('IN_PROGRESS', 'GENERATED')"),
+            postgresql_where=text(
+                "status IN ('IN_PROGRESS', 'GENERATED')")),
+    )
+
+
 class TrainingPlan(db.Model):
     """The canonical persisted training plan.
 

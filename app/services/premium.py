@@ -81,27 +81,37 @@ def reserve_ai_quota(user, counter_key, limit):
     if getattr(user, "is_premium", False):
         return True
 
-    fresh_meta = (db.session.query(User.user_metadata)
-                  .filter_by(id=user.id).with_for_update().scalar())
-    target = db.session.get(User, user.id)
-    if target is None:
-        db.session.rollback()
+    week = reserve_ai_quota_in_transaction(user.id, counter_key, limit)
+    db.session.commit()
+    if week is None:
         return False
+    _remember_reservation_week(user, counter_key, week)
+    return True
 
-    meta, quota, week = _quota_from_meta(fresh_meta)
+
+def reserve_ai_quota_in_transaction(user_id, counter_key, limit):
+    """Reserve quota under a row lock without ending the caller's transaction.
+
+    Returns the reservation's ISO week, or ``None`` when the owner is premium,
+    missing, or has no allowance left. Callers that need to distinguish those
+    cases already own the authoritative user row/plan gate decision.
+    """
+    target = (db.session.query(User).filter_by(id=user_id)
+              .with_for_update().one_or_none())
+    if target is None or target.is_premium:
+        return None
+
+    meta, quota, week = _quota_from_meta(target.user_metadata)
     used = int(quota.get(counter_key, 0))
     if used >= limit:
-        db.session.commit()
-        return False
+        return None
 
     quota["week"] = week
     quota[counter_key] = used + 1
     meta["ai_plan_quota"] = quota
     target.user_metadata = meta
     flag_modified(target, "user_metadata")
-    db.session.commit()
-    _remember_reservation_week(user, counter_key, week)
-    return True
+    return week
 
 
 def refund_ai_quota(user, counter_key, reserved_week=None):
@@ -109,19 +119,23 @@ def refund_ai_quota(user, counter_key, reserved_week=None):
     if getattr(user, "is_premium", False):
         return
 
-    fresh_meta = (db.session.query(User.user_metadata)
-                  .filter_by(id=user.id).with_for_update().scalar())
-    target = db.session.get(User, user.id)
-    if target is None:
-        db.session.rollback()
-        return
-
     if reserved_week is None:
         reserved_week = reservation_week(user, counter_key)
+    refund_ai_quota_in_transaction(user.id, counter_key, reserved_week)
+    db.session.commit()
+    _forget_reservation_week(user, counter_key)
+
+
+def refund_ai_quota_in_transaction(user_id, counter_key, reserved_week):
+    """Refund a reservation without ending the caller's transaction."""
+    target = (db.session.query(User).filter_by(id=user_id)
+              .with_for_update().one_or_none())
+    if target is None or target.is_premium:
+        return
+
+    fresh_meta = target.user_metadata
     stored_quota = dict((fresh_meta or {}).get("ai_plan_quota") or {})
     if reserved_week is not None and stored_quota.get("week") != reserved_week:
-        db.session.commit()
-        _forget_reservation_week(user, counter_key)
         return
 
     meta, quota, week = _quota_from_meta(fresh_meta)
@@ -130,8 +144,6 @@ def refund_ai_quota(user, counter_key, reserved_week=None):
     meta["ai_plan_quota"] = quota
     target.user_metadata = meta
     flag_modified(target, "user_metadata")
-    db.session.commit()
-    _forget_reservation_week(user, counter_key)
 
 
 def remaining_ai_plans(user, kind):

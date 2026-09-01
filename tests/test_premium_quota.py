@@ -88,6 +88,31 @@ def test_remaining_and_reserve_per_kind(make_user):
     assert premium.remaining_ai_plans(u, "nutrition") == 1
 
 
+def test_transactional_quota_reservation_does_not_commit(make_user):
+    user = make_user("transactional-reserve")
+    week = premium.reserve_ai_quota_in_transaction(user.id, "training", 1)
+    assert week == premium._week_key()
+    db.session.rollback()
+    assert premium.remaining_ai_plans(db.session.get(User, user.id), "training") == 1
+
+
+def test_transactional_quota_refund_does_not_commit(make_user):
+    user = make_user("transactional-refund")
+    reserved_week = premium.reserve_ai_quota_in_transaction(user.id, "training", 1)
+    db.session.commit()
+    premium.refund_ai_quota_in_transaction(user.id, "training", reserved_week)
+    db.session.rollback()
+    assert premium.remaining_ai_plans(db.session.get(User, user.id), "training") == 0
+
+
+def test_transactional_quota_helpers_leave_premium_uncharged(make_user):
+    user = make_user("transactional-premium", is_premium=True)
+    assert premium.reserve_ai_quota_in_transaction(user.id, "training", 1) is None
+    premium.refund_ai_quota_in_transaction(user.id, "training", premium._week_key())
+    db.session.commit()
+    assert premium.remaining_ai_plans(user, "training") is None
+
+
 def test_premium_user_is_unlimited(make_user):
     u = make_user("vip", is_premium=True)
     assert premium.remaining_ai_plans(u, "training") is None
