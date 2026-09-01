@@ -31,6 +31,13 @@ from app.timeutil import APP_TZ, audit_clock
 
 SERVICE_PATH = Path("app/services/mobile_training.py")
 ROUTE_PATH = Path("app/blueprints/mobile_training.py")
+COMMAND_PATH = Path("app/services/mobile_training_generation/service.py")
+CONTRACT_PATH = Path("app/services/mobile_training_generation/contract.py")
+STORE_PATH = Path("app/services/mobile_training_generation/store.py")
+MODEL_PATH = Path("app/models.py")
+MIGRATION_PATH = Path(
+    "migrations/versions/d3e4f5a6b7c8_add_training_plan_generation_operations.py")
+CI_PATH = Path(".github/workflows/ci.yml")
 FIXED_NOW = datetime(2026, 7, 23, 15, 0, tzinfo=APP_TZ)
 WEEKDAYS = [
     "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi", "Pazar",
@@ -178,6 +185,62 @@ def test_generation_route_uses_the_command_and_shared_row_projector():
     assert "generate_and_persist(" in source
     assert "mobile_training.project_current_plan(" in source
     assert "app.blueprints.training" not in _imports(ROUTE_PATH)
+
+
+def test_generation_command_uses_canonical_authorities_and_durable_ledger():
+    contract = _source(CONTRACT_PATH)
+    command = _source(COMMAND_PATH)
+    store = _source(STORE_PATH)
+    model = _source(MODEL_PATH)
+    migration = _source(MIGRATION_PATH)
+
+    assert "parse_canonical_preferences" in contract
+    assert "require_supported" in contract
+    assert "generate_training_plan_candidate" in command
+    assert "get_active_plan" in command
+    assert "provider_guard" in command
+    assert "TrainingPlanGenerationOperation" in store
+    assert "TrainingPlanGenerationOperation" in model
+    assert "uq_training_plan_generation_user_key" in model
+    assert "uq_training_plan_generation_active_owner" in migration
+    assert "postgresql_where" in migration
+    assert "TrainingPlan.query.delete" not in command + store
+    assert "session.delete(plan" not in command + store
+
+
+def test_provider_limits_wrap_only_candidate_generation():
+    route = _source(ROUTE_PATH)
+    command = _source(COMMAND_PATH)
+
+    assert "def _native_generation_provider_guard" in route
+    assert route.count("limiter.limit(") == 2
+    assert "blocking_concurrency_slot()" in route
+    assert "with provider_guard():" in command
+    assert command.index("with provider_guard():") < command.index(
+        "generate_training_plan_candidate(")
+    assert command.index("_inspect_durable(") < command.index(
+        "with provider_guard():")
+
+
+def test_ci_runs_native_generation_in_postgresql_concurrency_job():
+    ci = _source(CI_PATH)
+    job = ci[ci.index("mobile-pg-concurrency:"):]
+
+    assert "tests/test_mobile_training_generation_pg.py" in job
+
+
+def test_generation_sources_do_not_log_or_return_sensitive_command_material():
+    route = _source(ROUTE_PATH)
+    command = _source(COMMAND_PATH)
+    store = _source(STORE_PATH)
+
+    for source in (route, command, store):
+        assert "logger.info(" not in source
+        assert "logger.warning(" not in source
+        assert "logger.error(" not in source
+    assert "request_fingerprint" not in route
+    assert "candidate_plan_data" not in route
+    assert "training_plan_id" not in route
 
 
 def test_every_training_read_succeeds_when_provider_clients_are_detonators(
