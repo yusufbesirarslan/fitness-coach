@@ -5,7 +5,6 @@ ve davranış AYNI (aynı `nutrition` blueprint'i, aynı endpoint adları). Orta
 `bp` paketten gelir.
 """
 import json
-from decimal import Decimal, InvalidOperation
 from flask import current_app, jsonify, request
 from flask_login import current_user
 from app.auth_middleware import require_auth
@@ -17,6 +16,11 @@ from app.i18n import t
 from app.models import CustomMeal, CustomMealItem, MealLog, NutritionPlan
 from app.services.gamification import complete_quest_for_user
 from app.services import meal_idempotency
+from app.services.mobile_log_food.parsing import (
+    InvalidLogFoodCommand,
+    parse_provider_identity,
+    parse_provider_quantity,
+)
 from app.services.provider_food_snapshot import (
     ProviderFoodNotFound,
     resolve_provider_food,
@@ -81,14 +85,40 @@ def _claim_diary_meal(meal_id, user_id):
     ).update({"is_logged": True}, synchronize_session=False)
 
 
-def _provider_quantity(value, default="1"):
-    try:
-        quantity = Decimal(str(default if value is None else value))
-    except (InvalidOperation, TypeError, ValueError):
-        raise ValueError("invalid provider quantity") from None
-    if not quantity.is_finite() or quantity <= 0 or quantity > Decimal("1000"):
-        raise ValueError("invalid provider quantity")
-    return quantity
+# The diary PERSISTS the identities it validates, and its columns are narrower
+# than the canonical 128-character transport bound. Deriving the effective
+# bound from the model is what keeps the two from drifting apart: an identity
+# the provider would accept but the column cannot hold must fail here, at the
+# transport, rather than after the network call at the INSERT (PR3B, P2-01).
+_IDENTITY_MAX_LENGTH = min(
+    CustomMealItem.__table__.c.fatsecret_food_id.type.length,
+    CustomMealItem.__table__.c.serving_id.type.length,
+)
+
+
+def _provider_identity(value):
+    """One provider identity, on the canonical policy plus the storage bound."""
+    return parse_provider_identity(value, _IDENTITY_MAX_LENGTH)
+
+
+def _stored_quantity(value):
+    """The default a PATCH/promotion re-resolves at when the caller omits one.
+
+    A STORED quantity is not transport input, so a legacy row that never had
+    one keeps the documented single serving; ``None`` arriving from the REQUEST
+    is malformed and never reaches here (see `_transport_quantity`).
+    """
+    return 1 if value is None else value
+
+
+def _transport_quantity(data, field, default):
+    """Read one quantity from the request under the canonical typed policy.
+
+    ``data.get(field, default)`` is the whole point: an OMITTED field keeps
+    ``default``, while a field present as JSON ``null`` arrives as ``None`` and
+    is rejected instead of silently becoming a plausible serving (P1-02).
+    """
+    return parse_provider_quantity(data.get(field, default))
 
 
 def _provider_error(exc):
@@ -278,20 +308,27 @@ def diary_add_item(meal_id):
         return jsonify({"error": t("route.meal_already_logged")}), 400
 
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "invalid_serving"}), 400
     food_name = data.get("food_name", "").strip()
-    food_id = str(data.get("fatsecret_food_id") or "").strip()
-    srv_id = str(data.get("serving_id") or "").strip()
+    # PRESENCE of either identity field is the provider claim, exactly as the
+    # canonical parser treats it: a field present as `null` is a malformed
+    # identity, not an absent one, so it cannot silently select manual mode.
+    provider_backed = bool({"fatsecret_food_id", "serving_id"} & set(data))
 
     if not food_name:
         return jsonify({"error": t("route.food_name_required")}), 400
 
-    if bool(food_id) != bool(srv_id):
-        return jsonify({"error": "invalid_serving"}), 400
-
-    if food_id:
+    if provider_backed:
+        # The complete provider command is validated - typed, bounded, and
+        # fail-closed - BEFORE any network I/O, on the canonical LogFood
+        # policy. An incomplete half never falls back to caller-owned manual
+        # nutrition, and a malformed value never becomes a default.
         try:
-            quantity = _provider_quantity(data.get("serving_quantity"))
-        except ValueError as exc:
+            food_id = _provider_identity(data.get("fatsecret_food_id"))
+            srv_id = _provider_identity(data.get("serving_id"))
+            quantity = _transport_quantity(data, "serving_quantity", 1)
+        except InvalidLogFoodCommand as exc:
             return _provider_error(exc)
 
         # The ownership check above opened a read transaction. Provider I/O must
@@ -367,6 +404,8 @@ def diary_update_item(item_id):
         return jsonify({"error": t("route.meal_already_logged")}), 400
 
     data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "invalid_serving"}), 400
     before = _item_state(item)
     food_id = str(item.fatsecret_food_id or "").strip()
     stored_serving_id = str(item.serving_id or "").strip()
@@ -374,14 +413,24 @@ def diary_update_item(item_id):
     if bool(food_id) != bool(stored_serving_id):
         return jsonify({"error": "invalid_serving"}), 400
 
+    # Provider-identity transport fields are validated BEFORE the manual or
+    # provider branch is chosen, so a request cannot claim provider identity
+    # and be answered as a caller-authoritative manual update (P1-01). The food
+    # identity is server-stored: serving and quantity are the only selections
+    # this transport owns, so a request-supplied food id - matching the stored
+    # one or not - is an attempted identity conversion and fails closed.
+    if "fatsecret_food_id" in data:
+        return jsonify({"error": "invalid_serving"}), 400
+
     if food_id:
         if "grams" in data or "per_100g" in data:
             return jsonify({"error": "invalid_serving"}), 400
-        serving_id = str(data.get("serving_id") or stored_serving_id).strip()
         try:
-            quantity = _provider_quantity(
-                data.get("serving_quantity"), item.serving_quantity or 1)
-        except ValueError as exc:
+            serving_id = (_provider_identity(data["serving_id"])
+                          if "serving_id" in data else stored_serving_id)
+            quantity = _transport_quantity(
+                data, "serving_quantity", _stored_quantity(item.serving_quantity))
+        except InvalidLogFoodCommand as exc:
             return _provider_error(exc)
 
         db.session.rollback()
@@ -405,7 +454,7 @@ def diary_update_item(item_id):
             return jsonify({"error": "diary_item_changed"}), 409
         _apply_provider_snapshot(item, snapshot)
     else:
-        if data.get("serving_id") or "serving_quantity" in data:
+        if "serving_id" in data or "serving_quantity" in data:
             return jsonify({"error": "invalid_serving"}), 400
         db.session.rollback()
         meal = CustomMeal.query.filter_by(
@@ -490,8 +539,9 @@ def diary_log_meal(meal_id):
             return jsonify({"error": "invalid_serving"}), 400
         if food_id:
             try:
-                quantity = _provider_quantity(item.serving_quantity)
-            except ValueError as exc:
+                quantity = parse_provider_quantity(
+                    _stored_quantity(item.serving_quantity))
+            except InvalidLogFoodCommand as exc:
                 return _provider_error(exc)
             provider_selections.append(
                 (item.id, food_id, serving_id, quantity))

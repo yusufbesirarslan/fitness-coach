@@ -90,6 +90,41 @@ locks and compares the meal/item snapshot before the atomic `is_logged` claim.
 Manual diary entries remain caller-authoritative and bounded. No endpoint, schema,
 migration, Flutter, PR4, or PR5 work was added. **N2 is now satisfied.**
 
+#### Amendment — PR3B review remediation (2026-09-01)
+
+The independent review of PR3B held **N2 `OPEN`**: the trust model was right,
+but the transport in front of it was not yet the single typed, fail-closed
+boundary N2 requires. Two ways in, both now closed:
+
+* **P1-01 — partial provider identity on `PATCH`.** Provider identity was
+  derived only from the STORED row, so a request claiming `fatsecret_food_id`
+  on a manual item was answered as a caller-authoritative manual update with
+  `200`. Provider-identity transport fields are now validated *before* the
+  manual/provider branch is chosen. The food identity is server-stored, so a
+  request-supplied one — matching the stored value or not — is an attempted
+  identity conversion and is rejected; serving and quantity remain the only
+  selections the transport owns.
+* **P1-02 — explicit `null` quantity.** `data.get("serving_quantity")` could
+  not distinguish an omitted field from a field present as JSON `null`, so a
+  malformed command became a plausible one-serving default and produced
+  durable provider staging. Both `POST` and `PATCH` now read quantities as
+  `data.get(field, <default>)` and parse them with the canonical LogFood
+  policy: an OMITTED field keeps its documented default, a present `null` is
+  rejected. Diary and mobile LogFood no longer disagree about `null`.
+
+Both fixes are adaptations into the canonical parser rather than diary-local
+copies — `parse_provider_identity` and `parse_provider_quantity` join
+`parse_manual_nutrition` as the transport policies both clients share (the PR3
+precedent). Also remediated: identities are bounded before network I/O at the
+width of the column that stores them, derived from the model so the two cannot
+drift (**P2-01**); the F15 architecture guards were rebuilt on AST call and
+data-flow allow-listing after the substring probes were shown to miss alias,
+subscript, computed-key, second-resolver and second-numeric-policy bypasses
+(**P2-02**); `tests/test_diary_provider_truth_pg.py` covers the diary
+snapshot/claim races on PostgreSQL, which SQLite cannot prove (**P2-03**); and
+`instance/` is excluded from pytest collection so runtime artefacts can no
+longer break a full-repository run (**P2-04**).
+
 ### Findings index
 
 | ID | Sev | One line |

@@ -277,6 +277,222 @@ def test_diary_update_manual_item_cannot_become_partial_provider(client, meal_id
     assert body["error"] == "invalid_serving"
 
 
+# ---------------------------------------------------------------------------
+# PR3B remediation - the single fail-closed diary transport boundary (N2)
+#
+# The diary POST/PATCH transport must apply the SAME typed policy the canonical
+# LogFood parser applies, and must apply it BEFORE it chooses the manual or
+# provider branch and BEFORE any provider network I/O. Three ways it did not:
+#
+#   P1-01  PATCH derived provider identity only from the stored row, so a
+#          request claiming `fatsecret_food_id` on a manual item silently fell
+#          through to a caller-authoritative manual update and returned 200.
+#   P1-02  `data.get("serving_quantity")` made an omitted field and a present
+#          JSON `null` indistinguishable, so a malformed command became a
+#          plausible one-serving default and produced durable provider staging.
+#   P2-01  Provider identities were unbounded in transport, so an oversized id
+#          reached the provider and could only fail at the String(50) INSERT.
+# ---------------------------------------------------------------------------
+
+_ITEM_COLUMNS = (
+    "food_name", "grams", "calories", "protein", "carbs", "fat",
+    "fatsecret_food_id", "serving_id", "serving_description",
+    "serving_quantity", "per_100g_calories", "per_100g_protein",
+    "per_100g_carbs", "per_100g_fat",
+)
+
+
+def _item_row(item_id):
+    """Every persisted field of one staging item, for no-durable-effect asserts."""
+    db.session.expire_all()
+    item = db.session.get(CustomMealItem, item_id)
+    return tuple(getattr(item, name) for name in _ITEM_COLUMNS)
+
+
+def _manual_item(client, meal_id):
+    return client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "yumurta", "grams": 100,
+        "per_100g": {"calories": 150, "protein": 12, "carbs": 1, "fat": 10},
+    }).get_json()["item_id"]
+
+
+def _provider_item(client, meal_id):
+    return client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "caller", "fatsecret_food_id": "f1",
+        "serving_id": "s1", "serving_quantity": 1,
+    }).get_json()["item_id"]
+
+
+def test_diary_update_manual_item_rejects_request_provider_food_id(
+        client, meal_id, diary_provider):
+    """P1-01: a request-claimed food id is never answered as a manual update.
+
+    The stored row is manual, so the old branch selection ignored the request's
+    `fatsecret_food_id` entirely and performed a caller-authoritative manual
+    write underneath an explicit provider claim - the ambiguous 200 the
+    documented fail-closed boundary forbids.
+    """
+    item_id = _manual_item(client, meal_id)
+    before = _item_row(item_id)
+
+    response = client.patch(f"/api/diary/item/{item_id}", json={
+        "fatsecret_food_id": "f1", "grams": 250,
+        "per_100g": {"calories": 900, "protein": 90, "carbs": 5, "fat": 5},
+    })
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid_serving"
+    assert _item_row(item_id) == before
+    assert diary_provider.calls == []
+
+
+def test_diary_update_provider_item_rejects_request_food_identity(
+        client, meal_id, diary_provider):
+    """P1-01: identity conversion is not a PATCH concern on a provider item.
+
+    Serving and quantity are the only selections this transport owns; the food
+    identity is server-stored. A request-supplied id - matching or not - is an
+    attempted identity conversion, so it fails closed instead of being ignored.
+    """
+    item_id = _provider_item(client, meal_id)
+    diary_provider.calls.clear()
+    before = _item_row(item_id)
+
+    for claimed in ("f1", "f2"):
+        response = client.patch(f"/api/diary/item/{item_id}", json={
+            "fatsecret_food_id": claimed, "serving_quantity": 2})
+        assert response.status_code == 400, claimed
+        assert response.get_json()["error"] == "invalid_serving"
+
+    assert _item_row(item_id) == before
+    assert diary_provider.calls == []
+
+
+def test_diary_update_provider_item_still_accepts_serving_and_quantity(
+        client, meal_id, diary_provider):
+    """P1-01 guard: rejecting request identity must not break real PATCHes."""
+    item_id = _provider_item(client, meal_id)
+    body = client.patch(f"/api/diary/item/{item_id}", json={
+        "serving_id": "s9", "serving_quantity": 2}).get_json()
+    assert body["calories"] == 390.0
+    item = db.session.get(CustomMealItem, item_id)
+    assert item.serving_id == "s9"
+    assert item.serving_quantity == 2
+
+
+@pytest.mark.parametrize(
+    "quantity", [None, True, "", [], {}, "abc", "NaN", "Infinity", 0, -1, 1001])
+def test_diary_add_item_rejects_malformed_serving_quantity(
+        client, meal_id, diary_provider, quantity):
+    """P1-02: a malformed quantity is never rehabilitated into a default.
+
+    `None` is the finding's exact shape: `data.get("serving_quantity")` could
+    not tell an omitted field from a present JSON `null`, so a malformed
+    command produced durable one-serving provider staging.
+    """
+    response = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "Hile", "fatsecret_food_id": "f1",
+        "serving_id": "s1", "serving_quantity": quantity})
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid_serving"
+    assert CustomMealItem.query.filter_by(custom_meal_id=meal_id).count() == 0
+    assert diary_provider.calls == []
+
+
+def test_diary_add_item_omitted_serving_quantity_still_defaults_to_one(
+        client, meal_id, diary_provider):
+    """P1-02 guard: an ABSENT field keeps its documented default. Only a
+    present-but-malformed value fails closed - that is the whole distinction."""
+    body = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "caller", "fatsecret_food_id": "f1",
+        "serving_id": "s1"}).get_json()
+    assert body["calories"] == 90.0
+    assert db.session.get(CustomMealItem, body["item_id"]).serving_quantity == 1
+
+
+@pytest.mark.parametrize("quantity", [None, True, "abc", 0, -1, 1001])
+def test_diary_update_item_rejects_malformed_serving_quantity(
+        client, meal_id, diary_provider, quantity):
+    """P1-02: the PATCH quantity carries exactly the same typed policy as POST."""
+    item_id = _provider_item(client, meal_id)
+    diary_provider.calls.clear()
+    before = _item_row(item_id)
+
+    response = client.patch(f"/api/diary/item/{item_id}",
+                            json={"serving_quantity": quantity})
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid_serving"
+    assert _item_row(item_id) == before
+    assert diary_provider.calls == []
+
+
+def test_diary_update_item_omitted_serving_quantity_keeps_stored_quantity(
+        client, meal_id, diary_provider):
+    """P1-02 guard: omitting the quantity re-resolves at the STORED quantity."""
+    item_id = _provider_item(client, meal_id)
+    client.patch(f"/api/diary/item/{item_id}", json={"serving_quantity": 3})
+    body = client.patch(f"/api/diary/item/{item_id}",
+                        json={"serving_id": "s1"}).get_json()
+    assert body["calories"] == 270.0
+    assert db.session.get(CustomMealItem, item_id).serving_quantity == 3
+
+
+@pytest.mark.parametrize("identity", [
+    {"fatsecret_food_id": "f" * 129, "serving_id": "s1"},
+    {"fatsecret_food_id": "f1", "serving_id": "s" * 129},
+    {"fatsecret_food_id": 12345, "serving_id": "s1"},
+    {"fatsecret_food_id": "f1", "serving_id": True},
+])
+def test_diary_add_item_rejects_unbounded_provider_identity(
+        client, meal_id, diary_provider, identity):
+    """P2-01: identities are typed and bounded BEFORE the provider call.
+
+    An unbounded identity previously reached FatSecret and, had it resolved,
+    could only have failed at the String(50) INSERT.
+    """
+    response = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "Hile", **identity, "serving_quantity": 1})
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "invalid_serving"
+    assert CustomMealItem.query.filter_by(custom_meal_id=meal_id).count() == 0
+    assert diary_provider.calls == []
+
+
+def test_diary_provider_identity_is_bounded_by_its_storage_column(
+        client, meal_id, diary_provider):
+    """P2-01: the canonical 128-char bound is not sufficient on its own here.
+
+    The diary PERSISTS the identity it validates and its columns are narrower
+    than the canonical transport bound, so the effective bound is the column's.
+    Deriving it from the model is what keeps the two from drifting apart.
+    """
+    column_limit = CustomMealItem.__table__.c.fatsecret_food_id.type.length
+    assert column_limit < 128
+
+    response = client.post(f"/api/diary/meal/{meal_id}/item", json={
+        "food_name": "Hile", "fatsecret_food_id": "f" * (column_limit + 1),
+        "serving_id": "s1", "serving_quantity": 1})
+
+    assert response.status_code == 400
+    assert diary_provider.calls == []
+
+
+def test_diary_update_serving_id_is_bounded_before_provider_io(
+        client, meal_id, diary_provider):
+    """P2-01: the PATCH serving selection is bounded on the same authority."""
+    item_id = _provider_item(client, meal_id)
+    diary_provider.calls.clear()
+
+    response = client.patch(f"/api/diary/item/{item_id}",
+                            json={"serving_id": "s" * 129})
+
+    assert response.status_code == 400
+    assert diary_provider.calls == []
+
+
 def test_diary_add_item_grams_based_scaling(client, meal_id):
     body = client.post(f"/api/diary/meal/{meal_id}/item", json={
         "food_name": "pirinç", "grams": 200,

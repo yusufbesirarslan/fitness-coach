@@ -926,14 +926,184 @@ def _request_keys(func):
     return keys
 
 
-def test_f15_diary_provider_transport_has_identity_not_nutrition_authority():
-    """PR3B successor: provider payload nutrition is never read as authority."""
-    source = _module_source("app/blueprints/nutrition/diary.py")
-    assert "resolve_provider_food" in source
-    for key in _DIARY_CALLER_NUTRITION_KEYS - {"serving_quantity"}:
-        assert f'data.get("{key}"' not in source
-    assert hasattr(CustomMealItem, "fatsecret_food_id")
-    assert hasattr(CustomMealItem, "serving_id")
+DIARY_MODULE = "app/blueprints/nutrition/diary.py"
+DIARY_WRITE_HANDLERS = ("diary_add_item", "diary_update_item", "diary_log_meal")
+
+# The ONLY request-body keys a diary write handler may read the VALUE of.
+# Presence tests (`"x" in data`) are deliberately NOT constrained: rejecting a
+# field is the opposite of trusting it, and PR3B's fail-closed transport is
+# built out of exactly those presence checks.
+_DIARY_ALLOWED_VALUE_KEYS = {
+    "food_name", "fatsecret_food_id", "serving_id", "serving_quantity",
+    "grams", "per_100g", "calories", "protein", "carbs", "fat", "meal_name",
+}
+
+# Call shapes that would mean a SECOND provider-truth path exists on the diary
+# write path. Matched as resolved callee names, not as substrings of the file:
+# `fatsecret_food_id` is an identity FIELD this path legitimately handles, so a
+# bare-word probe would defeat itself.
+_FORBIDDEN_PROVIDER_CALLS = {
+    "servings", "search_foods", "get_barcode_product", "_food_get_raw",
+    "_provider_snapshot", "log_food", "food_get",
+}
+
+
+def _body_names(func):
+    """Names inside ``func`` bound to the parsed request body, transitively.
+
+    Aliasing is the first thing a substring guard misses: `body = data` and
+    then `body.get("serving_calories")` reads caller nutrition while the
+    literal `data.get("serving_calories")` never appears in the file.
+    """
+    names = set()
+    for node in ast.walk(func):
+        if not isinstance(node, ast.Assign) or len(node.targets) != 1:
+            continue
+        target = node.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        value = node.value
+        if (isinstance(value, ast.BoolOp)
+                and isinstance(value.op, ast.Or) and value.values):
+            value = value.values[0]
+        if (isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Attribute)
+                and value.func.attr == "get_json"):
+            names.add(target.id)
+        elif isinstance(value, ast.Name) and value.id in names:
+            names.add(target.id)
+    return names
+
+
+def _body_value_reads(func):
+    """(literal keys, count of DYNAMIC reads) whose VALUE is read from the body.
+
+    A dynamic read - `data.get(key)` for a computed ``key`` - is counted rather
+    than named, because a single one would make any allow-list below unfalsifiable.
+    """
+    names = _body_names(func)
+    literal, dynamic = set(), 0
+
+    def record(key_node):
+        nonlocal dynamic
+        if isinstance(key_node, ast.Constant) and isinstance(key_node.value, str):
+            literal.add(key_node.value)
+        else:
+            dynamic += 1
+
+    for node in ast.walk(func):
+        if (isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"get", "pop", "setdefault"}
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in names
+                and node.args):
+            record(node.args[0])
+        elif (isinstance(node, ast.Subscript)
+                and isinstance(node.value, ast.Name)
+                and node.value.id in names):
+            record(node.slice)
+    return literal, dynamic
+
+
+def _called_names(func):
+    """Every callee name in ``func``: bare `f()` and the attribute of `a.b()`."""
+    names = set()
+    for node in ast.walk(func):
+        if not isinstance(node, ast.Call):
+            continue
+        if isinstance(node.func, ast.Name):
+            names.add(node.func.id)
+        elif isinstance(node.func, ast.Attribute):
+            names.add(node.func.attr)
+    return names
+
+
+def test_f15_diary_transport_reads_no_caller_nutrition_value():
+    """PR3B successor: caller nutrition is never READ as authority (P2-02).
+
+    This replaces a substring probe that asserted `'data.get("serving_calories"'`
+    did not appear in the file. That probe was satisfied by `data["serving_
+    calories"]`, by an alias, by a computed key, or by moving the read into a
+    helper. This one resolves the body through assignment, accepts only
+    literal keys from an explicit allow-list, and fails on any dynamic read.
+    """
+    for handler in DIARY_WRITE_HANDLERS:
+        func = _diary_function(handler)
+        literal, dynamic = _body_value_reads(func)
+
+        assert dynamic == 0, (
+            f"{handler} reads a request-body value under a computed key. "
+            "The allow-list below cannot constrain what it cannot name.")
+        leaked = literal & _DIARY_CALLER_NUTRITION_KEYS - {"serving_quantity"}
+        assert not leaked, (
+            f"{handler} reads caller-owned nutrition {sorted(leaked)}. "
+            "Provider nutrition comes from resolve_provider_food (F15/N2).")
+        unknown = literal - _DIARY_ALLOWED_VALUE_KEYS
+        assert not unknown, (
+            f"{handler} reads unlisted request keys {sorted(unknown)}. "
+            "Add them here deliberately, having decided who owns them.")
+
+
+def test_f15_diary_write_path_has_no_second_provider_lookup():
+    """PR3B successor: exactly one provider authority on the diary write path."""
+    for handler in DIARY_WRITE_HANDLERS:
+        called = _called_names(_diary_function(handler))
+        second = called & _FORBIDDEN_PROVIDER_CALLS
+        assert not second, (
+            f"{handler} calls {sorted(second)}. Provider truth on this path "
+            "comes from resolve_provider_food and from nothing else.")
+
+    resolving = {handler for handler in DIARY_WRITE_HANDLERS
+                 if "resolve_provider_food" in _called_names(
+                     _diary_function(handler))}
+    assert resolving == {"diary_add_item", "diary_update_item",
+                         "diary_log_meal"}, (
+        f"Only {sorted(resolving)} resolve provider truth. Staging, editing "
+        "and the canonical commit must each re-resolve it.")
+
+
+def test_f15_diary_and_mobile_share_one_provider_resolver():
+    """PR3B successor: the two clients depend on the SAME resolver object.
+
+    Name-level checks let a helper be extracted, re-exported or shadowed under
+    a new name in one client only. Object identity cannot be faked that way.
+    """
+    from app.blueprints.nutrition import diary
+    from app.services import provider_food_snapshot
+    from app.services.mobile_log_food import service as mobile_service
+
+    canonical = provider_food_snapshot.resolve_provider_food
+    assert diary.resolve_provider_food is canonical
+    assert mobile_service.resolve_provider_food is canonical
+
+
+def test_f15_diary_transport_policy_is_the_canonical_one():
+    """PR3B remediation: one typed transport policy, not a diary-local copy.
+
+    P1-02 and P2-01 were both second policies: a local quantity parser that
+    rehabilitated `None` into a default, and no identity bound at all. The
+    diary now adapts into the canonical LogFood parser, and the bound it adds
+    on top is DERIVED from the column that stores the identity rather than
+    written down a second time.
+    """
+    from app.blueprints.nutrition import diary
+    from app.services.mobile_log_food import parsing
+
+    assert diary.parse_provider_identity is parsing.parse_provider_identity
+    assert diary.parse_provider_quantity is parsing.parse_provider_quantity
+
+    tree = ast.parse(_module_source(DIARY_MODULE), filename=DIARY_MODULE)
+    called = {node.func.id for node in ast.walk(tree)
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    assert "Decimal" not in called, (
+        "The diary parses numbers again. Quantity bounds live in one place.")
+
+    assert diary._IDENTITY_MAX_LENGTH == min(
+        CustomMealItem.__table__.c.fatsecret_food_id.type.length,
+        CustomMealItem.__table__.c.serving_id.type.length), (
+        "The transport identity bound drifted from the column that stores it.")
+    assert diary._IDENTITY_MAX_LENGTH <= parsing.PROVIDER_IDENTITY_MAX_LENGTH
 
 
 def test_f15_diary_provider_truth_replaces_caller_nutrition(
