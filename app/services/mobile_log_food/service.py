@@ -1,11 +1,14 @@
 """Canonical MealLog persistence and semantic replay for mobile LogFood."""
 from datetime import datetime
-from decimal import Decimal
 from types import SimpleNamespace
 
 from app.extensions import db
 from app.models import MealLog
-from app.services import meal_idempotency, mobile_food_discovery
+from app.services import meal_idempotency
+from app.services.provider_food_snapshot import (
+    ProviderFoodNotFound,
+    resolve_provider_food,
+)
 from app.services.mobile_nutrition.identity import diary_entry_id
 from app.services.mobile_nutrition.revision import (
     diary_entry_revision,
@@ -16,17 +19,12 @@ from app.timeutil import day_key
 
 from .commands import (
     ManualLogFoodCommand,
-    ManualNutritionSnapshot,
     ProviderBackedLogFoodCommand,
 )
 from .fingerprint import semantic_fingerprint
 
 
 class IdempotencyConflict(Exception):
-    pass
-
-
-class ProviderFoodNotFound(Exception):
     pass
 
 
@@ -47,33 +45,6 @@ def _existing_or_conflict(user_id, key, fingerprint):
     return existing
 
 
-def _provider_snapshot(command):
-    food = mobile_food_discovery.servings(command.food_id)
-    if not food:
-        raise ProviderFoodNotFound
-    serving = next((item for item in food.get("servings", [])
-                    if item.get("serving_id") == command.serving_id), None)
-    if not serving:
-        raise ProviderFoodNotFound
-    nutrition = serving.get("nutrition") or {}
-    try:
-        scaled = ManualNutritionSnapshot(
-            energy_kcal=Decimal(str(nutrition["energy_kcal"])) * command.quantity,
-            protein_g=Decimal(str(nutrition["protein_g"])) * command.quantity,
-            carbohydrate_g=(
-                Decimal(str(nutrition["carbohydrate_g"])) * command.quantity),
-            fat_g=Decimal(str(nutrition["fat_g"])) * command.quantity,
-        )
-    except (KeyError, TypeError, ValueError):
-        raise ProviderFoodNotFound from None
-    quantity = format(command.quantity.normalize(), "f")
-    description = (
-        f"{food.get('name') or 'Food'} "
-        f"({quantity}x {serving.get('description') or 'serving'})"
-    )
-    return description, scaled
-
-
 def log_food(user_id, key, command):
     fingerprint = semantic_fingerprint(command)
     existing = _existing_or_conflict(user_id, key, fingerprint)
@@ -86,7 +57,10 @@ def log_food(user_id, key, command):
     db.session.rollback()
 
     if isinstance(command, ProviderBackedLogFoodCommand):
-        description, nutrition = _provider_snapshot(command)
+        snapshot = resolve_provider_food(
+            command.provider, command.food_id, command.serving_id,
+            command.quantity)
+        description, nutrition = snapshot.description, snapshot.nutrition
         source = command.discovery_source
     elif isinstance(command, ManualLogFoodCommand):
         description, nutrition = command.description, command.nutrition

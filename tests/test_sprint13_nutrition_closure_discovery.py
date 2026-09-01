@@ -861,11 +861,11 @@ def test_the_web_history_contract_publishes_a_day_with_no_year(
 # ---------------------------------------------------------------------------
 # F15 / N2 - the diary-builder commit path's trust model
 #
-# THESE ARE CHARACTERIZATION TESTS FOR AN **OPEN** FINDING.
+# THESE ARE PR3B SUCCESSOR INVARIANTS FOR THE CLOSED FINDING.
 #
 # F15 was discovered during the independent review of Sprint 13 PR3 - PR1's
 # writer inventory never enumerated the diary staging writer, so PR3 could not
-# have closed it, and N2 is OPEN because of it (report 12, 13).
+# have closed it. PR3B closes it and, with PR3, satisfies N2 (report 12, 13).
 #
 # They pin the defect *as it currently is* so it cannot vanish from the
 # architecture ledger unnoticed. PR3B - Diary Provider-Truth Convergence - is
@@ -926,47 +926,37 @@ def _request_keys(func):
     return keys
 
 
-def test_f15_the_diary_item_transport_accepts_provider_identity_and_nutrition():
-    """F15, first half: one request body carries both, and no provider is asked.
-
-    CHARACTERIZES AN OPEN DEFECT. See the section banner above.
-    """
-    for handler, identity in _DIARY_PROVIDER_IDENTITY_KEYS.items():
-        func = _diary_function(handler)
-        keys = _request_keys(func)
-
-        assert identity <= keys, (
-            f"{handler} no longer reads provider identity. If the diary path "
-            "stopped being provider-backed, F15 changed shape - re-assess it.")
-        assert _DIARY_CALLER_NUTRITION_KEYS <= keys, (
-            f"{handler} no longer accepts caller-supplied serving nutrition. "
-            "That is the FIX F15 asks for: invert this test and close F15 / N2 "
-            "in the discovery document instead of deleting it.")
-
-        body = ast.unparse(func)
-        for name in _PROVIDER_LOOKUP_NAMES:
-            assert name not in body, (
-                f"{handler} now reaches for provider truth ({name!r}). If the "
-                "recompute landed, F15 is fixed - update the ledger.")
-
-    # The edit path reads no food id because the staging row already stores one:
-    # the server never lacks the identity it declines to use.
+def test_f15_diary_provider_transport_has_identity_not_nutrition_authority():
+    """PR3B successor: provider payload nutrition is never read as authority."""
+    source = _module_source("app/blueprints/nutrition/diary.py")
+    assert "resolve_provider_food" in source
+    for key in _DIARY_CALLER_NUTRITION_KEYS - {"serving_quantity"}:
+        assert f'data.get("{key}"' not in source
     assert hasattr(CustomMealItem, "fatsecret_food_id")
     assert hasattr(CustomMealItem, "serving_id")
 
 
-def test_f15_the_diary_commit_promotes_caller_nutrition_to_the_ledger(
-        app, client, auth_user):
-    """F15, second half: staging macros become canonical macros, verbatim.
+def test_f15_diary_provider_truth_replaces_caller_nutrition(
+        app, client, auth_user, monkeypatch):
+    """PR3B successor: provider truth wins at staging and canonical commit."""
+    from app.services import mobile_food_discovery
 
-    CHARACTERIZES AN OPEN DEFECT. See the section banner above.
-
-    The item is posted with real provider identity AND caller-chosen serving
-    macros. The values are physically plausible, so ``_clamp_item_macros`` is a
-    no-op and the arithmetic below is exact - which is the point: bounding is
-    not authority. Nothing here stubs a provider, because nothing on this path
-    ever calls one.
-    """
+    calls = []
+    def _servings(food_id):
+        calls.append((food_id, db.session().in_transaction()))
+        return {
+            "provider": "fatsecret", "food_id": food_id,
+            "name": "Provider Chicken", "brand": "",
+            "servings": [{
+                "serving_id": "51359", "description": "100 g",
+                "metric_mass": {"amount": 100.0, "unit": "g"},
+                "nutrition": {"energy_kcal": 165, "protein_g": 31,
+                              "carbohydrate_g": 0, "fat_g": 3.6},
+                "nutrition_per_100g": {"energy_kcal": 165, "protein_g": 31,
+                                       "carbohydrate_g": 0, "fat_g": 3.6},
+            }],
+        }
+    monkeypatch.setattr(mobile_food_discovery, "servings", _servings)
     meal_id = client.post(
         "/api/diary/meal", json={"meal_name": "Öğle"}).get_json()["meal_id"]
 
@@ -977,59 +967,31 @@ def test_f15_the_diary_commit_promotes_caller_nutrition_to_the_ledger(
         "serving_description": "100 g",
         "metric_serving_amount": 100,
         "serving_quantity": 2,
-        "serving_calories": 500,               # ... yet the CALLER states what
-        "serving_protein": 30,                 #     that serving contains
+        "serving_calories": 500,
+        "serving_protein": 30,
         "serving_carbs": 50,
         "serving_fat": 20,
     })
     assert added.status_code == 200
 
     item = CustomMealItem.query.filter_by(custom_meal_id=meal_id).one()
-    assert (item.fatsecret_food_id, item.serving_id) == ("33691", "51359"), (
-        "Provider identity IS persisted on the staging row - the server has "
-        "everything it needs to re-fetch, and does not.")
+    assert (item.fatsecret_food_id, item.serving_id) == ("33691", "51359")
     assert (item.calories, item.protein, item.carbs, item.fat) == (
-        1000.0, 60.0, 100.0, 40.0), (
-        "Staging nutrition is the caller's numbers scaled by quantity.")
+        330.0, 62.0, 0.0, 7.2)
 
     assert client.post(f"/api/diary/meal/{meal_id}/log").status_code == 200
 
     entry = MealLog.query.filter_by(user_id=auth_user.id).one()
     assert entry.source == "diary"
     assert (entry.kalori, entry.protein, entry.karb, entry.yag) == (
-        1000.0, 60.0, 100.0, 40.0), (
-        "F15: canonical MealLog carries caller-supplied nutrition for a "
-        "provider-identified food. When PR3B lands this becomes the provider's "
-        "own figures, and this assertion must be inverted, not removed.")
+        330.0, 62.0, 0.0, 7.2)
+    assert calls == [("33691", False), ("33691", False)]
 
 
-def test_f15_the_canonical_diary_writer_only_sums_staging_rows():
-    """F15, structurally: promotion is an aggregate, never a re-derivation.
-
-    CHARACTERIZES AN OPEN DEFECT. See the section banner above.
-    """
-    func = _diary_function("diary_log_meal")
-    body = ast.unparse(func)
-
-    for macro in ("calories", "protein", "carbs", "fat"):
-        assert f"i.{macro} for i in meal.items" in body, (
-            "diary_log_meal no longer sums the staging item's own macros. If "
-            "canonical totals are now derived some other way, F15 must be "
-            "re-assessed against that derivation.")
-
-    ledger_writes = [node for node in ast.walk(func)
-                     if isinstance(node, ast.Call)
-                     and isinstance(node.func, ast.Name)
-                     and node.func.id == "MealLog"]
-    assert len(ledger_writes) == 1, (
-        "diary_log_meal is the single canonical writer on this path.")
-
-    for name in _PROVIDER_LOOKUP_NAMES:
-        assert name not in body, (
-            f"diary_log_meal now consults provider truth ({name!r}) at commit "
-            "time. That is PR3B's fix - close F15, and record N2 as satisfied.")
-
-    # And the staging table is NOT a second ledger: it owns no day key, which is
-    # why N1 survives F15 (report 6, 13).
+def test_f15_canonical_diary_writer_re_resolves_provider_staging():
+    """PR3B successor: canonical commit calls the shared resolver."""
+    body = ast.unparse(_diary_function("diary_log_meal"))
+    assert "resolve_provider_food" in body
+    assert "db.session.rollback()" in body
     assert not hasattr(CustomMealItem, "tarih")
     assert not hasattr(CustomMeal, "tarih")

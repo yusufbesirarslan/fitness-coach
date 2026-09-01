@@ -7,12 +7,9 @@ the web posted browser-computed macros for the same provider food. PR3 closes
 that gap on the DIRECT web write paths - F4, F5, F6, F7, F8 and F12 - and
 satisfies N8 at the first-party scope stated in the report's section 12.
 
-N2 is NOT closed by this module. The independent review of PR3 discovered F15:
-the diary-builder staging path (`POST /api/diary/meal/<id>/item`) still accepts
-caller-supplied serving nutrition for a provider-identified food, and
-`diary_log_meal` promotes those totals into canonical `MealLog`. That path is
-characterized in `tests/test_sprint13_nutrition_closure_discovery.py` and owned
-by PR3B; nothing here should be read as covering it.
+PR3B closes the independently discovered F15 diary gap and, together with these
+direct-writer invariants, satisfies N2. Its successor tests live in
+`tests/test_sprint13_nutrition_closure_discovery.py` and the diary route suite.
 
 These are *invariant* tests, not characterization tests: each one fails if the
 convergence regresses.
@@ -433,6 +430,22 @@ def _js_function_body(name):
                 return NUTRITION_JS[open_brace:index + 1]
         index += 1
     raise AssertionError(f"unbalanced body for {name}")
+
+
+def test_diary_provider_writes_send_semantics_not_canonical_nutrition():
+    """F15: diary macros may preview in the browser, never authorize writes."""
+    forbidden = (
+        "serving_calories", "serving_protein", "serving_carbs",
+        "serving_fat", "metric_serving_amount",
+    )
+    for name in (
+            "confirmServingModal", "updateDiaryServing",
+            "updateDiaryServingQty", "updateDiaryServingQtyOnly"):
+        body = _js_function_body(name)
+        assert not any(field in body for field in forbidden), name
+    add_body = _js_function_body("confirmServingModal")
+    assert "fatsecret_food_id" in add_body
+    assert "serving_id" in add_body and "serving_quantity" in add_body
 
 
 def test_the_multi_food_quick_log_computes_no_macros_of_its_own():
