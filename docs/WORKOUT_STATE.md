@@ -595,11 +595,13 @@ sensitive payload.
 
 `today_plan` contains only `gun`, `tip`, `odak`, `sure_dk` (0..1440),
 `tahmini_kalori` (0..900), and at most 50 exercises. Exercise keys are `isim`,
-`set` (1..100), `tekrar`, `dinlenme`, and `not`, with bounded strings. The
-full-week projection is closed and key ordering deterministic; unknown/internal
-fields, IDs, other-day metadata, and generation metadata are dropped. Malformed
-schedules cannot be presented as rest or startable content. Both persisted
-shapes remain compatible: the legacy top-level seven-day list and wrapped
+`set` (1..100), `tekrar`, `dinlenme`, and `not`, with bounded strings.
+`dinlenme` and `not` are optional display text: an absent or null value
+projects as `""`, while a present value is held to the same type and length
+bounds. The full-week projection is closed and key ordering deterministic;
+unknown/internal fields, IDs, other-day metadata, and generation metadata are
+dropped. Malformed schedules cannot be presented as rest or startable
+content. Both persisted shapes remain compatible: the legacy top-level seven-day list and wrapped
 `{ "program": [...] }`.
 
 ### Consumer ownership matrix
