@@ -301,7 +301,7 @@ def test_generation_annotates_after_canonical_exercise_resolution():
     target = next(
         node for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef)
-        and node.name == "generate_training_plan_payload"
+        and node.name == "generate_training_plan_candidate"
     )
     lines = {
         "canonicalize_plan_exercises": [],
