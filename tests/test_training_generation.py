@@ -380,7 +380,18 @@ def test_generation_retries_truncated_response_with_repair_request(monkeypatch):
     assert "{\"program\": [" not in repr(events)
 
 
-def test_generation_does_not_retry_schema_invalid_output(monkeypatch):
+def test_generation_repairs_schema_invalid_output_once_then_fails_closed(monkeypatch):
+    """A schema-invalid candidate now gets the ONE bounded repair turn.
+
+    Previously this path was terminal on the first completion, which made the
+    plainest supported request unusable whenever the provider missed the shape
+    (in production: exercises on a ``tip="dinlenme"`` day, 4/4 live attempts).
+    A missed shape is the provider getting the FORMAT wrong on a request the
+    server already accepted — the same class as a malformed or truncated
+    response, which always had a repair turn. The budget is unchanged: still
+    at most ``MAX_PROVIDER_COMPLETIONS``, still no loop, and a candidate that
+    does not validate after the repair still raises.
+    """
     calls = []
 
     def fake_chat(**kwargs):
@@ -388,6 +399,32 @@ def test_generation_does_not_retry_schema_invalid_output(monkeypatch):
         return json.dumps({})
 
     with pytest.raises(PlanValidationError):
+        _generate_with_chat(monkeypatch, fake_chat)
+
+    assert [call["max_tokens"] for call in calls] == [4000, 4000]
+    assert "REPAIR:" in calls[1]["messages"][0]["content"]
+    # The repair turn carries the original accepted request verbatim; it must
+    # not re-ask for, relax or invent a preference.
+    assert calls[1]["messages"][0]["content"].startswith(
+        calls[0]["messages"][0]["content"])
+
+
+def test_generation_does_not_retry_semantically_invalid_output(monkeypatch):
+    """A candidate that contradicts the accepted command is a different
+    answer, not a formatting slip — it stays terminal on one completion."""
+    from app.services.training_generation.output_errors import SemanticInvalidError
+
+    plan = _valid_generated_plan()
+    for day in plan["program"]:
+        day["tip"] = "dinlenme"
+        day["egzersizler"] = []
+    calls = []
+
+    def fake_chat(**kwargs):
+        calls.append(kwargs)
+        return json.dumps(plan)
+
+    with pytest.raises(SemanticInvalidError):
         _generate_with_chat(monkeypatch, fake_chat)
 
     assert [call["max_tokens"] for call in calls] == [4000]

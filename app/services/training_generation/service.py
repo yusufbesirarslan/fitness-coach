@@ -55,6 +55,20 @@ _REPAIR_JSON_SUFFIX = (
     "no commentary."
 )
 
+# The schema repair turn. Appended to the ORIGINAL prompt, so the accepted
+# request (days, equipment, duration, focus, cardio, injuries) is carried over
+# verbatim and this turn can only restate the canonical shape — it never
+# invents, relaxes or re-asks a preference.
+_REPAIR_SCHEMA_SUFFIX = (
+    "REPAIR: previous output was valid JSON but not the canonical weekly plan "
+    "shape. Keep every requested preference above exactly as stated and fix "
+    "ONLY the structure: exactly 7 days with the canonical Turkish weekday "
+    'names; "tip" one of antrenman/dinlenme/kardiyo; a tip="dinlenme" day '
+    'MUST have "egzersizler": []; every exercise object exactly isim, set, '
+    "tekrar, dinlenme, not; set/sure_dk/tahmini_kalori integers; no extra "
+    "keys anywhere. Return ONLY the complete JSON object."
+)
+
 
 def persist_posted_injuries(user, posted_injuries, logger=None):
     if not isinstance(posted_injuries, str) or not posted_injuries.strip():
@@ -253,14 +267,35 @@ def generate_training_plan_payload(
                 raise TruncatedError(
                     "provider truncated a closed JSON object")
             raise
-    except (ParseFailedError, TruncatedError) as exc:
-        category = "truncated" if isinstance(exc, TruncatedError) else "parse_failed"
+    # One bounded repair turn, for provider FORMATTING failures only: a
+    # malformed/truncated response, or a well-formed one that missed the
+    # canonical shape. All three are the provider getting the format wrong on a
+    # request the server already accepted, and a basic supported plan must not
+    # become unusable because of that. The turn is spent from the SAME
+    # ``MAX_PROVIDER_COMPLETIONS`` budget (so there is one retry, never a loop),
+    # re-runs the full canonical validation via ``_parse_and_validate``, and
+    # re-raises the typed error unchanged if it still does not validate —
+    # nothing unvalidated can reach the caller, let alone the save path.
+    # SemanticInvalidError is deliberately NOT repaired: that is a candidate
+    # contradicting the accepted command, which is a different answer, not a
+    # formatting slip.
+    except (ParseFailedError, TruncatedError, SchemaInvalidError) as exc:
+        if isinstance(exc, TruncatedError):
+            category = "truncated"
+        elif isinstance(exc, SchemaInvalidError):
+            category = "schema_invalid"
+        else:
+            category = "parse_failed"
         _log(logger, category, repair_eligible=1, calls=len(budget.calls))
         _log(logger, "repair_attempted", reason=type(exc).__name__, calls=len(budget.calls))
         repair_tokens = REPAIR_MAX_TOKENS if isinstance(exc, TruncatedError) else PRIMARY_MAX_TOKENS
+        repair_suffix = (
+            _REPAIR_SCHEMA_SUFFIX if isinstance(exc, SchemaInvalidError)
+            else _REPAIR_JSON_SUFFIX
+        )
         try:
             text, truncated = budget.complete(
-                prompt=f"{prompt}\n\n{_REPAIR_JSON_SUFFIX}",
+                prompt=f"{prompt}\n\n{repair_suffix}",
                 system_prompt=system_prompt,
                 max_tokens=repair_tokens,
                 temperature=0.35,
@@ -269,9 +304,6 @@ def generate_training_plan_payload(
         except (ParseFailedError, TruncatedError, SchemaInvalidError, SemanticInvalidError):
             _log(logger, "repair_failed", calls=len(budget.calls))
             raise
-    except SchemaInvalidError:
-        _log(logger, "schema_invalid", calls=len(budget.calls), repair_eligible=0)
-        raise
     except SemanticInvalidError:
         _log(logger, "semantic_invalid", calls=len(budget.calls), repair_eligible=0)
         raise

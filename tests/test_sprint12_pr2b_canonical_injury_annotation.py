@@ -323,9 +323,12 @@ def test_generation_annotates_after_canonical_exercise_resolution():
     assert source.index(canonicalize_call) < source.index(annotate_call)
     assert source.index(annotate_call) < source.index(ozet_line)
 
+    # The single bounded repair now also covers SchemaInvalidError; the
+    # invariant this guards is unchanged - neither canonicalization nor
+    # annotation may run from inside the repair attempt.
     repair_block = source.split(
-        "except (ParseFailedError, TruncatedError) as exc:"
-    )[1].split("except SchemaInvalidError:")[0]
+        "except (ParseFailedError, TruncatedError, SchemaInvalidError) as exc:"
+    )[1].split("except SemanticInvalidError:")[0]
     assert "annotate_injuries" not in repair_block
     assert "canonicalize_plan_exercises" not in repair_block
 

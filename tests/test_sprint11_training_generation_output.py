@@ -501,7 +501,12 @@ def test_truncated_closed_json_still_gets_one_repair(monkeypatch):
     ]
 
 
-def test_schema_failure_does_not_enter_repair(monkeypatch):
+def test_schema_failure_enters_exactly_one_bounded_repair(monkeypatch):
+    """Retargeted: a missed SHAPE is a provider formatting failure and now gets
+    the same single repair turn parse/truncation always had (the plainest
+    supported request was otherwise unusable whenever the provider slipped).
+    Still bounded by MAX_PROVIDER_COMPLETIONS, still raises if it does not
+    validate, and the full canonical validation re-runs after the repair."""
     calls = []
 
     def fake(**kwargs):
@@ -509,6 +514,26 @@ def test_schema_failure_does_not_enter_repair(monkeypatch):
         return json.dumps({})
 
     with pytest.raises(SchemaInvalidError):
+        _generate(monkeypatch, fake)
+    assert len(calls) == MAX_PROVIDER_COMPLETIONS == 2
+
+
+def test_semantic_failure_does_not_enter_repair(monkeypatch):
+    """A candidate that contradicts the ACCEPTED command is a different answer,
+    not a formatting slip — it stays terminal on the first completion."""
+    from app.services.training_generation.output_errors import SemanticInvalidError
+
+    week = _week()
+    for day in week["program"]:
+        day["tip"] = "dinlenme"
+        day["egzersizler"] = []
+    calls = []
+
+    def fake(**kwargs):
+        calls.append(kwargs)
+        return json.dumps(week)
+
+    with pytest.raises(SemanticInvalidError):
         _generate(monkeypatch, fake)
     assert len(calls) == 1
 
@@ -720,7 +745,8 @@ def test_http_typed_exercise_unresolved(client, auth_user, monkeypatch):
 
 def test_canonicalization_runs_after_the_full_try_except_not_inside_repair():
     source = Path(training_service.__file__).read_text(encoding="utf-8")
-    entry_repair_catch = "except (ParseFailedError, TruncatedError) as exc:"
+    entry_repair_catch = (
+        "except (ParseFailedError, TruncatedError, SchemaInvalidError) as exc:")
     ozet_line = 'ozet = plan.get("haftalik_ozet", {})'
     canonicalize_call = "plan = canonicalize_plan_exercises(plan, exercise_context)"
 
@@ -733,15 +759,22 @@ def test_canonicalization_runs_after_the_full_try_except_not_inside_repair():
     # The repair boundary's own try/except body must not gain exercise-error
     # handling — canonicalization must never be reachable from inside it.
     repair_block = source.split(entry_repair_catch)[1].split(
-        "except SchemaInvalidError:")[0]
+        "except SemanticInvalidError:")[0]
     assert "canonicalize_plan_exercises" not in repair_block
     assert "GenerationExercise" not in repair_block
 
 
-def test_repair_catches_remain_exactly_parse_and_truncation_errors():
+def test_repair_catches_remain_exactly_the_formatting_errors():
+    """Exactly ONE repair entry point, covering exactly the three provider
+    FORMATTING failures. SemanticInvalidError must never be added to it."""
     source = Path(training_service.__file__).read_text(encoding="utf-8")
-    assert source.count(
-        "except (ParseFailedError, TruncatedError) as exc:") == 1
+    entry = "except (ParseFailedError, TruncatedError, SchemaInvalidError) as exc:"
+    assert source.count(entry) == 1
+    assert (
+        "except (ParseFailedError, TruncatedError, SchemaInvalidError, "
+        "SemanticInvalidError) as exc:"
+    ) not in source
+    # The inner catch still re-raises every typed failure of the repair turn.
     assert (
         "except (ParseFailedError, TruncatedError, SchemaInvalidError, "
         "SemanticInvalidError):"

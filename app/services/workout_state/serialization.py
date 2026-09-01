@@ -78,10 +78,36 @@ def _serialize_day(selected):
             "isim": _bounded_text(exercise.get("isim"), 120, required=True),
             "set": _bounded_int(exercise.get("set"), 1, 100),
             "tekrar": _bounded_text(exercise.get("tekrar"), 40),
-            "dinlenme": _bounded_text(exercise.get("dinlenme"), 40),
-            "not": _bounded_text(exercise.get("not"), 240),
+            "dinlenme": _optional_bounded_text(exercise, "dinlenme", 40),
+            "not": _optional_bounded_text(exercise, "not", 240),
         })
     return projected
+
+
+def _optional_bounded_text(exercise, key, maximum):
+    """Read an exercise's optional display text, absent or not.
+
+    ``dinlenme`` and ``not`` carry no meaning to any consumer beyond being
+    shown, and a canonical plan can legitimately be missing them: the writer
+    that appends an exercise to an existing day persists ``isim``/``set``/
+    ``tekrar`` (plus the resolved catalog id) only, and the save validator
+    already treats ``not`` as optional. Demanding a ``str`` here
+    made one such entry raise, which ``/training/bootstrap`` turns into a
+    fail-closed 500 — so a plan the user still owns rendered as
+    "Workout state unavailable".
+
+    This is the whole compatibility boundary, and deliberately the narrowest
+    one: ABSENT (or null) becomes "". A value that is PRESENT is still held to
+    the exact same type and length bounds as before, and every other field —
+    ``isim``, ``set``, ``tekrar``, ``gun``, ``tip``, ``odak``, the numeric
+    bounds and the seven-day/weekday/tip authority — is untouched. Genuinely
+    unrepresentable content still fails the snapshot closed rather than
+    leaking a partial plan.
+    """
+    value = exercise.get(key)
+    if value is None:
+        return ""
+    return _bounded_text(value, maximum)
 
 
 def _bounded_text(value, maximum, *, required=False):
