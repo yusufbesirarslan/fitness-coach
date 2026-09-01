@@ -277,6 +277,13 @@ def _stream_bedrock(user_id, question, context, history, language,
             usage = _add_usage(usage, _usage_of(final))
 
             if getattr(final, "stop_reason", None) != "tool_use":
+                provider_text = "".join(buffered)
+                grounded = coach_confirmation.grounded_provider_reply(
+                    user_id, language, provider_text)
+                if grounded != provider_text:
+                    yield from _emit_text(
+                        grounded, provider="server", usage=usage)
+                    return
                 yield from _flush_buffered(buffered, parts)
                 text = "".join(parts)
                 if not text and tools_ran == 0:
@@ -289,6 +296,11 @@ def _stream_bedrock(user_id, question, context, history, language,
 
             if not coach_confirmation.holds_stream_preamble(
                     _tool_use_names(final)):
+                provider_text = "".join(buffered)
+                grounded = coach_confirmation.grounded_provider_reply(
+                    user_id, language, provider_text)
+                if grounded != provider_text:
+                    buffered.clear()
                 yield from _flush_buffered(buffered, parts)
 
             convo.append({"role": "assistant", "content": final.content})
