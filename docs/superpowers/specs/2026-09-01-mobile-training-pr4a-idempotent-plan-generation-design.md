@@ -1,8 +1,8 @@
 # Mobile Training PR4A: Durable Idempotent Plan Generation Design
 
-**Date:** 2026-09-01  
-**Status:** Approved for implementation planning  
-**Base:** `origin/main` at `2cfd008e1e8ab5f320a7bf810c485d0a4759a894`  
+**Date:** 2026-09-01
+**Status:** Approved for implementation planning
+**Base:** `origin/main` at `2cfd008e1e8ab5f320a7bf810c485d0a4759a894`
 **Branch:** `mobile-training-pr4a-idempotent-plan-generation`
 
 ## 1. Purpose
