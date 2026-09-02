@@ -164,9 +164,12 @@ def user_owned_intent(message=None, history=None, user_id=None):
     record, never assistant prose and never client-supplied history.
     """
     message = current_user_message() if message is None else message
-    stored = (
-        clarifications.load(user_id) if user_id is not None
-        else clarifications.load_current())
+    try:
+        stored = (
+            clarifications.load(user_id) if user_id is not None
+            else clarifications.load_current())
+    except clarifications.ClarificationAuthorityUnavailable:
+        stored = None
     accepted = _is_clarification_acceptance(message) if stored else (
         parse_confirmation_intent(message) == CONFIRM)
     current_rx = parse_prescription(message)
@@ -193,14 +196,20 @@ def user_owned_intent(message=None, history=None, user_id=None):
 
 def refresh_clarification_for_turn(user_message, user_id=None):
     """Drop a leftover clarification when this turn is a new mutation."""
-    stored = (
-        clarifications.load(user_id) if user_id is not None
-        else clarifications.load_current())
+    try:
+        stored = (
+            clarifications.load(user_id) if user_id is not None
+            else clarifications.load_current())
+    except clarifications.ClarificationAuthorityUnavailable:
+        return
     intent = parse_confirmation_intent(user_message)
     if intent == CONFIRM or _is_clarification_acceptance(user_message):
         return
     if intent == CANCEL:
-        clarifications.clear(user_id)
+        try:
+            clarifications.clear(user_id)
+        except clarifications.ClarificationAuthorityUnavailable:
+            return
         return
     if stored and _is_continuation_reply(user_message, stored):
         return
@@ -210,6 +219,25 @@ def refresh_clarification_for_turn(user_message, user_id=None):
     if stored and user_message and not _is_continuation_reply(
             user_message, stored):
         clarifications.clear(user_id)
+
+
+def is_continuation_attempt(message):
+    """Whether this turn looks like a clarification continuation, not a new mutation."""
+    if not isinstance(message, str) or not message.strip():
+        return False
+    if parse_confirmation_intent(message) in (CONFIRM, CANCEL):
+        return True
+    if _is_clarification_acceptance(message):
+        return True
+    if _exercise_from_text(message):
+        return False
+    if find_explicit_weekday(message) is not None:
+        return True
+    rx = parse_prescription(message)
+    if rx.sets is not None or rx.reps is not None:
+        return True
+    return bool(re.fullmatch(
+        r"\s*\d+(?:\s*[-–—]\s*\d+)?\s*", message.strip()))
 
 
 def _is_continuation_reply(message, stored):
@@ -598,6 +626,8 @@ def followup_mutation(user_id=None):
     if not stored:
         return None
     message = current_user_message()
+    if parse_confirmation_intent(message) == CANCEL:
+        return None
     if not _is_continuation_reply(message, stored):
         return None
     explicit = find_explicit_weekday(message)

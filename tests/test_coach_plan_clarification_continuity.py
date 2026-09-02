@@ -5,8 +5,10 @@ grounded fields must survive on a user-scoped server store. Persistence
 assertions are on the plan row, journal, proposals and workout logs.
 """
 import json
+import time
 
 import pytest
+from flask import session as flask_session
 
 from app.extensions import db
 from app.models import (
@@ -15,6 +17,7 @@ from app.models import (
 )
 from app.observability import assign_request_id
 from app.services import ai_coach, coach_confirmation, plan_confirmation
+from app.services.coach_plan_tools import clarifications as clar_mod
 from app.services.coach_plan_tools import results
 from app.services.plan_mutation.validation import WEEKDAYS
 from app.services.today_facts import get_active_plan
@@ -494,3 +497,193 @@ def test_bypassing_replace_user_day_grounding_misses_friday(
         })
     assert result["status"] != results.STATUS_APPLIED or (
         "Dumbbell Biceps Curl" not in names(user.id, "Cuma"))
+
+
+# ── Production continuation authority ─────────────────────────────────────────
+
+class _ClarificationRedis:
+    """Shared-store stand-in. ``fail=True`` is a production Redis outage."""
+
+    def __init__(self, fail=False):
+        self.store = {}
+        self.fail = fail
+
+    def get(self, key):
+        if self.fail:
+            raise RuntimeError("redis down")
+        return self.store.get(key)
+
+    def setex(self, key, ttl, value):
+        if self.fail:
+            raise RuntimeError("redis down")
+        self.store[key] = value
+        return True
+
+    def delete(self, key):
+        if self.fail:
+            raise RuntimeError("redis down")
+        self.store.pop(key, None)
+        return 1
+
+    def getdel(self, key):
+        if self.fail:
+            raise RuntimeError("redis down")
+        return self.store.pop(key, None)
+
+
+def _executable_add_record(user_id, **overrides):
+    record = {
+        "user_id": int(user_id),
+        "operation": "add_exercise",
+        "day": "Cuma",
+        "exercise": "Walking Lunge",
+        "replacement": "",
+        "suggestion": "",
+        "sets": 3,
+        "reps": "8-12",
+        "proposed_sets": 3,
+        "proposed_reps": "8-12",
+        "candidate_days": [],
+        "reason": results.REASON_MISSING_PRESCRIPTION,
+        "created_at": time.time(),
+    }
+    record.update(overrides)
+    return record
+
+
+def _assert_no_mutation(user_id, before):
+    _assert_unchanged(user_id, before)
+    assert "Walking Lunge" not in names(user_id, "Cuma")
+    assert len(journal(user_id)) == 0
+    assert plan_confirmation.get_pending(user_id) is None
+    assert TrainingPlanConfirmationProposal.query.filter_by(
+        user_id=user_id).count() == 0
+    assert WorkoutLog.query.filter_by(user_id=user_id).count() == 0
+
+
+def test_cross_worker_shared_authority_applies_once(
+        app, split_user, tools_on, monkeypatch):
+    """Create on worker A, resume on worker B via the shared store only."""
+    shared = _ClarificationRedis()
+    worker_a = {}
+    worker_b = {}
+    monkeypatch.setattr(clar_mod, "_redis", lambda: shared)
+    monkeypatch.setattr(clar_mod, "_MEMORY", worker_a)
+
+    before = _snapshot(split_user.id)
+    _turn1_add(app, split_user.id, "Add Walking Lunges to my leg workout.")
+    assert any(shared.store.values())
+
+    monkeypatch.setattr(clar_mod, "_MEMORY", worker_b)
+    applied = _turn2(app, split_user.id, "yes it would be good")
+    assert applied is not None
+    added = _friday_slot(split_user.id)["egzersizler"][-1]
+    assert added["isim"] == "Walking Lunge"
+    assert added["set"] == 3
+    assert added["tekrar"] == "8-12"
+    assert plan_version(split_user.id) == before[1] + 1
+    assert len(journal(split_user.id)) == 1
+
+    after = _snapshot(split_user.id)
+    again = _turn2(app, split_user.id, "yes")
+    _assert_unchanged(split_user.id, after)
+    assert len(journal(split_user.id)) == 1
+    assert again is None or "added" not in (again or "").lower() or (
+        "nothing was changed" in (again or "").lower())
+
+
+def test_shared_store_outage_fail_closed_does_not_mutate(
+        app, split_user, tools_on, monkeypatch):
+    """Redis is configured but down: local copies must not execute."""
+    down = _ClarificationRedis(fail=True)
+    local = {split_user.id: _executable_add_record(split_user.id)}
+    monkeypatch.setattr(clar_mod, "_redis", lambda: down)
+    monkeypatch.setattr(clar_mod, "_MEMORY", local)
+    before = _snapshot(split_user.id)
+
+    reply = _turn2(app, split_user.id, "yes it would be good")
+    _assert_no_mutation(split_user.id, before)
+    assert reply is not None
+    lowered = reply.lower()
+    assert "nothing was changed" in lowered
+    assert "try again" in lowered
+    assert "has been added" not in lowered
+
+
+def test_stale_local_copy_cannot_execute_when_shared_record_is_gone(
+        app, split_user, tools_on, monkeypatch):
+    """Redis miss (consumed/expired/cleared) must not revive process-local state."""
+    shared = _ClarificationRedis()
+    monkeypatch.setattr(clar_mod, "_redis", lambda: shared)
+    before = _snapshot(split_user.id)
+    _turn1_add(app, split_user.id, "Add Walking Lunges to my leg workout.")
+    record = json.loads(next(iter(shared.store.values())))
+    shared.store.clear()
+    monkeypatch.setattr(clar_mod, "_MEMORY", {split_user.id: record})
+
+    reply = _turn2(app, split_user.id, "yes it would be good")
+    _assert_no_mutation(split_user.id, before)
+    assert reply is None or "has been added" not in (reply or "").lower()
+
+
+def test_session_copy_is_not_executable_when_shared_record_is_gone(
+        app, split_user, tools_on, monkeypatch):
+    """A leftover signed session blob is transport, not mutation authority."""
+    shared = _ClarificationRedis()
+    monkeypatch.setattr(clar_mod, "_redis", lambda: shared)
+    before = _snapshot(split_user.id)
+    record = _executable_add_record(split_user.id)
+    monkeypatch.setattr(clar_mod, "_MEMORY", {})
+
+    with app.test_request_context("/ask", method="POST"):
+        flask_session[clar_mod._KEY] = record
+        flask_session.modified = True
+        _fresh_turn(app, "yes it would be good", user_id=split_user.id)
+        reply = coach_confirmation.resolve_pending_turn(split_user.id, "en")
+
+    _assert_no_mutation(split_user.id, before)
+    assert reply is None or "has been added" not in (reply or "").lower()
+
+
+def test_successful_yes_consumes_state_so_a_second_yes_cannot_replay(
+        app, split_user, tools_on):
+    before = _snapshot(split_user.id)
+    _turn1_add(app, split_user.id, "Add Walking Lunges to my leg workout.")
+    first = _turn2(app, split_user.id, "yes it would be good")
+    assert first is not None
+    added = _friday_slot(split_user.id)["egzersizler"][-1]
+    assert added["isim"] == "Walking Lunge"
+    assert plan_version(split_user.id) == before[1] + 1
+    assert len(journal(split_user.id)) == 1
+
+    after = _snapshot(split_user.id)
+    second = _turn2(app, split_user.id, "yes")
+    _assert_unchanged(split_user.id, after)
+    assert len(journal(split_user.id)) == 1
+    assert names(split_user.id, "Cuma").count("Walking Lunge") == 1
+    assert second is None or "has been added" not in (second or "").lower() or (
+        "nothing was changed" in (second or "").lower())
+
+
+def test_cancelled_clarification_is_not_executable(
+        app, split_user, tools_on):
+    before = _snapshot(split_user.id)
+    _turn1_add(app, split_user.id, "Add Walking Lunges to my leg workout.")
+    cancelled = _turn2(app, split_user.id, "no")
+    _assert_no_mutation(split_user.id, before)
+    later = _turn2(app, split_user.id, "yes it would be good")
+    _assert_no_mutation(split_user.id, before)
+    assert later is None or "has been added" not in (later or "").lower()
+    assert cancelled is None or "has been added" not in (cancelled or "").lower()
+
+
+def test_expired_clarification_is_not_executable(
+        app, split_user, tools_on, monkeypatch):
+    before = _snapshot(split_user.id)
+    _turn1_add(app, split_user.id, "Add Walking Lunges to my leg workout.")
+    now = time.time()
+    monkeypatch.setattr(
+        clar_mod.time, "time", lambda: now + clar_mod._TTL_SECONDS + 5)
+    reply = _turn2(app, split_user.id, "yes it would be good")
+    _assert_no_mutation(split_user.id, before)
+    assert reply is None or "has been added" not in (reply or "").lower()

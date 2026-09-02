@@ -7,9 +7,14 @@ is not an authority: assistant prose cannot mint a prescription, and a
 client-supplied history cannot either.
 
 The payload is a closed field set. TTL is short; a new mutation-shaped turn
-discards a leftover record. Persistence is user-scoped and server-owned so
-a second HTTP request (including /ask/stream) can resume without the Flask
-session cookie having been rewritten after streaming headers.
+discards a leftover record.
+
+Production executable authority is the shared Redis record. Process-local
+memory is used only when Redis is not configured (tests/dev). The signed
+Flask session may be mirrored for transport/UI, but is never read to
+execute a mutation. If the shared store is configured and cannot be read
+or written, continuation fails closed rather than running from stale
+worker-local state.
 """
 import json
 import time
@@ -17,7 +22,13 @@ import time
 _KEY = "_coach_plan_clarification"
 _TTL_SECONDS = 30 * 60
 _REDIS_PREFIX = "fitx:coach:plan_clarification:"
+_TAKEN_ATTR = "_coach_plan_clarification_taken"
 _MEMORY = {}
+
+
+class ClarificationAuthorityUnavailable(Exception):
+    """Shared continuation store could not be read or mutated. Fail closed."""
+
 
 _REMEMBERABLE = frozenset({
     "missing_prescription",
@@ -77,12 +88,7 @@ def load(user_id):
 
 
 def load_current():
-    """Session-scoped clarification for this request, if still fresh."""
-    store = _session_store()
-    if store is not None:
-        record = _fresh(store.get(_KEY))
-        if record is not None:
-            return record
+    """Still-valid clarification for the turn's authenticated user."""
     try:
         from flask import g
         user_id = getattr(g, "_coach_plan_user_id", None)
@@ -93,6 +99,13 @@ def load_current():
     return None
 
 
+def consume(user_id):
+    """Atomically take the record so a second continuation cannot execute it."""
+    if not _valid_user(user_id):
+        return None
+    return _take(int(user_id))
+
+
 def clear(user_id=None):
     """Drop the stored clarification. Owner-checked when ``user_id`` is set."""
     if user_id is None:
@@ -101,35 +114,12 @@ def clear(user_id=None):
             user_id = getattr(g, "_coach_plan_user_id", None)
         except RuntimeError:
             user_id = None
-    store = _session_store()
-    if store is not None:
-        record = store.get(_KEY)
-        if user_id is not None and isinstance(record, dict):
-            if record.get("user_id") != int(user_id):
-                pass
-            else:
-                store.pop(_KEY, None)
-        else:
-            store.pop(_KEY, None)
-        try:
-            store.modified = True
-        except Exception:
-            pass
+    _drop_session(user_id)
     if _valid_user(user_id):
         _drop(int(user_id))
 
 
 def _write(user_id, record):
-    store = _session_store()
-    if store is not None:
-        store[_KEY] = record
-        try:
-            store.modified = True
-        except Exception:
-            pass
-    memory = _memory()
-    if memory is not None:
-        memory[user_id] = record
     redis_client = _redis()
     if redis_client is not None:
         try:
@@ -139,7 +129,14 @@ def _write(user_id, record):
                 json.dumps(record, ensure_ascii=False),
             )
         except Exception:
-            pass
+            return
+        _drop_memory(user_id)
+        _mirror_session(record)
+        return
+    memory = _memory()
+    if memory is not None:
+        memory[user_id] = record
+    _mirror_session(record)
 
 
 def _read(user_id):
@@ -148,36 +145,125 @@ def _read(user_id):
         try:
             raw = redis_client.get(_REDIS_PREFIX + str(user_id))
         except Exception:
-            raw = None
-        if raw:
-            try:
-                record = json.loads(raw)
-            except (TypeError, ValueError):
-                record = None
-            fresh = _fresh(record)
-            if fresh is not None:
-                return fresh
+            raise ClarificationAuthorityUnavailable
+        if not raw:
+            return _request_taken(user_id)
+        try:
+            record = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        return _fresh(record)
+    taken = _request_taken(user_id)
+    if taken is not None:
+        return taken
     memory = _memory()
     if memory is not None:
-        fresh = _fresh(memory.get(user_id))
-        if fresh is not None:
-            return fresh
-    store = _session_store()
-    if store is not None:
-        return _fresh(store.get(_KEY))
+        return _fresh(memory.get(user_id))
     return None
 
 
-def _drop(user_id):
+def _take(user_id):
+    redis_client = _redis()
+    if redis_client is not None:
+        try:
+            raw = _take_redis(redis_client, user_id)
+        except Exception:
+            raise ClarificationAuthorityUnavailable
+        _drop_memory(user_id)
+        _drop_session(user_id)
+        if not raw:
+            return None
+        try:
+            record = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        fresh = _fresh(record)
+        if fresh is None or fresh.get("user_id") != user_id:
+            return None
+        _stash_taken(fresh)
+        return fresh
     memory = _memory()
+    record = None
     if memory is not None:
-        memory.pop(user_id, None)
+        record = _fresh(memory.pop(user_id, None))
+    _drop_session(user_id)
+    if record is None or record.get("user_id") != user_id:
+        return None
+    _stash_taken(record)
+    return record
+
+
+def _stash_taken(record):
+    try:
+        from flask import g
+        setattr(g, _TAKEN_ATTR, record)
+    except RuntimeError:
+        pass
+
+
+def _request_taken(user_id):
+    try:
+        from flask import g
+        record = getattr(g, _TAKEN_ATTR, None)
+    except RuntimeError:
+        return None
+    fresh = _fresh(record)
+    if fresh is None or fresh.get("user_id") != int(user_id):
+        return None
+    return fresh
+
+
+def _take_redis(redis_client, user_id):
+    key = _REDIS_PREFIX + str(user_id)
+    getter = getattr(redis_client, "getdel", None)
+    if callable(getter):
+        return getter(key)
+    raw = redis_client.get(key)
+    if raw:
+        redis_client.delete(key)
+    return raw
+
+
+def _drop(user_id):
+    _drop_memory(user_id)
     redis_client = _redis()
     if redis_client is not None:
         try:
             redis_client.delete(_REDIS_PREFIX + str(user_id))
         except Exception:
             pass
+
+
+def _drop_memory(user_id):
+    memory = _memory()
+    if memory is not None:
+        memory.pop(user_id, None)
+
+
+def _mirror_session(record):
+    store = _session_store()
+    if store is None:
+        return
+    store[_KEY] = record
+    try:
+        store.modified = True
+    except Exception:
+        pass
+
+
+def _drop_session(user_id):
+    store = _session_store()
+    if store is None:
+        return
+    record = store.get(_KEY)
+    if user_id is not None and isinstance(record, dict):
+        if record.get("user_id") != int(user_id):
+            return
+    store.pop(_KEY, None)
+    try:
+        store.modified = True
+    except Exception:
+        pass
 
 
 def _fresh(record):

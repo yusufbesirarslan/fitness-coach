@@ -7,6 +7,7 @@
   "coach.plan.exercise_suggest": "{suggestion} demek mi istedin? Onaylamadan hi\u00e7bir \u015fey de\u011fi\u015fmedi.",
   "coach.plan.workout_ambiguous": "Birden fazla uyan antrenman buldum ({candidates}). Hangisini kullanay\u0131m? Hi\u00e7bir \u015fey de\u011fi\u015fmedi.",
   "coach.plan.workout_unknown": "Bu antrenman\u0131 aktif plan\u0131nla e\u015fle\u015ftiremedim; hi\u00e7bir \u015fey de\u011fi\u015fmedi. Hangi g\u00fcn\u00fc kastediyorsun?",
+  "coach.plan.clarification_unavailable": "Bu plan de\u011fi\u015fikli\u011fine \u015fu an devam edemedim; hi\u00e7bir \u015fey de\u011fi\u015fmedi. L\u00fctfen tekrar dene.",
   "today.title": "Bugün",
   "today.greeting": "Merhaba",
   "today.status.no_plan": "Henüz bir antrenman planın yok.",

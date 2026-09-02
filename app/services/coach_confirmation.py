@@ -18,12 +18,15 @@ from app.observability import assign_request_id
 from app.services import coach_plan_tools, plan_confirmation
 from app.services.coach_plan_policy import CANCEL, CONFIRM, NONE
 from app.services.coach_plan_tools import results
+from app.services.coach_plan_tools import clarifications as clar_mod
 from app.services.coach_plan_tools.grounding import (
     PROPOSED_REPS,
     PROPOSED_SETS,
+    current_user_message,
     followup_add_arguments,
     followup_mutation,
     invalid_candidate_result,
+    is_continuation_attempt,
 )
 from app.services.coach_plan_tools.weekdays import (
     localize_weekday,
@@ -415,20 +418,29 @@ def _complete_grounded_followup(user_id, language):
 
     Completes a server-owned clarification record from the previous turn.
     Assistant chat text is not authority. Confirmation proposals are
-    handled above via TrainingPlanConfirmationProposal.
+    handled above via TrainingPlanConfirmationProposal. Shared-store
+    failure fails closed: no mutation, truthful retry copy.
     """
-    invalid = invalid_candidate_result(user_id)
-    if invalid:
-        return _format_plan_clarification(invalid, language)
-    mutation = followup_mutation(user_id)
-    if not mutation:
-        arguments = followup_add_arguments(user_id)
-        if not arguments:
+    try:
+        invalid = invalid_candidate_result(user_id)
+        if invalid:
+            return _format_plan_clarification(invalid, language)
+        mutation = followup_mutation(user_id)
+        if not mutation:
+            arguments = followup_add_arguments(user_id)
+            if not arguments:
+                return None
+            tool, arguments = "add_training_plan_exercise", arguments
+        else:
+            tool, arguments = mutation
+        taken = clar_mod.consume(user_id)
+        if taken is None:
             return None
-        tool, arguments = "add_training_plan_exercise", arguments
-    else:
-        tool, arguments = mutation
-    result = coach_plan_tools.execute_plan_tool(user_id, tool, arguments)
+        result = coach_plan_tools.execute_plan_tool(user_id, tool, arguments)
+    except clar_mod.ClarificationAuthorityUnavailable:
+        if is_continuation_attempt(current_user_message()):
+            return t("coach.plan.clarification_unavailable", locale=language)
+        return None
     if result.get("status") in (results.STATUS_APPLIED, results.STATUS_REPLAYED):
         return _format_plan_applied(result, language)
     if result.get("status") == results.STATUS_NEEDS_INPUT:
