@@ -601,9 +601,12 @@ def test_gallery_delete_removes_like_and_comment_children(client, auth_user, mak
 def test_feed_page_uses_shared_app_shell(client, auth_user):
     html = client.get("/feed").get_data(as_text=True)
 
-    # feed artık Profil sekmesi altında ikincil sayfadır
-    assert 'href="/edit-profile" class="ab-tab active"' in html
+    # Feed is a Community deep link — no primary tab should be active.
+    assert 'class="ab-tab active"' not in html
+    assert 'aria-current="page"' not in html
     assert 'class="global-header"' in html
+    assert 'data-nav-id="today"' in html
+    assert 'data-nav-id="coach"' in html
 
 
 def test_feed_template_preserves_exact_metadata_label_casing():
@@ -640,20 +643,19 @@ def test_chat_template_render_pump_check_card_includes_timestamp_and_unavailable
     assert "p.timePosted || p.createdAt || ''" in html
 
 
-def test_shell_partials_have_five_tabs_and_mobile_drawer():
-    # Alt sekme çubuğu (5 sekme) değişmez. İkincil özellikler ayrıca başlıktaki
-    # ☰ mobil drawer'ından (yalnızca <1024px) da erişilir — Profil hub'ıyla aynı set.
+def test_shell_partials_have_four_primary_destinations_and_no_drawer():
     root = Path(__file__).resolve().parents[1]
     bar = (root / "templates" / "_actionbar.html").read_text(encoding="utf-8")
-    for href in ('href="/"', 'href="/nutrition"', 'href="/training"',
-                 'href="/progress-page"', 'href="/edit-profile"'):
-        assert f'{href} class="ab-tab' in bar
     header = (root / "templates" / "_nav.html").read_text(encoding="utf-8")
-    assert 'id="header-menu-btn"' in header
-    assert 'id="nav-drawer"' in header
-    for href in ("/friends", "/feed", "/leaderboard", "/quests",
-                 "/pump-check-gallery", "/supplements"):
-        assert f'href="{href}" class="nav-drawer-link"' in header
+    for partial in (bar, header):
+        assert "nav_primary" in partial
+        assert 'id="header-menu-btn"' not in partial
+        assert 'id="nav-drawer"' not in partial
+        assert "nav-drawer" not in partial
+    assert 'href="/nutrition"' not in bar
+    assert 'href="/edit-profile"' not in bar
+    assert 'class="header-bell"' in header
+    assert 'class="header-avatar"' in header
 
 
 def test_like_create_and_delete_updates_count(client, auth_user, make_user):

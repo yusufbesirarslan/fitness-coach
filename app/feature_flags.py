@@ -279,11 +279,11 @@ ROLLOUT_FLAGS = (
     FeatureFlag(
         key="UIUX_NAV_V2_ENABLED",
         capability=(
-            "Replaces the legacy 5-tab shell (Home/Nutrition/Training/Progress/"
-            "Profile) with the four-destination information architecture "
-            "(Today/Plan/Coach/Progress) and moves Nutrition + Community + "
-            "utility into the secondary drawer tier. Presentation only; every "
-            "route keeps its own @require_auth."),
+            "Historical presentation flag for the four-destination information "
+            "architecture (Today/Plan/Coach/Progress). UX-1 PR2 made that shell "
+            "the production chrome; this key remains in the registry but no "
+            "longer selects a user-reachable legacy five-tab branch. "
+            "Presentation only; every route keeps its own @require_auth."),
         owner=_OWNER,
         default=False,
         depends_on=(),

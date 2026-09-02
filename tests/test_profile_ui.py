@@ -31,9 +31,14 @@ def test_profile_structural_anchors(client, auth_user):
 def test_profile_hub_destinations_preserved(client, auth_user):
     html = _html(client)
     for href in ("/friends", "/feed", "/leaderboard", "/quests",
-                 "/supplements", "/premium", "/logout"):
+                 "/challenges", "/logout"):
         assert f'href="{href}" class="hub-link' in html, href
+    assert 'href="/pump-check-gallery" class="hub-link' not in html
+    assert 'href="/supplements" class="hub-link' not in html
+    assert 'href="/premium" class="hub-link' not in html
     assert 'data-action="setLang"' in html
+    assert 'href="/premium"' in html
+    assert 'href="/supplements"' in html
 
 
 def test_membership_free_shows_upgrade(client, auth_user):

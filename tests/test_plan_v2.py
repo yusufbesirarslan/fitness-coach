@@ -363,7 +363,8 @@ def test_weekly_never_mounts_without_active_plan(app, client, make_user, login):
 # ══════════════════════════════════════════════════════════════════════════
 
 def test_plan_flag_independent_of_today_and_nav(app, client, make_user, login):
-    # Plan ON must not force Today v2 or Nav v2 on the Plan page.
+    # Plan ON must not force Today v2. Production chrome is always the
+    # four-destination shell (Plan tab active on /training).
     app.config["UIUX_PLAN_V2_ENABLED"] = True
     app.config["UIUX_TODAY_V2_ENABLED"] = False
     app.config["UIUX_NAV_V2_ENABLED"] = False
@@ -371,7 +372,8 @@ def test_plan_flag_independent_of_today_and_nav(app, client, make_user, login):
     html = client.get("/training").get_data(as_text=True)
     assert "data-plan-v2" in html
     assert "data-today-v2" not in html
-    assert 'data-nav-id="today"' not in html             # legacy nav preserved
+    assert 'data-nav-id="plan"' in html
+    assert 'aria-current="page"' in html
 
 
 def test_new_plan_copy_is_axisai_only():

@@ -1,9 +1,7 @@
-{# Paylaşılan gezinme ikonları (AxisAI UIUX Sprint 1 PR1).
-   Tek kaynak: hem v2 alt çubuk hem ikincil çekmece bu makrodan ikon alır —
-   ayrı elle bakımlı SVG kopyaları YOK. Yeni ikon kütüphanesi eklenmez; yollar
-   mevcut _nav/_actionbar/edit_profile SVG'lerinden alınmıştır. İkonlar DEKORATİF:
-   aria-hidden="true" → erişilebilir ad bitişik metin etiketinden gelir, ekran
-   okuyucuda çift okuma olmaz. Boyut/renk .ab-tab svg / .nav-drawer-link svg
+{# Paylaşılan gezinme ikonları (AxisAI UX-1 PR2).
+   Tek kaynak: üretim alt çubuk bu makrodan birincil ikonları alır.
+   Yeni ikon kütüphanesi eklenmez. İkonlar DEKORATİF: aria-hidden="true" →
+   erişilebilir ad bitişik metin etiketinden gelir. Boyut/renk .ab-tab svg
    token kurallarından miras alınır. #}
 {% macro icon(name) -%}
 <svg viewBox="0 0 24 24" aria-hidden="true">
