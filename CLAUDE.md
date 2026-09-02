@@ -53,6 +53,7 @@ Deploy: tek AWS EC2 üzerinde Docker Compose (önceden Railway'deydi).
 - s3_helper.py — S3 görsel yükleme + pre-signed URL (EC2 IAM Instance Profile ile auth; AWS anahtarı hardcode YOK)
 - migrations/ — Alembic (Flask-Migrate) şema geçmişi
 - templates/ + static/ — Türkçe UI (index, nutrition, training, progress, setup, friends, chat, quests, leaderboard, ...)
+- docs/PRODUCT_IA.md — Product Information Architecture contract (UX-1 PR1). Canonical destinations (Today · Plan · Coach · Progress), ownership matrix, chrome deprecation (hamburger, Coach FAB), and route-stability rules. `app/nav.py` is the flagged presentational shell; this document is the product-level authority for subsequent UX convergence PRs.
 - Dockerfile / docker-compose.yml — web (gunicorn, tek worker/8 thread) + redis; Postgres artık compose içinde değil, prod'da external RDS/DATABASE_URL ile gelir; servisler loopback'e bağlı
 - nginx.conf — host reverse proxy: / → Flask:5000, /fatsecret/rest/server.api → loopback proxy (127.0.0.1:3000 — ayrı süreç DEĞİL, host nginx'in kendi server bloğu; süpervizyon = nginx systemd; ayrıntı/geçmiş: deploy/fatsecret-proxy.md — deploy.yml dinleyiciyi kontrol eder, /health?deep=1 raporlar)
 - tests/ — pytest (menü çıkarımı, makro alaka, nutrition pipeline)

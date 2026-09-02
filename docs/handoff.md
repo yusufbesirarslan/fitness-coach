@@ -5300,3 +5300,44 @@ Automatic substitution · a `WorkoutLog` → catalog join or history backfill ·
 mobile generate contract · typed replace on save · generate idempotency ·
 per-exercise progression or risk metadata (the deleted `EXERCISE_KB` fields were
 never reviewed and are not product truth).
+
+---
+
+## UX-1 PR1 — Product Information Architecture Contract
+
+Date: 2026-09-02
+Sprint/PR: AxisAI Product UX Convergence — UX-1 PR1
+Branch: `docs/ux1-pr1-product-ia-contract`
+Base: `origin/main` @ `27ae521`
+
+### Objective
+
+Lock a repo-grounded Product IA contract so PR2 (global navigation convergence)
+can be implemented without reopening destination identity, ownership, or URL
+stability. Docs only — no chrome, route, flag, or template changes.
+
+### Artifact
+
+`docs/PRODUCT_IA.md` is the product-level authority. It inventories both
+production shells (legacy 5-tab default and flagged Nav v2), maps every
+user-facing destination to exactly one canonical home, and marks the hamburger
+and Coach FAB for later removal.
+
+`app/nav.py` remains the flagged presentational list. Where it disagrees on
+**secondary placement** (Nutrition as a drawer peer, Gallery as Community,
+hamburger as durable secondary access), the product contract wins; PR2 updates
+the executable nav list and `tests/test_nav_contract.py`.
+
+Primary destinations already agree and stay locked: Today `/` · Plan
+`/training` · Coach `/coach` · Progress `/progress-page`.
+
+### Non-goals (honoured)
+
+No Home redesign, no visual changes, no production navigation behavior change,
+no hamburger/FAB/route/redirect implementation, no domain UI redesigns, no API
+or backend changes.
+
+### Follow-up
+
+PR2 implements the chrome in `docs/PRODUCT_IA.md` §D.3 / §K. Do not reopen the
+four primaries, the web URL lock, or the ownership matrix.
