@@ -15,6 +15,7 @@ starter.py lokalde de sorunsuz import edilir. is_enabled() False dönerse çağ�
 taraflar görsel yüklemeyi sessizce atlar (temel akış bloklanmaz).
 """
 import os
+import re
 import uuid
 import logging
 from datetime import datetime
@@ -70,6 +71,15 @@ class S3Error(Exception):
     temel kullanıcı akışını bloklamadan zarifçe düşebilsin diye."""
 
 
+class UnsafeObjectKey(S3Error):
+    """Silme isteği, bu uygulamanın ÜRETMEDİĞİ bir nesne anahtarına gitti.
+
+    F14'ün silme primitifi bilinçli olarak DAR: yalnızca `_build_key`'in
+    ürettiği öğün-fotoğrafı grameriyle birebir eşleşen ve çağıranın sahibi
+    olduğu anahtarlar silinebilir. Veritabanındaki serbest metin ASLA rastgele
+    bir nesneyi silme yetkisine dönüşmez."""
+
+
 def is_enabled():
     """boto3 mevcut VE bir bucket yapılandırılmışsa True. Aksi halde çağıranlar
     yükleme/presign adımlarını atlar (lokal geliştirme güvenli kalır)."""
@@ -120,6 +130,54 @@ def key_belongs_to_user(key, user_id):
     ÖNCE anahtarın sahibini doğrulayabilsin diye açılır — ikinci bir anahtar
     grameri kopyası çıkmasın."""
     return _key_belongs_to(key, user_id)
+
+
+# F14 (Sprint 13 PR4). Öğün fotoğrafı silme primitifinin KABUL ETTİĞİ tek dilbilgisi
+# — `_build_key("meals", ...)` çıktısının birebir kendisi. Uzantı kümesi
+# `_EXT_BY_MIME` değerleri + bilinmeyen MIME'ın düştüğü "bin". Bu desen bilerek
+# dar: defterdeki serbest metin (bozuk URL, yabancı kova, yol geçişi) hiçbir
+# zaman bir nesneyi silme yetkisine dönüşmemeli (bkz. UnsafeObjectKey).
+_MEAL_PHOTO_KEY = re.compile(
+    r"meals/(?P<user_id>[1-9][0-9]{0,17})/[0-9]{4}/[0-9]{2}/"
+    r"[0-9a-f]{32}\.(?:jpg|png|webp|gif|bin)")
+
+
+def meal_photo_key_is_deletable(key, owner_user_id):
+    """Bu anahtar, `owner_user_id`'ye ait ve BİZİM ürettiğimiz bir öğün fotoğrafı mı?
+
+    Saf yüklem (ağ yok): çağıranlar (defter silme otoritesi) satırı silmeden
+    ÖNCE yaşam döngüsünün kapatılabilir olduğunu doğrulayabilsin diye açıktır.
+    """
+    if not isinstance(key, str) or not key:
+        return False
+    match = _MEAL_PHOTO_KEY.fullmatch(key)
+    return bool(match) and match.group("user_id") == str(owner_user_id)
+
+
+def delete_meal_photo(key, expected_user_id):
+    """SAHİBİ BİLİNEN tek bir öğün fotoğrafı nesnesini kalıcı olarak sil (F14).
+
+    Kova SUNUCU tarafından seçilir (parametre değildir) ve anahtar
+    `meal_photo_key_is_deletable` ile sınırlanır: çağıran ne kova ne de rastgele
+    bir URL/önek verebilir. Prefix ya da kullanıcı-klasörü silme YOKTUR — tam
+    olarak bir nesne.
+
+    S3 DeleteObject idempotenttir: olmayan bir anahtar için de başarı döner,
+    bu yüzden aynı düzeltmenin tekrarı güvenle yakınsar.
+
+    Anahtar tanınmazsa `UnsafeObjectKey`, taşıma hatasında `S3Error` yükseltir —
+    ikisi de FAIL-CLOSED; sessiz başarı yoktur."""
+    if not meal_photo_key_is_deletable(key, expected_user_id):
+        logger.warning("[S3] event=meal_photo_delete_denied reason=unsafe_key")
+        raise UnsafeObjectKey("Öğün fotoğrafı anahtarı silinebilir biçimde değil.")
+    try:
+        client = _get_client()
+        client.delete_object(Bucket=S3_BUCKET_NAME, Key=key)
+    except (BotoCoreError, ClientError) as e:
+        logger.warning(
+            "[S3] event=meal_photo_delete_failed error_type=%s", type(e).__name__)
+        raise S3Error(str(e)) from e
+    logger.info("[S3] event=meal_photo_deleted")
 
 
 def _build_key(prefix, content_type, user_id):

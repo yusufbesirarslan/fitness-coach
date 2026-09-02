@@ -129,8 +129,8 @@ longer break a full-repository run (**P2-04**).
 
 | ID | Sev | One line |
 |---|---|---|
-| F1 | P1 | Web cannot delete, move, or edit a committed `MealLog` row — no correction path |
-| F14 | P1 | Deleting a ledger row releases no S3 meal photo; `s3_helper` exposes no deletion primitive at all |
+| ~~F1~~ | P1 | **CLOSED by PR4.** The web owns one correction primitive for a committed `MealLog`: a current-day hard delete addressed by opaque token with an `If-Match` revision, served by the shared mutation authority. Slot move and editing remain out of scope (C4, C5) |
+| ~~F14~~ | P1 | **CLOSED by PR4.** `s3_helper.delete_meal_photo` is the one bounded object-deletion primitive, and `mobile_diary_mutation.delete_entry` — the *only* canonical deletion path, shared by web and mobile — calls it. Row commits first, object is released second, and an unreleased object is never reported as success |
 | F2 | P1 | Three server derivations of one daily macro-target split; `barcode._target_macros` disagrees with coach/menu for every non-bulk goal |
 | F3a | P2 | `barcode._target_macros` fabricates a `2000 kcal` target and publishes it on the **live** `GET /api/food/barcode` payload — currently rendered by nothing |
 | F4 | P1 | Web multi-food quick log posts **per-100 g** values as the meal total (quantity fixed at 100 g, never chosen) |
@@ -893,7 +893,7 @@ stated so it can be checked, not argued.
 | **N6** | Null and zero are truthful at every published boundary: a missing macro is not a measured zero, and an unset goal is not `0` | ⚠️ true on `/api/v1`; false on the legacy web payloads | accepted as legacy (C6); not a blocker |
 | **N7** | User- and provider-supplied nutrition is bounded before persistence on every path | ✅ already true (clamp + DB `CHECK`) | — |
 | **N8** | Repeated requests from **supported first-party write flows** are safe through that flow's declared replay authority (an idempotency key, or an atomic claim on immutable state) | ✅ **satisfied by PR3, at that scope.** W3's `_claim_diary_meal` claim is now declared and pinned by test; W6 records a deterministic key derived from the immutable message id; the provider `/meal-log` command **requires** an `Idempotency-Key`. **Not claimed:** that every arbitrary accepted HTTP request is replay-safe — see the scope note below | PR3 |
-| **N9** | Mobile mutations are stale-safe, and **every supported first-party client that can create a current-day consumed-food entry has a truthful correction path for that current-day entry** — deletion being the required primitive. That path must be ownership-isolated, stale-safe, free of client-fabricated totals, must close the lifecycle of a photo-bearing entry, and must tell the user where deletion is lossy. Edits that cannot be proven from stored state remain explicitly unsupported rather than silently approximated; correction of **past-day** entries and web slot move are outside Sprint 13 | ❌ F1, F14 (web has no correction path; deletion releases no stored object) | PR4 |
+| **N9** | Mobile mutations are stale-safe, and **every supported first-party client that can create a current-day consumed-food entry has a truthful correction path for that current-day entry** — deletion being the required primitive. That path must be ownership-isolated, stale-safe, free of client-fabricated totals, must close the lifecycle of a photo-bearing entry, and must tell the user where deletion is lossy. Edits that cannot be proven from stored state remain explicitly unsupported rather than silently approximated; correction of **past-day** entries and web slot move are outside Sprint 13 | ✅ **SATISFIED by PR4** — F1 and F14 both closed | PR4 |
 | **N10** | No unowned nutrition scoring/adherence definition ships on any surface | ❌ F9, F10 | PR5 |
 
 #### N8 scope — what the replay guarantee does and does not cover
@@ -970,6 +970,8 @@ and refuse once `is_logged` is set. A web user who logs the wrong meal cannot
 fix it, and the error propagates into every total, nudge and weekly report
 forever. Blocks **N9**. → PR4.
 
+> **CLOSED by PR4.** `DELETE /meal-log/entry/<entry_token>` is the web's correction primitive: `@require_auth`, `auth_write_limit`, `If-Match` required, server `day_key()`, and no delete logic of its own — it calls `mobile_diary_mutation.delete_entry`. The narrative above is preserved as the state at discovery.
+
 **F14 — deleting a ledger row releases no stored meal photo.**
 `MealLog.photo_key` holds an S3 object key (`models.py:573`), written by the web
 `/meal-log` path (`meallog.py:63,118`) and read back by every serializer. **No
@@ -988,6 +990,8 @@ delete would widen the leak. It is also what makes delete + re-log lossy in a wa
 a mobile user cannot repair at all, since mobile has no photo-logging path
 (§8). Blocks **N9**. → PR4 (which must add the deletion primitive as well as
 call it).
+
+> **CLOSED by PR4.** `s3_helper` gained exactly one deletion function — `delete_meal_photo(key, expected_user_id)` — and `delete_entry` calls it. The narrative above is preserved as the state at discovery.
 
 **F2 — three server derivations of one daily macro-target split, two of which
 disagree numerically.** `app/services/barcode.py:226` uses `calories * 0.45 / 4`
@@ -1369,6 +1373,107 @@ PR3  ─────→ PR4        (operational ordering, not a technical depend
 * **Out of scope:** editing description, nutrition, quantity, serving or provider
   (C4); **web slot move**; correction of past-day entries; advanced diary
   editing of any kind; soft delete, tombstones or a mutation journal; history.
+
+#### PR4 — as shipped (implementation evidence)
+
+Branch `sprint13-pr4-web-meal-correction`, based on `27ae521`. **No schema, no
+migration** (Alembic graph untouched), **no feature flag**, **no Flutter**, and
+no PR5 work. F1 = CLOSED · F14 = CLOSED · N9 = SATISFIED.
+
+**The web correction contract**
+
+| | |
+|---|---|
+| Route | `DELETE /meal-log/entry/<entry_token>` (`nutrition.delete_today_meal`) |
+| Auth | `@require_auth` + `@auth_write_limit`, and the repository's existing two-layer CSRF guard (Origin/Referer + session synchronizer token) — nothing was weakened to let `DELETE` through |
+| Entry identity | The opaque, owner-bound token the mobile contract already publishes. No `MealLog.id`, no `user_id` parameter, no day parameter |
+| Precondition | `If-Match: "<revision>"`, parsed by the shared `parse_if_match` |
+| Day authority | Server `day_key()`. A query string, a client date and a browser timezone all get no vote |
+| Success | `204`, empty body |
+| `428` | `If-Match` absent |
+| `400` | `If-Match` malformed |
+| `404` | Absent **or** owned by someone else **or** not today — one indistinguishable response, so the route is never an existence oracle |
+| `412` | Stale revision |
+| `409` | The row's stored photo reference is not one this application minted — fail closed (see below) |
+| `500` | The row is gone but its object was not released — a known, logged orphan, never dressed as success |
+
+**Shared mutation authority.** The route holds no delete of its own. Ownership,
+the day boundary, the `SELECT … FOR UPDATE` row lock, the revision comparison
+*under* that lock and the stored-object lifecycle all live in
+`app/services/mobile_diary_mutation`. The module keeps its name (renaming it
+would be churn across a shipped mobile contract) but its docstring now says what
+it is: the only ledger-mutation authority, with two transports. There is no
+`web_delete_meal_service.py`, no second revision algorithm and no second
+entry-token algorithm — a structural test asserts all three. The mobile request
+and response semantics are unchanged.
+
+One projection was added rather than duplicated: `entry_identity(row, secret)`
+returns `(entry_token, revision)` for one ORM row, and `/meal-log/today` calls
+it. `/meal-log/history` deliberately does **not** — publishing a correction
+identity for a past day is how N9 would quietly grow into a historical
+ledger-management API.
+
+**The object lifecycle (F14).** `s3_helper.delete_meal_photo(key,
+expected_user_id)` is the one new primitive. The bucket is server-chosen and is
+not a parameter; the key must match the exact grammar `_build_key("meals", …)`
+mints *and* be owned by the caller. No prefix delete, no user-folder delete, no
+URL parsing, and no web route accepts a storage key. S3 `DeleteObject` is
+idempotent for an absent key, so a repeat converges.
+
+**Ordering — the decision, and why.** PostgreSQL and S3 cannot share a
+transaction, so one failure shape has to be chosen:
+
+* **release-then-commit** can leave a *surviving row pointing at a deleted
+  object* — the exact state §17's rollback table rules out;
+* **commit-then-release** (chosen) can leave a released row's object behind.
+
+The first is unrecoverable from the user's side, so the row commits first and
+the object is released second. The commit also drops the row lock, so no lock is
+held across the S3 round-trip. Consequences, each with a test:
+
+| Failure | Durable outcome | Retry |
+|---|---|---|
+| S3 delete fails | Row **deleted**, object **retained**. `StoredObjectNotReleased` → `500`; the orphan is logged at ERROR with `event=meal_photo_orphaned` and the key, so the leak is visible rather than silent | Safe: converges on `404` and issues no further object call |
+| DB commit fails | Nothing deleted, nothing released — the object call is downstream of the commit and is never reached | Safe: fully retryable |
+| Photo reference unrecognised | Validated **before** the row is touched → `409`, row and object both intact | Deterministic; needs an operator, not a retry |
+| No photo | No object call at all | n/a |
+| Two concurrent deletes | The row lock admits one committer, so exactly one object deletion is issued; the loser gets `404` | Safe |
+
+Mobile deletion runs the identical path, which is what makes F14 closed
+*repository-wide* rather than closed on the web only. Its generic `except`
+already maps the new failure to the existing `503` envelope, so the published
+mobile contract did not move.
+
+**Rollback.** Still a plain `git revert` with no data repair. As §17 already
+states, deletions already performed stay deleted and objects already released
+stay released — the commit-then-release ordering is what guarantees a reverted
+build can never find a surviving row pointing at a deleted object.
+
+**Browser.** The current-day meal card gains one action. It is present only when
+the server published an identity *and* a revision, so a history card cannot
+render one. `deleteMeal()` confirms first — naming the stored photo when the row
+owns one — guards a single in-flight request, disables the control while it runs,
+removes nothing optimistically, and ends every path (`204`, `404`, `412`, `5xx`,
+network fault) in a canonical `loadTodayData()` re-read. It performs no macro
+arithmetic of its own; a structural test rejects local totals manipulation. The
+copy states that deletion is permanent and that re-logging does not recreate the
+entry — no undo is implied, because none exists (C4).
+
+**Tests.** `tests/test_web_meal_correction.py` (44) is the acceptance suite;
+`tests/test_mobile_diary_mutation_pg.py` gained two real-PostgreSQL races
+(concurrent delete releases the photo exactly once; a slot-move/delete race never
+orphans a surviving row) in a module CI's `pg_concurrency` job already selects.
+The two discovery guards that pinned F1 and F14 open were **inverted, not
+deleted**, so the closure is asserted where the defect used to be. All five
+required mutations were run and each failed the guard it should:
+
+| Mutation | Guard that failed |
+|---|---|
+| A — bypass the `If-Match` comparison | `test_a_stale_revision_deletes_nothing_and_releases_nothing` |
+| B — drop owner binding and day scoping | `…indistinguishable_from_an_absent_one`, `…historical_entry_is_not_deletable…`, `…day_from_the_server_not_the_request` |
+| C — remove the S3 cleanup from `delete_entry` | 5 lifecycle tests + `test_deleting_a_ledger_row_releases_its_stored_meal_photo` |
+| D — swallow the S3 failure after the row is deleted | `test_object_release_failure_is_never_reported_as_success` |
+| E — browser removes the card locally instead of re-reading | `test_the_browser_delete_re_reads_canonical_state_and_subtracts_nothing` |
 
 ### PR5 — Retire or confine unowned Nutrition intelligence and presentation authority
 

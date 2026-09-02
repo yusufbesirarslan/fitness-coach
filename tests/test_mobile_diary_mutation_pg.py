@@ -221,3 +221,101 @@ def test_returned_fresh_revision_allows_the_next_slot_move(pg_mutation_app):
             SetSlotCommand("aksam"), app.config["SECRET_KEY"])
 
     assert second["slot"] == "aksam"
+
+
+# ---------------------------------------------------------------------------
+# F14 (Sprint 13 PR4) - the stored-object lifecycle under a real row-lock race
+# ---------------------------------------------------------------------------
+
+PHOTO_KEY = "meals/{user_id}/2026/08/" + "a1" * 16 + ".jpg"
+
+
+@pytest.fixture
+def photo_backed_row(pg_mutation_app):
+    """Give the seeded row a stored photo and a faked S3 network boundary."""
+    from app.extensions import db
+    from app.models import MealLog
+    import s3_helper
+
+    app, user_id = pg_mutation_app
+    key = PHOTO_KEY.format(user_id=user_id)
+    with app.app_context():
+        row = MealLog.query.one()
+        row.photo_key = key
+        db.session.commit()
+
+    lock = threading.Lock()
+    deleted = []
+
+    class RacingS3Client:
+        def delete_object(self, **kwargs):
+            with lock:
+                deleted.append(kwargs)
+            return {"ResponseMetadata": {"HTTPStatusCode": 204}}
+
+    original = (s3_helper._BOTO3_AVAILABLE, s3_helper.S3_BUCKET_NAME,
+                s3_helper._client)
+    s3_helper._BOTO3_AVAILABLE = True
+    s3_helper.S3_BUCKET_NAME = "pg-race-bucket"
+    s3_helper._client = RacingS3Client()
+    try:
+        yield app, user_id, key, deleted
+    finally:
+        (s3_helper._BOTO3_AVAILABLE, s3_helper.S3_BUCKET_NAME,
+         s3_helper._client) = original
+
+
+def test_concurrent_deletes_release_the_photo_exactly_once(photo_backed_row):
+    """Two racing corrections; one row deleted, one object deletion issued.
+
+    This is the assumption the ordering decision rests on and the reason the
+    module runs against real PostgreSQL: the object call happens AFTER the
+    commit, so it is the `SELECT ... FOR UPDATE` row lock - not S3 idempotence -
+    that keeps the loser from issuing a second deletion. SQLite cannot prove
+    that. (S3 DeleteObject is idempotent as well, which is belt and braces.)
+    """
+    from app.models import MealLog
+
+    app, user_id, key, deleted = photo_backed_row
+    target = _target(app, user_id)
+
+    outcomes = _race(app, [
+        _delete(app, user_id, target),
+        _delete(app, user_id, target),
+    ])
+
+    assert sorted(outcome[0] for outcome in outcomes.values()) == ["missing", "ok"]
+    with app.app_context():
+        assert MealLog.query.count() == 0
+    assert deleted == [{"Bucket": "pg-race-bucket", "Key": key}], (
+        "The losing contender reached the object store. Only the caller that "
+        "won the row lock and committed may release the object.")
+
+
+def test_a_slot_move_racing_a_delete_never_orphans_a_surviving_row(
+        photo_backed_row):
+    """The surviving-row-points-at-a-deleted-object state must be unreachable.
+
+    Whichever contender wins, the durable end state is one of exactly two: the
+    row survives WITH its object, or the row is gone AND its object was
+    released. A photo-bearing row that outlives its own photo is the failure
+    Sprint 13's rollback plan rules out, and this race is where it would appear.
+    """
+    from app.models import MealLog
+
+    app, user_id, key, deleted = photo_backed_row
+    target = _target(app, user_id)
+
+    _race(app, [
+        _set_slot(app, user_id, target, "ogle"),
+        _delete(app, user_id, target),
+    ])
+
+    with app.app_context():
+        survivors = MealLog.query.all()
+        if survivors:
+            assert survivors[0].photo_key == key
+            assert deleted == [], (
+                "A row survived while its stored object was released.")
+        else:
+            assert deleted == [{"Bucket": "pg-race-bucket", "Key": key}]

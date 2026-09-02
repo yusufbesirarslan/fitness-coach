@@ -110,6 +110,19 @@
 }
 .mc-edit svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; }
 .mc-edit:hover { color: var(--color-primary); background: var(--overlay-4); }
+/* Correction action (Sprint 13 PR4). Same 44px target and neutral resting
+   colour as `.mc-edit` - a destructive action should not shout from the card;
+   the danger tint arrives on hover, and the confirmation carries the weight. */
+.mc-del {
+  min-width: 44px; min-height: 44px; display: flex; align-items: center;
+  justify-content: center; color: var(--color-text-4); background: none;
+  border: none; cursor: pointer; border-radius: var(--radius-md);
+  transition: color var(--duration-fast) var(--ease-standard),
+              background var(--duration-fast) var(--ease-standard);
+}
+.mc-del svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 2; }
+.mc-del:hover { color: var(--color-danger); background: var(--overlay-4); }
+.mc-del[disabled] { opacity: .5; cursor: progress; }
 
 .slot-empty {
   display: inline-flex; align-items: center; justify-content: center;
@@ -490,6 +503,7 @@
 .log-fab:focus-visible,
 .log-sheet-opt:focus-visible,
 .meal-card .mc-edit:focus-visible,
+.meal-card .mc-del:focus-visible,
 .slot-empty:focus-visible,
 .scan-close:focus-visible,
 .qab:focus-visible {
@@ -500,5 +514,5 @@
 /* ── 14 · REDUCED MOTION ──────────────────────────────────────────── */
 @media (prefers-reduced-motion: reduce) {
   .meal-card, .wg.just-filled, .qab-done .qab-check, .water-num { animation: none !important; transition: none !important; }
-  .log-fab, .log-sheet-opt, .mc-edit, .slot-empty { transition: none !important; }
+  .log-fab, .log-sheet-opt, .mc-edit, .mc-del, .slot-empty { transition: none !important; }
 }

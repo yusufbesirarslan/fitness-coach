@@ -12,7 +12,7 @@ from app.auth_middleware import require_auth
 
 from app.blueprints.nutrition import bp
 from app.config import AI_RATELIMIT
-from app.extensions import _user_or_ip_key, db, limiter
+from app.extensions import _user_or_ip_key, auth_write_limit, db, limiter
 from app.i18n import current_locale, t
 from app.models import MealLog, UserSession
 from app.prompts import nutrition as nutrition_prompts
@@ -20,7 +20,7 @@ from app.services.ai import _openai_chat
 from app.services.nutrition_pipeline import sanitize_meal_total_macros
 from app.services.nutrition_targets import derive_daily_macro_targets
 from app.services.gamification import complete_quest_for_user
-from app.services import meal_idempotency, mobile_log_food
+from app.services import meal_idempotency, mobile_diary_mutation, mobile_log_food
 from app.services.mobile_nutrition.serialization import SLOT_BY_MEAL_LABEL
 from app.services.validators import _meal_photo_url, validate_meal_photo
 from app.timeutil import day_key, display_ddmm
@@ -330,9 +330,17 @@ def today_meals():
     meals = MealLog.query.filter_by(user_id=current_user.id, tarih=today)\
         .order_by(MealLog.created_at.asc()).all()
 
+    secret = current_app.config["SECRET_KEY"]
     result = []
     totals = {"kalori": 0, "protein": 0, "karb": 0, "yag": 0}
     for m in meals:
+        # F1/N9 (PR4). To correct a row the browser needs an addressable
+        # identity and a precondition — and nothing else. Both come from the ONE
+        # canonical projection (opaque, owner-bound): never `MealLog.id`, never a
+        # raw revision column, never the storage key. Published on the
+        # CURRENT-DAY surface only; /meal-log/history stays uncorrectable by
+        # construction, which is how N9 remains scoped to today.
+        entry_token, revision = mobile_diary_mutation.entry_identity(m, secret)
         result.append({
             "ogun": m.ogun,
             "yemekler": m.yemekler,
@@ -343,6 +351,9 @@ def today_meals():
             "source": getattr(m, "source", "manual") or "manual",
             "photo_url": _meal_photo_url(m),
             "created_at": m.created_at.isoformat() if m.created_at else None,
+            "entry_token": entry_token,
+            "revision": revision,
+            "has_photo": bool(m.photo_key),
         })
         totals["kalori"]  += m.kalori or 0
         totals["protein"] += m.protein or 0
@@ -350,6 +361,76 @@ def today_meals():
         totals["yag"]     += m.yag or 0
 
     return jsonify({"meals": result, "totals": totals, "tarih": display_ddmm(today)})
+
+
+@bp.route("/meal-log/entry/<entry_token>", methods=["DELETE"])
+@require_auth
+@auth_write_limit
+def delete_today_meal(entry_token):
+    """F1/N9: the web correction primitive — CURRENT-DAY HARD DELETE.
+
+    A thin transport over the canonical mutation authority. It owns the HTTP
+    shape and nothing else: ownership, the day boundary, the row lock, the
+    revision comparison under that lock and the stored-object lifecycle all
+    live in `mobile_diary_mutation` (shared with the native client, whose
+    contract is unchanged). This route deliberately holds no delete of its own.
+
+    The day comes from `day_key()` — the server's Istanbul day. A query string,
+    a client date and a browser timezone all get no vote, so a valid token for
+    an entry outside today addresses nothing and this never becomes a
+    historical ledger-management API.
+
+    Sprint 13 chose deletion as the correction primitive (C4, C5): there is no
+    slot move, no macro edit and no quantity correction here, and deletion is
+    lossy — the browser confirmation says so before it calls.
+
+    Statuses: 204 done · 428 precondition required · 400 malformed precondition
+    · 404 absent / not owned / not today · 412 stale · 409 the row's stored
+    object is unreleasable (fail closed) · 500 the row is gone but its object
+    was not released (a known, logged orphan — never a false success).
+    """
+    try:
+        revision = mobile_diary_mutation.parse_if_match(
+            request.headers.get("If-Match"))
+    except mobile_diary_mutation.MissingPrecondition:
+        return jsonify({"error": t("route.meal_delete_precondition_required")}), 428
+    except mobile_diary_mutation.InvalidPrecondition:
+        return jsonify({"error": t("route.meal_delete_precondition_invalid")}), 400
+
+    try:
+        mobile_diary_mutation.delete_entry(
+            current_user.id,
+            day_key(),
+            entry_token,
+            revision,
+            current_app.config["SECRET_KEY"],
+        )
+    except mobile_diary_mutation.EntryNotFound:
+        db.session.rollback()
+        # Deliberately identical for "never existed", "belongs to someone else"
+        # and "not today" — the response must not become an existence oracle.
+        return jsonify({"error": t("route.meal_not_found")}), 404
+    except mobile_diary_mutation.StaleDiaryEntry:
+        db.session.rollback()
+        return jsonify({"error": t("route.meal_delete_stale")}), 412
+    except mobile_diary_mutation.UnreleasableStoredObject:
+        db.session.rollback()
+        return jsonify({"error": t("route.meal_delete_photo_unreleasable")}), 409
+    except mobile_diary_mutation.StoredObjectNotReleased:
+        # The row IS deleted and that is durable. Reporting success anyway would
+        # hide a known orphan behind a 204 — exactly the shape of F14. The
+        # browser re-reads canonical state and sees the entry gone.
+        return jsonify({"error": t("route.meal_delete_photo_not_released")}), 500
+    except Exception as error:
+        try:
+            db.session.rollback()
+        except Exception:
+            pass
+        current_app.logger.error(
+            "nutrition event=meal_delete_failed error_type=%s",
+            type(error).__name__)
+        return jsonify({"error": t("route.meal_delete_failed")}), 500
+    return "", 204
 
 
 @bp.route("/meal-log/history")
