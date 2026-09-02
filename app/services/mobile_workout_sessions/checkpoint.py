@@ -32,7 +32,12 @@ MAX_SETS_PER_EXERCISE = 20
 MAX_REPS = 1_000
 MAX_WEIGHT_KG = 1_000.0
 MAX_ELAPSED_SECONDS = 86_400
-MAX_SNAPSHOT_BYTES = 16_384
+# A BACKSTOP, not a second limit. The per-dimension bounds above are the real
+# contract, so this must sit comfortably above the largest snapshot they allow
+# (32 exercises x 20 sets ~ 39 KB) -- otherwise a legitimate maximal workout
+# would be unpersistable and the client would get a 400 it could not act on.
+# It exists only to stop a pathological encoding, never a real workout.
+MAX_SNAPSHOT_BYTES = 65_536
 
 _KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{8,64}$")
 _REVISION_RE = re.compile(r"^(0|[1-9][0-9]{0,8})$")

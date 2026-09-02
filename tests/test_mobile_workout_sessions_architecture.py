@@ -402,6 +402,44 @@ def _call_offsets(source, needle):
         offset = source.find(needle, offset + 1)
 
 
+def test_the_byte_backstop_admits_the_largest_snapshot_the_bounds_allow():
+    """The per-dimension bounds and the byte cap must not contradict each other.
+
+    If the byte cap were the tighter limit, a client running a legitimate
+    maximal workout would be told its progress is malformed and would have no
+    way to comply -- the request IS within every documented bound. The cap is a
+    backstop against a pathological encoding, never a second contract.
+    """
+    # Import the MODULE by path: the package re-exports a `checkpoint` command
+    # of the same name, which would shadow it.
+    import importlib
+
+    contract = importlib.import_module(
+        "app.services.mobile_workout_sessions.checkpoint")
+
+    worst_case = {
+        "current_exercise_index": 0,
+        "elapsed_seconds": contract.MAX_ELAPSED_SECONDS,
+        "exercises": [
+            {
+                # Longest exercise identity the persisted column can hold.
+                "exercise_id": "e" * 64,
+                "sets": [
+                    {"index": index, "completed": True,
+                     "reps": contract.MAX_REPS,
+                     "weight_kg": contract.MAX_WEIGHT_KG}
+                    for index in range(contract.MAX_SETS_PER_EXERCISE)
+                ],
+            }
+            for _ in range(contract.MAX_EXERCISES)
+        ],
+    }
+    encoded = contract._canonical_json(worst_case).encode("utf-8")
+
+    assert len(encoded) <= contract.MAX_SNAPSHOT_BYTES, (
+        len(encoded), contract.MAX_SNAPSHOT_BYTES)
+
+
 # Query bounds (section 64).
 def test_a_checkpoint_costs_a_bounded_number_of_statements(
     app, monkeypatch, make_user

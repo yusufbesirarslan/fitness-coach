@@ -538,6 +538,12 @@ for all of its callers.
   checkpoint that landed after the client's last read.
 * The native completion is `visibility="private"`: PR5 excludes the feed/social
   surface, so no native completion fans a Pump Check out to friends.
+* Checkpoint bounds: 32 exercises, 20 sets each, reps 0-1000, weight 0-1000 kg
+  (quantized to one decimal so a semantically identical retry fingerprints
+  identically), elapsed 0-86400 s. The 64 KiB snapshot cap is a BACKSTOP against
+  a pathological encoding, deliberately above the ~40 KiB largest snapshot those
+  bounds allow -- a limit that rejected a legitimate maximal workout would give
+  the client a 400 it could not act on.
 
 #### Known edge: adopting a browser-started session
 
