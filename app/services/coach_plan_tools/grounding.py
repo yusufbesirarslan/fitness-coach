@@ -8,7 +8,7 @@ a bounded non-applying result.
 from dataclasses import dataclass, replace
 import re
 
-from app.services.coach_plan_policy import CONFIRM, parse_confirmation_intent
+from app.services.coach_plan_policy import CANCEL, CONFIRM, parse_confirmation_intent
 from app.services.plan_mutation import (
     AddExerciseCommand,
     MoveTrainingDayCommand,
@@ -17,7 +17,7 @@ from app.services.plan_mutation import (
     UpdateExercisePrescriptionCommand,
 )
 
-from . import results
+from . import clarifications, results
 from .exercise_grounding import (
     KIND_SUGGEST as EX_SUGGEST,
     KIND_UNKNOWN as EX_UNKNOWN,
@@ -27,7 +27,6 @@ from .prescriptions import (
     Prescription,
     merge_prescription,
     parse_prescription,
-    parse_proposed_prescription,
 )
 from .weekdays import canonicalize_weekday, find_explicit_weekday
 from .workout_targets import (
@@ -84,26 +83,6 @@ def current_turn_history():
         return []
 
 
-def _last_user_and_assistant(history):
-    previous_user = ""
-    previous_assistant = ""
-    if not history:
-        return previous_user, previous_assistant
-    # History may already exclude the current user turn.
-    for item in reversed(list(history)):
-        if not isinstance(item, dict):
-            continue
-        role = item.get("role")
-        content = item.get("content") or ""
-        if role == "assistant" and not previous_assistant:
-            previous_assistant = content
-        elif role == "user" and not previous_user:
-            previous_user = content
-        if previous_user and previous_assistant:
-            break
-    return previous_user, previous_assistant
-
-
 _REGION_WORDS = frozenset(
     token for names in _REGION_TOKENS.values() for token in names)
 
@@ -132,50 +111,120 @@ def _exercise_from_text(message):
     return " ".join(kept).strip()
 
 
-def user_owned_intent(message=None, history=None):
-    """Exercise / day / prescription the user actually named this turn."""
+def user_owned_intent(message=None, history=None, user_id=None):
+    """Exercise / day / prescription grounded for this turn.
+
+    Current-turn user text is always authority for newly typed values.
+    Completing a prior clarification reads the server-owned session
+    record, never assistant prose and never client-supplied history.
+    """
     message = current_user_message() if message is None else message
-    history = current_turn_history() if history is None else history
-    previous_user, previous_assistant = _last_user_and_assistant(history)
-    current_rx = parse_prescription(message)
-    previous_rx = parse_prescription(previous_user)
-    proposed = parse_proposed_prescription(previous_assistant)
     accepted = parse_confirmation_intent(message) == CONFIRM
-    rx = current_rx
-    if rx.sets is None and rx.reps is None:
-        if accepted and (proposed.sets is not None and proposed.reps is not None):
-            rx = proposed
-        elif previous_rx.sets is not None or previous_rx.reps is not None:
-            # Current turn is the missing half ("12" / "3x12") of a prior add.
-            if current_rx.sets is None and current_rx.reps is None:
-                rx = previous_rx
-            else:
-                rx = Prescription(
-                    sets=current_rx.sets or previous_rx.sets,
-                    reps=current_rx.reps or previous_rx.reps,
-                )
-        elif current_rx.sets is not None or current_rx.reps is not None:
-            rx = current_rx
+    current_rx = parse_prescription(message)
     current_name = _exercise_from_text(message)
-    if parse_confirmation_intent(message) == CONFIRM:
+    if accepted:
         current_name = ""
-    name = current_name or _exercise_from_text(previous_user)
+    stored = (
+        clarifications.load(user_id) if user_id is not None
+        else clarifications.load_current())
+    rx = current_rx
+    name = current_name
     source = message or ""
-    if not find_explicit_weekday(source) and not semantic_regions(source):
-        source = previous_user or source
+    accepted_proposal = False
+    if stored:
+        rx, name, source, accepted_proposal = _overlay_stored_clarification(
+            stored, message, current_rx, current_name, accepted)
     return {
         "message": message,
         "source": source,
         "exercise": name,
         "prescription": rx,
-        "accepted_proposal": accepted and proposed.sets is not None,
+        "accepted_proposal": accepted_proposal,
         "has_user_text": bool((message or "").strip()),
     }
 
 
+def refresh_clarification_for_turn(user_message):
+    """Drop a leftover clarification when this turn names a new exercise."""
+    intent = parse_confirmation_intent(user_message)
+    if intent == CONFIRM:
+        return
+    if intent == CANCEL:
+        clarifications.clear()
+        return
+    if _exercise_from_text(user_message):
+        clarifications.clear()
+
+
+def _overlay_stored_clarification(stored, message, current_rx, current_name,
+                                  accepted):
+    """Fill missing fields from the server-owned clarification record."""
+    rx = _prescription_from_store(stored, message, current_rx, accepted)
+    if accepted and stored.get("suggestion"):
+        name = stored.get("suggestion") or ""
+    else:
+        name = current_name or stored.get("exercise") or ""
+    source = message or ""
+    if not find_explicit_weekday(source) and not semantic_regions(source):
+        source = stored.get("day") or source
+    accepted_proposal = bool(
+        accepted and (
+            stored.get("proposed_sets") is not None
+            or stored.get("suggestion")))
+    return rx, name, source, accepted_proposal
+
+
+def _prescription_from_store(stored, message, current_rx, accepted):
+    if current_rx.sets is None and current_rx.reps is None:
+        current_rx = _bare_number_prescription(stored, message) or current_rx
+    if current_rx.sets is not None or current_rx.reps is not None:
+        return Prescription(
+            sets=(current_rx.sets if current_rx.sets is not None
+                  else stored.get("sets")),
+            reps=(current_rx.reps if current_rx.reps is not None
+                  else stored.get("reps")),
+        )
+    if accepted:
+        if (stored.get("proposed_sets") is not None
+                and stored.get("proposed_reps") is not None):
+            return Prescription(
+                sets=stored.get("proposed_sets"),
+                reps=stored.get("proposed_reps"),
+            )
+        if stored.get("sets") is not None and stored.get("reps") is not None:
+            return Prescription(
+                sets=stored.get("sets"), reps=stored.get("reps"))
+    return Prescription(sets=stored.get("sets"), reps=stored.get("reps"))
+
+
+def _bare_number_prescription(stored, message):
+    """A bare '12' / '8-12' completes the half the server asked for."""
+    if not isinstance(message, str):
+        return None
+    match = re.fullmatch(
+        r"\s*(\d+(?:\s*[-–—]\s*\d+)?)\s*", message.strip())
+    if not match:
+        return None
+    reason = stored.get("reason")
+    token = match.group(1)
+    if reason == results.REASON_MISSING_REPS:
+        return Prescription(reps=_normalize_bare_reps(token))
+    if reason == results.REASON_MISSING_SETS:
+        try:
+            return Prescription(sets=int(token))
+        except ValueError:
+            return None
+    return None
+
+
+def _normalize_bare_reps(token):
+    from .prescriptions import _normalize_reps
+    return _normalize_reps(token)
+
+
 def ground_command(user_id, command):
     """Return a ``Grounding``: ready command, or a non-applying result."""
-    intent = user_owned_intent()
+    intent = user_owned_intent(user_id=user_id)
     command = _canonicalize_command_days(command)
 
     if isinstance(command, (AddExerciseCommand, RemoveExerciseCommand,
@@ -184,12 +233,12 @@ def ground_command(user_id, command):
         target = resolve_workout_target(
             user_id, intent["source"] or intent["message"], command.day)
         if target.kind == KIND_AMBIGUOUS:
-            return Grounding(result=results.needs_input_result(
-                results.REASON_AMBIGUOUS_WORKOUT, command,
-                candidates=target.candidates))
+            return _needs_input(
+                user_id, results.REASON_AMBIGUOUS_WORKOUT, command,
+                candidates=target.candidates)
         if target.kind == KIND_NOT_FOUND:
-            return Grounding(result=results.needs_input_result(
-                results.REASON_WORKOUT_NOT_FOUND, command))
+            return _needs_input(
+                user_id, results.REASON_WORKOUT_NOT_FOUND, command)
         if target.kind == KIND_RESOLVED:
             command = replace(command, day=target.day)
         elif target.kind == KIND_NONE:
@@ -201,14 +250,15 @@ def ground_command(user_id, command):
         name = intent["exercise"] or command.exercise
         destination = resolve_destination(name)
         if destination.kind == EX_UNKNOWN:
-            return Grounding(result=results.needs_input_result(
-                results.REASON_EXERCISE_UNKNOWN,
-                replace(command, exercise=name)))
+            return _needs_input(
+                user_id, results.REASON_EXERCISE_UNKNOWN,
+                replace(command, exercise=name))
         if destination.kind == EX_SUGGEST:
-            return Grounding(result=results.needs_input_result(
-                results.REASON_EXERCISE_SUGGEST,
+            return _needs_input(
+                user_id, results.REASON_EXERCISE_SUGGEST,
                 replace(command, exercise=name),
-                suggestion=destination.suggestion))
+                suggestion=destination.suggestion,
+                user_rx=intent["prescription"])
         command = replace(command, exercise=destination.canonical_name)
         rx = merge_prescription(
             intent["prescription"],
@@ -222,15 +272,18 @@ def ground_command(user_id, command):
                 or intent["accepted_proposal"]):
             rx = intent["prescription"]
         if rx.sets is None and rx.reps is None and intent["has_user_text"]:
-            return Grounding(result=results.needs_input_result(
-                results.REASON_MISSING_PRESCRIPTION, command,
-                label=_label_for(user_id, command.day, intent["source"])))
+            return _needs_input(
+                user_id, results.REASON_MISSING_PRESCRIPTION, command,
+                label=_label_for(user_id, command.day, intent["source"]),
+                user_rx=rx)
         if rx.sets is None and intent["has_user_text"]:
-            return Grounding(result=results.needs_input_result(
-                results.REASON_MISSING_SETS, replace(command, reps=rx.reps)))
+            return _needs_input(
+                user_id, results.REASON_MISSING_SETS,
+                replace(command, reps=rx.reps), user_rx=rx)
         if rx.reps is None and intent["has_user_text"]:
-            return Grounding(result=results.needs_input_result(
-                results.REASON_MISSING_REPS, replace(command, sets=rx.sets)))
+            return _needs_input(
+                user_id, results.REASON_MISSING_REPS,
+                replace(command, sets=rx.sets), user_rx=rx)
         if rx.sets is None or rx.reps is None:
             return Grounding(command=replace(
                 command, sets=rx.sets, reps=rx.reps))
@@ -245,12 +298,12 @@ def ground_command(user_id, command):
             return Grounding(command=command)
         destination = resolve_destination(command.replacement)
         if destination.kind == EX_UNKNOWN:
-            return Grounding(result=results.needs_input_result(
-                results.REASON_EXERCISE_UNKNOWN, command))
+            return _needs_input(
+                user_id, results.REASON_EXERCISE_UNKNOWN, command)
         if destination.kind == EX_SUGGEST:
-            return Grounding(result=results.needs_input_result(
-                results.REASON_EXERCISE_SUGGEST, command,
-                suggestion=destination.suggestion))
+            return _needs_input(
+                user_id, results.REASON_EXERCISE_SUGGEST, command,
+                suggestion=destination.suggestion)
         command = replace(command, replacement=destination.canonical_name)
         if intent["has_user_text"]:
             rx = intent["prescription"]
@@ -267,8 +320,8 @@ def ground_command(user_id, command):
         if intent["has_user_text"]:
             rx = intent["prescription"]
             if rx.sets is None and rx.reps is None:
-                return Grounding(result=results.needs_input_result(
-                    results.REASON_MISSING_PRESCRIPTION, command))
+                return _needs_input(
+                    user_id, results.REASON_MISSING_PRESCRIPTION, command)
             command = replace(
                 command,
                 sets=rx.sets if rx.sets is not None else command.sets,
@@ -305,48 +358,54 @@ def _label_for(user_id, day, message):
     return target.label or day
 
 
-_CLARIFICATION_MARKERS = (
-    "how many sets and reps",
-    "kaç set",
-    "set ve tekrar",
-    "would you like",
-    "did you mean",
-    "bunu mu demek",
-    "i found your",
-    "antrenmanını",
-    "i couldn't find",
-    "bulamadım",
-)
+def _needs_input(user_id, reason, command, user_rx=None, **kwargs):
+    """Non-applying result, remembering accept-able clarifications."""
+    if reason in (
+            results.REASON_MISSING_PRESCRIPTION,
+            results.REASON_MISSING_SETS,
+            results.REASON_MISSING_REPS,
+            results.REASON_EXERCISE_SUGGEST):
+        rx = user_rx or Prescription()
+        clarifications.remember(user_id, {
+            "day": getattr(command, "day", "") or "",
+            "exercise": getattr(command, "exercise", "") or "",
+            "suggestion": kwargs.get("suggestion") or "",
+            "sets": rx.sets,
+            "reps": rx.reps,
+            "proposed_sets": (
+                PROPOSED_SETS
+                if reason == results.REASON_MISSING_PRESCRIPTION else None),
+            "proposed_reps": (
+                PROPOSED_REPS
+                if reason == results.REASON_MISSING_PRESCRIPTION else None),
+            "reason": reason,
+        })
+    else:
+        clarifications.clear(user_id)
+    return Grounding(result=results.needs_input_result(
+        reason, command, **kwargs))
 
 
-def _looks_like_our_clarification(assistant_text):
-    if not isinstance(assistant_text, str) or not assistant_text.strip():
-        return False
-    folded = assistant_text.casefold()
-    return any(marker in folded for marker in _CLARIFICATION_MARKERS)
-
-
-def followup_add_arguments():
+def followup_add_arguments(user_id=None):
     """Arguments for a server-owned ADD completing a prior clarification.
 
-    Returns ``None`` unless the current turn supplies the missing piece of
-    an add the server already grounded (prescription text, or yes to a
-    proposal the server itself wrote). The dummy weekday is replaced by
-    workout-target resolution against the previous user turn.
+    Returns ``None`` unless a clarification the server itself stored is
+    being completed this turn (prescription text, or yes to the stored
+    proposal). Assistant chat text is never read.
     """
-    intent = user_owned_intent()
+    stored = (
+        clarifications.load(user_id) if user_id is not None
+        else clarifications.load_current())
+    if not stored or not stored.get("day"):
+        return None
+    intent = user_owned_intent(user_id=user_id)
     if not intent["has_user_text"] or not intent["exercise"]:
         return None
     rx = intent["prescription"]
     if rx.sets is None or rx.reps is None:
         return None
-    _previous_user, previous_assistant = _last_user_and_assistant(
-        current_turn_history())
-    if not _looks_like_our_clarification(previous_assistant):
-        return None
-    from app.services.plan_mutation.validation import WEEKDAYS
     return {
-        "day": WEEKDAYS[0],
+        "day": stored["day"],
         "exercise": intent["exercise"],
         "sets": rx.sets,
         "reps": str(rx.reps),

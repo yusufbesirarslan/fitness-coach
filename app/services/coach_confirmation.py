@@ -407,10 +407,11 @@ def _format_plan_applied(result, language):
 def _complete_grounded_followup(user_id, language):
     """Apply a prescription the user just supplied or accepted.
 
-    Only when the previous assistant turn was our own clarification — never
-    a confirmation proposal, which is handled above.
+    Completes a server-owned clarification record from the previous turn.
+    Assistant chat text is not authority. Confirmation proposals are
+    handled above via TrainingPlanConfirmationProposal.
     """
-    arguments = followup_add_arguments()
+    arguments = followup_add_arguments(user_id)
     if not arguments:
         return None
     result = coach_plan_tools.execute_plan_tool(

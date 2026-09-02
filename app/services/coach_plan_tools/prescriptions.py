@@ -28,16 +28,6 @@ _REPS_WORD = re.compile(
     r"(?<!\w)(\d+(?:\s*[-–—]\s*\d+)?)\s*(?:reps?|tekrar(?:lar)?)\b",
     re.IGNORECASE,
 )
-# Server-authored proposal copy: "Would you like 3 sets of 8-12 reps?"
-_PROPOSED = re.compile(
-    r"(?:would you like|ister misin(?:iz)?)\s+(\d+)\s+sets?\s+of\s+"
-    r"(\d+(?:\s*[-–—]\s*\d+)?)\s+reps?",
-    re.IGNORECASE,
-)
-_PROPOSED_TR = re.compile(
-    r"(\d+)\s+set\s+(\d+(?:\s*[-–—]\s*\d+)?)\s+tekrar",
-    re.IGNORECASE,
-)
 
 
 def _normalize_reps(value):
@@ -66,19 +56,6 @@ def parse_prescription(message):
     if reps_match:
         reps = _normalize_reps(reps_match.group(1))
     return Prescription(sets=sets, reps=reps)
-
-
-def parse_proposed_prescription(message):
-    """Read back a prescription the server itself proposed in prior copy."""
-    if not isinstance(message, str) or not message.strip():
-        return Prescription()
-    match = _PROPOSED.search(message) or _PROPOSED_TR.search(message)
-    if not match:
-        return Prescription()
-    return Prescription(
-        sets=int(match.group(1)),
-        reps=_normalize_reps(match.group(2)),
-    )
 
 
 def merge_prescription(user_owned, tool_sets=None, tool_reps=None,

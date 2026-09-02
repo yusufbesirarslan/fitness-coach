@@ -146,8 +146,8 @@ def begin_turn(user_message="", history=None):
 
     ``user_message`` is the raw current user turn. Confirmation authority and
     prescription/workout grounding are derived from it here, not from the
-    model. ``history`` is prior user/assistant turns of this conversation,
-    used only to complete a clarification the server itself started.
+    model. A leftover clarification is discarded when this turn names a new
+    exercise; ``yes`` keeps the server-owned record so it can be accepted.
     """
     try:
         setattr(g, _BUDGET_ATTR, [])
@@ -157,6 +157,8 @@ def begin_turn(user_message="", history=None):
         setattr(g, _INTENT_ATTR, parse_confirmation_intent(user_message))
         setattr(g, _USER_MSG_ATTR, user_message or "")
         setattr(g, _HISTORY_ATTR, list(history or ()))
+        from .grounding import refresh_clarification_for_turn
+        refresh_clarification_for_turn(user_message)
     except RuntimeError:
         pass
 
@@ -393,6 +395,8 @@ def _mark_plan_changed(payload):
         return
     try:
         setattr(g, _CHANGED_ATTR, True)
+        from .clarifications import clear
+        clear()
     except RuntimeError:
         pass
 
@@ -402,6 +406,8 @@ def _mark_proposal_created(payload):
         return
     try:
         setattr(g, _PROPOSAL_ATTR, True)
+        from .clarifications import clear
+        clear()
     except RuntimeError:
         pass
 
