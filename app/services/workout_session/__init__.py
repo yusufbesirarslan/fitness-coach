@@ -36,6 +36,7 @@ from .models import (
     SessionView,
     compute_fingerprint,
 )
+from .queries import NativeWorkoutIdentity, advance_checkpoint, get_owned_session
 from .service import (
     abandon_session,
     build_session_view,
@@ -51,6 +52,10 @@ from .service import (
 __all__ = [
     # service API
     "start_session",
+    # PR5 native execution primitives
+    "NativeWorkoutIdentity",
+    "advance_checkpoint",
+    "get_owned_session",
     "get_current_session",
     "resume_session",
     "checkpoint_session",

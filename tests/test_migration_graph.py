@@ -36,10 +36,9 @@ def test_alembic_migrations_have_single_head():
 
     heads = sorted(set(revisions) - down_revisions)
 
-    # Sprint 13 PR4 (remediation) adds the durable meal-photo cleanup table as
-    # the sole new head, chained off Mobile Training PR4A's d3e4f5a6b7c8.
-    # One head only.
-    assert heads == ["e4f5a6b7c8d9"]
+    # Mobile Training PR5 adds the native workout-session execution columns as
+    # the sole new head, chained off Sprint 13 PR4's e4f5a6b7c8d9. One head only.
+    assert heads == ["f5a6b7c8d9e0"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -58,10 +57,11 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     revision_files = sorted(path.name for path in versions_dir.glob("*.py"))
 
     # The literal is the tripwire that makes "we added one small table" fail
-    # here first. 38 = the integrated origin/main baseline; 39 = plus Sprint 13
-    # PR4's e4f5a6b7c8d9, the durable meal-photo cleanup table. Sprint 11 PR4
-    # still contributes none of them, which is the claim this test guards.
-    assert len(revision_files) == 39
+    # here first. 39 = the integrated origin/main baseline; 40 = plus Mobile
+    # Training PR5's f5a6b7c8d9e0, which adds COLUMNS to the existing
+    # workout_session table and no new table. Sprint 11 PR4 still contributes
+    # none of them, which is the claim this test guards.
+    assert len(revision_files) == 40
     assert not any("exercise" in name for name in revision_files)
 
     catalog_path = (

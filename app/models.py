@@ -1288,6 +1288,36 @@ class WorkoutSession(db.Model):
     # Transition version — bumped on TERMINAL transitions for lost-update safety;
     # the heartbeat is a lock-free conditional update and does NOT use it.
     version = db.Column(db.Integer, nullable=False, default=1, server_default="1")
+    # -- Native execution state (Mobile Training PR5) -------------------------
+    # The opaque native workout reference the session was started for. Server
+    # verified against the owner's CURRENT plan at start; stored so a checkpoint
+    # can be validated against the same canonical workout the session began with,
+    # and so plan drift is detectable without re-deriving identity from weekday
+    # text. NULL for sessions started through the browser contract, which has no
+    # native workout reference -- those keep their unchanged PR3 behavior.
+    workout_ref = db.Column(db.String(32), nullable=True)
+    # Canonical plan lineage/mutation version captured at start. Soft, like
+    # planned_training_plan_id: recorded for drift detection, never a hard FK.
+    plan_lineage_id = db.Column(db.String(64), nullable=True)
+    plan_mutation_version = db.Column(db.Integer, nullable=True)
+    # Optimistic checkpoint revision -- the ONLY concurrency authority for durable
+    # progress. Starts at 0 and advances by exactly one per accepted checkpoint,
+    # through a conditional UPDATE matching the caller's declared base revision.
+    # Deliberately SEPARATE from ``version`` (terminal transitions) so a terminal
+    # transition can never be mistaken for progress, or vice versa.
+    checkpoint_revision = db.Column(
+        db.Integer, nullable=False, default=0, server_default="0")
+    # Bounded full progress snapshot (JSON text). Never unbounded: the native
+    # contract validates shape, membership, ranges and total size BEFORE this is
+    # written (app/services/mobile_workout_sessions/checkpoint.py).
+    checkpoint_data = db.Column(db.Text, nullable=True)
+    checkpoint_at = db.Column(db.DateTime, nullable=True)
+    # Durable replay identity of the LAST accepted checkpoint. Same key + same
+    # fingerprint replays without advancing the revision; same key + a different
+    # fingerprint is a conflict. An older key is not retained -- its base revision
+    # is stale by construction, so it is already rejected by the revision check.
+    checkpoint_idempotency_key = db.Column(db.String(64), nullable=True)
+    checkpoint_fingerprint = db.Column(db.String(64), nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     updated_at = db.Column(
         db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow,
