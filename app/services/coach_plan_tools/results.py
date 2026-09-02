@@ -50,6 +50,7 @@ STATUS_NO_OP = "no_op"
 STATUS_REPLAYED = "replayed"
 STATUS_CONFIRMATION_REQUIRED = "confirmation_required"
 STATUS_CANCELLED = "cancelled"
+STATUS_NEEDS_INPUT = "needs_user_input"
 STATUS_ERROR = "error"
 
 #: Bounded error vocabulary. One entry per way this can honestly fail; the
@@ -339,6 +340,67 @@ def confirmation_required_result(command, reason_codes):
         "note": (
             "Plan HENÜZ değişmedi. Kullanıcıya neyin onay beklediğini anlat; "
             "uygulandığını SÖYLEME. Onay bir SONRAKİ mesajdır; sen onaylama."),
+    }
+
+
+REASON_MISSING_PRESCRIPTION = "missing_prescription"
+REASON_MISSING_SETS = "missing_sets"
+REASON_MISSING_REPS = "missing_reps"
+REASON_EXERCISE_UNKNOWN = "exercise_unknown"
+REASON_EXERCISE_SUGGEST = "exercise_suggest"
+REASON_AMBIGUOUS_WORKOUT = "ambiguous_workout"
+REASON_WORKOUT_NOT_FOUND = "workout_not_found"
+
+#: Model-facing recovery for a grounded clarification. Plan is unchanged.
+_INPUT_SUMMARIES = {
+    REASON_MISSING_PRESCRIPTION: (
+        "Egzersiz ve antrenman günü bulundu ama set/tekrar kullanıcı "
+        "tarafından verilmedi. Kullanıcıya sor; varsayılan uydurma, "
+        "aracı set/tekrar uydurarak tekrar çağırma."),
+    REASON_MISSING_SETS: (
+        "Tekrar var, set sayısı yok. Yalnızca set sayısını sor; uydurma."),
+    REASON_MISSING_REPS: (
+        "Set var, tekrar yok. Yalnızca tekrarı sor; uydurma."),
+    REASON_EXERCISE_UNKNOWN: (
+        "Bu isimde bir egzersiz katalogda yok. Kullanıcıya bulamadığını "
+        "söyle. Tahmin ederek başka bir isim yazma, aracı tekrar çağırma."),
+    REASON_EXERCISE_SUGGEST: (
+        "Kullanıcının yazdığı isim katalogda yok; olası bir eşleşme "
+        "detail'de. 'Bunu mu demek istedin?' diye SOR. Onay gelmeden "
+        "aracı çağırma, sessizce yerine koyma."),
+    REASON_AMBIGUOUS_WORKOUT: (
+        "İstenen antrenman birden fazla güne uyuyor. Hangisi olduğunu "
+        "kullanıcıya SOR. İlkini seçme, tahmin etme, aracı tekrar çağırma."),
+    REASON_WORKOUT_NOT_FOUND: (
+        "İstenen antrenman aktif planda yok. Kullanıcıya hangi günü "
+        "kastettiğini sor. Bir gün uydurma."),
+}
+
+_INPUT_NOTE = (
+    "Plan değişmedi. Kullanıcıya sor; onaylamadan veya eksik bilgiyi "
+    "almadan aracı tekrar çağırma. Değer uydurma.")
+
+
+def needs_input_result(reason, command, suggestion=None, candidates=None,
+                       label=None):
+    """Non-applying clarification. Not a confirmation proposal."""
+    change = _change_of(command) if command is not None else {}
+    detail = reason
+    if suggestion:
+        detail = suggestion
+    elif candidates:
+        detail = ", ".join(str(item) for item in candidates)
+    elif label:
+        detail = label
+    return {
+        "status": STATUS_NEEDS_INPUT,
+        "operation": command_type(command) if command is not None else "",
+        "change": change,
+        "summary": _INPUT_SUMMARIES.get(
+            reason, _INPUT_SUMMARIES[REASON_WORKOUT_NOT_FOUND]),
+        "detail": _clip(detail),
+        "note": _INPUT_NOTE,
+        "reason": reason,
     }
 
 

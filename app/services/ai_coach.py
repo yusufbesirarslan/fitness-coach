@@ -175,12 +175,12 @@ def _today_workout_totals(user_id):
 # gönderdiği sonraki turda mümkündür. İşaret g'de yaşar (istek-kapsamlı; koç
 # araç döngüsü tek HTTP isteğinde koşar).
 
-def _begin_coach_turn(user_message=""):
+def _begin_coach_turn(user_message="", history=None):
     g._coach_staged_ids = set()
     # PR3: the plan-mutation budget is per turn, and "a turn" is defined here so
     # the blocking and streaming paths cannot drift into two different answers.
     # PR4: confirmation intent is derived from the raw current user turn.
-    coach_plan_tools.begin_turn(user_message)
+    coach_plan_tools.begin_turn(user_message, history=history)
 
 
 def _mark_staged_this_turn(pending_id):
@@ -1050,17 +1050,6 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
     3) session cookie — en eski davranış.
     Asıl 'staged' veri DB'deki PendingAction'da yaşar.
     """
-    _begin_coach_turn(question)  # S1 stage lock + PR4 confirmation intent
-    resolved = coach_confirmation.resolve_pending_turn(user_id, language)
-    if resolved is not None:
-        if prepared_history is None and client_history is None:
-            history = list(session.get("coach_history", []))
-            new_history = history + [
-                {"role": "user", "content": question[:COACH_HISTORY_CHAR_CAP]},
-                {"role": "assistant", "content": resolved[:COACH_HISTORY_CHAR_CAP]},
-            ]
-            session["coach_history"] = new_history[-COACH_HISTORY_LIMIT:]
-        return resolved
     if prepared_history is not None:
         history = list(prepared_history)
         use_client = True  # session'a yazma (kalıcılık DB'de)
@@ -1075,6 +1064,17 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
         else:
             history = list(session.get("coach_history", []))
         history = history[-COACH_HISTORY_LIMIT:]
+
+    _begin_coach_turn(question, history=history)
+    resolved = coach_confirmation.resolve_pending_turn(user_id, language)
+    if resolved is not None:
+        if prepared_history is None and client_history is None:
+            new_history = history + [
+                {"role": "user", "content": question[:COACH_HISTORY_CHAR_CAP]},
+                {"role": "assistant", "content": resolved[:COACH_HISTORY_CHAR_CAP]},
+            ]
+            session["coach_history"] = new_history[-COACH_HISTORY_LIMIT:]
+        return resolved
 
     deadline = _coach_turn_deadline()
     final_text = None

@@ -47,9 +47,9 @@ def test_replace_without_session_impact_still_applies(
         app, planned_user, tools_on, turn):
     result = call(planned_user.id, REPLACE,
                   {"day": "Pazartesi", "exercise": "Bench Press",
-                   "replacement": "Machine Press"})
+                   "replacement": "Push-Up"})
     assert result["status"] == results.STATUS_APPLIED
-    assert names(planned_user.id)[0] == "Machine Press"
+    assert names(planned_user.id)[0] == "Push-Up"
     assert plan_version(planned_user.id) == 1
     assert len(journal(planned_user.id)) == 1
 
@@ -98,7 +98,7 @@ def test_replace_on_an_active_session_day_requires_confirmation(
 
     result = call(planned_user.id, REPLACE,
                   {"day": "Pazartesi", "exercise": "Bench Press",
-                   "replacement": "Machine Press"})
+                   "replacement": "Push-Up"})
 
     assert result["status"] == results.STATUS_CONFIRMATION_REQUIRED
     assert "ACTIVE_SESSION_IMPACT" in result["reason_codes"]
