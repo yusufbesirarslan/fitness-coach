@@ -90,7 +90,11 @@ def _target(app, user_id):
 
 def _race(app, operations):
     from app.extensions import db
-    from app.services.mobile_diary_mutation import EntryNotFound, StaleDiaryEntry
+    from app.services.mobile_diary_mutation import (
+        EntryNotFound,
+        StaleDiaryEntry,
+        StoredObjectNotReleased,
+    )
 
     barrier = threading.Barrier(len(operations))
     outcomes = {}
@@ -105,6 +109,11 @@ def _race(app, operations):
                 outcomes[index] = ("stale",)
             except EntryNotFound:
                 outcomes[index] = ("missing",)
+            except StoredObjectNotReleased:
+                # A domain outcome of the shared authority, not a surprise: the
+                # ledger correction committed and the object release is durably
+                # pending. Classified here so a race can assert on it.
+                outcomes[index] = ("pending",)
             except Exception as error:  # pragma: no cover - surfaced below
                 outcomes[index] = ("unexpected", type(error).__name__)
             finally:
@@ -266,15 +275,16 @@ def photo_backed_row(pg_mutation_app):
 
 
 def test_concurrent_deletes_release_the_photo_exactly_once(photo_backed_row):
-    """Two racing corrections; one row deleted, one object deletion issued.
+    """Two racing corrections converge: one row, one object, no leftover intent.
 
-    This is the assumption the ordering decision rests on and the reason the
-    module runs against real PostgreSQL: the object call happens AFTER the
-    commit, so it is the `SELECT ... FOR UPDATE` row lock - not S3 idempotence -
-    that keeps the loser from issuing a second deletion. SQLite cannot prove
-    that. (S3 DeleteObject is idempotent as well, which is belt and braces.)
+    The `SELECT ... FOR UPDATE` row lock still admits exactly one committer, so
+    exactly one cleanup intent is written. After that commit the loser no
+    longer sees the row; the remediation's retry path may then issue the same
+    idempotent DeleteObject if the winner has not yet retired the intent.
+    Duplicate release of the *same* key is therefore allowed. What must never
+    happen is a second intent, a surviving row, or a forgotten object.
     """
-    from app.models import MealLog
+    from app.models import MealLog, MealPhotoCleanup
 
     app, user_id, key, deleted = photo_backed_row
     target = _target(app, user_id)
@@ -284,12 +294,15 @@ def test_concurrent_deletes_release_the_photo_exactly_once(photo_backed_row):
         _delete(app, user_id, target),
     ])
 
-    assert sorted(outcome[0] for outcome in outcomes.values()) == ["missing", "ok"]
+    statuses = sorted(outcome[0] for outcome in outcomes.values())
+    assert statuses in (["missing", "ok"], ["ok", "ok"]), outcomes
     with app.app_context():
         assert MealLog.query.count() == 0
-    assert deleted == [{"Bucket": "pg-race-bucket", "Key": key}], (
-        "The losing contender reached the object store. Only the caller that "
-        "won the row lock and committed may release the object.")
+        assert MealPhotoCleanup.query.count() == 0
+    assert deleted, "the owned object was never released"
+    assert {item["Bucket"] for item in deleted} == {"pg-race-bucket"}
+    assert {item["Key"] for item in deleted} == {key}
+    assert len(deleted) in (1, 2)
 
 
 def test_a_slot_move_racing_a_delete_never_orphans_a_surviving_row(
@@ -319,3 +332,210 @@ def test_a_slot_move_racing_a_delete_never_orphans_a_surviving_row(
                 "A row survived while its stored object was released.")
         else:
             assert deleted == [{"Bucket": "pg-race-bucket", "Key": key}]
+
+
+# ---------------------------------------------------------------------------
+# F14 durability (PR4 remediation) - the cleanup intent under real transactions
+# ---------------------------------------------------------------------------
+
+def test_the_cleanup_intent_and_the_row_delete_commit_atomically(
+        photo_backed_row):
+    """One transaction, two state transitions - proved on the real engine.
+
+    SQLite can show the happy result; only PostgreSQL can show that the intent
+    INSERT and the row DELETE are the same unit of work under a row lock that
+    another connection is contending for. If they could ever land apart, the
+    losing shape is a committed deletion whose object identity was never
+    recorded - the defect this remediation removes.
+    """
+    from app.extensions import db
+    from app.models import MealLog, MealPhotoCleanup
+
+    app, user_id, key, deleted = photo_backed_row
+    target = _target(app, user_id)
+
+    _race(app, [
+        _delete(app, user_id, target),
+        _delete(app, user_id, target),
+    ])
+
+    with app.app_context():
+        assert MealLog.query.count() == 0
+        # The release succeeded, so the intent settled with it. What must never
+        # exist is the converse: a committed delete with no intent AND no
+        # released object.
+        assert MealPhotoCleanup.query.count() == 0
+        assert db.session.query(MealPhotoCleanup).count() == 0
+    assert deleted == [{"Bucket": "pg-race-bucket", "Key": key}]
+
+
+def test_a_failed_release_leaves_one_durable_intent_under_a_delete_race(
+        pg_mutation_app, monkeypatch):
+    """Two racing deletes, S3 down: exactly one intent, naming the exact object.
+
+    The row lock admits one committer, so a lost race must not also write an
+    intent - two intents for one object would mean two drains chasing it, and
+    the uniqueness constraint would surface as a spurious 500 on the loser.
+    """
+    import s3_helper
+    from app.extensions import db
+    from app.models import MealLog, MealPhotoCleanup
+
+    app, user_id = pg_mutation_app
+    key = PHOTO_KEY.format(user_id=user_id)
+    with app.app_context():
+        row = MealLog.query.one()
+        row.photo_key = key
+        db.session.commit()
+
+    class BrokenS3Client:
+        def delete_object(self, **kwargs):
+            raise s3_helper.BotoCoreError()
+
+    original = (s3_helper._BOTO3_AVAILABLE, s3_helper.S3_BUCKET_NAME,
+                s3_helper._client)
+    s3_helper._BOTO3_AVAILABLE = True
+    s3_helper.S3_BUCKET_NAME = "pg-race-bucket"
+    s3_helper._client = BrokenS3Client()
+    try:
+        target = _target(app, user_id)
+        outcomes = _race(app, [
+            _delete(app, user_id, target),
+            _delete(app, user_id, target),
+        ])
+    finally:
+        (s3_helper._BOTO3_AVAILABLE, s3_helper.S3_BUCKET_NAME,
+         s3_helper._client) = original
+
+    statuses = sorted(outcome[0] for outcome in outcomes.values())
+    # The winner commits the intent and then fails the release. The loser, no
+    # longer able to lock the row, takes the retry path and fails the same
+    # release — both report the pending lifecycle. A "missing" here would mean
+    # the retry path was skipped, which is the defect again.
+    assert statuses == ["pending", "pending"], outcomes
+
+    with app.app_context():
+        assert MealLog.query.count() == 0
+        pending = MealPhotoCleanup.query.all()
+        assert len(pending) == 1, (
+            "The loser of the row-lock race wrote a second intent for the same "
+            "object.")
+        assert pending[0].photo_key == key
+        assert pending[0].user_id == user_id
+
+
+def test_concurrent_drains_converge_without_corrupting_intents(
+        pg_mutation_app):
+    """Two operator drains may run at the same moment.
+
+    Both may issue the same idempotent DeleteObject; neither may clear an
+    intent that belongs to a different record. The primary-key delete is what
+    makes that structural rather than lucky, and the ORM unit of work is
+    avoided precisely because its zero-row DELETE would raise on the loser.
+    """
+    import s3_helper
+    from app.extensions import db
+    from app.models import MealPhotoCleanup
+    from app.services import mobile_diary_mutation
+
+    app, user_id = pg_mutation_app
+    mine = PHOTO_KEY.format(user_id=user_id)
+    other = f"meals/{user_id}/2026/08/" + "b2" * 16 + ".jpg"
+
+    lock = threading.Lock()
+    deleted = []
+
+    class RacingS3Client:
+        def delete_object(self, **kwargs):
+            with lock:
+                deleted.append(kwargs["Key"])
+            return {"ResponseMetadata": {"HTTPStatusCode": 204}}
+
+    original = (s3_helper._BOTO3_AVAILABLE, s3_helper.S3_BUCKET_NAME,
+                s3_helper._client)
+    s3_helper._BOTO3_AVAILABLE = True
+    s3_helper.S3_BUCKET_NAME = "pg-race-bucket"
+    s3_helper._client = RacingS3Client()
+    try:
+        with app.app_context():
+            for entry_id, key in ((4242, mine), (4243, other)):
+                db.session.add(MealPhotoCleanup(
+                    user_id=user_id, entry_id=entry_id, photo_key=key,
+                    entry_revision="pg-race-revision", diary_date=DAY_KEY,
+                    created_at=datetime(2026, 8, 11, 6, 0)))
+            db.session.commit()
+
+        def drain():
+            return mobile_diary_mutation.drain_meal_photo_cleanups(limit=10)
+
+        outcomes = _race(app, [drain, drain])
+    finally:
+        (s3_helper._BOTO3_AVAILABLE, s3_helper.S3_BUCKET_NAME,
+         s3_helper._client) = original
+
+    assert all(outcome[0] == "ok" for outcome in outcomes.values()), outcomes
+    assert sorted(set(deleted)) == sorted([mine, other])
+    with app.app_context():
+        assert MealPhotoCleanup.query.count() == 0, (
+            "Concurrent drains must converge on an empty table, not deadlock "
+            "or leave a record behind.")
+
+
+def test_a_retry_racing_the_operator_drain_converges(pg_mutation_app):
+    """A user retry and the operator drain may run at the same moment.
+
+    Both name the same exact key. Duplicate DeleteObject is tolerated;
+    neither may resurrect the ledger row, invent a second intent, or leave
+    the original intent behind after a successful release.
+    """
+    import s3_helper
+    from app.extensions import db
+    from app.models import MealLog, MealPhotoCleanup
+    from app.services import mobile_diary_mutation
+
+    app, user_id = pg_mutation_app
+    key = PHOTO_KEY.format(user_id=user_id)
+
+    lock = threading.Lock()
+    deleted = []
+
+    class RacingS3Client:
+        def delete_object(self, **kwargs):
+            with lock:
+                deleted.append(kwargs["Key"])
+            return {"ResponseMetadata": {"HTTPStatusCode": 204}}
+
+    original = (s3_helper._BOTO3_AVAILABLE, s3_helper.S3_BUCKET_NAME,
+                s3_helper._client)
+    s3_helper._BOTO3_AVAILABLE = True
+    s3_helper.S3_BUCKET_NAME = "pg-race-bucket"
+    s3_helper._client = RacingS3Client()
+    try:
+        with app.app_context():
+            row = MealLog.query.one()
+            row.photo_key = key
+            db.session.commit()
+        target = _target(app, user_id)
+        with app.app_context():
+            row = MealLog.query.one()
+            db.session.add(MealPhotoCleanup(
+                user_id=user_id, entry_id=row.id, photo_key=key,
+                entry_revision=target["revision"], diary_date=DAY_KEY,
+                created_at=datetime(2026, 8, 11, 6, 0)))
+            db.session.delete(row)
+            db.session.commit()
+
+        outcomes = _race(app, [
+            _delete(app, user_id, target),
+            lambda: mobile_diary_mutation.drain_meal_photo_cleanups(limit=10),
+        ])
+    finally:
+        (s3_helper._BOTO3_AVAILABLE, s3_helper.S3_BUCKET_NAME,
+         s3_helper._client) = original
+
+    statuses = sorted(outcome[0] for outcome in outcomes.values())
+    assert statuses in (["missing", "ok"], ["ok", "ok"]), outcomes
+    assert key in deleted
+    with app.app_context():
+        assert MealLog.query.count() == 0
+        assert MealPhotoCleanup.query.count() == 0

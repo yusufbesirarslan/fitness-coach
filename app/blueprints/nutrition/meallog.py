@@ -386,8 +386,8 @@ def delete_today_meal(entry_token):
 
     Statuses: 204 done · 428 precondition required · 400 malformed precondition
     · 404 absent / not owned / not today · 412 stale · 409 the row's stored
-    object is unreleasable (fail closed) · 500 the row is gone but its object
-    was not released (a known, logged orphan — never a false success).
+    object is unreleasable (fail closed) · 503 the correction committed but the
+    photo release has not finished yet (durably pending, and retryable).
     """
     try:
         revision = mobile_diary_mutation.parse_if_match(
@@ -417,10 +417,21 @@ def delete_today_meal(entry_token):
         db.session.rollback()
         return jsonify({"error": t("route.meal_delete_photo_unreleasable")}), 409
     except mobile_diary_mutation.StoredObjectNotReleased:
-        # The row IS deleted and that is durable. Reporting success anyway would
-        # hide a known orphan behind a 204 — exactly the shape of F14. The
-        # browser re-reads canonical state and sees the entry gone.
-        return jsonify({"error": t("route.meal_delete_photo_not_released")}), 500
+        # The row IS deleted and that is durable, so a 204 would hide an
+        # unfinished lifecycle — the shape of F14 — and a 500 would imply the
+        # correction did not happen. What is true is narrower: the ledger
+        # correction committed and the photo release is still PENDING, durably,
+        # with the exact object key recorded. Repeating this exact request
+        # retries that release and converges, and the operator drain converges
+        # without the user, so `retryable` here is a fact rather than a hope.
+        # The body says the entry is gone; the browser re-reads canonical state
+        # either way and never sees it come back.
+        return jsonify({
+            "error": t("route.meal_delete_photo_not_released"),
+            "entry_deleted": True,
+            "photo_cleanup": "pending",
+            "retryable": True,
+        }), 503
     except Exception as error:
         try:
             db.session.rollback()

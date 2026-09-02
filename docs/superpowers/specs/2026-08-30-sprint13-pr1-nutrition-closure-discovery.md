@@ -154,7 +154,7 @@ review verdict was **APPROVED WITH REQUIRED CHANGES**. Incorporated here:
 | # | Correction |
 |---|---|
 | 1 | `F13` **withdrawn** — the day-key defect was already repaired in June 2026 (**§5.1**) |
-| 2 | `C14` **retired** — no repair migration and no `ck_meal_log_tarih_iso`; **Sprint 13 requires no migration** |
+| 2 | `C14` **retired** — no repair migration and no `ck_meal_log_tarih_iso`; **Sprint 13 requires no day-key migration** (see §15 for the one migration PR4's review later did require) |
 | 3 | `PR2A` **removed** from the implementation sequence |
 | 4 | `N5` **satisfied**, not open |
 | 5 | `F3` **downgraded to P2** and split into `F3a` (live but unrendered fabrication) and `F3b` (benign prompt fallback) |
@@ -1359,7 +1359,10 @@ PR3  ─────→ PR4        (operational ordering, not a technical depend
     silent;
   * a user-facing confirmation that deletion is lossy, naming the stored photo
     where one exists.
-* **Schema:** none. **Migration:** none — `photo_key` already exists.
+* **Schema:** planned as none (`photo_key` already exists). **Revised on review
+  evidence:** one bounded table, `MealPhotoCleanup` (`e4f5a6b7c8d9`) — see §15
+  and "PR4 — as shipped". Reading `photo_key` is enough to *issue* the object
+  delete; it is not enough to *finish* one after the row that held it is gone.
 * **Risks:** the web has no `If-Match` story, so the precondition transport must
   be designed without weakening the row lock + revision comparison; deletion is
   hard and irreversible (as on mobile), so the confirmation UX matters; releasing
@@ -1376,9 +1379,10 @@ PR3  ─────→ PR4        (operational ordering, not a technical depend
 
 #### PR4 — as shipped (implementation evidence)
 
-Branch `sprint13-pr4-web-meal-correction`, based on `27ae521`. **No schema, no
-migration** (Alembic graph untouched), **no feature flag**, **no Flutter**, and
-no PR5 work. F1 = CLOSED · F14 = CLOSED · N9 = SATISFIED.
+Branch `sprint13-pr4-web-meal-correction`, based on `27ae521`. **One migration**
+(`e4f5a6b7c8d9`, the durable meal-photo cleanup table — see *Durability* below),
+**no feature flag**, **no Flutter**, and no PR5 work.
+F1 = CLOSED · F14 = CLOSED · N9 = SATISFIED.
 
 **The web correction contract**
 
@@ -1395,7 +1399,7 @@ no PR5 work. F1 = CLOSED · F14 = CLOSED · N9 = SATISFIED.
 | `404` | Absent **or** owned by someone else **or** not today — one indistinguishable response, so the route is never an existence oracle |
 | `412` | Stale revision |
 | `409` | The row's stored photo reference is not one this application minted — fail closed (see below) |
-| `500` | The row is gone but its object was not released — a known, logged orphan, never dressed as success |
+| `503` | The correction committed and the photo release has not finished — durably pending, and genuinely retryable. Body: `entry_deleted: true`, `photo_cleanup: "pending"`, `retryable: true`. Never dressed as success, and never dressed as "the entry survived" |
 
 **Shared mutation authority.** The route holds no delete of its own. Ownership,
 the day boundary, the `SELECT … FOR UPDATE` row lock, the revision comparison
@@ -1429,51 +1433,124 @@ transaction, so one failure shape has to be chosen:
 
 The first is unrecoverable from the user's side, so the row commits first and
 the object is released second. The commit also drops the row lock, so no lock is
-held across the S3 round-trip. Consequences, each with a test:
+held across the S3 round-trip.
 
-| Failure | Durable outcome | Retry |
-|---|---|---|
-| S3 delete fails | Row **deleted**, object **retained**. `StoredObjectNotReleased` → `500`; the orphan is logged at ERROR with `event=meal_photo_orphaned` and the key, so the leak is visible rather than silent | Safe: converges on `404` and issues no further object call |
-| DB commit fails | Nothing deleted, nothing released — the object call is downstream of the commit and is never reached | Safe: fully retryable |
-| Photo reference unrecognised | Validated **before** the row is touched → `409`, row and object both intact | Deterministic; needs an operator, not a retry |
-| No photo | No object call at all | n/a |
-| Two concurrent deletes | The row lock admits one committer, so exactly one object deletion is issued; the loser gets `404` | Safe |
+**Durability — what makes that ordering survivable, and why this PR has a
+migration.** The first review of this PR found the ordering correct and the
+recovery missing. Committing the row delete while recording nothing destroys the
+object's *identity*: `_build_key` mints `meals/<user>/<YYYY>/<MM>/<uuid4hex>.<ext>`,
+and that uuid4 cannot be reconstructed from the opaque entry token. So a failed
+release left `row gone + object retained + key forgotten`, and logging
+`meal_photo_orphaned` made that visible without making it recoverable — F14 with
+better observability. The repository was independently confirmed to own no
+reaper, outbox, cleanup table, bucket lifecycle rule, soft-delete state or
+durable upload record to lean on, which is what invalidated PR4's original
+*no migration* assumption on evidence.
+
+`MealPhotoCleanup` (revision `e4f5a6b7c8d9`, chained on the actual head
+`d3e4f5a6b7c8`) is the minimum that fixes it: owner, the deleted `MealLog.id`,
+the exact validated key, the revision that was current at deletion, the diary
+day, and a timestamp. Nothing else. It is unique on `photo_key` — the deleted
+*resource* is the object, and SQLite may reuse a rowid, so an entry-id key could
+later reject a legitimate second intent. It is never published to a client and
+carries no bucket, because a stored bucket is how a bounded cleanup table
+becomes a generic object-deletion queue.
+
+The intent is written inside the **same transaction** as the row delete, before
+any object call. Two state transitions, one commit:
+
+| Failure | `MealLog` | S3 object | Cleanup intent | Result | Converges? |
+|---|---|---|---|---|---|
+| DB failure before commit | **retained** | untouched | absent | error | n/a — nothing happened |
+| Happy path | deleted | deleted | removed | `204` | done |
+| No photo | deleted | no call | never written | `204` | done |
+| Photo reference unrecognised | retained | untouched | absent | `409` | deterministic; needs an operator |
+| S3 release fails | deleted | retained | **retained, exact key** | `503` retryable | yes — retry or drain |
+| Retry of that same request | already gone | deleted | removed | `204` | yes |
+| Operator drain | already gone | deleted | removed | — | yes |
+| S3 ok, intent removal fails | deleted | deleted | may remain | `204` | yes — next run repeats an idempotent delete |
+| Two concurrent deletes | deleted | deleted once | one intent, removed | `204` / `404` | yes |
+| Two concurrent drains | already gone | deleted (idempotent) | removed by primary key | — | yes |
+
+The ordering is never inverted to S3-first. Dropping the intent before the
+object would take the key down with the failure, which is the defect again.
+
+**Retry.** Once the row is gone the token resolves to nothing, so an ordinary
+`404` would strand a caller whose request is genuinely unfinished. `delete_entry`
+consults the pending intent first, matching on the **same** owner-bound
+`matches_diary_entry_id` digest against the stored `entry_id` — no second token
+algorithm — and re-checks day and revision so the retry is the same request, not
+a weaker one. A genuinely absent entry with no matching intent is still `404`.
+
+**Operational drain.** `flask --app starter cleanup-pending-meal-photos`
+(`--dry-run`, `--limit`), registered beside the repository's existing
+maintenance commands in `app/cli.py`. It re-validates every stored key at use
+rather than trusting it at rest, deletes exactly the recorded object, removes
+only intents whose object is actually gone, removes them **by primary key** so a
+concurrent worker cannot clear a different one, and leaves failures durable for
+the next run. It is bounded (`DEFAULT_CLEANUP_DRAIN_LIMIT = 200`) and safe to
+run repeatedly, because S3 `DeleteObject` is idempotent. The table is normally
+empty; a non-empty table means unfinished release work.
 
 Mobile deletion runs the identical path, which is what makes F14 closed
 *repository-wide* rather than closed on the web only. Its generic `except`
-already maps the new failure to the existing `503` envelope, so the published
-mobile contract did not move.
+already maps this failure to the existing `503 retryable=True` envelope, so the
+published mobile contract did not move — and `retryable=True` is now *true*,
+because a mobile retry converges instead of hitting a permanent `404`.
 
-**Rollback.** Still a plain `git revert` with no data repair. As §17 already
-states, deletions already performed stay deleted and objects already released
-stay released — the commit-then-release ordering is what guarantees a reverted
-build can never find a surviving row pointing at a deleted object.
+**Rollback.** `git revert` plus `alembic downgrade` of `e4f5a6b7c8d9`, which
+drops only the new table. As §17 already states, deletions already performed
+stay deleted and objects already released stay released — the
+commit-then-release ordering is what guarantees a reverted build can never find
+a surviving row pointing at a deleted object. **Drain first:** downgrading with
+rows still pending discards the only record of those objects, so the revert
+procedure is drain → verify empty → downgrade.
 
 **Browser.** The current-day meal card gains one action. It is present only when
 the server published an identity *and* a revision, so a history card cannot
 render one. `deleteMeal()` confirms first — naming the stored photo when the row
 owns one — guards a single in-flight request, disables the control while it runs,
-removes nothing optimistically, and ends every path (`204`, `404`, `412`, `5xx`,
-network fault) in a canonical `loadTodayData()` re-read. It performs no macro
+removes nothing optimistically, and ends every path (`204`, `404`, `412`, `503`,
+`5xx`, network fault) in a canonical `loadTodayData()` re-read. `503` gets its
+own copy: the entry *is* gone and saying otherwise would be false; what is
+pending is the photo, and the server finishes that itself. It performs no macro
 arithmetic of its own; a structural test rejects local totals manipulation. The
 copy states that deletion is permanent and that re-logging does not recreate the
 entry — no undo is implied, because none exists (C4).
 
-**Tests.** `tests/test_web_meal_correction.py` (44) is the acceptance suite;
-`tests/test_mobile_diary_mutation_pg.py` gained two real-PostgreSQL races
-(concurrent delete releases the photo exactly once; a slot-move/delete race never
-orphans a surviving row) in a module CI's `pg_concurrency` job already selects.
+**Tests.** `tests/test_web_meal_correction.py` is the acceptance suite,
+including the durable-cleanup convergence section: atomic intent, happy path, S3
+failure, same-request retry, ownership across the row's death, current-day scope
+on the convergence path, the malformed stored key, the real operator drain
+entrypoint (dry run, failure durability, repeat safety, boundedness, unsafe key,
+foreign owner key), the S3-succeeded/bookkeeping-failed case, and mobile
+convergence. `tests/test_mobile_diary_mutation_api.py` proves the published
+mobile `503 retryable=True` envelope actually converges on retry rather than
+landing on a permanent 404. `tests/test_mobile_diary_mutation_pg.py` gained
+real-PostgreSQL races on top of PR4's concurrent delete and slot-move-vs-delete
+coverage — atomic intent + row delete under contention, exactly one durable
+intent when the release fails under a delete race, concurrent drains, and a
+user retry racing the operator drain — in a module CI's `pg_concurrency` job
+already selects.
+`tests/test_migration_graph.py` gained the revision's round-trip, `create_all`
+and fail-closed coverage, and both single-head pins moved to `e4f5a6b7c8d9`.
 The two discovery guards that pinned F1 and F14 open were **inverted, not
-deleted**, so the closure is asserted where the defect used to be. All five
-required mutations were run and each failed the guard it should:
+deleted**, and the F14 guard now asserts the *ordering* of the lifecycle
+(intent → row delete → commit → release) rather than the mere presence of a
+call. All five required remediation mutations were run and each failed the guard
+it should:
 
-| Mutation | Guard that failed |
+| Mutation | Guards that failed |
 |---|---|
-| A — bypass the `If-Match` comparison | `test_a_stale_revision_deletes_nothing_and_releases_nothing` |
-| B — drop owner binding and day scoping | `…indistinguishable_from_an_absent_one`, `…historical_entry_is_not_deletable…`, `…day_from_the_server_not_the_request` |
-| C — remove the S3 cleanup from `delete_entry` | 5 lifecycle tests + `test_deleting_a_ledger_row_releases_its_stored_meal_photo` |
-| D — swallow the S3 failure after the row is deleted | `test_object_release_failure_is_never_reported_as_success` |
-| E — browser removes the card locally instead of re-reading | `test_the_browser_delete_re_reads_canonical_state_and_subtracts_nothing` |
+| A — drop the cleanup-intent insert before the row deletion | **4** — `test_the_cleanup_intent_records_the_exact_object_and_nothing_else`, `test_object_release_failure_is_never_reported_as_success`, `test_retrying_the_same_request_after_a_failed_release_converges`, F14 discovery `…releases_its_stored_meal_photo` |
+| B — discard the cleanup record after an S3 failure | **3** — `test_object_release_failure_is_never_reported_as_success`, `test_retrying_the_same_request_after_a_failed_release_converges`, `test_a_retry_that_fails_again_stays_durable` |
+| C — return `EntryNotFound` without consulting a pending cleanup | **3** — `test_retrying_the_same_request_after_a_failed_release_converges`, `test_the_mobile_transport_converges_on_retry_rather_than_404`, `test_mobile_http_retry_converges_after_post_commit_photo_failure` |
+| D — let the drain clear a record whose S3 delete failed | **1** — `test_the_drain_leaves_a_failure_durable_for_the_next_run` |
+| E — permit an arbitrary/unowned cleanup key in the drain | **1** — `test_the_drain_never_hands_boto3_a_key_it_did_not_mint`. `test_the_drain_releases_only_the_owner_bound_object` survives because `delete_meal_photo` re-checks ownership at the object boundary; that defence in depth is deliberate, and the drain's own check is what keeps a corrupted key away from boto3 entirely |
+
+The five mutations of the original PR4 implementation (`If-Match` bypass, owner
+and day scoping, the S3 cleanup call, swallowing the S3 failure, optimistic
+browser removal) remain covered by the guards that first caught them.
 
 ### PR5 — Retire or confine unowned Nutrition intelligence and presentation authority
 
@@ -1512,9 +1589,20 @@ required mutations were run and each failed the guard it should:
 
 ## 15. Migration implications
 
-**None.** Sprint 13 requires **no schema migration**. The current Alembic head is
-`c2d3e4f5a6b7`, and it is still the head after Sprint 13: PR2, PR3, PR4 and PR5
-each ship with an unchanged migration graph.
+**One, in PR4, added on review evidence.** Sprint 13 was planned with no schema
+migration and PR2, PR3, PR3B and PR5 each ship with an unchanged migration graph.
+PR4 does not: its independent review proved that committing a ledger deletion and
+then failing to release the stored photo destroys the object's identity, because
+the key carries a uuid4 that cannot be rebuilt from the opaque entry token, and
+that the repository owns no reaper, outbox, cleanup table, bucket lifecycle rule,
+soft-delete state or durable upload record to recover it. The remediation adds
+exactly one bounded table, `meal_photo_cleanup` (revision `e4f5a6b7c8d9`), whose
+only purpose is to hold a deletion's unfinished object release. It is reversible,
+it introduces no unrelated schema, and the graph stays single-headed.
+
+The head this document named (`c2d3e4f5a6b7`) has since advanced on `main`
+independently of Sprint 13; PR4 chains from the actual head at implementation
+time, `d3e4f5a6b7c8`.
 
 `F15` and its owner `PR3B`, added by the PR3 review, change nothing here: the
 finding is a **trust-boundary** defect, not a storage defect. Provider identity is
@@ -1536,8 +1624,10 @@ concern and needs no column: `photo_key` already exists.
 ## 16. Rollout implications
 
 No Sprint 13 PR may change a feature-flag default, and none is gated behind a new
-flag: PR2–PR5 are all corrections to live, unflagged behaviour. **No PR touches
-the database**, so none needs a migration deploy window. Mobile nutrition remains
+flag: PR2–PR5 are all corrections to live, unflagged behaviour. **PR4 is the one
+exception that writes a table** (`meal_photo_cleanup`, revision `e4f5a6b7c8d9`),
+so it is the one PR that needs a migration deploy window. PR2, PR3, PR3B and PR5
+still write none. Mobile nutrition remains
 dark behind `MOBILE_AUTH_ENABLED` throughout, and nothing in this sequence
 depends on that flag being enabled. Sprint 15's native-auth rollout is not
 coupled to Nutrition closure in either direction.
@@ -1553,15 +1643,16 @@ deletion loses (C4, F14).
 
 ## 17. Rollback philosophy
 
-Each PR is one `git revert`. **No PR writes a migration**, so no PR needs a
-down-revision plan and no PR has schema to undo.
+Each PR is one `git revert`. **PR4 also needs `alembic downgrade` of
+`e4f5a6b7c8d9`**, after the pending-cleanup table has been drained empty; the
+other Sprint 13 PRs still write no schema.
 
 | PR | Rollback | Data left behind |
 |---|---|---|
 | PR2 | revert; the three call sites return to their own formulas | none — nothing persisted |
 | PR3 | revert; the web returns to client-computed macros and the deprecated route loses its safety fix | ledger rows written correctly stay correct. **Note:** reverting PR3 does not reopen `F15` — that defect predates PR3 and is untouched by it |
 | PR3B | revert; diary provider staging again trusts browser nutrition and canonical commit stops re-resolving legacy provider rows | ledger rows already written from provider truth stay correct; no data repair is required |
-| PR4 | revert; the web loses the correction path again | deletions already performed stay deleted — hard delete is irreversible by design, which is why PR4 ships after PR3 and behind an explicit confirmation. **Objects already released stay released**, so the photo lifecycle must be ordered such that a revert can never leave a surviving row pointing at a deleted object |
+| PR4 | revert plus `alembic downgrade` of `e4f5a6b7c8d9`. **Drain first:** downgrading with rows still pending discards the only record of those objects | deletions already performed stay deleted — hard delete is irreversible by design, which is why PR4 ships after PR3 and behind an explicit confirmation. **Objects already released stay released**, so the photo lifecycle must be ordered such that a revert can never leave a surviving row pointing at a deleted object |
 | PR5 | revert; the orphaned endpoints and the browser score return | none |
 
 ## 18. Explicit non-goals for PR1 — all honoured

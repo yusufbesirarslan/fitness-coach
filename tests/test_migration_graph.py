@@ -36,9 +36,10 @@ def test_alembic_migrations_have_single_head():
 
     heads = sorted(set(revisions) - down_revisions)
 
-    # Adaptive Coaching S1 PR4 adds the confirmation-proposal table as the sole
-    # new head, chained off Sprint 10 PR4A's c1d2e3f4a5b6. One head only.
-    assert heads == ["d3e4f5a6b7c8"]
+    # Sprint 13 PR4 (remediation) adds the durable meal-photo cleanup table as
+    # the sole new head, chained off Mobile Training PR4A's d3e4f5a6b7c8.
+    # One head only.
+    assert heads == ["e4f5a6b7c8d9"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -56,10 +57,11 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     versions_dir = Path(__file__).resolve().parents[1] / "migrations" / "versions"
     revision_files = sorted(path.name for path in versions_dir.glob("*.py"))
 
-    # 37 = the integrated origin/main baseline (Adaptive Coaching S1 PR4's
-    # c2d3e4f5a6b7 is the newest). PR4 contributes none of them; the literal is
-    # the tripwire that makes "we added one small table" fail here first.
-    assert len(revision_files) == 38
+    # The literal is the tripwire that makes "we added one small table" fail
+    # here first. 38 = the integrated origin/main baseline; 39 = plus Sprint 13
+    # PR4's e4f5a6b7c8d9, the durable meal-photo cleanup table. Sprint 11 PR4
+    # still contributes none of them, which is the claim this test guards.
+    assert len(revision_files) == 39
     assert not any("exercise" in name for name in revision_files)
 
     catalog_path = (
@@ -121,6 +123,110 @@ def test_meal_idempotency_fingerprint_migration_round_trips_only_nullable_column
         assert "idempotency_fingerprint" in {
             c["name"] for c in sa.inspect(connection).get_columns("meal_log")
         }
+
+
+def _meal_photo_cleanup_migration():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / "migrations"
+        / "versions"
+        / "e4f5a6b7c8d9_add_meal_photo_cleanup.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "meal_photo_cleanup_migration", migration_path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    return migration
+
+
+def test_meal_photo_cleanup_migration_round_trips_and_is_reversible(tmp_path):
+    """Sprint 13 PR4 remediation: the one table F14 durability needs.
+
+    Chained on the ACTUAL head at the time (d3e4f5a6b7c8), not the older
+    Sprint 13 head. The uniqueness is on `photo_key` rather than
+    (user_id, entry_id) on purpose: SQLite may reuse a rowid once the highest
+    row is deleted, so an entry-id key could later reject a legitimate second
+    cleanup intent. Meal photo keys carry a uuid4 and are never shared.
+    """
+    migration = _meal_photo_cleanup_migration()
+    assert migration.revision == "e4f5a6b7c8d9"
+    assert migration.down_revision == "d3e4f5a6b7c8"
+
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'meal-photo-cleanup.db'}")
+    with engine.begin() as connection:
+        connection.execute(sa.text(
+            "CREATE TABLE user (id INTEGER PRIMARY KEY, username VARCHAR(80))"))
+        context = MigrationContext.configure(connection)
+
+        with Operations.context(context):
+            migration.upgrade()
+
+        inspector = sa.inspect(connection)
+        columns = {c["name"]: c for c in inspector.get_columns("meal_photo_cleanup")}
+        assert set(columns) == {
+            "id", "user_id", "entry_id", "photo_key", "entry_revision",
+            "diary_date", "created_at"}
+        for name in ("user_id", "entry_id", "photo_key", "entry_revision",
+                     "diary_date", "created_at"):
+            assert columns[name]["nullable"] is False, name
+        assert columns["photo_key"]["type"].length == 300
+
+        uniques = {
+            tuple(uc["column_names"])
+            for uc in inspector.get_unique_constraints("meal_photo_cleanup")
+        }
+        assert ("photo_key",) in uniques
+        indexes = {ix["name"] for ix in inspector.get_indexes("meal_photo_cleanup")}
+        assert "ix_meal_photo_cleanup_owner_entry" in indexes
+
+        # entry_id names a meal_log row that the same transaction deletes, so it
+        # must NOT be a foreign key.
+        assert [
+            fk["referred_table"]
+            for fk in inspector.get_foreign_keys("meal_photo_cleanup")
+        ] == ["user"]
+
+        with Operations.context(context):
+            migration.downgrade()
+        assert not sa.inspect(connection).has_table("meal_photo_cleanup")
+
+        with Operations.context(context):
+            migration.upgrade()
+        assert sa.inspect(connection).has_table("meal_photo_cleanup")
+
+
+def test_meal_photo_cleanup_migration_accepts_a_create_all_built_schema(tmp_path):
+    """The boot path may run ``db.create_all()`` first; verify, do not re-create."""
+    from app.models import MealPhotoCleanup
+
+    migration = _meal_photo_cleanup_migration()
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'cleanup-created.db'}")
+    with engine.begin() as connection:
+        connection.execute(sa.text(
+            "CREATE TABLE user (id INTEGER PRIMARY KEY, username VARCHAR(80))"))
+        MealPhotoCleanup.__table__.create(connection)
+        context = MigrationContext.configure(connection)
+
+        with Operations.context(context):
+            migration.upgrade()
+
+        names = [c["name"] for c in sa.inspect(connection).get_columns(
+            "meal_photo_cleanup")]
+        assert names.count("photo_key") == 1
+
+
+def test_meal_photo_cleanup_migration_refuses_an_incompatible_table(tmp_path):
+    """Fail closed: a same-named table of another shape is not an upgrade."""
+    migration = _meal_photo_cleanup_migration()
+    engine = sa.create_engine(f"sqlite:///{tmp_path / 'cleanup-broken.db'}")
+    with engine.begin() as connection:
+        connection.execute(sa.text(
+            "CREATE TABLE meal_photo_cleanup (id INTEGER PRIMARY KEY)"))
+        context = MigrationContext.configure(connection)
+
+        with pytest.raises(RuntimeError):
+            with Operations.context(context):
+                migration.upgrade()
 
 
 def test_meal_log_maps_nullable_idempotency_fingerprint_without_new_constraint():

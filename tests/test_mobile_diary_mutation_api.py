@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.extensions import db
-from app.models import MealLog
+from app.models import MealLog, MealPhotoCleanup
 from app.services import mobile_auth
 from app.services.mobile_nutrition.serialization import SLOT_BY_MEAL_LABEL
 from app.timeutil import APP_TZ, audit_clock
@@ -239,6 +239,59 @@ def test_stale_delete_fails_and_second_delete_is_private_not_found(
     assert (second.status_code, second.json["error"]["code"]) == (
         404, "DIARY_ENTRY_NOT_FOUND")
     assert diary(raw_client, as_mobile(mobile_user)).json["meals"] == []
+
+
+def test_mobile_http_retry_converges_after_post_commit_photo_failure(
+        raw_client, as_mobile, mobile_user, monkeypatch):
+    """The published 503 retryable=True envelope is now a true claim.
+
+    A post-commit S3 failure used to strand the next DELETE on a permanent
+    404. The same request must instead finish the pending release.
+    """
+    import s3_helper
+
+    key = f"meals/{mobile_user.id}/2026/08/{'ab' * 16}.jpg"
+    row = log_meal(mobile_user, description="Fotoğraflı")
+    row.photo_key = key
+    db.session.commit()
+
+    class FakeS3Client:
+        def __init__(self):
+            self.deleted = []
+            self.delete_error = None
+
+        def delete_object(self, **kwargs):
+            self.deleted.append(kwargs)
+            if self.delete_error is not None:
+                raise self.delete_error
+            return {"ResponseMetadata": {"HTTPStatusCode": 204}}
+
+    fake = FakeS3Client()
+    monkeypatch.setattr(s3_helper, "_BOTO3_AVAILABLE", True)
+    monkeypatch.setattr(s3_helper, "S3_BUCKET_NAME", "axisai-test-bucket")
+    monkeypatch.setattr(s3_helper, "_client", fake)
+
+    path, target = mutation_target(raw_client, as_mobile(mobile_user))
+    fake.delete_error = s3_helper.BotoCoreError()
+    first = raw_client.delete(
+        path, headers=as_mobile(mobile_user, target["revision"]))
+
+    assert first.status_code == 503
+    assert first.json["error"]["code"] == "NUTRITION_TEMPORARILY_UNAVAILABLE"
+    assert first.json["error"]["retryable"] is True
+    assert MealLog.query.filter_by(id=row.id).count() == 0
+    assert MealPhotoCleanup.query.count() == 1
+
+    fake.delete_error = None
+    second = raw_client.delete(
+        path, headers=as_mobile(mobile_user, target["revision"]))
+
+    assert second.status_code == 204
+    assert MealPhotoCleanup.query.count() == 0
+    assert fake.deleted == [
+        {"Bucket": "axisai-test-bucket", "Key": key},
+        {"Bucket": "axisai-test-bucket", "Key": key},
+    ]
 
 
 def test_delete_rejects_a_body_instead_of_ignoring_it(

@@ -765,7 +765,7 @@ def test_the_orphaned_nutrition_read_surfaces_still_exist_and_have_no_consumer(
 # ---------------------------------------------------------------------------
 
 def test_deleting_a_ledger_row_releases_its_stored_meal_photo():
-    """F14 closed (PR4): the deletion primitive now owns an object lifecycle.
+    """F14 closed (PR4): the deletion primitive owns a DURABLE object lifecycle.
 
     Pre-PR4 this characterized the defect in two halves: the repository owned
     no S3 deletion primitive at all, and the single code path that deletes a
@@ -778,7 +778,8 @@ def test_deleting_a_ledger_row_releases_its_stored_meal_photo():
     every future caller into an unbounded object-store client.
 
     The behaviour itself — ordering, partial failure, retry, concurrency,
-    malformed references — is proved in `tests/test_web_meal_correction.py`.
+    malformed references, the durable cleanup intent and its operator drain —
+    is proved in `tests/test_web_meal_correction.py`.
     """
     import s3_helper
 
@@ -793,14 +794,49 @@ def test_deleting_a_ledger_row_releases_its_stored_meal_photo():
 
     tree = ast.parse(
         _module_source("app/services/mobile_diary_mutation/service.py"))
-    delete_entry = next(
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.FunctionDef) and node.name == "delete_entry")
-    body = ast.dump(delete_entry).lower()
-    assert "delete_meal_photo" in body, (
+    functions = {
+        node.name: node for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef)
+    }
+    assert "delete_meal_photo" in ast.dump(
+        functions["_release_owned_object"]), (
         "The canonical deletion authority stopped releasing the stored object. "
         "F14 is repository-wide: every supported deletion transport goes "
         "through this function, so a leak here is a leak everywhere.")
+
+    # F14 has a second half, added by the PR4 remediation: the release may fail,
+    # and the key carries a random uuid4 that cannot be rebuilt from the opaque
+    # token. So the deletion must record a DURABLE cleanup intent in the SAME
+    # transaction that removes the row, before any object call. Ordering is the
+    # claim, so ordering is what is asserted.
+    delete_entry = functions["delete_entry"]
+    marks = {}
+    for node in ast.walk(delete_entry):
+        if isinstance(node, ast.Call):
+            name = getattr(node.func, "id", None) or getattr(
+                node.func, "attr", None)
+            if name in {"MealPhotoCleanup", "commit", "_release_owned_object"}:
+                marks.setdefault(name, node.lineno)
+            if name == "delete" and getattr(
+                    getattr(node.func, "value", None), "attr", None) == "session":
+                marks.setdefault("row_delete", node.lineno)
+
+    assert set(marks) == {
+        "MealPhotoCleanup", "row_delete", "commit", "_release_owned_object"}, (
+        f"delete_entry no longer performs the durable lifecycle: {sorted(marks)}")
+    assert marks["MealPhotoCleanup"] < marks["row_delete"] < marks["commit"], (
+        "The cleanup intent and the row deletion must be one transaction. "
+        "Committing the row without recording the object key is exactly the "
+        "state that leaves an unnameable orphan behind.")
+    assert marks["commit"] < marks["_release_owned_object"], (
+        "The object must be released only AFTER the row deletion commits; "
+        "release-then-commit can leave a surviving row pointing at a deleted "
+        "object.")
+
+    # The operator half. A durable record nothing can drain closes nothing.
+    assert "drain_meal_photo_cleanups" in functions, (
+        "The pending-cleanup drain disappeared. Without it F14 depends on a "
+        "user happening to retry.")
 
 
 # ---------------------------------------------------------------------------

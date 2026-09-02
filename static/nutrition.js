@@ -295,6 +295,14 @@ async function deleteMeal(entryToken, revision, hasPhoto, el) {
     });
     if (res.status === 204) {
       showToast(__t('nutrition.delete_meal_done'), 'success');
+    } else if (res.status === 503) {
+      /* The ledger correction COMMITTED; what remains pending is only the
+         release of the stored photo, and the server holds that intent
+         durably. Reporting a failed delete here would be false: the entry is
+         gone, and the canonical re-read below proves it. The server converges
+         on the photo by itself (a retry, or the operator drain), so this is a
+         warning rather than an error the user has to act on. */
+      showToast(__t('nutrition.delete_meal_photo_pending'), 'warning');
     } else if (res.status === 404 || res.status === 412) {
       /* Someone or something else moved first. Say so plainly; the canonical
          re-read below decides what is actually there now. */

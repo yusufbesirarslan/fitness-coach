@@ -96,10 +96,10 @@ def test_the_repository_still_has_exactly_one_alembic_head():
             parents.update(
                 re.findall(r"""["']([0-9a-zA-Z_]+)["']""", down.group(1)))
 
-    # The single head moves with every added revision. Mobile Training PR4A
-    # chains d3e4f5a6b7c8 (native generation operations) onto c2d3e4f5a6b7,
-    # so the graph is still single-headed and this pin names the new tip.
-    assert [r for r in revisions if r not in parents] == ["d3e4f5a6b7c8"]
+    # The single head moves with every added revision. Sprint 13 PR4 chains
+    # e4f5a6b7c8d9 (durable meal-photo cleanup) onto d3e4f5a6b7c8, so the graph
+    # is still single-headed and this pin names the new tip.
+    assert [r for r in revisions if r not in parents] == ["e4f5a6b7c8d9"]
 
 
 def test_the_migration_descends_from_the_merged_comparison_head():
