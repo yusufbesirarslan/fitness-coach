@@ -42,6 +42,7 @@ from .models import (
     classify_relationship,
 )
 from .queries import (
+    NativeWorkoutIdentity,
     PlanSnapshot,
     compute_plan_snapshot,
     completed_today,
@@ -117,29 +118,53 @@ def build_session_view(session, today: date) -> SessionView:
     return _build_view(session, today)
 
 
-def _same_intended_workout(existing, today: date, snapshot: PlanSnapshot) -> bool:
-    """A genuine idempotent-start replay targets the same day + slot + source."""
-    return (
+def _same_intended_workout(
+    existing, today: date, snapshot: PlanSnapshot,
+    native: Optional[NativeWorkoutIdentity] = None,
+) -> bool:
+    """A genuine idempotent-start replay targets the same day + slot + source.
+
+    When BOTH the retry and the existing session name a native workout
+    reference, the references must also match: two different native workouts are
+    two different intentions, never a replay of one another. A reference on only
+    one side is not evidence of a different workout (a browser-started session
+    has none), so day + slot + source still decide.
+    """
+    if not (
         existing.workout_date == today.isoformat()
         and existing.weekday_slot == snapshot.weekday_slot
         and existing.source == snapshot.source
-    )
+    ):
+        return False
+    if native is None or not existing.workout_ref:
+        return True
+    return existing.workout_ref == native.workout_ref
 
 
-def _existing_or_conflict(existing, today: date, snapshot: PlanSnapshot) -> SessionResult:
+def _existing_or_conflict(
+    existing, today: date, snapshot: PlanSnapshot,
+    native: Optional[NativeWorkoutIdentity] = None,
+) -> SessionResult:
     view = _build_view(existing, today)
-    if _same_intended_workout(existing, today, snapshot):
+    if _same_intended_workout(existing, today, snapshot, native):
         return SessionResult(SessionOutcome.EXISTING_ACTIVE, session=view)
     return SessionResult(SessionOutcome.CONFLICT, session=view)
 
 
-def start_session(user_id: int, *, today: Optional[date] = None) -> SessionResult:
+def start_session(
+    user_id: int, *, today: Optional[date] = None,
+    native: Optional[NativeWorkoutIdentity] = None,
+) -> SessionResult:
     """Start (or idempotently replay) the user's current workout session.
 
     Server-derives the user-local date + plan snapshot/fingerprint; never trusts
     client-supplied ownership or plan content. The insert is the atomic claim: a
     partial-index conflict means an active session already exists — the same
     intended workout replays as EXISTING_ACTIVE, a different one is a CONFLICT.
+
+    ``native`` (PR5) is the already server-resolved native workout identity. It
+    is recorded on the row; it is never a second source of the day, the plan or
+    the workout content, all of which stay server-derived exactly as before.
     """
     day = today or app_today()
     now = datetime.utcnow()
@@ -147,17 +172,17 @@ def start_session(user_id: int, *, today: Optional[date] = None) -> SessionResul
 
     existing = get_active_session(user_id)
     if existing is not None:
-        return _existing_or_conflict(existing, day, snapshot)
+        return _existing_or_conflict(existing, day, snapshot, native)
 
     try:
-        session = insert_active_session(user_id, day, snapshot, now)
+        session = insert_active_session(user_id, day, snapshot, now, native)
         db.session.commit()
     except IntegrityError as exc:
         db.session.rollback()
         if is_active_session_owner_violation(exc):
             existing = get_active_session(user_id)
             if existing is not None:
-                return _existing_or_conflict(existing, day, snapshot)
+                return _existing_or_conflict(existing, day, snapshot, native)
             # Violation but no active row visible now — treat conservatively.
             _log("start_conflict", user_id)
             return SessionResult(SessionOutcome.CONFLICT)
@@ -318,11 +343,13 @@ def complete_session(
     )
     try:
         completion = complete_workout(command)
-    except SessionCompletionConflict:
+    except SessionCompletionConflict as conflict:
         session = get_owned_session(user_id, public_id)
         view = _build_view(session, day) if session is not None else None
         _log("complete_conflict", user_id)
-        return SessionResult(SessionOutcome.CONFLICT, session=view)
+        return SessionResult(
+            SessionOutcome.CONFLICT, session=view,
+            conflict_reason=getattr(conflict, "reason", "abandoned"))
 
     session = get_owned_session(user_id, public_id)
     view = _build_view(session, day) if session is not None else None

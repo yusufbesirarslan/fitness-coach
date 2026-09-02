@@ -27,16 +27,31 @@ class CompletionOutcome(Enum):
 
 
 class SessionCompletionConflict(Exception):
-    """A session-scoped completion cannot proceed because the referenced session
-    is in a terminal state incompatible with completion (it was explicitly
-    ABANDONED). Raised *after* rolling back, before any completion artifact is
-    written — so no PumpCheck/marker/XP is produced. The caller maps it to a
-    deterministic conflict outcome (never an HTTP 500).
+    """A session-scoped completion cannot proceed against the referenced session.
+
+    Two causes, distinguished by ``reason`` so a caller can map each to its own
+    public error without inspecting message text:
+
+    ``"abandoned"`` (default)
+        The session is in a terminal state incompatible with completion (it was
+        explicitly ABANDONED).
+    ``"revision"``
+        The caller declared an expected checkpoint revision that is no longer
+        canonical — durable progress landed after the caller last read the
+        session, so completing now would silently discard it (PR5 section 31).
+
+    Raised *after* rolling back, before any completion artifact is written —
+    so no PumpCheck/marker/XP is produced. The caller maps it to a deterministic
+    conflict outcome (never an HTTP 500).
 
     Defined here (not in ``workout_session``) so the completion authority never
     imports the session package — the dependency arrow stays one-way
     (``workout_session`` → ``workout_completion``), avoiding an import cycle.
     """
+
+    def __init__(self, message: str = "", *, reason: str = "abandoned"):
+        super().__init__(message or reason)
+        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -57,6 +72,13 @@ class CompleteWorkoutCommand:
     # (the default) is the unchanged legacy path — a completion without a session
     # stays fully valid and no session is fabricated.
     session_id: Optional[int] = None
+    # OPTIONAL optimistic precondition (Mobile Training PR5). When not ``None``,
+    # the linked session's ``checkpoint_revision`` must still equal this value at
+    # the moment the session row is locked, otherwise the completion is refused
+    # with ``SessionCompletionConflict(reason="revision")`` and NO artifact is
+    # written. Checked inside the completion transaction, after the FOR UPDATE
+    # lock, because that is the only place the check is race-free.
+    expected_checkpoint_revision: Optional[int] = None
     image_key: Optional[str] = None
     location_type: str = ""
     description: str = ""
