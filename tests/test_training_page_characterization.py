@@ -145,10 +145,16 @@ def test_training_is_the_active_navigation_entry(training_html):
 
 @pytest.mark.parametrize("asset", [
     "/static/training.css", "/static/theme.css", "/static/nav.css",
-    "/static/training.js", "/static/coach_widget.js", "/static/actions.js",
+    "/static/training.js", "/static/actions.js",
 ])
 def test_existing_assets_are_wired(training_html, asset):
     assert asset in training_html
+
+
+def test_the_global_coach_widget_is_no_longer_loaded(training_html):
+    """UX-1 PR3: the page carried the widget only to host the global FAB, which
+    is retired now that Coach is a primary destination."""
+    assert "/static/coach_widget.js" not in training_html
 
 
 def test_inline_training_bootstrap_carries_a_csp_nonce(training_html):

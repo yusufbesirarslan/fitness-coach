@@ -436,16 +436,12 @@ async function doNextAction() {
 }
 
 
-/* ═══ MENÜ TARA (coach widget) ═══ */
+/* ═══ MENÜ TARA ═══
+   UX-1 PR3: Today no longer hosts the coach widget, so the menu scanner is
+   reached where Nutrition owns it — the log sheet on /nutrition. That is the
+   destination this quick action already used whenever the widget was absent. */
 function openMenuScan() {
-    if (window.CW && typeof CW.startScan === 'function') {
-        if (!CW.open && typeof CW.toggle === 'function') CW.toggle();
-        setTimeout(function () {
-            try { CW.startScan(); } catch (e) { location.href = '/nutrition'; }
-        }, 300);
-    } else {
-        location.href = '/nutrition';
-    }
+    location.href = '/nutrition';
 }
 
 
@@ -802,7 +798,6 @@ async function init() {
 init();
 </script>
 
-<script src="/static/coach_widget.js"></script>
 <script src="/static/actions.js"></script>
 
 <!-- WEEKLY REWARD CELEBRATION -->

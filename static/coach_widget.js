@@ -19,6 +19,18 @@
   if (window.__cwWidgetInit) return;
   window.__cwWidgetInit = true;
 
+  /* ── 0b. Launcher ownership (AxisAI UX-1 PR3) ──
+     The floating action button is the ONLY part of this widget that was ever
+     global chrome, and Coach is now a primary navigation destination (/coach),
+     so an app-wide launcher is duplicate navigation. It is injected ONLY where
+     the host page opts in with <body data-coach-launcher> — the canonical Coach
+     destination, nothing else. Everything else the widget owns (window, composer,
+     stream, /coach/history hydration, menu scanner) is untouched and still
+     available to its in-domain consumers, e.g. Nutrition's menu scan.
+     Contextual Coach entry points are plain links to /coach; they do NOT
+     resurrect an in-page launcher. */
+  var CW_LAUNCHER = !!(document.body &&
+                       document.body.hasAttribute('data-coach-launcher'));
 
   function mealWriteHeaders() {
     var key = (window.crypto && window.crypto.randomUUID)
@@ -130,12 +142,15 @@
 
     '</div>' +
 
-    '<button id="cw-fab" aria-label="' + t('coach.fab') + '">' +
-      '<span id="cw-badge" aria-hidden="true"></span>' +
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
-        '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>' +
-      '</svg>' +
-    '</button>' +
+    /* Launcher: opt-in only (see §0b). The unread badge went with it — its
+       single writer was the cross-page check-in push, which no longer exists. */
+    (CW_LAUNCHER
+      ? '<button id="cw-fab" aria-label="' + t('coach.fab') + '">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' +
+            '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>' +
+          '</svg>' +
+        '</button>'
+      : '') +
 
   '</div>' +
   '<div id="cw-notify" aria-live="assertive"></div>';
@@ -150,9 +165,17 @@
     while (wrap.firstChild) document.body.appendChild(wrap.firstChild);
   }
 
+  /* A closed window is invisible (opacity:0) but its composer and buttons were
+     still in the tab order. That was survivable while a launcher stood next to
+     it; on a launcher-less host it is focusable UI the user cannot see and could
+     not have opened. Cleared on every open (CW.toggle). */
+  var cwWinEl = document.getElementById('cw-window');
+  if (cwWinEl) cwWinEl.inert = true;
+
   /* ── 3. Wire events ── */
   document.getElementById('cw-close').addEventListener('click', function () { CW.toggle(); });
-  document.getElementById('cw-fab').addEventListener('click', function () { CW.toggle(); });
+  var cwFab = document.getElementById('cw-fab');   // absent unless the page opts in
+  if (cwFab) cwFab.addEventListener('click', function () { CW.toggle(); });
   document.getElementById('cw-send').addEventListener('click', function () { CW.send(); });
   document.getElementById('cw-stop').addEventListener('click', function () { CW.stop(); });
   document.getElementById('cw-input').addEventListener('keydown', function (e) {
@@ -206,7 +229,6 @@
   var CW = window.CW = {
     open:     false,
     busy:     false,
-    unread:   false,
     messages: [],
     _scanner: null,
     _abort:   null,   // akan isteği iptal eden AbortController (Durdur)
@@ -267,20 +289,23 @@
     toggle: function () {
       this.open = !this.open;
       var win = document.getElementById('cw-window');
-      var fab = document.getElementById('cw-fab');
+      var fab = document.getElementById('cw-fab');   // null on a launcher-less host
+      win.inert = !this.open;
       if (this.open) {
         win.classList.add('cw-open');
-        fab.classList.add('cw-hidden');
-        this.unread = false;
-        document.getElementById('cw-badge').style.display = 'none';
+        if (fab) fab.classList.add('cw-hidden');
         this._scrollBottom();
         setTimeout(function () {
-          var inp = document.getElementById('cw-input');
-          if (inp) inp.focus();
+          var inp  = document.getElementById('cw-input');
+          var scan = document.getElementById('cw-scan');
+          // The composer sits UNDER the scanner overlay, so focusing it there
+          // only summons a keyboard behind the camera view. startScan opens the
+          // window itself now, which is what makes this reachable.
+          if (inp && !(scan && scan.classList.contains('cw-open'))) inp.focus();
         }, 240);
       } else {
         win.classList.remove('cw-open');
-        fab.classList.remove('cw-hidden');
+        if (fab) fab.classList.remove('cw-hidden');
         this.hideQrMenu();
         this.hideUrlBox();
         this.stopScan();
@@ -475,15 +500,6 @@
       this._scrollBottom();
     },
 
-    receiveCheckinFeedback: function (text) {
-      this._push('bot', t('coach.checkin_feedback') + '\n\n' + text);
-      if (!this.open) {
-        this.unread = true;
-        document.getElementById('cw-badge').style.display = 'block';
-        this._showNotify();
-      }
-    },
-
     /* ── QR / menu flow ── */
     _normUrl: function (raw) {
       var url = (raw || '').trim();
@@ -529,6 +545,10 @@
     },
 
     startScan: function () {
+      // #cw-scan is absolutely positioned inside #cw-window, which is opacity:0 /
+      // pointer-events:none while closed — the scanner is only reachable once its
+      // host is open, and no launcher reopens it. Idempotent: toggle only if closed.
+      if (!this.open) this.toggle();
       this.hideQrMenu();
       var self = this;
       var overlay = document.getElementById('cw-scan');
@@ -890,15 +910,6 @@
       n.classList.add('cw-show');
       clearTimeout(this._toastT);
       this._toastT = setTimeout(function () { n.classList.remove('cw-show'); }, 3500);
-    },
-
-    _showNotify: function () {
-      var n = document.getElementById('cw-notify');
-      if (!n) return;
-      cwSetNotify(n, 'info', t('coach.new_message'));
-      n.classList.add('cw-show');
-      clearTimeout(this._toastT);
-      this._toastT = setTimeout(function () { n.classList.remove('cw-show'); }, 5000);
     }
   };
 

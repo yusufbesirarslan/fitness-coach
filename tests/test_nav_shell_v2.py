@@ -152,11 +152,17 @@ def test_coach_page_renders_shell_and_hosts_widget(client, make_user, login):
     assert _active_ids(html).get("coach") is True
 
 
-def test_coach_fab_remains_on_core_pages(client, make_user, login):
+def test_global_coach_launcher_is_retired_from_core_pages(client, make_user, login):
+    """UX-1 PR3: Coach is a primary destination, so no page opts into the
+    floating launcher except the Coach destination itself."""
     _seed_login(client, make_user, login)
-    for route in ("/", "/nutrition", "/training", "/progress-page", "/coach"):
+    for route in ("/", "/nutrition", "/training", "/progress-page"):
         html = client.get(route).get_data(as_text=True)
-        assert "/static/coach_widget.js" in html, route
+        assert "data-coach-launcher" not in html, route
+        assert 'id="cw-fab"' not in html, route
+    coach = client.get("/coach").get_data(as_text=True)
+    assert "data-coach-launcher" in coach
+    assert "/static/coach_widget.js" in coach
 
 
 # ── Yerelleştirme ──

@@ -173,7 +173,7 @@ def test_on_leaves_the_existing_controls_intact(app, render_training):
     for action in ("startWorkout", "generatePlan", "savePlan", "resetPlan",
                    "submitPumpCheck", "finishSession"):
         assert 'data-action="%s"' % action in html, action
-    for asset in ("/static/training.js", "/static/coach_widget.js", "/static/actions.js",
+    for asset in ("/static/training.js", "/static/actions.js",
                   "/static/training.css"):
         assert asset in html, asset
 

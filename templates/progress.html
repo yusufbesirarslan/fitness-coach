@@ -49,9 +49,15 @@
                 <button type="button" class="btn-ghost" data-action="openCheckin">
                     {{ t('progress.checkin_action') }}
                 </button>
-                <button type="button" class="btn-ghost" data-action="askAxis" id="ps-ask" hidden>
+                {#- Contextual Coach entry (UX-1 PR3). It used to be a button that
+                    toggled the floating widget and was revealed by JS only if that
+                    widget had loaded; it is now a server-rendered link to the
+                    canonical Coach destination, so it cannot silently disappear.
+                    Sits beside the check-in action, both secondary — the interpreted
+                    insight above is what the user came here to read. -#}
+                <a class="btn-ghost" href="/coach" id="ps-ask">
                     {{ t('progress.ask_axis') }}
-                </button>
+                </a>
             </div>
         </div>
     </section>
@@ -242,7 +248,6 @@
 <script src="/static/progress_physique.js?v={{ _v }}"></script>
 <script src="/static/progress_history.js?v={{ _v }}"></script>
 <script src="/static/progress.js?v={{ _v }}"></script>
-<script src="/static/coach_widget.js?v={{ _v }}"></script>
 <script src="/static/actions.js?v={{ _v }}"></script>
 </body>
 </html>

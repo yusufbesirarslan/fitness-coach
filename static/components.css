@@ -69,6 +69,13 @@ img, video { max-width: 100%; }
   .btn-ghost { padding: var(--space-2) 14px; font-size: var(--text-sm); }
 }
 
+/* ── CONTEXTUAL COACH ENTRY (UX-1 PR3) ──────────────────── */
+/* Not a new component: a block that places an EXISTING secondary primitive
+   (.btn-ghost as a link) under the content it refers to. It exists so a
+   contextual Coach action is spaced like a footnote to that content and can
+   never be mistaken for the screen's dominant CTA. */
+.coach-entry { margin-top: var(--space-4); }
+
 .btn-danger {
   display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
   padding: 13px 28px;

@@ -239,6 +239,16 @@
       </details>
       {% endfor %}
     </section>
+
+    {#- ── CONTEXTUAL COACH ENTRY (UX-1 PR3) ──
+        The same entry legacy /training carries, in the active-plan branch only, so
+        the two renderings of this route do not disagree about where Coach is
+        reachable. Secondary by construction; this branch has no dominant CTA to
+        compete with (the plan content is the target). Plain link to /coach — no
+        context is serialized into the URL; the Coach reads the plan server-side. -#}
+    <div class="coach-entry">
+      <a class="btn-ghost" href="/coach">{{ t('training.ask_coach') }}</a>
+    </div>
   {% endif %}
 
   {% if plan.secondary %}
@@ -267,6 +277,5 @@
 {% endif %}
 
 <script src="/static/actions.js?v={{ _v }}"></script>
-<script src="/static/coach_widget.js?v={{ _v }}"></script>
 </body>
 </html>

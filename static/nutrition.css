@@ -165,7 +165,9 @@
 
 /* ── 3 · LOG FAB + BOTTOM SHEET ───────────────────────────────────── */
 .log-fab {
-  /* Left rail, not stacked above the coach FAB (#cw-fab, coach_widget.css).
+  /* Left rail. It was moved here because it stacked above the global coach FAB
+     (#cw-fab), which UX-1 PR3 retired; the reasoning below is what put it on the
+     left and what still keeps it clear of `.mc-side`, so the position stands.
      Two 56px primary-blue circles in one right-hand column read as one
      ambiguous control pair, and — confirmed in a rendered 390px viewport —
      the upper one sat exactly on top of `.mc-side`, covering each meal card's

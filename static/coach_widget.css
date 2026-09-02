@@ -118,9 +118,6 @@
 #cw-fab svg{width:24px;height:24px;color:var(--color-on-primary)}
 #cw-fab.cw-hidden{opacity:0;pointer-events:none;transform:scale(.8)}
 
-#cw-badge{position:absolute;top:-2px;right:-2px;width:15px;height:15px;border-radius:50%;background:var(--color-chat-badge);border:2px solid var(--bg);display:none;animation:cw-bp 1.6s ease-in-out infinite}
-@keyframes cw-bp{0%,100%{box-shadow:0 0 0 0 var(--color-chat-badge-glow)}50%{box-shadow:0 0 0 5px transparent}}
-
 #cw-notify{position:fixed;bottom:calc(var(--action-bar-h,68px) + 75px);right:20px;background:var(--surface-2);border:1px solid var(--color-primary-a20);border-radius:10px;padding:10px 15px;font-family:var(--font-body);font-size:13px;color:var(--color-text-1);box-shadow:0 4px 20px var(--shadow-color-2);z-index:9999;opacity:0;transform:translateY(8px);transition:opacity .25s ease,transform .25s ease;pointer-events:none;display:flex;align-items:center;gap:9px;max-width:250px}
 #cw-notify.cw-show{opacity:1;transform:translateY(0)}
 #cw-notify .cw-notify-ic{width:var(--icon-sm);height:var(--icon-sm);flex-shrink:0;stroke:var(--color-primary);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
