@@ -281,11 +281,22 @@ def test_tip_dot_hit_area_meets_touch_minimum_without_growing_the_row():
 def test_page_shell_reserves_the_floating_fab_rail():
     """Measured at the document end on all four surfaces: the coach FAB covered
     trailing content on 15 of 16 viewport cells (including Nutrition's "day
-    review" button) because only the action bar was reserved."""
-    body = _rule(_css("nav.css"), ".page-body")
-    assert "var(--fab-rail-h)" in body, (
-        "the shell must reserve the FAB rail, not just the action bar"
+    review" button) because only the action bar was reserved.
+
+    UX-1 PR3 retired the global coach launcher, so the reserve moved from every
+    page to the pages that still carry a FAB. The occlusion fix is unchanged for
+    them; every other page stopped reserving space for a button it does not have.
+    """
+    nav_css = _css("nav.css")
+    assert "var(--fab-rail-h)" not in _rule(nav_css, ".page-body"), (
+        "the shell must not reserve a FAB rail on pages with no FAB"
     )
+    body = _rule(nav_css, ".page-body.has-fab-rail")
+    assert "var(--fab-rail-h)" in body, (
+        "a page that carries a FAB must still reserve the rail"
+    )
+    for name in ("nutrition.html", "coach.html", "coach_v2.html"):
+        assert "has-fab-rail" in _read(TEMPLATES / name), name
     tokens = _css("tokens.css")
     assert re.search(r"--fab-rail-h:\s*calc\(", tokens), (
         "--fab-rail-h must be derived from the inset and button size"

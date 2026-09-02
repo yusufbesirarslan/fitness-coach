@@ -207,6 +207,16 @@
             </button>
         </div>
 
+        {#- ── CONTEXTUAL COACH ENTRY (UX-1 PR3) ──
+            At the foot of #active-plan-view, so it appears only when there is a
+            program to ask about and never beside Start Workout, which stays the
+            one dominant CTA on this page. A plain link to the canonical Coach
+            destination — no context is serialized into the URL; the Coach already
+            reads the user's plan server-side. -#}
+        <div class="coach-entry">
+            <a class="btn-ghost" href="/coach">{{ t('training.ask_coach') }}</a>
+        </div>
+
     </div>
 
     <!-- ══ KURULUM FORMU (plan yoksa veya sıfırlandığında göster) ══ -->
@@ -362,7 +372,6 @@
 <script src="/static/weekly_program.js?v={{ _v }}"></script>
 {%- endif %}
 
-<script src="/static/coach_widget.js?v={{ _v }}"></script>
 <script src="/static/actions.js?v={{ _v }}"></script>
 </body>
 </html>

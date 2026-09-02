@@ -135,18 +135,26 @@
 }
 
 /* ── 4. PAGE SHELL ───────────────────────────────────── */
-/* PR2: the reservation now includes the floating FAB rail, not just the action
-   bar. The coach FAB is on every page and stands ~71px tall above the bar, but
-   only 24px was reserved — so the last line of a page that filled its viewport
-   (proven on /training at 390px: the plan provenance row) sat underneath it. */
+/* PR2: the reservation includes the floating FAB rail, not just the action bar.
+   A FAB stands ~71px tall above the bar but only 24px was reserved — so the last
+   line of a page that filled its viewport (proven on /training at 390px: the
+   plan provenance row) sat underneath it.
+   UX-1 PR3: the coach FAB is no longer on every page, so the rail is reserved by
+   the pages that actually carry a floating control — Nutrition (#log-fab) and
+   the Coach destination (#cw-fab). Everywhere else it was space held open for a
+   button that is not there. One token, still one owner. */
 .page-body {
   padding-top: var(--header-h);
-  padding-bottom: calc(var(--action-bar-h) + var(--fab-rail-h) + var(--space-4)
+  padding-bottom: calc(var(--action-bar-h) + var(--space-4)
                        + env(safe-area-inset-bottom, 0));
 }
+.page-body.has-fab-rail { padding-bottom: calc(var(--action-bar-h)
+                       + var(--fab-rail-h) + var(--space-4)
+                       + env(safe-area-inset-bottom, 0)); }
 @media (min-width: 1024px) {
   /* No action bar above 1024px; --fab-rail-inset is 36px there (tokens.css). */
-  .page-body { padding-bottom: calc(var(--fab-rail-h) + var(--space-4)); }
+  .page-body { padding-bottom: var(--space-4); }
+  .page-body.has-fab-rail { padding-bottom: calc(var(--fab-rail-h) + var(--space-4)); }
 }
 
 /* Sayfa girişi — kabuk sabit kalır, içerik yumuşak girer. */

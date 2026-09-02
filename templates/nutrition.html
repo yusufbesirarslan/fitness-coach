@@ -8,7 +8,9 @@
   <link rel="stylesheet" href="/static/nutrition.css?v={{ _v }}">
 </head>
 
-<body class="page-body">
+{#- has-fab-rail: this page still carries a floating control (#log-fab), so it
+    keeps the rail reserve the shell no longer applies globally (UX-1 PR3). -#}
+<body class="page-body has-fab-rail">
 
 <!-- ── LOADING OVERLAY ── -->
 <div class="loading-overlay" id="loading">
@@ -163,6 +165,16 @@
             </div>
           </div>
         </div>
+      </div>
+
+      {#- ── CONTEXTUAL COACH ENTRY (UX-1 PR3) ──
+          At the foot of the target card, where "is this target right for me?"
+          is asked. Secondary text-weight link; the dominant action on this page
+          is logging (#log-fab), which is untouched. Plain link to /coach — no
+          nutrition data is serialized into the URL; the Coach reads the
+          canonical targets server-side. -#}
+      <div class="coach-entry">
+        <a class="btn-ghost" href="/coach">{{ t('nutrition.ask_coach') }}</a>
       </div>
     </div>
 

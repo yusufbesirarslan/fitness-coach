@@ -7,7 +7,11 @@
     <link rel="stylesheet" href="/static/nav.css">
 </head>
 {% set nav_active = 'coach' %}
-<body class="page-body">
+{#- data-coach-launcher: the floating launcher is page-owned chrome now, not
+    application chrome (UX-1 PR3). Only the canonical Coach destination opts in,
+    so the user can reopen the conversation after closing it. has-fab-rail keeps
+    the foot of the page clear of that button. -#}
+<body class="page-body has-fab-rail" data-coach-launcher>
 
 {% include "_nav.html" %}
 
@@ -27,12 +31,14 @@
 <script nonce="{{ csp_nonce }}">
 (function(){
     // Coach sayfasına gelindiğinde mevcut widget'ı açılışta aç. Widget DOM'u
-    // CW.init() ile (DOMContentLoaded'da) kurulur; #cw-fab belirene dek bekle,
+    // CW.init() ile (DOMContentLoaded'da) kurulur; CW hazır olana dek bekle,
     // sonra TEK kez aç. Diyalog/alert tetiklenmez.
+    // UX-1 PR3: hazırlık işareti artık yüzen başlatıcı düğmesi DEĞİL, widget'ın
+    // kendi API'si (CW.toggle). Başlatıcı sayfaya özel bir tercih olduğundan
+    // (data-coach-launcher) açılış ona bağlı olamaz.
     function tryOpen(){
         if(window.CW && window.CW.open) return true;            // zaten açık → dur
-        var fab = document.getElementById('cw-fab');
-        if(fab && window.CW && typeof window.CW.toggle === 'function'){
+        if(window.CW && typeof window.CW.toggle === 'function'){
             window.CW.toggle();
             return true;
         }

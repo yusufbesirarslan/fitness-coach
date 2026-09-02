@@ -87,7 +87,6 @@ async function submitCheckin() {
         fb.classList.add('visible');
         fb.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         showToast(__t('progress.checkin_saved'), 'success');
-        if (window.CW) window.CW.receiveCheckinFeedback(data.coach_feedback);
         // A fresh check-in changes Body/Consistency and adds a history row —
         // repaint the data-driven sections so the page stays truthful without
         // a manual reload.
@@ -188,10 +187,9 @@ function _getJSON(url) {
 // Each section owns its own fetch + catch: a secondary failure degrades that
 // one section, never the whole page.
 function initProgress() {
-  var ask = _el('ps-ask');
-  // Reuse of the EXISTING coach entry point (coach_widget.js). Only revealed
-  // when the widget actually loaded — no new AI workflow is introduced here.
-  if (ask && window.CW && typeof window.CW.toggle === 'function') ask.hidden = false;
+  // UX-1 PR3: the contextual Coach entry is a server-rendered link to the
+  // canonical Coach destination, so it needs no client gating and cannot
+  // disappear when a script fails to load.
   loadProgress();
 }
 function loadProgress() {
@@ -218,11 +216,6 @@ function loadAxisInsights() {
   if (mod && typeof mod.load === 'function') mod.load();
 }
 document.addEventListener('DOMContentLoaded', initProgress);
-
-// Reuses the existing coach widget rather than creating a second AI surface.
-function askAxis() {
-  if (window.CW && typeof window.CW.toggle === 'function') window.CW.toggle();
-}
 
 /* ── THE CANONICAL SUMMARY ────────────────────────────────────────────
    One fetch of /api/progress/summary drives YOUR PROGRESS and all three

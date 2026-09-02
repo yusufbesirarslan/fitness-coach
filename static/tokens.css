@@ -269,12 +269,15 @@
   --drawer-w:     280px;
   --fab-protrude: 22px;
   /* Floating FAB rail (PR2). The coach FAB (#cw-root, coach_widget.css) and the
-     nutrition log FAB both sit on this rail, and `.page-body` (nav.css) reserves
-     `--fab-rail-h` at the foot of every page so the last line of content is
-     never underneath them. Offsets and button size live here rather than as
-     three copies of `15px`/`36px`/`56px`, so the reservation cannot drift away
-     from what it is reserving. One size token (`--fab-btn`) for every FAB of
-     this control class; `--fab-size` is a legacy alias below. */
+     nutrition log FAB both sit on this rail, and `.page-body.has-fab-rail`
+     (nav.css) reserves `--fab-rail-h` at the foot of the pages that actually
+     carry one, so the last line of content is never underneath them. UX-1 PR3
+     made that reserve opt-in rather than global: the coach launcher is no longer
+     app-wide chrome, so an unconditional reserve held space for a button that is
+     not there. Offsets and button size live here rather than as three copies of
+     `15px`/`36px`/`56px`, so the reservation cannot drift away from what it is
+     reserving. One size token (`--fab-btn`) for every FAB of this control class;
+     `--fab-size` is a legacy alias below. */
   --fab-btn:         56px;
   --fab-rail-inset:  15px;   /* above the bottom action bar */
   --fab-rail-h:      calc(var(--fab-rail-inset) + var(--fab-btn));

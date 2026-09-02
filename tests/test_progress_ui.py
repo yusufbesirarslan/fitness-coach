@@ -132,22 +132,26 @@ def test_weekly_checkin_remains_reachable_and_secondary(app, client, make_user, 
     assert "w-full" not in opener.group(0)
 
 
-def test_ask_axis_action_is_hidden_until_the_coach_widget_exists(app, client, make_user, login):
-    """It defaults to hidden server-side, and the CSS must actually hide it.
-
-    `.btn-ghost` sets `display: inline-flex`, which beats the UA
-    `[hidden] { display: none }` rule — without a page-scoped guard the action
-    would render even when the coach widget never loaded.
-    """
+def test_ask_axis_action_is_a_server_rendered_link_to_the_coach_destination(
+        app, client, make_user, login):
+    """UX-1 PR3: it used to be a button that toggled the floating coach widget,
+    revealed by JS only once that widget had loaded. Progress no longer loads the
+    widget, so the entry is a plain link to /coach that is always rendered and
+    cannot vanish when a script fails."""
     html = _get_progress_html(client, make_user, login, "proguiask")
 
-    ask = re.search(r'<button[^>]*id="ps-ask"[^>]*>', html)
+    ask = re.search(r'<a[^>]*id="ps-ask"[^>]*>', html)
     assert ask, "Ask-AxisAI action is missing"
-    assert "hidden" in ask.group(0)
+    assert 'href="/coach"' in ask.group(0)
+    assert "hidden" not in ask.group(0)
+    assert "btn-ghost" in ask.group(0)      # secondary, like the check-in opener
+    assert "btn-volt" not in ask.group(0)
+    assert 'data-action="askAxis"' not in html
 
-    css = client.get("/static/progress.css")
-    assert css.status_code == 200
-    assert ".ps-actions [hidden]" in css.get_data(as_text=True)
+    # The client half is gone with it: no gate, no toggle, no widget reference.
+    js = _progress_js(client)
+    assert "askAxis" not in js
+    assert "window.CW" not in js
 
 
 def test_overload_chips_are_keyboard_operable(app, client, make_user, login):

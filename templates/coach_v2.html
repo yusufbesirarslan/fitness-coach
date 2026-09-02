@@ -7,7 +7,9 @@
     <link rel="stylesheet" href="/static/nav.css">
 </head>
 {% set nav_active = 'coach' %}
-<body class="page-body">
+{#- data-coach-launcher / has-fab-rail: see templates/coach.html — the floating
+    launcher is page-owned chrome on the Coach destination only (UX-1 PR3). -#}
+<body class="page-body has-fab-rail" data-coach-launcher>
 
 {% include "_nav.html" %}
 
