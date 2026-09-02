@@ -741,23 +741,28 @@ def test_progress_and_mobile_today_consume_no_nutrition_authority():
             "is an architecture decision.")
 
 
-def test_the_orphaned_nutrition_read_surfaces_still_exist_and_have_no_consumer(
+def test_the_orphaned_nutrition_read_surfaces_were_retired_without_touching_axis_insights(
         app):
-    """F9: both halves of the finding - the routes exist, nothing calls them."""
+    """F9 closed (PR5): the orphans are gone; the live Axis Insights route is not.
+
+    Pre-PR5 this characterized the defect: both routes existed and nothing
+    first-party called them. C8 chose retirement over blessing. The live
+    consumer is the different ``/api/progress/axis-insights`` path — a
+    substring-trap cleanup would have deleted it.
+    """
     rules = {rule.rule for rule in app.url_map.iter_rules()}
-    assert "/api/progress/nutrition" in rules
-    assert "/api/progress/insights" in rules
+    assert "/api/progress/nutrition" not in rules
+    assert "/api/progress/insights" not in rules
+    assert "/api/progress/axis-insights" in rules
 
     frontend = list((REPO_ROOT / "static").rglob("*.js"))
     frontend += list((REPO_ROOT / "templates").rglob("*.html"))
-    for endpoint in ("progress/nutrition", "progress/insights"):
-        callers = [
-            _relative(path) for path in frontend
-            if endpoint in path.read_text(encoding="utf-8", errors="ignore")
-        ]
-        assert callers == [], (
-            f"{endpoint} gained a consumer. F9 recommended retiring it (C8); "
-            "wiring it up instead is a decision that needs recording.")
+    for path in frontend:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        assert "/api/progress/nutrition" not in text
+        assert "/api/progress/axis-insights" in text or \
+            "/api/progress/insights" not in text.replace(
+                "/api/progress/axis-insights", "")
 
 
 # ---------------------------------------------------------------------------

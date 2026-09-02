@@ -13,32 +13,18 @@ def _login(make_user, login, name="prog"):
     return u
 
 
-def test_nutrition_trend_groups_by_day(app, client, make_user, login):
-    u = _login(make_user, login, "nutru")
-    today = app_today().isoformat()
-    db.session.add(MealLog(user_id=u.id, ogun="Kahvaltı", yemekler="x",
-                           kalori=500, protein=30, karb=50, yag=10, tarih=today))
-    db.session.add(MealLog(user_id=u.id, ogun="Öğle", yemekler="y",
-                           kalori=700, protein=40, karb=60, yag=20, tarih=today))
-    db.session.commit()
+def test_legacy_progress_nutrition_route_is_gone(app, client, make_user, login):
+    """F9 closed (PR5): the orphaned nutrition-trend route no longer exists."""
+    _login(make_user, login, "nutru")
     r = client.get("/api/progress/nutrition?range=week")
-    assert r.status_code == 200
-    d = r.get_json()
-    assert len(d["days"]) == 7
-    last = d["days"][-1]
-    assert last["date"] == today and last["kcal"] == 1200 and last["p"] == 70
-    assert d["avg"]["kcal"] == 1200   # one logged day
+    assert r.status_code == 404
 
 
-def test_nutrition_scoped_to_user(app, client, make_user, login):
-    other = make_user("nutother", profile_complete=True)
-    db.session.add(MealLog(user_id=other.id, ogun="Kahvaltı", yemekler="z",
-                           kalori=999, protein=1, karb=1, yag=1,
-                           tarih=app_today().isoformat()))
-    db.session.commit()
-    _login(make_user, login, "nutme")
-    d = client.get("/api/progress/nutrition?range=week").get_json()
-    assert all(day["kcal"] == 0 for day in d["days"])   # other user's meal not visible
+def test_legacy_progress_insights_route_is_gone(app, client, make_user, login):
+    """F9 closed (PR5): the unowned calorie-adherence heuristic route is gone."""
+    _login(make_user, login, "insuser")
+    r = client.get("/api/progress/insights")
+    assert r.status_code == 404
 
 
 def test_workout_trend_marker_excluded_from_volume(app, client, make_user, login):
@@ -169,10 +155,8 @@ def test_heatmap_and_insights_use_training_history_reader(
                   if cell["date"] == today.isoformat()][0]
     assert today_cell["level"] == 1
 
-    insights = client.get("/api/progress/insights").get_json()["insights"]
-    assert len(insights) == 2  # workout + always-present streak
-    assert len(calls) == 2
-    assert all(call[0] == user.id and call[3] is True for call in calls)
+    assert len(calls) == 1
+    assert calls[0][0] == user.id and calls[0][3] is True
 
 
 def test_heatmap_weeks_clamped(app, client, make_user, login):
@@ -198,10 +182,10 @@ def test_achievements_shape(app, client, make_user, login):
     assert any(m["key"] == "streak30" and not m["hit"] for m in d["milestones"])
 
 
-def test_insights_always_nonempty(app, client, make_user, login):
+def test_legacy_insights_do_not_return_a_heuristic_payload(
+        app, client, make_user, login):
     _login(make_user, login, "insuser")
-    d = client.get("/api/progress/insights").get_json()
-    assert isinstance(d["insights"], list) and len(d["insights"]) >= 1
-    first = d["insights"][0]
-    assert set(("icon", "title", "body", "tone")).issubset(first)
-    assert first["tone"] in ("success", "warning", "info")
+    r = client.get("/api/progress/insights")
+    assert r.status_code == 404
+    body = r.get_json(silent=True) or {}
+    assert "insights" not in body

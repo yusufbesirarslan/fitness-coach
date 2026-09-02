@@ -3,8 +3,9 @@
 The endpoint is the only runtime surface of ``app/services/progress_insights``,
 so what is pinned here is the *wire contract* and the boundary behaviours the
 service tests cannot see: auth, input refusal, cache headers, the deliberate
-difference between "no insight" and "the backend broke", and the promise that
-the legacy insight endpoint keeps its exact contract.
+difference between "no insight" and "the backend broke", and the Sprint 13
+PR5 promise that retiring the *legacy* ``/api/progress/insights`` heuristic
+does not capture this live Axis Insights route.
 
     python -m pytest tests/test_progress_insights_api.py -v
 """
@@ -314,19 +315,19 @@ def test_insights_failure_does_not_break_the_other_progress_endpoints(
 
     assert client.get(INSIGHTS_URL).status_code == 500
     assert client.get(SUMMARY_URL).status_code == 200
-    assert client.get(LEGACY_URL).status_code == 200
+    assert client.get(LEGACY_URL).status_code == 404
     assert client.get("/checkin-history").status_code == 200
     assert client.get("/api/progress/achievements").status_code == 200
     assert client.get("/progress-page").status_code == 200
 
 
 # ---------------------------------------------------------------------------
-# Legacy compatibility (§3.14, Rule 14, STOP I)
+# Legacy retirement (Sprint 13 PR5 / F9) — the live route must survive
 # ---------------------------------------------------------------------------
 
-def test_legacy_insight_endpoint_keeps_its_exact_contract(
+def test_legacy_insight_endpoint_is_gone_and_axis_insights_is_not(
         app, client, make_user, login):
-    """PR3 adds a route; it does not change or delete the old one."""
+    """PR5 deletes the unowned heuristic. It must not capture axis-insights."""
     user = _login(make_user, login, "axapilegacy", weight=80.0)
     db.session.add(WeeklyCheckIn(user_id=user.id, weight=80.0, yogunluk=3,
                                  created_at=datetime.utcnow() - timedelta(days=8)))
@@ -335,34 +336,33 @@ def test_legacy_insight_endpoint_keeps_its_exact_contract(
     _consistent_history(user.id)
 
     r = client.get(LEGACY_URL)
-    assert r.status_code == 200
-    d = r.get_json()
-    assert set(d) == {"insights"}
-    assert isinstance(d["insights"], list) and d["insights"]
-    for item in d["insights"]:
-        assert set(item) == {"icon", "title", "body", "tone"}
-        assert item["tone"] in ("success", "warning", "info")
+    assert r.status_code == 404
+    body = r.get_json(silent=True) or {}
+    assert "insights" not in body
 
-    # The legacy heuristics (streak, calorie %, workout count, weight delta)
-    # still live there and are still localized prose — which is exactly why the
-    # new surface is a separate route rather than a change to this one.
-    assert any("kg" in item["body"] for item in d["insights"])
+    canonical = client.get(INSIGHTS_URL)
+    assert canonical.status_code == 200
+    assert "next_move" in canonical.get_json()
+    assert "insights" not in canonical.get_json()
 
 
-def test_the_two_insight_routes_are_independent(app, client, make_user, login):
-    """Different paths, different shapes, neither affects the other."""
+def test_the_live_axis_insights_route_is_independent_of_the_retired_legacy(
+        app, client, make_user, login):
+    """Different paths. Removing one must not rename or empty the other."""
     user = _login(make_user, login, "axapiboth")
     _consistent_history(user.id)
 
-    legacy = client.get(LEGACY_URL).get_json()
+    assert client.get(LEGACY_URL).status_code == 404
     canonical = client.get(INSIGHTS_URL).get_json()
     assert "insights" not in canonical
-    assert "next_move" not in legacy
-    assert client.get(LEGACY_URL).get_json() == legacy   # unchanged by the new read
+    assert "next_move" in canonical
 
 
-def test_legacy_route_is_not_given_the_new_cache_header(
+def test_retired_legacy_route_cannot_carry_the_axis_insights_cache_header(
         app, client, make_user, login):
-    """The no-store rule is scoped to the new path; the old response is untouched."""
+    """A 404 is not the canonical no-store payload."""
     _login(make_user, login, "axapilegacycache")
-    assert client.get(LEGACY_URL).headers.get("Cache-Control") != "private, no-store"
+    r = client.get(LEGACY_URL)
+    assert r.status_code == 404
+    assert r.headers.get("Cache-Control") != "private, no-store" \
+        or "next_move" not in (r.get_json(silent=True) or {})

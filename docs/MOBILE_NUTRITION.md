@@ -16,7 +16,8 @@ live browser surface.
 ## Why a new surface instead of a decorator on the old one
 
 Every existing nutrition route (`/meal-log/today`, `/meal-log/history`,
-`/api/diary/today`, `/api/progress/nutrition`, `/api/food/*`, `/api/menu/*`)
+`/api/diary/today`, `/api/food/*`, `/api/menu/*`; historically also
+`/api/progress/nutrition`, retired by Sprint 13 PR5)
 carries `@require_auth`, which resolves a Flask-Login cookie plus a
 `cognito_sid` session value and answers a browser. A native client has neither,
 so no nutrition data was reachable from the app at all.
@@ -149,15 +150,16 @@ A day with no entries totals `0`, which is a measurement, not a gap.
 `null` when no target is configured; otherwise `{"target_energy_kcal": <number>}`.
 
 The value is the newest `UserSession.target_calories` — the same selector
-`/api/progress/nutrition`, `/meal-log/review` and the barcode context already
+`/meal-log/today`, `/meal-log/review` and the barcode context already
 use. This contract normalises what that value *means* at the boundary; it does
 not add a second place that decides where a target comes from.
 
 Normalisation: a NULL target and a non-positive stored target both publish as
-"no goal". Zero kilocalories a day is not a target anyone configured, and
-`/api/progress/nutrition` currently answers `target_kcal: 0` for both "unset"
-and "zero". Zero-as-unset stops at this boundary; the persisted column keeps
-whatever it holds.
+"no goal". Zero kilocalories a day is not a target anyone configured.
+Zero-as-unset stops at this boundary; the persisted column keeps
+whatever it holds. (The legacy `/api/progress/nutrition` surface that used to
+answer `target_kcal: 0` for both "unset" and "zero" was retired by Sprint 13
+PR5.)
 
 ## Entry identity
 
@@ -205,7 +207,6 @@ The backend has three related surfaces and only one of them is the ledger:
 | --- | --- | --- |
 | `/meal-log/today` | `MealLog` | Canonical record of what was eaten |
 | `/api/diary/today` | `CustomMeal` + `CustomMealItem` | Web diary *builder* (staging) |
-| `/api/progress/nutrition` | `MealLog` | Multi-day aggregation of the ledger |
 
 Committing a builder meal writes it into the ledger **and** keeps it in the
 builder, so the two totals must never be added; both route docstrings say so.
@@ -281,9 +282,11 @@ consistency is claimed or needed.
 Nothing existing changed behaviour:
 
 - `/meal-log/today`, `/meal-log/history`, `/api/diary/today`,
-  `/api/progress/nutrition`, `/api/food/*` and `/api/menu/*` keep their paths,
+  `/api/food/*` and `/api/menu/*` keep their paths,
   their auth, their payloads and their Turkish field names. A characterisation
-  test pins that `/meal-log/today` still answers `DD.MM` with no entry id;
+  test pins that `/meal-log/today` still answers `DD.MM` with no entry id.
+  Sprint 13 PR5 retired the orphaned `/api/progress/nutrition` read (F9) —
+  that path is no longer a live compatibility surface;
 - no route switched to Bearer-only auth;
 - no persisted total, diary grouping or timezone behaviour changed;
 - the PR1 read adapter itself changed no schema; PR2A later added only the

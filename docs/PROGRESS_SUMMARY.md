@@ -218,8 +218,8 @@ No BMI. No body-fat estimate. No rate-of-loss prescription.
 | `distance_to_target_kg` | `abs(current - target)`, only when both exist |
 
 **Qualifying** means a full weekly check-in, identified by
-`yogunluk IS NOT NULL` — the exact filter `/checkin-history` and
-`/api/progress/insights` already use to keep sparse `/update-weight` rows out of
+`yogunluk IS NOT NULL` — the exact filter `/checkin-history` already
+uses to keep sparse `/update-weight` rows out of
 Progress history (BUG-5). The two concepts are **not** merged: a sparse row is a
 perfectly good answer to "what does this user weigh" (so it feeds the current
 weight fallback) and not an answer to "is this a Progress observation" (so it
@@ -313,7 +313,8 @@ PR2 converges; it does not clean up. These endpoints are **unchanged** and keep
 their other consumers:
 
 `/api/progress/workout` · `/api/progress/achievements` · `/checkin-history` ·
-`/api/progress/insights` · `/api/progress/heatmap` · Pump Check gallery.
+`/api/progress/heatmap` · Pump Check gallery.
+(The legacy `/api/progress/insights` heuristic was retired by Sprint 13 PR5.)
 
 No schema change, no migration, no new table, no persisted summary, no cached
 trajectory. The summary is a read model, recomputed per request.

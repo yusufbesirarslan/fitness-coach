@@ -125,22 +125,36 @@ snapshot/claim races on PostgreSQL, which SQLite cannot prove (**P2-03**); and
 `instance/` is excluded from pytest collection so runtime artefacts can no
 longer break a full-repository run (**P2-04**).
 
+### Amendment — PR5 implementation (2026-09-02)
+
+PR5 closes **F9, F10, N4 (browser half) and N10**. Unowned scoring and
+adherence definitions were **removed**, not promoted. The browser consumes
+PR2's canonical target projection on `/meal-log/today` (or presents
+absence). `POST /api/food/barcode/add` remains **SAFE + DEPRECATED +
+RETAINED** — C13's removal bar is not met.
+
+**SPRINT 13 NUTRITION CORE COMPLETE.** Post-closure capabilities listed in
+§12 (native history, mobile menu adapter, a validated intelligence domain,
+web slot move, past-day correction, meal photos on mobile, `MOBILE_AUTH_ENABLED`
+activation) remain open on purpose. Core complete is not "all nutrition
+product work complete".
+
 ### Findings index
 
 | ID | Sev | One line |
 |---|---|---|
 | ~~F1~~ | P1 | **CLOSED by PR4.** The web owns one correction primitive for a committed `MealLog`: a current-day hard delete addressed by opaque token with an `If-Match` revision, served by the shared mutation authority. Slot move and editing remain out of scope (C4, C5) |
 | ~~F14~~ | P1 | **CLOSED by PR4.** `s3_helper.delete_meal_photo` is the one bounded object-deletion primitive, and `mobile_diary_mutation.delete_entry` — the *only* canonical deletion path, shared by web and mobile — calls it. Row commits first, object is released second, and an unreleased object is never reported as success |
-| F2 | P1 | Three server derivations of one daily macro-target split; `barcode._target_macros` disagrees with coach/menu for every non-bulk goal |
-| F3a | P2 | `barcode._target_macros` fabricates a `2000 kcal` target and publishes it on the **live** `GET /api/food/barcode` payload — currently rendered by nothing |
-| F4 | P1 | Web multi-food quick log posts **per-100 g** values as the meal total (quantity fixed at 100 g, never chosen) |
-| F5 | P1 | `/meal-log` `override_macros` persists client-computed macros; the mobile path recomputes from the provider. Same ledger, two trust models |
+| ~~F2~~ | P1 | **CLOSED by PR2.** One server-owned `nutrition_targets` derivation; barcode/coach/menu consume it |
+| ~~F3a~~ | P2 | **CLOSED by PR2.** Unset `target_calories` publishes absence, never a fabricated `2000 kcal` |
+| ~~F4~~ | P1 | **CLOSED by PR3.** Web multi-food quick log no longer posts per-100 g values as a meal total |
+| ~~F5~~ | P1 | **CLOSED by PR3.** Provider-backed `/meal-log` recomputes from server authority; `override_macros` is the manual command only |
 | ~~F15~~ | P1 | **CLOSED by PR3B.** Diary provider staging and canonical commit both resolve provider identity through shared server authority; caller serving macros are preview-only |
-| F6 | P2 | `POST /api/food/barcode/add` accepts a caller-supplied `food` object; no first-party consumer, but a documented `/api/food/*` compatibility surface — deprecate before removing (C13) |
-| F7 | P2 | `/meal-log` does not validate `ogun`: free text reaches `MealLog.ogun` (`String(100)`) → `unknown` slot on the wire, `DataError` above 100 chars |
-| F8 | P2 | Social meal-suggestion writer sets no `source` (reads back as `manual`) and uses no idempotency key |
-| F9 | P2 | `/api/progress/nutrition` and `/api/progress/insights` are orphaned; the latter contains an unowned calorie-adherence heuristic |
-| F10 | P2 | `static/nutrition.js` computes a 0–100 nutrition score and an A–D letter grade in the browser, with no server owner and no mobile counterpart |
+| F6 | P2 | **F6 safety CLOSED by PR3.** `POST /api/food/barcode/add` no longer trusts a caller-supplied `food` object and is marked deprecated. **Compatibility-route removal = DEFERRED by PR5** — C13's evidence bar is not met (no sunset, no elapsed deprecation period, `docs/MOBILE_NUTRITION.md` still documents the path as a supported compatibility surface) |
+| ~~F7~~ | P2 | **CLOSED by PR3.** `/meal-log` validates `ogun` against the four canonical labels |
+| ~~F8~~ | P2 | **CLOSED by PR3.** Suggestion writer sets `source="suggestion"` and uses a deterministic key |
+| ~~F9~~ | P2 | **CLOSED by PR5.** `/api/progress/nutrition` and legacy `/api/progress/insights` are gone; the live `/api/progress/axis-insights` route is untouched; the unowned `80 ≤ pct ≤ 110` calorie-adherence heuristic is deleted, not moved into canonical Progress |
+| ~~F10~~ | P2 | **CLOSED by PR5.** Browser 0–100 nutrition score and A–D grade **REMOVED** (not confined, not relocated). No server replacement score was introduced |
 | F11 | P2 | `fitx_mcp.log_nutrition_entry` writes the ledger with `user_id` as a *tool parameter* and no idempotency (not deployed) |
 | F12 | P2 | `diary_log_meal` writes the ledger without an idempotency key (safe today only because of the atomic `is_logged` claim) |
 | F3b | — | `/meal-log/review`'s `2000` is an internal LLM-prompt fallback for qualitative text, never a published target — **benign**, recorded so it is not re-raised |
@@ -888,13 +902,13 @@ stated so it can be checked, not argued.
 | **N1** | Exactly one canonical consumed-food ledger (`MealLog`), and no surface persists a competing definition of what was eaten | ✅ already true | — (C1 guards it) |
 | **N2** | Every supported writer converges on that ledger through a single clamp/validation gate, and no writer accepts caller-supplied nutrition for a provider-backed food | ✅ **satisfied by PR3 + PR3B.** Direct web and diary provider paths resolve server-owned provider truth; manual diary nutrition remains explicitly caller-authoritative and bounded | PR3 + PR3B |
 | **N3** | Canonical daily totals cannot differ between web, mobile, Coach and downstream consumers, because all of them read the same rows and none re-derives totals | ✅ already true | — |
-| **N4** | The daily macro-target split and the remaining-macro budget have exactly one server-owned derivation; no first-party surface — server or browser — presents a different interpretation of that same configured daily target; and no surface substitutes a number for an unset target. Analytical questions that are genuinely different (a weekly protein goal, a recommendation heuristic) are **not** required to become identical | ❌ F2, F3a (server); ❌ F10 (browser split) | PR2 (server) + PR5 (browser) |
+| **N4** | The daily macro-target split and the remaining-macro budget have exactly one server-owned derivation; no first-party surface — server or browser — presents a different interpretation of that same configured daily target; and no surface substitutes a number for an unset target. Analytical questions that are genuinely different (a weekly protein goal, a recommendation heuristic) are **not** required to become identical | ✅ **SATISFIED by PR2 + PR5.** Server: one `nutrition_targets` derivation. Browser: `/meal-log/today` publishes `targets`/`remaining` (or `null`); `static/nutrition.js`, `templates/index.html` and `templates/today.html` consume those values and invent no 30/40/30 split, no 2000 kcal stand-in, and no remaining-budget of their own | PR2 (server) + PR5 (browser) |
 | **N5** | Day and day-boundary decisions are server-owned and identical on every path (`app/timeutil`), and every persisted day key is a valid ISO calendar date | ✅ **already true** — every live writer derives its day key from `app/timeutil`, and the one transient yearless backfill was normalised by its direct successor `9be792c80008` (§5.1). No schema `CHECK` is needed to hold this | — |
 | **N6** | Null and zero are truthful at every published boundary: a missing macro is not a measured zero, and an unset goal is not `0` | ⚠️ true on `/api/v1`; false on the legacy web payloads | accepted as legacy (C6); not a blocker |
 | **N7** | User- and provider-supplied nutrition is bounded before persistence on every path | ✅ already true (clamp + DB `CHECK`) | — |
 | **N8** | Repeated requests from **supported first-party write flows** are safe through that flow's declared replay authority (an idempotency key, or an atomic claim on immutable state) | ✅ **satisfied by PR3, at that scope.** W3's `_claim_diary_meal` claim is now declared and pinned by test; W6 records a deterministic key derived from the immutable message id; the provider `/meal-log` command **requires** an `Idempotency-Key`. **Not claimed:** that every arbitrary accepted HTTP request is replay-safe — see the scope note below | PR3 |
 | **N9** | Mobile mutations are stale-safe, and **every supported first-party client that can create a current-day consumed-food entry has a truthful correction path for that current-day entry** — deletion being the required primitive. That path must be ownership-isolated, stale-safe, free of client-fabricated totals, must close the lifecycle of a photo-bearing entry, and must tell the user where deletion is lossy. Edits that cannot be proven from stored state remain explicitly unsupported rather than silently approximated; correction of **past-day** entries and web slot move are outside Sprint 13 | ✅ **SATISFIED by PR4** — F1 and F14 both closed | PR4 |
-| **N10** | No unowned nutrition scoring/adherence definition ships on any surface | ❌ F9, F10 | PR5 |
+| **N10** | No unowned nutrition scoring/adherence definition ships on any surface | ✅ **SATISFIED by PR5.** F9's calorie-adherence heuristic and F10's browser score/grade were **removed**, not promoted into a canonical intelligence domain (C8). Training `adherence_score`, the check-in `nutrition_adh` slider, and nutrition-*plan* 0–10 labels are different questions with different owners | PR5 |
 
 #### N8 scope — what the replay guarantee does and does not cover
 
@@ -1584,6 +1598,54 @@ browser removal) remain covered by the guards that first caught them.
   compatibility route removed here has recorded evidence behind it.
 * **Out of scope:** creating any adherence or intelligence domain; touching the
   canonical Progress services.
+
+#### PR5 — as shipped (implementation evidence)
+
+Branch `sprint13-pr5-nutrition-intelligence-closure`, based on `origin/main`
+`47669ed` (`feat(nutrition): add web meal correction (#269)`). **No migration**,
+**no feature flag**, **no Flutter**, **no schema**, and no PR4 lifecycle change.
+F9 = CLOSED · F10 = CLOSED (REMOVED, not confined) · N4 = SATISFIED ·
+N10 = SATISFIED.
+
+**F9.** `GET /api/progress/nutrition` and legacy `GET /api/progress/insights`
+are unregistered. Fresh inventory found no JS/template/mobile-lib consumer and
+no compatibility contract of the C13 kind. The unowned `80 ≤ pct ≤ 110`
+calorie-adherence heuristic, its route functions, and the locale keys that
+existed solely to serve them (`progress.ins_*`) are gone. Canonical Progress
+(`progress_summary`, `progress_insights`, Axis Insights) was not given the
+heuristic. `GET /api/progress/axis-insights` remains the live Axis Insights
+surface; a route-map guard asserts exact-path deletion so a substring of
+`insights` cannot capture it.
+
+**F10.** `mealScore`, the A–D grade badge, and `nutrition.ai_score` are
+deleted. No Python replacement score, no API field, no confined presentation
+shell. The nutrition-*plan* 0–10 İyi/Orta/Kötü labels are a different domain
+and stay.
+
+**N4.** `/meal-log/today` now projects PR2's `derive_daily_macro_targets` and
+`remaining_macro_budget` as `targets` / `remaining` in the web vocabulary
+(`kalori`/`protein`/`karb`/`yag`), or `null` when no calorie target is
+configured. `static/nutrition.js`, `templates/index.html` and
+`templates/today.html` consume that payload. The browser 30/40/30 split, the
+140/200/60 g fallbacks, and the `targetCalories = 2000` / `target_calories ||
+2000` stand-ins are gone. Unset remains unset.
+
+**C13 / F6.** `POST /api/food/barcode/add` is **KEPT DEPRECATED**. Evidence:
+
+* `docs/MOBILE_NUTRITION.md` still documents the path as a supported
+  compatibility surface and states that **no sunset date is promised**.
+* PR3's deprecation is observable (`Deprecation: true` + successor `Link`)
+  but names no period that has elapsed.
+* The repository records no release note or external-integrator sunset.
+* Absence of a first-party `static/` / `templates/` caller is documented, and
+  C13 says that is **not sufficient**.
+* No production access log is available from this worktree.
+
+F6 safety remains CLOSED by PR3. Compatibility-route removal is DEFERRED.
+PR3's safe implementation was not modified.
+
+**N1–N10.** See §12. Sprint 13 Nutrition Core is complete. Post-closure
+capabilities listed in §12 remain open on purpose and do not reopen the core.
 
 ---
 

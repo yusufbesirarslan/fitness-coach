@@ -537,6 +537,10 @@ def test_the_legacy_web_ledger_route_is_left_exactly_as_it_was(
     The web UI parses `DD.MM` and has no use for an entry identity, so both stay
     as they are; the ambiguities they carry are corrected at the versioned
     mobile boundary instead of underneath a live browser surface.
+
+    Sprint 13 PR5 additively publishes canonical `targets` / `remaining` on
+    this same payload (or `null` when unset). The legacy keys and the
+    `DD.MM` day label are unchanged.
     """
     log_meal(auth_user, day=FIXED_DAY)
 
@@ -544,6 +548,8 @@ def test_the_legacy_web_ledger_route_is_left_exactly_as_it_was(
         payload = client.get("/meal-log/today").get_json()
 
     assert payload["tarih"] == "09.08"
-    assert set(payload) == {"meals", "totals", "tarih"}
+    assert set(payload) == {"meals", "totals", "tarih", "targets", "remaining"}
     assert "id" not in payload["meals"][0]
     assert set(payload["totals"]) == {"kalori", "protein", "karb", "yag"}
+    assert payload["targets"] is None
+    assert payload["remaining"] is None

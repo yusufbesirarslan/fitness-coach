@@ -18,12 +18,31 @@ from app.models import MealLog, UserSession
 from app.prompts import nutrition as nutrition_prompts
 from app.services.ai import _openai_chat
 from app.services.nutrition_pipeline import sanitize_meal_total_macros
-from app.services.nutrition_targets import derive_daily_macro_targets
+from app.services.nutrition_targets import (
+    derive_daily_macro_targets,
+    remaining_macro_budget,
+)
 from app.services.gamification import complete_quest_for_user
 from app.services import meal_idempotency, mobile_diary_mutation, mobile_log_food
 from app.services.mobile_nutrition.serialization import SLOT_BY_MEAL_LABEL
 from app.services.validators import _meal_photo_url, validate_meal_photo
 from app.timeutil import day_key, display_ddmm
+
+
+def _web_daily_macros(macros):
+    """Project a canonical DailyMacros onto the web payload's Turkish keys.
+
+    Absence stays ``None`` — never a zero-filled object that would read as a
+    configured target of nothing (F3a). Rounding is the browser's job.
+    """
+    if macros is None:
+        return None
+    return {
+        "kalori": macros.calories,
+        "protein": macros.protein,
+        "karb": macros.carbs,
+        "yag": macros.fat,
+    }
 
 
 # F7 / C12 (Sprint 13 PR3). `MealLog.ogun` bir GÖRÜNTÜ etiketi kolonudur ve
@@ -360,7 +379,28 @@ def today_meals():
         totals["karb"]    += m.karb or 0
         totals["yag"]     += m.yag or 0
 
-    return jsonify({"meals": result, "totals": totals, "tarih": display_ddmm(today)})
+    # Sprint 13 PR5 / N4: the browser presents this derivation or none at all.
+    # It must not invent a 30/40/30 split, a 2000 kcal stand-in, or a remaining
+    # budget of its own. Absence is a real domain state.
+    last = UserSession.query.filter_by(user_id=current_user.id)\
+        .order_by(UserSession.created_at.desc()).first()
+    configured = derive_daily_macro_targets(
+        getattr(last, "target_calories", None),
+        getattr(last, "goal", None),
+    )
+    remaining = remaining_macro_budget(configured, {
+        "calories": totals["kalori"],
+        "protein": totals["protein"],
+        "carbs": totals["karb"],
+        "fat": totals["yag"],
+    })
+    return jsonify({
+        "meals": result,
+        "totals": totals,
+        "tarih": display_ddmm(today),
+        "targets": _web_daily_macros(configured),
+        "remaining": _web_daily_macros(remaining),
+    })
 
 
 @bp.route("/meal-log/entry/<entry_token>", methods=["DELETE"])

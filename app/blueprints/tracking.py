@@ -612,39 +612,6 @@ def _progress_range(range_key):
     return app_today() - timedelta(days=n - 1), n
 
 
-@bp.route("/api/progress/nutrition")
-@require_auth
-def progress_nutrition():
-    start, n = _progress_range(request.args.get("range"))
-    rows = MealLog.query.filter(
-        MealLog.user_id == current_user.id,
-        MealLog.tarih >= start.isoformat(),
-    ).all()
-    by_day = {}
-    for m in rows:
-        d = by_day.setdefault(m.tarih, {"kcal": 0.0, "p": 0.0, "c": 0.0, "f": 0.0})
-        d["kcal"] += m.kalori or 0
-        d["p"] += m.protein or 0
-        d["c"] += m.karb or 0
-        d["f"] += m.yag or 0
-    days = []
-    for i in range(n):
-        dt = (start + timedelta(days=i)).isoformat()
-        v = by_day.get(dt, {"kcal": 0, "p": 0, "c": 0, "f": 0})
-        days.append({"date": dt, "kcal": round(v["kcal"]), "p": round(v["p"]),
-                     "c": round(v["c"]), "f": round(v["f"])})
-    logged = [d for d in days if d["kcal"] > 0]
-    k = len(logged) or 1
-    avg = {"kcal": round(sum(d["kcal"] for d in logged) / k),
-           "p": round(sum(d["p"] for d in logged) / k),
-           "c": round(sum(d["c"] for d in logged) / k),
-           "f": round(sum(d["f"] for d in logged) / k)}
-    last = UserSession.query.filter_by(user_id=current_user.id)\
-        .order_by(UserSession.created_at.desc()).first()
-    target = round(getattr(last, "target_calories", 0) or 0) if last else 0
-    return jsonify({"days": days, "avg": avg, "target_kcal": target})
-
-
 @bp.route("/api/progress/workout")
 @require_auth
 def progress_workout():
@@ -739,8 +706,9 @@ def progress_axis_insights_read():
     surface as the blueprint's generic JSON 500; no exception text, SQL,
     identifier or path leaves the process, only a coarse error class in the log.
 
-    This route is additive. Legacy ``GET /api/progress/insights`` is untouched
-    and keeps its exact contract for any consumer outside the Progress page.
+    Sprint 13 PR5 retired the orphaned legacy ``GET /api/progress/insights``
+    route (F9). This live Axis Insights path is a different surface and must
+    not be captured by that removal.
     """
     try:
         insights = build_progress_insights(current_user.id)
@@ -889,46 +857,3 @@ def progress_achievements():
                     "weekly_xp": current_user.weekly_xp or 0, "streak": streak,
                     "quests_done": quests_done, "weekly_wins": weekly_wins,
                     "milestones": milestones})
-
-
-@bp.route("/api/progress/insights")
-@require_auth
-def progress_insights():
-    insights = []
-    # 1) Weight direction over the last two check-ins
-    cis = WeeklyCheckIn.query.filter_by(user_id=current_user.id)\
-        .filter(WeeklyCheckIn.yogunluk.isnot(None))\
-        .order_by(WeeklyCheckIn.created_at.desc()).limit(2).all()
-    if len(cis) == 2 and cis[0].weight and cis[1].weight:
-        delta = round(cis[0].weight - cis[1].weight, 1)
-        if delta != 0:
-            insights.append({"icon": "⚖️", "title": t("progress.ins_weight_title"),
-                             "body": t("progress.ins_weight_body", delta=("%+g" % delta)),
-                             "tone": "info"})
-    # 2) Workout sessions in the last 7 app-days
-    start = app_today() - timedelta(days=6)
-    workout_entries = fetch_workout_entries(
-        current_user.id, start, app_today(), include_markers=True)
-    wdays = {entry.performed_on.isoformat() for entry in workout_entries}
-    if wdays:
-        insights.append({"icon": "🏋️", "title": t("progress.ins_workout_title"),
-                         "body": t("progress.ins_workout_body", n=len(wdays)),
-                         "tone": "success" if len(wdays) >= 3 else "warning"})
-    # 3) Calorie adherence today vs target
-    last = UserSession.query.filter_by(user_id=current_user.id)\
-        .order_by(UserSession.created_at.desc()).first()
-    target = getattr(last, "target_calories", 0) or 0 if last else 0
-    if target:
-        eaten = sum((m.kalori or 0) for m in MealLog.query.filter_by(
-            user_id=current_user.id, tarih=app_today().isoformat()).all())
-        if eaten:
-            pct = round(eaten / target * 100)
-            insights.append({"icon": "🍽️", "title": t("progress.ins_cal_title"),
-                             "body": t("progress.ins_cal_body", pct=pct),
-                             "tone": "success" if 80 <= pct <= 110 else "warning"})
-    # 4) Streak encouragement (always available)
-    streak = current_user.streak_count or 0
-    insights.append({"icon": "🔥", "title": t("progress.ins_streak_title"),
-                     "body": t("progress.ins_streak_body", n=streak),
-                     "tone": "success" if streak >= 3 else "info"})
-    return jsonify({"insights": insights})

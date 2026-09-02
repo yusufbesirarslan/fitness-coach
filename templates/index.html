@@ -221,7 +221,7 @@
      ══════════════════════════════════════ -->
 <script nonce="{{ csp_nonce }}">
 let tipIdx = 0, sparkChart = null, userGoal = null;
-let currentConsumedCals = 0, currentTargetCals = 2000;
+let currentConsumedCals = 0, currentTargetCals = null;
 let waterCount = 0, waterGoal = 8, workoutDone = false, mealsLogged = false;
 let nextAction = null;
 
@@ -337,17 +337,23 @@ function renderStreak(n) {
 
 
 /* ═══ CALORIE HERO RING ═══ */
-function updateCalRing(consumed, target) {
+function updateCalRing(consumed, target, remaining) {
     currentConsumedCals = consumed;
     currentTargetCals = target;
     const circ = 326.73;                 // 2π·52
-    const ratio = target > 0 ? Math.min(consumed / target, 1) : 0;
-    const remaining = Math.max(target - consumed, 0);
     const ring = document.getElementById('cal-ring');
+    if (!(target > 0)) {
+        ring.style.strokeDashoffset = circ;
+        ring.style.stroke = 'var(--color-primary)';
+        document.getElementById('cal-num').textContent = '—';
+        document.getElementById('hero-sub').textContent = consumed + ' kcal';
+        return;
+    }
+    const ratio = Math.min(consumed / target, 1);
     ring.style.strokeDashoffset = circ * (1 - ratio);
     ring.style.stroke = ratio >= 1 ? 'var(--color-danger)' : ratio >= 0.85 ? 'var(--color-warning)' : 'var(--color-primary)';
-    document.getElementById('cal-num').textContent = remaining;
-    document.getElementById('hero-sub').textContent = consumed + ' / ' + target + ' kcal';
+    document.getElementById('cal-num').textContent = Math.round(remaining);
+    document.getElementById('hero-sub').textContent = Math.round(consumed) + ' / ' + Math.round(target) + ' kcal';
 }
 
 
@@ -357,9 +363,18 @@ function setRing(id, ratio) {
     const el = document.getElementById(id);
     if (el) el.style.strokeDashoffset = circ * (1 - Math.min(Math.max(ratio, 0), 1));
 }
-function updateNutrition(totals, target) {
+function updateNutrition(totals, targets) {
     const p = Math.round(totals.protein || 0), c = Math.round(totals.karb || 0), f = Math.round(totals.yag || 0);
-    const tp = Math.round(target * 0.30 / 4), tc = Math.round(target * 0.40 / 4), tf = Math.round(target * 0.30 / 9);
+    if (!targets) {
+        document.getElementById('nv-protein').textContent = p + 'g';
+        document.getElementById('nv-carb').textContent    = c + 'g';
+        document.getElementById('nv-fat').textContent     = f + 'g';
+        setRing('nr-protein', 0);
+        setRing('nr-carb', 0);
+        setRing('nr-fat', 0);
+        return;
+    }
+    const tp = Math.round(targets.protein), tc = Math.round(targets.karb), tf = Math.round(targets.yag);
     document.getElementById('nv-protein').textContent = p + '/' + tp + 'g';
     document.getElementById('nv-carb').textContent    = c + '/' + tc + 'g';
     document.getElementById('nv-fat').textContent     = f + '/' + tf + 'g';
@@ -377,13 +392,13 @@ function updateWaterRing(count, goal) {
 /* ═══ AI NEXT ACTION (deterministik) ═══ */
 function computeNextAction() {
     const h = new Date().getHours();
-    const consumed = currentConsumedCals, target = currentTargetCals || 2000;
+    const consumed = currentConsumedCals, target = currentTargetCals;
     const set = (icon, title, sub, ctaLabel, kind) => ({ icon, title, sub, ctaLabel, kind });
     if (h >= 5 && h < 11 && !mealsLogged)
         return set('breakfast', t('index.na_breakfast_title'), t('index.na_breakfast_sub'), t('index.na_cta_log'), 'nutrition');
-    if (h >= 11 && h < 16 && consumed < 0.35 * target)
+    if (h >= 11 && h < 16 && target > 0 && consumed < 0.35 * target)
         return set('lunch', t('index.na_lunch_title'), t('index.na_lunch_sub'), t('index.na_cta_log'), 'nutrition');
-    if (h >= 16 && h < 22 && consumed < 0.75 * target)
+    if (h >= 16 && h < 22 && target > 0 && consumed < 0.75 * target)
         return set('nutrition', t('index.na_dinner_title'), t('index.na_dinner_sub'), t('index.na_cta_log'), 'nutrition');
     if (waterCount < waterGoal && h >= 12)
         return set('hydration', t('index.na_water_title'), t('index.na_water_sub', { n: waterCount }), t('index.na_cta_water'), 'water');
@@ -729,12 +744,12 @@ async function init() {
         const mealArr = (meals && meals.meals) ? meals.meals : [];
         mealsLogged = mealArr.length > 0;
         const totals = (meals && meals.totals) ? meals.totals : { kalori: 0, protein: 0, karb: 0, yag: 0 };
+        const targets = (meals && meals.targets) ? meals.targets : null;
+        const remaining = (meals && meals.remaining) ? meals.remaining : null;
 
-        let target = 2000;
         if (sess.exists) {
             userGoal = sess.goal;
             setGreeting(sess.goal);
-            target = Math.round(sess.target_calories || 2000);
             const currentWeight = sess.weight || 0;
             document.getElementById('w-kg').textContent = currentWeight || '—';
 
@@ -766,14 +781,16 @@ async function init() {
             setGreeting(null);
         }
 
-        updateCalRing(Math.round(totals.kalori || 0), target);
-        updateNutrition(totals, target);
+        updateCalRing(Math.round(totals.kalori || 0),
+                      targets ? targets.kalori : null,
+                      remaining ? remaining.kalori : null);
+        updateNutrition(totals, targets);
         updateWaterRing(waterCount, waterGoal);
         renderNextAction();
     } catch(e) {
         setGreeting(null);
-        updateCalRing(0, 2000);
-        updateNutrition({}, 2000);
+        updateCalRing(0, null, null);
+        updateNutrition({}, null);
         updateWaterRing(waterCount, waterGoal);
         renderNextAction();
     }

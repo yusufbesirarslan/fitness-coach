@@ -1,7 +1,6 @@
 
 /* ── CONSTANTS ── */
 const RING_CIRC = 301.6; // 2π × 48
-let targetCalories = 2000;
 
 function newIdempotencyKey() {
   return (window.crypto && window.crypto.randomUUID)
@@ -119,12 +118,18 @@ function fxUpdateDiaryGrams(el) { updateDiaryGrams(el.dataset.itemId, el.value);
 
 /* ── CALORIE RING ── */
 function updateRing(eaten, target) {
-  const pct = Math.min(eaten / Math.max(target, 1), 1);
-  const offset = RING_CIRC * (1 - pct);
   const ring = document.getElementById('calorie-ring');
-  ring.style.strokeDashoffset = offset;
-  ring.style.stroke = eaten > target * 1.05 ? '#FF4D4D' : '#3D8BFF';
   document.getElementById('ring-eaten').textContent = Math.round(eaten);
+  if (!(target > 0)) {
+    ring.style.strokeDashoffset = RING_CIRC;
+    ring.style.stroke = '#3D8BFF';
+    document.getElementById('ring-pct').textContent = '—';
+    document.getElementById('ring-target').textContent = '—';
+    return;
+  }
+  const pct = Math.min(eaten / target, 1);
+  ring.style.strokeDashoffset = RING_CIRC * (1 - pct);
+  ring.style.stroke = eaten > target * 1.05 ? '#FF4D4D' : '#3D8BFF';
   document.getElementById('ring-pct').textContent   = Math.round(pct * 100) + '%';
   document.getElementById('ring-target').textContent = Math.round(target);
 }
@@ -132,15 +137,19 @@ function updateRing(eaten, target) {
 /* ── MACRO BARS ── */
 function updateMacroBars(totals, targets) {
   const cfg = [
-    { key:'protein', elVal:'macro-protein', elBar:'bar-protein', tgt: targets.protein || 140 },
-    { key:'karb',    elVal:'macro-karb',    elBar:'bar-karb',    tgt: targets.karb    || 200 },
-    { key:'yag',     elVal:'macro-yag',     elBar:'bar-yag',     tgt: targets.yag     || 60  },
+    { key:'protein', elVal:'macro-protein', elBar:'bar-protein' },
+    { key:'karb',    elVal:'macro-karb',    elBar:'bar-karb' },
+    { key:'yag',     elVal:'macro-yag',     elBar:'bar-yag' },
   ];
   cfg.forEach(c => {
     const val = totals[c.key] || 0;
-    const pct = Math.min(val / c.tgt, 1) * 100;
     document.getElementById(c.elVal).textContent = Math.round(val);
-    document.getElementById(c.elBar).style.width = pct + '%';
+    const bar = document.getElementById(c.elBar);
+    if (!targets || !(targets[c.key] > 0)) {
+      bar.style.width = '0%';
+      return;
+    }
+    bar.style.width = (Math.min(val / targets[c.key], 1) * 100) + '%';
   });
 }
 
@@ -154,63 +163,16 @@ function selectMealType(type, el) {
 /* ── LOAD TODAY DATA ── */
 async function loadTodayData() {
   try {
-    const [sessionRes, todayRes] = await Promise.all([
-      fetch('/last-session'),
-      fetch('/meal-log/today')
-    ]);
-    const session = await sessionRes.json();
+    const todayRes = await fetch('/meal-log/today');
     const today   = await todayRes.json();
-
-    if (session.exists && session.target_calories) {
-      targetCalories = Math.round(session.target_calories);
-    }
-
-    // Update ring & bars
     const eaten = today.totals || {};
-    updateRing(eaten.kalori || 0, targetCalories);
-
-    // Estimate macro targets from calories (rough: 30/40/30 split)
-    const macroTargets = {
-      protein: Math.round(targetCalories * 0.30 / 4),
-      karb:    Math.round(targetCalories * 0.40 / 4),
-      yag:     Math.round(targetCalories * 0.30 / 9),
-    };
-    updateMacroBars(eaten, macroTargets);
-
-    // Render meal timeline
+    const targets = today.targets;
+    updateRing(eaten.kalori || 0, targets ? targets.kalori : null);
+    updateMacroBars(eaten, targets);
     renderTimeline(today.meals || []);
-
   } catch (e) {
     console.error('loadTodayData', e);
   }
-}
-
-/* ── AI SCORE (client-side, deterministic) ──
-   Öğünün kendi makrolarından 0-100 + harf notu üretir. Ağ YOK, offline-güvenli
-   (Faz 3 kural motoruyla aynı felsefe). */
-function mealScore(m) {
-  var kcal = Math.max(+m.kalori || 0, 1);
-  var pK = (+m.protein || 0) * 4, cK = (+m.karb || 0) * 4, fK = (+m.yag || 0) * 9;
-  var sum = Math.max(pK + cK + fK, 1);
-  var pShare = pK / sum, cShare = cK / sum, fShare = fK / sum;
-  // 1) Protein yoğunluğu (0-40): ideal protein payı >= 0.30
-  var pScore = Math.min(pShare / 0.30, 1) * 40;
-  // 2) Makro denge (0-35): aşırı yağ (>0.40) veya karb (>0.60) payını cezalandır
-  var balance = 35;
-  if (fShare > 0.40) balance -= (fShare - 0.40) * 60;
-  if (cShare > 0.60) balance -= (cShare - 0.60) * 50;
-  balance = Math.max(0, balance);
-  // 3) Kalori makullüğü (0-25): 900 kcal'e kadar tam, sonra azalır
-  var cal = 25;
-  if (kcal > 900) cal -= Math.min((kcal - 900) / 30, 25);
-  cal = Math.max(0, cal);
-  var value = Math.round(pScore + balance + cal);
-  var grade, tone;
-  if (value >= 75)      { grade = 'A'; tone = 'success'; }
-  else if (value >= 55) { grade = 'B'; tone = 'success'; }
-  else if (value >= 40) { grade = 'C'; tone = 'warning'; }
-  else                  { grade = 'D'; tone = 'danger';  }
-  return { value: value, grade: grade, tone: tone };
 }
 
 /* ── MEAL TIMELINE ── */
@@ -238,7 +200,6 @@ function fmtTime(iso) {
 var _MEAL_PLACEHOLDER_SVG = '<svg viewBox="0 0 24 24"><path d="M3 2v7c0 1.1.9 2 2 2h.5V22M6 2v9M9 2v9M9 2v7c0 1.1-.9 2-2 2"/><path d="M18 2c-1.7 0-3 2-3 5.5S16 13 18 13s3-2 3-5.5S19.7 2 18 2zM18 13v9"/></svg>';
 
 function mealCardHTML(m) {
-  var s = mealScore(m);
   var img = m.photo_url
     ? '<img class="mc-img" src="' + esc(m.photo_url) + '" alt="">'
     : '<div class="mc-img">' + _MEAL_PLACEHOLDER_SVG + '</div>';
@@ -266,7 +227,6 @@ function mealCardHTML(m) {
       (time ? '<div class="mc-time">' + time + '</div>' : '') +
     '</div>' +
     '<div class="mc-side">' +
-      '<span class="badge badge-' + s.tone + '" title="' + __t('nutrition.ai_score') + ' ' + s.value + '/100">' + s.grade + '</span>' +
       '<button class="mc-edit" data-action="quickEditMeal" data-args=\'["' + esc(m.ogun) + '"]\' aria-label="' + __t('nutrition.quick_edit') + '">' +
         '<svg viewBox="0 0 24 24"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>' +
       '</button>' + del +
