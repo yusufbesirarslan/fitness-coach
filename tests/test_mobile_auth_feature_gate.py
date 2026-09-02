@@ -62,8 +62,14 @@ def test_disabled_mobile_routes_are_unavailable(monkeypatch):
         ("get", "/api/v1/training/preferences"),
         ("get", "/api/v1/training/plans/current"),
         ("get", "/api/v1/training/workouts/AAAAAAAAAAAAAAAAAAAAAAAA"),
+        ("post", "/api/v1/training/workout-sessions"),
+        ("get", "/api/v1/training/workout-sessions/current"),
+        ("post", "/api/v1/training/workout-sessions/abc/resume"),
+        ("put", "/api/v1/training/workout-sessions/abc/checkpoint"),
+        ("post", "/api/v1/training/workout-sessions/abc/abandon"),
+        ("post", "/api/v1/training/workout-sessions/abc/complete"),
     ):
-        headers = post_headers if method == "post" else None
+        headers = post_headers if method in ("post", "put") else None
         assert getattr(client, method)(path, headers=headers).status_code == 404
 
 
@@ -132,6 +138,19 @@ def test_enabled_startup_exposes_only_approved_mobile_routes(monkeypatch):
             ("/api/v1/training/plans", ("POST",)),
             ("/api/v1/training/plans/current", ("GET",)),
             ("/api/v1/training/workouts/<workout_reference>", ("GET",)),
+            # Mobile Training PR5. Native workout session writes; behind
+            # FITX_WORKOUT_SESSIONS_ENABLED at request time, but the ROUTES are
+            # registered unconditionally, so they belong in this allow-list.
+            ("/api/v1/training/workout-sessions", ("POST",)),
+            ("/api/v1/training/workout-sessions/current", ("GET",)),
+            ("/api/v1/training/workout-sessions/<session_reference>/resume",
+             ("POST",)),
+            ("/api/v1/training/workout-sessions/<session_reference>/checkpoint",
+             ("PUT",)),
+            ("/api/v1/training/workout-sessions/<session_reference>/abandon",
+             ("POST",)),
+            ("/api/v1/training/workout-sessions/<session_reference>/complete",
+             ("POST",)),
         }
 
 

@@ -220,3 +220,4 @@ from app.blueprints import mobile_pump_checks  # noqa: E402,F401
 from app.blueprints import mobile_pump_check_comparisons  # noqa: E402,F401
 from app.blueprints import mobile_today  # noqa: E402,F401
 from app.blueprints import mobile_training  # noqa: E402,F401
+from app.blueprints import mobile_workout_sessions  # noqa: E402,F401

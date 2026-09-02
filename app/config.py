@@ -75,6 +75,14 @@ SUGGESTION_RATELIMIT = os.getenv("SUGGESTION_RATELIMIT", "30 per hour")
 FEED_WRITE_RATELIMIT = os.getenv("FEED_WRITE_RATELIMIT", "60 per hour")
 FEED_REPORT_RATELIMIT = os.getenv("FEED_REPORT_RATELIMIT", "20 per day")
 COMMENT_WRITE_RATELIMIT = os.getenv("COMMENT_WRITE_RATELIMIT", "120 per hour")
+# Mobile Training PR5: native workout progress persistence is CHEAP (no AI, no
+# provider, one conditional UPDATE) but legitimately frequent -- a client may
+# checkpoint every set. It therefore gets its own per-user ceiling instead of
+# borrowing an expensive-generation limit, while still bounding an abusive
+# client. Correctness never depends on this: the revision + idempotency
+# contract is what makes a checkpoint safe, not the throttle.
+WORKOUT_CHECKPOINT_RATELIMIT = os.getenv(
+    "WORKOUT_CHECKPOINT_RATELIMIT", "60 per minute; 900 per hour")
 # Freemium: AI plan üretiminde sunucu-taraflı haftalık kota (app/services/premium).
 # Operasyonel kapatma anahtarı; üretimde varsayılan AÇIK.
 AI_PLAN_QUOTA_ENABLED = os.getenv("AI_PLAN_QUOTA_ENABLED", "1") == "1"
