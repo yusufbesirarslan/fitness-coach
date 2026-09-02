@@ -96,7 +96,23 @@ def complete_workout(command: CompleteWorkoutCommand) -> CompletionResult:
             db.session.rollback()
             _log(command, "session_abandoned_conflict")
             raise SessionCompletionConflict(
-                "cannot complete an abandoned workout session"
+                "cannot complete an abandoned workout session", reason="abandoned"
+            )
+        # PR5 optimistic precondition, evaluated while the row is locked so a
+        # checkpoint cannot slip in between the check and the completion. It
+        # closes the gap where a client completes against a revision it no
+        # longer holds and silently loses the progress written since. FAIL
+        # CLOSED: a declared precondition that cannot be evaluated (no lockable
+        # session row) is refused, never waved through.
+        if command.expected_checkpoint_revision is not None and (
+            session is None
+            or (session.checkpoint_revision or 0)
+            != command.expected_checkpoint_revision
+        ):
+            db.session.rollback()
+            _log(command, "session_revision_conflict")
+            raise SessionCompletionConflict(
+                "workout session progress moved on", reason="revision"
             )
 
     # Preflight (optimization only): skip the whole mutation for an obvious

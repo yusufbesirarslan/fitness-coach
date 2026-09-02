@@ -214,6 +214,11 @@ class SessionResult:
     outcome: SessionOutcome
     session: Optional[SessionView] = None
     completion: object = None  # workout_completion.CompletionResult | None
+    # Why a CONFLICT outcome happened, when the completion authority said so:
+    # "abandoned" (terminal) or "revision" (progress moved on). None for every
+    # other outcome. Lets a transport map one outcome to two public errors
+    # without inspecting exception message text.
+    conflict_reason: Optional[str] = None
 
 
 def _iso(value: Optional[datetime]) -> Optional[str]:

@@ -292,6 +292,10 @@ EXPECTED_GATED_ENDPOINTS = {
     # çağrısı, tıpkı tekil pump-check gibi bloklayıcı ağır-AI yüzeyi
     "mobile_api.create_pump_check_comparison",
     "tracking.checkin",                   # haftalık check-in geri bildirimi (N2)
+    # Mobile Training PR5: native antrenman tamamlanması, tarayıcıdaki
+    # training.complete_workout ile AYNI bloklayıcı Bedrock görü doğrulamasını
+    # (validate_pump_check) çalıştırır — aynı thread riski, aynı kapı.
+    "mobile_api.complete_workout_session",
 }
 
 

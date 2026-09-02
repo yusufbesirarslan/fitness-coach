@@ -88,9 +88,14 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
     of whole domains, and a subset assertion would not notice one arriving.
 
     `/api/v1/today` joined the set in Sprint 12 PR3. Mobile Training PR2 adds
-    exactly three canonical read projections. Any further path means a domain
-    arrived on mobile and its architecture has to be reviewed, which is what
-    this exact-set assertion is for.
+    exactly three canonical read projections, PR4A one native plan write, and
+    PR5 the six native workout-session write contracts. Any further path means
+    a domain arrived on mobile and its architecture has to be reviewed, which
+    is what this exact-set assertion is for.
+
+    The PR5 routes are registered unconditionally and answer 404 while
+    `FITX_WORKOUT_SESSIONS_ENABLED` is off, so they are part of the published
+    URL map either way and belong in this enumeration.
     """
     assert _mobile_paths(mobile_enabled_app) == {
         "/api/v1/auth/login",
@@ -112,6 +117,12 @@ def test_mobile_api_publishes_only_approved_domain_contracts(
         "/api/v1/training/plans",
         "/api/v1/training/plans/current",
         "/api/v1/training/workouts/<workout_reference>",
+        "/api/v1/training/workout-sessions",
+        "/api/v1/training/workout-sessions/current",
+        "/api/v1/training/workout-sessions/<session_reference>/resume",
+        "/api/v1/training/workout-sessions/<session_reference>/checkpoint",
+        "/api/v1/training/workout-sessions/<session_reference>/abandon",
+        "/api/v1/training/workout-sessions/<session_reference>/complete",
     }
 
 
@@ -133,6 +144,19 @@ _APPROVED_TRAINING_PATHS = {
     "/api/v1/training/plans",
     "/api/v1/training/plans/current",
     "/api/v1/training/workouts/<workout_reference>",
+    # Mobile Training PR5 publishes the six native workout-session write
+    # contracts. They are execution writes against the ALREADY canonical
+    # session and completion authorities -- start/current/resume/checkpoint/
+    # abandon/complete -- and none of them composes a Daily-Coach aggregate,
+    # mints a workout, or computes a Today of its own. Completion delegates to
+    # the one canonical completion transaction the browser route also uses.
+    # Admitted here by review, not by widening the guard.
+    "/api/v1/training/workout-sessions",
+    "/api/v1/training/workout-sessions/current",
+    "/api/v1/training/workout-sessions/<session_reference>/resume",
+    "/api/v1/training/workout-sessions/<session_reference>/checkpoint",
+    "/api/v1/training/workout-sessions/<session_reference>/abandon",
+    "/api/v1/training/workout-sessions/<session_reference>/complete",
 }
 
 

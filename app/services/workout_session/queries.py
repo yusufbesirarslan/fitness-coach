@@ -35,6 +35,19 @@ _WORKOUT_TIPS = frozenset(VALID_TIPS) - {_REST_TIP}
 
 
 @dataclass(frozen=True)
+class NativeWorkoutIdentity:
+    """The canonical native workout identity captured at start (PR5).
+
+    Server-resolved from an opaque ``workout_ref`` against the owner's CURRENT
+    plan before the session row exists; never client-authored content. ``None``
+    for a browser-started session, which has no native reference.
+    """
+    workout_ref: str
+    plan_lineage_id: str
+    plan_mutation_version: int
+
+
+@dataclass(frozen=True)
 class PlanSnapshot:
     """The trusted, server-derived plan reference captured at session start."""
     weekday_slot: str
@@ -192,9 +205,18 @@ def lock_owned_session(user_id: int, session_id: int) -> Optional[WorkoutSession
 
 
 def insert_active_session(
-    user_id: int, today: date, snapshot: PlanSnapshot, now: datetime
+    user_id: int,
+    today: date,
+    snapshot: PlanSnapshot,
+    now: datetime,
+    native: Optional[NativeWorkoutIdentity] = None,
 ) -> WorkoutSession:
-    """Insert a new ACTIVE session and flush so a partial-index conflict surfaces."""
+    """Insert a new ACTIVE session and flush so a partial-index conflict surfaces.
+
+    ``native`` records the PR5 native workout identity when the session was
+    started through the native contract. Progress always starts at revision 0
+    with no snapshot: durable progress is only ever created by a checkpoint.
+    """
     session = WorkoutSession(
         public_id=_gen_public_id(),
         user_id=user_id,
@@ -204,6 +226,11 @@ def insert_active_session(
         source=snapshot.source,
         planned_training_plan_id=snapshot.planned_training_plan_id,
         plan_fingerprint=snapshot.plan_fingerprint,
+        workout_ref=native.workout_ref if native is not None else None,
+        plan_lineage_id=native.plan_lineage_id if native is not None else None,
+        plan_mutation_version=(
+            native.plan_mutation_version if native is not None else None),
+        checkpoint_revision=0,
         started_at=now,
         last_activity_at=now,
         version=1,
@@ -249,6 +276,52 @@ def touch_active(user_id: int, public_id: str, now: datetime) -> int:
             WorkoutSession.status == WORKOUT_SESSION_ACTIVE,
         )
         .values(last_activity_at=now)
+    )
+    db.session.commit()
+    return result.rowcount
+
+
+def advance_checkpoint(
+    user_id: int,
+    public_id: str,
+    base_revision: int,
+    snapshot_json: str,
+    fingerprint: str,
+    key: str,
+    now: datetime,
+) -> int:
+    """Durably advance progress by exactly one revision (PR5).
+
+    ONE atomic conditional UPDATE is the whole concurrency story: it matches the
+    owned session, the ACTIVE status and the caller's declared base revision, so
+
+      * a late request built on an older revision matches 0 rows (it can never
+        overwrite newer progress -- revision decides, not arrival order);
+      * a terminal session matches 0 rows (no post-completion mutation);
+      * two concurrent writers on the same base revision produce exactly one
+        winner, because the second one no longer matches the base.
+
+    The snapshot, its fingerprint, the replay key, the new revision and the
+    checkpoint timestamp move together in that single statement, so a revision
+    can never advance without the snapshot that justified it. Returns the
+    affected row count (0 = the caller lost / is stale / is terminal).
+    """
+    result = db.session.execute(
+        update(WorkoutSession)
+        .where(
+            WorkoutSession.public_id == public_id,
+            WorkoutSession.user_id == user_id,
+            WorkoutSession.status == WORKOUT_SESSION_ACTIVE,
+            WorkoutSession.checkpoint_revision == base_revision,
+        )
+        .values(
+            checkpoint_revision=base_revision + 1,
+            checkpoint_data=snapshot_json,
+            checkpoint_fingerprint=fingerprint,
+            checkpoint_idempotency_key=key,
+            checkpoint_at=now,
+            last_activity_at=now,
+        )
     )
     db.session.commit()
     return result.rowcount
