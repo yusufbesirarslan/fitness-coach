@@ -18,6 +18,12 @@ from app.observability import assign_request_id
 from app.services import coach_plan_tools, plan_confirmation
 from app.services.coach_plan_policy import CANCEL, CONFIRM, NONE
 from app.services.coach_plan_tools import results
+from app.services.coach_plan_tools.grounding import (
+    PROPOSED_REPS,
+    PROPOSED_SETS,
+    followup_add_arguments,
+)
+from app.services.coach_plan_tools.weekdays import localize_weekday
 
 
 _LOG_STAGE_TOOLS = frozenset({
@@ -64,7 +70,7 @@ def resolve_pending_turn(user_id, language="tr"):
     log_pending = active_log_pending(user_id)
     n = int(plan_pending is not None) + int(log_pending is not None)
     if n == 0:
-        return None
+        return _complete_grounded_followup(user_id, language)
     if n > 1:
         if intent == CANCEL:
             return _cancel_all(user_id, language)
@@ -87,21 +93,28 @@ def reply_after_tools(user_id, language="tr", tool_results=None):
 
     Pending proposals stay future-tense. APPLY_NOW / replayed mutations use
     past-tense success copy so the model cannot ask for confirmation after
-    persistence already succeeded.
+    persistence already succeeded. Grounded clarifications (missing
+    prescription, unknown exercise, ambiguous workout) are also owned here
+    so the model cannot persist a guess after asking.
     """
     pending = canonical_pending_prompt(user_id, language)
     if pending:
         return pending
     applied = []
+    clarifications = []
     for payload in tool_results or ():
         if not isinstance(payload, dict):
             continue
         if payload.get("status") in (
                 results.STATUS_APPLIED, results.STATUS_REPLAYED):
             applied.append(payload)
-    if not applied:
-        return None
-    return _format_plan_applied(applied[-1], language)
+        elif payload.get("status") == results.STATUS_NEEDS_INPUT:
+            clarifications.append(payload)
+    if applied:
+        return _format_plan_applied(applied[-1], language)
+    if clarifications:
+        return _format_plan_clarification(clarifications[-1], language)
+    return None
 
 
 def grounded_provider_reply(user_id, language, text):
@@ -327,15 +340,20 @@ def _format_workout_proposal(payload, language):
     )
 
 
+def _day_for_copy(value, language):
+    return localize_weekday(value or "", language)
+
+
 def _format_plan_proposal(pending, language):
     payload = pending.command_payload or {}
     kind = pending.command_type
+    day = _day_for_copy(payload.get("day") or "", language)
     if kind == "add_exercise":
         return t(
             "coach.confirm.propose_plan_add",
             locale=language,
             exercise=payload.get("exercise") or "",
-            day=payload.get("day") or "",
+            day=day,
             sets=payload.get("sets") or "",
             reps=payload.get("reps") or "",
         )
@@ -344,7 +362,7 @@ def _format_plan_proposal(pending, language):
             "coach.confirm.propose_plan_remove",
             locale=language,
             exercise=payload.get("exercise") or "",
-            day=payload.get("day") or "",
+            day=day,
         )
     if kind == "replace_exercise":
         return t(
@@ -352,7 +370,7 @@ def _format_plan_proposal(pending, language):
             locale=language,
             exercise=payload.get("exercise") or "",
             replacement=payload.get("replacement") or "",
-            day=payload.get("day") or "",
+            day=day,
         )
     return t("coach.confirm.propose_plan", locale=language)
 
@@ -360,19 +378,20 @@ def _format_plan_proposal(pending, language):
 def _format_plan_applied(result, language):
     change = result.get("change") or {}
     operation = result.get("operation") or ""
+    day = _day_for_copy(change.get("day") or "", language)
     if operation == "add_exercise":
         return t(
             "coach.confirm.plan_add",
             locale=language,
             exercise=change.get("exercise") or "",
-            day=change.get("day") or "",
+            day=day,
         )
     if operation == "remove_exercise":
         return t(
             "coach.confirm.plan_remove",
             locale=language,
             exercise=change.get("exercise") or "",
-            day=change.get("day") or "",
+            day=day,
         )
     if operation == "replace_exercise":
         return t(
@@ -380,6 +399,83 @@ def _format_plan_applied(result, language):
             locale=language,
             exercise=change.get("exercise") or "",
             replacement=change.get("replacement") or "",
-            day=change.get("day") or "",
+            day=day,
         )
     return t("coach.confirm.plan_generic", locale=language)
+
+
+def _complete_grounded_followup(user_id, language):
+    """Apply a prescription the user just supplied or accepted.
+
+    Only when the previous assistant turn was our own clarification — never
+    a confirmation proposal, which is handled above.
+    """
+    arguments = followup_add_arguments()
+    if not arguments:
+        return None
+    result = coach_plan_tools.execute_plan_tool(
+        user_id, "add_training_plan_exercise", arguments)
+    if result.get("status") in (results.STATUS_APPLIED, results.STATUS_REPLAYED):
+        return _format_plan_applied(result, language)
+    if result.get("status") == results.STATUS_NEEDS_INPUT:
+        return _format_plan_clarification(result, language)
+    return None
+
+
+def _format_plan_clarification(payload, language):
+    reason = payload.get("reason") or ""
+    change = payload.get("change") or {}
+    day = _day_for_copy(change.get("day") or "", language)
+    exercise = change.get("exercise") or ""
+    detail = payload.get("detail") or ""
+    if reason == "missing_prescription":
+        label = detail if detail and detail != reason else day
+        return t(
+            "coach.plan.ask_sets_reps",
+            locale=language,
+            label=label,
+            day=day,
+            exercise=exercise,
+            sets=PROPOSED_SETS,
+            reps=PROPOSED_REPS,
+        )
+    if reason == "missing_reps":
+        return t(
+            "coach.plan.ask_reps",
+            locale=language,
+            exercise=exercise,
+            sets=change.get("sets") or "",
+        )
+    if reason == "missing_sets":
+        return t(
+            "coach.plan.ask_sets",
+            locale=language,
+            exercise=exercise,
+            reps=change.get("reps") or "",
+        )
+    if reason == "exercise_unknown":
+        return t(
+            "coach.plan.exercise_unknown",
+            locale=language,
+            exercise=exercise or detail,
+        )
+    if reason == "exercise_suggest":
+        return t(
+            "coach.plan.exercise_suggest",
+            locale=language,
+            exercise=exercise,
+            suggestion=detail,
+        )
+    if reason == "ambiguous_workout":
+        candidates = [
+            _day_for_copy(item.strip(), language)
+            for item in str(detail).split(",") if item.strip()
+        ]
+        return t(
+            "coach.plan.workout_ambiguous",
+            locale=language,
+            candidates=", ".join(candidates),
+        )
+    if reason == "workout_not_found":
+        return t("coach.plan.workout_unknown", locale=language)
+    return t("coach.plan.workout_unknown", locale=language)

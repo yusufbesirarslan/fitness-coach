@@ -1,5 +1,12 @@
 {
   "coach.confirm.no_plan_proposal": "Bu plan de\u011fi\u015fikli\u011fini haz\u0131rlayamad\u0131m; hi\u00e7bir \u015fey de\u011fi\u015fmedi. L\u00fctfen egzersiz, g\u00fcn, set ve tekrar bilgisini yeniden yaz.",
+  "coach.plan.ask_sets_reps": "{day} g\u00fcn\u00fcndeki {label} antrenman\u0131n\u0131 buldum. {exercise} i\u00e7in ka\u00e7 set ve tekrar ekleyeyim? {sets} set {reps} tekrar ister misin?",
+  "coach.plan.ask_reps": "{exercise} i\u00e7in ka\u00e7 tekrar kullanay\u0131m? {sets} set istedin.",
+  "coach.plan.ask_sets": "{exercise} i\u00e7in ka\u00e7 set kullanay\u0131m? {reps} tekrar istedin.",
+  "coach.plan.exercise_unknown": "Bu egzersizi katalogda bulamad\u0131m; hi\u00e7bir \u015fey de\u011fi\u015fmedi.",
+  "coach.plan.exercise_suggest": "{suggestion} demek mi istedin? Onaylamadan hi\u00e7bir \u015fey de\u011fi\u015fmedi.",
+  "coach.plan.workout_ambiguous": "Birden fazla uyan antrenman buldum ({candidates}). Hangisini kullanay\u0131m? Hi\u00e7bir \u015fey de\u011fi\u015fmedi.",
+  "coach.plan.workout_unknown": "Bu antrenman\u0131 aktif plan\u0131nla e\u015fle\u015ftiremedim; hi\u00e7bir \u015fey de\u011fi\u015fmedi. Hangi g\u00fcn\u00fc kastediyorsun?",
   "today.title": "Bugün",
   "today.greeting": "Merhaba",
   "today.status.no_plan": "Henüz bir antrenman planın yok.",

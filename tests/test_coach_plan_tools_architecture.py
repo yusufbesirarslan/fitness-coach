@@ -420,7 +420,7 @@ def test_the_result_shape_is_a_closed_set_of_keys():
     """Whatever appears here is billed on the next model call and can be
     paraphrased to the user; the set of things that may appear is fixed."""
     allowed = {"status", "operation", "plan_version", "change", "summary",
-               "note", "error", "message", "detail", "reason_codes"}
+               "note", "error", "message", "detail", "reason_codes", "reason"}
     literal_keys = set()
     for path in (PACKAGE_ROOT / "results.py", PACKAGE_ROOT / "executor.py"):
         for node in ast.walk(_tree(path)):

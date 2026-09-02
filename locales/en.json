@@ -974,6 +974,13 @@
   "coach.confirm.propose_plan_replace": "I'll replace {exercise} with {replacement} on {day}. Confirm this change?",
   "coach.confirm.propose_plan": "A training-plan change is waiting. Confirm this change?",
   "coach.confirm.no_plan_proposal": "I couldn't prepare that plan change, so nothing was changed. Please repeat the exercise, day, sets, and reps.",
+  "coach.plan.ask_sets_reps": "I found your {label} workout on {day}. How many sets and reps should I add for {exercise}? Would you like {sets} sets of {reps} reps?",
+  "coach.plan.ask_reps": "How many reps should I use for {exercise}? You asked for {sets} sets.",
+  "coach.plan.ask_sets": "How many sets should I use for {exercise}? You asked for {reps} reps.",
+  "coach.plan.exercise_unknown": "I couldn't find that exercise in the catalog, so nothing was changed.",
+  "coach.plan.exercise_suggest": "Did you mean {suggestion}? Nothing was changed until you confirm.",
+  "coach.plan.workout_ambiguous": "I found more than one matching workout ({candidates}). Which one should I use? Nothing was changed.",
+  "coach.plan.workout_unknown": "I couldn't match that workout to your current plan, so nothing was changed. Which day did you mean?",
 
   "quest.login.title": "Daily Login",
   "quest.login.desc": "Log in to the app today",

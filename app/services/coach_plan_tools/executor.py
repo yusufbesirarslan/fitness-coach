@@ -131,7 +131,11 @@ _NEW_PROPOSAL_ATTR = "_coach_plan_new_proposal_created"
 _INTENT_ATTR = "_coach_plan_confirmation_intent"
 
 
-def begin_turn(user_message=""):
+_USER_MSG_ATTR = "_coach_plan_user_message"
+_HISTORY_ATTR = "_coach_plan_history"
+
+
+def begin_turn(user_message="", history=None):
     """Reset the per-turn mutation budget, markers and confirmation intent.
 
     Called from the Coach's own turn setup, so blocking and streaming share one
@@ -140,8 +144,10 @@ def begin_turn(user_message=""):
     either (``current_turn_id`` refuses), so this is a no-op rather than an
     error.
 
-    ``user_message`` is the raw current user turn. Confirmation authority is
-    derived from it here, not from the model.
+    ``user_message`` is the raw current user turn. Confirmation authority and
+    prescription/workout grounding are derived from it here, not from the
+    model. ``history`` is prior user/assistant turns of this conversation,
+    used only to complete a clarification the server itself started.
     """
     try:
         setattr(g, _BUDGET_ATTR, [])
@@ -149,6 +155,16 @@ def begin_turn(user_message=""):
         setattr(g, _PROPOSAL_ATTR, False)
         setattr(g, _NEW_PROPOSAL_ATTR, False)
         setattr(g, _INTENT_ATTR, parse_confirmation_intent(user_message))
+        setattr(g, _USER_MSG_ATTR, user_message or "")
+        setattr(g, _HISTORY_ATTR, list(history or ()))
+    except RuntimeError:
+        pass
+
+
+def set_turn_history(history):
+    """Attach conversation history after the Coach has resolved it."""
+    try:
+        setattr(g, _HISTORY_ATTR, list(history or ()))
     except RuntimeError:
         pass
 
@@ -464,6 +480,11 @@ def _context(operation_key):
 
 def _execute_mutation(user_id, name, arguments):
     command = build_command(name, arguments)
+    from .grounding import ground_command
+    grounded = ground_command(user_id, command)
+    if not grounded.ready:
+        return grounded.result
+    command = grounded.command
     plan, _document, changed = preview_command(user_id, command)
     if not changed:
         return _apply_typed(user_id, command)

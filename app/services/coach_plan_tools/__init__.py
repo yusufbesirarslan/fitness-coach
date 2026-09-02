@@ -49,6 +49,7 @@ from .executor import (
     plan_mutation_tools_enabled,
     proposal_created_this_turn,
     published_plan_tool_defs,
+    set_turn_history,
 )
 from .schemas import (
     CANCEL_PENDING_TOOL,
@@ -78,4 +79,5 @@ __all__ = [
     "plan_mutation_tools_enabled",
     "proposal_created_this_turn",
     "published_plan_tool_defs",
+    "set_turn_history",
 ]

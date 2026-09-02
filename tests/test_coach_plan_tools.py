@@ -207,12 +207,12 @@ def test_a_replace_changes_exactly_one_exercise_and_records_it(
     result, residual = call_and_settle(
         planned_user.id, REPLACE,
         {"day": "Pazartesi", "exercise": "Bench Press",
-         "replacement": "Machine Press"})
+         "replacement": "Push-Up"})
 
     assert result["status"] == results.STATUS_APPLIED
     # Nothing is held open for the provider call that follows a tool (§43).
     assert not residual
-    assert names(planned_user.id) == ["Machine Press", "Shoulder Press"]
+    assert names(planned_user.id) == ["Push-Up", "Shoulder Press"]
     # The untouched day is untouched, not rebuilt.
     assert names(planned_user.id, "Cuma") == ["Squat"]
     entries = journal(planned_user.id)
@@ -227,9 +227,9 @@ def test_the_same_command_twice_in_one_turn_changes_the_plan_once(
     """The failure this prevents is a duplicated exercise, not a wasted call.
 
     A provider that re-delivers a tool call — a retry, a malformed continuation,
-    a model that repeats itself — must not add "Cable Fly" twice (§35).
+    a model that repeats itself — must not add "Push-Up" twice (§35).
     """
-    arguments = {"day": "Pazartesi", "exercise": "Cable Fly",
+    arguments = {"day": "Pazartesi", "exercise": "Push-Up",
                  "sets": 3, "reps": "12"}
     first = call(planned_user.id, ADD, dict(arguments))
     second, residual = call_and_settle(planned_user.id, ADD, dict(arguments))
@@ -238,7 +238,7 @@ def test_the_same_command_twice_in_one_turn_changes_the_plan_once(
     assert second["status"] == results.STATUS_REPLAYED
     # A replay is served from durable history; it must not leave a read open.
     assert not residual
-    assert names(planned_user.id).count("Cable Fly") == 1
+    assert names(planned_user.id).count("Push-Up") == 1
     assert len(journal(planned_user.id)) == 1
     assert plan_version(planned_user.id) == 1
 
@@ -247,14 +247,14 @@ def test_two_different_commands_in_one_turn_are_two_changes(
         app, planned_user, tools_on, turn):
     """Replay must not swallow a second, genuinely different edit (§36)."""
     first = call(planned_user.id, ADD,
-                 {"day": "Pazartesi", "exercise": "Cable Fly",
+                 {"day": "Pazartesi", "exercise": "Push-Up",
                   "sets": 3, "reps": "12"})
     second = call(planned_user.id, PRESCRIBE,
                   {"day": "Cuma", "exercise": "Squat", "sets": 4})
 
     assert first["status"] == results.STATUS_APPLIED
     assert second["status"] == results.STATUS_APPLIED
-    assert names(planned_user.id) == ["Bench Press", "Shoulder Press", "Cable Fly"]
+    assert names(planned_user.id) == ["Bench Press", "Shoulder Press", "Push-Up"]
     assert day_exercises(planned_user.id, "Cuma") == [("Squat", 4, "5")]
     keys = {entry.idempotency_key for entry in journal(planned_user.id)}
     assert len(keys) == 2
@@ -269,16 +269,16 @@ def test_a_third_distinct_change_in_one_turn_is_refused(
     swarm, and the first two edits stay applied — a budget that rolled back
     earlier work would punish the user for the model's behaviour.
     """
-    call(planned_user.id, ADD, {"day": "Pazartesi", "exercise": "Cable Fly",
+    call(planned_user.id, ADD, {"day": "Pazartesi", "exercise": "Push-Up",
                                 "sets": 3, "reps": "12"})
     call(planned_user.id, PRESCRIBE,
          {"day": "Cuma", "exercise": "Squat", "sets": 4})
     third = call(planned_user.id, REPLACE,
                  {"day": "Pazartesi", "exercise": "Bench Press",
-                  "replacement": "Machine Press"})
+                  "replacement": "Push-Up"})
 
     assert third["error"] == results.ERROR_MUTATION_BUDGET_EXHAUSTED
-    assert names(planned_user.id) == ["Bench Press", "Shoulder Press", "Cable Fly"]
+    assert names(planned_user.id) == ["Bench Press", "Shoulder Press", "Push-Up"]
     assert day_exercises(planned_user.id, "Cuma") == [("Squat", 4, "5")]
     assert len(journal(planned_user.id)) == 2
 
@@ -290,7 +290,7 @@ def test_a_repeat_of_an_earlier_change_does_not_spend_budget(
     That is the worst possible answer: the user's edit WAS applied, and the
     model would tell them it was rejected.
     """
-    first = {"day": "Pazartesi", "exercise": "Cable Fly",
+    first = {"day": "Pazartesi", "exercise": "Push-Up",
              "sets": 3, "reps": "12"}
     call(planned_user.id, ADD, dict(first))
     call(planned_user.id, ADD, dict(first))       # replay, costs nothing
@@ -312,7 +312,7 @@ def test_a_new_turn_gets_a_new_budget_and_a_new_identity(
     """
     from app.observability import assign_request_id
 
-    arguments = {"day": "Pazartesi", "exercise": "Cable Fly",
+    arguments = {"day": "Pazartesi", "exercise": "Push-Up",
                  "sets": 3, "reps": "12"}
     turn_ids = []
     for _ in range(2):
@@ -324,7 +324,7 @@ def test_a_new_turn_gets_a_new_budget_and_a_new_identity(
                 results.STATUS_APPLIED
 
     assert turn_ids[0] != turn_ids[1]
-    assert names(planned_user.id).count("Cable Fly") == 2
+    assert names(planned_user.id).count("Push-Up") == 2
     assert len({e.idempotency_key for e in journal(planned_user.id)}) == 2
 
 
@@ -332,7 +332,7 @@ def test_undo_reverses_the_newest_change_and_only_on_request(
         app, planned_user, tools_on, turn):
     call(planned_user.id, REPLACE,
          {"day": "Pazartesi", "exercise": "Bench Press",
-          "replacement": "Machine Press"})
+          "replacement": "Push-Up"})
     undone, residual = call_and_settle(planned_user.id, UNDO)
 
     assert undone["status"] == results.STATUS_APPLIED
@@ -355,7 +355,7 @@ def test_a_repeated_undo_in_one_turn_does_not_reach_further_back(
     which is exactly why the second delivery replays instead of walking the
     history backwards (§52).
     """
-    call(planned_user.id, ADD, {"day": "Pazartesi", "exercise": "Cable Fly",
+    call(planned_user.id, ADD, {"day": "Pazartesi", "exercise": "Push-Up",
                                 "sets": 3, "reps": "12"})
     first = call(planned_user.id, UNDO)
     second = call(planned_user.id, UNDO)
@@ -372,13 +372,13 @@ def test_undo_refuses_arguments_instead_of_ignoring_them(
     """A model that thinks it can choose WHICH change to undo must learn it
     cannot — silently dropping the argument would execute a different
     operation than the one the model expressed (§31, §38)."""
-    call(planned_user.id, ADD, {"day": "Pazartesi", "exercise": "Cable Fly",
+    call(planned_user.id, ADD, {"day": "Pazartesi", "exercise": "Push-Up",
                                 "sets": 3, "reps": "12"})
     refused = call(planned_user.id, UNDO, {"version": 1})
 
     assert refused["error"] == results.ERROR_INVALID_ARGUMENTS
     assert "version" in refused["detail"]
-    assert names(planned_user.id).count("Cable Fly") == 1
+    assert names(planned_user.id).count("Push-Up") == 1
     assert [e.operation_kind for e in journal(planned_user.id)] == ["mutation"]
 
 
@@ -424,19 +424,19 @@ def test_the_openai_loop_applies_one_change_for_one_intent(
     _openai_only(monkeypatch)
     monkeypatch.setattr(ai_coach, "openai_client", _ScriptedOpenAI([
         (REPLACE, {"day": "Pazartesi", "exercise": "Bench Press",
-                   "replacement": "Machine Press"}),
+                   "replacement": "Push-Up"}),
     ]))
 
     with app.test_request_context("/ask", method="POST"):
         assign_request_id()
         answer = ai_coach._run_coach_conversation(
-            planned_user.id, "Pazartesi bench yerine machine press koy",
+            planned_user.id, "Pazartesi bench yerine push-up koy",
             "", client_history=[])
 
-    assert "machine press" in answer.lower()
+    assert "push-up" in answer.lower()
     assert "bench press" in answer.lower()
     assert "confirm" not in answer.lower()
-    assert names(planned_user.id) == ["Machine Press", "Shoulder Press"]
+    assert names(planned_user.id) == ["Push-Up", "Shoulder Press"]
     assert len(journal(planned_user.id)) == 1
 
 
@@ -445,7 +445,7 @@ def test_a_model_that_repeats_itself_still_changes_the_plan_once(
     """Two identical tool calls inside ONE provider loop (§35)."""
     from app.observability import assign_request_id
 
-    arguments = {"day": "Pazartesi", "exercise": "Cable Fly",
+    arguments = {"day": "Pazartesi", "exercise": "Push-Up",
                  "sets": 3, "reps": "12"}
     _openai_only(monkeypatch)
     monkeypatch.setattr(ai_coach, "openai_client", _ScriptedOpenAI([
@@ -455,10 +455,10 @@ def test_a_model_that_repeats_itself_still_changes_the_plan_once(
     with app.test_request_context("/ask", method="POST"):
         assign_request_id()
         ai_coach._run_coach_conversation(
-            planned_user.id, "pazartesiye cable fly ekle", "",
+            planned_user.id, "pazartesiye push-up 3x12 ekle", "",
             client_history=[])
 
-    assert names(planned_user.id).count("Cable Fly") == 1
+    assert names(planned_user.id).count("Push-Up") == 1
     assert len(journal(planned_user.id)) == 1
 
 
@@ -479,7 +479,7 @@ def test_a_provider_fallback_does_not_repeat_a_change_that_already_ran(
     tool_block = SimpleNamespace(
         type="tool_use", name=REPLACE, id="t1",
         input={"day": "Pazartesi", "exercise": "Bench Press",
-               "replacement": "Machine Press"})
+               "replacement": "Push-Up"})
     responses = [SimpleNamespace(stop_reason="tool_use", content=[tool_block])]
 
     class _Messages:
@@ -498,16 +498,16 @@ def test_a_provider_fallback_does_not_repeat_a_change_that_already_ran(
     with app.test_request_context("/ask", method="POST"):
         assign_request_id()
         answer = ai_coach._run_coach_conversation(
-            planned_user.id, "bench yerine machine press", "",
+            planned_user.id, "bench yerine push-up", "",
             client_history=[], language="tr")
 
     # APPLY_NOW short-circuits on the tool result: the user hears that the
     # change is already saved, the next provider call never runs, and a
     # "try again" fallback cannot ask them to repeat the same mutation.
-    assert "machine press" in answer.lower()
+    assert "push-up" in answer.lower()
     assert answer != ai_coach._COACH_FALLBACKS["tr"]["tool"]
     assert openai.calls == []                     # no second provider ran
-    assert names(planned_user.id) == ["Machine Press", "Shoulder Press"]
+    assert names(planned_user.id) == ["Push-Up", "Shoulder Press"]
     entries = journal(planned_user.id)
     assert [e.operation_kind for e in entries] == ["mutation"]
     assert plan_version(planned_user.id) == 1
@@ -525,7 +525,7 @@ def test_a_fallback_before_any_tool_ran_applies_the_change_once(
 
     from app.observability import assign_request_id
 
-    arguments = {"day": "Pazartesi", "exercise": "Cable Fly",
+    arguments = {"day": "Pazartesi", "exercise": "Push-Up",
                  "sets": 3, "reps": "12"}
 
     class _Messages:
@@ -543,11 +543,12 @@ def test_a_fallback_before_any_tool_ran_applies_the_change_once(
     with app.test_request_context("/ask", method="POST"):
         assign_request_id()
         answer = ai_coach._run_coach_conversation(
-            planned_user.id, "cable fly ekle", "", client_history=[])
+            planned_user.id, "pazartesiye push-up 3x12 ekle", "",
+            client_history=[])
 
-    assert "cable fly" in answer.lower()
+    assert "push-up" in answer.lower()
     assert "confirm" not in answer.lower()
-    assert names(planned_user.id).count("Cable Fly") == 1
+    assert names(planned_user.id).count("Push-Up") == 1
     assert len(journal(planned_user.id)) == 1
 
 
@@ -605,7 +606,7 @@ def test_a_refused_plan_tool_is_not_reported_as_a_saved_plan_change(
         app, planned_user, tools_on, turn):
     refused = call(planned_user.id, REPLACE,
                    {"day": "Pazartesi", "exercise": "Deadlift",
-                    "replacement": "X"})
+                    "replacement": "Push-Up"})
 
     assert refused["error"] == results.ERROR_TARGET_NOT_FOUND
     assert coach_plan_tools.plan_changed_this_turn() is False
@@ -630,7 +631,7 @@ def test_the_streaming_path_reports_a_saved_plan_change_too(
 
     block = SimpleNamespace(
         type="tool_use", name=ADD, id="t1",
-        input={"day": "Pazartesi", "exercise": "Cable Fly", "sets": 3,
+        input={"day": "Pazartesi", "exercise": "Push-Up", "sets": 3,
                "reps": "12"})
     final = SimpleNamespace(stop_reason="tool_use", content=[block],
                             usage=None)
@@ -663,15 +664,15 @@ def test_the_streaming_path_reports_a_saved_plan_change_too(
     with app.test_request_context("/ask/stream", method="POST"):
         assign_request_id()
         events = list(ai_stream.stream_coach_answer(
-            planned_user.id, "cable fly ekle", "", [], "tr"))
+            planned_user.id, "pazartesiye push-up 3x12 ekle", "", [], "tr"))
 
     error = [e for e in events if e["type"] == "error"]
     assert error == []
     done = [e for e in events if e["type"] == "done"]
     assert done
-    assert "cable fly" in done[-1]["text"].lower()
+    assert "push-up" in done[-1]["text"].lower()
     assert done[-1]["provider"] == "bedrock"
-    assert names(planned_user.id).count("Cable Fly") == 1
+    assert names(planned_user.id).count("Push-Up") == 1
     assert len(journal(planned_user.id)) == 1
 
 
@@ -702,12 +703,12 @@ def test_unparseable_arguments_never_execute_an_undo(
     Undo accepts ``{}``, so inheriting that behaviour would turn a decoding
     failure into a plan change nobody requested (§37).
     """
-    call(planned_user.id, ADD, {"day": "Pazartesi", "exercise": "Cable Fly",
+    call(planned_user.id, ADD, {"day": "Pazartesi", "exercise": "Push-Up",
                                 "sets": 3, "reps": "12"})
     raw = ai_coach._dispatch_coach_tool(planned_user.id, UNDO, "{not json")
 
     assert json.loads(raw)["error"] == results.ERROR_INVALID_ARGUMENTS
-    assert names(planned_user.id).count("Cable Fly") == 1
+    assert names(planned_user.id).count("Push-Up") == 1
     assert [e.operation_kind for e in journal(planned_user.id)] == ["mutation"]
 
 
@@ -737,10 +738,10 @@ def test_an_unreadable_plan_is_refused_not_repaired(app, make_user, tools_on,
 
 
 def test_unknown_day(app, planned_user, tools_on, turn):
-    """A day outside the schema's enum — an English weekday is the realistic
-    way a model produces one."""
+    """A day the plan does not have. English weekdays are canonicalized
+    (Monday → Pazartesi); a nonsense label still misses."""
     result, residual = call_and_settle(
-        planned_user.id, REMOVE, {"day": "Monday", "exercise": "Squat"})
+        planned_user.id, REMOVE, {"day": "Holiday", "exercise": "Squat"})
     assert result["error"] == results.ERROR_DAY_NOT_FOUND
     assert not residual
 
@@ -849,7 +850,7 @@ def test_undo_refuses_when_the_plan_moved_underneath_it(
     """
     from app.services.today_facts import get_active_plan
 
-    call(planned_user.id, ADD, {"day": "Pazartesi", "exercise": "Cable Fly",
+    call(planned_user.id, ADD, {"day": "Pazartesi", "exercise": "Push-Up",
                                 "sets": 3, "reps": "12"})
     plan = get_active_plan(planned_user.id)
     document = json.loads(plan.plan_data)
@@ -874,7 +875,7 @@ def test_an_operation_key_bound_to_a_different_change_fails_closed(
     from app.services.plan_mutation import AddExerciseCommand
 
     command = AddExerciseCommand(
-        day="Pazartesi", exercise="Cable Fly", sets=3, reps="12")
+        day="Pazartesi", exercise="Push-Up", sets=3, reps="12")
     key = identity.mutation_operation_key(command)
     db.session.add(PlanMutationRecord(
         public_id="seeded-conflict", user_id=planned_user.id,
@@ -886,11 +887,11 @@ def test_an_operation_key_bound_to_a_different_change_fails_closed(
     db.session.commit()
 
     result = call(planned_user.id, ADD,
-                  {"day": "Pazartesi", "exercise": "Cable Fly",
+                  {"day": "Pazartesi", "exercise": "Push-Up",
                    "sets": 3, "reps": "12"})
 
     assert result["error"] == results.ERROR_IDEMPOTENCY_CONFLICT
-    assert "Cable Fly" not in names(planned_user.id)
+    assert "Push-Up" not in names(planned_user.id)
 
 
 def test_a_lost_write_race_is_reported_not_narrated(
@@ -909,7 +910,7 @@ def test_a_lost_write_race_is_reported_not_narrated(
 
     result = call(planned_user.id, REPLACE,
                   {"day": "Pazartesi", "exercise": "Bench Press",
-                   "replacement": "Machine Press"})
+                   "replacement": "Push-Up"})
 
     assert result["error"] == results.ERROR_PLAN_STATE_CONFLICT
     assert "Zorla" in result["message"]
@@ -928,7 +929,7 @@ def test_an_unexpected_failure_is_never_dressed_up_as_user_error(
 
     result = call(planned_user.id, REPLACE,
                   {"day": "Pazartesi", "exercise": "Bench Press",
-                   "replacement": "Machine Press"})
+                   "replacement": "Push-Up"})
 
     assert result["error"] == results.ERROR_INTERNAL
     assert "something internal" not in json.dumps(result, ensure_ascii=False)
@@ -953,7 +954,7 @@ def test_an_unexpected_failure_does_not_log_the_exception_it_swallowed(
     with caplog.at_level("WARNING"):
         call(planned_user.id, REPLACE,
              {"day": "Pazartesi", "exercise": "Bench Press",
-              "replacement": "Machine Press"})
+              "replacement": "Push-Up"})
 
     emitted = "\n".join(
         record.getMessage() + (record.exc_text or "")
@@ -982,11 +983,11 @@ def test_without_a_turn_identity_the_tools_refuse(app, planned_user, tools_on):
     """No request, no turn — and no key that would be safe to mint (§16)."""
     with app.app_context():
         result = call(planned_user.id, ADD,
-                      {"day": "Pazartesi", "exercise": "Cable Fly",
+                      {"day": "Pazartesi", "exercise": "Push-Up",
                        "sets": 3, "reps": "12"})
 
     assert result["error"] == results.ERROR_TURN_IDENTITY_UNAVAILABLE
-    assert "Cable Fly" not in names(planned_user.id)
+    assert "Push-Up" not in names(planned_user.id)
     assert journal(planned_user.id) == []
 
 
@@ -1013,7 +1014,7 @@ def test_a_tool_result_carries_no_server_identity(
 
     applied = call(planned_user.id, REPLACE,
                    {"day": "Pazartesi", "exercise": "Bench Press",
-                    "replacement": "Machine Press"})
+                    "replacement": "Push-Up"})
     undone = call(planned_user.id, UNDO)
 
     entry = journal(planned_user.id)[0]
@@ -1056,7 +1057,7 @@ def test_an_applied_result_flags_the_stale_context_block(
     """The plan block in the prompt predates the tool call (§33)."""
     result = call(planned_user.id, REPLACE,
                   {"day": "Pazartesi", "exercise": "Bench Press",
-                   "replacement": "Machine Press"})
+                   "replacement": "Push-Up"})
     assert result["status"] == results.STATUS_APPLIED
     assert "bu sonucu esas al" in result["note"]
 
@@ -1214,7 +1215,9 @@ def test_the_coach_cannot_invent_an_exercise_on_a_canonical_plan(
         "day": "Pazartesi", "exercise": "Dumbbell Row",
         "replacement": "Machine Chest Press"})
 
-    assert result["error"] == results.ERROR_INVALID_MUTATION
+    assert result["status"] == results.STATUS_NEEDS_INPUT
+    assert result["reason"] in (
+        results.REASON_EXERCISE_UNKNOWN, results.REASON_EXERCISE_SUGGEST)
     assert identities(canonical_user.id) == [
         ("Dumbbell Row", "ex_dumbbell_row"), ("Push-Up", "ex_push_up")]
     assert journal(canonical_user.id) == []
@@ -1269,11 +1272,12 @@ def test_the_same_cardio_exercise_is_accepted_on_the_cardio_day(
 
 def test_a_coach_edit_leaves_a_legacy_plan_name_only(
         app, planned_user, tools_on, turn):
-    """The Coach must not upgrade a pre-PR4 plan on the way past. ``Machine
-    Press`` is not in the catalog and stays perfectly writable here."""
+    """The Coach must not upgrade a pre-PR4 plan on the way past. A catalog
+    destination is rewritten to its canonical name, still without an
+    ``exercise_id``."""
     result = call(planned_user.id, REPLACE, {
         "day": "Pazartesi", "exercise": "Bench Press",
-        "replacement": "Machine Press"})
+        "replacement": "Push-Up"})
 
     from app.services.today_facts import get_active_plan
     db.session.expire_all()

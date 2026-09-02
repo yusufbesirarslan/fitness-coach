@@ -268,7 +268,7 @@ def test_plan_add_with_session_impact_yes_adds_once(
         reply = ai_coach._run_coach_conversation(
             planned_user.id, "yes", "", client_history=[], language="en")
 
-    assert "Lateral Raise" in names(planned_user.id)
+    assert "Dumbbell Lateral Raise" in names(planned_user.id)
     assert plan_confirmation.get_pending(planned_user.id) is None
     assert _workout_logs(planned_user) == []
     assert "lateral raise" in reply.lower()
@@ -554,7 +554,7 @@ def test_streaming_workout_stage_does_not_claim_logged(
 def test_apply_now_add_without_session_persists_immediately(
         app, planned_user, tools_on):
     with app.test_request_context("/ask", method="POST"):
-        _new_turn(app, "add lateral raise to monday")
+        _new_turn(app, "add lateral raise 3x10 to monday")
         result = call(planned_user.id, ADD, {
             "day": "Pazartesi", "exercise": "Lateral Raise",
             "sets": 3, "reps": "10",
@@ -564,7 +564,7 @@ def test_apply_now_add_without_session_persists_immediately(
             planned_user.id, "en", [result])
 
     assert result["status"] == results.STATUS_APPLIED
-    assert "Lateral Raise" in names(planned_user.id)
+    assert "Dumbbell Lateral Raise" in names(planned_user.id)
     assert plan_confirmation.get_pending(planned_user.id) is None
     assert _workout_logs(planned_user) == []
     assert "lateral raise" in reply.lower()
@@ -705,9 +705,9 @@ def test_ask_stream_add_applies_once_with_server_owned_copy(
 
     assert response.status_code == 200
     assert "confirm" not in visible.lower()
-    assert "dumbbell curl" in visible.lower()
+    assert "dumbbell biceps curl" in visible.lower()
     assert "added" in visible.lower()
-    assert names(auth_user.id).count("Dumbbell Curl") == 1
+    assert names(auth_user.id).count("Dumbbell Biceps Curl") == 1
     refreshed = db.session.get(TrainingPlan, plan.id)
     assert refreshed.mutation_version == 1
     assert TrainingPlanConfirmationProposal.query.filter_by(
@@ -796,7 +796,7 @@ def test_streaming_apply_now_does_not_emit_success_before_persist(
     with app.test_request_context("/ask/stream", method="POST"):
         assign_request_id()
         for event in ai_stream.stream_coach_answer(
-                planned_user.id, "add lateral raise to my chest day",
+                planned_user.id, "add lateral raise 3x10 to my chest day",
                 "", [], language="en"):
             events.append(event)
 
@@ -808,7 +808,7 @@ def test_streaming_apply_now_does_not_emit_success_before_persist(
     assert "lateral raise" in done[-1]["text"].lower()
     assert "added" in done[-1]["text"].lower()
     assert "confirm" not in done[-1]["text"].lower()
-    assert "Lateral Raise" in names(planned_user.id)
+    assert "Dumbbell Lateral Raise" in names(planned_user.id)
     assert plan_confirmation.get_pending(planned_user.id) is None
     assert _workout_logs(planned_user) == []
     assert len(fake.calls) == 1
@@ -845,7 +845,7 @@ def test_apply_now_later_yes_does_not_mutate_or_stage_workout(
         ai_coach._run_coach_conversation(
             planned_user.id, "yes", "", client_history=[], language="en")
 
-    assert names(planned_user.id).count("Lateral Raise") == 1
+    assert names(planned_user.id).count("Dumbbell Lateral Raise") == 1
     assert "Ghost Raise" not in names(planned_user.id)
     assert _workout_logs(planned_user) == []
     assert _pending_logs(planned_user) == []
