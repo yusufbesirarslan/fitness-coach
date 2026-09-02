@@ -277,6 +277,11 @@ def complete_workout_session(session_reference):
     quest claim or activity row.
     """
     try:
+        # Validated and then deliberately UNUSED. The published contract
+        # requires the header, and rejecting a malformed one keeps clients
+        # honest -- but exact-once here is the canonical uq_pump_check_day
+        # claim, never this key. Nothing about completion may depend on a
+        # client-minted string.
         sessions.parse_idempotency_key(request.headers.get("Idempotency-Key"))
         revision = sessions.parse_revision(request.headers.get("If-Match"))
         row = sessions.prepare_complete(
