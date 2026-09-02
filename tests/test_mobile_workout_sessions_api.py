@@ -21,7 +21,7 @@ from app.models import (
     WorkoutSession,
 )
 from app.services import mobile_auth, mobile_training
-from app.timeutil import APP_TZ, audit_clock
+from app.timeutil import APP_TZ, app_today, audit_clock
 
 
 SESSIONS_PATH = "/api/v1/training/workout-sessions"
@@ -1127,6 +1127,113 @@ def test_a_completion_replay_does_not_even_attempt_a_second_insert(
     assert replay.json["completion"]["outcome"] == "already_completed"
     inserts = [s for s in statements if s.lstrip().upper().startswith("INSERT")]
     assert inserts == [], inserts
+
+
+# -- Today convergence (section 51) -------------------------------------------
+
+@pytest.fixture
+def live_workout_ref(app, owner):
+    """A plan whose training day is the REAL current weekday, on a live clock.
+
+    The rest of this file freezes the canonical day, which is fine for the write
+    contracts but makes a Today proof dishonest: the completion authority windows
+    on ``PumpCheck.created_at``, so a frozen canonical day and a live column
+    default land in different Istanbul days and the completion would look
+    unregistered for a reason that cannot happen in production.
+    """
+    slot = app_today().weekday()
+    document = _plan_document()
+    document["program"] = [_day(name) for name in WEEKDAYS]
+    document["program"][slot] = _day(WEEKDAYS[slot], "antrenman")
+    db.session.add(TrainingPlan(
+        user_id=owner.id,
+        plan_data=json.dumps(document, ensure_ascii=False),
+        score=8.5, created_at=datetime(2026, 7, 1, 8, 30),
+        lineage_id="live-session-lineage", mutation_version=2))
+    db.session.commit()
+    return mobile_training.workout_ref(
+        app.config["SECRET_KEY"], owner.id, "live-session-lineage", 2, slot)
+
+
+def test_today_observes_the_session_lifecycle_through_the_canonical_authority(
+    client, owner, as_mobile, live_workout_ref, completion_proof
+):
+    """The write surface must never need a second reader to be believed.
+
+    /api/v1/today is a PROJECTION over the canonical workout-state resolver, and
+    PR5 touches neither. Driving the lifecycle through the native writes and
+    reading Today back is what proves the effects land in canonical state rather
+    than in a private native store.
+    """
+    headers = as_mobile(owner)
+    workout_ref = live_workout_ref
+
+    def _today():
+        response = client.get("/api/v1/today", headers=headers)
+        assert response.status_code == 200
+        return response.json["today"]
+
+    before = _today()
+    assert before["status"] == "scheduled_not_started"
+    assert before["state"]["completed_today"] is False
+    assert before["state"]["session"] is None
+    assert before["workout"]["completed"] is False
+
+    reference = client.post(
+        SESSIONS_PATH, headers=headers,
+        json={"workout_ref": workout_ref}).json["session"]["session_ref"]
+    started = _today()
+    # The session Today reports is THE session the native write created.
+    assert started["state"]["session"]["public_id"] == reference
+    assert started["state"]["session_state"] == "active_resumable"
+    assert started["state"]["session"]["resumable"] is True
+    assert started["state"]["action"] == "resume"
+
+    client.put(
+        f"{SESSIONS_PATH}/{reference}/checkpoint",
+        headers={**headers, "If-Match": "0", "Idempotency-Key": "today-key-01"},
+        json={"checkpoint": _snapshot()})
+    saved = _today()
+    # Durable progress is session state, not completion: Today must NOT move.
+    assert saved["status"] == started["status"]
+    assert saved["state"]["completed_today"] is False
+    assert saved["state"]["session"]["public_id"] == reference
+
+    client.post(
+        f"{SESSIONS_PATH}/{reference}/complete",
+        headers={**headers, "If-Match": "1", "Idempotency-Key": "today-key-02"},
+        data={"location_type": "gym"})
+    done = _today()
+    assert done["status"] == "completed"
+    assert done["state"]["completed_today"] is True
+    assert done["state"]["execution_state"] == "completed"
+    assert done["workout"]["completed"] is True
+
+
+def test_today_reports_an_abandoned_session_as_not_completed(
+    client, owner, as_mobile, live_workout_ref
+):
+    headers = as_mobile(owner)
+    reference = client.post(
+        SESSIONS_PATH, headers=headers,
+        json={"workout_ref": live_workout_ref}).json["session"]["session_ref"]
+    client.put(
+        f"{SESSIONS_PATH}/{reference}/checkpoint",
+        headers={**headers, "If-Match": "0", "Idempotency-Key": "today-key-03"},
+        json={"checkpoint": _snapshot()})
+
+    client.post(f"{SESSIONS_PATH}/{reference}/abandon", headers=headers,
+                json={"reason": "user_cancelled"})
+
+    today = client.get("/api/v1/today", headers=headers).json["today"]
+    # No completion was earned, and the terminal session is reported honestly:
+    # visible, but never resumable and never a completion.
+    assert today["state"]["completed_today"] is False
+    assert today["state"]["session_state"] == "abandoned"
+    assert today["state"]["session"]["status"] == "abandoned"
+    assert today["state"]["session"]["resumable"] is False
+    assert today["state"]["action"] == "start"
+    assert today["workout"]["completed"] is False
 
 
 def test_the_native_completion_never_fans_a_pump_check_out_to_friends(
