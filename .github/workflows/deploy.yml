@@ -12,10 +12,6 @@ on:
     types: [completed]
     branches: [main]
 
-concurrency:
-  group: production-deploy
-  cancel-in-progress: false
-
 env:
   DEPLOY_SHA: ${{ github.event.workflow_run.head_sha }}
 
@@ -24,12 +20,52 @@ permissions:
   contents: read
 
 jobs:
+  # Unprivileged: no environment, no OIDC, no production lock. A superseded
+  # SHA skips here (exit 0) instead of sitting in `waiting` on required
+  # reviewers and then failing red when the newer run replaces it — the
+  # failure mode of deploy #250. Sibling runs that are only waiting for
+  # approval on an ancestor SHA are released; a deploy job that already has
+  # a runner is left alone.
+  candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event == 'push' && github.sha == github.event.workflow_run.head_sha }}
+    outputs:
+      deploy: ${{ steps.gate.outputs.deploy }}
+    steps:
+      - name: Verify privileged workflow identity
+        timeout-minutes: 1
+        env:
+          CANDIDATE_SHA: ${{ github.event.workflow_run.head_sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: test -n "$WORKFLOW_SHA" && test "$WORKFLOW_SHA" = "$CANDIDATE_SHA"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        timeout-minutes: 5
+        with:
+          ref: ${{ env.DEPLOY_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Skip superseded candidates before the approval gate
+        id: gate
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/deploy_gate.py
+
   deploy:
+    needs: candidate
+    if: ${{ needs.candidate.outputs.deploy == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 65
     environment: production
-    # CI basarisizsa deploy hic calismaz.
-    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.event == 'push' && github.sha == github.event.workflow_run.head_sha }}
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
     steps:
       - name: Verify privileged workflow identity
         timeout-minutes: 1

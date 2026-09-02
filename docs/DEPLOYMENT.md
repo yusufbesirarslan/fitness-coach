@@ -42,10 +42,16 @@ CODEOWNER review, blocked force-push/deletion, and a protected `production`
 environment with required reviewers and restricted OIDC trust -- are currently
 recorded as unproven.
 
-GitHub serializes this work with the `production-deploy` concurrency group and
-`cancel-in-progress: false`. GitHub keeps the running job and at most one pending
-job for that group; a newer pending job may replace an older pending job. It
-never cancels a transaction that has already started. If the GitHub runner is
+The unprivileged `candidate` job does not hold the production lock and does not
+request environment approval. It skips when `DEPLOY_SHA` is already behind
+`origin/main`, and it cancels sibling Deploy-to-EC2 runs that are only waiting
+for the production approval gate on a superseded SHA. That is the skip deploy
+run #250 never got: the pending deployment was rejected at the required-reviewer
+gate, the controller never started, and the run failed red. The privileged
+`deploy` job then serializes host mutation with the `production-deploy`
+concurrency group and `cancel-in-progress: false`. GitHub keeps the running job
+and at most one pending job for that group; a newer pending job may replace an
+older pending job. It never cancels a transaction that has already started. If the GitHub runner is
 lost after SendCommand accepts the request, SSM
 may still complete C on the host. Do not issue a second deploy to compensate:
 recover the command ID and host outcome first, then allow the serialized queue
