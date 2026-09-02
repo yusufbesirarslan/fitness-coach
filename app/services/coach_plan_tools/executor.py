@@ -133,9 +133,10 @@ _INTENT_ATTR = "_coach_plan_confirmation_intent"
 
 _USER_MSG_ATTR = "_coach_plan_user_message"
 _HISTORY_ATTR = "_coach_plan_history"
+_USER_ID_ATTR = "_coach_plan_user_id"
 
 
-def begin_turn(user_message="", history=None):
+def begin_turn(user_message="", history=None, user_id=None):
     """Reset the per-turn mutation budget, markers and confirmation intent.
 
     Called from the Coach's own turn setup, so blocking and streaming share one
@@ -157,8 +158,9 @@ def begin_turn(user_message="", history=None):
         setattr(g, _INTENT_ATTR, parse_confirmation_intent(user_message))
         setattr(g, _USER_MSG_ATTR, user_message or "")
         setattr(g, _HISTORY_ATTR, list(history or ()))
+        setattr(g, _USER_ID_ATTR, user_id)
         from .grounding import refresh_clarification_for_turn
-        refresh_clarification_for_turn(user_message)
+        refresh_clarification_for_turn(user_message, user_id=user_id)
     except RuntimeError:
         pass
 
@@ -423,6 +425,12 @@ def _execute(user_id, name, arguments):
     if name not in PLAN_WRITE_TOOL_NAMES:
         return results.error_result(
             results.ERROR_INVALID_ARGUMENTS, "bilinmeyen plan aracı")
+
+    try:
+        if getattr(g, _USER_ID_ATTR, None) is None:
+            setattr(g, _USER_ID_ATTR, user_id)
+    except RuntimeError:
+        pass
 
     if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id <= 0:
         # The dispatcher passes the authenticated user. A missing or malformed

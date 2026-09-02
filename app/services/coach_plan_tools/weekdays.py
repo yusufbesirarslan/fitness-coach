@@ -109,6 +109,27 @@ def localize_weekday(canonical, locale="tr"):
     return canonical
 
 
+def localize_weekday_text(value, locale="tr"):
+    """Replace canonical Turkish weekday tokens in Coach presentation copy.
+
+    English names the user typed are left alone. Storage identity is not
+    changed — this is copy only.
+    """
+    if not isinstance(value, str) or not value:
+        return value or ""
+    if locale != "en":
+        return value
+    result = value
+    for token in _tokenize(value):
+        canonical = canonicalize_weekday(token)
+        if canonical not in WEEKDAYS:
+            continue
+        if _fold_ascii(token) != _fold_ascii(canonical) and token.casefold() != canonical.casefold():
+            continue
+        result = result.replace(token, localize_weekday(canonical, "en"))
+    return result
+
+
 def find_explicit_weekday(message):
     """The one explicit weekday named in ``message``, or ``None``.
 

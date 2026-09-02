@@ -16,6 +16,7 @@ from app.services.plan_mutation import (
     ReplaceExerciseCommand,
     UpdateExercisePrescriptionCommand,
 )
+from app.services.plan_mutation.fingerprint import command_type
 
 from . import clarifications, results
 from .exercise_grounding import (
@@ -28,13 +29,20 @@ from .prescriptions import (
     merge_prescription,
     parse_prescription,
 )
+from .schemas import (
+    ADD_EXERCISE_TOOL,
+    REPLACE_EXERCISE_TOOL,
+    UPDATE_PRESCRIPTION_TOOL,
+)
 from .weekdays import canonicalize_weekday, find_explicit_weekday
 from .workout_targets import (
     KIND_AMBIGUOUS,
     KIND_NONE,
     KIND_NOT_FOUND,
     KIND_RESOLVED,
+    WorkoutTarget,
     _REGION_TOKENS,
+    find_exercise_slots,
     resolve_workout_target,
     semantic_regions,
 )
@@ -51,10 +59,30 @@ _CUE_WORDS = frozenset({
     "ekle", "ekler", "lutfen", "lütfen", "benim", "bir", "ye", "ya",
     "workout", "workouts", "antrenman", "antrenmanima", "antrenmanıma",
     "antrenmanina", "antrenmanına", "day", "gun", "gün", "gunu", "günü",
-    "gunune", "gününe", "gunune",
+    "gunune", "gününe", "gunune", "body", "upper", "lower",
     "sets", "set", "reps", "rep", "tekrar", "tekrari", "tekrarı",
     "yes", "yeah", "yep", "evet", "ok", "okay", "olur",
+    "it", "that", "this", "would", "be", "good", "great", "fine", "sure",
+    "thanks", "thank", "please", "works", "perfect", "just", "like",
+    "sounds", "nice", "really", "very", "too", "also", "then", "so",
+    "well", "maybe", "kind", "kinda", "cool", "alright", "right",
+    "gotcha", "want", "idea", "tamam", "harika", "super", "süper",
+    "bunu", "onu", "oyle", "öyle", "boyle", "böyle", "yap", "yapalim",
+    "yapalım", "istiyorum", "tabii", "peki",
+    "change", "replace", "swap", "instead", "degistir", "değiştir",
+    "yerine", "guncelle", "güncelle",
 })
+
+_ACCEPT_PREFIXES = frozenset({
+    "yes", "yeah", "yep", "evet", "olur", "ok", "okay", "sure", "tabii",
+    "confirm", "tamam",
+})
+
+_OPERATION_TOOLS = {
+    "add_exercise": ADD_EXERCISE_TOOL,
+    "replace_exercise": REPLACE_EXERCISE_TOOL,
+    "update_exercise_prescription": UPDATE_PRESCRIPTION_TOOL,
+}
 
 
 @dataclass(frozen=True)
@@ -96,6 +124,7 @@ def _exercise_from_text(message):
         r"\d+\s*[x×]\s*\d+(?:\s*[-–—]\s*\d+)?", " ", text, flags=re.I)
     text = re.sub(
         r"\d+\s*(?:sets?|set|reps?|tekrar(?:lar)?)\b", " ", text, flags=re.I)
+    text = re.sub(r"\b\d+(?:\s*[-–—]\s*\d+)?\b", " ", text)
     text = re.sub(r"\bwith\b", " ", text, flags=re.I)
     tokens = re.findall(r"[A-Za-z0-9çÇğĞıİöÖşŞüÜ+-]+", text)
     kept = []
@@ -111,6 +140,22 @@ def _exercise_from_text(message):
     return " ".join(kept).strip()
 
 
+def _is_clarification_acceptance(message):
+    if parse_confirmation_intent(message) == CONFIRM:
+        return True
+    if not isinstance(message, str) or not message.strip():
+        return False
+    tokens = re.findall(r"[A-Za-z0-9çÇğĞıİöÖşŞüÜ+-]+", message)
+    if not tokens:
+        return False
+    if tokens[0].casefold() not in _ACCEPT_PREFIXES:
+        return False
+    if parse_confirmation_intent(message) == CANCEL:
+        return False
+    remainder = " ".join(tokens[1:])
+    return not _exercise_from_text(remainder)
+
+
 def user_owned_intent(message=None, history=None, user_id=None):
     """Exercise / day / prescription grounded for this turn.
 
@@ -119,19 +164,20 @@ def user_owned_intent(message=None, history=None, user_id=None):
     record, never assistant prose and never client-supplied history.
     """
     message = current_user_message() if message is None else message
-    accepted = parse_confirmation_intent(message) == CONFIRM
+    stored = (
+        clarifications.load(user_id) if user_id is not None
+        else clarifications.load_current())
+    accepted = _is_clarification_acceptance(message) if stored else (
+        parse_confirmation_intent(message) == CONFIRM)
     current_rx = parse_prescription(message)
     current_name = _exercise_from_text(message)
     if accepted:
         current_name = ""
-    stored = (
-        clarifications.load(user_id) if user_id is not None
-        else clarifications.load_current())
     rx = current_rx
     name = current_name
     source = message or ""
     accepted_proposal = False
-    if stored:
+    if stored and _is_continuation_reply(message, stored):
         rx, name, source, accepted_proposal = _overlay_stored_clarification(
             stored, message, current_rx, current_name, accepted)
     return {
@@ -141,19 +187,54 @@ def user_owned_intent(message=None, history=None, user_id=None):
         "prescription": rx,
         "accepted_proposal": accepted_proposal,
         "has_user_text": bool((message or "").strip()),
+        "stored": stored,
     }
 
 
-def refresh_clarification_for_turn(user_message):
-    """Drop a leftover clarification when this turn names a new exercise."""
+def refresh_clarification_for_turn(user_message, user_id=None):
+    """Drop a leftover clarification when this turn is a new mutation."""
+    stored = (
+        clarifications.load(user_id) if user_id is not None
+        else clarifications.load_current())
     intent = parse_confirmation_intent(user_message)
-    if intent == CONFIRM:
+    if intent == CONFIRM or _is_clarification_acceptance(user_message):
         return
     if intent == CANCEL:
-        clarifications.clear()
+        clarifications.clear(user_id)
+        return
+    if stored and _is_continuation_reply(user_message, stored):
         return
     if _exercise_from_text(user_message):
-        clarifications.clear()
+        clarifications.clear(user_id)
+        return
+    if stored and user_message and not _is_continuation_reply(
+            user_message, stored):
+        clarifications.clear(user_id)
+
+
+def _is_continuation_reply(message, stored):
+    if not stored or not isinstance(message, str):
+        return False
+    if parse_confirmation_intent(message) in (CONFIRM, CANCEL):
+        return True
+    if _is_clarification_acceptance(message):
+        return True
+    leftover = _exercise_from_text(message)
+    if leftover:
+        return False
+    if _bare_number_prescription(stored, message) is not None:
+        return True
+    rx = parse_prescription(message)
+    if rx.sets is not None or rx.reps is not None:
+        return True
+    explicit = find_explicit_weekday(message)
+    if explicit is None:
+        return False
+    candidates = tuple(stored.get("candidate_days") or ())
+    if candidates:
+        return True
+    stored_day = stored.get("day") or ""
+    return not stored_day or explicit == stored_day
 
 
 def _overlay_stored_clarification(stored, message, current_rx, current_name,
@@ -165,7 +246,11 @@ def _overlay_stored_clarification(stored, message, current_rx, current_name,
     else:
         name = current_name or stored.get("exercise") or ""
     source = message or ""
-    if not find_explicit_weekday(source) and not semantic_regions(source):
+    explicit = find_explicit_weekday(source)
+    candidates = tuple(stored.get("candidate_days") or ())
+    if explicit and candidates and explicit not in candidates:
+        source = source
+    elif not explicit and not semantic_regions(source):
         source = stored.get("day") or source
     accepted_proposal = bool(
         accepted and (
@@ -214,6 +299,19 @@ def _bare_number_prescription(stored, message):
             return Prescription(sets=int(token))
         except ValueError:
             return None
+    if reason in (
+            results.REASON_MISSING_PRESCRIPTION,
+            results.REASON_AMBIGUOUS_WORKOUT,
+            results.REASON_EXERCISE_SUGGEST):
+        if stored.get("sets") is None and stored.get("reps") is None:
+            return None
+        if stored.get("sets") is not None and stored.get("reps") is None:
+            return Prescription(reps=_normalize_bare_reps(token))
+        if stored.get("reps") is not None and stored.get("sets") is None:
+            try:
+                return Prescription(sets=int(token))
+            except ValueError:
+                return None
     return None
 
 
@@ -226,19 +324,31 @@ def ground_command(user_id, command):
     """Return a ``Grounding``: ready command, or a non-applying result."""
     intent = user_owned_intent(user_id=user_id)
     command = _canonicalize_command_days(command)
+    stored = intent.get("stored")
+
+    if stored and stored.get("candidate_days"):
+        explicit = find_explicit_weekday(intent["message"])
+        candidates = tuple(stored.get("candidate_days") or ())
+        if explicit and explicit not in candidates:
+            return _needs_input(
+                user_id, results.REASON_AMBIGUOUS_WORKOUT, command,
+                candidates=candidates,
+                user_rx=intent["prescription"])
 
     if isinstance(command, (AddExerciseCommand, RemoveExerciseCommand,
                             ReplaceExerciseCommand,
                             UpdateExercisePrescriptionCommand)):
-        target = resolve_workout_target(
-            user_id, intent["source"] or intent["message"], command.day)
+        target = _resolve_command_workout(user_id, command, intent)
         if target.kind == KIND_AMBIGUOUS:
+            grounded = _prepare_partial(user_id, command, intent)
             return _needs_input(
-                user_id, results.REASON_AMBIGUOUS_WORKOUT, command,
-                candidates=target.candidates)
+                user_id, results.REASON_AMBIGUOUS_WORKOUT, grounded,
+                candidates=target.candidates,
+                user_rx=intent["prescription"])
         if target.kind == KIND_NOT_FOUND:
+            grounded = _prepare_partial(user_id, command, intent)
             return _needs_input(
-                user_id, results.REASON_WORKOUT_NOT_FOUND, command)
+                user_id, results.REASON_WORKOUT_NOT_FOUND, grounded)
         if target.kind == KIND_RESOLVED:
             command = replace(command, day=target.day)
         elif target.kind == KIND_NONE:
@@ -247,87 +357,13 @@ def ground_command(user_id, command):
                 command = replace(command, day=canonical)
 
     if isinstance(command, AddExerciseCommand):
-        name = intent["exercise"] or command.exercise
-        destination = resolve_destination(name)
-        if destination.kind == EX_UNKNOWN:
-            return _needs_input(
-                user_id, results.REASON_EXERCISE_UNKNOWN,
-                replace(command, exercise=name))
-        if destination.kind == EX_SUGGEST:
-            return _needs_input(
-                user_id, results.REASON_EXERCISE_SUGGEST,
-                replace(command, exercise=name),
-                suggestion=destination.suggestion,
-                user_rx=intent["prescription"])
-        command = replace(command, exercise=destination.canonical_name)
-        rx = merge_prescription(
-            intent["prescription"],
-            tool_sets=command.sets,
-            tool_reps=command.reps,
-            user_message_present=intent["has_user_text"],
-        )
-        if intent["has_user_text"] and (
-                intent["prescription"].sets is not None
-                or intent["prescription"].reps is not None
-                or intent["accepted_proposal"]):
-            rx = intent["prescription"]
-        if rx.sets is None and rx.reps is None and intent["has_user_text"]:
-            return _needs_input(
-                user_id, results.REASON_MISSING_PRESCRIPTION, command,
-                label=_label_for(user_id, command.day, intent["source"]),
-                user_rx=rx)
-        if rx.sets is None and intent["has_user_text"]:
-            return _needs_input(
-                user_id, results.REASON_MISSING_SETS,
-                replace(command, reps=rx.reps), user_rx=rx)
-        if rx.reps is None and intent["has_user_text"]:
-            return _needs_input(
-                user_id, results.REASON_MISSING_REPS,
-                replace(command, sets=rx.sets), user_rx=rx)
-        if rx.sets is None or rx.reps is None:
-            return Grounding(command=replace(
-                command, sets=rx.sets, reps=rx.reps))
-        return Grounding(command=replace(
-            command, sets=rx.sets, reps=str(rx.reps)))
+        return _ground_add(user_id, command, intent)
 
     if isinstance(command, ReplaceExerciseCommand):
-        same_name = (
-            str(command.exercise).strip().casefold()
-            == str(command.replacement).strip().casefold())
-        if same_name:
-            return Grounding(command=command)
-        destination = resolve_destination(command.replacement)
-        if destination.kind == EX_UNKNOWN:
-            return _needs_input(
-                user_id, results.REASON_EXERCISE_UNKNOWN, command)
-        if destination.kind == EX_SUGGEST:
-            return _needs_input(
-                user_id, results.REASON_EXERCISE_SUGGEST, command,
-                suggestion=destination.suggestion)
-        command = replace(command, replacement=destination.canonical_name)
-        if intent["has_user_text"]:
-            rx = intent["prescription"]
-            if rx.sets is not None or rx.reps is not None:
-                command = replace(
-                    command,
-                    sets=rx.sets if rx.sets is not None else command.sets,
-                    reps=(str(rx.reps) if rx.reps is not None
-                          else command.reps),
-                )
-        return Grounding(command=command)
+        return _ground_replace(user_id, command, intent)
 
     if isinstance(command, UpdateExercisePrescriptionCommand):
-        if intent["has_user_text"]:
-            rx = intent["prescription"]
-            if rx.sets is None and rx.reps is None:
-                return _needs_input(
-                    user_id, results.REASON_MISSING_PRESCRIPTION, command)
-            command = replace(
-                command,
-                sets=rx.sets if rx.sets is not None else command.sets,
-                reps=(str(rx.reps) if rx.reps is not None else command.reps),
-            )
-        return Grounding(command=command)
+        return _ground_update(user_id, command, intent)
 
     if isinstance(command, MoveTrainingDayCommand):
         day = canonicalize_weekday(command.day) or command.day
@@ -338,6 +374,136 @@ def ground_command(user_id, command):
     if isinstance(command, RemoveExerciseCommand):
         return Grounding(command=command)
 
+    return Grounding(command=command)
+
+
+def _resolve_command_workout(user_id, command, intent):
+    message = intent["source"] or intent["message"]
+    named_day = find_explicit_weekday(intent["message"])
+    named_region = semantic_regions(intent["message"])
+    target = resolve_workout_target(user_id, message, command.day)
+    slot_commands = (
+        UpdateExercisePrescriptionCommand, ReplaceExerciseCommand,
+        RemoveExerciseCommand)
+    if (isinstance(command, slot_commands) and intent["has_user_text"]
+            and not named_day and not named_region):
+        search = command.exercise
+        destination = resolve_destination(search)
+        if destination.canonical_name:
+            search = destination.canonical_name
+        elif destination.suggestion:
+            search = destination.suggestion
+        slots = find_exercise_slots(user_id, search)
+        if len(slots) == 1:
+            return WorkoutTarget(KIND_RESOLVED, day=slots[0], label=slots[0])
+        if len(slots) > 1:
+            return WorkoutTarget(KIND_AMBIGUOUS, candidates=slots)
+        return WorkoutTarget(KIND_NOT_FOUND)
+    return target
+
+
+def _prepare_partial(user_id, command, intent):
+    if isinstance(command, AddExerciseCommand):
+        name = intent["exercise"] or command.exercise
+        destination = resolve_destination(name)
+        if destination.kind != EX_UNKNOWN and destination.canonical_name:
+            command = replace(command, exercise=destination.canonical_name)
+        elif destination.kind == EX_SUGGEST:
+            command = replace(command, exercise=name)
+        rx = intent["prescription"]
+        if rx.sets is not None or rx.reps is not None:
+            command = replace(
+                command,
+                sets=rx.sets if rx.sets is not None else command.sets,
+                reps=(str(rx.reps) if rx.reps is not None else command.reps),
+            )
+    return command
+
+
+def _ground_add(user_id, command, intent):
+    name = intent["exercise"] or command.exercise
+    destination = resolve_destination(name)
+    if destination.kind == EX_UNKNOWN:
+        return _needs_input(
+            user_id, results.REASON_EXERCISE_UNKNOWN,
+            replace(command, exercise=name))
+    if destination.kind == EX_SUGGEST:
+        return _needs_input(
+            user_id, results.REASON_EXERCISE_SUGGEST,
+            replace(command, exercise=name),
+            suggestion=destination.suggestion,
+            user_rx=intent["prescription"])
+    command = replace(command, exercise=destination.canonical_name)
+    rx = merge_prescription(
+        intent["prescription"],
+        tool_sets=command.sets,
+        tool_reps=command.reps,
+        user_message_present=intent["has_user_text"],
+    )
+    if intent["has_user_text"] and (
+            intent["prescription"].sets is not None
+            or intent["prescription"].reps is not None
+            or intent["accepted_proposal"]):
+        rx = intent["prescription"]
+    if rx.sets is None and rx.reps is None and intent["has_user_text"]:
+        return _needs_input(
+            user_id, results.REASON_MISSING_PRESCRIPTION, command,
+            label=_label_for(user_id, command.day, intent["source"]),
+            user_rx=rx)
+    if rx.sets is None and intent["has_user_text"]:
+        return _needs_input(
+            user_id, results.REASON_MISSING_SETS,
+            replace(command, reps=rx.reps), user_rx=rx)
+    if rx.reps is None and intent["has_user_text"]:
+        return _needs_input(
+            user_id, results.REASON_MISSING_REPS,
+            replace(command, sets=rx.sets), user_rx=rx)
+    if rx.sets is None or rx.reps is None:
+        return Grounding(command=replace(
+            command, sets=rx.sets, reps=rx.reps))
+    return Grounding(command=replace(
+        command, sets=rx.sets, reps=str(rx.reps)))
+
+
+def _ground_replace(user_id, command, intent):
+    same_name = (
+        str(command.exercise).strip().casefold()
+        == str(command.replacement).strip().casefold())
+    if same_name:
+        return Grounding(command=command)
+    destination = resolve_destination(command.replacement)
+    if destination.kind == EX_UNKNOWN:
+        return _needs_input(
+            user_id, results.REASON_EXERCISE_UNKNOWN, command)
+    if destination.kind == EX_SUGGEST:
+        return _needs_input(
+            user_id, results.REASON_EXERCISE_SUGGEST, command,
+            suggestion=destination.suggestion,
+            user_rx=intent["prescription"])
+    command = replace(command, replacement=destination.canonical_name)
+    if intent["has_user_text"]:
+        rx = intent["prescription"]
+        if rx.sets is not None or rx.reps is not None:
+            command = replace(
+                command,
+                sets=rx.sets if rx.sets is not None else command.sets,
+                reps=(str(rx.reps) if rx.reps is not None
+                      else command.reps),
+            )
+    return Grounding(command=command)
+
+
+def _ground_update(user_id, command, intent):
+    if intent["has_user_text"]:
+        rx = intent["prescription"]
+        if rx.sets is None and rx.reps is None:
+            return _needs_input(
+                user_id, results.REASON_MISSING_PRESCRIPTION, command)
+        command = replace(
+            command,
+            sets=rx.sets if rx.sets is not None else command.sets,
+            reps=(str(rx.reps) if rx.reps is not None else command.reps),
+        )
     return Grounding(command=command)
 
 
@@ -364,20 +530,43 @@ def _needs_input(user_id, reason, command, user_rx=None, **kwargs):
             results.REASON_MISSING_PRESCRIPTION,
             results.REASON_MISSING_SETS,
             results.REASON_MISSING_REPS,
-            results.REASON_EXERCISE_SUGGEST):
+            results.REASON_EXERCISE_SUGGEST,
+            results.REASON_AMBIGUOUS_WORKOUT):
         rx = user_rx or Prescription()
+        candidates = kwargs.get("candidates") or ()
+        intent = user_owned_intent(user_id=user_id)
+        if rx.sets is None and rx.reps is None:
+            stored = intent.get("stored") or {}
+            rx = Prescription(
+                sets=stored.get("sets") if stored else None,
+                reps=stored.get("reps") if stored else None,
+            ) if stored else rx
+            if user_rx is not None:
+                rx = user_rx
+        stored = intent.get("stored") or {}
+        day = getattr(command, "day", "") or ""
+        if reason == results.REASON_AMBIGUOUS_WORKOUT:
+            day = ""
         clarifications.remember(user_id, {
-            "day": getattr(command, "day", "") or "",
-            "exercise": getattr(command, "exercise", "") or "",
-            "suggestion": kwargs.get("suggestion") or "",
-            "sets": rx.sets,
-            "reps": rx.reps,
+            "operation": command_type(command) if command is not None else (
+                "add_exercise"),
+            "day": day,
+            "exercise": (
+                stored.get("exercise")
+                or getattr(command, "exercise", "")
+                or ""),
+            "replacement": getattr(command, "replacement", "") or "",
+            "suggestion": kwargs.get("suggestion") or (
+                stored.get("suggestion") or ""),
+            "sets": rx.sets if rx.sets is not None else stored.get("sets"),
+            "reps": rx.reps if rx.reps is not None else stored.get("reps"),
             "proposed_sets": (
                 PROPOSED_SETS
                 if reason == results.REASON_MISSING_PRESCRIPTION else None),
             "proposed_reps": (
                 PROPOSED_REPS
                 if reason == results.REASON_MISSING_PRESCRIPTION else None),
+            "candidate_days": candidates or stored.get("candidate_days") or (),
             "reason": reason,
         })
     else:
@@ -387,26 +576,110 @@ def _needs_input(user_id, reason, command, user_rx=None, **kwargs):
 
 
 def followup_add_arguments(user_id=None):
-    """Arguments for a server-owned ADD completing a prior clarification.
+    """Arguments for a server-owned ADD completing a prior clarification."""
+    mutation = followup_mutation(user_id)
+    if not mutation:
+        return None
+    tool, arguments = mutation
+    if tool != ADD_EXERCISE_TOOL:
+        return None
+    return arguments
+
+
+def followup_mutation(user_id=None):
+    """``(tool_name, arguments)`` completing a server-owned clarification.
 
     Returns ``None`` unless a clarification the server itself stored is
-    being completed this turn (prescription text, or yes to the stored
-    proposal). Assistant chat text is never read.
+    being completed this turn. Assistant chat text is never read.
     """
     stored = (
         clarifications.load(user_id) if user_id is not None
         else clarifications.load_current())
-    if not stored or not stored.get("day"):
+    if not stored:
+        return None
+    message = current_user_message()
+    if not _is_continuation_reply(message, stored):
+        return None
+    explicit = find_explicit_weekday(message)
+    candidates = tuple(stored.get("candidate_days") or ())
+    if explicit and candidates and explicit not in candidates:
         return None
     intent = user_owned_intent(user_id=user_id)
-    if not intent["has_user_text"] or not intent["exercise"]:
+    if not intent["has_user_text"]:
         return None
+    day = stored.get("day") or ""
+    if explicit and (not candidates or explicit in candidates):
+        day = explicit
+    if not day:
+        return None
+    exercise = intent["exercise"] or stored.get("exercise") or ""
+    if stored.get("suggestion") and _is_clarification_acceptance(message):
+        exercise = stored.get("suggestion") or exercise
+    if not exercise:
+        return None
+    operation = stored.get("operation") or "add_exercise"
+    tool = _OPERATION_TOOLS.get(operation)
+    if tool is None:
+        return None
+    if operation == "replace_exercise":
+        replacement = (
+            stored.get("suggestion") or stored.get("replacement") or "")
+        if not replacement:
+            return None
+        arguments = {
+            "day": day,
+            "exercise": stored.get("exercise") or exercise,
+            "replacement": replacement,
+        }
+        rx = intent["prescription"]
+        if rx.sets is not None:
+            arguments["sets"] = rx.sets
+        if rx.reps is not None:
+            arguments["reps"] = str(rx.reps)
+        return tool, arguments
+    if operation == "update_exercise_prescription":
+        rx = intent["prescription"]
+        if rx.sets is None and rx.reps is None:
+            return None
+        arguments = {
+            "day": day,
+            "exercise": exercise,
+        }
+        if rx.sets is not None:
+            arguments["sets"] = rx.sets
+        if rx.reps is not None:
+            arguments["reps"] = str(rx.reps)
+        return tool, arguments
     rx = intent["prescription"]
     if rx.sets is None or rx.reps is None:
         return None
-    return {
-        "day": stored["day"],
-        "exercise": intent["exercise"],
+    return tool, {
+        "day": day,
+        "exercise": exercise,
         "sets": rx.sets,
         "reps": str(rx.reps),
     }
+
+
+def invalid_candidate_result(user_id=None):
+    """Re-ask when the user named a day that is not a stored candidate."""
+    stored = (
+        clarifications.load(user_id) if user_id is not None
+        else clarifications.load_current())
+    if not stored:
+        return None
+    message = current_user_message()
+    explicit = find_explicit_weekday(message)
+    candidates = tuple(stored.get("candidate_days") or ())
+    if not explicit or not candidates or explicit in candidates:
+        return None
+    if _exercise_from_text(message):
+        return None
+    command = AddExerciseCommand(
+        day=stored.get("day") or "",
+        exercise=stored.get("exercise") or "",
+        sets=stored.get("sets"),
+        reps=stored.get("reps"),
+    )
+    return results.needs_input_result(
+        results.REASON_AMBIGUOUS_WORKOUT, command, candidates=candidates)

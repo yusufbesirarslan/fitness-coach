@@ -172,7 +172,7 @@ def stream_coach_answer(user_id, question, context, history, language="tr"):
     delta gönderilmemişken mümkündür."""
     from app.services import ai_coach, coach_confirmation
 
-    ai_coach._begin_coach_turn(question, history=history)
+    ai_coach._begin_coach_turn(question, history=history, user_id=user_id)
     resolved = coach_confirmation.resolve_pending_turn(user_id, language)
     if resolved is not None:
         yield from _emit_text(resolved, provider="server")

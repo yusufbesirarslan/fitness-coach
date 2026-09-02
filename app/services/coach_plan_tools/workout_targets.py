@@ -219,3 +219,54 @@ def resolve_workout_target(user_id, message, model_day=None):
         # nickname. Do not let the model pick one.
         return WorkoutTarget(KIND_NOT_FOUND)
     return WorkoutTarget(KIND_NONE)
+
+
+def find_exercise_slots(user_id, name):
+    """Canonical days in the active plan that hold ``name``.
+
+    Matching is catalog-aware when the name (or the stored slot name)
+    resolves, otherwise casefold equality. Used to resume update/replace
+    when the user named the exercise but not the day. Several hits stay
+    ambiguous — never ``candidates[0]``.
+    """
+    if not isinstance(name, str) or not name.strip():
+        return ()
+    days = _program_days(user_id)
+    if not days:
+        return ()
+    wanted = _identity(name)
+    if wanted is None:
+        return ()
+    found = []
+    for day in days:
+        if not _is_workout_day(day):
+            continue
+        gun = day.get("gun")
+        if not isinstance(gun, str) or not gun:
+            continue
+        exercises = day.get("egzersizler") or []
+        if not isinstance(exercises, list):
+            continue
+        for entry in exercises:
+            if not isinstance(entry, dict):
+                continue
+            slot = _identity(entry.get("isim"))
+            if slot is None:
+                continue
+            if slot == wanted:
+                if gun not in found:
+                    found.append(gun)
+                break
+    return tuple(found)
+
+
+def _identity(name):
+    if not isinstance(name, str) or not name.strip():
+        return None
+    try:
+        definition = resolve_exercise(name=name)
+    except ExerciseResolutionError:
+        definition = None
+    if definition is not None:
+        return ("id", definition.exercise_id)
+    return ("name", _fold(name))

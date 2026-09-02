@@ -22,8 +22,13 @@ from app.services.coach_plan_tools.grounding import (
     PROPOSED_REPS,
     PROPOSED_SETS,
     followup_add_arguments,
+    followup_mutation,
+    invalid_candidate_result,
 )
-from app.services.coach_plan_tools.weekdays import localize_weekday
+from app.services.coach_plan_tools.weekdays import (
+    localize_weekday,
+    localize_weekday_text,
+)
 
 
 _LOG_STAGE_TOOLS = frozenset({
@@ -341,7 +346,8 @@ def _format_workout_proposal(payload, language):
 
 
 def _day_for_copy(value, language):
-    return localize_weekday(value or "", language)
+    return localize_weekday_text(
+        localize_weekday(value or "", language), language)
 
 
 def _format_plan_proposal(pending, language):
@@ -411,11 +417,18 @@ def _complete_grounded_followup(user_id, language):
     Assistant chat text is not authority. Confirmation proposals are
     handled above via TrainingPlanConfirmationProposal.
     """
-    arguments = followup_add_arguments(user_id)
-    if not arguments:
-        return None
-    result = coach_plan_tools.execute_plan_tool(
-        user_id, "add_training_plan_exercise", arguments)
+    invalid = invalid_candidate_result(user_id)
+    if invalid:
+        return _format_plan_clarification(invalid, language)
+    mutation = followup_mutation(user_id)
+    if not mutation:
+        arguments = followup_add_arguments(user_id)
+        if not arguments:
+            return None
+        tool, arguments = "add_training_plan_exercise", arguments
+    else:
+        tool, arguments = mutation
+    result = coach_plan_tools.execute_plan_tool(user_id, tool, arguments)
     if result.get("status") in (results.STATUS_APPLIED, results.STATUS_REPLAYED):
         return _format_plan_applied(result, language)
     if result.get("status") == results.STATUS_NEEDS_INPUT:
@@ -428,9 +441,10 @@ def _format_plan_clarification(payload, language):
     change = payload.get("change") or {}
     day = _day_for_copy(change.get("day") or "", language)
     exercise = change.get("exercise") or ""
-    detail = payload.get("detail") or ""
+    detail = localize_weekday_text(payload.get("detail") or "", language)
     if reason == "missing_prescription":
         label = detail if detail and detail != reason else day
+        label = localize_weekday_text(label, language)
         return t(
             "coach.plan.ask_sets_reps",
             locale=language,
