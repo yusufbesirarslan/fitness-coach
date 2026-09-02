@@ -139,6 +139,47 @@ web slot move, past-day correction, meal photos on mobile, `MOBILE_AUTH_ENABLED`
 activation) remain open on purpose. Core complete is not "all nutrition
 product work complete".
 
+### Amendment — Sprint 13 closing audit (2026-09-02)
+
+Closing audit of current `origin/main` `9f81f70cb9774e5039118b812e4c2c88bc21b04c`
+after PR5 squash `70a7b5f` (`#272`). The one later main commit is deploy
+infrastructure (`#271`) and does not touch Nutrition. N1–N10 still hold at
+their formally declared scope. No P0/P1 closure regression.
+
+**SPRINT 13 NUTRITION CORE COMPLETE** means correctness/authority criteria
+N1–N10 are satisfied at their declared scope. It does **not** mean Nutrition
+feature complete, all P2 debt removed, all mobile functionality complete, or
+all compatibility routes removed.
+
+The implementation sequence on main is:
+
+```text
+PR1  #257  docs(sprint13): define nutrition closure architecture
+PR2  #260  feat(nutrition): canonicalize daily macro targets
+PR3  #261  feat(nutrition): converge web food logging
+PR3B #264  feat(nutrition): converge diary provider truth
+PR4  #269  feat(nutrition): add web meal correction
+PR5  #272  refactor(nutrition): retire unowned nutrition intelligence
+```
+
+§14's original `CURRENT` / `NEW` labels are the mid-sprint sequence as
+planned. They are **not** rewritten here. All six nodes are now **SHIPPED**.
+
+The classified accepted post-closure backlog is **§21**. Items there do not
+reopen Core Complete.
+
+Current operational freeze:
+
+* Alembic head = `e4f5a6b7c8d9` (`meal_photo_cleanup`). Main has not advanced it.
+* PR4 rollback remains: drain pending `MealPhotoCleanup` → verify empty →
+  `alembic downgrade`.
+* `POST /api/food/barcode/add` = **SAFE + DEPRECATED + RETAINED**. Removal
+  evidence threshold is not satisfied. Sprint 13 complete is not permission
+  to delete it.
+* `flask --app starter cleanup-pending-meal-photos` remains registered.
+  Same-request retry = convergence; operator CLI = recovery/drain;
+  automated scheduler = not implemented.
+
 ### Findings index
 
 | ID | Sev | One line |
@@ -965,6 +1006,10 @@ web and mobile** — it does not hold today.
 None of these makes the Nutrition **core** incomplete: each is an added
 capability, not a correctness or authority gap.
 
+The classified post-closure backlog, including P2 operational/correctness
+items that were recorded elsewhere in this document or only in code comments,
+is **§21**. §21 does not reopen Core Complete.
+
 ---
 
 ## 13. Findings
@@ -1204,6 +1249,12 @@ PR1 (this) ── discovery + characterization
     +-- PR5   retire/confine unowned intelligence    (F9, F10 -> N10, N4 browser half)
 ```
 
+**Closing audit (2026-09-02):** the tree above is the approved sequence, with
+PR3 labelled `CURRENT` and PR3B labelled `NEW` at the moment those labels
+were true. All six nodes later shipped on `main` (PR1 `#257`, PR2 `#260`,
+PR3 `#261`, PR3B `#264`, PR4 `#269`, PR5 `#272`). Do not read `CURRENT` /
+`NEW` as live status.
+
 Dependency edges, stated explicitly rather than implied by the order:
 
 ```
@@ -1323,6 +1374,10 @@ PR3  ─────→ PR4        (operational ordering, not a technical depend
 ### PR3B — Diary provider-truth convergence *(added by the PR3 review)*
 
 * **Status:** **implemented locally; evidence pending independent review.**
+  **Closing audit (2026-09-02):** SHIPPED on `main` as `#264` (`7ea3b50`).
+  Independent review remediations are recorded in the 2026-09-01 amendment
+  above. The "pending independent review" sentence is the implementation-time
+  status and is preserved.
 * **Objective — the minimal future requirement, and nothing more:** *a
   provider-identified diary item must not obtain canonical nutrition from
   caller-supplied serving macros.*
@@ -1865,3 +1920,53 @@ Backend: `app/models.py`; `app/__init__.py`; `app/timeutil.py`;
 Mobile (read-only, `3386df3`): `lib/features/nutrition/**`;
 `lib/app/router/{app_router,nutrition_route_context,app_navigation_coordinator}.dart`;
 `fixtures/nutrition-diary-*.json`.
+
+---
+
+## 21. Accepted post-closure backlog
+
+Authoritative as of the 2026-09-02 closing audit on `origin/main`
+`9f81f70cb9774e5039118b812e4c2c88bc21b04c`.
+
+**SPRINT 13 NUTRITION CORE COMPLETE** remains true. Nothing in this section
+is a Core Complete blocker. Do not reopen shipped PR2–PR5 implementations
+to clear this list.
+
+`POST /api/food/barcode/add` status = **SAFE + DEPRECATED + RETAINED**.
+Reason: removal evidence threshold not yet satisfied. Sprint 13 complete
+is not permission to delete it.
+
+| Item | Type | Severity | Core blocker? | Bucket | Suggested future owner | Dependency |
+|---|---|---|---|---|---|---|
+| native nutrition history | product capability | P3 | no | product capability | later mobile/analytics contract; must not reuse `/meal-log/history` `DD.MM` | server-owned ISO history; C6 |
+| mobile menu adapter | product capability | P3 | no | product capability | separate menu capability PR | security prerequisite closed; adapter still missing; C7 |
+| validated nutrition intelligence domain | product capability | P3 | no | product capability | future intelligence domain only if product wants a score | C8 retired unowned scores in PR5; canonical domain still unbuilt |
+| web committed-entry slot move | product capability | P3 | no | product capability | web transport over existing `mobile_diary_mutation.set_slot` | C5; mobile PATCH already exists |
+| past-day correction | product capability | P3 | no | product capability | mutation *route policy* (service is day-agnostic) | would expand N9; `/meal-log/history` must not grow correction identities |
+| meal photos on mobile | product capability | P3 | no | product capability | mobile LogFood + diary serializer | web photo log exists; mobile payload has no photo field |
+| `MOBILE_AUTH_ENABLED` rollout | product activation / operational | P2 ops | no | operational debt + product capability | Sprint 15 native-auth / ops. Nutrition must not flip flags | C11: core = contract-complete, not activated. Host flag history is recorded in `docs/ROLLOUT.md`; native compile-time ON remains a separate product step |
+| account-erasure object-store lifecycle | correctness / resource-lifecycle debt | **P2** under current product surface | no | operational debt | account-erasure / privacy lifecycle | `_purge_user` / `cleanup-test-users` destroy pending `MealPhotoCleanup` identity without releasing the object. Not a live first-party delete-account product path. Outside meal-delete Core closure |
+| keyless raw HTTP replay | correctness debt | **P2** | no | correctness debt | write-path / `meal_idempotency` (mandatory key on remaining modes) | N8 satisfied at declared first-party scope; keyless `/meal-log` manual/photo and `POST /api/food/barcode/add` still double-write |
+| manual web/mobile clamp mismatch | correctness debt | **P2** | no | correctness debt | shared persist pipeline after `ManualNutritionSnapshot` | pre-existing; do not claim numeric parity |
+| deprecated `POST /api/food/barcode/add` | compatibility retention | P2 | no | operational + contract debt | removal only after C13 evidence (sunset + elapsed period + logs) | F6 safety CLOSED by PR3; PR5 kept the route |
+| PR4 deterministic mobile `UnreleasableStoredObject` envelope | correctness debt | **P2** | no | correctness debt | `app/blueprints/mobile_nutrition.py` DELETE (typed 409, `retryable=false`) | web already maps unreleasable stored objects to 409; mobile generic `except` advertises 503 retryable |
+| automatic `MealPhotoCleanup` drain scheduling | operational debt | **P2** | no | operational debt | host/RQ timer calling `drain_meal_photo_cleanups` | same-request retry = convergence; operator CLI = recovery/drain; automated scheduler = not implemented |
+
+PR4 operational freeze, recorded not changed:
+
+* Alembic head `e4f5a6b7c8d9`
+* Rollback: drain pending `MealPhotoCleanup` → verify empty → downgrade
+* Do not run a production downgrade as part of Sprint closure
+* Do not build the scheduler here
+
+Account-erasure finding, preserved:
+
+```text
+_purge_user / cleanup-test-users
+can destroy pending MealPhotoCleanup identity
+without releasing the object
+```
+
+Classification: P2; not a live first-party delete-account product path;
+outside meal-delete Core closure. Explicit future lifecycle item. Do not
+clean this up opportunistically.
