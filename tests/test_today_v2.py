@@ -224,18 +224,19 @@ def test_four_flag_combinations_render_safely(app, client, make_user, login):
             legacy = 'class="dash-grid"' in html
             assert v2 != legacy, f"nav={nav_on} today={today_on}: XOR Today tree"
             assert v2 is today_on
-            # Nav shell follows ITS OWN flag, independent of Today.
-            assert ('data-nav-id="today"' in html) is nav_on
+            # Production chrome is the four-destination shell regardless of
+            # UIUX_NAV_V2_ENABLED; Today remains independently flag-gated.
+            assert 'data-nav-id="today"' in html
 
 
 def test_nav_and_today_flags_are_independent(app, client, make_user, login):
-    # Today ON does not force nav v2; nav ON does not force Today v2.
+    # Today ON does not change production chrome; chrome does not force Today v2.
     _seed_login(client, make_user, login)
     app.config["UIUX_NAV_V2_ENABLED"] = False
     app.config["UIUX_TODAY_V2_ENABLED"] = True
     html = client.get("/").get_data(as_text=True)
     assert "data-today-v2" in html
-    assert 'data-nav-id="today"' not in html            # legacy nav preserved
+    assert 'data-nav-id="today"' in html
 
 
 # ══════════════════════════════════════════════════════════════════════════

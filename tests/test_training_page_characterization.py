@@ -123,15 +123,22 @@ def test_pump_share_selector_is_present(training_html):
 # ── navigation ──────────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("href", [
-    'href="/"', 'href="/nutrition"', 'href="/training"',
+    'href="/"', 'href="/training"', 'href="/coach"',
     'href="/progress-page"', 'href="/edit-profile"', 'href="/notifications"',
 ])
 def test_existing_navigation_entries_are_present(training_html, href):
     assert href in training_html
 
 
+def test_nutrition_is_not_a_primary_navigation_entry(training_html):
+    assert 'href="/nutrition"' not in training_html
+    assert 'data-nav-id="nutrition"' not in training_html
+
+
 def test_training_is_the_active_navigation_entry(training_html):
-    assert 'href="/training" class="hn-link active" aria-current="page"' in training_html
+    assert 'data-nav-id="plan"' in training_html
+    assert 'class="hn-link active"' in training_html
+    assert 'aria-current="page"' in training_html
 
 
 # ── assets / scripts ────────────────────────────────────────────────────────────

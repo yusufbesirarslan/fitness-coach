@@ -104,24 +104,22 @@ activate first.
 | 2 | `UIUX_TODAY_V2_ENABLED` | Independently reachable through the legacy shell's Home tab (`/`). |
 | 3 | `UIUX_PLAN_V2_ENABLED` | Reachable through the legacy Training tab (`/training`). Shares a page with #1; separate windows. |
 | 4 | `UIUX_COACH_PAGE_V2_ENABLED` | Independent, but sits on the AI path. Re-check after #5 — see the note below. |
-| 5 | `UIUX_NAV_V2_ENABLED` | **Last among the presentation flags**: widest UI blast radius paired with the weakest observability. |
+| 5 | `UIUX_NAV_V2_ENABLED` | Historical after UX-1 PR2: production chrome is already Today/Plan/Coach/Progress. Flipping this env var does **not** restore the five-tab shell. |
 | 6 | `FITX_WORKOUT_SESSIONS_ENABLED` | Mutating and schema-backed. Staging first; needs migration `a994f9bed783`. |
 | 7 | `AI_ADAPTIVE_PLAN_CONTEXT` | Changes AI behaviour for every user. Staging + human answer review; no metric can judge quality. |
 | 8 | `AI_COACH_PLAN_MUTATION_TOOLS_ENABLED` | **The only flag that lets the AI write user data.** After #7, which owns the system prompt it extends. Staging + journal review; needs migration `b3c4d5e6f7a8`. |
 | 9 | `MOBILE_AUTH_ENABLED` | Hardening PR4 is merged (`34f8dc79`). Treat the `blocked` lifecycle label as stale. **Runtime (2026-08-26):** already `1` on production SHA `a6d6b2e` — do **not** enable it again. Native-auth mobile remains OFF until [docs/superpowers/specs/2026-08-26-sprint12-mobile-auth-today-production-rollout-readiness.md](../superpowers/specs/2026-08-26-sprint12-mobile-auth-today-production-rollout-readiness.md) conditions close. |
 
-**Nav v2 is not a prerequisite for anything.** `app/nav.py` points its four
-primary destinations at pre-existing canonical routes (`/`, `/training`,
-`/coach`, `/progress-page`), all of which respond regardless of the Today/Plan/
-Coach v2 flags — so it can be activated at any point, and it goes last among the
-presentation flags because a regression under it is the hardest to attribute.
+**Nav v2 after UX-1 PR2.** Production chrome is already Today · Plan · Coach ·
+Progress. `UIUX_NAV_V2_ENABLED` remains registered for compatibility/history but
+flipping it does **not** restore the five-tab shell or hamburger. Coach is a
+primary destination. Rollback is a git revert of the UX-1 PR2 chrome change,
+not `UIUX_NAV_V2_ENABLED=0`.
 
-**One caveat on #4.** The legacy shell has no `/coach` entry point (not a tab,
-not a drawer link), so until #5 activates, `/coach` is reached only by direct URL
-— the everyday coach entry point is the floating widget, which this flag does not
-change. A clean window at #4 therefore proves less than it appears: **re-check
-`UIUX_COACH_PAGE_V2_ENABLED`'s abort signals during #5's observation window**,
-particularly duplicated `/coach/history` fetches.
+**One caveat on #4.** Coach is a production primary tab after UX-1 PR2, so
+`UIUX_COACH_PAGE_V2_ENABLED` is now reachable from chrome as well as by direct
+URL. The floating widget remains until UX-1 PR3. Abort signal is still
+duplicated `/coach/history` fetches.
 
 **#8 is observed differently from the other eight.** Its abort signals are not
 rates, they are individual events: one plan change the user did not ask for is a

@@ -209,12 +209,13 @@ prompt, model, streaming protocol, persistence, rate limit or moderation policy.
 Abort signal: duplicated `/coach/history` fetches (a double mount). Re-check its
 signals after flag 5 — see the ordering note above.
 
-**5. `UIUX_NAV_V2_ENABLED`** — four-destination shell (Today/Plan/Coach/Progress)
-replacing the legacy 5-tab shell; Nutrition + Community move to the drawer tier.
-Widest UI blast radius of the nine and no feature-specific signal, which is why
-it goes last among the presentation flags. The specific abort signal is a *fall*
-in requests to a demoted blueprint (nutrition, social) — that means it became
-unreachable, which a 5xx-based alarm would never catch.
+**5. `UIUX_NAV_V2_ENABLED`** — historical presentation flag. UX-1 PR2 made
+Today/Plan/Coach/Progress production chrome. The key remains in the registry
+but no longer selects a user-reachable legacy five-tab branch or drawer.
+Setting it to `0` does **not** restore Home/Nutrition/Training/Progress/Profile
+or the hamburger. Rollback is a git revert of that chrome change, not an env
+flip. Nutrition and Community stay reachable by their locked URLs; they are
+not a fifth primary tab.
 
 **6. `FITX_WORKOUT_SESSIONS_ENABLED`** — persisted workout-session lifecycle;
 `/workout/session/*` stops 404-ing and the resolver emits the additive
