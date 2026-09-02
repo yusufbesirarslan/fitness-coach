@@ -291,27 +291,31 @@ ROLLOUT_FLAGS = (
             "PARTIAL — no feature-specific log line or metric exists. Visible "
             "only through the PR1 per-blueprint HttpRequests/HttpLatency/"
             "HttpClientErrors SLIs, which cannot separate a navigation "
-            "regression from any other change on the same blueprint."),
+            "regression from any other change on the same blueprint. The env "
+            "value is not a chrome selector after UX-1 PR2."),
         prerequisites=(
-            "RUNTIME_METRICS_ENABLED=1 with a per-blueprint baseline",
-            "every destination reachable in the new shell verified by hand — "
-            "the flag has the widest UI blast radius of the eight",
-            "the presentation flags it hosts (Today/Plan/Coach v2) settled "
-            "first. This flag goes LAST among the presentation flags because it "
-            "pairs the widest blast radius with the weakest observability: "
-            "activating it earlier would put every subsequent rollout behind a "
-            "shell change that no metric can attribute a regression to",
+            "none for chrome selection — UX-1 PR2 made Today/Plan/Coach/"
+            "Progress production chrome without this flag",
+            "keep the key registered so /health and the [FLAGS] boot line do "
+            "not drift; do not treat a 0/1 flip as a shell change",
         ),
         success_signals=(
-            "no increase in 4xx on any blueprint reachable from the shell",
-            "no drop in requests to blueprints demoted to the drawer tier "
-            "(nutrition, social), which would indicate they became unreachable",
+            "production chrome remains Today · Plan · Coach · Progress "
+            "regardless of this flag's 0/1 value",
+            "Nutrition and Community routes remain reachable by their locked "
+            "URLs (they are not a fifth primary tab)",
         ),
         abort_signals=(
-            "requests to a demoted blueprint fall sharply",
-            "4xx/5xx increase on any blueprint after activation",
+            "legacy five-tab chrome (Home/Nutrition/Training/Progress/Profile) "
+            "or a hamburger/drawer reappears in production",
+            "Coach missing from primary navigation",
         ),
-        rollback=_rollback("UIUX_NAV_V2_ENABLED"),
+        rollback=(
+            "git revert of the UX-1 PR2 chrome change "
+            "(feat(ux): converge global navigation to Product IA) and redeploy; "
+            "setting UIUX_NAV_V2_ENABLED=0 does not restore the legacy "
+            "five-tab shell"
+        ),
         lifecycle=LIFECYCLE_SHIPPED_DARK,
         review_by="2026-10-01",
         decision=DECISION_ENABLE,

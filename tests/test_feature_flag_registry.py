@@ -72,6 +72,19 @@ def test_every_flag_carries_a_complete_lifecycle_record(flag):
     assert flag.decision in DECISIONS
 
 
+def test_nav_v2_flag_rollback_is_not_an_env_flip():
+    """UX-1 PR2 made the four-destination shell production chrome.
+
+    Operators must not be told that `UIUX_NAV_V2_ENABLED=0` restores the
+    legacy five-tab shell — that env flip is a no-op after this PR.
+    """
+    flag = next(f for f in feature_flags.ROLLOUT_FLAGS
+                if f.key == "UIUX_NAV_V2_ENABLED")
+    assert "revert" in flag.rollback.lower()
+    assert "does not restore" in flag.rollback
+    assert "set UIUX_NAV_V2_ENABLED=0" not in flag.rollback
+
+
 def test_no_flag_is_registered_with_a_default_of_on():
     """PR2 must not activate a feature.
 
