@@ -175,12 +175,13 @@ def _today_workout_totals(user_id):
 # gönderdiği sonraki turda mümkündür. İşaret g'de yaşar (istek-kapsamlı; koç
 # araç döngüsü tek HTTP isteğinde koşar).
 
-def _begin_coach_turn(user_message="", history=None):
+def _begin_coach_turn(user_message="", history=None, user_id=None):
     g._coach_staged_ids = set()
     # PR3: the plan-mutation budget is per turn, and "a turn" is defined here so
     # the blocking and streaming paths cannot drift into two different answers.
     # PR4: confirmation intent is derived from the raw current user turn.
-    coach_plan_tools.begin_turn(user_message, history=history)
+    coach_plan_tools.begin_turn(
+        user_message, history=history, user_id=user_id)
 
 
 def _mark_staged_this_turn(pending_id):
@@ -1065,7 +1066,7 @@ def _run_coach_conversation(user_id, question, context, client_history=None,
             history = list(session.get("coach_history", []))
         history = history[-COACH_HISTORY_LIMIT:]
 
-    _begin_coach_turn(question, history=history)
+    _begin_coach_turn(question, history=history, user_id=user_id)
     resolved = coach_confirmation.resolve_pending_turn(user_id, language)
     if resolved is not None:
         if prepared_history is None and client_history is None:

@@ -981,6 +981,7 @@
   "coach.plan.exercise_suggest": "Did you mean {suggestion}? Nothing was changed until you confirm.",
   "coach.plan.workout_ambiguous": "I found more than one matching workout ({candidates}). Which one should I use? Nothing was changed.",
   "coach.plan.workout_unknown": "I couldn't match that workout to your current plan, so nothing was changed. Which day did you mean?",
+  "coach.plan.clarification_unavailable": "I couldn't continue that plan change just now, so nothing was changed. Please try again.",
 
   "quest.login.title": "Daily Login",
   "quest.login.desc": "Log in to the app today",
