@@ -158,11 +158,41 @@ def test_deploy_has_only_ci_workflow_run_authority():
 
 
 def test_production_deploys_are_coalesced_without_cancelling_running_work():
-    concurrency = _workflow_doc()["concurrency"]
-    assert concurrency == {
+    workflow = _workflow_doc()
+    assert "concurrency" not in workflow
+    assert workflow["jobs"]["candidate"].get("concurrency") is None
+    assert workflow["jobs"]["candidate"].get("environment") is None
+    assert workflow["jobs"]["deploy"]["concurrency"] == {
         "group": "production-deploy",
         "cancel-in-progress": "false",
     }
+    assert workflow["jobs"]["deploy"]["environment"] == "production"
+
+
+def test_candidate_job_skips_before_the_production_approval_gate():
+    """A superseded SHA must not request environment approval.
+
+    Deploy #250 sat in `waiting` on required reviewers, then GitHub rejected
+    the pending deployment when a newer SHA queued. The controller's
+    CandidateSuperseded skip never ran because the job never started. The
+    unprivileged candidate job is the skip that can run without approval.
+    """
+    workflow = _workflow_doc()
+    candidate = workflow["jobs"]["candidate"]
+    deploy = workflow["jobs"]["deploy"]
+    gate = next(
+        step for step in candidate["steps"]
+        if step.get("run") == "python3 scripts/deploy_gate.py"
+    )
+
+    assert "needs" not in candidate
+    assert deploy["needs"] == "candidate" or deploy["needs"] == ["candidate"]
+    assert "needs.candidate.outputs.deploy == 'true'" in deploy["if"]
+    assert gate["id"] == "gate"
+    assert candidate["outputs"]["deploy"] == "${{ steps.gate.outputs.deploy }}"
+    assert candidate["permissions"]["contents"] == "read"
+    assert candidate["permissions"]["actions"] == "write"
+    assert "id-token" not in candidate.get("permissions", {})
 
 
 def test_deploy_checks_out_only_the_ci_approved_sha_with_full_history():
@@ -182,9 +212,9 @@ def test_deploy_checks_out_only_the_ci_approved_sha_with_full_history():
 
 
 def test_privileged_deploy_job_requires_default_branch_execution_sha_to_equal_candidate():
-    job = _workflow_doc()["jobs"]["deploy"]
+    candidate = _workflow_doc()["jobs"]["candidate"]
 
-    assert job["if"] == (
+    assert candidate["if"] == (
         "${{ github.event.workflow_run.conclusion == 'success' && "
         "github.event.workflow_run.head_branch == 'main' && "
         "github.event.workflow_run.event == 'push' && "
@@ -244,6 +274,7 @@ def test_governance_contract_has_codeowners_for_every_privileged_surface():
         "/.github/workflows/deploy.yml",
         "/.github/workflows/ci.yml",
         "/scripts/deploy_control.py",
+        "/scripts/deploy_gate.py",
         "/scripts/production_deploy.sh",
         "/docs/DEPLOYMENT.md",
     ):
@@ -430,6 +461,7 @@ REQUIRED_EXECUTABLE_SOURCES = (
     Path(".github/workflows/ci.yml"),
     Path("scripts/production_deploy.sh"),
     Path("scripts/deploy_control.py"),
+    Path("scripts/deploy_gate.py"),
     Path("scripts/check_cognito_pool.py"),
     Path("docker-compose.yml"),
     Path("infra/cognito-email-sender/template.yaml"),
@@ -2712,7 +2744,12 @@ def _deploy_source_violations(source):
 
 
 def test_deploy_sources_cannot_expose_secrets_change_flags_or_reset_mutable_main():
-    deploy_sources = "\n".join((_deploy_yaml(), _controller_source(), _host_script()))
+    deploy_sources = "\n".join((
+        _deploy_yaml(),
+        _controller_source(),
+        _host_script(),
+        Path("scripts/deploy_gate.py").read_text(encoding="utf-8"),
+    ))
 
     assert _deploy_source_violations(deploy_sources) == []
 
@@ -2793,6 +2830,7 @@ PRODUCTION_AUTHORITY_SURFACES = (
     ".github/workflows/deploy.yml",
     "scripts/deploy_contract.py",
     "scripts/deploy_control.py",
+    "scripts/deploy_gate.py",
     "scripts/production_deploy.sh",
     "scripts/check_cognito_pool.py",
     "scripts/check_email_lambda.py",

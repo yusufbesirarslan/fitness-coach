@@ -14,6 +14,7 @@
 # Deploy transaction: controller, canonical time contract, host helper
 /scripts/deploy_contract.py @yusufbesirarslan
 /scripts/deploy_control.py @yusufbesirarslan
+/scripts/deploy_gate.py @yusufbesirarslan
 /scripts/production_deploy.sh @yusufbesirarslan
 /scripts/check_cognito_pool.py @yusufbesirarslan
 /scripts/check_email_lambda.py @yusufbesirarslan
