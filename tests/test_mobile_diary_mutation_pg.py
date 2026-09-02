@@ -277,12 +277,11 @@ def photo_backed_row(pg_mutation_app):
 def test_concurrent_deletes_release_the_photo_exactly_once(photo_backed_row):
     """Two racing corrections converge: one row, one object, no leftover intent.
 
-    The `SELECT ... FOR UPDATE` row lock still admits exactly one committer, so
-    exactly one cleanup intent is written. After that commit the loser no
-    longer sees the row; the remediation's retry path may then issue the same
-    idempotent DeleteObject if the winner has not yet retired the intent.
-    Duplicate release of the *same* key is therefore allowed. What must never
-    happen is a second intent, a surviving row, or a forgotten object.
+    The MealLog ``SELECT ... FOR UPDATE`` admits exactly one committer, so
+    exactly one cleanup intent is written. The cleanup-row claim then admits
+    exactly one post-commit release actor, so the loser's retry path cannot
+    independently DeleteObject the same identity. What must never happen is a
+    second intent, a surviving row, a forgotten object, or a duplicate release.
     """
     from app.models import MealLog, MealPhotoCleanup
 
@@ -299,10 +298,7 @@ def test_concurrent_deletes_release_the_photo_exactly_once(photo_backed_row):
     with app.app_context():
         assert MealLog.query.count() == 0
         assert MealPhotoCleanup.query.count() == 0
-    assert deleted, "the owned object was never released"
-    assert {item["Bucket"] for item in deleted} == {"pg-race-bucket"}
-    assert {item["Key"] for item in deleted} == {key}
-    assert len(deleted) in (1, 2)
+    assert deleted == [{"Bucket": "pg-race-bucket", "Key": key}]
 
 
 def test_a_slot_move_racing_a_delete_never_orphans_a_surviving_row(
@@ -339,7 +335,7 @@ def test_a_slot_move_racing_a_delete_never_orphans_a_surviving_row(
 # ---------------------------------------------------------------------------
 
 def test_the_cleanup_intent_and_the_row_delete_commit_atomically(
-        photo_backed_row):
+        photo_backed_row, monkeypatch):
     """One transaction, two state transitions - proved on the real engine.
 
     SQLite can show the happy result; only PostgreSQL can show that the intent
@@ -347,12 +343,28 @@ def test_the_cleanup_intent_and_the_row_delete_commit_atomically(
     another connection is contending for. If they could ever land apart, the
     losing shape is a committed deletion whose object identity was never
     recorded - the defect this remediation removes.
+
+    The post-commit window is forced: both the MealLog winner and the retry
+    path reach the release helper before either DeleteObject runs. Timing
+    here only exposes the interleaving; ownership comes from the cleanup-row
+    claim, so the same object is still released once.
     """
     from app.extensions import db
     from app.models import MealLog, MealPhotoCleanup
+    from app.services.mobile_diary_mutation import service as mutation_service
 
     app, user_id, key, deleted = photo_backed_row
     target = _target(app, user_id)
+
+    release_gate = threading.Barrier(2)
+    original_release = mutation_service._release_owned_object
+
+    def both_contenders_reach_release(*args, **kwargs):
+        release_gate.wait(timeout=10)
+        return original_release(*args, **kwargs)
+
+    monkeypatch.setattr(
+        mutation_service, "_release_owned_object", both_contenders_reach_release)
 
     _race(app, [
         _delete(app, user_id, target),
@@ -428,10 +440,11 @@ def test_concurrent_drains_converge_without_corrupting_intents(
         pg_mutation_app):
     """Two operator drains may run at the same moment.
 
-    Both may issue the same idempotent DeleteObject; neither may clear an
-    intent that belongs to a different record. The primary-key delete is what
-    makes that structural rather than lucky, and the ORM unit of work is
-    avoided precisely because its zero-row DELETE would raise on the loser.
+    The cleanup-row claim admits one release actor per intent. Neither drain
+    may clear an intent that belongs to a different record. The primary-key
+    delete is what makes that structural rather than lucky, and the ORM unit
+    of work is avoided precisely because its zero-row DELETE would raise on
+    the loser.
     """
     import s3_helper
     from app.extensions import db
@@ -474,7 +487,7 @@ def test_concurrent_drains_converge_without_corrupting_intents(
          s3_helper._client) = original
 
     assert all(outcome[0] == "ok" for outcome in outcomes.values()), outcomes
-    assert sorted(set(deleted)) == sorted([mine, other])
+    assert sorted(deleted) == sorted([mine, other])
     with app.app_context():
         assert MealPhotoCleanup.query.count() == 0, (
             "Concurrent drains must converge on an empty table, not deadlock "
@@ -484,9 +497,10 @@ def test_concurrent_drains_converge_without_corrupting_intents(
 def test_a_retry_racing_the_operator_drain_converges(pg_mutation_app):
     """A user retry and the operator drain may run at the same moment.
 
-    Both name the same exact key. Duplicate DeleteObject is tolerated;
-    neither may resurrect the ledger row, invent a second intent, or leave
-    the original intent behind after a successful release.
+    Both name the same exact key. The cleanup-row claim lets one actor win;
+    the loser must not independently release the same identity, resurrect the
+    ledger row, invent a second intent, or leave the original intent behind
+    after a successful release.
     """
     import s3_helper
     from app.extensions import db
@@ -535,7 +549,7 @@ def test_a_retry_racing_the_operator_drain_converges(pg_mutation_app):
 
     statuses = sorted(outcome[0] for outcome in outcomes.values())
     assert statuses in (["missing", "ok"], ["ok", "ok"]), outcomes
-    assert key in deleted
+    assert deleted == [key]
     with app.app_context():
         assert MealLog.query.count() == 0
         assert MealPhotoCleanup.query.count() == 0

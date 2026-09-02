@@ -192,20 +192,57 @@ def _forget_cleanup(cleanup_id):
     db.session.commit()
 
 
+def _claim_cleanup(cleanup_id):
+    """Own the active release attempt for one cleanup intent, or stand down.
+
+    ``SELECT … FOR UPDATE`` on the primary key is the single ownership
+    mechanism. The MealLog row lock already admits one committer, so exactly
+    one intent is written; this lock is what stops the *post-commit* actors
+    (the winner's release, a same-request retry, a concurrent delete's retry
+    path, the operator drain) from all independently calling DeleteObject for
+    that one identity.
+
+    The lock is on the cleanup intent, not the ledger row, and it is taken
+    only after the MealLog delete has committed — S3 still does not run
+    inside the ledger transaction. A waiter either inherits a still-pending
+    row (the holder rolled back after an S3 failure) or sees no row (the
+    holder settled it) and must not release again.
+    """
+    if cleanup_id is None:
+        return None
+    return (MealPhotoCleanup.query
+            .filter_by(id=cleanup_id)
+            .populate_existing()
+            .with_for_update()
+            .one_or_none())
+
+
 def _release_owned_object(user_id, entry_id, photo_key, cleanup_id):
     """Release one owned object and, only then, retire its cleanup intent.
 
     Never inverted. Dropping the intent first would take the object's identity
     down with an S3 failure, which is F14 again. Failure therefore leaves the
     intent exactly where it is and the caller is told the lifecycle is open.
+
+    The claim is taken before any object I/O. Two concurrent actors may both
+    *observe* the same pending intent; only the claimant may call S3. A lost
+    claim after the other actor settled is success: the lifecycle is already
+    closed. A lost claim after the other actor failed inherits the durable
+    intent and retries.
     """
+    claimed = _claim_cleanup(cleanup_id)
+    if claimed is None:
+        db.session.rollback()
+        return
     try:
-        s3_helper.delete_meal_photo(photo_key, user_id)
+        s3_helper.delete_meal_photo(claimed.photo_key, claimed.user_id)
     except Exception as error:
-        # The key is the only thing that makes this actionable, and it is an
-        # internal object identifier - not a credential and not a presigned
-        # URL. Meal text, macros and image bytes stay out of the log. The object
-        # is NOT orphaned: `cleanup_id` names it durably.
+        # Release the claim without dropping the intent. The key is the only
+        # thing that makes this actionable, and it is an internal object
+        # identifier - not a credential and not a presigned URL. Meal text,
+        # macros and image bytes stay out of the log. The object is NOT
+        # orphaned: `cleanup_id` names it durably.
+        db.session.rollback()
         logger.error(
             "[DIARY] event=meal_photo_release_pending user_id=%s entry_id=%s "
             "key=%s cleanup_id=%s error_type=%s",
@@ -284,8 +321,10 @@ def delete_entry(user_id, diary_date, entry_token, revision, secret):
       intent retained. Retrying this exact request converges (below), and
       `drain_meal_photo_cleanups` converges without the user.
     * DB failure  -> raised before any object call; nothing is released.
-    * concurrent  -> the row lock lets exactly one caller reach the commit, so
-      exactly one intent is written; the loser sees ``EntryNotFound``.
+    * concurrent  -> the MealLog row lock lets exactly one caller reach the
+      commit, so exactly one intent is written. The cleanup-row claim then
+      lets exactly one post-commit actor own the active release; a loser of
+      that claim either inherits a still-pending intent or finds it settled.
     * no photo    -> no intent, no object call at all.
 
     RETRY. Once the row is gone the token resolves to nothing, so a plain
@@ -346,8 +385,8 @@ def drain_meal_photo_cleanups(limit=DEFAULT_CLEANUP_DRAIN_LIMIT):
     * every stored key is re-validated *here* rather than trusted because it was
       valid when written - an unparseable key is reported and left alone, never
       guessed at;
-    * the object delete happens outside any row lock and S3 ``DeleteObject`` is
-      idempotent, so a duplicate release racing the retry path is harmless;
+    * the cleanup-row claim is taken before any object I/O, so a retry racing
+      this drain cannot both independently release the same identity;
     * only an intent whose object is actually gone is removed, and it is removed
       by primary key, so a concurrent worker can never clear a different one;
     * a failure keeps its intent for the next run.
@@ -369,10 +408,16 @@ def drain_meal_photo_cleanups(limit=DEFAULT_CLEANUP_DRAIN_LIMIT):
 
     outcomes = []
     for cleanup_id, user_id, photo_key in batch:
-        if not s3_helper.meal_photo_key_is_deletable(photo_key, user_id):
+        claimed = _claim_cleanup(cleanup_id)
+        if claimed is None:
+            db.session.rollback()
+            continue
+        if not s3_helper.meal_photo_key_is_deletable(
+                claimed.photo_key, claimed.user_id):
             # Only reachable if the stored key was corrupted after the fact.
             # Fail closed and keep the row: an operator can still read the exact
             # string, and no guess is ever turned into a delete.
+            db.session.rollback()
             logger.error(
                 "[DIARY] event=meal_photo_cleanup_unsafe_key cleanup_id=%s "
                 "user_id=%s", cleanup_id, user_id)
@@ -380,7 +425,7 @@ def drain_meal_photo_cleanups(limit=DEFAULT_CLEANUP_DRAIN_LIMIT):
                 cleanup_id, user_id, photo_key, "unsafe_key", None))
             continue
         try:
-            s3_helper.delete_meal_photo(photo_key, user_id)
+            s3_helper.delete_meal_photo(claimed.photo_key, claimed.user_id)
         except Exception as error:
             db.session.rollback()
             logger.warning(
