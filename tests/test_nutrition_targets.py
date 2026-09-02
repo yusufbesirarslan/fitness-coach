@@ -13,9 +13,8 @@ different kind of claim:
    Proven structurally (AST + imports + a purity check on the module's own
    dependencies), not by grepping for a sentence.
 
-What PR2 does *not* claim: N4 is not closed by it. `static/nutrition.js` still
-carries a browser-owned 30/40/30 split, which is PR5's, and this module must not
-touch `static/`.
+PR5 closed the browser half of N4: first-party surfaces now consume this
+module's derivation (or present absence) and invent no competing split.
 
     python -m pytest tests/test_nutrition_targets.py -v
 """
@@ -545,6 +544,7 @@ def test_every_converged_consumer_imports_the_canonical_authority():
         "app/services/barcode.py",
         "app/services/analytics_engine.py",
         "fitx_mcp/server.py",
+        "app/blueprints/nutrition/meallog.py",
     )
     for relative in consumers:
         imported = {
@@ -594,10 +594,9 @@ def test_the_authority_consumes_values_not_users():
         SimpleNamespace(target_calories=2000), "kas kazanma") is None
 
 
-def test_pr2_did_not_touch_the_browser_half_of_n4():
-    """§16: the browser's 30/40/30 split is PR5's, and N4 stays open until then."""
+def test_pr5_retired_the_browser_half_of_n4():
+    """The competing 30/40/30 split is gone; the browser consumes this module."""
     nutrition_js = (REPO_ROOT / "static" / "nutrition.js").read_text(
         encoding="utf-8", errors="ignore")
-    assert "0.40 / 4" in nutrition_js, (
-        "static/nutrition.js lost its client-side 30/40/30 split. PR2 must not "
-        "touch static/ — if PR5 landed, retire this guard with it.")
+    assert "0.40 / 4" not in nutrition_js
+    assert "0.30 / 4" not in nutrition_js

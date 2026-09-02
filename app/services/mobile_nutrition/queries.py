@@ -75,7 +75,7 @@ def fetch_ledger_entries(user_id, day_key):
 def fetch_target_energy_kcal(user_id):
     """Return the stored daily calorie target, or None when none is stored.
 
-    Deliberately the same selector `/api/progress/nutrition`, `/meal-log/review`
+    Deliberately the same selector `/meal-log/today`, `/meal-log/review`
     and the barcode context already use — the newest `UserSession` row. This
     contract normalises what that value MEANS at the boundary; it does not
     introduce a second place that decides where a target comes from.

@@ -610,7 +610,7 @@ def test_legacy_barcode_add_fails_closed_without_provider_identity(
 
 
 def test_the_legacy_barcode_route_still_exists(app):
-    """C13: PR3 makes it safe; only PR5 may remove it, and only with evidence."""
+    """C13: PR3 made it safe. PR5 investigated removal and KEPT it deprecated."""
     rules = {rule.rule for rule in app.url_map.iter_rules()}
     assert "/api/food/barcode/add" in rules
 

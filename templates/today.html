@@ -199,23 +199,36 @@
   }
 
   function renderSummary(sess, meals, water) {
-    var target = 2000;
-    if (sess && sess.exists) { target = Math.round(sess.target_calories || 2000); if (sess.weight) $('t-w-kg').textContent = sess.weight; }
+    if (sess && sess.exists && sess.weight) $('t-w-kg').textContent = sess.weight;
     var totals = (meals && meals.totals) ? meals.totals : {};
+    var targets = (meals && meals.targets) ? meals.targets : null;
+    var remainingMacros = (meals && meals.remaining) ? meals.remaining : null;
     var consumed = Math.round(totals.kalori || 0);
-    var remaining = Math.max(target - consumed, 0);
-    $('t-cal-num').textContent = remaining;
-    $('t-cal-sub').textContent = consumed + ' / ' + target + ' kcal';
-    var ratio = target > 0 ? Math.min(consumed / target, 1) : 0;
-    var rEl = $('t-cal-ring');
-    rEl.style.stroke = ratio >= 1 ? 'var(--color-danger)' : (ratio >= 0.85 ? 'var(--color-warning)' : 'var(--color-primary)');
-    ring('t-cal-ring', ratio);
+    var target = targets ? targets.kalori : null;
+    var remaining = remainingMacros ? remainingMacros.kalori : null;
+    if (!(target > 0)) {
+      $('t-cal-num').textContent = '—';
+      $('t-cal-sub').textContent = consumed + ' kcal';
+      ring('t-cal-ring', 0);
+    } else {
+      $('t-cal-num').textContent = Math.round(remaining);
+      $('t-cal-sub').textContent = consumed + ' / ' + Math.round(target) + ' kcal';
+      var ratio = Math.min(consumed / target, 1);
+      var rEl = $('t-cal-ring');
+      rEl.style.stroke = ratio >= 1 ? 'var(--color-danger)' : (ratio >= 0.85 ? 'var(--color-warning)' : 'var(--color-primary)');
+      ring('t-cal-ring', ratio);
+    }
 
     var p = Math.round(totals.protein || 0), c = Math.round(totals.karb || 0), f = Math.round(totals.yag || 0);
-    var tp = Math.round(target * 0.30 / 4), tc = Math.round(target * 0.40 / 4), tf = Math.round(target * 0.30 / 9);
-    $('t-protein').textContent = p + '/' + tp + 'g';
-    $('t-carb').textContent = c + '/' + tc + 'g';
-    $('t-fat').textContent = f + '/' + tf + 'g';
+    if (!targets) {
+      $('t-protein').textContent = p + 'g';
+      $('t-carb').textContent = c + 'g';
+      $('t-fat').textContent = f + 'g';
+    } else {
+      $('t-protein').textContent = p + '/' + Math.round(targets.protein) + 'g';
+      $('t-carb').textContent = c + '/' + Math.round(targets.karb) + 'g';
+      $('t-fat').textContent = f + '/' + Math.round(targets.yag) + 'g';
+    }
     var wc = (water && typeof water.count === 'number') ? water.count : 0;
     var wg = (water && water.goal) ? water.goal : 8;
     $('t-water').textContent = wc + '/' + wg;

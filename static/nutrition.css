@@ -169,7 +169,7 @@
      Two 56px primary-blue circles in one right-hand column read as one
      ambiguous control pair, and — confirmed in a rendered 390px viewport —
      the upper one sat exactly on top of `.mc-side`, covering each meal card's
-     score badge and quick-edit button with an opaque, higher z-index button.
+     quick-edit button with an opaque, higher z-index button.
      The left rail is where components.css already documents the app's
      quick-add FAB, and the only thing under it in the meal list is the card's
      photo thumbnail, never a control. Same bottom offset as the coach FAB so

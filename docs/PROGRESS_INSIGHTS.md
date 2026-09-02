@@ -326,9 +326,10 @@ generic 500 with the localized retry message. The route logs one PII-free line:
 
 `error_class` reuses the PR2 bucketing helper (`contract_drift` /
 `unexpected_error`); no exception text, user id, payload or history reaches the
-log. The failure is isolated: `/api/progress/summary`, `/api/progress/insights`,
+log. The failure is isolated: `/api/progress/summary`,
 `/checkin-history`, `/api/progress/achievements` and the Progress page itself
-all still return 200 when this endpoint is down.
+all still return 200 when this endpoint is down. (The legacy
+`/api/progress/insights` heuristic was retired by Sprint 13 PR5.)
 
 ---
 
@@ -378,10 +379,11 @@ There is no carousel, no tab strip, no chart, and no horizontal scroller.
 ## 12. Legacy compatibility
 
 `GET /api/progress/insights` (the streak/calorie/workout-count/weight heuristic
-list) is **untouched** — same route, same payload, same cache header. It is no
-longer read by the Progress page, but nothing else about it changed and the
-byte-shape of its response is pinned by a test. Removing it is a separate
-decision with its own consumers to check.
+list) was **retired by Sprint 13 PR5 (F9)**. It had no first-party consumer
+and owned an unowned calorie-adherence judgement (`80 ≤ pct ≤ 110` →
+`success`). The live Axis Insights surface is this document's
+`GET /api/progress/axis-insights` route; the two must not be confused.
+Canonical Progress did not inherit the heuristic.
 
 ---
 
