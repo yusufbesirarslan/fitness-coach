@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.extensions import db
@@ -13,6 +15,10 @@ from app.services.training_generation.exercise_resolution import (
 )
 from app.services.training_generation.extractor import extract_plan_object
 from app.services.training_generation.feature_extractor import build_features, parse_preferences
+from app.services.training_generation.models import (
+    ClassificationResult,
+    TrainingPreferences,
+)
 from app.services.training_generation.output_errors import (
     GenerationExerciseAmbiguousError,
     GenerationExerciseIdentityInvalidError,
@@ -68,6 +74,19 @@ _REPAIR_SCHEMA_SUFFIX = (
     "tekrar, dinlenme, not; set/sure_dk/tahmini_kalori integers; no extra "
     "keys anywhere. Return ONLY the complete JSON object."
 )
+
+
+@dataclass(frozen=True)
+class GeneratedTrainingPlanCandidate:
+    """A fully validated, catalog-owned plan ready for canonical persistence."""
+
+    document: dict
+    overall_score: float
+    exercise_context: ExerciseContext
+    injury_warnings: list[dict]
+    classification: ClassificationResult
+    risk_flags: list[str]
+    constraints_applied: list[str]
 
 
 def persist_posted_injuries(user, posted_injuries, logger=None):
@@ -212,22 +231,23 @@ def validate_plan_for_save(plan, exercise_context):
     return saved
 
 
-def generate_training_plan_payload(
-    user, last_session, request_data, chat_fn, language="tr", logger=None,
-    *, context_token_factory=None,
-):
-    """Generate one accepted candidate plan for ``user``.
+def generate_training_plan_candidate(
+    user,
+    last_session,
+    preferences: TrainingPreferences,
+    chat_fn,
+    language="tr",
+    logger=None,
+) -> GeneratedTrainingPlanCandidate:
+    """Run the canonical generator and return one persistence-ready candidate.
 
-    ``context_token_factory`` (``Callable[[ExerciseContext], str]``) is how the
-    accepted equipment context reaches the later save call. It is optional so
-    unit callers can generate without transport signing, but the HTTP route
-    must always supply one — a candidate returned over the wire without its
-    token is a plan the user could never save.
+    The caller supplies already parsed canonical preferences. This boundary is
+    deliberately free of request parsing and preference persistence, so a
+    native generate-and-persist command has no intermediate domain write.
     """
-    stored = (getattr(user, "user_metadata", None) or {}).get("injuries") or ""
-    preferences = parse_preferences(request_data, stored_injuries=stored)
+    if not isinstance(preferences, TrainingPreferences):
+        raise TypeError("preferences must be TrainingPreferences")
     require_supported(preferences)
-    persist_posted_injuries(user, request_data.get("injuries"), logger=logger)
     _log(
         logger, "generation_started",
         style=preferences.antrenman_tarzi,
@@ -324,29 +344,73 @@ def generate_training_plan_payload(
     denge = ozet.get("denge_skoru") or 7
     uygunluk = ozet.get("uygunluk_skoru") or 7
     overall = round((yogunluk + denge + uygunluk) / 3, 1)
-    if overall >= 8:
+    persistence_document = {
+        "program": plan["program"],
+        "haftalik_ozet": ozet,
+        "exercise_context": {
+            "equipment_context": exercise_context.equipment_context,
+            "cardio_type": exercise_context.cardio_type,
+            "style": exercise_context.style,
+            "catalog_version": exercise_context.catalog_version,
+        },
+    }
+    return GeneratedTrainingPlanCandidate(
+        document=persistence_document,
+        overall_score=overall,
+        exercise_context=exercise_context,
+        injury_warnings=injury_warnings,
+        classification=classification,
+        risk_flags=classification.risk_flags,
+        constraints_applied=classification.constraints_applied,
+    )
+
+
+def generate_training_plan_payload(
+    user, last_session, request_data, chat_fn, language="tr", logger=None,
+    *, context_token_factory=None,
+):
+    """Preserve the legacy browser candidate payload over the shared generator.
+
+    ``context_token_factory`` (``Callable[[ExerciseContext], str]``) is how the
+    accepted equipment context reaches the later browser save call. Native
+    generation consumes the typed candidate directly and never round-trips it.
+    """
+    stored = (getattr(user, "user_metadata", None) or {}).get("injuries") or ""
+    preferences = parse_preferences(request_data, stored_injuries=stored)
+    require_supported(preferences)
+    persist_posted_injuries(user, request_data.get("injuries"), logger=logger)
+    candidate = generate_training_plan_candidate(
+        user,
+        last_session,
+        preferences,
+        chat_fn,
+        language=language,
+        logger=logger,
+    )
+    if candidate.overall_score >= 8:
         score_label = "İyi"
-    elif overall >= 6:
+    elif candidate.overall_score >= 6:
         score_label = "Orta"
     else:
         score_label = "Kötü"
     payload = {
-        "program": plan["program"],
-        "haftalik_ozet": ozet,
-        "overall_score": overall,
+        "program": candidate.document["program"],
+        "haftalik_ozet": candidate.document["haftalik_ozet"],
+        "overall_score": candidate.overall_score,
         "score_label": score_label,
-        "injury_warnings": injury_warnings,
+        "injury_warnings": candidate.injury_warnings,
         "classification": {
-            "level": classification.level,
-            "confidence": classification.confidence,
-            "score": classification.score,
+            "level": candidate.classification.level,
+            "confidence": candidate.classification.confidence,
+            "score": candidate.classification.score,
         },
-        "risk_flags": classification.risk_flags,
-        "constraints_applied": classification.constraints_applied,
+        "risk_flags": candidate.risk_flags,
+        "constraints_applied": candidate.constraints_applied,
     }
     if context_token_factory is not None:
         # The context itself is never echoed in the clear: the opaque token is
         # the only carrier, so a client cannot read what it is asserting, let
         # alone edit it.
-        payload["exercise_context_token"] = context_token_factory(exercise_context)
+        payload["exercise_context_token"] = context_token_factory(
+            candidate.exercise_context)
     return payload

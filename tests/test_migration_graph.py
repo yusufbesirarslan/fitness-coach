@@ -38,7 +38,7 @@ def test_alembic_migrations_have_single_head():
 
     # Adaptive Coaching S1 PR4 adds the confirmation-proposal table as the sole
     # new head, chained off Sprint 10 PR4A's c1d2e3f4a5b6. One head only.
-    assert heads == ["c2d3e4f5a6b7"]
+    assert heads == ["d3e4f5a6b7c8"]
 
 
 def test_pr4_canonical_exercise_authority_adds_no_migration():
@@ -59,7 +59,7 @@ def test_pr4_canonical_exercise_authority_adds_no_migration():
     # 37 = the integrated origin/main baseline (Adaptive Coaching S1 PR4's
     # c2d3e4f5a6b7 is the newest). PR4 contributes none of them; the literal is
     # the tripwire that makes "we added one small table" fail here first.
-    assert len(revision_files) == 37
+    assert len(revision_files) == 38
     assert not any("exercise" in name for name in revision_files)
 
     catalog_path = (

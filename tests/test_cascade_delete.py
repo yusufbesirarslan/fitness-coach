@@ -10,7 +10,8 @@ NOT NULL FK'yi NULL'lamaya çalışıp patlardı.
 from app.extensions import db
 from app.models import (DailyActivity, MealLog, PumpCheck,
                         PumpCheckComparison, PumpCheckComparisonRequest,
-                        Supplement, User, WaterLog, WorkoutLog)
+                        Supplement, TrainingPlanGenerationOperation, User,
+                        WaterLog, WorkoutLog)
 from app.timeutil import day_key
 
 
@@ -24,6 +25,9 @@ def test_user_delete_cascades_children(app, make_user):
         DailyActivity(user_id=uid, steps=1000, intensity="moderate", date_key=day_key()),
         WaterLog(user_id=uid, date_key=day_key(), count=3),
         PumpCheck(user_id=uid, valid=True, date_key=day_key()),
+        TrainingPlanGenerationOperation(
+            user_id=uid, idempotency_key="cascade-generation-key",
+            request_fingerprint="a" * 64, status="FAILED"),
     ])
     db.session.commit()
 
@@ -32,7 +36,8 @@ def test_user_delete_cascades_children(app, make_user):
     db.session.commit()
 
     assert db.session.get(User, uid) is None
-    for model in (WorkoutLog, Supplement, MealLog, DailyActivity, WaterLog, PumpCheck):
+    for model in (WorkoutLog, Supplement, MealLog, DailyActivity, WaterLog,
+                  PumpCheck, TrainingPlanGenerationOperation):
         assert model.query.filter_by(user_id=uid).count() == 0, model.__name__
 
 
